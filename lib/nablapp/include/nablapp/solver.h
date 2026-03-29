@@ -3,5 +3,6 @@
 
 #include "nablapp/solver/options.h"
 #include "nablapp/solver/basic_solver.h"
+#include "nablapp/solver/lbfgsb_policy.h"
 
 #endif
