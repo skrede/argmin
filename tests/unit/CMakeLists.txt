@@ -5,6 +5,7 @@ add_executable(nablapp_unit_tests
     basic_solver_test.cpp
     scheduling_test.cpp
     solver_group_test.cpp
+    finite_difference_test.cpp
 )
 
 target_link_libraries(nablapp_unit_tests
