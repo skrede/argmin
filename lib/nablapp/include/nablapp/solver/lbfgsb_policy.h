@@ -71,8 +71,8 @@ struct lbfgsb_policy
     };
 
     template <typename Problem>
-    static state_type init(const Problem& problem, const Eigen::VectorXd& x0,
-                           const solver_options<double>& opts)
+    state_type init(this auto&&, const Problem& problem, const Eigen::VectorXd& x0,
+                    const solver_options<double>& opts)
     {
         const int n = problem.dimension();
         state_type s;
@@ -107,7 +107,7 @@ struct lbfgsb_policy
         return s;
     }
 
-    static step_result<double> step(state_type& s)
+    step_result<double> step(this auto&&, state_type& s)
     {
         // Evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
@@ -210,7 +210,7 @@ struct lbfgsb_policy
     }
 
     // Hot start -- preserves curvature pairs (D-05).
-    static void reset(state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = s.eval_value(x0);
@@ -220,9 +220,9 @@ struct lbfgsb_policy
     }
 
     // Cold restart -- clears curvature history (D-05).
-    static void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        self.reset(s, x0);
         s.B.reset();
     }
 };

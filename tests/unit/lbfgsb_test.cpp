@@ -49,8 +49,9 @@ TEST_CASE("lbfgsb_policy satisfies policy contract", "[lbfgsb]")
 
     SECTION("init and step compile and return finite values")
     {
-        auto state = lbfgsb_policy::init(problem, x0, opts);
-        auto sr = lbfgsb_policy::step(state);
+        lbfgsb_policy policy;
+        auto state = policy.init(problem, x0, opts);
+        auto sr = policy.step(state);
 
         CHECK(std::isfinite(sr.objective_value));
         CHECK(std::isfinite(sr.gradient_norm));
@@ -60,16 +61,17 @@ TEST_CASE("lbfgsb_policy satisfies policy contract", "[lbfgsb]")
 
     SECTION("reset preserves curvature")
     {
-        auto state = lbfgsb_policy::init(problem, x0, opts);
+        lbfgsb_policy policy;
+        auto state = policy.init(problem, x0, opts);
 
         for(int i = 0; i < 5; ++i)
-            lbfgsb_policy::step(state);
+            policy.step(state);
 
         int curvature_size = state.B.size();
         CHECK(curvature_size > 0);
 
         Eigen::VectorXd new_x0{{0.5, 0.5}};
-        lbfgsb_policy::reset(state, new_x0);
+        policy.reset(state, new_x0);
 
         CHECK(state.B.size() == curvature_size);
         CHECK(state.x.isApprox(new_x0));
@@ -78,15 +80,16 @@ TEST_CASE("lbfgsb_policy satisfies policy contract", "[lbfgsb]")
 
     SECTION("reset_clear clears curvature")
     {
-        auto state = lbfgsb_policy::init(problem, x0, opts);
+        lbfgsb_policy policy;
+        auto state = policy.init(problem, x0, opts);
 
         for(int i = 0; i < 5; ++i)
-            lbfgsb_policy::step(state);
+            policy.step(state);
 
         CHECK(state.B.size() > 0);
 
         Eigen::VectorXd new_x0{{0.5, 0.5}};
-        lbfgsb_policy::reset_clear(state, new_x0);
+        policy.reset_clear(state, new_x0);
 
         CHECK(state.B.size() == 0);
         CHECK(state.x.isApprox(new_x0));

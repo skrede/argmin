@@ -29,8 +29,8 @@ struct mock_policy
     };
 
     template <typename Problem>
-    static state_type init(const Problem&, const Eigen::VectorXd& x0,
-                           const nablapp::solver_options<double>&)
+    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+                    const nablapp::solver_options<double>&)
     {
         return state_type{
             .x = x0,
@@ -38,7 +38,7 @@ struct mock_policy
         };
     }
 
-    static nablapp::step_result<double> step(state_type& s)
+    nablapp::step_result<double> step(this auto&&, state_type& s)
     {
         double old_f = s.objective_value;
         s.x *= (1.0 - s.step_size);
@@ -53,15 +53,15 @@ struct mock_policy
         };
     }
 
-    static void reset(state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
     }
 
-    static void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        self.reset(s, x0);
     }
 };
 
@@ -79,8 +79,8 @@ struct non_converging_policy
     };
 
     template <typename Problem>
-    static state_type init(const Problem&, const Eigen::VectorXd& x0,
-                           const nablapp::solver_options<double>&)
+    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+                    const nablapp::solver_options<double>&)
     {
         return state_type{
             .x = x0,
@@ -88,7 +88,7 @@ struct non_converging_policy
         };
     }
 
-    static nablapp::step_result<double> step(state_type& s)
+    nablapp::step_result<double> step(this auto&&, state_type& s)
     {
         ++s.step_count;
         return nablapp::step_result<double>{
@@ -100,16 +100,16 @@ struct non_converging_policy
         };
     }
 
-    static void reset(state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 100.0;
         s.step_count = 0;
     }
 
-    static void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        self.reset(s, x0);
     }
 };
 
