@@ -201,17 +201,10 @@ struct bobyqa_policy
         s.Y.col(k) = x_new;
         s.f_values[k] = f_new;
 
-        // Accept step if sufficient improvement
+        // Accept step if sufficient improvement or strictly better
         bool improved = false;
-        if(rho > 0.1 && f_new < old_f)
+        if(f_new < old_f)
         {
-            s.x = x_new;
-            s.objective_value = f_new;
-            improved = true;
-        }
-        else if(f_new < s.objective_value)
-        {
-            // Accept if objective is strictly better even with poor model agreement
             s.x = x_new;
             s.objective_value = f_new;
             improved = true;
@@ -242,17 +235,26 @@ struct bobyqa_policy
 
         ++s.iteration;
 
-        // Use model gradient norm as proxy (derivative-free: set large enough
-        // to avoid basic_solver falsely triggering gradient convergence)
+        // Derivative-free convergence signalling:
+        // - gradient_norm: use model gradient as proxy, but ensure it stays large
+        //   enough to prevent basic_solver from triggering gradient convergence
+        //   while the trust region is still active
+        // - objective_change: when step is rejected (objective unchanged), report
+        //   delta as a proxy to prevent ftol_reached from firing prematurely
+        // - step_size: report delta when step is rejected, to prevent stall detection
+        double obj_change = s.objective_value - old_f;
+        double effective_step = improved ? d_norm : s.delta;
+        double effective_change = improved ? obj_change : s.delta;
+
         double grad_proxy = mg.norm();
-        if(grad_proxy < 1e-4 && s.delta > options_type{}.final_trust_radius)
-            grad_proxy = 1.0;
+        if(s.delta > options_type{}.final_trust_radius)
+            grad_proxy = std::max(grad_proxy, 1.0);
 
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = grad_proxy,
-            .step_size = d_norm,
-            .objective_change = s.objective_value - old_f,
+            .step_size = effective_step,
+            .objective_change = effective_change,
             .improved = improved,
         };
     }

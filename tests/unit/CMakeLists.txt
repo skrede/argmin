@@ -12,6 +12,7 @@ add_executable(nablapp_unit_tests
     halton_test.cpp
     lbfgsb_test.cpp
     active_set_qp_test.cpp
+    bobyqa_test.cpp
 )
 
 target_link_libraries(nablapp_unit_tests
