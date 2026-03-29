@@ -10,6 +10,7 @@ add_executable(nablapp_unit_tests
     line_search_test.cpp
     hessian_test.cpp
     halton_test.cpp
+    lbfgsb_test.cpp
 )
 
 target_link_libraries(nablapp_unit_tests
