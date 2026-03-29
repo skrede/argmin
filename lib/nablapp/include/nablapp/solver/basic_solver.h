@@ -109,6 +109,22 @@ public:
 
     const state_type& state() const { return state_; }
 
+    // Reset to a new starting point, preserving algorithm state (e.g. L-BFGS
+    // curvature pairs). Delegates to Policy::reset(). Per D-05.
+    void reset(const Eigen::VectorX<scalar_type>& x0)
+    {
+        Policy::reset(state_, x0);
+        iterations_ = 0;
+    }
+
+    // Reset to a new starting point, clearing all algorithm state.
+    // Delegates to Policy::reset_clear(). Per D-05.
+    void reset_clear(const Eigen::VectorX<scalar_type>& x0)
+    {
+        Policy::reset_clear(state_, x0);
+        iterations_ = 0;
+    }
+
 private:
     solver_options<scalar_type> options_;
     state_type state_;

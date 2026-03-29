@@ -52,6 +52,17 @@ struct mock_policy
             .improved = s.objective_value < old_f,
         };
     }
+
+    static void reset(state_type& s, const Eigen::VectorXd& x0)
+    {
+        s.x = x0;
+        s.objective_value = 0.5 * x0.squaredNorm();
+    }
+
+    static void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    {
+        reset(s, x0);
+    }
 };
 
 // Mock policy that never converges (gradient_norm stays above tolerance).
@@ -87,6 +98,18 @@ struct non_converging_policy
             .objective_change = -1.0,
             .improved = true,
         };
+    }
+
+    static void reset(state_type& s, const Eigen::VectorXd& x0)
+    {
+        s.x = x0;
+        s.objective_value = 100.0;
+        s.step_count = 0;
+    }
+
+    static void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    {
+        reset(s, x0);
     }
 };
 

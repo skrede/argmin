@@ -113,3 +113,41 @@ TEST_CASE("basic_solver convergence on objective_change", "[solver]")
 
     CHECK(result.status == solver_status::converged);
 }
+
+TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
+{
+    quadratic prob;
+    Eigen::VectorXd x0{{10.0, 10.0}};
+    solver_options opts;
+    opts.gradient_tolerance = 1e-4;
+
+    basic_solver<test::mock_policy> solver{prob, x0, opts};
+
+    SECTION("reset to new x0 and solve again")
+    {
+        auto result1 = solver.solve();
+        CHECK(result1.status == solver_status::converged);
+
+        Eigen::VectorXd new_x0{{5.0, 5.0}};
+        solver.reset(new_x0);
+
+        CHECK(solver.state().x.isApprox(new_x0));
+
+        auto result2 = solver.solve();
+        CHECK(result2.status == solver_status::converged);
+    }
+
+    SECTION("reset_clear to new x0 and solve again")
+    {
+        auto result1 = solver.solve();
+        CHECK(result1.status == solver_status::converged);
+
+        Eigen::VectorXd new_x0{{5.0, 5.0}};
+        solver.reset_clear(new_x0);
+
+        CHECK(solver.state().x.isApprox(new_x0));
+
+        auto result2 = solver.solve();
+        CHECK(result2.status == solver_status::converged);
+    }
+}
