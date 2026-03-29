@@ -5,5 +5,6 @@
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/solver/lbfgsb_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
+#include "nablapp/solver/kraft_slsqp_policy.h"
 
 #endif
