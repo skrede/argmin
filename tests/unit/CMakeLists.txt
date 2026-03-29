@@ -3,6 +3,7 @@ include(Catch)
 add_executable(nablapp_unit_tests
     test_functions_test.cpp
     basic_solver_test.cpp
+    detail_test.cpp
     scheduling_test.cpp
     solver_group_test.cpp
     finite_difference_test.cpp

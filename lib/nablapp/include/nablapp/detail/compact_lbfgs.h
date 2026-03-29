@@ -210,7 +210,7 @@ private:
         M.topLeftCorner(k, k) = theta_ * (S.transpose() * S);
         M.topRightCorner(k, k) = L_.topLeftCorner(k, k);
         M.bottomLeftCorner(k, k) = L_.topLeftCorner(k, k).transpose();
-        M.bottomRightCorner(k, k) = -D_.head(k).asDiagonal();
+        M.bottomRightCorner(k, k) = (-D_.head(k)).asDiagonal();
         return M;
     }
 

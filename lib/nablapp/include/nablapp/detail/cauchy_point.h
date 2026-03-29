@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
 #include <vector>
 
 namespace nablapp::detail
@@ -23,6 +24,37 @@ struct cauchy_result
     std::vector<int> free_indices;    // indices NOT at bounds after GCP
     std::vector<int> active_indices;  // indices AT bounds after GCP
 };
+
+// Classify indices into free and active sets based on x_cauchy position.
+template <typename Scalar = double>
+cauchy_result<Scalar> classify_indices(const Eigen::VectorX<Scalar>& x_cauchy,
+                                       const Eigen::VectorX<Scalar>& lower,
+                                       const Eigen::VectorX<Scalar>& upper)
+{
+    const int n = x_cauchy.size();
+    constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
+
+    std::vector<int> free_idx;
+    std::vector<int> active_idx;
+    free_idx.reserve(n);
+    active_idx.reserve(n);
+
+    for(int i = 0; i < n; ++i)
+    {
+        bool at_lower = x_cauchy[i] <= lower[i] + eps * (Scalar(1) + std::abs(lower[i]));
+        bool at_upper = x_cauchy[i] >= upper[i] - eps * (Scalar(1) + std::abs(upper[i]));
+        if(at_lower || at_upper)
+            active_idx.push_back(i);
+        else
+            free_idx.push_back(i);
+    }
+
+    return cauchy_result<Scalar>{
+        .x_cauchy = x_cauchy,
+        .free_indices = std::move(free_idx),
+        .active_indices = std::move(active_idx),
+    };
+}
 
 // Generalized Cauchy Point via breakpoint search along the projected gradient path.
 //
@@ -84,7 +116,7 @@ cauchy_result<Scalar> cauchy_point(
         else if(gTd < Scalar(0))
             t_star = Scalar(1);  // Negative curvature: take unit step
 
-        Eigen::VectorX<Scalar> x_cauchy = x + t_star * d;
+        Eigen::VectorX<Scalar> x_cauchy = (x + t_star * d).eval();
 
         std::vector<int> free_idx(n);
         std::iota(free_idx.begin(), free_idx.end(), 0);
@@ -124,18 +156,14 @@ cauchy_result<Scalar> cauchy_point(
         Scalar dt = bp.t - t_old;
 
         // Check if minimum is in the current interval [t_old, bp.t]
-        if(f_prime * dt + Scalar(0.5) * f_double_prime * dt * dt >= Scalar(0)
-           || (f_double_prime > Scalar(0) && f_prime < Scalar(0)))
+        if(f_double_prime > Scalar(0) && f_prime < Scalar(0))
         {
-            // Minimum at t* = t_old - f'/f'' if f'' > 0
-            if(f_double_prime > Scalar(0))
+            Scalar t_star = t_old - f_prime / f_double_prime;
+            if(t_star >= t_old && t_star <= bp.t)
             {
-                Scalar t_star = t_old - f_prime / f_double_prime;
-                if(t_star > t_old && t_star < bp.t)
-                {
-                    Eigen::VectorX<Scalar> x_cauchy = project(x - t_star * g, lower, upper);
-                    return classify_indices(x_cauchy, lower, upper);
-                }
+                Eigen::VectorX<Scalar> x_cauchy = project(
+                    Eigen::VectorX<Scalar>((x - t_star * g).eval()), lower, upper);
+                return classify_indices(x_cauchy, lower, upper);
             }
         }
 
@@ -145,7 +173,8 @@ cauchy_result<Scalar> cauchy_point(
         // If f' >= 0 at this breakpoint, the minimum is here
         if(f_prime >= Scalar(0))
         {
-            Eigen::VectorX<Scalar> x_cauchy = project(x - bp.t * g, lower, upper);
+            Eigen::VectorX<Scalar> x_cauchy = project(
+                Eigen::VectorX<Scalar>((x - bp.t * g).eval()), lower, upper);
             return classify_indices(x_cauchy, lower, upper);
         }
 
@@ -154,50 +183,18 @@ cauchy_result<Scalar> cauchy_point(
         t_old = bp.t;
 
         // Recompute f' and f'' with updated d (simpler approach per plan)
-        f_prime = g.dot(d);
         Bd = B.multiply(d);
         f_double_prime = -d.dot(Bd);
 
-        // Adjust f' for position along the path
-        // At position t_old, the model derivative is g^T d + t_old * d^T B d
-        // but since we projected, we use the incremental form
+        // f' at current position t_old with reduced d
         f_prime = g.dot(d) + t_old * (-f_double_prime);
     }
 
     // After all breakpoints: minimum is at or beyond the last breakpoint
     Scalar t_last = bps.back().t;
-    Eigen::VectorX<Scalar> x_cauchy = project(x - t_last * g, lower, upper);
+    Eigen::VectorX<Scalar> x_cauchy = project(
+        Eigen::VectorX<Scalar>((x - t_last * g).eval()), lower, upper);
     return classify_indices(x_cauchy, lower, upper);
-}
-
-// Classify indices into free and active sets based on x_cauchy position.
-template <typename Scalar = double>
-cauchy_result<Scalar> classify_indices(const Eigen::VectorX<Scalar>& x_cauchy,
-                                       const Eigen::VectorX<Scalar>& lower,
-                                       const Eigen::VectorX<Scalar>& upper)
-{
-    const int n = x_cauchy.size();
-    constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
-
-    std::vector<int> free_idx;
-    std::vector<int> active_idx;
-    free_idx.reserve(n);
-    active_idx.reserve(n);
-
-    for(int i = 0; i < n; ++i)
-    {
-        if(x_cauchy[i] <= lower[i] + eps * std::abs(lower[i])
-           || x_cauchy[i] >= upper[i] - eps * std::abs(upper[i]))
-            active_idx.push_back(i);
-        else
-            free_idx.push_back(i);
-    }
-
-    return cauchy_result<Scalar>{
-        .x_cauchy = x_cauchy,
-        .free_indices = std::move(free_idx),
-        .active_indices = std::move(active_idx),
-    };
 }
 
 }
