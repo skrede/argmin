@@ -320,7 +320,12 @@ qp_result<Scalar> solve_qp(
             {
                 // All inequality multipliers non-negative: optimal
                 auto lambda_full = build_full_lambda(lambda_W, W, m_total);
-                return {x, lambda_full, qp_status::optimal, iter};
+                qp_result<Scalar> res;
+                res.x = x;
+                res.lambda = lambda_full;
+                res.status = qp_status::optimal;
+                res.iterations = iter;
+                return res;
             }
             // Remove the constraint with most negative multiplier
             W.erase(W.begin() + drop);
@@ -337,9 +342,15 @@ qp_result<Scalar> solve_qp(
         }
     }
 
-    auto lambda_full = build_full_lambda(
-        Eigen::VectorX<Scalar>::Zero(static_cast<int>(W.size())), W, m_total);
-    return {x, lambda_full, qp_status::max_iterations, opts.max_iterations};
+    Eigen::VectorX<Scalar> zero_lam = Eigen::VectorX<Scalar>::Zero(
+        static_cast<int>(W.size()));
+    auto lambda_full = build_full_lambda(zero_lam, W, m_total);
+    qp_result<Scalar> res;
+    res.x = x;
+    res.lambda = lambda_full;
+    res.status = qp_status::max_iterations;
+    res.iterations = opts.max_iterations;
+    return res;
 }
 
 // Convenience overload with box constraints.
