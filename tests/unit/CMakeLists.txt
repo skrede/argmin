@@ -7,6 +7,8 @@ add_executable(nablapp_unit_tests
     solver_group_test.cpp
     finite_difference_test.cpp
     line_search_test.cpp
+    hessian_test.cpp
+    halton_test.cpp
 )
 
 target_link_libraries(nablapp_unit_tests
