@@ -16,7 +16,12 @@ enum class solver_status
     max_iterations,
     budget_exhausted,
     stalled,
-    diverged
+    diverged,
+    xtol_reached,
+    ftol_reached,
+    maxeval_reached,
+    roundoff_limited,
+    aborted
 };
 
 }

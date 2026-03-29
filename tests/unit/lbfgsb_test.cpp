@@ -154,6 +154,7 @@ TEST_CASE("L-BFGS-B respects box constraints", "[lbfgsb]")
         auto result = solver.solve();
 
         CHECK((result.status == solver_status::converged
+               || result.status == solver_status::ftol_reached
                || result.status == solver_status::stalled
                || result.status == solver_status::max_iterations));
 

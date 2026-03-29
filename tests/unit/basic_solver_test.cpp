@@ -111,7 +111,7 @@ TEST_CASE("basic_solver convergence on objective_change", "[solver]")
     basic_solver<test::mock_policy> solver{prob, x0, opts};
     auto result = solver.solve();
 
-    CHECK(result.status == solver_status::converged);
+    CHECK(result.status == solver_status::ftol_reached);
 }
 
 TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
