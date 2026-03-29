@@ -2,5 +2,6 @@
 #define HPP_GUARD_NABLAPP_SOLVER_H
 
 #include "nablapp/solver/options.h"
+#include "nablapp/solver/basic_solver.h"
 
 #endif

@@ -2,6 +2,7 @@ include(Catch)
 
 add_executable(nablapp_unit_tests
     test_functions_test.cpp
+    basic_solver_test.cpp
 )
 
 target_link_libraries(nablapp_unit_tests
