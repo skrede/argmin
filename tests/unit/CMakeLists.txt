@@ -13,6 +13,7 @@ add_executable(nablapp_unit_tests
     lbfgsb_test.cpp
     active_set_qp_test.cpp
     bobyqa_test.cpp
+    sqp_test.cpp
     kraft_slsqp_test.cpp
 )
 
