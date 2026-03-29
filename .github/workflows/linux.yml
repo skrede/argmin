@@ -1,0 +1,153 @@
+name: Linux
+
+on:
+  push:
+    branches: [master,develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.planning/**'
+  pull_request:
+    branches: [master,develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.planning/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc-14
+            cc: gcc-14
+            cxx: g++-14
+            coverage: true
+            gcov_executable: gcov-14
+          - compiler: clang-18
+            cc: clang-18
+            cxx: clang++-18
+            coverage: true
+            gcov_executable: "llvm-cov-18 gcov"
+
+    runs-on: ubuntu-24.04
+    name: ${{ matrix.compiler }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gcovr
+        if: matrix.coverage
+        run: pip install gcovr
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          if [ "${{ matrix.coverage }}" = "true" ]; then
+            cmake . -B build -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_CXX_FLAGS="-Werror --coverage" \
+              -DCMAKE_C_FLAGS="--coverage" \
+              -DNABLAPP_BUILD_TESTS=ON \
+              -DNABLAPP_BUILD_EXAMPLES=OFF \
+              -DNABLAPP_CMAKE_FETCH_DEPS=ON
+          else
+            cmake . -B build -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_FLAGS="-Werror" \
+              -DNABLAPP_BUILD_TESTS=ON \
+              -DNABLAPP_BUILD_EXAMPLES=OFF \
+              -DNABLAPP_CMAKE_FETCH_DEPS=ON
+          fi
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: cd build && ctest --output-on-failure
+
+      - name: Generate coverage
+        if: matrix.coverage
+        run: |
+          gcovr build \
+            --root . \
+            --gcov-executable "${{ matrix.gcov_executable }}" \
+            --filter 'lib/nablapp/include/nablapp/' \
+             \
+            --gcov-ignore-errors=source_not_found \
+            --xml coverage.xml
+
+      - name: Upload to Codecov
+        if: matrix.coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  sanitize:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: asan-ubsan
+            cc: clang-18
+            cxx: clang++-18
+            flags: "-fsanitize=address,undefined -fno-omit-frame-pointer"
+          - name: msan
+            cc: clang-18
+            cxx: clang++-18
+            flags: "-fsanitize=memory -fno-omit-frame-pointer -fsanitize-memory-track-origins=2"
+
+    runs-on: ubuntu-24.04
+    name: sanitize (${{ matrix.name }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake . -B build -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="${{ matrix.flags }}" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.flags }}" \
+            -DNABLAPP_BUILD_TESTS=ON \
+            -DNABLAPP_CMAKE_FETCH_DEPS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: cd build && ctest --output-on-failure
+
+  install-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Eigen
+        run: sudo apt-get update && sudo apt-get install -y libeigen3-dev
+
+      - name: Build and install
+        run: |
+          cmake . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install \
+            -DNABLAPP_CMAKE_FETCH_DEPS=OFF
+          cmake --build build
+          cmake --install build
+
+      - name: Build consumer project
+        run: |
+          cmake tests/integration/consumer -B build-consumer \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/install \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-consumer
+
+      - name: Run consumer test
+        run: |
+          ./build-consumer/integration_test

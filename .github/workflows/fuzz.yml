@@ -1,0 +1,42 @@
+name: Fuzz testing
+
+on:
+  push:
+    branches: [master,develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.planning/**'
+  pull_request:
+    branches: [master,develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.planning/**'
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang and LLVM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm
+
+      - name: Configure
+        run: >
+          cmake -B build
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DNABLAPP_BUILD_FUZZ_TESTS=ON
+          -DNABLAPP_CMAKE_FETCH_DEPS=ON
+
+      - name: Build fuzz targets
+        run: cmake --build build -j$(nproc)
