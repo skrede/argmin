@@ -1,6 +1,10 @@
 #ifndef HPP_GUARD_NABLAPP_FORMULATION_CONCEPTS_H
 #define HPP_GUARD_NABLAPP_FORMULATION_CONCEPTS_H
 
+#include "nablapp/result/status.h"
+#include "nablapp/result/step_result.h"
+#include "nablapp/result/solve_result.h"
+
 #include <Eigen/Core>
 
 #include <concepts>
@@ -67,6 +71,30 @@ concept least_squares = objective<P, S> &&
     { p.residuals(x, r) };
     { p.jacobian(x, J) };
     { p.num_residuals() } -> std::convertible_to<int>;
+};
+
+// NLP solver concept for downstream consumer injection (e.g., ctrlpp).
+//
+// Checks that a solver provides the full iterative execution model
+// plus constraint violation diagnostics. Designed to be satisfied by
+// basic_solver<Policy> for any constrained policy.
+//
+// Reference: D-07, D-08 from Phase 4 CONTEXT.
+template <typename Solver, typename S = double>
+concept nlp_solver = requires(Solver& solver, const Solver& csolver,
+                              const Eigen::VectorX<S>& x0)
+{
+    typename Solver::scalar_type;
+    typename Solver::state_type;
+    { solver.step() } -> std::convertible_to<step_result<S>>;
+    { solver.solve() } -> std::convertible_to<solve_result<S>>;
+    { solver.step_n(int{}) } -> std::convertible_to<solve_result<S>>;
+    { csolver.state() };
+    { csolver.status() } -> std::convertible_to<solver_status>;
+    { solver.reset(x0) };
+    { solver.reset_clear(x0) };
+    { solver.abort() };
+    { csolver.constraint_violation() } -> std::convertible_to<S>;
 };
 
 }

@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_NABLAPP_SOLVER_BASIC_SOLVER_H
 #define HPP_GUARD_NABLAPP_SOLVER_BASIC_SOLVER_H
 
+#include "nablapp/detail/lagrangian.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/result/solve_result.h"
 #include "nablapp/result/status.h"
@@ -157,6 +158,14 @@ public:
     const state_type& state() const { return state_; }
 
     solver_status status() const { return last_status_; }
+
+    scalar_type constraint_violation() const
+    {
+        if constexpr(requires { state_.c_eq; state_.c_ineq; })
+            return detail::constraint_violation(state_.c_eq, state_.c_ineq);
+        else
+            return scalar_type(0);
+    }
 
     void abort() { abort_flag_.store(true, std::memory_order_relaxed); }
 
