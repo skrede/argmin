@@ -7,12 +7,19 @@
 // the build fails with a clear concept-violation error.
 
 #include "nablapp/formulation/concepts.h"
+#include "nablapp/solver/basic_solver.h"
+#include "nablapp/solver/options.h"
+#include "nablapp/solver/nw_sqp_policy.h"
+#include "nablapp/solver/kraft_slsqp_policy.h"
+#include "nablapp/solver/lbfgsb_policy.h"
+#include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/test_functions/booth.h"
 #include "nablapp/test_functions/beale.h"
 #include "nablapp/test_functions/ackley.h"
 #include "nablapp/test_functions/rastrigin.h"
 #include "nablapp/test_functions/rosenbrock.h"
 #include "nablapp/test_functions/himmelblau.h"
+#include "nablapp/test_functions/hock_schittkowski.h"
 
 // ---------------------------------------------------------------------------
 // Positive tests: all six test functions satisfy objective and differentiable
@@ -137,6 +144,54 @@ static_assert(nablapp::bound_constrained<full_problem>);
 static_assert(nablapp::constrained<full_problem>);
 static_assert(nablapp::least_squares<full_problem>);
 
+// A mock solver type missing constraint_violation -- must NOT satisfy nlp_solver
+struct mock_solver_no_cv
+{
+    using scalar_type = double;
+    using state_type = int;
+    nablapp::step_result<double> step() { return {}; }
+    nablapp::solve_result<double> solve() { return {}; }
+    nablapp::solve_result<double> step_n(int) { return {}; }
+    const state_type& state() const { static state_type s{}; return s; }
+    nablapp::solver_status status() const { return {}; }
+    void reset(const Eigen::VectorXd&) {}
+    void reset_clear(const Eigen::VectorXd&) {}
+    void abort() {}
+    // deliberately omitting constraint_violation()
+};
+
+static_assert(!nablapp::nlp_solver<mock_solver_no_cv>);
+
 }
+
+// ---------------------------------------------------------------------------
+// HS test functions satisfy constrained + differentiable + bound_constrained
+// ---------------------------------------------------------------------------
+
+static_assert(nablapp::constrained<nablapp::hs071<>>);
+static_assert(nablapp::differentiable<nablapp::hs071<>>);
+static_assert(nablapp::bound_constrained<nablapp::hs071<>>);
+
+static_assert(nablapp::constrained<nablapp::hs076<>>);
+static_assert(nablapp::differentiable<nablapp::hs076<>>);
+static_assert(nablapp::bound_constrained<nablapp::hs076<>>);
+
+static_assert(nablapp::constrained<nablapp::hs024<>>);
+static_assert(nablapp::differentiable<nablapp::hs024<>>);
+static_assert(nablapp::bound_constrained<nablapp::hs024<>>);
+
+static_assert(nablapp::constrained<nablapp::hs035<>>);
+static_assert(nablapp::differentiable<nablapp::hs035<>>);
+static_assert(nablapp::bound_constrained<nablapp::hs035<>>);
+
+// ---------------------------------------------------------------------------
+// nlp_solver concept satisfaction (INTG-02)
+// basic_solver<Policy> satisfies nlp_solver for all solver policies
+// ---------------------------------------------------------------------------
+
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::nw_sqp_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::kraft_slsqp_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lbfgsb_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::bobyqa_policy>>);
 
 int main() { return 0; }
