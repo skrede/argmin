@@ -13,6 +13,9 @@
 #include "nablapp/solver/kraft_slsqp_policy.h"
 #include "nablapp/solver/lbfgsb_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
+#include "nablapp/solver/mma_policy.h"
+#include "nablapp/solver/gcmma_policy.h"
+#include "nablapp/solver/augmented_lagrangian_policy.h"
 #include "nablapp/test_functions/booth.h"
 #include "nablapp/test_functions/beale.h"
 #include "nablapp/test_functions/ackley.h"
@@ -193,5 +196,10 @@ static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::nw_sqp_policy>>
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::kraft_slsqp_policy>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lbfgsb_policy>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::bobyqa_policy>>);
+
+// Phase 4 policies satisfy nlp_solver (INTG-02)
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::augmented_lagrangian_policy<>>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::mma_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::gcmma_policy>>);
 
 int main() { return 0; }

@@ -7,5 +7,8 @@
 #include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
+#include "nablapp/solver/mma_policy.h"
+#include "nablapp/solver/gcmma_policy.h"
+#include "nablapp/solver/augmented_lagrangian_policy.h"
 
 #endif
