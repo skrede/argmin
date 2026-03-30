@@ -182,11 +182,18 @@ struct lm_policy
 
         ++s.iteration;
 
+        // Report h.norm() as step_size even on rejection to prevent
+        // basic_solver stall detection from firing prematurely. The solver
+        // is still making progress by adjusting lambda.
+        // On rejection, report lambda as objective_change proxy to prevent
+        // ftol_reached from firing.
+        double effective_change = accepted ? (s.objective_value - old_value) : s.lambda;
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = g.norm(),
-            .step_size = accepted ? h.norm() : 0.0,
-            .objective_change = s.objective_value - old_value,
+            .step_size = h.norm(),
+            .objective_change = effective_change,
             .improved = accepted,
         };
     }
