@@ -18,6 +18,9 @@ add_executable(nablapp_unit_tests
     augmented_lagrangian_test.cpp
     mma_test.cpp
     hock_schittkowski_test.cpp
+    lm_test.cpp
+    cmaes_test.cpp
+    convergence_test.cpp
 )
 
 target_link_libraries(nablapp_unit_tests
