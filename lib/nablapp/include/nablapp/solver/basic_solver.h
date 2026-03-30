@@ -150,6 +150,7 @@ public:
             .function_evaluations = iterations_,
             .objective_value = last.objective_value,
             .gradient_norm = last.gradient_norm,
+            .constraint_violation = constraint_violation(),
             .x = state_.x,
             .wall_time = t1 - t0,
         };
