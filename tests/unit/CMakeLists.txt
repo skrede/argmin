@@ -16,6 +16,7 @@ add_executable(nablapp_unit_tests
     sqp_test.cpp
     kraft_slsqp_test.cpp
     augmented_lagrangian_test.cpp
+    mma_test.cpp
 )
 
 target_link_libraries(nablapp_unit_tests

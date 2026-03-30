@@ -244,14 +244,19 @@ Eigen::VectorX<Scalar> mma_dual_solve(
         if(grad.cwiseAbs().maxCoeff() < tol)
             break;
 
-        // Compute dual Hessian (m x m, symmetric)
-        // d^2W/dy_i dy_k = -sum_j [ (dp_j/dy_i * dp_j/dy_k) / (4*pj^{3/2})
-        //                          + (dq_j/dy_i * dq_j/dy_k) / (4*qj^{3/2}) ]
-        //                  * dx_j/d(stuff)
-        // In practice, we compute it from the second derivative of the dual function.
-        // For the separable structure, the Hessian has a simple form.
-
-        Eigen::MatrixX<Scalar> H = Eigen::MatrixX<Scalar>::Zero(m, m);
+        // Compute the negative dual Hessian (-d^2W/dy^2), which is positive
+        // semidefinite. Uses implicit differentiation of KKT condition
+        // dL/dx_j = 0 to get dx_j/dy_k.
+        //
+        // -H_{i1,i2} = sum_j [ dg_{i1}/dx_j * (-dx_j/dy_{i2}) ]
+        //            = sum_j [ v_{i1,j} * v_{i2,j} / w_j ]
+        //
+        // where v_{i,j} = pi_{i,j}/a_j^2 - qi_{i,j}/b_j^2
+        //       w_j     = 2*P_j/a_j^3 + 2*Q_j/b_j^3
+        //       a_j     = U_j - x_j, b_j = x_j - L_j
+        //
+        // Reference: Svanberg 1987, dual Newton system.
+        Eigen::MatrixX<Scalar> negH = Eigen::MatrixX<Scalar>::Zero(m, m);
         for(int j = 0; j < n; ++j)
         {
             Scalar pj = coeffs.p0[j];
@@ -264,38 +269,37 @@ Eigen::VectorX<Scalar> mma_dual_solve(
             pj = std::max(pj, eps);
             qj = std::max(qj, eps);
 
-            Scalar ux = U[j] - x_opt[j];
-            Scalar xl = x_opt[j] - L[j];
+            Scalar aj = U[j] - x_opt[j];
+            Scalar bj = x_opt[j] - L[j];
+            aj = std::max(aj, eps);
+            bj = std::max(bj, eps);
 
-            // dx_j/dy_i contribution to Hessian
-            // The dual Hessian is negative semidefinite (we maximize the dual).
-            // For Newton: H * dy = -grad, where H is the negative dual Hessian
-            // (so H is positive semidefinite).
-            Scalar sp = std::sqrt(pj);
-            Scalar sq = std::sqrt(qj);
-            Scalar denom = sp + sq;
-            Scalar factor = (U[j] - L[j]) / (Scalar(2) * denom * denom * denom);
+            Scalar wj = Scalar(2) * pj / (aj * aj * aj)
+                      + Scalar(2) * qj / (bj * bj * bj);
+            wj = std::max(wj, eps);
 
             for(int i1 = 0; i1 < m; ++i1)
             {
-                Scalar a1 = coeffs.pi(i1, j) / sp - coeffs.qi(i1, j) / sq;
+                Scalar v1 = coeffs.pi(i1, j) / (aj * aj)
+                          - coeffs.qi(i1, j) / (bj * bj);
                 for(int i2 = i1; i2 < m; ++i2)
                 {
-                    Scalar a2 = coeffs.pi(i2, j) / sp - coeffs.qi(i2, j) / sq;
-                    Scalar val = factor * a1 * a2;
-                    H(i1, i2) += val;
+                    Scalar v2 = coeffs.pi(i2, j) / (aj * aj)
+                              - coeffs.qi(i2, j) / (bj * bj);
+                    Scalar val = v1 * v2 / wj;
+                    negH(i1, i2) += val;
                     if(i1 != i2)
-                        H(i2, i1) += val;
+                        negH(i2, i1) += val;
                 }
             }
         }
 
         // Regularize
-        H.diagonal().array() += eps;
+        negH.diagonal().array() += eps;
 
-        // Newton step: H * dy = -grad (note: we use the negative Hessian
-        // since we maximize the dual, so -H is psd and we solve H dy = grad)
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(H);
+        // Newton ascent: dy = (-H)^{-1} * grad, then y += alpha * dy.
+        // This maximizes the concave dual W(y).
+        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(negH);
         Eigen::VectorX<Scalar> dy = ldlt.solve(grad);
 
         // Line search: backtrack to keep y >= 0
@@ -304,13 +308,13 @@ Eigen::VectorX<Scalar> mma_dual_solve(
         {
             if(dy[i] < Scalar(0) && y[i] > Scalar(0))
             {
-                Scalar max_step = -y[i] / dy[i] * Scalar(0.95);
+                Scalar max_step = y[i] / (-dy[i]) * Scalar(0.95);
                 alpha = std::min(alpha, max_step);
             }
         }
         alpha = std::max(alpha, eps);
 
-        y -= alpha * dy;
+        y += alpha * dy;
 
         // Project to non-negative orthant
         y = y.cwiseMax(Scalar(0));
