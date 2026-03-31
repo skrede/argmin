@@ -4,8 +4,6 @@
 #include "nablapp/types.h"
 #include "nablapp/result.h"
 #include "nablapp/solver.h"
-#include "nablapp/hessian.h"
-#include "nablapp/sampling.h"
 #include "nablapp/schedule.h"
 #include "nablapp/derivative.h"
 #include "nablapp/formulation.h"

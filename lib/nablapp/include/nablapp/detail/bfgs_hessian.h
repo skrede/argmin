@@ -7,9 +7,8 @@
 // This is required by SQP because the QP subproblem uses B directly
 // as the quadratic term: min 0.5 p^T B p + g^T p.
 //
-// The existing bfgs_approximation maintains H = B^{-1} (inverse
-// Hessian), which would require O(n^3) inversion to recover B.
-// This class avoids that cost.
+// An inverse-Hessian form (H = B^{-1}) would require O(n^3)
+// inversion to recover B. This class avoids that cost.
 //
 // Reference: N&W eq. 8.19 (direct BFGS update);
 //            N&W Procedure 18.2, eq. 18.22-18.24 (Powell damping);

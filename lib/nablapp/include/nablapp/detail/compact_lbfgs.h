@@ -17,9 +17,8 @@ namespace nablapp::detail
 // the 2m x 2m middle matrix. Also provides two_loop_recursion(g) computing
 // H_k*g (N&W Algorithm 9.1) using the same (s,y) storage.
 //
-// This is SEPARATE from lbfgs_history (Phase 2). lbfgs_history computes H*g
-// only; this class additionally provides B*v products and reduced Hessians
-// needed by L-BFGS-B subspace minimization.
+// Provides both H*g (two-loop recursion) and B*v products plus reduced
+// Hessians needed by L-BFGS-B subspace minimization.
 //
 // Reference: N&W Section 9.2 (compact representation, eq. 9.15),
 //            N&W Algorithm 9.1 (two-loop recursion),
