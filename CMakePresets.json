@@ -1,0 +1,149 @@
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "dev",
+            "displayName": "Development (tests only)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/dev",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "NABLAPP_BUILD_TESTS": "ON",
+                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+            }
+        },
+        {
+            "name": "dev-full",
+            "displayName": "Full development (tests + examples + fuzz + property)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/dev-full",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "NABLAPP_BUILD_TESTS": "ON",
+                "NABLAPP_BUILD_EXAMPLES": "ON",
+                "NABLAPP_BUILD_FUZZ_TESTS": "ON",
+                "NABLAPP_BUILD_PROPERTY_TESTS": "ON",
+                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+            }
+        },
+        {
+            "name": "coverage",
+            "displayName": "Coverage (GCC + gcov)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/coverage",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS": "--coverage -fprofile-arcs -ftest-coverage",
+                "NABLAPP_BUILD_TESTS": "ON",
+                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+            }
+        },
+        {
+            "name": "sanitize",
+            "displayName": "Sanitizers (ASan + UBSan)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/sanitize",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
+                "NABLAPP_BUILD_TESTS": "ON",
+                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+            }
+        },
+        {
+            "name": "bench",
+            "displayName": "Benchmarks",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/bench",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "NABLAPP_BUILD_BENCHMARKS": "ON",
+                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+            }
+        },
+        {
+            "name": "fuzz",
+            "displayName": "Fuzz testing",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/fuzz",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "NABLAPP_BUILD_FUZZ_TESTS": "ON",
+                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "dev",
+            "configurePreset": "dev"
+        },
+        {
+            "name": "dev-full",
+            "configurePreset": "dev-full"
+        },
+        {
+            "name": "release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "coverage",
+            "configurePreset": "coverage"
+        },
+        {
+            "name": "sanitize",
+            "configurePreset": "sanitize"
+        },
+        {
+            "name": "bench",
+            "configurePreset": "bench"
+        },
+        {
+            "name": "fuzz",
+            "configurePreset": "fuzz"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "dev",
+            "configurePreset": "dev",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "dev-full",
+            "configurePreset": "dev-full",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "coverage",
+            "configurePreset": "coverage",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "sanitize",
+            "configurePreset": "sanitize",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}

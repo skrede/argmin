@@ -1,0 +1,59 @@
+---
+Language: Cpp
+Standard: Latest
+BasedOnStyle: LLVM
+
+# Core formatting (D-01, D-02, D-03)
+BreakBeforeBraces: Allman
+ColumnLimit: 220
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+
+# Include ordering (D-06) -- NEVER sort, preserve manual ordering
+SortIncludes: Never
+IncludeBlocks: Preserve
+
+# Parameter/argument alignment (D-07, mdnspp style)
+AlignAfterOpenBracket: Align
+BinPackArguments: false
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+
+# Pointer/reference alignment (mdnspp convention -- bind to type)
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# Constructor initializer (mdnspp convention)
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: NextLine
+
+# Space control (mdnspp: no space before parens in control flow, asio convention)
+SpaceBeforeParens: Never
+SpaceBeforeCpp11BracedList: false
+SpaceInEmptyBlock: false
+SpacesInAngles: Never
+
+# Lambda and short function formatting
+AllowShortLambdasOnASingleLine: All
+AllowShortFunctionsOnASingleLine: Inline
+
+# Miscellaneous
+AlignTrailingComments: true
+AllowShortBlocksOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+IndentCaseLabels: false
+NamespaceIndentation: None
+FixNamespaceComments: true
+MaxEmptyLinesToKeep: 2
+EmptyLineBeforeAccessModifier: Always
+SeparateDefinitionBlocks: Leave
+
+# Template formatting
+AlwaysBreakTemplateDeclarations: Yes
+SpaceAfterTemplateKeyword: true
+...
