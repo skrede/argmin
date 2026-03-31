@@ -39,6 +39,7 @@ public:
                        Schedule schedule = {})
         : solvers_{basic_solver<Policies>{problem, x0, opts}...}
         , schedule_{std::move(schedule)}
+        , opts_{opts}
     {
         init_schedule();
     }
@@ -81,12 +82,15 @@ public:
 
         auto t1 = std::chrono::steady_clock::now();
 
+        auto best_idx = best_solver_index(std::index_sequence_for<Policies...>{});
+
         return solve_result<scalar_type>{
             .status = status,
             .iterations = budget,
             .function_evaluations = budget,
             .objective_value = last.objective_value,
             .gradient_norm = last.gradient_norm,
+            .constraint_violation = constraint_violation_at(best_idx, std::index_sequence_for<Policies...>{}),
             .x = best_x(std::index_sequence_for<Policies...>{}),
             .wall_time = t1 - t0,
         };
@@ -103,12 +107,12 @@ private:
 
     int max_iterations() const
     {
-        return std::get<0>(solvers_).state().x.size() * 1000;
+        return opts_.max_iterations;
     }
 
     scalar_type gradient_tolerance() const
     {
-        return scalar_type(1e-8);
+        return opts_.gradient_tolerance;
     }
 
     template <std::size_t... Is>
@@ -120,26 +124,44 @@ private:
     }
 
     template <std::size_t... Is>
-    Eigen::VectorX<scalar_type> best_x(std::index_sequence<Is...>) const
+    std::size_t best_solver_index(std::index_sequence<Is...>) const
     {
         scalar_type best_val = std::numeric_limits<scalar_type>::max();
-        const Eigen::VectorX<scalar_type>* best_ptr = nullptr;
+        std::size_t best_idx = 0;
 
-        auto check = [&](const auto& solver)
+        auto check = [&](std::size_t idx, const auto& solver)
         {
             if(solver.state().objective_value < best_val)
             {
                 best_val = solver.state().objective_value;
-                best_ptr = &solver.state().x;
+                best_idx = idx;
             }
         };
 
-        (check(std::get<Is>(solvers_)), ...);
-        return *best_ptr;
+        (check(Is, std::get<Is>(solvers_)), ...);
+        return best_idx;
+    }
+
+    template <std::size_t... Is>
+    Eigen::VectorX<scalar_type> best_x(std::index_sequence<Is...>) const
+    {
+        auto idx = best_solver_index(std::index_sequence<Is...>{});
+        const Eigen::VectorX<scalar_type>* ptr = nullptr;
+        ((Is == idx ? (ptr = &std::get<Is>(solvers_).state().x, true) : false), ...);
+        return *ptr;
+    }
+
+    template <std::size_t... Is>
+    scalar_type constraint_violation_at(std::size_t idx, std::index_sequence<Is...>) const
+    {
+        scalar_type cv{};
+        ((Is == idx ? (cv = std::get<Is>(solvers_).constraint_violation(), true) : false), ...);
+        return cv;
     }
 
     std::tuple<basic_solver<Policies>...> solvers_;
     Schedule schedule_;
+    solver_options<scalar_type> opts_;
 };
 
 }
