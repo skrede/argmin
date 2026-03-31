@@ -1,0 +1,144 @@
+// Ceres Solver comparison benchmarks for nablapp benchmark suite.
+//
+// Each Ceres solver is benchmarked on applicable problems using Ceres' native
+// API (per D-01: no common adapter interface). Results are collected as
+// benchmark_result structs with library = "ceres".
+//
+// Per Research pitfall 2: Ceres has NO constrained optimization. Only
+// benchmark on unconstrained problems via GradientProblem + GradientProblemSolver.
+//
+// Solver mapping (per D-04):
+//   Unconstrained: ceres::LBFGS -> "ceres_lbfgs"
+
+#include "bench_ceres.h"
+#include "problem_registry.h"
+
+#include <ceres/gradient_problem.h>
+#include <ceres/gradient_problem_solver.h>
+
+#include <chrono>
+#include <cmath>
+#include <string_view>
+#include <vector>
+
+namespace nablapp::bench
+{
+
+namespace detail
+{
+
+// Adapts any nablapp problem as a ceres::FirstOrderFunction.
+// Problem must provide value(), gradient(), dimension().
+template <typename Problem>
+class ceres_first_order_adapter : public ceres::FirstOrderFunction
+{
+public:
+    explicit ceres_first_order_adapter(Problem prob)
+        : prob_{std::move(prob)}
+    {
+    }
+
+    bool Evaluate(const double* parameters,
+                  double* cost,
+                  double* gradient) const override
+    {
+        Eigen::Map<const Eigen::VectorXd> x(parameters, prob_.dimension());
+        *cost = prob_.value(x);
+
+        if(gradient)
+        {
+            Eigen::VectorXd g(prob_.dimension());
+            prob_.gradient(x, g);
+            Eigen::Map<Eigen::VectorXd>(gradient, prob_.dimension()) = g;
+        }
+
+        return true;
+    }
+
+    int NumParameters() const override
+    {
+        return prob_.dimension();
+    }
+
+private:
+    Problem prob_;
+};
+
+[[nodiscard]] auto ceres_status_string(ceres::TerminationType t)
+    -> std::string_view
+{
+    switch(t)
+    {
+    case ceres::CONVERGENCE: return "converged";
+    case ceres::NO_CONVERGENCE: return "max_iterations";
+    case ceres::FAILURE: return "failed";
+    case ceres::USER_SUCCESS: return "user_success";
+    case ceres::USER_FAILURE: return "user_failure";
+    default: return "unknown";
+    }
+}
+
+// Run Ceres LBFGS on a problem and return a benchmark_result.
+template <typename Problem>
+auto run_ceres_solver(std::string_view problem_name,
+                      Problem prob,
+                      int max_iterations) -> benchmark_result
+{
+    auto x0 = prob.initial_point();
+
+    // GradientProblem takes ownership of the raw pointer.
+    auto* adapter = new ceres_first_order_adapter<Problem>(prob);
+    ceres::GradientProblem gradient_problem(adapter);
+
+    ceres::GradientProblemSolver::Options options;
+    options.max_num_iterations = max_iterations;
+    options.line_search_direction_type = ceres::LBFGS;
+    options.function_tolerance = 1e-12;
+    options.gradient_tolerance = 1e-10;
+    options.logging_type = ceres::SILENT;
+
+    std::vector<double> x(x0.data(), x0.data() + prob.dimension());
+
+    ceres::GradientProblemSolver::Summary summary;
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    ceres::Solve(options, gradient_problem, x.data(), &summary);
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    auto wall_us = std::chrono::duration_cast<
+        std::chrono::microseconds>(t1 - t0).count();
+
+    double known_opt = prob.optimal_value();
+
+    return benchmark_result{
+        .solver = "ceres_lbfgs",
+        .library = "ceres",
+        .problem = problem_name,
+        .pclass = prob.pclass,
+        .dimension = prob.dimension(),
+        .f_evals = summary.num_cost_evaluations,
+        .g_evals = summary.num_gradient_evaluations,
+        .wall_time_us = wall_us,
+        .final_objective = summary.final_cost,
+        .known_optimum = known_opt,
+        .accuracy = std::abs(summary.final_cost - known_opt),
+        .status = ceres_status_string(summary.termination_type),
+    };
+}
+
+}
+
+void run_ceres_benchmarks(std::vector<benchmark_result>& results)
+{
+    constexpr int max_iterations = 10000;
+
+    // Ceres only does unconstrained -- use for_each_problem_of_class.
+    for_each_problem_of_class(problem_class::unconstrained,
+        [&](std::string_view name, auto&& prob) {
+            using P = std::remove_cvref_t<decltype(prob)>;
+            results.push_back(
+                detail::run_ceres_solver(name, P{}, max_iterations));
+        });
+}
+
+}
