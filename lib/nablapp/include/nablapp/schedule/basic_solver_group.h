@@ -210,7 +210,7 @@ private:
     step_result<scalar_type> step_at(std::size_t idx, std::index_sequence<Is...>)
     {
         step_result<scalar_type> result{};
-        ((Is == idx ? (result = std::get<Is>(solvers_).step(), true) : false), ...);
+        ((Is == idx ? void(result = std::get<Is>(solvers_).step()) : void()), ...);
         return result;
     }
 
@@ -254,7 +254,7 @@ private:
     {
         auto idx = best_solver_index(std::index_sequence<Is...>{});
         const Eigen::VectorX<scalar_type>* ptr = nullptr;
-        ((Is == idx ? (ptr = &std::get<Is>(solvers_).state().x, true) : false), ...);
+        ((Is == idx ? void(ptr = &std::get<Is>(solvers_).state().x) : void()), ...);
         return *ptr;
     }
 
@@ -262,7 +262,7 @@ private:
     scalar_type objective_at(std::size_t idx, std::index_sequence<Is...>) const
     {
         scalar_type val{};
-        ((Is == idx ? (val = std::get<Is>(solvers_).state().objective_value, true) : false), ...);
+        ((Is == idx ? void(val = std::get<Is>(solvers_).state().objective_value) : void()), ...);
         return val;
     }
 
@@ -270,7 +270,7 @@ private:
     scalar_type constraint_violation_at(std::size_t idx, std::index_sequence<Is...>) const
     {
         scalar_type cv{};
-        ((Is == idx ? (cv = std::get<Is>(solvers_).constraint_violation(), true) : false), ...);
+        ((Is == idx ? void(cv = std::get<Is>(solvers_).constraint_violation()) : void()), ...);
         return cv;
     }
 
