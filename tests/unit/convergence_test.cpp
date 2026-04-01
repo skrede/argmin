@@ -323,16 +323,16 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
     {
         solver_options opts;
         opts.max_iterations = 500;
-        opts.gradient_tolerance = 1e-12;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-12);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         SECTION("Rosenbrock 2D")
         {
             rosenbrock problem{};
             Eigen::VectorXd x0{{-1.0, -1.0}};
             basic_solver<lbfgsb_policy> solver{problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
 
@@ -341,7 +341,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             booth problem{};
             Eigen::VectorXd x0{{0.0, 0.0}};
             basic_solver<lbfgsb_policy> solver{problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
 
@@ -350,7 +350,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             beale problem{};
             Eigen::VectorXd x0{{0.0, 0.0}};
             basic_solver<lbfgsb_policy> solver{problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
     }
@@ -362,16 +362,16 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
     {
         solver_options opts;
         opts.max_iterations = 500;
-        opts.gradient_tolerance = 1e-15;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-15);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         SECTION("Rosenbrock 2D bounded")
         {
             bounded_rosenbrock problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
             basic_solver<bobyqa_policy> solver{problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
         }
 
@@ -380,7 +380,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             bounded_booth problem;
             Eigen::VectorXd x0{{0.0, 0.0}};
             basic_solver<bobyqa_policy> solver{problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
         }
 
@@ -389,7 +389,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             bounded_himmelblau problem;
             Eigen::VectorXd x0{{1.0, 1.0}};
             basic_solver<bobyqa_policy> solver{problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
         }
     }
@@ -405,15 +405,15 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             Eigen::VectorXd x0 = Eigen::VectorXd::Constant(5, 2.0);
             solver_options opts;
             opts.max_iterations = 5000;
-            opts.gradient_tolerance = 1e-15;
-            opts.step_tolerance = 1e-15;
-            opts.objective_tolerance = 1e-15;
+            opts.set_gradient_threshold(1e-15);
+            opts.set_step_threshold(1e-15);
+            opts.set_objective_threshold(1e-15);
 
             cmaes_policy policy;
             policy.options.initial_sigma = 1.0;
             policy.options.seed = 42u;
             basic_solver solver{policy, problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value < 5.0);
         }
 
@@ -423,15 +423,15 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             Eigen::VectorXd x0{{-1.0, -1.0}};
             solver_options opts;
             opts.max_iterations = 2000;
-            opts.gradient_tolerance = 1e-15;
-            opts.step_tolerance = 1e-15;
-            opts.objective_tolerance = 1e-15;
+            opts.set_gradient_threshold(1e-15);
+            opts.set_step_threshold(1e-15);
+            opts.set_objective_threshold(1e-15);
 
             cmaes_policy policy;
             policy.options.initial_sigma = 0.5;
             policy.options.seed = 42u;
             basic_solver solver{policy, problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value < 0.01);
         }
 
@@ -441,15 +441,15 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             Eigen::VectorXd x0 = Eigen::VectorXd::Constant(5, 1.0);
             solver_options opts;
             opts.max_iterations = 5000;
-            opts.gradient_tolerance = 1e-15;
-            opts.step_tolerance = 1e-15;
-            opts.objective_tolerance = 1e-15;
+            opts.set_gradient_threshold(1e-15);
+            opts.set_step_threshold(1e-15);
+            opts.set_objective_threshold(1e-15);
 
             cmaes_policy policy;
             policy.options.initial_sigma = 1.0;
             policy.options.seed = 42u;
             basic_solver solver{policy, problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value < 1.0);
         }
     }
@@ -461,14 +461,14 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
     {
         solver_options opts;
         opts.max_iterations = 200;
-        opts.gradient_tolerance = 1e-12;
+        opts.set_gradient_threshold(1e-12);
 
         SECTION("Rosenbrock residual")
         {
             rosenbrock_ls problem;
             Eigen::VectorXd x0{{-1.0, 1.0}};
             basic_solver solver{lm_policy{}, problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(solver.state().objective_value < 1e-8);
         }
 
@@ -477,7 +477,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             exponential_fitting problem;
             Eigen::VectorXd x0{{1.0, -0.5}};
             basic_solver solver{lm_policy{}, problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(solver.state().objective_value < 0.01);
         }
 
@@ -486,7 +486,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             powell_singular problem;
             Eigen::VectorXd x0{{3.0, -1.0, 0.0, 1.0}};
             basic_solver solver{lm_policy{}, problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(solver.state().objective_value < 1e-6);
         }
     }
@@ -498,15 +498,15 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
     {
         solver_options opts;
         opts.max_iterations = 500;
-        opts.gradient_tolerance = 1e-4;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-4);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         SECTION("HS071")
         {
             hs071 problem;
             basic_solver<kraft_slsqp_policy> solver{problem, problem.initial_point(), opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 30.0);
         }
@@ -515,7 +515,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             hs076 problem;
             basic_solver<kraft_slsqp_policy> solver{problem, problem.initial_point(), opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
             CHECK(solver.constraint_violation() < 1e-4);
         }
@@ -525,7 +525,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
             basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 1.0);
         }
@@ -538,15 +538,15 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
     {
         solver_options opts;
         opts.max_iterations = 500;
-        opts.gradient_tolerance = 1e-4;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-4);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         SECTION("HS071")
         {
             hs071 problem;
             basic_solver<nw_sqp_policy> solver{problem, problem.initial_point(), opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 30.0);
         }
@@ -555,7 +555,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             hs076 problem;
             basic_solver<nw_sqp_policy> solver{problem, problem.initial_point(), opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
             CHECK(solver.constraint_violation() < 1e-4);
         }
@@ -565,7 +565,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
             basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 1.0);
         }
@@ -578,16 +578,16 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
     {
         solver_options opts;
         opts.max_iterations = 80;
-        opts.gradient_tolerance = 1e-4;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-4);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         SECTION("HS071")
         {
             hs071 problem;
             basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
                 problem, problem.initial_point(), opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(17.014).margin(0.5));
             CHECK(solver.constraint_violation() < 1e-2);
         }
@@ -597,7 +597,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             hs076 problem;
             basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
                 problem, problem.initial_point(), opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(0.2));
             CHECK(solver.constraint_violation() < 1e-3);
         }
@@ -608,7 +608,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             Eigen::VectorXd x0{{-1.0, -1.0}};
             basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
                 problem, x0, opts};
-            auto result = solver.solve();
+            auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 5.0);
         }
@@ -620,10 +620,10 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
     SECTION("MMA")
     {
         solver_options opts;
-        opts.gradient_tolerance = 1e-5;
+        opts.set_gradient_threshold(1e-5);
         opts.max_iterations = 500;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         SECTION("HS076")
         {
@@ -688,10 +688,10 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
     SECTION("GCMMA")
     {
         solver_options opts;
-        opts.gradient_tolerance = 1e-5;
+        opts.set_gradient_threshold(1e-5);
         opts.max_iterations = 500;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         SECTION("HS076")
         {
@@ -759,15 +759,15 @@ TEST_CASE("Solver group: lbfgsb + cmaes racing", "[convergence][solver_group]")
 {
     rosenbrock<double> problem{};
     Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, -1.0);
-    solver_options<double> opts;
+    solver_options<> opts;
     opts.max_iterations = 500;
-    opts.gradient_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver_group<round_robin_schedule,
                        lbfgsb_policy,
                        cmaes_policy> group(problem, x0, opts);
-    auto result = group.solve();
+    auto result = group.step_n(500, opts);
     CHECK(result.objective_value < 0.1);
 }

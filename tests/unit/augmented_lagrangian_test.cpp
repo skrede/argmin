@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <cstdint>
 
 using Catch::Approx;
 using namespace nablapp;
@@ -21,13 +22,13 @@ TEST_CASE("augmented lagrangian converges on HS076", "[augmented_lagrangian]")
 
     solver_options opts;
     opts.max_iterations = 60;
-    opts.gradient_tolerance = 1e-6;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
         problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(-4.6818).margin(1e-2));
     CHECK(solver.constraint_violation() < 1e-3);
@@ -40,13 +41,13 @@ TEST_CASE("augmented lagrangian converges on HS035", "[augmented_lagrangian]")
 
     solver_options opts;
     opts.max_iterations = 50;
-    opts.gradient_tolerance = 1e-6;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
         problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1e-3));
     CHECK(solver.constraint_violation() < 1e-4);
@@ -60,13 +61,13 @@ TEST_CASE("augmented lagrangian on HS071 (equality + inequality)",
 
     solver_options opts;
     opts.max_iterations = 80;
-    opts.gradient_tolerance = 1e-4;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-4);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
         problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Relaxed tolerance: AugLag on mixed eq/ineq is harder
     CHECK(result.objective_value == Approx(17.0140173).margin(1e-1));
@@ -82,13 +83,13 @@ TEST_CASE("augmented lagrangian with BOBYQA inner solver",
 
     solver_options opts;
     opts.max_iterations = 80;
-    opts.gradient_tolerance = 1e-4;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-4);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     basic_solver<augmented_lagrangian_policy<bobyqa_policy>> solver{
         problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // BOBYQA is derivative-free; relaxed tolerance
     CHECK(result.objective_value == Approx(1.0 / 9.0).margin(0.5));
@@ -102,9 +103,9 @@ TEST_CASE("augmented lagrangian step and solve consistency",
 
     solver_options opts;
     opts.max_iterations = 30;
-    opts.gradient_tolerance = 1e-5;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-5);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     SECTION("step returns finite values")
     {
@@ -123,15 +124,15 @@ TEST_CASE("augmented lagrangian step and solve consistency",
     {
         basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver1{
             problem, x0, opts};
-        auto result1 = solver1.solve();
+        auto result1 = solver1.solve(opts);
 
         basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver2{
             problem, x0, opts};
         step_result<double> last{};
-        for(int i = 0; i < opts.max_iterations; ++i)
+        for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
         {
             last = solver2.step();
-            if(last.gradient_norm < opts.gradient_tolerance)
+            if(last.gradient_norm < 1e-5)
                 break;
         }
 

@@ -81,17 +81,17 @@ struct kraft_slsqp_policy
         std::function<void(const Eigen::VectorXd&, Eigen::MatrixXd&, Eigen::MatrixXd&)> eval_jacobian;
     };
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>& opts, const options_type& policy_opts)
+                    const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
         return self.init(problem, x0, opts);
     }
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>& /*opts*/)
+                    const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
         state_type s;
@@ -328,7 +328,7 @@ struct kraft_slsqp_policy
             return merit(x_trial);
         };
 
-        line_search_options<double> ls_opts;
+        line_search_options ls_opts;
         ls_opts.max_alpha = 1.0;
         ls_opts.c1 = 1e-4;
         ls_opts.rho = 0.5;

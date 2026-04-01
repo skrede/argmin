@@ -1,5 +1,6 @@
 #include "mock_policy.h"
 #include "nablapp/solver/basic_solver.h"
+#include "nablapp/solver/convergence.h"
 #include "nablapp/result/status.h"
 
 #include <catch2/catch_approx.hpp>
@@ -42,15 +43,15 @@ TEST_CASE("basic_solver solve converges", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{2.0, 2.0}};
-    solver_options opts;
-    opts.gradient_tolerance = 1e-4;
+    solver_options<> opts;
+    std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
 
     basic_solver<test::mock_policy> solver{prob, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::converged);
     CHECK(result.iterations > 0);
-    CHECK(result.gradient_norm < opts.gradient_tolerance);
+    CHECK(result.gradient_norm < 1e-4);
     CHECK(result.x.norm() < 1e-3);
 }
 
@@ -58,14 +59,11 @@ TEST_CASE("basic_solver solve max_iterations", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{1.0, 1.0}};
-    solver_options opts;
+    solver_options<> opts;
     opts.max_iterations = 10;
-    opts.gradient_tolerance = 1e-100;
-    opts.objective_tolerance = 1e-100;
-    opts.step_tolerance = 1e-100;
 
     basic_solver<test::non_converging_policy> solver{prob, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::max_iterations);
     CHECK(result.iterations == 10);
@@ -75,14 +73,11 @@ TEST_CASE("basic_solver step_n budget", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{10.0, 10.0}};
-    solver_options opts;
-    opts.gradient_tolerance = 1e-100;
-    opts.objective_tolerance = 1e-100;
-    opts.step_tolerance = 1e-100;
+    solver_options<> opts;
     opts.max_iterations = 1000;
 
     basic_solver<test::non_converging_policy> solver{prob, x0, opts};
-    auto result = solver.step_n(3);
+    auto result = solver.step_n(3, opts);
 
     CHECK(result.status == solver_status::budget_exhausted);
     CHECK(result.iterations == 3);
@@ -104,12 +99,11 @@ TEST_CASE("basic_solver convergence on objective_change", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{0.001, 0.001}};
-    solver_options opts;
-    opts.gradient_tolerance = 1e-100;
-    opts.objective_tolerance = 1e-8;
+    solver_options<> opts;
+    std::get<objective_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-8;
 
     basic_solver<test::mock_policy> solver{prob, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::ftol_reached);
 }
@@ -118,14 +112,14 @@ TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{10.0, 10.0}};
-    solver_options opts;
-    opts.gradient_tolerance = 1e-4;
+    solver_options<> opts;
+    std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
 
     basic_solver<test::mock_policy> solver{prob, x0, opts};
 
     SECTION("reset to new x0 and solve again")
     {
-        auto result1 = solver.solve();
+        auto result1 = solver.solve(opts);
         CHECK(result1.status == solver_status::converged);
 
         Eigen::VectorXd new_x0{{5.0, 5.0}};
@@ -133,13 +127,13 @@ TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
 
         CHECK(solver.state().x.isApprox(new_x0));
 
-        auto result2 = solver.solve();
+        auto result2 = solver.solve(opts);
         CHECK(result2.status == solver_status::converged);
     }
 
     SECTION("reset_clear to new x0 and solve again")
     {
-        auto result1 = solver.solve();
+        auto result1 = solver.solve(opts);
         CHECK(result1.status == solver_status::converged);
 
         Eigen::VectorXd new_x0{{5.0, 5.0}};
@@ -147,7 +141,7 @@ TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
 
         CHECK(solver.state().x.isApprox(new_x0));
 
-        auto result2 = solver.solve();
+        auto result2 = solver.solve(opts);
         CHECK(result2.status == solver_status::converged);
     }
 }

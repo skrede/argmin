@@ -65,10 +65,10 @@ struct mma_policy
                            Eigen::MatrixXd&)> eval_jacobian;
     };
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem,
                     const Eigen::VectorXd& x0,
-                    const solver_options<double>& opts,
+                    const solver_options<Convergence>& opts,
                     const options_type& policy_opts)
     {
         auto s = self.init(problem, x0, opts);
@@ -84,10 +84,10 @@ struct mma_policy
         return s;
     }
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&&, const Problem& problem,
                     const Eigen::VectorXd& x0,
-                    const solver_options<double>& /*opts*/)
+                    const solver_options<Convergence>& /*opts*/)
     {
         static_assert(differentiable<Problem>,
                       "mma_policy requires differentiable<Problem>");

@@ -5,6 +5,7 @@
 #include "nablapp/result/step_result.h"
 #include "nablapp/result/solve_result.h"
 #include "nablapp/result/status.h"
+#include "nablapp/solver/convergence.h"
 #include "nablapp/solver/options.h"
 
 #include <Eigen/Core>
@@ -12,6 +13,8 @@
 #include <chrono>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -30,16 +33,17 @@ class basic_solver_group
 public:
     using scalar_type = typename std::tuple_element_t<0, std::tuple<Policies...>>::scalar_type;
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
         requires (std::constructible_from<basic_solver<Policies>, const Problem&,
-                  const Eigen::VectorX<scalar_type>&, const solver_options<scalar_type>&> && ...)
+                  const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&> && ...)
     basic_solver_group(const Problem& problem,
                        const Eigen::VectorX<scalar_type>& x0,
-                       const solver_options<scalar_type>& opts = {},
+                       const solver_options<Convergence>& opts = {},
                        Schedule schedule = {})
         : solvers_{basic_solver<Policies>{problem, x0, opts}...}
         , schedule_{std::move(schedule)}
-        , opts_{opts}
+        , max_iterations_{opts.max_iterations}
+        , constraint_tolerance_{opts.constraint_tolerance}
     {
         init_schedule();
     }
@@ -47,19 +51,20 @@ public:
     // Per-policy options constructor.
     // Each element of policy_opts is forwarded to the corresponding
     // policy's basic_solver constructor.
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
         requires (std::constructible_from<basic_solver<Policies>, const Problem&,
-                  const Eigen::VectorX<scalar_type>&, const solver_options<scalar_type>&,
+                  const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&,
                   const policy_options_t<Policies, scalar_type>&> && ...)
     basic_solver_group(const Problem& problem,
                        const Eigen::VectorX<scalar_type>& x0,
-                       const solver_options<scalar_type>& opts,
+                       const solver_options<Convergence>& opts,
                        std::tuple<policy_options_t<Policies, scalar_type>...> policy_opts,
                        Schedule schedule = {})
         : solvers_{make_solvers_with_opts(problem, x0, opts, policy_opts,
                                          std::index_sequence_for<Policies...>{})}
         , schedule_{std::move(schedule)}
-        , opts_{opts}
+        , max_iterations_{opts.max_iterations}
+        , constraint_tolerance_{opts.constraint_tolerance}
     {
         init_schedule();
     }
@@ -74,23 +79,47 @@ public:
 
     solve_result<scalar_type> solve()
     {
-        return step_n(max_iterations());
+        solver_options<> opts;
+        opts.max_iterations = max_iterations_;
+        return step_n(max_iterations_, opts);
     }
 
-    solve_result<scalar_type> step_n(int budget)
+    template <typename Convergence = default_convergence>
+    solve_result<scalar_type> step_n(std::uint32_t budget,
+                                     const solver_options<Convergence>& opts = {})
     {
         auto t0 = std::chrono::steady_clock::now();
 
         step_result<scalar_type> last{};
         solver_status status = solver_status::running;
 
-        for(int i = 0; i < budget; ++i)
+        for(std::uint32_t i = 0; i < budget; ++i)
         {
+            // Time limit check (D-11: between steps)
+            if(opts.max_time)
+            {
+                auto elapsed = std::chrono::steady_clock::now() - t0;
+                if(elapsed >= *opts.max_time)
+                {
+                    status = solver_status::time_limit_reached;
+                    break;
+                }
+            }
+
             last = step();
 
-            if(last.gradient_norm < gradient_tolerance())
+            // Policy-reported failure is final (D-16)
+            if(last.policy_status)
             {
-                status = solver_status::converged;
+                status = *last.policy_status;
+                break;
+            }
+
+            // Convergence policy check
+            auto conv = opts.convergence.check(last, i + 1);
+            if(conv)
+            {
+                status = *conv;
                 break;
             }
         }
@@ -126,26 +155,16 @@ private:
         }
     }
 
-    template <typename Problem, std::size_t... Is>
+    template <typename Problem, typename Convergence, std::size_t... Is>
     static auto make_solvers_with_opts(
         const Problem& problem,
         const Eigen::VectorX<scalar_type>& x0,
-        const solver_options<scalar_type>& opts,
+        const solver_options<Convergence>& opts,
         const std::tuple<policy_options_t<Policies, scalar_type>...>& policy_opts,
         std::index_sequence<Is...>)
     {
         return std::tuple{basic_solver<Policies>{
             problem, x0, opts, std::get<Is>(policy_opts)}...};
-    }
-
-    int max_iterations() const
-    {
-        return opts_.max_iterations;
-    }
-
-    scalar_type gradient_tolerance() const
-    {
-        return opts_.gradient_tolerance;
     }
 
     template <std::size_t... Is>
@@ -164,7 +183,7 @@ private:
         scalar_type best_obj = std::numeric_limits<scalar_type>::max();
         scalar_type best_cv = std::numeric_limits<scalar_type>::max();
         std::size_t best_idx = 0;
-        scalar_type tol = opts_.constraint_tolerance;
+        scalar_type tol = constraint_tolerance_.value_or(scalar_type(0));
 
         auto check = [&](std::size_t idx, const auto& solver)
         {
@@ -218,7 +237,8 @@ private:
 
     std::tuple<basic_solver<Policies>...> solvers_;
     Schedule schedule_;
-    solver_options<scalar_type> opts_;
+    std::uint32_t max_iterations_{1000};
+    std::optional<double> constraint_tolerance_{};
 };
 
 }

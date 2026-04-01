@@ -30,7 +30,7 @@ struct mock_policy
 
     template <typename Problem>
     state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<double>&)
+                    const nablapp::solver_options<>&)
     {
         return state_type{
             .x = x0,
@@ -50,6 +50,7 @@ struct mock_policy
             .step_size = s.step_size,
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
+            .x_norm = s.x.norm(),
         };
     }
 
@@ -80,7 +81,7 @@ struct non_converging_policy
 
     template <typename Problem>
     state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<double>&)
+                    const nablapp::solver_options<>&)
     {
         return state_type{
             .x = x0,
@@ -133,7 +134,7 @@ struct constrained_mock_policy
 
     template <typename Problem>
     state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<double>&)
+                    const nablapp::solver_options<>&)
     {
         Eigen::VectorXd c_ineq(1);
         c_ineq(0) = x0(0) - 1.0;
@@ -192,7 +193,7 @@ struct feasible_mock_policy
 
     template <typename Problem>
     state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<double>&)
+                    const nablapp::solver_options<>&)
     {
         return state_type{
             .x = x0,
@@ -241,7 +242,7 @@ struct infeasible_mock_policy
 
     template <typename Problem>
     state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<double>&)
+                    const nablapp::solver_options<>&)
     {
         return state_type{
             .x = x0,
@@ -290,7 +291,7 @@ struct high_violation_mock_policy
 
     template <typename Problem>
     state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<double>&)
+                    const nablapp::solver_options<>&)
     {
         return state_type{
             .x = x0,
@@ -344,14 +345,14 @@ struct mock_policy_with_opts
 
     template <typename Problem>
     state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<double>&)
+                    const nablapp::solver_options<>&)
     {
         return {.x = x0, .objective_value = 0.5 * x0.squaredNorm()};
     }
 
     template <typename Problem>
     state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<double>&,
+                    const nablapp::solver_options<>&,
                     const options_type& policy_opts)
     {
         return {.x = x0, .objective_value = 0.5 * x0.squaredNorm(),

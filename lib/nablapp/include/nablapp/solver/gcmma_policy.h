@@ -83,10 +83,10 @@ struct gcmma_policy
         }
     };
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem,
                     const Eigen::VectorXd& x0,
-                    const solver_options<double>& sopts,
+                    const solver_options<Convergence>& sopts,
                     const options_type& policy_opts)
     {
         auto s = self.init(problem, x0, sopts);
@@ -95,10 +95,10 @@ struct gcmma_policy
         return s;
     }
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&&, const Problem& problem,
                     const Eigen::VectorXd& x0,
-                    const solver_options<double>& sopts)
+                    const solver_options<Convergence>& sopts)
     {
         state_type s;
         s.mma_state = mma_policy{}.init(problem, x0, sopts);

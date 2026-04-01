@@ -62,17 +62,17 @@ struct lm_policy
         int num_residuals{};
     };
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>& opts, const options_type& policy_opts)
+                    const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
         return self.init(problem, x0, opts);
     }
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>& /*opts*/)
+                    const solver_options<Convergence>& /*opts*/)
     {
         state_type s;
         const int n = x0.size();

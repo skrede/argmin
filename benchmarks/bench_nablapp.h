@@ -73,7 +73,7 @@ auto run_nablapp_solver(std::string_view solver_name,
                         std::vector<trace_entry>& trace) -> benchmark_result
 {
     auto x0 = prob.initial_point();
-    solver_options<double> opts{};
+    solver_options<> opts{};
     opts.max_iterations = max_iterations;
 
     if(collect_trace)
@@ -104,19 +104,10 @@ auto run_nablapp_solver(std::string_view solver_name,
 
             final_obj = sr.objective_value;
 
-            if(sr.gradient_norm < opts.gradient_tolerance)
+            auto conv = opts.convergence.check(sr, static_cast<std::uint32_t>(i + 1));
+            if(conv)
             {
-                final_status = solver_status::converged;
-                break;
-            }
-            if(i > 0 && std::abs(sr.objective_change) < opts.objective_tolerance)
-            {
-                final_status = solver_status::ftol_reached;
-                break;
-            }
-            if(sr.step_size < opts.step_tolerance && i > 0)
-            {
-                final_status = solver_status::stalled;
+                final_status = *conv;
                 break;
             }
         }
