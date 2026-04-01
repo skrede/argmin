@@ -26,6 +26,8 @@ struct bounded_rosenbrock
     Eigen::VectorXd lb;
     Eigen::VectorXd ub;
 
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return inner.dimension(); }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
     void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const { inner.gradient(x, g); }

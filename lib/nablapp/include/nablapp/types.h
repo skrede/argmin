@@ -13,14 +13,16 @@ namespace nablapp
 // temporaries, because the underlying storage may be invalidated before
 // evaluation. Always assign to a concrete type (vector<>, matrix<>, etc.).
 
-template <typename Scalar = double>
-using vector = Eigen::VectorX<Scalar>;
+inline constexpr int dynamic_dimension = Eigen::Dynamic;
 
-template <typename Scalar = double>
-using matrix = Eigen::MatrixX<Scalar>;
+template <typename Scalar = double, int N = dynamic_dimension>
+using vector = Eigen::Vector<Scalar, N>;
 
-template <typename Scalar = double>
-using row_vector = Eigen::RowVectorX<Scalar>;
+template <typename Scalar = double, int Rows = dynamic_dimension, int Cols = dynamic_dimension>
+using matrix = Eigen::Matrix<Scalar, Rows, Cols>;
+
+template <typename Scalar = double, int N = dynamic_dimension>
+using row_vector = Eigen::RowVector<Scalar, N>;
 
 }
 

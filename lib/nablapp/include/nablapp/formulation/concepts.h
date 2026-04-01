@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_NABLAPP_FORMULATION_CONCEPTS_H
 #define HPP_GUARD_NABLAPP_FORMULATION_CONCEPTS_H
 
+#include "nablapp/types.h"
 #include "nablapp/result/status.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/result/solve_result.h"
@@ -25,8 +26,21 @@ namespace nablapp
 // All concepts are parameterised on Scalar (defaulting to double) per D-07.
 // Problem types satisfy concepts by duck-typing -- no base class required.
 
+// Dimension extraction machinery. Every problem type MUST declare
+// static constexpr int problem_dimension. There is no fallback -- if a
+// type lacks this member, problem_dimension_v<T> fails to compile.
+
+template <typename P>
+concept has_problem_dimension = requires {
+    { P::problem_dimension } -> std::convertible_to<int>;
+};
+
+template <has_problem_dimension P>
+inline constexpr int problem_dimension_v = P::problem_dimension;
+
 template <typename P, typename S = double>
-concept objective = requires(const P& p, const Eigen::VectorX<S>& x)
+concept objective = has_problem_dimension<P> &&
+    requires(const P& p, const Eigen::VectorX<S>& x)
 {
     { p.value(x) } -> std::convertible_to<S>;
     { p.dimension() } -> std::convertible_to<int>;

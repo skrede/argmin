@@ -27,6 +27,8 @@ struct bounded_rosenbrock
     Eigen::VectorXd lb;
     Eigen::VectorXd ub;
 
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return n; }
 
     double value(const Eigen::VectorXd& x) const

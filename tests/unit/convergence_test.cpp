@@ -42,6 +42,8 @@ namespace
 // Bounded Rosenbrock for BOBYQA (objective + bound_constrained, no gradient).
 struct bounded_rosenbrock
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
 
     double value(const Eigen::VectorXd& x) const
@@ -65,6 +67,8 @@ struct bounded_rosenbrock
 // Bounded Booth for BOBYQA.
 struct bounded_booth
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
 
     double value(const Eigen::VectorXd& x) const
@@ -88,6 +92,8 @@ struct bounded_booth
 // Bounded Himmelblau for BOBYQA.
 struct bounded_himmelblau
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
 
     double value(const Eigen::VectorXd& x) const
@@ -113,6 +119,8 @@ struct bounded_himmelblau
 // f(x) = 0.5*(r_0^2 + r_1^2), minimum at (1,1), f*=0.
 struct rosenbrock_ls
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
     int num_residuals() const { return 2; }
 
@@ -144,6 +152,8 @@ struct exponential_fitting
 {
     static constexpr double t[] = {0.0, 0.5, 1.0, 1.5, 2.0};
     static constexpr double y[] = {2.0, 1.2, 0.75, 0.45, 0.28};
+
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
 
     int dimension() const { return 2; }
     int num_residuals() const { return 5; }
@@ -182,6 +192,8 @@ struct exponential_fitting
 // Reference: Powell, "A hybrid method for nonlinear equations" (1970).
 struct powell_singular
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 4; }
     int num_residuals() const { return 4; }
 
@@ -218,6 +230,8 @@ struct powell_singular
 // For SQP and AugLag testing.
 struct rosenbrock_constrained
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
     int num_equality() const { return 0; }
     int num_inequality() const { return 1; }
@@ -268,6 +282,8 @@ struct rosenbrock_constrained
 // For MMA/GCMMA testing (inequality only).
 struct beam_design
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
     int num_equality() const { return 0; }
     int num_inequality() const { return 1; }

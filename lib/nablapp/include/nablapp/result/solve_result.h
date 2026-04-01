@@ -1,9 +1,8 @@
 #ifndef HPP_GUARD_NABLAPP_RESULT_SOLVE_RESULT_H
 #define HPP_GUARD_NABLAPP_RESULT_SOLVE_RESULT_H
 
+#include "nablapp/types.h"
 #include "nablapp/result/status.h"
-
-#include <Eigen/Core>
 
 #include <chrono>
 #include <cstdint>
@@ -16,7 +15,7 @@ namespace nablapp
 // Captures the final iterate, objective value, gradient norm, constraint
 // violation, iteration counts, and wall-clock time.
 
-template <typename Scalar = double>
+template <typename Scalar = double, int N = dynamic_dimension>
 struct solve_result
 {
     solver_status status{solver_status::running};
@@ -25,7 +24,7 @@ struct solve_result
     Scalar objective_value{};
     Scalar gradient_norm{};
     Scalar constraint_violation{};
-    Eigen::VectorX<Scalar> x;
+    vector<Scalar, N> x;
     std::chrono::steady_clock::duration wall_time{};
 };
 

@@ -9,6 +9,7 @@
 //
 // All problems are unconstrained with analytic gradients.
 
+#include "nablapp/types.h"
 #include "nablapp/test_functions/problem_class.h"
 
 #include <Eigen/Core>
@@ -30,6 +31,7 @@ namespace nablapp
 template <typename Scalar = double>
 struct powell_singular
 {
+    static constexpr int problem_dimension = dynamic_dimension;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return 4; }
@@ -80,6 +82,7 @@ struct powell_singular
 template <typename Scalar = double>
 struct brown_badly_scaled
 {
+    static constexpr int problem_dimension = dynamic_dimension;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return 2; }
@@ -125,6 +128,7 @@ struct trigonometric
 {
     int n{5};
 
+    static constexpr int problem_dimension = dynamic_dimension;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return n; }
@@ -201,6 +205,7 @@ struct trigonometric
 template <typename Scalar = double>
 struct wood
 {
+    static constexpr int problem_dimension = dynamic_dimension;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return 4; }
@@ -255,6 +260,7 @@ struct wood
 template <typename Scalar = double>
 struct helical_valley
 {
+    static constexpr int problem_dimension = dynamic_dimension;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return 3; }
@@ -315,6 +321,7 @@ struct penalty_i
 {
     int n{4};
 
+    static constexpr int problem_dimension = dynamic_dimension;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return n; }
@@ -382,6 +389,7 @@ struct variably_dimensioned
 {
     int n{5};
 
+    static constexpr int problem_dimension = dynamic_dimension;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return n; }
@@ -438,6 +446,7 @@ struct extended_rosenbrock
 {
     int n{4};
 
+    static constexpr int problem_dimension = dynamic_dimension;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return n; }

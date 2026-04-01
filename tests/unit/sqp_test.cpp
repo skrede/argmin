@@ -23,6 +23,8 @@ struct unconstrained_rosenbrock
 {
     nablapp::rosenbrock<> inner{.n = 2};
 
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return inner.dimension(); }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
     void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
@@ -43,6 +45,8 @@ struct unconstrained_rosenbrock
 // Solution: x* = (0.5, 0.5), f* = 0.5
 struct equality_constrained_quadratic
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
 
     double value(const Eigen::VectorXd& x) const
@@ -82,6 +86,8 @@ struct inequality_constrained_rosenbrock
 {
     nablapp::rosenbrock<> inner{.n = 2};
 
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
     void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
@@ -109,6 +115,8 @@ struct inequality_constrained_rosenbrock
 struct inequality_rosenbrock
 {
     nablapp::rosenbrock<> inner{.n = 2};
+
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
 
     int dimension() const { return 2; }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
@@ -140,6 +148,8 @@ struct inequality_rosenbrock
 struct box_constrained_rosenbrock
 {
     nablapp::rosenbrock<> inner{.n = 2};
+
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
 
     int dimension() const { return 2; }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
