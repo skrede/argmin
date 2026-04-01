@@ -10,6 +10,7 @@
 
 #include <Eigen/Core>
 
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
@@ -71,10 +72,37 @@ public:
 
     step_result<scalar_type> step()
     {
-        std::size_t idx = schedule_.select(sizeof...(Policies));
-        auto result = step_at(idx, std::index_sequence_for<Policies...>{});
-        schedule_.notify(result);
-        return result;
+        constexpr std::size_t n = sizeof...(Policies);
+
+        // Find next non-retired policy
+        for(std::size_t attempt = 0; attempt < n; ++attempt)
+        {
+            std::size_t idx = schedule_.select(n);
+            if(!retired_[idx])
+            {
+                auto result = step_at(idx, std::index_sequence_for<Policies...>{});
+                schedule_.notify(result);
+
+                // Retire on failure status
+                if(result.policy_status &&
+                   (*result.policy_status == solver_status::roundoff_limited ||
+                    *result.policy_status == solver_status::diverged))
+                {
+                    retired_[idx] = true;
+                    populate_result(idx, result, std::index_sequence_for<Policies...>{});
+                }
+
+                return result;
+            }
+        }
+
+        // All retired
+        return step_result<scalar_type>{};
+    }
+
+    const std::array<solve_result<scalar_type>, sizeof...(Policies)>& results() const
+    {
+        return results_;
     }
 
     solve_result<scalar_type> solve()
@@ -106,12 +134,20 @@ public:
                 }
             }
 
+            // All policies retired -- stop iteration
+            if(all_retired())
+            {
+                status = solver_status::budget_exhausted;
+                break;
+            }
+
             last = step();
 
-            // Policy-reported failure is final (D-16)
-            if(last.policy_status)
+            // For groups, policy failure retires the individual policy (handled in step()).
+            // Only stop the entire group if ALL policies are retired.
+            if(all_retired())
             {
-                status = *last.policy_status;
+                status = solver_status::budget_exhausted;
                 break;
             }
 
@@ -130,6 +166,9 @@ public:
         }
 
         auto t1 = std::chrono::steady_clock::now();
+
+        // Populate results for non-retired policies
+        populate_active_results(status, t1 - t0, std::index_sequence_for<Policies...>{});
 
         auto best_idx = best_solver_index(std::index_sequence_for<Policies...>{});
         auto seq = std::index_sequence_for<Policies...>{};
@@ -235,10 +274,63 @@ private:
         return cv;
     }
 
+    bool all_retired() const
+    {
+        for(std::size_t i = 0; i < sizeof...(Policies); ++i)
+        {
+            if(!retired_[i]) return false;
+        }
+        return true;
+    }
+
+    template <std::size_t... Is>
+    void populate_result(std::size_t idx, const step_result<scalar_type>& sr,
+                         std::index_sequence<Is...>)
+    {
+        auto fill = [&](std::size_t i, const auto& solver)
+        {
+            if(i == idx)
+            {
+                results_[i] = solve_result<scalar_type>{
+                    .status = sr.policy_status.value_or(solver_status::running),
+                    .objective_value = sr.objective_value,
+                    .gradient_norm = sr.gradient_norm,
+                    .constraint_violation = solver.constraint_violation(),
+                    .x = solver.state().x,
+                };
+            }
+        };
+        (fill(Is, std::get<Is>(solvers_)), ...);
+    }
+
+    template <std::size_t... Is>
+    void populate_active_results(solver_status group_status,
+                                 std::chrono::steady_clock::duration wall_time,
+                                 std::index_sequence<Is...>)
+    {
+        auto fill = [&](std::size_t i, const auto& solver)
+        {
+            if(!retired_[i])
+            {
+                results_[i] = solve_result<scalar_type>{
+                    .status = group_status,
+                    .objective_value = solver.state().objective_value,
+                    .gradient_norm = 0.0,
+                    .constraint_violation = solver.constraint_violation(),
+                    .x = solver.state().x,
+                    .wall_time = wall_time,
+                };
+            }
+        };
+        (fill(Is, std::get<Is>(solvers_)), ...);
+    }
+
     std::tuple<basic_solver<Policies>...> solvers_;
     Schedule schedule_;
     std::uint32_t max_iterations_{1000};
     std::optional<double> constraint_tolerance_{};
+    std::array<bool, sizeof...(Policies)> retired_{};
+    std::array<solve_result<scalar_type>, sizeof...(Policies)> results_{};
 };
 
 }
