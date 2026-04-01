@@ -50,9 +50,11 @@ namespace detail
     case solver_status::ftol_reached:     return "ftol_reached";
     case solver_status::xtol_reached:     return "xtol_reached";
     case solver_status::maxeval_reached:  return "maxeval_reached";
-    case solver_status::roundoff_limited: return "roundoff_limited";
-    case solver_status::aborted:          return "aborted";
-    case solver_status::running:          return "running";
+    case solver_status::roundoff_limited:   return "roundoff_limited";
+    case solver_status::objective_stalled: return "objective_stalled";
+    case solver_status::time_limit_reached: return "time_limit_reached";
+    case solver_status::aborted:           return "aborted";
+    case solver_status::running:           return "running";
     }
     return "unknown";
 }
@@ -156,8 +158,8 @@ auto run_nablapp_solver(std::string_view solver_name,
             .problem = problem_name,
             .pclass = prob.pclass,
             .dimension = prob.dimension(),
-            .f_evals = result.function_evaluations,
-            .g_evals = result.function_evaluations,
+            .f_evals = static_cast<int>(result.function_evaluations),
+            .g_evals = static_cast<int>(result.function_evaluations),
             .wall_time_us = wall_us,
             .final_objective = result.objective_value,
             .known_optimum = prob.optimal_value(),
