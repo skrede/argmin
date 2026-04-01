@@ -13,6 +13,7 @@
 //            Sections 3 (TRSBOX), 4 (point replacement), 5 (radius update),
 //            6 (geometry check).
 
+#include "nablapp/options/trust_region_options.h"
 #include "nablapp/detail/bound_projection.h"
 
 #include <Eigen/Core>
@@ -182,12 +183,19 @@ Scalar compute_rho(Scalar f_old, Scalar f_new, Scalar q_old, Scalar q_new)
 //
 // Reference: Powell 2009, Section 5.
 template <typename Scalar = double>
-Scalar update_radius(Scalar delta, Scalar rho, Scalar step_norm, Scalar delta_max)
+Scalar update_radius(Scalar delta, Scalar rho, Scalar step_norm, Scalar delta_max,
+                     const trust_region_options& opts = {})
 {
-    if(rho > Scalar(0.7) && step_norm > Scalar(0.5) * delta)
-        return std::min(Scalar(2) * delta, delta_max);
-    if(rho < Scalar(0.1))
-        return Scalar(0.5) * delta;
+    const auto eta_good = static_cast<Scalar>(opts.eta_good.value_or(0.7));
+    const auto eta_poor = static_cast<Scalar>(opts.eta_poor.value_or(0.1));
+    const auto step_thr = static_cast<Scalar>(opts.step_threshold.value_or(0.5));
+    const auto expand = static_cast<Scalar>(opts.expand_factor.value_or(2.0));
+    const auto shrink = static_cast<Scalar>(opts.shrink_factor.value_or(0.5));
+
+    if(rho > eta_good && step_norm > step_thr * delta)
+        return std::min(expand * delta, delta_max);
+    if(rho < eta_poor)
+        return shrink * delta;
     return delta;
 }
 
@@ -201,10 +209,12 @@ Scalar update_radius(Scalar delta, Scalar rho, Scalar step_norm, Scalar delta_ma
 template <typename Scalar = double>
 int check_geometry(const Eigen::MatrixX<Scalar>& Y,
                    const Eigen::VectorX<Scalar>& x_k,
-                   Scalar delta)
+                   Scalar delta,
+                   const trust_region_options& opts = {})
 {
     const int m = Y.cols();
-    Scalar worst_dist = Scalar(2) * delta;
+    const auto geo_factor = static_cast<Scalar>(opts.geometry_factor.value_or(2.0));
+    Scalar worst_dist = geo_factor * delta;
     int worst_idx = -1;
 
     for(int i = 0; i < m; ++i)

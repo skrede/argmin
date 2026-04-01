@@ -14,6 +14,8 @@
 // Reference: Svanberg 1987; Svanberg 2002;
 //            jdumas/mma reference implementation.
 
+#include "nablapp/options/mma_subproblem_options.h"
+
 #include <Eigen/Core>
 #include <Eigen/Cholesky>
 
@@ -60,10 +62,11 @@ mma_coeffs<Scalar> mma_coefficients(
     const Eigen::MatrixX<Scalar>& dg,
     const Eigen::VectorX<Scalar>& L,
     const Eigen::VectorX<Scalar>& U,
-    Scalar epsilon = Scalar(1e-7))
+    const mma_subproblem_options& opts = {})
 {
     const int n = static_cast<int>(x.size());
     const int m = static_cast<int>(g.size());
+    const auto epsilon = static_cast<Scalar>(opts.regularization_epsilon.value_or(1e-7));
 
     mma_coeffs<Scalar> c;
     c.p0.resize(n);
@@ -171,8 +174,7 @@ Eigen::VectorX<Scalar> mma_dual_solve(
     const Eigen::VectorX<Scalar>& U,
     const Eigen::VectorX<Scalar>& x_min,
     const Eigen::VectorX<Scalar>& x_max,
-    int max_iter = 50,
-    Scalar tol = Scalar(1e-9))
+    const mma_subproblem_options& opts = {})
 {
     const int n = static_cast<int>(L.size());
     const int m = static_cast<int>(coeffs.ri.size());
@@ -199,6 +201,10 @@ Eigen::VectorX<Scalar> mma_dual_solve(
     Eigen::VectorX<Scalar> y = Eigen::VectorX<Scalar>::Ones(m);
 
     Eigen::VectorX<Scalar> x_opt(n);
+
+    const int max_iter = static_cast<int>(opts.dual_max_iterations.value_or(50));
+    const auto tol = static_cast<Scalar>(opts.dual_tolerance.value_or(1e-9));
+    const auto backtrack = static_cast<Scalar>(opts.backtrack_factor.value_or(0.95));
 
     for(int iter = 0; iter < max_iter; ++iter)
     {
@@ -308,7 +314,7 @@ Eigen::VectorX<Scalar> mma_dual_solve(
         {
             if(dy[i] < Scalar(0) && y[i] > Scalar(0))
             {
-                Scalar max_step = y[i] / (-dy[i]) * Scalar(0.95);
+                Scalar max_step = y[i] / (-dy[i]) * backtrack;
                 alpha = std::min(alpha, max_step);
             }
         }

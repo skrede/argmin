@@ -249,8 +249,8 @@ struct kraft_slsqp_policy
         Eigen::VectorXd p0 = Eigen::VectorXd::Zero(n);
 
         // Solve QP with box constraints
-        detail::qp_options<double> qp_opts;
-        qp_opts.max_iterations = 10 * n;
+        nablapp::qp_options qp_opts;
+        qp_opts.max_iterations = static_cast<std::uint16_t>(10 * n);
         auto qp_res = detail::solve_qp(B, s.g, A_eq, b_eq, A_ineq, b_ineq,
                                         p_lower, p_upper, p0, qp_opts);
 
