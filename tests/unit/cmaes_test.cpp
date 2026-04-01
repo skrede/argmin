@@ -59,16 +59,16 @@ TEST_CASE("cmaes_policy: Rosenbrock 2D", "[cmaes]")
     Eigen::VectorXd x0{{-1.0, -1.0}};
     solver_options opts;
     opts.max_iterations = 500;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     cmaes_policy policy;
     policy.options.initial_sigma = 0.5;
     policy.options.seed = 42u;
 
     basic_solver solver{policy, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(result.objective_value < 0.01);
     CHECK(result.x[0] == Approx(1.0).margin(0.1));
@@ -82,16 +82,16 @@ TEST_CASE("cmaes_policy: Rastrigin 5D", "[cmaes]")
     Eigen::VectorXd x0 = Eigen::VectorXd::Constant(3, 2.0);
     solver_options opts;
     opts.max_iterations = 500;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     cmaes_policy policy;
     policy.options.initial_sigma = 2.0;
     policy.options.seed = 123u;
 
     basic_solver solver{policy, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Rastrigin 3D is highly multimodal; CMA-ES should reach a good basin.
     // Relaxed threshold: global minimum is 0, local basins have f ~ n*k.
@@ -105,9 +105,9 @@ TEST_CASE("cmaes_policy: step_n budget", "[cmaes]")
     Eigen::VectorXd x0{{0.0, 0.0}};
     solver_options opts;
     opts.max_iterations = 1000;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     cmaes_policy policy;
     policy.options.seed = 7u;
@@ -127,9 +127,9 @@ TEST_CASE("cmaes_policy: IPOP restart", "[cmaes]")
     Eigen::VectorXd x0 = Eigen::VectorXd::Constant(3, 3.0);
     solver_options opts;
     opts.max_iterations = 200;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     cmaes_policy policy;
     policy.options.initial_sigma = 0.1;
@@ -137,7 +137,7 @@ TEST_CASE("cmaes_policy: IPOP restart", "[cmaes]")
     policy.options.seed = 99u;
 
     basic_solver solver{policy, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Should complete without crash
     CHECK(std::isfinite(result.objective_value));
@@ -155,16 +155,16 @@ TEST_CASE("cmaes_policy: bounded Rosenbrock", "[cmaes]")
     Eigen::VectorXd x0{{-0.5, -0.5}};
     solver_options opts;
     opts.max_iterations = 500;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     cmaes_policy policy;
     policy.options.initial_sigma = 0.5;
     policy.options.seed = 55u;
 
     basic_solver solver{policy, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(result.objective_value < 0.1);
     CHECK(result.x[0] >= -2.0 - 1e-10);

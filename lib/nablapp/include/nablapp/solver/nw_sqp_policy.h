@@ -69,10 +69,10 @@ struct nw_sqp_policy
                            Eigen::MatrixXd&)> eval_jacobian;
     };
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&&, const Problem& problem,
                     const Eigen::VectorXd& x0,
-                    const solver_options<double>& /*opts*/)
+                    const solver_options<Convergence>& /*opts*/)
     {
         static_assert(differentiable<Problem>,
                       "nw_sqp_policy requires differentiable<Problem>");

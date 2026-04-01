@@ -26,10 +26,10 @@ TEST_CASE("mma converges on HS076", "[mma]")
     hs076 problem;
     Eigen::VectorXd x0 = problem.initial_point();
     solver_options opts;
-    opts.gradient_tolerance = 1e-5;
+    opts.set_gradient_threshold(1e-5);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<mma_policy> solver{problem, x0, opts};
 
@@ -56,10 +56,10 @@ TEST_CASE("mma converges on HS035", "[mma]")
     hs035 problem;
     Eigen::VectorXd x0 = problem.initial_point();
     solver_options opts;
-    opts.gradient_tolerance = 1e-5;
+    opts.set_gradient_threshold(1e-5);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<mma_policy> solver{problem, x0, opts};
 
@@ -83,10 +83,10 @@ TEST_CASE("gcmma converges on HS076", "[mma][gcmma]")
     hs076 problem;
     Eigen::VectorXd x0 = problem.initial_point();
     solver_options opts;
-    opts.gradient_tolerance = 1e-5;
+    opts.set_gradient_threshold(1e-5);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<gcmma_policy> solver{problem, x0, opts};
 
@@ -124,10 +124,10 @@ TEST_CASE("mma step and step_n consistency", "[mma]")
     hs076 problem;
     Eigen::VectorXd x0 = problem.initial_point();
     solver_options opts;
-    opts.gradient_tolerance = 1e-4;
+    opts.set_gradient_threshold(1e-4);
     opts.max_iterations = 200;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     SECTION("step returns finite values")
     {

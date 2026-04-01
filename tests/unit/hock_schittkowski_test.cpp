@@ -37,12 +37,12 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 500;
-        opts.gradient_tolerance = 1e-4;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-4);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         // HS071 with equality + inequality is hard for BFGS-based SQP;
         // verify solver produces finite result and objective is bounded
@@ -56,12 +56,12 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 200;
-        opts.gradient_tolerance = 1e-6;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
         CHECK(solver.constraint_violation() < 1e-4);
@@ -73,12 +73,12 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 200;
-        opts.gradient_tolerance = 1e-6;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(1e-2));
         CHECK(solver.constraint_violation() < 1e-4);
@@ -90,12 +90,12 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 200;
-        opts.gradient_tolerance = 1e-6;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1e-2));
         CHECK(solver.constraint_violation() < 1e-4);
@@ -114,12 +114,12 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 500;
-        opts.gradient_tolerance = 1e-4;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-4);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         // SLSQP with L-BFGS Hessian on mixed eq/ineq;
         // verify solver produces finite result and objective is bounded
@@ -133,12 +133,12 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 200;
-        opts.gradient_tolerance = 1e-6;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
         CHECK(solver.constraint_violation() < 1e-4);
@@ -150,12 +150,12 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 200;
-        opts.gradient_tolerance = 1e-6;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(1e-2));
         CHECK(solver.constraint_violation() < 1e-4);
@@ -167,12 +167,12 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 200;
-        opts.gradient_tolerance = 1e-6;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1e-2));
         CHECK(solver.constraint_violation() < 1e-4);
@@ -191,13 +191,13 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 80;
-        opts.gradient_tolerance = 1e-4;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-4);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
             problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         // Relaxed: AugLag on mixed eq/ineq is harder
         CHECK(result.objective_value == Approx(17.0140173).margin(1e-1));
@@ -210,13 +210,13 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 60;
-        opts.gradient_tolerance = 1e-6;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
             problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.681818).margin(0.1));
         CHECK(solver.constraint_violation() < 1e-3);
@@ -231,13 +231,13 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 100;
-        opts.gradient_tolerance = 1e-4;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-4);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
             problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         // AugLag converges to a feasible point but may not reach
         // the global minimum on this cubic problem
@@ -251,13 +251,13 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         auto x0 = problem.initial_point();
         solver_options opts;
         opts.max_iterations = 50;
-        opts.gradient_tolerance = 1e-6;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
             problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(0.1));
         CHECK(solver.constraint_violation() < 1e-3);
@@ -271,10 +271,10 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
 TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
 {
     solver_options opts;
-    opts.gradient_tolerance = 1e-5;
+    opts.set_gradient_threshold(1e-5);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     SECTION("HS076")
     {
@@ -347,10 +347,10 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
 TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
 {
     solver_options opts;
-    opts.gradient_tolerance = 1e-5;
+    opts.set_gradient_threshold(1e-5);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     SECTION("HS076")
     {

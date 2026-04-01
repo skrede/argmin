@@ -103,11 +103,11 @@ TEST_CASE("L-BFGS-B converges on unconstrained Rosenbrock", "[lbfgsb]")
         rosenbrock<> problem{.n = 2};
         Eigen::VectorXd x0{{-1.2, 1.0}};
         solver_options opts;
-        opts.gradient_tolerance = 1e-6;
+        opts.set_gradient_threshold(1e-6);
         opts.max_iterations = 200;
 
         basic_solver<lbfgsb_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.status == solver_status::converged);
         CHECK(result.x[0] == Approx(1.0).margin(1e-4));
@@ -120,11 +120,11 @@ TEST_CASE("L-BFGS-B converges on unconstrained Rosenbrock", "[lbfgsb]")
         rosenbrock<> problem{.n = 10};
         Eigen::VectorXd x0 = Eigen::VectorXd::Constant(10, -1.0);
         solver_options opts;
-        opts.gradient_tolerance = 1e-6;
+        opts.set_gradient_threshold(1e-6);
         opts.max_iterations = 500;
 
         basic_solver<lbfgsb_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK(result.status == solver_status::converged);
         for(int i = 0; i < 10; ++i)
@@ -148,13 +148,13 @@ TEST_CASE("L-BFGS-B respects box constraints", "[lbfgsb]")
 
         Eigen::VectorXd x0{{0.6, 0.5}};
         solver_options opts;
-        opts.gradient_tolerance = 1e-6;
+        opts.set_gradient_threshold(1e-6);
         opts.max_iterations = 500;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<lbfgsb_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK((result.status == solver_status::converged
                || result.status == solver_status::ftol_reached
@@ -181,13 +181,13 @@ TEST_CASE("L-BFGS-B respects box constraints", "[lbfgsb]")
 
         Eigen::VectorXd x0{{-1.2, 1.0}};
         solver_options opts;
-        opts.gradient_tolerance = 1e-5;
+        opts.set_gradient_threshold(1e-5);
         opts.max_iterations = 500;
-        opts.step_tolerance = 1e-15;
-        opts.objective_tolerance = 1e-15;
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
 
         basic_solver<lbfgsb_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
 
         CHECK((result.status == solver_status::converged
                || result.status == solver_status::stalled));
@@ -201,7 +201,7 @@ TEST_CASE("L-BFGS-B step/solve/step_n consistency", "[lbfgsb]")
     rosenbrock<> problem{.n = 2};
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 200;
 
     SECTION("step returns finite values")
@@ -223,7 +223,7 @@ TEST_CASE("L-BFGS-B step/solve/step_n consistency", "[lbfgsb]")
     SECTION("solve converges from scratch")
     {
         basic_solver<lbfgsb_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
         CHECK(result.status == solver_status::converged);
     }
 }
@@ -233,7 +233,7 @@ TEST_CASE("Two L-BFGS-B policies in solver_group (SC5)", "[lbfgsb][solver_group]
     rosenbrock<> problem{.n = 2};
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
 
     basic_solver_group<round_robin_schedule, lbfgsb_policy, lbfgsb_policy> group{
         problem, x0, opts};
@@ -247,7 +247,7 @@ TEST_CASE("Two L-BFGS-B policies in solver_group (SC5)", "[lbfgsb][solver_group]
     }
 
     // Run to convergence or budget
-    auto result = group.step_n(200);
+    auto result = group.step_n(200, opts);
 
     CHECK((result.status == solver_status::converged
            || result.status == solver_status::budget_exhausted));

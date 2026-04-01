@@ -25,7 +25,7 @@ template <typename Phi, typename Scalar = double>
 [[nodiscard]] line_search_result<Scalar> armijo(Phi&& phi,
                                                 Scalar phi0,
                                                 Scalar dphi0,
-                                                const line_search_options<Scalar>& opts = {})
+                                                const line_search_options& opts = {})
 {
     line_search_result<Scalar> result;
     result.alpha = opts.max_alpha;

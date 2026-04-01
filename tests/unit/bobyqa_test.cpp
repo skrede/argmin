@@ -123,12 +123,12 @@ TEST_CASE("bobyqa bound-constrained Rosenbrock 2D", "[bobyqa]")
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
     opts.max_iterations = 500;
-    opts.gradient_tolerance = 1e-15;  // effectively disabled for derivative-free
-    opts.objective_tolerance = 1e-10;
-    opts.step_tolerance = 1e-12;
+    opts.set_gradient_threshold(1e-15);  // effectively disabled for derivative-free
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-12);
 
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(result.x[0] == Approx(1.0).margin(5e-3));
     CHECK(result.x[1] == Approx(1.0).margin(5e-3));
@@ -152,12 +152,12 @@ TEST_CASE("bobyqa tight bounds", "[bobyqa]")
     Eigen::VectorXd x0{{0.4, 0.4}};
     solver_options opts;
     opts.max_iterations = 500;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-10;
-    opts.step_tolerance = 1e-12;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-12);
 
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Solution must be within bounds
     CHECK(result.x[0] >= -1e-10);
@@ -179,12 +179,12 @@ TEST_CASE("bobyqa Booth function", "[bobyqa]")
     Eigen::VectorXd x0{{0.0, 0.0}};
     solver_options opts;
     opts.max_iterations = 300;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-10;
-    opts.step_tolerance = 1e-12;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-12);
 
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Booth minimum at (1, 3)
     CHECK(result.x[0] == Approx(1.0).margin(1e-3));
@@ -202,12 +202,12 @@ TEST_CASE("bobyqa higher dimensional (n=6)", "[bobyqa]")
     Eigen::VectorXd x0 = Eigen::VectorXd::Constant(6, -0.5);
     solver_options opts;
     opts.max_iterations = 1000;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-8;
-    opts.step_tolerance = 1e-12;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-8);
+    opts.set_step_threshold(1e-12);
 
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Should converge reasonably close to (1,1,...,1)
     for(int i = 0; i < 6; ++i)
@@ -230,9 +230,9 @@ TEST_CASE("bobyqa step solve step_n", "[bobyqa]")
     Eigen::VectorXd x0{{0.0, 0.0}};
     solver_options opts;
     opts.max_iterations = 200;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-10;
-    opts.step_tolerance = 1e-12;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-12);
 
     SECTION("step returns finite values")
     {
@@ -257,7 +257,7 @@ TEST_CASE("bobyqa step solve step_n", "[bobyqa]")
     SECTION("solve converges")
     {
         basic_solver solver{bobyqa_policy{}, problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
         CHECK(result.objective_value < 1e-2);
     }
 }
@@ -273,14 +273,14 @@ TEST_CASE("bobyqa custom interpolation points", "[bobyqa]")
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
     opts.max_iterations = 500;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-10;
-    opts.step_tolerance = 1e-12;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-12);
 
     SECTION("default 2n+1 interpolation points")
     {
         basic_solver solver{bobyqa_policy{}, problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
         CHECK(result.objective_value < 1e-3);
     }
 }

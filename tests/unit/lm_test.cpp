@@ -121,10 +121,10 @@ TEST_CASE("lm_policy: Rosenbrock residual form", "[lm]")
 
     solver_options opts;
     opts.max_iterations = 200;
-    opts.gradient_tolerance = 1e-12;
+    opts.set_gradient_threshold(1e-12);
 
     basic_solver solver{lm_policy{}, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-12);
     CHECK(result.x(0) == Approx(1.0).margin(1e-6));
@@ -138,10 +138,10 @@ TEST_CASE("lm_policy: exponential fitting", "[lm]")
 
     solver_options opts;
     opts.max_iterations = 200;
-    opts.gradient_tolerance = 1e-10;
+    opts.set_gradient_threshold(1e-10);
 
     basic_solver solver{lm_policy{}, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Data is approximate exponential, so residual won't be zero
     CHECK(solver.state().objective_value < 0.01);
@@ -154,10 +154,10 @@ TEST_CASE("lm_policy: FD Jacobian fallback", "[lm]")
 
     solver_options opts;
     opts.max_iterations = 200;
-    opts.gradient_tolerance = 1e-10;
+    opts.set_gradient_threshold(1e-10);
 
     basic_solver solver{lm_policy{}, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-8);
     CHECK(result.x(0) == Approx(1.0).margin(1e-4));
@@ -171,9 +171,9 @@ TEST_CASE("lm_policy: step_n budget", "[lm]")
 
     solver_options opts;
     opts.max_iterations = 1000;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     basic_solver solver{lm_policy{}, problem, x0, opts};
     double f0 = solver.state().objective_value;
@@ -192,10 +192,10 @@ TEST_CASE("lm_policy: rejected steps recovery", "[lm]")
 
     solver_options opts;
     opts.max_iterations = 500;
-    opts.gradient_tolerance = 1e-10;
+    opts.set_gradient_threshold(1e-10);
 
     basic_solver solver{lm_policy{}, problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Should converge despite starting far away (some rejected steps expected)
     CHECK(solver.state().objective_value < 1e-8);

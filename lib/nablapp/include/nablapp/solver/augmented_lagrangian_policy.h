@@ -83,10 +83,10 @@ struct augmented_lagrangian_policy
         options_type opts;
     };
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem,
                     const Eigen::VectorX<scalar_type>& x0,
-                    const solver_options<scalar_type>& solver_opts,
+                    const solver_options<Convergence>& solver_opts,
                     const options_type& policy_opts)
     {
         auto s = self.init(problem, x0, solver_opts);
@@ -96,10 +96,10 @@ struct augmented_lagrangian_policy
         return s;
     }
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&&, const Problem& problem,
                     const Eigen::VectorX<scalar_type>& x0,
-                    const solver_options<scalar_type>& /*solver_opts*/)
+                    const solver_options<Convergence>& /*solver_opts*/)
     {
         static_assert(constrained<Problem, scalar_type>,
                       "augmented_lagrangian_policy requires constrained<Problem>");
@@ -278,14 +278,17 @@ struct augmented_lagrangian_policy
         };
 
         // Inner solver: solve the augmented Lagrangian subproblem
-        solver_options<scalar_type> inner_opts;
+        solver_options<> inner_opts;
         inner_opts.max_iterations = s.opts.inner_max_iter;
-        inner_opts.gradient_tolerance = s.opts.inner_grad_tol;
-        inner_opts.objective_tolerance = scalar_type(1e-15);
-        inner_opts.step_tolerance = scalar_type(1e-15);
+        std::get<gradient_tolerance_criterion>(inner_opts.convergence.criteria)
+            .threshold = s.opts.inner_grad_tol;
+        std::get<objective_tolerance_criterion>(inner_opts.convergence.criteria)
+            .threshold = scalar_type(1e-15);
+        std::get<step_tolerance_criterion>(inner_opts.convergence.criteria)
+            .threshold = scalar_type(1e-15);
 
         basic_solver<InnerPolicy> inner_solver{sub, s.x, inner_opts};
-        auto inner_result = inner_solver.solve();
+        auto inner_result = inner_solver.solve(inner_opts);
 
         // Extract solution from inner solver
         scalar_type f_old = s.f;

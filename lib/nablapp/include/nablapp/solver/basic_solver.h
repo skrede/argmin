@@ -5,6 +5,7 @@
 #include "nablapp/result/step_result.h"
 #include "nablapp/result/solve_result.h"
 #include "nablapp/result/status.h"
+#include "nablapp/solver/convergence.h"
 #include "nablapp/solver/options.h"
 
 #include <Eigen/Core>
@@ -13,6 +14,8 @@
 #include <chrono>
 #include <cmath>
 #include <concepts>
+#include <cstdint>
+#include <optional>
 #include <type_traits>
 
 namespace nablapp
@@ -32,7 +35,7 @@ struct policy_options_impl
 template <typename Policy, typename Scalar>
 struct policy_options_impl<Policy, Scalar, false>
 {
-    using type = solver_options<Scalar>;
+    using type = solver_options<>;
 };
 }
 
@@ -45,6 +48,10 @@ using policy_options_t = typename detail::policy_options_impl<Policy, Scalar>::t
 // The solver provides the iterative execution model: step(), solve(),
 // step_n(budget). Convergence checking is performed by basic_solver --
 // the policy does NOT know about convergence.
+//
+// basic_solver<Policy> has exactly ONE template parameter (D-02).
+// Convergence behavior is deduced from solver_options<Convergence>
+// passed to solve()/step_n().
 //
 // Policy contract (deducing this):
 //   - Policy::scalar_type         -- scalar type (double, float)
@@ -64,52 +71,67 @@ public:
     using scalar_type = typename Policy::scalar_type;
     using state_type = typename Policy::state_type;
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     basic_solver(Policy policy, const Problem& problem,
                  const Eigen::VectorX<scalar_type>& x0,
-                 const solver_options<scalar_type>& opts = {})
+                 const solver_options<Convergence>& opts = {})
         : policy_{std::move(policy)}
-        , options_{opts}
+        , max_iterations_{opts.max_iterations}
+        , verbosity_{opts.verbosity}
+        , max_time_{opts.max_time}
+        , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, x0, opts)}
     {}
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     basic_solver(const Problem& problem, const Eigen::VectorX<scalar_type>& x0,
-                 const solver_options<scalar_type>& opts = {})
-        : options_{opts}
+                 const solver_options<Convergence>& opts = {})
+        : max_iterations_{opts.max_iterations}
+        , verbosity_{opts.verbosity}
+        , max_time_{opts.max_time}
+        , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, x0, opts)}
     {}
 
-    template <typename Problem, typename PolicyOpts>
+    template <typename Problem, typename PolicyOpts, typename Convergence = default_convergence>
         requires has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
     basic_solver(Policy policy, const Problem& problem,
                  const Eigen::VectorX<scalar_type>& x0,
-                 const solver_options<scalar_type>& opts,
+                 const solver_options<Convergence>& opts,
                  const PolicyOpts& policy_opts)
         : policy_{std::move(policy)}
-        , options_{opts}
+        , max_iterations_{opts.max_iterations}
+        , verbosity_{opts.verbosity}
+        , max_time_{opts.max_time}
+        , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, x0, opts, policy_opts)}
     {}
 
-    template <typename Problem, typename PolicyOpts>
+    template <typename Problem, typename PolicyOpts, typename Convergence = default_convergence>
         requires has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
     basic_solver(const Problem& problem, const Eigen::VectorX<scalar_type>& x0,
-                 const solver_options<scalar_type>& opts,
+                 const solver_options<Convergence>& opts,
                  const PolicyOpts& policy_opts)
-        : options_{opts}
+        : max_iterations_{opts.max_iterations}
+        , verbosity_{opts.verbosity}
+        , max_time_{opts.max_time}
+        , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, x0, opts, policy_opts)}
     {}
 
     // Overload for policies without options_type: the fourth argument is
-    // solver_options<Scalar> (the policy_options_t fallback) and is ignored.
-    template <typename Problem>
+    // solver_options<> (the policy_options_t fallback) and is ignored.
+    template <typename Problem, typename Convergence = default_convergence>
         requires (!has_options_type<Policy>)
     basic_solver(const Problem& problem, const Eigen::VectorX<scalar_type>& x0,
-                 const solver_options<scalar_type>& opts,
-                 const solver_options<scalar_type>&)
-        : options_{opts}
+                 const solver_options<Convergence>& opts,
+                 const solver_options<>&)
+        : max_iterations_{opts.max_iterations}
+        , verbosity_{opts.verbosity}
+        , max_time_{opts.max_time}
+        , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, x0, opts)}
     {}
 
@@ -118,7 +140,10 @@ public:
 
     basic_solver(basic_solver&& other) noexcept
         : policy_{std::move(other.policy_)}
-        , options_{std::move(other.options_)}
+        , max_iterations_{other.max_iterations_}
+        , verbosity_{other.verbosity_}
+        , max_time_{other.max_time_}
+        , constraint_tolerance_{other.constraint_tolerance_}
         , state_{std::move(other.state_)}
         , iterations_{other.iterations_}
         , last_status_{other.last_status_}
@@ -130,7 +155,10 @@ public:
         if(this != &other)
         {
             policy_ = std::move(other.policy_);
-            options_ = std::move(other.options_);
+            max_iterations_ = other.max_iterations_;
+            verbosity_ = other.verbosity_;
+            max_time_ = other.max_time_;
+            constraint_tolerance_ = other.constraint_tolerance_;
             state_ = std::move(other.state_);
             iterations_ = other.iterations_;
             last_status_ = other.last_status_;
@@ -148,19 +176,49 @@ public:
         return result;
     }
 
+    // Solve with default convergence (uses stored max_iterations).
     solve_result<scalar_type> solve()
     {
-        return step_n(options_.max_iterations);
+        solver_options<> opts;
+        opts.max_iterations = max_iterations_;
+        opts.max_time = max_time_;
+        return step_n(max_iterations_, opts);
     }
 
-    solve_result<scalar_type> step_n(int budget)
+    // Solve with explicit convergence policy via solver_options.
+    template <typename Convergence>
+    solve_result<scalar_type> solve(const solver_options<Convergence>& opts)
+    {
+        return step_n(opts.max_iterations, opts);
+    }
+
+    // Step with budget, default convergence.
+    solve_result<scalar_type> step_n(std::uint32_t budget)
+    {
+        solver_options<> opts;
+        opts.max_iterations = max_iterations_;
+        opts.max_time = max_time_;
+        return step_n(budget, opts);
+    }
+
+    // Step with budget and explicit convergence policy via solver_options.
+    //
+    // Convergence loop structure:
+    //   1. Check abort flag
+    //   2. Check time limit between steps (D-11: not inside policy, D-12: steady_clock)
+    //   3. Execute policy step
+    //   4. Check policy-reported failure (D-16: policy failure is final)
+    //   5. Check convergence policy
+    template <typename Convergence>
+    solve_result<scalar_type> step_n(std::uint32_t budget,
+                                     const solver_options<Convergence>& opts)
     {
         auto t0 = std::chrono::steady_clock::now();
 
         solver_status status = solver_status::running;
         step_result<scalar_type> last{};
 
-        for(int i = 0; i < budget; ++i)
+        for(std::uint32_t i = 0; i < budget; ++i)
         {
             if(abort_flag_.load(std::memory_order_relaxed))
             {
@@ -168,31 +226,38 @@ public:
                 break;
             }
 
+            // Time limit check (D-11: between steps, not inside policy)
+            if(opts.max_time)
+            {
+                auto elapsed = std::chrono::steady_clock::now() - t0;
+                if(elapsed >= *opts.max_time)
+                {
+                    status = solver_status::time_limit_reached;
+                    break;
+                }
+            }
+
             last = step();
 
-            if(last.gradient_norm < options_.gradient_tolerance)
+            // Policy-reported failure is final (D-16)
+            if(last.policy_status)
             {
-                status = solver_status::converged;
+                status = *last.policy_status;
                 break;
             }
 
-            if(iterations_ > 1
-               && std::abs(last.objective_change) < options_.objective_tolerance)
+            // Convergence policy check
+            auto conv = opts.convergence.check(last, iterations_);
+            if(conv)
             {
-                status = solver_status::ftol_reached;
-                break;
-            }
-
-            if(last.step_size < options_.step_tolerance && iterations_ > 1)
-            {
-                status = solver_status::stalled;
+                status = *conv;
                 break;
             }
         }
 
         if(status == solver_status::running)
         {
-            status = (iterations_ >= options_.max_iterations)
+            status = (iterations_ >= opts.max_iterations)
                          ? solver_status::max_iterations
                          : solver_status::budget_exhausted;
         }
@@ -249,22 +314,35 @@ public:
 
 private:
     Policy policy_{};
-    solver_options<scalar_type> options_;
+    std::uint32_t max_iterations_{1000};
+    std::uint8_t verbosity_{0};
+    std::optional<std::chrono::nanoseconds> max_time_{};
+    std::optional<double> constraint_tolerance_{};
     state_type state_;
-    int iterations_{0};
+    std::uint32_t iterations_{0};
     solver_status last_status_{solver_status::running};
     std::atomic<bool> abort_flag_{false};
 };
 
 // CTAD deduction guides (per D-13).
 
-template <typename Policy, typename Problem, typename Scalar>
+template <typename Policy, typename Problem, typename Scalar, typename Convergence>
 basic_solver(Policy, const Problem&, const Eigen::VectorX<Scalar>&,
-             const solver_options<Scalar>&) -> basic_solver<Policy>;
+             const solver_options<Convergence>&) -> basic_solver<Policy>;
 
 template <typename Policy, typename Problem, typename Scalar>
 basic_solver(Policy, const Problem&, const Eigen::VectorX<Scalar>&)
     -> basic_solver<Policy>;
+
+// D-04: convenience type aliases for common configurations.
+// These are identity aliases -- basic_solver has ONE template parameter,
+// and the convergence configuration flows through solver_options at call time.
+
+template <typename Policy>
+using realtime_solver = basic_solver<Policy>;
+
+template <typename Policy>
+using gradient_solver = basic_solver<Policy>;
 
 }
 

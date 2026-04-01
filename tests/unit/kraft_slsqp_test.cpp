@@ -149,11 +149,11 @@ TEST_CASE("kraft_slsqp unconstrained Rosenbrock", "[kraft_slsqp]")
     rosenbrock<> problem{.n = 2};
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 500;
 
     basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK((result.status == solver_status::converged
            || result.status == solver_status::ftol_reached));
@@ -167,13 +167,13 @@ TEST_CASE("kraft_slsqp equality constrained", "[kraft_slsqp]")
     equality_quadratic problem;
     Eigen::VectorXd x0{{0.0, 1.0}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK(result.x[0] == Approx(0.5).margin(1e-3));
     CHECK(result.x[1] == Approx(0.5).margin(1e-3));
@@ -186,13 +186,13 @@ TEST_CASE("kraft_slsqp inequality constrained", "[kraft_slsqp]")
     ineq_rosenbrock problem;
     Eigen::VectorXd x0{{0.5, 0.5}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Solution is (1,1) which satisfies 1+1=2<=2 (active constraint).
     // Or near it. Objective should be near zero.
@@ -206,13 +206,13 @@ TEST_CASE("kraft_slsqp box constrained", "[kraft_slsqp]")
     box_rosenbrock problem;
     Eigen::VectorXd x0{{0.4, 0.4}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Solution constrained by upper bound (optimum (1,1) excluded).
     // x should be within [0, 0.8].
@@ -232,13 +232,13 @@ TEST_CASE("kraft_slsqp liepp-like budget", "[kraft_slsqp]")
     liepp_box_rosenbrock problem;
     Eigen::VectorXd x0{{-1.0, 0.5}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-8;
-    opts.objective_tolerance = 1e-12;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-15);
     opts.max_iterations = 500;
 
     basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Must converge within 500 iterations (liepp budget)
     CHECK(result.iterations <= 500);
@@ -273,7 +273,7 @@ TEST_CASE("kraft_slsqp step solve step_n", "[kraft_slsqp]")
     rosenbrock<> problem{.n = 2};
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 500;
 
     SECTION("step returns finite values")
@@ -300,7 +300,7 @@ TEST_CASE("kraft_slsqp step solve step_n", "[kraft_slsqp]")
     SECTION("solve runs to convergence")
     {
         basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
         CHECK((result.status == solver_status::converged
                || result.status == solver_status::ftol_reached));
     }

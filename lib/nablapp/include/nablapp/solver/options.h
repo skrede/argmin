@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <tuple>
 
 namespace nablapp
 {
@@ -26,6 +27,30 @@ struct solver_options
     std::optional<std::chrono::nanoseconds> max_time{};
     std::optional<double> constraint_tolerance{};
     Convergence convergence{};
+
+    // Convenience accessors for common convergence criteria thresholds.
+    // These delegate to the corresponding criterion in the convergence policy.
+
+    template <typename C = Convergence>
+    void set_gradient_threshold(double v)
+        requires requires(C& c) { std::get<gradient_tolerance_criterion>(c.criteria); }
+    {
+        std::get<gradient_tolerance_criterion>(convergence.criteria).threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_objective_threshold(double v)
+        requires requires(C& c) { std::get<objective_tolerance_criterion>(c.criteria); }
+    {
+        std::get<objective_tolerance_criterion>(convergence.criteria).threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_step_threshold(double v)
+        requires requires(C& c) { std::get<step_tolerance_criterion>(c.criteria); }
+    {
+        std::get<step_tolerance_criterion>(convergence.criteria).threshold = v;
+    }
 };
 
 }

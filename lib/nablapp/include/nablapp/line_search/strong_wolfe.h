@@ -30,7 +30,7 @@ template <typename Phi, typename DPhi, typename Scalar = double>
                                                       DPhi&& dphi,
                                                       Scalar phi0,
                                                       Scalar dphi0,
-                                                      const line_search_options<Scalar>& opts = {})
+                                                      const line_search_options& opts = {})
 {
     line_search_result<Scalar> result;
 

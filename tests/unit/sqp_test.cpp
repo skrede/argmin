@@ -191,13 +191,13 @@ TEST_CASE("nw_sqp unconstrained Rosenbrock", "[sqp]")
     unconstrained_rosenbrock problem;
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK((result.status == solver_status::converged
            || result.status == solver_status::ftol_reached
@@ -212,13 +212,13 @@ TEST_CASE("nw_sqp equality constrained", "[sqp]")
     equality_constrained_quadratic problem;
     Eigen::VectorXd x0{{0.0, 0.0}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 200;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     CHECK((result.status == solver_status::converged
            || result.status == solver_status::ftol_reached));
@@ -232,13 +232,13 @@ TEST_CASE("nw_sqp inequality constrained", "[sqp]")
     inequality_rosenbrock problem;
     Eigen::VectorXd x0{{0.5, 0.5}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-4;
+    opts.set_gradient_threshold(1e-4);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // The unconstrained minimum (1,1) is on the boundary of x0^2+x1^2<=2
     // so it should be feasible (1+1=2).
@@ -252,13 +252,13 @@ TEST_CASE("nw_sqp box constrained", "[sqp]")
     box_constrained_rosenbrock problem;
     Eigen::VectorXd x0{{0.4, 0.4}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-5;
+    opts.set_gradient_threshold(1e-5);
     opts.max_iterations = 500;
-    opts.step_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
 
     basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-    auto result = solver.solve();
+    auto result = solver.solve(opts);
 
     // Solution must respect bounds [0, 0.8]
     CHECK(result.x[0] >= -1e-10);
@@ -275,7 +275,7 @@ TEST_CASE("nw_sqp step solve step_n", "[sqp]")
     unconstrained_rosenbrock problem;
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
-    opts.gradient_tolerance = 1e-6;
+    opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 200;
 
     SECTION("step returns finite values")
@@ -297,7 +297,7 @@ TEST_CASE("nw_sqp step solve step_n", "[sqp]")
     SECTION("solve converges from scratch")
     {
         basic_solver<nw_sqp_policy> solver{problem, x0, opts};
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
         CHECK((result.status == solver_status::converged
                || result.status == solver_status::ftol_reached
                || result.status == solver_status::stalled));

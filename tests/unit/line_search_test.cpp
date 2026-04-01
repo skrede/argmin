@@ -67,7 +67,7 @@ TEST_CASE("armijo with zero iterations", "[line_search][armijo]")
 {
     auto phi = [](double alpha) -> double { return alpha * alpha; };
 
-    line_search_options<double> opts;
+    line_search_options opts;
     opts.max_iterations = 0;
 
     auto result = armijo(phi, 1.0, -2.0, opts);
@@ -124,7 +124,7 @@ TEST_CASE("strong_wolfe on quadratic", "[line_search][strong_wolfe]")
     CHECK(result.success);
 
     // Verify sufficient decrease (Armijo): phi(alpha) <= phi0 + c1*alpha*dphi0
-    line_search_options<double> opts;
+    line_search_options opts;
     CHECK(result.value <= phi0 + opts.c1 * result.alpha * dphi0);
 
     // Verify curvature condition: |dphi(alpha)| <= c2*|dphi0|
@@ -164,7 +164,7 @@ TEST_CASE("strong_wolfe on Rosenbrock", "[line_search][strong_wolfe]")
     CHECK(result.value < phi0);
 
     // Verify sufficient decrease
-    line_search_options<double> opts;
+    line_search_options opts;
     CHECK(result.value <= phi0 + opts.c1 * result.alpha * dphi0);
 
     // Verify curvature condition
@@ -191,7 +191,7 @@ TEST_CASE("strong_wolfe sufficient decrease verified", "[line_search][strong_wol
     double phi0 = phi(0.0);
     double dphi0 = dphi(0.0);
 
-    line_search_options<double> opts;
+    line_search_options opts;
     opts.max_alpha = 5.0;
 
     auto result = strong_wolfe(phi, dphi, phi0, dphi0, opts);
@@ -218,7 +218,7 @@ TEST_CASE("strong_wolfe curvature condition verified", "[line_search][strong_wol
     double phi0 = phi(0.0);
     double dphi0 = dphi(0.0);
 
-    line_search_options<double> opts;
+    line_search_options opts;
     opts.max_alpha = 5.0;
 
     auto result = strong_wolfe(phi, dphi, phi0, dphi0, opts);
@@ -242,7 +242,7 @@ TEST_CASE("strong_wolfe with insufficient iterations", "[line_search][strong_wol
         return 2.0 * (alpha - 2.0);
     };
 
-    line_search_options<double> opts;
+    line_search_options opts;
     opts.max_iterations = 0;
 
     auto result = strong_wolfe(phi, dphi, 4.0, -4.0, opts);
