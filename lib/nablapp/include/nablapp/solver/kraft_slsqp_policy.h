@@ -27,6 +27,8 @@
 #include "nablapp/detail/active_set_qp.h"
 #include "nablapp/detail/compact_lbfgs.h"
 #include "nablapp/line_search/armijo.h"
+#include "nablapp/options/bfgs_options.h"
+#include "nablapp/options/qp_options.h"
 #include "nablapp/line_search/options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
@@ -37,8 +39,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 
 namespace nablapp
 {
@@ -49,9 +53,12 @@ struct kraft_slsqp_policy
 
     struct options_type
     {
-        int history_depth{10};
-        double initial_penalty{1.0};
-        double penalty_growth{10.0};
+        std::optional<std::uint8_t> history_depth{};   // L-BFGS memory (default: 10, N&W 7.2)
+        std::optional<double> initial_penalty{};       // penalty weight (default: 1.0, Kraft 1988)
+        std::optional<double> penalty_growth{};        // penalty multiplier (default: 10.0, Kraft 1988)
+        line_search_options line_search{};              // Embedded line search params
+        bfgs_options bfgs{};                            // BFGS update params
+        qp_options qp{};                                // QP subproblem params
     };
 
     options_type options{};
@@ -70,7 +77,7 @@ struct kraft_slsqp_policy
         double objective_value{};
         double sigma{1.0};
         detail::compact_lbfgs<double> lbfgs;
-        int iteration{0};
+        std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
         int n{0};
@@ -174,8 +181,9 @@ struct kraft_slsqp_policy
             };
         }
 
-        s.lbfgs = detail::compact_lbfgs<double>{self.options.history_depth};
-        s.sigma = self.options.initial_penalty;
+        std::uint8_t depth = self.options.history_depth.value_or(10);
+        s.lbfgs = detail::compact_lbfgs<double>{depth};
+        s.sigma = self.options.initial_penalty.value_or(1.0);
         s.iteration = 0;
 
         s.eval_value = [&problem](const Eigen::VectorXd& v) {
@@ -188,7 +196,7 @@ struct kraft_slsqp_policy
         return s;
     }
 
-    step_result<double> step(this auto&&, state_type& s)
+    step_result<double> step(this auto&& self, state_type& s)
     {
         // Re-evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
@@ -248,9 +256,14 @@ struct kraft_slsqp_policy
         // equality constraints. Use p0 = 0 and let the active-set solver handle it.
         Eigen::VectorXd p0 = Eigen::VectorXd::Zero(n);
 
-        // Solve QP with box constraints
+        // Solve QP with box constraints, using embedded QP options
         nablapp::qp_options qp_opts;
-        qp_opts.max_iterations = static_cast<std::uint16_t>(10 * n);
+        qp_opts.max_iterations = self.options.qp.max_iterations.has_value()
+            ? self.options.qp.max_iterations
+            : std::optional<std::uint16_t>{static_cast<std::uint16_t>(10 * n)};
+        qp_opts.tolerance = self.options.qp.tolerance.has_value()
+            ? self.options.qp.tolerance
+            : std::optional<double>{1e-12};
         auto qp_res = detail::solve_qp(B, s.g, A_eq, b_eq, A_ineq, b_ineq,
                                         p_lower, p_upper, p0, qp_opts);
 
@@ -266,6 +279,7 @@ struct kraft_slsqp_policy
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .x_norm = s.x.norm(),
             };
         }
 
@@ -316,7 +330,7 @@ struct kraft_slsqp_policy
         if(dphi_merit >= 0.0)
             dphi_merit = -1e-8;
 
-        // Backtracking Armijo line search on L1 merit
+        // Backtracking Armijo line search on L1 merit, using embedded options
         auto phi_ls = [&](double alpha) {
             Eigen::VectorXd x_trial = s.x + alpha * p;
             // Project onto bounds for safety
@@ -328,13 +342,7 @@ struct kraft_slsqp_policy
             return merit(x_trial);
         };
 
-        line_search_options ls_opts;
-        ls_opts.max_alpha = 1.0;
-        ls_opts.c1 = 1e-4;
-        ls_opts.rho = 0.5;
-        ls_opts.max_iterations = 20;
-
-        auto ls = armijo(phi_ls, merit_0, dphi_merit, ls_opts);
+        auto ls = armijo(phi_ls, merit_0, dphi_merit, self.options.line_search);
         double alpha = ls.alpha;
 
         // Ensure minimum step
@@ -423,6 +431,7 @@ struct kraft_slsqp_policy
             .step_size = sk.norm(),
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
+            .x_norm = s.x.norm(),
         };
     }
 
@@ -445,7 +454,7 @@ struct kraft_slsqp_policy
     {
         self.reset(s, x0);
         s.lbfgs.reset();
-        s.sigma = 1.0;
+        s.sigma = self.options.initial_penalty.value_or(1.0);
     }
 };
 

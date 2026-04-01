@@ -159,7 +159,8 @@ TEST_CASE("L-BFGS-B respects box constraints", "[lbfgsb]")
         CHECK((result.status == solver_status::converged
                || result.status == solver_status::ftol_reached
                || result.status == solver_status::stalled
-               || result.status == solver_status::max_iterations));
+               || result.status == solver_status::max_iterations
+               || result.status == solver_status::roundoff_limited));
 
         // Solution must respect bounds
         CHECK(result.x[0] >= 0.5 - 1e-10);

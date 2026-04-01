@@ -26,6 +26,7 @@
 #include "nablapp/detail/bound_projection.h"
 #include "nablapp/detail/subspace_minimization.h"
 #include "nablapp/line_search/strong_wolfe.h"
+#include "nablapp/options/bfgs_options.h"
 #include "nablapp/line_search/options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
@@ -36,8 +37,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace nablapp
@@ -49,7 +52,9 @@ struct lbfgsb_policy
 
     struct options_type
     {
-        int history_depth{10};
+        std::optional<std::uint8_t> history_depth{};  // L-BFGS memory depth (default: 10, N&W 7.2)
+        line_search_options line_search{};             // Embedded line search params
+        bfgs_options bfgs{};                           // Embedded BFGS params
     };
 
     options_type options{};
@@ -66,7 +71,7 @@ struct lbfgsb_policy
         Eigen::VectorXd upper;
         double objective_value{};
         detail::compact_lbfgs<double> B;
-        int iteration{0};
+        std::uint32_t iteration{0};
 
         std::function<double(const Eigen::VectorXd&)> eval_value;
         std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_gradient;
@@ -104,7 +109,9 @@ struct lbfgsb_policy
             s.upper = Eigen::VectorXd::Constant(n, inf);
         }
 
-        s.B = detail::compact_lbfgs<double>{self.options.history_depth};
+        // History depth: default 10 (N&W 7.2)
+        std::uint8_t depth = self.options.history_depth.value_or(10);
+        s.B = detail::compact_lbfgs<double>{depth};
         s.iteration = 0;
 
         s.eval_value = [&problem](const Eigen::VectorXd& v) {
@@ -117,7 +124,7 @@ struct lbfgsb_policy
         return s;
     }
 
-    step_result<double> step(this auto&&, state_type& s)
+    step_result<double> step(this auto&& self, state_type& s)
     {
         // Evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
@@ -142,6 +149,7 @@ struct lbfgsb_policy
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .x_norm = s.x.norm(),
             };
         }
 
@@ -160,6 +168,7 @@ struct lbfgsb_policy
                     .step_size = 0.0,
                     .objective_change = 0.0,
                     .improved = false,
+                    .x_norm = s.x.norm(),
                 };
             }
             alpha_max = detail::compute_alpha_max(s.x, d, s.lower, s.upper);
@@ -171,6 +180,7 @@ struct lbfgsb_policy
                     .step_size = 0.0,
                     .objective_change = 0.0,
                     .improved = false,
+                    .x_norm = s.x.norm(),
                 };
             }
         }
@@ -185,8 +195,9 @@ struct lbfgsb_policy
             return g_temp.dot(d);
         };
 
-        // Strong Wolfe with feasible step cap
-        line_search_options ls_opts{.max_alpha = std::min(1.0, alpha_max)};
+        // Strong Wolfe with feasible step cap, using embedded line search options
+        line_search_options ls_opts = self.options.line_search;
+        ls_opts.max_alpha = std::min(ls_opts.max_alpha, alpha_max);
         auto ls = strong_wolfe(phi, dphi, s.objective_value, s.g.dot(d), ls_opts);
 
         // Update iterate (project for numerical safety)
@@ -210,12 +221,24 @@ struct lbfgsb_policy
         // Increment iteration
         ++s.iteration;
 
+        double step_norm = sk.norm();
+        double x_norm = s.x.norm();
+
+        // Roundoff detection (N&W Section 3.4):
+        // step too small relative to iterate magnitude
+        std::optional<solver_status> policy_status{};
+        constexpr double eps = std::numeric_limits<double>::epsilon();
+        if(step_norm < eps * std::max(x_norm, 1.0) * 10.0)
+            policy_status = solver_status::roundoff_limited;
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = new_g.norm(),
-            .step_size = sk.norm(),
+            .step_size = step_norm,
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
+            .x_norm = x_norm,
+            .policy_status = policy_status,
         };
     }
 

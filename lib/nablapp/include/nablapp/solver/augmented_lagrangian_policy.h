@@ -27,8 +27,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 
 namespace nablapp
 {
@@ -40,15 +42,18 @@ struct augmented_lagrangian_policy
 
     struct options_type
     {
-        scalar_type mu_init = scalar_type(1);
-        scalar_type mu_decrease = scalar_type(0.1);
-        scalar_type mu_min = scalar_type(1e-12);
-        int inner_max_iter = 200;
-        int max_outer_iter = 50;
-        scalar_type constraint_tol = scalar_type(1e-6);
-        scalar_type inner_grad_tol = scalar_type(1e-6);
+        std::optional<scalar_type> mu_init{};                      // default: 1.0 (K&W 10.9)
+        std::optional<scalar_type> mu_decrease{};                  // default: 0.1 (K&W 10.9)
+        std::optional<scalar_type> mu_min{};                       // default: 1e-12 (K&W 10.9)
+        std::optional<std::uint32_t> inner_max_iterations{};       // default: 200
+        std::optional<std::uint32_t> max_outer_iterations{};       // default: 50 (K&W 10.9)
+        std::optional<scalar_type> constraint_tolerance{};         // default: 1e-6 (K&W 10.9)
+        std::optional<scalar_type> inner_gradient_tolerance{};     // default: 1e-6 (K&W 10.9)
+        std::optional<scalar_type> feasibility_progress{};         // default: 0.25 (N&W 17.4)
         typename InnerPolicy::options_type inner_opts = {};
     };
+
+    options_type options{};
 
     struct state_type
     {
@@ -78,7 +83,7 @@ struct augmented_lagrangian_policy
 
         int n_eq = 0;
         int n_ineq = 0;
-        int outer_iter = 0;
+        std::uint32_t outer_iter = 0;
 
         options_type opts;
     };
@@ -89,15 +94,16 @@ struct augmented_lagrangian_policy
                     const solver_options<Convergence>& solver_opts,
                     const options_type& policy_opts)
     {
+        self.options = policy_opts;
         auto s = self.init(problem, x0, solver_opts);
         s.opts = policy_opts;
-        s.mu = policy_opts.mu_init;
+        s.mu = policy_opts.mu_init.value_or(scalar_type(1));
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
         return s;
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&&, const Problem& problem,
+    state_type init(this auto&& self, const Problem& problem,
                     const Eigen::VectorX<scalar_type>& x0,
                     const solver_options<Convergence>& /*solver_opts*/)
     {
@@ -106,7 +112,7 @@ struct augmented_lagrangian_policy
 
         const int n = problem.dimension();
         state_type s;
-        s.opts = options_type{};
+        s.opts = self.options;
 
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
@@ -127,7 +133,7 @@ struct augmented_lagrangian_policy
         s.lambda_ineq = Eigen::VectorX<scalar_type>::Zero(s.n_ineq);
 
         // Penalty
-        s.mu = s.opts.mu_init;
+        s.mu = s.opts.mu_init.value_or(scalar_type(1));
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.outer_iter = 0;
 
@@ -193,6 +199,13 @@ struct augmented_lagrangian_policy
     step_result<scalar_type> step(this auto&&, state_type& s)
     {
         const int n = static_cast<int>(s.x.size());
+
+        const scalar_type inner_grad_tol = s.opts.inner_gradient_tolerance.value_or(scalar_type(1e-6));
+        const std::uint32_t inner_max = s.opts.inner_max_iterations.value_or(200);
+        const scalar_type mu_dec = s.opts.mu_decrease.value_or(scalar_type(0.1));
+        const scalar_type mu_floor = s.opts.mu_min.value_or(scalar_type(1e-12));
+        const scalar_type feas_progress = s.opts.feasibility_progress.value_or(scalar_type(0.25));
+        const scalar_type con_tol = s.opts.constraint_tolerance.value_or(scalar_type(1e-6));
 
         // Evaluate constraints and Jacobian at current x
         s.eval_constraints(s.x, s.c_eq, s.c_ineq);
@@ -279,9 +292,9 @@ struct augmented_lagrangian_policy
 
         // Inner solver: solve the augmented Lagrangian subproblem
         solver_options<> inner_opts;
-        inner_opts.max_iterations = s.opts.inner_max_iter;
+        inner_opts.max_iterations = inner_max;
         std::get<gradient_tolerance_criterion>(inner_opts.convergence.criteria)
-            .threshold = s.opts.inner_grad_tol;
+            .threshold = inner_grad_tol;
         std::get<objective_tolerance_criterion>(inner_opts.convergence.criteria)
             .threshold = scalar_type(1e-15);
         std::get<step_tolerance_criterion>(inner_opts.convergence.criteria)
@@ -306,10 +319,10 @@ struct augmented_lagrangian_policy
         detail::update_multipliers(
             s.lambda_eq, s.lambda_ineq, s.c_eq, s.c_ineq, s.mu);
 
-        if(viol > scalar_type(0.25) * s.prev_viol)
+        if(viol > feas_progress * s.prev_viol)
         {
             // Insufficient feasibility progress: decrease mu
-            s.mu = std::max(s.mu * s.opts.mu_decrease, s.opts.mu_min);
+            s.mu = std::max(s.mu * mu_dec, mu_floor);
         }
         s.prev_viol = viol;
 
@@ -328,7 +341,8 @@ struct augmented_lagrangian_policy
             .gradient_norm = grad_proxy,
             .step_size = step_norm,
             .objective_change = s.f - f_old,
-            .improved = s.f < f_old || viol < s.opts.constraint_tol,
+            .improved = s.f < f_old || viol < con_tol,
+            .x_norm = s.x.norm(),
         };
     }
 
@@ -347,7 +361,7 @@ struct augmented_lagrangian_policy
         self.reset(s, x0);
         s.lambda_eq.setZero();
         s.lambda_ineq.setZero();
-        s.mu = s.opts.mu_init;
+        s.mu = s.opts.mu_init.value_or(scalar_type(1));
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
     }
 };

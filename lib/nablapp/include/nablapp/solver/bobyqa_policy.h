@@ -20,6 +20,7 @@
 #include "nablapp/detail/quadratic_model.h"
 #include "nablapp/detail/trust_region.h"
 #include "nablapp/detail/bound_projection.h"
+#include "nablapp/options/trust_region_options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
 
@@ -29,8 +30,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 
 namespace nablapp
 {
@@ -41,9 +44,11 @@ struct bobyqa_policy
 
     struct options_type
     {
-        int num_interpolation_points{0};   // 0 means 2n+1 default (D-06)
-        double initial_trust_radius{0.0};  // 0 means auto (10% of max bound range)
-        double final_trust_radius{1e-8};   // stopping criterion on delta
+        std::optional<std::uint16_t> num_interpolation_points{};  // default: 2n+1 (Powell 2009)
+        std::optional<double> initial_trust_radius{};             // default: auto, 10% of max bound range (Powell 2009)
+        std::optional<double> final_trust_radius{};               // default: 1e-8, stopping criterion on delta (Powell 2009)
+        std::optional<double> step_convergence_factor{};          // default: 1e-3
+        trust_region_options trust{};                              // Embedded trust region params
     };
 
     options_type options{};
@@ -59,7 +64,8 @@ struct bobyqa_policy
         detail::quadratic_model<double> model;
         double delta{};
         double delta_max{};
-        int iteration{0};
+        double final_trust_radius{1e-8};
+        std::uint32_t iteration{0};
         int m{};
         bool initialized{false};
 
@@ -93,13 +99,16 @@ struct bobyqa_policy
             return problem.value(v);
         };
 
-        // Number of interpolation points (D-06)
-        s.m = (self.options.num_interpolation_points > 0)
-                  ? self.options.num_interpolation_points
+        // Number of interpolation points (Powell 2009)
+        s.m = self.options.num_interpolation_points.has_value()
+                  ? static_cast<int>(self.options.num_interpolation_points.value())
                   : 2 * n + 1;
 
-        // Initial trust-region radius
-        double h = self.options.initial_trust_radius;
+        // Final trust radius
+        s.final_trust_radius = self.options.final_trust_radius.value_or(1e-8);
+
+        // Initial trust-region radius (Powell 2009)
+        double h = self.options.initial_trust_radius.value_or(0.0);
         if(h <= 0.0)
         {
             // Auto: 10% of the maximum bound range
@@ -163,9 +172,10 @@ struct bobyqa_policy
         return s;
     }
 
-    step_result<double> step(this auto&&, state_type& s)
+    step_result<double> step(this auto&& self, state_type& s)
     {
         double old_f = s.objective_value;
+        double step_conv_factor = self.options.step_convergence_factor.value_or(1e-3);
 
         // Model gradient at current best point
         Eigen::VectorXd mg = detail::model_gradient(s.model, s.x);
@@ -177,7 +187,7 @@ struct bobyqa_policy
         double d_norm = d.norm();
 
         // Convergence check: step too small relative to final trust radius
-        if(d_norm < s.delta * 1e-3 && s.delta < options_type{}.final_trust_radius * 10.0)
+        if(d_norm < s.delta * step_conv_factor && s.delta < s.final_trust_radius * 10.0)
         {
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -185,6 +195,7 @@ struct bobyqa_policy
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .x_norm = s.x.norm(),
             };
         }
 
@@ -200,8 +211,9 @@ struct bobyqa_policy
         // Accuracy ratio
         double rho = detail::compute_rho(old_f, f_new, q_old, q_new);
 
-        // Update trust-region radius
-        s.delta = detail::update_radius(s.delta, rho, d_norm, s.delta_max);
+        // Update trust-region radius, passing embedded trust region options
+        s.delta = detail::update_radius(s.delta, rho, d_norm, s.delta_max,
+                                        self.options.trust);
 
         // Select point to replace in interpolation set
         int k = detail::select_replacement(
@@ -257,7 +269,7 @@ struct bobyqa_policy
         double effective_change = improved ? obj_change : s.delta;
 
         double grad_proxy = mg.norm();
-        if(s.delta > options_type{}.final_trust_radius)
+        if(s.delta > s.final_trust_radius)
             grad_proxy = std::max(grad_proxy, 1.0);
 
         return step_result<double>{
@@ -266,6 +278,7 @@ struct bobyqa_policy
             .step_size = effective_step,
             .objective_change = effective_change,
             .improved = improved,
+            .x_norm = s.x.norm(),
         };
     }
 

@@ -20,6 +20,7 @@
 #include "nablapp/detail/cmaes_constants.h"
 #include "nablapp/detail/cmaes_covariance.h"
 #include "nablapp/detail/cmaes_sampling.h"
+#include "nablapp/options/cmaes_options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
 
@@ -29,6 +30,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <numeric>
@@ -47,10 +49,11 @@ struct cmaes_policy
 
     struct options_type
     {
-        int lambda{0};
-        double initial_sigma{0.3};
+        std::optional<std::uint32_t> lambda{};           // population size (default: auto, K&W 8.19)
+        std::optional<double> initial_sigma{};           // initial step size (default: 0.3, Hansen tutorial)
         restart_strategy restart{restart_strategy::none};
-        std::optional<unsigned> seed{std::nullopt};
+        std::optional<std::uint64_t> seed{};             // RNG seed
+        cmaes_options cmaes{};                           // Detection params (Hansen tutorial)
     };
 
     struct state_type
@@ -65,7 +68,7 @@ struct cmaes_policy
         Eigen::VectorXd p_sigma;
         Eigen::VectorXd p_c;
         double sigma{};
-        int generation{0};
+        std::uint32_t generation{0};
         detail::cmaes_params params;
         std::mt19937 rng;
 
@@ -75,7 +78,7 @@ struct cmaes_policy
         bool has_bounds{false};
 
         double initial_sigma{};
-        int stagnation_count{0};
+        std::uint32_t stagnation_count{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
     };
 
@@ -97,7 +100,7 @@ struct cmaes_policy
         state_type s;
 
         s.mean = x0;
-        s.sigma = self.options.initial_sigma;
+        s.sigma = self.options.initial_sigma.value_or(0.3);
         s.initial_sigma = s.sigma;
 
         s.eval_value = [&problem](const Eigen::VectorXd& v) {
@@ -111,7 +114,10 @@ struct cmaes_policy
             s.has_bounds = true;
         }
 
-        s.params = detail::compute_constants(n, self.options.lambda);
+        int pop_lambda = self.options.lambda.has_value()
+            ? static_cast<int>(self.options.lambda.value())
+            : 0;
+        s.params = detail::compute_constants(n, pop_lambda);
 
         s.C = Eigen::MatrixXd::Identity(n, n);
         s.p_sigma = Eigen::VectorXd::Zero(n);
@@ -120,7 +126,7 @@ struct cmaes_policy
         s.D = Eigen::VectorXd::Ones(n);
 
         if(self.options.seed.has_value())
-            s.rng.seed(self.options.seed.value());
+            s.rng.seed(static_cast<unsigned>(self.options.seed.value()));
         else
             s.rng.seed(std::random_device{}());
 
@@ -227,17 +233,35 @@ struct cmaes_policy
         if(s.objective_value < s.best_ever_value)
             s.best_ever_value = s.objective_value;
 
-        // 15. IPOP stagnation check (D-04)
+        // 15. Status detection: roundoff_limited and diverged (Hansen tutorial)
+        std::optional<solver_status> policy_status{};
+
+        // Sigma collapse detection (roundoff_limited)
+        double sigma_collapse_thr = self.options.cmaes.sigma_collapse_threshold.value_or(1e-12);
+        if(s.sigma * s.D.maxCoeff() < sigma_collapse_thr * s.initial_sigma)
+            policy_status = solver_status::roundoff_limited;
+
+        // Condition number explosion detection (diverged)
+        double cond_limit = self.options.cmaes.condition_number_limit.value_or(1e14);
+        double cond = s.D.maxCoeff() / std::max(s.D.minCoeff(), 1e-30);
+        if(cond * cond > cond_limit)
+        {
+            if(!policy_status.has_value())
+                policy_status = solver_status::diverged;
+        }
+
+        // 16. IPOP stagnation check (D-04)
         if(self.options.restart == restart_strategy::ipop)
         {
             bool stagnated = false;
 
             // Collapsed: sigma * max(D) too small
-            if(s.sigma * s.D.maxCoeff() < 1e-12 * s.initial_sigma)
+            if(policy_status == solver_status::roundoff_limited)
                 stagnated = true;
 
             // No improvement for many generations
-            int stag_limit = 10 + static_cast<int>(std::ceil(30.0 * n / s.params.lambda));
+            std::uint32_t stag_limit = self.options.cmaes.stagnation_limit.value_or(
+                static_cast<std::uint32_t>(10 + std::ceil(30.0 * n / s.params.lambda)));
             if(gen_best_f >= old_best)
                 ++s.stagnation_count;
             else
@@ -247,8 +271,7 @@ struct cmaes_policy
                 stagnated = true;
 
             // Condition number too large
-            double cond = s.D.maxCoeff() / std::max(s.D.minCoeff(), 1e-30);
-            if(cond * cond > 1e14)
+            if(policy_status == solver_status::diverged)
                 stagnated = true;
 
             if(stagnated)
@@ -265,13 +288,15 @@ struct cmaes_policy
                 s.generation = 0;
                 s.stagnation_count = 0;
                 // Keep s.x, s.objective_value, s.best_ever_value
+                // Clear status -- IPOP restart is recovery, not failure
+                policy_status = std::nullopt;
             }
         }
 
-        // 16. Increment generation
+        // 17. Increment generation
         ++s.generation;
 
-        // 17. Return step_result
+        // 18. Return step_result
         // Derivative-free convergence signalling (same pattern as BOBYQA):
         // - gradient_norm proxy: sigma * max(D) -- collapses when converged
         // - When no improvement, use sigma as proxy for objective_change and
@@ -288,6 +313,8 @@ struct cmaes_policy
             .step_size = effective_step,
             .objective_change = obj_change,
             .improved = improved,
+            .x_norm = s.x.norm(),
+            .policy_status = policy_status,
         };
     }
 

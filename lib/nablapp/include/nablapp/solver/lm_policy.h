@@ -29,7 +29,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
+#include <optional>
 
 namespace nablapp
 {
@@ -40,8 +42,13 @@ struct lm_policy
 
     struct options_type
     {
-        double initial_lambda{0.0};  // 0 = auto via Nielsen init: tau * max(diag(J^T*J))
-        double tau{1e-3};            // for initial lambda computation
+        std::optional<double> initial_lambda{};      // LM damping init (default: auto via Nielsen, Nielsen 1999)
+        std::optional<double> tau{};                 // initial damping scale (default: 1e-3, Nielsen 1999)
+        std::optional<double> nu_initial{};          // damping direction factor (default: 2.0, Nielsen 1999)
+        std::optional<double> damping_factor{};      // lambda update 1/3 factor (default: 1/3, Nielsen 1999)
+        std::optional<double> diagonal_min_clamp{};  // min diagonal value (default: 1e-8)
+        std::optional<double> lambda_min{};          // lambda floor (default: 1e-20)
+        std::optional<double> lambda_max{};          // lambda ceiling (default: 1e20)
     };
 
     options_type options{};
@@ -54,7 +61,8 @@ struct lm_policy
         double nu{2.0};              // lambda multiplier on rejection
         Eigen::VectorXd r;           // current residuals
         Eigen::MatrixXd J;           // current Jacobian
-        int iteration{0};
+        double initial_objective{};  // for divergence detection
+        std::uint32_t iteration{0};
 
         std::function<double(const Eigen::VectorXd&)> eval_value;
         std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_residuals;
@@ -114,27 +122,34 @@ struct lm_policy
         s.eval_residuals(x0, s.r);
         s.eval_jacobian(x0, s.J);
         s.objective_value = 0.5 * s.r.squaredNorm();
+        s.initial_objective = s.objective_value;
 
         // Initialize lambda (Nielsen 1999)
-        if(self.options.initial_lambda > 0.0)
+        double init_lambda = self.options.initial_lambda.value_or(0.0);
+        double tau = self.options.tau.value_or(1e-3);
+        if(init_lambda > 0.0)
         {
-            s.lambda = self.options.initial_lambda;
+            s.lambda = init_lambda;
         }
         else
         {
             Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
             double max_diag = diag.maxCoeff();
-            s.lambda = (max_diag > 0.0) ? self.options.tau * max_diag : 1e-4;
+            s.lambda = (max_diag > 0.0) ? tau * max_diag : 1e-4;
         }
 
-        s.nu = 2.0;
+        s.nu = self.options.nu_initial.value_or(2.0);
         return s;
     }
 
     // One LM iteration per K&W Algorithm 6.3 with Nielsen (1999) lambda update.
-    step_result<double> step(this auto&&, state_type& s)
+    step_result<double> step(this auto&& self, state_type& s)
     {
         const int n = s.x.size();
+        const double diag_min = self.options.diagonal_min_clamp.value_or(1e-8);
+        const double lam_min = self.options.lambda_min.value_or(1e-20);
+        const double lam_max = self.options.lambda_max.value_or(1e20);
+        const double damp_factor = self.options.damping_factor.value_or(1.0 / 3.0);
 
         // Gauss-Newton Hessian approximation
         Eigen::MatrixXd H = (s.J.transpose() * s.J).eval();
@@ -144,7 +159,7 @@ struct lm_policy
 
         // Diagonal-scaled damping (K&W Eq. 6.11)
         for(int i = 0; i < n; ++i)
-            H(i, i) += s.lambda * std::max(H(i, i), 1e-8);
+            H(i, i) += s.lambda * std::max(H(i, i), diag_min);
 
         // Solve damped normal equations via LDLT (D-07)
         Eigen::VectorXd h = H.ldlt().solve(-g);
@@ -177,8 +192,8 @@ struct lm_policy
             s.objective_value = f_trial;
 
             double factor = 1.0 - std::pow(2.0 * rho - 1.0, 3.0);
-            s.lambda *= std::max(1.0 / 3.0, factor);
-            s.nu = 2.0;
+            s.lambda *= std::max(damp_factor, factor);
+            s.nu = self.options.nu_initial.value_or(2.0);
         }
         else
         {
@@ -187,9 +202,14 @@ struct lm_policy
         }
 
         // Clamp lambda to prevent overflow/underflow
-        s.lambda = std::clamp(s.lambda, 1e-20, 1e20);
+        s.lambda = std::clamp(s.lambda, lam_min, lam_max);
 
         ++s.iteration;
+
+        // Divergence detection: objective grows 100x from initial
+        std::optional<solver_status> policy_status{};
+        if(s.initial_objective > 0.0 && s.objective_value > 100.0 * s.initial_objective)
+            policy_status = solver_status::diverged;
 
         // Report h.norm() as step_size even on rejection to prevent
         // basic_solver stall detection from firing prematurely. The solver
@@ -204,10 +224,12 @@ struct lm_policy
             .step_size = h.norm(),
             .objective_change = effective_change,
             .improved = accepted,
+            .x_norm = s.x.norm(),
+            .policy_status = policy_status,
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.r.resize(s.num_residuals);
@@ -215,12 +237,14 @@ struct lm_policy
         s.eval_residuals(x0, s.r);
         s.eval_jacobian(x0, s.J);
         s.objective_value = 0.5 * s.r.squaredNorm();
+        s.initial_objective = s.objective_value;
 
-        // Nielsen init for lambda
+        // Nielsen init for lambda using policy options
+        double tau = self.options.tau.value_or(1e-3);
         Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
         double max_diag = diag.maxCoeff();
-        s.lambda = (max_diag > 0.0) ? 1e-3 * max_diag : 1e-4;
-        s.nu = 2.0;
+        s.lambda = (max_diag > 0.0) ? tau * max_diag : 1e-4;
+        s.nu = self.options.nu_initial.value_or(2.0);
         s.iteration = 0;
     }
 
