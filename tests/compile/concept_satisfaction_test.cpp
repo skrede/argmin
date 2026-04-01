@@ -93,6 +93,8 @@ namespace
 struct objective_only
 {
     double value(const Eigen::VectorXd&) const { return 0.0; }
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 1; }
 };
 
@@ -108,6 +110,8 @@ struct differentiable_only
 {
     double value(const Eigen::VectorXd&) const { return 0.0; }
     void gradient(const Eigen::VectorXd&, Eigen::VectorXd&) const {}
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 1; }
 };
 
@@ -142,6 +146,8 @@ struct full_problem
     void residuals(const Eigen::VectorXd&, Eigen::VectorXd&) const {}
     void jacobian(const Eigen::VectorXd&, Eigen::MatrixXd&) const {}
     int num_residuals() const { return 0; }
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 1; }
 };
 

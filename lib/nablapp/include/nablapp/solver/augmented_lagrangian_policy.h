@@ -215,6 +215,7 @@ struct augmented_lagrangian_policy
         // Satisfies differentiable + bound_constrained.
         struct subproblem
         {
+            enum : int { problem_dimension = dynamic_dimension };
             int dim;
             const Eigen::VectorX<scalar_type>& lo;
             const Eigen::VectorX<scalar_type>& hi;

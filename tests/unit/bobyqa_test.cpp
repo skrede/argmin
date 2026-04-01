@@ -19,6 +19,7 @@ namespace
 // Satisfies objective && bound_constrained but NOT differentiable.
 struct bobyqa_rosenbrock
 {
+    static constexpr int problem_dimension = dynamic_dimension;
     int n{2};
     double a{1};
     double b{5};
@@ -47,6 +48,7 @@ struct bobyqa_rosenbrock
 // Minimum at (1, 3), f* = 0.
 struct bobyqa_booth
 {
+    static constexpr int problem_dimension = dynamic_dimension;
     Eigen::VectorXd lb;
     Eigen::VectorXd ub;
 
@@ -66,6 +68,7 @@ struct bobyqa_booth
 // 6D sum of 2D Rosenbrock pairs (matching liepp joint space dimension).
 struct bobyqa_rosenbrock_6d
 {
+    static constexpr int problem_dimension = dynamic_dimension;
     Eigen::VectorXd lb;
     Eigen::VectorXd ub;
 

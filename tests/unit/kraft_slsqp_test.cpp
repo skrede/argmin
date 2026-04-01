@@ -21,6 +21,8 @@ namespace
 // Solution: (0.5, 0.5), f* = 0.5.
 struct equality_quadratic
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
 
     double value(const Eigen::VectorXd& x) const
@@ -58,6 +60,8 @@ struct ineq_rosenbrock
 {
     nablapp::rosenbrock<> inner{.n = 2};
 
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
 
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
@@ -89,6 +93,8 @@ struct box_rosenbrock
 {
     nablapp::rosenbrock<> inner{.n = 2};
 
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
 
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
@@ -113,6 +119,8 @@ struct box_rosenbrock
 struct liepp_box_rosenbrock
 {
     nablapp::rosenbrock<> inner{.n = 2};
+
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
 
     int dimension() const { return 2; }
 

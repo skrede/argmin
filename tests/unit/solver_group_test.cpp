@@ -12,6 +12,8 @@ using namespace nablapp;
 
 struct quadratic_group
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
     double value(const Eigen::VectorXd& x) const { return 0.5 * x.squaredNorm(); }
 };

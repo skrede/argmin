@@ -21,6 +21,8 @@ namespace
 // Provides analytic Jacobian.
 struct rosenbrock_ls
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
     int num_residuals() const { return 2; }
 
@@ -52,6 +54,8 @@ struct exponential_fitting
 {
     static constexpr double t[] = {0.0, 0.5, 1.0, 1.5, 2.0};
     static constexpr double y[] = {2.0, 1.2, 0.75, 0.45, 0.28};
+
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
 
     int dimension() const { return 2; }
     int num_residuals() const { return 5; }
@@ -87,6 +91,8 @@ struct exponential_fitting
 // Rosenbrock residual form WITHOUT jacobian method -- triggers FD fallback.
 struct rosenbrock_ls_no_jac
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
     int dimension() const { return 2; }
     int num_residuals() const { return 2; }
 
