@@ -14,6 +14,8 @@
 //            N&W Procedure 18.2, eq. 18.22-18.24 (Powell damping);
 //            N&W Section 18.4 (Hessian of augmented Lagrangian).
 
+#include "nablapp/options/bfgs_options.h"
+
 #include <Eigen/Core>
 
 #include <cmath>
@@ -45,7 +47,8 @@ public:
     //
     // Reference: N&W eq. 8.19, Procedure 18.2.
     void update(const Eigen::VectorX<Scalar>& s,
-                const Eigen::VectorX<Scalar>& y)
+                const Eigen::VectorX<Scalar>& y,
+                const bfgs_options& opts = {})
     {
         Eigen::VectorX<Scalar> Bs = B_ * s;
         Scalar sBs = s.dot(Bs);
@@ -56,15 +59,18 @@ public:
 
         Scalar sTy = s.dot(y);
 
-        // Powell damping
+        // Powell damping (N&W Procedure 18.2)
+        const auto damp_thr = static_cast<Scalar>(opts.damping_threshold.value_or(0.2));
+        const auto damp_fac = static_cast<Scalar>(opts.damping_factor.value_or(0.8));
+
         Eigen::VectorX<Scalar> r;
-        if(sTy >= Scalar(0.2) * sBs)
+        if(sTy >= damp_thr * sBs)
         {
             r = y;
         }
         else
         {
-            Scalar theta = Scalar(0.8) * sBs / (sBs - sTy);
+            Scalar theta = damp_fac * sBs / (sBs - sTy);
             r = theta * y + (Scalar(1) - theta) * Bs;
         }
 

@@ -11,6 +11,8 @@
 //
 // Reference: Svanberg 1987, Section 3.
 
+#include "nablapp/options/asymptote_options.h"
+
 #include <Eigen/Core>
 
 #include <algorithm>
@@ -44,7 +46,8 @@ void update_asymptotes(
     int iteration,
     Scalar asyminit = Scalar(0.5),
     Scalar asymdec = Scalar(0.7),
-    Scalar asyminc = Scalar(1.2))
+    Scalar asyminc = Scalar(1.2),
+    const asymptote_options& opts = {})
 {
     const int n = static_cast<int>(x.size());
     L.resize(n);
@@ -81,8 +84,8 @@ void update_asymptotes(
         }
 
         // Safety clamp: asymptotes must not get too close to iterate.
-        // Minimum distance is 0.01 * range.
-        Scalar min_dist = Scalar(0.01) * range;
+        // Minimum distance is minimum_distance_fraction * range (Svanberg 1987).
+        Scalar min_dist = static_cast<Scalar>(opts.minimum_distance_fraction.value_or(0.01)) * range;
         L[j] = std::min(L[j], x[j] - min_dist);
         U[j] = std::max(U[j], x[j] + min_dist);
     }

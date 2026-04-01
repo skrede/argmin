@@ -8,6 +8,7 @@
 #include <cmath>
 
 using Catch::Approx;
+using namespace nablapp;
 using namespace nablapp::detail;
 
 TEST_CASE("solve_qp unconstrained", "[qp]")

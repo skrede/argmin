@@ -12,6 +12,8 @@
 //            N&W eq. 16.29 (blocking step length)
 //            N&W Section 16.5 (indefinite QP extensions)
 
+#include "nablapp/options/qp_options.h"
+
 #include <Eigen/Core>
 #include <Eigen/QR>
 #include <Eigen/Cholesky>
@@ -33,13 +35,6 @@ struct qp_result
     Eigen::VectorX<Scalar> lambda;
     qp_status status{qp_status::optimal};
     int iterations{0};
-};
-
-template <typename Scalar = double>
-struct qp_options
-{
-    int max_iterations{200};
-    Scalar tolerance{Scalar(1e-12)};
 };
 
 // Determine initial working set from feasible point x0.
@@ -280,12 +275,14 @@ qp_result<Scalar> solve_qp(
     const Eigen::MatrixX<Scalar>& A_ineq,
     const Eigen::VectorX<Scalar>& b_ineq,
     const Eigen::VectorX<Scalar>& x0,
-    const qp_options<Scalar>& opts = {})
+    const nablapp::qp_options& opts = {})
 {
     const int n = G.rows();
     const int m_eq = A_eq.rows();
     const int m_ineq = A_ineq.rows();
     const int m_total = m_eq + m_ineq;
+    const int max_iter = static_cast<int>(opts.max_iterations.value_or(200));
+    const auto tol = static_cast<Scalar>(opts.tolerance.value_or(1e-12));
 
     // Assemble full constraint matrix: [A_eq; A_ineq] x >= [b_eq; b_ineq]
     // (Equality constraints treated as a_i^T x = b_i, always active.)
@@ -302,20 +299,20 @@ qp_result<Scalar> solve_qp(
         b_full.tail(m_ineq) = b_ineq;
     }
 
-    auto W = initial_working_set(x0, A_full, b_full, m_eq, opts.tolerance);
+    auto W = initial_working_set(x0, A_full, b_full, m_eq, tol);
     Eigen::VectorX<Scalar> x = x0;
 
-    for(int iter = 0; iter < opts.max_iterations; ++iter)
+    for(int iter = 0; iter < max_iter; ++iter)
     {
         Eigen::VectorX<Scalar> g_k = G * x + d;
         Eigen::MatrixX<Scalar> A_W = extract_working_rows(A_full, W);
 
         auto [p, lambda_W] = solve_equality_qp(G, g_k, A_W);
 
-        if(p.norm() < opts.tolerance)
+        if(p.norm() < tol)
         {
             // At stationary point for current working set -- check multipliers
-            int drop = most_negative_multiplier(lambda_W, W, m_eq, opts.tolerance);
+            int drop = most_negative_multiplier(lambda_W, W, m_eq, tol);
             if(drop == -1)
             {
                 // All inequality multipliers non-negative: optimal
@@ -349,7 +346,7 @@ qp_result<Scalar> solve_qp(
     res.x = x;
     res.lambda = lambda_full;
     res.status = qp_status::max_iterations;
-    res.iterations = opts.max_iterations;
+    res.iterations = max_iter;
     return res;
 }
 
@@ -370,7 +367,7 @@ qp_result<Scalar> solve_qp(
     const Eigen::VectorX<Scalar>& lower,
     const Eigen::VectorX<Scalar>& upper,
     const Eigen::VectorX<Scalar>& x0,
-    const qp_options<Scalar>& opts = {})
+    const nablapp::qp_options& opts = {})
 {
     const int n = G.rows();
     const int m_ineq = A_ineq.rows();

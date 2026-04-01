@@ -223,7 +223,7 @@ struct nw_sqp_policy
         // If any violated, project p0 minimally. For simplicity, if
         // infeasible we still proceed -- the QP solver handles this.
 
-        detail::qp_options<double> qp_opts;
+        nablapp::qp_options qp_opts;
         qp_opts.max_iterations = 200;
         qp_opts.tolerance = 1e-12;
 
