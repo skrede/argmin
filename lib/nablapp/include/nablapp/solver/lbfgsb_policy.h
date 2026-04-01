@@ -26,7 +26,6 @@
 #include "nablapp/detail/bound_projection.h"
 #include "nablapp/detail/subspace_minimization.h"
 #include "nablapp/line_search/strong_wolfe.h"
-#include "nablapp/options/bfgs_options.h"
 #include "nablapp/line_search/options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
@@ -54,7 +53,6 @@ struct lbfgsb_policy
     {
         std::optional<std::uint8_t> history_depth{};  // L-BFGS memory depth (default: 10, N&W 7.2)
         line_search_options line_search{};             // Embedded line search params
-        bfgs_options bfgs{};                           // Embedded BFGS params
     };
 
     options_type options{};
