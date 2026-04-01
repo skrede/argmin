@@ -77,6 +77,9 @@ auto run_nablapp_solver(std::string_view solver_name,
     auto x0 = prob.initial_point();
     solver_options<> opts{};
     opts.max_iterations = max_iterations;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
 
     if(collect_trace)
     {
