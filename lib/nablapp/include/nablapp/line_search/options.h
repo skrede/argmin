@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_NABLAPP_LINE_SEARCH_OPTIONS_H
 #define HPP_GUARD_NABLAPP_LINE_SEARCH_OPTIONS_H
 
+#include <cstdint>
+
 namespace nablapp
 {
 
@@ -19,14 +21,13 @@ namespace nablapp
 //
 // max_iterations: evaluation budget.
 
-template <typename Scalar = double>
 struct line_search_options
 {
-    Scalar c1{Scalar(1e-4)};
-    Scalar c2{Scalar(0.9)};
-    Scalar rho{Scalar(0.5)};
-    Scalar max_alpha{Scalar(1)};
-    int max_iterations{40};
+    double c1{1e-4};
+    double c2{0.9};
+    double rho{0.5};
+    double max_alpha{1.0};
+    std::uint16_t max_iterations{40};
 };
 
 }

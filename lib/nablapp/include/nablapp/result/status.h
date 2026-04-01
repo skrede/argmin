@@ -21,6 +21,7 @@ enum class solver_status
     ftol_reached,
     maxeval_reached,
     roundoff_limited,
+    time_limit_reached,
     aborted
 };
 
