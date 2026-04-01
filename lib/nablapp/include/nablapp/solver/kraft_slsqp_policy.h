@@ -27,7 +27,6 @@
 #include "nablapp/detail/active_set_qp.h"
 #include "nablapp/detail/compact_lbfgs.h"
 #include "nablapp/line_search/armijo.h"
-#include "nablapp/options/bfgs_options.h"
 #include "nablapp/options/qp_options.h"
 #include "nablapp/line_search/options.h"
 #include "nablapp/result/step_result.h"
@@ -57,7 +56,6 @@ struct kraft_slsqp_policy
         std::optional<double> initial_penalty{};       // penalty weight (default: 1.0, Kraft 1988)
         std::optional<double> penalty_growth{};        // penalty multiplier (default: 10.0, Kraft 1988)
         line_search_options line_search{};              // Embedded line search params
-        bfgs_options bfgs{};                            // BFGS update params
         qp_options qp{};                                // QP subproblem params
     };
 
