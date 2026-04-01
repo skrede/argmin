@@ -14,6 +14,8 @@
 #include "nablapp/detail/asymptote_update.h"
 #include "nablapp/detail/mma_subproblem.h"
 #include "nablapp/detail/lagrangian.h"
+#include "nablapp/options/asymptote_options.h"
+#include "nablapp/options/mma_subproblem_options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
 
@@ -26,6 +28,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <optional>
 
 namespace nablapp
 {
@@ -36,11 +39,14 @@ struct mma_policy
 
     struct options_type
     {
-        double move_limit = 0.2;
-        double asyminit = 0.5;
-        double asymdec = 0.7;
-        double asyminc = 1.2;
-        double kkttol = 1e-6;
+        std::optional<double> move_limit{};              // default: 0.2 (Svanberg 1987)
+        std::optional<double> asymptote_init{};          // default: 0.5 (Svanberg 1987)
+        std::optional<double> asymptote_decrease{};      // default: 0.7 (Svanberg 1987)
+        std::optional<double> asymptote_increase{};      // default: 1.2 (Svanberg 1987)
+        std::optional<double> kkt_tolerance{};           // default: 1e-6 (Svanberg 1987)
+        std::optional<double> effective_bounds_scale{};  // default: 10.0
+        asymptote_options asymptote{};                   // Embedded asymptote update params
+        mma_subproblem_options subproblem{};              // Embedded subproblem params
     };
 
     struct state_type
@@ -54,7 +60,7 @@ struct mma_policy
         Eigen::VectorXd x_old1, x_old2;
         Eigen::VectorXd lower, upper;
 
-        int iteration{0};
+        std::uint32_t iteration{0};
         options_type opts;
 
         std::function<double(const Eigen::VectorXd&)> eval_value;
@@ -75,11 +81,12 @@ struct mma_policy
         s.opts = policy_opts;
         // Re-initialize asymptotes with new opts
         const int n = problem.dimension();
+        double asym_init = policy_opts.asymptote_init.value_or(0.5);
         for(int j = 0; j < n; ++j)
         {
             double range = finite_range(s.lower[j], s.upper[j]);
-            s.L[j] = x0[j] - policy_opts.asyminit * range;
-            s.U[j] = x0[j] + policy_opts.asyminit * range;
+            s.L[j] = x0[j] - asym_init * range;
+            s.U[j] = x0[j] + asym_init * range;
         }
         return s;
     }
@@ -143,11 +150,12 @@ struct mma_policy
         s.x_old1 = x0;
         s.x_old2 = x0;
 
+        double asym_init = s.opts.asymptote_init.value_or(0.5);
         for(int j = 0; j < n; ++j)
         {
             double range = finite_range(s.lower[j], s.upper[j]);
-            s.L[j] = x0[j] - s.opts.asyminit * range;
-            s.U[j] = x0[j] + s.opts.asyminit * range;
+            s.L[j] = x0[j] - asym_init * range;
+            s.U[j] = x0[j] + asym_init * range;
         }
 
         s.iteration = 0;
@@ -190,6 +198,12 @@ struct mma_policy
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
 
+        double move_lim = s.opts.move_limit.value_or(0.2);
+        double asym_init = s.opts.asymptote_init.value_or(0.5);
+        double asym_dec = s.opts.asymptote_decrease.value_or(0.7);
+        double asym_inc = s.opts.asymptote_increase.value_or(1.2);
+        double eff_scale = s.opts.effective_bounds_scale.value_or(10.0);
+
         // Re-evaluate at current x (skip on first iteration -- init did it)
         if(s.iteration != 0)
         {
@@ -200,14 +214,15 @@ struct mma_policy
             s.eval_jacobian(s.x, Jeq_dummy, s.J_ineq);
         }
 
-        // 1. Update asymptotes
-        Eigen::VectorXd x_min_eff = effective_bounds(s.lower, s.x, n, false);
-        Eigen::VectorXd x_max_eff = effective_bounds(s.upper, s.x, n, true);
+        // 1. Update asymptotes, passing embedded options
+        Eigen::VectorXd x_min_eff = effective_bounds(s.lower, s.x, n, false, eff_scale);
+        Eigen::VectorXd x_max_eff = effective_bounds(s.upper, s.x, n, true, eff_scale);
 
         detail::update_asymptotes(
             s.L, s.U, s.x, s.x_old1, s.x_old2,
             x_min_eff, x_max_eff,
-            s.iteration, s.opts.asyminit, s.opts.asymdec, s.opts.asyminc);
+            s.iteration, asym_init, asym_dec, asym_inc,
+            s.opts.asymptote);
 
         // 2. Compute MMA coefficients
         // For MMA, constraint signs: we negate c_ineq to get g_i <= 0 form
@@ -217,17 +232,19 @@ struct mma_policy
         Eigen::MatrixXd dg_mma = -s.J_ineq;
 
         auto coeffs = detail::mma_coefficients(
-            s.x, s.f, s.g, g_mma, dg_mma, s.L, s.U);
+            s.x, s.f, s.g, g_mma, dg_mma, s.L, s.U,
+            s.opts.subproblem);
 
-        // 3. Solve dual subproblem
+        // 3. Solve dual subproblem, passing embedded options
         Eigen::VectorXd x_new = detail::mma_dual_solve(
-            coeffs, s.L, s.U, x_min_eff, x_max_eff);
+            coeffs, s.L, s.U, x_min_eff, x_max_eff,
+            s.opts.subproblem);
 
         // 4. Apply move limits
         for(int j = 0; j < n; ++j)
         {
             double range = finite_range(s.lower[j], s.upper[j]);
-            double delta = s.opts.move_limit * range;
+            double delta = move_lim * range;
             x_new[j] = std::clamp(x_new[j],
                 std::max(s.x[j] - delta, s.lower[j]),
                 std::min(s.x[j] + delta, s.upper[j]));
@@ -260,6 +277,7 @@ struct mma_policy
             .step_size = step_size,
             .objective_change = s.f - f_old,
             .improved = s.f < f_old,
+            .x_norm = s.x.norm(),
         };
     }
 
@@ -281,11 +299,12 @@ struct mma_policy
     {
         self.reset(s, x0);
         const int n = static_cast<int>(x0.size());
+        double asym_init = s.opts.asymptote_init.value_or(0.5);
         for(int j = 0; j < n; ++j)
         {
             double range = finite_range(s.lower[j], s.upper[j]);
-            s.L[j] = x0[j] - s.opts.asyminit * range;
-            s.U[j] = x0[j] + s.opts.asyminit * range;
+            s.L[j] = x0[j] - asym_init * range;
+            s.U[j] = x0[j] + asym_init * range;
         }
     }
 
@@ -304,16 +323,16 @@ private:
 
     static Eigen::VectorXd effective_bounds(
         const Eigen::VectorXd& bounds, const Eigen::VectorXd& x,
-        int n, bool is_upper)
+        int n, bool is_upper, double scale = 10.0)
     {
         constexpr double inf = std::numeric_limits<double>::infinity();
         Eigen::VectorXd result(n);
         for(int j = 0; j < n; ++j)
         {
             if(is_upper && bounds[j] >= inf)
-                result[j] = x[j] + std::max(std::abs(x[j]), 1.0) * 10.0;
+                result[j] = x[j] + std::max(std::abs(x[j]), 1.0) * scale;
             else if(!is_upper && bounds[j] <= -inf)
-                result[j] = x[j] - std::max(std::abs(x[j]), 1.0) * 10.0;
+                result[j] = x[j] - std::max(std::abs(x[j]), 1.0) * scale;
             else
                 result[j] = bounds[j];
         }

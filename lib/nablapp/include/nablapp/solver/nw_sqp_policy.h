@@ -22,6 +22,8 @@
 #include "nablapp/detail/bfgs_hessian.h"
 #include "nablapp/detail/active_set_qp.h"
 #include "nablapp/detail/bound_projection.h"
+#include "nablapp/options/bfgs_options.h"
+#include "nablapp/options/qp_options.h"
 #include "nablapp/line_search/options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
@@ -33,6 +35,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
 
@@ -42,6 +45,15 @@ namespace nablapp
 struct nw_sqp_policy
 {
     using scalar_type = double;
+
+    struct options_type
+    {
+        line_search_options line_search{};  // Replaces hardcoded c1=1e-4, rho=0.5, max_iter=30
+        bfgs_options bfgs{};               // BFGS Hessian update params (N&W Proc 18.2)
+        qp_options qp{};                   // QP subproblem params
+    };
+
+    options_type options{};
 
     struct state_type
     {
@@ -57,7 +69,7 @@ struct nw_sqp_policy
         double objective_value{};
         double sigma{1.0};
         detail::bfgs_hessian<double> B;
-        int iteration{0};
+        std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
 
@@ -69,8 +81,18 @@ struct nw_sqp_policy
                            Eigen::MatrixXd&)> eval_jacobian;
     };
 
+    template <typename Problem, typename Convergence>
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::VectorXd& x0,
+                    const solver_options<Convergence>& opts,
+                    const options_type& policy_opts)
+    {
+        self.options = policy_opts;
+        return self.init(problem, x0, opts);
+    }
+
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&&, const Problem& problem,
+    state_type init(this auto&& self, const Problem& problem,
                     const Eigen::VectorXd& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
@@ -176,7 +198,7 @@ struct nw_sqp_policy
         return s;
     }
 
-    step_result<double> step(this auto&&, state_type& s)
+    step_result<double> step(this auto&& self, state_type& s)
     {
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
@@ -219,13 +241,14 @@ struct nw_sqp_policy
             p0 = A_eq.transpose() * w;
         }
 
-        // Also ensure inequality feasibility: J_ineq * p0 >= -c_ineq
-        // If any violated, project p0 minimally. For simplicity, if
-        // infeasible we still proceed -- the QP solver handles this.
-
+        // Use embedded QP options with defaults
         nablapp::qp_options qp_opts;
-        qp_opts.max_iterations = 200;
-        qp_opts.tolerance = 1e-12;
+        qp_opts.max_iterations = self.options.qp.max_iterations.has_value()
+            ? self.options.qp.max_iterations
+            : std::optional<std::uint16_t>{200};
+        qp_opts.tolerance = self.options.qp.tolerance.has_value()
+            ? self.options.qp.tolerance
+            : std::optional<double>{1e-12};
 
         detail::qp_result<double> qp;
         bool has_finite_bounds = has_finite_box(s.lower, s.upper);
@@ -259,6 +282,7 @@ struct nw_sqp_policy
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .x_norm = s.x.norm(),
             };
         }
 
@@ -281,15 +305,16 @@ struct nw_sqp_policy
             s.g.dot(p), s.c_eq, s.c_ineq, s.sigma);
 
         // Backtracking Armijo on L1 merit (robust for non-smooth merit)
+        // using embedded line search options
         double alpha = 1.0;
-        constexpr double c1 = 1e-4;
-        constexpr double rho = 0.5;
-        constexpr int max_ls = 30;
+        const double ls_c1 = self.options.line_search.c1;
+        const double ls_rho = self.options.line_search.rho;
+        const std::uint16_t max_ls = self.options.line_search.max_iterations;
 
         Eigen::VectorXd x_trial(n);
         Eigen::VectorXd c_eq_trial, c_ineq_trial;
 
-        for(int ls = 0; ls < max_ls; ++ls)
+        for(std::uint16_t ls = 0; ls < max_ls; ++ls)
         {
             x_trial = s.x + alpha * p;
 
@@ -302,10 +327,10 @@ struct nw_sqp_policy
             double phi_trial = detail::l1_merit(f_trial, c_eq_trial,
                                                 c_ineq_trial, s.sigma);
 
-            if(phi_trial <= phi0 + c1 * alpha * dphi0)
+            if(phi_trial <= phi0 + ls_c1 * alpha * dphi0)
                 break;
 
-            alpha *= rho;
+            alpha *= ls_rho;
         }
 
         // --- 5. Compute BFGS update vectors ---
@@ -321,17 +346,6 @@ struct nw_sqp_policy
         s.eval_jacobian(s.x, s.J_eq, s.J_ineq);
 
         Eigen::VectorXd sk = s.x - x_old;
-
-        // Build full Jacobians for Lagrangian gradient computation
-        Eigen::MatrixXd A_old(m, n);
-        Eigen::MatrixXd A_new(m, n);
-        if(s.n_eq > 0)
-        {
-            Eigen::MatrixXd J_eq_old;
-            Eigen::MatrixXd J_ineq_old;
-            // We don't have the old Jacobian anymore, use current as approx
-            // (standard quasi-Newton SQP uses lambda_{k+1} with both grads)
-        }
 
         // Lagrangian gradient at new and old points using new multipliers
         // y = grad_L(x_{k+1}, lambda_{k+1}) - grad_L(x_k, lambda_{k+1})
@@ -360,8 +374,9 @@ struct nw_sqp_policy
         Eigen::VectorXd yk = grad_L_new - grad_L_old;
 
         // --- 6. Damped BFGS update (N&W Procedure 18.2) ---
+        // Pass embedded bfgs options for Powell damping parameters
         if(sk.norm() > 1e-15)
-            s.B.update(sk, yk);
+            s.B.update(sk, yk, self.options.bfgs);
 
         // --- 7. Update multipliers and iteration ---
         s.lambda = lambda_new;
@@ -378,6 +393,7 @@ struct nw_sqp_policy
             .step_size = sk.norm(),
             .objective_change = s.objective_value - f_old,
             .improved = phi_new < phi0,
+            .x_norm = s.x.norm(),
         };
     }
 

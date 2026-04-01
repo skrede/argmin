@@ -16,6 +16,8 @@
 #include "nablapp/detail/asymptote_update.h"
 #include "nablapp/detail/mma_subproblem.h"
 #include "nablapp/detail/lagrangian.h"
+#include "nablapp/options/asymptote_options.h"
+#include "nablapp/options/mma_subproblem_options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
 
@@ -26,8 +28,10 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 
 namespace nablapp
 {
@@ -39,9 +43,15 @@ struct gcmma_policy
     struct options_type
     {
         mma_policy::options_type mma_opts{};
-        int max_inner_iter = 15;
-        double raa0 = 1e-5;
+        std::optional<std::uint16_t> max_inner_iterations{};    // default: 15 (Svanberg 2002)
+        std::optional<double> raa0{};                           // default: 1e-5 (Svanberg 2002)
+        std::optional<double> tighten_factor{};                 // default: 0.7 (Svanberg 2002)
+        std::optional<double> minimum_distance_fraction{};      // default: 0.001 (Svanberg 2002)
+        asymptote_options asymptote{};                          // Embedded asymptote params
+        mma_subproblem_options subproblem{};                     // Embedded subproblem params
     };
+
+    options_type options{};
 
     struct state_type
     {
@@ -89,6 +99,7 @@ struct gcmma_policy
                     const solver_options<Convergence>& sopts,
                     const options_type& policy_opts)
     {
+        self.options = policy_opts;
         auto s = self.init(problem, x0, sopts);
         s.opts = policy_opts;
         s.mma_state.opts = policy_opts.mma_opts;
@@ -105,11 +116,21 @@ struct gcmma_policy
         return s;
     }
 
-    step_result<double> step(this auto&&, state_type& s)
+    step_result<double> step(this auto&& self, state_type& s)
     {
         auto& ms = s.mma_state;
         const int n = static_cast<int>(ms.x.size());
         const int m = static_cast<int>(ms.c_ineq.size());
+
+        double asym_init = ms.opts.asymptote_init.value_or(0.5);
+        double asym_dec = ms.opts.asymptote_decrease.value_or(0.7);
+        double asym_inc = ms.opts.asymptote_increase.value_or(1.2);
+        double move_lim = ms.opts.move_limit.value_or(0.2);
+        double eff_scale = ms.opts.effective_bounds_scale.value_or(10.0);
+        std::uint16_t max_inner = s.opts.max_inner_iterations.value_or(15);
+        double raa0_val = s.opts.raa0.value_or(1e-5);
+        double tighten = s.opts.tighten_factor.value_or(0.7);
+        double min_dist_frac = s.opts.minimum_distance_fraction.value_or(0.001);
 
         // Re-evaluate at current x (skip on first iteration)
         if(ms.iteration != 0)
@@ -122,14 +143,15 @@ struct gcmma_policy
         }
 
         // Effective bounds for asymptote update
-        Eigen::VectorXd x_min_eff = effective_bounds(ms.lower, ms.x, n, false);
-        Eigen::VectorXd x_max_eff = effective_bounds(ms.upper, ms.x, n, true);
+        Eigen::VectorXd x_min_eff = effective_bounds(ms.lower, ms.x, n, false, eff_scale);
+        Eigen::VectorXd x_max_eff = effective_bounds(ms.upper, ms.x, n, true, eff_scale);
 
-        // Update asymptotes
+        // Update asymptotes, passing embedded options
         detail::update_asymptotes(
             ms.L, ms.U, ms.x, ms.x_old1, ms.x_old2,
             x_min_eff, x_max_eff,
-            ms.iteration, ms.opts.asyminit, ms.opts.asymdec, ms.opts.asyminc);
+            ms.iteration, asym_init, asym_dec, asym_inc,
+            s.opts.asymptote);
 
         // Work with copies of L, U for inner tightening
         Eigen::VectorXd L_inner = ms.L;
@@ -143,21 +165,23 @@ struct gcmma_policy
         double f_trial{};
         Eigen::VectorXd c_ineq_trial(m);
 
-        for(int inner = 0; inner < s.opts.max_inner_iter; ++inner)
+        for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
             // Compute coefficients with current (possibly tightened) asymptotes
             auto coeffs = detail::mma_coefficients(
-                ms.x, ms.f, ms.g, g_mma, dg_mma, L_inner, U_inner);
+                ms.x, ms.f, ms.g, g_mma, dg_mma, L_inner, U_inner,
+                s.opts.subproblem);
 
-            // Solve dual subproblem
+            // Solve dual subproblem, passing embedded options
             x_trial = detail::mma_dual_solve(
-                coeffs, L_inner, U_inner, x_min_eff, x_max_eff);
+                coeffs, L_inner, U_inner, x_min_eff, x_max_eff,
+                s.opts.subproblem);
 
             // Apply move limits
             for(int j = 0; j < n; ++j)
             {
                 double range = finite_range(ms.lower[j], ms.upper[j]);
-                double delta = ms.opts.move_limit * range;
+                double delta = move_lim * range;
                 x_trial[j] = std::clamp(x_trial[j],
                     std::max(ms.x[j] - delta, ms.lower[j]),
                     std::min(ms.x[j] + delta, ms.upper[j]));
@@ -173,7 +197,7 @@ struct gcmma_policy
             double approx_f = detail::mma_subproblem_value(
                 coeffs, x_trial, L_inner, U_inner);
 
-            bool conservative = (f_trial <= approx_f + s.opts.raa0);
+            bool conservative = (f_trial <= approx_f + raa0_val);
 
             if(conservative && m > 0)
             {
@@ -182,7 +206,7 @@ struct gcmma_policy
                     double g_actual = -c_ineq_trial[i];
                     double g_approx = detail::mma_subproblem_constraint(
                         coeffs, i, x_trial, L_inner, U_inner);
-                    if(g_actual > g_approx + s.opts.raa0)
+                    if(g_actual > g_approx + raa0_val)
                     {
                         conservative = false;
                         break;
@@ -193,18 +217,15 @@ struct gcmma_policy
             if(conservative)
                 break;
 
-            // Tighten asymptotes: move L, U closer by factor 0.7
-            constexpr double tighten = 0.7;
+            // Tighten asymptotes: move L, U closer by tighten_factor
             for(int j = 0; j < n; ++j)
             {
-                double midL = (ms.x[j] + L_inner[j]) * 0.5;
-                double midU = (ms.x[j] + U_inner[j]) * 0.5;
                 L_inner[j] = ms.x[j] - tighten * (ms.x[j] - L_inner[j]);
                 U_inner[j] = ms.x[j] + tighten * (U_inner[j] - ms.x[j]);
 
                 // Safety: keep minimum distance
                 double range = finite_range(ms.lower[j], ms.upper[j]);
-                double min_dist = 0.001 * range;
+                double min_dist = min_dist_frac * range;
                 L_inner[j] = std::min(L_inner[j], ms.x[j] - min_dist);
                 U_inner[j] = std::max(U_inner[j], ms.x[j] + min_dist);
             }
@@ -236,6 +257,7 @@ struct gcmma_policy
             .step_size = step_size,
             .objective_change = ms.f - f_old,
             .improved = ms.f < f_old,
+            .x_norm = ms.x.norm(),
         };
     }
 
@@ -264,16 +286,16 @@ private:
 
     static Eigen::VectorXd effective_bounds(
         const Eigen::VectorXd& bounds, const Eigen::VectorXd& x,
-        int n, bool is_upper)
+        int n, bool is_upper, double scale = 10.0)
     {
         constexpr double inf = std::numeric_limits<double>::infinity();
         Eigen::VectorXd result(n);
         for(int j = 0; j < n; ++j)
         {
             if(is_upper && bounds[j] >= inf)
-                result[j] = x[j] + std::max(std::abs(x[j]), 1.0) * 10.0;
+                result[j] = x[j] + std::max(std::abs(x[j]), 1.0) * scale;
             else if(!is_upper && bounds[j] <= -inf)
-                result[j] = x[j] - std::max(std::abs(x[j]), 1.0) * 10.0;
+                result[j] = x[j] - std::max(std::abs(x[j]), 1.0) * scale;
             else
                 result[j] = bounds[j];
         }
