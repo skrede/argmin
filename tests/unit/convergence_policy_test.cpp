@@ -1,9 +1,11 @@
 // Tests for convergence policy types and criterion composition.
 //
 // Validates each convergence criterion in isolation, then tests
-// convergence_policy fold-expression composition.
+// convergence_policy fold-expression composition and
+// constrained_convergence_policy feasibility gating.
 //
-// Reference: N&W 2e Section 2.2, K&W 2e Section 2.3.
+// Reference: N&W 2e Section 2.2, K&W 2e Section 2.3,
+//            N&W 2e Section 12.1 (KKT feasibility).
 
 #include "nablapp/solver/options.h"
 #include "nablapp/solver/convergence.h"
@@ -302,4 +304,87 @@ TEST_CASE("convergence_policy with stationarity gate does not fire on stagnant n
 
     auto status = conv.check(r, 5);
     CHECK(!status.has_value());
+}
+
+// -- constrained_convergence_policy tests --
+
+TEST_CASE("constrained_convergence_policy blocks when infeasible",
+          "[convergence_policy]")
+{
+    constrained_convergence_policy<default_convergence> cp{
+        .inner = {.criteria = {
+            gradient_tolerance_criterion{.threshold = 1e-6},
+            objective_tolerance_criterion{},
+            step_tolerance_criterion{},
+        }},
+        .feasibility_threshold = 1e-4,
+    };
+
+    step_result<double> r{
+        .gradient_norm = 1e-8,
+        .constraint_violation = 0.5,
+    };
+
+    auto status = cp.check(r, 5);
+    CHECK(!status.has_value());
+}
+
+TEST_CASE("constrained_convergence_policy passes when feasible",
+          "[convergence_policy]")
+{
+    constrained_convergence_policy<default_convergence> cp{
+        .inner = {.criteria = {
+            gradient_tolerance_criterion{.threshold = 1e-6},
+            objective_tolerance_criterion{},
+            step_tolerance_criterion{},
+        }},
+        .feasibility_threshold = 1e-4,
+    };
+
+    step_result<double> r{
+        .gradient_norm = 1e-8,
+        .constraint_violation = 1e-6,
+    };
+
+    auto status = cp.check(r, 5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::converged);
+}
+
+TEST_CASE("constrained_convergence_policy with nullopt threshold delegates directly",
+          "[convergence_policy]")
+{
+    constrained_convergence_policy<default_convergence> cp{
+        .inner = {.criteria = {
+            gradient_tolerance_criterion{.threshold = 1e-6},
+            objective_tolerance_criterion{},
+            step_tolerance_criterion{},
+        }},
+        .feasibility_threshold = std::nullopt,
+    };
+
+    step_result<double> r{
+        .gradient_norm = 1e-8,
+        .constraint_violation = 100.0,
+    };
+
+    auto status = cp.check(r, 5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::converged);
+}
+
+TEST_CASE("solver_options<constrained_convergence> convenience setters work",
+          "[convergence_policy]")
+{
+    solver_options<constrained_convergence> opts;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-8);
+    opts.set_feasibility_threshold(1e-4);
+
+    auto& inner = opts.convergence.inner;
+    CHECK(std::get<gradient_tolerance_criterion>(inner.criteria).threshold == 1e-6);
+    CHECK(std::get<objective_tolerance_criterion>(inner.criteria).threshold == 1e-10);
+    CHECK(std::get<step_tolerance_criterion>(inner.criteria).threshold == 1e-8);
+    CHECK(opts.convergence.feasibility_threshold == 1e-4);
 }

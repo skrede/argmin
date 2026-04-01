@@ -20,11 +20,12 @@ TEST_CASE("augmented lagrangian converges on HS076", "[augmented_lagrangian]")
     hs076 problem;
     auto x0 = problem.initial_point();
 
-    solver_options opts;
+    solver_options<constrained_convergence> opts;
     opts.max_iterations = 60;
     opts.set_gradient_threshold(1e-6);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
+    opts.set_feasibility_threshold(1e-4);
 
     basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
         problem, x0, opts};
@@ -39,11 +40,12 @@ TEST_CASE("augmented lagrangian converges on HS035", "[augmented_lagrangian]")
     hs035 problem;
     auto x0 = problem.initial_point();
 
-    solver_options opts;
+    solver_options<constrained_convergence> opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-6);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
+    opts.set_feasibility_threshold(1e-4);
 
     basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
         problem, x0, opts};
@@ -59,11 +61,12 @@ TEST_CASE("augmented lagrangian on HS071 (equality + inequality)",
     hs071 problem;
     auto x0 = problem.initial_point();
 
-    solver_options opts;
+    solver_options<constrained_convergence> opts;
     opts.max_iterations = 80;
     opts.set_gradient_threshold(1e-4);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
+    opts.set_feasibility_threshold(1e-2);
 
     basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
         problem, x0, opts};
@@ -101,11 +104,12 @@ TEST_CASE("augmented lagrangian step and solve consistency",
     hs035 problem;
     auto x0 = problem.initial_point();
 
-    solver_options opts;
+    solver_options<constrained_convergence> opts;
     opts.max_iterations = 30;
     opts.set_gradient_threshold(1e-5);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
+    opts.set_feasibility_threshold(1e-4);
 
     SECTION("step returns finite values")
     {
@@ -132,11 +136,58 @@ TEST_CASE("augmented lagrangian step and solve consistency",
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
         {
             last = solver2.step();
-            if(last.gradient_norm < 1e-5)
+            if(last.gradient_norm < 1e-5 && last.constraint_violation < 1e-4)
                 break;
         }
 
         // Both should reach a similar objective value
         CHECK(last.objective_value == Approx(result1.objective_value).margin(1e-2));
     }
+}
+
+TEST_CASE("augmented lagrangian reports actual gradient norm",
+          "[augmented_lagrangian]")
+{
+    hs076 problem;
+    auto x0 = problem.initial_point();
+
+    solver_options<constrained_convergence> opts;
+    opts.max_iterations = 60;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+    opts.set_feasibility_threshold(1e-4);
+
+    basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
+        problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // With actual gradient reporting the norm reflects the augmented
+    // Lagrangian gradient, not the old max(violation, step_norm) proxy.
+    // The aug-lag gradient includes penalty-scaled constraint terms, so
+    // it can be moderate even at an optimal feasible point.
+    CHECK(std::isfinite(result.gradient_norm));
+    CHECK(result.gradient_norm >= 0.0);
+    CHECK(result.constraint_violation < 1e-3);
+}
+
+TEST_CASE("augmented lagrangian convergence on HS076 with constrained_convergence",
+          "[augmented_lagrangian]")
+{
+    hs076 problem;
+    auto x0 = problem.initial_point();
+
+    solver_options<constrained_convergence> opts;
+    opts.max_iterations = 60;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+    opts.set_feasibility_threshold(1e-4);
+
+    basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
+        problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-4.6818).margin(1e-2));
+    CHECK(result.constraint_violation < 1e-3);
 }
