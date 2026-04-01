@@ -51,6 +51,42 @@ struct solver_options
     {
         std::get<step_tolerance_criterion>(convergence.criteria).threshold = v;
     }
+
+    // Feasibility threshold setter for constrained convergence policies.
+    template <typename C = Convergence>
+    void set_feasibility_threshold(double v)
+        requires requires(C& c) { c.feasibility_threshold; }
+    {
+        convergence.feasibility_threshold = v;
+    }
+
+    // Delegating setters for convergence policies that wrap an inner policy
+    // (e.g., constrained_convergence_policy). These reach through .inner
+    // when the outer type lacks a direct criteria tuple.
+
+    template <typename C = Convergence>
+    void set_gradient_threshold(double v)
+        requires (!requires(C& c) { std::get<gradient_tolerance_criterion>(c.criteria); })
+              && requires(C& c) { std::get<gradient_tolerance_criterion>(c.inner.criteria); }
+    {
+        std::get<gradient_tolerance_criterion>(convergence.inner.criteria).threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_objective_threshold(double v)
+        requires (!requires(C& c) { std::get<objective_tolerance_criterion>(c.criteria); })
+              && requires(C& c) { std::get<objective_tolerance_criterion>(c.inner.criteria); }
+    {
+        std::get<objective_tolerance_criterion>(convergence.inner.criteria).threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_step_threshold(double v)
+        requires (!requires(C& c) { std::get<step_tolerance_criterion>(c.criteria); })
+              && requires(C& c) { std::get<step_tolerance_criterion>(c.inner.criteria); }
+    {
+        std::get<step_tolerance_criterion>(convergence.inner.criteria).threshold = v;
+    }
 };
 
 }

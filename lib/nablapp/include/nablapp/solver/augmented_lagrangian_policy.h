@@ -313,6 +313,32 @@ struct augmented_lagrangian_policy
         // Constraint violation
         scalar_type viol = detail::constraint_violation(s.c_eq, s.c_ineq);
 
+        scalar_type step_norm = (s.x - x_old).norm();
+
+        // Actual augmented Lagrangian gradient norm at current iterate.
+        // Uses pre-update multipliers so the norm reflects the current
+        // subproblem, not the next one.
+        // (N&W Section 17.4, eq. 17.47 derivative)
+        scalar_type reported_grad_norm;
+        if(s.eval_gradient)
+        {
+            Eigen::VectorX<scalar_type> grad_f(n);
+            s.eval_gradient(s.x, grad_f);
+
+            Eigen::MatrixX<scalar_type> J_eq_new, J_ineq_new;
+            s.eval_jacobian(s.x, J_eq_new, J_ineq_new);
+
+            auto aug_grad = detail::augmented_lagrangian_gradient(
+                grad_f, J_eq_new, J_ineq_new, s.c_eq, s.c_ineq,
+                s.lambda_eq, s.lambda_ineq, s.mu);
+            reported_grad_norm = aug_grad.norm();
+        }
+        else
+        {
+            // Derivative-free inner policy: use step change as proxy
+            reported_grad_norm = step_norm;
+        }
+
         // K&W Algorithm 10.2 / N&W Algorithm 17.4:
         // Always update multipliers. If violation is not decreasing
         // sufficiently, also decrease mu (increase penalty).
@@ -328,20 +354,13 @@ struct augmented_lagrangian_policy
 
         ++s.outer_iter;
 
-        // Use the max of constraint violation and step change as
-        // gradient_norm proxy. This prevents basic_solver from stopping
-        // early when constraints happen to be satisfied at a non-optimal
-        // feasible point. The outer loop must continue until both
-        // feasibility and optimality are achieved.
-        scalar_type step_norm = (s.x - x_old).norm();
-        scalar_type grad_proxy = std::max(viol, step_norm);
-
         return step_result<scalar_type>{
             .objective_value = s.f,
-            .gradient_norm = grad_proxy,
+            .gradient_norm = reported_grad_norm,
             .step_size = step_norm,
             .objective_change = s.f - f_old,
             .improved = s.f < f_old || viol < con_tol,
+            .constraint_violation = viol,
             .x_norm = s.x.norm(),
         };
     }
