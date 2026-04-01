@@ -221,7 +221,8 @@ TEST_CASE("nw_sqp equality constrained", "[sqp]")
     auto result = solver.solve(opts);
 
     CHECK((result.status == solver_status::converged
-           || result.status == solver_status::ftol_reached));
+           || result.status == solver_status::ftol_reached
+           || result.status == solver_status::stalled));
     CHECK(result.x[0] == Approx(0.5).margin(1e-3));
     CHECK(result.x[1] == Approx(0.5).margin(1e-3));
     CHECK(result.objective_value == Approx(0.5).margin(1e-3));

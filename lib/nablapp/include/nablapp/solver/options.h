@@ -43,6 +43,14 @@ struct solver_options
         requires requires(C& c) { std::get<objective_tolerance_criterion>(c.criteria); }
     {
         std::get<objective_tolerance_criterion>(convergence.criteria).threshold = v;
+        std::get<objective_tolerance_criterion>(convergence.criteria).stationarity_threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_stationarity_threshold(double v)
+        requires requires(C& c) { std::get<objective_tolerance_criterion>(c.criteria); }
+    {
+        std::get<objective_tolerance_criterion>(convergence.criteria).stationarity_threshold = v;
     }
 
     template <typename C = Convergence>

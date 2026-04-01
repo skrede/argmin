@@ -30,14 +30,23 @@ struct gradient_tolerance_criterion
 struct objective_tolerance_criterion
 {
     std::optional<double> threshold{};
+    std::optional<double> stationarity_threshold{};
 
+    // K&W 2e Section 4.4: convergence requires stationarity. Small objective
+    // change alone is insufficient -- the gradient must also be small to
+    // distinguish genuine convergence from a non-stationary plateau.
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
             return std::nullopt;
         if(iteration > 1 && std::abs(r.objective_change) < *threshold)
-            return solver_status::ftol_reached;
+        {
+            double gate = stationarity_threshold.value_or(1e-8);
+            if(r.gradient_norm < gate)
+                return solver_status::ftol_reached;
+            return std::nullopt;
+        }
         return std::nullopt;
     }
 };
@@ -61,7 +70,9 @@ struct step_tolerance_criterion
 struct objective_tolerance_rel_criterion
 {
     std::optional<double> threshold{};
+    std::optional<double> stationarity_threshold{};
 
+    // K&W 2e Section 4.4: stationarity gate applies to relative criterion too.
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
@@ -69,7 +80,12 @@ struct objective_tolerance_rel_criterion
             return std::nullopt;
         if(iteration > 1 &&
            std::abs(r.objective_change) / std::max(std::abs(r.objective_value), 1.0) < *threshold)
-            return solver_status::ftol_reached;
+        {
+            double gate = stationarity_threshold.value_or(1e-8);
+            if(r.gradient_norm < gate)
+                return solver_status::ftol_reached;
+            return std::nullopt;
+        }
         return std::nullopt;
     }
 };

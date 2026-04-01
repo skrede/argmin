@@ -5,9 +5,11 @@
 //
 // Reference: N&W 2e Section 2.2, K&W 2e Section 2.3.
 
+#include "nablapp/solver/options.h"
 #include "nablapp/solver/convergence.h"
-#include "nablapp/result/step_result.h"
+
 #include "nablapp/result/status.h"
+#include "nablapp/result/step_result.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -183,4 +185,121 @@ TEST_CASE("convergence_policy gradient-only for derivative-free scenario",
     auto status = cp.check(r_below, 5);
     REQUIRE(status.has_value());
     CHECK(*status == solver_status::converged);
+}
+
+// -- Test 10: stationarity gate blocks ftol when gradient is large --
+
+TEST_CASE("objective_tolerance_criterion stationarity gate blocks when gradient large",
+          "[convergence_policy]")
+{
+    objective_tolerance_criterion c{
+        .threshold = 1e-10,
+        .stationarity_threshold = 1e-6,
+    };
+    step_result<double> r{
+        .gradient_norm = 0.5,
+        .objective_change = 1e-15,
+    };
+    auto status = c.check(r, 2);
+    CHECK(!status.has_value());
+}
+
+// -- Test 11: stationarity gate passes when gradient is small --
+
+TEST_CASE("objective_tolerance_criterion stationarity gate passes when gradient small",
+          "[convergence_policy]")
+{
+    objective_tolerance_criterion c{
+        .threshold = 1e-10,
+        .stationarity_threshold = 1e-6,
+    };
+    step_result<double> r{
+        .gradient_norm = 1e-8,
+        .objective_change = 1e-15,
+    };
+    auto status = c.check(r, 2);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::ftol_reached);
+}
+
+// -- Test 12: stationarity gate uses sensible default when nullopt --
+
+TEST_CASE("objective_tolerance_criterion stationarity gate uses default when nullopt",
+          "[convergence_policy]")
+{
+    objective_tolerance_criterion c{.threshold = 1e-10};
+
+    // gradient_norm below default gate (1e-8) -- should pass
+    step_result<double> r_small{
+        .gradient_norm = 1e-9,
+        .objective_change = 1e-15,
+    };
+    auto status_pass = c.check(r_small, 2);
+    REQUIRE(status_pass.has_value());
+    CHECK(*status_pass == solver_status::ftol_reached);
+
+    // gradient_norm above default gate (1e-8) -- should block
+    step_result<double> r_large{
+        .gradient_norm = 0.1,
+        .objective_change = 1e-15,
+    };
+    auto status_block = c.check(r_large, 2);
+    CHECK(!status_block.has_value());
+}
+
+// -- Test 13: objective_tolerance_rel_criterion stationarity gate --
+
+TEST_CASE("objective_tolerance_rel_criterion stationarity gate blocks when gradient large",
+          "[convergence_policy]")
+{
+    objective_tolerance_rel_criterion c{
+        .threshold = 1e-10,
+        .stationarity_threshold = 1e-6,
+    };
+    step_result<double> r{
+        .objective_value = 1.0,
+        .gradient_norm = 0.5,
+        .objective_change = 1e-15,
+    };
+    auto status = c.check(r, 2);
+    CHECK(!status.has_value());
+}
+
+// -- Test 14: set_objective_threshold propagates stationarity_threshold --
+
+TEST_CASE("set_objective_threshold propagates stationarity_threshold",
+          "[convergence_policy]")
+{
+    solver_options<> opts;
+    opts.set_objective_threshold(1e-10);
+
+    auto& crit = std::get<objective_tolerance_criterion>(opts.convergence.criteria);
+    REQUIRE(crit.stationarity_threshold.has_value());
+    CHECK(*crit.stationarity_threshold == 1e-10);
+}
+
+// -- Test 15: full policy with stationarity gate on stagnant non-stationary point --
+
+TEST_CASE("convergence_policy with stationarity gate does not fire on stagnant non-stationary point",
+          "[convergence_policy]")
+{
+    default_convergence conv{
+        .criteria = {
+            gradient_tolerance_criterion{.threshold = 1e-6},
+            objective_tolerance_criterion{
+                .threshold = 1e-10,
+                .stationarity_threshold = 1e-6,
+            },
+            step_tolerance_criterion{.threshold = 1e-12},
+        }
+    };
+
+    step_result<double> r{
+        .gradient_norm = 0.1,
+        .step_size = 0.01,
+        .objective_change = 1e-15,
+    };
+
+    auto status = conv.check(r, 5);
+    CHECK(!status.has_value());
 }
