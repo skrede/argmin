@@ -77,19 +77,6 @@ concept constrained_values = objective<P, S> &&
     { p.num_inequality() } -> std::convertible_to<int>;
 };
 
-// Value-only constrained problems: constraints without Jacobians.
-//
-// ISRES and other derivative-free constrained solvers need only constraint
-// values (no Jacobian). This concept is strictly weaker than constrained.
-template <typename P, typename S = double>
-concept constrained_values = objective<P, S> &&
-    requires(const P& p, const Eigen::VectorX<S>& x, Eigen::VectorX<S>& c)
-{
-    { p.constraints(x, c) };
-    { p.num_equality() } -> std::convertible_to<int>;
-    { p.num_inequality() } -> std::convertible_to<int>;
-};
-
 template <typename P, typename S = double>
 concept constrained = constrained_values<P, S> &&
     requires(const P& p, const Eigen::VectorX<S>& x, Eigen::MatrixX<S>& J)
