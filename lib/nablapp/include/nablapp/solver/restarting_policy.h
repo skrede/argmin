@@ -47,6 +47,7 @@ struct restarting_policy
     struct state_type
     {
         typename Inner::state_type inner;
+        decltype(std::declval<typename Inner::state_type>().x) x{};
         std::uint32_t stagnation_count{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
         bool restart_pending{false};
@@ -54,6 +55,9 @@ struct restarting_policy
         std::uint32_t dimension{0};
         std::uint32_t initial_lambda{0};
         std::function<void(state_type&)> reinit;
+
+        Eigen::VectorXd c_eq{};
+        Eigen::VectorXd c_ineq{};
     };
 
     Inner inner_policy_{};
@@ -99,8 +103,10 @@ struct restarting_policy
                 self_ref.inner_policy_.options.lambda = new_pop;
 
             self_ref.inner_policy_.reset_clear(st.inner, x0);
+            sync_from_inner(st);
         };
 
+        sync_from_inner(s);
         return s;
     }
 
@@ -152,6 +158,7 @@ struct restarting_policy
         if(s.stagnation_count >= limit)
             s.restart_pending = true;
 
+        sync_from_inner(s);
         return result;
     }
 
@@ -161,6 +168,7 @@ struct restarting_policy
         s.stagnation_count = 0;
         s.best_ever_value = s.inner.objective_value;
         s.restart_pending = false;
+        sync_from_inner(s);
     }
 
     void reset_clear(this auto&& self, state_type& s, const auto& x0)
@@ -170,6 +178,19 @@ struct restarting_policy
         s.restart_count = 0;
         s.best_ever_value = s.inner.objective_value;
         s.restart_pending = false;
+        sync_from_inner(s);
+    }
+
+private:
+
+    static void sync_from_inner(state_type& s)
+    {
+        s.x = s.inner.x;
+        if constexpr(requires { s.inner.c_eq; s.inner.c_ineq; })
+        {
+            s.c_eq = s.inner.c_eq;
+            s.c_ineq = s.inner.c_ineq;
+        }
     }
 };
 

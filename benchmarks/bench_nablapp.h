@@ -12,6 +12,8 @@
 #include "problem_registry.h"
 
 #include "nablapp/solver/basic_solver.h"
+#include "nablapp/solver/cobyla_policy.h"
+#include "nablapp/solver/isres_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/lbfgsb_policy.h"
@@ -255,6 +257,14 @@ void run_all_nablapp_solvers(
     // CMA-ES: global problems with bounds.
     if constexpr(is_global && is_bound)
         run("cmaes", cmaes_policy<>{});
+
+    // COBYLA: constrained derivative-free (requires bounds + constraint values).
+    if constexpr(constrained_values<Problem> && is_bound)
+        run("cobyla", cobyla_policy{});
+
+    // ISRES: global constrained (requires bounds + constraint values).
+    if constexpr(is_global && constrained_values<Problem> && is_bound)
+        run("isres", isres_policy<>{});
 }
 
 }

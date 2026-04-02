@@ -375,15 +375,31 @@ void run_nlopt_benchmarks(std::vector<benchmark_result>& results)
             results.push_back(
                 detail::run_nlopt_auglag(name, p, max_evals));
 
+        // COBYLA: derivative-free constrained (no gradient needed).
+        if constexpr((is_ineq || is_mixed || is_eq) && bound_constrained<P>)
+            results.push_back(
+                detail::run_nlopt_solver(nlopt::LN_COBYLA, "nlopt_cobyla",
+                                         name, p, max_evals));
+
+        // ISRES: global constrained -- also on constrained bounded problems
+        // for comparison with nablapp's isres_policy.
+        if constexpr(constrained<P> && bound_constrained<P>)
+            results.push_back(
+                detail::run_nlopt_solver(nlopt::GN_ISRES, "nlopt_isres",
+                                         name, p, max_evals));
+
         // Global: CRS2 and ISRES (require bounds).
         if constexpr(is_global && bound_constrained<P>)
         {
             results.push_back(
                 detail::run_nlopt_solver(nlopt::GN_CRS2_LM, "nlopt_crs2",
                                          name, p, max_evals));
-            results.push_back(
-                detail::run_nlopt_solver(nlopt::GN_ISRES, "nlopt_isres",
-                                         name, p, max_evals));
+            // nlopt_isres on global problems already dispatched above
+            // when constrained<P> is also satisfied.
+            if constexpr(!constrained<P>)
+                results.push_back(
+                    detail::run_nlopt_solver(nlopt::GN_ISRES, "nlopt_isres",
+                                             name, p, max_evals));
         }
     });
 }

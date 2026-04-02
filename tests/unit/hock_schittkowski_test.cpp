@@ -7,6 +7,8 @@
 // Reference: Hock & Schittkowski, "Test Examples for Nonlinear
 //            Programming Codes", Springer, 1981.
 
+#include "nablapp/solver/cobyla_policy.h"
+#include "nablapp/solver/isres_policy.h"
 #include "nablapp/solver/augmented_lagrangian_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"
@@ -413,5 +415,108 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
         }
 
         CHECK(best_feasible < problem.optimal_value() + 0.2);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// cobyla on HS problems (derivative-free constrained)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
+{
+    SECTION("HS024")
+    {
+        hs024 problem;
+        auto x0 = problem.initial_point();
+        solver_options opts;
+        opts.max_iterations = 2000;
+        opts.set_gradient_threshold(1e-15);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
+
+        basic_solver<cobyla_policy> solver{problem, x0, opts};
+        auto result = solver.solve();
+
+        CHECK(result.objective_value == Approx(-1.0).margin(1.0));
+        CHECK(solver.constraint_violation() < 0.5);
+    }
+
+    SECTION("HS035")
+    {
+        hs035 problem;
+        auto x0 = problem.initial_point();
+        solver_options opts;
+        opts.max_iterations = 2000;
+        opts.set_gradient_threshold(1e-15);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
+
+        basic_solver<cobyla_policy> solver{problem, x0, opts};
+        auto result = solver.solve();
+
+        CHECK(result.objective_value == Approx(1.0 / 9.0).margin(0.5));
+        CHECK(solver.constraint_violation() < 0.5);
+    }
+
+    SECTION("HS076")
+    {
+        hs076 problem;
+        auto x0 = problem.initial_point();
+        solver_options opts;
+        opts.max_iterations = 2000;
+        opts.set_gradient_threshold(1e-15);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
+
+        basic_solver<cobyla_policy> solver{problem, x0, opts};
+        auto result = solver.solve();
+
+        CHECK(result.objective_value == Approx(-4.681818).margin(1.0));
+        CHECK(solver.constraint_violation() < 0.5);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// isres on HS problems (global stochastic constrained)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("isres on hock-schittkowski problems", "[hs][isres]")
+{
+    SECTION("HS024")
+    {
+        hs024 problem;
+        auto x0 = problem.initial_point();
+        solver_options opts;
+        opts.max_iterations = 500;
+        opts.set_gradient_threshold(1e-15);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
+
+        isres_policy<> policy;
+        policy.options.seed = 42u;
+
+        basic_solver<isres_policy<>> solver{policy, problem, x0, opts};
+        auto result = solver.solve();
+
+        CHECK(result.objective_value == Approx(-1.0).margin(1.0));
+    }
+
+    SECTION("HS035")
+    {
+        hs035 problem;
+        auto x0 = problem.initial_point();
+        solver_options opts;
+        opts.max_iterations = 500;
+        opts.set_gradient_threshold(1e-15);
+        opts.set_step_threshold(1e-15);
+        opts.set_objective_threshold(1e-15);
+
+        isres_policy<> policy;
+        policy.options.seed = 42u;
+
+        basic_solver<isres_policy<>> solver{policy, problem, x0, opts};
+        auto result = solver.solve();
+
+        CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1.0));
     }
 }

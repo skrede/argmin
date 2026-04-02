@@ -5,6 +5,8 @@ add_executable(nablapp_unit_tests
     lm_test.cpp
     sqp_test.cpp
     mma_test.cpp
+    isres_test.cpp
+    cobyla_test.cpp
     bobyqa_test.cpp
     lbfgsb_test.cpp
     cmaes_test.cpp

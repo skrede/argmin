@@ -75,19 +75,19 @@ struct cobyla_policy
         std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_constraints;
     };
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>& opts, const options_type& policy_opts)
+                    const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
         return self.init(problem, x0, opts);
     }
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>& /*opts*/)
+                    const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
         state_type s;
