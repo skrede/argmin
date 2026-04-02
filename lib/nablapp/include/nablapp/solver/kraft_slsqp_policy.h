@@ -31,6 +31,7 @@
 #include "nablapp/line_search/options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
+#include "nablapp/types.h"
 
 #include "nablapp/formulation/concepts.h"
 
@@ -46,9 +47,13 @@
 namespace nablapp
 {
 
+template <int N = dynamic_dimension>
 struct kraft_slsqp_policy
 {
     using scalar_type = double;
+
+    template <int M>
+    using rebind = kraft_slsqp_policy<M>;
 
     struct options_type
     {
@@ -63,31 +68,35 @@ struct kraft_slsqp_policy
 
     struct state_type
     {
-        Eigen::VectorXd x;
-        Eigen::VectorXd g;
+        Eigen::Vector<double, N> x;
+        Eigen::Vector<double, N> g;
         Eigen::VectorXd c_eq;
         Eigen::VectorXd c_ineq;
         Eigen::MatrixXd J_eq;
         Eigen::MatrixXd J_ineq;
-        Eigen::VectorXd lower;
-        Eigen::VectorXd upper;
+        Eigen::Vector<double, N> lower;
+        Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
         double objective_value{};
         double sigma{1.0};
-        detail::compact_lbfgs<double> lbfgs;
+        detail::compact_lbfgs<double, N> lbfgs;
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
         int n{0};
 
-        std::function<double(const Eigen::VectorXd&)> eval_value;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_gradient;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&, Eigen::VectorXd&)> eval_constraints;
-        std::function<void(const Eigen::VectorXd&, Eigen::MatrixXd&, Eigen::MatrixXd&)> eval_jacobian;
+        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
+        std::function<void(const Eigen::Vector<double, N>&,
+                           Eigen::Vector<double, N>&)> eval_gradient;
+        std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&,
+                           Eigen::VectorXd&)> eval_constraints;
+        std::function<void(const Eigen::Vector<double, N>&, Eigen::MatrixXd&,
+                           Eigen::MatrixXd&)> eval_jacobian;
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
@@ -95,7 +104,8 @@ struct kraft_slsqp_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
@@ -116,8 +126,8 @@ struct kraft_slsqp_policy
         else
         {
             constexpr double inf = std::numeric_limits<double>::infinity();
-            s.lower = Eigen::VectorXd::Constant(n, -inf);
-            s.upper = Eigen::VectorXd::Constant(n, inf);
+            s.lower = Eigen::Vector<double, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<double, N>::Constant(n, inf);
         }
 
         // Constraints
@@ -126,8 +136,6 @@ struct kraft_slsqp_policy
             s.n_eq = problem.num_equality();
             s.n_ineq = problem.num_inequality();
 
-            // The constrained concept uses a single constraints() call that fills
-            // a combined vector. We split into eq and ineq parts.
             Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
             problem.constraints(x0, c_all);
             s.c_eq = c_all.head(s.n_eq);
@@ -141,7 +149,7 @@ struct kraft_slsqp_policy
             s.lambda = Eigen::VectorXd::Zero(s.n_eq + s.n_ineq);
 
             s.eval_constraints = [&problem, n_eq = s.n_eq, n_ineq = s.n_ineq](
-                const Eigen::VectorXd& v, Eigen::VectorXd& ceq, Eigen::VectorXd& cineq) {
+                const Eigen::Vector<double, N>& v, Eigen::VectorXd& ceq, Eigen::VectorXd& cineq) {
                 Eigen::VectorXd c_all(n_eq + n_ineq);
                 problem.constraints(v, c_all);
                 ceq = c_all.head(n_eq);
@@ -149,7 +157,7 @@ struct kraft_slsqp_policy
             };
 
             s.eval_jacobian = [&problem, n_eq = s.n_eq, n_ineq = s.n_ineq, n](
-                const Eigen::VectorXd& v, Eigen::MatrixXd& Jeq, Eigen::MatrixXd& Jineq) {
+                const Eigen::Vector<double, N>& v, Eigen::MatrixXd& Jeq, Eigen::MatrixXd& Jineq) {
                 Eigen::MatrixXd J_all(n_eq + n_ineq, n);
                 problem.constraint_jacobian(v, J_all);
                 Jeq = J_all.topRows(n_eq);
@@ -166,13 +174,13 @@ struct kraft_slsqp_policy
             s.J_ineq.resize(0, n);
             s.lambda.resize(0);
 
-            s.eval_constraints = [](const Eigen::VectorXd&, Eigen::VectorXd& ceq,
+            s.eval_constraints = [](const Eigen::Vector<double, N>&, Eigen::VectorXd& ceq,
                                     Eigen::VectorXd& cineq) {
                 ceq.resize(0);
                 cineq.resize(0);
             };
 
-            s.eval_jacobian = [n](const Eigen::VectorXd&, Eigen::MatrixXd& Jeq,
+            s.eval_jacobian = [n](const Eigen::Vector<double, N>&, Eigen::MatrixXd& Jeq,
                                   Eigen::MatrixXd& Jineq) {
                 Jeq.resize(0, n);
                 Jineq.resize(0, n);
@@ -180,14 +188,15 @@ struct kraft_slsqp_policy
         }
 
         std::uint8_t depth = self.options.history_depth.value_or(10);
-        s.lbfgs = detail::compact_lbfgs<double>{depth};
+        s.lbfgs = detail::compact_lbfgs<double, N>{depth};
         s.sigma = self.options.initial_penalty.value_or(1.0);
         s.iteration = 0;
 
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
+        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
             return problem.value(v);
         };
-        s.eval_gradient = [&problem](const Eigen::VectorXd& v, Eigen::VectorXd& grad) {
+        s.eval_gradient = [&problem](const Eigen::Vector<double, N>& v,
+                                     Eigen::Vector<double, N>& grad) {
             problem.gradient(v, grad);
         };
 
@@ -209,11 +218,9 @@ struct kraft_slsqp_policy
 
         const int n = s.n;
 
-        // Build QP Hessian from compact L-BFGS: B[:,j] = lbfgs.multiply(e_j).
-        // For small n (liepp uses n=6-7), this column-by-column approach is O(n*m*n)
-        // which is negligible.
+        // Build QP Hessian from compact L-BFGS
         Eigen::MatrixXd B(n, n);
-        Eigen::VectorXd ej = Eigen::VectorXd::Zero(n);
+        Eigen::Vector<double, N> ej = Eigen::Vector<double, N>::Zero(n);
         for(int j = 0; j < n; ++j)
         {
             ej[j] = 1.0;
@@ -224,24 +231,15 @@ struct kraft_slsqp_policy
         // Symmetrize for numerical safety
         B = (0.5 * (B + B.transpose())).eval();
 
-        // Build QP subproblem:
-        //   min  0.5 * p^T B p + g^T p
-        //   s.t. J_eq * p + c_eq = 0          (linearised equality)
-        //        J_ineq * p + c_ineq >= 0      (linearised inequality)
-        //        lower - x <= p <= upper - x    (box on step)
-        //
-        // In solve_qp convention: A_eq * p = b_eq, A_ineq * p >= b_ineq
         Eigen::MatrixXd A_eq = s.J_eq;
         Eigen::VectorXd b_eq = -s.c_eq;
-
         Eigen::MatrixXd A_ineq = s.J_ineq;
         Eigen::VectorXd b_ineq = -s.c_ineq;
 
-        // Box bounds on the step: lower - x <= p <= upper - x
-        Eigen::VectorXd p_lower = s.lower - s.x;
-        Eigen::VectorXd p_upper = s.upper - s.x;
+        // Box bounds on the step
+        Eigen::VectorXd p_lower = Eigen::VectorXd(s.lower) - Eigen::VectorXd(s.x);
+        Eigen::VectorXd p_upper = Eigen::VectorXd(s.upper) - Eigen::VectorXd(s.x);
 
-        // Clamp infinities to large finite for QP feasibility
         constexpr double big = 1e20;
         for(int i = 0; i < n; ++i)
         {
@@ -249,12 +247,9 @@ struct kraft_slsqp_policy
             if(p_upper[i] > big) p_upper[i] = big;
         }
 
-        // Feasible starting point for QP: p0 = 0 is feasible for box since
-        // lower - x <= 0 <= upper - x when x is feasible. But it may violate
-        // equality constraints. Use p0 = 0 and let the active-set solver handle it.
         Eigen::VectorXd p0 = Eigen::VectorXd::Zero(n);
 
-        // Solve QP with box constraints, using embedded QP options
+        // Solve QP with embedded options
         nablapp::qp_options qp_opts;
         qp_opts.max_iterations = self.options.qp.max_iterations.has_value()
             ? self.options.qp.max_iterations
@@ -262,12 +257,11 @@ struct kraft_slsqp_policy
         qp_opts.tolerance = self.options.qp.tolerance.has_value()
             ? self.options.qp.tolerance
             : std::optional<double>{1e-12};
-        auto qp_res = detail::solve_qp(B, s.g, A_eq, b_eq, A_ineq, b_ineq,
+        auto qp_res = detail::solve_qp(B, Eigen::VectorXd(s.g), A_eq, b_eq, A_ineq, b_ineq,
                                         p_lower, p_upper, p0, qp_opts);
 
-        Eigen::VectorXd p = qp_res.x;
+        Eigen::Vector<double, N> p = qp_res.x;
 
-        // Zero step check
         double p_norm = p.norm();
         if(p_norm < 1e-15)
         {
@@ -281,9 +275,7 @@ struct kraft_slsqp_policy
             };
         }
 
-        // Update penalty parameter sigma.
-        // N&W eq. 18.36: sigma >= max_i |lambda_i| + delta for some delta > 0.
-        // This ensures the L1 merit function is exact.
+        // Update penalty parameter sigma
         if(qp_res.lambda.size() > 0)
         {
             double lambda_max = qp_res.lambda.cwiseAbs().maxCoeff();
@@ -291,9 +283,8 @@ struct kraft_slsqp_policy
                 s.sigma = lambda_max + 1.0;
         }
 
-        // L1 merit function for line search:
-        //   phi_1(x) = f(x) + sigma * (||c_eq(x)||_1 + ||max(0, -c_ineq(x))||_1)
-        auto merit = [&](const Eigen::VectorXd& xk) -> double {
+        // L1 merit function for line search
+        auto merit = [&](const Eigen::Vector<double, N>& xk) -> double {
             double fval = s.eval_value(xk);
             double viol = 0.0;
 
@@ -313,9 +304,6 @@ struct kraft_slsqp_policy
 
         double merit_0 = merit(s.x);
 
-        // Directional derivative of L1 merit along p:
-        //   D phi_1 = g^T p - sigma * (||c_eq||_1 + ||max(0,-c_ineq)||_1)
-        // The second term is the constraint violation reduction (approximate).
         double constraint_viol_0 = 0.0;
         if(s.c_eq.size() > 0)
             constraint_viol_0 += s.c_eq.cwiseAbs().sum();
@@ -324,14 +312,12 @@ struct kraft_slsqp_policy
 
         double dphi_merit = s.g.dot(p) - s.sigma * constraint_viol_0;
 
-        // Ensure descent direction for merit function
         if(dphi_merit >= 0.0)
             dphi_merit = -1e-8;
 
-        // Backtracking Armijo line search on L1 merit, using embedded options
+        // Backtracking Armijo line search on L1 merit
         auto phi_ls = [&](double alpha) {
-            Eigen::VectorXd x_trial = s.x + alpha * p;
-            // Project onto bounds for safety
+            Eigen::Vector<double, N> x_trial = s.x + alpha * p;
             for(int i = 0; i < n; ++i)
             {
                 if(x_trial[i] < s.lower[i]) x_trial[i] = s.lower[i];
@@ -343,54 +329,41 @@ struct kraft_slsqp_policy
         auto ls = armijo(phi_ls, merit_0, dphi_merit, self.options.line_search);
         double alpha = ls.alpha;
 
-        // Ensure minimum step
         if(alpha < 1e-15)
             alpha = 1e-4;
 
         // Update iterate
-        Eigen::VectorXd x_old = s.x;
+        Eigen::Vector<double, N> x_old = s.x;
         double old_f = s.objective_value;
         s.x = s.x + alpha * p;
 
-        // Project onto bounds
         for(int i = 0; i < n; ++i)
         {
             if(s.x[i] < s.lower[i]) s.x[i] = s.lower[i];
             if(s.x[i] > s.upper[i]) s.x[i] = s.upper[i];
         }
 
-        // Evaluate new objective
         s.objective_value = s.eval_value(s.x);
 
-        // Evaluate new gradient for L-BFGS update
-        Eigen::VectorXd g_old = s.g;
+        Eigen::Vector<double, N> g_old = s.g;
         s.eval_gradient(s.x, s.g);
 
-        // Update constraints
         if(s.n_eq + s.n_ineq > 0)
         {
             s.eval_constraints(s.x, s.c_eq, s.c_ineq);
             s.eval_jacobian(s.x, s.J_eq, s.J_ineq);
         }
 
-        // L-BFGS update using Lagrangian gradient:
-        //   grad_L = grad_f - J_eq^T lambda_eq - J_ineq^T lambda_ineq
-        // For simplicity (and matching Kraft's original), we use the objective
-        // gradient directly when unconstrained, and the Lagrangian gradient
-        // when constrained.
-        Eigen::VectorXd grad_L_old = g_old;
-        Eigen::VectorXd grad_L_new = s.g;
+        // L-BFGS update using Lagrangian gradient
+        Eigen::Vector<double, N> grad_L_old = g_old;
+        Eigen::Vector<double, N> grad_L_new = s.g;
 
         if(s.n_eq + s.n_ineq > 0 && qp_res.lambda.size() > 0)
         {
-            // Extract multipliers: first m_eq are equality, rest are inequality
-            // Note: qp_res.lambda includes box constraint multipliers at the end
-            // We only use the first n_eq + n_ineq entries for the Lagrangian
             int m_total = s.n_eq + s.n_ineq;
             Eigen::VectorXd lam = qp_res.lambda.head(
                 std::min(m_total, static_cast<int>(qp_res.lambda.size())));
 
-            // Update stored multipliers
             if(lam.size() == m_total)
                 s.lambda = lam;
 
@@ -398,7 +371,6 @@ struct kraft_slsqp_policy
             {
                 Eigen::VectorXd lam_eq = lam.head(s.n_eq);
 
-                // Recompute old Jacobian at old point for grad_L_old
                 Eigen::MatrixXd J_eq_old, J_ineq_old;
                 s.eval_jacobian(x_old, J_eq_old, J_ineq_old);
                 grad_L_old -= J_eq_old.transpose() * lam_eq;
@@ -416,9 +388,8 @@ struct kraft_slsqp_policy
             }
         }
 
-        // Curvature pair for L-BFGS
-        Eigen::VectorXd sk = s.x - x_old;
-        Eigen::VectorXd yk = grad_L_new - grad_L_old;
+        Eigen::Vector<double, N> sk = s.x - x_old;
+        Eigen::Vector<double, N> yk = grad_L_new - grad_L_old;
         s.lbfgs.push(sk, yk);
 
         ++s.iteration;
@@ -434,7 +405,7 @@ struct kraft_slsqp_policy
     }
 
     // Hot start -- preserves L-BFGS history.
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.objective_value = s.eval_value(x0);
@@ -448,7 +419,7 @@ struct kraft_slsqp_policy
     }
 
     // Cold restart -- clears L-BFGS curvature history.
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         self.reset(s, x0);
         s.lbfgs.reset();

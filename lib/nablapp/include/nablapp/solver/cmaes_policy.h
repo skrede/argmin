@@ -23,6 +23,7 @@
 #include "nablapp/options/cmaes_options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
+#include "nablapp/types.h"
 
 #include "nablapp/formulation/concepts.h"
 
@@ -41,9 +42,13 @@
 namespace nablapp
 {
 
+template <int N = dynamic_dimension>
 struct cmaes_policy
 {
     using scalar_type = double;
+
+    template <int M>
+    using rebind = cmaes_policy<M>;
 
     enum class restart_strategy { none, ipop };
 
@@ -58,23 +63,23 @@ struct cmaes_policy
 
     struct state_type
     {
-        Eigen::VectorXd x;
+        Eigen::Vector<double, N> x;
         double objective_value{};
 
-        Eigen::VectorXd mean;
-        Eigen::MatrixXd C;
-        Eigen::MatrixXd B;
-        Eigen::VectorXd D;
-        Eigen::VectorXd p_sigma;
-        Eigen::VectorXd p_c;
+        Eigen::Vector<double, N> mean;
+        Eigen::Matrix<double, N, N> C;
+        Eigen::Matrix<double, N, N> B;
+        Eigen::Vector<double, N> D;
+        Eigen::Vector<double, N> p_sigma;
+        Eigen::Vector<double, N> p_c;
         double sigma{};
         std::uint32_t generation{0};
         detail::cmaes_params<> params;
         std::mt19937 rng;
 
-        std::function<double(const Eigen::VectorXd&)> eval_value;
-        Eigen::VectorXd lower;
-        Eigen::VectorXd upper;
+        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
+        Eigen::Vector<double, N> lower;
+        Eigen::Vector<double, N> upper;
         bool has_bounds{false};
 
         double initial_sigma{};
@@ -85,7 +90,8 @@ struct cmaes_policy
     options_type options{};
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
@@ -93,7 +99,8 @@ struct cmaes_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
@@ -103,7 +110,7 @@ struct cmaes_policy
         s.sigma = self.options.initial_sigma.value_or(0.3);
         s.initial_sigma = s.sigma;
 
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
+        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
             return problem.value(v);
         };
 
@@ -119,11 +126,11 @@ struct cmaes_policy
             : 0;
         s.params = detail::compute_constants(n, pop_lambda);
 
-        s.C = Eigen::MatrixXd::Identity(n, n);
-        s.p_sigma = Eigen::VectorXd::Zero(n);
-        s.p_c = Eigen::VectorXd::Zero(n);
-        s.B = Eigen::MatrixXd::Identity(n, n);
-        s.D = Eigen::VectorXd::Ones(n);
+        s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
+        s.p_sigma = Eigen::Vector<double, N>::Zero(n);
+        s.p_c = Eigen::Vector<double, N>::Zero(n);
+        s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
+        s.D = Eigen::Vector<double, N>::Ones(n);
 
         if(self.options.seed.has_value())
             s.rng.seed(static_cast<unsigned>(self.options.seed.value()));
@@ -152,7 +159,7 @@ struct cmaes_policy
         Eigen::VectorXd fitnesses(lambda);
         for(int i = 0; i < lambda; ++i)
         {
-            Eigen::VectorXd xi = offspring.col(i);
+            Eigen::Vector<double, N> xi = offspring.col(i);
             double penalty = 0.0;
             if(s.has_bounds)
                 penalty = detail::repair_and_penalize(xi, s.lower, s.upper);
@@ -168,17 +175,17 @@ struct cmaes_policy
         });
 
         // 4. Update mean: weighted recombination of mu best
-        Eigen::VectorXd mean_old = s.mean;
-        Eigen::VectorXd mean_new = Eigen::VectorXd::Zero(n);
+        Eigen::Vector<double, N> mean_old = s.mean;
+        Eigen::Vector<double, N> mean_new = Eigen::Vector<double, N>::Zero(n);
         for(int i = 0; i < mu; ++i)
             mean_new += s.params.weights[i] * offspring.col(idx[i]);
 
         // 5. delta_w = (mean_new - mean_old) / sigma
-        Eigen::VectorXd delta_w = ((mean_new - mean_old) / s.sigma).eval();
+        Eigen::Vector<double, N> delta_w = ((mean_new - mean_old) / s.sigma).eval();
 
         // 6. Update evolution path p_sigma (CSA)
         // C^{-1/2} * v = B * D^{-1} * B^T * v
-        Eigen::VectorXd C_inv_sqrt_dw =
+        Eigen::Vector<double, N> C_inv_sqrt_dw =
             (s.B * s.D.cwiseInverse().asDiagonal() * (s.B.transpose() * delta_w)).eval();
 
         s.p_sigma = (1.0 - s.params.c_sigma) * s.p_sigma
@@ -202,7 +209,7 @@ struct cmaes_policy
                 * delta_w;
 
         // 10. Compute deltas for covariance update
-        Eigen::MatrixXd deltas(n, lambda);
+        Eigen::Matrix<double, N, Eigen::Dynamic> deltas(n, lambda);
         for(int i = 0; i < lambda; ++i)
             deltas.col(i) = (offspring.col(idx[i]) - mean_old) / s.sigma;
 
@@ -279,9 +286,9 @@ struct cmaes_policy
                 // IPOP: double lambda, reset state, keep best
                 int new_lambda = s.params.lambda * 2;
                 s.params = detail::compute_constants(n, new_lambda);
-                s.C = Eigen::MatrixXd::Identity(n, n);
-                s.B = Eigen::MatrixXd::Identity(n, n);
-                s.D = Eigen::VectorXd::Ones(n);
+                s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
+                s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
+                s.D = Eigen::Vector<double, N>::Ones(n);
                 s.p_sigma.setZero();
                 s.p_c.setZero();
                 s.sigma = s.initial_sigma;
@@ -318,7 +325,7 @@ struct cmaes_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
         s.mean = x0;
@@ -327,15 +334,15 @@ struct cmaes_policy
         s.best_ever_value = s.objective_value;
         s.p_sigma.setZero();
         s.p_c.setZero();
-        s.C = Eigen::MatrixXd::Identity(n, n);
-        s.B = Eigen::MatrixXd::Identity(n, n);
-        s.D = Eigen::VectorXd::Ones(n);
+        s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
+        s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
+        s.D = Eigen::Vector<double, N>::Ones(n);
         s.sigma = s.initial_sigma;
         s.generation = 0;
         s.stagnation_count = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         self.reset(s, x0);
     }

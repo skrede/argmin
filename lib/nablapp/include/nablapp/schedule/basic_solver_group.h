@@ -7,6 +7,7 @@
 #include "nablapp/result/status.h"
 #include "nablapp/solver/convergence.h"
 #include "nablapp/solver/options.h"
+#include "nablapp/types.h"
 
 #include <Eigen/Core>
 
@@ -24,24 +25,24 @@ namespace nablapp
 
 // Multi-solver group with scheduling (per CORE-03, CORE-04, D-12).
 //
-// Holds a tuple of basic_solver<Policies>... and uses a Schedule to decide
+// Holds a tuple of basic_solver<Policies, N>... and uses a Schedule to decide
 // which solver to step next. The compile-time fold-expression requires clause
 // ensures the Problem type satisfies the union of all policy requirements.
 
-template <typename Schedule, typename... Policies>
+template <typename Schedule, int N = dynamic_dimension, typename... Policies>
 class basic_solver_group
 {
 public:
     using scalar_type = typename std::tuple_element_t<0, std::tuple<Policies...>>::scalar_type;
 
     template <typename Problem, typename Convergence = default_convergence>
-        requires (std::constructible_from<basic_solver<Policies>, const Problem&,
+        requires (std::constructible_from<basic_solver<Policies, N>, const Problem&,
                   const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&> && ...)
     basic_solver_group(const Problem& problem,
                        const Eigen::VectorX<scalar_type>& x0,
                        const solver_options<Convergence>& opts = {},
                        Schedule schedule = {})
-        : solvers_{basic_solver<Policies>{problem, x0, opts}...}
+        : solvers_{basic_solver<Policies, N>{problem, x0, opts}...}
         , schedule_{std::move(schedule)}
         , max_iterations_{opts.max_iterations}
         , constraint_tolerance_{opts.constraint_tolerance}
@@ -53,7 +54,7 @@ public:
     // Each element of policy_opts is forwarded to the corresponding
     // policy's basic_solver constructor.
     template <typename Problem, typename Convergence = default_convergence>
-        requires (std::constructible_from<basic_solver<Policies>, const Problem&,
+        requires (std::constructible_from<basic_solver<Policies, N>, const Problem&,
                   const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&,
                   const policy_options_t<Policies, scalar_type>&> && ...)
     basic_solver_group(const Problem& problem,
@@ -100,12 +101,12 @@ public:
         return step_result<scalar_type>{};
     }
 
-    const std::array<solve_result<scalar_type>, sizeof...(Policies)>& results() const
+    const std::array<solve_result<scalar_type, N>, sizeof...(Policies)>& results() const
     {
         return results_;
     }
 
-    solve_result<scalar_type> solve()
+    solve_result<scalar_type, N> solve()
     {
         solver_options<> opts;
         opts.max_iterations = max_iterations_;
@@ -113,8 +114,8 @@ public:
     }
 
     template <typename Convergence = default_convergence>
-    solve_result<scalar_type> step_n(std::uint32_t budget,
-                                     const solver_options<Convergence>& opts = {})
+    solve_result<scalar_type, N> step_n(std::uint32_t budget,
+                                        const solver_options<Convergence>& opts = {})
     {
         auto t0 = std::chrono::steady_clock::now();
 
@@ -173,7 +174,7 @@ public:
         auto best_idx = best_solver_index(std::index_sequence_for<Policies...>{});
         auto seq = std::index_sequence_for<Policies...>{};
 
-        return solve_result<scalar_type>{
+        return solve_result<scalar_type, N>{
             .status = status,
             .iterations = budget,
             .function_evaluations = budget,
@@ -202,7 +203,7 @@ private:
         const std::tuple<policy_options_t<Policies, scalar_type>...>& policy_opts,
         std::index_sequence<Is...>)
     {
-        return std::tuple{basic_solver<Policies>{
+        return std::tuple{basic_solver<Policies, N>{
             problem, x0, opts, std::get<Is>(policy_opts)}...};
     }
 
@@ -250,10 +251,10 @@ private:
     }
 
     template <std::size_t... Is>
-    Eigen::VectorX<scalar_type> best_x(std::index_sequence<Is...>) const
+    Eigen::Vector<scalar_type, N> best_x(std::index_sequence<Is...>) const
     {
         auto idx = best_solver_index(std::index_sequence<Is...>{});
-        const Eigen::VectorX<scalar_type>* ptr = nullptr;
+        const Eigen::Vector<scalar_type, N>* ptr = nullptr;
         ((Is == idx ? void(ptr = &std::get<Is>(solvers_).state().x) : void()), ...);
         return *ptr;
     }
@@ -291,7 +292,7 @@ private:
         {
             if(i == idx)
             {
-                results_[i] = solve_result<scalar_type>{
+                results_[i] = solve_result<scalar_type, N>{
                     .status = sr.policy_status.value_or(solver_status::running),
                     .objective_value = sr.objective_value,
                     .gradient_norm = sr.gradient_norm,
@@ -312,7 +313,7 @@ private:
         {
             if(!retired_[i])
             {
-                results_[i] = solve_result<scalar_type>{
+                results_[i] = solve_result<scalar_type, N>{
                     .status = group_status,
                     .objective_value = solver.state().objective_value,
                     .gradient_norm = 0.0,
@@ -325,12 +326,12 @@ private:
         (fill(Is, std::get<Is>(solvers_)), ...);
     }
 
-    std::tuple<basic_solver<Policies>...> solvers_;
+    std::tuple<basic_solver<Policies, N>...> solvers_;
     Schedule schedule_;
     std::uint32_t max_iterations_{1000};
     std::optional<double> constraint_tolerance_{};
     std::array<bool, sizeof...(Policies)> retired_{};
-    std::array<solve_result<scalar_type>, sizeof...(Policies)> results_{};
+    std::array<solve_result<scalar_type, N>, sizeof...(Policies)> results_{};
 };
 
 }

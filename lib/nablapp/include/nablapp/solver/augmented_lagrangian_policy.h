@@ -20,6 +20,7 @@
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/solver/options.h"
 #include "nablapp/result/step_result.h"
+#include "nablapp/types.h"
 
 #include "nablapp/formulation/concepts.h"
 
@@ -35,10 +36,13 @@
 namespace nablapp
 {
 
-template <typename InnerPolicy = lbfgsb_policy<>>
+template <typename InnerPolicy = lbfgsb_policy<>, int N = dynamic_dimension>
 struct augmented_lagrangian_policy
 {
     using scalar_type = typename InnerPolicy::scalar_type;
+
+    template <int M>
+    using rebind = augmented_lagrangian_policy<InnerPolicy, M>;
 
     struct options_type
     {
@@ -57,7 +61,7 @@ struct augmented_lagrangian_policy
 
     struct state_type
     {
-        Eigen::VectorX<scalar_type> x;
+        Eigen::Vector<scalar_type, N> x;
         scalar_type f{};
         Eigen::VectorX<scalar_type> c_eq;
         Eigen::VectorX<scalar_type> c_ineq;
@@ -68,18 +72,18 @@ struct augmented_lagrangian_policy
         scalar_type mu{};
         scalar_type prev_viol{};
 
-        std::function<scalar_type(const Eigen::VectorX<scalar_type>&)> eval_value;
-        std::function<void(const Eigen::VectorX<scalar_type>&,
-                           Eigen::VectorX<scalar_type>&)> eval_gradient;
-        std::function<void(const Eigen::VectorX<scalar_type>&,
+        std::function<scalar_type(const Eigen::Vector<scalar_type, N>&)> eval_value;
+        std::function<void(const Eigen::Vector<scalar_type, N>&,
+                           Eigen::Vector<scalar_type, N>&)> eval_gradient;
+        std::function<void(const Eigen::Vector<scalar_type, N>&,
                            Eigen::VectorX<scalar_type>&,
                            Eigen::VectorX<scalar_type>&)> eval_constraints;
-        std::function<void(const Eigen::VectorX<scalar_type>&,
+        std::function<void(const Eigen::Vector<scalar_type, N>&,
                            Eigen::MatrixX<scalar_type>&,
                            Eigen::MatrixX<scalar_type>&)> eval_jacobian;
 
-        Eigen::VectorX<scalar_type> lower;
-        Eigen::VectorX<scalar_type> upper;
+        Eigen::Vector<scalar_type, N> lower;
+        Eigen::Vector<scalar_type, N> upper;
 
         int n_eq = 0;
         int n_ineq = 0;
@@ -90,7 +94,7 @@ struct augmented_lagrangian_policy
 
     template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem,
-                    const Eigen::VectorX<scalar_type>& x0,
+                    const Eigen::Vector<scalar_type, N>& x0,
                     const solver_options<Convergence>& solver_opts,
                     const options_type& policy_opts)
     {
@@ -104,7 +108,7 @@ struct augmented_lagrangian_policy
 
     template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&& self, const Problem& problem,
-                    const Eigen::VectorX<scalar_type>& x0,
+                    const Eigen::Vector<scalar_type, N>& x0,
                     const solver_options<Convergence>& /*solver_opts*/)
     {
         static_assert(constrained<Problem, scalar_type>,
@@ -146,19 +150,19 @@ struct augmented_lagrangian_policy
         else
         {
             constexpr scalar_type inf = std::numeric_limits<scalar_type>::infinity();
-            s.lower = Eigen::VectorX<scalar_type>::Constant(n, -inf);
-            s.upper = Eigen::VectorX<scalar_type>::Constant(n, inf);
+            s.lower = Eigen::Vector<scalar_type, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<scalar_type, N>::Constant(n, inf);
         }
 
         // Closures capturing problem by const reference
-        s.eval_value = [&problem](const Eigen::VectorX<scalar_type>& v) {
+        s.eval_value = [&problem](const Eigen::Vector<scalar_type, N>& v) {
             return problem.value(v);
         };
 
         if constexpr(differentiable<Problem, scalar_type>)
         {
-            s.eval_gradient = [&problem](const Eigen::VectorX<scalar_type>& v,
-                                         Eigen::VectorX<scalar_type>& grad) {
+            s.eval_gradient = [&problem](const Eigen::Vector<scalar_type, N>& v,
+                                         Eigen::Vector<scalar_type, N>& grad) {
                 problem.gradient(v, grad);
             };
         }
@@ -167,7 +171,7 @@ struct augmented_lagrangian_policy
         const int n_ineq_cap = s.n_ineq;
 
         s.eval_constraints = [&problem, n_eq_cap, n_ineq_cap](
-            const Eigen::VectorX<scalar_type>& v,
+            const Eigen::Vector<scalar_type, N>& v,
             Eigen::VectorX<scalar_type>& ceq,
             Eigen::VectorX<scalar_type>& cineq)
         {
@@ -180,7 +184,7 @@ struct augmented_lagrangian_policy
         };
 
         s.eval_jacobian = [&problem, n_eq_cap, n_ineq_cap](
-            const Eigen::VectorX<scalar_type>& v,
+            const Eigen::Vector<scalar_type, N>& v,
             Eigen::MatrixX<scalar_type>& Jeq,
             Eigen::MatrixX<scalar_type>& Jineq)
         {
@@ -212,8 +216,7 @@ struct augmented_lagrangian_policy
         Eigen::MatrixX<scalar_type> J_eq, J_ineq;
         s.eval_jacobian(s.x, J_eq, J_ineq);
 
-        // Capture state for the inner subproblem. These references are
-        // safe because the inner solver is local to this function.
+        // Capture state for the inner subproblem
         const auto& lambda_eq = s.lambda_eq;
         const auto& lambda_ineq = s.lambda_ineq;
         const scalar_type mu = s.mu;
@@ -228,10 +231,10 @@ struct augmented_lagrangian_policy
         // Satisfies differentiable + bound_constrained.
         struct subproblem
         {
-            enum : int { problem_dimension = dynamic_dimension };
+            enum : int { problem_dimension = N };
             int dim;
-            const Eigen::VectorX<scalar_type>& lo;
-            const Eigen::VectorX<scalar_type>& hi;
+            const Eigen::Vector<scalar_type, N>& lo;
+            const Eigen::Vector<scalar_type, N>& hi;
 
             const Eigen::VectorX<scalar_type>& lam_eq;
             const Eigen::VectorX<scalar_type>& lam_ineq;
@@ -239,13 +242,13 @@ struct augmented_lagrangian_policy
             int neq;
             int nineq;
 
-            const std::function<scalar_type(const Eigen::VectorX<scalar_type>&)>& ev_value;
-            const std::function<void(const Eigen::VectorX<scalar_type>&,
-                                     Eigen::VectorX<scalar_type>&)>& ev_gradient;
-            const std::function<void(const Eigen::VectorX<scalar_type>&,
+            const std::function<scalar_type(const Eigen::Vector<scalar_type, N>&)>& ev_value;
+            const std::function<void(const Eigen::Vector<scalar_type, N>&,
+                                     Eigen::Vector<scalar_type, N>&)>& ev_gradient;
+            const std::function<void(const Eigen::Vector<scalar_type, N>&,
                                      Eigen::VectorX<scalar_type>&,
                                      Eigen::VectorX<scalar_type>&)>& ev_constraints;
-            const std::function<void(const Eigen::VectorX<scalar_type>&,
+            const std::function<void(const Eigen::Vector<scalar_type, N>&,
                                      Eigen::MatrixX<scalar_type>&,
                                      Eigen::MatrixX<scalar_type>&)>& ev_jacobian;
 
@@ -301,12 +304,13 @@ struct augmented_lagrangian_policy
         std::get<step_tolerance_criterion>(inner_opts.convergence.criteria)
             .threshold = scalar_type(1e-15);
 
-        basic_solver<InnerPolicy> inner_solver{sub, s.x, inner_opts};
+        using rebound_inner = typename InnerPolicy::template rebind<N>;
+        basic_solver<rebound_inner, N> inner_solver{sub, Eigen::VectorX<scalar_type>(s.x), inner_opts};
         auto inner_result = inner_solver.solve(inner_opts);
 
         // Extract solution from inner solver
         scalar_type f_old = s.f;
-        Eigen::VectorX<scalar_type> x_old = s.x;
+        Eigen::Vector<scalar_type, N> x_old = s.x;
         s.x = inner_result.x;
         s.f = eval_value(s.x);
         eval_constraints(s.x, s.c_eq, s.c_ineq);
@@ -316,14 +320,11 @@ struct augmented_lagrangian_policy
 
         scalar_type step_norm = (s.x - x_old).norm();
 
-        // Actual augmented Lagrangian gradient norm at current iterate.
-        // Uses pre-update multipliers so the norm reflects the current
-        // subproblem, not the next one.
-        // (N&W Section 17.4, eq. 17.47 derivative)
+        // Actual augmented Lagrangian gradient norm at current iterate
         scalar_type reported_grad_norm;
         if(s.eval_gradient)
         {
-            Eigen::VectorX<scalar_type> grad_f(n);
+            Eigen::Vector<scalar_type, N> grad_f(n);
             s.eval_gradient(s.x, grad_f);
 
             Eigen::MatrixX<scalar_type> J_eq_new, J_ineq_new;
@@ -336,19 +337,15 @@ struct augmented_lagrangian_policy
         }
         else
         {
-            // Derivative-free inner policy: use step change as proxy
             reported_grad_norm = step_norm;
         }
 
-        // K&W Algorithm 10.2 / N&W Algorithm 17.4:
-        // Always update multipliers. If violation is not decreasing
-        // sufficiently, also decrease mu (increase penalty).
+        // K&W Algorithm 10.2 / N&W Algorithm 17.4
         detail::update_multipliers(
             s.lambda_eq, s.lambda_ineq, s.c_eq, s.c_ineq, s.mu);
 
         if(viol > feas_progress * s.prev_viol)
         {
-            // Insufficient feasibility progress: decrease mu
             s.mu = std::max(s.mu * mu_dec, mu_floor);
         }
         s.prev_viol = viol;
@@ -366,17 +363,16 @@ struct augmented_lagrangian_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorX<scalar_type>& x0)
+    void reset(this auto&&, state_type& s, const Eigen::Vector<scalar_type, N>& x0)
     {
         s.x = x0;
         s.f = s.eval_value(x0);
         s.eval_constraints(x0, s.c_eq, s.c_ineq);
         s.outer_iter = 0;
-        // Preserve multipliers and penalty (hot start)
     }
 
     void reset_clear(this auto&& self, state_type& s,
-                     const Eigen::VectorX<scalar_type>& x0)
+                     const Eigen::Vector<scalar_type, N>& x0)
     {
         self.reset(s, x0);
         s.lambda_eq.setZero();

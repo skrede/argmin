@@ -27,6 +27,7 @@
 #include "nablapp/line_search/options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
+#include "nablapp/types.h"
 
 #include "nablapp/formulation/concepts.h"
 
@@ -42,9 +43,13 @@
 namespace nablapp
 {
 
+template <int N = dynamic_dimension>
 struct nw_sqp_policy
 {
     using scalar_type = double;
+
+    template <int M>
+    using rebind = nw_sqp_policy<M>;
 
     struct options_type
     {
@@ -57,33 +62,34 @@ struct nw_sqp_policy
 
     struct state_type
     {
-        Eigen::VectorXd x;
-        Eigen::VectorXd g;
+        Eigen::Vector<double, N> x;
+        Eigen::Vector<double, N> g;
         Eigen::VectorXd c_eq;
         Eigen::VectorXd c_ineq;
         Eigen::MatrixXd J_eq;
         Eigen::MatrixXd J_ineq;
-        Eigen::VectorXd lower;
-        Eigen::VectorXd upper;
+        Eigen::Vector<double, N> lower;
+        Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
         double objective_value{};
         double sigma{1.0};
-        detail::bfgs_hessian<double> B;
+        detail::bfgs_hessian<double, N> B;
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
 
-        std::function<double(const Eigen::VectorXd&)> eval_value;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_gradient;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&,
+        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
+        std::function<void(const Eigen::Vector<double, N>&,
+                           Eigen::Vector<double, N>&)> eval_gradient;
+        std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&,
                            Eigen::VectorXd&)> eval_constraints;
-        std::function<void(const Eigen::VectorXd&, Eigen::MatrixXd&,
+        std::function<void(const Eigen::Vector<double, N>&, Eigen::MatrixXd&,
                            Eigen::MatrixXd&)> eval_jacobian;
     };
 
     template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem,
-                    const Eigen::VectorXd& x0,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts,
                     const options_type& policy_opts)
     {
@@ -93,7 +99,7 @@ struct nw_sqp_policy
 
     template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&& self, const Problem& problem,
-                    const Eigen::VectorXd& x0,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         static_assert(differentiable<Problem>,
@@ -136,12 +142,12 @@ struct nw_sqp_policy
         else
         {
             constexpr double inf = std::numeric_limits<double>::infinity();
-            s.lower = Eigen::VectorXd::Constant(n, -inf);
-            s.upper = Eigen::VectorXd::Constant(n, inf);
+            s.lower = Eigen::Vector<double, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<double, N>::Constant(n, inf);
         }
 
         // BFGS Hessian of Lagrangian, initialized to I
-        s.B = detail::bfgs_hessian<double>{n};
+        s.B = detail::bfgs_hessian<double, N>{n};
         s.sigma = 1.0;
         s.iteration = 0;
 
@@ -159,11 +165,11 @@ struct nw_sqp_policy
         }
 
         // Closures capturing problem by const reference
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
+        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
             return problem.value(v);
         };
-        s.eval_gradient = [&problem](const Eigen::VectorXd& v,
-                                     Eigen::VectorXd& grad) {
+        s.eval_gradient = [&problem](const Eigen::Vector<double, N>& v,
+                                     Eigen::Vector<double, N>& grad) {
             problem.gradient(v, grad);
         };
 
@@ -171,7 +177,7 @@ struct nw_sqp_policy
         const int n_ineq_cap = s.n_ineq;
 
         s.eval_constraints = [&problem, n_eq_cap, n_ineq_cap](
-            const Eigen::VectorXd& v,
+            const Eigen::Vector<double, N>& v,
             Eigen::VectorXd& ceq, Eigen::VectorXd& cineq)
         {
             const int mtot = n_eq_cap + n_ineq_cap;
@@ -183,7 +189,7 @@ struct nw_sqp_policy
         };
 
         s.eval_jacobian = [&problem, n_eq_cap, n_ineq_cap](
-            const Eigen::VectorXd& v,
+            const Eigen::Vector<double, N>& v,
             Eigen::MatrixXd& Jeq, Eigen::MatrixXd& Jineq)
         {
             const int mtot = n_eq_cap + n_ineq_cap;
@@ -213,28 +219,14 @@ struct nw_sqp_policy
         }
 
         // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
-        //
-        // min 0.5 p^T B p + g^T p
-        // s.t. J_eq p + c_eq = 0      =>  J_eq p = -c_eq
-        // s.t. J_ineq p + c_ineq >= 0 =>  J_ineq p >= -c_ineq
-        //
-        // For solve_qp convention (A_ineq x >= b_ineq):
-        //   A_eq = J_eq, b_eq = -c_eq  (A_eq p = b_eq means J_eq p = -c_eq)
-        //   A_ineq = J_ineq, b_ineq = -c_ineq
-
         Eigen::MatrixXd A_eq = s.J_eq;
         Eigen::VectorXd b_eq = -s.c_eq;
         Eigen::MatrixXd A_ineq = s.J_ineq;
         Eigen::VectorXd b_ineq = -s.c_ineq;
 
-        // Compute feasible starting point for QP.
-        // p0 = 0 is feasible when c_eq = 0 (J_eq * 0 = 0 = -c_eq).
-        // When c_eq != 0, compute minimum-norm point satisfying A_eq p = b_eq:
-        //   p0 = A_eq^T (A_eq A_eq^T)^{-1} b_eq
         Eigen::VectorXd p0 = Eigen::VectorXd::Zero(n);
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
         {
-            // Solve (A_eq A_eq^T) w = b_eq, then p0 = A_eq^T w
             Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
             auto qr = AAt.colPivHouseholderQr();
             Eigen::VectorXd w = qr.solve(b_eq);
@@ -255,23 +247,21 @@ struct nw_sqp_policy
 
         if(has_finite_bounds)
         {
-            // Box constraints on p: (lower - x) <= p <= (upper - x)
-            Eigen::VectorXd p_lower = s.lower - s.x;
-            Eigen::VectorXd p_upper = s.upper - s.x;
-            // Clamp p0 to box
+            Eigen::VectorXd p_lower = Eigen::VectorXd(s.lower) - Eigen::VectorXd(s.x);
+            Eigen::VectorXd p_upper = Eigen::VectorXd(s.upper) - Eigen::VectorXd(s.x);
             p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
-            qp = detail::solve_qp(s.B.hessian(), s.g,
+            qp = detail::solve_qp(s.B.hessian(), Eigen::VectorXd(s.g),
                                   A_eq, b_eq, A_ineq, b_ineq,
                                   p_lower, p_upper, p0, qp_opts);
         }
         else
         {
-            qp = detail::solve_qp(s.B.hessian(), s.g,
+            qp = detail::solve_qp(s.B.hessian(), Eigen::VectorXd(s.g),
                                   A_eq, b_eq, A_ineq, b_ineq,
                                   p0, qp_opts);
         }
 
-        Eigen::VectorXd p = qp.x;
+        Eigen::Vector<double, N> p = qp.x;
 
         // Zero step check
         if(p.norm() < 1e-15)
@@ -287,8 +277,6 @@ struct nw_sqp_policy
         }
 
         // --- 2. Extract QP multipliers ---
-        // QP lambda covers [equality; inequality] constraints.
-        // Box constraint multipliers from the augmented system are ignored.
         Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
         if(m > 0 && qp.lambda.size() >= m)
             lambda_new = qp.lambda.head(m);
@@ -304,21 +292,19 @@ struct nw_sqp_policy
         double dphi0 = detail::l1_merit_directional_derivative(
             s.g.dot(p), s.c_eq, s.c_ineq, s.sigma);
 
-        // Backtracking Armijo on L1 merit (robust for non-smooth merit)
-        // using embedded line search options
+        // Backtracking Armijo on L1 merit using embedded line search options
         double alpha = 1.0;
         const double ls_c1 = self.options.line_search.c1;
         const double ls_rho = self.options.line_search.rho;
         const std::uint16_t max_ls = self.options.line_search.max_iterations;
 
-        Eigen::VectorXd x_trial(n);
+        Eigen::Vector<double, N> x_trial(n);
         Eigen::VectorXd c_eq_trial, c_ineq_trial;
 
         for(std::uint16_t ls = 0; ls < max_ls; ++ls)
         {
             x_trial = s.x + alpha * p;
 
-            // Project to box bounds if present
             if(has_finite_bounds)
                 x_trial = detail::project(x_trial, s.lower, s.upper);
 
@@ -334,9 +320,8 @@ struct nw_sqp_policy
         }
 
         // --- 5. Compute BFGS update vectors ---
-        // s_k = x_{k+1} - x_k
-        Eigen::VectorXd x_old = s.x;
-        Eigen::VectorXd g_old = s.g;
+        Eigen::Vector<double, N> x_old = s.x;
+        Eigen::Vector<double, N> g_old = s.g;
         double f_old = s.objective_value;
 
         s.x = x_trial;
@@ -345,12 +330,10 @@ struct nw_sqp_policy
         s.eval_constraints(s.x, s.c_eq, s.c_ineq);
         s.eval_jacobian(s.x, s.J_eq, s.J_ineq);
 
-        Eigen::VectorXd sk = s.x - x_old;
+        Eigen::Vector<double, N> sk = s.x - x_old;
 
         // Lagrangian gradient at new and old points using new multipliers
-        // y = grad_L(x_{k+1}, lambda_{k+1}) - grad_L(x_k, lambda_{k+1})
-        // N&W eq. 18.13 / Section 18.4
-        Eigen::VectorXd grad_L_new, grad_L_old;
+        Eigen::Vector<double, N> grad_L_new, grad_L_old;
         if(m > 0)
         {
             Eigen::MatrixXd A_new_full(m, n);
@@ -359,9 +342,6 @@ struct nw_sqp_policy
 
             grad_L_new = detail::lagrangian_gradient(s.g, A_new_full,
                                                      lambda_new);
-            // For grad_L_old, we use g_old and A_new_full (quasi-Newton
-            // approximation -- the Jacobian at x_old is no longer available,
-            // but using A_{k+1} is standard in practical SQP, see N&W p. 539)
             grad_L_old = detail::lagrangian_gradient(g_old, A_new_full,
                                                      lambda_new);
         }
@@ -371,10 +351,9 @@ struct nw_sqp_policy
             grad_L_old = g_old;
         }
 
-        Eigen::VectorXd yk = grad_L_new - grad_L_old;
+        Eigen::Vector<double, N> yk = grad_L_new - grad_L_old;
 
         // --- 6. Damped BFGS update (N&W Procedure 18.2) ---
-        // Pass embedded bfgs options for Powell damping parameters
         if(sk.norm() > 1e-15)
             s.B.update(sk, yk, self.options.bfgs);
 
@@ -398,7 +377,7 @@ struct nw_sqp_policy
     }
 
     // Hot start -- preserves BFGS Hessian.
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.objective_value = s.eval_value(x0);
@@ -406,12 +385,11 @@ struct nw_sqp_policy
         s.eval_constraints(x0, s.c_eq, s.c_ineq);
         s.eval_jacobian(x0, s.J_eq, s.J_ineq);
         s.iteration = 0;
-        // B is NOT reset -- preserves curvature
     }
 
     // Cold restart -- clears BFGS Hessian.
     void reset_clear(this auto&& self, state_type& s,
-                     const Eigen::VectorXd& x0)
+                     const Eigen::Vector<double, N>& x0)
     {
         self.reset(s, x0);
         s.B.reset();
@@ -420,9 +398,8 @@ struct nw_sqp_policy
     }
 
 private:
-    // Check if box bounds contain any finite values.
-    static bool has_finite_box(const Eigen::VectorXd& lower,
-                               const Eigen::VectorXd& upper)
+    static bool has_finite_box(const Eigen::Vector<double, N>& lower,
+                               const Eigen::Vector<double, N>& upper)
     {
         constexpr double inf = std::numeric_limits<double>::infinity();
         for(int i = 0; i < lower.size(); ++i)
@@ -433,7 +410,6 @@ private:
         return false;
     }
 
-    // Compute Lagrangian gradient norm at current state.
     static double lagrangian_gradient_norm(const state_type& s)
     {
         const int n = static_cast<int>(s.x.size());

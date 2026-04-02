@@ -21,6 +21,7 @@
 #include "nablapp/derivative/finite_difference.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
+#include "nablapp/types.h"
 
 #include "nablapp/formulation/concepts.h"
 
@@ -36,9 +37,13 @@
 namespace nablapp
 {
 
+template <int N = dynamic_dimension>
 struct lm_policy
 {
     using scalar_type = double;
+
+    template <int M>
+    using rebind = lm_policy<M>;
 
     struct options_type
     {
@@ -55,23 +60,24 @@ struct lm_policy
 
     struct state_type
     {
-        Eigen::VectorXd x;
+        Eigen::Vector<double, N> x;
         double objective_value{};     // 0.5 * ||r||^2
         double lambda{};              // damping parameter
         double nu{2.0};              // lambda multiplier on rejection
-        Eigen::VectorXd r;           // current residuals
-        Eigen::MatrixXd J;           // current Jacobian
+        Eigen::VectorXd r;           // current residuals (m-dimensional, stays dynamic)
+        Eigen::MatrixXd J;           // current Jacobian (m x n, stays dynamic for concept compat)
         double initial_objective{};  // for divergence detection
         std::uint32_t iteration{0};
 
-        std::function<double(const Eigen::VectorXd&)> eval_value;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_residuals;
-        std::function<void(const Eigen::VectorXd&, Eigen::MatrixXd&)> eval_jacobian;
+        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
+        std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&)> eval_residuals;
+        std::function<void(const Eigen::Vector<double, N>&, Eigen::MatrixXd&)> eval_jacobian;
         int num_residuals{};
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
@@ -79,7 +85,8 @@ struct lm_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         state_type s;
@@ -89,10 +96,10 @@ struct lm_policy
         s.num_residuals = problem.num_residuals();
 
         // Capture closures (problem must outlive solver)
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
+        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
             return problem.value(v);
         };
-        s.eval_residuals = [&problem](const Eigen::VectorXd& v, Eigen::VectorXd& rr) {
+        s.eval_residuals = [&problem](const Eigen::Vector<double, N>& v, Eigen::VectorXd& rr) {
             problem.residuals(v, rr);
         };
 
@@ -101,18 +108,18 @@ struct lm_policy
                          p.jacobian(xx, JJ);
                      })
         {
-            s.eval_jacobian = [&problem](const Eigen::VectorXd& v, Eigen::MatrixXd& JJ) {
+            s.eval_jacobian = [&problem](const Eigen::Vector<double, N>& v, Eigen::MatrixXd& JJ) {
                 problem.jacobian(v, JJ);
             };
         }
         else
         {
             const int m = s.num_residuals;
-            s.eval_jacobian = [&problem, m](const Eigen::VectorXd& v, Eigen::MatrixXd& JJ) {
+            s.eval_jacobian = [&problem, m](const Eigen::Vector<double, N>& v, Eigen::MatrixXd& JJ) {
                 auto residual_fn = [&problem](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
                     problem.residuals(xx, rr);
                 };
-                fd_jacobian(residual_fn, v, JJ, m);
+                fd_jacobian(residual_fn, Eigen::VectorXd(v), JJ, m);
             };
         }
 
@@ -152,20 +159,20 @@ struct lm_policy
         const double damp_factor = self.options.damping_factor.value_or(1.0 / 3.0);
 
         // Gauss-Newton Hessian approximation
-        Eigen::MatrixXd H = (s.J.transpose() * s.J).eval();
+        Eigen::Matrix<double, N, N> H = (s.J.transpose() * s.J).eval();
 
         // Gradient of 0.5*||r||^2: g = J^T * r
-        Eigen::VectorXd g = (s.J.transpose() * s.r).eval();
+        Eigen::Vector<double, N> g = (s.J.transpose() * s.r).eval();
 
         // Diagonal-scaled damping (K&W Eq. 6.11)
         for(int i = 0; i < n; ++i)
             H(i, i) += s.lambda * std::max(H(i, i), diag_min);
 
         // Solve damped normal equations via LDLT (D-07)
-        Eigen::VectorXd h = H.ldlt().solve(-g);
+        Eigen::Vector<double, N> h = H.ldlt().solve(-g);
 
         // Trial point
-        Eigen::VectorXd x_trial = (s.x + h).eval();
+        Eigen::Vector<double, N> x_trial = (s.x + h).eval();
 
         // Evaluate trial residuals
         Eigen::VectorXd r_trial(s.num_residuals);
@@ -229,7 +236,7 @@ struct lm_policy
         };
     }
 
-    void reset(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.r.resize(s.num_residuals);
@@ -248,7 +255,7 @@ struct lm_policy
         s.iteration = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         self.reset(s, x0);
     }

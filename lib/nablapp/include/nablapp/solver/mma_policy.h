@@ -18,6 +18,7 @@
 #include "nablapp/options/mma_subproblem_options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
+#include "nablapp/types.h"
 
 #include "nablapp/formulation/concepts.h"
 
@@ -26,6 +27,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -33,9 +35,13 @@
 namespace nablapp
 {
 
+template <int N = dynamic_dimension>
 struct mma_policy
 {
     using scalar_type = double;
+
+    template <int M>
+    using rebind = mma_policy<M>;
 
     struct options_type
     {
@@ -51,29 +57,30 @@ struct mma_policy
 
     struct state_type
     {
-        Eigen::VectorXd x, g;
+        Eigen::Vector<double, N> x, g;
         double f{};
         Eigen::VectorXd c_eq, c_ineq;
         Eigen::MatrixXd J_ineq;
 
-        Eigen::VectorXd L, U;
-        Eigen::VectorXd x_old1, x_old2;
-        Eigen::VectorXd lower, upper;
+        Eigen::Vector<double, N> L, U;
+        Eigen::Vector<double, N> x_old1, x_old2;
+        Eigen::Vector<double, N> lower, upper;
 
         std::uint32_t iteration{0};
         options_type opts;
 
-        std::function<double(const Eigen::VectorXd&)> eval_value;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_gradient;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&,
+        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
+        std::function<void(const Eigen::Vector<double, N>&,
+                           Eigen::Vector<double, N>&)> eval_gradient;
+        std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&,
                            Eigen::VectorXd&)> eval_constraints;
-        std::function<void(const Eigen::VectorXd&, Eigen::MatrixXd&,
+        std::function<void(const Eigen::Vector<double, N>&, Eigen::MatrixXd&,
                            Eigen::MatrixXd&)> eval_jacobian;
     };
 
     template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem,
-                    const Eigen::VectorXd& x0,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts,
                     const options_type& policy_opts)
     {
@@ -93,7 +100,7 @@ struct mma_policy
 
     template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&&, const Problem& problem,
-                    const Eigen::VectorXd& x0,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         static_assert(differentiable<Problem>,
@@ -140,8 +147,8 @@ struct mma_policy
         else
         {
             constexpr double inf = std::numeric_limits<double>::infinity();
-            s.lower = Eigen::VectorXd::Constant(n, -inf);
-            s.upper = Eigen::VectorXd::Constant(n, inf);
+            s.lower = Eigen::Vector<double, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<double, N>::Constant(n, inf);
         }
 
         // Initialize asymptotes
@@ -161,17 +168,17 @@ struct mma_policy
         s.iteration = 0;
 
         // Closures capturing problem by const reference
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
+        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
             return problem.value(v);
         };
-        s.eval_gradient = [&problem](const Eigen::VectorXd& v,
-                                     Eigen::VectorXd& grad) {
+        s.eval_gradient = [&problem](const Eigen::Vector<double, N>& v,
+                                     Eigen::Vector<double, N>& grad) {
             problem.gradient(v, grad);
         };
 
         const int n_ineq_cap = m_ineq;
         s.eval_constraints = [&problem, n_ineq_cap](
-            const Eigen::VectorXd& v,
+            const Eigen::Vector<double, N>& v,
             Eigen::VectorXd& ceq, Eigen::VectorXd& cineq)
         {
             ceq = Eigen::VectorXd{};
@@ -181,7 +188,7 @@ struct mma_policy
         };
 
         s.eval_jacobian = [&problem, n_ineq_cap](
-            const Eigen::VectorXd& v,
+            const Eigen::Vector<double, N>& v,
             Eigen::MatrixXd& Jeq, Eigen::MatrixXd& Jineq)
         {
             Jeq = Eigen::MatrixXd{};
@@ -215,8 +222,8 @@ struct mma_policy
         }
 
         // 1. Update asymptotes, passing embedded options
-        Eigen::VectorXd x_min_eff = effective_bounds(s.lower, s.x, n, false, eff_scale);
-        Eigen::VectorXd x_max_eff = effective_bounds(s.upper, s.x, n, true, eff_scale);
+        Eigen::Vector<double, N> x_min_eff = effective_bounds(s.lower, s.x, n, false, eff_scale);
+        Eigen::Vector<double, N> x_max_eff = effective_bounds(s.upper, s.x, n, true, eff_scale);
 
         detail::update_asymptotes(
             s.L, s.U, s.x, s.x_old1, s.x_old2,
@@ -236,7 +243,7 @@ struct mma_policy
             s.opts.subproblem);
 
         // 3. Solve dual subproblem, passing embedded options
-        Eigen::VectorXd x_new = detail::mma_dual_solve(
+        Eigen::Vector<double, N> x_new = detail::mma_dual_solve(
             coeffs, s.L, s.U, x_min_eff, x_max_eff,
             s.opts.subproblem);
 
@@ -281,7 +288,7 @@ struct mma_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.f = s.eval_value(x0);
@@ -295,7 +302,7 @@ struct mma_policy
     }
 
     void reset_clear(this auto&& self, state_type& s,
-                     const Eigen::VectorXd& x0)
+                     const Eigen::Vector<double, N>& x0)
     {
         self.reset(s, x0);
         const int n = static_cast<int>(x0.size());
@@ -321,12 +328,12 @@ private:
         return std::max(hi - lo, 1e-10);
     }
 
-    static Eigen::VectorXd effective_bounds(
-        const Eigen::VectorXd& bounds, const Eigen::VectorXd& x,
+    static Eigen::Vector<double, N> effective_bounds(
+        const Eigen::Vector<double, N>& bounds, const Eigen::Vector<double, N>& x,
         int n, bool is_upper, double scale = 10.0)
     {
         constexpr double inf = std::numeric_limits<double>::infinity();
-        Eigen::VectorXd result(n);
+        Eigen::Vector<double, N> result(n);
         for(int j = 0; j < n; ++j)
         {
             if(is_upper && bounds[j] >= inf)

@@ -20,6 +20,7 @@
 #include "nablapp/options/mma_subproblem_options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
+#include "nablapp/types.h"
 
 #include "nablapp/formulation/concepts.h"
 
@@ -36,13 +37,17 @@
 namespace nablapp
 {
 
+template <int N = dynamic_dimension>
 struct gcmma_policy
 {
     using scalar_type = double;
 
+    template <int M>
+    using rebind = gcmma_policy<M>;
+
     struct options_type
     {
-        mma_policy::options_type mma_opts{};
+        typename mma_policy<N>::options_type mma_opts{};
         std::optional<std::uint16_t> max_inner_iterations{};    // default: 15 (Svanberg 2002)
         std::optional<double> raa0{};                           // default: 1e-5 (Svanberg 2002)
         std::optional<double> tighten_factor{};                 // default: 0.7 (Svanberg 2002)
@@ -55,12 +60,12 @@ struct gcmma_policy
 
     struct state_type
     {
-        mma_policy::state_type mma_state;
+        typename mma_policy<N>::state_type mma_state;
         options_type opts;
 
         // Proxy members for basic_solver compatibility (it accesses state_.x,
         // state_.c_eq, state_.c_ineq directly).
-        Eigen::VectorXd& x = mma_state.x;
+        Eigen::Vector<double, N>& x = mma_state.x;
         Eigen::VectorXd& c_eq = mma_state.c_eq;
         Eigen::VectorXd& c_ineq = mma_state.c_ineq;
 
@@ -95,7 +100,7 @@ struct gcmma_policy
 
     template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem,
-                    const Eigen::VectorXd& x0,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& sopts,
                     const options_type& policy_opts)
     {
@@ -108,11 +113,11 @@ struct gcmma_policy
 
     template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&&, const Problem& problem,
-                    const Eigen::VectorXd& x0,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& sopts)
     {
         state_type s;
-        s.mma_state = mma_policy{}.init(problem, x0, sopts);
+        s.mma_state = mma_policy<N>{}.init(problem, x0, sopts);
         return s;
     }
 
@@ -143,8 +148,8 @@ struct gcmma_policy
         }
 
         // Effective bounds for asymptote update
-        Eigen::VectorXd x_min_eff = effective_bounds(ms.lower, ms.x, n, false, eff_scale);
-        Eigen::VectorXd x_max_eff = effective_bounds(ms.upper, ms.x, n, true, eff_scale);
+        Eigen::Vector<double, N> x_min_eff = effective_bounds(ms.lower, ms.x, n, false, eff_scale);
+        Eigen::Vector<double, N> x_max_eff = effective_bounds(ms.upper, ms.x, n, true, eff_scale);
 
         // Update asymptotes, passing embedded options
         detail::update_asymptotes(
@@ -154,14 +159,14 @@ struct gcmma_policy
             s.opts.asymptote);
 
         // Work with copies of L, U for inner tightening
-        Eigen::VectorXd L_inner = ms.L;
-        Eigen::VectorXd U_inner = ms.U;
+        Eigen::Vector<double, N> L_inner = ms.L;
+        Eigen::Vector<double, N> U_inner = ms.U;
 
         // MMA convention: g_i <= 0 form
         Eigen::VectorXd g_mma = -ms.c_ineq;
         Eigen::MatrixXd dg_mma = -ms.J_ineq;
 
-        Eigen::VectorXd x_trial(n);
+        Eigen::Vector<double, N> x_trial(n);
         double f_trial{};
         Eigen::VectorXd c_ineq_trial(m);
 
@@ -261,14 +266,14 @@ struct gcmma_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
     {
-        mma_policy{}.reset(s.mma_state, x0);
+        mma_policy<N>{}.reset(s.mma_state, x0);
     }
 
-    void reset_clear(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
     {
-        mma_policy{}.reset_clear(s.mma_state, x0);
+        mma_policy<N>{}.reset_clear(s.mma_state, x0);
     }
 
 private:
@@ -284,12 +289,12 @@ private:
         return std::max(hi - lo, 1e-10);
     }
 
-    static Eigen::VectorXd effective_bounds(
-        const Eigen::VectorXd& bounds, const Eigen::VectorXd& x,
+    static Eigen::Vector<double, N> effective_bounds(
+        const Eigen::Vector<double, N>& bounds, const Eigen::Vector<double, N>& x,
         int n, bool is_upper, double scale = 10.0)
     {
         constexpr double inf = std::numeric_limits<double>::infinity();
-        Eigen::VectorXd result(n);
+        Eigen::Vector<double, N> result(n);
         for(int j = 0; j < n; ++j)
         {
             if(is_upper && bounds[j] >= inf)

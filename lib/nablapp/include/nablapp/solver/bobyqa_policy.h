@@ -23,6 +23,7 @@
 #include "nablapp/options/trust_region_options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
+#include "nablapp/types.h"
 
 #include "nablapp/formulation/concepts.h"
 
@@ -38,9 +39,13 @@
 namespace nablapp
 {
 
+template <int N = dynamic_dimension>
 struct bobyqa_policy
 {
     using scalar_type = double;
+
+    template <int M>
+    using rebind = bobyqa_policy<M>;
 
     struct options_type
     {
@@ -55,11 +60,11 @@ struct bobyqa_policy
 
     struct state_type
     {
-        Eigen::VectorXd x;
-        Eigen::VectorXd lower;
-        Eigen::VectorXd upper;
+        Eigen::Vector<double, N> x;
+        Eigen::Vector<double, N> lower;
+        Eigen::Vector<double, N> upper;
         double objective_value{};
-        Eigen::MatrixXd Y;
+        Eigen::Matrix<double, N, Eigen::Dynamic> Y;
         Eigen::VectorXd f_values;
         detail::quadratic_model<double> model;
         double delta{};
@@ -69,12 +74,13 @@ struct bobyqa_policy
         int m{};
         bool initialized{false};
 
-        std::function<double(const Eigen::VectorXd&)> eval_value;
+        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
     };
 
     template <typename Problem, typename Convergence>
         requires objective<Problem> && bound_constrained<Problem>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
@@ -83,7 +89,8 @@ struct bobyqa_policy
 
     template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && bound_constrained<Problem>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
@@ -95,7 +102,7 @@ struct bobyqa_policy
         // Project x0 to feasible region
         s.x = detail::project(x0, s.lower, s.upper);
 
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
+        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
             return problem.value(v);
         };
 
@@ -134,7 +141,7 @@ struct bobyqa_policy
 
         for(int i = 0; i < n && (1 + i) < s.m; ++i)
         {
-            Eigen::VectorXd pt = s.x;
+            Eigen::Vector<double, N> pt = s.x;
             pt[i] = std::min(pt[i] + h, s.upper[i]);
             // If positive step hits the bound, try negative
             if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
@@ -145,7 +152,7 @@ struct bobyqa_policy
 
         for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
         {
-            Eigen::VectorXd pt = s.x;
+            Eigen::Vector<double, N> pt = s.x;
             pt[i] = std::max(pt[i] - h, s.lower[i]);
             // If negative step hits the bound, try positive
             if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
@@ -178,10 +185,10 @@ struct bobyqa_policy
         double step_conv_factor = self.options.step_convergence_factor.value_or(1e-3);
 
         // Model gradient at current best point
-        Eigen::VectorXd mg = detail::model_gradient(s.model, s.x);
+        Eigen::Vector<double, N> mg = detail::model_gradient(s.model, s.x);
 
         // Solve trust-region subproblem
-        Eigen::VectorXd d = detail::solve_trust_region_box(
+        Eigen::Vector<double, N> d = detail::solve_trust_region_box(
             mg, s.model.H, s.x, s.delta, s.lower, s.upper);
 
         double d_norm = d.norm();
@@ -200,7 +207,7 @@ struct bobyqa_policy
         }
 
         // Trial point
-        Eigen::VectorXd x_new = detail::project(
+        Eigen::Vector<double, N> x_new = detail::project(
             (s.x + d).eval(), s.lower, s.upper);
         double f_new = s.eval_value(x_new);
 
@@ -240,7 +247,7 @@ struct bobyqa_policy
         if(g_idx >= 0)
         {
             // Replace with a geometry-improving point midway between x_k and the far point
-            Eigen::VectorXd geo_pt = detail::project(
+            Eigen::Vector<double, N> geo_pt = detail::project(
                 (0.5 * (s.x + s.Y.col(g_idx))).eval(), s.lower, s.upper);
             double geo_f = s.eval_value(geo_pt);
             s.Y.col(g_idx) = geo_pt;
@@ -284,13 +291,13 @@ struct bobyqa_policy
 
     // Cold restart -- BOBYQA has no warm-start mode since the interpolation
     // set is point-specific.
-    void reset(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         // BOBYQA cannot warm-start; delegate to full reset
         self.reset_clear(s, x0);
     }
 
-    void reset_clear(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
         s.x = detail::project(x0, s.lower, s.upper);
@@ -305,7 +312,7 @@ struct bobyqa_policy
 
         for(int i = 0; i < n && (1 + i) < s.m; ++i)
         {
-            Eigen::VectorXd pt = s.x;
+            Eigen::Vector<double, N> pt = s.x;
             pt[i] = std::min(pt[i] + h, s.upper[i]);
             if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
                 pt[i] = std::max(s.x[i] - h, s.lower[i]);
@@ -315,7 +322,7 @@ struct bobyqa_policy
 
         for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
         {
-            Eigen::VectorXd pt = s.x;
+            Eigen::Vector<double, N> pt = s.x;
             pt[i] = std::max(pt[i] - h, s.lower[i]);
             if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
                 pt[i] = std::min(s.x[i] + h, s.upper[i]);
