@@ -14,6 +14,7 @@
 //            N&W Procedure 18.2, eq. 18.22-18.24 (Powell damping);
 //            N&W Section 18.4 (Hessian of augmented Lagrangian).
 
+#include "nablapp/types.h"
 #include "nablapp/options/bfgs_options.h"
 
 #include <Eigen/Core>
@@ -23,12 +24,12 @@
 namespace nablapp::detail
 {
 
-template <typename Scalar = double>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
 class bfgs_hessian
 {
 public:
     explicit bfgs_hessian(int n = 0)
-        : B_(Eigen::MatrixX<Scalar>::Identity(n, n))
+        : B_(Eigen::Matrix<Scalar, N, N>::Identity(n, n))
     {}
 
     // Damped BFGS direct update.
@@ -46,11 +47,11 @@ public:
     //   5. B_{k+1} = B - Bs Bs^T / sBs + r r^T / (s^T r)
     //
     // Reference: N&W eq. 8.19, Procedure 18.2.
-    void update(const Eigen::VectorX<Scalar>& s,
-                const Eigen::VectorX<Scalar>& y,
+    void update(const Eigen::Vector<Scalar, N>& s,
+                const Eigen::Vector<Scalar, N>& y,
                 const bfgs_options& opts = {})
     {
-        Eigen::VectorX<Scalar> Bs = B_ * s;
+        Eigen::Vector<Scalar, N> Bs = (B_ * s).eval();
         Scalar sBs = s.dot(Bs);
 
         // Guard against degenerate step
@@ -63,7 +64,7 @@ public:
         const auto damp_thr = static_cast<Scalar>(opts.damping_threshold.value_or(0.2));
         const auto damp_fac = static_cast<Scalar>(opts.damping_factor.value_or(0.8));
 
-        Eigen::VectorX<Scalar> r;
+        Eigen::Vector<Scalar, N> r;
         if(sTy >= damp_thr * sBs)
         {
             r = y;
@@ -71,7 +72,7 @@ public:
         else
         {
             Scalar theta = damp_fac * sBs / (sBs - sTy);
-            r = theta * y + (Scalar(1) - theta) * Bs;
+            r = (theta * y + (Scalar(1) - theta) * Bs).eval();
         }
 
         Scalar sTr = s.dot(r);
@@ -82,9 +83,9 @@ public:
         B_ += -Bs * Bs.transpose() / sBs + r * r.transpose() / sTr;
     }
 
-    const Eigen::MatrixX<Scalar>& hessian() const { return B_; }
+    const Eigen::Matrix<Scalar, N, N>& hessian() const { return B_; }
 
-    Eigen::VectorX<Scalar> multiply(const Eigen::VectorX<Scalar>& v) const
+    Eigen::Vector<Scalar, N> multiply(const Eigen::Vector<Scalar, N>& v) const
     {
         return (B_ * v).eval();
     }
@@ -92,13 +93,13 @@ public:
     void reset()
     {
         const int n = static_cast<int>(B_.rows());
-        B_ = Eigen::MatrixX<Scalar>::Identity(n, n);
+        B_ = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
     }
 
     int dimension() const { return static_cast<int>(B_.rows()); }
 
 private:
-    Eigen::MatrixX<Scalar> B_;
+    Eigen::Matrix<Scalar, N, N> B_;
 };
 
 }

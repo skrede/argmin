@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_NABLAPP_DETAIL_BOUND_PROJECTION_H
 #define HPP_GUARD_NABLAPP_DETAIL_BOUND_PROJECTION_H
 
+#include "nablapp/types.h"
+
 #include <Eigen/Core>
 
 #include <algorithm>
@@ -14,10 +16,10 @@ namespace nablapp::detail
 //
 // Reference: N&W Section 16.6, definition of P(x, l, u).
 
-template <typename Scalar = double>
-Eigen::VectorX<Scalar> project(const Eigen::VectorX<Scalar>& x,
-                                const Eigen::VectorX<Scalar>& lower,
-                                const Eigen::VectorX<Scalar>& upper)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> project(const Eigen::Vector<Scalar, N>& x,
+                                 const Eigen::Vector<Scalar, N>& lower,
+                                 const Eigen::Vector<Scalar, N>& upper)
 {
     return x.cwiseMax(lower).cwiseMin(upper).eval();
 }
@@ -28,11 +30,11 @@ Eigen::VectorX<Scalar> project(const Eigen::VectorX<Scalar>& x,
 //
 // Reference: Byrd et al. 1995, N&W Section 16.6.
 
-template <typename Scalar = double>
-Scalar compute_alpha_max(const Eigen::VectorX<Scalar>& x,
-                          const Eigen::VectorX<Scalar>& d,
-                          const Eigen::VectorX<Scalar>& lower,
-                          const Eigen::VectorX<Scalar>& upper)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Scalar compute_alpha_max(const Eigen::Vector<Scalar, N>& x,
+                          const Eigen::Vector<Scalar, N>& d,
+                          const Eigen::Vector<Scalar, N>& lower,
+                          const Eigen::Vector<Scalar, N>& upper)
 {
     Scalar alpha = std::numeric_limits<Scalar>::infinity();
     const int n = x.size();

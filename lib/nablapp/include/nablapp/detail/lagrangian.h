@@ -10,6 +10,8 @@
 //            N&W eq. 15.24 / 17.44 (constraint violation);
 //            N&W eq. 18.15 (multiplier estimation).
 
+#include "nablapp/types.h"
+
 #include <Eigen/Core>
 #include <Eigen/QR>
 
@@ -26,10 +28,10 @@ namespace nablapp::detail
 // grad_x L = grad_f - A^T lambda.
 //
 // Reference: N&W eq. 18.2-18.3.
-template <typename Scalar>
-Eigen::VectorX<Scalar> lagrangian_gradient(
-    const Eigen::VectorX<Scalar>& grad_f,
-    const Eigen::MatrixX<Scalar>& A,
+template <typename Scalar, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> lagrangian_gradient(
+    const Eigen::Vector<Scalar, N>& grad_f,
+    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A,
     const Eigen::VectorX<Scalar>& lambda)
 {
     if(A.rows() == 0)
@@ -64,10 +66,10 @@ Scalar constraint_violation(
 // Uses ColPivHouseholderQR for numerical robustness.
 //
 // Reference: N&W eq. 18.15.
-template <typename Scalar>
+template <typename Scalar, int N = nablapp::dynamic_dimension>
 Eigen::VectorX<Scalar> estimate_multipliers(
-    const Eigen::VectorX<Scalar>& grad_f,
-    const Eigen::MatrixX<Scalar>& A)
+    const Eigen::Vector<Scalar, N>& grad_f,
+    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A)
 {
     if(A.rows() == 0)
         return Eigen::VectorX<Scalar>{};

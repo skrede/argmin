@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_NABLAPP_DETAIL_COMPACT_LBFGS_H
 #define HPP_GUARD_NABLAPP_DETAIL_COMPACT_LBFGS_H
 
+#include "nablapp/types.h"
+
 #include <Eigen/Core>
 #include <Eigen/Cholesky>
 
@@ -24,7 +26,7 @@ namespace nablapp::detail
 //            N&W Algorithm 9.1 (two-loop recursion),
 //            Byrd, Lu, Nocedal, Zhu 1995 (L-BFGS-B algorithm).
 
-template <typename Scalar = double>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
 class compact_lbfgs
 {
 public:
@@ -35,7 +37,7 @@ public:
     }
 
     // Add a new (s, y) pair. Rejects pairs with s^T y <= 0 (curvature guard).
-    void push(const Eigen::VectorX<Scalar>& s, const Eigen::VectorX<Scalar>& y)
+    void push(const Eigen::Vector<Scalar, N>& s, const Eigen::Vector<Scalar, N>& y)
     {
         Scalar sTy = s.dot(y);
         if(sTy <= Scalar(0)) return;
@@ -82,7 +84,7 @@ public:
     // Compute B*v = theta*v - W * M^{-1} * W^T * v.
     // W = [theta*S, Y], M = [[theta*S^T*S, L], [L^T, -D]].
     // Reference: N&W Section 9.2, eq. 9.15.
-    Eigen::VectorX<Scalar> multiply(const Eigen::VectorX<Scalar>& v) const
+    Eigen::Vector<Scalar, N> multiply(const Eigen::Vector<Scalar, N>& v) const
     {
         if(count_ == 0) return (theta_ * v).eval();
 
@@ -101,7 +103,7 @@ public:
         Eigen::VectorX<Scalar> z = ldlt.solve(Wv);
 
         // B*v = theta*v - W*z
-        Eigen::VectorX<Scalar> Wz = theta_ * (S * z.head(k)) + Y * z.tail(k);
+        Eigen::Vector<Scalar, N> Wz = (theta_ * (S * z.head(k)) + Y * z.tail(k)).eval();
         return (theta_ * v - Wz).eval();
     }
 
@@ -142,12 +144,12 @@ public:
     // Two-loop recursion computing H_k * g (N&W Algorithm 9.1).
     // Returns H*g without negation; caller negates for search direction.
     // Uses the same (s,y) storage as the compact form.
-    Eigen::VectorX<Scalar> two_loop_recursion(const Eigen::VectorX<Scalar>& g) const
+    Eigen::Vector<Scalar, N> two_loop_recursion(const Eigen::Vector<Scalar, N>& g) const
     {
         if(count_ == 0) return g;
 
         const int k = count_;
-        Eigen::VectorX<Scalar> q = g;
+        Eigen::Vector<Scalar, N> q = g;
         std::vector<Scalar> alpha(k);
 
         // Backward loop (N&W Algorithm 9.1, step 1)
@@ -159,7 +161,7 @@ public:
 
         // Initial Hessian scaling: gamma = s^T y / y^T y = 1/theta
         Scalar gamma = Scalar(1) / theta_;
-        Eigen::VectorX<Scalar> r = gamma * q;
+        Eigen::Vector<Scalar, N> r = (gamma * q).eval();
 
         // Forward loop (N&W Algorithm 9.1, step 3)
         for(int j = 0; j < k; ++j)
@@ -213,11 +215,11 @@ private:
         return M;
     }
 
-    Eigen::MatrixX<Scalar> S_;           // n x capacity_ (displacement vectors)
-    Eigen::MatrixX<Scalar> Y_;           // n x capacity_ (gradient differences)
-    Eigen::MatrixX<Scalar> L_;           // capacity_ x capacity_ (strictly lower triangular)
-    Eigen::VectorX<Scalar> D_;           // capacity_ (diagonal: s_i^T y_i)
-    std::vector<Scalar> rho_;            // 1 / (s_i^T y_i) for two-loop recursion
+    Eigen::Matrix<Scalar, N, Eigen::Dynamic> S_;  // n x capacity_ (displacement vectors)
+    Eigen::Matrix<Scalar, N, Eigen::Dynamic> Y_;  // n x capacity_ (gradient differences)
+    Eigen::MatrixX<Scalar> L_;                     // capacity_ x capacity_ (strictly lower triangular)
+    Eigen::VectorX<Scalar> D_;                     // capacity_ (diagonal: s_i^T y_i)
+    std::vector<Scalar> rho_;                      // 1 / (s_i^T y_i) for two-loop recursion
     Scalar theta_{Scalar(1)};
     int count_{0};
     int capacity_;

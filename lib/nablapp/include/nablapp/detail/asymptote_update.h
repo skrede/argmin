@@ -11,6 +11,7 @@
 //
 // Reference: Svanberg 1987, Section 3.
 
+#include "nablapp/types.h"
 #include "nablapp/options/asymptote_options.h"
 
 #include <Eigen/Core>
@@ -34,15 +35,15 @@ namespace nablapp::detail
 // asyminc:     expansion factor on monotone change (> 1)
 //
 // Reference: Svanberg 1987, Section 3.
-template <typename Scalar>
+template <typename Scalar, int N = nablapp::dynamic_dimension>
 void update_asymptotes(
-    Eigen::VectorX<Scalar>& L,
-    Eigen::VectorX<Scalar>& U,
-    const Eigen::VectorX<Scalar>& x,
-    const Eigen::VectorX<Scalar>& x_old1,
-    const Eigen::VectorX<Scalar>& x_old2,
-    const Eigen::VectorX<Scalar>& x_min,
-    const Eigen::VectorX<Scalar>& x_max,
+    Eigen::Vector<Scalar, N>& L,
+    Eigen::Vector<Scalar, N>& U,
+    const Eigen::Vector<Scalar, N>& x,
+    const Eigen::Vector<Scalar, N>& x_old1,
+    const Eigen::Vector<Scalar, N>& x_old2,
+    const Eigen::Vector<Scalar, N>& x_min,
+    const Eigen::Vector<Scalar, N>& x_max,
     int iteration,
     Scalar asyminit = Scalar(0.5),
     Scalar asymdec = Scalar(0.7),

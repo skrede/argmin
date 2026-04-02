@@ -10,6 +10,8 @@
 // Reference: N&W Section 17.4, eq. 17.46-17.58;
 //            K&W Section 10.9, Algorithm 10.2.
 
+#include "nablapp/types.h"
+
 #include <Eigen/Core>
 
 #include <algorithm>
@@ -68,18 +70,18 @@ Scalar augmented_lagrangian_value(
 //   if effective > 0: g -= effective * J_ineq.row(i)^T
 //
 // J_eq and J_ineq are the constraint Jacobians (m_eq x n) and (m_ineq x n).
-template <typename Scalar>
-Eigen::VectorX<Scalar> augmented_lagrangian_gradient(
-    const Eigen::VectorX<Scalar>& grad_f,
-    const Eigen::MatrixX<Scalar>& J_eq,
-    const Eigen::MatrixX<Scalar>& J_ineq,
+template <typename Scalar, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> augmented_lagrangian_gradient(
+    const Eigen::Vector<Scalar, N>& grad_f,
+    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& J_eq,
+    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& J_ineq,
     const Eigen::VectorX<Scalar>& c_eq,
     const Eigen::VectorX<Scalar>& c_ineq,
     const Eigen::VectorX<Scalar>& lambda_eq,
     const Eigen::VectorX<Scalar>& lambda_ineq,
     Scalar mu)
 {
-    Eigen::VectorX<Scalar> g = grad_f;
+    Eigen::Vector<Scalar, N> g = grad_f;
 
     // Equality contribution
     for(int i = 0; i < c_eq.size(); ++i)

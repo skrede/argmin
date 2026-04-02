@@ -13,6 +13,7 @@
 //            Sections 3 (TRSBOX), 4 (point replacement), 5 (radius update),
 //            6 (geometry check).
 
+#include "nablapp/types.h"
 #include "nablapp/options/trust_region_options.h"
 #include "nablapp/detail/bound_projection.h"
 
@@ -37,23 +38,23 @@ namespace nablapp::detail
 // Returns step d (not new point). x_new = x_k + d.
 //
 // Reference: Powell 2009, Section 3 (TRSBOX subroutine).
-template <typename Scalar = double>
-Eigen::VectorX<Scalar> solve_trust_region_box(
-    const Eigen::VectorX<Scalar>& g,
-    const Eigen::MatrixX<Scalar>& H,
-    const Eigen::VectorX<Scalar>& x_k,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> solve_trust_region_box(
+    const Eigen::Vector<Scalar, N>& g,
+    const Eigen::Matrix<Scalar, N, N>& H,
+    const Eigen::Vector<Scalar, N>& x_k,
     Scalar delta,
-    const Eigen::VectorX<Scalar>& lower,
-    const Eigen::VectorX<Scalar>& upper)
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
 {
     const int n = g.size();
     const Scalar eps = std::numeric_limits<Scalar>::epsilon();
 
-    Eigen::VectorX<Scalar> d = Eigen::VectorX<Scalar>::Zero(n);
+    Eigen::Vector<Scalar, N> d = Eigen::Vector<Scalar, N>::Zero(n);
 
     // Effective box bounds on d: lower - x_k <= d <= upper - x_k
-    Eigen::VectorX<Scalar> d_lo = lower - x_k;
-    Eigen::VectorX<Scalar> d_hi = upper - x_k;
+    Eigen::Vector<Scalar, N> d_lo = (lower - x_k).eval();
+    Eigen::Vector<Scalar, N> d_hi = (upper - x_k).eval();
 
     // Clamp delta-ball to box bounds
     for(int i = 0; i < n; ++i)
@@ -63,8 +64,8 @@ Eigen::VectorX<Scalar> solve_trust_region_box(
     }
 
     // Truncated projected CG
-    Eigen::VectorX<Scalar> r = g;
-    Eigen::VectorX<Scalar> s = -r;
+    Eigen::Vector<Scalar, N> r = g;
+    Eigen::Vector<Scalar, N> s = -r;
 
     for(int iter = 0; iter < n; ++iter)
     {
@@ -120,7 +121,7 @@ Eigen::VectorX<Scalar> solve_trust_region_box(
         }
 
         // Standard CG update
-        Eigen::VectorX<Scalar> d_new = d + alpha_cg * s;
+        Eigen::Vector<Scalar, N> d_new = (d + alpha_cg * s).eval();
 
         // Project to box (numerical safety)
         for(int i = 0; i < n; ++i)
@@ -136,7 +137,7 @@ Eigen::VectorX<Scalar> solve_trust_region_box(
             break;
 
         Scalar beta = rr_new / rr_old;
-        s = -r + beta * s;
+        s = (-r + beta * s).eval();
 
         // Zero out search direction components at active bounds
         for(int i = 0; i < n; ++i)
@@ -206,9 +207,9 @@ Scalar update_radius(Scalar delta, Scalar rho, Scalar step_norm, Scalar delta_ma
 // -1 if all points are within acceptable distance.
 //
 // Reference: Powell 2009, Section 6.
-template <typename Scalar = double>
-int check_geometry(const Eigen::MatrixX<Scalar>& Y,
-                   const Eigen::VectorX<Scalar>& x_k,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+int check_geometry(const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
+                   const Eigen::Vector<Scalar, N>& x_k,
                    Scalar delta,
                    const trust_region_options& opts = {})
 {
@@ -241,12 +242,12 @@ int check_geometry(const Eigen::MatrixX<Scalar>& Y,
 // farthest point.
 //
 // Reference: Powell 2009, Section 4.
-template <typename Scalar = double>
-int select_replacement(const Eigen::MatrixX<Scalar>& Y,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+int select_replacement(const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
                        const Eigen::VectorX<Scalar>& f_values,
-                       const Eigen::VectorX<Scalar>& x_new,
+                       const Eigen::Vector<Scalar, N>& x_new,
                        Scalar f_new,
-                       const Eigen::VectorX<Scalar>& x_k)
+                       const Eigen::Vector<Scalar, N>& x_k)
 {
     const int m = Y.cols();
 

@@ -9,6 +9,8 @@
 // Reference: K&W Section 8.7, Algorithm 8.10 step 1.
 //            Hansen (2023) boundary handling tutorial.
 
+#include "nablapp/types.h"
+
 #include <Eigen/Core>
 
 #include <random>
@@ -19,20 +21,22 @@ namespace nablapp::detail
 // Sample lambda offspring: x_i = mean + sigma * B * D * z_i, z_i ~ N(0,I).
 // Returns n x lambda matrix of offspring.
 // Reference: K&W Algorithm 8.10 step 1.
-inline Eigen::MatrixXd sample_offspring(const Eigen::VectorXd& mean,
-                                        double sigma,
-                                        const Eigen::MatrixXd& B,
-                                        const Eigen::VectorXd& D,
-                                        int lambda,
-                                        std::mt19937& rng)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Matrix<Scalar, N, Eigen::Dynamic> sample_offspring(
+    const Eigen::Vector<Scalar, N>& mean,
+    Scalar sigma,
+    const Eigen::Matrix<Scalar, N, N>& B,
+    const Eigen::Vector<Scalar, N>& D,
+    int lambda,
+    std::mt19937& rng)
 {
     const int n = mean.size();
-    std::normal_distribution<double> normal(0.0, 1.0);
+    std::normal_distribution<Scalar> normal(Scalar(0), Scalar(1));
 
-    Eigen::MatrixXd offspring(n, lambda);
+    Eigen::Matrix<Scalar, N, Eigen::Dynamic> offspring(n, lambda);
     for(int i = 0; i < lambda; ++i)
     {
-        Eigen::VectorXd z(n);
+        Eigen::Vector<Scalar, N> z(n);
         for(int j = 0; j < n; ++j)
             z[j] = normal(rng);
 
@@ -45,22 +49,23 @@ inline Eigen::MatrixXd sample_offspring(const Eigen::VectorXd& mean,
 // Repair infeasible point by clipping to bounds and return penalty.
 // Penalty = sum of squared repair distances.
 // Reference: Hansen boundary handling tutorial (D-03).
-inline double repair_and_penalize(Eigen::VectorXd& x,
-                                  const Eigen::VectorXd& lower,
-                                  const Eigen::VectorXd& upper)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Scalar repair_and_penalize(Eigen::Vector<Scalar, N>& x,
+                           const Eigen::Vector<Scalar, N>& lower,
+                           const Eigen::Vector<Scalar, N>& upper)
 {
-    double penalty = 0.0;
+    Scalar penalty = Scalar(0);
     for(int i = 0; i < x.size(); ++i)
     {
         if(x[i] < lower[i])
         {
-            double d = lower[i] - x[i];
+            Scalar d = lower[i] - x[i];
             penalty += d * d;
             x[i] = lower[i];
         }
         else if(x[i] > upper[i])
         {
-            double d = x[i] - upper[i];
+            Scalar d = x[i] - upper[i];
             penalty += d * d;
             x[i] = upper[i];
         }

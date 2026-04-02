@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_NABLAPP_DETAIL_CAUCHY_POINT_H
 #define HPP_GUARD_NABLAPP_DETAIL_CAUCHY_POINT_H
 
+#include "nablapp/types.h"
 #include "nablapp/detail/compact_lbfgs.h"
 #include "nablapp/detail/bound_projection.h"
 
@@ -17,19 +18,19 @@ namespace nablapp::detail
 
 // Result of the generalized Cauchy point computation.
 
-template <typename Scalar = double>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
 struct cauchy_result
 {
-    Eigen::VectorX<Scalar> x_cauchy;
+    Eigen::Vector<Scalar, N> x_cauchy;
     std::vector<int> free_indices;    // indices NOT at bounds after GCP
     std::vector<int> active_indices;  // indices AT bounds after GCP
 };
 
 // Classify indices into free and active sets based on x_cauchy position.
-template <typename Scalar = double>
-cauchy_result<Scalar> classify_indices(const Eigen::VectorX<Scalar>& x_cauchy,
-                                       const Eigen::VectorX<Scalar>& lower,
-                                       const Eigen::VectorX<Scalar>& upper)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+cauchy_result<Scalar, N> classify_indices(const Eigen::Vector<Scalar, N>& x_cauchy,
+                                          const Eigen::Vector<Scalar, N>& lower,
+                                          const Eigen::Vector<Scalar, N>& upper)
 {
     const int n = x_cauchy.size();
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
@@ -49,7 +50,7 @@ cauchy_result<Scalar> classify_indices(const Eigen::VectorX<Scalar>& x_cauchy,
             free_idx.push_back(i);
     }
 
-    return cauchy_result<Scalar>{
+    return cauchy_result<Scalar, N>{
         .x_cauchy = x_cauchy,
         .free_indices = std::move(free_idx),
         .active_indices = std::move(active_idx),
@@ -65,13 +66,13 @@ cauchy_result<Scalar> classify_indices(const Eigen::VectorX<Scalar>& x_cauchy,
 // Reference: N&W Section 16.6, pp. 475-477, eq. 16.44-16.48.
 //            Byrd, Lu, Nocedal, Zhu 1995 (L-BFGS-B algorithm).
 
-template <typename Scalar = double>
-cauchy_result<Scalar> cauchy_point(
-    const Eigen::VectorX<Scalar>& x,
-    const Eigen::VectorX<Scalar>& g,
-    const Eigen::VectorX<Scalar>& lower,
-    const Eigen::VectorX<Scalar>& upper,
-    const compact_lbfgs<Scalar>& B)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+cauchy_result<Scalar, N> cauchy_point(
+    const Eigen::Vector<Scalar, N>& x,
+    const Eigen::Vector<Scalar, N>& g,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper,
+    const compact_lbfgs<Scalar, N>& B)
 {
     const int n = x.size();
     constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
@@ -105,8 +106,8 @@ cauchy_result<Scalar> cauchy_point(
     if(bps.empty())
     {
         // d = -g (steepest descent direction), find minimum of quadratic along d.
-        Eigen::VectorX<Scalar> d = -g;
-        Eigen::VectorX<Scalar> Bd = B.multiply(d);
+        Eigen::Vector<Scalar, N> d = -g;
+        Eigen::Vector<Scalar, N> Bd = B.multiply(d);
         Scalar dTBd = d.dot(Bd);
         Scalar gTd = g.dot(d);
 
@@ -116,12 +117,12 @@ cauchy_result<Scalar> cauchy_point(
         else if(gTd < Scalar(0))
             t_star = Scalar(1);  // Negative curvature: take unit step
 
-        Eigen::VectorX<Scalar> x_cauchy = (x + t_star * d).eval();
+        Eigen::Vector<Scalar, N> x_cauchy = (x + t_star * d).eval();
 
         std::vector<int> free_idx(n);
         std::iota(free_idx.begin(), free_idx.end(), 0);
 
-        return cauchy_result<Scalar>{
+        return cauchy_result<Scalar, N>{
             .x_cauchy = std::move(x_cauchy),
             .free_indices = std::move(free_idx),
             .active_indices = {},
@@ -134,7 +135,7 @@ cauchy_result<Scalar> cauchy_point(
 
     // Step 3: walk the piecewise-linear path, tracking f'(t) and f''(t)
     // Initialize direction: d_i = -g_i for free components
-    Eigen::VectorX<Scalar> d = -g;
+    Eigen::Vector<Scalar, N> d = -g;
 
     // Check which components are already at bounds at t=0
     for(int i = 0; i < n; ++i)
@@ -146,7 +147,7 @@ cauchy_result<Scalar> cauchy_point(
     }
 
     Scalar f_prime = g.dot(d);
-    Eigen::VectorX<Scalar> Bd = B.multiply(d);
+    Eigen::Vector<Scalar, N> Bd = B.multiply(d);
     Scalar f_double_prime = -d.dot(Bd);
 
     Scalar t_old = Scalar(0);
@@ -161,9 +162,9 @@ cauchy_result<Scalar> cauchy_point(
             Scalar t_star = t_old - f_prime / f_double_prime;
             if(t_star >= t_old && t_star <= bp.t)
             {
-                Eigen::VectorX<Scalar> x_cauchy = project(
-                    Eigen::VectorX<Scalar>((x - t_star * g).eval()), lower, upper);
-                return classify_indices(x_cauchy, lower, upper);
+                Eigen::Vector<Scalar, N> x_cauchy = project<Scalar, N>(
+                    Eigen::Vector<Scalar, N>((x - t_star * g).eval()), lower, upper);
+                return classify_indices<Scalar, N>(x_cauchy, lower, upper);
             }
         }
 
@@ -173,9 +174,9 @@ cauchy_result<Scalar> cauchy_point(
         // If f' >= 0 at this breakpoint, the minimum is here
         if(f_prime >= Scalar(0))
         {
-            Eigen::VectorX<Scalar> x_cauchy = project(
-                Eigen::VectorX<Scalar>((x - bp.t * g).eval()), lower, upper);
-            return classify_indices(x_cauchy, lower, upper);
+            Eigen::Vector<Scalar, N> x_cauchy = project<Scalar, N>(
+                Eigen::Vector<Scalar, N>((x - bp.t * g).eval()), lower, upper);
+            return classify_indices<Scalar, N>(x_cauchy, lower, upper);
         }
 
         // Variable bp.index becomes fixed at its bound
@@ -192,9 +193,9 @@ cauchy_result<Scalar> cauchy_point(
 
     // After all breakpoints: minimum is at or beyond the last breakpoint
     Scalar t_last = bps.back().t;
-    Eigen::VectorX<Scalar> x_cauchy = project(
-        Eigen::VectorX<Scalar>((x - t_last * g).eval()), lower, upper);
-    return classify_indices(x_cauchy, lower, upper);
+    Eigen::Vector<Scalar, N> x_cauchy = project<Scalar, N>(
+        Eigen::Vector<Scalar, N>((x - t_last * g).eval()), lower, upper);
+    return classify_indices<Scalar, N>(x_cauchy, lower, upper);
 }
 
 }

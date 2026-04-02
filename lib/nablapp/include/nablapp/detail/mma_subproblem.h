@@ -14,6 +14,7 @@
 // Reference: Svanberg 1987; Svanberg 2002;
 //            jdumas/mma reference implementation.
 
+#include "nablapp/types.h"
 #include "nablapp/options/mma_subproblem_options.h"
 
 #include <Eigen/Core>
@@ -31,11 +32,11 @@ namespace nablapp::detail
 // pi, qi: constraint coefficients (m x n)
 // r0:     objective constant (scalar, stored as 1-element vector)
 // ri:     constraint constants (m)
-template <typename Scalar>
+template <typename Scalar, int N = nablapp::dynamic_dimension>
 struct mma_coeffs
 {
-    Eigen::VectorX<Scalar> p0, q0;
-    Eigen::MatrixX<Scalar> pi, qi;
+    Eigen::Vector<Scalar, N> p0, q0;
+    Eigen::Matrix<Scalar, Eigen::Dynamic, N> pi, qi;
     Eigen::VectorX<Scalar> r0;
     Eigen::VectorX<Scalar> ri;
 };
@@ -53,22 +54,22 @@ struct mma_coeffs
 // The approximation matches function and gradient values at x.
 //
 // Reference: Svanberg 1987, eq. (2.1)-(2.5).
-template <typename Scalar>
-mma_coeffs<Scalar> mma_coefficients(
-    const Eigen::VectorX<Scalar>& x,
+template <typename Scalar, int N = nablapp::dynamic_dimension>
+mma_coeffs<Scalar, N> mma_coefficients(
+    const Eigen::Vector<Scalar, N>& x,
     Scalar f,
-    const Eigen::VectorX<Scalar>& grad_f,
+    const Eigen::Vector<Scalar, N>& grad_f,
     const Eigen::VectorX<Scalar>& g,
-    const Eigen::MatrixX<Scalar>& dg,
-    const Eigen::VectorX<Scalar>& L,
-    const Eigen::VectorX<Scalar>& U,
+    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& dg,
+    const Eigen::Vector<Scalar, N>& L,
+    const Eigen::Vector<Scalar, N>& U,
     const mma_subproblem_options& opts = {})
 {
     const int n = static_cast<int>(x.size());
     const int m = static_cast<int>(g.size());
     const auto epsilon = static_cast<Scalar>(opts.regularization_epsilon.value_or(1e-7));
 
-    mma_coeffs<Scalar> c;
+    mma_coeffs<Scalar, N> c;
     c.p0.resize(n);
     c.q0.resize(n);
     c.pi.resize(m, n);
@@ -117,12 +118,12 @@ mma_coeffs<Scalar> mma_coefficients(
 // Used by GCMMA to check conservatism.
 //
 // Reference: Svanberg 2002, conservatism condition.
-template <typename Scalar>
+template <typename Scalar, int N = nablapp::dynamic_dimension>
 Scalar mma_subproblem_value(
-    const mma_coeffs<Scalar>& coeffs,
-    const Eigen::VectorX<Scalar>& x,
-    const Eigen::VectorX<Scalar>& L,
-    const Eigen::VectorX<Scalar>& U)
+    const mma_coeffs<Scalar, N>& coeffs,
+    const Eigen::Vector<Scalar, N>& x,
+    const Eigen::Vector<Scalar, N>& L,
+    const Eigen::Vector<Scalar, N>& U)
 {
     const int n = static_cast<int>(x.size());
     Scalar val = coeffs.r0[0];
@@ -136,13 +137,13 @@ Scalar mma_subproblem_value(
 // Returns: sum_j(pi[i][j]/(U[j]-x[j]) + qi[i][j]/(x[j]-L[j])) + ri[i]
 //
 // Reference: Svanberg 2002.
-template <typename Scalar>
+template <typename Scalar, int N = nablapp::dynamic_dimension>
 Scalar mma_subproblem_constraint(
-    const mma_coeffs<Scalar>& coeffs,
+    const mma_coeffs<Scalar, N>& coeffs,
     int i,
-    const Eigen::VectorX<Scalar>& x,
-    const Eigen::VectorX<Scalar>& L,
-    const Eigen::VectorX<Scalar>& U)
+    const Eigen::Vector<Scalar, N>& x,
+    const Eigen::Vector<Scalar, N>& L,
+    const Eigen::Vector<Scalar, N>& U)
 {
     const int n = static_cast<int>(x.size());
     Scalar val = coeffs.ri[i];
@@ -167,13 +168,13 @@ Scalar mma_subproblem_constraint(
 // tol:     convergence tolerance on dual gradient infinity norm
 //
 // Reference: Svanberg 1987, dual formulation; Svanberg 2002, Section 5.
-template <typename Scalar>
-Eigen::VectorX<Scalar> mma_dual_solve(
-    const mma_coeffs<Scalar>& coeffs,
-    const Eigen::VectorX<Scalar>& L,
-    const Eigen::VectorX<Scalar>& U,
-    const Eigen::VectorX<Scalar>& x_min,
-    const Eigen::VectorX<Scalar>& x_max,
+template <typename Scalar, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> mma_dual_solve(
+    const mma_coeffs<Scalar, N>& coeffs,
+    const Eigen::Vector<Scalar, N>& L,
+    const Eigen::Vector<Scalar, N>& U,
+    const Eigen::Vector<Scalar, N>& x_min,
+    const Eigen::Vector<Scalar, N>& x_max,
     const mma_subproblem_options& opts = {})
 {
     const int n = static_cast<int>(L.size());
@@ -184,7 +185,7 @@ Eigen::VectorX<Scalar> mma_dual_solve(
     // No constraints: solve unconstrained primal directly
     if(m == 0)
     {
-        Eigen::VectorX<Scalar> x_opt(n);
+        Eigen::Vector<Scalar, N> x_opt(n);
         for(int j = 0; j < n; ++j)
         {
             Scalar sp = std::sqrt(coeffs.p0[j]);
@@ -200,7 +201,7 @@ Eigen::VectorX<Scalar> mma_dual_solve(
     // Dual variables initialized to 1
     Eigen::VectorX<Scalar> y = Eigen::VectorX<Scalar>::Ones(m);
 
-    Eigen::VectorX<Scalar> x_opt(n);
+    Eigen::Vector<Scalar, N> x_opt(n);
 
     const int max_iter = static_cast<int>(opts.dual_max_iterations.value_or(50));
     const auto tol = static_cast<Scalar>(opts.dual_tolerance.value_or(1e-9));

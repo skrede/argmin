@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_NABLAPP_DETAIL_SUBSPACE_MINIMIZATION_H
 #define HPP_GUARD_NABLAPP_DETAIL_SUBSPACE_MINIMIZATION_H
 
+#include "nablapp/types.h"
 #include "nablapp/detail/compact_lbfgs.h"
 #include "nablapp/detail/bound_projection.h"
 
@@ -22,15 +23,15 @@ namespace nablapp::detail
 // Reference: N&W Section 16.6, p. 478, eq. 16.49.
 //            Byrd, Lu, Nocedal, Zhu 1995 (L-BFGS-B algorithm).
 
-template <typename Scalar = double>
-Eigen::VectorX<Scalar> subspace_minimize(
-    const Eigen::VectorX<Scalar>& x,
-    const Eigen::VectorX<Scalar>& x_cauchy,
-    const Eigen::VectorX<Scalar>& g,
-    const Eigen::VectorX<Scalar>& lower,
-    const Eigen::VectorX<Scalar>& upper,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> subspace_minimize(
+    const Eigen::Vector<Scalar, N>& x,
+    const Eigen::Vector<Scalar, N>& x_cauchy,
+    const Eigen::Vector<Scalar, N>& g,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper,
     const std::vector<int>& free_indices,
-    const compact_lbfgs<Scalar>& B)
+    const compact_lbfgs<Scalar, N>& B)
 {
     // If no free variables, return Cauchy point (all at bounds, pitfall 2)
     if(free_indices.empty())
@@ -39,7 +40,7 @@ Eigen::VectorX<Scalar> subspace_minimize(
     const int nf = static_cast<int>(free_indices.size());
 
     // Compute reduced gradient at Cauchy point: r_F[j] = g[F[j]] + (B*(x_c - x))[F[j]]
-    Eigen::VectorX<Scalar> Bd = B.multiply(x_cauchy - x);
+    Eigen::Vector<Scalar, N> Bd = B.multiply(x_cauchy - x);
     Eigen::VectorX<Scalar> r_F(nf);
     for(int j = 0; j < nf; ++j)
         r_F[j] = g[free_indices[j]] + Bd[free_indices[j]];
@@ -62,12 +63,12 @@ Eigen::VectorX<Scalar> subspace_minimize(
     }
 
     // Assemble full step: x_new = x_cauchy + d (d_i = 0 for fixed variables)
-    Eigen::VectorX<Scalar> x_new = x_cauchy;
+    Eigen::Vector<Scalar, N> x_new = x_cauchy;
     for(int j = 0; j < nf; ++j)
         x_new[free_indices[j]] += d_hat[j];
 
     // Project to bounds for numerical safety
-    x_new = project(x_new, lower, upper);
+    x_new = project<Scalar, N>(x_new, lower, upper);
 
     return x_new;
 }

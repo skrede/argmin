@@ -12,6 +12,8 @@
 //            constrained optimization without derivatives, DAMTP 2009/NA06,
 //            Sections 2 (model construction) and 4 (model update).
 
+#include "nablapp/types.h"
+
 #include <Eigen/Core>
 #include <Eigen/SVD>
 
@@ -20,13 +22,13 @@
 namespace nablapp::detail
 {
 
-template <typename Scalar = double>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
 struct quadratic_model
 {
-    Eigen::VectorX<Scalar> g;
-    Eigen::MatrixX<Scalar> H;
+    Eigen::Vector<Scalar, N> g;
+    Eigen::Matrix<Scalar, N, N> H;
     Scalar c{};
-    Eigen::VectorX<Scalar> x_base;
+    Eigen::Vector<Scalar, N> x_base;
 };
 
 // Build quadratic model from m interpolation points and their function values.
@@ -38,11 +40,11 @@ struct quadratic_model
 // ||coefficients||_2, effectively minimizing ||H||_F among all interpolants.
 //
 // Reference: Powell 2009, Section 2.
-template <typename Scalar = double>
-quadratic_model<Scalar> build_model(
-    const Eigen::MatrixX<Scalar>& Y,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+quadratic_model<Scalar, N> build_model(
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
     const Eigen::VectorX<Scalar>& f_values,
-    const Eigen::VectorX<Scalar>& x_base)
+    const Eigen::Vector<Scalar, N>& x_base)
 {
     const int n = Y.rows();
     const int m = Y.cols();
@@ -56,7 +58,7 @@ quadratic_model<Scalar> build_model(
 
     for(int i = 0; i < m; ++i)
     {
-        Eigen::VectorX<Scalar> s = Y.col(i) - x_base;
+        Eigen::Vector<Scalar, N> s = (Y.col(i) - x_base).eval();
 
         // Constant term
         Phi(i, 0) = Scalar(1);
@@ -84,7 +86,7 @@ quadratic_model<Scalar> build_model(
     Eigen::VectorX<Scalar> theta = svd.solve(f_values);
 
     // Extract model coefficients from theta
-    quadratic_model<Scalar> model;
+    quadratic_model<Scalar, N> model;
     model.x_base = x_base;
     model.c = theta[0];
     model.g = theta.segment(1, n);
@@ -112,32 +114,32 @@ quadratic_model<Scalar> build_model(
 // adds complexity not justified for n < 20.
 //
 // Reference: Powell 2009, Section 4.
-template <typename Scalar = double>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
 void update_model(
-    quadratic_model<Scalar>& model,
-    const Eigen::MatrixX<Scalar>& Y,
+    quadratic_model<Scalar, N>& model,
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
     const Eigen::VectorX<Scalar>& f_values,
     [[maybe_unused]] int replaced_index,
-    const Eigen::VectorX<Scalar>& x_base)
+    const Eigen::Vector<Scalar, N>& x_base)
 {
-    model = build_model(Y, f_values, x_base);
+    model = build_model<Scalar, N>(Y, f_values, x_base);
 }
 
 // Evaluate model at point x.
 //
 // Q(x) = c + g^T * (x - x_base) + 0.5 * (x - x_base)^T * H * (x - x_base)
-template <typename Scalar = double>
-Scalar evaluate_model(const quadratic_model<Scalar>& model,
-                      const Eigen::VectorX<Scalar>& x)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Scalar evaluate_model(const quadratic_model<Scalar, N>& model,
+                      const Eigen::Vector<Scalar, N>& x)
 {
-    Eigen::VectorX<Scalar> s = x - model.x_base;
+    Eigen::Vector<Scalar, N> s = (x - model.x_base).eval();
     return model.c + model.g.dot(s) + Scalar(0.5) * s.dot(model.H * s);
 }
 
 // Model gradient at point x: g + H * (x - x_base).
-template <typename Scalar = double>
-Eigen::VectorX<Scalar> model_gradient(const quadratic_model<Scalar>& model,
-                                       const Eigen::VectorX<Scalar>& x)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> model_gradient(const quadratic_model<Scalar, N>& model,
+                                         const Eigen::Vector<Scalar, N>& x)
 {
     return (model.g + model.H * (x - model.x_base)).eval();
 }

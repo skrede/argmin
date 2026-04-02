@@ -10,6 +10,8 @@
 //            Hansen (2023) "The CMA Evolution Strategy: A Tutorial",
 //            arXiv:1604.00772, Section 4.
 
+#include "nablapp/types.h"
+
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
 
@@ -23,13 +25,14 @@ namespace nablapp::detail
 // B receives eigenvectors (columns), D receives sqrt(eigenvalues).
 // Eigenvalues clamped to min 1e-20 for numerical safety.
 // Reference: Hansen tutorial Section 4.
-inline void eigendecompose(const Eigen::MatrixXd& C,
-                           Eigen::MatrixXd& B,
-                           Eigen::VectorXd& D)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+void eigendecompose(const Eigen::Matrix<Scalar, N, N>& C,
+                    Eigen::Matrix<Scalar, N, N>& B,
+                    Eigen::Vector<Scalar, N>& D)
 {
-    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(C);
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<Scalar, N, N>> es(C);
     B = es.eigenvectors();
-    D = es.eigenvalues().cwiseMax(1e-20).cwiseSqrt();
+    D = es.eigenvalues().cwiseMax(Scalar(1e-20)).cwiseSqrt();
 }
 
 // Rank-one + rank-mu covariance update.
@@ -43,48 +46,49 @@ inline void eigendecompose(const Eigen::MatrixXd& C,
 //
 // deltas: n x lambda matrix where column i = (x_{i:lambda} - mean_old) / sigma.
 // Reference: K&W Eq. 8.28-8.31.
-inline void update_covariance(Eigen::MatrixXd& C,
-                              const Eigen::VectorXd& p_c,
-                              double h_sigma,
-                              double c_1,
-                              double c_mu,
-                              double c_c,
-                              const Eigen::VectorXd& weights,
-                              const Eigen::MatrixXd& deltas,
-                              const Eigen::MatrixXd& B,
-                              const Eigen::VectorXd& D,
-                              int mu)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+void update_covariance(Eigen::Matrix<Scalar, N, N>& C,
+                       const Eigen::Vector<Scalar, N>& p_c,
+                       Scalar h_sigma,
+                       Scalar c_1,
+                       Scalar c_mu,
+                       Scalar c_c,
+                       const Eigen::VectorX<Scalar>& weights,
+                       const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& deltas,
+                       const Eigen::Matrix<Scalar, N, N>& B,
+                       const Eigen::Vector<Scalar, N>& D,
+                       int mu)
 {
     const int n = C.rows();
     const int lambda = weights.size();
 
     // Sum of absolute weights for the diagonal decay factor
-    double sum_abs_w = 0.0;
+    Scalar sum_abs_w = Scalar(0);
     for(int i = 0; i < lambda; ++i)
         sum_abs_w += std::abs(weights[i]);
 
     // Diagonal decay factor
-    double alpha = 1.0 + c_1 * (1.0 - h_sigma) * c_c * (2.0 - c_c)
+    Scalar alpha = Scalar(1) + c_1 * (Scalar(1) - h_sigma) * c_c * (Scalar(2) - c_c)
                  - c_1 - c_mu * sum_abs_w;
-    alpha = std::max(alpha, 0.0);
+    alpha = std::max(alpha, Scalar(0));
 
     // Rank-mu contribution
-    Eigen::MatrixXd rank_mu = Eigen::MatrixXd::Zero(n, n);
+    Eigen::Matrix<Scalar, N, N> rank_mu = Eigen::Matrix<Scalar, N, N>::Zero(n, n);
     for(int i = 0; i < lambda; ++i)
     {
-        double w_i = weights[i];
-        Eigen::VectorXd di = deltas.col(i);
+        Scalar w_i = weights[i];
+        Eigen::Vector<Scalar, N> di = deltas.col(i);
 
-        if(i >= mu && w_i < 0.0)
+        if(i >= mu && w_i < Scalar(0))
         {
             // Negative weight scaling: n / ||C^{-1/2} * delta_i||^2
             // C^{-1/2} * v = B * D^{-1} * B^T * v
             // K&W Eq. 8.31
-            Eigen::VectorXd inv_sqrt_delta =
+            Eigen::Vector<Scalar, N> inv_sqrt_delta =
                 (B * D.cwiseInverse().asDiagonal() * (B.transpose() * di)).eval();
-            double denom = inv_sqrt_delta.squaredNorm();
-            if(denom > 1e-30)
-                w_i *= static_cast<double>(n) / denom;
+            Scalar denom = inv_sqrt_delta.squaredNorm();
+            if(denom > Scalar(1e-30))
+                w_i *= static_cast<Scalar>(n) / denom;
         }
 
         rank_mu.noalias() += w_i * di * di.transpose();
@@ -94,7 +98,7 @@ inline void update_covariance(Eigen::MatrixXd& C,
     C = alpha * C + c_1 * p_c * p_c.transpose() + c_mu * rank_mu;
 
     // Enforce symmetry
-    C = (C + C.transpose()) * 0.5;
+    C = (C + C.transpose()) * Scalar(0.5);
 }
 
 }
