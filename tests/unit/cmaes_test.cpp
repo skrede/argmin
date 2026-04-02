@@ -65,7 +65,7 @@ TEST_CASE("cmaes_policy: Rosenbrock 2D", "[cmaes]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    cmaes_policy policy;
+    cmaes_policy<> policy;
     policy.options.initial_sigma = 0.5;
     policy.options.seed = 42u;
 
@@ -88,7 +88,7 @@ TEST_CASE("cmaes_policy: Rastrigin 5D", "[cmaes]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    cmaes_policy policy;
+    cmaes_policy<> policy;
     policy.options.initial_sigma = 2.0;
     policy.options.seed = 123u;
 
@@ -111,7 +111,7 @@ TEST_CASE("cmaes_policy: step_n budget", "[cmaes]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    cmaes_policy policy;
+    cmaes_policy<> policy;
     policy.options.seed = 7u;
 
     basic_solver solver{policy, problem, x0, opts};
@@ -133,9 +133,9 @@ TEST_CASE("cmaes_policy: IPOP restart", "[cmaes]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    cmaes_policy policy;
+    cmaes_policy<> policy;
     policy.options.initial_sigma = 0.1;
-    policy.options.restart = cmaes_policy::restart_strategy::ipop;
+    policy.options.restart = cmaes_policy<>::restart_strategy::ipop;
     policy.options.seed = 99u;
 
     basic_solver solver{policy, problem, x0, opts};
@@ -161,7 +161,7 @@ TEST_CASE("cmaes_policy: bounded Rosenbrock", "[cmaes]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    cmaes_policy policy;
+    cmaes_policy<> policy;
     policy.options.initial_sigma = 0.5;
     policy.options.seed = 55u;
 

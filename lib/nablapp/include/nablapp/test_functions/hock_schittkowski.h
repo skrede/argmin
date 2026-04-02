@@ -11,7 +11,6 @@
 // Inequality convention: c_ineq >= 0 (nablapp lower-bound form).
 // Constraint layout: equality first (rows 0..n_eq-1), then inequality.
 
-#include "nablapp/types.h"
 #include "nablapp/test_functions/problem_class.h"
 
 #include <Eigen/Core>
@@ -34,7 +33,7 @@ namespace nablapp
 template <typename Scalar = double>
 struct hs001
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
@@ -92,7 +91,7 @@ struct hs001
 template <typename Scalar = double>
 struct hs002
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
@@ -153,7 +152,7 @@ struct hs002
 template <typename Scalar = double>
 struct hs005
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
@@ -217,7 +216,7 @@ struct hs005
 template <typename Scalar = double>
 struct hs006
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::equality;
 
     [[nodiscard]] int dimension() const { return 2; }
@@ -286,7 +285,7 @@ struct hs006
 template <typename Scalar = double>
 struct hs007
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::equality;
 
     [[nodiscard]] int dimension() const { return 2; }
@@ -362,7 +361,7 @@ struct hs007
 template <typename Scalar = double>
 struct hs024
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
@@ -445,7 +444,7 @@ struct hs024
 template <typename Scalar = double>
 struct hs026
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 3;
     static constexpr problem_class pclass = problem_class::equality;
 
     [[nodiscard]] int dimension() const { return 3; }
@@ -521,7 +520,7 @@ struct hs026
 template <typename Scalar = double>
 struct hs028
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 3;
     static constexpr problem_class pclass = problem_class::equality;
 
     [[nodiscard]] int dimension() const { return 3; }
@@ -597,7 +596,7 @@ struct hs028
 template <typename Scalar = double>
 struct hs035
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 3;
     static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 3; }
@@ -672,7 +671,7 @@ struct hs035
 template <typename Scalar = double>
 struct hs039
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::equality;
 
     [[nodiscard]] int dimension() const { return 4; }
@@ -749,7 +748,7 @@ struct hs039
 template <typename Scalar = double>
 struct hs040
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::equality;
 
     [[nodiscard]] int dimension() const { return 4; }
@@ -835,7 +834,7 @@ struct hs040
 template <typename Scalar = double>
 struct hs043
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::inequality;
 
     [[nodiscard]] int dimension() const { return 4; }
@@ -921,7 +920,7 @@ struct hs043
 template <typename Scalar = double>
 struct hs048
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 5;
     static constexpr problem_class pclass = problem_class::equality;
 
     [[nodiscard]] int dimension() const { return 5; }
@@ -1006,7 +1005,7 @@ struct hs048
 template <typename Scalar = double>
 struct hs050
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 5;
     static constexpr problem_class pclass = problem_class::equality;
 
     [[nodiscard]] int dimension() const { return 5; }
@@ -1098,7 +1097,7 @@ struct hs050
 template <typename Scalar = double>
 struct hs051
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 5;
     static constexpr problem_class pclass = problem_class::equality;
 
     [[nodiscard]] int dimension() const { return 5; }
@@ -1184,7 +1183,7 @@ struct hs051
 template <typename Scalar = double>
 struct hs071
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::mixed;
 
     [[nodiscard]] int dimension() const { return 4; }
@@ -1268,7 +1267,7 @@ struct hs071
 template <typename Scalar = double>
 struct hs076
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 4; }

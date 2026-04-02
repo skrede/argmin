@@ -204,15 +204,15 @@ void run_all_nablapp_solvers(
 
     // L-BFGS-B: unconstrained or bound-constrained (not general constrained).
     if constexpr(differentiable<Problem> && !is_constrained)
-        run("lbfgsb", lbfgsb_policy{});
+        run("lbfgsb", lbfgsb_policy<>{});
 
     // BOBYQA: bound-constrained or global with bounds.
     if constexpr(is_bound && !is_constrained)
-        run("bobyqa", bobyqa_policy{});
+        run("bobyqa", bobyqa_policy<>{});
 
     // SLSQP: any constrained problem.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
-        run("kraft_slsqp", kraft_slsqp_policy{});
+        run("kraft_slsqp", kraft_slsqp_policy<>{});
 
     // MMA: inequality-constrained (no equality).
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
@@ -224,7 +224,7 @@ void run_all_nablapp_solvers(
             if(prob.num_equality() == 0 && prob.num_inequality() > 0)
             {
                 std::vector<trace_entry> trace;
-                auto r = run_nablapp_solver<mma_policy>(
+                auto r = run_nablapp_solver<mma_policy<>>(
                     "mma", problem_name, prob, max_iterations, collect_trace, trace);
                 results.push_back(r);
                 traces.push_back(std::move(trace));
@@ -240,7 +240,7 @@ void run_all_nablapp_solvers(
             if(prob.num_equality() > 0)
             {
                 std::vector<trace_entry> trace;
-                auto r = run_nablapp_solver<nw_sqp_policy>(
+                auto r = run_nablapp_solver<nw_sqp_policy<>>(
                     "nw_sqp", problem_name, prob, max_iterations, collect_trace, trace);
                 results.push_back(r);
                 traces.push_back(std::move(trace));
@@ -254,7 +254,7 @@ void run_all_nablapp_solvers(
 
     // CMA-ES: global problems with bounds.
     if constexpr(is_global && is_bound)
-        run("cmaes", cmaes_policy{});
+        run("cmaes", cmaes_policy<>{});
 }
 
 }

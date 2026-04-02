@@ -238,7 +238,7 @@ TEST_CASE("Two L-BFGS-B policies in solver_group (SC5)", "[lbfgsb][solver_group]
     solver_options opts;
     opts.set_gradient_threshold(1e-6);
 
-    basic_solver_group<round_robin_schedule, lbfgsb_policy<>, lbfgsb_policy<>> group{
+    basic_solver_group<round_robin_schedule, dynamic_dimension, lbfgsb_policy<>, lbfgsb_policy<>> group{
         problem, x0, opts};
 
     // Step 10 times, each step should produce finite results

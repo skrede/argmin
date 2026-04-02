@@ -1,7 +1,6 @@
 #ifndef HPP_GUARD_NABLAPP_TEST_FUNCTIONS_BOOTH_H
 #define HPP_GUARD_NABLAPP_TEST_FUNCTIONS_BOOTH_H
 
-#include "nablapp/types.h"
 #include "nablapp/test_functions/problem_class.h"
 
 #include <Eigen/Core>
@@ -21,7 +20,7 @@ namespace nablapp
 template <typename Scalar = double>
 struct booth
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return 2; }

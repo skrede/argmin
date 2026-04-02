@@ -41,7 +41,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<nw_sqp_policy> solver{problem, x0, opts};
+        basic_solver<nw_sqp_policy<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         // HS071 with equality + inequality is hard for BFGS-based SQP;
@@ -60,7 +60,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<nw_sqp_policy> solver{problem, x0, opts};
+        basic_solver<nw_sqp_policy<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
@@ -77,7 +77,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<nw_sqp_policy> solver{problem, x0, opts};
+        basic_solver<nw_sqp_policy<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(1e-2));
@@ -94,7 +94,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<nw_sqp_policy> solver{problem, x0, opts};
+        basic_solver<nw_sqp_policy<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1e-2));
@@ -118,7 +118,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
+        basic_solver<kraft_slsqp_policy<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         // SLSQP with L-BFGS Hessian on mixed eq/ineq;
@@ -137,7 +137,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
+        basic_solver<kraft_slsqp_policy<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
@@ -154,7 +154,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
+        basic_solver<kraft_slsqp_policy<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(1e-2));
@@ -171,7 +171,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
+        basic_solver<kraft_slsqp_policy<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1e-2));
@@ -281,7 +281,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
     {
         hs076 problem;
         auto x0 = problem.initial_point();
-        basic_solver<mma_policy> solver{problem, x0, opts};
+        basic_solver<mma_policy<>> solver{problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -304,7 +304,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
         // approximation; verify improvement from initial point
         hs024 problem;
         auto x0 = problem.initial_point();
-        basic_solver<mma_policy> solver{problem, x0, opts};
+        basic_solver<mma_policy<>> solver{problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -324,7 +324,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
     {
         hs035 problem;
         auto x0 = problem.initial_point();
-        basic_solver<mma_policy> solver{problem, x0, opts};
+        basic_solver<mma_policy<>> solver{problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -357,7 +357,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
     {
         hs076 problem;
         auto x0 = problem.initial_point();
-        basic_solver<gcmma_policy> solver{problem, x0, opts};
+        basic_solver<gcmma_policy<>> solver{problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -379,7 +379,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
         // HS024 cubic objective is hard for GCMMA; verify improvement
         hs024 problem;
         auto x0 = problem.initial_point();
-        basic_solver<gcmma_policy> solver{problem, x0, opts};
+        basic_solver<gcmma_policy<>> solver{problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -399,7 +399,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
     {
         hs035 problem;
         auto x0 = problem.initial_point();
-        basic_solver<gcmma_policy> solver{problem, x0, opts};
+        basic_solver<gcmma_policy<>> solver{problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)

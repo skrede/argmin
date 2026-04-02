@@ -386,7 +386,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             bounded_rosenbrock problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            basic_solver<bobyqa_policy> solver{problem, x0, opts};
+            basic_solver<bobyqa_policy<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
         }
@@ -395,7 +395,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             bounded_booth problem;
             Eigen::VectorXd x0{{0.0, 0.0}};
-            basic_solver<bobyqa_policy> solver{problem, x0, opts};
+            basic_solver<bobyqa_policy<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
         }
@@ -404,7 +404,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             bounded_himmelblau problem;
             Eigen::VectorXd x0{{1.0, 1.0}};
-            basic_solver<bobyqa_policy> solver{problem, x0, opts};
+            basic_solver<bobyqa_policy<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
         }
@@ -521,7 +521,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS071")
         {
             hs071 problem;
-            basic_solver<kraft_slsqp_policy> solver{problem, problem.initial_point(), opts};
+            basic_solver<kraft_slsqp_policy<>> solver{problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 30.0);
@@ -530,7 +530,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            basic_solver<kraft_slsqp_policy> solver{problem, problem.initial_point(), opts};
+            basic_solver<kraft_slsqp_policy<>> solver{problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
             CHECK(solver.constraint_violation() < 1e-4);
@@ -540,7 +540,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            basic_solver<kraft_slsqp_policy> solver{problem, x0, opts};
+            basic_solver<kraft_slsqp_policy<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 1.0);
@@ -561,7 +561,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS071")
         {
             hs071 problem;
-            basic_solver<nw_sqp_policy> solver{problem, problem.initial_point(), opts};
+            basic_solver<nw_sqp_policy<>> solver{problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 30.0);
@@ -570,7 +570,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            basic_solver<nw_sqp_policy> solver{problem, problem.initial_point(), opts};
+            basic_solver<nw_sqp_policy<>> solver{problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
             CHECK(solver.constraint_violation() < 1e-4);
@@ -580,7 +580,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            basic_solver<nw_sqp_policy> solver{problem, x0, opts};
+            basic_solver<nw_sqp_policy<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 1.0);
@@ -644,7 +644,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            basic_solver<mma_policy> solver{problem, problem.initial_point(), opts};
+            basic_solver<mma_policy<>> solver{problem, problem.initial_point(), opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -663,7 +663,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{0.5, 0.5}};
-            basic_solver<mma_policy> solver{problem, x0, opts};
+            basic_solver<mma_policy<>> solver{problem, x0, opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -682,7 +682,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             beam_design problem;
             Eigen::VectorXd x0{{2.0, 2.0}};
-            basic_solver<mma_policy> solver{problem, x0, opts};
+            basic_solver<mma_policy<>> solver{problem, x0, opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -712,7 +712,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            basic_solver<gcmma_policy> solver{problem, problem.initial_point(), opts};
+            basic_solver<gcmma_policy<>> solver{problem, problem.initial_point(), opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -731,7 +731,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{0.5, 0.5}};
-            basic_solver<gcmma_policy> solver{problem, x0, opts};
+            basic_solver<gcmma_policy<>> solver{problem, x0, opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -750,7 +750,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             beam_design problem;
             Eigen::VectorXd x0{{2.0, 2.0}};
-            basic_solver<gcmma_policy> solver{problem, x0, opts};
+            basic_solver<gcmma_policy<>> solver{problem, x0, opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -782,8 +782,9 @@ TEST_CASE("Solver group: lbfgsb + cmaes racing", "[convergence][solver_group]")
     opts.set_objective_threshold(1e-15);
 
     basic_solver_group<round_robin_schedule,
+                       nablapp::dynamic_dimension,
                        lbfgsb_policy<>,
-                       cmaes_policy> group(problem, x0, opts);
+                       cmaes_policy<>> group(problem, x0, opts);
     auto result = group.step_n(500, opts);
     CHECK(result.objective_value < 0.1);
 }

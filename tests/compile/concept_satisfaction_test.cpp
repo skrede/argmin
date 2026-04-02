@@ -203,18 +203,29 @@ static_assert(nablapp::bound_constrained<nablapp::hs035<>>);
 // basic_solver<Policy> satisfies nlp_solver for all solver policies
 // ---------------------------------------------------------------------------
 
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::nw_sqp_policy>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::kraft_slsqp_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::nw_sqp_policy<>>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::kraft_slsqp_policy<>>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lbfgsb_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::bobyqa_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::bobyqa_policy<>>>);
 
-// Phase 4 policies satisfy nlp_solver (INTG-02)
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::augmented_lagrangian_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::mma_policy>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::gcmma_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::mma_policy<>>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::gcmma_policy<>>>);
 
-// Phase 5 policies satisfy nlp_solver (INTG-02)
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::cmaes_policy>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lm_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::cmaes_policy<>>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lm_policy<>>>);
+
+// problem_dimension concept verification
+static_assert(nablapp::has_problem_dimension<nablapp::himmelblau<>>);
+static_assert(nablapp::problem_dimension_v<nablapp::himmelblau<>> == 2);
+static_assert(nablapp::problem_dimension_v<nablapp::rosenbrock<>> == nablapp::dynamic_dimension);
+static_assert(nablapp::problem_dimension_v<nablapp::beale<>> == 2);
+static_assert(nablapp::problem_dimension_v<nablapp::booth<>> == 2);
+static_assert(nablapp::problem_dimension_v<nablapp::hs001<>> == 2);
+static_assert(nablapp::problem_dimension_v<nablapp::powell_singular<>> == 4);
+static_assert(nablapp::problem_dimension_v<nablapp::helical_valley<>> == 3);
+
+// Negative: type without problem_dimension does NOT satisfy objective
+static_assert(!nablapp::objective<empty_type>);
 
 int main() { return 0; }

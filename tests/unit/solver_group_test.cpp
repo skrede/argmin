@@ -26,7 +26,7 @@ TEST_CASE("basic_solver_group construction", "[solver_group]")
 
     SECTION("constructs with round_robin and two policies")
     {
-        basic_solver_group<round_robin_schedule, test::mock_policy, test::mock_policy>
+        basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension, test::mock_policy, test::mock_policy>
             group{prob, x0, opts};
         (void)group;
         SUCCEED("construction compiled and ran");
@@ -39,7 +39,7 @@ TEST_CASE("basic_solver_group step with round_robin", "[solver_group]")
     Eigen::VectorXd x0{{2.0, 2.0}};
     solver_options opts;
 
-    basic_solver_group<round_robin_schedule, test::mock_policy, test::mock_policy>
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension, test::mock_policy, test::mock_policy>
         group{prob, x0, opts};
 
     auto r1 = group.step();
@@ -55,7 +55,7 @@ TEST_CASE("basic_solver_group solve converges", "[solver_group]")
     Eigen::VectorXd x0{{1.0, 1.0}};
     solver_options opts;
 
-    basic_solver_group<round_robin_schedule, test::mock_policy, test::mock_policy>
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension, test::mock_policy, test::mock_policy>
         group{prob, x0, opts};
 
     auto result = group.step_n(100);
@@ -70,7 +70,7 @@ TEST_CASE("basic_solver_group fold expression concept check", "[solver_group]")
     quadratic_group prob;
     Eigen::VectorXd x0{{1.0, 1.0}};
 
-    basic_solver_group<round_robin_schedule, test::mock_policy, test::non_converging_policy>
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension, test::mock_policy, test::non_converging_policy>
         group{prob, x0};
     (void)group;
     SUCCEED("fold expression concept check passed at compile time");
@@ -106,7 +106,7 @@ TEST_CASE("feasible solver beats infeasible despite worse objective",
 
     // feasible_mock: obj=10, cv=0 (feasible)
     // infeasible_mock: obj=1, cv=2 (infeasible)
-    basic_solver_group<round_robin_schedule,
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension,
                        test::feasible_mock_policy,
                        test::infeasible_mock_policy>
         group{prob, x0, opts};
@@ -128,7 +128,7 @@ TEST_CASE("among feasible solvers lowest objective wins",
     // descent so objectives differ slightly between the two due to round-robin
     // alternation, but both have the same behavior. The result should pick
     // whichever has the lowest objective.
-    basic_solver_group<round_robin_schedule,
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension,
                        test::mock_policy,
                        test::mock_policy>
         group{prob, x0, opts};
@@ -149,7 +149,7 @@ TEST_CASE("among infeasible solvers lowest violation wins",
 
     // infeasible_mock: obj=1, cv=2 (lower violation)
     // high_violation_mock: obj=0.5, cv=5 (higher violation)
-    basic_solver_group<round_robin_schedule,
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension,
                        test::infeasible_mock_policy,
                        test::high_violation_mock_policy>
         group{prob, x0, opts};
@@ -196,7 +196,7 @@ TEST_CASE("basic_solver_group per-policy options tuple",
         test::mock_policy_with_opts::options_type{.custom_step_size = 0.9}
     };
 
-    basic_solver_group<round_robin_schedule,
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension,
                        test::mock_policy_with_opts,
                        test::mock_policy_with_opts>
         group{prob, x0, opts, policy_opts};
@@ -219,7 +219,7 @@ TEST_CASE("basic_solver_group existing constructor still works",
 
     SECTION("no options_type policy (broadcast)")
     {
-        basic_solver_group<round_robin_schedule,
+        basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension,
                            test::mock_policy, test::mock_policy>
             group{prob, x0, opts};
         auto result = group.step();
@@ -228,7 +228,7 @@ TEST_CASE("basic_solver_group existing constructor still works",
 
     SECTION("has options_type policy (broadcast, no per-policy opts)")
     {
-        basic_solver_group<round_robin_schedule,
+        basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension,
                            test::mock_policy_with_opts, test::mock_policy_with_opts>
             group{prob, x0, opts};
         auto result = group.step();

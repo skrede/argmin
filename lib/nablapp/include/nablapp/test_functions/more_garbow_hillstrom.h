@@ -31,7 +31,7 @@ namespace nablapp
 template <typename Scalar = double>
 struct powell_singular
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return 4; }
@@ -82,7 +82,7 @@ struct powell_singular
 template <typename Scalar = double>
 struct brown_badly_scaled
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return 2; }
@@ -205,7 +205,7 @@ struct trigonometric
 template <typename Scalar = double>
 struct wood
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return 4; }
@@ -260,7 +260,7 @@ struct wood
 template <typename Scalar = double>
 struct helical_valley
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 3;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return 3; }

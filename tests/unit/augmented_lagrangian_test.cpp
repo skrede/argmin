@@ -90,7 +90,7 @@ TEST_CASE("augmented lagrangian with BOBYQA inner solver",
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver<augmented_lagrangian_policy<bobyqa_policy>> solver{
+    basic_solver<augmented_lagrangian_policy<bobyqa_policy<>>> solver{
         problem, x0, opts};
     auto result = solver.solve(opts);
 

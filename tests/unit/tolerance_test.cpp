@@ -24,6 +24,7 @@ namespace
 
 struct quadratic
 {
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
     int dimension() const { return 2; }
     double value(const Eigen::VectorXd& x) const { return 0.5 * x.squaredNorm(); }
 };
@@ -154,7 +155,7 @@ TEST_CASE("solver_group retires roundoff_limited policy", "[tolerance]")
 
     quadratic prob;
     Eigen::VectorXd x0{{3.0, 4.0}};
-    basic_solver_group<round_robin_schedule,
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension,
                        test::roundoff_mock_policy,
                        test::mock_policy> group(prob, x0, opts);
     auto result = group.step_n(200, opts);
@@ -177,7 +178,7 @@ TEST_CASE("solver_group results provides per-policy info", "[tolerance]")
 
     quadratic prob;
     Eigen::VectorXd x0{{2.0, 2.0}};
-    basic_solver_group<round_robin_schedule,
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension,
                        test::roundoff_mock_policy,
                        test::mock_policy> group(prob, x0, opts);
     auto result = group.step_n(200, opts);
@@ -201,7 +202,7 @@ TEST_CASE("solver_group all retired stops iteration", "[tolerance]")
 
     quadratic prob;
     Eigen::VectorXd x0{{2.0, 2.0}};
-    basic_solver_group<round_robin_schedule,
+    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension,
                        test::roundoff_mock_policy,
                        test::diverging_mock_policy> group(prob, x0, opts);
     auto result = group.step_n(1000, opts);
