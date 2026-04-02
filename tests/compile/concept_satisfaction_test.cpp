@@ -205,7 +205,7 @@ static_assert(nablapp::bound_constrained<nablapp::hs035<>>);
 
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::nw_sqp_policy>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::kraft_slsqp_policy>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lbfgsb_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lbfgsb_policy<>>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::bobyqa_policy>>);
 
 // Phase 4 policies satisfy nlp_solver (INTG-02)

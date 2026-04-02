@@ -195,7 +195,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
+        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<>>> solver{
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -214,7 +214,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
+        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<>>> solver{
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -235,7 +235,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
+        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<>>> solver{
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -256,7 +256,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_objective_threshold(1e-15);
         opts.set_feasibility_threshold(1e-4);
 
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
+        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<>>> solver{
             problem, x0, opts};
         auto result = solver.solve(opts);
 

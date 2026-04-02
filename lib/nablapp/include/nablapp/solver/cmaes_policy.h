@@ -69,7 +69,7 @@ struct cmaes_policy
         Eigen::VectorXd p_c;
         double sigma{};
         std::uint32_t generation{0};
-        detail::cmaes_params params;
+        detail::cmaes_params<> params;
         std::mt19937 rng;
 
         std::function<double(const Eigen::VectorXd&)> eval_value;

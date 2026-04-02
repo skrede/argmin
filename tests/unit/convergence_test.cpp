@@ -347,7 +347,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock problem{};
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            basic_solver<lbfgsb_policy> solver{problem, x0, opts};
+            basic_solver<lbfgsb_policy<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
@@ -356,7 +356,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             booth problem{};
             Eigen::VectorXd x0{{0.0, 0.0}};
-            basic_solver<lbfgsb_policy> solver{problem, x0, opts};
+            basic_solver<lbfgsb_policy<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
@@ -365,7 +365,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             beale problem{};
             Eigen::VectorXd x0{{0.0, 0.0}};
-            basic_solver<lbfgsb_policy> solver{problem, x0, opts};
+            basic_solver<lbfgsb_policy<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
@@ -601,7 +601,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS071")
         {
             hs071 problem;
-            basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
+            basic_solver<augmented_lagrangian_policy<lbfgsb_policy<>>> solver{
                 problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(17.014).margin(0.5));
@@ -611,7 +611,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
+            basic_solver<augmented_lagrangian_policy<lbfgsb_policy<>>> solver{
                 problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(0.2));
@@ -622,7 +622,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            basic_solver<augmented_lagrangian_policy<lbfgsb_policy>> solver{
+            basic_solver<augmented_lagrangian_policy<lbfgsb_policy<>>> solver{
                 problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
@@ -782,7 +782,7 @@ TEST_CASE("Solver group: lbfgsb + cmaes racing", "[convergence][solver_group]")
     opts.set_objective_threshold(1e-15);
 
     basic_solver_group<round_robin_schedule,
-                       lbfgsb_policy,
+                       lbfgsb_policy<>,
                        cmaes_policy> group(problem, x0, opts);
     auto result = group.step_n(500, opts);
     CHECK(result.objective_value < 0.1);

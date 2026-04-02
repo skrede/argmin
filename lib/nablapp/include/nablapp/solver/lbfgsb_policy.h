@@ -45,9 +45,13 @@
 namespace nablapp
 {
 
+template <int N = dynamic_dimension>
 struct lbfgsb_policy
 {
     using scalar_type = double;
+
+    template <int M>
+    using rebind = lbfgsb_policy<M>;
 
     struct options_type
     {
@@ -63,20 +67,21 @@ struct lbfgsb_policy
     // const Problem&).
     struct state_type
     {
-        Eigen::VectorXd x;
-        Eigen::VectorXd g;
-        Eigen::VectorXd lower;
-        Eigen::VectorXd upper;
+        Eigen::Vector<double, N> x;
+        Eigen::Vector<double, N> g;
+        Eigen::Vector<double, N> lower;
+        Eigen::Vector<double, N> upper;
         double objective_value{};
-        detail::compact_lbfgs<double> B;
+        detail::compact_lbfgs<double, N> B;
         std::uint32_t iteration{0};
 
-        std::function<double(const Eigen::VectorXd&)> eval_value;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_gradient;
+        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
+        std::function<void(const Eigen::Vector<double, N>&, Eigen::Vector<double, N>&)> eval_gradient;
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
@@ -84,7 +89,8 @@ struct lbfgsb_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(this auto&& self, const Problem& problem,
+                    const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
@@ -103,19 +109,20 @@ struct lbfgsb_policy
         else
         {
             constexpr double inf = std::numeric_limits<double>::infinity();
-            s.lower = Eigen::VectorXd::Constant(n, -inf);
-            s.upper = Eigen::VectorXd::Constant(n, inf);
+            s.lower = Eigen::Vector<double, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<double, N>::Constant(n, inf);
         }
 
         // History depth: default 10 (N&W 7.2)
         std::uint8_t depth = self.options.history_depth.value_or(10);
-        s.B = detail::compact_lbfgs<double>{depth};
+        s.B = detail::compact_lbfgs<double, N>{depth};
         s.iteration = 0;
 
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
+        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
             return problem.value(v);
         };
-        s.eval_gradient = [&problem](const Eigen::VectorXd& v, Eigen::VectorXd& grad) {
+        s.eval_gradient = [&problem](const Eigen::Vector<double, N>& v,
+                                     Eigen::Vector<double, N>& grad) {
             problem.gradient(v, grad);
         };
 
@@ -132,11 +139,11 @@ struct lbfgsb_policy
         auto gcp = detail::cauchy_point(s.x, s.g, s.lower, s.upper, s.B);
 
         // Subspace minimization over free variables
-        Eigen::VectorXd x_new = detail::subspace_minimize(
+        Eigen::Vector<double, N> x_new = detail::subspace_minimize(
             s.x, gcp.x_cauchy, s.g, s.lower, s.upper, gcp.free_indices, s.B);
 
         // Search direction
-        Eigen::VectorXd d = (x_new - s.x).eval();
+        Eigen::Vector<double, N> d = (x_new - s.x).eval();
 
         // Zero step check
         if(d.norm() < 1e-15)
@@ -188,7 +195,7 @@ struct lbfgsb_policy
             return s.eval_value((s.x + a * d).eval());
         };
         auto dphi = [&](double a) {
-            Eigen::VectorXd g_temp(s.x.size());
+            Eigen::Vector<double, N> g_temp(s.x.size());
             s.eval_gradient((s.x + a * d).eval(), g_temp);
             return g_temp.dot(d);
         };
@@ -199,18 +206,18 @@ struct lbfgsb_policy
         auto ls = strong_wolfe(phi, dphi, s.objective_value, s.g.dot(d), ls_opts);
 
         // Update iterate (project for numerical safety)
-        Eigen::VectorXd x_old = s.x;
+        Eigen::Vector<double, N> x_old = s.x;
         double old_f = s.objective_value;
         s.x = detail::project((s.x + ls.alpha * d).eval(), s.lower, s.upper);
 
         // Evaluate new objective and gradient
         s.objective_value = s.eval_value(s.x);
-        Eigen::VectorXd new_g(s.x.size());
+        Eigen::Vector<double, N> new_g(s.x.size());
         s.eval_gradient(s.x, new_g);
 
         // Update L-BFGS curvature pairs
-        Eigen::VectorXd sk = (s.x - x_old).eval();
-        Eigen::VectorXd yk = (new_g - s.g).eval();
+        Eigen::Vector<double, N> sk = (s.x - x_old).eval();
+        Eigen::Vector<double, N> yk = (new_g - s.g).eval();
         s.B.push(sk, yk);
 
         // Store new gradient
@@ -241,7 +248,7 @@ struct lbfgsb_policy
     }
 
     // Hot start -- preserves curvature pairs (D-05).
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.objective_value = s.eval_value(x0);
@@ -251,7 +258,7 @@ struct lbfgsb_policy
     }
 
     // Cold restart -- clears curvature history (D-05).
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
     {
         self.reset(s, x0);
         s.B.reset();

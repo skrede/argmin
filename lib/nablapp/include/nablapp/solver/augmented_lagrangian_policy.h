@@ -35,7 +35,7 @@
 namespace nablapp
 {
 
-template <typename InnerPolicy = lbfgsb_policy>
+template <typename InnerPolicy = lbfgsb_policy<>>
 struct augmented_lagrangian_policy
 {
     using scalar_type = typename InnerPolicy::scalar_type;

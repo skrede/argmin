@@ -1,12 +1,15 @@
 #ifndef HPP_GUARD_NABLAPP_SOLVER_BASIC_SOLVER_H
 #define HPP_GUARD_NABLAPP_SOLVER_BASIC_SOLVER_H
 
+#include "nablapp/types.h"
 #include "nablapp/detail/lagrangian.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/result/solve_result.h"
 #include "nablapp/result/status.h"
 #include "nablapp/solver/convergence.h"
 #include "nablapp/solver/options.h"
+
+#include "nablapp/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -49,9 +52,10 @@ using policy_options_t = typename detail::policy_options_impl<Policy, Scalar>::t
 // step_n(budget). Convergence checking is performed by basic_solver --
 // the policy does NOT know about convergence.
 //
-// basic_solver<Policy> has exactly ONE template parameter (D-02).
-// Convergence behavior is deduced from solver_options<Convergence>
-// passed to solve()/step_n().
+// basic_solver<Policy, N> has two template parameters: the policy and
+// the compile-time dimension N. N is deduced from the problem via CTAD
+// deduction guides and is used to rebind the policy to the correct
+// dimension. Users never write N explicitly.
 //
 // Policy contract (deducing this):
 //   - Policy::scalar_type         -- scalar type (double, float)
@@ -63,7 +67,7 @@ using policy_options_t = typename detail::policy_options_impl<Policy, Scalar>::t
 //
 // Reference: K&W Section 4.4 (convergence criteria), N&W Section 3.1.
 
-template <typename Policy>
+template <typename Policy, int N = dynamic_dimension>
 class basic_solver
 {
 public:
@@ -80,7 +84,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
-        , state_{policy_.init(problem, x0, opts)}
+        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {}
 
     template <typename Problem, typename Convergence = default_convergence>
@@ -90,7 +94,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
-        , state_{policy_.init(problem, x0, opts)}
+        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {}
 
     template <typename Problem, typename PolicyOpts, typename Convergence = default_convergence>
@@ -105,7 +109,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
-        , state_{policy_.init(problem, x0, opts, policy_opts)}
+        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {}
 
     template <typename Problem, typename PolicyOpts, typename Convergence = default_convergence>
@@ -118,7 +122,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
-        , state_{policy_.init(problem, x0, opts, policy_opts)}
+        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {}
 
     // Overload for policies without options_type: the fourth argument is
@@ -132,7 +136,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
-        , state_{policy_.init(problem, x0, opts)}
+        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {}
 
     basic_solver(const basic_solver&) = delete;
@@ -177,7 +181,7 @@ public:
     }
 
     // Solve with default convergence (uses stored max_iterations).
-    solve_result<scalar_type> solve()
+    solve_result<scalar_type, N> solve()
     {
         solver_options<> opts;
         opts.max_iterations = max_iterations_;
@@ -187,13 +191,13 @@ public:
 
     // Solve with explicit convergence policy via solver_options.
     template <typename Convergence>
-    solve_result<scalar_type> solve(const solver_options<Convergence>& opts)
+    solve_result<scalar_type, N> solve(const solver_options<Convergence>& opts)
     {
         return step_n(opts.max_iterations, opts);
     }
 
     // Step with budget, default convergence.
-    solve_result<scalar_type> step_n(std::uint32_t budget)
+    solve_result<scalar_type, N> step_n(std::uint32_t budget)
     {
         solver_options<> opts;
         opts.max_iterations = max_iterations_;
@@ -210,8 +214,8 @@ public:
     //   4. Check policy-reported failure (D-16: policy failure is final)
     //   5. Check convergence policy
     template <typename Convergence>
-    solve_result<scalar_type> step_n(std::uint32_t budget,
-                                     const solver_options<Convergence>& opts)
+    solve_result<scalar_type, N> step_n(std::uint32_t budget,
+                                        const solver_options<Convergence>& opts)
     {
         auto t0 = std::chrono::steady_clock::now();
 
@@ -266,7 +270,7 @@ public:
 
         auto t1 = std::chrono::steady_clock::now();
 
-        return solve_result<scalar_type>{
+        return solve_result<scalar_type, N>{
             .status = status,
             .iterations = iterations_,
             .function_evaluations = iterations_,
@@ -296,7 +300,7 @@ public:
     // curvature pairs). Delegates to policy.reset(). Per D-05.
     void reset(const Eigen::VectorX<scalar_type>& x0)
     {
-        policy_.reset(state_, x0);
+        policy_.reset(state_, Eigen::Vector<scalar_type, N>(x0));
         iterations_ = 0;
         last_status_ = solver_status::running;
         abort_flag_.store(false, std::memory_order_relaxed);
@@ -306,7 +310,7 @@ public:
     // Delegates to policy.reset_clear(). Per D-05.
     void reset_clear(const Eigen::VectorX<scalar_type>& x0)
     {
-        policy_.reset_clear(state_, x0);
+        policy_.reset_clear(state_, Eigen::Vector<scalar_type, N>(x0));
         iterations_ = 0;
         last_status_ = solver_status::running;
         abort_flag_.store(false, std::memory_order_relaxed);
@@ -324,25 +328,44 @@ private:
     std::atomic<bool> abort_flag_{false};
 };
 
-// CTAD deduction guides (per D-13).
+// CTAD deduction guides.
+//
+// These guides extract N from the problem type via problem_dimension_v<Problem>
+// and rebind the policy to that dimension via Policy::template rebind<N>.
+// Users write basic_solver solver(lbfgsb_policy{}, problem, x0, opts)
+// and get basic_solver<lbfgsb_policy<problem_dimension_v<Problem>>,
+//                       problem_dimension_v<Problem>>.
 
+// Policy + Problem + x0 + opts
 template <typename Policy, typename Problem, typename Scalar, typename Convergence>
 basic_solver(Policy, const Problem&, const Eigen::VectorX<Scalar>&,
-             const solver_options<Convergence>&) -> basic_solver<Policy>;
+             const solver_options<Convergence>&)
+    -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
+                    problem_dimension_v<Problem>>;
 
+// Policy + Problem + x0 (no opts)
 template <typename Policy, typename Problem, typename Scalar>
 basic_solver(Policy, const Problem&, const Eigen::VectorX<Scalar>&)
-    -> basic_solver<Policy>;
+    -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
+                    problem_dimension_v<Problem>>;
+
+// Policy + Problem + x0 + opts + policy_opts
+template <typename Policy, typename Problem, typename Scalar, typename Convergence,
+          typename PolicyOpts>
+basic_solver(Policy, const Problem&, const Eigen::VectorX<Scalar>&,
+             const solver_options<Convergence>&, const PolicyOpts&)
+    -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
+                    problem_dimension_v<Problem>>;
 
 // D-04: convenience type aliases for common configurations.
-// These are identity aliases -- basic_solver has ONE template parameter,
+// These are identity aliases -- basic_solver has two template parameters,
 // and the convergence configuration flows through solver_options at call time.
 
-template <typename Policy>
-using realtime_solver = basic_solver<Policy>;
+template <typename Policy, int N = dynamic_dimension>
+using realtime_solver = basic_solver<Policy, N>;
 
-template <typename Policy>
-using gradient_solver = basic_solver<Policy>;
+template <typename Policy, int N = dynamic_dimension>
+using gradient_solver = basic_solver<Policy, N>;
 
 }
 
