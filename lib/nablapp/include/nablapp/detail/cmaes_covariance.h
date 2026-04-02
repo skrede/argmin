@@ -25,6 +25,20 @@ namespace nablapp::detail
 // B receives eigenvectors (columns), D receives sqrt(eigenvalues).
 // Eigenvalues clamped to min 1e-20 for numerical safety.
 // Reference: Hansen tutorial Section 4.
+//
+// Overload accepting a pre-allocated eigensolver to avoid per-call
+// workspace allocation (the solver's internal buffers are reused).
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+void eigendecompose(const Eigen::Matrix<Scalar, N, N>& C,
+                    Eigen::Matrix<Scalar, N, N>& B,
+                    Eigen::Vector<Scalar, N>& D,
+                    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<Scalar, N, N>>& es)
+{
+    es.compute(C);
+    B = es.eigenvectors();
+    D = es.eigenvalues().cwiseMax(Scalar(1e-20)).cwiseSqrt();
+}
+
 template <typename Scalar = double, int N = nablapp::dynamic_dimension>
 void eigendecompose(const Eigen::Matrix<Scalar, N, N>& C,
                     Eigen::Matrix<Scalar, N, N>& B,
@@ -77,7 +91,7 @@ void update_covariance(Eigen::Matrix<Scalar, N, N>& C,
     for(int i = 0; i < lambda; ++i)
     {
         Scalar w_i = weights[i];
-        Eigen::Vector<Scalar, N> di = deltas.col(i);
+        const auto di = deltas.col(i);
 
         if(i >= mu && w_i < Scalar(0))
         {

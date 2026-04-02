@@ -31,6 +31,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
@@ -68,13 +69,14 @@ namespace detail
 //
 // Policy must be a valid basic_solver policy.
 // Problem must provide value, gradient, dimension, optimal_value, initial_point.
-template <typename Policy, typename Problem>
+template <typename Policy, typename Problem, typename... PolicyOpts>
 auto run_nablapp_solver(std::string_view solver_name,
                         std::string_view problem_name,
                         const Problem& prob,
                         int max_iterations,
                         bool collect_trace,
-                        std::vector<trace_entry>& trace) -> benchmark_result
+                        std::vector<trace_entry>& trace,
+                        PolicyOpts&&... policy_opts) -> benchmark_result
 {
     auto x0 = prob.initial_point();
     solver_options<> opts{};
@@ -89,7 +91,8 @@ auto run_nablapp_solver(std::string_view solver_name,
         trace.clear();
         trace.resize(static_cast<std::size_t>(max_iterations));
 
-        basic_solver<Policy> solver(prob, x0, opts);
+        basic_solver<Policy> solver(prob, x0, opts,
+                                    std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -147,7 +150,8 @@ auto run_nablapp_solver(std::string_view solver_name,
     else
     {
         // Use solve() for simplicity when no trace needed.
-        basic_solver<Policy> solver(prob, x0, opts);
+        basic_solver<Policy> solver(prob, x0, opts,
+                                    std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();
         auto result = solver.solve();
@@ -190,7 +194,8 @@ void run_all_nablapp_solvers(
     int max_iterations,
     bool collect_trace,
     std::vector<benchmark_result>& results,
-    std::vector<std::vector<trace_entry>>& traces)
+    std::vector<std::vector<trace_entry>>& traces,
+    std::uint64_t seed = 42)
 {
     auto run = [&]<typename Policy>(std::string_view name, Policy) {
         std::vector<trace_entry> trace;
@@ -256,7 +261,16 @@ void run_all_nablapp_solvers(
 
     // CMA-ES: global problems with bounds.
     if constexpr(is_global && is_bound)
-        run("cmaes", cmaes_policy<>{});
+    {
+        typename cmaes_policy<>::options_type cmaes_opts{};
+        cmaes_opts.seed = seed;
+        std::vector<trace_entry> trace;
+        auto r = run_nablapp_solver<cmaes_policy<>>(
+            "cmaes", problem_name, prob, max_iterations, collect_trace, trace,
+            cmaes_opts);
+        results.push_back(r);
+        traces.push_back(std::move(trace));
+    }
 
     // COBYLA: constrained derivative-free (requires bounds + constraint values).
     if constexpr(constrained_values<Problem> && is_bound)
@@ -264,7 +278,16 @@ void run_all_nablapp_solvers(
 
     // ISRES: global constrained (requires bounds + constraint values).
     if constexpr(is_global && constrained_values<Problem> && is_bound)
-        run("isres", isres_policy<>{});
+    {
+        typename isres_policy<>::options_type isres_opts{};
+        isres_opts.seed = seed;
+        std::vector<trace_entry> trace;
+        auto r = run_nablapp_solver<isres_policy<>>(
+            "isres", problem_name, prob, max_iterations, collect_trace, trace,
+            isres_opts);
+        results.push_back(r);
+        traces.push_back(std::move(trace));
+    }
 }
 
 }

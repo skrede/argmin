@@ -15,6 +15,8 @@
 
 #ifdef NABLAPP_HAS_NLOPT
 #include "bench_nlopt.h"
+
+#include <nlopt.hpp>
 #endif
 #ifdef NABLAPP_HAS_CERES
 #include "bench_ceres.h"
@@ -24,6 +26,7 @@
 #endif
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -43,6 +46,7 @@ struct driver_config
     std::string trace_dir{"traces"};
     bool trace_enabled{true};
     bool compare_trace{false};
+    std::uint64_t seed{42};
 };
 
 auto parse_args(int argc, char** argv) -> driver_config
@@ -59,6 +63,8 @@ auto parse_args(int argc, char** argv) -> driver_config
             cfg.compare_trace = true;
         else if(arg == "--trace-dir" && i + 1 < argc)
             cfg.trace_dir = argv[++i];
+        else if(arg == "--seed" && i + 1 < argc)
+            cfg.seed = std::stoull(argv[++i]);
     }
     return cfg;
 }
@@ -101,11 +107,13 @@ int main(int argc, char** argv)
     // Run nablapp solvers on all registered problems.
     nablapp::bench::for_each_problem([&](std::string_view name, auto&& prob) {
         nablapp::bench::run_all_nablapp_solvers(
-            name, prob, max_iterations, cfg.trace_enabled, results, traces);
+            name, prob, max_iterations, cfg.trace_enabled, results, traces,
+            cfg.seed);
     });
 
     // Run comparison library benchmarks (if detected at build time).
 #ifdef NABLAPP_HAS_NLOPT
+    nlopt::srand(static_cast<unsigned long>(cfg.seed));
     nablapp::bench::run_nlopt_benchmarks(results);
 #endif
 #ifdef NABLAPP_HAS_CERES
@@ -150,7 +158,8 @@ int main(int argc, char** argv)
 
         nablapp::bench::for_each_problem([&](std::string_view name, auto&& prob) {
             nablapp::bench::run_all_nablapp_solvers(
-                name, prob, max_iterations, false, no_trace_results, no_trace_traces);
+                name, prob, max_iterations, false, no_trace_results, no_trace_traces,
+                cfg.seed);
         });
 
         for(std::size_t i = 0; i < results.size() && i < no_trace_results.size(); ++i)

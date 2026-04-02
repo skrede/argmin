@@ -207,6 +207,9 @@ Eigen::Vector<Scalar, N> mma_dual_solve(
     const auto tol = static_cast<Scalar>(opts.dual_tolerance.value_or(1e-9));
     const auto backtrack = static_cast<Scalar>(opts.backtrack_factor.value_or(0.95));
 
+    Eigen::VectorX<Scalar> grad(m);
+    Eigen::MatrixX<Scalar> negH(m, m);
+
     for(int iter = 0; iter < max_iter; ++iter)
     {
         // For current y, compute optimal primal x_j analytically.
@@ -235,7 +238,6 @@ Eigen::Vector<Scalar, N> mma_dual_solve(
         }
 
         // Compute dual gradient: dW/dy_i = constraint approximation value at x_opt
-        Eigen::VectorX<Scalar> grad(m);
         for(int i = 0; i < m; ++i)
         {
             grad[i] = coeffs.ri[i];
@@ -263,7 +265,7 @@ Eigen::Vector<Scalar, N> mma_dual_solve(
         //       a_j     = U_j - x_j, b_j = x_j - L_j
         //
         // Reference: Svanberg 1987, dual Newton system.
-        Eigen::MatrixX<Scalar> negH = Eigen::MatrixX<Scalar>::Zero(m, m);
+        negH.setZero();
         for(int j = 0; j < n; ++j)
         {
             Scalar pj = coeffs.p0[j];
@@ -306,7 +308,7 @@ Eigen::Vector<Scalar, N> mma_dual_solve(
 
         // Newton ascent: dy = (-H)^{-1} * grad, then y += alpha * dy.
         // This maximizes the concave dual W(y).
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(negH);
+        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(std::move(negH));
         Eigen::VectorX<Scalar> dy = ldlt.solve(grad);
 
         // Line search: backtrack to keep y >= 0

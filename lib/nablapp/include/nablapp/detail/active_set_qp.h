@@ -109,20 +109,27 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::VectorX<Scalar>> solve_equality_qp(
     // Reference: N&W eq. 16.37.
     Eigen::ColPivHouseholderQR<Eigen::MatrixX<Scalar>> qr(A_W.transpose());
     const int rank = qr.rank();
+    const int nz = n - rank;
 
-    Eigen::MatrixX<Scalar> Q = qr.householderQ() *
-        Eigen::MatrixX<Scalar>::Identity(n, n);
+    // Materialize only the Q columns we need via thin products.
+    // Q * [0; I_{nz}] gives the null-space basis Z (n x nz).
+    // Q * [I_{rank}; 0] gives the range-space basis Y (n x rank).
+    Eigen::MatrixX<Scalar> Z(n, nz);
+    Z.setZero();
+    Z.bottomRightCorner(nz, nz).setIdentity();
+    Z.applyOnTheLeft(qr.householderQ());
 
-    // Y = first rank columns, Z = remaining columns
-    Eigen::MatrixX<Scalar> Y = Q.leftCols(rank);
-    Eigen::MatrixX<Scalar> Z = Q.rightCols(n - rank);
+    Eigen::MatrixX<Scalar> Y(n, rank);
+    Y.setZero();
+    Y.topLeftCorner(rank, rank).setIdentity();
+    Y.applyOnTheLeft(qr.householderQ());
 
     // Solve for p_y: A_W * Y * p_y = 0 (since constraints are A_W p = 0)
     // => p_y = 0 (the subproblem has RHS = 0 because we work with p = x - x_k)
     // So p = Z * p_z where (Z^T G Z) p_z = -Z^T g_k  (eq. 16.18)
 
     Eigen::MatrixX<Scalar> ZtGZ = Z.transpose() * G * Z;
-    Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(ZtGZ);
+    Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(std::move(ZtGZ));
 
     // Check inertia: if reduced Hessian is not positive (semi)definite,
     // the subproblem direction may point to a saddle.
@@ -132,9 +139,8 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::VectorX<Scalar>> solve_equality_qp(
     Eigen::Vector<Scalar, N> p = (Z * p_z).eval();
 
     // Multipliers: (A_W Y)^T lambda = Y^T (g_k + G p)  (eq. 16.19)
-    Eigen::MatrixX<Scalar> AY = A_W * Y;
     Eigen::VectorX<Scalar> rhs_lam = Y.transpose() * (g_k + G * p);
-    auto qr_ay = AY.transpose().colPivHouseholderQr();
+    auto qr_ay = (A_W * Y).transpose().colPivHouseholderQr();
     Eigen::VectorX<Scalar> lambda = qr_ay.solve(rhs_lam);
 
     return {p, lambda};

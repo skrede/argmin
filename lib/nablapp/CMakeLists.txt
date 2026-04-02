@@ -47,7 +47,7 @@ target_link_libraries(nablapp
     Eigen3::Eigen
 )
 
-if(NOT NABLAPP_CMAKE_FETCH_DEPS)
+if(PROJECT_IS_TOP_LEVEL AND NOT NABLAPP_CMAKE_FETCH_DEPS)
     install(TARGETS nablapp
         EXPORT nablappTargets
     )

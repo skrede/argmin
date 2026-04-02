@@ -28,6 +28,7 @@
 #include "nablapp/formulation/concepts.h"
 
 #include <Eigen/Core>
+#include <Eigen/Eigenvalues>
 
 #include <algorithm>
 #include <cmath>
@@ -85,6 +86,8 @@ struct cmaes_policy
         double initial_sigma{};
         std::uint32_t stagnation_count{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
+
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, N, N>> eigen_solver;
     };
 
     options_type options{};
@@ -131,6 +134,7 @@ struct cmaes_policy
         s.p_c = Eigen::Vector<double, N>::Zero(n);
         s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
         s.D = Eigen::Vector<double, N>::Ones(n);
+        s.eigen_solver.compute(s.C);
 
         if(self.options.seed.has_value())
             s.rng.seed(static_cast<unsigned>(self.options.seed.value()));
@@ -221,8 +225,8 @@ struct cmaes_policy
         // 12. Set new mean
         s.mean = mean_new;
 
-        // 13. Eigendecompose updated C
-        detail::eigendecompose(s.C, s.B, s.D);
+        // 13. Eigendecompose updated C (reuses pre-allocated solver workspace)
+        detail::eigendecompose(s.C, s.B, s.D, s.eigen_solver);
 
         // 14. Track best
         double gen_best_f = fitnesses[idx[0]];

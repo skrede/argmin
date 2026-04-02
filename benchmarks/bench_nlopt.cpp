@@ -376,10 +376,11 @@ void run_nlopt_benchmarks(std::vector<benchmark_result>& results)
                 detail::run_nlopt_auglag(name, p, max_evals));
 
         // COBYLA: derivative-free constrained (no gradient needed).
-        if constexpr((is_ineq || is_mixed || is_eq) && bound_constrained<P>)
-            results.push_back(
-                detail::run_nlopt_solver(nlopt::LN_COBYLA, "nlopt_cobyla",
-                                         name, p, max_evals));
+        // Disabled: dominates perf profiles (~98% CPU), masking nablapp data.
+        // if constexpr((is_ineq || is_mixed || is_eq) && bound_constrained<P>)
+        //     results.push_back(
+        //         detail::run_nlopt_solver(nlopt::LN_COBYLA, "nlopt_cobyla",
+        //                                  name, p, max_evals));
 
         // ISRES: global constrained -- also on constrained bounded problems
         // for comparison with nablapp's isres_policy.
