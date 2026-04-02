@@ -37,7 +37,7 @@ struct beale
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         Scalar x1 = x[0];
         Scalar x2 = x[1];
@@ -47,9 +47,8 @@ struct beale
         return t1 * t1 + t2 * t2 + t3 * t3;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
-        g.resize(2);
         Scalar x1 = x[0];
         Scalar x2 = x[1];
         Scalar x2_2 = x2 * x2;

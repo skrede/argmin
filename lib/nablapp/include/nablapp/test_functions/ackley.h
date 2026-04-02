@@ -53,7 +53,7 @@ struct ackley
         return Eigen::VectorX<Scalar>::Constant(n, Scalar(32.768));
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         Scalar d = Scalar(n);
         Scalar sum_sq{0};
@@ -68,7 +68,7 @@ struct ackley
              + a + std::exp(Scalar(1));
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
         Scalar d = Scalar(n);
         Scalar sum_sq{0};
@@ -89,7 +89,6 @@ struct ackley
         // d/dx_i of second term: exp(sum_cos/d) * sin(c*x_i) * c / d
         Scalar exp_term2 = std::exp(sum_cos / d) / d;
 
-        g.resize(n);
         for(int i = 0; i < n; ++i)
         {
             g[i] = exp_term1 * x[i] + exp_term2 * c * std::sin(c * x[i]);

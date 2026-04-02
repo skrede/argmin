@@ -42,12 +42,14 @@ namespace detail
 template <typename Problem>
 double nlopt_objective(unsigned n, const double* x, double* grad, void* data)
 {
+    static constexpr int N = Problem::problem_dimension;
     auto* prob = static_cast<Problem*>(data);
-    Eigen::Map<const Eigen::VectorXd> xv(x, n);
+    Eigen::Vector<double, N> xv =
+        Eigen::Map<const Eigen::VectorXd>(x, n);
 
     if(grad)
     {
-        Eigen::VectorXd g(n);
+        Eigen::Vector<double, N> g(n);
         prob->gradient(xv, g);
         Eigen::Map<Eigen::VectorXd>(grad, n) = g;
     }
@@ -63,8 +65,10 @@ void nlopt_ineq_mconstraint(unsigned m, double* result,
                             unsigned n, const double* x,
                             double* grad, void* data)
 {
+    static constexpr int N = Problem::problem_dimension;
     auto* prob = static_cast<Problem*>(data);
-    Eigen::Map<const Eigen::VectorXd> xv(x, n);
+    Eigen::Vector<double, N> xv =
+        Eigen::Map<const Eigen::VectorXd>(x, n);
 
     Eigen::VectorXd c(m);
     prob->constraints(xv, c);
@@ -93,8 +97,10 @@ void nlopt_eq_mconstraint(unsigned m, double* result,
                           unsigned n, const double* x,
                           double* grad, void* data)
 {
+    static constexpr int N = Problem::problem_dimension;
     auto* prob = static_cast<Problem*>(data);
-    Eigen::Map<const Eigen::VectorXd> xv(x, n);
+    Eigen::Vector<double, N> xv =
+        Eigen::Map<const Eigen::VectorXd>(x, n);
 
     Eigen::VectorXd c;
     prob->constraints(xv, c);

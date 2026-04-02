@@ -47,7 +47,7 @@ struct rastrigin
         return Eigen::VectorX<Scalar>::Constant(n, Scalar(5.12));
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         constexpr Scalar two_pi = Scalar(2) * std::numbers::pi_v<Scalar>;
         Scalar f = Scalar(10) * Scalar(n);
@@ -58,10 +58,9 @@ struct rastrigin
         return f;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
         constexpr Scalar two_pi = Scalar(2) * std::numbers::pi_v<Scalar>;
-        g.resize(n);
         for(int i = 0; i < n; ++i)
         {
             g[i] = Scalar(2) * x[i] + Scalar(10) * two_pi * std::sin(two_pi * x[i]);

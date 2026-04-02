@@ -34,16 +34,15 @@ struct booth
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         Scalar t1 = x[0] + Scalar(2) * x[1] - Scalar(7);
         Scalar t2 = Scalar(2) * x[0] + x[1] - Scalar(5);
         return t1 * t1 + t2 * t2;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
-        g.resize(2);
         Scalar t1 = x[0] + Scalar(2) * x[1] - Scalar(7);
         Scalar t2 = Scalar(2) * x[0] + x[1] - Scalar(5);
         g[0] = Scalar(2) * t1 + Scalar(4) * t2;

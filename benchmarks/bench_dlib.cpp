@@ -52,7 +52,9 @@ struct counting_objective
     double operator()(const dlib::matrix<double, 0, 1>& x) const
     {
         ++f_count;
-        Eigen::Map<const Eigen::VectorXd> xv(x.begin(), x.size());
+        static constexpr int N = Problem::problem_dimension;
+        Eigen::Vector<double, N> xv =
+            Eigen::Map<const Eigen::VectorXd>(x.begin(), x.size());
         return prob.value(xv);
     }
 };
@@ -68,8 +70,10 @@ struct counting_gradient
         const dlib::matrix<double, 0, 1>& x) const
     {
         ++g_count;
-        Eigen::Map<const Eigen::VectorXd> xv(x.begin(), x.size());
-        Eigen::VectorXd g(x.size());
+        static constexpr int N = Problem::problem_dimension;
+        Eigen::Vector<double, N> xv =
+            Eigen::Map<const Eigen::VectorXd>(x.begin(), x.size());
+        Eigen::Vector<double, N> g(x.size());
         prob.gradient(xv, g);
 
         dlib::matrix<double, 0, 1> result(x.size());
@@ -121,8 +125,10 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
+    static constexpr int N = Problem::problem_dimension;
     double final_obj = prob.value(
-        Eigen::Map<const Eigen::VectorXd>(x0.begin(), x0.size()));
+        Eigen::Vector<double, N>(
+            Eigen::Map<const Eigen::VectorXd>(x0.begin(), x0.size())));
     double known_opt = prob.optimal_value();
 
     return benchmark_result{
@@ -147,6 +153,7 @@ auto run_dlib_bobyqa(std::string_view problem_name,
                      const Problem& prob,
                      int max_evals) -> benchmark_result
 {
+    static constexpr int N = Problem::problem_dimension;
     counting_objective<Problem> obj{prob};
 
     auto x0 = to_dlib(prob.initial_point());
@@ -172,7 +179,8 @@ auto run_dlib_bobyqa(std::string_view problem_name,
     {
         // dlib throws on max-evals reached or other failures.
         minf = prob.value(
-            Eigen::Map<const Eigen::VectorXd>(x0.begin(), x0.size()));
+            Eigen::Vector<double, N>(
+                Eigen::Map<const Eigen::VectorXd>(x0.begin(), x0.size())));
         status_str = "max_iterations";
     }
 

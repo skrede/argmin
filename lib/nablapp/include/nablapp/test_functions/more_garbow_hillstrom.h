@@ -45,7 +45,7 @@ struct powell_singular
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         Scalar t1 = x[0] + Scalar(10) * x[1];
         Scalar t2 = x[2] - x[3];
@@ -55,8 +55,7 @@ struct powell_singular
                + t3 * t3 * t3 * t3 + Scalar(10) * t4 * t4 * t4 * t4;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
         Scalar t1 = x[0] + Scalar(10) * x[1];
         Scalar t2 = x[2] - x[3];
@@ -64,7 +63,6 @@ struct powell_singular
         Scalar t4 = x[0] - x[3];
         Scalar t3_cubed = t3 * t3 * t3;
         Scalar t4_cubed = t4 * t4 * t4;
-        g.resize(4);
         g[0] = Scalar(2) * t1 + Scalar(40) * t4_cubed;
         g[1] = Scalar(20) * t1 + Scalar(4) * t3_cubed;
         g[2] = Scalar(10) * t2 - Scalar(8) * t3_cubed;
@@ -94,7 +92,7 @@ struct brown_badly_scaled
         return Eigen::VectorX<Scalar>::Ones(2);
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         Scalar t1 = x[0] - Scalar(1e6);
         Scalar t2 = x[1] - Scalar(2e-6);
@@ -102,13 +100,11 @@ struct brown_badly_scaled
         return t1 * t1 + t2 * t2 + t3 * t3;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
         Scalar t1 = x[0] - Scalar(1e6);
         Scalar t2 = x[1] - Scalar(2e-6);
         Scalar t3 = x[0] * x[1] - Scalar(2);
-        g.resize(2);
         g[0] = Scalar(2) * t1 + Scalar(2) * t3 * x[1];
         g[1] = Scalar(2) * t2 + Scalar(2) * t3 * x[0];
     }
@@ -140,7 +136,7 @@ struct trigonometric
         return Eigen::VectorX<Scalar>::Constant(n, Scalar(1) / Scalar(n));
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         using std::cos;
         using std::sin;
@@ -159,8 +155,7 @@ struct trigonometric
         return f;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
         using std::cos;
         using std::sin;
@@ -182,7 +177,6 @@ struct trigonometric
         for(int i = 0; i < n; ++i)
             r_sum += r[i];
 
-        g.resize(n);
         for(int i = 0; i < n; ++i)
         {
             Scalar si = sin(x[i]);
@@ -219,7 +213,7 @@ struct wood
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         Scalar t1 = x[1] - x[0] * x[0];
         Scalar t2 = Scalar(1) - x[0];
@@ -233,14 +227,12 @@ struct wood
                + Scalar(19.8) * t5 * t6;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
         Scalar t1 = x[1] - x[0] * x[0];
         Scalar t3 = x[3] - x[2] * x[2];
         Scalar t5 = x[1] - Scalar(1);
         Scalar t6 = x[3] - Scalar(1);
-        g.resize(4);
         g[0] = Scalar(-400) * x[0] * t1 - Scalar(2) * (Scalar(1) - x[0]);
         g[1] = Scalar(200) * t1 + Scalar(20.2) * t5 + Scalar(19.8) * t6;
         g[2] = Scalar(-360) * x[2] * t3 - Scalar(2) * (Scalar(1) - x[2]);
@@ -274,7 +266,7 @@ struct helical_valley
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         using std::atan2;
         using std::sqrt;
@@ -286,8 +278,7 @@ struct helical_valley
         return Scalar(100) * (t1 * t1 + t2 * t2) + x[2] * x[2];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
         using std::atan2;
         using std::sqrt;
@@ -299,7 +290,6 @@ struct helical_valley
         Scalar t2 = r - Scalar(1);
         // dtheta/dx0 = -x1 / (2*pi*r2), dtheta/dx1 = x0 / (2*pi*r2)
         Scalar k = Scalar(10) / (pi2 * r2);
-        g.resize(3);
         g[0] = Scalar(200) * (t1 * k * x[1] + t2 * x[0] / r);
         g[1] = Scalar(200) * (-t1 * k * x[0] + t2 * x[1] / r);
         g[2] = Scalar(200) * t1 + Scalar(2) * x[2];
@@ -339,7 +329,7 @@ struct penalty_i
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         using std::sqrt;
         constexpr Scalar a = Scalar(1e-5);
@@ -356,8 +346,7 @@ struct penalty_i
         return f + pen * pen;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
         constexpr Scalar a = Scalar(1e-5);
         Scalar sum_sq{0};
@@ -365,7 +354,6 @@ struct penalty_i
             sum_sq += x[i] * x[i];
         Scalar pen = sum_sq - Scalar(0.25);
 
-        g.resize(n);
         for(int i = 0; i < n; ++i)
         {
             g[i] = Scalar(2) * a * (x[i] - Scalar(1))
@@ -404,7 +392,7 @@ struct variably_dimensioned
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         Scalar sum_sq{0};
         Scalar s{0};
@@ -417,15 +405,13 @@ struct variably_dimensioned
         return sum_sq + s * s + s * s * s * s;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
         Scalar s{0};
         for(int i = 0; i < n; ++i)
             s += Scalar(i + 1) * (x[i] - Scalar(1));
 
         Scalar ds = Scalar(2) * s + Scalar(4) * s * s * s;
-        g.resize(n);
         for(int i = 0; i < n; ++i)
         {
             g[i] = Scalar(2) * (x[i] - Scalar(1))
@@ -461,7 +447,7 @@ struct extended_rosenbrock
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
     {
         Scalar f{0};
         for(int i = 0; i < n - 1; i += 2)
@@ -473,10 +459,9 @@ struct extended_rosenbrock
         return f;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
     {
-        g.setZero(n);
+        g.setZero();
         for(int i = 0; i < n - 1; i += 2)
         {
             Scalar t = x[i + 1] - x[i] * x[i];
