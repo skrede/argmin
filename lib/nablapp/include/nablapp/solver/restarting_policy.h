@@ -1,0 +1,178 @@
+#ifndef HPP_GUARD_NABLAPP_SOLVER_RESTARTING_POLICY_H
+#define HPP_GUARD_NABLAPP_SOLVER_RESTARTING_POLICY_H
+
+// IPOP restart decorator for population-based solver policies.
+//
+// Transparent GoF decorator that wraps any policy and adds restart-on-
+// stagnation with increasing population size (IPOP). The decorator
+// forwards init/step/reset/reset_clear to the inner policy and monitors
+// for stagnation. When triggered, restart consumes one step() call.
+//
+// rebind<M> forwards through the decorator so basic_solver CTAD works
+// transparently.
+//
+// Reference: Auger & Hansen (2005), "A Restart CMA Evolution Strategy
+//            with Increasing Population Size", CEC 2005.
+
+#include "nablapp/result/step_result.h"
+#include "nablapp/solver/options.h"
+#include "nablapp/types.h"
+
+#include <Eigen/Core>
+
+#include <cmath>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <optional>
+
+namespace nablapp
+{
+
+template <typename Inner>
+struct restarting_policy
+{
+    using scalar_type = typename Inner::scalar_type;
+
+    template <int M>
+    using rebind = restarting_policy<typename Inner::template rebind<M>>;
+
+    struct options_type
+    {
+        typename Inner::options_type inner{};
+        std::optional<std::uint32_t> stagnation_limit{};
+        std::optional<double> population_multiplier{};
+    };
+
+    struct state_type
+    {
+        typename Inner::state_type inner;
+        std::uint32_t stagnation_count{0};
+        double best_ever_value{std::numeric_limits<double>::infinity()};
+        bool restart_pending{false};
+        std::uint32_t restart_count{0};
+        std::uint32_t dimension{0};
+        std::uint32_t initial_lambda{0};
+        std::function<void(state_type&)> reinit;
+    };
+
+    Inner inner_policy_{};
+    options_type options{};
+
+    template <typename Problem, typename Convergence = default_convergence>
+    state_type init(this auto&& self, const Problem& problem,
+                    const auto& x0,
+                    const solver_options<Convergence>& opts)
+    {
+        self.inner_policy_.options = self.options.inner;
+
+        state_type s;
+        s.inner = self.inner_policy_.init(problem, x0, opts);
+        s.best_ever_value = s.inner.objective_value;
+        s.stagnation_count = 0;
+        s.restart_count = 0;
+        s.restart_pending = false;
+        s.dimension = static_cast<std::uint32_t>(x0.size());
+
+        // Extract initial lambda from inner state
+        if constexpr(requires { s.inner.lambda; })
+            s.initial_lambda = static_cast<std::uint32_t>(s.inner.lambda);
+        else if constexpr(requires { s.inner.params.lambda; })
+            s.initial_lambda = static_cast<std::uint32_t>(s.inner.params.lambda);
+        else
+            s.initial_lambda = static_cast<std::uint32_t>(
+                4 + 3 * std::log(static_cast<double>(s.dimension)));
+
+        // Build reinit closure
+        s.reinit = [&self_ref = self, &problem, x0, opts](state_type& st) {
+            ++st.restart_count;
+
+            // IPOP: population = initial_lambda * 2^restart_count
+            double multiplier = self_ref.options.population_multiplier.value_or(2.0);
+            auto new_pop = static_cast<std::uint32_t>(
+                st.initial_lambda * std::pow(multiplier, st.restart_count));
+
+            // Update inner population size via the appropriate field
+            if constexpr(requires { self_ref.inner_policy_.options.population_size; })
+                self_ref.inner_policy_.options.population_size = new_pop;
+            else if constexpr(requires { self_ref.inner_policy_.options.lambda; })
+                self_ref.inner_policy_.options.lambda = new_pop;
+
+            self_ref.inner_policy_.reset_clear(st.inner, x0);
+        };
+
+        return s;
+    }
+
+    template <typename Problem, typename Convergence>
+    state_type init(this auto&& self, const Problem& problem,
+                    const auto& x0,
+                    const solver_options<Convergence>& opts,
+                    const options_type& policy_opts)
+    {
+        self.options = policy_opts;
+        return self.init(problem, x0, opts);
+    }
+
+    step_result<scalar_type> step(this auto&& self, state_type& s)
+    {
+        if(s.restart_pending)
+        {
+            s.reinit(s);
+            s.restart_pending = false;
+            s.stagnation_count = 0;
+
+            return step_result<scalar_type>{
+                .objective_value = s.inner.objective_value,
+                .gradient_norm = 1.0,
+                .step_size = 1.0,
+                .objective_change = 1.0,
+                .improved = false,
+                .x_norm = s.inner.x.norm(),
+            };
+        }
+
+        auto result = self.inner_policy_.step(s.inner);
+
+        // Stall detection
+        if(result.objective_value < s.best_ever_value)
+        {
+            s.best_ever_value = result.objective_value;
+            s.stagnation_count = 0;
+        }
+        else
+        {
+            ++s.stagnation_count;
+        }
+
+        std::uint32_t limit = self.options.stagnation_limit.value_or(
+            static_cast<std::uint32_t>(
+                10 + std::ceil(30.0 * s.dimension / s.initial_lambda)));
+
+        if(s.stagnation_count >= limit)
+            s.restart_pending = true;
+
+        return result;
+    }
+
+    void reset(this auto&& self, state_type& s, const auto& x0)
+    {
+        self.inner_policy_.reset(s.inner, x0);
+        s.stagnation_count = 0;
+        s.best_ever_value = s.inner.objective_value;
+        s.restart_pending = false;
+    }
+
+    void reset_clear(this auto&& self, state_type& s, const auto& x0)
+    {
+        self.inner_policy_.reset_clear(s.inner, x0);
+        s.stagnation_count = 0;
+        s.restart_count = 0;
+        s.best_ever_value = s.inner.objective_value;
+        s.restart_pending = false;
+    }
+};
+
+}
+
+#endif
