@@ -58,7 +58,7 @@ struct griewank
         return Eigen::VectorX<Scalar>::Constant(n, Scalar(600));
     }
 
-    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
+    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
     {
         using std::cos;
         using std::sqrt;
@@ -72,7 +72,8 @@ struct griewank
         return Scalar(1) + sum - prod;
     }
 
-    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
+    void gradient(const Eigen::VectorX<Scalar>& x,
+                  Eigen::VectorX<Scalar>& g) const
     {
         using std::cos;
         using std::sin;
@@ -82,6 +83,7 @@ struct griewank
         for(int i = 0; i < n; ++i)
             prod *= cos(x[i] / sqrt(Scalar(i + 1)));
 
+        g.resize(n);
         for(int i = 0; i < n; ++i)
         {
             Scalar si = sqrt(Scalar(i + 1));

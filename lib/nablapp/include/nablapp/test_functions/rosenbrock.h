@@ -43,7 +43,7 @@ struct rosenbrock
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
+    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
     {
         Scalar f{0};
         for(int i = 0; i < n - 1; ++i)
@@ -55,9 +55,9 @@ struct rosenbrock
         return f;
     }
 
-    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
+    void gradient(const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& g) const
     {
-        g.setZero();
+        g.setZero(n);
         for(int i = 0; i < n - 1; ++i)
         {
             Scalar t1 = a - x[i];

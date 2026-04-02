@@ -42,15 +42,12 @@ public:
                   double* cost,
                   double* gradient) const override
     {
-        static constexpr int N = Problem::problem_dimension;
-        Eigen::Vector<double, N> x =
-            Eigen::Map<const Eigen::VectorXd>(parameters, prob_.dimension());
-
+        Eigen::Map<const Eigen::VectorXd> x(parameters, prob_.dimension());
         *cost = prob_.value(x);
 
         if(gradient)
         {
-            Eigen::Vector<double, N> g(prob_.dimension());
+            Eigen::VectorXd g(prob_.dimension());
             prob_.gradient(x, g);
             Eigen::Map<Eigen::VectorXd>(gradient, prob_.dimension()) = g;
         }

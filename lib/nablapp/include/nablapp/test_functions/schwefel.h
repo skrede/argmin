@@ -55,7 +55,7 @@ struct schwefel
         return Eigen::VectorX<Scalar>::Constant(n, Scalar(500));
     }
 
-    [[nodiscard]] Scalar value(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x) const
+    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
     {
         using std::abs;
         using std::sin;
@@ -66,12 +66,14 @@ struct schwefel
         return Scalar(418.9829) * Scalar(n) - s;
     }
 
-    void gradient(const Eigen::Ref<const Eigen::VectorX<Scalar>>& x, Eigen::Ref<Eigen::VectorX<Scalar>> g) const
+    void gradient(const Eigen::VectorX<Scalar>& x,
+                  Eigen::VectorX<Scalar>& g) const
     {
         using std::abs;
         using std::cos;
         using std::sin;
         using std::sqrt;
+        g.resize(n);
         for(int i = 0; i < n; ++i)
         {
             Scalar ax = abs(x[i]);
