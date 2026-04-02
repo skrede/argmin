@@ -7,6 +7,7 @@
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/solver/gcmma_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
+#include "nablapp/solver/cobyla_policy.h"
 #include "nablapp/solver/lbfgsb_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"

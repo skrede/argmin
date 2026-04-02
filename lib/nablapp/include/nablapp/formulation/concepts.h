@@ -69,13 +69,19 @@ concept bound_constrained = objective<P, S> &&
 };
 
 template <typename P, typename S = double>
-concept constrained = objective<P, S> &&
-    requires(const P& p, const Eigen::VectorX<S>& x, Eigen::VectorX<S>& c, Eigen::MatrixX<S>& J)
+concept constrained_values = objective<P, S> &&
+    requires(const P& p, const Eigen::VectorX<S>& x, Eigen::VectorX<S>& c)
 {
     { p.constraints(x, c) };
-    { p.constraint_jacobian(x, J) };
     { p.num_equality() } -> std::convertible_to<int>;
     { p.num_inequality() } -> std::convertible_to<int>;
+};
+
+template <typename P, typename S = double>
+concept constrained = constrained_values<P, S> &&
+    requires(const P& p, const Eigen::VectorX<S>& x, Eigen::MatrixX<S>& J)
+{
+    { p.constraint_jacobian(x, J) };
 };
 
 template <typename P, typename S = double>
