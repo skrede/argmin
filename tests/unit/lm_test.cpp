@@ -21,25 +21,25 @@ namespace
 // Provides analytic Jacobian.
 struct rosenbrock_ls
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
     int num_residuals() const { return 2; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double r0 = 1.0 - x(0);
         double r1 = std::sqrt(5.0) * (x(1) - x(0) * x(0));
         return 0.5 * (r0 * r0 + r1 * r1);
     }
 
-    void residuals(const Eigen::VectorXd& x, Eigen::VectorXd& r) const
+    void residuals(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& r) const
     {
         r(0) = 1.0 - x(0);
         r(1) = std::sqrt(5.0) * (x(1) - x(0) * x(0));
     }
 
-    void jacobian(const Eigen::VectorXd& x, Eigen::MatrixXd& J) const
+    void jacobian(const Eigen::Vector<double, 2>& x, Eigen::MatrixXd& J) const
     {
         J(0, 0) = -1.0;
         J(0, 1) = 0.0;
@@ -55,12 +55,12 @@ struct exponential_fitting
     static constexpr double t[] = {0.0, 0.5, 1.0, 1.5, 2.0};
     static constexpr double y[] = {2.0, 1.2, 0.75, 0.45, 0.28};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
     int num_residuals() const { return 5; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double f = 0.0;
         for(int i = 0; i < 5; ++i)
@@ -71,13 +71,13 @@ struct exponential_fitting
         return 0.5 * f;
     }
 
-    void residuals(const Eigen::VectorXd& x, Eigen::VectorXd& r) const
+    void residuals(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& r) const
     {
         for(int i = 0; i < 5; ++i)
             r(i) = x(0) * std::exp(x(1) * t[i]) - y[i];
     }
 
-    void jacobian(const Eigen::VectorXd& x, Eigen::MatrixXd& J) const
+    void jacobian(const Eigen::Vector<double, 2>& x, Eigen::MatrixXd& J) const
     {
         for(int i = 0; i < 5; ++i)
         {
@@ -91,19 +91,19 @@ struct exponential_fitting
 // Rosenbrock residual form WITHOUT jacobian method -- triggers FD fallback.
 struct rosenbrock_ls_no_jac
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
     int num_residuals() const { return 2; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double r0 = 1.0 - x(0);
         double r1 = std::sqrt(5.0) * (x(1) - x(0) * x(0));
         return 0.5 * (r0 * r0 + r1 * r1);
     }
 
-    void residuals(const Eigen::VectorXd& x, Eigen::VectorXd& r) const
+    void residuals(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& r) const
     {
         r(0) = 1.0 - x(0);
         r(1) = std::sqrt(5.0) * (x(1) - x(0) * x(0));

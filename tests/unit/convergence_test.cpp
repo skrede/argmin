@@ -42,75 +42,75 @@ namespace
 // Bounded Rosenbrock for BOBYQA (objective + bound_constrained, no gradient).
 struct bounded_rosenbrock
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double t1 = 1.0 - x[0];
         double t2 = x[1] - x[0] * x[0];
         return t1 * t1 + 5.0 * t2 * t2;
     }
 
-    Eigen::VectorXd lower_bounds() const
+    Eigen::Vector<double, 2> lower_bounds() const
     {
-        return Eigen::VectorXd::Constant(2, -5.0);
+        return Eigen::Vector<double, 2>::Constant(-5.0);
     }
 
-    Eigen::VectorXd upper_bounds() const
+    Eigen::Vector<double, 2> upper_bounds() const
     {
-        return Eigen::VectorXd::Constant(2, 5.0);
+        return Eigen::Vector<double, 2>::Constant(5.0);
     }
 };
 
 // Bounded Booth for BOBYQA.
 struct bounded_booth
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double t1 = x[0] + 2.0 * x[1] - 7.0;
         double t2 = 2.0 * x[0] + x[1] - 5.0;
         return t1 * t1 + t2 * t2;
     }
 
-    Eigen::VectorXd lower_bounds() const
+    Eigen::Vector<double, 2> lower_bounds() const
     {
-        return Eigen::VectorXd::Constant(2, -10.0);
+        return Eigen::Vector<double, 2>::Constant(-10.0);
     }
 
-    Eigen::VectorXd upper_bounds() const
+    Eigen::Vector<double, 2> upper_bounds() const
     {
-        return Eigen::VectorXd::Constant(2, 10.0);
+        return Eigen::Vector<double, 2>::Constant(10.0);
     }
 };
 
 // Bounded Himmelblau for BOBYQA.
 struct bounded_himmelblau
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double t1 = x[0] * x[0] + x[1] - 11.0;
         double t2 = x[0] + x[1] * x[1] - 7.0;
         return t1 * t1 + t2 * t2;
     }
 
-    Eigen::VectorXd lower_bounds() const
+    Eigen::Vector<double, 2> lower_bounds() const
     {
-        return Eigen::VectorXd::Constant(2, -5.0);
+        return Eigen::Vector<double, 2>::Constant(-5.0);
     }
 
-    Eigen::VectorXd upper_bounds() const
+    Eigen::Vector<double, 2> upper_bounds() const
     {
-        return Eigen::VectorXd::Constant(2, 5.0);
+        return Eigen::Vector<double, 2>::Constant(5.0);
     }
 };
 
@@ -119,25 +119,25 @@ struct bounded_himmelblau
 // f(x) = 0.5*(r_0^2 + r_1^2), minimum at (1,1), f*=0.
 struct rosenbrock_ls
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
     int num_residuals() const { return 2; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double r0 = 1.0 - x(0);
         double r1 = std::sqrt(5.0) * (x(1) - x(0) * x(0));
         return 0.5 * (r0 * r0 + r1 * r1);
     }
 
-    void residuals(const Eigen::VectorXd& x, Eigen::VectorXd& r) const
+    void residuals(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& r) const
     {
         r(0) = 1.0 - x(0);
         r(1) = std::sqrt(5.0) * (x(1) - x(0) * x(0));
     }
 
-    void jacobian(const Eigen::VectorXd& x, Eigen::MatrixXd& J) const
+    void jacobian(const Eigen::Vector<double, 2>& x, Eigen::MatrixXd& J) const
     {
         J(0, 0) = -1.0;
         J(0, 1) = 0.0;
@@ -153,12 +153,12 @@ struct exponential_fitting
     static constexpr double t[] = {0.0, 0.5, 1.0, 1.5, 2.0};
     static constexpr double y[] = {2.0, 1.2, 0.75, 0.45, 0.28};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
     int num_residuals() const { return 5; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double f = 0.0;
         for(int i = 0; i < 5; ++i)
@@ -169,13 +169,13 @@ struct exponential_fitting
         return 0.5 * f;
     }
 
-    void residuals(const Eigen::VectorXd& x, Eigen::VectorXd& r) const
+    void residuals(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& r) const
     {
         for(int i = 0; i < 5; ++i)
             r(i) = x(0) * std::exp(x(1) * t[i]) - y[i];
     }
 
-    void jacobian(const Eigen::VectorXd& x, Eigen::MatrixXd& J) const
+    void jacobian(const Eigen::Vector<double, 2>& x, Eigen::MatrixXd& J) const
     {
         for(int i = 0; i < 5; ++i)
         {
@@ -192,19 +192,19 @@ struct exponential_fitting
 // Reference: Powell, "A hybrid method for nonlinear equations" (1970).
 struct powell_singular
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 4;
 
     int dimension() const { return 4; }
     int num_residuals() const { return 4; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 4>& x) const
     {
         Eigen::VectorXd r(4);
         residuals(x, r);
         return 0.5 * r.squaredNorm();
     }
 
-    void residuals(const Eigen::VectorXd& x, Eigen::VectorXd& r) const
+    void residuals(const Eigen::Vector<double, 4>& x, Eigen::VectorXd& r) const
     {
         r(0) = x(0) + 10.0 * x(1);
         r(1) = std::sqrt(5.0) * (x(2) - x(3));
@@ -212,7 +212,7 @@ struct powell_singular
         r(3) = std::sqrt(10.0) * (x(0) - x(3)) * (x(0) - x(3));
     }
 
-    void jacobian(const Eigen::VectorXd& x, Eigen::MatrixXd& J) const
+    void jacobian(const Eigen::Vector<double, 4>& x, Eigen::MatrixXd& J) const
     {
         J.setZero();
         J(0, 0) = 1.0;
@@ -230,51 +230,50 @@ struct powell_singular
 // For SQP and AugLag testing.
 struct rosenbrock_constrained
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
     int num_equality() const { return 0; }
     int num_inequality() const { return 1; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double t1 = 1.0 - x[0];
         double t2 = x[1] - x[0] * x[0];
         return t1 * t1 + 5.0 * t2 * t2;
     }
 
-    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    void gradient(const Eigen::Vector<double, 2>& x, Eigen::Vector<double, 2>& g) const
     {
-        g.resize(2);
         double t1 = 1.0 - x[0];
         double t2 = x[1] - x[0] * x[0];
         g[0] = -2.0 * t1 - 20.0 * x[0] * t2;
         g[1] = 10.0 * t2;
     }
 
-    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    void constraints(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& c) const
     {
         c.resize(1);
         c[0] = x[0] + x[1] - 1.0;  // x0 + x1 >= 1
     }
 
-    void constraint_jacobian(const Eigen::VectorXd&, Eigen::MatrixXd& J) const
+    void constraint_jacobian(const Eigen::Vector<double, 2>&, Eigen::MatrixXd& J) const
     {
         J.resize(1, 2);
         J(0, 0) = 1.0;
         J(0, 1) = 1.0;
     }
 
-    Eigen::VectorXd lower_bounds() const
+    Eigen::Vector<double, 2> lower_bounds() const
     {
         constexpr double inf = std::numeric_limits<double>::infinity();
-        return Eigen::VectorXd::Constant(2, -inf);
+        return Eigen::Vector<double, 2>::Constant(-inf);
     }
 
-    Eigen::VectorXd upper_bounds() const
+    Eigen::Vector<double, 2> upper_bounds() const
     {
         constexpr double inf = std::numeric_limits<double>::infinity();
-        return Eigen::VectorXd::Constant(2, inf);
+        return Eigen::Vector<double, 2>::Constant(inf);
     }
 };
 
@@ -282,45 +281,44 @@ struct rosenbrock_constrained
 // For MMA/GCMMA testing (inequality only).
 struct beam_design
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
     int num_equality() const { return 0; }
     int num_inequality() const { return 1; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         return x[0] * x[1];
     }
 
-    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    void gradient(const Eigen::Vector<double, 2>& x, Eigen::Vector<double, 2>& g) const
     {
-        g.resize(2);
         g[0] = x[1];
         g[1] = x[0];
     }
 
-    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    void constraints(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& c) const
     {
         c.resize(1);
         c[0] = x[0] * x[1] - 1.0;  // x0*x1 >= 1
     }
 
-    void constraint_jacobian(const Eigen::VectorXd& x, Eigen::MatrixXd& J) const
+    void constraint_jacobian(const Eigen::Vector<double, 2>& x, Eigen::MatrixXd& J) const
     {
         J.resize(1, 2);
         J(0, 0) = x[1];
         J(0, 1) = x[0];
     }
 
-    Eigen::VectorXd lower_bounds() const
+    Eigen::Vector<double, 2> lower_bounds() const
     {
-        return Eigen::VectorXd::Constant(2, 0.1);
+        return Eigen::Vector<double, 2>::Constant(0.1);
     }
 
-    Eigen::VectorXd upper_bounds() const
+    Eigen::Vector<double, 2> upper_bounds() const
     {
-        return Eigen::VectorXd::Constant(2, 10.0);
+        return Eigen::Vector<double, 2>::Constant(10.0);
     }
 };
 

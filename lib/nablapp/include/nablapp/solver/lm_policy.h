@@ -104,7 +104,7 @@ struct lm_policy
         };
 
         // Jacobian dispatch: analytic when available, FD fallback otherwise
-        if constexpr(requires(const Problem& p, const Eigen::VectorXd& xx, Eigen::MatrixXd& JJ) {
+        if constexpr(requires(const Problem& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
                          p.jacobian(xx, JJ);
                      })
         {
@@ -117,7 +117,7 @@ struct lm_policy
             const int m = s.num_residuals;
             s.eval_jacobian = [&problem, m](const Eigen::Vector<double, N>& v, Eigen::MatrixXd& JJ) {
                 auto residual_fn = [&problem](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
-                    problem.residuals(xx, rr);
+                    problem.residuals(Eigen::Vector<double, N>(xx), rr);
                 };
                 fd_jacobian(residual_fn, Eigen::VectorXd(v), JJ, m);
             };

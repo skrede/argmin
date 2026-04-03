@@ -48,33 +48,33 @@ struct bobyqa_rosenbrock
 // Minimum at (1, 3), f* = 0.
 struct bobyqa_booth
 {
-    static constexpr int problem_dimension = dynamic_dimension;
-    Eigen::VectorXd lb;
-    Eigen::VectorXd ub;
+    static constexpr int problem_dimension = 2;
+    Eigen::Vector<double, 2> lb;
+    Eigen::Vector<double, 2> ub;
 
     int dimension() const { return 2; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         double t1 = x[0] + 2.0 * x[1] - 7.0;
         double t2 = 2.0 * x[0] + x[1] - 5.0;
         return t1 * t1 + t2 * t2;
     }
 
-    Eigen::VectorXd lower_bounds() const { return lb; }
-    Eigen::VectorXd upper_bounds() const { return ub; }
+    Eigen::Vector<double, 2> lower_bounds() const { return lb; }
+    Eigen::Vector<double, 2> upper_bounds() const { return ub; }
 };
 
 // 6D sum of 2D Rosenbrock pairs (matching liepp joint space dimension).
 struct bobyqa_rosenbrock_6d
 {
-    static constexpr int problem_dimension = dynamic_dimension;
-    Eigen::VectorXd lb;
-    Eigen::VectorXd ub;
+    static constexpr int problem_dimension = 6;
+    Eigen::Vector<double, 6> lb;
+    Eigen::Vector<double, 6> ub;
 
     int dimension() const { return 6; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 6>& x) const
     {
         double f = 0.0;
         for(int i = 0; i < 5; ++i)
@@ -86,8 +86,8 @@ struct bobyqa_rosenbrock_6d
         return f;
     }
 
-    Eigen::VectorXd lower_bounds() const { return lb; }
-    Eigen::VectorXd upper_bounds() const { return ub; }
+    Eigen::Vector<double, 6> lower_bounds() const { return lb; }
+    Eigen::Vector<double, 6> upper_bounds() const { return ub; }
 };
 
 }
@@ -175,8 +175,8 @@ TEST_CASE("bobyqa tight bounds", "[bobyqa]")
 TEST_CASE("bobyqa Booth function", "[bobyqa]")
 {
     bobyqa_booth problem{
-        .lb = Eigen::VectorXd{{-10.0, -10.0}},
-        .ub = Eigen::VectorXd{{10.0, 10.0}},
+        .lb = Eigen::Vector<double, 2>{{-10.0, -10.0}},
+        .ub = Eigen::Vector<double, 2>{{10.0, 10.0}},
     };
 
     Eigen::VectorXd x0{{0.0, 0.0}};
@@ -198,8 +198,8 @@ TEST_CASE("bobyqa Booth function", "[bobyqa]")
 TEST_CASE("bobyqa higher dimensional (n=6)", "[bobyqa]")
 {
     bobyqa_rosenbrock_6d problem{
-        .lb = Eigen::VectorXd::Constant(6, -2.0),
-        .ub = Eigen::VectorXd::Constant(6, 2.0),
+        .lb = Eigen::Vector<double, 6>::Constant(-2.0),
+        .ub = Eigen::Vector<double, 6>::Constant(2.0),
     };
 
     Eigen::VectorXd x0 = Eigen::VectorXd::Constant(6, -0.5);
@@ -226,8 +226,8 @@ TEST_CASE("bobyqa higher dimensional (n=6)", "[bobyqa]")
 TEST_CASE("bobyqa step solve step_n", "[bobyqa]")
 {
     bobyqa_booth problem{
-        .lb = Eigen::VectorXd{{-10.0, -10.0}},
-        .ub = Eigen::VectorXd{{10.0, 10.0}},
+        .lb = Eigen::Vector<double, 2>{{-10.0, -10.0}},
+        .ub = Eigen::Vector<double, 2>{{10.0, 10.0}},
     };
 
     Eigen::VectorXd x0{{0.0, 0.0}};

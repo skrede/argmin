@@ -59,7 +59,7 @@ TEST_CASE("fd_gradient on quadratic", "[finite_difference]")
 {
     struct half_norm_sq
     {
-        enum : int { problem_dimension = nablapp::dynamic_dimension };
+        static constexpr int problem_dimension = nablapp::dynamic_dimension;
 
         int dimension() const { return 3; }
         double value(const Eigen::VectorXd& x) const { return 0.5 * x.squaredNorm(); }

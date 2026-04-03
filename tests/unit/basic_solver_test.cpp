@@ -12,10 +12,10 @@ using namespace nablapp;
 // Dummy problem type -- mock_policy ignores it, but basic_solver needs one.
 struct quadratic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
-    double value(const Eigen::VectorXd& x) const { return 0.5 * x.squaredNorm(); }
+    double value(const Eigen::Vector<double, 2>& x) const { return 0.5 * x.squaredNorm(); }
 };
 
 TEST_CASE("basic_solver step", "[solver]")
