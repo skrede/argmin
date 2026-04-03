@@ -76,16 +76,16 @@ struct lm_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
@@ -132,8 +132,8 @@ struct lm_policy
         s.initial_objective = s.objective_value;
 
         // Initialize lambda (Nielsen 1999)
-        double init_lambda = self.options.initial_lambda.value_or(0.0);
-        double tau = self.options.tau.value_or(1e-3);
+        double init_lambda = options.initial_lambda.value_or(0.0);
+        double tau = options.tau.value_or(1e-3);
         if(init_lambda > 0.0)
         {
             s.lambda = init_lambda;
@@ -145,18 +145,18 @@ struct lm_policy
             s.lambda = (max_diag > 0.0) ? tau * max_diag : 1e-4;
         }
 
-        s.nu = self.options.nu_initial.value_or(2.0);
+        s.nu = options.nu_initial.value_or(2.0);
         return s;
     }
 
     // One LM iteration per K&W Algorithm 6.3 with Nielsen (1999) lambda update.
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         const int n = s.x.size();
-        const double diag_min = self.options.diagonal_min_clamp.value_or(1e-8);
-        const double lam_min = self.options.lambda_min.value_or(1e-20);
-        const double lam_max = self.options.lambda_max.value_or(1e20);
-        const double damp_factor = self.options.damping_factor.value_or(1.0 / 3.0);
+        const double diag_min = options.diagonal_min_clamp.value_or(1e-8);
+        const double lam_min = options.lambda_min.value_or(1e-20);
+        const double lam_max = options.lambda_max.value_or(1e20);
+        const double damp_factor = options.damping_factor.value_or(1.0 / 3.0);
 
         // Gauss-Newton Hessian approximation
         Eigen::Matrix<double, N, N> H = (s.J.transpose() * s.J).eval();
@@ -200,7 +200,7 @@ struct lm_policy
 
             double factor = 1.0 - std::pow(2.0 * rho - 1.0, 3.0);
             s.lambda *= std::max(damp_factor, factor);
-            s.nu = self.options.nu_initial.value_or(2.0);
+            s.nu = options.nu_initial.value_or(2.0);
         }
         else
         {
@@ -236,7 +236,7 @@ struct lm_policy
         };
     }
 
-    void reset(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.r.resize(s.num_residuals);
@@ -247,17 +247,17 @@ struct lm_policy
         s.initial_objective = s.objective_value;
 
         // Nielsen init for lambda using policy options
-        double tau = self.options.tau.value_or(1e-3);
+        double tau = options.tau.value_or(1e-3);
         Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
         double max_diag = diag.maxCoeff();
         s.lambda = (max_diag > 0.0) ? tau * max_diag : 1e-4;
-        s.nu = self.options.nu_initial.value_or(2.0);
+        s.nu = options.nu_initial.value_or(2.0);
         s.iteration = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 

@@ -31,7 +31,7 @@ struct mock_policy
     };
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&)
     {
         return state_type{
@@ -40,7 +40,7 @@ struct mock_policy
         };
     }
 
-    nablapp::step_result<double> step(this auto&&, state_type& s)
+    nablapp::step_result<double> step(state_type& s)
     {
         double old_f = s.objective_value;
         s.x *= (1.0 - s.step_size);
@@ -56,15 +56,15 @@ struct mock_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 
@@ -82,7 +82,7 @@ struct non_converging_policy
     };
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&)
     {
         return state_type{
@@ -91,7 +91,7 @@ struct non_converging_policy
         };
     }
 
-    nablapp::step_result<double> step(this auto&&, state_type& s)
+    nablapp::step_result<double> step(state_type& s)
     {
         ++s.step_count;
         return nablapp::step_result<double>{
@@ -103,16 +103,16 @@ struct non_converging_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 100.0;
         s.step_count = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 
@@ -135,7 +135,7 @@ struct constrained_mock_policy
     };
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&)
     {
         Eigen::VectorXd c_ineq(1);
@@ -149,7 +149,7 @@ struct constrained_mock_policy
         };
     }
 
-    nablapp::step_result<double> step(this auto&&, state_type& s)
+    nablapp::step_result<double> step(state_type& s)
     {
         double old_f = s.objective_value;
         s.x *= (1.0 - s.step_size);
@@ -165,16 +165,16 @@ struct constrained_mock_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
         s.c_ineq(0) = x0(0) - 1.0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 
@@ -194,7 +194,7 @@ struct feasible_mock_policy
     };
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&)
     {
         return state_type{
@@ -205,7 +205,7 @@ struct feasible_mock_policy
         };
     }
 
-    nablapp::step_result<double> step(this auto&&, state_type& s)
+    nablapp::step_result<double> step(state_type& s)
     {
         return nablapp::step_result<double>{
             .objective_value = s.objective_value,
@@ -216,14 +216,14 @@ struct feasible_mock_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 
@@ -243,7 +243,7 @@ struct infeasible_mock_policy
     };
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&)
     {
         return state_type{
@@ -254,7 +254,7 @@ struct infeasible_mock_policy
         };
     }
 
-    nablapp::step_result<double> step(this auto&&, state_type& s)
+    nablapp::step_result<double> step(state_type& s)
     {
         return nablapp::step_result<double>{
             .objective_value = s.objective_value,
@@ -265,14 +265,14 @@ struct infeasible_mock_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 
@@ -292,7 +292,7 @@ struct high_violation_mock_policy
     };
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&)
     {
         return state_type{
@@ -303,7 +303,7 @@ struct high_violation_mock_policy
         };
     }
 
-    nablapp::step_result<double> step(this auto&&, state_type& s)
+    nablapp::step_result<double> step(state_type& s)
     {
         return nablapp::step_result<double>{
             .objective_value = s.objective_value,
@@ -314,14 +314,14 @@ struct high_violation_mock_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 
@@ -340,13 +340,13 @@ struct roundoff_mock_policy
     };
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&)
     {
         return {.x = x0, .objective_value = 0.5 * x0.squaredNorm()};
     }
 
-    nablapp::step_result<double> step(this auto&&, state_type& s)
+    nablapp::step_result<double> step(state_type& s)
     {
         ++s.step_count;
         s.x *= 0.5;
@@ -364,16 +364,16 @@ struct roundoff_mock_policy
         return r;
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
         s.step_count = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 
@@ -392,13 +392,13 @@ struct diverging_mock_policy
     };
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&)
     {
         return {.x = x0, .objective_value = 1.0};
     }
 
-    nablapp::step_result<double> step(this auto&&, state_type& s)
+    nablapp::step_result<double> step(state_type& s)
     {
         ++s.step_count;
         s.objective_value *= 10.0;
@@ -416,16 +416,16 @@ struct diverging_mock_policy
         return r;
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 1.0;
         s.step_count = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 
@@ -450,14 +450,14 @@ struct mock_policy_with_opts
     };
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&)
     {
         return {.x = x0, .objective_value = 0.5 * x0.squaredNorm()};
     }
 
     template <typename Problem, typename Convergence = nablapp::default_convergence>
-    state_type init(this auto&&, const Problem&, const Eigen::VectorXd& x0,
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const nablapp::solver_options<Convergence>&,
                     const options_type& policy_opts)
     {
@@ -465,7 +465,7 @@ struct mock_policy_with_opts
                 .step_size = policy_opts.custom_step_size};
     }
 
-    nablapp::step_result<double> step(this auto&&, state_type& s)
+    nablapp::step_result<double> step(state_type& s)
     {
         double old_f = s.objective_value;
         s.x *= (1.0 - s.step_size);
@@ -480,15 +480,15 @@ struct mock_policy_with_opts
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 

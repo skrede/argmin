@@ -88,17 +88,17 @@ struct isres_policy
     options_type options{};
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
@@ -131,17 +131,17 @@ struct isres_policy
 
         // Population parameters
         s.lambda = static_cast<int>(
-            self.options.population_size.value_or(
+            options.population_size.value_or(
                 static_cast<std::uint32_t>(20 * (n + 1))));
-        double frac = self.options.parent_fraction.value_or(1.0 / 7.0);
+        double frac = options.parent_fraction.value_or(1.0 / 7.0);
         s.mu = std::max(1, static_cast<int>(s.lambda * frac));
-        s.pf = self.options.ranking_probability.value_or(0.45);
-        s.alpha = self.options.differential_weight.value_or(0.2);
+        s.pf = options.ranking_probability.value_or(0.45);
+        s.alpha = options.differential_weight.value_or(0.2);
         s.rates = detail::compute_es_rates(n);
 
         // Seed RNG
-        if(self.options.seed.has_value())
-            s.rng.seed(static_cast<unsigned>(self.options.seed.value()));
+        if(options.seed.has_value())
+            s.rng.seed(static_cast<unsigned>(options.seed.value()));
         else
             s.rng.seed(std::random_device{}());
 
@@ -206,7 +206,7 @@ struct isres_policy
         return s;
     }
 
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         const int n = s.x.size();
         const int n_c = s.n_eq + s.n_ineq;
@@ -326,7 +326,7 @@ struct isres_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
 
@@ -344,9 +344,9 @@ struct isres_policy
             s.eval_constraints(s.x, s.c_eq, s.c_ineq);
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 

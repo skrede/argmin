@@ -64,14 +64,14 @@ struct restarting_policy
     options_type options{};
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const auto& x0,
                     const solver_options<Convergence>& opts)
     {
-        self.inner_policy_.options = self.options.inner;
+        inner_policy_.options = options.inner;
 
         state_type s;
-        s.inner = self.inner_policy_.init(problem, x0, opts);
+        s.inner = inner_policy_.init(problem, x0, opts);
         s.best_ever_value = s.inner.objective_value;
         s.stagnation_count = 0;
         s.restart_count = 0;
@@ -88,7 +88,7 @@ struct restarting_policy
                 4 + 3 * std::log(static_cast<double>(s.dimension)));
 
         // Build reinit closure
-        s.reinit = [&self_ref = self, &problem, x0, opts](state_type& st) {
+        s.reinit = [&self_ref = *this, &problem, x0, opts](state_type& st) {
             ++st.restart_count;
 
             // IPOP: population = initial_lambda * 2^restart_count
@@ -111,16 +111,16 @@ struct restarting_policy
     }
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const auto& x0,
                     const solver_options<Convergence>& opts,
                     const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
-    step_result<scalar_type> step(this auto&& self, state_type& s)
+    step_result<scalar_type> step(state_type& s)
     {
         if(s.restart_pending)
         {
@@ -138,7 +138,7 @@ struct restarting_policy
             };
         }
 
-        auto result = self.inner_policy_.step(s.inner);
+        auto result = inner_policy_.step(s.inner);
 
         // Stall detection
         if(result.objective_value < s.best_ever_value)
@@ -151,7 +151,7 @@ struct restarting_policy
             ++s.stagnation_count;
         }
 
-        std::uint32_t limit = self.options.stagnation_limit.value_or(
+        std::uint32_t limit = options.stagnation_limit.value_or(
             static_cast<std::uint32_t>(
                 10 + std::ceil(30.0 * s.dimension / s.initial_lambda)));
 
@@ -162,18 +162,18 @@ struct restarting_policy
         return result;
     }
 
-    void reset(this auto&& self, state_type& s, const auto& x0)
+    void reset(state_type& s, const auto& x0)
     {
-        self.inner_policy_.reset(s.inner, x0);
+        inner_policy_.reset(s.inner, x0);
         s.stagnation_count = 0;
         s.best_ever_value = s.inner.objective_value;
         s.restart_pending = false;
         sync_from_inner(s);
     }
 
-    void reset_clear(this auto&& self, state_type& s, const auto& x0)
+    void reset_clear(state_type& s, const auto& x0)
     {
-        self.inner_policy_.reset_clear(s.inner, x0);
+        inner_policy_.reset_clear(s.inner, x0);
         s.stagnation_count = 0;
         s.restart_count = 0;
         s.best_ever_value = s.inner.objective_value;

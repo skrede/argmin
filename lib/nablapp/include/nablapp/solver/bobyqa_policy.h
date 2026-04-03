@@ -79,17 +79,17 @@ struct bobyqa_policy
 
     template <typename Problem, typename Convergence>
         requires objective<Problem> && bound_constrained<Problem>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && bound_constrained<Problem>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
@@ -107,15 +107,15 @@ struct bobyqa_policy
         };
 
         // Number of interpolation points (Powell 2009)
-        s.m = self.options.num_interpolation_points.has_value()
-                  ? static_cast<int>(self.options.num_interpolation_points.value())
+        s.m = options.num_interpolation_points.has_value()
+                  ? static_cast<int>(options.num_interpolation_points.value())
                   : 2 * n + 1;
 
         // Final trust radius
-        s.final_trust_radius = self.options.final_trust_radius.value_or(1e-8);
+        s.final_trust_radius = options.final_trust_radius.value_or(1e-8);
 
         // Initial trust-region radius (Powell 2009)
-        double h = self.options.initial_trust_radius.value_or(0.0);
+        double h = options.initial_trust_radius.value_or(0.0);
         if(h <= 0.0)
         {
             // Auto: 10% of the maximum bound range
@@ -179,10 +179,10 @@ struct bobyqa_policy
         return s;
     }
 
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         double old_f = s.objective_value;
-        double step_conv_factor = self.options.step_convergence_factor.value_or(1e-3);
+        double step_conv_factor = options.step_convergence_factor.value_or(1e-3);
 
         // Model gradient at current best point
         Eigen::Vector<double, N> mg = detail::model_gradient(s.model, s.x);
@@ -220,7 +220,7 @@ struct bobyqa_policy
 
         // Update trust-region radius, passing embedded trust region options
         s.delta = detail::update_radius(s.delta, rho, d_norm, s.delta_max,
-                                        self.options.trust);
+                                        options.trust);
 
         // Select point to replace in interpolation set
         int k = detail::select_replacement(
@@ -291,13 +291,13 @@ struct bobyqa_policy
 
     // Cold restart -- BOBYQA has no warm-start mode since the interpolation
     // set is point-specific.
-    void reset(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         // BOBYQA cannot warm-start; delegate to full reset
-        self.reset_clear(s, x0);
+        reset_clear(s, x0);
     }
 
-    void reset_clear(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
         s.x = detail::project(x0, s.lower, s.upper);

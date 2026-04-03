@@ -158,6 +158,55 @@ static_assert(nablapp::bound_constrained<full_problem>);
 static_assert(nablapp::constrained<full_problem>);
 static_assert(nablapp::least_squares<full_problem>);
 
+// ---------------------------------------------------------------------------
+// Fixed-dimension concept satisfaction
+// ---------------------------------------------------------------------------
+
+struct fixed_2d_objective
+{
+    static constexpr int problem_dimension = 2;
+    double value(const Eigen::Vector<double, 2>&) const { return 0.0; }
+    int dimension() const { return 2; }
+};
+
+static_assert(nablapp::objective<fixed_2d_objective>);
+static_assert(!nablapp::differentiable<fixed_2d_objective>);
+
+struct fixed_2d_differentiable
+{
+    static constexpr int problem_dimension = 2;
+    double value(const Eigen::Vector<double, 2>&) const { return 0.0; }
+    void gradient(const Eigen::Vector<double, 2>&, Eigen::VectorXd&) const {}
+    int dimension() const { return 2; }
+};
+
+static_assert(nablapp::differentiable<fixed_2d_differentiable>);
+
+struct fixed_2d_full
+{
+    static constexpr int problem_dimension = 2;
+    double value(const Eigen::Vector<double, 2>&) const { return 0.0; }
+    void gradient(const Eigen::Vector<double, 2>&, Eigen::VectorXd&) const {}
+    void hessian(const Eigen::Vector<double, 2>&, Eigen::MatrixXd&) const {}
+    Eigen::Vector<double, 2> lower_bounds() const { return {}; }
+    Eigen::Vector<double, 2> upper_bounds() const { return {}; }
+    void constraints(const Eigen::Vector<double, 2>&, Eigen::VectorXd&) const {}
+    void constraint_jacobian(const Eigen::Vector<double, 2>&, Eigen::MatrixXd&) const {}
+    int num_equality() const { return 0; }
+    int num_inequality() const { return 0; }
+    void residuals(const Eigen::Vector<double, 2>&, Eigen::VectorXd&) const {}
+    void jacobian(const Eigen::Vector<double, 2>&, Eigen::MatrixXd&) const {}
+    int num_residuals() const { return 0; }
+    int dimension() const { return 2; }
+};
+
+static_assert(nablapp::objective<fixed_2d_full>);
+static_assert(nablapp::differentiable<fixed_2d_full>);
+static_assert(nablapp::second_order<fixed_2d_full>);
+static_assert(nablapp::bound_constrained<fixed_2d_full>);
+static_assert(nablapp::constrained<fixed_2d_full>);
+static_assert(nablapp::least_squares<fixed_2d_full>);
+
 // A mock solver type missing constraint_violation -- must NOT satisfy nlp_solver
 struct mock_solver_no_cv
 {

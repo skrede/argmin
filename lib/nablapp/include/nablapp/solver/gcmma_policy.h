@@ -99,20 +99,20 @@ struct gcmma_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& sopts,
                     const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        auto s = self.init(problem, x0, sopts);
+        options = policy_opts;
+        auto s = init(problem, x0, sopts);
         s.opts = policy_opts;
         s.mma_state.opts = policy_opts.mma_opts;
         return s;
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&&, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& sopts)
     {
@@ -121,7 +121,7 @@ struct gcmma_policy
         return s;
     }
 
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         auto& ms = s.mma_state;
         const int n = static_cast<int>(ms.x.size());
@@ -266,12 +266,12 @@ struct gcmma_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         mma_policy<N>{}.reset(s.mma_state, x0);
     }
 
-    void reset_clear(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         mma_policy<N>{}.reset_clear(s.mma_state, x0);
     }

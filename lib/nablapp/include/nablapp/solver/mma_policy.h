@@ -79,12 +79,12 @@ struct mma_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts,
                     const options_type& policy_opts)
     {
-        auto s = self.init(problem, x0, opts);
+        auto s = init(problem, x0, opts);
         s.opts = policy_opts;
         // Re-initialize asymptotes with new opts
         const int n = problem.dimension();
@@ -99,7 +99,7 @@ struct mma_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&&, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
@@ -200,7 +200,7 @@ struct mma_policy
         return s;
     }
 
-    step_result<double> step(this auto&&, state_type& s)
+    step_result<double> step(state_type& s)
     {
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
@@ -288,7 +288,7 @@ struct mma_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.f = s.eval_value(x0);
@@ -301,10 +301,10 @@ struct mma_policy
         s.x_old2 = x0;
     }
 
-    void reset_clear(this auto&& self, state_type& s,
+    void reset_clear(state_type& s,
                      const Eigen::Vector<double, N>& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
         const int n = static_cast<int>(x0.size());
         double asym_init = s.opts.asymptote_init.value_or(0.5);
         for(int j = 0; j < n; ++j)

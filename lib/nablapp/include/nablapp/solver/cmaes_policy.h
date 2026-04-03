@@ -93,16 +93,16 @@ struct cmaes_policy
     options_type options{};
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
@@ -110,7 +110,7 @@ struct cmaes_policy
         state_type s;
 
         s.mean = x0;
-        s.sigma = self.options.initial_sigma.value_or(0.3);
+        s.sigma = options.initial_sigma.value_or(0.3);
         s.initial_sigma = s.sigma;
 
         s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
@@ -124,8 +124,8 @@ struct cmaes_policy
             s.has_bounds = true;
         }
 
-        int pop_lambda = self.options.lambda.has_value()
-            ? static_cast<int>(self.options.lambda.value())
+        int pop_lambda = options.lambda.has_value()
+            ? static_cast<int>(options.lambda.value())
             : 0;
         s.params = detail::compute_constants(n, pop_lambda);
 
@@ -136,8 +136,8 @@ struct cmaes_policy
         s.D = Eigen::Vector<double, N>::Ones(n);
         s.eigen_solver.compute(s.C);
 
-        if(self.options.seed.has_value())
-            s.rng.seed(static_cast<unsigned>(self.options.seed.value()));
+        if(options.seed.has_value())
+            s.rng.seed(static_cast<unsigned>(options.seed.value()));
         else
             s.rng.seed(std::random_device{}());
 
@@ -148,7 +148,7 @@ struct cmaes_policy
         return s;
     }
 
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         const int n = s.mean.size();
         const int lambda = s.params.lambda;
@@ -248,12 +248,12 @@ struct cmaes_policy
         std::optional<solver_status> policy_status{};
 
         // Sigma collapse detection (roundoff_limited)
-        double sigma_collapse_thr = self.options.cmaes.sigma_collapse_threshold.value_or(1e-12);
+        double sigma_collapse_thr = options.cmaes.sigma_collapse_threshold.value_or(1e-12);
         if(s.sigma * s.D.maxCoeff() < sigma_collapse_thr * s.initial_sigma)
             policy_status = solver_status::roundoff_limited;
 
         // Condition number explosion detection (diverged)
-        double cond_limit = self.options.cmaes.condition_number_limit.value_or(1e14);
+        double cond_limit = options.cmaes.condition_number_limit.value_or(1e14);
         double cond = s.D.maxCoeff() / std::max(s.D.minCoeff(), 1e-30);
         if(cond * cond > cond_limit)
         {
@@ -262,7 +262,7 @@ struct cmaes_policy
         }
 
         // 16. IPOP stagnation check (D-04)
-        if(self.options.restart == restart_strategy::ipop)
+        if(options.restart == restart_strategy::ipop)
         {
             bool stagnated = false;
 
@@ -271,7 +271,7 @@ struct cmaes_policy
                 stagnated = true;
 
             // No improvement for many generations
-            std::uint32_t stag_limit = self.options.cmaes.stagnation_limit.value_or(
+            std::uint32_t stag_limit = options.cmaes.stagnation_limit.value_or(
                 static_cast<std::uint32_t>(10 + std::ceil(30.0 * n / s.params.lambda)));
             if(gen_best_f >= old_best)
                 ++s.stagnation_count;
@@ -329,7 +329,7 @@ struct cmaes_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
         s.mean = x0;
@@ -346,9 +346,9 @@ struct cmaes_policy
         s.stagnation_count = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 

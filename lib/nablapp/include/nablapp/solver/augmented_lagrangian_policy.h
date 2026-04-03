@@ -93,13 +93,13 @@ struct augmented_lagrangian_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<scalar_type, N>& x0,
                     const solver_options<Convergence>& solver_opts,
                     const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        auto s = self.init(problem, x0, solver_opts);
+        options = policy_opts;
+        auto s = init(problem, x0, solver_opts);
         s.opts = policy_opts;
         s.mu = policy_opts.mu_init.value_or(scalar_type(1));
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
@@ -107,7 +107,7 @@ struct augmented_lagrangian_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<scalar_type, N>& x0,
                     const solver_options<Convergence>& /*solver_opts*/)
     {
@@ -116,7 +116,7 @@ struct augmented_lagrangian_policy
 
         const int n = problem.dimension();
         state_type s;
-        s.opts = self.options;
+        s.opts = options;
 
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
@@ -200,7 +200,7 @@ struct augmented_lagrangian_policy
         return s;
     }
 
-    step_result<scalar_type> step(this auto&&, state_type& s)
+    step_result<scalar_type> step(state_type& s)
     {
         const int n = static_cast<int>(s.x.size());
 
@@ -363,7 +363,7 @@ struct augmented_lagrangian_policy
         };
     }
 
-    void reset(this auto&&, state_type& s, const Eigen::Vector<scalar_type, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<scalar_type, N>& x0)
     {
         s.x = x0;
         s.f = s.eval_value(x0);
@@ -371,10 +371,10 @@ struct augmented_lagrangian_policy
         s.outer_iter = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s,
+    void reset_clear(state_type& s,
                      const Eigen::Vector<scalar_type, N>& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
         s.lambda_eq.setZero();
         s.lambda_ineq.setZero();
         s.mu = s.opts.mu_init.value_or(scalar_type(1));

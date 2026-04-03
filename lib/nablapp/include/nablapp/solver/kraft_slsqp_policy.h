@@ -95,16 +95,16 @@ struct kraft_slsqp_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
@@ -187,9 +187,9 @@ struct kraft_slsqp_policy
             };
         }
 
-        std::uint8_t depth = self.options.history_depth.value_or(10);
+        std::uint8_t depth = options.history_depth.value_or(10);
         s.lbfgs = detail::compact_lbfgs<double, N>{depth};
-        s.sigma = self.options.initial_penalty.value_or(1.0);
+        s.sigma = options.initial_penalty.value_or(1.0);
         s.iteration = 0;
 
         s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
@@ -203,7 +203,7 @@ struct kraft_slsqp_policy
         return s;
     }
 
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         // Re-evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
@@ -251,11 +251,11 @@ struct kraft_slsqp_policy
 
         // Solve QP with embedded options
         nablapp::qp_options qp_opts;
-        qp_opts.max_iterations = self.options.qp.max_iterations.has_value()
-            ? self.options.qp.max_iterations
+        qp_opts.max_iterations = options.qp.max_iterations.has_value()
+            ? options.qp.max_iterations
             : std::optional<std::uint16_t>{static_cast<std::uint16_t>(10 * n)};
-        qp_opts.tolerance = self.options.qp.tolerance.has_value()
-            ? self.options.qp.tolerance
+        qp_opts.tolerance = options.qp.tolerance.has_value()
+            ? options.qp.tolerance
             : std::optional<double>{1e-12};
         auto qp_res = detail::solve_qp(B, Eigen::VectorXd(s.g), A_eq, b_eq, A_ineq, b_ineq,
                                         p_lower, p_upper, p0, qp_opts);
@@ -326,7 +326,7 @@ struct kraft_slsqp_policy
             return merit(x_trial);
         };
 
-        auto ls = armijo(phi_ls, merit_0, dphi_merit, self.options.line_search);
+        auto ls = armijo(phi_ls, merit_0, dphi_merit, options.line_search);
         double alpha = ls.alpha;
 
         if(alpha < 1e-15)
@@ -405,7 +405,7 @@ struct kraft_slsqp_policy
     }
 
     // Hot start -- preserves L-BFGS history.
-    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.objective_value = s.eval_value(x0);
@@ -419,11 +419,11 @@ struct kraft_slsqp_policy
     }
 
     // Cold restart -- clears L-BFGS curvature history.
-    void reset_clear(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
         s.lbfgs.reset();
-        s.sigma = self.options.initial_penalty.value_or(1.0);
+        s.sigma = options.initial_penalty.value_or(1.0);
     }
 };
 

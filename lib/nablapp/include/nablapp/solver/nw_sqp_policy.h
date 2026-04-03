@@ -88,17 +88,17 @@ struct nw_sqp_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts,
                     const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
@@ -204,7 +204,7 @@ struct nw_sqp_policy
         return s;
     }
 
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
@@ -235,11 +235,11 @@ struct nw_sqp_policy
 
         // Use embedded QP options with defaults
         nablapp::qp_options qp_opts;
-        qp_opts.max_iterations = self.options.qp.max_iterations.has_value()
-            ? self.options.qp.max_iterations
+        qp_opts.max_iterations = options.qp.max_iterations.has_value()
+            ? options.qp.max_iterations
             : std::optional<std::uint16_t>{200};
-        qp_opts.tolerance = self.options.qp.tolerance.has_value()
-            ? self.options.qp.tolerance
+        qp_opts.tolerance = options.qp.tolerance.has_value()
+            ? options.qp.tolerance
             : std::optional<double>{1e-12};
 
         detail::qp_result<double> qp;
@@ -294,9 +294,9 @@ struct nw_sqp_policy
 
         // Backtracking Armijo on L1 merit using embedded line search options
         double alpha = 1.0;
-        const double ls_c1 = self.options.line_search.c1;
-        const double ls_rho = self.options.line_search.rho;
-        const std::uint16_t max_ls = self.options.line_search.max_iterations;
+        const double ls_c1 = options.line_search.c1;
+        const double ls_rho = options.line_search.rho;
+        const std::uint16_t max_ls = options.line_search.max_iterations;
 
         Eigen::Vector<double, N> x_trial(n);
         Eigen::VectorXd c_eq_trial, c_ineq_trial;
@@ -355,7 +355,7 @@ struct nw_sqp_policy
 
         // --- 6. Damped BFGS update (N&W Procedure 18.2) ---
         if(sk.norm() > 1e-15)
-            s.B.update(sk, yk, self.options.bfgs);
+            s.B.update(sk, yk, options.bfgs);
 
         // --- 7. Update multipliers and iteration ---
         s.lambda = lambda_new;
@@ -377,7 +377,7 @@ struct nw_sqp_policy
     }
 
     // Hot start -- preserves BFGS Hessian.
-    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.objective_value = s.eval_value(x0);
@@ -388,10 +388,10 @@ struct nw_sqp_policy
     }
 
     // Cold restart -- clears BFGS Hessian.
-    void reset_clear(this auto&& self, state_type& s,
+    void reset_clear(state_type& s,
                      const Eigen::Vector<double, N>& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
         s.B.reset();
         s.sigma = 1.0;
         s.lambda.setZero();

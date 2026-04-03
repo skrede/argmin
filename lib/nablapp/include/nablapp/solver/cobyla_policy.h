@@ -77,16 +77,16 @@ struct cobyla_policy
 
     template <typename Problem, typename Convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
@@ -109,7 +109,7 @@ struct cobyla_policy
         };
 
         // Initial trust radius (same auto logic as BOBYQA)
-        double h = self.options.initial_trust_radius;
+        double h = options.initial_trust_radius;
         if(h <= 0.0)
         {
             double max_range = 0.0;
@@ -122,7 +122,7 @@ struct cobyla_policy
             h = (max_range > 0.0) ? 0.1 * max_range : 1.0;
         }
         s.rho = h;
-        s.rho_end = self.options.final_trust_radius;
+        s.rho_end = options.final_trust_radius;
 
         // Build initial simplex
         s.simplex = detail::build_simplex(s.x, s.rho, s.lower, s.upper);
@@ -154,7 +154,7 @@ struct cobyla_policy
         return s;
     }
 
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         const int n = static_cast<int>(s.x.size());
         double old_f = s.objective_value;
@@ -180,7 +180,7 @@ struct cobyla_policy
         double d_norm = d.norm();
 
         // Convergence: step too small relative to trust radius
-        if(d_norm < s.rho * self.options.step_convergence_factor &&
+        if(d_norm < s.rho * options.step_convergence_factor &&
            s.rho <= s.rho_end)
         {
             return make_converged_result(s, models.objective_gradient.norm());
@@ -252,12 +252,12 @@ struct cobyla_policy
         };
     }
 
-    void reset(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset_clear(s, x0);
+        reset_clear(s, x0);
     }
 
-    void reset_clear(this auto&&, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
         const int n = static_cast<int>(x0.size());
         s.x = detail::project(x0, s.lower, s.upper);

@@ -4,6 +4,7 @@
 #include "nablapp/result/step_result.h"
 #include "nablapp/result/status.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>

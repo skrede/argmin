@@ -40,7 +40,7 @@ inline constexpr int problem_dimension_v = P::problem_dimension;
 
 template <typename P, typename S = double>
 concept objective = has_problem_dimension<P> &&
-    requires(const P& p, const Eigen::VectorX<S>& x)
+    requires(const P& p, const Eigen::Vector<S, problem_dimension_v<P>>& x)
 {
     { p.value(x) } -> std::convertible_to<S>;
     { p.dimension() } -> std::convertible_to<int>;
@@ -48,14 +48,15 @@ concept objective = has_problem_dimension<P> &&
 
 template <typename P, typename S = double>
 concept differentiable = objective<P, S> &&
-    requires(const P& p, const Eigen::VectorX<S>& x, Eigen::VectorX<S>& g)
+    requires(const P& p, const Eigen::Vector<S, problem_dimension_v<P>>& x,
+             Eigen::VectorX<S>& g)
 {
     { p.gradient(x, g) };
 };
 
 template <typename P, typename S = double>
 concept second_order = differentiable<P, S> &&
-    requires(const P& p, const Eigen::VectorX<S>& x, Eigen::MatrixX<S>& H)
+    requires(const P& p, const Eigen::Vector<S, problem_dimension_v<P>>& x, Eigen::MatrixX<S>& H)
 {
     { p.hessian(x, H) };
 };
@@ -64,13 +65,13 @@ template <typename P, typename S = double>
 concept bound_constrained = objective<P, S> &&
     requires(const P& p)
 {
-    { p.lower_bounds() } -> std::convertible_to<Eigen::VectorX<S>>;
-    { p.upper_bounds() } -> std::convertible_to<Eigen::VectorX<S>>;
+    { p.lower_bounds() } -> std::convertible_to<Eigen::Vector<S, problem_dimension_v<P>>>;
+    { p.upper_bounds() } -> std::convertible_to<Eigen::Vector<S, problem_dimension_v<P>>>;
 };
 
 template <typename P, typename S = double>
 concept constrained_values = objective<P, S> &&
-    requires(const P& p, const Eigen::VectorX<S>& x, Eigen::VectorX<S>& c)
+    requires(const P& p, const Eigen::Vector<S, problem_dimension_v<P>>& x, Eigen::VectorX<S>& c)
 {
     { p.constraints(x, c) };
     { p.num_equality() } -> std::convertible_to<int>;
@@ -79,14 +80,15 @@ concept constrained_values = objective<P, S> &&
 
 template <typename P, typename S = double>
 concept constrained = constrained_values<P, S> &&
-    requires(const P& p, const Eigen::VectorX<S>& x, Eigen::MatrixX<S>& J)
+    requires(const P& p, const Eigen::Vector<S, problem_dimension_v<P>>& x, Eigen::MatrixX<S>& J)
 {
     { p.constraint_jacobian(x, J) };
 };
 
 template <typename P, typename S = double>
 concept least_squares = objective<P, S> &&
-    requires(const P& p, const Eigen::VectorX<S>& x, Eigen::VectorX<S>& r, Eigen::MatrixX<S>& J)
+    requires(const P& p, const Eigen::Vector<S, problem_dimension_v<P>>& x,
+             Eigen::VectorX<S>& r, Eigen::MatrixX<S>& J)
 {
     { p.residuals(x, r) };
     { p.jacobian(x, J) };

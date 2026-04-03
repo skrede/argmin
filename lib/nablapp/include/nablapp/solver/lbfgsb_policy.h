@@ -80,16 +80,16 @@ struct lbfgsb_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem,
+    state_type init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
@@ -114,7 +114,7 @@ struct lbfgsb_policy
         }
 
         // History depth: default 10 (N&W 7.2)
-        std::uint8_t depth = self.options.history_depth.value_or(10);
+        std::uint8_t depth = options.history_depth.value_or(10);
         s.B = detail::compact_lbfgs<double, N>{depth};
         s.iteration = 0;
 
@@ -129,7 +129,7 @@ struct lbfgsb_policy
         return s;
     }
 
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         // Evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
@@ -201,7 +201,7 @@ struct lbfgsb_policy
         };
 
         // Strong Wolfe with feasible step cap, using embedded line search options
-        line_search_options ls_opts = self.options.line_search;
+        line_search_options ls_opts = options.line_search;
         ls_opts.max_alpha = std::min(ls_opts.max_alpha, alpha_max);
         auto ls = strong_wolfe(phi, dphi, s.objective_value, s.g.dot(d), ls_opts);
 
@@ -248,7 +248,7 @@ struct lbfgsb_policy
     }
 
     // Hot start -- preserves curvature pairs (D-05).
-    void reset(this auto&&, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.objective_value = s.eval_value(x0);
@@ -258,9 +258,9 @@ struct lbfgsb_policy
     }
 
     // Cold restart -- clears curvature history (D-05).
-    void reset_clear(this auto&& self, state_type& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
         s.B.reset();
     }
 };
