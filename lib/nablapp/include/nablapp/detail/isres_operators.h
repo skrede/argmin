@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <limits>
 #include <random>
+#include <type_traits>
 #include <utility>
 
 namespace nablapp::detail
@@ -31,24 +32,24 @@ namespace nablapp::detail
 // uses [-1, 1] as a fallback range.
 //
 // Reference: K&W Section 8.6 (ES initialization).
-template <int N, typename Rng>
-Eigen::Matrix<double, N, Eigen::Dynamic> initialize_population(
+template <int N = nablapp::dynamic_dimension, typename Scalar = double, typename Rng>
+Eigen::Matrix<Scalar, N, Eigen::Dynamic> initialize_population(
     int n, int lambda,
-    const Eigen::Vector<double, N>& lower,
-    const Eigen::Vector<double, N>& upper,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper,
     Rng& rng)
 {
-    constexpr double inf = std::numeric_limits<double>::infinity();
-    std::uniform_real_distribution<double> uniform(0.0, 1.0);
+    constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+    std::uniform_real_distribution<Scalar> uniform(Scalar(0), Scalar(1));
 
-    Eigen::Matrix<double, N, Eigen::Dynamic> pop(n, lambda);
+    Eigen::Matrix<Scalar, N, Eigen::Dynamic> pop(n, lambda);
 
     for(int j = 0; j < lambda; ++j)
     {
         for(int i = 0; i < n; ++i)
         {
-            double lo = (lower[i] > -inf) ? lower[i] : -1.0;
-            double hi = (upper[i] <  inf) ? upper[i] :  1.0;
+            Scalar lo = (lower[i] > -inf) ? lower[i] : Scalar(-1);
+            Scalar hi = (upper[i] <  inf) ? upper[i] : Scalar(1);
             pop(i, j) = lo + uniform(rng) * (hi - lo);
         }
     }
@@ -62,22 +63,23 @@ Eigen::Matrix<double, N, Eigen::Dynamic> initialize_population(
 // If infinite range on a dimension, uses 1.0.
 //
 // Reference: Runarsson & Yao (2005).
-inline Eigen::MatrixXd initialize_sigmas(
+template <int N = nablapp::dynamic_dimension, typename Scalar = double>
+Eigen::Matrix<Scalar, N, Eigen::Dynamic> initialize_sigmas(
     int n, int lambda,
-    const Eigen::VectorXd& lower,
-    const Eigen::VectorXd& upper)
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
 {
-    constexpr double inf = std::numeric_limits<double>::infinity();
-    double sqrt_n = std::sqrt(static_cast<double>(n));
+    constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+    Scalar sqrt_n = std::sqrt(static_cast<Scalar>(n));
 
-    Eigen::MatrixXd sigmas(n, lambda);
+    Eigen::Matrix<Scalar, N, Eigen::Dynamic> sigmas(n, lambda);
 
     for(int i = 0; i < n; ++i)
     {
-        double range = (lower[i] > -inf && upper[i] < inf)
+        Scalar range = (lower[i] > -inf && upper[i] < inf)
             ? (upper[i] - lower[i])
             : sqrt_n;
-        double s = range / sqrt_n;
+        Scalar s = range / sqrt_n;
         sigmas.row(i).setConstant(s);
     }
 
@@ -95,29 +97,29 @@ inline Eigen::MatrixXd initialize_sigmas(
 //   Clamp x_new to [lower, upper]
 //
 // Reference: Runarsson & Yao (2005), K&W Section 8.6.
-template <int N, typename Rng>
-std::pair<Eigen::Vector<double, N>, Eigen::VectorXd> mutate_individual(
-    const Eigen::Vector<double, N>& parent,
-    const Eigen::VectorXd& sigma,
-    const Eigen::Vector<double, N>& x_best,
-    double alpha,
-    double tau,
-    double tau_prime,
-    const Eigen::Vector<double, N>& lower,
-    const Eigen::Vector<double, N>& upper,
+template <int N = nablapp::dynamic_dimension, typename Scalar = double, typename Rng>
+std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, N>> mutate_individual(
+    const Eigen::Vector<Scalar, N>& parent,
+    const std::type_identity_t<Eigen::Vector<Scalar, N>>& sigma,
+    const Eigen::Vector<Scalar, N>& x_best,
+    Scalar alpha,
+    Scalar tau,
+    Scalar tau_prime,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper,
     Rng& rng)
 {
     const int n = parent.size();
-    std::normal_distribution<double> normal(0.0, 1.0);
+    std::normal_distribution<Scalar> normal(Scalar(0), Scalar(1));
 
     // Log-normal self-adaptation (element-wise)
-    double global_noise = tau * normal(rng);
-    Eigen::VectorXd sigma_new(n);
+    Scalar global_noise = tau * normal(rng);
+    Eigen::Vector<Scalar, N> sigma_new(n);
     for(int i = 0; i < n; ++i)
         sigma_new[i] = sigma[i] * std::exp(global_noise + tau_prime * normal(rng));
 
     // Gaussian perturbation + differential variation
-    Eigen::Vector<double, N> x_new(n);
+    Eigen::Vector<Scalar, N> x_new(n);
     for(int i = 0; i < n; ++i)
     {
         x_new[i] = parent[i]

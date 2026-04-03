@@ -15,6 +15,7 @@
 //            K&W 2e, Section 10.7 (derivative-free constrained optimization).
 
 #include "nablapp/detail/bound_projection.h"
+#include "nablapp/types.h"
 
 #include <Eigen/Core>
 #include <Eigen/LU>
@@ -27,10 +28,11 @@ namespace nablapp::detail
 {
 
 // Result of building linear models from simplex interpolation.
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
 struct cobyla_linear_models
 {
-    Eigen::VectorXd objective_gradient;
-    Eigen::MatrixXd constraint_gradients;  // m_total x n
+    Eigen::Vector<Scalar, N> objective_gradient;
+    Eigen::MatrixX<Scalar> constraint_gradients;  // m_total x n
 };
 
 // Build initial simplex from x0 by perturbing each coordinate by rho.
@@ -42,22 +44,23 @@ struct cobyla_linear_models
 // Returns matrix of shape (n, n+1) where each column is a vertex.
 //
 // Reference: Powell 1994, Section 2 (initial simplex construction).
-inline Eigen::MatrixXd build_simplex(
-    const Eigen::VectorXd& x0,
-    double rho,
-    const Eigen::VectorXd& lower,
-    const Eigen::VectorXd& upper)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Matrix<Scalar, N, Eigen::Dynamic> build_simplex(
+    const Eigen::Vector<Scalar, N>& x0,
+    Scalar rho,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
 {
     const int n = static_cast<int>(x0.size());
-    Eigen::MatrixXd simplex(n, n + 1);
+    Eigen::Matrix<Scalar, N, Eigen::Dynamic> simplex(n, n + 1);
     simplex.col(0) = x0;
 
     for(int i = 0; i < n; ++i)
     {
-        Eigen::VectorXd pt = x0;
+        Eigen::Vector<Scalar, N> pt = x0;
         pt[i] = std::min(pt[i] + rho, upper[i]);
 
-        if(std::abs(pt[i] - x0[i]) < 1e-15 * rho)
+        if(std::abs(pt[i] - x0[i]) < Scalar(1e-15) * rho)
             pt[i] = std::max(x0[i] - rho, lower[i]);
 
         simplex.col(1 + i) = pt;
@@ -77,22 +80,23 @@ inline Eigen::MatrixXd build_simplex(
 // (using all non-best vertices). Solves D^T g = delta_f for each model.
 //
 // Reference: Powell 1994, Section 3 (linear interpolation).
-inline cobyla_linear_models build_linear_models(
-    const Eigen::MatrixXd& simplex,
-    const Eigen::VectorXd& f_values,
-    const Eigen::MatrixXd& c_values,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+cobyla_linear_models<Scalar, N> build_linear_models(
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
+    const Eigen::VectorX<Scalar>& f_values,
+    const Eigen::MatrixX<Scalar>& c_values,
     int best_idx)
 {
     const int n = static_cast<int>(simplex.rows());
     const int m = static_cast<int>(c_values.rows());
 
-    Eigen::VectorXd x_best = simplex.col(best_idx);
-    double f_best = f_values[best_idx];
+    Eigen::Vector<Scalar, N> x_best = simplex.col(best_idx);
+    Scalar f_best = f_values[best_idx];
 
     // Build displacement matrix (n x n) and function deltas
-    Eigen::MatrixXd D(n, n);
-    Eigen::VectorXd df(n);
-    Eigen::MatrixXd dc(m, n);
+    Eigen::Matrix<Scalar, N, N> D(n, n);
+    Eigen::Vector<Scalar, N> df(n);
+    Eigen::MatrixX<Scalar> dc(m, n);
 
     int col = 0;
     for(int i = 0; i <= n; ++i)
@@ -109,7 +113,7 @@ inline cobyla_linear_models build_linear_models(
     // Solve D^T g = delta via LU decomposition
     auto lu = D.transpose().fullPivLu();
 
-    cobyla_linear_models models;
+    cobyla_linear_models<Scalar, N> models;
     models.objective_gradient = lu.solve(df);
 
     if(m > 0)
@@ -129,14 +133,15 @@ inline cobyla_linear_models build_linear_models(
 // Replace vertex k in the simplex with a new point.
 //
 // Reference: Powell 1994, Section 4 (vertex replacement).
-inline void replace_vertex(
-    Eigen::MatrixXd& simplex,
-    Eigen::VectorXd& f_values,
-    Eigen::MatrixXd& c_values,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+void replace_vertex(
+    Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
+    Eigen::VectorX<Scalar>& f_values,
+    Eigen::MatrixX<Scalar>& c_values,
     int k,
-    const Eigen::VectorXd& x_new,
-    double f_new,
-    const Eigen::VectorXd& c_new)
+    const Eigen::Vector<Scalar, N>& x_new,
+    Scalar f_new,
+    const Eigen::VectorX<Scalar>& c_new)
 {
     simplex.col(k) = x_new;
     f_values[k] = f_new;
@@ -151,22 +156,23 @@ inline void replace_vertex(
 // determinant of the interpolation matrix.
 //
 // Reference: Powell 1994, Section 4.
-inline int select_replacement_vertex(
-    const Eigen::MatrixXd& simplex,
-    const Eigen::VectorXd& f_values,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+int select_replacement_vertex(
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
+    const Eigen::VectorX<Scalar>& f_values,
     int best_idx,
-    const Eigen::VectorXd& x_new)
+    const Eigen::Vector<Scalar, N>& x_new)
 {
     const int m = static_cast<int>(simplex.cols());
 
     int farthest = (best_idx == 0) ? 1 : 0;
-    double max_dist = (simplex.col(farthest) - x_new).squaredNorm();
+    Scalar max_dist = (simplex.col(farthest) - x_new).squaredNorm();
 
     for(int i = 0; i < m; ++i)
     {
         if(i == best_idx)
             continue;
-        double dist = (simplex.col(i) - x_new).squaredNorm();
+        Scalar dist = (simplex.col(i) - x_new).squaredNorm();
         if(dist > max_dist)
         {
             max_dist = dist;
@@ -183,16 +189,17 @@ inline int select_replacement_vertex(
 // condition number exceeds the threshold, or -1 if geometry is acceptable.
 //
 // Reference: Powell 1994, Section 5 (geometry maintenance).
-inline int check_simplex_geometry(
-    const Eigen::MatrixXd& simplex,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+int check_simplex_geometry(
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
     int best_idx,
-    double rho)
+    Scalar rho)
 {
     const int n = static_cast<int>(simplex.rows());
-    Eigen::VectorXd x_best = simplex.col(best_idx);
+    Eigen::Vector<Scalar, N> x_best = simplex.col(best_idx);
 
     // Build displacement matrix
-    Eigen::MatrixXd D(n, n);
+    Eigen::Matrix<Scalar, N, N> D(n, n);
     std::vector<int> vertex_map(static_cast<std::size_t>(n));
     int col = 0;
     for(int i = 0; i <= n; ++i)
@@ -205,18 +212,18 @@ inline int check_simplex_geometry(
     }
 
     auto lu = D.fullPivLu();
-    double cond = 1.0 / lu.rcond();
+    Scalar cond = Scalar(1) / lu.rcond();
 
-    if(cond > 1e10 || !std::isfinite(cond))
+    if(cond > Scalar(1e10) || !std::isfinite(cond))
     {
         // Find the vertex closest to x_best (most degenerate)
         int worst = vertex_map[0];
-        double min_dist = (simplex.col(worst) - x_best).squaredNorm();
+        Scalar min_dist = (simplex.col(worst) - x_best).squaredNorm();
 
         for(int i = 1; i < n; ++i)
         {
             int vi = vertex_map[static_cast<std::size_t>(i)];
-            double dist = (simplex.col(vi) - x_best).squaredNorm();
+            Scalar dist = (simplex.col(vi) - x_best).squaredNorm();
             if(dist < min_dist)
             {
                 min_dist = dist;
@@ -236,16 +243,17 @@ inline int check_simplex_geometry(
 // maximise the displacement matrix determinant, projected to bounds.
 //
 // Reference: Powell 1994, Section 5.
-inline Eigen::VectorXd geometry_improving_point(
-    const Eigen::MatrixXd& simplex,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> geometry_improving_point(
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
     int best_idx,
     int k,
-    double rho,
-    const Eigen::VectorXd& lower,
-    const Eigen::VectorXd& upper)
+    Scalar rho,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
 {
     const int n = static_cast<int>(simplex.rows());
-    Eigen::VectorXd x_best = simplex.col(best_idx);
+    Eigen::Vector<Scalar, N> x_best = simplex.col(best_idx);
 
     // Determine which coordinate direction vertex k corresponded to.
     // Use the direction that maximises the distance from x_best.
@@ -266,12 +274,12 @@ inline Eigen::VectorXd geometry_improving_point(
     // Clamp j to valid range
     j = std::min(j, n - 1);
 
-    Eigen::VectorXd pt = x_best;
+    Eigen::Vector<Scalar, N> pt = x_best;
     pt[j] = std::min(pt[j] + rho, upper[j]);
-    if(std::abs(pt[j] - x_best[j]) < 1e-15 * rho)
+    if(std::abs(pt[j] - x_best[j]) < Scalar(1e-15) * rho)
         pt[j] = std::max(x_best[j] - rho, lower[j]);
 
-    return project(pt, lower, upper);
+    return project<Scalar, N>(pt, lower, upper);
 }
 
 }

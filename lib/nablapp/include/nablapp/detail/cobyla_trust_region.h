@@ -14,6 +14,7 @@
 //            K&W 2e, Section 10.7.
 
 #include "nablapp/detail/bound_projection.h"
+#include "nablapp/types.h"
 
 #include <Eigen/Core>
 
@@ -26,15 +27,16 @@ namespace nablapp::detail
 
 // Clip a displacement vector d to the intersection of the trust ball
 // ||d|| <= rho and box bounds lower <= x + d <= upper.
-inline Eigen::VectorXd clip_to_trust_and_bounds(
-    const Eigen::VectorXd& d,
-    double rho,
-    const Eigen::VectorXd& x,
-    const Eigen::VectorXd& lower,
-    const Eigen::VectorXd& upper)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> clip_to_trust_and_bounds(
+    const Eigen::Vector<Scalar, N>& d,
+    Scalar rho,
+    const Eigen::Vector<Scalar, N>& x,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
 {
     const int n = static_cast<int>(d.size());
-    Eigen::VectorXd result = d;
+    Eigen::Vector<Scalar, N> result = d;
 
     for(int i = 0; i < n; ++i)
         result[i] = std::clamp(result[i], lower[i] - x[i], upper[i] - x[i]);
@@ -49,22 +51,23 @@ inline Eigen::VectorXd clip_to_trust_and_bounds(
 //
 // For inequality constraints: violation if g_j^T d + offset_j < 0.
 // For equality constraints (indices [0, n_eq)): both directions.
-inline double linearised_violation(
-    const Eigen::MatrixXd& constraint_gradients,
-    const Eigen::VectorXd& constraint_offsets,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Scalar linearised_violation(
+    const Eigen::MatrixX<Scalar>& constraint_gradients,
+    const Eigen::VectorX<Scalar>& constraint_offsets,
     int n_eq,
-    const Eigen::VectorXd& d)
+    const Eigen::Vector<Scalar, N>& d)
 {
     const int m = static_cast<int>(constraint_offsets.size());
-    double viol = 0.0;
+    Scalar viol = Scalar(0);
 
     for(int j = 0; j < m; ++j)
     {
-        double val = constraint_gradients.row(j).dot(d) + constraint_offsets[j];
+        Scalar val = constraint_gradients.row(j).dot(d) + constraint_offsets[j];
         if(j < n_eq)
             viol += std::abs(val);
         else
-            viol += std::max(0.0, -val);
+            viol += std::max(Scalar(0), -val);
     }
 
     return viol;
@@ -86,23 +89,24 @@ inline double linearised_violation(
 // (n dimensions), so 100 iterations with adaptive step size suffices.
 //
 // Reference: Powell 1994, Section 3 (trust-region subproblem).
-inline Eigen::VectorXd solve_linear_subproblem(
-    const Eigen::VectorXd& obj_gradient,
-    const Eigen::MatrixXd& constraint_gradients,
-    const Eigen::VectorXd& constraint_offsets,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> solve_linear_subproblem(
+    const Eigen::Vector<Scalar, N>& obj_gradient,
+    const Eigen::MatrixX<Scalar>& constraint_gradients,
+    const Eigen::VectorX<Scalar>& constraint_offsets,
     int n_eq,
-    double rho,
-    const Eigen::VectorXd& lower,
-    const Eigen::VectorXd& upper,
-    const Eigen::VectorXd& x_current)
+    Scalar rho,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper,
+    const Eigen::Vector<Scalar, N>& x_current)
 {
     const int n = static_cast<int>(obj_gradient.size());
     const int m = static_cast<int>(constraint_offsets.size());
 
     // Expand equality constraints into pairs of inequalities
     int m_expanded = m + n_eq;
-    Eigen::MatrixXd G(m_expanded, n);
-    Eigen::VectorXd h(m_expanded);
+    Eigen::MatrixX<Scalar> G(m_expanded, n);
+    Eigen::VectorX<Scalar> h(m_expanded);
 
     // Original constraints
     G.topRows(m) = constraint_gradients;
@@ -115,37 +119,37 @@ inline Eigen::VectorXd solve_linear_subproblem(
         h[m + j] = -constraint_offsets[j];
     }
 
-    Eigen::VectorXd d = Eigen::VectorXd::Zero(n);
-    double penalty = 10.0;
-    double step_size = rho * 0.5;
+    Eigen::Vector<Scalar, N> d = Eigen::Vector<Scalar, N>::Zero(n);
+    Scalar penalty = Scalar(10);
+    Scalar step_size = rho * Scalar(0.5);
 
     for(int iter = 0; iter < 100; ++iter)
     {
         // Gradient of penalised objective: g_obj + penalty * sum(violation gradients)
-        Eigen::VectorXd grad = obj_gradient;
+        Eigen::Vector<Scalar, N> grad = obj_gradient;
 
         for(int j = 0; j < m_expanded; ++j)
         {
-            double val = G.row(j).dot(d) + h[j];
-            if(val < 0.0)
+            Scalar val = G.row(j).dot(d) + h[j];
+            if(val < Scalar(0))
                 grad -= penalty * G.row(j).transpose();
         }
 
         // Steepest descent step
-        if(grad.norm() < 1e-15)
+        if(grad.norm() < Scalar(1e-15))
             break;
 
-        Eigen::VectorXd d_new = d - step_size * grad / grad.norm();
-        d_new = clip_to_trust_and_bounds(d_new, rho, x_current, lower, upper);
+        Eigen::Vector<Scalar, N> d_new = d - step_size * grad / grad.norm();
+        d_new = clip_to_trust_and_bounds<Scalar, N>(d_new, rho, x_current, lower, upper);
 
         // Evaluate merit: objective + penalty * violation
-        auto merit = [&](const Eigen::VectorXd& dd) {
-            double obj = obj_gradient.dot(dd);
-            double viol = 0.0;
+        auto merit = [&](const Eigen::Vector<Scalar, N>& dd) {
+            Scalar obj = obj_gradient.dot(dd);
+            Scalar viol = Scalar(0);
             for(int j = 0; j < m_expanded; ++j)
             {
-                double val = G.row(j).dot(dd) + h[j];
-                viol += std::max(0.0, -val);
+                Scalar val = G.row(j).dot(dd) + h[j];
+                viol += std::max(Scalar(0), -val);
             }
             return obj + penalty * viol;
         };
@@ -153,12 +157,12 @@ inline Eigen::VectorXd solve_linear_subproblem(
         if(merit(d_new) < merit(d))
         {
             d = d_new;
-            step_size = std::min(step_size * 1.1, rho);
+            step_size = std::min(step_size * Scalar(1.1), rho);
         }
         else
         {
-            step_size *= 0.5;
-            if(step_size < rho * 1e-10)
+            step_size *= Scalar(0.5);
+            if(step_size < rho * Scalar(1e-10))
                 break;
         }
     }
@@ -175,22 +179,23 @@ inline Eigen::VectorXd solve_linear_subproblem(
 // Returns the new trust radius.
 //
 // Reference: Powell 1994, Section 4 (trust radius management).
-inline double compute_rho_update(
-    double rho,
-    double rho_end,
-    double actual_reduction,
-    double predicted_reduction)
+template <typename Scalar = double>
+Scalar compute_rho_update(
+    Scalar rho,
+    Scalar rho_end,
+    Scalar actual_reduction,
+    Scalar predicted_reduction)
 {
-    if(std::abs(predicted_reduction) < 1e-30)
-        return std::max(rho * 0.5, rho_end);
+    if(std::abs(predicted_reduction) < Scalar(1e-30))
+        return std::max(rho * Scalar(0.5), rho_end);
 
-    double ratio = actual_reduction / predicted_reduction;
+    Scalar ratio = actual_reduction / predicted_reduction;
 
-    if(ratio > 0.7)
+    if(ratio > Scalar(0.7))
         return rho;
 
-    if(ratio < 0.1)
-        return std::max(rho * 0.5, rho_end);
+    if(ratio < Scalar(0.1))
+        return std::max(rho * Scalar(0.5), rho_end);
 
     return rho;
 }
