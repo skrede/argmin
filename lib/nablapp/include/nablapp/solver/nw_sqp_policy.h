@@ -154,7 +154,7 @@ struct nw_sqp_policy
         // Initial multiplier estimate via least-squares (N&W eq. 18.15)
         if(m > 0)
         {
-            Eigen::MatrixXd A_all(m, n);
+            Eigen::Matrix<double, Eigen::Dynamic, N> A_all(m, n);
             if(s.n_eq > 0) A_all.topRows(s.n_eq) = s.J_eq;
             if(s.n_ineq > 0) A_all.bottomRows(s.n_ineq) = s.J_ineq;
             s.lambda = detail::estimate_multipliers(s.g, A_all);
@@ -219,12 +219,12 @@ struct nw_sqp_policy
         }
 
         // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
-        Eigen::MatrixXd A_eq = s.J_eq;
+        Eigen::Matrix<double, Eigen::Dynamic, N> A_eq = s.J_eq;
         Eigen::VectorXd b_eq = -s.c_eq;
-        Eigen::MatrixXd A_ineq = s.J_ineq;
+        Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq = s.J_ineq;
         Eigen::VectorXd b_ineq = -s.c_ineq;
 
-        Eigen::VectorXd p0 = Eigen::VectorXd::Zero(n);
+        Eigen::Vector<double, N> p0 = Eigen::Vector<double, N>::Zero(n);
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
         {
             Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
@@ -242,21 +242,21 @@ struct nw_sqp_policy
             ? options.qp.tolerance
             : std::optional<double>{1e-12};
 
-        detail::qp_result<double> qp;
+        detail::qp_result<double, N> qp;
         bool has_finite_bounds = has_finite_box(s.lower, s.upper);
 
         if(has_finite_bounds)
         {
-            Eigen::VectorXd p_lower = Eigen::VectorXd(s.lower) - Eigen::VectorXd(s.x);
-            Eigen::VectorXd p_upper = Eigen::VectorXd(s.upper) - Eigen::VectorXd(s.x);
+            Eigen::Vector<double, N> p_lower = (Eigen::VectorXd(s.lower) - Eigen::VectorXd(s.x)).eval();
+            Eigen::Vector<double, N> p_upper = (Eigen::VectorXd(s.upper) - Eigen::VectorXd(s.x)).eval();
             p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
-            qp = detail::solve_qp(s.B.hessian(), Eigen::VectorXd(s.g),
+            qp = detail::solve_qp<double, N>(s.B.hessian(), s.g,
                                   A_eq, b_eq, A_ineq, b_ineq,
                                   p_lower, p_upper, p0, qp_opts);
         }
         else
         {
-            qp = detail::solve_qp(s.B.hessian(), Eigen::VectorXd(s.g),
+            qp = detail::solve_qp<double, N>(s.B.hessian(), s.g,
                                   A_eq, b_eq, A_ineq, b_ineq,
                                   p0, qp_opts);
         }
@@ -336,7 +336,7 @@ struct nw_sqp_policy
         Eigen::Vector<double, N> grad_L_new, grad_L_old;
         if(m > 0)
         {
-            Eigen::MatrixXd A_new_full(m, n);
+            Eigen::Matrix<double, Eigen::Dynamic, N> A_new_full(m, n);
             if(s.n_eq > 0) A_new_full.topRows(s.n_eq) = s.J_eq;
             if(s.n_ineq > 0) A_new_full.bottomRows(s.n_ineq) = s.J_ineq;
 
@@ -417,7 +417,7 @@ private:
         if(m == 0)
             return s.g.norm();
 
-        Eigen::MatrixXd A(m, n);
+        Eigen::Matrix<double, Eigen::Dynamic, N> A(m, n);
         if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
         if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
         return detail::lagrangian_gradient(s.g, A, s.lambda).norm();

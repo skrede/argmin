@@ -49,7 +49,7 @@ concept objective = has_problem_dimension<P> &&
 template <typename P, typename S = double>
 concept differentiable = objective<P, S> &&
     requires(const P& p, const Eigen::Vector<S, problem_dimension_v<P>>& x,
-             Eigen::VectorX<S>& g)
+             Eigen::Vector<S, problem_dimension_v<P>>& g)
 {
     { p.gradient(x, g) };
 };

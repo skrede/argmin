@@ -68,8 +68,9 @@ struct counting_gradient
         const dlib::matrix<double, 0, 1>& x) const
     {
         ++g_count;
-        Eigen::Map<const Eigen::VectorXd> xv(x.begin(), x.size());
-        Eigen::VectorXd g(x.size());
+        Eigen::Map<const Eigen::VectorXd> xmap(x.begin(), x.size());
+        Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
+        Eigen::Vector<double, Problem::problem_dimension> g;
         prob.gradient(xv, g);
 
         dlib::matrix<double, 0, 1> result(x.size());

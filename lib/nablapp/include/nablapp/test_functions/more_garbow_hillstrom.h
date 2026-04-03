@@ -38,14 +38,14 @@ struct powell_singular
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(4);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(3), Scalar(-1), Scalar(0), Scalar(1);
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar t1 = x[0] + Scalar(10) * x[1];
         Scalar t2 = x[2] - x[3];
@@ -56,7 +56,7 @@ struct powell_singular
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar t1 = x[0] + Scalar(10) * x[1];
         Scalar t2 = x[2] - x[3];
@@ -64,7 +64,6 @@ struct powell_singular
         Scalar t4 = x[0] - x[3];
         Scalar t3_cubed = t3 * t3 * t3;
         Scalar t4_cubed = t4 * t4 * t4;
-        g.resize(4);
         g[0] = Scalar(2) * t1 + Scalar(40) * t4_cubed;
         g[1] = Scalar(20) * t1 + Scalar(4) * t3_cubed;
         g[2] = Scalar(10) * t2 - Scalar(8) * t3_cubed;
@@ -89,12 +88,12 @@ struct brown_badly_scaled
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Ones(2);
+        return Eigen::Vector<Scalar, problem_dimension>::Ones(2);
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar t1 = x[0] - Scalar(1e6);
         Scalar t2 = x[1] - Scalar(2e-6);
@@ -103,12 +102,11 @@ struct brown_badly_scaled
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar t1 = x[0] - Scalar(1e6);
         Scalar t2 = x[1] - Scalar(2e-6);
         Scalar t3 = x[0] * x[1] - Scalar(2);
-        g.resize(2);
         g[0] = Scalar(2) * t1 + Scalar(2) * t3 * x[1];
         g[1] = Scalar(2) * t2 + Scalar(2) * t3 * x[0];
     }
@@ -212,14 +210,14 @@ struct wood
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(4);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(-3), Scalar(-1), Scalar(-3), Scalar(-1);
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar t1 = x[1] - x[0] * x[0];
         Scalar t2 = Scalar(1) - x[0];
@@ -234,13 +232,12 @@ struct wood
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar t1 = x[1] - x[0] * x[0];
         Scalar t3 = x[3] - x[2] * x[2];
         Scalar t5 = x[1] - Scalar(1);
         Scalar t6 = x[3] - Scalar(1);
-        g.resize(4);
         g[0] = Scalar(-400) * x[0] * t1 - Scalar(2) * (Scalar(1) - x[0]);
         g[1] = Scalar(200) * t1 + Scalar(20.2) * t5 + Scalar(19.8) * t6;
         g[2] = Scalar(-360) * x[2] * t3 - Scalar(2) * (Scalar(1) - x[2]);
@@ -267,14 +264,14 @@ struct helical_valley
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(3);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(-1), Scalar(0), Scalar(0);
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         using std::atan2;
         using std::sqrt;
@@ -287,7 +284,7 @@ struct helical_valley
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         using std::atan2;
         using std::sqrt;
@@ -299,7 +296,6 @@ struct helical_valley
         Scalar t2 = r - Scalar(1);
         // dtheta/dx0 = -x1 / (2*pi*r2), dtheta/dx1 = x0 / (2*pi*r2)
         Scalar k = Scalar(10) / (pi2 * r2);
-        g.resize(3);
         g[0] = Scalar(200) * (t1 * k * x[1] + t2 * x[0] / r);
         g[1] = Scalar(200) * (-t1 * k * x[0] + t2 * x[1] / r);
         g[2] = Scalar(200) * t1 + Scalar(2) * x[2];

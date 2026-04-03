@@ -43,11 +43,12 @@ template <typename Problem>
 double nlopt_objective(unsigned n, const double* x, double* grad, void* data)
 {
     auto* prob = static_cast<Problem*>(data);
-    Eigen::Map<const Eigen::VectorXd> xv(x, n);
+    Eigen::Map<const Eigen::VectorXd> xmap(x, n);
+    Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
 
     if(grad)
     {
-        Eigen::VectorXd g(n);
+        Eigen::Vector<double, Problem::problem_dimension> g;
         prob->gradient(xv, g);
         Eigen::Map<Eigen::VectorXd>(grad, n) = g;
     }
@@ -64,7 +65,8 @@ void nlopt_ineq_mconstraint(unsigned m, double* result,
                             double* grad, void* data)
 {
     auto* prob = static_cast<Problem*>(data);
-    Eigen::Map<const Eigen::VectorXd> xv(x, n);
+    Eigen::Map<const Eigen::VectorXd> xmap(x, n);
+    Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
 
     Eigen::VectorXd c(m);
     prob->constraints(xv, c);

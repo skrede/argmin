@@ -164,7 +164,7 @@ struct gcmma_policy
 
         // MMA convention: g_i <= 0 form
         Eigen::VectorXd g_mma = -ms.c_ineq;
-        Eigen::MatrixXd dg_mma = -ms.J_ineq;
+        Eigen::Matrix<double, Eigen::Dynamic, N> dg_mma = -ms.J_ineq;
 
         Eigen::Vector<double, N> x_trial(n);
         double f_trial{};

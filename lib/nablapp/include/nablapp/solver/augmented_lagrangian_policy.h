@@ -161,9 +161,19 @@ struct augmented_lagrangian_policy
 
         if constexpr(differentiable<Problem, scalar_type>)
         {
+            constexpr int PD = problem_dimension_v<Problem>;
             s.eval_gradient = [&problem](const Eigen::Vector<scalar_type, N>& v,
                                          Eigen::Vector<scalar_type, N>& grad) {
-                problem.gradient(v, grad);
+                if constexpr(N == PD)
+                {
+                    problem.gradient(v, grad);
+                }
+                else
+                {
+                    Eigen::Vector<scalar_type, PD> g_tmp(grad.size());
+                    problem.gradient(Eigen::VectorX<scalar_type>(v), g_tmp);
+                    grad = g_tmp;
+                }
             };
         }
 
@@ -254,7 +264,7 @@ struct augmented_lagrangian_policy
 
             int dimension() const { return dim; }
 
-            scalar_type value(const Eigen::VectorX<scalar_type>& x) const
+            scalar_type value(const Eigen::Vector<scalar_type, N>& x) const
             {
                 scalar_type fval = ev_value(x);
                 Eigen::VectorX<scalar_type> ceq, cineq;
@@ -263,20 +273,22 @@ struct augmented_lagrangian_policy
                     fval, ceq, cineq, lam_eq, lam_ineq, pen);
             }
 
-            void gradient(const Eigen::VectorX<scalar_type>& x,
-                          Eigen::VectorX<scalar_type>& g) const
+            void gradient(const Eigen::Vector<scalar_type, N>& x,
+                          Eigen::Vector<scalar_type, N>& g) const
             {
                 ev_gradient(x, g);
                 Eigen::VectorX<scalar_type> ceq, cineq;
-                Eigen::MatrixX<scalar_type> Jeq, Jineq;
+                Eigen::MatrixX<scalar_type> Jeq_dyn, Jineq_dyn;
                 ev_constraints(x, ceq, cineq);
-                ev_jacobian(x, Jeq, Jineq);
+                ev_jacobian(x, Jeq_dyn, Jineq_dyn);
+                Eigen::Matrix<scalar_type, Eigen::Dynamic, N> Jeq = Jeq_dyn;
+                Eigen::Matrix<scalar_type, Eigen::Dynamic, N> Jineq = Jineq_dyn;
                 g = detail::augmented_lagrangian_gradient(
                     g, Jeq, Jineq, ceq, cineq, lam_eq, lam_ineq, pen);
             }
 
-            Eigen::VectorX<scalar_type> lower_bounds() const { return lo; }
-            Eigen::VectorX<scalar_type> upper_bounds() const { return hi; }
+            Eigen::Vector<scalar_type, N> lower_bounds() const { return lo; }
+            Eigen::Vector<scalar_type, N> upper_bounds() const { return hi; }
         };
 
         subproblem sub{
@@ -305,7 +317,7 @@ struct augmented_lagrangian_policy
             .threshold = scalar_type(1e-15);
 
         using rebound_inner = typename InnerPolicy::template rebind<N>;
-        basic_solver<rebound_inner, N> inner_solver{sub, Eigen::VectorX<scalar_type>(s.x), inner_opts};
+        basic_solver<rebound_inner, N> inner_solver{sub, s.x, inner_opts};
         auto inner_result = inner_solver.solve(inner_opts);
 
         // Extract solution from inner solver
@@ -327,8 +339,10 @@ struct augmented_lagrangian_policy
             Eigen::Vector<scalar_type, N> grad_f(n);
             s.eval_gradient(s.x, grad_f);
 
-            Eigen::MatrixX<scalar_type> J_eq_new, J_ineq_new;
-            s.eval_jacobian(s.x, J_eq_new, J_ineq_new);
+            Eigen::MatrixX<scalar_type> J_eq_dyn, J_ineq_dyn;
+            s.eval_jacobian(s.x, J_eq_dyn, J_ineq_dyn);
+            Eigen::Matrix<scalar_type, Eigen::Dynamic, N> J_eq_new = J_eq_dyn;
+            Eigen::Matrix<scalar_type, Eigen::Dynamic, N> J_ineq_new = J_ineq_dyn;
 
             auto aug_grad = detail::augmented_lagrangian_gradient(
                 grad_f, J_eq_new, J_ineq_new, s.c_eq, s.c_ineq,

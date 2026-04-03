@@ -33,6 +33,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace nablapp::bench
@@ -40,6 +41,16 @@ namespace nablapp::bench
 
 namespace detail
 {
+
+template <typename Policy, int N, typename = void>
+struct rebind_policy { using type = Policy; };
+
+template <typename Policy, int N>
+struct rebind_policy<Policy, N, std::void_t<typename Policy::template rebind<N>>>
+{ using type = typename Policy::template rebind<N>; };
+
+template <typename Policy, int N>
+using rebind_policy_t = typename rebind_policy<Policy, N>::type;
 
 [[nodiscard]] inline auto status_string(solver_status s) -> std::string_view
 {
@@ -78,6 +89,9 @@ auto run_nablapp_solver(std::string_view solver_name,
                         std::vector<trace_entry>& trace,
                         PolicyOpts&&... policy_opts) -> benchmark_result
 {
+    static constexpr int N = problem_dimension_v<Problem>;
+    using rebound_policy = detail::rebind_policy_t<Policy, N>;
+
     auto x0 = prob.initial_point();
     solver_options<> opts{};
     opts.max_iterations = max_iterations;
@@ -91,7 +105,7 @@ auto run_nablapp_solver(std::string_view solver_name,
         trace.clear();
         trace.resize(static_cast<std::size_t>(max_iterations));
 
-        basic_solver<Policy> solver(prob, x0, opts,
+        basic_solver<rebound_policy, N> solver(prob, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();
@@ -150,7 +164,7 @@ auto run_nablapp_solver(std::string_view solver_name,
     else
     {
         // Use solve() for simplicity when no trace needed.
-        basic_solver<Policy> solver(prob, x0, opts,
+        basic_solver<rebound_policy, N> solver(prob, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();

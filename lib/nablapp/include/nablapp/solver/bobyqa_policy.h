@@ -66,7 +66,7 @@ struct bobyqa_policy
         double objective_value{};
         Eigen::Matrix<double, N, Eigen::Dynamic> Y;
         Eigen::VectorXd f_values;
-        detail::quadratic_model<double> model;
+        detail::quadratic_model<double, N> model;
         double delta{};
         double delta_max{};
         double final_trust_radius{1e-8};

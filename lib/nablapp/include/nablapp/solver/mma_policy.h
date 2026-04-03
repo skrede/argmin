@@ -236,7 +236,7 @@ struct mma_policy
         // (MMA convention: constraints are g_i(x) <= 0, nablapp uses c >= 0)
         // So g_i = -c_ineq_i, dg_i = -J_ineq_i
         Eigen::VectorXd g_mma = -s.c_ineq;
-        Eigen::MatrixXd dg_mma = -s.J_ineq;
+        Eigen::Matrix<double, Eigen::Dynamic, N> dg_mma = -s.J_ineq;
 
         auto coeffs = detail::mma_coefficients(
             s.x, s.f, s.g, g_mma, dg_mma, s.L, s.U,

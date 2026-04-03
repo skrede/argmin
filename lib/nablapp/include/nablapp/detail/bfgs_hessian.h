@@ -28,7 +28,7 @@ template <typename Scalar = double, int N = nablapp::dynamic_dimension>
 class bfgs_hessian
 {
 public:
-    explicit bfgs_hessian(int n = 0)
+    explicit bfgs_hessian(int n = (N == nablapp::dynamic_dimension ? 0 : N))
         : B_(Eigen::Matrix<Scalar, N, N>::Identity(n, n))
     {}
 

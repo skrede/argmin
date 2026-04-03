@@ -84,8 +84,9 @@ TEST_CASE("rosenbrock", "[test_functions]")
 TEST_CASE("booth", "[test_functions]")
 {
     nablapp::booth fn;
-    Eigen::VectorXd x_star{{1.0, 3.0}};
-    Eigen::VectorXd g(2);
+    Eigen::Vector<double, 2> x_star;
+    x_star << 1.0, 3.0;
+    Eigen::Vector<double, 2> g;
 
     SECTION("value at optimum")
     {
@@ -108,8 +109,9 @@ TEST_CASE("booth", "[test_functions]")
 TEST_CASE("beale", "[test_functions]")
 {
     nablapp::beale fn;
-    Eigen::VectorXd x_star{{3.0, 0.5}};
-    Eigen::VectorXd g(2);
+    Eigen::Vector<double, 2> x_star;
+    x_star << 3.0, 0.5;
+    Eigen::Vector<double, 2> g;
 
     SECTION("value at optimum")
     {
@@ -132,8 +134,9 @@ TEST_CASE("beale", "[test_functions]")
 TEST_CASE("himmelblau", "[test_functions]")
 {
     nablapp::himmelblau fn;
-    Eigen::VectorXd x_star{{3.0, 2.0}};
-    Eigen::VectorXd g(2);
+    Eigen::Vector<double, 2> x_star;
+    x_star << 3.0, 2.0;
+    Eigen::Vector<double, 2> g;
 
     SECTION("value at optimum")
     {

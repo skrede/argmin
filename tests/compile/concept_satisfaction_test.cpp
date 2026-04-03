@@ -176,7 +176,7 @@ struct fixed_2d_differentiable
 {
     static constexpr int problem_dimension = 2;
     double value(const Eigen::Vector<double, 2>&) const { return 0.0; }
-    void gradient(const Eigen::Vector<double, 2>&, Eigen::VectorXd&) const {}
+    void gradient(const Eigen::Vector<double, 2>&, Eigen::Vector<double, 2>&) const {}
     int dimension() const { return 2; }
 };
 
@@ -186,7 +186,7 @@ struct fixed_2d_full
 {
     static constexpr int problem_dimension = 2;
     double value(const Eigen::Vector<double, 2>&) const { return 0.0; }
-    void gradient(const Eigen::Vector<double, 2>&, Eigen::VectorXd&) const {}
+    void gradient(const Eigen::Vector<double, 2>&, Eigen::Vector<double, 2>&) const {}
     void hessian(const Eigen::Vector<double, 2>&, Eigen::MatrixXd&) const {}
     Eigen::Vector<double, 2> lower_bounds() const { return {}; }
     Eigen::Vector<double, 2> upper_bounds() const { return {}; }

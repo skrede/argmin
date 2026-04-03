@@ -40,7 +40,7 @@ struct hs001
     [[nodiscard]] int num_equality() const { return 0; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar t1 = x[1] - x[0] * x[0];
         Scalar t2 = Scalar(1) - x[0];
@@ -48,31 +48,30 @@ struct hs001
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(2);
         Scalar t = x[1] - x[0] * x[0];
         g[0] = Scalar(-400) * x[0] * t - Scalar(2) * (Scalar(1) - x[0]);
         g[1] = Scalar(200) * t;
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        Eigen::VectorX<Scalar> lb(2);
+        Eigen::Vector<Scalar, problem_dimension> lb;
         lb << -inf, Scalar(-1.5);
         return lb;
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(2, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(2);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(-2), Scalar(1);
         return x0;
     }
@@ -98,7 +97,7 @@ struct hs002
     [[nodiscard]] int num_equality() const { return 0; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar t1 = x[1] - x[0] * x[0];
         Scalar t2 = Scalar(1) - x[0];
@@ -106,31 +105,30 @@ struct hs002
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(2);
         Scalar t = x[1] - x[0] * x[0];
         g[0] = Scalar(-400) * x[0] * t - Scalar(2) * (Scalar(1) - x[0]);
         g[1] = Scalar(200) * t;
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        Eigen::VectorX<Scalar> lb(2);
+        Eigen::Vector<Scalar, problem_dimension> lb;
         lb << -inf, Scalar(1.5);
         return lb;
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(2, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(2);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(-2), Scalar(1);
         return x0;
     }
@@ -159,7 +157,7 @@ struct hs005
     [[nodiscard]] int num_equality() const { return 0; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         using std::sin;
         Scalar d = x[0] - x[1];
@@ -168,33 +166,32 @@ struct hs005
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         using std::cos;
         Scalar c = cos(x[0] + x[1]);
         Scalar d = x[0] - x[1];
-        g.resize(2);
         g[0] = c + Scalar(2) * d - Scalar(1.5);
         g[1] = c - Scalar(2) * d + Scalar(2.5);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
-        Eigen::VectorX<Scalar> lb(2);
+        Eigen::Vector<Scalar, problem_dimension> lb;
         lb << Scalar(-1.5), Scalar(-3);
         return lb;
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
-        Eigen::VectorX<Scalar> ub(2);
+        Eigen::Vector<Scalar, problem_dimension> ub;
         ub << Scalar(4), Scalar(3);
         return ub;
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Zero(2);
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(2);
     }
 
     [[nodiscard]] Scalar optimal_value() const
@@ -223,16 +220,15 @@ struct hs006
     [[nodiscard]] int num_equality() const { return 1; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar t = Scalar(1) - x[0];
         return t * t;
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(2);
         g[0] = Scalar(-2) * (Scalar(1) - x[0]);
         g[1] = Scalar(0);
     }
@@ -252,21 +248,21 @@ struct hs006
         J(0, 1) = Scalar(10);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(2, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(2, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(2);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(-1.2), Scalar(1);
         return x0;
     }
@@ -292,16 +288,15 @@ struct hs007
     [[nodiscard]] int num_equality() const { return 1; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         using std::log;
         return log(Scalar(1) + x[0] * x[0]) - x[1];
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(2);
         g[0] = Scalar(2) * x[0] / (Scalar(1) + x[0] * x[0]);
         g[1] = Scalar(-1);
     }
@@ -323,21 +318,21 @@ struct hs007
         J(0, 1) = Scalar(2) * x[1];
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(2, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(2, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Constant(2, Scalar(2));
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, Scalar(2));
     }
 
     [[nodiscard]] Scalar optimal_value() const
@@ -368,7 +363,7 @@ struct hs024
     [[nodiscard]] int num_equality() const { return 0; }
     [[nodiscard]] int num_inequality() const { return 3; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         using std::sqrt;
         Scalar k = Scalar(1) / (Scalar(27) * sqrt(Scalar(3)));
@@ -377,13 +372,12 @@ struct hs024
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         using std::sqrt;
         Scalar k = Scalar(1) / (Scalar(27) * sqrt(Scalar(3)));
         Scalar t = (x[0] - Scalar(3)) * (x[0] - Scalar(3)) - Scalar(9);
         Scalar x1_cubed = x[1] * x[1] * x[1];
-        g.resize(2);
         // df/dx0 = k * 2*(x0-3) * x1^3
         g[0] = k * Scalar(2) * (x[0] - Scalar(3)) * x1_cubed;
         // df/dx1 = k * t * 3*x1^2
@@ -412,20 +406,20 @@ struct hs024
         J(2, 0) = Scalar(-1);      J(2, 1) = -s3;
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
-        return Eigen::VectorX<Scalar>::Zero(2);
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(2);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(2, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(2);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(1), Scalar(0.5);
         return x0;
     }
@@ -451,7 +445,7 @@ struct hs026
     [[nodiscard]] int num_equality() const { return 1; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar d01 = x[0] - x[1];
         Scalar d12 = x[1] - x[2];
@@ -459,12 +453,11 @@ struct hs026
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar d01 = x[0] - x[1];
         Scalar d12 = x[1] - x[2];
         Scalar d12_cubed = d12 * d12 * d12;
-        g.resize(3);
         g[0] = Scalar(2) * d01;
         g[1] = Scalar(-2) * d01 + Scalar(4) * d12_cubed;
         g[2] = Scalar(-4) * d12_cubed;
@@ -487,21 +480,21 @@ struct hs026
         J(0, 2) = Scalar(4) * x[2] * x[2] * x[2];
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(3, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(3, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(3);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(-2.6), Scalar(2), Scalar(2);
         return x0;
     }
@@ -527,7 +520,7 @@ struct hs028
     [[nodiscard]] int num_equality() const { return 1; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar s01 = x[0] + x[1];
         Scalar s12 = x[1] + x[2];
@@ -535,11 +528,10 @@ struct hs028
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar s01 = x[0] + x[1];
         Scalar s12 = x[1] + x[2];
-        g.resize(3);
         g[0] = Scalar(2) * s01;
         g[1] = Scalar(2) * s01 + Scalar(2) * s12;
         g[2] = Scalar(2) * s12;
@@ -561,21 +553,21 @@ struct hs028
         J(0, 2) = Scalar(3);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(3, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(3, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(3);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(-4), Scalar(1), Scalar(1);
         return x0;
     }
@@ -603,7 +595,7 @@ struct hs035
     [[nodiscard]] int num_equality() const { return 0; }
     [[nodiscard]] int num_inequality() const { return 1; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         return Scalar(9) - Scalar(8) * x[0] - Scalar(6) * x[1]
                - Scalar(4) * x[2] + Scalar(2) * x[0] * x[0]
@@ -612,9 +604,8 @@ struct hs035
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(3);
         g[0] = Scalar(-8) + Scalar(4) * x[0] + Scalar(2) * x[1]
                + Scalar(2) * x[2];
         g[1] = Scalar(-6) + Scalar(2) * x[0] + Scalar(4) * x[1];
@@ -637,20 +628,20 @@ struct hs035
         J(0, 2) = Scalar(-2);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
-        return Eigen::VectorX<Scalar>::Zero(3);
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(3);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(3, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Constant(3, Scalar(0.5));
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, Scalar(0.5));
     }
 
     [[nodiscard]] Scalar optimal_value() const
@@ -678,15 +669,14 @@ struct hs039
     [[nodiscard]] int num_equality() const { return 2; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         return -x[0];
     }
 
     void gradient(const Eigen::VectorX<Scalar>& /*x*/,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(4);
         g[0] = Scalar(-1);
         g[1] = Scalar(0);
         g[2] = Scalar(0);
@@ -715,21 +705,21 @@ struct hs039
         J(1, 3) = Scalar(-2) * x[3];
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(4, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(4, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Constant(4, Scalar(2));
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, Scalar(2));
     }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(-1); }
@@ -755,15 +745,14 @@ struct hs040
     [[nodiscard]] int num_equality() const { return 3; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         return -x[0] * x[1] * x[2] * x[3];
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(4);
         g[0] = -x[1] * x[2] * x[3];
         g[1] = -x[0] * x[2] * x[3];
         g[2] = -x[0] * x[1] * x[3];
@@ -797,21 +786,21 @@ struct hs040
         J(2, 3) = Scalar(2) * x[3];
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(4, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(4, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Constant(4, Scalar(0.8));
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, Scalar(0.8));
     }
 
     [[nodiscard]] Scalar optimal_value() const
@@ -841,7 +830,7 @@ struct hs043
     [[nodiscard]] int num_equality() const { return 0; }
     [[nodiscard]] int num_inequality() const { return 3; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         return x[0] * x[0] + x[1] * x[1] + Scalar(2) * x[2] * x[2]
                + x[3] * x[3] - Scalar(5) * x[0] - Scalar(5) * x[1]
@@ -849,9 +838,8 @@ struct hs043
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(4);
         g[0] = Scalar(2) * x[0] - Scalar(5);
         g[1] = Scalar(2) * x[1] - Scalar(5);
         g[2] = Scalar(4) * x[2] - Scalar(21);
@@ -888,21 +876,21 @@ struct hs043
         J(2, 3) = Scalar(1);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(4, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(4, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Zero(4);
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(4);
     }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(-44); }
@@ -927,7 +915,7 @@ struct hs048
     [[nodiscard]] int num_equality() const { return 2; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar t0 = x[0] - Scalar(1);
         Scalar t1 = x[1] - x[2];
@@ -936,9 +924,8 @@ struct hs048
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(5);
         g[0] = Scalar(2) * (x[0] - Scalar(1));
         g[1] = Scalar(2) * (x[1] - x[2]);
         g[2] = Scalar(-2) * (x[1] - x[2]);
@@ -970,21 +957,21 @@ struct hs048
         J(1, 4) = Scalar(-2);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(5, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(5, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(5, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(5, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(5);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(3), Scalar(5), Scalar(-3), Scalar(2), Scalar(-2);
         return x0;
     }
@@ -1012,7 +999,7 @@ struct hs050
     [[nodiscard]] int num_equality() const { return 3; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar d01 = x[0] - x[1];
         Scalar d12 = x[1] - x[2];
@@ -1022,14 +1009,13 @@ struct hs050
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar d01 = x[0] - x[1];
         Scalar d12 = x[1] - x[2];
         Scalar d23 = x[2] - x[3];
         Scalar d23_cubed = d23 * d23 * d23;
         Scalar d34 = x[3] - x[4];
-        g.resize(5);
         g[0] = Scalar(2) * d01;
         g[1] = Scalar(-2) * d01 + Scalar(2) * d12;
         g[2] = Scalar(-2) * d12 + Scalar(4) * d23_cubed;
@@ -1062,21 +1048,21 @@ struct hs050
         J(2, 4) = Scalar(3);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(5, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(5, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(5, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(5, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(5);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(35), Scalar(-31), Scalar(11), Scalar(5), Scalar(-5);
         return x0;
     }
@@ -1104,7 +1090,7 @@ struct hs051
     [[nodiscard]] int num_equality() const { return 3; }
     [[nodiscard]] int num_inequality() const { return 0; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         Scalar t0 = x[0] - x[1];
         Scalar t1 = x[1] + x[2] - Scalar(2);
@@ -1114,9 +1100,8 @@ struct hs051
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(5);
         g[0] = Scalar(2) * (x[0] - x[1]);
         g[1] = Scalar(-2) * (x[0] - x[1])
                + Scalar(2) * (x[1] + x[2] - Scalar(2));
@@ -1148,21 +1133,21 @@ struct hs051
         J(2, 4) = Scalar(-1);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(5, -inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(5, -inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(5, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(5, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(5);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(2.5), Scalar(0.5), Scalar(2), Scalar(-1), Scalar(0.5);
         return x0;
     }
@@ -1190,15 +1175,14 @@ struct hs071
     [[nodiscard]] int num_equality() const { return 1; }
     [[nodiscard]] int num_inequality() const { return 1; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         return x[0] * x[3] * (x[0] + x[1] + x[2]) + x[2];
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(4);
         g[0] = x[3] * (Scalar(2) * x[0] + x[1] + x[2]);
         g[1] = x[0] * x[3];
         g[2] = x[0] * x[3] + Scalar(1);
@@ -1232,19 +1216,19 @@ struct hs071
         J(1, 3) = x[0] * x[1] * x[2];
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
-        return Eigen::VectorX<Scalar>::Constant(4, Scalar(1));
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, Scalar(1));
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
-        return Eigen::VectorX<Scalar>::Constant(4, Scalar(5));
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, Scalar(5));
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(4);
+        Eigen::Vector<Scalar, problem_dimension> x0;
         x0 << Scalar(1), Scalar(5), Scalar(5), Scalar(1);
         return x0;
     }
@@ -1274,7 +1258,7 @@ struct hs076
     [[nodiscard]] int num_equality() const { return 0; }
     [[nodiscard]] int num_inequality() const { return 3; }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
     {
         return x[0] * x[0] + Scalar(0.5) * x[1] * x[1]
                + x[2] * x[2] + Scalar(0.5) * x[3] * x[3]
@@ -1283,9 +1267,8 @@ struct hs076
     }
 
     void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
     {
-        g.resize(4);
         g[0] = Scalar(2) * x[0] - x[2] - Scalar(1);
         g[1] = x[1] - Scalar(3);
         g[2] = Scalar(2) * x[2] - x[0] + x[3] + Scalar(1);
@@ -1310,20 +1293,20 @@ struct hs076
              Scalar(0),  Scalar(1),  Scalar(4),  Scalar(0);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
     {
-        return Eigen::VectorX<Scalar>::Zero(4);
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(4);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
     {
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        return Eigen::VectorX<Scalar>::Constant(4, inf);
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, inf);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Constant(4, Scalar(0.5));
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, Scalar(0.5));
     }
 
     [[nodiscard]] Scalar optimal_value() const

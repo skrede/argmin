@@ -87,6 +87,24 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {}
 
+    // CTAD converting constructor: accepts an un-rebound policy and discards
+    // it, default-constructing the rebound policy. Enables deduction guides
+    // that rebind Policy to the problem's compile-time dimension.
+    template <typename OrigPolicy, typename Problem,
+              typename Convergence = default_convergence>
+        requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
+              && requires { typename OrigPolicy::template rebind<N>; }
+              && std::same_as<Policy, typename OrigPolicy::template rebind<N>>
+    basic_solver(OrigPolicy&&, const Problem& problem,
+                 const Eigen::VectorX<scalar_type>& x0,
+                 const solver_options<Convergence>& opts = {})
+        : max_iterations_{opts.max_iterations}
+        , verbosity_{opts.verbosity}
+        , max_time_{opts.max_time}
+        , constraint_tolerance_{opts.constraint_tolerance}
+        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
+    {}
+
     template <typename Problem, typename Convergence = default_convergence>
     basic_solver(const Problem& problem, const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts = {})
@@ -106,6 +124,25 @@ public:
                  const PolicyOpts& policy_opts)
         : policy_{std::move(policy)}
         , max_iterations_{opts.max_iterations}
+        , verbosity_{opts.verbosity}
+        , max_time_{opts.max_time}
+        , constraint_tolerance_{opts.constraint_tolerance}
+        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
+    {}
+
+    // CTAD converting constructor with policy options.
+    template <typename OrigPolicy, typename Problem, typename PolicyOpts,
+              typename Convergence = default_convergence>
+        requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
+              && requires { typename OrigPolicy::template rebind<N>; }
+              && std::same_as<Policy, typename OrigPolicy::template rebind<N>>
+              && has_options_type<Policy>
+              && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
+    basic_solver(OrigPolicy&&, const Problem& problem,
+                 const Eigen::VectorX<scalar_type>& x0,
+                 const solver_options<Convergence>& opts,
+                 const PolicyOpts& policy_opts)
+        : max_iterations_{opts.max_iterations}
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
@@ -337,22 +374,22 @@ private:
 //                       problem_dimension_v<Problem>>.
 
 // Policy + Problem + x0 + opts
-template <typename Policy, typename Problem, typename Scalar, typename Convergence>
-basic_solver(Policy, const Problem&, const Eigen::VectorX<Scalar>&,
+template <typename Policy, typename Problem, typename X, typename Convergence>
+basic_solver(Policy, const Problem&, const X&,
              const solver_options<Convergence>&)
     -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
                     problem_dimension_v<Problem>>;
 
 // Policy + Problem + x0 (no opts)
-template <typename Policy, typename Problem, typename Scalar>
-basic_solver(Policy, const Problem&, const Eigen::VectorX<Scalar>&)
+template <typename Policy, typename Problem, typename X>
+basic_solver(Policy, const Problem&, const X&)
     -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
                     problem_dimension_v<Problem>>;
 
 // Policy + Problem + x0 + opts + policy_opts
-template <typename Policy, typename Problem, typename Scalar, typename Convergence,
+template <typename Policy, typename Problem, typename X, typename Convergence,
           typename PolicyOpts>
-basic_solver(Policy, const Problem&, const Eigen::VectorX<Scalar>&,
+basic_solver(Policy, const Problem&, const X&,
              const solver_options<Convergence>&, const PolicyOpts&)
     -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
                     problem_dimension_v<Problem>>;

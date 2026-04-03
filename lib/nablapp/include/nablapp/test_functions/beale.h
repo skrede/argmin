@@ -30,14 +30,14 @@ struct beale
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, 2> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(2);
+        Eigen::Vector<Scalar, 2> x0;
         x0 << Scalar(0.5), Scalar(0.5);
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, 2>& x) const
     {
         Scalar x1 = x[0];
         Scalar x2 = x[1];
@@ -47,9 +47,8 @@ struct beale
         return t1 * t1 + t2 * t2 + t3 * t3;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Vector<Scalar, 2>& x, Eigen::Vector<Scalar, 2>& g) const
     {
-        g.resize(2);
         Scalar x1 = x[0];
         Scalar x2 = x[1];
         Scalar x2_2 = x2 * x2;
