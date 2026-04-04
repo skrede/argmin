@@ -73,6 +73,8 @@ struct lbfgsb_policy
         Eigen::Vector<double, N> upper;
         double objective_value{};
         detail::compact_lbfgs<double, N> B;
+        detail::cauchy_point_solver<double, N> gcp_solver;
+        detail::subspace_minimizer<double, N> ssm_solver;
         std::uint32_t iteration{0};
 
         std::function<double(const Eigen::Vector<double, N>&)> eval_value;
@@ -116,6 +118,8 @@ struct lbfgsb_policy
         // History depth: default 10 (N&W 7.2)
         std::uint8_t depth = options.history_depth.value_or(10);
         s.B = detail::compact_lbfgs<double, N>{depth};
+        s.gcp_solver = detail::cauchy_point_solver<double, N>{n};
+        s.ssm_solver = detail::subspace_minimizer<double, N>{n};
         s.iteration = 0;
 
         s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
@@ -135,11 +139,11 @@ struct lbfgsb_policy
         if(s.iteration != 0)
             s.eval_gradient(s.x, s.g);
 
-        // Generalized Cauchy Point
-        auto gcp = detail::cauchy_point(s.x, s.g, s.lower, s.upper, s.B);
+        // Generalized Cauchy Point using pre-allocated solver
+        const auto& gcp = s.gcp_solver.solve(s.x, s.g, s.lower, s.upper, s.B);
 
-        // Subspace minimization over free variables
-        Eigen::Vector<double, N> x_new = detail::subspace_minimize(
+        // Subspace minimization over free variables using pre-allocated solver
+        Eigen::Vector<double, N> x_new = s.ssm_solver.solve(
             s.x, gcp.x_cauchy, s.g, s.lower, s.upper, gcp.free_indices, s.B);
 
         // Search direction

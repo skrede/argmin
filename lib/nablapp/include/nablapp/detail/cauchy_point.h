@@ -27,45 +27,203 @@ struct cauchy_result
 };
 
 // Classify indices into free and active sets based on x_cauchy position.
+// Writes into pre-allocated vectors if provided; otherwise allocates.
 template <typename Scalar = double, int N = nablapp::dynamic_dimension>
-cauchy_result<Scalar, N> classify_indices(const Eigen::Vector<Scalar, N>& x_cauchy,
-                                          const Eigen::Vector<Scalar, N>& lower,
-                                          const Eigen::Vector<Scalar, N>& upper)
+void classify_indices(const Eigen::Vector<Scalar, N>& x_cauchy,
+                      const Eigen::Vector<Scalar, N>& lower,
+                      const Eigen::Vector<Scalar, N>& upper,
+                      cauchy_result<Scalar, N>& result)
 {
     const int n = x_cauchy.size();
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
 
-    std::vector<int> free_idx;
-    std::vector<int> active_idx;
-    free_idx.reserve(n);
-    active_idx.reserve(n);
+    result.x_cauchy = x_cauchy;
+    result.free_indices.clear();
+    result.active_indices.clear();
 
     for(int i = 0; i < n; ++i)
     {
         bool at_lower = x_cauchy[i] <= lower[i] + eps * (Scalar(1) + std::abs(lower[i]));
         bool at_upper = x_cauchy[i] >= upper[i] - eps * (Scalar(1) + std::abs(upper[i]));
         if(at_lower || at_upper)
-            active_idx.push_back(i);
+            result.active_indices.push_back(i);
         else
-            free_idx.push_back(i);
+            result.free_indices.push_back(i);
     }
-
-    return cauchy_result<Scalar, N>{
-        .x_cauchy = x_cauchy,
-        .free_indices = std::move(free_idx),
-        .active_indices = std::move(active_idx),
-    };
 }
 
-// Generalized Cauchy Point via breakpoint search along the projected gradient path.
+// Backward-compatible free function returning by value.
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+cauchy_result<Scalar, N> classify_indices(const Eigen::Vector<Scalar, N>& x_cauchy,
+                                          const Eigen::Vector<Scalar, N>& lower,
+                                          const Eigen::Vector<Scalar, N>& upper)
+{
+    cauchy_result<Scalar, N> result;
+    result.free_indices.reserve(x_cauchy.size());
+    result.active_indices.reserve(x_cauchy.size());
+    classify_indices<Scalar, N>(x_cauchy, lower, upper, result);
+    return result;
+}
+
+// Stateful Cauchy point solver with pre-allocated workspace.
 //
-// Walks the piecewise-linear path x(t) = P(x - t*g, l, u) and finds the first
-// local minimum of the quadratic model m(x(t)) = f + g^T d(t) + 0.5 d(t)^T B d(t)
-// where d(t) = x(t) - x.
+// Pre-allocates all temporaries used during the generalized Cauchy point
+// computation to eliminate per-step dynamic allocation.
 //
 // Reference: N&W Section 16.6, pp. 475-477, eq. 16.44-16.48.
 //            Byrd, Lu, Nocedal, Zhu 1995 (L-BFGS-B algorithm).
 
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+class cauchy_point_solver
+{
+public:
+    explicit cauchy_point_solver(int n)
+        : d_(n)
+        , Bd_(n)
+        , x_cauchy_(n)
+    {
+        bps_.reserve(n);
+        result_.free_indices.reserve(n);
+        result_.active_indices.reserve(n);
+        result_.x_cauchy.resize(n);
+    }
+
+    cauchy_point_solver() = default;
+
+    // Compute the generalized Cauchy point using pre-allocated workspace.
+    //
+    // Reference: N&W Section 16.6, pp. 475-477, eq. 16.44-16.48.
+    const cauchy_result<Scalar, N>& solve(
+        const Eigen::Vector<Scalar, N>& x,
+        const Eigen::Vector<Scalar, N>& g,
+        const Eigen::Vector<Scalar, N>& lower,
+        const Eigen::Vector<Scalar, N>& upper,
+        const compact_lbfgs<Scalar, N>& B)
+    {
+        const int n = x.size();
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+
+        // Step 1: compute breakpoints (N&W eq. 16.46)
+        bps_.clear();
+
+        for(int i = 0; i < n; ++i)
+        {
+            Scalar ti;
+            if(g[i] < Scalar(0) && upper[i] < inf)
+                ti = (x[i] - upper[i]) / g[i];
+            else if(g[i] > Scalar(0) && lower[i] > -inf)
+                ti = (x[i] - lower[i]) / g[i];
+            else
+                continue;
+
+            if(ti > Scalar(0))
+                bps_.push_back({i, ti});
+        }
+
+        // Unconstrained fallback (D-04): no finite breakpoints, all variables free.
+        if(bps_.empty())
+        {
+            d_.noalias() = -g;
+            Bd_ = B.multiply(d_);
+            Scalar dTBd = d_.dot(Bd_);
+            Scalar gTd = g.dot(d_);
+
+            Scalar t_star = Scalar(0);
+            if(dTBd > Scalar(0))
+                t_star = -gTd / dTBd;
+            else if(gTd < Scalar(0))
+                t_star = Scalar(1);
+
+            result_.x_cauchy.noalias() = x + t_star * d_;
+            result_.free_indices.clear();
+            result_.free_indices.resize(n);
+            std::iota(result_.free_indices.begin(), result_.free_indices.end(), 0);
+            result_.active_indices.clear();
+
+            return result_;
+        }
+
+        // Step 2: sort breakpoints by t
+        std::sort(bps_.begin(), bps_.end(),
+                  [](const auto& a, const auto& b) { return a.t < b.t; });
+
+        // Step 3: walk the piecewise-linear path, tracking f'(t) and f''(t)
+        d_.noalias() = -g;
+
+        for(int i = 0; i < n; ++i)
+        {
+            if(x[i] <= lower[i] && g[i] > Scalar(0))
+                d_[i] = Scalar(0);
+            else if(x[i] >= upper[i] && g[i] < Scalar(0))
+                d_[i] = Scalar(0);
+        }
+
+        Scalar f_prime = g.dot(d_);
+        Bd_ = B.multiply(d_);
+        Scalar f_double_prime = -d_.dot(Bd_);
+
+        Scalar t_old = Scalar(0);
+
+        for(const auto& bp : bps_)
+        {
+            Scalar dt = bp.t - t_old;
+
+            if(f_double_prime > Scalar(0) && f_prime < Scalar(0))
+            {
+                Scalar t_star = t_old - f_prime / f_double_prime;
+                if(t_star >= t_old && t_star <= bp.t)
+                {
+                    x_cauchy_.noalias() = x - t_star * g;
+                    x_cauchy_ = project<Scalar, N>(x_cauchy_, lower, upper);
+                    classify_indices<Scalar, N>(x_cauchy_, lower, upper, result_);
+                    return result_;
+                }
+            }
+
+            f_prime += dt * f_double_prime;
+
+            if(f_prime >= Scalar(0))
+            {
+                x_cauchy_.noalias() = x - bp.t * g;
+                x_cauchy_ = project<Scalar, N>(x_cauchy_, lower, upper);
+                classify_indices<Scalar, N>(x_cauchy_, lower, upper, result_);
+                return result_;
+            }
+
+            d_[bp.index] = Scalar(0);
+            t_old = bp.t;
+
+            Bd_ = B.multiply(d_);
+            f_double_prime = -d_.dot(Bd_);
+
+            f_prime = g.dot(d_) + t_old * (-f_double_prime);
+        }
+
+        Scalar t_last = bps_.back().t;
+        x_cauchy_.noalias() = x - t_last * g;
+        x_cauchy_ = project<Scalar, N>(x_cauchy_, lower, upper);
+        classify_indices<Scalar, N>(x_cauchy_, lower, upper, result_);
+        return result_;
+    }
+
+private:
+    struct breakpoint
+    {
+        int index;
+        Scalar t;
+    };
+
+    std::vector<breakpoint> bps_;
+    Eigen::Vector<Scalar, N> d_;
+    Eigen::Vector<Scalar, N> Bd_;
+    Eigen::Vector<Scalar, N> x_cauchy_;
+    cauchy_result<Scalar, N> result_;
+};
+
+// Backward-compatible free function wrapper.
+//
+// Reference: N&W Section 16.6, pp. 475-477, eq. 16.44-16.48.
+//            Byrd, Lu, Nocedal, Zhu 1995 (L-BFGS-B algorithm).
 template <typename Scalar = double, int N = nablapp::dynamic_dimension>
 cauchy_result<Scalar, N> cauchy_point(
     const Eigen::Vector<Scalar, N>& x,
@@ -74,128 +232,9 @@ cauchy_result<Scalar, N> cauchy_point(
     const Eigen::Vector<Scalar, N>& upper,
     const compact_lbfgs<Scalar, N>& B)
 {
-    const int n = x.size();
-    constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-
-    // Breakpoint struct for sorting
-    struct breakpoint
-    {
-        int index;
-        Scalar t;
-    };
-
-    // Step 1: compute breakpoints (N&W eq. 16.46)
-    std::vector<breakpoint> bps;
-    bps.reserve(n);
-
-    for(int i = 0; i < n; ++i)
-    {
-        Scalar ti;
-        if(g[i] < Scalar(0) && upper[i] < inf)
-            ti = (x[i] - upper[i]) / g[i];
-        else if(g[i] > Scalar(0) && lower[i] > -inf)
-            ti = (x[i] - lower[i]) / g[i];
-        else
-            continue;  // ti = +inf, variable never hits bound
-
-        if(ti > Scalar(0))
-            bps.push_back({i, ti});
-    }
-
-    // Unconstrained fallback (D-04): no finite breakpoints, all variables free.
-    if(bps.empty())
-    {
-        // d = -g (steepest descent direction), find minimum of quadratic along d.
-        Eigen::Vector<Scalar, N> d = -g;
-        Eigen::Vector<Scalar, N> Bd = B.multiply(d);
-        Scalar dTBd = d.dot(Bd);
-        Scalar gTd = g.dot(d);
-
-        Scalar t_star = Scalar(0);
-        if(dTBd > Scalar(0))
-            t_star = -gTd / dTBd;
-        else if(gTd < Scalar(0))
-            t_star = Scalar(1);  // Negative curvature: take unit step
-
-        Eigen::Vector<Scalar, N> x_cauchy = (x + t_star * d).eval();
-
-        std::vector<int> free_idx(n);
-        std::iota(free_idx.begin(), free_idx.end(), 0);
-
-        return cauchy_result<Scalar, N>{
-            .x_cauchy = std::move(x_cauchy),
-            .free_indices = std::move(free_idx),
-            .active_indices = {},
-        };
-    }
-
-    // Step 2: sort breakpoints by t
-    std::sort(bps.begin(), bps.end(),
-              [](const auto& a, const auto& b) { return a.t < b.t; });
-
-    // Step 3: walk the piecewise-linear path, tracking f'(t) and f''(t)
-    // Initialize direction: d_i = -g_i for free components
-    Eigen::Vector<Scalar, N> d = -g;
-
-    // Check which components are already at bounds at t=0
-    for(int i = 0; i < n; ++i)
-    {
-        if(x[i] <= lower[i] && g[i] > Scalar(0))
-            d[i] = Scalar(0);
-        else if(x[i] >= upper[i] && g[i] < Scalar(0))
-            d[i] = Scalar(0);
-    }
-
-    Scalar f_prime = g.dot(d);
-    Eigen::Vector<Scalar, N> Bd = B.multiply(d);
-    Scalar f_double_prime = -d.dot(Bd);
-
-    Scalar t_old = Scalar(0);
-
-    for(const auto& bp : bps)
-    {
-        Scalar dt = bp.t - t_old;
-
-        // Check if minimum is in the current interval [t_old, bp.t]
-        if(f_double_prime > Scalar(0) && f_prime < Scalar(0))
-        {
-            Scalar t_star = t_old - f_prime / f_double_prime;
-            if(t_star >= t_old && t_star <= bp.t)
-            {
-                Eigen::Vector<Scalar, N> x_cauchy = project<Scalar, N>(
-                    Eigen::Vector<Scalar, N>((x - t_star * g).eval()), lower, upper);
-                return classify_indices<Scalar, N>(x_cauchy, lower, upper);
-            }
-        }
-
-        // Update f' at the breakpoint
-        f_prime += dt * f_double_prime;
-
-        // If f' >= 0 at this breakpoint, the minimum is here
-        if(f_prime >= Scalar(0))
-        {
-            Eigen::Vector<Scalar, N> x_cauchy = project<Scalar, N>(
-                Eigen::Vector<Scalar, N>((x - bp.t * g).eval()), lower, upper);
-            return classify_indices<Scalar, N>(x_cauchy, lower, upper);
-        }
-
-        // Variable bp.index becomes fixed at its bound
-        d[bp.index] = Scalar(0);
-        t_old = bp.t;
-
-        // Recompute f' and f'' with updated d (simpler approach per plan)
-        Bd = B.multiply(d);
-        f_double_prime = -d.dot(Bd);
-
-        // f' at current position t_old with reduced d
-        f_prime = g.dot(d) + t_old * (-f_double_prime);
-    }
-
-    // After all breakpoints: minimum is at or beyond the last breakpoint
-    Scalar t_last = bps.back().t;
-    Eigen::Vector<Scalar, N> x_cauchy = project<Scalar, N>(
-        Eigen::Vector<Scalar, N>((x - t_last * g).eval()), lower, upper);
-    return classify_indices<Scalar, N>(x_cauchy, lower, upper);
+    cauchy_point_solver<Scalar, N> solver(x.size());
+    const auto& result = solver.solve(x, g, lower, upper, B);
+    return result;
 }
 
 }

@@ -4,10 +4,18 @@
 
 #include "nablapp/test_functions/beale.h"
 #include "nablapp/test_functions/booth.h"
+#include "nablapp/test_functions/hock_schittkowski.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/solver/lbfgsb_policy.h"
+#include "nablapp/solver/kraft_slsqp_policy.h"
+#include "nablapp/solver/mma_policy.h"
 #include "nablapp/types.h"
+#include "nablapp/detail/compact_lbfgs.h"
+#include "nablapp/detail/cauchy_point.h"
 #include "nablapp/detail/bound_projection.h"
+#include "nablapp/detail/subspace_minimization.h"
+#include "nablapp/detail/active_set_qp.h"
+#include "nablapp/detail/mma_subproblem.h"
 
 #include <Eigen/Core>
 
@@ -65,13 +73,9 @@ TEST_CASE("fixed-dim booth value+gradient: zero dynamic allocation", "[zero-copy
 
 TEST_CASE("fixed-dim solver state types are stack-allocated", "[zero-copy]")
 {
-    // Verify that basic_solver<lbfgsb_policy<2>, 2> uses fixed-size state
-    // vectors, proving end-to-end compile-time dimension propagation.
     using solver_type = basic_solver<lbfgsb_policy<2>, 2>;
     using state_type = typename solver_type::state_type;
 
-    // The state's x and g vectors must be Eigen::Vector<double, 2>,
-    // not Eigen::VectorXd (which would be Matrix<double, -1, 1>).
     static_assert(std::is_same_v<decltype(state_type::x),
                                  Eigen::Vector<double, 2>>,
                   "solver state x must be Vector<double, 2>");
@@ -79,7 +83,6 @@ TEST_CASE("fixed-dim solver state types are stack-allocated", "[zero-copy]")
                                  Eigen::Vector<double, 2>>,
                   "solver state g must be Vector<double, 2>");
 
-    // Construct and verify the solver works with the rebound types.
     beale<double> problem;
     Eigen::Vector<double, 2> x0;
     x0 << 0.5, 0.5;
@@ -90,4 +93,177 @@ TEST_CASE("fixed-dim solver state types are stack-allocated", "[zero-copy]")
     auto result = solver.step();
 
     CHECK(std::isfinite(result.objective_value));
+}
+
+// Verify that the pre-allocated compact_lbfgs B*v product and two-loop
+// recursion are allocation-free for fixed-dimension vectors after
+// curvature pairs have been pushed.
+TEST_CASE("fixed-dim compact_lbfgs operations: zero dynamic allocation", "[zero-copy]")
+{
+    constexpr int N = 2;
+    detail::compact_lbfgs<double, N> B{5};
+
+    // Push a curvature pair (allocates internally on first push)
+    Eigen::Vector<double, N> s;
+    s << 0.1, 0.2;
+    Eigen::Vector<double, N> y;
+    y << 1.0, 2.0;
+    B.push(s, y);
+
+    Eigen::Vector<double, N> v;
+    v << 1.0, -1.0;
+
+    Eigen::internal::set_is_malloc_allowed(false);
+
+    auto Bv = B.multiply(v);
+    auto Hg = B.two_loop_recursion(v);
+
+    Eigen::internal::set_is_malloc_allowed(true);
+
+    CHECK(std::isfinite(Bv[0]));
+    CHECK(std::isfinite(Hg[0]));
+}
+
+// Verify that the pre-allocated cauchy_point_solver is allocation-free
+// for fixed-dimension problems after construction.
+TEST_CASE("fixed-dim cauchy_point_solver: zero dynamic allocation", "[zero-copy]")
+{
+    constexpr int N = 2;
+    detail::compact_lbfgs<double, N> B{5};
+    Eigen::Vector<double, N> s;
+    s << 0.1, 0.2;
+    Eigen::Vector<double, N> y;
+    y << 1.0, 2.0;
+    B.push(s, y);
+
+    detail::cauchy_point_solver<double, N> solver{N};
+
+    Eigen::Vector<double, N> x;
+    x << 0.5, 0.5;
+    Eigen::Vector<double, N> g;
+    g << 1.0, -1.0;
+    Eigen::Vector<double, N> lower;
+    lower << -10.0, -10.0;
+    Eigen::Vector<double, N> upper;
+    upper << 10.0, 10.0;
+
+    // Warm-up: first call may trigger lazy allocation in breakpoint vector
+    solver.solve(x, g, lower, upper, B);
+
+    Eigen::internal::set_is_malloc_allowed(false);
+
+    const auto& result = solver.solve(x, g, lower, upper, B);
+
+    Eigen::internal::set_is_malloc_allowed(true);
+
+    CHECK(std::isfinite(result.x_cauchy[0]));
+}
+
+// Verify that the pre-allocated active_set_qp_solver is allocation-free
+// for fixed-dimension QP solves (SLSQP hot path).
+TEST_CASE("fixed-dim active_set_qp_solver: zero dynamic allocation", "[zero-copy]")
+{
+    constexpr int N = 3;
+    detail::active_set_qp_solver<double, N> qp{N, 2};
+
+    Eigen::Matrix<double, N, N> G = Eigen::Matrix<double, N, N>::Identity();
+    Eigen::Vector<double, N> d;
+    d << 1.0, 2.0, 3.0;
+    Eigen::Matrix<double, Eigen::Dynamic, N> A_eq(0, N);
+    Eigen::VectorXd b_eq(0);
+    Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq(1, N);
+    A_ineq << 1.0, 1.0, 1.0;
+    Eigen::VectorXd b_ineq(1);
+    b_ineq << -5.0;
+    Eigen::Vector<double, N> x0 = Eigen::Vector<double, N>::Zero();
+
+    // Warm-up
+    qp.solve(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    Eigen::internal::set_is_malloc_allowed(false);
+
+    auto result = qp.solve(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    Eigen::internal::set_is_malloc_allowed(true);
+
+    CHECK(result.status == detail::qp_status::optimal);
+}
+
+// Verify that the pre-allocated mma_subproblem_solver is allocation-free
+// for fixed-dimension dual solves (MMA hot path).
+TEST_CASE("fixed-dim mma_subproblem_solver: zero dynamic allocation", "[zero-copy]")
+{
+    constexpr int N = 3;
+    const int m = 1;
+    detail::mma_subproblem_solver<double, N> sub{N, m};
+
+    Eigen::Vector<double, N> x;
+    x << 1.0, 2.0, 3.0;
+    Eigen::Vector<double, N> grad_f;
+    grad_f << 0.5, -0.3, 0.1;
+    Eigen::VectorXd g(m);
+    g << -0.5;
+    Eigen::Matrix<double, Eigen::Dynamic, N> dg(m, N);
+    dg << 1.0, 0.0, -1.0;
+    Eigen::Vector<double, N> L;
+    L << -1.0, 0.0, 1.0;
+    Eigen::Vector<double, N> U;
+    U << 3.0, 4.0, 5.0;
+
+    Eigen::Vector<double, N> x_min;
+    x_min << 0.0, 1.0, 2.0;
+    Eigen::Vector<double, N> x_max;
+    x_max << 2.0, 3.0, 4.0;
+
+    // Warm-up: compute coefficients and solve once
+    sub.compute_coefficients(x, 1.0, grad_f, g, dg, L, U);
+    sub.dual_solve(L, U, x_min, x_max);
+
+    // Second run should be allocation-free
+    Eigen::internal::set_is_malloc_allowed(false);
+
+    sub.compute_coefficients(x, 1.0, grad_f, g, dg, L, U);
+    auto x_opt = sub.dual_solve(L, U, x_min, x_max);
+
+    Eigen::internal::set_is_malloc_allowed(true);
+
+    CHECK(std::isfinite(x_opt[0]));
+}
+
+// Verify that the pre-allocated subspace_minimizer is allocation-free
+// for fixed-dimension subspace solves (L-BFGS-B hot path).
+TEST_CASE("fixed-dim subspace_minimizer: zero dynamic allocation", "[zero-copy]")
+{
+    constexpr int N = 2;
+    detail::compact_lbfgs<double, N> B{5};
+    Eigen::Vector<double, N> s;
+    s << 0.1, 0.2;
+    Eigen::Vector<double, N> y;
+    y << 1.0, 2.0;
+    B.push(s, y);
+
+    detail::subspace_minimizer<double, N> sm{N};
+
+    Eigen::Vector<double, N> x;
+    x << 0.5, 0.5;
+    Eigen::Vector<double, N> x_cauchy;
+    x_cauchy << 0.4, 0.6;
+    Eigen::Vector<double, N> g;
+    g << 1.0, -1.0;
+    Eigen::Vector<double, N> lower;
+    lower << -10.0, -10.0;
+    Eigen::Vector<double, N> upper;
+    upper << 10.0, 10.0;
+    std::vector<int> free_indices = {0, 1};
+
+    // Warm-up
+    sm.solve(x, x_cauchy, g, lower, upper, free_indices, B);
+
+    Eigen::internal::set_is_malloc_allowed(false);
+
+    auto result = sm.solve(x, x_cauchy, g, lower, upper, free_indices, B);
+
+    Eigen::internal::set_is_malloc_allowed(true);
+
+    CHECK(std::isfinite(result[0]));
 }

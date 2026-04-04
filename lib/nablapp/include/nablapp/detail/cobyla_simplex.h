@@ -22,7 +22,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <vector>
 
 namespace nablapp::detail
 {
@@ -69,15 +71,129 @@ Eigen::Matrix<Scalar, N, Eigen::Dynamic> build_simplex(
     return simplex;
 }
 
-// Build linear models of objective and constraints by interpolation.
+// Stateful simplex model builder with pre-allocated workspace.
 //
-// Given n+1 simplex points with objective values f and constraint values
-// c (m_total x (n+1)), fits linear models:
-//   L_0(x) = f(x_best) + g_obj^T (x - x_best)
-//   L_j(x) = c_j(x_best) + g_cj^T (x - x_best)
+// Pre-allocates the displacement matrix, function deltas, and LU workspace
+// used by build_linear_models to eliminate per-step dynamic allocation.
 //
-// The displacement matrix D = [v_1 - x_best, ..., v_n - x_best] is n x n
-// (using all non-best vertices). Solves D^T g = delta_f for each model.
+// Reference: Powell 1994, Section 3 (linear interpolation).
+
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+class cobyla_simplex_solver
+{
+public:
+    explicit cobyla_simplex_solver(int n, int m_total)
+        : n_{n}
+        , m_{m_total}
+        , D_(n, n)
+        , df_(n)
+        , dc_(m_total, n)
+    {
+        models_.objective_gradient.resize(n);
+        models_.constraint_gradients.resize(m_total, n);
+        vertex_map_.reserve(static_cast<std::size_t>(n));
+    }
+
+    cobyla_simplex_solver() = default;
+
+    // Build linear models of objective and constraints by interpolation.
+    //
+    // Reference: Powell 1994, Section 3 (linear interpolation).
+    const cobyla_linear_models<Scalar, N>& build_models(
+        const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
+        const Eigen::VectorX<Scalar>& f_values,
+        const Eigen::MatrixX<Scalar>& c_values,
+        int best_idx)
+    {
+        Eigen::Vector<Scalar, N> x_best = simplex.col(best_idx);
+        Scalar f_best = f_values[best_idx];
+
+        int col = 0;
+        for(int i = 0; i <= n_; ++i)
+        {
+            if(i == best_idx)
+                continue;
+            D_.col(col) = simplex.col(i) - x_best;
+            df_[col] = f_values[i] - f_best;
+            if(m_ > 0)
+                dc_.col(col) = c_values.col(i) - c_values.col(best_idx);
+            ++col;
+        }
+
+        auto lu = D_.transpose().fullPivLu();
+
+        models_.objective_gradient = lu.solve(df_);
+
+        if(m_ > 0)
+        {
+            for(int j = 0; j < m_; ++j)
+                models_.constraint_gradients.row(j) = lu.solve(
+                    Eigen::VectorX<Scalar>(dc_.row(j).transpose())).transpose();
+        }
+
+        return models_;
+    }
+
+    // Check simplex geometry by examining the displacement matrix condition.
+    //
+    // Returns the index of the vertex contributing most to degeneracy if the
+    // condition number exceeds the threshold, or -1 if geometry is acceptable.
+    //
+    // Reference: Powell 1994, Section 5 (geometry maintenance).
+    int check_geometry(
+        const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
+        int best_idx,
+        Scalar rho)
+    {
+        Eigen::Vector<Scalar, N> x_best = simplex.col(best_idx);
+
+        vertex_map_.clear();
+        int col = 0;
+        for(int i = 0; i <= n_; ++i)
+        {
+            if(i == best_idx)
+                continue;
+            D_.col(col) = simplex.col(i) - x_best;
+            vertex_map_.push_back(i);
+            ++col;
+        }
+
+        auto lu = D_.fullPivLu();
+        Scalar cond = Scalar(1) / lu.rcond();
+
+        if(cond > Scalar(1e10) || !std::isfinite(cond))
+        {
+            int worst = vertex_map_[0];
+            Scalar min_dist = (simplex.col(worst) - x_best).squaredNorm();
+
+            for(int i = 1; i < n_; ++i)
+            {
+                int vi = vertex_map_[static_cast<std::size_t>(i)];
+                Scalar dist = (simplex.col(vi) - x_best).squaredNorm();
+                if(dist < min_dist)
+                {
+                    min_dist = dist;
+                    worst = vi;
+                }
+            }
+            return worst;
+        }
+
+        (void)rho;
+        return -1;
+    }
+
+private:
+    int n_{0};
+    int m_{0};
+    Eigen::Matrix<Scalar, N, N> D_;
+    Eigen::Vector<Scalar, N> df_;
+    Eigen::MatrixX<Scalar> dc_;
+    cobyla_linear_models<Scalar, N> models_;
+    std::vector<int> vertex_map_;
+};
+
+// Backward-compatible free function: build linear models.
 //
 // Reference: Powell 1994, Section 3 (linear interpolation).
 template <typename Scalar = double, int N = nablapp::dynamic_dimension>
@@ -89,45 +205,8 @@ cobyla_linear_models<Scalar, N> build_linear_models(
 {
     const int n = static_cast<int>(simplex.rows());
     const int m = static_cast<int>(c_values.rows());
-
-    Eigen::Vector<Scalar, N> x_best = simplex.col(best_idx);
-    Scalar f_best = f_values[best_idx];
-
-    // Build displacement matrix (n x n) and function deltas
-    Eigen::Matrix<Scalar, N, N> D(n, n);
-    Eigen::Vector<Scalar, N> df(n);
-    Eigen::MatrixX<Scalar> dc(m, n);
-
-    int col = 0;
-    for(int i = 0; i <= n; ++i)
-    {
-        if(i == best_idx)
-            continue;
-        D.col(col) = simplex.col(i) - x_best;
-        df[col] = f_values[i] - f_best;
-        if(m > 0)
-            dc.col(col) = c_values.col(i) - c_values.col(best_idx);
-        ++col;
-    }
-
-    // Solve D^T g = delta via LU decomposition
-    auto lu = D.transpose().fullPivLu();
-
-    cobyla_linear_models<Scalar, N> models;
-    models.objective_gradient = lu.solve(df);
-
-    if(m > 0)
-    {
-        models.constraint_gradients.resize(m, n);
-        for(int j = 0; j < m; ++j)
-            models.constraint_gradients.row(j) = lu.solve(dc.row(j).transpose()).transpose();
-    }
-    else
-    {
-        models.constraint_gradients.resize(0, n);
-    }
-
-    return models;
+    cobyla_simplex_solver<Scalar, N> solver(n, m);
+    return solver.build_models(simplex, f_values, c_values, best_idx);
 }
 
 // Replace vertex k in the simplex with a new point.
@@ -183,10 +262,7 @@ int select_replacement_vertex(
     return farthest;
 }
 
-// Check simplex geometry by examining the displacement matrix condition.
-//
-// Returns the index of the vertex contributing most to degeneracy if the
-// condition number exceeds the threshold, or -1 if geometry is acceptable.
+// Backward-compatible free function: check simplex geometry.
 //
 // Reference: Powell 1994, Section 5 (geometry maintenance).
 template <typename Scalar = double, int N = nablapp::dynamic_dimension>
@@ -196,45 +272,8 @@ int check_simplex_geometry(
     Scalar rho)
 {
     const int n = static_cast<int>(simplex.rows());
-    Eigen::Vector<Scalar, N> x_best = simplex.col(best_idx);
-
-    // Build displacement matrix
-    Eigen::Matrix<Scalar, N, N> D(n, n);
-    std::vector<int> vertex_map(static_cast<std::size_t>(n));
-    int col = 0;
-    for(int i = 0; i <= n; ++i)
-    {
-        if(i == best_idx)
-            continue;
-        D.col(col) = simplex.col(i) - x_best;
-        vertex_map[static_cast<std::size_t>(col)] = i;
-        ++col;
-    }
-
-    auto lu = D.fullPivLu();
-    Scalar cond = Scalar(1) / lu.rcond();
-
-    if(cond > Scalar(1e10) || !std::isfinite(cond))
-    {
-        // Find the vertex closest to x_best (most degenerate)
-        int worst = vertex_map[0];
-        Scalar min_dist = (simplex.col(worst) - x_best).squaredNorm();
-
-        for(int i = 1; i < n; ++i)
-        {
-            int vi = vertex_map[static_cast<std::size_t>(i)];
-            Scalar dist = (simplex.col(vi) - x_best).squaredNorm();
-            if(dist < min_dist)
-            {
-                min_dist = dist;
-                worst = vi;
-            }
-        }
-        return worst;
-    }
-
-    (void)rho;
-    return -1;
+    cobyla_simplex_solver<Scalar, N> solver(n, 0);
+    return solver.check_geometry(simplex, best_idx, rho);
 }
 
 // Generate a geometry-improving replacement for degenerate vertex k.
@@ -255,8 +294,6 @@ Eigen::Vector<Scalar, N> geometry_improving_point(
     const int n = static_cast<int>(simplex.rows());
     Eigen::Vector<Scalar, N> x_best = simplex.col(best_idx);
 
-    // Determine which coordinate direction vertex k corresponded to.
-    // Use the direction that maximises the distance from x_best.
     int col_idx = 0;
     int j = 0;
     for(int i = 0; i <= n; ++i)
@@ -271,7 +308,6 @@ Eigen::Vector<Scalar, N> geometry_improving_point(
         ++col_idx;
     }
 
-    // Clamp j to valid range
     j = std::min(j, n - 1);
 
     Eigen::Vector<Scalar, N> pt = x_best;

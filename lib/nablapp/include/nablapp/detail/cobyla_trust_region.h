@@ -73,20 +73,127 @@ Scalar linearised_violation(
     return viol;
 }
 
-// Solve the COBYLA trust-region subproblem.
+// Stateful trust-region subproblem solver with pre-allocated workspace.
 //
-// Minimise  g_obj^T d
-// subject to  g_cj^T d + offset_j >= 0   (inequality, j >= n_eq)
-//             g_cj^T d + offset_j  = 0   (equality, j < n_eq)
-//             ||d|| <= rho
-//             lower <= x + d <= upper
+// Pre-allocates the expanded constraint matrices, gradient, and displacement
+// vectors used by solve_linear_subproblem.
 //
-// Equality constraints are handled by converting h(x) = 0 to
-// h(x) >= 0 AND -h(x) >= 0 (per Powell 1994, same as NLopt).
-//
-// Uses projected gradient descent on the linearised objective with
-// a penalty for linearised constraint violation. The problem is small
-// (n dimensions), so 100 iterations with adaptive step size suffices.
+// Reference: Powell 1994, Section 3 (trust-region subproblem).
+
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+class cobyla_trust_region_solver
+{
+public:
+    explicit cobyla_trust_region_solver(int n, int m_total, int n_eq)
+        : n_{n}
+        , m_expanded_{m_total + n_eq}
+        , G_(m_total + n_eq, n)
+        , h_(m_total + n_eq)
+        , d_(n)
+        , grad_(n)
+        , d_new_(n)
+    {
+    }
+
+    cobyla_trust_region_solver() = default;
+
+    // Solve the COBYLA trust-region subproblem using pre-allocated workspace.
+    //
+    // Minimise  g_obj^T d
+    // subject to  g_cj^T d + offset_j >= 0   (inequality, j >= n_eq)
+    //             g_cj^T d + offset_j  = 0   (equality, j < n_eq)
+    //             ||d|| <= rho
+    //             lower <= x + d <= upper
+    //
+    // Equality constraints are handled by converting h(x) = 0 to
+    // h(x) >= 0 AND -h(x) >= 0 (per Powell 1994, same as NLopt).
+    //
+    // Uses projected gradient descent on the linearised objective with
+    // a penalty for linearised constraint violation.
+    //
+    // Reference: Powell 1994, Section 3 (trust-region subproblem).
+    Eigen::Vector<Scalar, N> solve(
+        const Eigen::Vector<Scalar, N>& obj_gradient,
+        const Eigen::MatrixX<Scalar>& constraint_gradients,
+        const Eigen::VectorX<Scalar>& constraint_offsets,
+        int n_eq,
+        Scalar rho,
+        const Eigen::Vector<Scalar, N>& lower,
+        const Eigen::Vector<Scalar, N>& upper,
+        const Eigen::Vector<Scalar, N>& x_current)
+    {
+        const int m = static_cast<int>(constraint_offsets.size());
+        int m_expanded = m + n_eq;
+
+        // Expand equality constraints into pairs of inequalities
+        G_.topRows(m) = constraint_gradients;
+        h_.head(m) = constraint_offsets;
+
+        for(int j = 0; j < n_eq; ++j)
+        {
+            G_.row(m + j) = -constraint_gradients.row(j);
+            h_[m + j] = -constraint_offsets[j];
+        }
+
+        d_.setZero();
+        Scalar penalty = Scalar(10);
+        Scalar step_size = rho * Scalar(0.5);
+
+        for(int iter = 0; iter < 100; ++iter)
+        {
+            grad_ = obj_gradient;
+
+            for(int j = 0; j < m_expanded; ++j)
+            {
+                Scalar val = G_.row(j).dot(d_) + h_[j];
+                if(val < Scalar(0))
+                    grad_ -= penalty * G_.row(j).transpose();
+            }
+
+            if(grad_.norm() < Scalar(1e-15))
+                break;
+
+            d_new_ = d_ - step_size * grad_ / grad_.norm();
+            d_new_ = clip_to_trust_and_bounds<Scalar, N>(d_new_, rho, x_current, lower, upper);
+
+            auto merit = [&](const Eigen::Vector<Scalar, N>& dd) {
+                Scalar obj = obj_gradient.dot(dd);
+                Scalar viol = Scalar(0);
+                for(int j = 0; j < m_expanded; ++j)
+                {
+                    Scalar val = G_.row(j).dot(dd) + h_[j];
+                    viol += std::max(Scalar(0), -val);
+                }
+                return obj + penalty * viol;
+            };
+
+            if(merit(d_new_) < merit(d_))
+            {
+                d_ = d_new_;
+                step_size = std::min(step_size * Scalar(1.1), rho);
+            }
+            else
+            {
+                step_size *= Scalar(0.5);
+                if(step_size < rho * Scalar(1e-10))
+                    break;
+            }
+        }
+
+        return d_;
+    }
+
+private:
+    int n_{0};
+    int m_expanded_{0};
+    Eigen::MatrixX<Scalar> G_;
+    Eigen::VectorX<Scalar> h_;
+    Eigen::Vector<Scalar, N> d_;
+    Eigen::Vector<Scalar, N> grad_;
+    Eigen::Vector<Scalar, N> d_new_;
+};
+
+// Backward-compatible free function wrapper.
 //
 // Reference: Powell 1994, Section 3 (trust-region subproblem).
 template <typename Scalar = double, int N = nablapp::dynamic_dimension>
@@ -102,72 +209,9 @@ Eigen::Vector<Scalar, N> solve_linear_subproblem(
 {
     const int n = static_cast<int>(obj_gradient.size());
     const int m = static_cast<int>(constraint_offsets.size());
-
-    // Expand equality constraints into pairs of inequalities
-    int m_expanded = m + n_eq;
-    Eigen::MatrixX<Scalar> G(m_expanded, n);
-    Eigen::VectorX<Scalar> h(m_expanded);
-
-    // Original constraints
-    G.topRows(m) = constraint_gradients;
-    h.head(m) = constraint_offsets;
-
-    // Negated equality constraints
-    for(int j = 0; j < n_eq; ++j)
-    {
-        G.row(m + j) = -constraint_gradients.row(j);
-        h[m + j] = -constraint_offsets[j];
-    }
-
-    Eigen::Vector<Scalar, N> d = Eigen::Vector<Scalar, N>::Zero(n);
-    Scalar penalty = Scalar(10);
-    Scalar step_size = rho * Scalar(0.5);
-
-    for(int iter = 0; iter < 100; ++iter)
-    {
-        // Gradient of penalised objective: g_obj + penalty * sum(violation gradients)
-        Eigen::Vector<Scalar, N> grad = obj_gradient;
-
-        for(int j = 0; j < m_expanded; ++j)
-        {
-            Scalar val = G.row(j).dot(d) + h[j];
-            if(val < Scalar(0))
-                grad -= penalty * G.row(j).transpose();
-        }
-
-        // Steepest descent step
-        if(grad.norm() < Scalar(1e-15))
-            break;
-
-        Eigen::Vector<Scalar, N> d_new = d - step_size * grad / grad.norm();
-        d_new = clip_to_trust_and_bounds<Scalar, N>(d_new, rho, x_current, lower, upper);
-
-        // Evaluate merit: objective + penalty * violation
-        auto merit = [&](const Eigen::Vector<Scalar, N>& dd) {
-            Scalar obj = obj_gradient.dot(dd);
-            Scalar viol = Scalar(0);
-            for(int j = 0; j < m_expanded; ++j)
-            {
-                Scalar val = G.row(j).dot(dd) + h[j];
-                viol += std::max(Scalar(0), -val);
-            }
-            return obj + penalty * viol;
-        };
-
-        if(merit(d_new) < merit(d))
-        {
-            d = d_new;
-            step_size = std::min(step_size * Scalar(1.1), rho);
-        }
-        else
-        {
-            step_size *= Scalar(0.5);
-            if(step_size < rho * Scalar(1e-10))
-                break;
-        }
-    }
-
-    return d;
+    cobyla_trust_region_solver<Scalar, N> solver(n, m, n_eq);
+    return solver.solve(obj_gradient, constraint_gradients, constraint_offsets,
+                        n_eq, rho, lower, upper, x_current);
 }
 
 // Update trust radius following Powell's COBYLA schedule.

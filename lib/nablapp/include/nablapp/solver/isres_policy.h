@@ -81,6 +81,8 @@ struct isres_policy
         double alpha{0.2};
         detail::es_learning_rates rates{};
 
+        std::optional<detail::isres_operator_workspace<double, N>> mutation_workspace;
+
         std::function<double(const Eigen::Vector<double, N>&)> eval_value;
         std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&, Eigen::VectorXd&)> eval_constraints;
     };
@@ -144,6 +146,9 @@ struct isres_policy
             s.rng.seed(static_cast<unsigned>(options.seed.value()));
         else
             s.rng.seed(std::random_device{}());
+
+        // Pre-allocate mutation workspace
+        s.mutation_workspace.emplace(n);
 
         // Initialize population uniformly in bounds
         s.population = detail::initialize_population<N>(
@@ -220,7 +225,7 @@ struct isres_policy
         {
             // Select parent from current population (top mu by rank)
             int parent_idx = j % s.mu;
-            auto [child, sig] = detail::mutate_individual<N>(
+            auto [child, sig] = s.mutation_workspace->mutate(
                 Eigen::Vector<double, N>(s.population.col(parent_idx)),
                 s.sigmas.col(parent_idx),
                 s.x,

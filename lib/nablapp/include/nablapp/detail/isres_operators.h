@@ -133,6 +133,64 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, N>> mutate_individual(
     return {x_new, sigma_new};
 }
 
+// Stateful ISRES operator workspace with pre-allocated mutation temporaries.
+//
+// Pre-allocates the per-individual mutation vectors (sigma_new, x_new) that
+// are created on every mutation call to eliminate per-generation allocation.
+//
+// Reference: Runarsson & Yao (2005), K&W Section 8.6.
+
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+class isres_operator_workspace
+{
+public:
+    explicit isres_operator_workspace(int n)
+        : sigma_new_(n)
+        , x_new_(n)
+    {
+    }
+
+    isres_operator_workspace() = default;
+
+    // Mutate a single individual using pre-allocated workspace.
+    //
+    // Reference: Runarsson & Yao (2005), K&W Section 8.6.
+    template <typename Rng>
+    std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, N>> mutate(
+        const Eigen::Vector<Scalar, N>& parent,
+        const std::type_identity_t<Eigen::Vector<Scalar, N>>& sigma,
+        const Eigen::Vector<Scalar, N>& x_best,
+        Scalar alpha,
+        Scalar tau,
+        Scalar tau_prime,
+        const Eigen::Vector<Scalar, N>& lower,
+        const Eigen::Vector<Scalar, N>& upper,
+        Rng& rng)
+    {
+        const int n = parent.size();
+        std::normal_distribution<Scalar> normal(Scalar(0), Scalar(1));
+
+        Scalar global_noise = tau * normal(rng);
+        for(int i = 0; i < n; ++i)
+            sigma_new_[i] = sigma[i] * std::exp(global_noise + tau_prime * normal(rng));
+
+        for(int i = 0; i < n; ++i)
+        {
+            x_new_[i] = parent[i]
+                       + sigma_new_[i] * normal(rng)
+                       + alpha * (x_best[i] - parent[i]);
+        }
+
+        x_new_ = x_new_.cwiseMax(lower).cwiseMin(upper);
+
+        return {x_new_, sigma_new_};
+    }
+
+private:
+    Eigen::Vector<Scalar, N> sigma_new_;
+    Eigen::Vector<Scalar, N> x_new_;
+};
+
 // Compute total constraint violation for each individual.
 //
 // constraints_matrix: (n_eq + n_ineq) x lambda matrix of constraint values.

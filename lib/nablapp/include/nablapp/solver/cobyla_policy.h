@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 
 namespace nablapp
 {
@@ -70,6 +71,9 @@ struct cobyla_policy
         int n_ineq{0};
         int m_total{0};
         int best_idx{0};
+
+        std::optional<detail::cobyla_simplex_solver<double>> simplex_solver;
+        std::optional<detail::cobyla_trust_region_solver<double>> trust_region_solver;
 
         std::function<double(const Eigen::VectorXd&)> eval_value;
         std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_constraints;
@@ -124,6 +128,10 @@ struct cobyla_policy
         s.rho = h;
         s.rho_end = options.final_trust_radius;
 
+        // Pre-allocate stateful solvers
+        s.simplex_solver.emplace(n, s.m_total);
+        s.trust_region_solver.emplace(n, s.m_total, s.n_eq);
+
         // Build initial simplex
         s.simplex = detail::build_simplex(s.x, s.rho, s.lower, s.upper);
 
@@ -159,15 +167,15 @@ struct cobyla_policy
         const int n = static_cast<int>(s.x.size());
         double old_f = s.objective_value;
 
-        // Build linear models from current simplex
-        auto models = detail::build_linear_models(
+        // Build linear models from current simplex using pre-allocated solver
+        const auto& models = s.simplex_solver->build_models(
             s.simplex, s.f_simplex, s.c_simplex, s.best_idx);
 
         // Compute linearised constraint offsets at best point
         Eigen::VectorXd constraint_offsets = compute_constraint_offsets(s);
 
-        // Solve trust-region subproblem
-        Eigen::VectorXd d = detail::solve_linear_subproblem(
+        // Solve trust-region subproblem using pre-allocated solver
+        Eigen::VectorXd d = s.trust_region_solver->solve(
             models.objective_gradient,
             models.constraint_gradients,
             constraint_offsets,
@@ -225,8 +233,8 @@ struct cobyla_policy
             improved = (s.objective_value < old_f);
         }
 
-        // Geometry maintenance
-        int geo_idx = detail::check_simplex_geometry(s.simplex, s.best_idx, s.rho);
+        // Geometry maintenance using pre-allocated solver
+        int geo_idx = s.simplex_solver->check_geometry(s.simplex, s.best_idx, s.rho);
         if(geo_idx >= 0)
             repair_geometry(s, geo_idx);
 
