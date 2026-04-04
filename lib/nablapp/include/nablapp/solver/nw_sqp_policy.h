@@ -209,15 +209,6 @@ struct nw_sqp_policy
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
 
-        // Re-evaluate at current x (skip on first iteration -- init did it)
-        if(s.iteration != 0)
-        {
-            s.objective_value = s.eval_value(s.x);
-            s.eval_gradient(s.x, s.g);
-            s.eval_constraints(s.x, s.c_eq, s.c_ineq);
-            s.eval_jacobian(s.x, s.J_eq, s.J_ineq);
-        }
-
         // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
         Eigen::Matrix<double, Eigen::Dynamic, N> A_eq = s.J_eq;
         Eigen::VectorXd b_eq = -s.c_eq;
@@ -300,6 +291,7 @@ struct nw_sqp_policy
 
         Eigen::Vector<double, N> x_trial(n);
         Eigen::VectorXd c_eq_trial, c_ineq_trial;
+        double f_trial{};
 
         for(std::uint16_t ls = 0; ls < max_ls; ++ls)
         {
@@ -308,7 +300,7 @@ struct nw_sqp_policy
             if(has_finite_bounds)
                 x_trial = detail::project(x_trial, s.lower, s.upper);
 
-            double f_trial = s.eval_value(x_trial);
+            f_trial = s.eval_value(x_trial);
             s.eval_constraints(x_trial, c_eq_trial, c_ineq_trial);
             double phi_trial = detail::l1_merit(f_trial, c_eq_trial,
                                                 c_ineq_trial, s.sigma);
@@ -320,14 +312,17 @@ struct nw_sqp_policy
         }
 
         // --- 5. Compute BFGS update vectors ---
+        // Reuse objective and constraint values from line search (already
+        // evaluated at x_trial). Only gradient and Jacobian need fresh eval.
         Eigen::Vector<double, N> x_old = s.x;
         Eigen::Vector<double, N> g_old = s.g;
         double f_old = s.objective_value;
 
         s.x = x_trial;
-        s.objective_value = s.eval_value(s.x);
+        s.objective_value = f_trial;
         s.eval_gradient(s.x, s.g);
-        s.eval_constraints(s.x, s.c_eq, s.c_ineq);
+        s.c_eq = c_eq_trial;
+        s.c_ineq = c_ineq_trial;
         s.eval_jacobian(s.x, s.J_eq, s.J_ineq);
 
         Eigen::Vector<double, N> sk = s.x - x_old;

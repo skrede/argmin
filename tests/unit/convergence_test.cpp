@@ -425,6 +425,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
 
             cmaes_policy policy;
             policy.options.initial_sigma = 1.0;
+            policy.options.lambda = 64u;
             policy.options.seed = 42u;
             basic_solver solver{policy, problem, x0, opts};
             auto result = solver.solve(opts);
