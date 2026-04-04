@@ -263,6 +263,283 @@ Eigen::VectorX<Scalar> build_full_lambda(
     return lambda;
 }
 
+// In-place overload: writes into pre-allocated output vector.
+template <typename Scalar>
+void build_full_lambda(
+    const Eigen::VectorX<Scalar>& lambda_W,
+    const std::vector<int>& working_set,
+    int total_constraints,
+    Eigen::VectorX<Scalar>& lambda_full)
+{
+    lambda_full.setZero(total_constraints);
+    const int wsize = static_cast<int>(working_set.size());
+    for(int k = 0; k < wsize && k < lambda_W.size(); ++k)
+        lambda_full[working_set[k]] = lambda_W[k];
+}
+
+// In-place initial_working_set: writes into pre-allocated output vector.
+template <typename Scalar, int N = nablapp::dynamic_dimension>
+void initial_working_set(
+    const Eigen::Vector<Scalar, N>& x0,
+    const Eigen::MatrixX<Scalar>& A_full,
+    const Eigen::VectorX<Scalar>& b_full,
+    int n_eq,
+    Scalar tolerance,
+    std::vector<int>& W)
+{
+    W.clear();
+    const int m = static_cast<int>(A_full.rows());
+
+    for(int i = 0; i < n_eq; ++i)
+        W.push_back(i);
+
+    for(int i = n_eq; i < m; ++i)
+    {
+        Scalar residual = A_full.row(i).dot(x0) - b_full[i];
+        if(std::abs(residual) < tolerance)
+            W.push_back(i);
+    }
+}
+
+// Stateful dense active-set QP solver with pre-allocated workspace.
+//
+// Pre-allocates factorization objects and workspace matrices at construction,
+// then recomputes via compute() on each solve. Eliminates per-call dynamic
+// allocation for QR, LDLT, working-set matrix extraction, and intermediate
+// vectors.
+//
+// Reference: N&W Algorithm 16.1, pp. 460-463 (active-set method for convex QP)
+//            N&W Section 16.2, eq. 16.16-16.19 (null-space method)
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+class active_set_qp_solver
+{
+public:
+    explicit active_set_qp_solver(int n, int max_constraints)
+        : n_(n)
+        , max_m_(max_constraints)
+        , A_full_(max_constraints, n)
+        , b_full_(max_constraints)
+        , A_W_(max_constraints, n)
+        , qr_(n, n)
+        , qr_lambda_(n, n)
+        , ldlt_reduced_(n)
+        , Q_(n, n)
+        , ZtGZ_(n, n)
+        , rhs_(n)
+        , p_z_(n)
+        , rhs_lam_(n)
+        , g_k_(n)
+        , lambda_full_(max_constraints)
+        , A_aug_(max_constraints, n)
+        , b_aug_(max_constraints)
+    {
+        W_.reserve(max_constraints);
+    }
+
+    active_set_qp_solver() = default;
+
+    // Solve QP subproblem using pre-allocated workspace.
+    //
+    // Reference: N&W Algorithm 16.1, pp. 460-463.
+    qp_result<Scalar, N> solve(
+        const Eigen::Matrix<Scalar, N, N>& G,
+        const Eigen::Vector<Scalar, N>& d,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::VectorX<Scalar>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::VectorX<Scalar>& b_ineq,
+        const Eigen::Vector<Scalar, N>& x0,
+        const nablapp::qp_options& opts = {})
+    {
+        const int n = G.rows();
+        const int m_eq = A_eq.rows();
+        const int m_ineq = A_ineq.rows();
+        const int m_total = m_eq + m_ineq;
+        const int max_iter = static_cast<int>(opts.max_iterations.value_or(200));
+        const auto tol = static_cast<Scalar>(opts.tolerance.value_or(1e-12));
+
+        if(m_eq > 0)
+        {
+            A_full_.topRows(m_eq) = A_eq;
+            b_full_.head(m_eq) = b_eq;
+        }
+        if(m_ineq > 0)
+        {
+            A_full_.middleRows(m_eq, m_ineq) = A_ineq;
+            b_full_.segment(m_eq, m_ineq) = b_ineq;
+        }
+
+        auto A_view = A_full_.topRows(m_total);
+        auto b_view = b_full_.head(m_total);
+
+        initial_working_set<Scalar, N>(
+            x0, Eigen::MatrixX<Scalar>(A_view),
+            Eigen::VectorX<Scalar>(b_view), m_eq, tol, W_);
+
+        Eigen::Vector<Scalar, N> x = x0;
+
+        for(int iter = 0; iter < max_iter; ++iter)
+        {
+            g_k_.head(n) = G * x + d;
+
+            const int wsize = static_cast<int>(W_.size());
+            for(int k = 0; k < wsize; ++k)
+                A_W_.row(k) = A_full_.row(W_[k]);
+
+            auto [p, lambda_W] = solve_equality_subproblem(
+                G, g_k_.head(n), A_W_.topRows(wsize), n, wsize);
+
+            if(p.norm() < tol)
+            {
+                int drop = most_negative_multiplier(lambda_W, W_, m_eq, tol);
+                if(drop == -1)
+                {
+                    build_full_lambda(lambda_W, W_, m_total, lambda_full_);
+                    qp_result<Scalar, N> res;
+                    res.x = x;
+                    res.lambda = lambda_full_.head(m_total);
+                    res.status = qp_status::optimal;
+                    res.iterations = iter;
+                    return res;
+                }
+                W_.erase(W_.begin() + drop);
+            }
+            else
+            {
+                auto [alpha, blocking_idx] = blocking_step_length<Scalar, N>(
+                    x, Eigen::Vector<Scalar, N>(p),
+                    Eigen::MatrixX<Scalar>(A_view),
+                    Eigen::VectorX<Scalar>(b_view), W_, m_eq);
+                x += alpha * p;
+
+                if(alpha < Scalar(1) && blocking_idx >= 0)
+                    W_.push_back(blocking_idx);
+            }
+        }
+
+        Eigen::VectorX<Scalar> zero_lam = Eigen::VectorX<Scalar>::Zero(
+            static_cast<int>(W_.size()));
+        build_full_lambda(zero_lam, W_, m_total, lambda_full_);
+        qp_result<Scalar, N> res;
+        res.x = x;
+        res.lambda = lambda_full_.head(m_total);
+        res.status = qp_status::max_iterations;
+        res.iterations = max_iter;
+        return res;
+    }
+
+    // Box-constraint overload.
+    qp_result<Scalar, N> solve(
+        const Eigen::Matrix<Scalar, N, N>& G,
+        const Eigen::Vector<Scalar, N>& d,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::VectorX<Scalar>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::VectorX<Scalar>& b_ineq,
+        const Eigen::Vector<Scalar, N>& lower,
+        const Eigen::Vector<Scalar, N>& upper,
+        const Eigen::Vector<Scalar, N>& x0,
+        const nablapp::qp_options& opts = {})
+    {
+        const int n = G.rows();
+        const int m_ineq = A_ineq.rows();
+        const int m_box = 2 * n;
+        const int m_aug = m_ineq + m_box;
+
+        if(m_ineq > 0)
+        {
+            A_aug_.topRows(m_ineq) = A_ineq;
+            b_aug_.head(m_ineq) = b_ineq;
+        }
+
+        A_aug_.middleRows(m_ineq, n) = Eigen::MatrixX<Scalar>::Identity(n, n);
+        b_aug_.segment(m_ineq, n) = lower;
+
+        A_aug_.middleRows(m_ineq + n, n) = -Eigen::MatrixX<Scalar>::Identity(n, n);
+        b_aug_.segment(m_ineq + n, n) = -upper;
+
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_eq_dyn = A_eq;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_aug_dyn(m_aug, n);
+        A_aug_dyn = A_aug_.topRows(m_aug);
+
+        return solve(G, d, A_eq_dyn, b_eq, A_aug_dyn,
+                     Eigen::VectorX<Scalar>(b_aug_.head(m_aug)), x0, opts);
+    }
+
+private:
+    // Solve equality-constrained QP subproblem via null-space method.
+    // Reference: N&W Section 16.2, eq. 16.16-16.19.
+    std::pair<Eigen::VectorX<Scalar>, Eigen::VectorX<Scalar>>
+    solve_equality_subproblem(
+        const Eigen::Ref<const Eigen::MatrixX<Scalar>>& G,
+        const Eigen::Ref<const Eigen::VectorX<Scalar>>& g_k,
+        const Eigen::Ref<const Eigen::MatrixX<Scalar>>& A_W,
+        int n,
+        int m)
+    {
+        if(m == 0)
+        {
+            ldlt_reduced_.compute(G);
+            Eigen::VectorX<Scalar> p = ldlt_reduced_.solve(-g_k);
+            return {p, Eigen::VectorX<Scalar>{}};
+        }
+
+        if(m >= n)
+        {
+            Eigen::VectorX<Scalar> p = Eigen::VectorX<Scalar>::Zero(n);
+            qr_lambda_.compute(A_W.transpose());
+            Eigen::VectorX<Scalar> lambda = qr_lambda_.solve(g_k);
+            return {p, lambda};
+        }
+
+        qr_.compute(A_W.transpose());
+        const int rank = qr_.rank();
+
+        Q_ = qr_.householderQ() * Eigen::MatrixX<Scalar>::Identity(n, n);
+
+        auto Y_block = Q_.leftCols(rank);
+        auto Z_block = Q_.rightCols(n - rank);
+
+        ZtGZ_.topLeftCorner(n - rank, n - rank).noalias() =
+            Z_block.transpose() * G * Z_block;
+        ldlt_reduced_.compute(ZtGZ_.topLeftCorner(n - rank, n - rank));
+
+        rhs_.head(n - rank).noalias() = -(Z_block.transpose() * g_k);
+        p_z_.head(n - rank) = ldlt_reduced_.solve(rhs_.head(n - rank));
+        Eigen::VectorX<Scalar> p = Z_block * p_z_.head(n - rank);
+
+        Eigen::MatrixX<Scalar> AY = A_W * Y_block;
+        rhs_lam_.head(rank).noalias() = Y_block.transpose() * (g_k + G * p);
+        qr_lambda_.compute(AY.transpose());
+        Eigen::VectorX<Scalar> lambda = qr_lambda_.solve(rhs_lam_.head(rank));
+
+        return {p, lambda};
+    }
+
+    int n_{0};
+    int max_m_{0};
+
+    Eigen::MatrixX<Scalar> A_full_;
+    Eigen::VectorX<Scalar> b_full_;
+    Eigen::MatrixX<Scalar> A_W_;
+
+    Eigen::ColPivHouseholderQR<Eigen::MatrixX<Scalar>> qr_;
+    Eigen::ColPivHouseholderQR<Eigen::MatrixX<Scalar>> qr_lambda_;
+    Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_reduced_;
+    Eigen::MatrixX<Scalar> Q_;
+    Eigen::MatrixX<Scalar> ZtGZ_;
+    Eigen::VectorX<Scalar> rhs_;
+    Eigen::VectorX<Scalar> p_z_;
+    Eigen::VectorX<Scalar> rhs_lam_;
+    Eigen::VectorX<Scalar> g_k_;
+
+    std::vector<int> W_;
+    Eigen::VectorX<Scalar> lambda_full_;
+
+    Eigen::MatrixX<Scalar> A_aug_;
+    Eigen::VectorX<Scalar> b_aug_;
+};
+
 // Dense active-set QP solver.
 //
 // Solves: min 0.5 x^T G x + d^T x

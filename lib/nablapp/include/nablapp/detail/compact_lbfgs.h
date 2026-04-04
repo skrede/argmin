@@ -34,6 +34,8 @@ public:
     {
         L_.setZero(capacity_, capacity_);
         D_.setZero(capacity_);
+        middle_.setZero(2 * capacity_, 2 * capacity_);
+        alpha_.resize(capacity_);
     }
 
     // Add a new (s, y) pair. Rejects pairs with s^T y <= 0 (curvature guard).
@@ -77,8 +79,9 @@ public:
         theta_ = y.squaredNorm() / sTy;
         theta_ = std::clamp(theta_, Scalar(1e-10), Scalar(1e10));
 
-        // Recompute L and D from active columns
+        // Recompute L, D, and middle matrix from active columns
         recompute_LD();
+        recompute_middle();
     }
 
     // Compute B*v = theta*v - W * M^{-1} * W^T * v.
@@ -97,8 +100,8 @@ public:
         Wv.head(k) = theta_ * (S.transpose() * v);
         Wv.tail(k) = Y.transpose() * v;
 
-        // Solve M * z = W^T * v using LDLT
-        Eigen::MatrixX<Scalar> M = build_middle_matrix();
+        // Solve M * z = W^T * v using pre-allocated middle matrix
+        auto M = middle_.topLeftCorner(2 * k, 2 * k);
         Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(M);
         Eigen::VectorX<Scalar> z = ldlt.solve(Wv);
 
@@ -130,8 +133,8 @@ public:
             WF.row(j).tail(k) = Y_.row(idx).head(k);
         }
 
-        // M^{-1} * W_F^T
-        Eigen::MatrixX<Scalar> M = build_middle_matrix();
+        // M^{-1} * W_F^T using pre-allocated middle matrix
+        auto M = middle_.topLeftCorner(2 * k, 2 * k);
         Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(M);
         Eigen::MatrixX<Scalar> MiWFt = ldlt.solve(WF.transpose());
 
@@ -150,13 +153,12 @@ public:
 
         const int k = count_;
         Eigen::Vector<Scalar, N> q = g;
-        std::vector<Scalar> alpha(k);
 
         // Backward loop (N&W Algorithm 9.1, step 1)
         for(int j = k - 1; j >= 0; --j)
         {
-            alpha[j] = rho_[j] * S_.col(j).dot(q);
-            q -= alpha[j] * Y_.col(j);
+            alpha_[j] = rho_[j] * S_.col(j).dot(q);
+            q -= alpha_[j] * Y_.col(j);
         }
 
         // Initial Hessian scaling: gamma = s^T y / y^T y = 1/theta
@@ -167,7 +169,7 @@ public:
         for(int j = 0; j < k; ++j)
         {
             Scalar beta = rho_[j] * Y_.col(j).dot(r);
-            r += S_.col(j) * (alpha[j] - beta);
+            r += S_.col(j) * (alpha_[j] - beta);
         }
 
         return r;
@@ -201,25 +203,26 @@ private:
         }
     }
 
-    // Build the 2k x 2k middle matrix M = [[theta*S^T*S, L], [L^T, -D]].
-    Eigen::MatrixX<Scalar> build_middle_matrix() const
+    // Recompute the 2k x 2k middle matrix M = [[theta*S^T*S, L], [L^T, -D]]
+    // into the pre-allocated middle_ member.
+    void recompute_middle()
     {
         const int k = count_;
         auto S = S_.leftCols(k);
 
-        Eigen::MatrixX<Scalar> M(2 * k, 2 * k);
-        M.topLeftCorner(k, k) = theta_ * (S.transpose() * S);
-        M.topRightCorner(k, k) = L_.topLeftCorner(k, k);
-        M.bottomLeftCorner(k, k) = L_.topLeftCorner(k, k).transpose();
-        M.bottomRightCorner(k, k) = (-D_.head(k)).asDiagonal();
-        return M;
+        middle_.topLeftCorner(k, k).noalias() = theta_ * (S.transpose() * S);
+        middle_.block(0, k, k, k) = L_.topLeftCorner(k, k);
+        middle_.block(k, 0, k, k) = L_.topLeftCorner(k, k).transpose();
+        middle_.block(k, k, k, k) = (-D_.head(k)).asDiagonal();
     }
 
     Eigen::Matrix<Scalar, N, Eigen::Dynamic> S_;  // n x capacity_ (displacement vectors)
     Eigen::Matrix<Scalar, N, Eigen::Dynamic> Y_;  // n x capacity_ (gradient differences)
     Eigen::MatrixX<Scalar> L_;                     // capacity_ x capacity_ (strictly lower triangular)
     Eigen::VectorX<Scalar> D_;                     // capacity_ (diagonal: s_i^T y_i)
+    Eigen::MatrixX<Scalar> middle_;                // 2*capacity_ x 2*capacity_ (pre-allocated)
     std::vector<Scalar> rho_;                      // 1 / (s_i^T y_i) for two-loop recursion
+    mutable std::vector<Scalar> alpha_;            // pre-allocated for two_loop_recursion
     Scalar theta_{Scalar(1)};
     int count_{0};
     int capacity_;

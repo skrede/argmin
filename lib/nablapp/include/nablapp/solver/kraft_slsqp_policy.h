@@ -80,6 +80,9 @@ struct kraft_slsqp_policy
         double objective_value{};
         double sigma{1.0};
         detail::compact_lbfgs<double, N> lbfgs;
+        detail::active_set_qp_solver<double, N> qp_solver;
+        Eigen::Matrix<double, N, N> B_workspace;
+        Eigen::Vector<double, N> ej_workspace;
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
@@ -192,6 +195,12 @@ struct kraft_slsqp_policy
         s.sigma = options.initial_penalty.value_or(1.0);
         s.iteration = 0;
 
+        // Pre-allocate QP solver workspace
+        int max_constraints = s.n_eq + s.n_ineq + 2 * n;
+        s.qp_solver = detail::active_set_qp_solver<double, N>(n, max_constraints);
+        s.B_workspace.setZero(n, n);
+        s.ej_workspace = Eigen::Vector<double, N>::Zero(n);
+
         s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
             return problem.value(v);
         };
@@ -218,18 +227,16 @@ struct kraft_slsqp_policy
 
         const int n = s.n;
 
-        // Build QP Hessian from compact L-BFGS
-        Eigen::MatrixXd B(n, n);
-        Eigen::Vector<double, N> ej = Eigen::Vector<double, N>::Zero(n);
+        // Build QP Hessian from compact L-BFGS using pre-allocated workspace
         for(int j = 0; j < n; ++j)
         {
-            ej[j] = 1.0;
-            B.col(j) = s.lbfgs.multiply(ej);
-            ej[j] = 0.0;
+            s.ej_workspace[j] = 1.0;
+            s.B_workspace.col(j) = s.lbfgs.multiply(s.ej_workspace);
+            s.ej_workspace[j] = 0.0;
         }
 
         // Symmetrize for numerical safety
-        B = (0.5 * (B + B.transpose())).eval();
+        s.B_workspace = (0.5 * (s.B_workspace + s.B_workspace.transpose())).eval();
 
         Eigen::MatrixXd A_eq = s.J_eq;
         Eigen::VectorXd b_eq = -s.c_eq;
@@ -247,8 +254,6 @@ struct kraft_slsqp_policy
             if(p_upper[i] > big) p_upper[i] = big;
         }
 
-        Eigen::VectorXd p0 = Eigen::VectorXd::Zero(n);
-
         // Solve QP with embedded options
         nablapp::qp_options qp_opts;
         qp_opts.max_iterations = options.qp.max_iterations.has_value()
@@ -257,8 +262,14 @@ struct kraft_slsqp_policy
         qp_opts.tolerance = options.qp.tolerance.has_value()
             ? options.qp.tolerance
             : std::optional<double>{1e-12};
-        auto qp_res = detail::solve_qp(B, Eigen::VectorXd(s.g), A_eq, b_eq, A_ineq, b_ineq,
-                                        p_lower, p_upper, p0, qp_opts);
+        Eigen::Vector<double, N> p_lo(p_lower);
+        Eigen::Vector<double, N> p_hi(p_upper);
+        Eigen::Vector<double, N> p_start = Eigen::Vector<double, N>::Zero(n);
+        auto qp_res = s.qp_solver.solve(s.B_workspace, Eigen::Vector<double, N>(s.g),
+                                         Eigen::Matrix<double, Eigen::Dynamic, N>(A_eq),
+                                         b_eq,
+                                         Eigen::Matrix<double, Eigen::Dynamic, N>(A_ineq),
+                                         b_ineq, p_lo, p_hi, p_start, qp_opts);
 
         Eigen::Vector<double, N> p = qp_res.x;
 
