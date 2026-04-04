@@ -228,6 +228,35 @@ TEST_CASE("strong_wolfe curvature condition verified", "[line_search][strong_wol
     CHECK(std::abs(dphi_at_alpha) <= opts.c2 * std::abs(dphi0));
 }
 
+TEST_CASE("strong_wolfe interpolation uses fewer evaluations", "[line_search][strong_wolfe]")
+{
+    // Simple quadratic: phi(a) = (a - 0.5)^2, minimum at a = 0.5.
+    // Interpolation should find this in very few evaluations.
+    auto phi = [](double alpha) -> double
+    {
+        return (alpha - 0.5) * (alpha - 0.5);
+    };
+
+    auto dphi = [](double alpha) -> double
+    {
+        return 2.0 * (alpha - 0.5);
+    };
+
+    double phi0 = phi(0.0);
+    double dphi0 = dphi(0.0);
+
+    line_search_options opts;
+    opts.max_alpha = 1.0;
+
+    auto result = strong_wolfe(phi, dphi, phi0, dphi0, opts);
+
+    CHECK(result.success);
+    CHECK(result.alpha == Approx(0.5).epsilon(1e-6));
+    // With interpolation, a quadratic should be solved in very few evals.
+    // Pure bisection would take ~50 iterations on [0, 1].
+    CHECK(result.evaluations < 10);
+}
+
 TEST_CASE("strong_wolfe with insufficient iterations", "[line_search][strong_wolfe]")
 {
     // Rosenbrock-derived phi where convergence needs many evals.

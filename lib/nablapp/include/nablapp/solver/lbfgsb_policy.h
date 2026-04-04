@@ -190,14 +190,20 @@ struct lbfgsb_policy
             }
         }
 
-        // Line search functors (CORE-09: .eval() on Eigen expressions)
+        // Line search functors with gradient caching.
+        // The dphi callback computes the gradient at the trial point, which
+        // is the same point accepted after line search. Cache it to avoid
+        // a redundant gradient evaluation after step acceptance.
+        Eigen::Vector<double, N> cached_g(s.x.size());
+        double cached_alpha = -1.0;
+
         auto phi = [&](double a) {
             return s.eval_value((s.x + a * d).eval());
         };
         auto dphi = [&](double a) {
-            Eigen::Vector<double, N> g_temp(s.x.size());
-            s.eval_gradient((s.x + a * d).eval(), g_temp);
-            return g_temp.dot(d);
+            s.eval_gradient((s.x + a * d).eval(), cached_g);
+            cached_alpha = a;
+            return cached_g.dot(d);
         };
 
         // Strong Wolfe with feasible step cap, using embedded line search options
@@ -210,10 +216,18 @@ struct lbfgsb_policy
         double old_f = s.objective_value;
         s.x = detail::project((s.x + ls.alpha * d).eval(), s.lower, s.upper);
 
-        // Evaluate new objective and gradient
+        // Evaluate objective at projected point (projection may differ from
+        // line search trial point due to bound clamping)
         s.objective_value = s.eval_value(s.x);
+
+        // Reuse cached gradient from line search dphi callback if it was
+        // evaluated at the accepted alpha and projection didn't change x
         Eigen::Vector<double, N> new_g(s.x.size());
-        s.eval_gradient(s.x, new_g);
+        if(cached_alpha == ls.alpha &&
+           s.x.isApprox((x_old + ls.alpha * d).eval(), 0.0))
+            new_g = cached_g;
+        else
+            s.eval_gradient(s.x, new_g);
 
         // Update L-BFGS curvature pairs
         Eigen::Vector<double, N> sk = (s.x - x_old).eval();

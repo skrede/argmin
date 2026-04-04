@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <optional>
 
 namespace nablapp
 {
@@ -36,15 +38,50 @@ template <typename Phi, typename DPhi, typename Scalar = double>
 
     auto budget_ok = [&]() { return result.evaluations < opts.max_iterations; };
 
-    // --- zoom phase (N&W Algorithm 3.6) ---
-    // Bisection-based refinement within a bracket [alpha_lo, alpha_hi].
-    // phi_lo is the cached value of phi(alpha_lo) to avoid redundant evals.
-    auto zoom = [&](Scalar alpha_lo, Scalar alpha_hi,
-                    Scalar phi_lo) -> line_search_result<Scalar>
+    // Quadratic interpolation minimizer (N&W p. 59).
+    // Given (a_lo, phi_lo, dphi_lo) and (a_hi, phi_hi), returns the
+    // minimizer of the quadratic interpolant, or nullopt if degenerate.
+    auto quadratic_minimize = [](Scalar a_lo, Scalar phi_lo, Scalar dphi_lo,
+                                 Scalar a_hi, Scalar phi_hi) -> std::optional<Scalar>
     {
+        Scalar d = a_hi - a_lo;
+        if(std::abs(d) < std::numeric_limits<Scalar>::epsilon())
+            return std::nullopt;
+
+        Scalar denom = Scalar(2) * (phi_hi - phi_lo - dphi_lo * d);
+        if(std::abs(denom) < Scalar(1e-12) * std::max(Scalar(1), std::abs(phi_hi - phi_lo)))
+            return std::nullopt;
+
+        Scalar alpha_min = a_lo - dphi_lo * d * d / denom;
+
+        Scalar lo = std::min(a_lo, a_hi);
+        Scalar hi = std::max(a_lo, a_hi);
+        Scalar margin = Scalar(0.2) * (hi - lo);
+        if(!std::isfinite(alpha_min) ||
+           alpha_min <= lo + margin || alpha_min >= hi - margin)
+            return std::nullopt;
+
+        return alpha_min;
+    };
+
+    // --- zoom phase (N&W Algorithm 3.6) ---
+    // Interpolation-based refinement within a bracket [alpha_lo, alpha_hi],
+    // with bisection fallback when interpolation is degenerate.
+    // Reference: N&W pp. 59-62.
+    auto zoom = [&](Scalar alpha_lo, Scalar alpha_hi,
+                    Scalar phi_lo, Scalar dphi_lo_val,
+                    Scalar phi_hi) -> line_search_result<Scalar>
+    {
+        int zoom_iter = 0;
         while(budget_ok())
         {
-            Scalar alpha_j = (alpha_lo + alpha_hi) / Scalar(2);
+            auto interp = (zoom_iter > 0)
+                ? quadratic_minimize(alpha_lo, phi_lo, dphi_lo_val,
+                                     alpha_hi, phi_hi)
+                : std::optional<Scalar>{};
+            Scalar alpha_j = interp ? *interp
+                                    : (alpha_lo + alpha_hi) / Scalar(2);
+            ++zoom_iter;
 
             Scalar phi_j = phi(alpha_j);
             ++result.evaluations;
@@ -52,6 +89,7 @@ template <typename Phi, typename DPhi, typename Scalar = double>
             if(phi_j > phi0 + opts.c1 * alpha_j * dphi0 || phi_j >= phi_lo)
             {
                 alpha_hi = alpha_j;
+                phi_hi = phi_j;
             }
             else
             {
@@ -69,10 +107,12 @@ template <typename Phi, typename DPhi, typename Scalar = double>
                 if(dphi_j * (alpha_hi - alpha_lo) >= Scalar(0))
                 {
                     alpha_hi = alpha_lo;
+                    phi_hi = phi_lo;
                 }
 
                 alpha_lo = alpha_j;
                 phi_lo = phi_j;
+                dphi_lo_val = dphi_j;
             }
 
             // Bracket too narrow -- return best found
@@ -93,6 +133,7 @@ template <typename Phi, typename DPhi, typename Scalar = double>
     // --- bracketing phase (N&W Algorithm 3.5) ---
     Scalar alpha_prev = Scalar(0);
     Scalar phi_prev = phi0;
+    Scalar dphi_prev = dphi0;
     Scalar alpha = opts.max_alpha;
 
     for(int i = 1; budget_ok(); ++i)
@@ -104,7 +145,7 @@ template <typename Phi, typename DPhi, typename Scalar = double>
         if(phi_alpha > phi0 + opts.c1 * alpha * dphi0 ||
            (phi_alpha >= phi_prev && i > 1))
         {
-            return zoom(alpha_prev, alpha, phi_prev);
+            return zoom(alpha_prev, alpha, phi_prev, dphi_prev, phi_alpha);
         }
 
         Scalar dphi_alpha = dphi(alpha);
@@ -122,12 +163,13 @@ template <typename Phi, typename DPhi, typename Scalar = double>
         // Condition 3: positive slope -- bracket found in reversed order
         if(dphi_alpha >= Scalar(0))
         {
-            return zoom(alpha, alpha_prev, phi_alpha);
+            return zoom(alpha, alpha_prev, phi_alpha, dphi_alpha, phi_prev);
         }
 
         // Expand step: double alpha, capped at max_alpha
         alpha_prev = alpha;
         phi_prev = phi_alpha;
+        dphi_prev = dphi_alpha;
         alpha = std::min(Scalar(2) * alpha, opts.max_alpha);
 
         // If alpha cannot grow further, we are stuck at max_alpha
