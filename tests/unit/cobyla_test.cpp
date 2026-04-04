@@ -33,16 +33,16 @@ namespace
 // Optimal: x* = (0.5, 0.5), f* = 0.5.
 struct simple_constrained
 {
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = 2;
 
     int dimension() const { return 2; }
 
-    double value(const Eigen::VectorXd& x) const
+    double value(const Eigen::Vector<double, 2>& x) const
     {
         return x[0] * x[0] + x[1] * x[1];
     }
 
-    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    void constraints(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& c) const
     {
         c.resize(1);
         c[0] = x[0] + x[1] - 1.0;
@@ -51,14 +51,18 @@ struct simple_constrained
     int num_equality() const { return 0; }
     int num_inequality() const { return 1; }
 
-    Eigen::VectorXd lower_bounds() const
+    Eigen::Vector<double, 2> lower_bounds() const
     {
-        return Eigen::VectorXd{{-10.0, -10.0}};
+        Eigen::Vector<double, 2> lb;
+        lb << -10.0, -10.0;
+        return lb;
     }
 
-    Eigen::VectorXd upper_bounds() const
+    Eigen::Vector<double, 2> upper_bounds() const
     {
-        return Eigen::VectorXd{{10.0, 10.0}};
+        Eigen::Vector<double, 2> ub;
+        ub << 10.0, 10.0;
+        return ub;
     }
 };
 
