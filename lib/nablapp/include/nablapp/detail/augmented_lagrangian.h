@@ -105,19 +105,33 @@ Eigen::Vector<Scalar, N> augmented_lagrangian_gradient(
 //
 // Equality: lambda -= c/mu  (N&W eq. 17.49)
 // Inequality: lambda = max(lambda - c/mu, 0)  (N&W eq. 17.58)
+//
+// Multiplier magnitudes are clamped to lambda_max to prevent divergence
+// when mu is small and constraints are poorly satisfied. This safeguard
+// is standard practice in augmented Lagrangian implementations; see
+// Conn, Gould & Toint, "A globally convergent augmented Lagrangian
+// algorithm for optimization with general constraints and simple bounds",
+// SIAM J. Numer. Anal. 28(2), 1991, Section 3.
 template <typename Scalar>
 void update_multipliers(
     Eigen::VectorX<Scalar>& lambda_eq,
     Eigen::VectorX<Scalar>& lambda_ineq,
     const Eigen::VectorX<Scalar>& c_eq,
     const Eigen::VectorX<Scalar>& c_ineq,
-    Scalar mu)
+    Scalar mu,
+    Scalar lambda_max = Scalar(1e8))
 {
     for(int i = 0; i < lambda_eq.size(); ++i)
+    {
         lambda_eq[i] -= c_eq[i] / mu;
+        lambda_eq[i] = std::clamp(lambda_eq[i], -lambda_max, lambda_max);
+    }
 
     for(int i = 0; i < lambda_ineq.size(); ++i)
+    {
         lambda_ineq[i] = std::max(lambda_ineq[i] - c_ineq[i] / mu, Scalar(0));
+        lambda_ineq[i] = std::min(lambda_ineq[i], lambda_max);
+    }
 }
 
 }

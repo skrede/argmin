@@ -322,6 +322,112 @@ auto run_nlopt_auglag(std::string_view problem_name,
     };
 }
 
+// Run NLopt GN_ISRES (derivative-free evolutionary constrained optimizer)
+// on a problem. ISRES requires bounds and handles both inequality and
+// equality constraints via individual callbacks. It needs relaxed stopping
+// criteria and deterministic seeding.
+//
+// Reference: Runarsson & Yao, "Search biases in constrained evolutionary
+//            optimization", IEEE TSMC-C, 35(2), 2005.
+template <typename Problem>
+auto run_nlopt_isres(std::string_view problem_name,
+                     Problem& prob,
+                     int max_evals) -> benchmark_result
+{
+    auto n = static_cast<unsigned>(prob.dimension());
+    nlopt::opt opt(nlopt::GN_ISRES, n);
+
+    // Deterministic seed for reproducible benchmarks.
+    nlopt::srand(42);
+
+    // ISRES uses derivative-free objective evaluation.
+    opt.set_min_objective(nlopt_objective<Problem>, &prob);
+
+    // Bounds are required for ISRES.
+    if constexpr(bound_constrained<Problem>)
+    {
+        auto lb = prob.lower_bounds();
+        auto ub = prob.upper_bounds();
+        std::vector<double> lb_vec(lb.data(), lb.data() + n);
+        std::vector<double> ub_vec(ub.data(), ub.data() + n);
+        opt.set_lower_bounds(lb_vec);
+        opt.set_upper_bounds(ub_vec);
+    }
+
+    // Register constraints individually (not mconstraint) for maximum
+    // compatibility with ISRES. NLopt's GN_ISRES supports both interfaces
+    // but individual callbacks are more reliable across versions.
+    if constexpr(constrained<Problem>)
+    {
+        int n_ineq = prob.num_inequality();
+        int n_eq = prob.num_equality();
+
+        if(n_ineq > 0)
+        {
+            std::vector<double> tol(static_cast<std::size_t>(n_ineq), 1e-6);
+            opt.add_inequality_mconstraint(
+                nlopt_ineq_mconstraint<Problem>, &prob, tol);
+        }
+        if(n_eq > 0)
+        {
+            std::vector<double> tol(static_cast<std::size_t>(n_eq), 1e-6);
+            opt.add_equality_mconstraint(
+                nlopt_eq_mconstraint<Problem>, &prob, tol);
+        }
+    }
+
+    // ISRES is evolutionary and needs many evaluations; relaxed ftol.
+    opt.set_maxeval(max_evals);
+    opt.set_ftol_rel(1e-8);
+    opt.set_xtol_rel(1e-8);
+
+    auto x0 = prob.initial_point();
+    std::vector<double> x(x0.data(), x0.data() + n);
+    double minf{};
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+
+    nlopt::result res{};
+    std::string_view status_str;
+    try
+    {
+        res = opt.optimize(x, minf);
+        status_str = nlopt_result_string(res);
+    }
+    catch(const nlopt::roundoff_limited&)
+    {
+        minf = opt.last_optimum_value();
+        status_str = "roundoff_limited";
+    }
+    catch(const std::exception&)
+    {
+        minf = opt.last_optimum_value();
+        status_str = "failed";
+    }
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    auto wall_us = std::chrono::duration_cast<
+        std::chrono::microseconds>(t1 - t0).count();
+
+    int f_evals = opt.get_numevals();
+    double known_opt = prob.optimal_value();
+
+    return benchmark_result{
+        .solver = "nlopt_isres",
+        .library = "nlopt",
+        .problem = problem_name,
+        .pclass = prob.pclass,
+        .dimension = prob.dimension(),
+        .f_evals = f_evals,
+        .g_evals = 0,
+        .wall_time_us = wall_us,
+        .final_objective = minf,
+        .known_optimum = known_opt,
+        .accuracy = std::abs(minf - known_opt),
+        .status = status_str,
+    };
+}
+
 } // detail
 
 void run_nlopt_benchmarks(std::vector<benchmark_result>& results)
@@ -384,26 +490,23 @@ void run_nlopt_benchmarks(std::vector<benchmark_result>& results)
         //         detail::run_nlopt_solver(nlopt::LN_COBYLA, "nlopt_cobyla",
         //                                  name, p, max_evals));
 
-        // ISRES: global constrained -- also on constrained bounded problems
-        // for comparison with nablapp's isres_policy.
-        if constexpr(constrained<P> && bound_constrained<P>)
-            results.push_back(
-                detail::run_nlopt_solver(nlopt::GN_ISRES, "nlopt_isres",
-                                         name, p, max_evals));
-
         // Global: CRS2 and ISRES (require bounds).
         if constexpr(is_global && bound_constrained<P>)
         {
             results.push_back(
                 detail::run_nlopt_solver(nlopt::GN_CRS2_LM, "nlopt_crs2",
                                          name, p, max_evals));
-            // nlopt_isres on global problems already dispatched above
-            // when constrained<P> is also satisfied.
-            if constexpr(!constrained<P>)
-                results.push_back(
-                    detail::run_nlopt_solver(nlopt::GN_ISRES, "nlopt_isres",
-                                             name, p, max_evals));
+            results.push_back(
+                detail::run_nlopt_isres(name, p, max_evals));
         }
+
+        // ISRES on constrained problems with bounds (evolutionary
+        // constrained optimizer). Dispatched separately from gradient-
+        // based constrained solvers since ISRES is derivative-free.
+        if constexpr((is_ineq || is_eq || is_mixed) && bound_constrained<P>
+                     && !is_global)
+            results.push_back(
+                detail::run_nlopt_isres(name, p, max_evals));
     });
 }
 

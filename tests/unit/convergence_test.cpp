@@ -770,6 +770,95 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
 // Solver group: heterogeneous racing (SC-5, D-11, D-12)
 // ---------------------------------------------------------------------------
 
+TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]")
+{
+    // Regression test: verify that solve() produces the same convergence
+    // behavior as a manual step loop with equivalent stopping criteria.
+    // The solve() path delegates to step_n() which checks gradient_tolerance,
+    // objective_tolerance, and step_tolerance from solver_options.
+
+    SECTION("L-BFGS-B on Beale")
+    {
+        beale problem{};
+        Eigen::VectorXd x0{{0.0, 0.0}};
+
+        solver_options opts;
+        opts.max_iterations = 1000;
+        opts.gradient_tolerance = 1e-8;
+        opts.objective_tolerance = 1e-12;
+        opts.step_tolerance = 1e-12;
+
+        // solve() path
+        basic_solver<lbfgsb_policy> solver1{problem, x0, opts};
+        auto result = solver1.solve();
+
+        // Manual step loop with identical stopping criteria
+        basic_solver<lbfgsb_policy> solver2{problem, x0, opts};
+        int manual_iters = 0;
+        step_result<double> last{};
+        for(int i = 0; i < opts.max_iterations; ++i)
+        {
+            last = solver2.step();
+            ++manual_iters;
+
+            if(last.gradient_norm < opts.gradient_tolerance)
+                break;
+            if(manual_iters > 1
+               && std::abs(last.objective_change) < opts.objective_tolerance)
+                break;
+            if(last.step_size < opts.step_tolerance && manual_iters > 1)
+                break;
+        }
+
+        // Both must converge well before max_iterations
+        CHECK(result.iterations < 100);
+        CHECK(manual_iters < 100);
+
+        // Iteration counts must match exactly (same convergence logic)
+        CHECK(result.iterations == manual_iters);
+
+        // Both must reach the minimum
+        CHECK(result.objective_value < 1e-8);
+        CHECK(last.objective_value < 1e-8);
+    }
+
+    SECTION("L-BFGS-B on Rosenbrock 2D")
+    {
+        rosenbrock problem{};
+        Eigen::VectorXd x0{{-1.0, -1.0}};
+
+        solver_options opts;
+        opts.max_iterations = 1000;
+        opts.gradient_tolerance = 1e-10;
+        opts.objective_tolerance = 1e-15;
+        opts.step_tolerance = 1e-15;
+
+        basic_solver<lbfgsb_policy> solver1{problem, x0, opts};
+        auto result = solver1.solve();
+
+        basic_solver<lbfgsb_policy> solver2{problem, x0, opts};
+        int manual_iters = 0;
+        step_result<double> last{};
+        for(int i = 0; i < opts.max_iterations; ++i)
+        {
+            last = solver2.step();
+            ++manual_iters;
+
+            if(last.gradient_norm < opts.gradient_tolerance)
+                break;
+            if(manual_iters > 1
+               && std::abs(last.objective_change) < opts.objective_tolerance)
+                break;
+            if(last.step_size < opts.step_tolerance && manual_iters > 1)
+                break;
+        }
+
+        CHECK(result.iterations < 500);
+        CHECK(result.iterations == manual_iters);
+        CHECK(result.objective_value < 1e-8);
+    }
+}
+
 TEST_CASE("Solver group: lbfgsb + cmaes racing", "[convergence][solver_group]")
 {
     rosenbrock<double> problem{};

@@ -46,9 +46,9 @@ struct augmented_lagrangian_policy
 
     struct options_type
     {
-        std::optional<scalar_type> mu_init{};                      // default: 1.0 (K&W 10.9)
-        std::optional<scalar_type> mu_decrease{};                  // default: 0.1 (K&W 10.9)
-        std::optional<scalar_type> mu_min{};                       // default: 1e-12 (K&W 10.9)
+        std::optional<scalar_type> mu_init{};                      // default: 0.1 (Conn-Gould-Toint)
+        std::optional<scalar_type> mu_decrease{};                  // default: 0.25 (Conn-Gould-Toint)
+        std::optional<scalar_type> mu_min{};                       // default: 1e-6 (Conn-Gould-Toint)
         std::optional<std::uint32_t> inner_max_iterations{};       // default: 200
         std::optional<std::uint32_t> max_outer_iterations{};       // default: 50 (K&W 10.9)
         std::optional<scalar_type> constraint_tolerance{};         // default: 1e-6 (K&W 10.9)
@@ -101,7 +101,7 @@ struct augmented_lagrangian_policy
         options = policy_opts;
         auto s = init(problem, x0, solver_opts);
         s.opts = policy_opts;
-        s.mu = policy_opts.mu_init.value_or(scalar_type(1));
+        s.mu = policy_opts.mu_init.value_or(scalar_type(0.1));
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
         return s;
     }
@@ -137,7 +137,7 @@ struct augmented_lagrangian_policy
         s.lambda_ineq = Eigen::VectorX<scalar_type>::Zero(s.n_ineq);
 
         // Penalty
-        s.mu = s.opts.mu_init.value_or(scalar_type(1));
+        s.mu = s.opts.mu_init.value_or(scalar_type(0.1));
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.outer_iter = 0;
 
@@ -216,8 +216,8 @@ struct augmented_lagrangian_policy
 
         const scalar_type inner_grad_tol = s.opts.inner_gradient_tolerance.value_or(scalar_type(1e-6));
         const std::uint32_t inner_max = s.opts.inner_max_iterations.value_or(200);
-        const scalar_type mu_dec = s.opts.mu_decrease.value_or(scalar_type(0.1));
-        const scalar_type mu_floor = s.opts.mu_min.value_or(scalar_type(1e-12));
+        const scalar_type mu_dec = s.opts.mu_decrease.value_or(scalar_type(0.25));
+        const scalar_type mu_floor = s.opts.mu_min.value_or(scalar_type(1e-6));
         const scalar_type feas_progress = s.opts.feasibility_progress.value_or(scalar_type(0.25));
         const scalar_type con_tol = s.opts.constraint_tolerance.value_or(scalar_type(1e-6));
 
@@ -354,11 +354,16 @@ struct augmented_lagrangian_policy
             reported_grad_norm = step_norm;
         }
 
-        // K&W Algorithm 10.2 / N&W Algorithm 17.4
-        detail::update_multipliers(
-            s.lambda_eq, s.lambda_ineq, s.c_eq, s.c_ineq, s.mu);
-
-        if(viol > feas_progress * s.prev_viol)
+        // K&W Algorithm 10.2 / N&W Algorithm 17.4:
+        // Conn, Gould & Toint (1991) recommend updating multipliers only
+        // when sufficient feasibility progress is observed, and decreasing
+        // the penalty parameter otherwise.
+        if(viol < feas_progress * s.prev_viol || s.outer_iter == 0)
+        {
+            detail::update_multipliers(
+                s.lambda_eq, s.lambda_ineq, s.c_eq, s.c_ineq, s.mu);
+        }
+        else
         {
             s.mu = std::max(s.mu * mu_dec, mu_floor);
         }
@@ -391,7 +396,7 @@ struct augmented_lagrangian_policy
         reset(s, x0);
         s.lambda_eq.setZero();
         s.lambda_ineq.setZero();
-        s.mu = s.opts.mu_init.value_or(scalar_type(1));
+        s.mu = s.opts.mu_init.value_or(scalar_type(0.1));
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
     }
 };
