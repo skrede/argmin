@@ -110,6 +110,36 @@ TEST_CASE("basic_solver convergence on objective_change", "[solver]")
     CHECK(result.status == solver_status::ftol_reached);
 }
 
+TEST_CASE("basic_solver solve_uses_stored_convergence", "[solver]")
+{
+    quadratic prob;
+    Eigen::VectorXd x0{{3.0, 4.0}};
+    solver_options<> opts;
+    std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
+
+    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    auto result = solver.solve();
+
+    CHECK(result.status == solver_status::converged);
+    CHECK(result.iterations < 500);
+    CHECK(result.gradient_norm < 1e-4);
+}
+
+TEST_CASE("basic_solver step_n_no_opts_uses_stored_convergence", "[solver]")
+{
+    quadratic prob;
+    Eigen::VectorXd x0{{3.0, 4.0}};
+    solver_options<> opts;
+    std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
+
+    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    auto result = solver.step_n(1000);
+
+    CHECK(result.status == solver_status::converged);
+    CHECK(result.iterations < 500);
+    CHECK(result.gradient_norm < 1e-4);
+}
+
 TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
 {
     quadratic prob;

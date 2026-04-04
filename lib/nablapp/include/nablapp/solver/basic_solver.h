@@ -85,7 +85,9 @@ public:
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
-    {}
+    {
+        store_convergence(opts.convergence);
+    }
 
     // CTAD converting constructor: accepts an un-rebound policy and discards
     // it, default-constructing the rebound policy. Enables deduction guides
@@ -103,7 +105,9 @@ public:
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
-    {}
+    {
+        store_convergence(opts.convergence);
+    }
 
     template <typename Problem, typename Convergence = default_convergence>
     basic_solver(const Problem& problem, const Eigen::VectorX<scalar_type>& x0,
@@ -113,7 +117,9 @@ public:
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
-    {}
+    {
+        store_convergence(opts.convergence);
+    }
 
     template <typename Problem, typename PolicyOpts, typename Convergence = default_convergence>
         requires has_options_type<Policy>
@@ -128,7 +134,9 @@ public:
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
-    {}
+    {
+        store_convergence(opts.convergence);
+    }
 
     // CTAD converting constructor with policy options.
     template <typename OrigPolicy, typename Problem, typename PolicyOpts,
@@ -147,7 +155,9 @@ public:
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
-    {}
+    {
+        store_convergence(opts.convergence);
+    }
 
     template <typename Problem, typename PolicyOpts, typename Convergence = default_convergence>
         requires has_options_type<Policy>
@@ -160,7 +170,9 @@ public:
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
-    {}
+    {
+        store_convergence(opts.convergence);
+    }
 
     // Overload for policies without options_type: the fourth argument is
     // solver_options<> (the policy_options_t fallback) and is ignored.
@@ -174,7 +186,9 @@ public:
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
-    {}
+    {
+        store_convergence(opts.convergence);
+    }
 
     basic_solver(const basic_solver&) = delete;
     basic_solver& operator=(const basic_solver&) = delete;
@@ -185,6 +199,7 @@ public:
         , verbosity_{other.verbosity_}
         , max_time_{other.max_time_}
         , constraint_tolerance_{other.constraint_tolerance_}
+        , stored_convergence_{other.stored_convergence_}
         , state_{std::move(other.state_)}
         , iterations_{other.iterations_}
         , last_status_{other.last_status_}
@@ -200,6 +215,7 @@ public:
             verbosity_ = other.verbosity_;
             max_time_ = other.max_time_;
             constraint_tolerance_ = other.constraint_tolerance_;
+            stored_convergence_ = other.stored_convergence_;
             state_ = std::move(other.state_);
             iterations_ = other.iterations_;
             last_status_ = other.last_status_;
@@ -223,6 +239,7 @@ public:
         solver_options<> opts;
         opts.max_iterations = max_iterations_;
         opts.max_time = max_time_;
+        opts.convergence = stored_convergence_;
         return step_n(max_iterations_, opts);
     }
 
@@ -239,6 +256,7 @@ public:
         solver_options<> opts;
         opts.max_iterations = max_iterations_;
         opts.max_time = max_time_;
+        opts.convergence = stored_convergence_;
         return step_n(budget, opts);
     }
 
@@ -353,12 +371,43 @@ public:
         abort_flag_.store(false, std::memory_order_relaxed);
     }
 
+    template <typename Criterion>
+    void store_criterion(const Criterion& c)
+    {
+        if constexpr(std::same_as<Criterion, gradient_tolerance_criterion>)
+            std::get<gradient_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+        else if constexpr(std::same_as<Criterion, objective_tolerance_criterion>)
+        {
+            auto& dst = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+            dst.threshold = c.threshold;
+            dst.stationarity_threshold = c.stationarity_threshold;
+        }
+        else if constexpr(std::same_as<Criterion, step_tolerance_criterion>)
+            std::get<step_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+    }
+
+    template <typename Convergence>
+    void store_convergence(const Convergence& conv)
+    {
+        if constexpr(requires { conv.criteria; })
+        {
+            std::apply([this](const auto&... cs) {
+                (store_criterion(cs), ...);
+            }, conv.criteria);
+        }
+        if constexpr(requires { conv.inner; })
+        {
+            store_convergence(conv.inner);
+        }
+    }
+
 private:
     Policy policy_{};
     std::uint32_t max_iterations_{1000};
     std::uint8_t verbosity_{0};
     std::optional<std::chrono::nanoseconds> max_time_{};
     std::optional<double> constraint_tolerance_{};
+    default_convergence stored_convergence_{};
     state_type state_;
     std::uint32_t iterations_{0};
     solver_status last_status_{solver_status::running};
