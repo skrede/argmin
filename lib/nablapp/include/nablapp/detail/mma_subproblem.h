@@ -152,6 +152,255 @@ Scalar mma_subproblem_constraint(
     return val;
 }
 
+// Stateful MMA subproblem solver with pre-allocated workspace.
+//
+// Owns LDLT factorization object, coefficient storage, and dual solve
+// buffers. Eliminates per-call allocation in the Newton loop.
+//
+// Reference: Svanberg 1987; Svanberg 2002, Section 5.
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+class mma_subproblem_solver
+{
+public:
+    explicit mma_subproblem_solver(int n, int m)
+        : n_{n}, m_{m}
+    {
+        coeffs_.p0.resize(n);
+        coeffs_.q0.resize(n);
+        coeffs_.pi.resize(m, n);
+        coeffs_.qi.resize(m, n);
+        coeffs_.r0.resize(1);
+        coeffs_.ri.resize(m);
+
+        y_.resize(m);
+        x_opt_.resize(n);
+        dual_grad_.resize(m);
+        dual_hess_.resize(m, m);
+        dy_.resize(m);
+    }
+
+    mma_subproblem_solver() = default;
+
+    // Compute MMA approximation coefficients into pre-allocated workspace.
+    //
+    // Reference: Svanberg 1987, eq. (2.1)-(2.5).
+    void compute_coefficients(
+        const Eigen::Vector<Scalar, N>& x,
+        Scalar f,
+        const Eigen::Vector<Scalar, N>& grad_f,
+        const Eigen::VectorX<Scalar>& g,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& dg,
+        const Eigen::Vector<Scalar, N>& L,
+        const Eigen::Vector<Scalar, N>& U,
+        const mma_subproblem_options& opts = {})
+    {
+        const auto epsilon = static_cast<Scalar>(opts.regularization_epsilon.value_or(1e-7));
+
+        Scalar r0_val = f;
+        for(int j = 0; j < n_; ++j)
+        {
+            Scalar ux = U[j] - x[j];
+            Scalar xl = x[j] - L[j];
+
+            coeffs_.p0[j] = ux * ux * std::max(grad_f[j], Scalar(0)) + epsilon;
+            coeffs_.q0[j] = xl * xl * std::max(-grad_f[j], Scalar(0)) + epsilon;
+
+            r0_val -= coeffs_.p0[j] / ux + coeffs_.q0[j] / xl;
+        }
+        coeffs_.r0[0] = r0_val;
+
+        for(int i = 0; i < m_; ++i)
+        {
+            Scalar ri_val = g[i];
+            for(int j = 0; j < n_; ++j)
+            {
+                Scalar ux = U[j] - x[j];
+                Scalar xl = x[j] - L[j];
+
+                coeffs_.pi(i, j) = ux * ux * std::max(dg(i, j), Scalar(0)) + epsilon;
+                coeffs_.qi(i, j) = xl * xl * std::max(-dg(i, j), Scalar(0)) + epsilon;
+
+                ri_val -= coeffs_.pi(i, j) / ux + coeffs_.qi(i, j) / xl;
+            }
+            coeffs_.ri[i] = ri_val;
+        }
+    }
+
+    // Solve dual problem via Newton iteration using pre-allocated LDLT.
+    //
+    // Reference: Svanberg 1987, dual formulation; Svanberg 2002, Section 5.
+    Eigen::Vector<Scalar, N> dual_solve(
+        const Eigen::Vector<Scalar, N>& L,
+        const Eigen::Vector<Scalar, N>& U,
+        const Eigen::Vector<Scalar, N>& x_min,
+        const Eigen::Vector<Scalar, N>& x_max,
+        const mma_subproblem_options& opts = {})
+    {
+        constexpr Scalar eps = Scalar(1e-10);
+
+        const int max_iter = static_cast<int>(opts.dual_max_iterations.value_or(50));
+        const auto tol = static_cast<Scalar>(opts.dual_tolerance.value_or(1e-9));
+        const auto backtrack = static_cast<Scalar>(opts.backtrack_factor.value_or(0.95));
+
+        if(m_ == 0)
+        {
+            Eigen::Vector<Scalar, N> x_opt(n_);
+            for(int j = 0; j < n_; ++j)
+            {
+                Scalar sp = std::sqrt(coeffs_.p0[j]);
+                Scalar sq = std::sqrt(coeffs_.q0[j]);
+                x_opt[j] = (sp * L[j] + sq * U[j]) / (sp + sq);
+                x_opt[j] = std::clamp(x_opt[j],
+                    std::max(L[j] + eps, x_min[j]),
+                    std::min(U[j] - eps, x_max[j]));
+            }
+            return x_opt;
+        }
+
+        y_.setOnes();
+
+        for(int iter = 0; iter < max_iter; ++iter)
+        {
+            for(int j = 0; j < n_; ++j)
+            {
+                Scalar pj = coeffs_.p0[j];
+                Scalar qj = coeffs_.q0[j];
+                for(int i = 0; i < m_; ++i)
+                {
+                    pj += y_[i] * coeffs_.pi(i, j);
+                    qj += y_[i] * coeffs_.qi(i, j);
+                }
+                pj = std::max(pj, eps);
+                qj = std::max(qj, eps);
+
+                Scalar sp = std::sqrt(pj);
+                Scalar sq = std::sqrt(qj);
+                x_opt_[j] = (sp * L[j] + sq * U[j]) / (sp + sq);
+                x_opt_[j] = std::clamp(x_opt_[j],
+                    std::max(L[j] + eps, x_min[j]),
+                    std::min(U[j] - eps, x_max[j]));
+            }
+
+            for(int i = 0; i < m_; ++i)
+            {
+                dual_grad_[i] = coeffs_.ri[i];
+                for(int j = 0; j < n_; ++j)
+                {
+                    Scalar ux = U[j] - x_opt_[j];
+                    Scalar xl = x_opt_[j] - L[j];
+                    dual_grad_[i] += coeffs_.pi(i, j) / ux + coeffs_.qi(i, j) / xl;
+                }
+            }
+
+            if(dual_grad_.cwiseAbs().maxCoeff() < tol)
+                break;
+
+            dual_hess_.setZero();
+            for(int j = 0; j < n_; ++j)
+            {
+                Scalar pj = coeffs_.p0[j];
+                Scalar qj = coeffs_.q0[j];
+                for(int i = 0; i < m_; ++i)
+                {
+                    pj += y_[i] * coeffs_.pi(i, j);
+                    qj += y_[i] * coeffs_.qi(i, j);
+                }
+                pj = std::max(pj, eps);
+                qj = std::max(qj, eps);
+
+                Scalar aj = U[j] - x_opt_[j];
+                Scalar bj = x_opt_[j] - L[j];
+                aj = std::max(aj, eps);
+                bj = std::max(bj, eps);
+
+                Scalar wj = Scalar(2) * pj / (aj * aj * aj)
+                          + Scalar(2) * qj / (bj * bj * bj);
+                wj = std::max(wj, eps);
+
+                for(int i1 = 0; i1 < m_; ++i1)
+                {
+                    Scalar v1 = coeffs_.pi(i1, j) / (aj * aj)
+                              - coeffs_.qi(i1, j) / (bj * bj);
+                    for(int i2 = i1; i2 < m_; ++i2)
+                    {
+                        Scalar v2 = coeffs_.pi(i2, j) / (aj * aj)
+                                  - coeffs_.qi(i2, j) / (bj * bj);
+                        Scalar val = v1 * v2 / wj;
+                        dual_hess_(i1, i2) += val;
+                        if(i1 != i2)
+                            dual_hess_(i2, i1) += val;
+                    }
+                }
+            }
+
+            dual_hess_.diagonal().array() += eps;
+
+            ldlt_.compute(dual_hess_);
+            dy_ = ldlt_.solve(dual_grad_);
+
+            Scalar alpha = Scalar(1);
+            for(int i = 0; i < m_; ++i)
+            {
+                if(dy_[i] < Scalar(0) && y_[i] > Scalar(0))
+                {
+                    Scalar max_step = y_[i] / (-dy_[i]) * backtrack;
+                    alpha = std::min(alpha, max_step);
+                }
+            }
+            alpha = std::max(alpha, eps);
+
+            y_ += alpha * dy_;
+            y_ = y_.cwiseMax(Scalar(0));
+        }
+
+        return Eigen::Vector<Scalar, N>(x_opt_);
+    }
+
+    // Evaluate the MMA approximation of the objective at point x.
+    //
+    // Reference: Svanberg 2002, conservatism condition.
+    Scalar subproblem_value(
+        const Eigen::Vector<Scalar, N>& x,
+        const Eigen::Vector<Scalar, N>& L,
+        const Eigen::Vector<Scalar, N>& U) const
+    {
+        Scalar val = coeffs_.r0[0];
+        for(int j = 0; j < n_; ++j)
+            val += coeffs_.p0[j] / (U[j] - x[j]) + coeffs_.q0[j] / (x[j] - L[j]);
+        return val;
+    }
+
+    // Evaluate the MMA approximation of constraint i at point x.
+    //
+    // Reference: Svanberg 2002.
+    Scalar subproblem_constraint(
+        int i,
+        const Eigen::Vector<Scalar, N>& x,
+        const Eigen::Vector<Scalar, N>& L,
+        const Eigen::Vector<Scalar, N>& U) const
+    {
+        Scalar val = coeffs_.ri[i];
+        for(int j = 0; j < n_; ++j)
+            val += coeffs_.pi(i, j) / (U[j] - x[j]) + coeffs_.qi(i, j) / (x[j] - L[j]);
+        return val;
+    }
+
+    const mma_coeffs<Scalar, N>& coefficients() const { return coeffs_; }
+
+private:
+    int n_{0};
+    int m_{0};
+
+    mma_coeffs<Scalar, N> coeffs_;
+
+    Eigen::VectorX<Scalar> y_;
+    Eigen::VectorX<Scalar> x_opt_;
+    Eigen::VectorX<Scalar> dual_grad_;
+    Eigen::MatrixX<Scalar> dual_hess_;
+    Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_;
+    Eigen::VectorX<Scalar> dy_;
+};
+
 // Solve the MMA dual problem via Newton iteration.
 //
 // The MMA subproblem is separable and convex. For given dual variables

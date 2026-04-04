@@ -774,8 +774,8 @@ TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]"
 {
     // Regression test: verify that solve() produces the same convergence
     // behavior as a manual step loop with equivalent stopping criteria.
-    // The solve() path delegates to step_n() which checks gradient_tolerance,
-    // objective_tolerance, and step_tolerance from solver_options.
+    // The solve() path delegates to step_n() which checks convergence
+    // criteria from solver_options.
 
     SECTION("L-BFGS-B on Beale")
     {
@@ -784,40 +784,36 @@ TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]"
 
         solver_options opts;
         opts.max_iterations = 1000;
-        opts.gradient_tolerance = 1e-8;
-        opts.objective_tolerance = 1e-12;
-        opts.step_tolerance = 1e-12;
+        opts.set_gradient_threshold(1e-8);
+        opts.set_objective_threshold(1e-12);
+        opts.set_step_threshold(1e-12);
 
-        // solve() path
-        basic_solver<lbfgsb_policy> solver1{problem, x0, opts};
+        constexpr int D = beale<>::problem_dimension;
+        Eigen::Vector<double, D> x0_fixed{{0.0, 0.0}};
+
+        basic_solver<lbfgsb_policy<D>> solver1{problem, x0_fixed, opts};
         auto result = solver1.solve();
 
-        // Manual step loop with identical stopping criteria
-        basic_solver<lbfgsb_policy> solver2{problem, x0, opts};
+        basic_solver<lbfgsb_policy<D>> solver2{problem, x0_fixed, opts};
         int manual_iters = 0;
         step_result<double> last{};
-        for(int i = 0; i < opts.max_iterations; ++i)
+        for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
         {
             last = solver2.step();
             ++manual_iters;
 
-            if(last.gradient_norm < opts.gradient_tolerance)
+            if(last.gradient_norm < 1e-8)
                 break;
             if(manual_iters > 1
-               && std::abs(last.objective_change) < opts.objective_tolerance)
+               && std::abs(last.objective_change) < 1e-12)
                 break;
-            if(last.step_size < opts.step_tolerance && manual_iters > 1)
+            if(last.step_size < 1e-12 && manual_iters > 1)
                 break;
         }
 
-        // Both must converge well before max_iterations
         CHECK(result.iterations < 100);
         CHECK(manual_iters < 100);
-
-        // Iteration counts must match exactly (same convergence logic)
         CHECK(result.iterations == manual_iters);
-
-        // Both must reach the minimum
         CHECK(result.objective_value < 1e-8);
         CHECK(last.objective_value < 1e-8);
     }
@@ -825,31 +821,33 @@ TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]"
     SECTION("L-BFGS-B on Rosenbrock 2D")
     {
         rosenbrock problem{};
-        Eigen::VectorXd x0{{-1.0, -1.0}};
 
         solver_options opts;
         opts.max_iterations = 1000;
-        opts.gradient_tolerance = 1e-10;
-        opts.objective_tolerance = 1e-15;
-        opts.step_tolerance = 1e-15;
+        opts.set_gradient_threshold(1e-10);
+        opts.set_objective_threshold(1e-15);
+        opts.set_step_threshold(1e-15);
 
-        basic_solver<lbfgsb_policy> solver1{problem, x0, opts};
+        constexpr int D = rosenbrock<>::problem_dimension;
+        Eigen::Vector<double, D> x0_fixed{{-1.0, -1.0}};
+
+        basic_solver<lbfgsb_policy<D>> solver1{problem, x0_fixed, opts};
         auto result = solver1.solve();
 
-        basic_solver<lbfgsb_policy> solver2{problem, x0, opts};
+        basic_solver<lbfgsb_policy<D>> solver2{problem, x0_fixed, opts};
         int manual_iters = 0;
         step_result<double> last{};
-        for(int i = 0; i < opts.max_iterations; ++i)
+        for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
         {
             last = solver2.step();
             ++manual_iters;
 
-            if(last.gradient_norm < opts.gradient_tolerance)
+            if(last.gradient_norm < 1e-10)
                 break;
             if(manual_iters > 1
-               && std::abs(last.objective_change) < opts.objective_tolerance)
+               && std::abs(last.objective_change) < 1e-15)
                 break;
-            if(last.step_size < opts.step_tolerance && manual_iters > 1)
+            if(last.step_size < 1e-15 && manual_iters > 1)
                 break;
         }
 

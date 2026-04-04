@@ -66,6 +66,7 @@ struct mma_policy
         Eigen::Vector<double, N> x_old1, x_old2;
         Eigen::Vector<double, N> lower, upper;
 
+        std::optional<detail::mma_subproblem_solver<double, N>> subproblem;
         std::uint32_t iteration{0};
         options_type opts;
 
@@ -166,6 +167,7 @@ struct mma_policy
         }
 
         s.iteration = 0;
+        s.subproblem.emplace(n, m_ineq);
 
         // Closures capturing problem by const reference
         s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
@@ -238,13 +240,13 @@ struct mma_policy
         Eigen::VectorXd g_mma = -s.c_ineq;
         Eigen::Matrix<double, Eigen::Dynamic, N> dg_mma = -s.J_ineq;
 
-        auto coeffs = detail::mma_coefficients(
+        s.subproblem->compute_coefficients(
             s.x, s.f, s.g, g_mma, dg_mma, s.L, s.U,
             s.opts.subproblem);
 
-        // 3. Solve dual subproblem, passing embedded options
-        Eigen::Vector<double, N> x_new = detail::mma_dual_solve(
-            coeffs, s.L, s.U, x_min_eff, x_max_eff,
+        // 3. Solve dual subproblem using pre-allocated solver
+        Eigen::Vector<double, N> x_new = s.subproblem->dual_solve(
+            s.L, s.U, x_min_eff, x_max_eff,
             s.opts.subproblem);
 
         // 4. Apply move limits

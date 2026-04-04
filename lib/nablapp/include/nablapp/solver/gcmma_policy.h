@@ -173,13 +173,13 @@ struct gcmma_policy
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
             // Compute coefficients with current (possibly tightened) asymptotes
-            auto coeffs = detail::mma_coefficients(
+            ms.subproblem->compute_coefficients(
                 ms.x, ms.f, ms.g, g_mma, dg_mma, L_inner, U_inner,
                 s.opts.subproblem);
 
-            // Solve dual subproblem, passing embedded options
-            x_trial = detail::mma_dual_solve(
-                coeffs, L_inner, U_inner, x_min_eff, x_max_eff,
+            // Solve dual subproblem using pre-allocated solver
+            x_trial = ms.subproblem->dual_solve(
+                L_inner, U_inner, x_min_eff, x_max_eff,
                 s.opts.subproblem);
 
             // Apply move limits
@@ -199,8 +199,8 @@ struct gcmma_policy
 
             // Check conservatism: actual <= approximation for objective
             // and for each constraint (in g <= 0 form)
-            double approx_f = detail::mma_subproblem_value(
-                coeffs, x_trial, L_inner, U_inner);
+            double approx_f = ms.subproblem->subproblem_value(
+                x_trial, L_inner, U_inner);
 
             bool conservative = (f_trial <= approx_f + raa0_val);
 
@@ -209,8 +209,8 @@ struct gcmma_policy
                 for(int i = 0; i < m; ++i)
                 {
                     double g_actual = -c_ineq_trial[i];
-                    double g_approx = detail::mma_subproblem_constraint(
-                        coeffs, i, x_trial, L_inner, U_inner);
+                    double g_approx = ms.subproblem->subproblem_constraint(
+                        i, x_trial, L_inner, U_inner);
                     if(g_actual > g_approx + raa0_val)
                     {
                         conservative = false;
