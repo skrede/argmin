@@ -37,7 +37,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 
 namespace nablapp
@@ -60,8 +59,10 @@ struct nw_sqp_policy
 
     options_type options{};
 
+    template <typename P = void>
     struct state_type
     {
+        const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         Eigen::Vector<double, N> g;
         Eigen::VectorXd c_eq;
@@ -77,30 +78,22 @@ struct nw_sqp_policy
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
-
-        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
-        std::function<void(const Eigen::Vector<double, N>&,
-                           Eigen::Vector<double, N>&)> eval_gradient;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&,
-                           Eigen::VectorXd&)> eval_constraints;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::MatrixXd&,
-                           Eigen::MatrixXd&)> eval_jacobian;
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& opts,
-                    const options_type& policy_opts)
+    state_type<Problem> init(const Problem& problem,
+                             const Eigen::Vector<double, N>& x0,
+                             const solver_options<Convergence>& opts,
+                             const options_type& policy_opts)
     {
         options = policy_opts;
         return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& /*opts*/)
+    state_type<Problem> init(const Problem& problem,
+                             const Eigen::Vector<double, N>& x0,
+                             const solver_options<Convergence>& /*opts*/)
     {
         static_assert(differentiable<Problem>,
                       "nw_sqp_policy requires differentiable<Problem>");
@@ -108,7 +101,8 @@ struct nw_sqp_policy
                       "nw_sqp_policy requires constrained<Problem>");
 
         const int n = problem.dimension();
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
 
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
@@ -164,47 +158,11 @@ struct nw_sqp_policy
             s.lambda = Eigen::VectorXd::Zero(0);
         }
 
-        // Closures capturing problem by const reference
-        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
-            return problem.value(v);
-        };
-        s.eval_gradient = [&problem](const Eigen::Vector<double, N>& v,
-                                     Eigen::Vector<double, N>& grad) {
-            problem.gradient(v, grad);
-        };
-
-        const int n_eq_cap = s.n_eq;
-        const int n_ineq_cap = s.n_ineq;
-
-        s.eval_constraints = [&problem, n_eq_cap, n_ineq_cap](
-            const Eigen::Vector<double, N>& v,
-            Eigen::VectorXd& ceq, Eigen::VectorXd& cineq)
-        {
-            const int mtot = n_eq_cap + n_ineq_cap;
-            Eigen::VectorXd c(mtot);
-            if(mtot > 0)
-                problem.constraints(v, c);
-            ceq = c.head(n_eq_cap);
-            cineq = c.tail(n_ineq_cap);
-        };
-
-        s.eval_jacobian = [&problem, n_eq_cap, n_ineq_cap](
-            const Eigen::Vector<double, N>& v,
-            Eigen::MatrixXd& Jeq, Eigen::MatrixXd& Jineq)
-        {
-            const int mtot = n_eq_cap + n_ineq_cap;
-            const int n_dim = v.size();
-            Eigen::MatrixXd J(mtot, n_dim);
-            if(mtot > 0)
-                problem.constraint_jacobian(v, J);
-            Jeq = J.topRows(n_eq_cap);
-            Jineq = J.bottomRows(n_ineq_cap);
-        };
-
         return s;
     }
 
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
@@ -300,8 +258,14 @@ struct nw_sqp_policy
             if(has_finite_bounds)
                 x_trial = detail::project(x_trial, s.lower, s.upper);
 
-            f_trial = s.eval_value(x_trial);
-            s.eval_constraints(x_trial, c_eq_trial, c_ineq_trial);
+            f_trial = s.problem->value(x_trial);
+            {
+                Eigen::VectorXd c_all(m);
+                if(m > 0)
+                    s.problem->constraints(x_trial, c_all);
+                c_eq_trial = c_all.head(s.n_eq);
+                c_ineq_trial = c_all.tail(s.n_ineq);
+            }
             double phi_trial = detail::l1_merit(f_trial, c_eq_trial,
                                                 c_ineq_trial, s.sigma);
 
@@ -320,10 +284,16 @@ struct nw_sqp_policy
 
         s.x = x_trial;
         s.objective_value = f_trial;
-        s.eval_gradient(s.x, s.g);
+        s.problem->gradient(s.x, s.g);
         s.c_eq = c_eq_trial;
         s.c_ineq = c_ineq_trial;
-        s.eval_jacobian(s.x, s.J_eq, s.J_ineq);
+        {
+            Eigen::MatrixXd J_all(m, n);
+            if(m > 0)
+                s.problem->constraint_jacobian(s.x, J_all);
+            s.J_eq = J_all.topRows(s.n_eq);
+            s.J_ineq = J_all.bottomRows(s.n_ineq);
+        }
 
         Eigen::Vector<double, N> sk = s.x - x_old;
 
@@ -372,18 +342,34 @@ struct nw_sqp_policy
     }
 
     // Hot start -- preserves BFGS Hessian.
-    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
+        const int n = static_cast<int>(x0.size());
+        const int m = s.n_eq + s.n_ineq;
         s.x = x0;
-        s.objective_value = s.eval_value(x0);
-        s.eval_gradient(x0, s.g);
-        s.eval_constraints(x0, s.c_eq, s.c_ineq);
-        s.eval_jacobian(x0, s.J_eq, s.J_ineq);
+        s.objective_value = s.problem->value(x0);
+        s.problem->gradient(x0, s.g);
+        {
+            Eigen::VectorXd c_all(m);
+            if(m > 0)
+                s.problem->constraints(x0, c_all);
+            s.c_eq = c_all.head(s.n_eq);
+            s.c_ineq = c_all.tail(s.n_ineq);
+        }
+        {
+            Eigen::MatrixXd J_all(m, n);
+            if(m > 0)
+                s.problem->constraint_jacobian(x0, J_all);
+            s.J_eq = J_all.topRows(s.n_eq);
+            s.J_ineq = J_all.bottomRows(s.n_ineq);
+        }
         s.iteration = 0;
     }
 
     // Cold restart -- clears BFGS Hessian.
-    void reset_clear(state_type& s,
+    template <typename P>
+    void reset_clear(state_type<P>& s,
                      const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
@@ -405,7 +391,8 @@ private:
         return false;
     }
 
-    static double lagrangian_gradient_norm(const state_type& s)
+    template <typename P>
+    static double lagrangian_gradient_norm(const state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;

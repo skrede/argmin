@@ -31,7 +31,7 @@ TEST_CASE("mma converges on HS076", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver<mma_policy<hs076<>::problem_dimension>> solver{problem, x0, opts};
+    basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -58,7 +58,7 @@ TEST_CASE("mma converges on HS024", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver<mma_policy<hs024<>::problem_dimension>> solver{problem, x0, opts};
+    basic_solver solver{mma_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -86,7 +86,7 @@ TEST_CASE("mma converges on HS043", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver<mma_policy<hs043<>::problem_dimension>> solver{problem, x0, opts};
+    basic_solver solver{mma_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -113,7 +113,7 @@ TEST_CASE("mma converges on HS035", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver<mma_policy<hs035<>::problem_dimension>> solver{problem, x0, opts};
+    basic_solver solver{mma_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -140,7 +140,7 @@ TEST_CASE("gcmma converges on HS076", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver<gcmma_policy<hs076<>::problem_dimension>> solver{problem, x0, opts};
+    basic_solver solver{gcmma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -183,7 +183,7 @@ TEST_CASE("mma step and step_n consistency", "[mma]")
 
     SECTION("step returns finite values")
     {
-        basic_solver<mma_policy<hs076<>::problem_dimension>> solver{problem, x0, opts};
+        basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
         {
@@ -196,7 +196,7 @@ TEST_CASE("mma step and step_n consistency", "[mma]")
 
     SECTION("step_n reaches similar result as solve")
     {
-        basic_solver<mma_policy<hs076<>::problem_dimension>> solver{problem, x0, opts};
+        basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.step_n(200);
         CHECK(std::isfinite(result.objective_value));
         CHECK(result.objective_value < problem.value(x0));

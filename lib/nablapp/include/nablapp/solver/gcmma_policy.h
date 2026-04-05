@@ -30,7 +30,6 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <optional>
 
@@ -58,9 +57,10 @@ struct gcmma_policy
 
     options_type options{};
 
+    template <typename P = void>
     struct state_type
     {
-        typename mma_policy<N>::state_type mma_state;
+        typename mma_policy<N>::template state_type<P> mma_state;
         options_type opts;
 
         // Proxy members for basic_solver compatibility (it accesses state_.x,
@@ -99,10 +99,10 @@ struct gcmma_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& sopts,
-                    const options_type& policy_opts)
+    state_type<Problem> init(const Problem& problem,
+                             const Eigen::Vector<double, N>& x0,
+                             const solver_options<Convergence>& sopts,
+                             const options_type& policy_opts)
     {
         options = policy_opts;
         auto s = init(problem, x0, sopts);
@@ -112,16 +112,17 @@ struct gcmma_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& sopts)
+    state_type<Problem> init(const Problem& problem,
+                             const Eigen::Vector<double, N>& x0,
+                             const solver_options<Convergence>& sopts)
     {
-        state_type s;
+        state_type<Problem> s;
         s.mma_state = mma_policy<N>{}.init(problem, x0, sopts);
         return s;
     }
 
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         auto& ms = s.mma_state;
         const int n = static_cast<int>(ms.x.size());
@@ -140,11 +141,12 @@ struct gcmma_policy
         // Re-evaluate at current x (skip on first iteration)
         if(ms.iteration != 0)
         {
-            ms.f = ms.eval_value(ms.x);
-            ms.eval_gradient(ms.x, ms.g);
-            ms.eval_constraints(ms.x, ms.c_eq, ms.c_ineq);
-            Eigen::MatrixXd Jeq_dummy;
-            ms.eval_jacobian(ms.x, Jeq_dummy, ms.J_ineq);
+            ms.f = ms.problem->value(ms.x);
+            ms.problem->gradient(ms.x, ms.g);
+            if(m > 0)
+                ms.problem->constraints(ms.x, ms.c_ineq);
+            if(m > 0)
+                ms.problem->constraint_jacobian(ms.x, ms.J_ineq);
         }
 
         // Effective bounds for asymptote update
@@ -193,9 +195,9 @@ struct gcmma_policy
             }
 
             // Evaluate actual values at trial point
-            f_trial = ms.eval_value(x_trial);
-            Eigen::VectorXd ceq_trial;
-            ms.eval_constraints(x_trial, ceq_trial, c_ineq_trial);
+            f_trial = ms.problem->value(x_trial);
+            if(m > 0)
+                ms.problem->constraints(x_trial, c_ineq_trial);
 
             // Check conservatism: actual <= approximation for objective
             // and for each constraint (in g <= 0 form)
@@ -247,9 +249,9 @@ struct gcmma_policy
         ms.c_ineq = c_ineq_trial;
 
         // Re-evaluate gradient and Jacobian at new point
-        ms.eval_gradient(ms.x, ms.g);
-        Eigen::MatrixXd Jeq_dummy;
-        ms.eval_jacobian(ms.x, Jeq_dummy, ms.J_ineq);
+        ms.problem->gradient(ms.x, ms.g);
+        if(m > 0)
+            ms.problem->constraint_jacobian(ms.x, ms.J_ineq);
 
         ++ms.iteration;
 
@@ -266,14 +268,16 @@ struct gcmma_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
-        mma_policy<N>{}.reset(s.mma_state, x0);
+        mma_policy<N>{}.template reset<P>(s.mma_state, x0);
     }
 
-    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
-        mma_policy<N>{}.reset_clear(s.mma_state, x0);
+        mma_policy<N>{}.template reset_clear<P>(s.mma_state, x0);
     }
 
 private:

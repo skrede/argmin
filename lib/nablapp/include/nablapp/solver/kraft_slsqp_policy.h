@@ -40,7 +40,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <optional>
 
@@ -66,8 +65,10 @@ struct kraft_slsqp_policy
 
     options_type options{};
 
+    template <typename P = void>
     struct state_type
     {
+        const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         Eigen::Vector<double, N> g;
         Eigen::VectorXd c_eq;
@@ -87,32 +88,26 @@ struct kraft_slsqp_policy
         int n_eq{0};
         int n_ineq{0};
         int n{0};
-
-        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
-        std::function<void(const Eigen::Vector<double, N>&,
-                           Eigen::Vector<double, N>&)> eval_gradient;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&,
-                           Eigen::VectorXd&)> eval_constraints;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::MatrixXd&,
-                           Eigen::MatrixXd&)> eval_jacobian;
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& opts, const options_type& policy_opts)
+    state_type<Problem> init(const Problem& problem,
+                             const Eigen::Vector<double, N>& x0,
+                             const solver_options<Convergence>& opts,
+                             const options_type& policy_opts)
     {
         options = policy_opts;
         return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& /*opts*/)
+    state_type<Problem> init(const Problem& problem,
+                             const Eigen::Vector<double, N>& x0,
+                             const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
 
         s.n = n;
         s.x = x0;
@@ -150,22 +145,6 @@ struct kraft_slsqp_policy
             s.J_ineq = J_all.bottomRows(s.n_ineq);
 
             s.lambda = Eigen::VectorXd::Zero(s.n_eq + s.n_ineq);
-
-            s.eval_constraints = [&problem, n_eq = s.n_eq, n_ineq = s.n_ineq](
-                const Eigen::Vector<double, N>& v, Eigen::VectorXd& ceq, Eigen::VectorXd& cineq) {
-                Eigen::VectorXd c_all(n_eq + n_ineq);
-                problem.constraints(v, c_all);
-                ceq = c_all.head(n_eq);
-                cineq = c_all.tail(n_ineq);
-            };
-
-            s.eval_jacobian = [&problem, n_eq = s.n_eq, n_ineq = s.n_ineq, n](
-                const Eigen::Vector<double, N>& v, Eigen::MatrixXd& Jeq, Eigen::MatrixXd& Jineq) {
-                Eigen::MatrixXd J_all(n_eq + n_ineq, n);
-                problem.constraint_jacobian(v, J_all);
-                Jeq = J_all.topRows(n_eq);
-                Jineq = J_all.bottomRows(n_ineq);
-            };
         }
         else
         {
@@ -177,17 +156,6 @@ struct kraft_slsqp_policy
             s.J_ineq.resize(0, n);
             s.lambda.resize(0);
 
-            s.eval_constraints = [](const Eigen::Vector<double, N>&, Eigen::VectorXd& ceq,
-                                    Eigen::VectorXd& cineq) {
-                ceq.resize(0);
-                cineq.resize(0);
-            };
-
-            s.eval_jacobian = [n](const Eigen::Vector<double, N>&, Eigen::MatrixXd& Jeq,
-                                  Eigen::MatrixXd& Jineq) {
-                Jeq.resize(0, n);
-                Jineq.resize(0, n);
-            };
         }
 
         s.lbfgs = detail::compact_lbfgs<double, N, 10>{};
@@ -200,27 +168,30 @@ struct kraft_slsqp_policy
         s.B_workspace.setZero(n, n);
         s.ej_workspace = Eigen::Vector<double, N>::Zero(n);
 
-        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
-            return problem.value(v);
-        };
-        s.eval_gradient = [&problem](const Eigen::Vector<double, N>& v,
-                                     Eigen::Vector<double, N>& grad) {
-            problem.gradient(v, grad);
-        };
-
         return s;
     }
 
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         // Re-evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
         {
-            s.eval_gradient(s.x, s.g);
-            if(s.n_eq + s.n_ineq > 0)
+            s.problem->gradient(s.x, s.g);
+            if constexpr(constrained<P>)
             {
-                s.eval_constraints(s.x, s.c_eq, s.c_ineq);
-                s.eval_jacobian(s.x, s.J_eq, s.J_ineq);
+                if(s.n_eq + s.n_ineq > 0)
+                {
+                    Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
+                    s.problem->constraints(s.x, c_all);
+                    s.c_eq = c_all.head(s.n_eq);
+                    s.c_ineq = c_all.tail(s.n_ineq);
+
+                    Eigen::MatrixXd J_all(s.n_eq + s.n_ineq, s.n);
+                    s.problem->constraint_jacobian(s.x, J_all);
+                    s.J_eq = J_all.topRows(s.n_eq);
+                    s.J_ineq = J_all.bottomRows(s.n_ineq);
+                }
             }
         }
 
@@ -314,18 +285,23 @@ struct kraft_slsqp_policy
 
         // L1 merit function for line search
         auto merit = [&](const Eigen::Vector<double, N>& xk) -> double {
-            double fval = s.eval_value(xk);
+            double fval = s.problem->value(xk);
             double viol = 0.0;
 
-            if(s.n_eq + s.n_ineq > 0)
+            if constexpr(constrained<P>)
             {
-                Eigen::VectorXd ceq, cineq;
-                s.eval_constraints(xk, ceq, cineq);
+                if(s.n_eq + s.n_ineq > 0)
+                {
+                    Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
+                    s.problem->constraints(xk, c_all);
+                    auto ceq = c_all.head(s.n_eq);
+                    auto cineq = c_all.tail(s.n_ineq);
 
-                if(ceq.size() > 0)
-                    viol += ceq.cwiseAbs().sum();
-                if(cineq.size() > 0)
-                    viol += (-cineq).cwiseMax(0.0).sum();
+                    if(ceq.size() > 0)
+                        viol += ceq.cwiseAbs().sum();
+                    if(cineq.size() > 0)
+                        viol += (-cineq).cwiseMax(0.0).sum();
+                }
             }
 
             return fval + s.sigma * viol;
@@ -372,48 +348,58 @@ struct kraft_slsqp_policy
             if(s.x[i] > s.upper[i]) s.x[i] = s.upper[i];
         }
 
-        s.objective_value = s.eval_value(s.x);
+        s.objective_value = s.problem->value(s.x);
 
         Eigen::Vector<double, N> g_old = s.g;
-        s.eval_gradient(s.x, s.g);
+        s.problem->gradient(s.x, s.g);
 
-        if(s.n_eq + s.n_ineq > 0)
+        if constexpr(constrained<P>)
         {
-            s.eval_constraints(s.x, s.c_eq, s.c_ineq);
-            s.eval_jacobian(s.x, s.J_eq, s.J_ineq);
+            if(s.n_eq + s.n_ineq > 0)
+            {
+                Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
+                s.problem->constraints(s.x, c_all);
+                s.c_eq = c_all.head(s.n_eq);
+                s.c_ineq = c_all.tail(s.n_ineq);
+
+                Eigen::MatrixXd J_all(s.n_eq + s.n_ineq, n);
+                s.problem->constraint_jacobian(s.x, J_all);
+                s.J_eq = J_all.topRows(s.n_eq);
+                s.J_ineq = J_all.bottomRows(s.n_ineq);
+            }
         }
 
         // L-BFGS update using Lagrangian gradient
         Eigen::Vector<double, N> grad_L_old = g_old;
         Eigen::Vector<double, N> grad_L_new = s.g;
 
-        if(s.n_eq + s.n_ineq > 0 && qp_res.lambda.size() > 0)
+        if constexpr(constrained<P>)
         {
-            int m_total = s.n_eq + s.n_ineq;
-            Eigen::VectorXd lam = qp_res.lambda.head(
-                std::min(m_total, static_cast<int>(qp_res.lambda.size())));
-
-            if(lam.size() == m_total)
-                s.lambda = lam;
-
-            if(s.n_eq > 0 && lam.size() >= s.n_eq)
+            if(s.n_eq + s.n_ineq > 0 && qp_res.lambda.size() > 0)
             {
-                Eigen::VectorXd lam_eq = lam.head(s.n_eq);
+                int m_total = s.n_eq + s.n_ineq;
+                Eigen::VectorXd lam = qp_res.lambda.head(
+                    std::min(m_total, static_cast<int>(qp_res.lambda.size())));
 
-                Eigen::MatrixXd J_eq_old, J_ineq_old;
-                s.eval_jacobian(x_old, J_eq_old, J_ineq_old);
-                grad_L_old -= J_eq_old.transpose() * lam_eq;
-                grad_L_new -= s.J_eq.transpose() * lam_eq;
-            }
+                if(lam.size() == m_total)
+                    s.lambda = lam;
 
-            if(s.n_ineq > 0 && lam.size() >= s.n_eq + s.n_ineq)
-            {
-                Eigen::VectorXd lam_ineq = lam.segment(s.n_eq, s.n_ineq);
+                Eigen::MatrixXd J_all_old(s.n_eq + s.n_ineq, n);
+                s.problem->constraint_jacobian(x_old, J_all_old);
 
-                Eigen::MatrixXd J_eq_old, J_ineq_old;
-                s.eval_jacobian(x_old, J_eq_old, J_ineq_old);
-                grad_L_old -= J_ineq_old.transpose() * lam_ineq;
-                grad_L_new -= s.J_ineq.transpose() * lam_ineq;
+                if(s.n_eq > 0 && lam.size() >= s.n_eq)
+                {
+                    Eigen::VectorXd lam_eq = lam.head(s.n_eq);
+                    grad_L_old -= J_all_old.topRows(s.n_eq).transpose() * lam_eq;
+                    grad_L_new -= s.J_eq.transpose() * lam_eq;
+                }
+
+                if(s.n_ineq > 0 && lam.size() >= s.n_eq + s.n_ineq)
+                {
+                    Eigen::VectorXd lam_ineq = lam.segment(s.n_eq, s.n_ineq);
+                    grad_L_old -= J_all_old.bottomRows(s.n_ineq).transpose() * lam_ineq;
+                    grad_L_new -= s.J_ineq.transpose() * lam_ineq;
+                }
             }
         }
 
@@ -434,21 +420,33 @@ struct kraft_slsqp_policy
     }
 
     // Hot start -- preserves L-BFGS history.
-    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
-        s.objective_value = s.eval_value(x0);
-        s.eval_gradient(x0, s.g);
-        if(s.n_eq + s.n_ineq > 0)
+        s.objective_value = s.problem->value(x0);
+        s.problem->gradient(x0, s.g);
+        if constexpr(constrained<P>)
         {
-            s.eval_constraints(x0, s.c_eq, s.c_ineq);
-            s.eval_jacobian(x0, s.J_eq, s.J_ineq);
+            if(s.n_eq + s.n_ineq > 0)
+            {
+                Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
+                s.problem->constraints(x0, c_all);
+                s.c_eq = c_all.head(s.n_eq);
+                s.c_ineq = c_all.tail(s.n_ineq);
+
+                Eigen::MatrixXd J_all(s.n_eq + s.n_ineq, s.n);
+                s.problem->constraint_jacobian(x0, J_all);
+                s.J_eq = J_all.topRows(s.n_eq);
+                s.J_ineq = J_all.bottomRows(s.n_ineq);
+            }
         }
         s.iteration = 0;
     }
 
     // Cold restart -- clears L-BFGS curvature history.
-    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
         s.lbfgs.reset();

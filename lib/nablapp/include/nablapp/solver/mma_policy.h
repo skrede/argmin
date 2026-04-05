@@ -28,7 +28,6 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <optional>
 
@@ -55,8 +54,10 @@ struct mma_policy
         mma_subproblem_options subproblem{};              // Embedded subproblem params
     };
 
+    template <typename P = void>
     struct state_type
     {
+        const P* problem{nullptr};
         Eigen::Vector<double, N> x, g;
         double f{};
         Eigen::VectorXd c_eq, c_ineq;
@@ -69,21 +70,13 @@ struct mma_policy
         std::optional<detail::mma_subproblem_solver<double, N>> subproblem;
         std::uint32_t iteration{0};
         options_type opts;
-
-        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
-        std::function<void(const Eigen::Vector<double, N>&,
-                           Eigen::Vector<double, N>&)> eval_gradient;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&,
-                           Eigen::VectorXd&)> eval_constraints;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::MatrixXd&,
-                           Eigen::MatrixXd&)> eval_jacobian;
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& opts,
-                    const options_type& policy_opts)
+    state_type<Problem> init(const Problem& problem,
+                             const Eigen::Vector<double, N>& x0,
+                             const solver_options<Convergence>& opts,
+                             const options_type& policy_opts)
     {
         auto s = init(problem, x0, opts);
         s.opts = policy_opts;
@@ -105,9 +98,9 @@ struct mma_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& /*opts*/)
+    state_type<Problem> init(const Problem& problem,
+                             const Eigen::Vector<double, N>& x0,
+                             const solver_options<Convergence>& /*opts*/)
     {
         static_assert(differentiable<Problem>,
                       "mma_policy requires differentiable<Problem>");
@@ -122,7 +115,8 @@ struct mma_policy
 
         const int n = problem.dimension();
         const int m_ineq = problem.num_inequality();
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
 
         s.x = x0;
         s.g.resize(n);
@@ -179,40 +173,11 @@ struct mma_policy
         s.iteration = 0;
         s.subproblem.emplace(n, m_ineq);
 
-        // Closures capturing problem by const reference
-        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
-            return problem.value(v);
-        };
-        s.eval_gradient = [&problem](const Eigen::Vector<double, N>& v,
-                                     Eigen::Vector<double, N>& grad) {
-            problem.gradient(v, grad);
-        };
-
-        const int n_ineq_cap = m_ineq;
-        s.eval_constraints = [&problem, n_ineq_cap](
-            const Eigen::Vector<double, N>& v,
-            Eigen::VectorXd& ceq, Eigen::VectorXd& cineq)
-        {
-            ceq = Eigen::VectorXd{};
-            cineq.resize(n_ineq_cap);
-            if(n_ineq_cap > 0)
-                problem.constraints(v, cineq);
-        };
-
-        s.eval_jacobian = [&problem, n_ineq_cap](
-            const Eigen::Vector<double, N>& v,
-            Eigen::MatrixXd& Jeq, Eigen::MatrixXd& Jineq)
-        {
-            Jeq = Eigen::MatrixXd{};
-            Jineq.resize(n_ineq_cap, v.size());
-            if(n_ineq_cap > 0)
-                problem.constraint_jacobian(v, Jineq);
-        };
-
         return s;
     }
 
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
@@ -298,9 +263,11 @@ struct mma_policy
         Eigen::Vector<double, N> dx = x_new - s.x;
 
         // Evaluate full step
-        double f_trial = s.eval_value(x_new);
-        Eigen::VectorXd c_eq_trial, c_ineq_trial;
-        s.eval_constraints(x_new, c_eq_trial, c_ineq_trial);
+        double f_trial = s.problem->value(x_new);
+        Eigen::VectorXd c_eq_trial{};
+        Eigen::VectorXd c_ineq_trial(m);
+        if(m > 0)
+            s.problem->constraints(x_new, c_ineq_trial);
         double cv_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
         double merit_trial = f_trial + mu * cv_trial;
 
@@ -308,8 +275,9 @@ struct mma_policy
         {
             double step_alpha = 1.0 / (1 << (bt + 1));
             x_new = s.x + step_alpha * dx;
-            f_trial = s.eval_value(x_new);
-            s.eval_constraints(x_new, c_eq_trial, c_ineq_trial);
+            f_trial = s.problem->value(x_new);
+            if(m > 0)
+                s.problem->constraints(x_new, c_ineq_trial);
             cv_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
             merit_trial = f_trial + mu * cv_trial;
         }
@@ -340,11 +308,11 @@ struct mma_policy
         double step_size = (x_new - s.x).norm();
         s.x = x_new;
         s.f = f_trial;
-        s.eval_gradient(s.x, s.g);
+        s.problem->gradient(s.x, s.g);
         s.c_eq = c_eq_trial;
         s.c_ineq = c_ineq_trial;
-        Eigen::MatrixXd Jeq_dummy;
-        s.eval_jacobian(s.x, Jeq_dummy, s.J_ineq);
+        if(m > 0)
+            s.problem->constraint_jacobian(s.x, s.J_ineq);
 
         // 8. Iteration++
         ++s.iteration;
@@ -363,20 +331,23 @@ struct mma_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
-        s.f = s.eval_value(x0);
-        s.eval_gradient(x0, s.g);
-        s.eval_constraints(x0, s.c_eq, s.c_ineq);
-        Eigen::MatrixXd Jeq_dummy;
-        s.eval_jacobian(x0, Jeq_dummy, s.J_ineq);
+        s.f = s.problem->value(x0);
+        s.problem->gradient(x0, s.g);
+        if(static_cast<int>(s.c_ineq.size()) > 0)
+            s.problem->constraints(x0, s.c_ineq);
+        if(s.J_ineq.rows() > 0)
+            s.problem->constraint_jacobian(x0, s.J_ineq);
         s.iteration = 0;
         s.x_old1 = x0;
         s.x_old2 = x0;
     }
 
-    void reset_clear(state_type& s,
+    template <typename P>
+    void reset_clear(state_type<P>& s,
                      const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
