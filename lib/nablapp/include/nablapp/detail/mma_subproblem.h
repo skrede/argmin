@@ -37,7 +37,7 @@ struct mma_coeffs
 {
     Eigen::Vector<Scalar, N> p0, q0;
     Eigen::Matrix<Scalar, M, N> pi, qi;
-    Eigen::VectorX<Scalar> r0;
+    Eigen::Vector<Scalar, 1> r0;
     Eigen::Vector<Scalar, M> ri;
 };
 
@@ -471,7 +471,7 @@ Eigen::Vector<Scalar, N> mma_dual_solve(
     }
 
     // Dual variables initialized to 1
-    Eigen::VectorX<Scalar> y = Eigen::VectorX<Scalar>::Ones(m);
+    Eigen::Vector<Scalar, M> y = Eigen::Vector<Scalar, M>::Ones(m);
 
     Eigen::Vector<Scalar, N> x_opt(n);
 
@@ -479,8 +479,8 @@ Eigen::Vector<Scalar, N> mma_dual_solve(
     const auto tol = static_cast<Scalar>(opts.dual_tolerance.value_or(1e-9));
     const auto backtrack = static_cast<Scalar>(opts.backtrack_factor.value_or(0.95));
 
-    Eigen::VectorX<Scalar> grad(m);
-    Eigen::MatrixX<Scalar> negH(m, m);
+    Eigen::Vector<Scalar, M> grad(m);
+    Eigen::Matrix<Scalar, M, M> negH(m, m);
 
     for(int iter = 0; iter < max_iter; ++iter)
     {
@@ -588,8 +588,8 @@ Eigen::Vector<Scalar, N> mma_dual_solve(
 
         // Newton ascent: dy = (-H)^{-1} * grad, then y += alpha * dy.
         // This maximizes the concave dual W(y).
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(std::move(negH));
-        Eigen::VectorX<Scalar> dy = ldlt.solve(grad);
+        Eigen::LDLT<Eigen::Matrix<Scalar, M, M>> ldlt(std::move(negH));
+        Eigen::Vector<Scalar, M> dy = ldlt.solve(grad);
 
         // Line search: backtrack to keep y >= 0
         Scalar alpha = Scalar(1);

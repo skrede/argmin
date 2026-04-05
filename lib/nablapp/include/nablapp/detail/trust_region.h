@@ -242,9 +242,9 @@ int check_geometry(const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
 // farthest point.
 //
 // Reference: Powell 2009, Section 4.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
-int select_replacement(const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
-                       const Eigen::VectorX<Scalar>& f_values,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
+int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
+                       const Eigen::Vector<Scalar, P>& f_values,
                        const Eigen::Vector<Scalar, N>& x_new,
                        Scalar f_new,
                        const Eigen::Vector<Scalar, N>& x_k)

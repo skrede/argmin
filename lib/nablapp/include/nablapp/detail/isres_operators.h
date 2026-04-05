@@ -197,27 +197,28 @@ private:
 // First n_eq rows are equality constraints (must be zero).
 // Remaining n_ineq rows are inequality constraints (c >= 0 convention).
 //
-// Returns: VectorXd of violations per individual.
+// Returns: vector of violations per individual.
 // violation = sum(|c_eq|) + sum(max(0, -c_ineq))
 //
 // Reference: N&W eq. 15.24 / 17.44.
-inline Eigen::VectorXd compute_violations(
-    const Eigen::MatrixXd& constraints_matrix,
+template <typename Scalar = double, int M = nablapp::dynamic_dimension, int Lambda = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, Lambda> compute_violations(
+    const Eigen::Matrix<Scalar, M, Lambda>& constraints_matrix,
     int n_eq,
     int n_ineq)
 {
     const int lambda = static_cast<int>(constraints_matrix.cols());
-    Eigen::VectorXd violations(lambda);
+    Eigen::Vector<Scalar, Lambda> violations(lambda);
 
     for(int j = 0; j < lambda; ++j)
     {
-        double v = 0.0;
+        Scalar v = Scalar(0);
 
         for(int i = 0; i < n_eq; ++i)
             v += std::abs(constraints_matrix(i, j));
 
         for(int i = 0; i < n_ineq; ++i)
-            v += std::max(0.0, -constraints_matrix(n_eq + i, j));
+            v += std::max(Scalar(0), -constraints_matrix(n_eq + i, j));
 
         violations[j] = v;
     }

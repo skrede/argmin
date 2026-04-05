@@ -28,10 +28,10 @@ namespace nablapp::detail
 // phi_1(x; sigma) = f + sigma * violation(c_eq, c_ineq).
 //
 // Reference: N&W eq. 15.24, Section 18.5.
-template <typename Scalar>
+template <typename Scalar, int Meq = nablapp::dynamic_dimension, int Mineq = nablapp::dynamic_dimension>
 Scalar l1_merit(Scalar f,
-                const Eigen::VectorX<Scalar>& c_eq,
-                const Eigen::VectorX<Scalar>& c_ineq,
+                const Eigen::Vector<Scalar, Meq>& c_eq,
+                const Eigen::Vector<Scalar, Mineq>& c_ineq,
                 Scalar sigma)
 {
     return f + sigma * constraint_violation(c_eq, c_ineq);
@@ -47,11 +47,11 @@ Scalar l1_merit(Scalar f,
 // constraints, driving them toward feasibility.
 //
 // Reference: N&W eq. 18.36 (directional derivative condition).
-template <typename Scalar>
+template <typename Scalar, int Meq = nablapp::dynamic_dimension, int Mineq = nablapp::dynamic_dimension>
 Scalar l1_merit_directional_derivative(
     Scalar grad_f_dot_p,
-    const Eigen::VectorX<Scalar>& c_eq,
-    const Eigen::VectorX<Scalar>& c_ineq,
+    const Eigen::Vector<Scalar, Meq>& c_eq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq,
     Scalar sigma)
 {
     return grad_f_dot_p - sigma * constraint_violation(c_eq, c_ineq);
@@ -64,9 +64,9 @@ Scalar l1_merit_directional_derivative(
 // sigma (monotone update).
 //
 // Reference: N&W eq. 18.36 (sufficient penalty for descent).
-template <typename Scalar>
+template <typename Scalar, int M = nablapp::dynamic_dimension>
 Scalar update_penalty(Scalar sigma,
-                      const Eigen::VectorX<Scalar>& lambda,
+                      const Eigen::Vector<Scalar, M>& lambda,
                       Scalar delta = Scalar(1e-4))
 {
     if(lambda.size() == 0)

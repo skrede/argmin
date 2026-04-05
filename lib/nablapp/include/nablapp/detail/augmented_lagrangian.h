@@ -32,13 +32,13 @@ namespace nablapp::detail
 //     -(mu/2)*lambda_ineq[i]^2
 //
 // Note: inequality convention is c_ineq >= 0.
-template <typename Scalar>
+template <typename Scalar, int Meq = nablapp::dynamic_dimension, int Mineq = nablapp::dynamic_dimension>
 Scalar augmented_lagrangian_value(
     Scalar f,
-    const Eigen::VectorX<Scalar>& c_eq,
-    const Eigen::VectorX<Scalar>& c_ineq,
-    const Eigen::VectorX<Scalar>& lambda_eq,
-    const Eigen::VectorX<Scalar>& lambda_ineq,
+    const Eigen::Vector<Scalar, Meq>& c_eq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq,
+    const Eigen::Vector<Scalar, Meq>& lambda_eq,
+    const Eigen::Vector<Scalar, Mineq>& lambda_ineq,
     Scalar mu)
 {
     Scalar val = f;
@@ -70,15 +70,16 @@ Scalar augmented_lagrangian_value(
 //   if effective > 0: g -= effective * J_ineq.row(i)^T
 //
 // J_eq and J_ineq are the constraint Jacobians (m_eq x n) and (m_ineq x n).
-template <typename Scalar, int N = nablapp::dynamic_dimension>
+template <typename Scalar, int N = nablapp::dynamic_dimension,
+          int Meq = nablapp::dynamic_dimension, int Mineq = nablapp::dynamic_dimension>
 Eigen::Vector<Scalar, N> augmented_lagrangian_gradient(
     const Eigen::Vector<Scalar, N>& grad_f,
-    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& J_eq,
-    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& J_ineq,
-    const Eigen::VectorX<Scalar>& c_eq,
-    const Eigen::VectorX<Scalar>& c_ineq,
-    const Eigen::VectorX<Scalar>& lambda_eq,
-    const Eigen::VectorX<Scalar>& lambda_ineq,
+    const Eigen::Matrix<Scalar, Meq, N>& J_eq,
+    const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
+    const Eigen::Vector<Scalar, Meq>& c_eq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq,
+    const Eigen::Vector<Scalar, Meq>& lambda_eq,
+    const Eigen::Vector<Scalar, Mineq>& lambda_ineq,
     Scalar mu)
 {
     Eigen::Vector<Scalar, N> g = grad_f;
@@ -112,12 +113,12 @@ Eigen::Vector<Scalar, N> augmented_lagrangian_gradient(
 // Conn, Gould & Toint, "A globally convergent augmented Lagrangian
 // algorithm for optimization with general constraints and simple bounds",
 // SIAM J. Numer. Anal. 28(2), 1991, Section 3.
-template <typename Scalar>
+template <typename Scalar, int Meq = nablapp::dynamic_dimension, int Mineq = nablapp::dynamic_dimension>
 void update_multipliers(
-    Eigen::VectorX<Scalar>& lambda_eq,
-    Eigen::VectorX<Scalar>& lambda_ineq,
-    const Eigen::VectorX<Scalar>& c_eq,
-    const Eigen::VectorX<Scalar>& c_ineq,
+    Eigen::Vector<Scalar, Meq>& lambda_eq,
+    Eigen::Vector<Scalar, Mineq>& lambda_ineq,
+    const Eigen::Vector<Scalar, Meq>& c_eq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq,
     Scalar mu,
     Scalar lambda_max = Scalar(1e8))
 {

@@ -109,10 +109,10 @@ public:
 
         Eigen::LDLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
                                   0, 2 * MaxHistory, 2 * MaxHistory>> ldlt(M_active);
-        Eigen::VectorX<Scalar> Wv_active(2 * k);
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1> Wv_active(2 * k);
         Wv_active.head(k) = Wv.head(k);
         Wv_active.tail(k) = Wv.segment(MaxHistory, k);
-        Eigen::VectorX<Scalar> z = ldlt.solve(Wv_active);
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1> z = ldlt.solve(Wv_active);
 
         // B*v = theta*v - W*z
         Eigen::Vector<Scalar, N> Wz = (theta_ * (S * z.head(k)) + Y * z.tail(k)).eval();
@@ -125,17 +125,19 @@ public:
     //
     // LDLT stays dynamic because free-variable count varies per call.
     // Reference: N&W Section 16.6 (subspace minimization).
-    Eigen::MatrixX<Scalar> reduced_hessian(const std::vector<int>& free_indices) const
+    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> reduced_hessian(
+        const std::vector<int>& free_indices) const
     {
+        using dyn_matrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
         const int nf = static_cast<int>(free_indices.size());
-        if(nf == 0) return Eigen::MatrixX<Scalar>{};
+        if(nf == 0) return dyn_matrix{};
 
         if(count_ == 0)
-            return (theta_ * Eigen::MatrixX<Scalar>::Identity(nf, nf)).eval();
+            return (theta_ * dyn_matrix::Identity(nf, nf)).eval();
 
         const int k = count_;
 
-        Eigen::MatrixX<Scalar> WF(nf, 2 * k);
+        dyn_matrix WF(nf, 2 * k);
         for(int j = 0; j < nf; ++j)
         {
             int idx = free_indices[j];
@@ -151,11 +153,11 @@ public:
         M_active.block(k, 0, k, k) = middle_.block(MaxHistory, 0, k, k);
         M_active.block(k, k, k, k) = middle_.block(MaxHistory, MaxHistory, k, k);
 
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(M_active);
-        Eigen::MatrixX<Scalar> MiWFt = ldlt.solve(WF.transpose());
+        Eigen::LDLT<dyn_matrix> ldlt(M_active);
+        dyn_matrix MiWFt = ldlt.solve(WF.transpose());
 
-        Eigen::MatrixX<Scalar> BFF = theta_ * Eigen::MatrixX<Scalar>::Identity(nf, nf)
-                                   - WF * MiWFt;
+        dyn_matrix BFF = theta_ * dyn_matrix::Identity(nf, nf)
+                       - WF * MiWFt;
         return BFF;
     }
 

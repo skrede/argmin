@@ -30,11 +30,11 @@ namespace nablapp::detail
 {
 
 // Result of building linear models from simplex interpolation.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 struct cobyla_linear_models
 {
     Eigen::Vector<Scalar, N> objective_gradient;
-    Eigen::MatrixX<Scalar> constraint_gradients;  // m_total x n
+    Eigen::Matrix<Scalar, M, N> constraint_gradients;
 };
 
 // Build initial simplex from x0 by perturbing each coordinate by rho.
@@ -78,7 +78,7 @@ Eigen::Matrix<Scalar, N, Eigen::Dynamic> build_simplex(
 //
 // Reference: Powell 1994, Section 3 (linear interpolation).
 
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 class cobyla_simplex_solver
 {
 public:
@@ -99,10 +99,11 @@ public:
     // Build linear models of objective and constraints by interpolation.
     //
     // Reference: Powell 1994, Section 3 (linear interpolation).
-    const cobyla_linear_models<Scalar, N>& build_models(
-        const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
-        const Eigen::VectorX<Scalar>& f_values,
-        const Eigen::MatrixX<Scalar>& c_values,
+    template <int P = nablapp::dynamic_dimension>
+    const cobyla_linear_models<Scalar, N, M>& build_models(
+        const Eigen::Matrix<Scalar, N, P>& simplex,
+        const Eigen::Vector<Scalar, P>& f_values,
+        const Eigen::Matrix<Scalar, M, P>& c_values,
         int best_idx)
     {
         Eigen::Vector<Scalar, N> x_best = simplex.col(best_idx);
@@ -128,7 +129,7 @@ public:
         {
             for(int j = 0; j < m_; ++j)
                 models_.constraint_gradients.row(j) = lu.solve(
-                    Eigen::VectorX<Scalar>(dc_.row(j).transpose())).transpose();
+                    Eigen::Vector<Scalar, N>(dc_.row(j).transpose())).transpose();
         }
 
         return models_;
@@ -188,39 +189,41 @@ private:
     int m_{0};
     Eigen::Matrix<Scalar, N, N> D_;
     Eigen::Vector<Scalar, N> df_;
-    Eigen::MatrixX<Scalar> dc_;
-    cobyla_linear_models<Scalar, N> models_;
+    Eigen::Matrix<Scalar, M, N> dc_;
+    cobyla_linear_models<Scalar, N, M> models_;
     std::vector<int> vertex_map_;
 };
 
 // Backward-compatible free function: build linear models.
 //
 // Reference: Powell 1994, Section 3 (linear interpolation).
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
-cobyla_linear_models<Scalar, N> build_linear_models(
-    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
-    const Eigen::VectorX<Scalar>& f_values,
-    const Eigen::MatrixX<Scalar>& c_values,
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension,
+          int P = nablapp::dynamic_dimension>
+cobyla_linear_models<Scalar, N, M> build_linear_models(
+    const Eigen::Matrix<Scalar, N, P>& simplex,
+    const Eigen::Vector<Scalar, P>& f_values,
+    const Eigen::Matrix<Scalar, M, P>& c_values,
     int best_idx)
 {
     const int n = static_cast<int>(simplex.rows());
     const int m = static_cast<int>(c_values.rows());
-    cobyla_simplex_solver<Scalar, N> solver(n, m);
+    cobyla_simplex_solver<Scalar, N, M> solver(n, m);
     return solver.build_models(simplex, f_values, c_values, best_idx);
 }
 
 // Replace vertex k in the simplex with a new point.
 //
 // Reference: Powell 1994, Section 4 (vertex replacement).
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension,
+          int P = nablapp::dynamic_dimension>
 void replace_vertex(
-    Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
-    Eigen::VectorX<Scalar>& f_values,
-    Eigen::MatrixX<Scalar>& c_values,
+    Eigen::Matrix<Scalar, N, P>& simplex,
+    Eigen::Vector<Scalar, P>& f_values,
+    Eigen::Matrix<Scalar, M, P>& c_values,
     int k,
     const Eigen::Vector<Scalar, N>& x_new,
     Scalar f_new,
-    const Eigen::VectorX<Scalar>& c_new)
+    const Eigen::Vector<Scalar, M>& c_new)
 {
     simplex.col(k) = x_new;
     f_values[k] = f_new;
@@ -235,10 +238,10 @@ void replace_vertex(
 // determinant of the interpolation matrix.
 //
 // Reference: Powell 1994, Section 4.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
 int select_replacement_vertex(
-    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
-    const Eigen::VectorX<Scalar>& f_values,
+    const Eigen::Matrix<Scalar, N, P>& simplex,
+    const Eigen::Vector<Scalar, P>& f_values,
     int best_idx,
     const Eigen::Vector<Scalar, N>& x_new)
 {
@@ -265,9 +268,9 @@ int select_replacement_vertex(
 // Backward-compatible free function: check simplex geometry.
 //
 // Reference: Powell 1994, Section 5 (geometry maintenance).
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
 int check_simplex_geometry(
-    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& simplex,
+    const Eigen::Matrix<Scalar, N, P>& simplex,
     int best_idx,
     Scalar rho)
 {

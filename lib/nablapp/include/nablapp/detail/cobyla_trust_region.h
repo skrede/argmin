@@ -51,10 +51,10 @@ Eigen::Vector<Scalar, N> clip_to_trust_and_bounds(
 //
 // For inequality constraints: violation if g_j^T d + offset_j < 0.
 // For equality constraints (indices [0, n_eq)): both directions.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 Scalar linearised_violation(
-    const Eigen::MatrixX<Scalar>& constraint_gradients,
-    const Eigen::VectorX<Scalar>& constraint_offsets,
+    const Eigen::Matrix<Scalar, M, N>& constraint_gradients,
+    const Eigen::Vector<Scalar, M>& constraint_offsets,
     int n_eq,
     const Eigen::Vector<Scalar, N>& d)
 {
@@ -80,9 +80,14 @@ Scalar linearised_violation(
 //
 // Reference: Powell 1994, Section 3 (trust-region subproblem).
 
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 class cobyla_trust_region_solver
 {
+    // M_expanded: M constraints + up to M equality duplications (worst case all eq).
+    // When M is compile-time, use 2*M as max bound; when dynamic, stay dynamic.
+    static constexpr int Mexp = (M == nablapp::dynamic_dimension)
+        ? nablapp::dynamic_dimension : 2 * M;
+
 public:
     explicit cobyla_trust_region_solver(int n, int m_total, int n_eq)
         : n_{n}
@@ -114,8 +119,8 @@ public:
     // Reference: Powell 1994, Section 3 (trust-region subproblem).
     Eigen::Vector<Scalar, N> solve(
         const Eigen::Vector<Scalar, N>& obj_gradient,
-        const Eigen::MatrixX<Scalar>& constraint_gradients,
-        const Eigen::VectorX<Scalar>& constraint_offsets,
+        const Eigen::Matrix<Scalar, M, N>& constraint_gradients,
+        const Eigen::Vector<Scalar, M>& constraint_offsets,
         int n_eq,
         Scalar rho,
         const Eigen::Vector<Scalar, N>& lower,
@@ -186,8 +191,8 @@ public:
 private:
     int n_{0};
     int m_expanded_{0};
-    Eigen::MatrixX<Scalar> G_;
-    Eigen::VectorX<Scalar> h_;
+    Eigen::Matrix<Scalar, Mexp, N> G_;
+    Eigen::Vector<Scalar, Mexp> h_;
     Eigen::Vector<Scalar, N> d_;
     Eigen::Vector<Scalar, N> grad_;
     Eigen::Vector<Scalar, N> d_new_;
@@ -196,11 +201,11 @@ private:
 // Backward-compatible free function wrapper.
 //
 // Reference: Powell 1994, Section 3 (trust-region subproblem).
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 Eigen::Vector<Scalar, N> solve_linear_subproblem(
     const Eigen::Vector<Scalar, N>& obj_gradient,
-    const Eigen::MatrixX<Scalar>& constraint_gradients,
-    const Eigen::VectorX<Scalar>& constraint_offsets,
+    const Eigen::Matrix<Scalar, M, N>& constraint_gradients,
+    const Eigen::Vector<Scalar, M>& constraint_offsets,
     int n_eq,
     Scalar rho,
     const Eigen::Vector<Scalar, N>& lower,
@@ -209,7 +214,7 @@ Eigen::Vector<Scalar, N> solve_linear_subproblem(
 {
     const int n = static_cast<int>(obj_gradient.size());
     const int m = static_cast<int>(constraint_offsets.size());
-    cobyla_trust_region_solver<Scalar, N> solver(n, m, n_eq);
+    cobyla_trust_region_solver<Scalar, N, M> solver(n, m, n_eq);
     return solver.solve(obj_gradient, constraint_gradients, constraint_offsets,
                         n_eq, rho, lower, upper, x_current);
 }

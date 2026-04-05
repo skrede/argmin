@@ -11,6 +11,8 @@
 // Reference: Runarsson & Yao (2005), "Search Biases in Constrained
 //            Evolutionary Optimization", IEEE Trans. SMC-C, eq. 2.
 
+#include "nablapp/types.h"
+
 #include <Eigen/Core>
 
 #include <cstdint>
@@ -31,11 +33,11 @@ namespace nablapp::detail
 // rng: random number generator
 //
 // Reference: Runarsson & Yao (2005), Algorithm 1, eq. 2.
-template <typename Rng>
+template <typename Scalar = double, int Lambda = nablapp::dynamic_dimension, typename Rng>
 void stochastic_rank(std::vector<std::uint32_t>& indices,
-                     const Eigen::VectorXd& objectives,
-                     const Eigen::VectorXd& violations,
-                     double pf,
+                     const Eigen::Vector<Scalar, Lambda>& objectives,
+                     const Eigen::Vector<Scalar, Lambda>& violations,
+                     Scalar pf,
                      Rng& rng)
 {
     const auto n = indices.size();

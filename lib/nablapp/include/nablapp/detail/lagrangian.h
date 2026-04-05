@@ -28,11 +28,11 @@ namespace nablapp::detail
 // grad_x L = grad_f - A^T lambda.
 //
 // Reference: N&W eq. 18.2-18.3.
-template <typename Scalar, int N = nablapp::dynamic_dimension>
+template <typename Scalar, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 Eigen::Vector<Scalar, N> lagrangian_gradient(
     const Eigen::Vector<Scalar, N>& grad_f,
-    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A,
-    const Eigen::VectorX<Scalar>& lambda)
+    const Eigen::Matrix<Scalar, M, N>& A,
+    const Eigen::Vector<Scalar, M>& lambda)
 {
     if(A.rows() == 0)
         return grad_f;
@@ -46,10 +46,10 @@ Eigen::Vector<Scalar, N> lagrangian_gradient(
 // contribute their negative part.
 //
 // Reference: N&W eq. 15.24 / 17.44 (violation part).
-template <typename Scalar>
+template <typename Scalar, int Meq = nablapp::dynamic_dimension, int Mineq = nablapp::dynamic_dimension>
 Scalar constraint_violation(
-    const Eigen::VectorX<Scalar>& c_eq,
-    const Eigen::VectorX<Scalar>& c_ineq)
+    const Eigen::Vector<Scalar, Meq>& c_eq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq)
 {
     Scalar v = Scalar(0);
     if(c_eq.size() > 0)
@@ -66,13 +66,13 @@ Scalar constraint_violation(
 // Uses ColPivHouseholderQR for numerical robustness.
 //
 // Reference: N&W eq. 18.15.
-template <typename Scalar, int N = nablapp::dynamic_dimension>
-Eigen::VectorX<Scalar> estimate_multipliers(
+template <typename Scalar, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, M> estimate_multipliers(
     const Eigen::Vector<Scalar, N>& grad_f,
-    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A)
+    const Eigen::Matrix<Scalar, M, N>& A)
 {
     if(A.rows() == 0)
-        return Eigen::VectorX<Scalar>{};
+        return Eigen::Vector<Scalar, M>{};
 
     // Solve A^T lambda = grad_f in the least-squares sense.
     auto qr = A.transpose().colPivHouseholderQr();

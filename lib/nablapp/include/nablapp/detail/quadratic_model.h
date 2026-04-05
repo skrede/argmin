@@ -40,10 +40,10 @@ struct quadratic_model
 // ||coefficients||_2, effectively minimizing ||H||_F among all interpolants.
 //
 // Reference: Powell 2009, Section 2.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
 quadratic_model<Scalar, N> build_model(
-    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
-    const Eigen::VectorX<Scalar>& f_values,
+    const Eigen::Matrix<Scalar, N, P>& Y,
+    const Eigen::Vector<Scalar, P>& f_values,
     const Eigen::Vector<Scalar, N>& x_base)
 {
     const int n = Y.rows();
@@ -52,9 +52,13 @@ quadratic_model<Scalar, N> build_model(
     // Number of polynomial basis terms: 1 + n + n*(n+1)/2
     const int p = 1 + n + n * (n + 1) / 2;
 
-    // Build the Vandermonde-like matrix Phi (m x p)
-    // Columns: [1 | s | vech(s*s^T)] where s = y_i - x_base
-    Eigen::MatrixX<Scalar> Phi(m, p);
+    // Phi is (m x p) where both m and p are derived quantities.
+    // When N is compile-time, p = 1 + N + N*(N+1)/2 is also compile-time,
+    // but m = P (number of interpolation points) varies. Use dynamic.
+    static constexpr int Pcoeff = (N == nablapp::dynamic_dimension)
+        ? nablapp::dynamic_dimension
+        : 1 + N + N * (N + 1) / 2;
+    Eigen::Matrix<Scalar, P, Pcoeff> Phi(m, p);
 
     for(int i = 0; i < m; ++i)
     {
@@ -83,7 +87,7 @@ quadratic_model<Scalar, N> build_model(
     // Solve min ||theta||_2 s.t. Phi * theta = f_values via SVD
     auto svd = Phi.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
     svd.setThreshold(Scalar(1e-12));
-    Eigen::VectorX<Scalar> theta = svd.solve(f_values);
+    Eigen::Vector<Scalar, Pcoeff> theta = svd.solve(f_values);
 
     // Extract model coefficients from theta
     quadratic_model<Scalar, N> model;
@@ -114,11 +118,11 @@ quadratic_model<Scalar, N> build_model(
 // adds complexity not justified for n < 20.
 //
 // Reference: Powell 2009, Section 4.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
 void update_model(
     quadratic_model<Scalar, N>& model,
-    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
-    const Eigen::VectorX<Scalar>& f_values,
+    const Eigen::Matrix<Scalar, N, P>& Y,
+    const Eigen::Vector<Scalar, P>& f_values,
     [[maybe_unused]] int replaced_index,
     const Eigen::Vector<Scalar, N>& x_base)
 {

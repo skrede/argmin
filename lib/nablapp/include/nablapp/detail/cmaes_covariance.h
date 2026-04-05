@@ -60,15 +60,15 @@ void eigendecompose(const Eigen::Matrix<Scalar, N, N>& C,
 //
 // deltas: n x lambda matrix where column i = (x_{i:lambda} - mean_old) / sigma.
 // Reference: K&W Eq. 8.28-8.31.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int Lambda = nablapp::dynamic_dimension>
 void update_covariance(Eigen::Matrix<Scalar, N, N>& C,
                        const Eigen::Vector<Scalar, N>& p_c,
                        Scalar h_sigma,
                        Scalar c_1,
                        Scalar c_mu,
                        Scalar c_c,
-                       const Eigen::VectorX<Scalar>& weights,
-                       const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& deltas,
+                       const Eigen::Vector<Scalar, Lambda>& weights,
+                       const Eigen::Matrix<Scalar, N, Lambda>& deltas,
                        const Eigen::Matrix<Scalar, N, N>& B,
                        const Eigen::Vector<Scalar, N>& D,
                        int mu)

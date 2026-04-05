@@ -21,12 +21,12 @@
 namespace nablapp::detail
 {
 
-template <typename Scalar = double>
+template <typename Scalar = double, int Lambda = nablapp::dynamic_dimension>
 struct cmaes_params
 {
     int lambda;
     int mu;
-    Eigen::VectorX<Scalar> weights;
+    Eigen::Vector<Scalar, Lambda> weights;
     Scalar mu_eff;
     Scalar c_sigma;
     Scalar d_sigma;
@@ -39,10 +39,10 @@ struct cmaes_params
 // Compute CMA-ES strategy parameters from dimension n.
 // If lambda_override > 0, use that population size; otherwise auto-compute.
 // Reference: K&W Eq. 8.19, 8.22, 8.25-8.27, 8.33-8.35; Hansen tutorial Sec. 3.
-template <typename Scalar = double>
-cmaes_params<Scalar> compute_constants(int n, int lambda_override = 0)
+template <typename Scalar = double, int Lambda = nablapp::dynamic_dimension>
+cmaes_params<Scalar, Lambda> compute_constants(int n, int lambda_override = 0)
 {
-    cmaes_params<Scalar> p{};
+    cmaes_params<Scalar, Lambda> p{};
 
     // Population size: K&W Eq. 8.19
     p.lambda = (lambda_override > 0)
