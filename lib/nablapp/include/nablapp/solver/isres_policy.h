@@ -27,7 +27,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <optional>
 #include <random>
@@ -53,8 +52,10 @@ struct isres_policy
         std::optional<std::uint64_t> seed{};
     };
 
+    template <typename P = void>
     struct state_type
     {
+        const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         double objective_value{};
 
@@ -82,15 +83,12 @@ struct isres_policy
         detail::es_learning_rates rates{};
 
         std::optional<detail::isres_operator_workspace<double, N>> mutation_workspace;
-
-        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&, Eigen::VectorXd&)> eval_constraints;
     };
 
     options_type options{};
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
@@ -100,12 +98,13 @@ struct isres_policy
 
     template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
 
         // Store bounds
         s.lower = problem.lower_bounds();
@@ -115,21 +114,6 @@ struct isres_policy
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
         const int n_c = s.n_eq + s.n_ineq;
-
-        // Store closures
-        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
-            return problem.value(v);
-        };
-
-        s.eval_constraints = [&problem](const Eigen::Vector<double, N>& v,
-                                        Eigen::VectorXd& c_eq, Eigen::VectorXd& c_ineq) {
-            int ne = problem.num_equality();
-            int ni = problem.num_inequality();
-            Eigen::VectorXd c(ne + ni);
-            problem.constraints(v, c);
-            c_eq = c.head(ne);
-            c_ineq = c.tail(ni);
-        };
 
         // Population parameters
         s.lambda = static_cast<int>(
@@ -164,12 +148,12 @@ struct isres_policy
         for(int j = 0; j < s.lambda; ++j)
         {
             Eigen::Vector<double, N> xi = s.population.col(j);
-            s.fitnesses[j] = s.eval_value(xi);
+            s.fitnesses[j] = s.problem->value(xi);
 
             if(n_c > 0)
             {
                 Eigen::VectorXd c(n_c);
-                problem.constraints(xi, c);
+                s.problem->constraints(xi, c);
                 all_constraints.col(j) = c;
             }
         }
@@ -206,12 +190,18 @@ struct isres_policy
         s.c_eq.resize(s.n_eq);
         s.c_ineq.resize(s.n_ineq);
         if(n_c > 0)
-            s.eval_constraints(s.x, s.c_eq, s.c_ineq);
+        {
+            Eigen::VectorXd c(n_c);
+            s.problem->constraints(s.x, c);
+            s.c_eq = c.head(s.n_eq);
+            s.c_ineq = c.tail(s.n_ineq);
+        }
 
         return s;
     }
 
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         const int n = s.x.size();
         const int n_c = s.n_eq + s.n_ineq;
@@ -243,15 +233,13 @@ struct isres_policy
         for(int j = 0; j < s.lambda; ++j)
         {
             Eigen::Vector<double, N> xi = offspring.col(j);
-            fitnesses[j] = s.eval_value(xi);
+            fitnesses[j] = s.problem->value(xi);
 
             if(n_c > 0)
             {
-                Eigen::VectorXd c_eq_j(s.n_eq);
-                Eigen::VectorXd c_ineq_j(s.n_ineq);
-                s.eval_constraints(xi, c_eq_j, c_ineq_j);
-                all_constraints.col(j).head(s.n_eq) = c_eq_j;
-                all_constraints.col(j).tail(s.n_ineq) = c_ineq_j;
+                Eigen::VectorXd c(n_c);
+                s.problem->constraints(xi, c);
+                all_constraints.col(j) = c;
             }
         }
 
@@ -297,7 +285,12 @@ struct isres_policy
             s.x = offspring.col(best_ranked);
 
             if(n_c > 0)
-                s.eval_constraints(s.x, s.c_eq, s.c_ineq);
+            {
+                Eigen::VectorXd c(n_c);
+                s.problem->constraints(s.x, c);
+                s.c_eq = c.head(s.n_eq);
+                s.c_ineq = c.tail(s.n_ineq);
+            }
         }
         else if(s.best_ever_value == std::numeric_limits<double>::infinity())
         {
@@ -309,7 +302,12 @@ struct isres_policy
                 s.x = offspring.col(best_ranked);
 
                 if(n_c > 0)
-                    s.eval_constraints(s.x, s.c_eq, s.c_ineq);
+                {
+                    Eigen::VectorXd c(n_c);
+                    s.problem->constraints(s.x, c);
+                    s.c_eq = c.head(s.n_eq);
+                    s.c_ineq = c.tail(s.n_ineq);
+                }
             }
         }
 
@@ -331,7 +329,8 @@ struct isres_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
 
@@ -341,15 +340,22 @@ struct isres_policy
         s.sigmas = detail::initialize_sigmas(n, s.lambda, s.lower, s.upper);
 
         s.x = x0;
-        s.objective_value = s.eval_value(x0);
+        s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
         s.generation = 0;
 
         if(s.n_eq + s.n_ineq > 0)
-            s.eval_constraints(s.x, s.c_eq, s.c_ineq);
+        {
+            const int n_c = s.n_eq + s.n_ineq;
+            Eigen::VectorXd c(n_c);
+            s.problem->constraints(s.x, c);
+            s.c_eq = c.head(s.n_eq);
+            s.c_ineq = c.tail(s.n_ineq);
+        }
     }
 
-    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
     }

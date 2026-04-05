@@ -197,7 +197,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>, hs071<>::problem_dimension> solver{
+        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -218,7 +218,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>, hs076<>::problem_dimension> solver{
+        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -239,7 +239,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs024<>::problem_dimension>>, hs024<>::problem_dimension> solver{
+        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs024<>::problem_dimension>>{},
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -260,7 +260,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_objective_threshold(1e-15);
         opts.set_feasibility_threshold(1e-4);
 
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>, hs035<>::problem_dimension> solver{
+        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -436,7 +436,7 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<cobyla_policy> solver{problem, x0, opts};
+        basic_solver solver{cobyla_policy{}, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(-1.0).margin(1.0));
@@ -453,7 +453,7 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<cobyla_policy> solver{problem, x0, opts};
+        basic_solver solver{cobyla_policy{}, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(0.5));
@@ -470,7 +470,7 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<cobyla_policy> solver{problem, x0, opts};
+        basic_solver solver{cobyla_policy{}, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1.0));
@@ -497,7 +497,7 @@ TEST_CASE("isres on hock-schittkowski problems", "[hs][isres]")
         isres_policy<hs024<>::problem_dimension> policy;
         policy.options.seed = 42u;
 
-        basic_solver<isres_policy<hs024<>::problem_dimension>> solver{policy, problem, x0, opts};
+        basic_solver solver{policy, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(-1.0).margin(1.0));
@@ -516,7 +516,7 @@ TEST_CASE("isres on hock-schittkowski problems", "[hs][isres]")
         isres_policy<hs035<>::problem_dimension> policy;
         policy.options.seed = 42u;
 
-        basic_solver<isres_policy<hs035<>::problem_dimension>> solver{policy, problem, x0, opts};
+        basic_solver solver{policy, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1.0));

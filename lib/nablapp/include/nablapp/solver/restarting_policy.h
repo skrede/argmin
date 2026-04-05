@@ -22,7 +22,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <optional>
 #include <type_traits>
@@ -68,13 +67,14 @@ struct restarting_policy
     {
         detail::resolve_inner_state_t<Inner, P> inner;
         decltype(std::declval<detail::resolve_inner_state_t<Inner, P>>().x) x{};
+        const P* problem{nullptr};
+        decltype(x) x0_saved{};
         std::uint32_t stagnation_count{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
         bool restart_pending{false};
         std::uint32_t restart_count{0};
         std::uint32_t dimension{0};
         std::uint32_t initial_lambda{0};
-        std::function<void(state_type&)> reinit;
 
         Eigen::VectorXd c_eq{};
         Eigen::VectorXd c_ineq{};
@@ -91,6 +91,8 @@ struct restarting_policy
         inner_policy_.options = options.inner;
 
         state_type<Problem> s;
+        s.problem = &problem;
+        s.x0_saved = x0;
         s.inner = inner_policy_.init(problem, x0, opts);
         s.best_ever_value = s.inner.objective_value;
         s.stagnation_count = 0;
@@ -106,25 +108,6 @@ struct restarting_policy
         else
             s.initial_lambda = static_cast<std::uint32_t>(
                 4 + 3 * std::log(static_cast<double>(s.dimension)));
-
-        // Build reinit closure
-        s.reinit = [&self_ref = *this, &problem, x0, opts](state_type<Problem>& st) {
-            ++st.restart_count;
-
-            // IPOP: population = initial_lambda * 2^restart_count
-            double multiplier = self_ref.options.population_multiplier.value_or(2.0);
-            auto new_pop = static_cast<std::uint32_t>(
-                st.initial_lambda * std::pow(multiplier, st.restart_count));
-
-            // Update inner population size via the appropriate field
-            if constexpr(requires { self_ref.inner_policy_.options.population_size; })
-                self_ref.inner_policy_.options.population_size = new_pop;
-            else if constexpr(requires { self_ref.inner_policy_.options.lambda; })
-                self_ref.inner_policy_.options.lambda = new_pop;
-
-            self_ref.inner_policy_.reset_clear(st.inner, x0);
-            sync_from_inner(st);
-        };
 
         sync_from_inner(s);
         return s;
@@ -145,7 +128,7 @@ struct restarting_policy
     {
         if(s.restart_pending)
         {
-            s.reinit(s);
+            reinit(s);
             s.restart_pending = false;
             s.stagnation_count = 0;
 
@@ -205,6 +188,26 @@ struct restarting_policy
     }
 
 private:
+
+    template <typename P>
+    void reinit(state_type<P>& s)
+    {
+        ++s.restart_count;
+
+        // IPOP: population = initial_lambda * 2^restart_count
+        double multiplier = options.population_multiplier.value_or(2.0);
+        auto new_pop = static_cast<std::uint32_t>(
+            s.initial_lambda * std::pow(multiplier, s.restart_count));
+
+        // Update inner population size via the appropriate field
+        if constexpr(requires { inner_policy_.options.population_size; })
+            inner_policy_.options.population_size = new_pop;
+        else if constexpr(requires { inner_policy_.options.lambda; })
+            inner_policy_.options.lambda = new_pop;
+
+        inner_policy_.reset_clear(s.inner, s.x0_saved);
+        sync_from_inner(s);
+    }
 
     template <typename P>
     static void sync_from_inner(state_type<P>& s)

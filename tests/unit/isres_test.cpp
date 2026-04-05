@@ -203,7 +203,7 @@ TEST_CASE("isres_policy: basic_solver_group compatibility", "[isres][solver_grou
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver_group<round_robin_schedule, dynamic_dimension, void, isres_policy<>> group{
+    basic_solver_group<round_robin_schedule, dynamic_dimension, simple_constrained, isres_policy<>> group{
         problem, x0, opts};
     auto result = group.solve();
 

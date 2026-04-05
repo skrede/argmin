@@ -27,7 +27,7 @@ TEST_CASE("augmented lagrangian converges on HS076", "[augmented_lagrangian]")
     opts.set_step_threshold(1e-15);
     opts.set_feasibility_threshold(1e-4);
 
-    basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>, hs076<>::problem_dimension> solver{
+    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -47,7 +47,7 @@ TEST_CASE("augmented lagrangian converges on HS035", "[augmented_lagrangian]")
     opts.set_step_threshold(1e-15);
     opts.set_feasibility_threshold(1e-4);
 
-    basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>, hs035<>::problem_dimension> solver{
+    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -68,7 +68,7 @@ TEST_CASE("augmented lagrangian on HS071 (equality + inequality)",
     opts.set_step_threshold(1e-15);
     opts.set_feasibility_threshold(1e-2);
 
-    basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>, hs071<>::problem_dimension> solver{
+    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -92,7 +92,7 @@ TEST_CASE("augmented lagrangian with BOBYQA inner solver",
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver<augmented_lagrangian_policy<bobyqa_policy<hs035<>::problem_dimension>>, hs035<>::problem_dimension> solver{
+    basic_solver solver{augmented_lagrangian_policy<bobyqa_policy<hs035<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -112,7 +112,7 @@ TEST_CASE("augmented lagrangian converges on HS040 (equality only)",
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver<augmented_lagrangian_policy<lbfgsb_policy<>>> solver{
+    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<>>{}, 
         problem, x0, opts};
     auto result = solver.solve();
 
@@ -136,7 +136,7 @@ TEST_CASE("augmented lagrangian step and solve consistency",
 
     SECTION("step returns finite values")
     {
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>, hs035<>::problem_dimension> solver{
+        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
             problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
@@ -149,11 +149,11 @@ TEST_CASE("augmented lagrangian step and solve consistency",
 
     SECTION("solve gives similar result to manual stepping")
     {
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>, hs035<>::problem_dimension> solver1{
+        basic_solver solver1{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
             problem, x0, opts};
         auto result1 = solver1.solve(opts);
 
-        basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>, hs035<>::problem_dimension> solver2{
+        basic_solver solver2{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
             problem, x0, opts};
         step_result<double> last{};
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -181,7 +181,7 @@ TEST_CASE("augmented lagrangian reports actual gradient norm",
     opts.set_step_threshold(1e-15);
     opts.set_feasibility_threshold(1e-4);
 
-    basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>, hs076<>::problem_dimension> solver{
+    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -207,7 +207,7 @@ TEST_CASE("augmented lagrangian convergence on HS076 with constrained_convergenc
     opts.set_step_threshold(1e-12);
     opts.set_feasibility_threshold(1e-4);
 
-    basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>, hs076<>::problem_dimension> solver{
+    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 

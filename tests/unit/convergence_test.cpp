@@ -603,7 +603,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS071")
         {
             hs071 problem;
-            basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>, hs071<>::problem_dimension> solver{
+            basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
                 problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(17.014).margin(0.5));
@@ -613,7 +613,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            basic_solver<augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>, hs076<>::problem_dimension> solver{
+            basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
                 problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(0.2));
@@ -624,7 +624,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            basic_solver<augmented_lagrangian_policy<lbfgsb_policy<rosenbrock_constrained::problem_dimension>>, rosenbrock_constrained::problem_dimension> solver{
+            basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<rosenbrock_constrained::problem_dimension>>{}, 
                 problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));

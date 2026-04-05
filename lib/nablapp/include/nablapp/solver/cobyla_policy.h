@@ -33,7 +33,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <optional>
 
@@ -44,6 +43,9 @@ struct cobyla_policy
 {
     using scalar_type = double;
 
+    template <int M>
+    using rebind = cobyla_policy;
+
     struct options_type
     {
         double initial_trust_radius{0.0};   // 0 means auto (10% of max bound range)
@@ -53,8 +55,10 @@ struct cobyla_policy
 
     options_type options{};
 
+    template <typename P = void>
     struct state_type
     {
+        const P* problem{nullptr};
         Eigen::VectorXd x;
         Eigen::MatrixXd simplex;       // n x (n+1)
         Eigen::VectorXd f_simplex;     // objective at each vertex
@@ -74,14 +78,11 @@ struct cobyla_policy
 
         std::optional<detail::cobyla_simplex_solver<double>> simplex_solver;
         std::optional<detail::cobyla_trust_region_solver<double>> trust_region_solver;
-
-        std::function<double(const Eigen::VectorXd&)> eval_value;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_constraints;
     };
 
     template <typename Problem, typename Convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
-    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
+    state_type<Problem> init(const Problem& problem, const Eigen::VectorXd& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
@@ -90,11 +91,12 @@ struct cobyla_policy
 
     template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
-    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
+    state_type<Problem> init(const Problem& problem, const Eigen::VectorXd& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
 
         s.lower = problem.lower_bounds();
         s.upper = problem.upper_bounds();
@@ -103,14 +105,6 @@ struct cobyla_policy
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
         s.m_total = s.n_eq + s.n_ineq;
-
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
-            return problem.value(v);
-        };
-
-        s.eval_constraints = [&problem](const Eigen::VectorXd& v, Eigen::VectorXd& c) {
-            problem.constraints(v, c);
-        };
 
         // Initial trust radius (same auto logic as BOBYQA)
         double h = options.initial_trust_radius;
@@ -141,11 +135,11 @@ struct cobyla_policy
 
         for(int i = 0; i <= n; ++i)
         {
-            s.f_simplex[i] = s.eval_value(s.simplex.col(i));
+            s.f_simplex[i] = s.problem->value(s.simplex.col(i));
             if(s.m_total > 0)
             {
                 Eigen::VectorXd c(s.m_total);
-                s.eval_constraints(s.simplex.col(i), c);
+                s.problem->constraints(s.simplex.col(i), c);
                 s.c_simplex.col(i) = c;
             }
         }
@@ -162,7 +156,8 @@ struct cobyla_policy
         return s;
     }
 
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
         double old_f = s.objective_value;
@@ -197,11 +192,11 @@ struct cobyla_policy
         // Trial point
         Eigen::VectorXd x_trial = detail::project(
             (s.x + d).eval(), s.lower, s.upper);
-        double f_trial = s.eval_value(x_trial);
+        double f_trial = s.problem->value(x_trial);
 
         Eigen::VectorXd c_trial(s.m_total);
         if(s.m_total > 0)
-            s.eval_constraints(x_trial, c_trial);
+            s.problem->constraints(x_trial, c_trial);
 
         // Predicted vs actual reduction (using merit: f + penalty * violation)
         double penalty = 10.0;
@@ -260,12 +255,14 @@ struct cobyla_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::VectorXd& x0)
     {
         reset_clear(s, x0);
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, const Eigen::VectorXd& x0)
     {
         const int n = static_cast<int>(x0.size());
         s.x = detail::project(x0, s.lower, s.upper);
@@ -275,11 +272,11 @@ struct cobyla_policy
 
         for(int i = 0; i <= n; ++i)
         {
-            s.f_simplex[i] = s.eval_value(s.simplex.col(i));
+            s.f_simplex[i] = s.problem->value(s.simplex.col(i));
             if(s.m_total > 0)
             {
                 Eigen::VectorXd c(s.m_total);
-                s.eval_constraints(s.simplex.col(i), c);
+                s.problem->constraints(s.simplex.col(i), c);
                 s.c_simplex.col(i) = c;
             }
         }
@@ -293,7 +290,8 @@ struct cobyla_policy
 private:
 
     // Find the best simplex vertex, preferring feasible points.
-    static int find_best_point(const state_type& s)
+    template <typename P>
+    static int find_best_point(const state_type<P>& s)
     {
         const int nv = static_cast<int>(s.f_simplex.size());
         int best = 0;
@@ -325,13 +323,15 @@ private:
     }
 
     // Current violation at the best point.
-    static double current_violation(const state_type& s)
+    template <typename P>
+    static double current_violation(const state_type<P>& s)
     {
         return detail::constraint_violation(s.c_eq, s.c_ineq);
     }
 
     // Compute linearised constraint offsets (constraint values at best point).
-    static Eigen::VectorXd compute_constraint_offsets(const state_type& s)
+    template <typename P>
+    static Eigen::VectorXd compute_constraint_offsets(const state_type<P>& s)
     {
         if(s.m_total == 0)
             return Eigen::VectorXd{};
@@ -349,7 +349,8 @@ private:
     }
 
     // Populate c_eq and c_ineq from the best point's constraint values.
-    static void populate_constraint_state(state_type& s)
+    template <typename P>
+    static void populate_constraint_state(state_type<P>& s)
     {
         if(s.m_total > 0)
         {
@@ -365,21 +366,23 @@ private:
     }
 
     // Repair degenerate simplex geometry at vertex geo_idx.
-    static void repair_geometry(state_type& s, int geo_idx)
+    template <typename P>
+    static void repair_geometry(state_type<P>& s, int geo_idx)
     {
         Eigen::VectorXd geo_pt = detail::geometry_improving_point(
             s.simplex, s.best_idx, geo_idx, s.rho, s.lower, s.upper);
-        double geo_f = s.eval_value(geo_pt);
+        double geo_f = s.problem->value(geo_pt);
 
         Eigen::VectorXd geo_c(s.m_total);
         if(s.m_total > 0)
-            s.eval_constraints(geo_pt, geo_c);
+            s.problem->constraints(geo_pt, geo_c);
 
         detail::replace_vertex(s.simplex, s.f_simplex, s.c_simplex,
                                geo_idx, geo_pt, geo_f, geo_c);
     }
 
-    static step_result<double> make_converged_result(const state_type& s, double grad_norm)
+    template <typename P>
+    static step_result<double> make_converged_result(const state_type<P>& s, double grad_norm)
     {
         return step_result<double>{
             .objective_value = s.objective_value,
