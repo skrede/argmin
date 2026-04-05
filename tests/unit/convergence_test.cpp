@@ -345,7 +345,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock problem{};
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>> solver{problem, x0, opts};
+            basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
@@ -354,7 +354,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             booth problem{};
             Eigen::VectorXd x0{{0.0, 0.0}};
-            basic_solver<lbfgsb_policy<booth<>::problem_dimension>> solver{problem, x0, opts};
+            basic_solver<lbfgsb_policy<booth<>::problem_dimension>, booth<>::problem_dimension, booth<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
@@ -363,7 +363,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             beale problem{};
             Eigen::VectorXd x0{{0.0, 0.0}};
-            basic_solver<lbfgsb_policy<beale<>::problem_dimension>> solver{problem, x0, opts};
+            basic_solver<lbfgsb_policy<beale<>::problem_dimension>, beale<>::problem_dimension, beale<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
@@ -384,7 +384,8 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             bounded_rosenbrock problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            basic_solver<bobyqa_policy<bounded_rosenbrock::problem_dimension>> solver{problem, x0, opts};
+            basic_solver<bobyqa_policy<bounded_rosenbrock::problem_dimension>,
+                         bounded_rosenbrock::problem_dimension, bounded_rosenbrock> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
         }
@@ -393,7 +394,8 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             bounded_booth problem;
             Eigen::VectorXd x0{{0.0, 0.0}};
-            basic_solver<bobyqa_policy<bounded_booth::problem_dimension>> solver{problem, x0, opts};
+            basic_solver<bobyqa_policy<bounded_booth::problem_dimension>,
+                         bounded_booth::problem_dimension, bounded_booth> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
         }
@@ -402,7 +404,8 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             bounded_himmelblau problem;
             Eigen::VectorXd x0{{1.0, 1.0}};
-            basic_solver<bobyqa_policy<bounded_himmelblau::problem_dimension>> solver{problem, x0, opts};
+            basic_solver<bobyqa_policy<bounded_himmelblau::problem_dimension>,
+                         bounded_himmelblau::problem_dimension, bounded_himmelblau> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
         }
@@ -791,10 +794,10 @@ TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]"
         constexpr int D = beale<>::problem_dimension;
         Eigen::Vector<double, D> x0_fixed{{0.0, 0.0}};
 
-        basic_solver<lbfgsb_policy<D>> solver1{problem, x0_fixed, opts};
+        basic_solver<lbfgsb_policy<D>, D, beale<>> solver1{problem, x0_fixed, opts};
         auto result = solver1.solve();
 
-        basic_solver<lbfgsb_policy<D>> solver2{problem, x0_fixed, opts};
+        basic_solver<lbfgsb_policy<D>, D, beale<>> solver2{problem, x0_fixed, opts};
         int manual_iters = 0;
         step_result<double> last{};
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -831,10 +834,10 @@ TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]"
         constexpr int D = rosenbrock<>::problem_dimension;
         Eigen::Vector<double, D> x0_fixed{{-1.0, -1.0}};
 
-        basic_solver<lbfgsb_policy<D>> solver1{problem, x0_fixed, opts};
+        basic_solver<lbfgsb_policy<D>, D, rosenbrock<>> solver1{problem, x0_fixed, opts};
         auto result = solver1.solve();
 
-        basic_solver<lbfgsb_policy<D>> solver2{problem, x0_fixed, opts};
+        basic_solver<lbfgsb_policy<D>, D, rosenbrock<>> solver2{problem, x0_fixed, opts};
         int manual_iters = 0;
         step_result<double> last{};
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -869,6 +872,7 @@ TEST_CASE("Solver group: lbfgsb + cmaes racing", "[convergence][solver_group]")
 
     basic_solver_group<round_robin_schedule,
                        nablapp::dynamic_dimension,
+                       rosenbrock<double>,
                        lbfgsb_policy<>,
                        cmaes_policy<>> group(problem, x0, opts);
     auto result = group.step_n(500, opts);

@@ -33,7 +33,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -62,8 +61,10 @@ struct cmaes_policy
         cmaes_options cmaes{};                           // Detection params (Hansen tutorial)
     };
 
+    template <typename P = void>
     struct state_type
     {
+        const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         double objective_value{};
 
@@ -78,7 +79,6 @@ struct cmaes_policy
         detail::cmaes_params<> params;
         std::mt19937 rng;
 
-        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
         bool has_bounds{false};
@@ -93,7 +93,7 @@ struct cmaes_policy
     options_type options{};
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
@@ -102,20 +102,17 @@ struct cmaes_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
 
         s.mean = x0;
         s.sigma = options.initial_sigma.value_or(0.3);
         s.initial_sigma = s.sigma;
-
-        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
-            return problem.value(v);
-        };
 
         if constexpr(bound_constrained<Problem>)
         {
@@ -141,14 +138,15 @@ struct cmaes_policy
         else
             s.rng.seed(std::random_device{}());
 
-        s.objective_value = s.eval_value(x0);
+        s.objective_value = s.problem->value(x0);
         s.x = x0;
         s.best_ever_value = s.objective_value;
 
         return s;
     }
 
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         const int n = s.mean.size();
         const int lambda = s.params.lambda;
@@ -168,7 +166,7 @@ struct cmaes_policy
             if(s.has_bounds)
                 penalty = detail::repair_and_penalize(xi, s.lower, s.upper);
             offspring.col(i) = xi;
-            fitnesses[i] = s.eval_value(xi) + penalty;
+            fitnesses[i] = s.problem->value(xi) + penalty;
         }
 
         // 3. Rank offspring (ascending -- minimization)
@@ -235,7 +233,7 @@ struct cmaes_policy
             s.objective_value = gen_best_f;
             s.x = offspring.col(idx[0]);
         }
-        double mean_f = s.eval_value(s.mean);
+        double mean_f = s.problem->value(s.mean);
         if(mean_f < s.objective_value)
         {
             s.objective_value = mean_f;
@@ -348,12 +346,13 @@ struct cmaes_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
         s.mean = x0;
         s.x = x0;
-        s.objective_value = s.eval_value(x0);
+        s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
         s.p_sigma.setZero();
         s.p_c.setZero();
@@ -365,7 +364,8 @@ struct cmaes_policy
         s.stagnation_count = 0;
     }
 
-    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
     }

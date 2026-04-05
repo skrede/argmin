@@ -25,9 +25,28 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <type_traits>
 
 namespace nablapp
 {
+
+namespace detail
+{
+// Resolve state_type: use Inner::state_type<P> when available, else Inner::state_type.
+// Mirrors basic_solver's resolve_state_t for use in policy decorators.
+template <typename InnerPolicy, typename P>
+consteval auto resolve_inner_state_tag()
+{
+    if constexpr(requires { typename InnerPolicy::template state_type<P>; })
+        return std::type_identity<typename InnerPolicy::template state_type<P>>{};
+    else
+        return std::type_identity<typename InnerPolicy::state_type>{};
+}
+
+template <typename InnerPolicy, typename P>
+using resolve_inner_state_t =
+    typename decltype(resolve_inner_state_tag<InnerPolicy, P>())::type;
+}
 
 template <typename Inner>
 struct restarting_policy
@@ -44,10 +63,11 @@ struct restarting_policy
         std::optional<double> population_multiplier{};
     };
 
+    template <typename P = void>
     struct state_type
     {
-        typename Inner::state_type inner;
-        decltype(std::declval<typename Inner::state_type>().x) x{};
+        detail::resolve_inner_state_t<Inner, P> inner;
+        decltype(std::declval<detail::resolve_inner_state_t<Inner, P>>().x) x{};
         std::uint32_t stagnation_count{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
         bool restart_pending{false};
@@ -64,13 +84,13 @@ struct restarting_policy
     options_type options{};
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const auto& x0,
                     const solver_options<Convergence>& opts)
     {
         inner_policy_.options = options.inner;
 
-        state_type s;
+        state_type<Problem> s;
         s.inner = inner_policy_.init(problem, x0, opts);
         s.best_ever_value = s.inner.objective_value;
         s.stagnation_count = 0;
@@ -88,7 +108,7 @@ struct restarting_policy
                 4 + 3 * std::log(static_cast<double>(s.dimension)));
 
         // Build reinit closure
-        s.reinit = [&self_ref = *this, &problem, x0, opts](state_type& st) {
+        s.reinit = [&self_ref = *this, &problem, x0, opts](state_type<Problem>& st) {
             ++st.restart_count;
 
             // IPOP: population = initial_lambda * 2^restart_count
@@ -111,7 +131,7 @@ struct restarting_policy
     }
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const auto& x0,
                     const solver_options<Convergence>& opts,
                     const options_type& policy_opts)
@@ -120,7 +140,8 @@ struct restarting_policy
         return init(problem, x0, opts);
     }
 
-    step_result<scalar_type> step(state_type& s)
+    template <typename P>
+    step_result<scalar_type> step(state_type<P>& s)
     {
         if(s.restart_pending)
         {
@@ -162,7 +183,8 @@ struct restarting_policy
         return result;
     }
 
-    void reset(state_type& s, const auto& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const auto& x0)
     {
         inner_policy_.reset(s.inner, x0);
         s.stagnation_count = 0;
@@ -171,7 +193,8 @@ struct restarting_policy
         sync_from_inner(s);
     }
 
-    void reset_clear(state_type& s, const auto& x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, const auto& x0)
     {
         inner_policy_.reset_clear(s.inner, x0);
         s.stagnation_count = 0;
@@ -183,7 +206,8 @@ struct restarting_policy
 
 private:
 
-    static void sync_from_inner(state_type& s)
+    template <typename P>
+    static void sync_from_inner(state_type<P>& s)
     {
         s.x = s.inner.x;
         if constexpr(requires { s.inner.c_eq; s.inner.c_ineq; })

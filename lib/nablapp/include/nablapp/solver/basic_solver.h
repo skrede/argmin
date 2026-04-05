@@ -45,6 +45,26 @@ struct policy_options_impl<Policy, Scalar, false>
 template <typename Policy, typename Scalar>
 using policy_options_t = typename detail::policy_options_impl<Policy, Scalar>::type;
 
+namespace detail
+{
+// Resolve state_type: if Policy has template state_type<P>, use it.
+// Otherwise fall back to Policy::state_type (non-template).
+// This enables incremental conversion of policies from std::function
+// to direct problem pointer calls.
+template <typename Policy, typename Problem>
+consteval auto resolve_state_tag()
+{
+    if constexpr(requires { typename Policy::template state_type<Problem>; })
+        return std::type_identity<typename Policy::template state_type<Problem>>{};
+    else
+        return std::type_identity<typename Policy::state_type>{};
+}
+
+template <typename Policy, typename Problem>
+using resolve_state_t =
+    typename decltype(resolve_state_tag<Policy, Problem>())::type;
+}
+
 // Solver wrapper with convergence loop (per CORE-02, D-09, D-10, D-11, D-13, D-14).
 //
 // basic_solver wraps a Policy instance that defines the algorithm logic.
@@ -52,31 +72,35 @@ using policy_options_t = typename detail::policy_options_impl<Policy, Scalar>::t
 // step_n(budget). Convergence checking is performed by basic_solver --
 // the policy does NOT know about convergence.
 //
-// basic_solver<Policy, N> has two template parameters: the policy and
-// the compile-time dimension N. N is deduced from the problem via CTAD
-// deduction guides and is used to rebind the policy to the correct
-// dimension. Users never write N explicitly.
+// basic_solver<Policy, N, Problem> has three template parameters:
+// the policy, the compile-time dimension N, and the Problem type.
+// N and Problem are deduced from the problem via CTAD deduction guides.
+// Users never write N or Problem explicitly — CTAD handles both.
+//
+// For policies with non-template state_type (pre-conversion), Problem
+// defaults to void and is ignored. For policies with template
+// state_type<P>, Problem is used to instantiate the state.
 //
 // Policy contract (deducing this):
 //   - Policy::scalar_type         -- scalar type (double, float)
-//   - Policy::state_type          -- owns problem ref, current iterate, algorithm state
-//   - policy.init(problem, x0, opts) -> state_type
+//   - Policy::state_type          or Policy::template state_type<P>
+//   - policy.init(problem, x0, opts) -> state_type or state_type<Problem>
 //   - policy.step(state)          -> step_result<scalar_type>
 //   - policy.reset(state, x0)     -> void
 //   - policy.reset_clear(state, x0) -> void
 //
 // Reference: K&W Section 4.4 (convergence criteria), N&W Section 3.1.
 
-template <typename Policy, int N = dynamic_dimension>
+template <typename Policy, int N = dynamic_dimension, typename Problem = void>
 class basic_solver
 {
 public:
     using policy_type = Policy;
     using scalar_type = typename Policy::scalar_type;
-    using state_type = typename Policy::state_type;
+    using state_type = detail::resolve_state_t<Policy, Problem>;
 
-    template <typename Problem, typename Convergence = default_convergence>
-    basic_solver(Policy policy, const Problem& problem,
+    template <typename P, typename Convergence = default_convergence>
+    basic_solver(Policy policy, const P& problem,
                  const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts = {})
         : policy_{std::move(policy)}
@@ -92,12 +116,12 @@ public:
     // CTAD converting constructor: accepts an un-rebound policy and discards
     // it, default-constructing the rebound policy. Enables deduction guides
     // that rebind Policy to the problem's compile-time dimension.
-    template <typename OrigPolicy, typename Problem,
+    template <typename OrigPolicy, typename P,
               typename Convergence = default_convergence>
         requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
               && requires { typename OrigPolicy::template rebind<N>; }
               && std::same_as<Policy, typename OrigPolicy::template rebind<N>>
-    basic_solver(OrigPolicy&&, const Problem& problem,
+    basic_solver(OrigPolicy&&, const P& problem,
                  const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts = {})
         : max_iterations_{opts.max_iterations}
@@ -109,8 +133,8 @@ public:
         store_convergence(opts.convergence);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
-    basic_solver(const Problem& problem, const Eigen::VectorX<scalar_type>& x0,
+    template <typename P, typename Convergence = default_convergence>
+    basic_solver(const P& problem, const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts = {})
         : max_iterations_{opts.max_iterations}
         , verbosity_{opts.verbosity}
@@ -121,10 +145,10 @@ public:
         store_convergence(opts.convergence);
     }
 
-    template <typename Problem, typename PolicyOpts, typename Convergence = default_convergence>
+    template <typename P, typename PolicyOpts, typename Convergence = default_convergence>
         requires has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
-    basic_solver(Policy policy, const Problem& problem,
+    basic_solver(Policy policy, const P& problem,
                  const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts,
                  const PolicyOpts& policy_opts)
@@ -139,14 +163,14 @@ public:
     }
 
     // CTAD converting constructor with policy options.
-    template <typename OrigPolicy, typename Problem, typename PolicyOpts,
+    template <typename OrigPolicy, typename P, typename PolicyOpts,
               typename Convergence = default_convergence>
         requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
               && requires { typename OrigPolicy::template rebind<N>; }
               && std::same_as<Policy, typename OrigPolicy::template rebind<N>>
               && has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
-    basic_solver(OrigPolicy&&, const Problem& problem,
+    basic_solver(OrigPolicy&&, const P& problem,
                  const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts,
                  const PolicyOpts& policy_opts)
@@ -159,10 +183,10 @@ public:
         store_convergence(opts.convergence);
     }
 
-    template <typename Problem, typename PolicyOpts, typename Convergence = default_convergence>
+    template <typename P, typename PolicyOpts, typename Convergence = default_convergence>
         requires has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
-    basic_solver(const Problem& problem, const Eigen::VectorX<scalar_type>& x0,
+    basic_solver(const P& problem, const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts,
                  const PolicyOpts& policy_opts)
         : max_iterations_{opts.max_iterations}
@@ -176,9 +200,9 @@ public:
 
     // Overload for policies without options_type: the fourth argument is
     // solver_options<> (the policy_options_t fallback) and is ignored.
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename P, typename Convergence = default_convergence>
         requires (!has_options_type<Policy>)
-    basic_solver(const Problem& problem, const Eigen::VectorX<scalar_type>& x0,
+    basic_solver(const P& problem, const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts,
                  const solver_options<>&)
         : max_iterations_{opts.max_iterations}
@@ -418,40 +442,49 @@ private:
 //
 // These guides extract N from the problem type via problem_dimension_v<Problem>
 // and rebind the policy to that dimension via Policy::template rebind<N>.
-// Users write basic_solver solver(lbfgsb_policy{}, problem, x0, opts)
-// and get basic_solver<lbfgsb_policy<problem_dimension_v<Problem>>,
-//                       problem_dimension_v<Problem>>.
+// Problem is deduced from the constructor argument and stored as the third
+// template parameter for policies with template state_type<P>.
+//
+// The x0 parameter uses Eigen::VectorX<typename Policy::scalar_type> explicitly
+// (not a generic X) to match the constructor signature precisely. GCC 15 CTAD
+// resolution requires this to correctly deduce Problem when state_type is a
+// template -- a generic X parameter causes the guide to be ignored in favour
+// of the implicit deduction guide which defaults Problem to void.
 
 // Policy + Problem + x0 + opts
-template <typename Policy, typename Problem, typename X, typename Convergence>
-basic_solver(Policy, const Problem&, const X&,
+template <typename Policy, typename Problem, typename Convergence>
+basic_solver(Policy, const Problem&,
+             const Eigen::VectorX<typename Policy::scalar_type>&,
              const solver_options<Convergence>&)
     -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
-                    problem_dimension_v<Problem>>;
+                    problem_dimension_v<Problem>,
+                    Problem>;
 
 // Policy + Problem + x0 (no opts)
-template <typename Policy, typename Problem, typename X>
-basic_solver(Policy, const Problem&, const X&)
+template <typename Policy, typename Problem>
+basic_solver(Policy, const Problem&,
+             const Eigen::VectorX<typename Policy::scalar_type>&)
     -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
-                    problem_dimension_v<Problem>>;
+                    problem_dimension_v<Problem>,
+                    Problem>;
 
 // Policy + Problem + x0 + opts + policy_opts
-template <typename Policy, typename Problem, typename X, typename Convergence,
+template <typename Policy, typename Problem, typename Convergence,
           typename PolicyOpts>
-basic_solver(Policy, const Problem&, const X&,
+basic_solver(Policy, const Problem&,
+             const Eigen::VectorX<typename Policy::scalar_type>&,
              const solver_options<Convergence>&, const PolicyOpts&)
     -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
-                    problem_dimension_v<Problem>>;
+                    problem_dimension_v<Problem>,
+                    Problem>;
 
 // D-04: convenience type aliases for common configurations.
-// These are identity aliases -- basic_solver has two template parameters,
-// and the convergence configuration flows through solver_options at call time.
 
-template <typename Policy, int N = dynamic_dimension>
-using realtime_solver = basic_solver<Policy, N>;
+template <typename Policy, int N = dynamic_dimension, typename Problem = void>
+using realtime_solver = basic_solver<Policy, N, Problem>;
 
-template <typename Policy, int N = dynamic_dimension>
-using gradient_solver = basic_solver<Policy, N>;
+template <typename Policy, int N = dynamic_dimension, typename Problem = void>
+using gradient_solver = basic_solver<Policy, N, Problem>;
 
 }
 

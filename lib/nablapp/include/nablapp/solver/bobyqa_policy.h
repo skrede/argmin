@@ -32,7 +32,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <optional>
 
@@ -58,8 +57,10 @@ struct bobyqa_policy
 
     options_type options{};
 
+    template <typename P = void>
     struct state_type
     {
+        const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
@@ -73,13 +74,11 @@ struct bobyqa_policy
         std::uint32_t iteration{0};
         int m{};
         bool initialized{false};
-
-        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
     };
 
     template <typename Problem, typename Convergence>
         requires objective<Problem> && bound_constrained<Problem>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
@@ -89,22 +88,19 @@ struct bobyqa_policy
 
     template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && bound_constrained<Problem>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
 
         s.lower = problem.lower_bounds();
         s.upper = problem.upper_bounds();
 
         // Project x0 to feasible region
         s.x = detail::project(x0, s.lower, s.upper);
-
-        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
-            return problem.value(v);
-        };
 
         // Number of interpolation points (Powell 2009)
         s.m = options.num_interpolation_points.has_value()
@@ -137,7 +133,7 @@ struct bobyqa_policy
         s.f_values.resize(s.m);
 
         s.Y.col(0) = s.x;
-        s.f_values[0] = s.eval_value(s.x);
+        s.f_values[0] = s.problem->value(s.x);
 
         for(int i = 0; i < n && (1 + i) < s.m; ++i)
         {
@@ -147,7 +143,7 @@ struct bobyqa_policy
             if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
                 pt[i] = std::max(s.x[i] - h, s.lower[i]);
             s.Y.col(1 + i) = pt;
-            s.f_values[1 + i] = s.eval_value(pt);
+            s.f_values[1 + i] = s.problem->value(pt);
         }
 
         for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
@@ -158,7 +154,7 @@ struct bobyqa_policy
             if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
                 pt[i] = std::min(s.x[i] + h, s.upper[i]);
             s.Y.col(1 + n + i) = pt;
-            s.f_values[1 + n + i] = s.eval_value(pt);
+            s.f_values[1 + n + i] = s.problem->value(pt);
         }
 
         // Find best point
@@ -179,7 +175,8 @@ struct bobyqa_policy
         return s;
     }
 
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         double old_f = s.objective_value;
         double step_conv_factor = options.step_convergence_factor.value_or(1e-3);
@@ -209,7 +206,7 @@ struct bobyqa_policy
         // Trial point
         Eigen::Vector<double, N> x_new = detail::project(
             (s.x + d).eval(), s.lower, s.upper);
-        double f_new = s.eval_value(x_new);
+        double f_new = s.problem->value(x_new);
 
         // Model predictions
         double q_old = detail::evaluate_model(s.model, s.x);
@@ -249,7 +246,7 @@ struct bobyqa_policy
             // Replace with a geometry-improving point midway between x_k and the far point
             Eigen::Vector<double, N> geo_pt = detail::project(
                 (0.5 * (s.x + s.Y.col(g_idx))).eval(), s.lower, s.upper);
-            double geo_f = s.eval_value(geo_pt);
+            double geo_f = s.problem->value(geo_pt);
             s.Y.col(g_idx) = geo_pt;
             s.f_values[g_idx] = geo_f;
             detail::update_model(s.model, s.Y, s.f_values, g_idx, s.x);
@@ -291,13 +288,15 @@ struct bobyqa_policy
 
     // Cold restart -- BOBYQA has no warm-start mode since the interpolation
     // set is point-specific.
-    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         // BOBYQA cannot warm-start; delegate to full reset
         reset_clear(s, x0);
     }
 
-    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
         s.x = detail::project(x0, s.lower, s.upper);
@@ -308,7 +307,7 @@ struct bobyqa_policy
 
         // Rebuild interpolation set from new starting point
         s.Y.col(0) = s.x;
-        s.f_values[0] = s.eval_value(s.x);
+        s.f_values[0] = s.problem->value(s.x);
 
         for(int i = 0; i < n && (1 + i) < s.m; ++i)
         {
@@ -317,7 +316,7 @@ struct bobyqa_policy
             if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
                 pt[i] = std::max(s.x[i] - h, s.lower[i]);
             s.Y.col(1 + i) = pt;
-            s.f_values[1 + i] = s.eval_value(pt);
+            s.f_values[1 + i] = s.problem->value(pt);
         }
 
         for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
@@ -327,7 +326,7 @@ struct bobyqa_policy
             if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
                 pt[i] = std::min(s.x[i] + h, s.upper[i]);
             s.Y.col(1 + n + i) = pt;
-            s.f_values[1 + n + i] = s.eval_value(pt);
+            s.f_values[1 + n + i] = s.problem->value(pt);
         }
 
         // Find best point

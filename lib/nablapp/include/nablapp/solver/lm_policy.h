@@ -31,7 +31,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <optional>
 
 namespace nablapp
@@ -58,8 +57,10 @@ struct lm_policy
 
     options_type options{};
 
+    template <typename P = void>
     struct state_type
     {
+        const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         double objective_value{};     // 0.5 * ||r||^2
         double lambda{};              // damping parameter
@@ -68,15 +69,11 @@ struct lm_policy
         Eigen::MatrixXd J;           // current Jacobian (m x n, stays dynamic for concept compat)
         double initial_objective{};  // for divergence detection
         std::uint32_t iteration{0};
-
-        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::VectorXd&)> eval_residuals;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::MatrixXd&)> eval_jacobian;
         int num_residuals{};
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
@@ -85,49 +82,32 @@ struct lm_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
         const int n = x0.size();
 
         s.x = x0;
         s.num_residuals = problem.num_residuals();
 
-        // Capture closures (problem must outlive solver)
-        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
-            return problem.value(v);
-        };
-        s.eval_residuals = [&problem](const Eigen::Vector<double, N>& v, Eigen::VectorXd& rr) {
-            problem.residuals(v, rr);
-        };
-
-        // Jacobian dispatch: analytic when available, FD fallback otherwise
-        if constexpr(requires(const Problem& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
-                         p.jacobian(xx, JJ);
-                     })
-        {
-            s.eval_jacobian = [&problem](const Eigen::Vector<double, N>& v, Eigen::MatrixXd& JJ) {
-                problem.jacobian(v, JJ);
-            };
-        }
-        else
-        {
-            const int m = s.num_residuals;
-            s.eval_jacobian = [&problem, m](const Eigen::Vector<double, N>& v, Eigen::MatrixXd& JJ) {
-                auto residual_fn = [&problem](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
-                    problem.residuals(Eigen::Vector<double, N>(xx), rr);
-                };
-                fd_jacobian(residual_fn, Eigen::VectorXd(v), JJ, m);
-            };
-        }
-
         // Evaluate initial residuals and Jacobian
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, n);
-        s.eval_residuals(x0, s.r);
-        s.eval_jacobian(x0, s.J);
+        s.problem->residuals(x0, s.r);
+        if constexpr(requires(const Problem& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
+                         p.jacobian(xx, JJ);
+                     })
+            s.problem->jacobian(x0, s.J);
+        else
+        {
+            auto residual_fn = [&](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
+                s.problem->residuals(Eigen::Vector<double, N>(xx), rr);
+            };
+            fd_jacobian(residual_fn, Eigen::VectorXd(x0), s.J, s.num_residuals);
+        }
         s.objective_value = 0.5 * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
 
@@ -150,7 +130,8 @@ struct lm_policy
     }
 
     // One LM iteration per K&W Algorithm 6.3 with Nielsen (1999) lambda update.
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         const int n = s.x.size();
         const double diag_min = options.diagonal_min_clamp.value_or(1e-8);
@@ -176,7 +157,7 @@ struct lm_policy
 
         // Evaluate trial residuals
         Eigen::VectorXd r_trial(s.num_residuals);
-        s.eval_residuals(x_trial, r_trial);
+        s.problem->residuals(x_trial, r_trial);
         double f_trial = 0.5 * r_trial.squaredNorm();
 
         // Gain ratio (Nielsen 1999): predicted reduction using original J
@@ -195,7 +176,17 @@ struct lm_policy
         {
             s.x = x_trial;
             s.r = r_trial;
-            s.eval_jacobian(s.x, s.J);
+            if constexpr(requires(const P& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
+                             p.jacobian(xx, JJ);
+                         })
+                s.problem->jacobian(s.x, s.J);
+            else
+            {
+                auto residual_fn = [&](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
+                    s.problem->residuals(Eigen::Vector<double, N>(xx), rr);
+                };
+                fd_jacobian(residual_fn, Eigen::VectorXd(s.x), s.J, s.num_residuals);
+            }
             s.objective_value = f_trial;
 
             double factor = 1.0 - std::pow(2.0 * rho - 1.0, 3.0);
@@ -236,13 +227,24 @@ struct lm_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, x0.size());
-        s.eval_residuals(x0, s.r);
-        s.eval_jacobian(x0, s.J);
+        s.problem->residuals(x0, s.r);
+        if constexpr(requires(const P& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
+                         p.jacobian(xx, JJ);
+                     })
+            s.problem->jacobian(x0, s.J);
+        else
+        {
+            auto residual_fn = [&](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
+                s.problem->residuals(Eigen::Vector<double, N>(xx), rr);
+            };
+            fd_jacobian(residual_fn, Eigen::VectorXd(x0), s.J, s.num_residuals);
+        }
         s.objective_value = 0.5 * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
 
@@ -255,7 +257,8 @@ struct lm_policy
         s.iteration = 0;
     }
 
-    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
     }
