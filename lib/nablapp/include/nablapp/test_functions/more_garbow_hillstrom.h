@@ -55,7 +55,7 @@ struct powell_singular
                + t3 * t3 * t3 * t3 + Scalar(10) * t4 * t4 * t4 * t4;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar t1 = x[0] + Scalar(10) * x[1];
@@ -101,7 +101,7 @@ struct brown_badly_scaled
         return t1 * t1 + t2 * t2 + t3 * t3;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar t1 = x[0] - Scalar(1e6);
@@ -121,24 +121,24 @@ struct brown_badly_scaled
 // x0 = (1/n, ..., 1/n), f* = 0. Default n = 5.
 //
 // Reference: More, Garbow, Hillstrom (1981), Problem 26.
-template <typename Scalar = double>
+template <typename Scalar = double, int N = dynamic_dimension>
 struct trigonometric
 {
-    int n{5};
+    int n{N != dynamic_dimension ? N : 5};
 
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = N;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return n; }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Constant(n, Scalar(1) / Scalar(n));
+        return Eigen::Vector<Scalar, N>::Constant(n, Scalar(1) / Scalar(n));
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, N>& x) const
     {
         using std::cos;
         using std::sin;
@@ -157,8 +157,8 @@ struct trigonometric
         return f;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Vector<Scalar, N>& x,
+                  Eigen::Vector<Scalar, N>& g) const
     {
         using std::cos;
         using std::sin;
@@ -167,7 +167,7 @@ struct trigonometric
             sum_cos += cos(x[j]);
 
         // Precompute residuals.
-        Eigen::VectorX<Scalar> r(n);
+        Eigen::Vector<Scalar, N> r(n);
         for(int i = 0; i < n; ++i)
         {
             r[i] = Scalar(n) - sum_cos
@@ -231,7 +231,7 @@ struct wood
                + Scalar(19.8) * t5 * t6;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar t1 = x[1] - x[0] * x[0];
@@ -283,7 +283,7 @@ struct helical_valley
         return Scalar(100) * (t1 * t1 + t2 * t2) + x[2] * x[2];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         using std::atan2;
@@ -312,12 +312,12 @@ struct helical_valley
 // Default n = 4.
 //
 // Reference: More, Garbow, Hillstrom (1981), Problem 23.
-template <typename Scalar = double>
+template <typename Scalar = double, int N = dynamic_dimension>
 struct penalty_i
 {
-    int n{4};
+    int n{N != dynamic_dimension ? N : 4};
 
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = N;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return n; }
@@ -327,15 +327,15 @@ struct penalty_i
         return Scalar(2.24997e-5);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(n);
+        Eigen::Vector<Scalar, N> x0(n);
         for(int i = 0; i < n; ++i)
             x0[i] = Scalar(i + 1);
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, N>& x) const
     {
         using std::sqrt;
         constexpr Scalar a = Scalar(1e-5);
@@ -352,8 +352,8 @@ struct penalty_i
         return f + pen * pen;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Vector<Scalar, N>& x,
+                  Eigen::Vector<Scalar, N>& g) const
     {
         constexpr Scalar a = Scalar(1e-5);
         Scalar sum_sq{0};
@@ -380,27 +380,27 @@ struct penalty_i
 // x0_i = 1 - (i+1)/n, f* = 0 at (1, ..., 1). Default n = 5.
 //
 // Reference: More, Garbow, Hillstrom (1981), Problem 25.
-template <typename Scalar = double>
+template <typename Scalar = double, int N = dynamic_dimension>
 struct variably_dimensioned
 {
-    int n{5};
+    int n{N != dynamic_dimension ? N : 5};
 
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = N;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return n; }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(n);
+        Eigen::Vector<Scalar, N> x0(n);
         for(int i = 0; i < n; ++i)
             x0[i] = Scalar(1) - Scalar(i + 1) / Scalar(n);
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, N>& x) const
     {
         Scalar sum_sq{0};
         Scalar s{0};
@@ -413,8 +413,8 @@ struct variably_dimensioned
         return sum_sq + s * s + s * s * s * s;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Vector<Scalar, N>& x,
+                  Eigen::Vector<Scalar, N>& g) const
     {
         Scalar s{0};
         for(int i = 0; i < n; ++i)
@@ -437,27 +437,27 @@ struct variably_dimensioned
 // x0 = (-1.2, 1, -1.2, 1, ...), f* = 0 at (1, ..., 1). Default n = 4.
 //
 // Reference: More, Garbow, Hillstrom (1981), Problem 21.
-template <typename Scalar = double>
+template <typename Scalar = double, int N = dynamic_dimension>
 struct extended_rosenbrock
 {
-    int n{4};
+    int n{N != dynamic_dimension ? N : 4};
 
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = N;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return n; }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> initial_point() const
     {
-        Eigen::VectorX<Scalar> x0(n);
+        Eigen::Vector<Scalar, N> x0(n);
         for(int i = 0; i < n; ++i)
             x0[i] = (i % 2 == 0) ? Scalar(-1.2) : Scalar(1);
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, N>& x) const
     {
         Scalar f{0};
         for(int i = 0; i < n - 1; i += 2)
@@ -469,10 +469,11 @@ struct extended_rosenbrock
         return f;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Vector<Scalar, N>& x,
+                  Eigen::Vector<Scalar, N>& g) const
     {
-        g.setZero(n);
+        g.resize(n);
+        g.setZero();
         for(int i = 0; i < n - 1; i += 2)
         {
             Scalar t = x[i + 1] - x[i] * x[i];

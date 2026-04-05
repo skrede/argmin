@@ -31,34 +31,34 @@ namespace nablapp
 // Default n = 2.
 //
 // Reference: Griewank (1981).
-template <typename Scalar = double>
+template <typename Scalar = double, int N = dynamic_dimension>
 struct griewank
 {
-    int n{2};
+    int n{N != dynamic_dimension ? N : 2};
 
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = N;
     static constexpr problem_class pclass = problem_class::global | problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return n; }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Constant(n, Scalar(100));
+        return Eigen::Vector<Scalar, N>::Constant(n, Scalar(100));
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> lower_bounds() const
     {
-        return Eigen::VectorX<Scalar>::Constant(n, Scalar(-600));
+        return Eigen::Vector<Scalar, N>::Constant(n, Scalar(-600));
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> upper_bounds() const
     {
-        return Eigen::VectorX<Scalar>::Constant(n, Scalar(600));
+        return Eigen::Vector<Scalar, N>::Constant(n, Scalar(600));
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, N>& x) const
     {
         using std::cos;
         using std::sqrt;
@@ -72,8 +72,8 @@ struct griewank
         return Scalar(1) + sum - prod;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
-                  Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Vector<Scalar, N>& x,
+                  Eigen::Vector<Scalar, N>& g) const
     {
         using std::cos;
         using std::sin;

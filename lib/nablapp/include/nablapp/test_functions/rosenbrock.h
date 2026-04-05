@@ -20,30 +20,30 @@ namespace nablapp
 // Default parameters: a = 1, b = 5 (K&W convention).
 // Global minimum: x* = (a, a, ..., a), f(x*) = 0.
 
-template <typename Scalar = double>
+template <typename Scalar = double, int N = dynamic_dimension>
 struct rosenbrock
 {
     Scalar a{1};
     Scalar b{5};
-    int n{2};
+    int n{N != dynamic_dimension ? N : 2};
 
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = N;
     static constexpr problem_class pclass = problem_class::unconstrained;
 
     [[nodiscard]] int dimension() const { return n; }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> initial_point() const
     {
         // Standard: alternating -1.2 and 1.0 (More, Garbow, Hillstrom 1981).
-        Eigen::VectorX<Scalar> x0(n);
+        Eigen::Vector<Scalar, N> x0(n);
         for(int i = 0; i < n; ++i)
             x0[i] = (i % 2 == 0) ? Scalar(-1.2) : Scalar(1);
         return x0;
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, N>& x) const
     {
         Scalar f{0};
         for(int i = 0; i < n - 1; ++i)
@@ -55,9 +55,10 @@ struct rosenbrock
         return f;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Vector<Scalar, N>& x, Eigen::Vector<Scalar, N>& g) const
     {
-        g.setZero(n);
+        g.resize(n);
+        g.setZero();
         for(int i = 0; i < n - 1; ++i)
         {
             Scalar t1 = a - x[i];

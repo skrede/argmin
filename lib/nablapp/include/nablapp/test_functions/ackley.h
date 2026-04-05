@@ -23,37 +23,37 @@ namespace nablapp
 // Default parameters: a = 20, b = 0.2, c = 2*pi (K&W convention).
 // Global minimum: x* = 0, f(x*) = 0.
 
-template <typename Scalar = double>
+template <typename Scalar = double, int N = dynamic_dimension>
 struct ackley
 {
     Scalar a{20};
     Scalar b{Scalar(0.2)};
     Scalar c{Scalar(2) * std::numbers::pi_v<Scalar>};
-    int n{2};
+    int n{N != dynamic_dimension ? N : 2};
 
-    static constexpr int problem_dimension = dynamic_dimension;
+    static constexpr int problem_dimension = N;
     static constexpr problem_class pclass = problem_class::global | problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return n; }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> initial_point() const
     {
-        return Eigen::VectorX<Scalar>::Ones(n);
+        return Eigen::Vector<Scalar, N>::Ones(n);
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> lower_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> lower_bounds() const
     {
-        return Eigen::VectorX<Scalar>::Constant(n, Scalar(-32.768));
+        return Eigen::Vector<Scalar, N>::Constant(n, Scalar(-32.768));
     }
 
-    [[nodiscard]] Eigen::VectorX<Scalar> upper_bounds() const
+    [[nodiscard]] Eigen::Vector<Scalar, N> upper_bounds() const
     {
-        return Eigen::VectorX<Scalar>::Constant(n, Scalar(32.768));
+        return Eigen::Vector<Scalar, N>::Constant(n, Scalar(32.768));
     }
 
-    [[nodiscard]] Scalar value(const Eigen::VectorX<Scalar>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, N>& x) const
     {
         Scalar d = Scalar(n);
         Scalar sum_sq{0};
@@ -68,7 +68,7 @@ struct ackley
              + a + std::exp(Scalar(1));
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& g) const
+    void gradient(const Eigen::Vector<Scalar, N>& x, Eigen::Vector<Scalar, N>& g) const
     {
         Scalar d = Scalar(n);
         Scalar sum_sq{0};
