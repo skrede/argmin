@@ -68,17 +68,18 @@ void nlopt_ineq_mconstraint(unsigned m, double* result,
     Eigen::Map<const Eigen::VectorXd> xmap(x, n);
     Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
 
-    Eigen::VectorXd c(m);
+    int n_eq = prob->num_equality();
+    int total_constraints = n_eq + static_cast<int>(m);
+    Eigen::VectorXd c(total_constraints);
     prob->constraints(xv, c);
 
     // Only inequality constraints (skip leading equalities).
-    int n_eq = prob->num_equality();
     for(unsigned i = 0; i < m; ++i)
         result[i] = -c[n_eq + static_cast<int>(i)];
 
     if(grad)
     {
-        Eigen::MatrixXd J;
+        Eigen::MatrixXd J(total_constraints, static_cast<int>(n));
         prob->constraint_jacobian(xv, J);
         // grad layout: grad[i*n + j] = d(result[i])/dx[j]
         for(unsigned i = 0; i < m; ++i)
@@ -98,7 +99,8 @@ void nlopt_eq_mconstraint(unsigned m, double* result,
     auto* prob = static_cast<Problem*>(data);
     Eigen::Map<const Eigen::VectorXd> xv(x, n);
 
-    Eigen::VectorXd c;
+    int total_constraints = static_cast<int>(m) + prob->num_inequality();
+    Eigen::VectorXd c(total_constraints);
     prob->constraints(xv, c);
 
     // Equality constraints are the leading rows.
@@ -107,7 +109,7 @@ void nlopt_eq_mconstraint(unsigned m, double* result,
 
     if(grad)
     {
-        Eigen::MatrixXd J;
+        Eigen::MatrixXd J(total_constraints, static_cast<int>(n));
         prob->constraint_jacobian(xv, J);
         for(unsigned i = 0; i < m; ++i)
             for(unsigned j = 0; j < n; ++j)
