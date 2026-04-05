@@ -48,7 +48,7 @@ struct hs001
         return Scalar(100) * t1 * t1 + t2 * t2;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar t = x[1] - x[0] * x[0];
@@ -106,7 +106,7 @@ struct hs002
         return Scalar(100) * t1 * t1 + t2 * t2;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar t = x[1] - x[0] * x[0];
@@ -168,7 +168,7 @@ struct hs005
                - Scalar(1.5) * x[0] + Scalar(2.5) * x[1] + Scalar(1);
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         using std::cos;
@@ -230,24 +230,20 @@ struct hs006
         return t * t;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = Scalar(-2) * (Scalar(1) - x[0]);
         g[1] = Scalar(0);
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(1);
         c[0] = Scalar(10) * (x[1] - x[0] * x[0]);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& x,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
     {
-        J.resize(1, 2);
         J(0, 0) = Scalar(-20) * x[0];
         J(0, 1) = Scalar(10);
     }
@@ -299,25 +295,21 @@ struct hs007
         return log(Scalar(1) + x[0] * x[0]) - x[1];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = Scalar(2) * x[0] / (Scalar(1) + x[0] * x[0]);
         g[1] = Scalar(-1);
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(1);
         Scalar t = Scalar(1) + x[0] * x[0];
         c[0] = t * t + x[1] * x[1] - Scalar(4);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& x,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
     {
-        J.resize(1, 2);
         Scalar t = Scalar(1) + x[0] * x[0];
         J(0, 0) = Scalar(4) * x[0] * t;
         J(0, 1) = Scalar(2) * x[1];
@@ -377,7 +369,7 @@ struct hs024
         return k * t * x[1] * x[1] * x[1];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         using std::sqrt;
@@ -390,23 +382,19 @@ struct hs024
         g[1] = k * t * Scalar(3) * x[1] * x[1];
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
         using std::sqrt;
         Scalar s3 = sqrt(Scalar(3));
-        c.resize(3);
         c[0] = x[0] / s3 - x[1];
         c[1] = x[0] + s3 * x[1];
         c[2] = Scalar(6) - x[0] - s3 * x[1];
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& /*x*/,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
     {
         using std::sqrt;
         Scalar s3 = sqrt(Scalar(3));
-        J.resize(3, 2);
         J(0, 0) = Scalar(1) / s3;  J(0, 1) = Scalar(-1);
         J(1, 0) = Scalar(1);       J(1, 1) = s3;
         J(2, 0) = Scalar(-1);      J(2, 1) = -s3;
@@ -459,7 +447,7 @@ struct hs026
         return d01 * d01 + d12 * d12 * d12 * d12;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar d01 = x[0] - x[1];
@@ -470,18 +458,14 @@ struct hs026
         g[2] = Scalar(-4) * d12_cubed;
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(1);
         Scalar x2_sq = x[2] * x[2];
         c[0] = (Scalar(1) + x[1] * x[1]) * x[0] + x2_sq * x2_sq - Scalar(3);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& x,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
     {
-        J.resize(1, 3);
         J(0, 0) = Scalar(1) + x[1] * x[1];
         J(0, 1) = Scalar(2) * x[0] * x[1];
         J(0, 2) = Scalar(4) * x[2] * x[2] * x[2];
@@ -535,7 +519,7 @@ struct hs028
         return s01 * s01 + s12 * s12;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar s01 = x[0] + x[1];
@@ -545,17 +529,13 @@ struct hs028
         g[2] = Scalar(2) * s12;
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(1);
         c[0] = x[0] + Scalar(2) * x[1] + Scalar(3) * x[2] - Scalar(1);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& /*x*/,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
     {
-        J.resize(1, 3);
         J(0, 0) = Scalar(1);
         J(0, 1) = Scalar(2);
         J(0, 2) = Scalar(3);
@@ -612,7 +592,7 @@ struct hs035
                + Scalar(2) * x[0] * x[1] + Scalar(2) * x[0] * x[2];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = Scalar(-8) + Scalar(4) * x[0] + Scalar(2) * x[1]
@@ -621,17 +601,13 @@ struct hs035
         g[2] = Scalar(-4) + Scalar(2) * x[0] + Scalar(2) * x[2];
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(1);
         c[0] = Scalar(3) - (x[0] + x[1] + Scalar(2) * x[2]);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& /*x*/,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
     {
-        J.resize(1, 3);
         J(0, 0) = Scalar(-1);
         J(0, 1) = Scalar(-1);
         J(0, 2) = Scalar(-2);
@@ -684,7 +660,7 @@ struct hs039
         return -x[0];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& /*x*/,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& /*x*/,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = Scalar(-1);
@@ -693,18 +669,14 @@ struct hs039
         g[3] = Scalar(0);
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(2);
         c[0] = x[1] - x[0] * x[0] * x[0] - x[2] * x[2];
         c[1] = x[0] * x[0] - x[1] - x[3] * x[3];
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& x,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
     {
-        J.resize(2, 4);
         J(0, 0) = Scalar(-3) * x[0] * x[0];
         J(0, 1) = Scalar(1);
         J(0, 2) = Scalar(-2) * x[2];
@@ -761,7 +733,7 @@ struct hs040
         return -x[0] * x[1] * x[2] * x[3];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = -x[1] * x[2] * x[3];
@@ -770,19 +742,15 @@ struct hs040
         g[3] = -x[0] * x[1] * x[2];
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(3);
         c[0] = x[0] * x[0] * x[0] + x[1] * x[1] - Scalar(1);
         c[1] = x[0] * x[0] * x[3] - x[2];
         c[2] = x[3] * x[3] - x[1];
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& x,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
     {
-        J.resize(3, 4);
         J(0, 0) = Scalar(3) * x[0] * x[0];
         J(0, 1) = Scalar(2) * x[1];
         J(0, 2) = Scalar(0);
@@ -849,7 +817,7 @@ struct hs043
                - Scalar(21) * x[2] + Scalar(7) * x[3];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = Scalar(2) * x[0] - Scalar(5);
@@ -858,10 +826,8 @@ struct hs043
         g[3] = Scalar(2) * x[3] + Scalar(7);
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(3);
         c[0] = Scalar(8) - (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]
                + x[3] * x[3] + x[0] - x[1] + x[2] - x[3]);
         c[1] = Scalar(10) - (x[0] * x[0] + Scalar(2) * x[1] * x[1]
@@ -870,10 +836,8 @@ struct hs043
                + x[2] * x[2] + Scalar(2) * x[0] - x[1] - x[3]);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& x,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
     {
-        J.resize(3, 4);
         J(0, 0) = -(Scalar(2) * x[0] + Scalar(1));
         J(0, 1) = -(Scalar(2) * x[1] - Scalar(1));
         J(0, 2) = -(Scalar(2) * x[2] + Scalar(1));
@@ -936,7 +900,7 @@ struct hs048
         return t0 * t0 + t1 * t1 + t2 * t2;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = Scalar(2) * (x[0] - Scalar(1));
@@ -946,18 +910,14 @@ struct hs048
         g[4] = Scalar(-2) * (x[3] - x[4]);
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(2);
         c[0] = x[0] + x[1] + x[2] + x[3] + x[4] - Scalar(5);
         c[1] = x[2] - Scalar(2) * (x[3] + x[4]) + Scalar(3);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& /*x*/,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
     {
-        J.resize(2, 5);
         J(0, 0) = Scalar(1);
         J(0, 1) = Scalar(1);
         J(0, 2) = Scalar(1);
@@ -1022,7 +982,7 @@ struct hs050
         return d01 * d01 + d12 * d12 + d23 * d23 * d23 * d23 + d34 * d34;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         Scalar d01 = x[0] - x[1];
@@ -1037,19 +997,15 @@ struct hs050
         g[4] = Scalar(-2) * d34;
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(3);
         c[0] = x[0] + Scalar(2) * x[1] + Scalar(3) * x[2] - Scalar(6);
         c[1] = x[1] + Scalar(2) * x[2] + Scalar(3) * x[3] - Scalar(6);
         c[2] = x[2] + Scalar(2) * x[3] + Scalar(3) * x[4] - Scalar(6);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& /*x*/,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
     {
-        J.resize(3, 5);
         J.setZero();
         J(0, 0) = Scalar(1);
         J(0, 1) = Scalar(2);
@@ -1114,7 +1070,7 @@ struct hs051
         return t0 * t0 + t1 * t1 + t2 * t2 + t3 * t3;
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = Scalar(2) * (x[0] - x[1]);
@@ -1125,19 +1081,15 @@ struct hs051
         g[4] = Scalar(2) * (x[4] - Scalar(1));
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(3);
         c[0] = x[0] + Scalar(3) * x[1] - Scalar(4);
         c[1] = x[2] + x[3] - Scalar(2) * x[4];
         c[2] = x[1] - x[4];
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& /*x*/,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
     {
-        J.resize(3, 5);
         J.setZero();
         J(0, 0) = Scalar(1);
         J(0, 1) = Scalar(3);
@@ -1196,7 +1148,7 @@ struct hs071
         return x[0] * x[3] * (x[0] + x[1] + x[2]) + x[2];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = x[3] * (Scalar(2) * x[0] + x[1] + x[2]);
@@ -1205,10 +1157,8 @@ struct hs071
         g[3] = x[0] * (x[0] + x[1] + x[2]);
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(2);
         // eq: x0^2 + x1^2 + x2^2 + x3^2 - 40 = 0
         c[0] = x[0] * x[0] + x[1] * x[1] + x[2] * x[2] + x[3] * x[3]
                - Scalar(40);
@@ -1216,10 +1166,8 @@ struct hs071
         c[1] = x[0] * x[1] * x[2] * x[3] - Scalar(25);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& x,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
     {
-        J.resize(2, 4);
         // d(eq)/dx
         J(0, 0) = Scalar(2) * x[0];
         J(0, 1) = Scalar(2) * x[1];
@@ -1283,7 +1231,7 @@ struct hs076
                - x[0] - Scalar(3) * x[1] + x[2] - x[3];
     }
 
-    void gradient(const Eigen::VectorX<Scalar>& x,
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
                   Eigen::Vector<Scalar, problem_dimension>& g) const
     {
         g[0] = Scalar(2) * x[0] - x[2] - Scalar(1);
@@ -1292,19 +1240,15 @@ struct hs076
         g[3] = x[3] + x[2] - Scalar(1);
     }
 
-    void constraints(const Eigen::VectorX<Scalar>& x,
-                     Eigen::VectorX<Scalar>& c) const
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
     {
-        c.resize(3);
         c[0] = Scalar(5) - (x[0] + Scalar(2) * x[1] + x[2] + x[3]);
         c[1] = Scalar(4) - (Scalar(3) * x[0] + x[1] + Scalar(2) * x[2] - x[3]);
         c[2] = x[1] + Scalar(4) * x[2] - Scalar(1.5);
     }
 
-    void constraint_jacobian(const Eigen::VectorX<Scalar>& /*x*/,
-                             Eigen::MatrixX<Scalar>& J) const
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
     {
-        J.resize(3, 4);
         J << Scalar(-1), Scalar(-2), Scalar(-1), Scalar(-1),
              Scalar(-3), Scalar(-1), Scalar(-2), Scalar(1),
              Scalar(0),  Scalar(1),  Scalar(4),  Scalar(0);
