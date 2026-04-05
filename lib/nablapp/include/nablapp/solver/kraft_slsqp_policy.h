@@ -264,7 +264,26 @@ struct kraft_slsqp_policy
             : std::optional<double>{1e-12};
         Eigen::Vector<double, N> p_lo(p_lower);
         Eigen::Vector<double, N> p_hi(p_upper);
+
+        // Phase 1: compute a feasible starting point for the QP.
+        // The active-set method requires x0 satisfying A_eq * x0 = b_eq.
+        // With x0 = 0, equality constraints are unsatisfied (A_eq*0 = 0
+        // but b_eq = -c_eq ≠ 0), and every QP step stays in the null
+        // space of A_eq, never reducing equality violation.
+        // Fix: use the minimum-norm solution x0 = A^T*(AA^T)^{-1}*b.
+        // Reference: N&W Section 16.2, phase-1 feasibility.
         Eigen::Vector<double, N> p_start = Eigen::Vector<double, N>::Zero(n);
+        if(s.n_eq > 0 && b_eq.squaredNorm() > 1e-30)
+        {
+            Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
+            Eigen::LDLT<Eigen::MatrixXd> ldlt(AAt);
+            Eigen::VectorXd y = ldlt.solve(b_eq);
+            p_start = Eigen::Vector<double, N>(A_eq.transpose() * y);
+
+            for(int i = 0; i < n; ++i)
+                p_start[i] = std::clamp(p_start[i], p_lo[i], p_hi[i]);
+        }
+
         auto qp_res = s.qp_solver.solve(s.B_workspace, Eigen::Vector<double, N>(s.g),
                                          Eigen::Matrix<double, Eigen::Dynamic, N>(A_eq),
                                          b_eq,

@@ -1,6 +1,7 @@
 #include "nablapp/solver/kraft_slsqp_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/formulation/concepts.h"
+#include "nablapp/test_functions/hock_schittkowski.h"
 #include "nablapp/test_functions/rosenbrock.h"
 
 #include <Eigen/Core>
@@ -312,4 +313,55 @@ TEST_CASE("kraft_slsqp step solve step_n", "[kraft_slsqp]")
         CHECK((result.status == solver_status::converged
                || result.status == solver_status::ftol_reached));
     }
+}
+
+TEST_CASE("kraft_slsqp converges on HS007 equality", "[kraft_slsqp]")
+{
+    hs007 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver<kraft_slsqp_policy<hs007<>::problem_dimension>> solver{problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
+    CHECK(solver.constraint_violation() < 1e-4);
+}
+
+TEST_CASE("kraft_slsqp converges on HS039 equality", "[kraft_slsqp]")
+{
+    hs039 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver<kraft_slsqp_policy<hs039<>::problem_dimension>> solver{problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-1.0).margin(0.01));
+    CHECK(solver.constraint_violation() < 1e-4);
+}
+
+TEST_CASE("kraft_slsqp converges on HS040 equality", "[kraft_slsqp]")
+{
+    hs040 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver<kraft_slsqp_policy<hs040<>::problem_dimension>> solver{problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-0.25).margin(0.01));
+    CHECK(solver.constraint_violation() < 1e-4);
 }
