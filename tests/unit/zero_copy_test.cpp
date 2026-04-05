@@ -191,6 +191,11 @@ TEST_CASE("fixed-dim active_set_qp_solver: zero dynamic allocation", "[zero-copy
 
 // Verify that the pre-allocated mma_subproblem_solver is allocation-free
 // for fixed-dimension dual solves (MMA hot path).
+//
+// NOTE: This test covers N-dimension allocation paths (LDLT factorizations,
+// workspace vectors, compact L-BFGS middle matrix). M-dimension paths
+// (constraint vectors, Jacobian-sized matrices in policy state) remain
+// dynamic until Plan 11 wires constraint_count_v<P> through the policies.
 TEST_CASE("fixed-dim mma_subproblem_solver: zero dynamic allocation", "[zero-copy]")
 {
     constexpr int N = 3;

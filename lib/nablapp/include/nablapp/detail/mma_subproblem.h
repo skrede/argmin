@@ -32,13 +32,13 @@ namespace nablapp::detail
 // pi, qi: constraint coefficients (m x n)
 // r0:     objective constant (scalar, stored as 1-element vector)
 // ri:     constraint constants (m)
-template <typename Scalar, int N = nablapp::dynamic_dimension>
+template <typename Scalar, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 struct mma_coeffs
 {
     Eigen::Vector<Scalar, N> p0, q0;
-    Eigen::Matrix<Scalar, Eigen::Dynamic, N> pi, qi;
+    Eigen::Matrix<Scalar, M, N> pi, qi;
     Eigen::VectorX<Scalar> r0;
-    Eigen::VectorX<Scalar> ri;
+    Eigen::Vector<Scalar, M> ri;
 };
 
 // Compute reciprocal approximation coefficients from gradients.
@@ -54,13 +54,13 @@ struct mma_coeffs
 // The approximation matches function and gradient values at x.
 //
 // Reference: Svanberg 1987, eq. (2.1)-(2.5).
-template <typename Scalar, int N = nablapp::dynamic_dimension>
-mma_coeffs<Scalar, N> mma_coefficients(
+template <typename Scalar, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
+mma_coeffs<Scalar, N, M> mma_coefficients(
     const Eigen::Vector<Scalar, N>& x,
     Scalar f,
     const Eigen::Vector<Scalar, N>& grad_f,
-    const Eigen::VectorX<Scalar>& g,
-    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& dg,
+    const Eigen::Vector<Scalar, M>& g,
+    const Eigen::Matrix<Scalar, M, N>& dg,
     const Eigen::Vector<Scalar, N>& L,
     const Eigen::Vector<Scalar, N>& U,
     const mma_subproblem_options& opts = {})
@@ -69,7 +69,7 @@ mma_coeffs<Scalar, N> mma_coefficients(
     const int m = static_cast<int>(g.size());
     const auto epsilon = static_cast<Scalar>(opts.regularization_epsilon.value_or(1e-7));
 
-    mma_coeffs<Scalar, N> c;
+    mma_coeffs<Scalar, N, M> c;
     c.p0.resize(n);
     c.q0.resize(n);
     c.pi.resize(m, n);
@@ -118,9 +118,9 @@ mma_coeffs<Scalar, N> mma_coefficients(
 // Used by GCMMA to check conservatism.
 //
 // Reference: Svanberg 2002, conservatism condition.
-template <typename Scalar, int N = nablapp::dynamic_dimension>
+template <typename Scalar, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 Scalar mma_subproblem_value(
-    const mma_coeffs<Scalar, N>& coeffs,
+    const mma_coeffs<Scalar, N, M>& coeffs,
     const Eigen::Vector<Scalar, N>& x,
     const Eigen::Vector<Scalar, N>& L,
     const Eigen::Vector<Scalar, N>& U)
@@ -137,9 +137,9 @@ Scalar mma_subproblem_value(
 // Returns: sum_j(pi[i][j]/(U[j]-x[j]) + qi[i][j]/(x[j]-L[j])) + ri[i]
 //
 // Reference: Svanberg 2002.
-template <typename Scalar, int N = nablapp::dynamic_dimension>
+template <typename Scalar, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 Scalar mma_subproblem_constraint(
-    const mma_coeffs<Scalar, N>& coeffs,
+    const mma_coeffs<Scalar, N, M>& coeffs,
     int i,
     const Eigen::Vector<Scalar, N>& x,
     const Eigen::Vector<Scalar, N>& L,
@@ -157,10 +157,21 @@ Scalar mma_subproblem_constraint(
 // Owns LDLT factorization object, coefficient storage, and dual solve
 // buffers. Eliminates per-call allocation in the Newton loop.
 //
+// Template parameters:
+//   N — problem dimension (compile-time or dynamic_dimension)
+//   M — constraint count (compile-time or dynamic_dimension)
+//
+// When M is compile-time, the dual Newton system (LDLT, gradient,
+// Hessian, step) uses fixed-size M×M types — zero heap allocation.
+//
 // Reference: Svanberg 1987; Svanberg 2002, Section 5.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 class mma_subproblem_solver
 {
+    using constraint_vector = Eigen::Vector<Scalar, M>;
+    using constraint_matrix = Eigen::Matrix<Scalar, M, N>;
+    using dual_matrix = Eigen::Matrix<Scalar, M, M>;
+
 public:
     explicit mma_subproblem_solver(int n, int m)
         : n_{n}, m_{m}
@@ -188,8 +199,8 @@ public:
         const Eigen::Vector<Scalar, N>& x,
         Scalar f,
         const Eigen::Vector<Scalar, N>& grad_f,
-        const Eigen::VectorX<Scalar>& g,
-        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& dg,
+        const constraint_vector& g,
+        const constraint_matrix& dg,
         const Eigen::Vector<Scalar, N>& L,
         const Eigen::Vector<Scalar, N>& U,
         const mma_subproblem_options& opts = {})
@@ -365,7 +376,7 @@ public:
             y_ = y_.cwiseMax(Scalar(0));
         }
 
-        return Eigen::Vector<Scalar, N>(x_opt_);
+        return x_opt_;
     }
 
     // Evaluate the MMA approximation of the objective at point x.
@@ -397,20 +408,20 @@ public:
         return val;
     }
 
-    const mma_coeffs<Scalar, N>& coefficients() const { return coeffs_; }
+    const mma_coeffs<Scalar, N, M>& coefficients() const { return coeffs_; }
 
 private:
     int n_{0};
     int m_{0};
 
-    mma_coeffs<Scalar, N> coeffs_;
+    mma_coeffs<Scalar, N, M> coeffs_;
 
-    Eigen::VectorX<Scalar> y_;
-    Eigen::VectorX<Scalar> x_opt_;
-    Eigen::VectorX<Scalar> dual_grad_;
-    Eigen::MatrixX<Scalar> dual_hess_;
-    Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_;
-    Eigen::VectorX<Scalar> dy_;
+    constraint_vector y_;
+    Eigen::Vector<Scalar, N> x_opt_;
+    constraint_vector dual_grad_;
+    dual_matrix dual_hess_;
+    Eigen::LDLT<dual_matrix> ldlt_;
+    constraint_vector dy_;
 };
 
 // Solve the MMA dual problem via Newton iteration.
@@ -429,9 +440,9 @@ private:
 // tol:     convergence tolerance on dual gradient infinity norm
 //
 // Reference: Svanberg 1987, dual formulation; Svanberg 2002, Section 5.
-template <typename Scalar, int N = nablapp::dynamic_dimension>
+template <typename Scalar, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 Eigen::Vector<Scalar, N> mma_dual_solve(
-    const mma_coeffs<Scalar, N>& coeffs,
+    const mma_coeffs<Scalar, N, M>& coeffs,
     const Eigen::Vector<Scalar, N>& L,
     const Eigen::Vector<Scalar, N>& U,
     const Eigen::Vector<Scalar, N>& x_min,

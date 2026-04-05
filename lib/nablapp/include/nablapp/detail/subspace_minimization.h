@@ -32,6 +32,7 @@ public:
         , d_hat_(n)
         , x_new_(n)
         , B_FF_(n, n)
+        , ldlt_(n)
     {
     }
 
@@ -63,13 +64,13 @@ public:
         // Build reduced Hessian B_FF
         B_FF_ = B.reduced_hessian(free_indices);
 
-        // Solve B_FF * d_hat = -r_F using LDLT
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(B_FF_);
+        // Solve B_FF * d_hat = -r_F using LDLT (max-bounded N×N)
+        ldlt_.compute(B_FF_);
 
-        if(ldlt.info() == Eigen::Success && ldlt.isPositive())
+        if(ldlt_.info() == Eigen::Success && ldlt_.isPositive())
         {
             d_hat_.resize(nf);
-            d_hat_ = ldlt.solve(-r_F_);
+            d_hat_ = ldlt_.solve(-r_F_);
         }
         else
         {
@@ -87,11 +88,16 @@ public:
     }
 
 private:
-    Eigen::VectorX<Scalar> Bd_;
-    Eigen::VectorX<Scalar> r_F_;
-    Eigen::VectorX<Scalar> d_hat_;
+    // Max-bounded reduced Hessian: free-variable count varies per call but ≤ N.
+    using reduced_matrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, 0, N, N>;
+    using reduced_vector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1, 0, N, 1>;
+
+    reduced_vector Bd_;
+    reduced_vector r_F_;
+    reduced_vector d_hat_;
     Eigen::Vector<Scalar, N> x_new_;
-    Eigen::MatrixX<Scalar> B_FF_;
+    reduced_matrix B_FF_;
+    Eigen::LDLT<reduced_matrix> ldlt_;
 };
 
 // Backward-compatible free function wrapper.

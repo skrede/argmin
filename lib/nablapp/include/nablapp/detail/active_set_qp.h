@@ -29,7 +29,7 @@ namespace nablapp::detail
 
 enum class qp_status { optimal, infeasible, max_iterations, indefinite_hessian };
 
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 struct qp_result
 {
     Eigen::Vector<Scalar, N> x;
@@ -308,11 +308,53 @@ void initial_working_set(
 // allocation for QR, LDLT, working-set matrix extraction, and intermediate
 // vectors.
 //
+// Template parameters:
+//   N — problem dimension (compile-time or dynamic_dimension)
+//   M — constraint count excluding box bounds (compile-time or dynamic_dimension)
+//
+// When both N and M are compile-time, max_total_constraints = M + 2*N
+// (M constraints + N lower + N upper bounds) and all workspace uses
+// stack-allocated max-bounded Eigen types.
+//
 // Reference: N&W Algorithm 16.1, pp. 460-463 (active-set method for convex QP)
 //            N&W Section 16.2, eq. 16.16-16.19 (null-space method)
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 class active_set_qp_solver
 {
+    static constexpr int max_total_constraints =
+        (M == nablapp::dynamic_dimension || N == nablapp::dynamic_dimension)
+            ? Eigen::Dynamic : M + 2 * N;
+
+    // Max-bounded matrix type: rows up to MaxR, cols up to MaxC.
+    template <int Rows, int Cols, int MaxR, int MaxC>
+    using bounded_matrix = Eigen::Matrix<Scalar, Rows, Cols, 0, MaxR, MaxC>;
+
+    // Max-bounded vector type: size up to MaxN.
+    template <int Size, int MaxN>
+    using bounded_vector = Eigen::Matrix<Scalar, Size, 1, 0, MaxN, 1>;
+
+    // Constraint-row matrix: Dynamic rows up to max_total_constraints, N cols.
+    using constraint_matrix = bounded_matrix<Eigen::Dynamic, N, max_total_constraints, N>;
+
+    // Constraint-length vector: Dynamic size up to max_total_constraints.
+    using constraint_vector = bounded_vector<Eigen::Dynamic, max_total_constraints>;
+
+    // N-dimension square matrix (max-bounded).
+    using n_square_matrix = bounded_matrix<Eigen::Dynamic, Eigen::Dynamic, N, N>;
+
+    // N-dimension vector (max-bounded).
+    using n_vector = bounded_vector<Eigen::Dynamic, N>;
+
+    // QR input for A_W^T: always N rows, variable cols. Fixed-row when N is compile-time.
+    using qr_matrix = bounded_matrix<N, Eigen::Dynamic, N, max_total_constraints>;
+
+    // QR input for multiplier solves: variable rows (up to N), variable cols.
+    // Must be dynamic-row because (A_W * Y)^T has rank rows where rank <= N.
+    using qr_lambda_matrix = bounded_matrix<Eigen::Dynamic, Eigen::Dynamic, N, max_total_constraints>;
+
+    // Q matrix: N x N (max-bounded).
+    using q_matrix = bounded_matrix<Eigen::Dynamic, Eigen::Dynamic, N, N>;
+
 public:
     explicit active_set_qp_solver(int n, int max_constraints)
         : n_(n)
@@ -519,25 +561,25 @@ private:
     int n_{0};
     int max_m_{0};
 
-    Eigen::MatrixX<Scalar> A_full_;
-    Eigen::VectorX<Scalar> b_full_;
-    Eigen::MatrixX<Scalar> A_W_;
+    constraint_matrix A_full_;
+    constraint_vector b_full_;
+    constraint_matrix A_W_;
 
-    Eigen::ColPivHouseholderQR<Eigen::MatrixX<Scalar>> qr_;
-    Eigen::ColPivHouseholderQR<Eigen::MatrixX<Scalar>> qr_lambda_;
-    Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_reduced_;
-    Eigen::MatrixX<Scalar> Q_;
-    Eigen::MatrixX<Scalar> ZtGZ_;
-    Eigen::VectorX<Scalar> rhs_;
-    Eigen::VectorX<Scalar> p_z_;
-    Eigen::VectorX<Scalar> rhs_lam_;
-    Eigen::VectorX<Scalar> g_k_;
+    Eigen::ColPivHouseholderQR<qr_matrix> qr_;
+    Eigen::ColPivHouseholderQR<qr_lambda_matrix> qr_lambda_;
+    Eigen::LDLT<n_square_matrix> ldlt_reduced_;
+    q_matrix Q_;
+    n_square_matrix ZtGZ_;
+    n_vector rhs_;
+    n_vector p_z_;
+    n_vector rhs_lam_;
+    n_vector g_k_;
 
     std::vector<int> W_;
-    Eigen::VectorX<Scalar> lambda_full_;
+    constraint_vector lambda_full_;
 
-    Eigen::MatrixX<Scalar> A_aug_;
-    Eigen::VectorX<Scalar> b_aug_;
+    constraint_matrix A_aug_;
+    constraint_vector b_aug_;
 };
 
 // Dense active-set QP solver.
@@ -550,7 +592,7 @@ private:
 // The initial point x0 must be feasible.
 //
 // Reference: N&W Algorithm 16.1, pp. 460-463.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 qp_result<Scalar, N> solve_qp(
     const Eigen::Matrix<Scalar, N, N>& G,
     const Eigen::Vector<Scalar, N>& d,
@@ -640,7 +682,7 @@ qp_result<Scalar, N> solve_qp(
 //   I*x >= l    (lower bounds)
 //  -I*x >= -u   (upper bounds)
 // and appends them to A_ineq/b_ineq.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 qp_result<Scalar, N> solve_qp(
     const Eigen::Matrix<Scalar, N, N>& G,
     const Eigen::Vector<Scalar, N>& d,
