@@ -105,7 +105,7 @@ auto run_nablapp_solver(std::string_view solver_name,
         trace.clear();
         trace.resize(static_cast<std::size_t>(max_iterations));
 
-        basic_solver<rebound_policy, N> solver(prob, x0, opts,
+        basic_solver<rebound_policy, N, Problem> solver(prob, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();
@@ -164,7 +164,7 @@ auto run_nablapp_solver(std::string_view solver_name,
     else
     {
         // Use solve() for simplicity when no trace needed.
-        basic_solver<rebound_policy, N> solver(prob, x0, opts,
+        basic_solver<rebound_policy, N, Problem> solver(prob, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();
