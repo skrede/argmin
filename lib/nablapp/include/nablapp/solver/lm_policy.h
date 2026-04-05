@@ -103,10 +103,10 @@ struct lm_policy
             s.problem->jacobian(x0, s.J);
         else
         {
-            auto residual_fn = [&](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
-                s.problem->residuals(Eigen::Vector<double, N>(xx), rr);
+            auto residual_fn = [&](const Eigen::Vector<double, N>& xx, Eigen::VectorXd& rr) {
+                s.problem->residuals(xx, rr);
             };
-            fd_jacobian(residual_fn, Eigen::VectorXd(x0), s.J, s.num_residuals);
+            fd_jacobian<N>(residual_fn, x0, s.J, s.num_residuals);
         }
         s.objective_value = 0.5 * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
@@ -120,7 +120,7 @@ struct lm_policy
         }
         else
         {
-            Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
+            Eigen::Vector<double, N> diag = (s.J.transpose() * s.J).diagonal();
             double max_diag = diag.maxCoeff();
             s.lambda = (max_diag > 0.0) ? tau * max_diag : 1e-4;
         }
@@ -156,7 +156,7 @@ struct lm_policy
         Eigen::Vector<double, N> x_trial = (s.x + h).eval();
 
         // Evaluate trial residuals
-        Eigen::VectorXd r_trial(s.num_residuals);
+        Eigen::VectorXd r_trial(s.num_residuals); // residual dimension, stays dynamic
         s.problem->residuals(x_trial, r_trial);
         double f_trial = 0.5 * r_trial.squaredNorm();
 
@@ -182,10 +182,10 @@ struct lm_policy
                 s.problem->jacobian(s.x, s.J);
             else
             {
-                auto residual_fn = [&](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
-                    s.problem->residuals(Eigen::Vector<double, N>(xx), rr);
+                auto residual_fn = [&](const Eigen::Vector<double, N>& xx, Eigen::VectorXd& rr) {
+                    s.problem->residuals(xx, rr);
                 };
-                fd_jacobian(residual_fn, Eigen::VectorXd(s.x), s.J, s.num_residuals);
+                fd_jacobian<N>(residual_fn, s.x, s.J, s.num_residuals);
             }
             s.objective_value = f_trial;
 
@@ -240,17 +240,17 @@ struct lm_policy
             s.problem->jacobian(x0, s.J);
         else
         {
-            auto residual_fn = [&](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
-                s.problem->residuals(Eigen::Vector<double, N>(xx), rr);
+            auto residual_fn = [&](const Eigen::Vector<double, N>& xx, Eigen::VectorXd& rr) {
+                s.problem->residuals(xx, rr);
             };
-            fd_jacobian(residual_fn, Eigen::VectorXd(x0), s.J, s.num_residuals);
+            fd_jacobian<N>(residual_fn, x0, s.J, s.num_residuals);
         }
         s.objective_value = 0.5 * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
 
         // Nielsen init for lambda using policy options
         double tau = options.tau.value_or(1e-3);
-        Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
+        Eigen::Vector<double, N> diag = (s.J.transpose() * s.J).diagonal();
         double max_diag = diag.maxCoeff();
         s.lambda = (max_diag > 0.0) ? tau * max_diag : 1e-4;
         s.nu = options.nu_initial.value_or(2.0);

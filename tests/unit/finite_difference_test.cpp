@@ -42,9 +42,9 @@ TEST_CASE("fd_gradient on Rosenbrock", "[finite_difference]")
 TEST_CASE("fd_gradient on Booth", "[finite_difference]")
 {
     booth fn;
-    Eigen::VectorXd x{{2.0, 4.0}};
-    Eigen::VectorXd g_fd(2);
-    Eigen::VectorXd g_analytical(2);
+    Eigen::Vector2d x{2.0, 4.0};
+    Eigen::Vector2d g_fd;
+    Eigen::Vector2d g_analytical;
 
     fd_gradient(fn, x, g_fd);
     fn.gradient(x, g_analytical);
@@ -55,16 +55,19 @@ TEST_CASE("fd_gradient on Booth", "[finite_difference]")
     }
 }
 
+namespace
+{
+struct half_norm_sq
+{
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
+    int dimension() const { return 3; }
+    double value(const Eigen::VectorXd& x) const { return 0.5 * x.squaredNorm(); }
+};
+}
+
 TEST_CASE("fd_gradient on quadratic", "[finite_difference]")
 {
-    struct half_norm_sq
-    {
-        static constexpr int problem_dimension = nablapp::dynamic_dimension;
-
-        int dimension() const { return 3; }
-        double value(const Eigen::VectorXd& x) const { return 0.5 * x.squaredNorm(); }
-    };
-
     half_norm_sq fn;
     Eigen::VectorXd x{{3.0, -2.0, 1.0}};
     Eigen::VectorXd g_fd(3);
@@ -103,11 +106,11 @@ TEST_CASE("fd_jacobian on vector-valued function", "[finite_difference]")
 TEST_CASE("fd_gradient with float scalar", "[finite_difference]")
 {
     booth<float> fn;
-    Eigen::VectorXf x{{2.0f, 4.0f}};
-    Eigen::VectorXf g_fd(2);
-    Eigen::VectorXf g_analytical(2);
+    Eigen::Vector2f x{2.0f, 4.0f};
+    Eigen::Vector2f g_fd;
+    Eigen::Vector2f g_analytical;
 
-    fd_gradient<booth<float>, float>(fn, x, g_fd);
+    fd_gradient(fn, x, g_fd);
     fn.gradient(x, g_analytical);
 
     for(int i = 0; i < 2; ++i)
