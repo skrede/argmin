@@ -47,7 +47,7 @@ public:
         const Eigen::Vector<Scalar, N>& lower,
         const Eigen::Vector<Scalar, N>& upper,
         const std::vector<int>& free_indices,
-        const compact_lbfgs<Scalar, N>& B)
+        const auto& B)
     {
         if(free_indices.empty())
             return x_cauchy;
@@ -98,7 +98,7 @@ private:
 //
 // Reference: N&W Section 16.6, p. 478, eq. 16.49.
 //            Byrd, Lu, Nocedal, Zhu 1995 (L-BFGS-B algorithm).
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = 7>
 Eigen::Vector<Scalar, N> subspace_minimize(
     const Eigen::Vector<Scalar, N>& x,
     const Eigen::Vector<Scalar, N>& x_cauchy,
@@ -106,7 +106,7 @@ Eigen::Vector<Scalar, N> subspace_minimize(
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper,
     const std::vector<int>& free_indices,
-    const compact_lbfgs<Scalar, N>& B)
+    const compact_lbfgs<Scalar, N, M>& B)
 {
     subspace_minimizer<Scalar, N> sm(x.size());
     return sm.solve(x, x_cauchy, g, lower, upper, free_indices, B);

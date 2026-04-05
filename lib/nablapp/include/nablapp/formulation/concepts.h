@@ -38,6 +38,20 @@ concept has_problem_dimension = requires {
 template <has_problem_dimension P>
 inline constexpr int problem_dimension_v = P::problem_dimension;
 
+// Constraint count extraction. Constrained problem types MAY declare
+// static constexpr int constraint_count (total equality + inequality).
+// When present, enables fixed-size constraint vectors and Jacobians
+// throughout the solver pipeline. When absent, constraint dimensions
+// remain dynamic. Reference: D-03.
+
+template <typename P>
+concept has_constraint_count = requires {
+    { P::constraint_count } -> std::convertible_to<int>;
+};
+
+template <has_constraint_count P>
+inline constexpr int constraint_count_v = P::constraint_count;
+
 template <typename P, typename S = double>
 concept objective = has_problem_dimension<P> &&
     requires(const P& p, const Eigen::Vector<S, problem_dimension_v<P>>& x)

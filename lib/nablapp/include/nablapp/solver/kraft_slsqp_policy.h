@@ -79,7 +79,7 @@ struct kraft_slsqp_policy
         Eigen::VectorXd lambda;
         double objective_value{};
         double sigma{1.0};
-        detail::compact_lbfgs<double, N> lbfgs;
+        detail::compact_lbfgs<double, N, 10> lbfgs;
         detail::active_set_qp_solver<double, N> qp_solver;
         Eigen::Matrix<double, N, N> B_workspace;
         Eigen::Vector<double, N> ej_workspace;
@@ -190,8 +190,7 @@ struct kraft_slsqp_policy
             };
         }
 
-        std::uint8_t depth = options.history_depth.value_or(10);
-        s.lbfgs = detail::compact_lbfgs<double, N>{depth};
+        s.lbfgs = detail::compact_lbfgs<double, N, 10>{};
         s.sigma = options.initial_penalty.value_or(1.0);
         s.iteration = 0;
 

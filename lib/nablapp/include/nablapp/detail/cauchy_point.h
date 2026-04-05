@@ -98,7 +98,7 @@ public:
         const Eigen::Vector<Scalar, N>& g,
         const Eigen::Vector<Scalar, N>& lower,
         const Eigen::Vector<Scalar, N>& upper,
-        const compact_lbfgs<Scalar, N>& B)
+        const auto& B)
     {
         const int n = x.size();
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
@@ -224,13 +224,13 @@ private:
 //
 // Reference: N&W Section 16.6, pp. 475-477, eq. 16.44-16.48.
 //            Byrd, Lu, Nocedal, Zhu 1995 (L-BFGS-B algorithm).
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int M = 7>
 cauchy_result<Scalar, N> cauchy_point(
     const Eigen::Vector<Scalar, N>& x,
     const Eigen::Vector<Scalar, N>& g,
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper,
-    const compact_lbfgs<Scalar, N>& B)
+    const compact_lbfgs<Scalar, N, M>& B)
 {
     cauchy_point_solver<Scalar, N> solver(x.size());
     const auto& result = solver.solve(x, g, lower, upper, B);

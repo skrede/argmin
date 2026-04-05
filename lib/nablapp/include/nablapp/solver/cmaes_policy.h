@@ -43,13 +43,13 @@
 namespace nablapp
 {
 
-template <int N = dynamic_dimension>
+template <int N = dynamic_dimension, int MaxPopulation = dynamic_dimension>
 struct cmaes_policy
 {
     using scalar_type = double;
 
     template <int M>
-    using rebind = cmaes_policy<M>;
+    using rebind = cmaes_policy<M, MaxPopulation>;
 
     enum class restart_strategy { none, ipop };
 
@@ -287,8 +287,29 @@ struct cmaes_policy
 
             if(stagnated)
             {
-                // IPOP: double lambda, reset state, keep best
+                // IPOP: double lambda, reset state, keep best.
                 int new_lambda = s.params.lambda * 2;
+
+                // Guard: if MaxPopulation is a compile-time ceiling,
+                // the doubled population must not exceed it.
+                if constexpr(MaxPopulation != dynamic_dimension)
+                {
+                    if(new_lambda > MaxPopulation)
+                    {
+                        policy_status = solver_status::stalled;
+                        ++s.generation;
+                        return step_result<double>{
+                            .objective_value = s.objective_value,
+                            .gradient_norm = s.sigma * s.D.maxCoeff(),
+                            .step_size = 0.0,
+                            .objective_change = 0.0,
+                            .improved = false,
+                            .x_norm = s.x.norm(),
+                            .policy_status = policy_status,
+                        };
+                    }
+                }
+
                 s.params = detail::compute_constants(n, new_lambda);
                 s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
                 s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
@@ -298,8 +319,6 @@ struct cmaes_policy
                 s.sigma = s.initial_sigma;
                 s.generation = 0;
                 s.stagnation_count = 0;
-                // Keep s.x, s.objective_value, s.best_ever_value
-                // Clear status -- IPOP restart is recovery, not failure
                 policy_status = std::nullopt;
             }
         }

@@ -35,6 +35,7 @@ struct hs001
 {
     static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::bound_constrained;
+    static constexpr int constraint_count = 0;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -92,6 +93,7 @@ struct hs002
 {
     static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::bound_constrained;
+    static constexpr int constraint_count = 0;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -152,6 +154,7 @@ struct hs005
 {
     static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::bound_constrained;
+    static constexpr int constraint_count = 0;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -215,6 +218,7 @@ struct hs006
 {
     static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 1;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -283,6 +287,7 @@ struct hs007
 {
     static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 1;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -358,6 +363,7 @@ struct hs024
 {
     static constexpr int problem_dimension = 2;
     static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 3;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -440,6 +446,7 @@ struct hs026
 {
     static constexpr int problem_dimension = 3;
     static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 1;
 
     [[nodiscard]] int dimension() const { return 3; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -515,6 +522,7 @@ struct hs028
 {
     static constexpr int problem_dimension = 3;
     static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 1;
 
     [[nodiscard]] int dimension() const { return 3; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -590,6 +598,7 @@ struct hs035
 {
     static constexpr int problem_dimension = 3;
     static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 1;
 
     [[nodiscard]] int dimension() const { return 3; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -664,6 +673,7 @@ struct hs039
 {
     static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 2;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 2; }
@@ -740,6 +750,7 @@ struct hs040
 {
     static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 3;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 3; }
@@ -825,6 +836,7 @@ struct hs043
 {
     static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::inequality;
+    static constexpr int constraint_count = 3;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -910,6 +922,7 @@ struct hs048
 {
     static constexpr int problem_dimension = 5;
     static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 2;
 
     [[nodiscard]] int dimension() const { return 5; }
     [[nodiscard]] int num_equality() const { return 2; }
@@ -994,6 +1007,7 @@ struct hs050
 {
     static constexpr int problem_dimension = 5;
     static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 3;
 
     [[nodiscard]] int dimension() const { return 5; }
     [[nodiscard]] int num_equality() const { return 3; }
@@ -1085,6 +1099,7 @@ struct hs051
 {
     static constexpr int problem_dimension = 5;
     static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 3;
 
     [[nodiscard]] int dimension() const { return 5; }
     [[nodiscard]] int num_equality() const { return 3; }
@@ -1170,6 +1185,7 @@ struct hs071
 {
     static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::mixed;
+    static constexpr int constraint_count = 2;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -1253,6 +1269,7 @@ struct hs076
 {
     static constexpr int problem_dimension = 4;
     static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 3;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 0; }

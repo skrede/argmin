@@ -101,7 +101,7 @@ TEST_CASE("fixed-dim solver state types are stack-allocated", "[zero-copy]")
 TEST_CASE("fixed-dim compact_lbfgs operations: zero dynamic allocation", "[zero-copy]")
 {
     constexpr int N = 2;
-    detail::compact_lbfgs<double, N> B{5};
+    detail::compact_lbfgs<double, N, 5> B;
 
     // Push a curvature pair (allocates internally on first push)
     Eigen::Vector<double, N> s;
@@ -129,7 +129,7 @@ TEST_CASE("fixed-dim compact_lbfgs operations: zero dynamic allocation", "[zero-
 TEST_CASE("fixed-dim cauchy_point_solver: zero dynamic allocation", "[zero-copy]")
 {
     constexpr int N = 2;
-    detail::compact_lbfgs<double, N> B{5};
+    detail::compact_lbfgs<double, N, 5> B;
     Eigen::Vector<double, N> s;
     s << 0.1, 0.2;
     Eigen::Vector<double, N> y;
@@ -235,7 +235,7 @@ TEST_CASE("fixed-dim mma_subproblem_solver: zero dynamic allocation", "[zero-cop
 TEST_CASE("fixed-dim subspace_minimizer: zero dynamic allocation", "[zero-copy]")
 {
     constexpr int N = 2;
-    detail::compact_lbfgs<double, N> B{5};
+    detail::compact_lbfgs<double, N, 5> B;
     Eigen::Vector<double, N> s;
     s << 0.1, 0.2;
     Eigen::Vector<double, N> y;

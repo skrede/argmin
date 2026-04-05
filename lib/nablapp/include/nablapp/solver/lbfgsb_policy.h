@@ -72,7 +72,7 @@ struct lbfgsb_policy
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
         double objective_value{};
-        detail::compact_lbfgs<double, N> B;
+        detail::compact_lbfgs<double, N, 10> B;
         detail::cauchy_point_solver<double, N> gcp_solver;
         detail::subspace_minimizer<double, N> ssm_solver;
         std::uint32_t iteration{0};
@@ -115,9 +115,7 @@ struct lbfgsb_policy
             s.upper = Eigen::Vector<double, N>::Constant(n, inf);
         }
 
-        // History depth: default 10 (N&W 7.2)
-        std::uint8_t depth = options.history_depth.value_or(10);
-        s.B = detail::compact_lbfgs<double, N>{depth};
+        s.B = detail::compact_lbfgs<double, N, 10>{};
         s.gcp_solver = detail::cauchy_point_solver<double, N>{n};
         s.ssm_solver = detail::subspace_minimizer<double, N>{n};
         s.iteration = 0;

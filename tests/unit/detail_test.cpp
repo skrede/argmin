@@ -23,7 +23,7 @@ TEST_CASE("compact_lbfgs multiply matches explicit dense BFGS", "[detail]")
     Eigen::VectorXd y(2);
     y << 2.0, 1.0;
 
-    compact_lbfgs<> B(2);
+    compact_lbfgs<double, -1, 2> B;
     B.push(s, y);
 
     // Build explicit B1 from rank-2 BFGS update:
@@ -58,7 +58,7 @@ TEST_CASE("compact_lbfgs two_loop_recursion consistency", "[detail]")
     Eigen::VectorXd y(2);
     y << 2.0, 1.0;
 
-    compact_lbfgs<> B(2);
+    compact_lbfgs<double, -1, 2> B;
     B.push(s, y);
 
     Eigen::VectorXd g(2);
@@ -88,7 +88,7 @@ TEST_CASE("cauchy_point on bounded quadratic with known GCP", "[detail]")
     Eigen::VectorXd hi(2);
     hi << 3.0, 3.0;
 
-    compact_lbfgs<> B(2);  // Empty: B = theta*I = 1*I
+    compact_lbfgs<double, -1, 2> B;  // Empty: B = theta*I = 1*I
 
     auto result = cauchy_point(x, g, lo, hi, B);
 
@@ -117,7 +117,7 @@ TEST_CASE("cauchy_point unconstrained fallback returns all free", "[detail]")
     Eigen::VectorXd lo = Eigen::VectorXd::Constant(2, -inf);
     Eigen::VectorXd hi = Eigen::VectorXd::Constant(2, inf);
 
-    compact_lbfgs<> B(2);
+    compact_lbfgs<double, -1, 2> B;
 
     auto result = cauchy_point(x, g, lo, hi, B);
 
@@ -143,7 +143,7 @@ TEST_CASE("subspace_minimize on trivially solvable reduced system", "[detail]")
     hi << 10.0, 10.0;
     std::vector<int> free_idx{0, 1};
 
-    compact_lbfgs<> B(2);  // Empty: B = I
+    compact_lbfgs<double, -1, 2> B;  // Empty: B = I
 
     Eigen::VectorXd result = subspace_minimize(x, x_cauchy, g, lo, hi, free_idx, B);
 
@@ -171,7 +171,7 @@ TEST_CASE("subspace_minimize with empty free_indices returns x_cauchy", "[detail
     hi << 3.0, 3.0;
     std::vector<int> free_idx{};
 
-    compact_lbfgs<> B(2);
+    compact_lbfgs<double, -1, 2> B;
 
     Eigen::VectorXd result = subspace_minimize(x, x_cauchy, g, lo, hi, free_idx, B);
 
