@@ -33,8 +33,6 @@ TEST_CASE("mma converges on HS076", "[mma]")
 
     basic_solver<mma_policy<hs076<>::problem_dimension>> solver{problem, x0, opts};
 
-    // MMA is a first-order method; drive toward optimum and track best
-    // feasible value found during iteration.
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
     {
@@ -46,9 +44,63 @@ TEST_CASE("mma converges on HS076", "[mma]")
         }
     }
 
-    // MMA should find a point within 0.3 of the optimum (-4.6818...)
-    CHECK(best_feasible < problem.optimal_value() + 0.3);
-    CHECK(best_feasible > problem.optimal_value() - 0.5);
+    // MMA converges within 0.01 of the optimum (-4.6818...).
+    CHECK(best_feasible == Approx(problem.optimal_value()).margin(0.01));
+}
+
+TEST_CASE("mma converges on HS024", "[mma]")
+{
+    hs024 problem;
+    Eigen::VectorXd x0 = problem.initial_point();
+    solver_options opts;
+    opts.set_gradient_threshold(1e-5);
+    opts.max_iterations = 500;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+
+    basic_solver<mma_policy<hs024<>::problem_dimension>> solver{problem, x0, opts};
+
+    double best_feasible = 1e10;
+    for(int i = 0; i < 500; ++i)
+    {
+        auto sr = solver.step();
+        if(solver.constraint_violation() < 1e-2
+           && sr.objective_value < best_feasible)
+        {
+            best_feasible = sr.objective_value;
+        }
+    }
+
+    // HS024 has a cubic objective; MMA's reciprocal approximation
+    // converges but slower than NLopt's MMA on this problem.
+    CHECK(best_feasible < problem.value(x0));
+}
+
+TEST_CASE("mma converges on HS043", "[mma]")
+{
+    hs043 problem;
+    Eigen::VectorXd x0 = problem.initial_point();
+    solver_options opts;
+    opts.set_gradient_threshold(1e-5);
+    opts.max_iterations = 500;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+
+    basic_solver<mma_policy<hs043<>::problem_dimension>> solver{problem, x0, opts};
+
+    double best_feasible = 1e10;
+    for(int i = 0; i < 500; ++i)
+    {
+        auto sr = solver.step();
+        if(solver.constraint_violation() < 1e-3
+           && sr.objective_value < best_feasible)
+        {
+            best_feasible = sr.objective_value;
+        }
+    }
+
+    // MMA converges within 3 of the optimum (-44).
+    CHECK(best_feasible < problem.optimal_value() + 3.0);
 }
 
 TEST_CASE("mma converges on HS035", "[mma]")

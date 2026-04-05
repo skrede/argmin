@@ -60,29 +60,26 @@ void update_asymptotes(
         if(range <= Scalar(0))
             range = Scalar(1);
 
-        if(iteration < 2)
-        {
-            L[j] = x[j] - asyminit * range;
-            U[j] = x[j] + asyminit * range;
-        }
+        // Oscillation detection: sign of product of consecutive differences.
+        // For iterations 0-1, d2 is typically zero (x_old2 == x_old1 or
+        // x_old1 == x0), giving gamma = 1 (no change). The asymptotes
+        // recenter on the current iterate preserving their init half-width.
+        //
+        // Reference: Svanberg 1987, Section 3.
+        Scalar d1 = x[j] - x_old1[j];
+        Scalar d2 = x_old1[j] - x_old2[j];
+        Scalar product = d1 * d2;
+
+        Scalar gamma;
+        if(product < Scalar(0))
+            gamma = asymdec;
+        else if(product > Scalar(0))
+            gamma = asyminc;
         else
-        {
-            // Oscillation detection: sign of product of consecutive differences
-            Scalar d1 = x[j] - x_old1[j];
-            Scalar d2 = x_old1[j] - x_old2[j];
-            Scalar product = d1 * d2;
+            gamma = Scalar(1);
 
-            Scalar gamma;
-            if(product < Scalar(0))
-                gamma = asymdec;
-            else if(product > Scalar(0))
-                gamma = asyminc;
-            else
-                gamma = Scalar(1);
-
-            L[j] = x[j] - gamma * (x_old1[j] - L[j]);
-            U[j] = x[j] + gamma * (U[j] - x_old1[j]);
-        }
+        L[j] = x[j] - gamma * (x_old1[j] - L[j]);
+        U[j] = x[j] + gamma * (U[j] - x_old1[j]);
 
         // Safety clamp: asymptotes must not get too close to iterate.
         // Minimum distance is minimum_distance_fraction * range (Svanberg 1987).

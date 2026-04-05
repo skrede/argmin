@@ -45,7 +45,7 @@ struct mma_policy
 
     struct options_type
     {
-        std::optional<double> move_limit{};              // default: 0.2 (Svanberg 1987)
+        std::optional<double> move_limit{};              // default: 0.5 (Svanberg 1987)
         std::optional<double> asymptote_init{};          // default: 0.5 (Svanberg 1987)
         std::optional<double> asymptote_decrease{};      // default: 0.7 (Svanberg 1987)
         std::optional<double> asymptote_increase{};      // default: 1.2 (Svanberg 1987)
@@ -90,11 +90,16 @@ struct mma_policy
         // Re-initialize asymptotes with new opts
         const int n = problem.dimension();
         double asym_init = policy_opts.asymptote_init.value_or(0.5);
+        constexpr double inf_val = std::numeric_limits<double>::infinity();
         for(int j = 0; j < n; ++j)
         {
-            double range = finite_range(s.lower[j], s.upper[j]);
-            s.L[j] = x0[j] - asym_init * range;
-            s.U[j] = x0[j] + asym_init * range;
+            double half;
+            if(s.lower[j] > -inf_val && s.upper[j] < inf_val)
+                half = asym_init * (s.upper[j] - s.lower[j]);
+            else
+                half = 1.0;
+            s.L[j] = x0[j] - half;
+            s.U[j] = x0[j] + half;
         }
         return s;
     }
@@ -159,11 +164,16 @@ struct mma_policy
         s.x_old2 = x0;
 
         double asym_init = s.opts.asymptote_init.value_or(0.5);
+        constexpr double inf = std::numeric_limits<double>::infinity();
         for(int j = 0; j < n; ++j)
         {
-            double range = finite_range(s.lower[j], s.upper[j]);
-            s.L[j] = x0[j] - asym_init * range;
-            s.U[j] = x0[j] + asym_init * range;
+            double half;
+            if(s.lower[j] > -inf && s.upper[j] < inf)
+                half = asym_init * (s.upper[j] - s.lower[j]);
+            else
+                half = 1.0;
+            s.L[j] = x0[j] - half;
+            s.U[j] = x0[j] + half;
         }
 
         s.iteration = 0;
@@ -207,21 +217,14 @@ struct mma_policy
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
 
-        double move_lim = s.opts.move_limit.value_or(0.2);
+        double move_lim = s.opts.move_limit.value_or(0.5);
         double asym_init = s.opts.asymptote_init.value_or(0.5);
         double asym_dec = s.opts.asymptote_decrease.value_or(0.7);
         double asym_inc = s.opts.asymptote_increase.value_or(1.2);
-        double eff_scale = s.opts.effective_bounds_scale.value_or(10.0);
+        double eff_scale = s.opts.effective_bounds_scale.value_or(2.0);
 
-        // Re-evaluate at current x (skip on first iteration -- init did it)
-        if(s.iteration != 0)
-        {
-            s.f = s.eval_value(s.x);
-            s.eval_gradient(s.x, s.g);
-            s.eval_constraints(s.x, s.c_eq, s.c_ineq);
-            Eigen::MatrixXd Jeq_dummy;
-            s.eval_jacobian(s.x, Jeq_dummy, s.J_ineq);
-        }
+        // State (f, g, c_ineq, J_ineq) is current: init() evaluates at x0,
+        // and each step evaluates at the accepted iterate before returning.
 
         // 1. Update asymptotes, passing embedded options
         Eigen::Vector<double, N> x_min_eff = effective_bounds(s.lower, s.x, n, false, eff_scale);
@@ -233,7 +236,39 @@ struct mma_policy
             s.iteration, asym_init, asym_dec, asym_inc,
             s.opts.asymptote);
 
-        // 2. Compute MMA coefficients
+        // 2. Compute subproblem variable bounds per Svanberg 1987.
+        // Incorporates move limits, asymptote safety, and variable bounds
+        // into a single pair (alpha, beta) BEFORE the dual solve, so the
+        // KKT conditions of the subproblem are consistent with the bounds.
+        Eigen::Vector<double, N> alpha(n), beta(n);
+        for(int j = 0; j < n; ++j)
+        {
+            // Asymptote safety: stay away from L and U to keep the
+            // reciprocal approximation well-conditioned.
+            double L_safe = s.L[j] + 0.01 * (s.x[j] - s.L[j]);
+            double U_safe = s.U[j] - 0.01 * (s.U[j] - s.x[j]);
+
+            alpha[j] = std::max(L_safe, s.lower[j]);
+            beta[j] = std::min(U_safe, s.upper[j]);
+
+            // Move limit relative to current asymptote half-width.
+            // The half-width adapts via oscillation detection: contracts
+            // on oscillation (0.7x), expands on monotone progress (1.2x).
+            // Reference: Svanberg 1987, Section 5.
+            double half_L = s.x[j] - s.L[j];
+            double half_U = s.U[j] - s.x[j];
+            alpha[j] = std::max(alpha[j], s.x[j] - move_lim * half_L);
+            beta[j] = std::min(beta[j], s.x[j] + move_lim * half_U);
+
+            if(alpha[j] >= beta[j])
+            {
+                double mid = 0.5 * (alpha[j] + beta[j]);
+                alpha[j] = mid - 1e-10;
+                beta[j] = mid + 1e-10;
+            }
+        }
+
+        // 3. Compute MMA coefficients
         // For MMA, constraint signs: we negate c_ineq to get g_i <= 0 form
         // (MMA convention: constraints are g_i(x) <= 0, nablapp uses c >= 0)
         // So g_i = -c_ineq_i, dg_i = -J_ineq_i
@@ -244,40 +279,77 @@ struct mma_policy
             s.x, s.f, s.g, g_mma, dg_mma, s.L, s.U,
             s.opts.subproblem);
 
-        // 3. Solve dual subproblem using pre-allocated solver
+        // 4. Solve dual subproblem with proper bounds
         Eigen::Vector<double, N> x_new = s.subproblem->dual_solve(
-            s.L, s.U, x_min_eff, x_max_eff,
+            s.L, s.U, alpha, beta,
             s.opts.subproblem);
 
-        // 4. Apply move limits
-        for(int j = 0; j < n; ++j)
+        // 5. L1 merit function line search.
+        // Prevents oscillation between feasible and infeasible points by
+        // rejecting steps that worsen the merit function phi(x) = f(x) +
+        // mu * cv(x). Backtrack along the MMA direction until merit
+        // improves; accept null step if all backtracks fail.
+        // Reference: Nocedal & Wright, Section 18.3.
+        double f_old = s.f;
+        double cv_old = detail::constraint_violation(s.c_eq, s.c_ineq);
+        constexpr double mu = 10.0;
+        double merit_old = s.f + mu * cv_old;
+
+        Eigen::Vector<double, N> dx = x_new - s.x;
+
+        // Evaluate full step
+        double f_trial = s.eval_value(x_new);
+        Eigen::VectorXd c_eq_trial, c_ineq_trial;
+        s.eval_constraints(x_new, c_eq_trial, c_ineq_trial);
+        double cv_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
+        double merit_trial = f_trial + mu * cv_trial;
+
+        for(int bt = 0; bt < 4 && merit_trial > merit_old; ++bt)
         {
-            double range = finite_range(s.lower[j], s.upper[j]);
-            double delta = move_lim * range;
-            x_new[j] = std::clamp(x_new[j],
-                std::max(s.x[j] - delta, s.lower[j]),
-                std::min(s.x[j] + delta, s.upper[j]));
+            double step_alpha = 1.0 / (1 << (bt + 1));
+            x_new = s.x + step_alpha * dx;
+            f_trial = s.eval_value(x_new);
+            s.eval_constraints(x_new, c_eq_trial, c_ineq_trial);
+            cv_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
+            merit_trial = f_trial + mu * cv_trial;
         }
 
-        // 5. Shift history
-        double f_old = s.f;
+        // Null step with asymptote contraction: if all backtracks failed,
+        // stay at current iterate but tighten asymptotes. This contracts
+        // the trust region so the next iteration proposes a smaller step,
+        // breaking the reject-repeat cycle.
+        if(merit_trial > merit_old)
+        {
+            for(int j = 0; j < n; ++j)
+            {
+                s.L[j] = s.x[j] - asym_dec * (s.x[j] - s.L[j]);
+                s.U[j] = s.x[j] + asym_dec * (s.U[j] - s.x[j]);
+            }
+            x_new = s.x;
+            f_trial = s.f;
+            c_eq_trial = s.c_eq;
+            c_ineq_trial = s.c_ineq;
+            cv_trial = cv_old;
+        }
+
+        // 6. Shift history
         s.x_old2 = s.x_old1;
         s.x_old1 = s.x;
 
-        // 6. Update iterate
+        // 7. Accept step
         double step_size = (x_new - s.x).norm();
         s.x = x_new;
-        s.f = s.eval_value(s.x);
+        s.f = f_trial;
         s.eval_gradient(s.x, s.g);
-        s.eval_constraints(s.x, s.c_eq, s.c_ineq);
+        s.c_eq = c_eq_trial;
+        s.c_ineq = c_ineq_trial;
         Eigen::MatrixXd Jeq_dummy;
         s.eval_jacobian(s.x, Jeq_dummy, s.J_ineq);
 
-        // 7. Iteration++
+        // 8. Iteration++
         ++s.iteration;
 
-        // KKT violation: max(grad_norm, constraint_violation)
-        double violation = detail::constraint_violation(s.c_eq, s.c_ineq);
+        double violation = cv_trial;
         double grad_norm = std::max(s.g.norm(), violation);
 
         return step_result<double>{
@@ -286,6 +358,7 @@ struct mma_policy
             .step_size = step_size,
             .objective_change = s.f - f_old,
             .improved = s.f < f_old,
+            .constraint_violation = violation,
             .x_norm = s.x.norm(),
         };
     }
@@ -309,11 +382,16 @@ struct mma_policy
         reset(s, x0);
         const int n = static_cast<int>(x0.size());
         double asym_init = s.opts.asymptote_init.value_or(0.5);
+        constexpr double inf = std::numeric_limits<double>::infinity();
         for(int j = 0; j < n; ++j)
         {
-            double range = finite_range(s.lower[j], s.upper[j]);
-            s.L[j] = x0[j] - asym_init * range;
-            s.U[j] = x0[j] + asym_init * range;
+            double half;
+            if(s.lower[j] > -inf && s.upper[j] < inf)
+                half = asym_init * (s.upper[j] - s.lower[j]);
+            else
+                half = 1.0;
+            s.L[j] = x0[j] - half;
+            s.U[j] = x0[j] + half;
         }
     }
 

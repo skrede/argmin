@@ -292,7 +292,19 @@ public:
                 }
             }
 
-            if(dual_grad_.cwiseAbs().maxCoeff() < tol)
+            // Projected gradient convergence: for y_i > 0, |grad_i| < tol;
+            // for y_i ≈ 0, only the positive part matters (negative gradient
+            // means the constraint is satisfied and the dual variable is
+            // correctly at zero). Reference: Svanberg 1987, KKT conditions.
+            Scalar max_proj = Scalar(0);
+            for(int i = 0; i < m_; ++i)
+            {
+                if(y_[i] > eps)
+                    max_proj = std::max(max_proj, std::abs(dual_grad_[i]));
+                else
+                    max_proj = std::max(max_proj, std::max(dual_grad_[i], Scalar(0)));
+            }
+            if(max_proj < tol)
                 break;
 
             dual_hess_.setZero();
@@ -498,8 +510,16 @@ Eigen::Vector<Scalar, N> mma_dual_solve(
             }
         }
 
-        // Check convergence
-        if(grad.cwiseAbs().maxCoeff() < tol)
+        // Projected gradient convergence check (see stateful solver above).
+        Scalar max_proj = Scalar(0);
+        for(int i = 0; i < m; ++i)
+        {
+            if(y[i] > eps)
+                max_proj = std::max(max_proj, std::abs(grad[i]));
+            else
+                max_proj = std::max(max_proj, std::max(grad[i], Scalar(0)));
+        }
+        if(max_proj < tol)
             break;
 
         // Compute the negative dual Hessian (-d^2W/dy^2), which is positive
