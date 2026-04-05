@@ -108,7 +108,7 @@ TEST_CASE("L-BFGS-B converges on unconstrained Rosenbrock", "[lbfgsb]")
         opts.set_gradient_threshold(1e-6);
         opts.max_iterations = 200;
 
-        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>> solver{problem, x0, opts};
+        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.status == solver_status::converged);
@@ -125,7 +125,7 @@ TEST_CASE("L-BFGS-B converges on unconstrained Rosenbrock", "[lbfgsb]")
         opts.set_gradient_threshold(1e-6);
         opts.max_iterations = 500;
 
-        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>> solver{problem, x0, opts};
+        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.status == solver_status::converged);
@@ -155,7 +155,7 @@ TEST_CASE("L-BFGS-B respects box constraints", "[lbfgsb]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>> solver{problem, x0, opts};
+        basic_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>, bounded_rosenbrock::problem_dimension, bounded_rosenbrock> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK((result.status == solver_status::converged
@@ -189,7 +189,7 @@ TEST_CASE("L-BFGS-B respects box constraints", "[lbfgsb]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>> solver{problem, x0, opts};
+        basic_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>, bounded_rosenbrock::problem_dimension, bounded_rosenbrock> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK((result.status == solver_status::converged
@@ -209,7 +209,7 @@ TEST_CASE("L-BFGS-B step/solve/step_n consistency", "[lbfgsb]")
 
     SECTION("step returns finite values")
     {
-        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>> solver{problem, x0, opts};
+        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
         {
@@ -225,7 +225,7 @@ TEST_CASE("L-BFGS-B step/solve/step_n consistency", "[lbfgsb]")
 
     SECTION("solve converges from scratch")
     {
-        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>> solver{problem, x0, opts};
+        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK(result.status == solver_status::converged);
     }
@@ -238,7 +238,7 @@ TEST_CASE("Two L-BFGS-B policies in solver_group (SC5)", "[lbfgsb][solver_group]
     solver_options opts;
     opts.set_gradient_threshold(1e-6);
 
-    basic_solver_group<round_robin_schedule, dynamic_dimension, lbfgsb_policy<>, lbfgsb_policy<>> group{
+    basic_solver_group<round_robin_schedule, dynamic_dimension, rosenbrock<>, lbfgsb_policy<>, lbfgsb_policy<>> group{
         problem, x0, opts};
 
     // Step 10 times, each step should produce finite results

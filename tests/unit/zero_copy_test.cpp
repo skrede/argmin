@@ -73,7 +73,7 @@ TEST_CASE("fixed-dim booth value+gradient: zero dynamic allocation", "[zero-copy
 
 TEST_CASE("fixed-dim solver state types are stack-allocated", "[zero-copy]")
 {
-    using solver_type = basic_solver<lbfgsb_policy<2>, 2>;
+    using solver_type = basic_solver<lbfgsb_policy<2>, 2, beale<double>>;
     using state_type = typename solver_type::state_type;
 
     static_assert(std::is_same_v<decltype(state_type::x),

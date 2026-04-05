@@ -317,7 +317,7 @@ struct augmented_lagrangian_policy
             .threshold = scalar_type(1e-15);
 
         using rebound_inner = typename InnerPolicy::template rebind<N>;
-        basic_solver<rebound_inner, N> inner_solver{sub, s.x, inner_opts};
+        basic_solver<rebound_inner, N, subproblem> inner_solver{sub, s.x, inner_opts};
         auto inner_result = inner_solver.solve(inner_opts);
 
         // Extract solution from inner solver

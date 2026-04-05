@@ -37,7 +37,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <optional>
 #include <vector>
@@ -61,12 +60,14 @@ struct lbfgsb_policy
 
     options_type options{};
 
-    // The eval_value and eval_gradient functors capture the Problem by reference.
     // The Problem object passed to init() MUST outlive the solver.
     // This is the same lifetime model as all nablapp policies (init takes
-    // const Problem&).
+    // const Problem&). The problem pointer enables direct inlinable calls
+    // without std::function type-erasure overhead.
+    template <typename P = void>
     struct state_type
     {
+        const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         Eigen::Vector<double, N> g;
         Eigen::Vector<double, N> lower;
@@ -76,13 +77,10 @@ struct lbfgsb_policy
         detail::cauchy_point_solver<double, N> gcp_solver;
         detail::subspace_minimizer<double, N> ssm_solver;
         std::uint32_t iteration{0};
-
-        std::function<double(const Eigen::Vector<double, N>&)> eval_value;
-        std::function<void(const Eigen::Vector<double, N>&, Eigen::Vector<double, N>&)> eval_gradient;
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
@@ -91,12 +89,13 @@ struct lbfgsb_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem,
+    state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
 
         s.x = x0;
         s.g.setZero(n);
@@ -120,22 +119,15 @@ struct lbfgsb_policy
         s.ssm_solver = detail::subspace_minimizer<double, N>{n};
         s.iteration = 0;
 
-        s.eval_value = [&problem](const Eigen::Vector<double, N>& v) {
-            return problem.value(v);
-        };
-        s.eval_gradient = [&problem](const Eigen::Vector<double, N>& v,
-                                     Eigen::Vector<double, N>& grad) {
-            problem.gradient(v, grad);
-        };
-
         return s;
     }
 
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         // Evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
-            s.eval_gradient(s.x, s.g);
+            s.problem->gradient(s.x, s.g);
 
         // Generalized Cauchy Point using pre-allocated solver
         const auto& gcp = s.gcp_solver.solve(s.x, s.g, s.lower, s.upper, s.B);
@@ -200,10 +192,10 @@ struct lbfgsb_policy
         double cached_alpha = -1.0;
 
         auto phi = [&](double a) {
-            return s.eval_value((s.x + a * d).eval());
+            return s.problem->value((s.x + a * d).eval());
         };
         auto dphi = [&](double a) {
-            s.eval_gradient((s.x + a * d).eval(), cached_g);
+            s.problem->gradient((s.x + a * d).eval(), cached_g);
             cached_alpha = a;
             return cached_g.dot(d);
         };
@@ -220,7 +212,7 @@ struct lbfgsb_policy
 
         // Evaluate objective at projected point (projection may differ from
         // line search trial point due to bound clamping)
-        s.objective_value = s.eval_value(s.x);
+        s.objective_value = s.problem->value(s.x);
 
         // Reuse cached gradient from line search dphi callback if it was
         // evaluated at the accepted alpha and projection didn't change x
@@ -229,7 +221,7 @@ struct lbfgsb_policy
            s.x.isApprox((x_old + ls.alpha * d).eval(), 0.0))
             new_g = cached_g;
         else
-            s.eval_gradient(s.x, new_g);
+            s.problem->gradient(s.x, new_g);
 
         // Update L-BFGS curvature pairs
         Eigen::Vector<double, N> sk = (s.x - x_old).eval();
@@ -264,17 +256,19 @@ struct lbfgsb_policy
     }
 
     // Hot start -- preserves curvature pairs (D-05).
-    void reset(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         s.x = x0;
-        s.objective_value = s.eval_value(x0);
-        s.eval_gradient(x0, s.g);
+        s.objective_value = s.problem->value(x0);
+        s.problem->gradient(x0, s.g);
         s.iteration = 0;
         // B (compact_lbfgs) is NOT reset -- preserves curvature pairs
     }
 
     // Cold restart -- clears curvature history (D-05).
-    void reset_clear(state_type& s, const Eigen::Vector<double, N>& x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
         s.B.reset();

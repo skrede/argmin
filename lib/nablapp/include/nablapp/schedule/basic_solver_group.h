@@ -29,20 +29,20 @@ namespace nablapp
 // which solver to step next. The compile-time fold-expression requires clause
 // ensures the Problem type satisfies the union of all policy requirements.
 
-template <typename Schedule, int N = dynamic_dimension, typename... Policies>
+template <typename Schedule, int N = dynamic_dimension, typename Problem = void, typename... Policies>
 class basic_solver_group
 {
 public:
     using scalar_type = typename std::tuple_element_t<0, std::tuple<Policies...>>::scalar_type;
 
-    template <typename Problem, typename Convergence = default_convergence>
-        requires (std::constructible_from<basic_solver<Policies, N>, const Problem&,
+    template <typename P, typename Convergence = default_convergence>
+        requires (std::constructible_from<basic_solver<Policies, N, Problem>, const P&,
                   const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&> && ...)
-    basic_solver_group(const Problem& problem,
+    basic_solver_group(const P& problem,
                        const Eigen::VectorX<scalar_type>& x0,
                        const solver_options<Convergence>& opts = {},
                        Schedule schedule = {})
-        : solvers_{basic_solver<Policies, N>{problem, x0, opts}...}
+        : solvers_{basic_solver<Policies, N, Problem>{problem, x0, opts}...}
         , schedule_{std::move(schedule)}
         , max_iterations_{opts.max_iterations}
         , constraint_tolerance_{opts.constraint_tolerance}
@@ -51,13 +51,11 @@ public:
     }
 
     // Per-policy options constructor.
-    // Each element of policy_opts is forwarded to the corresponding
-    // policy's basic_solver constructor.
-    template <typename Problem, typename Convergence = default_convergence>
-        requires (std::constructible_from<basic_solver<Policies, N>, const Problem&,
+    template <typename P, typename Convergence = default_convergence>
+        requires (std::constructible_from<basic_solver<Policies, N, Problem>, const P&,
                   const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&,
                   const policy_options_t<Policies, scalar_type>&> && ...)
-    basic_solver_group(const Problem& problem,
+    basic_solver_group(const P& problem,
                        const Eigen::VectorX<scalar_type>& x0,
                        const solver_options<Convergence>& opts,
                        std::tuple<policy_options_t<Policies, scalar_type>...> policy_opts,
@@ -195,15 +193,15 @@ private:
         }
     }
 
-    template <typename Problem, typename Convergence, std::size_t... Is>
+    template <typename P, typename Convergence, std::size_t... Is>
     static auto make_solvers_with_opts(
-        const Problem& problem,
+        const P& problem,
         const Eigen::VectorX<scalar_type>& x0,
         const solver_options<Convergence>& opts,
         const std::tuple<policy_options_t<Policies, scalar_type>...>& policy_opts,
         std::index_sequence<Is...>)
     {
-        return std::tuple{basic_solver<Policies, N>{
+        return std::tuple{basic_solver<Policies, N, Problem>{
             problem, x0, opts, std::get<Is>(policy_opts)}...};
     }
 
@@ -326,7 +324,7 @@ private:
         (fill(Is, std::get<Is>(solvers_)), ...);
     }
 
-    std::tuple<basic_solver<Policies, N>...> solvers_;
+    std::tuple<basic_solver<Policies, N, Problem>...> solvers_;
     Schedule schedule_;
     std::uint32_t max_iterations_{1000};
     std::optional<double> constraint_tolerance_{};
