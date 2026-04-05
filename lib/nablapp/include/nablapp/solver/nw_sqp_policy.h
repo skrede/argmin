@@ -62,6 +62,11 @@ struct nw_sqp_policy
     template <typename P = void>
     struct state_type
     {
+        static constexpr int M = [] {
+            if constexpr(has_constraint_count<P>) return constraint_count_v<P>;
+            else return dynamic_dimension;
+        }();
+
         const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         Eigen::Vector<double, N> g;
@@ -99,6 +104,8 @@ struct nw_sqp_policy
                       "nw_sqp_policy requires differentiable<Problem>");
         static_assert(constrained<Problem>,
                       "nw_sqp_policy requires constrained<Problem>");
+
+        constexpr int M = state_type<Problem>::M;
 
         const int n = problem.dimension();
         state_type<Problem> s;
@@ -164,6 +171,8 @@ struct nw_sqp_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
+        constexpr int M = state_type<P>::M;
+
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
 
@@ -176,9 +185,9 @@ struct nw_sqp_policy
         Eigen::Vector<double, N> p0 = Eigen::Vector<double, N>::Zero(n);
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
         {
-            Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
+            auto AAt = (A_eq * A_eq.transpose()).eval();
             auto qr = AAt.colPivHouseholderQr();
-            Eigen::VectorXd w = qr.solve(b_eq);
+            auto w = qr.solve(b_eq);
             p0 = A_eq.transpose() * w;
         }
 
@@ -196,8 +205,10 @@ struct nw_sqp_policy
 
         if(has_finite_bounds)
         {
-            Eigen::Vector<double, N> p_lower = (Eigen::VectorXd(s.lower) - Eigen::VectorXd(s.x)).eval();
-            Eigen::Vector<double, N> p_upper = (Eigen::VectorXd(s.upper) - Eigen::VectorXd(s.x)).eval();
+            Eigen::Vector<double, N> p_lower = (Eigen::Vector<double, N>(s.lower) -
+                                                  Eigen::Vector<double, N>(s.x)).eval();
+            Eigen::Vector<double, N> p_upper = (Eigen::Vector<double, N>(s.upper) -
+                                                  Eigen::Vector<double, N>(s.x)).eval();
             p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
             qp = detail::solve_qp<double, N>(s.B.hessian(), s.g,
                                   A_eq, b_eq, A_ineq, b_ineq,
@@ -305,10 +316,8 @@ struct nw_sqp_policy
             if(s.n_eq > 0) A_new_full.topRows(s.n_eq) = s.J_eq;
             if(s.n_ineq > 0) A_new_full.bottomRows(s.n_ineq) = s.J_ineq;
 
-            grad_L_new = detail::lagrangian_gradient(s.g, A_new_full,
-                                                     lambda_new);
-            grad_L_old = detail::lagrangian_gradient(g_old, A_new_full,
-                                                     lambda_new);
+            grad_L_new = detail::lagrangian_gradient(s.g, A_new_full, lambda_new);
+            grad_L_old = detail::lagrangian_gradient(g_old, A_new_full, lambda_new);
         }
         else
         {
@@ -345,6 +354,8 @@ struct nw_sqp_policy
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
+        constexpr int M = state_type<P>::M;
+
         const int n = static_cast<int>(x0.size());
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
@@ -394,6 +405,8 @@ private:
     template <typename P>
     static double lagrangian_gradient_norm(const state_type<P>& s)
     {
+        constexpr int M = state_type<P>::M;
+
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
         if(m == 0)

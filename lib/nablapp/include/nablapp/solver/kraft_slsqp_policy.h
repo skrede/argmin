@@ -68,6 +68,11 @@ struct kraft_slsqp_policy
     template <typename P = void>
     struct state_type
     {
+        static constexpr int M = [] {
+            if constexpr(has_constraint_count<P>) return constraint_count_v<P>;
+            else return dynamic_dimension;
+        }();
+
         const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         Eigen::Vector<double, N> g;
@@ -128,6 +133,8 @@ struct kraft_slsqp_policy
             s.upper = Eigen::Vector<double, N>::Constant(n, inf);
         }
 
+        constexpr int M = state_type<Problem>::M;
+
         // Constraints
         if constexpr(constrained<Problem>)
         {
@@ -174,6 +181,8 @@ struct kraft_slsqp_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
+        constexpr int M = state_type<P>::M;
+
         // Re-evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
         {
@@ -208,14 +217,16 @@ struct kraft_slsqp_policy
         // Symmetrize for numerical safety
         s.B_workspace = (0.5 * (s.B_workspace + s.B_workspace.transpose())).eval();
 
-        Eigen::MatrixXd A_eq = s.J_eq;
+        Eigen::Matrix<double, Eigen::Dynamic, N> A_eq = s.J_eq;
         Eigen::VectorXd b_eq = -s.c_eq;
-        Eigen::MatrixXd A_ineq = s.J_ineq;
+        Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq = s.J_ineq;
         Eigen::VectorXd b_ineq = -s.c_ineq;
 
         // Box bounds on the step
-        Eigen::VectorXd p_lower = Eigen::VectorXd(s.lower) - Eigen::VectorXd(s.x);
-        Eigen::VectorXd p_upper = Eigen::VectorXd(s.upper) - Eigen::VectorXd(s.x);
+        Eigen::Vector<double, N> p_lower = (Eigen::Vector<double, N>(s.lower) -
+                                             Eigen::Vector<double, N>(s.x)).eval();
+        Eigen::Vector<double, N> p_upper = (Eigen::Vector<double, N>(s.upper) -
+                                             Eigen::Vector<double, N>(s.x)).eval();
 
         constexpr double big = 1e20;
         for(int i = 0; i < n; ++i)
@@ -238,16 +249,16 @@ struct kraft_slsqp_policy
         // Phase 1: compute a feasible starting point for the QP.
         // The active-set method requires x0 satisfying A_eq * x0 = b_eq.
         // With x0 = 0, equality constraints are unsatisfied (A_eq*0 = 0
-        // but b_eq = -c_eq ≠ 0), and every QP step stays in the null
+        // but b_eq = -c_eq != 0), and every QP step stays in the null
         // space of A_eq, never reducing equality violation.
         // Fix: use the minimum-norm solution x0 = A^T*(AA^T)^{-1}*b.
         // Reference: N&W Section 16.2, phase-1 feasibility.
         Eigen::Vector<double, N> p_start = Eigen::Vector<double, N>::Zero(n);
         if(s.n_eq > 0 && b_eq.squaredNorm() > 1e-30)
         {
-            Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
-            Eigen::LDLT<Eigen::MatrixXd> ldlt(AAt);
-            Eigen::VectorXd y = ldlt.solve(b_eq);
+            auto AAt = (A_eq * A_eq.transpose()).eval();
+            Eigen::LDLT<decltype(AAt)> ldlt(AAt);
+            auto y = ldlt.solve(b_eq);
             p_start = Eigen::Vector<double, N>(A_eq.transpose() * y);
 
             for(int i = 0; i < n; ++i)
@@ -255,10 +266,8 @@ struct kraft_slsqp_policy
         }
 
         auto qp_res = s.qp_solver.solve(s.B_workspace, Eigen::Vector<double, N>(s.g),
-                                         Eigen::Matrix<double, Eigen::Dynamic, N>(A_eq),
-                                         b_eq,
-                                         Eigen::Matrix<double, Eigen::Dynamic, N>(A_ineq),
-                                         b_ineq, p_lo, p_hi, p_start, qp_opts);
+                                         A_eq, b_eq, A_ineq, b_ineq,
+                                         p_lo, p_hi, p_start, qp_opts);
 
         Eigen::Vector<double, N> p = qp_res.x;
 
@@ -378,8 +387,8 @@ struct kraft_slsqp_policy
             if(s.n_eq + s.n_ineq > 0 && qp_res.lambda.size() > 0)
             {
                 int m_total = s.n_eq + s.n_ineq;
-                Eigen::VectorXd lam = qp_res.lambda.head(
-                    std::min(m_total, static_cast<int>(qp_res.lambda.size())));
+                auto lam = qp_res.lambda.head(
+                    std::min(m_total, static_cast<int>(qp_res.lambda.size()))).eval();
 
                 if(lam.size() == m_total)
                     s.lambda = lam;
@@ -389,14 +398,14 @@ struct kraft_slsqp_policy
 
                 if(s.n_eq > 0 && lam.size() >= s.n_eq)
                 {
-                    Eigen::VectorXd lam_eq = lam.head(s.n_eq);
+                    auto lam_eq = lam.head(s.n_eq);
                     grad_L_old -= J_all_old.topRows(s.n_eq).transpose() * lam_eq;
                     grad_L_new -= s.J_eq.transpose() * lam_eq;
                 }
 
                 if(s.n_ineq > 0 && lam.size() >= s.n_eq + s.n_ineq)
                 {
-                    Eigen::VectorXd lam_ineq = lam.segment(s.n_eq, s.n_ineq);
+                    auto lam_ineq = lam.segment(s.n_eq, s.n_ineq);
                     grad_L_old -= J_all_old.bottomRows(s.n_ineq).transpose() * lam_ineq;
                     grad_L_new -= s.J_ineq.transpose() * lam_ineq;
                 }
@@ -423,6 +432,7 @@ struct kraft_slsqp_policy
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
+        constexpr int M = state_type<P>::M;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);

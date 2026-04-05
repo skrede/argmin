@@ -60,6 +60,11 @@ struct gcmma_policy
     template <typename P = void>
     struct state_type
     {
+        static constexpr int M = [] {
+            if constexpr(has_constraint_count<P>) return constraint_count_v<P>;
+            else return dynamic_dimension;
+        }();
+
         typename mma_policy<N>::template state_type<P> mma_state;
         options_type opts;
 
@@ -67,7 +72,7 @@ struct gcmma_policy
         // state_.c_eq, state_.c_ineq directly).
         Eigen::Vector<double, N>& x = mma_state.x;
         Eigen::VectorXd& c_eq = mma_state.c_eq;
-        Eigen::VectorXd& c_ineq = mma_state.c_ineq;
+        Eigen::Vector<double, M>& c_ineq = mma_state.c_ineq;
 
         state_type() = default;
         state_type(const state_type& o)
@@ -124,6 +129,8 @@ struct gcmma_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
+        constexpr int MC = state_type<P>::M;
+
         auto& ms = s.mma_state;
         const int n = static_cast<int>(ms.x.size());
         const int m = static_cast<int>(ms.c_ineq.size());
@@ -144,9 +151,17 @@ struct gcmma_policy
             ms.f = ms.problem->value(ms.x);
             ms.problem->gradient(ms.x, ms.g);
             if(m > 0)
-                ms.problem->constraints(ms.x, ms.c_ineq);
+            {
+                Eigen::VectorXd c_tmp(m);
+                ms.problem->constraints(ms.x, c_tmp);
+                ms.c_ineq = c_tmp;
+            }
             if(m > 0)
-                ms.problem->constraint_jacobian(ms.x, ms.J_ineq);
+            {
+                Eigen::MatrixXd J_tmp(m, n);
+                ms.problem->constraint_jacobian(ms.x, J_tmp);
+                ms.J_ineq = J_tmp;
+            }
         }
 
         // Effective bounds for asymptote update
@@ -165,8 +180,8 @@ struct gcmma_policy
         Eigen::Vector<double, N> U_inner = ms.U;
 
         // MMA convention: g_i <= 0 form
-        Eigen::VectorXd g_mma = -ms.c_ineq;
-        Eigen::Matrix<double, Eigen::Dynamic, N> dg_mma = -ms.J_ineq;
+        Eigen::Vector<double, MC> g_mma = -ms.c_ineq;
+        Eigen::Matrix<double, MC, N> dg_mma = -ms.J_ineq;
 
         Eigen::Vector<double, N> x_trial(n);
         double f_trial{};
@@ -251,7 +266,11 @@ struct gcmma_policy
         // Re-evaluate gradient and Jacobian at new point
         ms.problem->gradient(ms.x, ms.g);
         if(m > 0)
-            ms.problem->constraint_jacobian(ms.x, ms.J_ineq);
+        {
+            Eigen::MatrixXd J_tmp(m, n);
+            ms.problem->constraint_jacobian(ms.x, J_tmp);
+            ms.J_ineq = J_tmp;
+        }
 
         ++ms.iteration;
 

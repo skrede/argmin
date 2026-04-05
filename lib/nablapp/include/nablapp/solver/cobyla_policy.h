@@ -58,6 +58,11 @@ struct cobyla_policy
     template <typename P = void>
     struct state_type
     {
+        static constexpr int M = [] {
+            if constexpr(has_constraint_count<P>) return constraint_count_v<P>;
+            else return dynamic_dimension;
+        }();
+
         const P* problem{nullptr};
         Eigen::VectorXd x;
         Eigen::MatrixXd simplex;       // n x (n+1)

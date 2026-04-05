@@ -61,6 +61,11 @@ struct augmented_lagrangian_policy
     template <typename P = void>
     struct state_type
     {
+        static constexpr int M = [] {
+            if constexpr(has_constraint_count<P>) return constraint_count_v<P>;
+            else return dynamic_dimension;
+        }();
+
         const P* problem{nullptr};
         Eigen::Vector<scalar_type, N> x;
         scalar_type f{};
@@ -104,6 +109,8 @@ struct augmented_lagrangian_policy
     {
         static_assert(constrained<Problem, scalar_type>,
                       "augmented_lagrangian_policy requires constrained<Problem>");
+
+        constexpr int MC = state_type<Problem>::M;
 
         const int n = problem.dimension();
         state_type<Problem> s;
@@ -152,6 +159,8 @@ struct augmented_lagrangian_policy
     template <typename P>
     step_result<scalar_type> step(state_type<P>& s)
     {
+        constexpr int MC = state_type<P>::M;
+
         const int n = static_cast<int>(s.x.size());
 
         const scalar_type inner_grad_tol = s.opts.inner_gradient_tolerance.value_or(scalar_type(1e-6));
@@ -209,7 +218,7 @@ struct augmented_lagrangian_policy
                 else
                 {
                     Eigen::Vector<scalar_type, PD> g_tmp(g.size());
-                    outer->gradient(Eigen::VectorX<scalar_type>(x), g_tmp);
+                    outer->gradient(Eigen::Vector<scalar_type, N>(x), g_tmp);
                     g = g_tmp;
                 }
                 const int m = neq + nineq;
@@ -288,7 +297,7 @@ struct augmented_lagrangian_policy
             else
             {
                 Eigen::Vector<scalar_type, PD> g_tmp(n);
-                s.problem->gradient(Eigen::VectorX<scalar_type>(s.x), g_tmp);
+                s.problem->gradient(Eigen::Vector<scalar_type, N>(s.x), g_tmp);
                 grad_f = g_tmp;
             }
 
@@ -340,6 +349,8 @@ struct augmented_lagrangian_policy
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<scalar_type, N>& x0)
     {
+        constexpr int MC = state_type<P>::M;
+
         s.x = x0;
         s.f = s.problem->value(x0);
         {

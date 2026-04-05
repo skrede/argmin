@@ -55,6 +55,11 @@ struct isres_policy
     template <typename P = void>
     struct state_type
     {
+        static constexpr int M = [] {
+            if constexpr(has_constraint_count<P>) return constraint_count_v<P>;
+            else return dynamic_dimension;
+        }();
+
         const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         double objective_value{};
@@ -102,6 +107,8 @@ struct isres_policy
                     const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts)
     {
+        constexpr int MC = state_type<Problem>::M;
+
         const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
@@ -203,6 +210,8 @@ struct isres_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
+        constexpr int MC = state_type<P>::M;
+
         const int n = s.x.size();
         const int n_c = s.n_eq + s.n_ineq;
         double old_best = s.objective_value;
@@ -332,6 +341,8 @@ struct isres_policy
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
+        constexpr int MC = state_type<P>::M;
+
         const int n = x0.size();
 
         // Re-initialize population uniformly

@@ -502,13 +502,14 @@ public:
         A_aug_.middleRows(m_ineq + n, n) = -Eigen::Matrix<Scalar, N, N>::Identity(n, n);
         b_aug_.segment(m_ineq + n, n) = -upper;
 
-        constraint_matrix A_eq_dyn(A_eq.rows(), n);
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_eq_dyn(A_eq.rows(), n);
         A_eq_dyn = A_eq;
-        constraint_matrix A_aug_dyn(m_aug, n);
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_aug_dyn(m_aug, n);
         A_aug_dyn = A_aug_.topRows(m_aug);
+        Eigen::VectorX<Scalar> b_eq_dyn = b_eq;
+        Eigen::VectorX<Scalar> b_aug_dyn = b_aug_.head(m_aug);
 
-        return solve(G, d, A_eq_dyn, b_eq, A_aug_dyn,
-                     constraint_vector(b_aug_.head(m_aug)), x0, opts);
+        return solve(G, d, A_eq_dyn, b_eq_dyn, A_aug_dyn, b_aug_dyn, x0, opts);
     }
 
 private:

@@ -57,17 +57,23 @@ struct mma_policy
     template <typename P = void>
     struct state_type
     {
+        static constexpr int M = [] {
+            if constexpr(has_constraint_count<P>) return constraint_count_v<P>;
+            else return dynamic_dimension;
+        }();
+
         const P* problem{nullptr};
         Eigen::Vector<double, N> x, g;
         double f{};
-        Eigen::VectorXd c_eq, c_ineq;
-        Eigen::MatrixXd J_ineq;
+        Eigen::VectorXd c_eq;
+        Eigen::Vector<double, M> c_ineq;
+        Eigen::Matrix<double, M, N> J_ineq;
 
         Eigen::Vector<double, N> L, U;
         Eigen::Vector<double, N> x_old1, x_old2;
         Eigen::Vector<double, N> lower, upper;
 
-        std::optional<detail::mma_subproblem_solver<double, N>> subproblem;
+        std::optional<detail::mma_subproblem_solver<double, N, M>> subproblem;
         std::uint32_t iteration{0};
         options_type opts;
     };
@@ -113,6 +119,8 @@ struct mma_policy
                && "MMA handles inequality constraints only. "
                   "Use SQP or augmented Lagrangian for equality constraints.");
 
+        constexpr int MC = state_type<Problem>::M;
+
         const int n = problem.dimension();
         const int m_ineq = problem.num_inequality();
         state_type<Problem> s;
@@ -120,7 +128,7 @@ struct mma_policy
 
         s.x = x0;
         s.g.resize(n);
-        s.c_eq = Eigen::VectorXd{};
+        s.c_eq = Eigen::Vector<double, MC>{};
         s.c_ineq.resize(m_ineq);
         s.J_ineq.resize(m_ineq, n);
 
@@ -179,6 +187,8 @@ struct mma_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
+        constexpr int MC = state_type<P>::M;
+
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
 
@@ -237,8 +247,8 @@ struct mma_policy
         // For MMA, constraint signs: we negate c_ineq to get g_i <= 0 form
         // (MMA convention: constraints are g_i(x) <= 0, nablapp uses c >= 0)
         // So g_i = -c_ineq_i, dg_i = -J_ineq_i
-        Eigen::VectorXd g_mma = -s.c_ineq;
-        Eigen::Matrix<double, Eigen::Dynamic, N> dg_mma = -s.J_ineq;
+        Eigen::Vector<double, MC> g_mma = -s.c_ineq;
+        Eigen::Matrix<double, MC, N> dg_mma = -s.J_ineq;
 
         s.subproblem->compute_coefficients(
             s.x, s.f, s.g, g_mma, dg_mma, s.L, s.U,
@@ -312,7 +322,11 @@ struct mma_policy
         s.c_eq = c_eq_trial;
         s.c_ineq = c_ineq_trial;
         if(m > 0)
-            s.problem->constraint_jacobian(s.x, s.J_ineq);
+        {
+            Eigen::MatrixXd J_tmp(m, n);
+            s.problem->constraint_jacobian(s.x, J_tmp);
+            s.J_ineq = J_tmp;
+        }
 
         // 8. Iteration++
         ++s.iteration;
@@ -338,9 +352,17 @@ struct mma_policy
         s.f = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
         if(static_cast<int>(s.c_ineq.size()) > 0)
-            s.problem->constraints(x0, s.c_ineq);
+        {
+            Eigen::VectorXd c_tmp(s.c_ineq.size());
+            s.problem->constraints(x0, c_tmp);
+            s.c_ineq = c_tmp;
+        }
         if(s.J_ineq.rows() > 0)
-            s.problem->constraint_jacobian(x0, s.J_ineq);
+        {
+            Eigen::MatrixXd J_tmp(s.J_ineq.rows(), s.J_ineq.cols());
+            s.problem->constraint_jacobian(x0, J_tmp);
+            s.J_ineq = J_tmp;
+        }
         s.iteration = 0;
         s.x_old1 = x0;
         s.x_old2 = x0;
