@@ -385,4 +385,5 @@ TEST_CASE("kraft_slsqp converges on HS026 (regression guard)", "[kraft_slsqp][re
     // HS026 optimal: f* = 0 at (1, 1, 1). NLopt SLSQP solves in ~15 iterations.
     CHECK(result.objective_value < 1e-6);
     CHECK(solver.constraint_violation() < 1e-3);
+    CHECK(result.iterations <= 50);
 }
