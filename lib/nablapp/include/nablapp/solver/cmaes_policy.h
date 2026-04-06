@@ -55,7 +55,7 @@ struct cmaes_policy
     struct options_type
     {
         std::optional<std::uint32_t> lambda{};           // population size (default: auto, K&W 8.19)
-        std::optional<double> initial_sigma{};           // initial step size (default: 0.3, Hansen tutorial)
+        std::optional<double> initial_sigma{};           // initial step size (default: bound-scaled, Hansen tutorial)
         restart_strategy restart{restart_strategy::none};
         std::optional<std::uint64_t> seed{};             // RNG seed
         cmaes_options cmaes{};                           // Detection params (Hansen tutorial)
@@ -111,8 +111,6 @@ struct cmaes_policy
         s.problem = &problem;
 
         s.mean = x0;
-        s.sigma = options.initial_sigma.value_or(0.3);
-        s.initial_sigma = s.sigma;
 
         if constexpr(bound_constrained<Problem>)
         {
@@ -121,9 +119,37 @@ struct cmaes_policy
             s.has_bounds = true;
         }
 
+        // Sigma initialization: explicit > bound-scaled > default.
+        // Hansen (2023) arXiv:1604.00772: sigma = 1/4 to 1/3 of search space.
+        if(options.initial_sigma.has_value())
+        {
+            s.sigma = options.initial_sigma.value();
+        }
+        else if(s.has_bounds)
+        {
+            double max_range = 0.0;
+            for(int i = 0; i < n; ++i)
+            {
+                double range = s.upper[i] - s.lower[i];
+                if(std::isfinite(range))
+                    max_range = std::max(max_range, range);
+            }
+            s.sigma = max_range > 0.0 ? max_range / 3.0 : 0.3;
+        }
+        else
+        {
+            s.sigma = 0.3;
+        }
+        s.initial_sigma = s.sigma;
+
+        // Lambda: user override or auto-compute, with bounded-problem minimum.
+        // Hansen (2023): lambda >= 4*N recommended for multimodal landscape coverage.
         int pop_lambda = options.lambda.has_value()
             ? static_cast<int>(options.lambda.value())
             : 0;
+        if(pop_lambda == 0 && s.has_bounds)
+            pop_lambda = std::max(4 * n,
+                static_cast<int>(4 + std::floor(3.0 * std::log(n))));
         s.params = detail::compute_constants(n, pop_lambda);
 
         s.C = Eigen::Matrix<double, N, N>::Identity(n, n);

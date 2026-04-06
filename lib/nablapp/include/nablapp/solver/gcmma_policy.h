@@ -194,9 +194,12 @@ struct gcmma_policy
                 ms.x, ms.f, ms.g, g_mma, dg_mma, L_inner, U_inner,
                 s.opts.subproblem);
 
-            // Solve dual subproblem using pre-allocated solver
+            // Solve dual subproblem using pre-allocated solver.
+            // Feasible region = tightened asymptote interval, not effective bounds.
+            // Svanberg (2002): subproblem solution must lie within (L_inner, U_inner)
+            // for the conservatism check to succeed without post-hoc distortion.
             x_trial = ms.subproblem->dual_solve(
-                L_inner, U_inner, x_min_eff, x_max_eff,
+                L_inner, U_inner, L_inner, U_inner,
                 s.opts.subproblem);
 
             // Apply move limits

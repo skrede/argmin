@@ -146,6 +146,74 @@ TEST_CASE("cmaes_policy: IPOP restart", "[cmaes]")
     CHECK(result.objective_value < 100.0);
 }
 
+TEST_CASE("cmaes_policy: sigma scales from bounds", "[cmaes]")
+{
+    bounded_rosenbrock problem{
+        .n = 2,
+        .lb = Eigen::VectorXd{{-5.0, -5.0}},
+        .ub = Eigen::VectorXd{{5.0, 5.0}},
+    };
+
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 10;
+    opts.gradient_tolerance = 1e-15;
+    opts.objective_tolerance = 1e-15;
+    opts.step_tolerance = 1e-15;
+
+    // No explicit sigma -- should scale from bound range (10.0 / 3.0).
+    cmaes_policy policy;
+    policy.options.seed = 42u;
+
+    basic_solver solver{policy, problem, x0, opts};
+    CHECK(solver.state().sigma == Approx(10.0 / 3.0).epsilon(1e-10));
+}
+
+TEST_CASE("cmaes_policy: lambda minimum for bounded problems", "[cmaes]")
+{
+    bounded_rosenbrock problem{
+        .n = 2,
+        .lb = Eigen::VectorXd{{-5.0, -5.0}},
+        .ub = Eigen::VectorXd{{5.0, 5.0}},
+    };
+
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 10;
+    opts.gradient_tolerance = 1e-15;
+    opts.objective_tolerance = 1e-15;
+    opts.step_tolerance = 1e-15;
+
+    // No explicit lambda -- should enforce 4*N = 8 minimum for bounded N=2.
+    cmaes_policy policy;
+    policy.options.seed = 42u;
+
+    basic_solver solver{policy, problem, x0, opts};
+    CHECK(solver.state().params.lambda >= 8);
+}
+
+TEST_CASE("cmaes_policy: solves bounded Rastrigin", "[cmaes]")
+{
+    rastrigin<double> problem{.n = 2};
+
+    Eigen::VectorXd x0{{2.0, 2.0}};
+    solver_options opts;
+    opts.max_iterations = 5000;
+    opts.gradient_tolerance = 1e-15;
+    opts.objective_tolerance = 1e-15;
+    opts.step_tolerance = 1e-15;
+
+    // Default options -- sigma and lambda should auto-scale from bounds.
+    cmaes_policy policy;
+    policy.options.seed = 42u;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve();
+
+    CHECK(result.iterations > 0);
+    CHECK(result.objective_value < 1.0);
+}
+
 TEST_CASE("cmaes_policy: bounded Rosenbrock", "[cmaes]")
 {
     bounded_rosenbrock problem{
