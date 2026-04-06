@@ -194,7 +194,7 @@ public:
             t_old = bp.t;
 
             Bd_ = B.multiply(d_);
-            f_double_prime = -d_.dot(Bd_);
+            f_double_prime = d_.dot(Bd_);
 
             f_prime = g.dot(d_) + t_old * f_double_prime;
         }

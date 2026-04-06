@@ -350,7 +350,7 @@ public:
         , A_W_(max_constraints, n)
         , qr_(n, n)
         , qr_lambda_(n, n)
-        , ldlt_reduced_(n)
+        , llt_reduced_(n)
         , Q_(n, n)
         , ZtGZ_(n, n)
         , rhs_(n)
@@ -511,8 +511,8 @@ private:
     {
         if(m == 0)
         {
-            ldlt_reduced_.compute(G);
-            n_vector p = ldlt_reduced_.solve(-g_k);
+            llt_reduced_.compute(G);
+            n_vector p = llt_reduced_.solve(-g_k);
             return {p, constraint_vector{}};
         }
 
@@ -525,7 +525,7 @@ private:
         }
 
         qr_.compute(A_W.transpose());
-        const int rank = qr_.rank();
+        const int rank = m;  // working set is full rank by construction
 
         Q_ = qr_.householderQ() * q_matrix::Identity(n, n);
 
@@ -534,10 +534,10 @@ private:
 
         ZtGZ_.topLeftCorner(n - rank, n - rank).noalias() =
             Z_block.transpose() * G * Z_block;
-        ldlt_reduced_.compute(ZtGZ_.topLeftCorner(n - rank, n - rank));
+        llt_reduced_.compute(ZtGZ_.topLeftCorner(n - rank, n - rank));
 
         rhs_.head(n - rank).noalias() = -(Z_block.transpose() * g_k);
-        p_z_.head(n - rank) = ldlt_reduced_.solve(rhs_.head(n - rank));
+        p_z_.head(n - rank) = llt_reduced_.solve(rhs_.head(n - rank));
         n_vector p = Z_block * p_z_.head(n - rank);
 
         auto AY = (A_W * Y_block).eval();
@@ -555,9 +555,9 @@ private:
     constraint_vector b_full_;
     constraint_matrix A_W_;
 
-    Eigen::ColPivHouseholderQR<qr_matrix> qr_;
-    Eigen::ColPivHouseholderQR<qr_lambda_matrix> qr_lambda_;
-    Eigen::LDLT<n_square_matrix> ldlt_reduced_;
+    Eigen::HouseholderQR<qr_matrix> qr_;
+    Eigen::HouseholderQR<qr_lambda_matrix> qr_lambda_;
+    Eigen::LLT<n_square_matrix> llt_reduced_;
     q_matrix Q_;
     n_square_matrix ZtGZ_;
     n_vector rhs_;
