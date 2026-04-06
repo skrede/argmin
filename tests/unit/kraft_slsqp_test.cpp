@@ -365,3 +365,24 @@ TEST_CASE("kraft_slsqp converges on HS040 equality", "[kraft_slsqp]")
     CHECK(result.objective_value == Approx(-0.25).margin(0.01));
     CHECK(solver.constraint_violation() < 1e-4);
 }
+
+TEST_CASE("kraft_slsqp converges on HS026 (regression guard)", "[kraft_slsqp][regression]")
+{
+    hs026 problem;
+    auto x0 = problem.initial_point();
+
+    // Budget of 50 iterations. The regression caused a 10,000-iteration stall;
+    // a healthy solver reaches f < 1e-6 and feasibility < 1e-3 within ~25 iters.
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+
+    basic_solver solver{kraft_slsqp_policy<hs026<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS026 optimal: f* = 0 at (1, 1, 1). NLopt SLSQP solves in ~15 iterations.
+    CHECK(result.objective_value < 1e-6);
+    CHECK(solver.constraint_violation() < 1e-3);
+}

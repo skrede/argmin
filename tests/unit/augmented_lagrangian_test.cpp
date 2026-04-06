@@ -77,6 +77,7 @@ TEST_CASE("augmented lagrangian on HS071 (equality + inequality)",
     // equality-constrained stability (HS040).
     CHECK(result.objective_value == Approx(17.0140173).margin(0.5));
     CHECK(solver.constraint_violation() < 1e-2);
+    CHECK(result.iterations <= 80);
 }
 
 TEST_CASE("augmented lagrangian with BOBYQA inner solver",
