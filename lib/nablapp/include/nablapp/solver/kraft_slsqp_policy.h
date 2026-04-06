@@ -256,9 +256,9 @@ struct kraft_slsqp_policy
         Eigen::Vector<double, N> p_start = Eigen::Vector<double, N>::Zero(n);
         if(s.n_eq > 0 && b_eq.squaredNorm() > 1e-30)
         {
-            auto AAt = (A_eq * A_eq.transpose()).eval();
-            Eigen::LDLT<decltype(AAt)> ldlt(AAt);
-            auto y = ldlt.solve(b_eq);
+            Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
+            Eigen::LDLT<Eigen::MatrixXd> ldlt(AAt);
+            Eigen::VectorXd y = ldlt.solve(b_eq);
             p_start = Eigen::Vector<double, N>(A_eq.transpose() * y);
 
             for(int i = 0; i < n; ++i)
@@ -398,14 +398,14 @@ struct kraft_slsqp_policy
 
                 if(s.n_eq > 0 && lam.size() >= s.n_eq)
                 {
-                    auto lam_eq = lam.head(s.n_eq);
+                    Eigen::VectorXd lam_eq = lam.head(s.n_eq);
                     grad_L_old -= J_all_old.topRows(s.n_eq).transpose() * lam_eq;
                     grad_L_new -= s.J_eq.transpose() * lam_eq;
                 }
 
                 if(s.n_ineq > 0 && lam.size() >= s.n_eq + s.n_ineq)
                 {
-                    auto lam_ineq = lam.segment(s.n_eq, s.n_ineq);
+                    Eigen::VectorXd lam_ineq = lam.segment(s.n_eq, s.n_ineq);
                     grad_L_old -= J_all_old.bottomRows(s.n_ineq).transpose() * lam_ineq;
                     grad_L_new -= s.J_ineq.transpose() * lam_ineq;
                 }

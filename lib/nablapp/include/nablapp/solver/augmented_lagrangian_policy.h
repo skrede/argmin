@@ -110,8 +110,6 @@ struct augmented_lagrangian_policy
         static_assert(constrained<Problem, scalar_type>,
                       "augmented_lagrangian_policy requires constrained<Problem>");
 
-        constexpr int MC = state_type<Problem>::M;
-
         const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
@@ -159,8 +157,6 @@ struct augmented_lagrangian_policy
     template <typename P>
     step_result<scalar_type> step(state_type<P>& s)
     {
-        constexpr int MC = state_type<P>::M;
-
         const int n = static_cast<int>(s.x.size());
 
         const scalar_type inner_grad_tol = s.opts.inner_gradient_tolerance.value_or(scalar_type(1e-6));
@@ -349,8 +345,6 @@ struct augmented_lagrangian_policy
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<scalar_type, N>& x0)
     {
-        constexpr int MC = state_type<P>::M;
-
         s.x = x0;
         s.f = s.problem->value(x0);
         {
