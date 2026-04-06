@@ -279,7 +279,7 @@ TEST_CASE("bobyqa fixed-dimension crash regression", "[bobyqa]")
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
     opts.max_iterations = 100;
-    opts.objective_tolerance = 1e-6;
+    opts.set_objective_threshold(1e-6);
 
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve();

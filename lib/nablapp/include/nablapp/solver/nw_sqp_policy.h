@@ -80,7 +80,7 @@ struct nw_sqp_policy
         double objective_value{};
         double sigma{1.0};
         detail::bfgs_hessian<double, N> B;
-        detail::active_set_qp_solver<double> qp_solver;
+        detail::active_set_qp_solver<double, N> qp_solver;
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
@@ -152,7 +152,7 @@ struct nw_sqp_policy
         s.B = detail::bfgs_hessian<double, N>{n};
         // Pre-allocate QP solver workspace: equality + inequality + 2n box bounds
         int max_constraints = s.n_eq + s.n_ineq + 2 * n;
-        s.qp_solver = detail::active_set_qp_solver<double>(n, max_constraints);
+        s.qp_solver = detail::active_set_qp_solver<double, N>(n, max_constraints);
         s.sigma = 1.0;
         s.iteration = 0;
 

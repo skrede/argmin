@@ -276,7 +276,7 @@ TEST_CASE("GCP finds interior minimum on bounded quadratic", "[lbfgsb]")
     // With corrected sign, f'' = d^T B d > 0 triggers the interior check.
     using namespace nablapp::detail;
 
-    compact_lbfgs<double> B(5);
+    compact_lbfgs<double> B;
 
     Eigen::VectorXd x(2);
     x << 1.5, 1.5;
@@ -324,7 +324,7 @@ TEST_CASE("compact_lbfgs accepts small curvature pairs", "[lbfgsb]")
     // Reference: N&W Section 9.1 (curvature condition).
     using namespace nablapp::detail;
 
-    compact_lbfgs<double> B(5);
+    compact_lbfgs<double> B;
 
     // Push a pair with small but positive curvature:
     // s = (1, 0), y = (1e-12, 0), s^T y = 1e-12.

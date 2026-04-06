@@ -85,7 +85,7 @@ quadratic_model<Scalar, N> build_model(
     }
 
     // Solve min ||theta||_2 s.t. Phi * theta = f_values via SVD
-    auto svd = Phi.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
+    auto svd = Phi.bdcSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
     svd.setThreshold(Scalar(1e-12));
     Eigen::Vector<Scalar, Pcoeff> theta = svd.solve(f_values);
 

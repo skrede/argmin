@@ -157,9 +157,9 @@ TEST_CASE("cmaes_policy: sigma scales from bounds", "[cmaes]")
     Eigen::VectorXd x0{{0.0, 0.0}};
     solver_options opts;
     opts.max_iterations = 10;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     // No explicit sigma -- should scale from bound range (10.0 / 3.0).
     cmaes_policy policy;
@@ -180,9 +180,9 @@ TEST_CASE("cmaes_policy: lambda minimum for bounded problems", "[cmaes]")
     Eigen::VectorXd x0{{0.0, 0.0}};
     solver_options opts;
     opts.max_iterations = 10;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     // No explicit lambda -- should enforce 4*N = 8 minimum for bounded N=2.
     cmaes_policy policy;
@@ -199,9 +199,9 @@ TEST_CASE("cmaes_policy: solves bounded Rastrigin", "[cmaes]")
     Eigen::VectorXd x0{{2.0, 2.0}};
     solver_options opts;
     opts.max_iterations = 5000;
-    opts.gradient_tolerance = 1e-15;
-    opts.objective_tolerance = 1e-15;
-    opts.step_tolerance = 1e-15;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
 
     // Default options -- sigma and lambda should auto-scale from bounds.
     cmaes_policy policy;
