@@ -32,7 +32,7 @@
 #include "nablapp/formulation/concepts.h"
 
 #include <Eigen/Core>
-#include <Eigen/QR>
+#include <Eigen/Cholesky>
 
 #include <algorithm>
 #include <cmath>
@@ -80,6 +80,7 @@ struct nw_sqp_policy
         double objective_value{};
         double sigma{1.0};
         detail::bfgs_hessian<double, N> B;
+        detail::active_set_qp_solver<double> qp_solver;
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
@@ -149,6 +150,9 @@ struct nw_sqp_policy
 
         // BFGS Hessian of Lagrangian, initialized to I
         s.B = detail::bfgs_hessian<double, N>{n};
+        // Pre-allocate QP solver workspace: equality + inequality + 2n box bounds
+        int max_constraints = s.n_eq + s.n_ineq + 2 * n;
+        s.qp_solver = detail::active_set_qp_solver<double>(n, max_constraints);
         s.sigma = 1.0;
         s.iteration = 0;
 
@@ -185,9 +189,12 @@ struct nw_sqp_policy
         Eigen::Vector<double, N> p0 = Eigen::Vector<double, N>::Zero(n);
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
         {
+            // Solve (A_eq A_eq^T) w = b_eq, then p0 = A_eq^T w
+            // A*A^T is positive definite when A has full row rank; LLT is
+            // faster than pivoted QR for this structure.
             auto AAt = (A_eq * A_eq.transpose()).eval();
-            auto qr = AAt.colPivHouseholderQr();
-            auto w = qr.solve(b_eq);
+            Eigen::LLT<decltype(AAt)> llt(AAt);
+            auto w = llt.solve(b_eq);
             p0 = A_eq.transpose() * w;
         }
 
@@ -210,15 +217,15 @@ struct nw_sqp_policy
             Eigen::Vector<double, N> p_upper = (Eigen::Vector<double, N>(s.upper) -
                                                   Eigen::Vector<double, N>(s.x)).eval();
             p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
-            qp = detail::solve_qp<double, N>(s.B.hessian(), s.g,
-                                  A_eq, b_eq, A_ineq, b_ineq,
-                                  p_lower, p_upper, p0, qp_opts);
+            qp = s.qp_solver.solve(s.B.hessian(), s.g,
+                                   A_eq, b_eq, A_ineq, b_ineq,
+                                   p_lower, p_upper, p0, qp_opts);
         }
         else
         {
-            qp = detail::solve_qp<double, N>(s.B.hessian(), s.g,
-                                  A_eq, b_eq, A_ineq, b_ineq,
-                                  p0, qp_opts);
+            qp = s.qp_solver.solve(s.B.hessian(), s.g,
+                                   A_eq, b_eq, A_ineq, b_ineq,
+                                   p0, qp_opts);
         }
 
         Eigen::Vector<double, N> p = qp.x;

@@ -71,8 +71,9 @@ std::vector<int> initial_working_set(
 //
 // min 0.5 p^T G p + g_k^T p   s.t.  A_W p = 0
 //
-// Uses ColPivHouseholderQR of A_W^T for rank-revealing null-space computation.
-// Uses LDLT for reduced Hessian Z^T G Z solve.
+// Uses HouseholderQR of A_W^T for null-space computation (working set is
+// full rank by construction, so rank-revealing is unnecessary).
+// Uses LLT for reduced Hessian Z^T G Z solve (positive definite by construction).
 //
 // Returns (step p, multipliers lambda_W for working set constraints).
 //
@@ -89,8 +90,8 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp
     // No active constraints: unconstrained sub-step
     if(m == 0)
     {
-        Eigen::LDLT<Eigen::Matrix<Scalar, N, N>> ldlt(G);
-        Eigen::Vector<Scalar, N> p = ldlt.solve(-g_k);
+        Eigen::LLT<Eigen::Matrix<Scalar, N, N>> llt(G);
+        Eigen::Vector<Scalar, N> p = llt.solve(-g_k);
         return {p, Eigen::Vector<Scalar, Mw>{}};
     }
 
@@ -99,7 +100,7 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp
     {
         Eigen::Vector<Scalar, N> p = Eigen::Vector<Scalar, N>::Zero(n);
         // lambda from (A_W)^T lambda = g_k  (eq. 16.30: sum a_i lambda_i = g)
-        auto qr = A_W.transpose().colPivHouseholderQr();
+        auto qr = A_W.transpose().householderQr();
         Eigen::Vector<Scalar, Mw> lambda = qr.solve(g_k);
         return {p, lambda};
     }
@@ -107,8 +108,8 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp
     // QR factorization of A_W^T to get null-space basis Z.
     // A_W^T = Q * [R; 0], so Z = last (n-m) columns of Q.
     // Reference: N&W eq. 16.37.
-    Eigen::ColPivHouseholderQR<Eigen::Matrix<Scalar, N, Mw>> qr(A_W.transpose());
-    const int rank = qr.rank();
+    Eigen::HouseholderQR<Eigen::Matrix<Scalar, N, Mw>> qr(A_W.transpose());
+    const int rank = m;  // working set is full rank by construction
     const int nz = n - rank;
 
     // Materialize only the Q columns we need via thin products.
@@ -129,18 +130,18 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp
     // So p = Z * p_z where (Z^T G Z) p_z = -Z^T g_k  (eq. 16.18)
 
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> ZtGZ = Z.transpose() * G * Z;
-    Eigen::LDLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> ldlt(std::move(ZtGZ));
+    Eigen::LLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> llt(std::move(ZtGZ));
 
     // Check inertia: if reduced Hessian is not positive (semi)definite,
     // the subproblem direction may point to a saddle.
     // For convex QP this won't happen; for indefinite we fall through.
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1> rhs = -(Z.transpose() * g_k);
-    Eigen::Matrix<Scalar, Eigen::Dynamic, 1> p_z = ldlt.solve(rhs);
+    Eigen::Matrix<Scalar, Eigen::Dynamic, 1> p_z = llt.solve(rhs);
     Eigen::Vector<Scalar, N> p = (Z * p_z).eval();
 
     // Multipliers: (A_W Y)^T lambda = Y^T (g_k + G p)  (eq. 16.19)
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1> rhs_lam = Y.transpose() * (g_k + G * p);
-    auto qr_ay = (A_W * Y).transpose().colPivHouseholderQr();
+    auto qr_ay = (A_W * Y).transpose().householderQr();
     Eigen::Vector<Scalar, Mw> lambda = qr_ay.solve(rhs_lam);
 
     return {p, lambda};
@@ -217,21 +218,6 @@ int most_negative_multiplier(
         }
     }
     return drop_idx;
-}
-
-// Check if LDLT factorization reveals indefiniteness.
-// Returns true if reduced Hessian has negative diagonal entries.
-//
-// Reference: N&W Section 16.5 (detecting indefiniteness via LDL^T).
-template <typename Scalar, typename MatType>
-bool check_inertia(const Eigen::LDLT<MatType>& ldlt)
-{
-    auto D = ldlt.vectorD();
-    for(int i = 0; i < D.size(); ++i)
-    {
-        if(D[i] < Scalar(0)) return true;
-    }
-    return false;
 }
 
 // Extract rows of A_full corresponding to working set indices.
@@ -723,6 +709,98 @@ qp_result<Scalar, N> solve_qp(
 
     return solve_qp(G, d, A_eq, b_eq, A_aug, b_aug, x0, opts);
 }
+
+// Stateful active-set QP solver that pre-allocates workspace.
+//
+// Eliminates per-call heap allocation by reusing internal buffers across
+// successive solve() calls. Dimensions are set at construction or resize().
+//
+// Reference: N&W Algorithm 16.1, pp. 460-463.
+template <typename Scalar = double>
+class active_set_qp_solver
+{
+public:
+    active_set_qp_solver() = default;
+
+    active_set_qp_solver(int n, int max_constraints)
+        : n_{n}, max_m_{max_constraints}
+    {
+        allocate();
+    }
+
+    void resize(int n, int max_constraints)
+    {
+        n_ = n;
+        max_m_ = max_constraints;
+        allocate();
+    }
+
+    // Solve QP without box constraints (same signature as free function).
+    qp_result<Scalar> solve(
+        const Eigen::MatrixX<Scalar>& G,
+        const Eigen::VectorX<Scalar>& d,
+        const Eigen::MatrixX<Scalar>& A_eq,
+        const Eigen::VectorX<Scalar>& b_eq,
+        const Eigen::MatrixX<Scalar>& A_ineq,
+        const Eigen::VectorX<Scalar>& b_ineq,
+        const Eigen::VectorX<Scalar>& x0,
+        const qp_options<Scalar>& opts = {})
+    {
+        return solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
+    }
+
+    // Solve QP with box constraints (same signature as free function).
+    qp_result<Scalar> solve(
+        const Eigen::MatrixX<Scalar>& G,
+        const Eigen::VectorX<Scalar>& d,
+        const Eigen::MatrixX<Scalar>& A_eq,
+        const Eigen::VectorX<Scalar>& b_eq,
+        const Eigen::MatrixX<Scalar>& A_ineq,
+        const Eigen::VectorX<Scalar>& b_ineq,
+        const Eigen::VectorX<Scalar>& lower,
+        const Eigen::VectorX<Scalar>& upper,
+        const Eigen::VectorX<Scalar>& x0,
+        const qp_options<Scalar>& opts = {})
+    {
+        const int n = G.rows();
+        const int m_ineq = A_ineq.rows();
+        const int m_box = 2 * n;
+
+        // Resize augmented buffers if needed
+        a_aug_.conservativeResize(m_ineq + m_box, n);
+        b_aug_.conservativeResize(m_ineq + m_box);
+
+        if(m_ineq > 0)
+        {
+            a_aug_.topRows(m_ineq) = A_ineq;
+            b_aug_.head(m_ineq) = b_ineq;
+        }
+
+        a_aug_.middleRows(m_ineq, n) =
+            Eigen::MatrixX<Scalar>::Identity(n, n);
+        b_aug_.segment(m_ineq, n) = lower;
+
+        a_aug_.bottomRows(n) =
+            -Eigen::MatrixX<Scalar>::Identity(n, n);
+        b_aug_.tail(n) = -upper;
+
+        return solve_qp(G, d, A_eq, b_eq, a_aug_, b_aug_, x0, opts);
+    }
+
+private:
+    void allocate()
+    {
+        a_aug_.resize(max_m_, n_);
+        b_aug_.resize(max_m_);
+    }
+
+    int n_{0};
+    int max_m_{0};
+
+    // Pre-allocated buffers for augmented inequality system (box constraints)
+    Eigen::MatrixX<Scalar> a_aug_;
+    Eigen::VectorX<Scalar> b_aug_;
+};
 
 }
 
