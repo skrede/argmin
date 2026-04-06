@@ -265,6 +265,29 @@ TEST_CASE("bobyqa step solve step_n", "[bobyqa]")
     }
 }
 
+TEST_CASE("bobyqa fixed-dimension crash regression", "[bobyqa]")
+{
+    // Regression guard: prior to JacobiSVD fix, BOBYQA would SIGABRT when
+    // BDCSVD was applied to the small Vandermonde-like matrix Phi in
+    // quadratic_model::build_model. This test verifies no crash occurs.
+    bobyqa_rosenbrock problem{
+        .n = 2,
+        .lb = Eigen::VectorXd{{-5.0, -5.0}},
+        .ub = Eigen::VectorXd{{5.0, 5.0}},
+    };
+
+    Eigen::VectorXd x0{{-1.2, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.objective_tolerance = 1e-6;
+
+    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    auto result = solver.solve();
+
+    CHECK(result.status != solver_status::diverged);
+    CHECK(std::isfinite(result.objective_value));
+}
+
 TEST_CASE("bobyqa custom interpolation points", "[bobyqa]")
 {
     bobyqa_rosenbrock problem{

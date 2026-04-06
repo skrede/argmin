@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace nablapp::detail
 {
@@ -37,11 +38,12 @@ class compact_lbfgs
 public:
     compact_lbfgs() = default;
 
-    // Add a new (s, y) pair. Rejects pairs with s^T y <= 0 (curvature guard).
+    // Add a new (s, y) pair. Rejects pairs with s^T y <= eps * ||s||^2 (curvature guard, N&W Section 9.1).
     void push(const Eigen::Vector<Scalar, N>& s, const Eigen::Vector<Scalar, N>& y)
     {
         Scalar sTy = s.dot(y);
-        if(sTy <= Scalar(0)) return;
+        constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
+        if(sTy <= eps * s.squaredNorm()) return;
 
         const int n = s.size();
 

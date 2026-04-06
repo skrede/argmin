@@ -160,7 +160,7 @@ public:
 
         Scalar f_prime = g.dot(d_);
         Bd_ = B.multiply(d_);
-        Scalar f_double_prime = -d_.dot(Bd_);
+        Scalar f_double_prime = d_.dot(Bd_);
 
         Scalar t_old = Scalar(0);
 
@@ -196,7 +196,7 @@ public:
             Bd_ = B.multiply(d_);
             f_double_prime = -d_.dot(Bd_);
 
-            f_prime = g.dot(d_) + t_old * (-f_double_prime);
+            f_prime = g.dot(d_) + t_old * f_double_prime;
         }
 
         Scalar t_last = bps_.back().t;
