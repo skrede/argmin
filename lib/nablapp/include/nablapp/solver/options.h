@@ -60,6 +60,21 @@ struct solver_options
         std::get<step_tolerance_criterion>(convergence.criteria).threshold = v;
     }
 
+    template <typename C = Convergence>
+    void set_objective_threshold_rel(double v)
+        requires requires(C& c) { std::get<objective_tolerance_rel_criterion>(c.criteria); }
+    {
+        std::get<objective_tolerance_rel_criterion>(convergence.criteria).threshold = v;
+        std::get<objective_tolerance_rel_criterion>(convergence.criteria).stationarity_threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_step_threshold_rel(double v)
+        requires requires(C& c) { std::get<step_tolerance_rel_criterion>(c.criteria); }
+    {
+        std::get<step_tolerance_rel_criterion>(convergence.criteria).threshold = v;
+    }
+
     // Feasibility threshold setter for constrained convergence policies.
     template <typename C = Convergence>
     void set_feasibility_threshold(double v)
@@ -94,6 +109,23 @@ struct solver_options
               && requires(C& c) { std::get<step_tolerance_criterion>(c.inner.criteria); }
     {
         std::get<step_tolerance_criterion>(convergence.inner.criteria).threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_objective_threshold_rel(double v)
+        requires (!requires(C& c) { std::get<objective_tolerance_rel_criterion>(c.criteria); })
+              && requires(C& c) { std::get<objective_tolerance_rel_criterion>(c.inner.criteria); }
+    {
+        std::get<objective_tolerance_rel_criterion>(convergence.inner.criteria).threshold = v;
+        std::get<objective_tolerance_rel_criterion>(convergence.inner.criteria).stationarity_threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_step_threshold_rel(double v)
+        requires (!requires(C& c) { std::get<step_tolerance_rel_criterion>(c.criteria); })
+              && requires(C& c) { std::get<step_tolerance_rel_criterion>(c.inner.criteria); }
+    {
+        std::get<step_tolerance_rel_criterion>(convergence.inner.criteria).threshold = v;
     }
 };
 
