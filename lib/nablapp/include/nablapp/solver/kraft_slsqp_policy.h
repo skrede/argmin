@@ -141,17 +141,21 @@ struct kraft_slsqp_policy
             s.n_eq = problem.num_equality();
             s.n_ineq = problem.num_inequality();
 
-            Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
-            problem.constraints(x0, c_all);
-            s.c_eq = c_all.head(s.n_eq);
-            s.c_ineq = c_all.tail(s.n_ineq);
+            const int m = s.n_eq + s.n_ineq;
+            if(m > 0)
+            {
+                Eigen::VectorXd c_all(m);
+                problem.constraints(x0, c_all);
+                s.c_eq = c_all.head(s.n_eq);
+                s.c_ineq = c_all.tail(s.n_ineq);
 
-            Eigen::MatrixXd J_all(s.n_eq + s.n_ineq, n);
-            problem.constraint_jacobian(x0, J_all);
-            s.J_eq = J_all.topRows(s.n_eq);
-            s.J_ineq = J_all.bottomRows(s.n_ineq);
+                Eigen::MatrixXd J_all(m, n);
+                problem.constraint_jacobian(x0, J_all);
+                s.J_eq = J_all.topRows(s.n_eq);
+                s.J_ineq = J_all.bottomRows(s.n_ineq);
 
-            s.lambda = Eigen::VectorXd::Zero(s.n_eq + s.n_ineq);
+                s.lambda = Eigen::VectorXd::Zero(m);
+            }
         }
         else
         {
