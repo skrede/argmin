@@ -3,6 +3,7 @@
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/detail/cauchy_point.h"
 #include "nablapp/detail/compact_lbfgs.h"
+#include "nablapp/detail/lbfgsb_direction.h"
 #include "nablapp/formulation/concepts.h"
 #include "nablapp/test_functions/rosenbrock.h"
 #include "nablapp/schedule/basic_solver_group.h"
@@ -420,4 +421,142 @@ TEST_CASE("lbfgsb_policy with Armijo line search converges", "[lbfgsb]")
     }
 
     CHECK(state.objective_value < 1.0);
+}
+
+TEST_CASE("Two-loop fast path direction equivalence", "[lbfgsb]")
+{
+    // Run the same unconstrained problem through both paths (fast path via
+    // two-loop recursion and forced GCP+subspace path with infinite bounds),
+    // assert search directions match to machine epsilon at each iteration.
+    //
+    // The fast path produces d = -H*g via two-loop recursion (N&W Algorithm
+    // 9.1). The GCP+subspace path runs the full L-BFGS-B direction with
+    // [-inf, inf] bounds -- when all variables are free, this should produce
+    // the same direction.
+    //
+    // Reference: N&W Algorithm 9.1 (two-loop recursion),
+    //            N&W Section 16.6 (GCP + subspace minimization).
+
+    using namespace nablapp::detail;
+
+    rosenbrock<> problem{.n = 2};
+    Eigen::VectorXd x = Eigen::VectorXd{{-1.2, 1.0}};
+    Eigen::VectorXd g(2);
+    problem.gradient(x, g);
+
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    Eigen::VectorXd lower = Eigen::VectorXd::Constant(2, -inf);
+    Eigen::VectorXd upper = Eigen::VectorXd::Constant(2, inf);
+
+    compact_lbfgs<double> B;
+    cauchy_point_solver<double> gcp_solver(2);
+    subspace_minimizer<double> ssm_solver(2);
+
+    constexpr double eps = std::numeric_limits<double>::epsilon();
+
+    // Run 10 iterations, comparing directions at each step.
+    for(int iter = 0; iter < 10; ++iter)
+    {
+        // Fast path: two-loop recursion (what compute_direction does for
+        // non-bound_constrained problems).
+        auto Hg = B.two_loop_recursion(g);
+        Eigen::VectorXd d_fast = (-Hg).eval();
+
+        // GCP+subspace path: full L-BFGS-B direction with infinite bounds.
+        const auto& gcp = gcp_solver.solve(x, g, lower, upper, B);
+        Eigen::VectorXd x_new = ssm_solver.solve(
+            x, gcp.x_cauchy, g, lower, upper, gcp.free_indices, B);
+        Eigen::VectorXd d_gcp = (x_new - x).eval();
+
+        // Directions must match to machine epsilon.
+        // Normalize by direction magnitude to get relative error.
+        double d_norm = std::max(d_fast.norm(), d_gcp.norm());
+        if(d_norm > 1e-15)
+        {
+            double rel_error = (d_fast - d_gcp).norm() / d_norm;
+            CHECK(rel_error < 1000 * eps);
+        }
+
+        // Take a step using the fast path direction (quasi-Newton).
+        if(d_fast.norm() < 1e-15) break;
+
+        double alpha = 1.0;
+        double f0 = problem.value(x);
+        double dphi0 = g.dot(d_fast);
+        for(int ls = 0; ls < 20; ++ls)
+        {
+            double f_trial = problem.value((x + alpha * d_fast).eval());
+            if(f_trial <= f0 + 1e-4 * alpha * dphi0) break;
+            alpha *= 0.5;
+        }
+
+        Eigen::VectorXd x_old = x;
+        Eigen::VectorXd g_old = g;
+        x = (x + alpha * d_fast).eval();
+        problem.gradient(x, g);
+
+        // Push curvature pair.
+        Eigen::VectorXd sk = (x - x_old).eval();
+        Eigen::VectorXd yk = (g - g_old).eval();
+        B.push(sk, yk);
+    }
+}
+
+TEST_CASE("Compile-time unconstrained path sets infinite alpha_max", "[lbfgsb]")
+{
+    // Compile-time unconstrained problems produce alpha_max = infinity because
+    // no bounds exist to limit step length.
+    //
+    // Reference: N&W Algorithm 9.1 (two-loop recursion, no bounds).
+
+    using namespace nablapp::detail;
+
+    rosenbrock<> problem{.n = 2};
+    Eigen::VectorXd x = Eigen::VectorXd{{-1.2, 1.0}};
+    Eigen::VectorXd g(2);
+    problem.gradient(x, g);
+
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    Eigen::VectorXd lower = Eigen::VectorXd::Constant(2, -inf);
+    Eigen::VectorXd upper = Eigen::VectorXd::Constant(2, inf);
+
+    compact_lbfgs<double> B;
+    cauchy_point_solver<double> gcp_solver(2);
+    subspace_minimizer<double> ssm_solver(2);
+
+    auto dir = compute_direction<rosenbrock<>>(x, g, lower, upper, B, gcp_solver, ssm_solver);
+    REQUIRE(dir.has_value());
+    CHECK(dir->alpha_max == inf);
+    CHECK(dir->d.norm() > 0.0);
+}
+
+TEST_CASE("Runtime fast path with loose bounds computes finite alpha_max", "[lbfgsb]")
+{
+    // Runtime fast path activates when bound_constrained is satisfied at
+    // compile time but all variables are free at runtime. It still computes
+    // alpha_max from the distance to the nearest bound.
+    //
+    // Reference: Byrd, Lu, Nocedal, Zhu 1995 (breakpoint definition).
+
+    using namespace nablapp::detail;
+
+    rosenbrock<> rosen{.n = 2};
+    Eigen::VectorXd x = Eigen::VectorXd{{-1.2, 1.0}};
+    Eigen::VectorXd g(2);
+    rosen.gradient(x, g);
+
+    // Loose bounds: x is well inside, all variables free.
+    Eigen::VectorXd lower = Eigen::VectorXd{{-10.0, -10.0}};
+    Eigen::VectorXd upper = Eigen::VectorXd{{10.0, 10.0}};
+
+    compact_lbfgs<double> B;
+    cauchy_point_solver<double> gcp_solver(2);
+    subspace_minimizer<double> ssm_solver(2);
+
+    auto dir = compute_direction<bounded_rosenbrock>(x, g, lower, upper, B, gcp_solver, ssm_solver);
+    REQUIRE(dir.has_value());
+    // alpha_max should be finite (bounded by distance to nearest wall).
+    CHECK(std::isfinite(dir->alpha_max));
+    CHECK(dir->alpha_max > 0.0);
+    CHECK(dir->d.norm() > 0.0);
 }
