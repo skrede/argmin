@@ -190,11 +190,11 @@ struct nw_sqp_policy
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
         {
             // Solve (A_eq A_eq^T) w = b_eq, then p0 = A_eq^T w
-            // A*A^T is positive definite when A has full row rank; LLT is
-            // faster than pivoted QR for this structure.
+            // A*A^T is PSD but may be rank-deficient with numerical noise;
+            // LDLT handles indefinite/singular cases that LLT cannot.
             auto AAt = (A_eq * A_eq.transpose()).eval();
-            Eigen::LLT<decltype(AAt)> llt(AAt);
-            auto w = llt.solve(b_eq);
+            Eigen::LDLT<decltype(AAt)> ldlt(AAt);
+            auto w = ldlt.solve(b_eq);
             p0 = A_eq.transpose() * w;
         }
 

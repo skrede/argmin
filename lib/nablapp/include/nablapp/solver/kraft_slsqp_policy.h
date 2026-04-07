@@ -261,8 +261,8 @@ struct kraft_slsqp_policy
         if(s.n_eq > 0 && b_eq.squaredNorm() > 1e-30)
         {
             Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
-            Eigen::LLT<Eigen::MatrixXd> llt(AAt);
-            Eigen::VectorXd y = llt.solve(b_eq);
+            Eigen::LDLT<Eigen::MatrixXd> ldlt(AAt);
+            Eigen::VectorXd y = ldlt.solve(b_eq);
             p_start = Eigen::Vector<double, N>(A_eq.transpose() * y);
 
             for(int i = 0; i < n; ++i)
