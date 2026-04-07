@@ -15,6 +15,7 @@
 #include "nablapp/detail/bound_projection.h"
 
 #include <Eigen/Core>
+#include <Eigen/SVD>
 
 #include <algorithm>
 #include <cassert>
@@ -325,6 +326,185 @@ struct bobyqa_model
         x_opt.setZero();
     }
 
+    // Rebuild model coefficients (GOPT, HQ, PQ) from current XPT and FVAL.
+    //
+    // Computes the minimum Frobenius norm quadratic interpolant using SVD.
+    // This is used when the incremental BMAT/ZMAT update becomes numerically
+    // unstable. The model satisfies Q(xpt[k]) = fval[k] for all k.
+    //
+    // Also rebuilds BMAT and ZMAT from the interpolation system inverse.
+    //
+    // Reference: Powell 2009, Sec. 2 (model construction).
+    void rebuild_model()
+    {
+        const int n = gopt.size();
+        const int npt = pq.size();
+        const int p = 1 + n + n * (n + 1) / 2;
+
+        // Build polynomial basis matrix Phi (npt x p).
+        // Basis: {1, s_1, ..., s_n, 0.5*s_1^2, s_1*s_2, ..., 0.5*s_n^2}
+        // where s = xpt[k] - x_opt (shifted to be centered at x_opt).
+        Eigen::MatrixXd phi(npt, p);
+
+        for(int k = 0; k < npt; ++k)
+        {
+            Eigen::VectorXd s = (xpt.row(k).transpose() - x_opt).template cast<double>();
+
+            phi(k, 0) = 1.0;
+
+            for(int j = 0; j < n; ++j)
+                phi(k, 1 + j) = s[j];
+
+            int idx = 1 + n;
+            for(int j = 0; j < n; ++j)
+            {
+                for(int l = j; l < n; ++l)
+                {
+                    double factor = (j == l) ? 0.5 : 1.0;
+                    phi(k, idx) = factor * s[j] * s[l];
+                    ++idx;
+                }
+            }
+        }
+
+        // Solve min ||theta||_2 s.t. Phi * theta = fval via SVD.
+        Eigen::VectorXd fv = fval.template cast<double>();
+        auto svd = phi.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
+        svd.setThreshold(1e-12);
+        Eigen::VectorXd theta = svd.solve(fv);
+
+        // Extract model coefficients from theta.
+        // theta[0] = constant (f_opt, ignored -- we track f_opt separately).
+        // theta[1..n] = gradient at x_opt.
+        for(int j = 0; j < n; ++j)
+            gopt[j] = static_cast<Scalar>(theta[1 + j]);
+
+        // Reconstruct symmetric H from upper-triangular entries -> HQ.
+        hq.setZero();
+        int idx = 1 + n;
+        for(int j = 0; j < n; ++j)
+        {
+            for(int l = j; l < n; ++l)
+            {
+                Scalar val = static_cast<Scalar>(theta[idx]);
+                hq_element(j, l, n) = val;
+                ++idx;
+            }
+        }
+
+        // Zero PQ since the SVD model absorbs everything into HQ.
+        pq.setZero();
+
+        // Rebuild BMAT/ZMAT for the current point set.
+        //
+        // The H matrix is the inverse of the interpolation system
+        // Omega. For general point sets, we compute Omega and invert it.
+        //
+        // Omega = [0_npt_npt, Phi_linear^T; Phi_linear, 0_nn]
+        // where Phi_linear is the linear+constant part (npt x (1+n)).
+        //
+        // For simplicity, rebuild using the coordinate-based approach
+        // that initialize_h_matrix uses, applied to the actual point set.
+        // Since we use SVD for the model, BMAT/ZMAT are only needed for
+        // compute_vlag and point replacement selection. For correctness,
+        // we reconstruct them from the interpolation system.
+        rebuild_h_matrix();
+    }
+
+    // Rebuild BMAT/ZMAT from the current XPT.
+    //
+    // Constructs the full interpolation system matrix Omega, inverts it,
+    // and extracts BMAT and ZMAT from the inverse.
+    //
+    // The Omega matrix has structure (Powell 2009, Sec. 2):
+    //   Omega = [ zeta   Phi^T ]
+    //           [ Phi    0     ]
+    // where zeta[j,k] = 0.5 * (xpt[j]^T xpt[k])^2 for j,k < npt
+    // and Phi[j,i] = [1, xpt[j]^T] for the last 1+n rows/columns.
+    //
+    // The inverse H = Omega^{-1} gives:
+    //   H[0:npt, 0:npt] = ZMAT * ZMAT^T (leading block)
+    //   H[:, npt:] = BMAT (last n columns, all rows)
+    //
+    // Reference: Powell 2009, Sec. 2.
+    void rebuild_h_matrix()
+    {
+        const int n = gopt.size();
+        const int npt = pq.size();
+        const int m = npt + n + 1;
+
+        // Build Omega matrix.
+        Eigen::MatrixXd omega = Eigen::MatrixXd::Zero(m, m);
+
+        // Upper-left block: zeta[j,k] = 0.5 * (xpt[j]^T xpt[k])^2.
+        for(int j = 0; j < npt; ++j)
+        {
+            for(int k = j; k < npt; ++k)
+            {
+                double dot = xpt.row(j).dot(xpt.row(k));
+                double val = 0.5 * dot * dot;
+                omega(j, k) = val;
+                omega(k, j) = val;
+            }
+        }
+
+        // Off-diagonal blocks: Phi = [1, xpt^T].
+        // Lower-left: Phi rows in rows npt..npt+n, columns 0..npt-1.
+        // Upper-right: Phi^T in rows 0..npt-1, columns npt..npt+n.
+        for(int k = 0; k < npt; ++k)
+        {
+            omega(npt, k) = 1.0;
+            omega(k, npt) = 1.0;
+            for(int i = 0; i < n; ++i)
+            {
+                omega(npt + 1 + i, k) = static_cast<double>(xpt(k, i));
+                omega(k, npt + 1 + i) = static_cast<double>(xpt(k, i));
+            }
+        }
+
+        // Invert Omega.
+        auto svd = omega.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
+        svd.setThreshold(1e-12);
+        Eigen::MatrixXd H_full = svd.solve(Eigen::MatrixXd::Identity(m, m));
+
+        // Extract BMAT: rows 0..npt+n-1, columns correspond to the
+        // last n entries. BMAT[k, i] = H[k, npt + 1 + i] for k < npt.
+        // BMAT[npt + i, j] = H[npt + 1 + i, npt + 1 + j] for the sigma block.
+        bmat.setZero();
+        for(int k = 0; k < npt; ++k)
+        {
+            for(int i = 0; i < n; ++i)
+                bmat(k, i) = static_cast<Scalar>(H_full(k, npt + 1 + i));
+        }
+        for(int i = 0; i < n; ++i)
+        {
+            for(int j = 0; j < n; ++j)
+                bmat(npt + i, j) = static_cast<Scalar>(H_full(npt + 1 + i, npt + 1 + j));
+        }
+
+        // Extract ZMAT: factor the leading npt x npt block of H as Z * Z^T.
+        // H_leading = H[0:npt, 0:npt].
+        // Use eigendecomposition: H_leading = U * D * U^T, then Z = U * sqrt(D).
+        // Only keep columns with positive eigenvalues (rank = npt - n - 1).
+        Eigen::MatrixXd H_leading(npt, npt);
+        for(int j = 0; j < npt; ++j)
+            for(int k = 0; k < npt; ++k)
+                H_leading(j, k) = H_full(j, k);
+
+        auto svd_leading = H_leading.jacobiSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
+        const int zmat_c = npt - n - 1;
+
+        zmat.setZero();
+        auto& sv = svd_leading.singularValues();
+        for(int j = 0; j < zmat_c && j < sv.size(); ++j)
+        {
+            if(sv[j] < 1e-15) continue;
+            double sqrtd = std::sqrt(sv[j]);
+            for(int k = 0; k < npt; ++k)
+                zmat(k, j) = static_cast<Scalar>(svd_leading.matrixU()(k, j) * sqrtd);
+        }
+    }
+
     // Progressive rho contraction per Powell 2009 Sec. 5 and BOB-02.
     //
     // When trust region iterations exhaust without sufficient improvement,
@@ -472,7 +652,9 @@ private:
             }
             else
             {
-                gopt[i] = (fp * sn2 - fn * sp2 - f0 * (sn2 - sp2)) / (denom * diff);
+                // Gradient via Cramer's rule on the interpolation system.
+                // The denominator is sp*sn*(sn - sp) = -sp*sn*(sp - sn).
+                gopt[i] = -(fp * sn2 - fn * sp2 - f0 * (sn2 - sp2)) / (denom * diff);
             }
 
             // PQ coefficients for points 1+i and 1+n+i.
@@ -486,12 +668,14 @@ private:
         }
 
         // Adjust GOPT to be at x_opt instead of x_base (if k_opt != 0).
+        //
+        // gopt currently holds the gradient at x_base (d=0). The gradient
+        // at x_opt is gopt_base + H * x_opt, which is exactly what
+        // hessian_vector_product(x_opt) adds.
+        //
+        // Reference: Powell 2009, Sec. 2.
         if(k_opt != 0)
         {
-            Eigen::Vector<Scalar, N> d = x_opt;
-            gopt = gradient(d) - gopt + gopt;
-            // Recalculate: gopt should be gradient at x_opt.
-            // gradient(d) = gopt_at_base + H*d, so gopt_at_xopt = gopt_at_base + H*x_opt.
             Eigen::Vector<Scalar, N> hv = hessian_vector_product(x_opt);
             gopt += hv;
         }
