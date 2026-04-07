@@ -1,13 +1,14 @@
 #ifndef HPP_GUARD_NABLAPP_DETAIL_COMPACT_LBFGS_H
 #define HPP_GUARD_NABLAPP_DETAIL_COMPACT_LBFGS_H
 
+#include "nablapp/types.h"
+
 #include <Eigen/Core>
 #include <Eigen/Cholesky>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <vector>
 
 namespace nablapp::detail
 {
@@ -21,19 +22,21 @@ namespace nablapp::detail
 // Provides both H*g (two-loop recursion) and B*v products plus reduced
 // Hessians needed by L-BFGS-B subspace minimization.
 //
+// MaxHistory is the compile-time history buffer capacity (number of (s,y)
+// pairs). All history-dimension storage is fixed-size when MaxHistory is
+// known at compile time, eliminating per-iteration heap allocation.
+//
 // Reference: N&W Section 9.2 (compact representation, eq. 9.15),
 //            N&W Algorithm 9.1 (two-loop recursion),
 //            Byrd, Lu, Nocedal, Zhu 1995 (L-BFGS-B algorithm).
 
-template <typename Scalar = double>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int MaxHistory = 7>
 class compact_lbfgs
 {
+    static_assert(MaxHistory > 0, "MaxHistory must be positive");
+
 public:
-    explicit compact_lbfgs(int m = 10) : capacity_(m)
-    {
-        L_.setZero(capacity_, capacity_);
-        D_.setZero(capacity_);
-    }
+    compact_lbfgs() = default;
 
     // Add a new (s, y) pair with damped curvature update.
     // Instead of silently rejecting pairs with small s^T y, clamps to
@@ -41,7 +44,7 @@ public:
     // near-orthogonal pairs. Only truly degenerate (zero-step) pairs
     // are rejected.
     // Reference: N&W Section 9.1 (curvature condition), Powell (damped BFGS).
-    void push(const Eigen::VectorX<Scalar>& s, const Eigen::VectorX<Scalar>& y)
+    void push(const Eigen::Vector<Scalar, N>& s, const Eigen::Vector<Scalar, N>& y)
     {
         constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
         Scalar sTs = s.squaredNorm();
@@ -52,18 +55,18 @@ public:
         // Damped: clamp s^T y upward to ensure positive curvature
         Scalar sTy = s.dot(y);
         Scalar sTy_effective = std::max(sTy, eps * sTs);
+        if(sTy <= Scalar(0) && sTy_effective <= Scalar(0)) return;
 
         const int n = s.size();
 
-        // Lazy allocation on first push
-        if(count_ == 0 && S_.cols() == 0)
+        // Lazy row-dimension initialization on first push (when N is dynamic)
+        if(count_ == 0 && S_.rows() == 0)
         {
-            S_.setZero(n, capacity_);
-            Y_.setZero(n, capacity_);
-            rho_.resize(capacity_);
+            S_.setZero(n, MaxHistory);
+            Y_.setZero(n, MaxHistory);
         }
 
-        if(count_ < capacity_)
+        if(count_ < MaxHistory)
         {
             S_.col(count_) = s;
             Y_.col(count_) = y;
@@ -72,31 +75,30 @@ public:
         }
         else
         {
-            // Shift columns left by 1, overwrite last
-            for(int j = 0; j < capacity_ - 1; ++j)
+            for(int j = 0; j < MaxHistory - 1; ++j)
             {
                 S_.col(j) = S_.col(j + 1);
                 Y_.col(j) = Y_.col(j + 1);
                 rho_[j] = rho_[j + 1];
             }
-            S_.col(capacity_ - 1) = s;
-            Y_.col(capacity_ - 1) = y;
-            rho_[capacity_ - 1] = Scalar(1) / sTy_effective;
+            S_.col(MaxHistory - 1) = s;
+            Y_.col(MaxHistory - 1) = y;
+            rho_[MaxHistory - 1] = Scalar(1) / sTy_effective;
         }
 
-        // Initial Hessian scaling: gamma_0 = s^T y / y^T y (N&W eq. 9.6).
-        // Stored as theta = 1/gamma = y^T y / s^T y, applied in two_loop_recursion.
+        // Initial Hessian scaling: theta = y^T y / s^T y (N&W eq. 9.6, inverse of gamma_0).
+        // gamma_0 = s^T y / y^T y scales H_0 to approximate curvature magnitude.
         theta_ = y.squaredNorm() / sTy_effective;
         theta_ = std::clamp(theta_, Scalar(1e-10), Scalar(1e10));
 
-        // Recompute L and D from active columns
         recompute_LD();
+        recompute_middle();
     }
 
     // Compute B*v = theta*v - W * M^{-1} * W^T * v.
     // W = [theta*S, Y], M = [[theta*S^T*S, L], [L^T, -D]].
     // Reference: N&W Section 9.2, eq. 9.15.
-    Eigen::VectorX<Scalar> multiply(const Eigen::VectorX<Scalar>& v) const
+    Eigen::Vector<Scalar, N> multiply(const Eigen::Vector<Scalar, N>& v) const
     {
         if(count_ == 0) return (theta_ * v).eval();
 
@@ -105,36 +107,52 @@ public:
         auto Y = Y_.leftCols(k);
 
         // W^T * v (2k x 1)
-        Eigen::VectorX<Scalar> Wv(2 * k);
+        Eigen::Vector<Scalar, 2 * MaxHistory> Wv;
         Wv.head(k) = theta_ * (S.transpose() * v);
-        Wv.tail(k) = Y.transpose() * v;
+        Wv.segment(MaxHistory, k) = Y.transpose() * v;
 
-        // Solve M * z = W^T * v using LDLT
-        Eigen::MatrixX<Scalar> M = build_middle_matrix();
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(M);
-        Eigen::VectorX<Scalar> z = ldlt.solve(Wv);
+        // Solve M * z = W^T * v using pre-allocated middle matrix
+        auto M = middle_.template topLeftCorner<2 * MaxHistory, 2 * MaxHistory>();
+
+        // Build the active submatrix for the LDLT solve
+        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                       0, 2 * MaxHistory, 2 * MaxHistory> M_active(2 * k, 2 * k);
+        M_active.topLeftCorner(k, k) = middle_.topLeftCorner(k, k);
+        M_active.block(0, k, k, k) = middle_.block(0, MaxHistory, k, k);
+        M_active.block(k, 0, k, k) = middle_.block(MaxHistory, 0, k, k);
+        M_active.block(k, k, k, k) = middle_.block(MaxHistory, MaxHistory, k, k);
+
+        Eigen::LDLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                                  0, 2 * MaxHistory, 2 * MaxHistory>> ldlt(M_active);
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1> Wv_active(2 * k);
+        Wv_active.head(k) = Wv.head(k);
+        Wv_active.tail(k) = Wv.segment(MaxHistory, k);
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1> z = ldlt.solve(Wv_active);
 
         // B*v = theta*v - W*z
-        Eigen::VectorX<Scalar> Wz = theta_ * (S * z.head(k)) + Y * z.tail(k);
+        Eigen::Vector<Scalar, N> Wz = (theta_ * (S * z.head(k)) + Y * z.tail(k)).eval();
         return (theta_ * v - Wz).eval();
     }
 
     // Build reduced Hessian Z^T * B * Z for free variable subspace.
     // Z selects rows in free_indices from the identity matrix.
     // B_FF = theta * I_F - W_F * M^{-1} * W_F^T.
+    //
+    // LDLT stays dynamic because free-variable count varies per call.
     // Reference: N&W Section 16.6 (subspace minimization).
-    Eigen::MatrixX<Scalar> reduced_hessian(const std::vector<int>& free_indices) const
+    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> reduced_hessian(
+        const std::vector<int>& free_indices) const
     {
+        using dyn_matrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
         const int nf = static_cast<int>(free_indices.size());
-        if(nf == 0) return Eigen::MatrixX<Scalar>{};
+        if(nf == 0) return dyn_matrix{};
 
         if(count_ == 0)
-            return (theta_ * Eigen::MatrixX<Scalar>::Identity(nf, nf)).eval();
+            return (theta_ * dyn_matrix::Identity(nf, nf)).eval();
 
         const int k = count_;
 
-        // Extract W_F (nf x 2k): rows of W restricted to free_indices
-        Eigen::MatrixX<Scalar> WF(nf, 2 * k);
+        dyn_matrix WF(nf, 2 * k);
         for(int j = 0; j < nf; ++j)
         {
             int idx = free_indices[j];
@@ -142,44 +160,44 @@ public:
             WF.row(j).tail(k) = Y_.row(idx).head(k);
         }
 
-        // M^{-1} * W_F^T
-        Eigen::MatrixX<Scalar> M = build_middle_matrix();
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt(M);
-        Eigen::MatrixX<Scalar> MiWFt = ldlt.solve(WF.transpose());
+        // Build active M submatrix
+        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                       0, 2 * MaxHistory, 2 * MaxHistory> M_active(2 * k, 2 * k);
+        M_active.topLeftCorner(k, k) = middle_.topLeftCorner(k, k);
+        M_active.block(0, k, k, k) = middle_.block(0, MaxHistory, k, k);
+        M_active.block(k, 0, k, k) = middle_.block(MaxHistory, 0, k, k);
+        M_active.block(k, k, k, k) = middle_.block(MaxHistory, MaxHistory, k, k);
 
-        // B_FF = theta * I_F - W_F * M^{-1} * W_F^T
-        Eigen::MatrixX<Scalar> BFF = theta_ * Eigen::MatrixX<Scalar>::Identity(nf, nf)
-                                   - WF * MiWFt;
+        Eigen::LDLT<dyn_matrix> ldlt(M_active);
+        dyn_matrix MiWFt = ldlt.solve(WF.transpose());
+
+        dyn_matrix BFF = theta_ * dyn_matrix::Identity(nf, nf)
+                       - WF * MiWFt;
         return BFF;
     }
 
     // Two-loop recursion computing H_k * g (N&W Algorithm 9.1).
     // Returns H*g without negation; caller negates for search direction.
-    // Uses the same (s,y) storage as the compact form.
-    Eigen::VectorX<Scalar> two_loop_recursion(const Eigen::VectorX<Scalar>& g) const
+    Eigen::Vector<Scalar, N> two_loop_recursion(const Eigen::Vector<Scalar, N>& g) const
     {
         if(count_ == 0) return g;
 
         const int k = count_;
-        Eigen::VectorX<Scalar> q = g;
-        std::vector<Scalar> alpha(k);
+        Eigen::Vector<Scalar, N> q = g;
 
-        // Backward loop (N&W Algorithm 9.1, step 1)
         for(int j = k - 1; j >= 0; --j)
         {
-            alpha[j] = rho_[j] * S_.col(j).dot(q);
-            q -= alpha[j] * Y_.col(j);
+            alpha_[j] = rho_[j] * S_.col(j).dot(q);
+            q -= alpha_[j] * Y_.col(j);
         }
 
-        // Initial Hessian scaling: gamma = s^T y / y^T y = 1/theta
         Scalar gamma = Scalar(1) / theta_;
-        Eigen::VectorX<Scalar> r = gamma * q;
+        Eigen::Vector<Scalar, N> r = (gamma * q).eval();
 
-        // Forward loop (N&W Algorithm 9.1, step 3)
         for(int j = 0; j < k; ++j)
         {
             Scalar beta = rho_[j] * Y_.col(j).dot(r);
-            r += S_.col(j) * (alpha[j] - beta);
+            r += S_.col(j) * (alpha_[j] - beta);
         }
 
         return r;
@@ -191,15 +209,12 @@ public:
     {
         count_ = 0;
         theta_ = Scalar(1);
-        // Keep allocated storage, just reset count
     }
 
     int size() const { return count_; }
-    int capacity() const { return capacity_; }
+    static constexpr int capacity() { return MaxHistory; }
 
 private:
-    // Recompute L_ (strictly lower triangular) and D_ (diagonal) from active columns.
-    // L_{i,j} = s_i^T y_j for i > j; D_i = s_i^T y_i.
     void recompute_LD()
     {
         const int k = count_;
@@ -213,28 +228,35 @@ private:
         }
     }
 
-    // Build the 2k x 2k middle matrix M = [[theta*S^T*S, L], [L^T, -D]].
-    Eigen::MatrixX<Scalar> build_middle_matrix() const
+    // Middle matrix M stored in block layout:
+    //   [0..MaxHistory-1, 0..MaxHistory-1]        = theta * S^T * S
+    //   [0..MaxHistory-1, MaxHistory..2*MaxHistory] = L
+    //   [MaxHistory.., 0..MaxHistory-1]            = L^T
+    //   [MaxHistory.., MaxHistory..]               = -D
+    void recompute_middle()
     {
         const int k = count_;
         auto S = S_.leftCols(k);
 
-        Eigen::MatrixX<Scalar> M(2 * k, 2 * k);
-        M.topLeftCorner(k, k) = theta_ * (S.transpose() * S);
-        M.topRightCorner(k, k) = L_.topLeftCorner(k, k);
-        M.bottomLeftCorner(k, k) = L_.topLeftCorner(k, k).transpose();
-        M.bottomRightCorner(k, k) = (-D_.head(k)).asDiagonal();
-        return M;
+        middle_.template topLeftCorner<MaxHistory, MaxHistory>()
+            .topLeftCorner(k, k).noalias() = theta_ * (S.transpose() * S);
+        middle_.template block<MaxHistory, MaxHistory>(0, MaxHistory)
+            .topLeftCorner(k, k) = L_.topLeftCorner(k, k);
+        middle_.template block<MaxHistory, MaxHistory>(MaxHistory, 0)
+            .topLeftCorner(k, k) = L_.topLeftCorner(k, k).transpose();
+        middle_.template block<MaxHistory, MaxHistory>(MaxHistory, MaxHistory)
+            .topLeftCorner(k, k) = (-D_.head(k)).asDiagonal();
     }
 
-    Eigen::MatrixX<Scalar> S_;           // n x capacity_ (displacement vectors)
-    Eigen::MatrixX<Scalar> Y_;           // n x capacity_ (gradient differences)
-    Eigen::MatrixX<Scalar> L_;           // capacity_ x capacity_ (strictly lower triangular)
-    Eigen::VectorX<Scalar> D_;           // capacity_ (diagonal: s_i^T y_i)
-    std::vector<Scalar> rho_;            // 1 / (s_i^T y_i) for two-loop recursion
+    Eigen::Matrix<Scalar, N, MaxHistory> S_{};
+    Eigen::Matrix<Scalar, N, MaxHistory> Y_{};
+    Eigen::Matrix<Scalar, MaxHistory, MaxHistory> L_{};
+    Eigen::Vector<Scalar, MaxHistory> D_{};
+    Eigen::Matrix<Scalar, 2 * MaxHistory, 2 * MaxHistory> middle_{};
+    Eigen::Vector<Scalar, MaxHistory> rho_{};
+    mutable Eigen::Vector<Scalar, MaxHistory> alpha_{};
     Scalar theta_{Scalar(1)};
     int count_{0};
-    int capacity_;
 };
 
 }
