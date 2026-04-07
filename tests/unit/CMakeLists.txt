@@ -14,6 +14,7 @@ add_executable(nablapp_unit_tests
     scheduling_test.cpp
     convergence_test.cpp
     line_search_test.cpp
+    multistart_test.cpp
     solver_group_test.cpp
     kraft_slsqp_test.cpp
     basic_solver_test.cpp
