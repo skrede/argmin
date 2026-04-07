@@ -52,10 +52,15 @@ public:
         // Reject truly degenerate pairs (zero step)
         if(sTs < eps * eps) return;
 
-        // Damped: clamp s^T y upward to ensure positive curvature
+        // Reject negative curvature (sTy <= 0). Negative curvature from
+        // Lagrangian evaluations in SQP solvers poisons the BFGS approximation.
+        // Damped clamping only applies to small-but-positive curvature.
         Scalar sTy = s.dot(y);
+        if(sTy <= Scalar(0)) return;
+
+        // Damped: clamp small positive s^T y upward to preserve curvature
+        // from near-orthogonal pairs (common at bound constraints).
         Scalar sTy_effective = std::max(sTy, eps * sTs);
-        if(sTy <= Scalar(0) && sTy_effective <= Scalar(0)) return;
 
         const int n = s.size();
 

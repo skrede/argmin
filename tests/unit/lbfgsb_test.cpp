@@ -358,23 +358,28 @@ TEST_CASE("compact_lbfgs accepts small curvature pairs", "[lbfgsb]")
 
 TEST_CASE("compact_lbfgs damped curvature accepts near-orthogonal pairs", "[lbfgsb]")
 {
-    // The damped update clamps s^T y to max(s^T y, eps * ||s||^2) instead
-    // of rejecting. Pairs with small but positive curvature that would have
-    // been rejected by the old strict guard are now accepted.
+    // The damped update clamps small positive s^T y to max(s^T y, eps * ||s||^2)
+    // instead of rejecting. Negative/zero curvature is still rejected.
     // Reference: Powell (damped BFGS), N&W Section 9.1.
     using namespace nablapp::detail;
 
     compact_lbfgs<double> B;
 
-    // Near-orthogonal pair: s^T y is very small relative to ||s||^2
-    // but not zero. Old guard would reject (sTy <= eps * sTs), damped accepts.
+    // Near-orthogonal pair with tiny positive curvature.
+    // s^T y = 1e-18 > 0, eps * ||s||^2 ~ 2.2e-16 >> 1e-18.
+    // Old guard rejected, damped clamps upward and accepts.
     Eigen::VectorXd s(2), y(2);
     s << 1.0, 0.0;
-    y << 0.0, 1.0;  // s^T y = 0, but damped clamps to eps * ||s||^2
+    y << 1e-18, 1.0;
     B.push(s, y);
-    // The pair should still be rejected because sTy <= 0 and clamped sTy_effective > 0
-    // but the guard checks sTy <= 0 && sTy_effective <= 0 -- since sTy_effective > 0,
-    // the pair IS accepted under damping.
+    CHECK(B.size() == 1);
+
+    // Zero curvature (s^T y = 0) is still rejected — negative/zero curvature
+    // poisons BFGS approximations in SQP solvers.
+    Eigen::VectorXd s_orth(2), y_orth(2);
+    s_orth << 1.0, 0.0;
+    y_orth << 0.0, 1.0;
+    B.push(s_orth, y_orth);
     CHECK(B.size() == 1);
 }
 

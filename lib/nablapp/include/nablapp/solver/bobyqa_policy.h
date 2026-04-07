@@ -1,30 +1,26 @@
 #ifndef HPP_GUARD_NABLAPP_SOLVER_BOBYQA_POLICY_H
 #define HPP_GUARD_NABLAPP_SOLVER_BOBYQA_POLICY_H
 
-// BOBYQA solver policy for basic_solver (Powell 2009 faithful implementation).
+// BOBYQA solver policy for basic_solver.
 //
-// Implements Powell's Bound Optimization BY Quadratic Approximation using
-// the GOPT/HQ/PQ model representation with BMAT/ZMAT H-matrix factorization.
-// The main iteration uses TRSBOX for trust-region steps, ALTMOV for geometry
-// improvement, and RESCUE for interpolation system recovery.
+// Implements Powell's Bound Optimization BY Quadratic Approximation.
+// A trust-region derivative-free method that maintains a quadratic
+// interpolation model Q(x) interpolating f at m points (default m = 2n+1).
+// Each step solves the trust-region subproblem min Q(x_k + d) subject to
+// ||d|| <= delta and box constraints, then updates the model and radius
+// based on the accuracy ratio rho.
 //
-// This replaces the earlier SVD-based quadratic model approach with Powell's
-// O(n^2) incremental update scheme, enabling proper geometry maintenance
-// and denominator-based point replacement.
-//
-// Requires: objective<P,S> && bound_constrained<P,S>.
+// Requires: objective<P,S> && bound_constrained<P,S> (D-08).
 // No gradient is needed -- BOBYQA uses only objective evaluations.
 //
 // Reference: Powell, M. J. D. (2009) The BOBYQA algorithm for bound
 //            constrained optimization without derivatives, DAMTP 2009/NA06.
 //            K&W Section 8.4 (surrogate model framework).
 
-#include "nablapp/detail/bobyqa_model.h"
-#include "nablapp/detail/bobyqa_update.h"
-#include "nablapp/detail/bobyqa_trsbox.h"
-#include "nablapp/detail/bobyqa_altmov.h"
-#include "nablapp/detail/bobyqa_rescue.h"
+#include "nablapp/detail/quadratic_model.h"
+#include "nablapp/detail/trust_region.h"
 #include "nablapp/detail/bound_projection.h"
+#include "nablapp/options/trust_region_options.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
 #include "nablapp/types.h"
@@ -52,9 +48,11 @@ struct bobyqa_policy
 
     struct options_type
     {
-        std::optional<std::uint16_t> num_interpolation_points{};
-        std::optional<double> initial_trust_radius{};
-        std::optional<double> final_trust_radius{};
+        std::optional<std::uint16_t> num_interpolation_points{};  // default: 2n+1 (Powell 2009)
+        std::optional<double> initial_trust_radius{};             // default: auto, 10% of max bound range (Powell 2009)
+        std::optional<double> final_trust_radius{};               // default: 1e-8, stopping criterion on delta (Powell 2009)
+        std::optional<double> step_convergence_factor{};          // default: 1e-3
+        trust_region_options trust{};                              // Embedded trust region params
     };
 
     options_type options{};
@@ -67,11 +65,17 @@ struct bobyqa_policy
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
         double objective_value{};
-        detail::bobyqa_model<double, N> model;
-        double delta{};                            // Trust-region radius (varies within [rho, 2*rho])
+        Eigen::Matrix<double, N, Eigen::Dynamic> Y;
+        Eigen::VectorXd f_values;
+        detail::quadratic_model<double, N> model;
+        double delta{};
+        double delta_max{};
+        double final_trust_radius{1e-8};
+        double rho{};       // Current minimum trust radius (contracts toward rho_end)
+        double rho_end{};   // Final rho target (= final_trust_radius)
         std::uint32_t iteration{0};
-        std::uint16_t itest{0};
-        std::uint16_t nf_since_rho_change{0};      // Steps since last rho contraction
+        std::uint16_t itest{0};  // Consecutive non-improving iterations (Powell 2009, Section 4)
+        int m{};
         bool initialized{false};
     };
 
@@ -89,7 +93,7 @@ struct bobyqa_policy
         requires objective<Problem> && bound_constrained<Problem>
     state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
-                    [[maybe_unused]] const solver_options<Convergence>& opts)
+                    const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
         state_type<Problem> s;
@@ -98,97 +102,111 @@ struct bobyqa_policy
         s.lower = problem.lower_bounds();
         s.upper = problem.upper_bounds();
 
-        // Initial trust-region radius (Powell 2009).
-        //
-        // Auto heuristic: use the minimum finite bound range scaled by 0.2,
-        // capped to avoid absurd initial steps for loosely bounded problems.
-        // When bounds are very wide (> 100), fall back to a scale based on
-        // ||x0|| or 1.0, whichever is larger. This matches the behavior of
-        // NLopt's BOBYQA default radius selection.
-        double rhobeg = options.initial_trust_radius.value_or(0.0);
-        if(rhobeg <= 0.0)
+        // Project x0 to feasible region
+        s.x = detail::project(x0, s.lower, s.upper);
+
+        // Number of interpolation points (Powell 2009)
+        s.m = options.num_interpolation_points.has_value()
+                  ? static_cast<int>(options.num_interpolation_points.value())
+                  : 2 * n + 1;
+
+        // Final trust radius
+        s.final_trust_radius = options.final_trust_radius.value_or(1e-8);
+
+        // Initial trust-region radius (Powell 2009)
+        double h = options.initial_trust_radius.value_or(0.0);
+        if(h <= 0.0)
         {
-            double min_finite_range = std::numeric_limits<double>::infinity();
+            // Auto: 10% of the maximum bound range
+            double max_range = 0.0;
             for(int i = 0; i < n; ++i)
             {
                 double range_i = s.upper[i] - s.lower[i];
-                if(std::isfinite(range_i) && range_i > 0.0)
-                    min_finite_range = std::min(min_finite_range, range_i);
+                if(std::isfinite(range_i))
+                    max_range = std::max(max_range, range_i);
             }
+            h = (max_range > 0.0) ? 0.1 * max_range : 1.0;
+        }
+        s.delta = h;
+        s.delta_max = 10.0 * h;
 
-            if(std::isfinite(min_finite_range) && min_finite_range <= 100.0)
-            {
-                rhobeg = 0.2 * min_finite_range;
-            }
-            else
-            {
-                // Wide or unbounded: use x0 scale or 1.0.
-                double x_scale = x0.norm();
-                rhobeg = std::max(x_scale * 0.1, 1.0);
-            }
+        // Build initial interpolation set
+        // Y[:,0] = x0 (projected), Y[:,i] = x0 + h*e_i, Y[:,n+i] = x0 - h*e_i
+        s.Y.resize(n, s.m);
+        s.f_values.resize(s.m);
+
+        s.Y.col(0) = s.x;
+        s.f_values[0] = s.problem->value(s.x);
+
+        for(int i = 0; i < n && (1 + i) < s.m; ++i)
+        {
+            Eigen::Vector<double, N> pt = s.x;
+            pt[i] = std::min(pt[i] + h, s.upper[i]);
+            // If positive step hits the bound, try negative
+            if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
+                pt[i] = std::max(s.x[i] - h, s.lower[i]);
+            s.Y.col(1 + i) = pt;
+            s.f_values[1 + i] = s.problem->value(pt);
         }
 
-        double rhoend = options.final_trust_radius.value_or(1e-8);
+        for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
+        {
+            Eigen::Vector<double, N> pt = s.x;
+            pt[i] = std::max(pt[i] - h, s.lower[i]);
+            // If negative step hits the bound, try positive
+            if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
+                pt[i] = std::min(s.x[i] + h, s.upper[i]);
+            s.Y.col(1 + n + i) = pt;
+            s.f_values[1 + n + i] = s.problem->value(pt);
+        }
 
-        // Project x0 to feasible region.
-        Eigen::Vector<double, N> x0_proj = detail::project(x0, s.lower, s.upper);
+        // Find best point
+        int best = 0;
+        for(int i = 1; i < s.m; ++i)
+        {
+            if(s.f_values[i] < s.f_values[best])
+                best = i;
+        }
+        s.x = s.Y.col(best);
+        s.objective_value = s.f_values[best];
 
-        // Initialize the Powell 2009 model (PRELIM).
-        auto eval_fn = [&](const Eigen::Vector<double, N>& pt) -> double {
-            return problem.value(pt);
-        };
-
-        s.model.initialize(x0_proj, s.lower, s.upper, rhobeg, rhoend, eval_fn);
-
-        s.x = s.model.x_base + s.model.x_opt;
-        s.objective_value = s.model.f_opt;
-        s.delta = rhobeg;
+        // Build initial quadratic model
+        s.model = detail::build_model(s.Y, s.f_values, s.x);
         s.initialized = true;
         s.iteration = 0;
-        s.itest = 0;
-        s.nf_since_rho_change = 0;
+
+        // Powell 2009, Section 5: two-radius rho contraction scheme.
+        // rho starts at the initial trust radius (rhobeg) and contracts toward rho_end.
+        s.rho = s.delta;
+        s.rho_end = s.final_trust_radius;
 
         return s;
     }
 
-    // Main iteration step per Powell 2009.
-    //
-    // Uses separate trust-region radius delta that varies based on
-    // accuracy ratio. Delta floats within [rho, 2*rho]. When delta = rho
-    // and steps are insufficient, rho is contracted.
-    //
-    // Reference: Powell 2009, main iteration loop.
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        const int n = s.model.gopt.size();
-        const double eps = std::numeric_limits<double>::epsilon();
         double old_f = s.objective_value;
+        double step_conv_factor = options.step_convergence_factor.value_or(1e-3);
 
-        // Step 1: Compute TRSBOX step with current delta.
-        Eigen::Vector<double, N> d = detail::trsbox(s.model, s.lower, s.upper, s.delta);
+        // Model gradient at current best point
+        Eigen::Vector<double, N> mg = detail::model_gradient(s.model, s.x);
+
+        // Solve trust-region subproblem
+        Eigen::Vector<double, N> d = detail::solve_trust_region_box(
+            mg, s.model.H, s.x, s.delta, s.lower, s.upper);
 
         double d_norm = d.norm();
 
-        // Step 2: Short-step check.
-        //
-        // If ||d|| < 0.5 * rho, the model cannot make progress at this scale.
-        // Contract rho or declare convergence.
-        // Reference: Powell 2009, Sec. 5.
-        if(d_norm < 0.5 * s.model.rho)
+        // Powell 2009, Section 5: convergence via rho contraction.
+        // Only declare convergence when rho has contracted to rho_end and
+        // delta is also exhausted. This ensures the solver goes through the
+        // full rho contraction sequence before stopping.
+        if(s.rho <= s.rho_end && s.delta <= s.rho_end)
         {
-            if(s.model.rho > s.model.rho_end)
-            {
-                s.model.update_rho();
-                s.delta = s.model.rho;
-                s.nf_since_rho_change = 0;
-                ++s.iteration;
-                return make_continuing_result(s, old_f);
-            }
-
             return step_result<double>{
                 .objective_value = s.objective_value,
-                .gradient_norm = 0.0,
+                .gradient_norm = mg.norm(),
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
@@ -196,134 +214,108 @@ struct bobyqa_policy
             };
         }
 
-        // Step 3: Evaluate trial point.
-        Eigen::Vector<double, N> x_trial = detail::project(
-            (s.model.x_base + s.model.x_opt + d).eval(), s.lower, s.upper);
-        double f_new = s.problem->value(x_trial);
-        ++s.nf_since_rho_change;
+        // Trial point
+        Eigen::Vector<double, N> x_new = detail::project(
+            (s.x + d).eval(), s.lower, s.upper);
+        double f_new = s.problem->value(x_new);
 
-        // Accuracy ratio (Powell 2009, Sec. 5).
-        double predicted = -s.model.evaluate(d);
-        double actual = old_f - f_new;
-        double ratio = (std::abs(predicted) > eps * 100.0)
-                           ? actual / predicted
-                           : 0.0;
+        // Model predictions
+        double q_old = detail::evaluate_model(s.model, s.x);
+        double q_new = detail::evaluate_model(s.model, x_new);
 
-        // Step 4: Update trust-region radius delta based on ratio.
-        //
-        // Good ratio (> 0.7) and step near boundary: expand delta.
-        // Poor ratio (< 0.1): contract delta toward rho.
-        // Reference: Powell 2009, Sec. 5.
-        if(ratio >= 0.7 && d_norm >= 0.5 * s.delta)
+        // Accuracy ratio
+        double accuracy_ratio = detail::compute_rho(old_f, f_new, q_old, q_new);
+
+        // Update trust-region radius (delta), passing embedded trust region options.
+        s.delta = detail::update_radius(s.delta, accuracy_ratio, d_norm, s.delta_max,
+                                        options.trust);
+
+        // Powell 2009, Section 5: two-radius rho contraction.
+        // When delta has shrunk to rho, contract rho by halving toward rho_end.
+        // Then ensure delta >= rho so the solver continues with a meaningful radius.
+        if(s.delta <= s.rho)
         {
-            s.delta = std::min(2.0 * s.delta, 2.0 * s.model.rho);
-        }
-        else if(ratio < 0.1)
-        {
-            s.delta = std::max(0.5 * s.delta, s.model.rho);
+            s.rho = std::max(s.rho * 0.5, s.rho_end);
+            s.delta = std::max(s.delta, s.rho);
         }
 
-        // Step 5: Select replacement and update model.
-        auto vlag = detail::compute_vlag(s.model, d);
-        double beta = detail::compute_beta(s.model, d);
-        std::uint16_t knew = detail::select_replacement_powell(s.model, vlag, beta, f_new);
+        // Select point to replace in interpolation set
+        int k = detail::select_replacement(
+            s.Y, s.f_values, x_new, f_new, s.x);
 
-        double hk = detail::h_diagonal(s.model.zmat, static_cast<int>(knew));
-        double denom = detail::compute_denominator(beta, hk, vlag[knew]);
+        // Update interpolation set
+        s.Y.col(k) = x_new;
+        s.f_values[k] = f_new;
 
-        if(std::abs(denom) < eps * std::max(vlag[knew] * vlag[knew], 1.0))
-        {
-            Eigen::Vector<double, N> d_alt = detail::altmov(
-                s.model, knew, s.lower, s.upper, s.delta);
-
-            if(d_alt.norm() > eps * s.model.rho)
-            {
-                auto vlag_alt = detail::compute_vlag(s.model, d_alt);
-                double beta_alt = detail::compute_beta(s.model, d_alt);
-                double hk_alt = detail::h_diagonal(s.model.zmat, static_cast<int>(knew));
-                double denom_alt = detail::compute_denominator(beta_alt, hk_alt, vlag_alt[knew]);
-
-                if(std::abs(denom_alt) > std::abs(denom))
-                {
-                    d = d_alt;
-                    x_trial = detail::project(
-                        (s.model.x_base + s.model.x_opt + d).eval(), s.lower, s.upper);
-                    f_new = s.problem->value(x_trial);
-                    vlag = vlag_alt;
-                    beta = beta_alt;
-                    denom = denom_alt;
-                }
-            }
-
-            if(std::abs(denom) < eps * std::max(vlag[knew] * vlag[knew], 1.0))
-            {
-                auto rescue_eval = [&](const Eigen::Vector<double, N>& pt) -> double {
-                    return s.problem->value(pt);
-                };
-                detail::rescue(s.model, s.lower, s.upper, rescue_eval);
-                s.delta = s.model.rho;
-
-                s.x = s.model.x_base + s.model.x_opt;
-                s.objective_value = s.model.f_opt;
-                s.itest = 0;
-                ++s.iteration;
-                return make_continuing_result(s, old_f);
-            }
-        }
-
-        // Update model with the new point.
-        detail::update_model_after_replacement(s.model, knew, d, f_new, vlag, beta);
-
-        // Track improvement.
+        // Accept step if sufficient improvement or strictly better
         bool improved = false;
-        if(f_new < s.objective_value)
+        if(f_new < old_f)
         {
+            s.x = x_new;
             s.objective_value = f_new;
-            s.x = s.model.x_base + s.model.x_opt;
             improved = true;
-            s.itest = 0;
-        }
-        else
-        {
-            s.x = s.model.x_base + s.model.x_opt;
         }
 
-        // Model switching heuristic (BOB-04).
-        if(ratio <= 0.0)
+        // Powell 2009, Section 4: itest model staleness counter.
+        // Track consecutive non-improving iterations. When itest >= 3 and
+        // NPT > 2N+1, the model should switch from full quadratic to
+        // minimum-Frobenius-norm. For the default NPT = 2N+1, the SVD
+        // solution is already minimum-Frobenius-norm, so the switch is a
+        // no-op. We track the counter for completeness and future NPT > 2N+1.
+        if(improved)
+            s.itest = 0;
+        else
             ++s.itest;
-        else
-            s.itest = 0;
 
+        // Update model
+        detail::update_model(s.model, s.Y, s.f_values, k, s.x);
+
+        // Powell 2009, Section 4: when itest >= 3 and NPT > 2N+1, zero H
+        // to force minimum-Frobenius-norm model. For default NPT = 2N+1,
+        // the SVD already produces minimum-norm, so this is a no-op.
         if(s.itest >= 3)
         {
-            absorb_hq_into_pq(s.model, n);
+            const int n = s.x.size();
+            if(s.m > 2 * n + 1)
+                s.model.H.setZero();
             s.itest = 0;
         }
 
-        // Rho contraction trigger: if many steps without improvement and
-        // delta is already at rho, force rho contraction.
-        // Reference: Powell 2009, Sec. 5.
-        const int npt = s.model.pq.size();
-        if(!improved && s.nf_since_rho_change > static_cast<std::uint16_t>(2 * npt)
-           && s.model.rho > s.model.rho_end)
+        // Geometry check: if a point is too far, replace it
+        int g_idx = detail::check_geometry(s.Y, s.x, s.delta);
+        if(g_idx >= 0)
         {
-            s.model.update_rho();
-            s.delta = s.model.rho;
-            s.nf_since_rho_change = 0;
-        }
+            // Replace with a geometry-improving point midway between x_k and the far point
+            Eigen::Vector<double, N> geo_pt = detail::project(
+                (0.5 * (s.x + s.Y.col(g_idx))).eval(), s.lower, s.upper);
+            double geo_f = s.problem->value(geo_pt);
+            s.Y.col(g_idx) = geo_pt;
+            s.f_values[g_idx] = geo_f;
+            detail::update_model(s.model, s.Y, s.f_values, g_idx, s.x);
 
-        // Base shift when x_opt grows large.
-        if(s.model.x_opt.norm() > 1e3 * s.model.rho)
-            s.model.shift_base(n);
+            if(geo_f < s.objective_value)
+            {
+                s.x = geo_pt;
+                s.objective_value = geo_f;
+                improved = true;
+            }
+        }
 
         ++s.iteration;
 
+        // Derivative-free convergence signalling:
+        // - gradient_norm: use model gradient as proxy, but ensure it stays large
+        //   enough to prevent basic_solver from triggering gradient convergence
+        //   while the trust region is still active
+        // - objective_change: when step is rejected (objective unchanged), report
+        //   delta as a proxy to prevent ftol_reached from firing prematurely
+        // - step_size: report delta when step is rejected, to prevent stall detection
         double obj_change = s.objective_value - old_f;
         double effective_step = improved ? d_norm : s.delta;
         double effective_change = improved ? obj_change : s.delta;
 
-        double grad_proxy = s.model.gopt.norm();
-        if(s.model.rho > s.model.rho_end)
+        double grad_proxy = mg.norm();
+        if(s.delta > s.final_trust_radius)
             grad_proxy = std::max(grad_proxy, 1.0);
 
         return step_result<double>{
@@ -336,86 +328,61 @@ struct bobyqa_policy
         };
     }
 
+    // Cold restart -- BOBYQA has no warm-start mode since the interpolation
+    // set is point-specific.
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
+        // BOBYQA cannot warm-start; delegate to full reset
         reset_clear(s, x0);
     }
 
     template <typename P>
     void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
-        Eigen::Vector<double, N> x0_proj = detail::project(x0, s.lower, s.upper);
-
-        auto eval_fn = [&](const Eigen::Vector<double, N>& pt) -> double {
-            return s.problem->value(pt);
-        };
-
-        s.model.initialize(x0_proj, s.lower, s.upper,
-                           s.model.rho_beg, s.model.rho_end, eval_fn);
-
-        s.x = s.model.x_base + s.model.x_opt;
-        s.objective_value = s.model.f_opt;
-        s.delta = s.model.rho;
+        const int n = x0.size();
+        s.x = detail::project(x0, s.lower, s.upper);
         s.iteration = 0;
-        s.itest = 0;
-        s.nf_since_rho_change = 0;
-        s.initialized = true;
-    }
+        s.initialized = false;
 
-private:
-    // Absorb HQ (explicit Hessian) into PQ (implicit Lagrange weights).
-    //
-    // This is the model switching step: zero out HQ and adjust PQ so
-    // that the model value and gradient remain unchanged.
-    //
-    // For each PQ[k], add the contribution from HQ via:
-    //   PQ[k] += xpt[k]^T * HQ_mat * xpt[k] / (xpt[k]^T xpt[k])^2
-    //
-    // This is approximate but sufficient for the model switch heuristic.
-    //
-    // Reference: Powell 2009 (model switching between full and min-Frobenius).
-    template <typename Scalar, int NN, int NPT>
-    static void absorb_hq_into_pq(detail::bobyqa_model<Scalar, NN, NPT>& model, int n)
-    {
-        const int npt = model.pq.size();
+        double h = s.delta;
 
-        for(int k = 0; k < npt; ++k)
+        // Rebuild interpolation set from new starting point
+        s.Y.col(0) = s.x;
+        s.f_values[0] = s.problem->value(s.x);
+
+        for(int i = 0; i < n && (1 + i) < s.m; ++i)
         {
-            Scalar xpt_sq = model.xpt.row(k).squaredNorm();
-            if(xpt_sq < std::numeric_limits<Scalar>::epsilon())
-                continue;
-
-            // Compute xpt[k]^T HQ xpt[k] using packed storage.
-            Scalar quad = Scalar(0);
-            for(int i = 0; i < n; ++i)
-            {
-                for(int j = 0; j < n; ++j)
-                    quad += model.hq_element(i, j, n) * model.xpt(k, i) * model.xpt(k, j);
-            }
-
-            model.pq[k] += quad / (xpt_sq * xpt_sq) * xpt_sq;
+            Eigen::Vector<double, N> pt = s.x;
+            pt[i] = std::min(pt[i] + h, s.upper[i]);
+            if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
+                pt[i] = std::max(s.x[i] - h, s.lower[i]);
+            s.Y.col(1 + i) = pt;
+            s.f_values[1 + i] = s.problem->value(pt);
         }
 
-        model.hq.setZero();
-    }
+        for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
+        {
+            Eigen::Vector<double, N> pt = s.x;
+            pt[i] = std::max(pt[i] - h, s.lower[i]);
+            if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
+                pt[i] = std::min(s.x[i] + h, s.upper[i]);
+            s.Y.col(1 + n + i) = pt;
+            s.f_values[1 + n + i] = s.problem->value(pt);
+        }
 
-    // Build a step_result for iterations that loop back (rho contraction, rescue).
-    template <typename P>
-    static step_result<double> make_continuing_result(const state_type<P>& s, double old_f)
-    {
-        double grad_proxy = s.model.gopt.norm();
-        if(s.model.rho > s.model.rho_end)
-            grad_proxy = std::max(grad_proxy, 1.0);
+        // Find best point
+        int best = 0;
+        for(int i = 1; i < s.m; ++i)
+        {
+            if(s.f_values[i] < s.f_values[best])
+                best = i;
+        }
+        s.x = s.Y.col(best);
+        s.objective_value = s.f_values[best];
 
-        return step_result<double>{
-            .objective_value = s.objective_value,
-            .gradient_norm = grad_proxy,
-            .step_size = s.model.rho,
-            .objective_change = s.model.rho,
-            .improved = false,
-            .x_norm = s.x.norm(),
-        };
+        s.model = detail::build_model(s.Y, s.f_values, s.x);
+        s.initialized = true;
     }
 };
 
