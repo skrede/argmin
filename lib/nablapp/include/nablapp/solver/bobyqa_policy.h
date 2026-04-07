@@ -80,6 +80,7 @@ struct bobyqa_policy
         std::uint32_t iteration{0};
         std::uint16_t itest{0};  // Consecutive non-improving iterations (Powell 2009, Section 4)
         std::uint16_t rescue_counter{0};  // Consecutive rho contractions without improvement (Powell 2009, RESCUE)
+        bool last_improved{false};       // Whether the previous step improved the objective
         int m{};
         bool initialized{false};
     };
@@ -236,7 +237,9 @@ struct bobyqa_policy
         double d_norm = d.norm();
 
         // Powell 2009, Section 5: convergence via rho contraction.
-        if(s.rho <= s.rho_end && s.delta <= s.rho_end)
+        // Only terminate when the previous step was also non-improving,
+        // preventing premature exit when the solver is still making progress.
+        if(s.rho <= s.rho_end && s.delta <= s.rho_end && !s.last_improved)
         {
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -245,6 +248,7 @@ struct bobyqa_policy
                 .objective_change = 0.0,
                 .improved = false,
                 .x_norm = s.x.norm(),
+                .policy_status = solver_status::converged,
             };
         }
 
@@ -267,9 +271,15 @@ struct bobyqa_policy
                                         options.trust);
 
         // Powell 2009, Section 5: two-radius rho contraction.
+        // Only contract rho when the solver has genuinely stalled at this
+        // scale (non-improving step AND rescue_counter indicates repeated
+        // failure), not from a single bad accuracy ratio shrinking delta.
         if(s.delta <= s.rho)
         {
-            s.rho = std::max(s.rho * 0.5, s.rho_end);
+            if(!s.last_improved && s.rescue_counter > 0)
+            {
+                s.rho = std::max(s.rho * 0.5, s.rho_end);
+            }
             s.delta = std::max(s.delta, s.rho);
         }
 
@@ -402,6 +412,7 @@ struct bobyqa_policy
         }
 
         ++s.iteration;
+        s.last_improved = improved;
 
         // Derivative-free convergence signalling
         double obj_change = s.objective_value - old_f;

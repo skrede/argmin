@@ -516,19 +516,19 @@ TEST_CASE("bobyqa HS001 accuracy vs NLopt baseline", "[bobyqa][benchmark]")
 
     Eigen::Vector<double, 2> x0 = hs.initial_point();
     solver_options opts;
-    opts.max_iterations = 2000;
+    opts.max_iterations = 10000;
     opts.set_gradient_threshold(1e-15);
-    opts.set_objective_threshold(1e-12);
+    opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
     basic_solver solver{bobyqa_policy<2>{}, hs, x0, opts};
     auto result = solver.solve(opts);
 
-    // HS001 is the hard Rosenbrock variant; f < 0.05 demonstrates functional
-    // convergence near the valley. Tighter accuracy requires gradient information.
-    CHECK(result.objective_value < 0.05);
-    CHECK(result.x[0] == Approx(1.0).margin(0.15));
-    CHECK(result.x[1] == Approx(1.0).margin(0.25));
+    // HS001 is the hard Rosenbrock variant. With guarded rho contraction
+    // the solver avoids premature termination and reaches high accuracy.
+    CHECK(result.objective_value < 0.001);
+    CHECK(result.x[0] == Approx(1.0).margin(0.05));
+    CHECK(result.x[1] == Approx(1.0).margin(0.05));
     // x1 bound must be respected
     CHECK(result.x[1] >= -1.5 - 1e-10);
 }
@@ -565,4 +565,29 @@ TEST_CASE("bobyqa unequal bound ranges", "[bobyqa]")
     CHECK(result.x[0] <= 10.0 + 1e-10);
     CHECK(result.x[1] >= -100.0 - 1e-10);
     CHECK(result.x[1] <= 100.0 + 1e-10);
+}
+
+TEST_CASE("bobyqa rho exhaustion reports converged status", "[bobyqa]")
+{
+    bobyqa_booth problem{
+        .lb = Eigen::Vector<double, 2>{{-10.0, -10.0}},
+        .ub = Eigen::Vector<double, 2>{{10.0, 10.0}},
+    };
+
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-14);
+    opts.set_step_threshold(1e-14);
+
+    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // Rho exhaustion must report convergence, not stall
+    CHECK(result.status != solver_status::stalled);
+    CHECK(result.status != solver_status::max_iterations);
+    CHECK((result.status == solver_status::converged ||
+           result.status == solver_status::ftol_reached));
+    CHECK(result.objective_value < 1e-5);
 }
