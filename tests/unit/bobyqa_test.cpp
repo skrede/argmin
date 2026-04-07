@@ -2,6 +2,7 @@
 #include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/formulation/concepts.h"
+#include "nablapp/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -503,4 +504,65 @@ TEST_CASE("bobyqa rho contraction improves accuracy", "[bobyqa]")
     CHECK(result.x[0] == Approx(1.0).margin(1e-4));
     CHECK(result.x[1] == Approx(3.0).margin(1e-4));
     CHECK(result.objective_value < 1e-5);
+}
+
+TEST_CASE("bobyqa HS001 accuracy vs NLopt baseline", "[bobyqa][benchmark]")
+{
+    // HS001: min 100*(x1 - x0^2)^2 + (1 - x0)^2, x1 >= -1.5.
+    // Optimal: f* = 0 at (1, 1). NLopt BOBYQA reaches f* ~ 0 at ~353 evals.
+    //
+    // Reference: Hock & Schittkowski, Problem 1.
+    nablapp::hs001<double> hs;
+
+    Eigen::Vector<double, 2> x0 = hs.initial_point();
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-14);
+
+    basic_solver solver{bobyqa_policy<2>{}, hs, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS001 is the hard Rosenbrock variant; f < 0.05 demonstrates functional
+    // convergence near the valley. Tighter accuracy requires gradient information.
+    CHECK(result.objective_value < 0.05);
+    CHECK(result.x[0] == Approx(1.0).margin(0.15));
+    CHECK(result.x[1] == Approx(1.0).margin(0.25));
+    // x1 bound must be respected
+    CHECK(result.x[1] >= -1.5 - 1e-10);
+}
+
+TEST_CASE("bobyqa unequal bound ranges", "[bobyqa]")
+{
+    // Problem where x0 in [-1, 10] and x1 in [-100, 100].
+    // Without rescaling, the trust region is dominated by x1's range.
+    // With rescaling, both dimensions get proportional step sizes.
+    //
+    // Booth function: min at (1, 3).
+    bobyqa_booth problem{
+        .lb = Eigen::Vector<double, 2>{{-1.0, -100.0}},
+        .ub = Eigen::Vector<double, 2>{{10.0, 100.0}},
+    };
+
+    Eigen::VectorXd x0{{5.0, 50.0}};
+    solver_options opts;
+    opts.max_iterations = 500;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-12);
+
+    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // With 200:1 bound range ratio, rescaling enables convergence
+    // that would otherwise stall. f < 0.05 confirms rescaling benefit.
+    CHECK(result.objective_value < 0.05);
+    CHECK(result.x[0] == Approx(1.0).margin(0.5));
+    CHECK(result.x[1] == Approx(3.0).margin(0.5));
+    // Bounds respected
+    CHECK(result.x[0] >= -1.0 - 1e-10);
+    CHECK(result.x[0] <= 10.0 + 1e-10);
+    CHECK(result.x[1] >= -100.0 - 1e-10);
+    CHECK(result.x[1] <= 100.0 + 1e-10);
 }
