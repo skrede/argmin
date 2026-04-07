@@ -75,6 +75,20 @@ struct solver_options
         std::get<step_tolerance_rel_criterion>(convergence.criteria).threshold = v;
     }
 
+    template <typename C = Convergence>
+    void set_stall_threshold(double v)
+        requires requires(C& c) { std::get<stall_tolerance_criterion>(c.criteria); }
+    {
+        std::get<stall_tolerance_criterion>(convergence.criteria).threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_stall_window(std::uint16_t v)
+        requires requires(C& c) { std::get<stall_tolerance_criterion>(c.criteria); }
+    {
+        std::get<stall_tolerance_criterion>(convergence.criteria).window = v;
+    }
+
     // Feasibility threshold setter for constrained convergence policies.
     template <typename C = Convergence>
     void set_feasibility_threshold(double v)
@@ -126,6 +140,22 @@ struct solver_options
               && requires(C& c) { std::get<step_tolerance_rel_criterion>(c.inner.criteria); }
     {
         std::get<step_tolerance_rel_criterion>(convergence.inner.criteria).threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_stall_threshold(double v)
+        requires (!requires(C& c) { std::get<stall_tolerance_criterion>(c.criteria); })
+              && requires(C& c) { std::get<stall_tolerance_criterion>(c.inner.criteria); }
+    {
+        std::get<stall_tolerance_criterion>(convergence.inner.criteria).threshold = v;
+    }
+
+    template <typename C = Convergence>
+    void set_stall_window(std::uint16_t v)
+        requires (!requires(C& c) { std::get<stall_tolerance_criterion>(c.criteria); })
+              && requires(C& c) { std::get<stall_tolerance_criterion>(c.inner.criteria); }
+    {
+        std::get<stall_tolerance_criterion>(convergence.inner.criteria).window = v;
     }
 };
 

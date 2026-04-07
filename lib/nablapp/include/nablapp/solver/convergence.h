@@ -5,6 +5,7 @@
 #include "nablapp/result/status.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -108,6 +109,48 @@ struct step_tolerance_rel_criterion
     }
 };
 
+// Stall detection: terminates when objective + constraint violation makes
+// no progress over a rolling window of K iterations.
+//
+// Unlike the other criteria which are stateless, this maintains a circular
+// buffer of combined metric values. The mutable buffer keeps convergence
+// logic self-contained within the criterion.
+//
+// The combined metric (objective + constraint_violation) catches SQP
+// solvers that cycle between feasible and infeasible points, where the
+// objective alone may appear to oscillate while overall progress stalls.
+//
+// Reference: K&W 2e Section 4.4 (convergence criteria).
+struct stall_tolerance_criterion
+{
+    std::optional<double> threshold{};
+    std::uint16_t window{50};
+
+    std::optional<solver_status> check(const step_result<double>& r,
+                                       std::uint32_t iteration) const
+    {
+        if(!threshold)
+            return std::nullopt;
+
+        double metric = r.objective_value + r.constraint_violation;
+        buffer_[iteration % max_window] = metric;
+
+        if(iteration < window)
+            return std::nullopt;
+
+        double old_metric = buffer_[(iteration - window + 1) % max_window];
+
+        if(std::abs(metric - old_metric) < *threshold * std::max(std::abs(metric), 1.0))
+            return solver_status::stalled;
+
+        return std::nullopt;
+    }
+
+private:
+    static constexpr std::uint16_t max_window = 64;
+    mutable std::array<double, max_window> buffer_{};
+};
+
 template <typename... Criteria>
 struct convergence_policy
 {
@@ -128,7 +171,8 @@ struct convergence_policy
 using default_convergence = convergence_policy<
     gradient_tolerance_criterion,
     objective_tolerance_criterion,
-    step_tolerance_criterion
+    step_tolerance_criterion,
+    stall_tolerance_criterion
 >;
 
 // Constrained convergence: gates inner convergence on feasibility.

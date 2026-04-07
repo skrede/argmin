@@ -408,6 +408,12 @@ public:
         }
         else if constexpr(std::same_as<Criterion, step_tolerance_criterion>)
             std::get<step_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+        else if constexpr(std::same_as<Criterion, stall_tolerance_criterion>)
+        {
+            auto& dst = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
+            dst.threshold = c.threshold;
+            dst.window = c.window;
+        }
     }
 
     template <typename Convergence>

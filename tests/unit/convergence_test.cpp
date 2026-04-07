@@ -878,3 +878,142 @@ TEST_CASE("Solver group: lbfgsb + cmaes racing", "[convergence][solver_group]")
     auto result = group.step_n(500, opts);
     CHECK(result.objective_value < 0.1);
 }
+
+// ---------------------------------------------------------------------------
+// Stall detection criterion tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("stall_tolerance_criterion detects constant objective", "[convergence][stall]")
+{
+    stall_tolerance_criterion criterion;
+    criterion.threshold = 1e-10;
+    criterion.window = 5;
+
+    for(std::uint32_t i = 0; i < 10; ++i)
+    {
+        step_result<double> r;
+        r.objective_value = 1.0;
+        r.constraint_violation = 0.0;
+        auto status = criterion.check(r, i);
+
+        if(i < 5)
+            CHECK(!status.has_value());
+        else
+            CHECK(status == solver_status::stalled);
+    }
+}
+
+TEST_CASE("stall_tolerance_criterion does not fire on improving objective", "[convergence][stall]")
+{
+    stall_tolerance_criterion criterion;
+    criterion.threshold = 1e-10;
+    criterion.window = 5;
+
+    for(std::uint32_t i = 0; i < 20; ++i)
+    {
+        step_result<double> r;
+        r.objective_value = 100.0 - static_cast<double>(i);
+        r.constraint_violation = 0.0;
+        auto status = criterion.check(r, i);
+        CHECK(!status.has_value());
+    }
+}
+
+TEST_CASE("stall_tolerance_criterion catches oscillating SQP pattern", "[convergence][stall]")
+{
+    stall_tolerance_criterion criterion;
+    criterion.threshold = 1e-10;
+    criterion.window = 10;
+
+    for(std::uint32_t i = 0; i < 20; ++i)
+    {
+        step_result<double> r;
+        r.objective_value = (i % 2 == 0) ? 1.0 : 0.9;
+        r.constraint_violation = (i % 2 == 0) ? 0.0 : 0.1;
+        auto status = criterion.check(r, i);
+
+        if(i >= 10)
+            CHECK(status == solver_status::stalled);
+    }
+}
+
+TEST_CASE("stall detection disabled with nullopt threshold", "[convergence][stall]")
+{
+    stall_tolerance_criterion criterion;
+    criterion.threshold = std::nullopt;
+
+    for(std::uint32_t i = 0; i < 50; ++i)
+    {
+        step_result<double> r;
+        r.objective_value = 1.0;
+        r.constraint_violation = 0.0;
+        auto status = criterion.check(r, i);
+        CHECK(!status.has_value());
+    }
+}
+
+TEST_CASE("kraft_slsqp hs043 terminates before max_iterations with stall detection", "[convergence][stall]")
+{
+    hs043 problem;
+    solver_options opts;
+    opts.max_iterations = 10000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_stall_threshold(1e-12);
+
+    basic_solver solver{kraft_slsqp_policy<hs043<>::problem_dimension>{},
+                        problem, problem.initial_point(), opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.status != solver_status::max_iterations);
+    CHECK(result.iterations < 5000);
+}
+
+TEST_CASE("nw_sqp hs071 terminates before max_iterations with stall detection", "[convergence][stall]")
+{
+    hs071 problem;
+    solver_options opts;
+    opts.max_iterations = 10000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_stall_threshold(1e-12);
+
+    basic_solver solver{nw_sqp_policy<hs071<>::problem_dimension>{},
+                        problem, problem.initial_point(), opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.status != solver_status::max_iterations);
+    CHECK(result.iterations < 5000);
+}
+
+TEST_CASE("set_stall_threshold convenience setter works", "[convergence][stall]")
+{
+    solver_options opts;
+    opts.set_stall_threshold(1e-6);
+    opts.set_stall_window(30);
+
+    auto& criterion = std::get<stall_tolerance_criterion>(opts.convergence.criteria);
+    CHECK(criterion.threshold.value() == 1e-6);
+    CHECK(criterion.window == 30);
+}
+
+TEST_CASE("stall criterion does not regress well-behaved L-BFGS-B convergence", "[convergence][stall]")
+{
+    rosenbrock problem{};
+    solver_options opts;
+    opts.max_iterations = 500;
+    opts.set_gradient_threshold(1e-12);
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+
+    constexpr int D = rosenbrock<>::problem_dimension;
+    Eigen::Vector<double, D> x0{{-1.0, -1.0}};
+
+    basic_solver<lbfgsb_policy<D>, D, rosenbrock<>> solver{problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.status != solver_status::stalled);
+    CHECK(result.objective_value < 1e-8);
+}

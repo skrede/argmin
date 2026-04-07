@@ -293,6 +293,7 @@ TEST_CASE("convergence_policy with stationarity gate does not fire on stagnant n
                 .stationarity_threshold = 1e-6,
             },
             step_tolerance_criterion{.threshold = 1e-12},
+            stall_tolerance_criterion{},
         }
     };
 
@@ -316,6 +317,7 @@ TEST_CASE("constrained_convergence_policy blocks when infeasible",
             gradient_tolerance_criterion{.threshold = 1e-6},
             objective_tolerance_criterion{},
             step_tolerance_criterion{},
+            stall_tolerance_criterion{},
         }},
         .feasibility_threshold = 1e-4,
     };
@@ -337,6 +339,7 @@ TEST_CASE("constrained_convergence_policy passes when feasible",
             gradient_tolerance_criterion{.threshold = 1e-6},
             objective_tolerance_criterion{},
             step_tolerance_criterion{},
+            stall_tolerance_criterion{},
         }},
         .feasibility_threshold = 1e-4,
     };
@@ -359,6 +362,7 @@ TEST_CASE("constrained_convergence_policy with nullopt threshold delegates direc
             gradient_tolerance_criterion{.threshold = 1e-6},
             objective_tolerance_criterion{},
             step_tolerance_criterion{},
+            stall_tolerance_criterion{},
         }},
         .feasibility_threshold = std::nullopt,
     };
