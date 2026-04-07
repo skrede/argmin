@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace nablapp::detail
@@ -34,11 +35,23 @@ public:
         D_.setZero(capacity_);
     }
 
-    // Add a new (s, y) pair. Rejects pairs with s^T y <= 0 (curvature guard).
+    // Add a new (s, y) pair with damped curvature update.
+    // Instead of silently rejecting pairs with small s^T y, clamps to
+    // max(s^T y, eps * ||s||^2) to preserve curvature information from
+    // near-orthogonal pairs. Only truly degenerate (zero-step) pairs
+    // are rejected.
+    // Reference: N&W Section 9.1 (curvature condition), Powell (damped BFGS).
     void push(const Eigen::VectorX<Scalar>& s, const Eigen::VectorX<Scalar>& y)
     {
+        constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
+        Scalar sTs = s.squaredNorm();
+
+        // Reject truly degenerate pairs (zero step)
+        if(sTs < eps * eps) return;
+
+        // Damped: clamp s^T y upward to ensure positive curvature
         Scalar sTy = s.dot(y);
-        if(sTy <= Scalar(0)) return;
+        Scalar sTy_effective = std::max(sTy, eps * sTs);
 
         const int n = s.size();
 
@@ -54,7 +67,7 @@ public:
         {
             S_.col(count_) = s;
             Y_.col(count_) = y;
-            rho_[count_] = Scalar(1) / sTy;
+            rho_[count_] = Scalar(1) / sTy_effective;
             ++count_;
         }
         else
@@ -68,11 +81,12 @@ public:
             }
             S_.col(capacity_ - 1) = s;
             Y_.col(capacity_ - 1) = y;
-            rho_[capacity_ - 1] = Scalar(1) / sTy;
+            rho_[capacity_ - 1] = Scalar(1) / sTy_effective;
         }
 
-        // Update theta = y^T y / s^T y (N&W eq. 9.6, inverse of gamma)
-        theta_ = y.squaredNorm() / sTy;
+        // Initial Hessian scaling: gamma_0 = s^T y / y^T y (N&W eq. 9.6).
+        // Stored as theta = 1/gamma = y^T y / s^T y, applied in two_loop_recursion.
+        theta_ = y.squaredNorm() / sTy_effective;
         theta_ = std::clamp(theta_, Scalar(1e-10), Scalar(1e10));
 
         // Recompute L and D from active columns

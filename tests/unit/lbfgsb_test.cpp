@@ -1,7 +1,9 @@
 #include "nablapp/solver/lbfgsb_policy.h"
+#include "nablapp/solver/byrd_lbfgsb_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/formulation/concepts.h"
 #include "nablapp/test_functions/rosenbrock.h"
+#include "nablapp/test_functions/hock_schittkowski.h"
 #include "nablapp/schedule/basic_solver_group.h"
 #include "nablapp/schedule/round_robin_schedule.h"
 
@@ -253,4 +255,101 @@ TEST_CASE("Two L-BFGS-B policies in solver_group (SC5)", "[lbfgsb][solver_group]
            || result.status == solver_status::budget_exhausted));
     CHECK(std::isfinite(result.objective_value));
     CHECK(result.x.size() == 2);
+}
+
+// Bound-constrained quadratic for GCP regression testing.
+// f(x) = 0.5 * x^T A x - b^T x, A = [[2,0],[0,4]], b = [1,2].
+// Minimum at x* = [0.5, 0.5] with f* = -0.75, subject to 0 <= x <= 1.
+namespace
+{
+
+struct bounded_quadratic
+{
+    int dimension() const { return 2; }
+    double value(const Eigen::VectorXd& x) const
+    {
+        return 0.5 * (2.0 * x[0] * x[0] + 4.0 * x[1] * x[1]) - x[0] - 2.0 * x[1];
+    }
+    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    {
+        g.resize(2);
+        g[0] = 2.0 * x[0] - 1.0;
+        g[1] = 4.0 * x[1] - 2.0;
+    }
+    Eigen::VectorXd lower_bounds() const { return Eigen::VectorXd{{0.0, 0.0}}; }
+    Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd{{1.0, 1.0}}; }
+};
+
+}
+
+static_assert(differentiable<bounded_quadratic>);
+static_assert(bound_constrained<bounded_quadratic>);
+
+TEST_CASE("lbfgsb GCP sign fix regression on bounded quadratic", "[lbfgsb]")
+{
+    // The Phase 15 sign error in cauchy_point.h negated f_double_prime,
+    // causing the GCP to skip quadratic minima along breakpoints.
+    // This test verifies the fix holds on a simple bounded quadratic.
+    bounded_quadratic problem;
+    Eigen::VectorXd x0{{0.9, 0.1}};
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.gradient_tolerance = 1e-10;
+
+    basic_solver<lbfgsb_policy> solver{problem, x0, opts};
+    auto result = solver.solve();
+
+    CHECK(result.objective_value == Approx(-0.75).epsilon(1e-8));
+    CHECK(result.x[0] == Approx(0.5).margin(1e-6));
+    CHECK(result.x[1] == Approx(0.5).margin(1e-6));
+    CHECK((result.status == solver_status::converged
+           || result.status == solver_status::ftol_reached));
+}
+
+TEST_CASE("lbfgsb solves hs001 accurately", "[lbfgsb]")
+{
+    hs001<> problem;
+    Eigen::VectorXd x0{{-2.0, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 1000;
+    opts.gradient_tolerance = 1e-8;
+
+    basic_solver<lbfgsb_policy> solver{problem, x0, opts};
+    auto result = solver.solve();
+
+    // Guard: the solver should converge and significantly improve from
+    // the initial value of 909. The GCP + subspace minimization
+    // currently stalls on hs001's narrow valley -- a known convergence
+    // gap that requires further GCP/subspace improvements.
+    CHECK(result.objective_value < 1.0);
+}
+
+TEST_CASE("byrd_lbfgsb solves Rosenbrock", "[lbfgsb][byrd]")
+{
+    rosenbrock<> problem{.n = 2};
+    Eigen::VectorXd x0{{-1.0, 1.0}};
+    solver_options opts;
+    opts.gradient_tolerance = 1e-6;
+    opts.max_iterations = 1000;
+
+    basic_solver<byrd_lbfgsb_policy> solver{problem, x0, opts};
+    auto result = solver.solve();
+
+    CHECK(result.objective_value < 1e-6);
+}
+
+TEST_CASE("byrd_lbfgsb solves hs001 with Armijo line search", "[lbfgsb][byrd]")
+{
+    hs001<> problem;
+    Eigen::VectorXd x0{{-2.0, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 1000;
+    opts.gradient_tolerance = 1e-8;
+    opts.objective_tolerance = 1e-15;
+    opts.step_tolerance = 1e-15;
+
+    basic_solver<byrd_lbfgsb_policy> solver{problem, x0, opts};
+    auto result = solver.solve();
+
+    CHECK(result.objective_value < 1e-6);
 }

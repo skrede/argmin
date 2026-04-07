@@ -1,73 +1,41 @@
-#ifndef HPP_GUARD_NABLAPP_SOLVER_LBFGSB_POLICY_H
-#define HPP_GUARD_NABLAPP_SOLVER_LBFGSB_POLICY_H
+#ifndef HPP_GUARD_NABLAPP_SOLVER_BYRD_LBFGSB_POLICY_H
+#define HPP_GUARD_NABLAPP_SOLVER_BYRD_LBFGSB_POLICY_H
 
-// L-BFGS-B solver policy for basic_solver.
+// Byrd 1995 variant L-BFGS-B solver policy for basic_solver.
 //
-// Implements the Limited-memory BFGS algorithm for Bound-constrained
-// optimization. Each step computes: (1) Generalized Cauchy Point via
-// breakpoint search along the projected gradient path, (2) subspace
-// minimization over free variables using the compact L-BFGS reduced
-// Hessian, (3) strong Wolfe line search capped at the maximum feasible
-// step length.
+// Structurally identical to lbfgsb_policy but with different defaults
+// motivated by non-convex landscapes (cartan IK benchmarks):
+//   - Armijo backtracking line search (instead of Strong Wolfe)
+//   - 5-pair curvature history (instead of 10)
 //
-// When the problem satisfies only differentiable (no bounds), all bounds
-// default to +/-infinity and the algorithm reduces to standard L-BFGS
-// with projected steps (D-04).
+// The Armijo line search avoids the curvature condition that can
+// over-constrain step acceptance on non-smooth or non-convex objectives.
+// Shorter history (m=5) reduces the cost of each two-loop recursion
+// and limits stale curvature influence.
 //
 // Reference: Byrd, Lu, Nocedal, Zhu (1995) "A Limited Memory Algorithm
 //            for Bound Constrained Optimization", SIAM J. Sci. Comput.
 //            16(5), pp. 1190-1208.
 //            N&W Sections 9.2 (compact representation), 16.6 (GCP +
 //            subspace minimization).
-//            K&W Section 6.5 (quasi-Newton methods).
 
-#include "nablapp/detail/compact_lbfgs.h"
-#include "nablapp/detail/cauchy_point.h"
-#include "nablapp/detail/bound_projection.h"
-#include "nablapp/detail/subspace_minimization.h"
-#include "nablapp/line_search/armijo.h"
-#include "nablapp/line_search/strong_wolfe.h"
-#include "nablapp/line_search/options.h"
-#include "nablapp/result/step_result.h"
-#include "nablapp/solver/options.h"
-
-#include "nablapp/formulation/concepts.h"
-
-#include <Eigen/Core>
-
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <functional>
-#include <limits>
-#include <vector>
+#include "nablapp/solver/lbfgsb_policy.h"
 
 namespace nablapp
 {
 
-// Line search strategy for L-BFGS-B policies.
-enum class lbfgsb_line_search : std::uint8_t
-{
-    strong_wolfe,
-    armijo
-};
-
-struct lbfgsb_policy
+struct byrd_lbfgsb_policy
 {
     using scalar_type = double;
 
     struct options_type
     {
-        int history_depth{10};
-        lbfgsb_line_search line_search_type{lbfgsb_line_search::strong_wolfe};
+        int history_depth{5};
+        lbfgsb_line_search line_search_type{lbfgsb_line_search::armijo};
     };
 
     options_type options{};
 
-    // The eval_value and eval_gradient functors capture the Problem by reference.
-    // The Problem object passed to init() MUST outlive the solver.
-    // This is the same lifetime model as all nablapp policies (init takes
-    // const Problem&).
     struct state_type
     {
         Eigen::VectorXd x;
@@ -129,21 +97,16 @@ struct lbfgsb_policy
 
     step_result<double> step(this auto&& self, state_type& s)
     {
-        // Evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
             s.eval_gradient(s.x, s.g);
 
-        // Generalized Cauchy Point
         auto gcp = detail::cauchy_point(s.x, s.g, s.lower, s.upper, s.B);
 
-        // Subspace minimization over free variables
         Eigen::VectorXd x_new = detail::subspace_minimize(
             s.x, gcp.x_cauchy, s.g, s.lower, s.upper, gcp.free_indices, s.B);
 
-        // Search direction
         Eigen::VectorXd d = (x_new - s.x).eval();
 
-        // Zero step check
         if(d.norm() < 1e-15)
         {
             return step_result<double>{
@@ -155,10 +118,8 @@ struct lbfgsb_policy
             };
         }
 
-        // Maximum feasible step length (D-03)
         double alpha_max = detail::compute_alpha_max(s.x, d, s.lower, s.upper);
 
-        // Fallback to Cauchy direction if alpha_max is too small
         if(alpha_max < 1e-15)
         {
             d = (gcp.x_cauchy - s.x).eval();
@@ -185,7 +146,6 @@ struct lbfgsb_policy
             }
         }
 
-        // Line search functors (CORE-09: .eval() on Eigen expressions)
         auto phi = [&](double a) {
             return s.eval_value((s.x + a * d).eval());
         };
@@ -195,7 +155,6 @@ struct lbfgsb_policy
             return g_temp.dot(d);
         };
 
-        // Line search with feasible step cap
         line_search_options<double> ls_opts{.max_alpha = std::min(1.0, alpha_max)};
         double dphi0 = s.g.dot(d);
         line_search_result<double> ls;
@@ -204,25 +163,19 @@ struct lbfgsb_policy
         else
             ls = strong_wolfe(phi, dphi, s.objective_value, dphi0, ls_opts);
 
-        // Update iterate (project for numerical safety)
         Eigen::VectorXd x_old = s.x;
         double old_f = s.objective_value;
         s.x = detail::project((s.x + ls.alpha * d).eval(), s.lower, s.upper);
 
-        // Evaluate new objective and gradient
         s.objective_value = s.eval_value(s.x);
         Eigen::VectorXd new_g(s.x.size());
         s.eval_gradient(s.x, new_g);
 
-        // Update L-BFGS curvature pairs
         Eigen::VectorXd sk = (s.x - x_old).eval();
         Eigen::VectorXd yk = (new_g - s.g).eval();
         s.B.push(sk, yk);
 
-        // Store new gradient
         s.g = new_g;
-
-        // Increment iteration
         ++s.iteration;
 
         return step_result<double>{
@@ -234,17 +187,14 @@ struct lbfgsb_policy
         };
     }
 
-    // Hot start -- preserves curvature pairs (D-05).
     void reset(this auto&&, state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = s.eval_value(x0);
         s.eval_gradient(x0, s.g);
         s.iteration = 0;
-        // B (compact_lbfgs) is NOT reset -- preserves curvature pairs
     }
 
-    // Cold restart -- clears curvature history (D-05).
     void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
     {
         self.reset(s, x0);
