@@ -71,7 +71,10 @@ struct bobyqa_policy
         double delta{};
         double delta_max{};
         double final_trust_radius{1e-8};
+        double rho{};       // Current minimum trust radius (contracts toward rho_end)
+        double rho_end{};   // Final rho target (= final_trust_radius)
         std::uint32_t iteration{0};
+        std::uint16_t itest{0};  // Consecutive non-improving iterations (Powell 2009, Section 4)
         int m{};
         bool initialized{false};
     };
@@ -172,6 +175,11 @@ struct bobyqa_policy
         s.initialized = true;
         s.iteration = 0;
 
+        // Powell 2009, Section 5: two-radius rho contraction scheme.
+        // rho starts at the initial trust radius (rhobeg) and contracts toward rho_end.
+        s.rho = s.delta;
+        s.rho_end = s.final_trust_radius;
+
         return s;
     }
 
@@ -190,8 +198,11 @@ struct bobyqa_policy
 
         double d_norm = d.norm();
 
-        // Convergence check: step too small relative to final trust radius
-        if(d_norm < s.delta * step_conv_factor && s.delta < s.final_trust_radius * 10.0)
+        // Powell 2009, Section 5: convergence via rho contraction.
+        // Only declare convergence when rho has contracted to rho_end and
+        // delta is also exhausted. This ensures the solver goes through the
+        // full rho contraction sequence before stopping.
+        if(s.rho <= s.rho_end && s.delta <= s.rho_end)
         {
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -213,11 +224,20 @@ struct bobyqa_policy
         double q_new = detail::evaluate_model(s.model, x_new);
 
         // Accuracy ratio
-        double rho = detail::compute_rho(old_f, f_new, q_old, q_new);
+        double accuracy_ratio = detail::compute_rho(old_f, f_new, q_old, q_new);
 
-        // Update trust-region radius, passing embedded trust region options
-        s.delta = detail::update_radius(s.delta, rho, d_norm, s.delta_max,
+        // Update trust-region radius (delta), passing embedded trust region options.
+        s.delta = detail::update_radius(s.delta, accuracy_ratio, d_norm, s.delta_max,
                                         options.trust);
+
+        // Powell 2009, Section 5: two-radius rho contraction.
+        // When delta has shrunk to rho, contract rho by halving toward rho_end.
+        // Then ensure delta >= rho so the solver continues with a meaningful radius.
+        if(s.delta <= s.rho)
+        {
+            s.rho = std::max(s.rho * 0.5, s.rho_end);
+            s.delta = std::max(s.delta, s.rho);
+        }
 
         // Select point to replace in interpolation set
         int k = detail::select_replacement(
@@ -236,8 +256,30 @@ struct bobyqa_policy
             improved = true;
         }
 
+        // Powell 2009, Section 4: itest model staleness counter.
+        // Track consecutive non-improving iterations. When itest >= 3 and
+        // NPT > 2N+1, the model should switch from full quadratic to
+        // minimum-Frobenius-norm. For the default NPT = 2N+1, the SVD
+        // solution is already minimum-Frobenius-norm, so the switch is a
+        // no-op. We track the counter for completeness and future NPT > 2N+1.
+        if(improved)
+            s.itest = 0;
+        else
+            ++s.itest;
+
         // Update model
         detail::update_model(s.model, s.Y, s.f_values, k, s.x);
+
+        // Powell 2009, Section 4: when itest >= 3 and NPT > 2N+1, zero H
+        // to force minimum-Frobenius-norm model. For default NPT = 2N+1,
+        // the SVD already produces minimum-norm, so this is a no-op.
+        if(s.itest >= 3)
+        {
+            const int n = s.x.size();
+            if(s.m > 2 * n + 1)
+                s.model.H.setZero();
+            s.itest = 0;
+        }
 
         // Geometry check: if a point is too far, replace it
         int g_idx = detail::check_geometry(s.Y, s.x, s.delta);

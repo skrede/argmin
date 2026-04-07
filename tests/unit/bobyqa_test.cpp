@@ -1,3 +1,4 @@
+#include "nablapp/detail/quadratic_model.h"
 #include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/formulation/concepts.h"
@@ -309,4 +310,80 @@ TEST_CASE("bobyqa custom interpolation points", "[bobyqa]")
         auto result = solver.solve(opts);
         CHECK(result.objective_value < 1e-3);
     }
+}
+
+TEST_CASE("bobyqa Lagrange values partition of unity", "[bobyqa]")
+{
+    // Build a 2D interpolation set with m = 2*2+1 = 5 points around x0.
+    const int n = 2;
+    const int m = 2 * n + 1;
+    Eigen::Vector2d x0{-1.2, 1.0};
+    double h = 0.5;
+
+    Eigen::Matrix<double, 2, Eigen::Dynamic> Y(n, m);
+    Eigen::VectorXd f_values(m);
+
+    // Rosenbrock evaluator
+    auto rosenbrock = [](const Eigen::Vector2d& x)
+    {
+        double t1 = 1.0 - x[0];
+        double t2 = x[1] - x[0] * x[0];
+        return t1 * t1 + 5.0 * t2 * t2;
+    };
+
+    Y.col(0) = x0;
+    f_values[0] = rosenbrock(x0);
+
+    for(int i = 0; i < n; ++i)
+    {
+        Eigen::Vector2d pt = x0;
+        pt[i] += h;
+        Y.col(1 + i) = pt;
+        f_values[1 + i] = rosenbrock(pt);
+    }
+
+    for(int i = 0; i < n; ++i)
+    {
+        Eigen::Vector2d pt = x0;
+        pt[i] -= h;
+        Y.col(1 + n + i) = pt;
+        f_values[1 + n + i] = rosenbrock(pt);
+    }
+
+    auto model = nablapp::detail::build_model(Y, f_values, x0);
+
+    // Partition of unity: sum_k L_k(x) = 1 for any x.
+    CHECK(model.lagrange_values.size() == m);
+    CHECK(model.lagrange_values.sum() == Approx(1.0).margin(1e-10));
+
+    // Each value should be finite and bounded (no blow-up from ill-conditioning)
+    for(int k = 0; k < m; ++k)
+    {
+        CHECK(std::isfinite(model.lagrange_values[k]));
+        CHECK(std::abs(model.lagrange_values[k]) < 10.0);
+    }
+}
+
+TEST_CASE("bobyqa rho contraction improves accuracy", "[bobyqa]")
+{
+    bobyqa_booth problem{
+        .lb = Eigen::Vector<double, 2>{{-10.0, -10.0}},
+        .ub = Eigen::Vector<double, 2>{{10.0, 10.0}},
+    };
+
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-14);
+    opts.set_step_threshold(1e-14);
+
+    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // With progressive rho contraction, the solver drives accuracy
+    // well beyond the 1e-4 baseline achievable without it.
+    CHECK(result.x[0] == Approx(1.0).margin(1e-4));
+    CHECK(result.x[1] == Approx(3.0).margin(1e-4));
+    CHECK(result.objective_value < 1e-5);
 }

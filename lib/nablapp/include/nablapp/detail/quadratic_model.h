@@ -29,6 +29,13 @@ struct quadratic_model
     Eigen::Matrix<Scalar, N, N> H;
     Scalar c{};
     Eigen::Vector<Scalar, N> x_base;
+
+    // Lagrange polynomial values L_k(x_base) for each interpolation point k.
+    // L_k(x) = 1 at point k and 0 at all other interpolation points.
+    // At x_base, sum_k L_k(x_base) = 1 (partition of unity).
+    //
+    // Reference: Powell 2009, Section 2 — Lagrange polynomials for interpolation.
+    Eigen::VectorXd lagrange_values;
 };
 
 // Build quadratic model from m interpolation points and their function values.
@@ -106,6 +113,44 @@ quadratic_model<Scalar, N> build_model(
             model.H(k, j) = theta[idx];
             ++idx;
         }
+    }
+
+    // Compute Lagrange polynomial values L_k(x_base) for each interpolation point k.
+    // For any function f, f(x_base) = sum_k L_k(x_base) * f(y_k). The Lagrange
+    // values are lambda = pinv(Phi)^T * phi(x_base), which is m-dimensional.
+    // Using SVD(Phi) = U * Sigma * V^T, this is U * Sigma^{-1} * V^T * phi(x_base).
+    //
+    // phi(x_base) = [1, 0, ..., 0] since x_base - x_base = 0 makes all linear
+    // and quadratic terms vanish.
+    //
+    // Reference: Powell 2009, Section 2.
+    {
+        Eigen::Vector<Scalar, Pcoeff> phi_xbase = Eigen::Vector<Scalar, Pcoeff>::Zero(p);
+        phi_xbase[0] = Scalar(1);
+
+        const auto& sv = svd.singularValues();
+        Scalar thr = svd.threshold() * sv[0];
+        auto V = svd.matrixV();  // p x p
+        auto U = svd.matrixU();  // m x m
+
+        // w = V^T * phi(x_base), then scale by Sigma^{-1}, then multiply by U
+        Eigen::VectorXd w = V.transpose() * phi_xbase.template cast<double>();
+        int rank = 0;
+        for(int i = 0; i < sv.size(); ++i)
+        {
+            if(sv[i] > thr)
+            {
+                w[i] /= sv[i];
+                ++rank;
+            }
+            else
+                w[i] = 0.0;
+        }
+        // Zero out components beyond singular value count
+        for(int i = sv.size(); i < w.size(); ++i)
+            w[i] = 0.0;
+
+        model.lagrange_values = U.leftCols(w.size()).template cast<double>() * w;
     }
 
     return model;
