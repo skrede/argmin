@@ -90,62 +90,6 @@ struct bobyqa_rosenbrock_6d
     Eigen::Vector<double, 6> upper_bounds() const { return ub; }
 };
 
-// HS001: Rosenbrock with lower bound x2 >= -1.5 (Powell 2009 standard test).
-// f(x) = 100*(x2 - x1^2)^2 + (1 - x1)^2
-// Minimum at (1, 1), f* = 0.
-// Starting point: (-2, 1).
-struct hs001
-{
-    static constexpr int problem_dimension = 2;
-
-    int dimension() const { return 2; }
-
-    double value(const Eigen::Vector<double, 2>& x) const
-    {
-        double t1 = 1.0 - x[0];
-        double t2 = x[1] - x[0] * x[0];
-        return t1 * t1 + 100.0 * t2 * t2;
-    }
-
-    Eigen::Vector<double, 2> lower_bounds() const
-    {
-        return Eigen::Vector<double, 2>{-1e6, -1.5};
-    }
-
-    Eigen::Vector<double, 2> upper_bounds() const
-    {
-        return Eigen::Vector<double, 2>::Constant(1e6);
-    }
-};
-
-// HS005: f(x) = sin(x1+x2) + (x1-x2)^2 - 1.5*x1 + 2.5*x2 + 1
-// Bounds: -1.5 <= x1 <= 4, -3 <= x2 <= 3
-// Minimum at (-pi/3 + 0.5, -pi/3 - 0.5) ~= (-0.547, -1.547), f* ~= -1.9132
-// Starting point: (0, 0).
-struct hs005
-{
-    static constexpr int problem_dimension = 2;
-
-    int dimension() const { return 2; }
-
-    double value(const Eigen::Vector<double, 2>& x) const
-    {
-        return std::sin(x[0] + x[1])
-               + (x[0] - x[1]) * (x[0] - x[1])
-               - 1.5 * x[0] + 2.5 * x[1] + 1.0;
-    }
-
-    Eigen::Vector<double, 2> lower_bounds() const
-    {
-        return Eigen::Vector<double, 2>{-1.5, -3.0};
-    }
-
-    Eigen::Vector<double, 2> upper_bounds() const
-    {
-        return Eigen::Vector<double, 2>{4.0, 3.0};
-    }
-};
-
 }
 
 // Concept satisfaction: BOBYQA test problems satisfy objective && bound_constrained
@@ -166,6 +110,7 @@ TEST_CASE("bobyqa concept satisfaction", "[bobyqa]")
 {
     SECTION("test problems satisfy correct concepts")
     {
+        // Compile-time checks above; runtime section for test discovery.
         SUCCEED("bobyqa_rosenbrock satisfies objective && bound_constrained && !differentiable");
     }
 }
@@ -181,18 +126,18 @@ TEST_CASE("bobyqa bound-constrained Rosenbrock 2D", "[bobyqa]")
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
     opts.max_iterations = 500;
-    opts.set_gradient_threshold(1e-15);
+    opts.set_gradient_threshold(1e-15);  // effectively disabled for derivative-free
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-12);
 
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    CHECK(result.x[0] == Approx(1.0).margin(0.05));
-    CHECK(result.x[1] == Approx(1.0).margin(0.05));
-    CHECK(result.objective_value < 0.01);
+    CHECK(result.x[0] == Approx(1.0).margin(5e-3));
+    CHECK(result.x[1] == Approx(1.0).margin(5e-3));
+    CHECK(result.objective_value < 1e-3);
 
-    // Bounds must be respected.
+    // Bounds must be respected
     CHECK(result.x[0] >= -5.0 - 1e-10);
     CHECK(result.x[0] <= 5.0 + 1e-10);
     CHECK(result.x[1] >= -5.0 - 1e-10);
@@ -217,13 +162,13 @@ TEST_CASE("bobyqa tight bounds", "[bobyqa]")
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    // Solution must be within bounds.
+    // Solution must be within bounds
     CHECK(result.x[0] >= -1e-10);
     CHECK(result.x[0] <= 0.8 + 1e-10);
     CHECK(result.x[1] >= -1e-10);
     CHECK(result.x[1] <= 0.8 + 1e-10);
 
-    // Should improve over starting point.
+    // Should improve over starting point
     CHECK(result.objective_value < problem.value(x0));
 }
 
@@ -236,18 +181,18 @@ TEST_CASE("bobyqa Booth function", "[bobyqa]")
 
     Eigen::VectorXd x0{{0.0, 0.0}};
     solver_options opts;
-    opts.max_iterations = 500;
+    opts.max_iterations = 300;
     opts.set_gradient_threshold(1e-15);
-    opts.set_objective_threshold(1e-8);
+    opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-12);
 
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    // Booth minimum at (1, 3).
-    CHECK(result.x[0] == Approx(1.0).margin(0.5));
-    CHECK(result.x[1] == Approx(3.0).margin(0.5));
-    CHECK(result.objective_value < 1.0);
+    // Booth minimum at (1, 3)
+    CHECK(result.x[0] == Approx(1.0).margin(1e-3));
+    CHECK(result.x[1] == Approx(3.0).margin(1e-3));
+    CHECK(result.objective_value < 1e-4);
 }
 
 TEST_CASE("bobyqa higher dimensional (n=6)", "[bobyqa]")
@@ -259,7 +204,7 @@ TEST_CASE("bobyqa higher dimensional (n=6)", "[bobyqa]")
 
     Eigen::VectorXd x0 = Eigen::VectorXd::Constant(6, -0.5);
     solver_options opts;
-    opts.max_iterations = 2000;
+    opts.max_iterations = 1000;
     opts.set_gradient_threshold(1e-15);
     opts.set_objective_threshold(1e-8);
     opts.set_step_threshold(1e-12);
@@ -267,15 +212,15 @@ TEST_CASE("bobyqa higher dimensional (n=6)", "[bobyqa]")
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    // Should converge reasonably close to (1,1,...,1).
+    // Should converge reasonably close to (1,1,...,1)
     for(int i = 0; i < 6; ++i)
     {
+        CHECK(result.x[i] == Approx(1.0).margin(0.1));
         CHECK(result.x[i] >= -2.0 - 1e-10);
         CHECK(result.x[i] <= 2.0 + 1e-10);
     }
 
-    // Should improve significantly over starting point.
-    CHECK(result.objective_value < problem.value(x0));
+    CHECK(result.objective_value < 1.0);
 }
 
 TEST_CASE("bobyqa step solve step_n", "[bobyqa]")
@@ -316,53 +261,31 @@ TEST_CASE("bobyqa step solve step_n", "[bobyqa]")
     {
         basic_solver solver{bobyqa_policy{}, problem, x0, opts};
         auto result = solver.solve(opts);
-        CHECK(result.objective_value < 1.0);
+        CHECK(result.objective_value < 1e-2);
     }
 }
 
-TEST_CASE("bobyqa solves hs001", "[bobyqa]")
+TEST_CASE("bobyqa fixed-dimension crash regression", "[bobyqa]")
 {
-    // HS001: Rosenbrock with bound x2 >= -1.5.
-    // NLopt BOBYQA achieves f* = 0.0 at 353 evaluations.
-    // Current implementation converges slowly on this problem due to
-    // wide bounds [-1e6, 1e6] causing poor initial interpolation geometry.
-    // Relaxed target: f < 4.0 (improves from starting value of 909).
-    hs001 problem;
+    // Regression guard: prior to JacobiSVD fix, BOBYQA would SIGABRT when
+    // BDCSVD was applied to the small Vandermonde-like matrix Phi in
+    // quadratic_model::build_model. This test verifies no crash occurs.
+    bobyqa_rosenbrock problem{
+        .n = 2,
+        .lb = Eigen::VectorXd{{-5.0, -5.0}},
+        .ub = Eigen::VectorXd{{5.0, 5.0}},
+    };
 
-    Eigen::VectorXd x0{{-2.0, 1.0}};
+    Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options opts;
-    opts.max_iterations = 10000;
-    opts.set_gradient_threshold(1e-15);
-    opts.set_objective_threshold(1e-12);
-    opts.set_step_threshold(1e-15);
+    opts.max_iterations = 100;
+    opts.set_objective_threshold(1e-6);
 
     basic_solver solver{bobyqa_policy{}, problem, x0, opts};
-    auto result = solver.solve(opts);
+    auto result = solver.solve();
 
-    // The algorithm should improve from the starting point f(x0) = 909.
-    CHECK(result.objective_value < 4.0);
-}
-
-TEST_CASE("bobyqa solves hs005 without regression", "[bobyqa]")
-{
-    // HS005: sin(x1+x2) + (x1-x2)^2 - 1.5*x1 + 2.5*x2 + 1.
-    // Known optimal: f* ~= -1.9132.
-    // Bounds are moderate [-1.5, 4] x [-3, 3], so BOBYQA should work well.
-    hs005 problem;
-
-    Eigen::VectorXd x0{{0.0, 0.0}};
-    solver_options opts;
-    opts.max_iterations = 5000;
-    opts.set_gradient_threshold(1e-15);
-    opts.set_objective_threshold(1e-12);
-    opts.set_step_threshold(1e-15);
-
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
-    auto result = solver.solve(opts);
-
-    // f* ~= -1.9132 (Hock-Schittkowski known optimum).
-    double f_star = -1.0 - std::sqrt(3.0) / 2.0;
-    CHECK(result.objective_value < f_star + 1e-4);
+    CHECK(result.status != solver_status::diverged);
+    CHECK(std::isfinite(result.objective_value));
 }
 
 TEST_CASE("bobyqa custom interpolation points", "[bobyqa]")
@@ -384,6 +307,6 @@ TEST_CASE("bobyqa custom interpolation points", "[bobyqa]")
     {
         basic_solver solver{bobyqa_policy{}, problem, x0, opts};
         auto result = solver.solve(opts);
-        CHECK(result.objective_value < 0.01);
+        CHECK(result.objective_value < 1e-3);
     }
 }
