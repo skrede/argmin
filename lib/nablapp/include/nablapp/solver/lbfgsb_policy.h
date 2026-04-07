@@ -22,9 +22,8 @@
 //            K&W Section 6.5 (quasi-Newton methods).
 
 #include "nablapp/detail/compact_lbfgs.h"
-#include "nablapp/detail/cauchy_point.h"
 #include "nablapp/detail/bound_projection.h"
-#include "nablapp/detail/subspace_minimization.h"
+#include "nablapp/detail/lbfgsb_direction.h"
 #include "nablapp/line_search/armijo.h"
 #include "nablapp/line_search/strong_wolfe.h"
 #include "nablapp/line_search/options.h"
@@ -139,18 +138,11 @@ struct lbfgsb_policy
         if(s.iteration != 0)
             s.problem->gradient(s.x, s.g);
 
-        // Generalized Cauchy Point using pre-allocated solver
-        const auto& gcp = s.gcp_solver.solve(s.x, s.g, s.lower, s.upper, s.B);
-
-        // Subspace minimization over free variables using pre-allocated solver
-        Eigen::Vector<double, N> x_new = s.ssm_solver.solve(
-            s.x, gcp.x_cauchy, s.g, s.lower, s.upper, gcp.free_indices, s.B);
-
-        // Search direction
-        Eigen::Vector<double, N> d = (x_new - s.x).eval();
-
-        // Zero step check
-        if(d.norm() < 1e-15)
+        // Direction computation: compile-time unconstrained fast path,
+        // runtime all-free fast path, or full GCP + subspace minimization.
+        auto dir = detail::compute_direction<P, double, N>(
+            s.x, s.g, s.lower, s.upper, s.B, s.gcp_solver, s.ssm_solver);
+        if(!dir)
         {
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -161,38 +153,7 @@ struct lbfgsb_policy
                 .x_norm = s.x.norm(),
             };
         }
-
-        // Maximum feasible step length (D-03)
-        double alpha_max = detail::compute_alpha_max(s.x, d, s.lower, s.upper);
-
-        // Fallback to Cauchy direction if alpha_max is too small
-        if(alpha_max < 1e-15)
-        {
-            d = (gcp.x_cauchy - s.x).eval();
-            if(d.norm() < 1e-15)
-            {
-                return step_result<double>{
-                    .objective_value = s.objective_value,
-                    .gradient_norm = s.g.norm(),
-                    .step_size = 0.0,
-                    .objective_change = 0.0,
-                    .improved = false,
-                    .x_norm = s.x.norm(),
-                };
-            }
-            alpha_max = detail::compute_alpha_max(s.x, d, s.lower, s.upper);
-            if(alpha_max < 1e-15)
-            {
-                return step_result<double>{
-                    .objective_value = s.objective_value,
-                    .gradient_norm = s.g.norm(),
-                    .step_size = 0.0,
-                    .objective_change = 0.0,
-                    .improved = false,
-                    .x_norm = s.x.norm(),
-                };
-            }
-        }
+        auto& [d, alpha_max] = *dir;
 
         // Line search functors with gradient caching.
         // The dphi callback computes the gradient at the trial point, which
@@ -219,23 +180,37 @@ struct lbfgsb_policy
             ? armijo(phi, s.objective_value, dphi0, ls_opts)
             : strong_wolfe(phi, dphi, s.objective_value, dphi0, ls_opts);
 
-        // Update iterate (project for numerical safety)
+        // Update iterate
         Eigen::Vector<double, N> x_old = s.x;
         double old_f = s.objective_value;
-        s.x = detail::project((s.x + ls.alpha * d).eval(), s.lower, s.upper);
+        if constexpr(bound_constrained<P>)
+            s.x = detail::project((s.x + ls.alpha * d).eval(), s.lower, s.upper);
+        else
+            s.x = (s.x + ls.alpha * d).eval();
 
         // Evaluate objective at projected point (projection may differ from
         // line search trial point due to bound clamping)
         s.objective_value = s.problem->value(s.x);
 
         // Reuse cached gradient from line search dphi callback if it was
-        // evaluated at the accepted alpha and projection didn't change x
+        // evaluated at the accepted alpha and projection didn't change x.
+        // Unconstrained: no projection, so cached gradient is always valid.
         Eigen::Vector<double, N> new_g(s.x.size());
-        if(cached_alpha == ls.alpha &&
-           s.x.isApprox((x_old + ls.alpha * d).eval(), 0.0))
-            new_g = cached_g;
+        if constexpr(bound_constrained<P>)
+        {
+            if(cached_alpha == ls.alpha &&
+               s.x.isApprox((x_old + ls.alpha * d).eval(), 0.0))
+                new_g = cached_g;
+            else
+                s.problem->gradient(s.x, new_g);
+        }
         else
-            s.problem->gradient(s.x, new_g);
+        {
+            if(cached_alpha == ls.alpha)
+                new_g = cached_g;
+            else
+                s.problem->gradient(s.x, new_g);
+        }
 
         // Update L-BFGS curvature pairs
         Eigen::Vector<double, N> sk = (s.x - x_old).eval();

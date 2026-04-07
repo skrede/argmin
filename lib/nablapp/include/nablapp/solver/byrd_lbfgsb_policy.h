@@ -19,6 +19,8 @@
 //            N&W Sections 9.2 (compact representation), 16.6 (GCP +
 //            subspace minimization).
 
+#include "nablapp/detail/lbfgsb_direction.h"
+
 #include "nablapp/solver/lbfgsb_policy.h"
 
 namespace nablapp
@@ -104,14 +106,11 @@ struct byrd_lbfgsb_policy
         if(s.iteration != 0)
             s.problem->gradient(s.x, s.g);
 
-        const auto& gcp = s.gcp_solver.solve(s.x, s.g, s.lower, s.upper, s.B);
-
-        Eigen::Vector<double, N> x_new = s.ssm_solver.solve(
-            s.x, gcp.x_cauchy, s.g, s.lower, s.upper, gcp.free_indices, s.B);
-
-        Eigen::Vector<double, N> d = (x_new - s.x).eval();
-
-        if(d.norm() < 1e-15)
+        // Direction computation: compile-time unconstrained fast path,
+        // runtime all-free fast path, or full GCP + subspace minimization.
+        auto dir = detail::compute_direction<P, double, N>(
+            s.x, s.g, s.lower, s.upper, s.B, s.gcp_solver, s.ssm_solver);
+        if(!dir)
         {
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -122,36 +121,7 @@ struct byrd_lbfgsb_policy
                 .x_norm = s.x.norm(),
             };
         }
-
-        double alpha_max = detail::compute_alpha_max(s.x, d, s.lower, s.upper);
-
-        if(alpha_max < 1e-15)
-        {
-            d = (gcp.x_cauchy - s.x).eval();
-            if(d.norm() < 1e-15)
-            {
-                return step_result<double>{
-                    .objective_value = s.objective_value,
-                    .gradient_norm = s.g.norm(),
-                    .step_size = 0.0,
-                    .objective_change = 0.0,
-                    .improved = false,
-                    .x_norm = s.x.norm(),
-                };
-            }
-            alpha_max = detail::compute_alpha_max(s.x, d, s.lower, s.upper);
-            if(alpha_max < 1e-15)
-            {
-                return step_result<double>{
-                    .objective_value = s.objective_value,
-                    .gradient_norm = s.g.norm(),
-                    .step_size = 0.0,
-                    .objective_change = 0.0,
-                    .improved = false,
-                    .x_norm = s.x.norm(),
-                };
-            }
-        }
+        auto& [d, alpha_max] = *dir;
 
         Eigen::Vector<double, N> cached_g(s.x.size());
         double cached_alpha = -1.0;
@@ -175,16 +145,29 @@ struct byrd_lbfgsb_policy
 
         Eigen::Vector<double, N> x_old = s.x;
         double old_f = s.objective_value;
-        s.x = detail::project((s.x + ls.alpha * d).eval(), s.lower, s.upper);
+        if constexpr(bound_constrained<P>)
+            s.x = detail::project((s.x + ls.alpha * d).eval(), s.lower, s.upper);
+        else
+            s.x = (s.x + ls.alpha * d).eval();
 
         s.objective_value = s.problem->value(s.x);
 
         Eigen::Vector<double, N> new_g(s.x.size());
-        if(cached_alpha == ls.alpha &&
-           s.x.isApprox((x_old + ls.alpha * d).eval(), 0.0))
-            new_g = cached_g;
+        if constexpr(bound_constrained<P>)
+        {
+            if(cached_alpha == ls.alpha &&
+               s.x.isApprox((x_old + ls.alpha * d).eval(), 0.0))
+                new_g = cached_g;
+            else
+                s.problem->gradient(s.x, new_g);
+        }
         else
-            s.problem->gradient(s.x, new_g);
+        {
+            if(cached_alpha == ls.alpha)
+                new_g = cached_g;
+            else
+                s.problem->gradient(s.x, new_g);
+        }
 
         Eigen::Vector<double, N> sk = (s.x - x_old).eval();
         Eigen::Vector<double, N> yk = (new_g - s.g).eval();
