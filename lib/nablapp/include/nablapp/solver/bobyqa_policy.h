@@ -75,6 +75,7 @@ struct bobyqa_policy
         double rho_end{};   // Final rho target (= final_trust_radius)
         std::uint32_t iteration{0};
         std::uint16_t itest{0};  // Consecutive non-improving iterations (Powell 2009, Section 4)
+        std::uint16_t rescue_counter{0};  // Consecutive rho contractions without improvement (Powell 2009, RESCUE)
         int m{};
         bool initialized{false};
     };
@@ -239,9 +240,13 @@ struct bobyqa_policy
             s.delta = std::max(s.delta, s.rho);
         }
 
-        // Select point to replace in interpolation set
+        // Powell 2009, Section 4: Lagrange-based point replacement.
+        // Compute Lagrange values at x_new and select the point k that
+        // maximizes |L_k(x_new)| for best-conditioned interpolation update.
+        Eigen::VectorXd lv_xnew = detail::compute_lagrange_at_point(
+            s.Y, s.f_values, s.x, x_new);
         int k = detail::select_replacement(
-            s.Y, s.f_values, x_new, f_new, s.x);
+            s.Y, s.f_values, x_new, f_new, s.x, lv_xnew);
 
         // Update interpolation set
         s.Y.col(k) = x_new;
@@ -257,11 +262,6 @@ struct bobyqa_policy
         }
 
         // Powell 2009, Section 4: itest model staleness counter.
-        // Track consecutive non-improving iterations. When itest >= 3 and
-        // NPT > 2N+1, the model should switch from full quadratic to
-        // minimum-Frobenius-norm. For the default NPT = 2N+1, the SVD
-        // solution is already minimum-Frobenius-norm, so the switch is a
-        // no-op. We track the counter for completeness and future NPT > 2N+1.
         if(improved)
             s.itest = 0;
         else
@@ -281,24 +281,94 @@ struct bobyqa_policy
             s.itest = 0;
         }
 
-        // Geometry check: if a point is too far, replace it
-        int g_idx = detail::check_geometry(s.Y, s.x, s.delta);
-        if(g_idx >= 0)
+        // Powell 2009, Section 6 (ALTMOV concept): geometry improvement.
+        // When the trust-region step is short and rho > rho_end, find the
+        // interpolation point k_geo with largest |L_k(x_opt)| and replace
+        // it with an objective evaluation at a geometry-improving point.
+        if(d_norm < 0.5 * s.rho && s.rho > s.rho_end)
         {
-            // Replace with a geometry-improving point midway between x_k and the far point
-            Eigen::Vector<double, N> geo_pt = detail::project(
-                (0.5 * (s.x + s.Y.col(g_idx))).eval(), s.lower, s.upper);
-            double geo_f = s.problem->value(geo_pt);
-            s.Y.col(g_idx) = geo_pt;
-            s.f_values[g_idx] = geo_f;
-            detail::update_model(s.model, s.Y, s.f_values, g_idx, s.x);
-
-            if(geo_f < s.objective_value)
+            // Find point with largest |L_k(x_opt)| (excluding best)
+            int best_idx = 0;
+            for(int i = 1; i < s.m; ++i)
             {
-                s.x = geo_pt;
-                s.objective_value = geo_f;
-                improved = true;
+                if(s.f_values[i] < s.f_values[best_idx])
+                    best_idx = i;
             }
+
+            int k_geo = (best_idx == 0) ? 1 : 0;
+            double max_abs_lk = std::abs(s.model.lagrange_values[k_geo]);
+            for(int i = 0; i < s.m; ++i)
+            {
+                if(i == best_idx) continue;
+                double abs_lk = std::abs(s.model.lagrange_values[i]);
+                if(abs_lk > max_abs_lk)
+                {
+                    max_abs_lk = abs_lk;
+                    k_geo = i;
+                }
+            }
+
+            // Geometry-improving point: move from x_opt toward Y[:,k_geo]
+            // at distance rho, projected onto bounds.
+            Eigen::Vector<double, N> dir = (s.Y.col(k_geo) - s.x).eval();
+            double dir_norm = dir.norm();
+            if(dir_norm > 1e-15)
+            {
+                Eigen::Vector<double, N> geo_pt = detail::project(
+                    (s.x + s.rho * dir / dir_norm).eval(), s.lower, s.upper);
+                double geo_f = s.problem->value(geo_pt);
+                s.Y.col(k_geo) = geo_pt;
+                s.f_values[k_geo] = geo_f;
+                detail::update_model(s.model, s.Y, s.f_values, k_geo, s.x);
+
+                if(geo_f < s.objective_value)
+                {
+                    s.x = geo_pt;
+                    s.objective_value = geo_f;
+                    improved = true;
+                }
+            }
+        }
+
+        // Powell 2009, RESCUE concept: full interpolation set rebuild.
+        // Track consecutive rho contractions without objective improvement.
+        // When rescue_counter >= 3, rebuild the entire interpolation set
+        // around x_opt using current rho as the step size.
+        if(s.delta <= s.rho && !improved)
+            ++s.rescue_counter;
+        else if(improved)
+            s.rescue_counter = 0;
+
+        if(s.rescue_counter >= 3)
+        {
+            const int n = s.x.size();
+            double h = s.rho;
+
+            s.Y.col(0) = s.x;
+            s.f_values[0] = s.problem->value(s.x);
+
+            for(int i = 0; i < n && (1 + i) < s.m; ++i)
+            {
+                Eigen::Vector<double, N> pt = s.x;
+                pt[i] = std::min(pt[i] + h, s.upper[i]);
+                if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
+                    pt[i] = std::max(s.x[i] - h, s.lower[i]);
+                s.Y.col(1 + i) = pt;
+                s.f_values[1 + i] = s.problem->value(pt);
+            }
+
+            for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
+            {
+                Eigen::Vector<double, N> pt = s.x;
+                pt[i] = std::max(pt[i] - h, s.lower[i]);
+                if(std::abs(pt[i] - s.x[i]) < 1e-15 * h)
+                    pt[i] = std::min(s.x[i] + h, s.upper[i]);
+                s.Y.col(1 + n + i) = pt;
+                s.f_values[1 + n + i] = s.problem->value(pt);
+            }
+
+            s.model = detail::build_model(s.Y, s.f_values, s.x);
+            s.rescue_counter = 0;
         }
 
         ++s.iteration;

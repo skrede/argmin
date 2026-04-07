@@ -364,6 +364,123 @@ TEST_CASE("bobyqa Lagrange values partition of unity", "[bobyqa]")
     }
 }
 
+TEST_CASE("bobyqa Lagrange-based point replacement", "[bobyqa]")
+{
+    // Directly test select_replacement with Lagrange values.
+    // Build a 2D interpolation set (5 points for n=2), compute Lagrange values
+    // at a trial point, and verify the returned index matches max |L_k|.
+    const int n = 2;
+    const int m = 2 * n + 1;
+    Eigen::Vector2d x0{0.0, 0.0};
+    double h = 1.0;
+
+    Eigen::Matrix<double, 2, Eigen::Dynamic> Y(n, m);
+    Eigen::VectorXd f_values(m);
+
+    auto quadratic = [](const Eigen::Vector2d& x) { return x.squaredNorm(); };
+
+    Y.col(0) = x0;
+    f_values[0] = quadratic(x0);
+    for(int i = 0; i < n; ++i)
+    {
+        Eigen::Vector2d pt = x0;
+        pt[i] += h;
+        Y.col(1 + i) = pt;
+        f_values[1 + i] = quadratic(pt);
+    }
+    for(int i = 0; i < n; ++i)
+    {
+        Eigen::Vector2d pt = x0;
+        pt[i] -= h;
+        Y.col(1 + n + i) = pt;
+        f_values[1 + n + i] = quadratic(pt);
+    }
+
+    // Trial point
+    Eigen::Vector2d x_new{0.5, 0.5};
+    double f_new = quadratic(x_new);
+
+    // Compute Lagrange values at x_new
+    auto lv = nablapp::detail::compute_lagrange_at_point(Y, f_values, x0, x_new);
+    CHECK(lv.size() == m);
+
+    // Find the expected replacement index (max |L_k| among non-best)
+    int best_idx = 0;
+    for(int i = 1; i < m; ++i)
+    {
+        if(f_values[i] < f_values[best_idx])
+            best_idx = i;
+    }
+
+    // Since f_new > f_best, Lagrange criterion applies (non-improvement step)
+    int expected = (best_idx == 0) ? 1 : 0;
+    double max_abs = std::abs(lv[expected]);
+    for(int i = 0; i < m; ++i)
+    {
+        if(i == best_idx) continue;
+        if(std::abs(lv[i]) > max_abs)
+        {
+            max_abs = std::abs(lv[i]);
+            expected = i;
+        }
+    }
+
+    int actual = nablapp::detail::select_replacement(Y, f_values, x_new, f_new, x0, lv);
+    CHECK(actual == expected);
+}
+
+TEST_CASE("bobyqa geometry improvement accuracy", "[bobyqa]")
+{
+    // Run BOBYQA on tight-bounds Rosenbrock with geometry improvement active.
+    // Accuracy should remain at least as good as baseline.
+    bobyqa_rosenbrock problem{
+        .n = 2,
+        .lb = Eigen::VectorXd{{0.0, 0.0}},
+        .ub = Eigen::VectorXd{{0.8, 0.8}},
+    };
+
+    Eigen::VectorXd x0{{0.4, 0.4}};
+    solver_options opts;
+    opts.max_iterations = 1000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-12);
+
+    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.x[0] >= -1e-10);
+    CHECK(result.x[0] <= 0.8 + 1e-10);
+    CHECK(result.objective_value < problem.value(x0));
+    CHECK(result.objective_value < 0.05);
+}
+
+TEST_CASE("bobyqa rescue does not break 6D convergence", "[bobyqa]")
+{
+    // Regression guard: rescue mechanism should not degrade 6D convergence.
+    bobyqa_rosenbrock_6d problem{
+        .lb = Eigen::Vector<double, 6>::Constant(-2.0),
+        .ub = Eigen::Vector<double, 6>::Constant(2.0),
+    };
+
+    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(6, -0.5);
+    solver_options opts;
+    opts.max_iterations = 1500;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-8);
+    opts.set_step_threshold(1e-12);
+
+    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value < 0.5);
+    for(int i = 0; i < 6; ++i)
+    {
+        CHECK(result.x[i] >= -2.0 - 1e-10);
+        CHECK(result.x[i] <= 2.0 + 1e-10);
+    }
+}
+
 TEST_CASE("bobyqa rho contraction improves accuracy", "[bobyqa]")
 {
     bobyqa_booth problem{

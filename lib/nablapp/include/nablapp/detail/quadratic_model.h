@@ -156,6 +156,86 @@ quadratic_model<Scalar, N> build_model(
     return model;
 }
 
+// Compute Lagrange polynomial values at an arbitrary query point.
+//
+// L_k(x_query) = row k of pinv(Phi) applied to phi(x_query).
+// Rebuilds the SVD — for n <= 20 this is negligible per Powell 2009.
+//
+// Reference: Powell 2009, Section 2.
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
+Eigen::VectorXd compute_lagrange_at_point(
+    const Eigen::Matrix<Scalar, N, P>& Y,
+    const Eigen::Vector<Scalar, P>& f_values,
+    const Eigen::Vector<Scalar, N>& x_base,
+    const Eigen::Vector<Scalar, N>& x_query)
+{
+    const int n = Y.rows();
+    const int m = Y.cols();
+    const int p = 1 + n + n * (n + 1) / 2;
+
+    static constexpr int Pcoeff = (N == nablapp::dynamic_dimension)
+        ? nablapp::dynamic_dimension
+        : 1 + N + N * (N + 1) / 2;
+    Eigen::Matrix<Scalar, P, Pcoeff> Phi(m, p);
+
+    for(int i = 0; i < m; ++i)
+    {
+        Eigen::Vector<Scalar, N> s = (Y.col(i) - x_base).eval();
+        Phi(i, 0) = Scalar(1);
+        for(int j = 0; j < n; ++j)
+            Phi(i, 1 + j) = s[j];
+        int idx = 1 + n;
+        for(int j = 0; j < n; ++j)
+        {
+            for(int k = j; k < n; ++k)
+            {
+                Scalar factor = (j == k) ? Scalar(0.5) : Scalar(1);
+                Phi(i, idx) = factor * s[j] * s[k];
+                ++idx;
+            }
+        }
+    }
+
+    auto svd = Phi.bdcSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
+    svd.setThreshold(Scalar(1e-12));
+
+    // Build phi(x_query)
+    Eigen::Vector<Scalar, N> sq = (x_query - x_base).eval();
+    Eigen::Vector<Scalar, Pcoeff> phi_q = Eigen::Vector<Scalar, Pcoeff>::Zero(p);
+    phi_q[0] = Scalar(1);
+    for(int j = 0; j < n; ++j)
+        phi_q[1 + j] = sq[j];
+    int idx = 1 + n;
+    for(int j = 0; j < n; ++j)
+    {
+        for(int k = j; k < n; ++k)
+        {
+            Scalar factor = (j == k) ? Scalar(0.5) : Scalar(1);
+            phi_q[idx] = factor * sq[j] * sq[k];
+            ++idx;
+        }
+    }
+
+    // L = pinv(Phi) * phi(x_query), computed via SVD
+    const auto& sv = svd.singularValues();
+    Scalar thr = svd.threshold() * sv[0];
+    auto V = svd.matrixV();
+    auto U = svd.matrixU();
+
+    Eigen::VectorXd w = V.transpose() * phi_q.template cast<double>();
+    for(int i = 0; i < sv.size(); ++i)
+    {
+        if(sv[i] > thr)
+            w[i] /= sv[i];
+        else
+            w[i] = 0.0;
+    }
+    for(int i = sv.size(); i < w.size(); ++i)
+        w[i] = 0.0;
+
+    return U.leftCols(w.size()).template cast<double>() * w;
+}
+
 // Update model after replacing interpolation point k with a new point.
 //
 // Full rebuild is O(m * p^2) which for n=6, m=13 is negligible.

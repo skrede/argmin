@@ -231,15 +231,66 @@ int check_geometry(const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
     return worst_idx;
 }
 
-// Select which interpolation point to replace.
+// Select which interpolation point to replace using Lagrange values.
 //
-// Among non-best points, choose the one farthest from x_k whose removal
-// would least degrade the interpolation set. For simplicity, we choose
-// the farthest point from x_new (maximizing geometry refresh).
+// Hybrid criterion inspired by Powell 2009 Section 4:
+// - When f_new improves the best: replace worst-f non-best point (preserve
+//   geometry, remove the least useful objective sample).
+// - When f_new does NOT improve: choose the point k that maximizes
+//   |L_k(x_new)| among non-best points. Replacing the point with largest
+//   Lagrange value produces the best-conditioned interpolation update.
 //
-// If the new point improves the objective, prefer replacing the worst
-// (highest f) point among those far from x_k. Otherwise, replace the
-// farthest point.
+// Reference: Powell 2009, Section 4.
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
+int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
+                       const Eigen::Vector<Scalar, P>& f_values,
+                       const Eigen::Vector<Scalar, N>& x_new,
+                       Scalar f_new,
+                       const Eigen::Vector<Scalar, N>& x_k,
+                       const Eigen::VectorXd& lagrange_values_at_xnew)
+{
+    const int m = Y.cols();
+
+    // Find the best point (lowest f) -- never replace it
+    int best_idx = 0;
+    for(int i = 1; i < m; ++i)
+    {
+        if(f_values[i] < f_values[best_idx])
+            best_idx = i;
+    }
+
+    // Improvement step: replace worst-f non-best point
+    if(f_new < f_values[best_idx])
+    {
+        int worst_idx = (best_idx == 0) ? 1 : 0;
+        for(int i = 0; i < m; ++i)
+        {
+            if(i == best_idx) continue;
+            if(f_values[i] > f_values[worst_idx])
+                worst_idx = i;
+        }
+        return worst_idx;
+    }
+
+    // Non-improvement step: Lagrange criterion, max |L_k(x_new)|
+    int chosen = (best_idx == 0) ? 1 : 0;
+    Scalar max_abs_lk = std::abs(lagrange_values_at_xnew[chosen]);
+
+    for(int i = 0; i < m; ++i)
+    {
+        if(i == best_idx) continue;
+        Scalar abs_lk = std::abs(lagrange_values_at_xnew[i]);
+        if(abs_lk > max_abs_lk)
+        {
+            max_abs_lk = abs_lk;
+            chosen = i;
+        }
+    }
+
+    return chosen;
+}
+
+// Backward-compatible overload: farthest-point heuristic (no Lagrange values).
 //
 // Reference: Powell 2009, Section 4.
 template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
