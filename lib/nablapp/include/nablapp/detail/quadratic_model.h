@@ -193,6 +193,89 @@ Eigen::Vector<Scalar, N> model_gradient(const quadratic_model<Scalar, N>& model,
     return (model.g + model.H * (x - model.x_base)).eval();
 }
 
+// Compute Lagrange polynomial values L_k(x_query) for each interpolation point k.
+//
+// Builds the polynomial basis matrix Phi from the interpolation set Y centered
+// at x_base, computes its SVD, constructs the basis vector phi(x_query), and
+// returns lambda = pinv(Phi)^T * phi(x_query). The k-th component lambda_k
+// equals L_k(x_query), i.e. the k-th Lagrange basis polynomial evaluated at
+// x_query. These values drive point replacement (choose k maximizing |L_k|).
+//
+// Reference: Powell 2009, Section 4 — Lagrange function denominators.
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
+Eigen::VectorXd compute_lagrange_at_point(
+    const Eigen::Matrix<Scalar, N, P>& Y,
+    const Eigen::Vector<Scalar, P>& f_values,
+    const Eigen::Vector<Scalar, N>& x_base,
+    const Eigen::Vector<Scalar, N>& x_query)
+{
+    const int n = Y.rows();
+    const int m = Y.cols();
+    const int p = 1 + n + n * (n + 1) / 2;
+
+    static constexpr int Pcoeff = (N == nablapp::dynamic_dimension)
+        ? nablapp::dynamic_dimension
+        : 1 + N + N * (N + 1) / 2;
+
+    // Build Phi matrix (same basis as build_model)
+    Eigen::Matrix<Scalar, P, Pcoeff> Phi(m, p);
+    for(int i = 0; i < m; ++i)
+    {
+        Eigen::Vector<Scalar, N> s = (Y.col(i) - x_base).eval();
+        Phi(i, 0) = Scalar(1);
+        for(int j = 0; j < n; ++j)
+            Phi(i, 1 + j) = s[j];
+        int idx = 1 + n;
+        for(int j = 0; j < n; ++j)
+        {
+            for(int k = j; k < n; ++k)
+            {
+                Scalar factor = (j == k) ? Scalar(0.5) : Scalar(1);
+                Phi(i, idx) = factor * s[j] * s[k];
+                ++idx;
+            }
+        }
+    }
+
+    // Build phi(x_query) in the same basis
+    Eigen::Vector<Scalar, N> sq = (x_query - x_base).eval();
+    Eigen::VectorXd phi_q = Eigen::VectorXd::Zero(p);
+    phi_q[0] = 1.0;
+    for(int j = 0; j < n; ++j)
+        phi_q[1 + j] = static_cast<double>(sq[j]);
+    int idx = 1 + n;
+    for(int j = 0; j < n; ++j)
+    {
+        for(int k = j; k < n; ++k)
+        {
+            double factor = (j == k) ? 0.5 : 1.0;
+            phi_q[idx] = factor * static_cast<double>(sq[j]) * static_cast<double>(sq[k]);
+            ++idx;
+        }
+    }
+
+    // SVD of Phi, then lambda = pinv(Phi)^T * phi_q = U * Sigma^{-1} * V^T * phi_q
+    auto svd = Phi.bdcSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
+    svd.setThreshold(Scalar(1e-12));
+    const auto& sv = svd.singularValues();
+    Scalar thr = svd.threshold() * sv[0];
+    auto V = svd.matrixV();
+    auto U = svd.matrixU();
+
+    Eigen::VectorXd w = V.transpose().template cast<double>() * phi_q;
+    for(int i = 0; i < sv.size(); ++i)
+    {
+        if(sv[i] > thr)
+            w[i] /= static_cast<double>(sv[i]);
+        else
+            w[i] = 0.0;
+    }
+    for(int i = sv.size(); i < w.size(); ++i)
+        w[i] = 0.0;
+
+    return (U.leftCols(w.size()).template cast<double>() * w).eval();
+}
+
 }
 
 #endif

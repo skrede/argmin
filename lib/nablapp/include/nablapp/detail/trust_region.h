@@ -231,15 +231,14 @@ int check_geometry(const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
     return worst_idx;
 }
 
-// Select which interpolation point to replace.
+// Select which interpolation point to replace using Lagrange polynomial values.
 //
-// Among non-best points, choose the one farthest from x_k whose removal
-// would least degrade the interpolation set. For simplicity, we choose
-// the farthest point from x_new (maximizing geometry refresh).
+// Powell's criterion (Section 4): choose the point k (excluding k_opt) that
+// maximizes |L_k(x_new)|, where L_k is the k-th Lagrange basis polynomial.
+// Replacing the point with the largest Lagrange value produces the
+// best-conditioned updated interpolation system.
 //
-// If the new point improves the objective, prefer replacing the worst
-// (highest f) point among those far from x_k. Otherwise, replace the
-// farthest point.
+// When lagrange_values_at_xnew is empty, falls back to farthest-point heuristic.
 //
 // Reference: Powell 2009, Section 4.
 template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
@@ -247,7 +246,8 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
                        const Eigen::Vector<Scalar, P>& f_values,
                        const Eigen::Vector<Scalar, N>& x_new,
                        Scalar f_new,
-                       const Eigen::Vector<Scalar, N>& x_k)
+                       const Eigen::Vector<Scalar, N>& x_k,
+                       const Eigen::VectorXd& lagrange_values_at_xnew)
 {
     const int m = Y.cols();
 
@@ -259,7 +259,26 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
             best_idx = i;
     }
 
-    // If the new point improves the best, replace the worst-f non-best point
+    // Lagrange-based criterion when values are available
+    if(lagrange_values_at_xnew.size() == m)
+    {
+        int chosen = (best_idx == 0) ? 1 : 0;
+        double max_abs_L = std::abs(lagrange_values_at_xnew[chosen]);
+
+        for(int i = 0; i < m; ++i)
+        {
+            if(i == best_idx) continue;
+            double abs_L = std::abs(lagrange_values_at_xnew[i]);
+            if(abs_L > max_abs_L)
+            {
+                max_abs_L = abs_L;
+                chosen = i;
+            }
+        }
+        return chosen;
+    }
+
+    // Fallback: farthest-point heuristic
     if(f_new < f_values[best_idx])
     {
         int worst_idx = (best_idx == 0) ? 1 : 0;
@@ -272,7 +291,6 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
         return worst_idx;
     }
 
-    // Otherwise, replace the farthest point from x_k (excluding best)
     int farthest_idx = (best_idx == 0) ? 1 : 0;
     Scalar max_dist = (Y.col(farthest_idx) - x_k).squaredNorm();
 
@@ -288,6 +306,20 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
     }
 
     return farthest_idx;
+}
+
+// Backward-compatible overload without Lagrange values.
+// Falls back to farthest-point heuristic.
+//
+// Reference: Powell 2009, Section 4.
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
+int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
+                       const Eigen::Vector<Scalar, P>& f_values,
+                       const Eigen::Vector<Scalar, N>& x_new,
+                       Scalar f_new,
+                       const Eigen::Vector<Scalar, N>& x_k)
+{
+    return select_replacement(Y, f_values, x_new, f_new, x_k, Eigen::VectorXd{});
 }
 
 }
