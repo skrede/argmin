@@ -42,7 +42,13 @@ class compact_lbfgs
     static_assert(MaxHistory > 0, "MaxHistory must be positive");
 
 public:
-    compact_lbfgs() = default;
+    compact_lbfgs()
+    {
+        STS_.setZero();
+        L_.setZero();
+        D_.setZero();
+        middle_.setZero();
+    }
 
     // Add a new (s, y) pair with damped curvature update.
     // Instead of silently rejecting pairs with small s^T y, clamps to
@@ -282,6 +288,10 @@ public:
     {
         count_ = 0;
         theta_ = Scalar(1);
+        STS_.setZero();
+        L_.setZero();
+        D_.setZero();
+        middle_.setZero();
     }
 
     int size() const { return count_; }
@@ -346,6 +356,8 @@ private:
     //   [0..MaxHistory-1, MaxHistory..2*MaxHistory] = L
     //   [MaxHistory.., 0..MaxHistory-1]            = L^T
     //   [MaxHistory.., MaxHistory..]               = -D
+    // Assemble middle matrix M from incrementally maintained STS_, L_, D_.
+    // Cost: O(k^2) block copies instead of O(n*k^2) S^T*S recomputation.
     // Assemble middle matrix M from incrementally maintained STS_, L_, D_.
     // Cost: O(k^2) block copies instead of O(n*k^2) S^T*S recomputation.
     void recompute_middle()
