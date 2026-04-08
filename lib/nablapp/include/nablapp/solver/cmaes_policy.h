@@ -17,6 +17,7 @@
 //            arXiv:1604.00772.
 //            K&W Section 8.7, Algorithm 8.10.
 
+#include "nablapp/detail/xoshiro256.h"
 #include "nablapp/detail/cmaes_constants.h"
 #include "nablapp/detail/cmaes_covariance.h"
 #include "nablapp/detail/cmaes_sampling.h"
@@ -78,15 +79,20 @@ struct cmaes_policy
         double sigma{};
         std::uint32_t generation{0};
         detail::cmaes_params<> params;
-        std::mt19937 rng;
+        detail::xoshiro256 rng{1};
 
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
         bool has_bounds{false};
 
         double initial_sigma{};
-        std::uint32_t stagnation_count{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
+
+        // Hansen stagnation detection history.
+        // Reference: Hansen (2023) arXiv:1604.00772, Section B.3 item 5.
+        std::vector<double> best_fitness_history;
+        std::vector<double> median_fitness_history;
+        std::uint32_t stagnation_window_min{120};
 
         Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, N, N>> eigen_solver;
 
@@ -178,10 +184,18 @@ struct cmaes_policy
                 static_cast<std::uint32_t>(std::floor(1.0 / skip_denom)));
         }
 
+        // xoshiro256+ RNG: 32 bytes state vs 2.5KB for mt19937.
+        // Reference: Blackman & Vigna (2021), ACM TOMS 47(4).
         if(options.seed.has_value())
-            s.rng.seed(static_cast<unsigned>(options.seed.value()));
+            s.rng = detail::xoshiro256{options.seed.value()};
         else
-            s.rng.seed(std::random_device{}());
+            s.rng = detail::xoshiro256{static_cast<std::uint64_t>(std::random_device{}())};
+
+        // Hansen stagnation window: max(120, 30*n/lambda).
+        // Reference: Hansen (2023) arXiv:1604.00772, Section B.3.
+        s.stagnation_window_min = std::max(
+            std::uint32_t{120},
+            static_cast<std::uint32_t>(30.0 * n / s.params.lambda));
 
         s.objective_value = s.problem->value(x0);
         s.x = x0;
@@ -320,25 +334,81 @@ struct cmaes_policy
         if(!policy_status.has_value() && cond * cond > cond_limit)
             policy_status = solver_status::diverged;
 
-        // 16. IPOP stagnation check (D-04)
+        // 16. IPOP stagnation check using Hansen's criteria.
+        // Reference: Hansen (2023) arXiv:1604.00772, Section B.3.
         if(options.restart == restart_strategy::ipop)
         {
+            // Track fitness history for stagnation detection.
+            s.best_fitness_history.push_back(gen_best_f);
+            {
+                // Compute median fitness of this generation.
+                std::vector<double> gen_fitnesses(lambda);
+                for(int i = 0; i < lambda; ++i)
+                    gen_fitnesses[i] = fitnesses[i];
+                auto mid = gen_fitnesses.begin() + lambda / 2;
+                std::nth_element(gen_fitnesses.begin(), mid, gen_fitnesses.end());
+                s.median_fitness_history.push_back(*mid);
+            }
+            // Cap history size.
+            if(s.best_fitness_history.size() > 20000)
+            {
+                s.best_fitness_history.erase(s.best_fitness_history.begin());
+                s.median_fitness_history.erase(s.median_fitness_history.begin());
+            }
+
             bool stagnated = false;
 
             // Collapsed: sigma * max(D) too small
             if(policy_status == solver_status::roundoff_limited)
                 stagnated = true;
 
-            // No improvement for many generations
-            std::uint32_t stag_limit = options.cmaes.stagnation_limit.value_or(
-                static_cast<std::uint32_t>(10 + std::ceil(30.0 * n / s.params.lambda)));
-            if(gen_best_f >= old_best)
-                ++s.stagnation_count;
-            else
-                s.stagnation_count = 0;
+            // Hansen B.3 item 5: Stagnation criterion with median history window.
+            // When both histories have >= min_window entries, check if the median
+            // of the last 30% is not improving vs the median of the first 30%.
+            auto window = static_cast<std::size_t>(s.stagnation_window_min);
+            if(!stagnated && s.best_fitness_history.size() >= window)
+            {
+                auto check_stagnation = [](const std::vector<double>& history,
+                                           std::size_t win) {
+                    std::size_t seg = win * 3 / 10;
+                    if(seg == 0)
+                        return false;
+                    std::size_t h = history.size();
+                    // Median of first 30% of window.
+                    std::vector<double> old_seg(history.begin() + static_cast<std::ptrdiff_t>(h - win),
+                                                history.begin() + static_cast<std::ptrdiff_t>(h - win + seg));
+                    auto om = old_seg.begin() + static_cast<std::ptrdiff_t>(seg / 2);
+                    std::nth_element(old_seg.begin(), om, old_seg.end());
+                    double old_median = *om;
+                    // Median of last 30% of window.
+                    std::vector<double> new_seg(history.end() - static_cast<std::ptrdiff_t>(seg),
+                                                history.end());
+                    auto nm = new_seg.begin() + static_cast<std::ptrdiff_t>(seg / 2);
+                    std::nth_element(new_seg.begin(), nm, new_seg.end());
+                    double new_median = *nm;
+                    return new_median >= old_median;
+                };
 
-            if(s.stagnation_count >= stag_limit)
-                stagnated = true;
+                if(check_stagnation(s.best_fitness_history, window)
+                   && check_stagnation(s.median_fitness_history, window))
+                    stagnated = true;
+            }
+
+            // Hansen B.3 item 4: EqualFunValues.
+            // Stop if range of best values over last K generations is zero.
+            if(!stagnated)
+            {
+                auto efv_window = static_cast<std::size_t>(
+                    10 + std::ceil(30.0 * n / s.params.lambda));
+                if(s.best_fitness_history.size() >= efv_window)
+                {
+                    auto it = s.best_fitness_history.end()
+                              - static_cast<std::ptrdiff_t>(efv_window);
+                    auto [mn, mx] = std::minmax_element(it, s.best_fitness_history.end());
+                    if(*mx - *mn < 1e-15 * (std::abs(*mx) + std::abs(*mn) + 1e-30))
+                        stagnated = true;
+                }
+            }
 
             // Condition number too large
             if(policy_status == solver_status::diverged)
@@ -380,7 +450,8 @@ struct cmaes_policy
                 s.p_c.setZero();
                 s.sigma = s.initial_sigma;
                 s.generation = 0;
-                s.stagnation_count = 0;
+                s.best_fitness_history.clear();
+                s.median_fitness_history.clear();
                 policy_status = std::nullopt;
             }
         }
@@ -425,7 +496,8 @@ struct cmaes_policy
         s.D = Eigen::Vector<double, N>::Ones(n);
         s.sigma = s.initial_sigma;
         s.generation = 0;
-        s.stagnation_count = 0;
+        s.best_fitness_history.clear();
+        s.median_fitness_history.clear();
     }
 
     template <typename P>

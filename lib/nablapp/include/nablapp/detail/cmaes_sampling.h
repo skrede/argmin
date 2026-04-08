@@ -21,15 +21,17 @@ namespace nablapp::detail
 // Sample lambda offspring: x_i = mean + sigma * B * D * z_i, z_i ~ N(0,I).
 // Returns n x lambda matrix of offspring.
 // MaxLambda bounds the column storage for stack allocation when known at compile time.
+// RNG must satisfy UniformRandomBitGenerator (e.g. detail::xoshiro256, std::mt19937).
 // Reference: K&W Algorithm 8.10 step 1.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension, int MaxLambda = Eigen::Dynamic>
+template <typename Scalar = double, int N = nablapp::dynamic_dimension,
+          int MaxLambda = Eigen::Dynamic, typename RNG = std::mt19937>
 auto sample_offspring(
     const Eigen::Vector<Scalar, N>& mean,
     Scalar sigma,
     const Eigen::Matrix<Scalar, N, N>& B,
     const Eigen::Vector<Scalar, N>& D,
     int lambda,
-    std::mt19937& rng)
+    RNG& rng)
     -> Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0,
         N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxLambda>
 {
