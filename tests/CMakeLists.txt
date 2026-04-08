@@ -1,3 +1,14 @@
+set(NABLAPP_TEST_RELEASE_FLAGS
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+
+include(CheckIPOSupported)
+check_ipo_supported(RESULT NABLAPP_LTO_SUPPORTED)
+
 if(NABLAPP_BUILD_TESTS)
     if(NABLAPP_CMAKE_FETCH_DEPS)
         FetchContent_Declare(

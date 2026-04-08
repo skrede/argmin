@@ -20,11 +20,26 @@ else()
     find_package(benchmark CONFIG REQUIRED)
 endif()
 
+include(CheckIPOSupported)
+check_ipo_supported(RESULT NABLAPP_LTO_SUPPORTED)
+
 # Main benchmark executable (always builds).
 add_executable(nablapp_bench
     benchmark_driver.cpp
 )
 target_link_libraries(nablapp_bench PRIVATE nablapp::nablapp benchmark::benchmark)
+
+target_compile_options(nablapp_bench PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(NABLAPP_LTO_SUPPORTED)
+    set_target_properties(nablapp_bench PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
 
 # Optional comparison library hooks (per D-03).
 
@@ -37,6 +52,23 @@ if(NABLAPP_BENCH_NLOPT)
         target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_NLOPT)
     else()
         message(STATUS "NLopt not found, skipping NLopt benchmarks")
+    endif()
+endif()
+
+# Micro-benchmark for single-solver profiling.
+if(NLopt_FOUND)
+    add_executable(micro_lbfgsb micro_lbfgsb.cpp)
+    target_link_libraries(micro_lbfgsb PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_lbfgsb PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native
+            -fno-math-errno
+            -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_lbfgsb PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 endif()
 

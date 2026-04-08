@@ -33,4 +33,10 @@ target_link_libraries(nablapp_unit_tests
         Catch2::Catch2WithMain
 )
 
+target_compile_options(nablapp_unit_tests PRIVATE ${NABLAPP_TEST_RELEASE_FLAGS})
+if(NABLAPP_LTO_SUPPORTED)
+    set_target_properties(nablapp_unit_tests PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 catch_discover_tests(nablapp_unit_tests)
