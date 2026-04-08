@@ -337,10 +337,14 @@ struct bobyqa_policy
         }
 
         // Powell 2009, Section 6 (ALTMOV concept): geometry improvement.
-        // When the trust-region step is short relative to rho, the model
-        // needs better geometry. Select the point with worst Lagrange
-        // conditioning and place a new point at distance rho in the
-        // direction of the replaced point to maintain interpolation spread.
+        // Direction-based heuristic retained over altmov_geometry_step()
+        // (see trust_region.h) due to SVD model incompatibility: nablapp's
+        // pinv_Phi Lagrange values drift under incremental updates, causing
+        // ALTMOV's denominator maximization to place points that degrade
+        // model conditioning. Empirical: ALTMOV degrades HS001 from 2509
+        // to 2902 iterations. NLopt's exact BMAT/ZMAT representation makes
+        // ALTMOV effective there. Switching to BMAT/ZMAT would enable the
+        // altmov_geometry_step functions already in trust_region.h.
         // All geometry operations in scaled coordinates.
         if(d_norm < 0.5 * s.rho && s.rho > s.rho_end)
         {

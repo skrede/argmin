@@ -562,6 +562,12 @@ TEST_CASE("bobyqa hs001 eval count regression guard", "[bobyqa]")
     std::cout << "[HS001 BOBYQA] iterations: " << result.iterations
               << "  f: " << result.objective_value << std::endl;
 
+    // Known architectural limitation: nablapp's SVD-based model (full
+    // rebuild per accepted step) vs NLopt's incremental BMAT/ZMAT updates
+    // results in ~7x more evaluations on HS001 (NLopt achieves 358).
+    // D-12 target of < 750 requires BMAT/ZMAT representation or
+    // multi-geometry-step iteration. Threshold guards against regression
+    // from the 3417 pre-fix baseline.
     CHECK(result.iterations < 2700);
     CHECK(result.objective_value < 1.0);
 }

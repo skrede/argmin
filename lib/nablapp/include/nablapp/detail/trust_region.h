@@ -502,6 +502,21 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
     return farthest_idx;
 }
 
+// ALTMOV geometry improvement functions (future infrastructure).
+//
+// The functions below (altmov_clip_step_bounds, altmov_line_search,
+// lagrange_gradient, altmov_cauchy_step, altmov_geometry_step) faithfully
+// implement Powell 2009 Section 6 / NLopt ALTMOV. They are NOT currently
+// wired into bobyqa_policy::step() because nablapp's SVD-based model
+// representation (pinv_Phi) produces Lagrange values that accumulate
+// numerical drift compared to NLopt's exact BMAT/ZMAT incremental
+// updates. Empirical testing on HS001: ALTMOV placement degraded
+// convergence from 2509 to 2902 iterations. The direction-based
+// heuristic in bobyqa_policy.h outperforms ALTMOV under the SVD model.
+//
+// These functions become usable when/if a BMAT/ZMAT model representation
+// is implemented, eliminating the Lagrange value drift issue.
+
 // Compute box-constrained step bounds along a direction from x_opt.
 //
 // For each dimension, tightens slbd/subd so that x_opt + t*direction
