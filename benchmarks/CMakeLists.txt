@@ -71,6 +71,34 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
+    add_executable(micro_bobyqa micro_bobyqa.cpp)
+    target_link_libraries(micro_bobyqa PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_bobyqa PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native
+            -fno-math-errno
+            -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_bobyqa PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
+    add_executable(micro_cmaes micro_cmaes.cpp)
+    target_link_libraries(micro_cmaes PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_cmaes PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native
+            -fno-math-errno
+            -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_cmaes PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
     add_executable(micro_kraft_slsqp micro_kraft_slsqp.cpp)
     target_link_libraries(micro_kraft_slsqp PRIVATE nablapp::nablapp NLopt::nlopt)
     target_compile_options(micro_kraft_slsqp PRIVATE
