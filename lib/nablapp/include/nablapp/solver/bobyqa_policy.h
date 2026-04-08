@@ -309,8 +309,20 @@ struct bobyqa_policy
         else
             ++s.itest;
 
-        // Update model (scaled coordinates)
-        detail::update_model(s.model, s.Y, s.f_values, k, s.x_scaled);
+        // Model update: incremental path for rejected steps, full SVD
+        // rebuild for accepted steps (re-centers x_base for conditioning).
+        // Reference: Powell 2009, Section 4.
+        if(improved)
+        {
+            s.model = detail::build_model(s.Y, s.f_values, s.x_scaled);
+        }
+        else
+        {
+            auto lv_result = detail::update_model_incremental(
+                s.model, s.f_values, x_new_scaled, k, s.model.x_base);
+            if(lv_result.size() == 0)
+                s.model = detail::build_model(s.Y, s.f_values, s.model.x_base);
+        }
 
         // Powell 2009, Section 4: when itest >= 3 and NPT > 2N+1, zero H
         if(s.itest >= 3)
@@ -358,7 +370,10 @@ struct bobyqa_policy
                 double geo_f = s.problem->value(geo_pt_orig);
                 s.Y.col(k_geo) = geo_pt_scaled;
                 s.f_values[k_geo] = geo_f;
-                detail::update_model(s.model, s.Y, s.f_values, k_geo, s.x_scaled);
+
+                // Full rebuild for geometry improvement: geometry points can be far
+                // from x_base, where LDLT pseudoinverse refresh loses accuracy.
+                s.model = detail::build_model(s.Y, s.f_values, s.x_scaled);
 
                 if(geo_f < s.objective_value)
                 {
