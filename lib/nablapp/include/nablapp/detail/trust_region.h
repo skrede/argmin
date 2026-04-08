@@ -14,6 +14,7 @@
 //            6 (geometry check).
 
 #include "nablapp/types.h"
+#include "nablapp/detail/interpolation_system.h"
 #include "nablapp/detail/quadratic_model.h"
 #include "nablapp/options/trust_region_options.h"
 #include "nablapp/detail/bound_projection.h"
@@ -502,20 +503,14 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
     return farthest_idx;
 }
 
-// ALTMOV geometry improvement functions (future infrastructure).
+// ALTMOV geometry improvement functions.
 //
-// The functions below (altmov_clip_step_bounds, altmov_line_search,
-// lagrange_gradient, altmov_cauchy_step, altmov_geometry_step) faithfully
-// implement Powell 2009 Section 6 / NLopt ALTMOV. They are NOT currently
-// wired into bobyqa_policy::step() because nablapp's SVD-based model
-// representation (pinv_Phi) produces Lagrange values that accumulate
-// numerical drift compared to NLopt's exact BMAT/ZMAT incremental
-// updates. Empirical testing on HS001: ALTMOV placement degraded
-// convergence from 2509 to 2902 iterations. The direction-based
-// heuristic in bobyqa_policy.h outperforms ALTMOV under the SVD model.
-//
-// These functions become usable when/if a BMAT/ZMAT model representation
-// is implemented, eliminating the Lagrange value drift issue.
+// Two sets of overloads exist:
+//   1. BMAT/ZMAT overloads (interpolation_system) -- used by bobyqa_policy.
+//      These use exact Lagrange values from BMAT/ZMAT, making ALTMOV
+//      effective as intended by Powell 2009.
+//   2. Legacy SVD overloads (quadratic_model) -- retained for test utilities.
+//      These use pinv_Phi-based Lagrange values which accumulate drift.
 
 // Compute box-constrained step bounds along a direction from x_opt.
 //
@@ -561,13 +556,171 @@ std::pair<Scalar, Scalar> altmov_clip_step_bounds(
     return {slbd, subd};
 }
 
-// Search through interpolation points for the best line-search candidate
-// maximizing |L_knew(x)|^2 for geometry improvement.
+// BMAT/ZMAT line search: search through interpolation points for the best
+// candidate maximizing |L_knew(x)|^2 using exact BMAT/ZMAT Lagrange values.
 //
-// For each point k (k != kopt), evaluates L_knew at box-clipped step
-// endpoints along the direction x_opt -> Y[:,k], tracking the candidate
-// with maximum |L_knew|^2. Uses stored pinv_Phi for O(m*p) Lagrange
-// evaluation instead of O(m*p^2) SVD per candidate.
+// Reference: Powell 2009, Section 6 (ALTMOV line search).
+// Adapted from NLopt bobyqa.c lines 864-982.
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L864
+template <typename Scalar, int N>
+std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_line_search(
+    const interpolation_system<Scalar, N>& sys,
+    int knew,
+    Scalar adelt,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
+{
+    const int32_t n = sys.xbase.size();
+    const int32_t m = sys.m_points;
+    Scalar best_score = Scalar(-1);
+    Eigen::Vector<Scalar, N> best_point = sys.xopt;
+
+    for(int32_t k = 0; k < m; ++k)
+    {
+        if(k == sys.kopt) continue;
+
+        Eigen::Vector<Scalar, N> d = (sys.xpt.col(k).head(n) - sys.xopt).eval();
+        auto [slbd, subd] = altmov_clip_step_bounds(sys.xopt, d, adelt, lower, upper);
+        if(slbd >= subd) continue;
+
+        for(Scalar t : {slbd, subd})
+        {
+            Eigen::Vector<Scalar, N> candidate = project(
+                (sys.xopt + t * d).eval(), lower, upper);
+            auto lv = compute_lagrange_at(sys, candidate);
+            Scalar score = lv[knew] * lv[knew];
+            if(score > best_score)
+            {
+                best_score = score;
+                best_point = candidate;
+            }
+        }
+    }
+
+    return {best_point, best_score};
+}
+
+// BMAT/ZMAT Cauchy step: steepest-ascent of L_knew using exact gradient
+// from lagrange_gradient_bmat.
+//
+// Reference: Powell 2009, Section 6 (ALTMOV Cauchy step).
+// Adapted from NLopt bobyqa.c lines 1017-1125.
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L1017
+template <typename Scalar, int N>
+std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_cauchy_step(
+    const interpolation_system<Scalar, N>& sys,
+    int knew,
+    Scalar adelt,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
+{
+    const int32_t n = sys.xbase.size();
+    Scalar best_score = Scalar(0);
+    Eigen::Vector<Scalar, N> best_point = sys.xopt;
+
+    Eigen::Vector<Scalar, N> grad = lagrange_gradient_bmat(sys, knew);
+
+    for(int sign = 0; sign < 2; ++sign)
+    {
+        Eigen::Vector<Scalar, N> glag = (sign == 0) ? grad : Eigen::Vector<Scalar, N>(-grad);
+
+        Scalar wfixsq = Scalar(0);
+        Scalar ggfree = Scalar(0);
+        Eigen::Vector<Scalar, N> w;
+        if constexpr(N == Eigen::Dynamic)
+            w = Eigen::Vector<Scalar, N>::Zero(n);
+        else
+            w.setZero();
+        Scalar bigstp = Scalar(2) * adelt;
+
+        for(int32_t i = 0; i < n; ++i)
+        {
+            Scalar tempa = std::min(sys.xopt[i] - lower[i], glag[i]);
+            Scalar tempb = std::max(sys.xopt[i] - upper[i], glag[i]);
+            if(tempa > Scalar(0) || tempb < Scalar(0))
+            {
+                w[i] = bigstp;
+                ggfree += glag[i] * glag[i];
+            }
+        }
+        if(ggfree <= Scalar(0)) continue;
+
+        Scalar step_len = adelt / std::sqrt(ggfree);
+        for(int32_t iter = 0; iter < n; ++iter)
+        {
+            Scalar wsqsav = wfixsq;
+            Scalar budget = adelt * adelt - wfixsq;
+            if(budget <= Scalar(0)) break;
+            step_len = std::sqrt(budget / std::max(ggfree, std::numeric_limits<Scalar>::epsilon()));
+            ggfree = Scalar(0);
+            for(int32_t i = 0; i < n; ++i)
+            {
+                if(w[i] != bigstp) continue;
+                Scalar trial = sys.xopt[i] - step_len * glag[i];
+                if(trial <= lower[i])
+                {
+                    w[i] = lower[i] - sys.xopt[i];
+                    wfixsq += w[i] * w[i];
+                }
+                else if(trial >= upper[i])
+                {
+                    w[i] = upper[i] - sys.xopt[i];
+                    wfixsq += w[i] * w[i];
+                }
+                else
+                    ggfree += glag[i] * glag[i];
+            }
+            if(wfixsq <= wsqsav || ggfree <= Scalar(0)) break;
+        }
+
+        for(int32_t i = 0; i < n; ++i)
+        {
+            if(w[i] == bigstp)
+                w[i] = -step_len * glag[i];
+        }
+
+        Eigen::Vector<Scalar, N> candidate = project(
+            (sys.xopt + w).eval(), lower, upper);
+        auto lv = compute_lagrange_at(sys, candidate);
+        Scalar score = lv[knew] * lv[knew];
+        if(score > best_score)
+        {
+            best_score = score;
+            best_point = candidate;
+        }
+    }
+
+    return {best_point, best_score};
+}
+
+// BMAT/ZMAT ALTMOV geometry step: maximize |L_knew(x)| using exact
+// Lagrange values from the factored interpolation system.
+//
+// Returns the step in shifted coordinates (relative to xbase).
+//
+// Reference: Powell 2009, Section 6 (ALTMOV).
+// Adapted from NLopt bobyqa.c lines 743-1159.
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L743
+template <typename Scalar, int N>
+Eigen::Vector<Scalar, N> altmov_geometry_step(
+    const interpolation_system<Scalar, N>& sys,
+    int knew,
+    Scalar adelt,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
+{
+    auto [line_point, line_score] = altmov_line_search<Scalar, N>(
+        sys, knew, adelt, lower, upper);
+    auto [cauchy_point, cauchy_score] = altmov_cauchy_step<Scalar, N>(
+        sys, knew, adelt, lower, upper);
+    return (cauchy_score > line_score) ? cauchy_point : line_point;
+}
+
+// --- Legacy SVD-based ALTMOV overloads (quadratic_model) ---
+// Retained for backward compatibility with test utilities.
+
+// Search through interpolation points for the best line-search candidate
+// maximizing |L_knew(x)|^2 for geometry improvement (legacy SVD path).
 //
 // Reference: Powell 2009, Section 6 (ALTMOV line search).
 // Adapted from NLopt bobyqa.c lines 864-982.
@@ -613,12 +766,8 @@ std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_line_search(
     return {best_point, best_score};
 }
 
-// Compute the gradient of L_knew at x_opt analytically from the polynomial
-// basis coefficients stored in pinv_Phi.
-//
-// L_knew(x) = pinv_Phi[knew,:] * phi(x) where phi has basis
-// [1, s_1, ..., s_n, 0.5*s_1^2, s_1*s_2, ..., 0.5*s_n^2] with s = x - x_base.
-// The gradient d/dx_j L_knew = pinv_Phi[knew, 1+j] + sum of quadratic terms.
+// Legacy: Lagrange gradient via pinv_Phi (superseded by lagrange_gradient_bmat
+// in interpolation_system.h for the BMAT/ZMAT representation).
 //
 // Reference: Powell 2009, Section 6 (gradient of Lagrange function).
 template <typename Scalar = double, int N = nablapp::dynamic_dimension>
@@ -655,11 +804,7 @@ Eigen::Vector<Scalar, N> lagrange_gradient(
     return grad;
 }
 
-// Constrained Cauchy step along gradient of L_knew for geometry improvement.
-//
-// Computes the steepest-ascent direction of L_knew at x_opt, projects
-// onto box constraints within the trust region, and selects the candidate
-// maximizing |L_knew|^2. Tries both ascent and descent directions.
+// Legacy: Cauchy step via pinv_Phi (superseded by BMAT/ZMAT overload above).
 //
 // Reference: Powell 2009, Section 6 (ALTMOV Cauchy step).
 // Adapted from NLopt bobyqa.c lines 1017-1125.
@@ -751,10 +896,7 @@ std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_cauchy_step(
     return {best_point, best_score};
 }
 
-// ALTMOV geometry improvement step: maximize |L_knew(x)| for point replacement.
-//
-// Orchestrates line search through interpolation points and constrained
-// Cauchy step, returning whichever candidate maximizes |L_knew(x)|^2.
+// Legacy: ALTMOV geometry step via pinv_Phi (superseded by BMAT/ZMAT overload above).
 //
 // Reference: Powell 2009, Section 6 (ALTMOV).
 // Adapted from NLopt bobyqa.c lines 743-1159.

@@ -541,10 +541,11 @@ TEST_CASE("bobyqa HS001 accuracy vs NLopt baseline", "[bobyqa][benchmark]")
 
 TEST_CASE("bobyqa hs001 eval count regression guard", "[bobyqa]")
 {
-    // HS001: original baseline was 3417 iterations. With three-regime rho
-    // contraction (Plan 01) and NLopt-faithful contraction trigger (Plan 02),
-    // reduced to ~2509. NLopt achieves 358 function evaluations; the remaining
-    // gap is due to nablapp's SVD model construction vs NLopt's BMAT/ZMAT.
+    // HS001: With BMAT/ZMAT factored interpolation system and ALTMOV
+    // geometry improvement, nablapp achieves ~540 iterations vs NLopt's 358.
+    // The remaining gap is due to differences in step acceptance logic.
+    // Previous baselines: 3417 (original), 2509 (rho contraction), now ~540
+    // with BMAT/ZMAT + ALTMOV.
     //
     // Reference: Hock & Schittkowski, Problem 1.
     nablapp::hs001<double> hs;
@@ -562,14 +563,11 @@ TEST_CASE("bobyqa hs001 eval count regression guard", "[bobyqa]")
     std::cout << "[HS001 BOBYQA] iterations: " << result.iterations
               << "  f: " << result.objective_value << std::endl;
 
-    // Known architectural limitation: nablapp's SVD-based model (full
-    // rebuild per accepted step) vs NLopt's incremental BMAT/ZMAT updates
-    // results in ~7x more evaluations on HS001 (NLopt achieves 358).
-    // D-12 target of < 750 requires BMAT/ZMAT representation or
-    // multi-geometry-step iteration. Threshold guards against regression
-    // from the 3417 pre-fix baseline.
-    CHECK(result.iterations < 2700);
-    CHECK(result.objective_value < 1.0);
+    // With BMAT/ZMAT and ALTMOV active, eval count is ~540 (within 2x of
+    // NLopt's 358). Guard against regression from both the 540 baseline
+    // and the plan target of 750.
+    CHECK(result.iterations < 750);
+    CHECK(result.objective_value < 0.01);
 }
 
 TEST_CASE("bobyqa hs002 and hs005 regression guard", "[bobyqa]")

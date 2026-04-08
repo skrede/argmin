@@ -10,14 +10,18 @@
 // ||d|| <= delta and box constraints, then updates the model and radius
 // based on the accuracy ratio rho.
 //
-// Requires: objective<P,S> && bound_constrained<P,S> (D-08).
+// Uses Powell's BMAT/ZMAT factored interpolation system for O(m*n) model
+// updates instead of O(m*p^2) SVD. ALTMOV geometry improvement is wired
+// using exact Lagrange values from BMAT/ZMAT.
+//
+// Requires: objective<P,S> && bound_constrained<P,S>.
 // No gradient is needed -- BOBYQA uses only objective evaluations.
 //
 // Reference: Powell, M. J. D. (2009) The BOBYQA algorithm for bound
 //            constrained optimization without derivatives, DAMTP 2009/NA06.
 //            K&W Section 8.4 (surrogate model framework).
 
-#include "nablapp/detail/quadratic_model.h"
+#include "nablapp/detail/interpolation_system.h"
 #include "nablapp/detail/trust_region.h"
 #include "nablapp/detail/bound_projection.h"
 #include "nablapp/options/trust_region_options.h"
@@ -38,6 +42,53 @@
 
 namespace nablapp
 {
+
+// Build explicit N x N Hessian from HQ (packed upper triangle) and PQ
+// (implicit second derivative via outer products of interpolation points).
+//
+// H = HQ_matrix + sum_k pq[k] * xpt[k] * xpt[k]^T
+//
+// Cost: O(n^2 * m), acceptable for n < 20.
+//
+// Reference: Powell 2009, Section 2 (equation 2.2).
+template <typename Scalar, int N>
+Eigen::Matrix<Scalar, N, N> build_explicit_hessian(
+    const detail::interpolation_system<Scalar, N>& sys)
+{
+    const int32_t n = sys.xbase.size();
+    const int32_t m = sys.m_points;
+
+    Eigen::Matrix<Scalar, N, N> H;
+    if constexpr(N == Eigen::Dynamic)
+        H.setZero(n, n);
+    else
+        H.setZero();
+
+    // Unpack HQ upper triangle into symmetric matrix.
+    int32_t ih = 0;
+    for(int32_t j = 0; j < n; ++j)
+    {
+        for(int32_t i = 0; i <= j; ++i)
+        {
+            H(i, j) = sys.hq[ih];
+            H(j, i) = sys.hq[ih];
+            ++ih;
+        }
+    }
+
+    // Add PQ outer products: sum_k pq[k] * xpt[k] * xpt[k]^T.
+    for(int32_t k = 0; k < m; ++k)
+    {
+        if(sys.pq[k] == Scalar(0)) continue;
+        auto xk = sys.xpt.col(k).head(n);
+        H.template selfadjointView<Eigen::Upper>().rankUpdate(xk, sys.pq[k]);
+    }
+    // Copy upper to lower.
+    H.template triangularView<Eigen::StrictlyLower>() =
+        H.template triangularView<Eigen::StrictlyUpper>().transpose();
+
+    return H;
+}
 
 template <int N = dynamic_dimension>
 struct bobyqa_policy
@@ -70,16 +121,13 @@ struct bobyqa_policy
         Eigen::Vector<double, N> lower_scaled;   // lower[i] / scale[i]
         Eigen::Vector<double, N> upper_scaled;   // upper[i] / scale[i]
         double objective_value{};
-        Eigen::Matrix<double, N, Eigen::Dynamic> Y;  // Interpolation points in scaled coordinates
-        Eigen::VectorXd f_values;
-        detail::quadratic_model<double, N> model;     // Model in scaled coordinates
+        detail::interpolation_system<double, N> sys;  // BMAT/ZMAT factored interpolation system
         double delta{};
         double delta_max{};
         double final_trust_radius{1e-8};
         double rho{};       // Current minimum trust radius (contracts toward rho_end)
         double rho_end{};   // Final rho target (= final_trust_radius)
         std::uint32_t iteration{0};
-        std::uint16_t itest{0};  // Consecutive non-improving iterations (Powell 2009, Section 4)
         std::uint16_t rescue_counter{0};  // Consecutive rho contractions without improvement (Powell 2009, RESCUE)
         bool last_improved{false};       // Whether the previous step improved the objective
         int m{};
@@ -147,14 +195,9 @@ struct bobyqa_policy
         s.final_trust_radius = options.final_trust_radius.value_or(1e-8);
 
         // Initial trust-region radius in SCALED space (Powell 2009).
-        // In scaled space, all dimensions have comparable ranges, so a
-        // uniform h makes the initial simplex well-conditioned.
         double h = options.initial_trust_radius.value_or(0.0);
         if(h <= 0.0)
         {
-            // Auto: 10% of the maximum scaled bound range.
-            // Since scaling normalizes the largest range to 1.0, max_range
-            // in scaled space is approximately 1/max_scale * max_range_orig.
             double max_range = 0.0;
             for(int i = 0; i < n; ++i)
             {
@@ -167,55 +210,29 @@ struct bobyqa_policy
         s.delta = h;
         s.delta_max = 10.0 * h;
 
-        // Build initial interpolation set in SCALED coordinates.
-        // The perturbation h is uniform in scaled space, meaning the actual
-        // perturbation in original space is h * scale[i] for variable i.
-        s.Y.resize(n, s.m);
-        s.f_values.resize(s.m);
+        // Bootstrap the BMAT/ZMAT interpolation system.
+        // The bootstrap evaluates f at 2n+1 coordinate-perturbation points
+        // around x_scaled and initializes BMAT, ZMAT, GOPT, HQ, PQ.
+        //
+        // Reference: Powell 2009, Section 2.
+        //   Adapted from NLopt prelim_() lines 1710-1950.
+        //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L1710
+        s.sys = detail::bootstrap_interpolation_system<double, N>(
+            s.x_scaled, h, s.lower_scaled, s.upper_scaled,
+            [&](const Eigen::Vector<double, N>& x_sc) {
+                return s.problem->value(
+                    (x_sc.array() * s.scale.array()).matrix());
+            });
 
-        s.Y.col(0) = s.x_scaled;
-        s.f_values[0] = s.problem->value(s.x);
-
-        for(int i = 0; i < n && (1 + i) < s.m; ++i)
-        {
-            Eigen::Vector<double, N> pt = s.x_scaled;
-            pt[i] = std::min(pt[i] + h, s.upper_scaled[i]);
-            if(std::abs(pt[i] - s.x_scaled[i]) < 1e-15 * h)
-                pt[i] = std::max(s.x_scaled[i] - h, s.lower_scaled[i]);
-            s.Y.col(1 + i) = pt;
-            s.f_values[1 + i] = s.problem->value(
-                (pt.array() * s.scale.array()).matrix());
-        }
-
-        for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
-        {
-            Eigen::Vector<double, N> pt = s.x_scaled;
-            pt[i] = std::max(pt[i] - h, s.lower_scaled[i]);
-            if(std::abs(pt[i] - s.x_scaled[i]) < 1e-15 * h)
-                pt[i] = std::min(s.x_scaled[i] + h, s.upper_scaled[i]);
-            s.Y.col(1 + n + i) = pt;
-            s.f_values[1 + n + i] = s.problem->value(
-                (pt.array() * s.scale.array()).matrix());
-        }
-
-        // Find best point
-        int best = 0;
-        for(int i = 1; i < s.m; ++i)
-        {
-            if(s.f_values[i] < s.f_values[best])
-                best = i;
-        }
-        s.x_scaled = s.Y.col(best);
+        // Update x to the best point found during bootstrap.
+        s.x_scaled = s.sys.xbase + s.sys.xopt;
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
-        s.objective_value = s.f_values[best];
+        s.objective_value = s.sys.fval[s.sys.kopt];
 
-        // Build initial quadratic model in scaled coordinates
-        s.model = detail::build_model(s.Y, s.f_values, s.x_scaled);
         s.initialized = true;
         s.iteration = 0;
 
         // Powell 2009, Section 5: two-radius rho contraction scheme.
-        // rho starts at the initial trust radius (rhobeg) and contracts toward rho_end.
         s.rho = s.delta;
         s.rho_end = s.final_trust_radius;
 
@@ -226,20 +243,31 @@ struct bobyqa_policy
     step_result<double> step(state_type<P>& s)
     {
         double old_f = s.objective_value;
+        const int n = s.x.size();
 
-        // All internal computation in scaled coordinates.
-        // Model gradient at current best point (scaled space).
-        Eigen::Vector<double, N> mg = detail::model_gradient(s.model, s.x_scaled);
+        // Model gradient at xopt (d=0 gives gopt directly).
+        Eigen::Vector<double, N> zero_d;
+        if constexpr(N == Eigen::Dynamic)
+            zero_d.setZero(n);
+        else
+            zero_d.setZero();
 
-        // Solve trust-region subproblem in scaled coordinates
+        Eigen::Vector<double, N> mg = detail::model_gradient_at(s.sys, zero_d);
+
+        // Build explicit Hessian for the trust-region subproblem.
+        // Cost: O(n^2 * m), acceptable for n < 20.
+        Eigen::Matrix<double, N, N> H = build_explicit_hessian<double, N>(s.sys);
+
+        // x_opt in absolute scaled coordinates for the trust-region solver.
+        Eigen::Vector<double, N> x_opt_abs = s.sys.xbase + s.sys.xopt;
+
+        // Solve trust-region subproblem in scaled coordinates.
         Eigen::Vector<double, N> d = detail::solve_trust_region_box(
-            mg, s.model.H, s.x_scaled, s.delta, s.lower_scaled, s.upper_scaled);
+            mg, H, x_opt_abs, s.delta, s.lower_scaled, s.upper_scaled);
 
         double d_norm = d.norm();
 
         // Powell 2009, Section 5: convergence via rho contraction.
-        // Only terminate when the previous step was also non-improving,
-        // preventing premature exit when the solver is still making progress.
         if(s.rho <= s.rho_end && s.delta <= s.rho_end && !s.last_improved)
         {
             return step_result<double>{
@@ -253,28 +281,36 @@ struct bobyqa_policy
             };
         }
 
-        // Trial point in scaled coordinates, then unscale for objective evaluation
-        Eigen::Vector<double, N> x_new_scaled = detail::project(
-            (s.x_scaled + d).eval(), s.lower_scaled, s.upper_scaled);
+        // Trial point: xopt + d in shifted coordinates (relative to xbase).
+        Eigen::Vector<double, N> x_new_shifted = s.sys.xopt + d;
+        Eigen::Vector<double, N> x_new_abs = detail::project(
+            (s.sys.xbase + x_new_shifted).eval(), s.lower_scaled, s.upper_scaled);
+        // Recompute the shifted coordinate after projection.
+        x_new_shifted = x_new_abs - s.sys.xbase;
+        // Recompute d after projection for accurate model prediction.
+        d = x_new_shifted - s.sys.xopt;
+
         Eigen::Vector<double, N> x_new_orig =
-            (x_new_scaled.array() * s.scale.array()).matrix();
+            (x_new_abs.array() * s.scale.array()).matrix();
         double f_new = s.problem->value(x_new_orig);
 
-        // Model predictions (scaled coordinates)
-        double q_old = detail::evaluate_model(s.model, s.x_scaled);
-        double q_new = detail::evaluate_model(s.model, x_new_scaled);
+        // Model predictions: Q(xopt + d) - Q(xopt) = Q(d) since gopt is at xopt.
+        double q_predicted = detail::evaluate_interpolation_model(s.sys, d);
 
-        // Accuracy ratio
-        double accuracy_ratio = detail::compute_rho(old_f, f_new, q_old, q_new);
+        // Accuracy ratio.
+        //
+        // Reference: Powell 2009, eq. (3.1).
+        double accuracy_ratio = 0.0;
+        if(std::abs(q_predicted) > std::numeric_limits<double>::epsilon() * 100.0)
+            accuracy_ratio = (old_f - f_new) / (-q_predicted);
 
-        // Update trust-region radius (delta)
+        // (model predictions used for accuracy ratio above)
+
+        // Update trust-region radius (delta).
         s.delta = detail::update_radius(s.delta, accuracy_ratio, d_norm, s.delta_max,
                                         options.trust);
 
         // Powell 2009, Section 5: rho contraction using three-regime schedule.
-        // Contract rho when delta and step norm are both at or below rho
-        // and the accuracy ratio was non-positive (step didn't improve).
-        // Three-regime schedule replaces the fixed 0.5x factor.
         // Adapted from NLopt bobyqa.c lines 2993-3017.
         // https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2993
         if(s.delta <= s.rho)
@@ -284,108 +320,138 @@ struct bobyqa_policy
             s.delta = std::max(s.delta, s.rho);
         }
 
-        // Powell 2009, Section 4: Lagrange-based point replacement.
-        // Full SVD evaluation retained for accurate point selection;
-        // the main O(m*p^2) saving is in update_model_incremental below.
-        Eigen::VectorXd lv_xnew = detail::compute_lagrange_at_point(
-            s.Y, s.f_values, s.x_scaled, x_new_scaled);
-        int k = detail::select_replacement(
-            s.Y, s.f_values, x_new_scaled, f_new, s.x_scaled, lv_xnew, s.delta);
+        // Powell 2009, Section 4: BMAT/ZMAT-based point replacement.
+        // Compute VLAG and BETA for the trial step.
+        auto [vlag, beta] = detail::compute_vlag_beta(s.sys, d);
 
-        // Update interpolation set (scaled coordinates)
-        s.Y.col(k) = x_new_scaled;
-        s.f_values[k] = f_new;
+        // Lagrange values at the trial point (first m entries of vlag).
+        Eigen::VectorXd lv_xnew(s.m);
+        for(int k = 0; k < s.m; ++k)
+            lv_xnew[k] = vlag[k];
 
-        // Accept step if strictly better
+        // Select replacement point using denominator*distance^4 weighting.
+        //
+        // Reference: Powell 2009, Section 4.
+        //   Adapted from NLopt bobyqa.c lines 2493-2549.
+        //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2493
+        //
+        // Use xpt columns (shifted coords) and x_opt_abs for distances
+        // in the select_replacement interface that expects absolute coords.
+        Eigen::Matrix<double, N, Eigen::Dynamic> Y_abs(n, s.m);
+        Eigen::VectorXd fval_vec(s.m);
+        for(int k = 0; k < s.m; ++k)
+        {
+            Y_abs.col(k) = s.sys.xbase + s.sys.xpt.col(k).head(n);
+            fval_vec[k] = s.sys.fval[k];
+        }
+
+        int knew = detail::select_replacement(
+            Y_abs, fval_vec, x_new_abs, f_new, x_opt_abs, lv_xnew, s.delta);
+
+        // Compute denominator for BMAT/ZMAT update.
+        // alpha = sum_j zmat[knew, j]^2 (diagonal element of Z*Z^T).
+        double alpha = 0.0;
+        {
+            int32_t nptm = s.m - n - 1;
+            for(int32_t jj = 0; jj < nptm; ++jj)
+                alpha += s.sys.zmat(knew, jj) * s.sys.zmat(knew, jj);
+        }
+        double denom = detail::compute_denom(vlag[knew], alpha, beta);
+
+        // Update BMAT/ZMAT if denominator is healthy.
+        // If denominator collapses, skip the factored update and trigger rescue.
+        bool denom_ok = (denom > 1e-20);
+        if(denom_ok)
+        {
+            detail::update_bmat_zmat(s.sys, vlag, beta, denom, knew);
+            detail::update_model_on_replacement(s.sys, x_new_shifted, f_new, knew, d);
+        }
+        else
+        {
+            // Denominator collapse: just update point data for consistency.
+            s.sys.fval[knew] = f_new;
+            for(int i = 0; i < n; ++i)
+                s.sys.xpt(i, knew) = x_new_shifted[i];
+            ++s.rescue_counter;
+        }
+
+        // Accept step if strictly better.
         bool improved = false;
         if(f_new < old_f)
         {
-            s.x_scaled = x_new_scaled;
+            s.x_scaled = x_new_abs;
             s.x = x_new_orig;
             s.objective_value = f_new;
             improved = true;
+
+            // If update_model_on_replacement didn't already update kopt
+            // (it does when f_new < fval[kopt]), ensure consistency.
+            if(denom_ok && s.sys.kopt != knew && f_new < s.sys.fval[s.sys.kopt])
+            {
+                s.sys.kopt = knew;
+                s.sys.xopt = s.sys.xpt.col(knew).head(n);
+            }
         }
 
-        // Powell 2009, Section 4: itest model staleness counter.
-        if(improved)
-            s.itest = 0;
-        else
-            ++s.itest;
-
-        // Model update: incremental path for rejected steps, full SVD
-        // rebuild for accepted steps (re-centers x_base for conditioning).
-        // Reference: Powell 2009, Section 4.
-        if(improved)
-        {
-            s.model = detail::build_model(s.Y, s.f_values, s.x_scaled);
-        }
-        else
-        {
-            auto lv_result = detail::update_model_incremental(
-                s.model, s.f_values, x_new_scaled, k, s.model.x_base);
-            if(lv_result.size() == 0)
-                s.model = detail::build_model(s.Y, s.f_values, s.model.x_base);
-        }
-
-        // Powell 2009, Section 4: when itest >= 3 and NPT > 2N+1, zero H
-        if(s.itest >= 3)
-        {
-            const int n = s.x.size();
-            if(s.m > 2 * n + 1)
-                s.model.H.setZero();
-            s.itest = 0;
-        }
-
-        // Powell 2009, Section 6 (ALTMOV concept): geometry improvement.
-        // Direction-based heuristic retained over altmov_geometry_step()
-        // (see trust_region.h) due to SVD model incompatibility: nablapp's
-        // pinv_Phi Lagrange values drift under incremental updates, causing
-        // ALTMOV's denominator maximization to place points that degrade
-        // model conditioning. Empirical: ALTMOV degrades HS001 from 2509
-        // to 2902 iterations. NLopt's exact BMAT/ZMAT representation makes
-        // ALTMOV effective there. Switching to BMAT/ZMAT would enable the
-        // altmov_geometry_step functions already in trust_region.h.
-        // All geometry operations in scaled coordinates.
+        // Powell 2009, Section 6 (ALTMOV): geometry improvement.
+        // With BMAT/ZMAT, the exact Lagrange values enable effective ALTMOV
+        // placement, eliminating the numerical drift that made it unusable
+        // under the SVD model representation.
+        //
+        // Reference: Powell 2009, Section 6.
+        //   Adapted from NLopt bobyqa.c lines 743-1159.
+        //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L743
         if(d_norm < 0.5 * s.rho && s.rho > s.rho_end)
         {
-            int best_idx = 0;
-            for(int i = 1; i < s.m; ++i)
-            {
-                if(s.f_values[i] < s.f_values[best_idx])
-                    best_idx = i;
-            }
+            // Select knew_geo as the point with largest |L_k(xopt)|.
+            auto lagrange_at_xopt = detail::compute_lagrange_at(s.sys, s.sys.xopt);
 
-            int k_geo = (best_idx == 0) ? 1 : 0;
-            double max_abs_lk = std::abs(s.model.lagrange_values[k_geo]);
+            int knew_geo = (s.sys.kopt == 0) ? 1 : 0;
+            double max_abs_lk = std::abs(lagrange_at_xopt[knew_geo]);
             for(int i = 0; i < s.m; ++i)
             {
-                if(i == best_idx) continue;
-                double abs_lk = std::abs(s.model.lagrange_values[i]);
+                if(i == s.sys.kopt) continue;
+                double abs_lk = std::abs(lagrange_at_xopt[i]);
                 if(abs_lk > max_abs_lk)
                 {
                     max_abs_lk = abs_lk;
-                    k_geo = i;
+                    knew_geo = i;
                 }
             }
 
-            Eigen::Vector<double, N> dir = (s.Y.col(k_geo) - s.x_scaled).eval();
-            double geo_dir_norm = dir.norm();
-            if(geo_dir_norm > 1e-15)
-            {
-                Eigen::Vector<double, N> geo_pt_scaled = detail::project(
-                    (s.x_scaled + s.rho * dir / geo_dir_norm).eval(),
-                    s.lower_scaled, s.upper_scaled);
-                Eigen::Vector<double, N> geo_pt_orig =
-                    (geo_pt_scaled.array() * s.scale.array()).matrix();
-                double geo_f = s.problem->value(geo_pt_orig);
-                s.Y.col(k_geo) = geo_pt_scaled;
-                s.f_values[k_geo] = geo_f;
+            // ALTMOV geometry step: find the point maximizing |L_knew_geo|.
+            Eigen::Vector<double, N> geo_pt_shifted = detail::altmov_geometry_step<double, N>(
+                s.sys, knew_geo, s.rho, s.lower_scaled - s.sys.xbase,
+                s.upper_scaled - s.sys.xbase);
 
-                s.model = detail::build_model(s.Y, s.f_values, s.x_scaled);
+            Eigen::Vector<double, N> geo_pt_abs = detail::project(
+                (s.sys.xbase + geo_pt_shifted).eval(), s.lower_scaled, s.upper_scaled);
+            geo_pt_shifted = geo_pt_abs - s.sys.xbase;
+
+            Eigen::Vector<double, N> geo_pt_orig =
+                (geo_pt_abs.array() * s.scale.array()).matrix();
+            double geo_f = s.problem->value(geo_pt_orig);
+
+            // Compute VLAG/BETA for the geometry step.
+            Eigen::Vector<double, N> d_geo = geo_pt_shifted - s.sys.xopt;
+            auto [vlag_geo, beta_geo] = detail::compute_vlag_beta(s.sys, d_geo);
+
+            double alpha_geo = 0.0;
+            {
+                int32_t nptm = s.m - n - 1;
+                for(int32_t jj = 0; jj < nptm; ++jj)
+                    alpha_geo += s.sys.zmat(knew_geo, jj) * s.sys.zmat(knew_geo, jj);
+            }
+            double denom_geo = detail::compute_denom(vlag_geo[knew_geo], alpha_geo, beta_geo);
+
+            if(denom_geo > 1e-20)
+            {
+                detail::update_bmat_zmat(s.sys, vlag_geo, beta_geo, denom_geo, knew_geo);
+                detail::update_model_on_replacement(s.sys, geo_pt_shifted, geo_f, knew_geo, d_geo);
 
                 if(geo_f < s.objective_value)
                 {
-                    s.x_scaled = geo_pt_scaled;
+                    s.x_scaled = geo_pt_abs;
                     s.x = geo_pt_orig;
                     s.objective_value = geo_f;
                     improved = true;
@@ -393,8 +459,7 @@ struct bobyqa_policy
             }
         }
 
-        // Powell 2009, RESCUE concept: full interpolation set rebuild.
-        // All in scaled coordinates.
+        // Powell 2009, RESCUE concept: full interpolation system rebuild.
         if(s.delta <= s.rho && !improved)
             ++s.rescue_counter;
         else if(improved)
@@ -402,42 +467,26 @@ struct bobyqa_policy
 
         if(s.rescue_counter >= 3)
         {
-            const int n = s.x.size();
             double h = s.rho;
+            Eigen::Vector<double, N> x_base_new = s.sys.xbase + s.sys.xopt;
 
-            s.Y.col(0) = s.x_scaled;
-            s.f_values[0] = s.problem->value(s.x);
+            s.sys = detail::bootstrap_interpolation_system<double, N>(
+                x_base_new, h, s.lower_scaled, s.upper_scaled,
+                [&](const Eigen::Vector<double, N>& x_sc) {
+                    return s.problem->value(
+                        (x_sc.array() * s.scale.array()).matrix());
+                });
 
-            for(int i = 0; i < n && (1 + i) < s.m; ++i)
-            {
-                Eigen::Vector<double, N> pt = s.x_scaled;
-                pt[i] = std::min(pt[i] + h, s.upper_scaled[i]);
-                if(std::abs(pt[i] - s.x_scaled[i]) < 1e-15 * h)
-                    pt[i] = std::max(s.x_scaled[i] - h, s.lower_scaled[i]);
-                s.Y.col(1 + i) = pt;
-                s.f_values[1 + i] = s.problem->value(
-                    (pt.array() * s.scale.array()).matrix());
-            }
-
-            for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
-            {
-                Eigen::Vector<double, N> pt = s.x_scaled;
-                pt[i] = std::max(pt[i] - h, s.lower_scaled[i]);
-                if(std::abs(pt[i] - s.x_scaled[i]) < 1e-15 * h)
-                    pt[i] = std::min(s.x_scaled[i] + h, s.upper_scaled[i]);
-                s.Y.col(1 + n + i) = pt;
-                s.f_values[1 + n + i] = s.problem->value(
-                    (pt.array() * s.scale.array()).matrix());
-            }
-
-            s.model = detail::build_model(s.Y, s.f_values, s.x_scaled);
+            s.x_scaled = s.sys.xbase + s.sys.xopt;
+            s.x = (s.x_scaled.array() * s.scale.array()).matrix();
+            s.objective_value = s.sys.fval[s.sys.kopt];
             s.rescue_counter = 0;
         }
 
         ++s.iteration;
         s.last_improved = improved;
 
-        // Derivative-free convergence signalling
+        // Derivative-free convergence signalling.
         double obj_change = s.objective_value - old_f;
         double effective_step = improved ? d_norm : s.delta;
         double effective_change = improved ? obj_change : s.delta;
@@ -461,14 +510,12 @@ struct bobyqa_policy
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
-        // BOBYQA cannot warm-start; delegate to full reset
         reset_clear(s, x0);
     }
 
     template <typename P>
     void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
-        const int n = x0.size();
         s.x = detail::project(x0, s.lower, s.upper);
         s.x_scaled = (s.x.array() / s.scale.array()).matrix();
         s.iteration = 0;
@@ -476,44 +523,16 @@ struct bobyqa_policy
 
         double h = s.delta;
 
-        // Rebuild interpolation set in scaled coordinates
-        s.Y.col(0) = s.x_scaled;
-        s.f_values[0] = s.problem->value(s.x);
+        s.sys = detail::bootstrap_interpolation_system<double, N>(
+            s.x_scaled, h, s.lower_scaled, s.upper_scaled,
+            [&](const Eigen::Vector<double, N>& x_sc) {
+                return s.problem->value(
+                    (x_sc.array() * s.scale.array()).matrix());
+            });
 
-        for(int i = 0; i < n && (1 + i) < s.m; ++i)
-        {
-            Eigen::Vector<double, N> pt = s.x_scaled;
-            pt[i] = std::min(pt[i] + h, s.upper_scaled[i]);
-            if(std::abs(pt[i] - s.x_scaled[i]) < 1e-15 * h)
-                pt[i] = std::max(s.x_scaled[i] - h, s.lower_scaled[i]);
-            s.Y.col(1 + i) = pt;
-            s.f_values[1 + i] = s.problem->value(
-                (pt.array() * s.scale.array()).matrix());
-        }
-
-        for(int i = 0; i < n && (1 + n + i) < s.m; ++i)
-        {
-            Eigen::Vector<double, N> pt = s.x_scaled;
-            pt[i] = std::max(pt[i] - h, s.lower_scaled[i]);
-            if(std::abs(pt[i] - s.x_scaled[i]) < 1e-15 * h)
-                pt[i] = std::min(s.x_scaled[i] + h, s.upper_scaled[i]);
-            s.Y.col(1 + n + i) = pt;
-            s.f_values[1 + n + i] = s.problem->value(
-                (pt.array() * s.scale.array()).matrix());
-        }
-
-        // Find best point
-        int best = 0;
-        for(int i = 1; i < s.m; ++i)
-        {
-            if(s.f_values[i] < s.f_values[best])
-                best = i;
-        }
-        s.x_scaled = s.Y.col(best);
+        s.x_scaled = s.sys.xbase + s.sys.xopt;
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
-        s.objective_value = s.f_values[best];
-
-        s.model = detail::build_model(s.Y, s.f_values, s.x_scaled);
+        s.objective_value = s.sys.fval[s.sys.kopt];
         s.initialized = true;
     }
 };
