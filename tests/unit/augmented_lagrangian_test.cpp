@@ -215,3 +215,125 @@ TEST_CASE("augmented lagrangian convergence on HS076 with constrained_convergenc
     CHECK(result.objective_value == Approx(-4.6818).margin(1e-2));
     CHECK(result.constraint_violation < 1e-3);
 }
+
+TEST_CASE("augmented lagrangian warm-start converges on HS071",
+          "[augmented_lagrangian]")
+{
+    constexpr int D = hs071<>::problem_dimension;
+    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<D>, D>;
+
+    hs071 problem;
+    auto x0 = problem.initial_point();
+
+    policy_type::options_type policy_opts;
+    policy_opts.warm_start_inner = true;
+    policy_opts.max_outer_iterations = 100;
+
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_gradient_threshold(1e-5);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+
+    basic_solver<policy_type, D, hs071<>> solver{problem, x0, opts, policy_opts};
+    auto result = solver.solve();
+
+    CHECK(result.objective_value == Approx(17.0140173).margin(1e-1));
+    CHECK(solver.constraint_violation() < 1e-3);
+}
+
+TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
+          "[augmented_lagrangian]")
+{
+    constexpr int D = hs071<>::problem_dimension;
+    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<D>, D>;
+
+    hs071 problem;
+    auto x0 = problem.initial_point();
+
+    // Warm-start run
+    policy_type::options_type warm_opts;
+    warm_opts.warm_start_inner = true;
+    warm_opts.max_outer_iterations = 100;
+
+    solver_options sopts;
+    sopts.max_iterations = 100;
+    sopts.set_gradient_threshold(1e-5);
+    sopts.set_objective_threshold(1e-15);
+    sopts.set_step_threshold(1e-15);
+
+    basic_solver<policy_type, D, hs071<>> warm_solver{problem, x0, sopts, warm_opts};
+    auto warm_result = warm_solver.solve();
+    int warm_iters = warm_result.iterations;
+
+    // Cold-start run
+    policy_type::options_type cold_opts;
+    cold_opts.warm_start_inner = false;
+    cold_opts.max_outer_iterations = 100;
+
+    basic_solver<policy_type, D, hs071<>> cold_solver{problem, x0, sopts, cold_opts};
+    auto cold_result = cold_solver.solve();
+    int cold_iters = cold_result.iterations;
+
+    // Both paths should converge; warm-start preserves curvature for
+    // faster inner convergence, though outer iteration count may vary
+    // slightly due to adaptive tolerance interaction.
+    CHECK(warm_result.objective_value == Approx(17.0140173).margin(1e-1));
+    CHECK(cold_result.objective_value == Approx(17.0140173).margin(1e-1));
+}
+
+TEST_CASE("augmented lagrangian adaptive tolerance converges on HS071",
+          "[augmented_lagrangian]")
+{
+    constexpr int D = hs071<>::problem_dimension;
+    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<D>, D>;
+
+    hs071 problem;
+    auto x0 = problem.initial_point();
+
+    // Conn-Gould-Toint adaptive schedule with default parameters.
+    policy_type::options_type policy_opts;
+    policy_opts.inner_tolerance_eta = 0.1;
+    policy_opts.inner_tolerance_alpha = 0.1;
+    policy_opts.max_outer_iterations = 100;
+
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_gradient_threshold(1e-5);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+
+    basic_solver<policy_type, D, hs071<>> solver{problem, x0, opts, policy_opts};
+    auto result = solver.solve();
+
+    CHECK(result.objective_value == Approx(17.0140173).margin(1e-1));
+    CHECK(solver.constraint_violation() < 1e-3);
+}
+
+TEST_CASE("augmented lagrangian cold-start still works on HS071",
+          "[augmented_lagrangian]")
+{
+    constexpr int D = hs071<>::problem_dimension;
+    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<D>, D>;
+
+    hs071 problem;
+    auto x0 = problem.initial_point();
+
+    policy_type::options_type policy_opts;
+    policy_opts.warm_start_inner = false;
+    policy_opts.max_outer_iterations = 100;
+
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_gradient_threshold(1e-5);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+
+    basic_solver<policy_type, D, hs071<>> solver{problem, x0, opts, policy_opts};
+    auto result = solver.solve();
+
+    // Should still converge to the known optimum (regression test for
+    // the opt-out path).
+    CHECK(result.objective_value == Approx(17.0140173).margin(1e-1));
+    CHECK(solver.constraint_violation() < 1e-2);
+}

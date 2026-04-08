@@ -10,8 +10,21 @@
 // subproblem satisfies differentiable + bound_constrained so that
 // gradient-based and derivative-free inner solvers both work.
 //
+// Warm-start: the inner basic_solver is persisted across outer
+// iterations, preserving compact_lbfgs curvature pairs via
+// lbfgsb_policy::reset(). The subproblem's penalty parameter is
+// stored as a pointer to the outer state's mu, so multiplier and
+// penalty updates propagate automatically without reconstruction.
+//
+// Adaptive inner tolerance: follows the Conn-Gould-Toint (1991)
+// schedule where inner tolerance loosens in early outer iterations
+// and tightens as mu decreases (N&W Algorithm 17.4).
+//
 // Reference: K&W Section 10.9, Algorithm 10.2;
-//            N&W Section 17.4, Algorithm 17.4.
+//            N&W Section 17.4, Algorithm 17.4;
+//            Conn, Gould, Toint (1991) "A globally convergent
+//            augmented Lagrangian algorithm for optimization with
+//            general constraints and simple bounds".
 
 #include "nablapp/detail/augmented_lagrangian.h"
 #include "nablapp/detail/lagrangian.h"
@@ -54,6 +67,16 @@ struct augmented_lagrangian_policy
         std::optional<scalar_type> inner_gradient_tolerance{};     // default: 1e-6 (K&W 10.9)
         std::optional<scalar_type> feasibility_progress{};         // default: 0.25 (N&W 17.4)
         typename InnerPolicy::options_type inner_opts = {};
+
+        // Persist the inner solver across outer iterations, preserving
+        // compact_lbfgs curvature pairs via lbfgsb_policy::reset().
+        std::optional<bool> warm_start_inner{};                   // default: true
+
+        // Conn-Gould-Toint (1991) adaptive inner tolerance schedule.
+        // inner_tol = max(eta / mu^alpha, inner_grad_tol)
+        // Reference: N&W Algorithm 17.4, Step 2.
+        std::optional<scalar_type> inner_tolerance_eta{};         // default: 0.1
+        std::optional<scalar_type> inner_tolerance_alpha{};       // default: 0.1
     };
 
     options_type options{};
@@ -86,6 +109,77 @@ struct augmented_lagrangian_policy
         std::uint32_t outer_iter = 0;
 
         options_type opts;
+
+        // Synthetic subproblem for the inner solver.
+        // Stores const P* and penalty state; satisfies differentiable + bound_constrained.
+        // Penalty parameter is stored as a pointer to outer state's mu, so
+        // multiplier/penalty updates propagate automatically without reconstruction.
+        struct subproblem
+        {
+            enum : int { problem_dimension = N };
+            const P* outer;
+            int dim;
+            const Eigen::Vector<scalar_type, N>* lo;
+            const Eigen::Vector<scalar_type, N>* hi;
+            const Eigen::VectorX<scalar_type>* lam_eq;
+            const Eigen::VectorX<scalar_type>* lam_ineq;
+            const scalar_type* pen;
+            int neq, nineq;
+
+            [[nodiscard]] int dimension() const { return dim; }
+
+            [[nodiscard]] scalar_type value(const Eigen::Vector<scalar_type, N>& x) const
+            {
+                scalar_type fval = outer->value(x);
+                const int m = neq + nineq;
+                Eigen::VectorX<scalar_type> c_all(m);
+                if(m > 0)
+                    outer->constraints(x, c_all);
+                Eigen::VectorX<scalar_type> ceq = c_all.head(neq);
+                Eigen::VectorX<scalar_type> cineq = c_all.tail(nineq);
+                return detail::augmented_lagrangian_value(
+                    fval, ceq, cineq, *lam_eq, *lam_ineq, *pen);
+            }
+
+            void gradient(const Eigen::Vector<scalar_type, N>& x,
+                          Eigen::Vector<scalar_type, N>& g) const
+            {
+                constexpr int PD = P::problem_dimension;
+                if constexpr(N == PD)
+                    outer->gradient(x, g);
+                else
+                {
+                    Eigen::Vector<scalar_type, PD> g_tmp(g.size());
+                    outer->gradient(Eigen::Vector<scalar_type, N>(x), g_tmp);
+                    g = g_tmp;
+                }
+                const int m = neq + nineq;
+                Eigen::VectorX<scalar_type> c_all(m);
+                Eigen::MatrixX<scalar_type> J_all(m, dim);
+                if(m > 0)
+                {
+                    outer->constraints(x, c_all);
+                    outer->constraint_jacobian(x, J_all);
+                }
+                Eigen::Matrix<scalar_type, Eigen::Dynamic, N> Jeq = J_all.topRows(neq);
+                Eigen::Matrix<scalar_type, Eigen::Dynamic, N> Jineq = J_all.bottomRows(nineq);
+                Eigen::VectorX<scalar_type> ceq = c_all.head(neq);
+                Eigen::VectorX<scalar_type> cineq = c_all.tail(nineq);
+                g = detail::augmented_lagrangian_gradient(
+                    g, Jeq, Jineq, ceq, cineq, *lam_eq, *lam_ineq, *pen);
+            }
+
+            [[nodiscard]] Eigen::Vector<scalar_type, N> lower_bounds() const { return *lo; }
+            [[nodiscard]] Eigen::Vector<scalar_type, N> upper_bounds() const { return *hi; }
+        };
+
+        using rebound_inner = typename InnerPolicy::template rebind<N>;
+
+        // Persisted inner solver for warm-start.
+        // Constructed on first outer step, reset() on subsequent steps
+        // to preserve compact_lbfgs curvature pairs (S, Y, theta).
+        std::optional<subproblem> sub_storage;
+        std::optional<basic_solver<rebound_inner, N, subproblem>> inner_solver;
     };
 
     template <typename Problem, typename Convergence>
@@ -176,92 +270,59 @@ struct augmented_lagrangian_policy
             s.c_ineq = c_all.tail(s.n_ineq);
         }
 
-        // Synthetic subproblem for the inner solver.
-        // Stores const P* and penalty state; satisfies differentiable + bound_constrained.
-        struct subproblem
+        // Build subproblem on first call (pointer-based: auto-sees updated
+        // mu/lambda via pointer dereference).
+        using subproblem = typename state_type<P>::subproblem;
+        using rebound_inner = typename state_type<P>::rebound_inner;
+        if(!s.sub_storage.has_value())
         {
-            enum : int { problem_dimension = N };
-            const P* outer;
-            int dim;
-            const Eigen::Vector<scalar_type, N>* lo;
-            const Eigen::Vector<scalar_type, N>* hi;
-            const Eigen::VectorX<scalar_type>* lam_eq;
-            const Eigen::VectorX<scalar_type>* lam_ineq;
-            scalar_type pen;
-            int neq, nineq;
+            s.sub_storage.emplace(subproblem{
+                .outer = s.problem,
+                .dim = n,
+                .lo = &s.lower,
+                .hi = &s.upper,
+                .lam_eq = &s.lambda_eq,
+                .lam_ineq = &s.lambda_ineq,
+                .pen = &s.mu,
+                .neq = s.n_eq,
+                .nineq = s.n_ineq,
+            });
+        }
 
-            [[nodiscard]] int dimension() const { return dim; }
+        // Adaptive inner tolerance (Conn-Gould-Toint 1991; N&W Algorithm 17.4).
+        // inner_tol = max(eta / mu^alpha, tol_final)
+        // Early outer iterations (large mu) get loose tolerance; as mu
+        // decreases the inner solve tightens toward the final tolerance.
+        const scalar_type tol_eta = s.opts.inner_tolerance_eta.value_or(scalar_type(0.1));
+        const scalar_type tol_alpha = s.opts.inner_tolerance_alpha.value_or(scalar_type(0.1));
+        const scalar_type inner_tol = std::max(
+            static_cast<scalar_type>(tol_eta / std::pow(s.mu, tol_alpha)),
+            inner_grad_tol);
 
-            [[nodiscard]] scalar_type value(const Eigen::Vector<scalar_type, N>& x) const
-            {
-                scalar_type fval = outer->value(x);
-                const int m = neq + nineq;
-                Eigen::VectorX<scalar_type> c_all(m);
-                if(m > 0)
-                    outer->constraints(x, c_all);
-                Eigen::VectorX<scalar_type> ceq = c_all.head(neq);
-                Eigen::VectorX<scalar_type> cineq = c_all.tail(nineq);
-                return detail::augmented_lagrangian_value(
-                    fval, ceq, cineq, *lam_eq, *lam_ineq, pen);
-            }
-
-            void gradient(const Eigen::Vector<scalar_type, N>& x,
-                          Eigen::Vector<scalar_type, N>& g) const
-            {
-                constexpr int PD = P::problem_dimension;
-                if constexpr(N == PD)
-                    outer->gradient(x, g);
-                else
-                {
-                    Eigen::Vector<scalar_type, PD> g_tmp(g.size());
-                    outer->gradient(Eigen::Vector<scalar_type, N>(x), g_tmp);
-                    g = g_tmp;
-                }
-                const int m = neq + nineq;
-                Eigen::VectorX<scalar_type> c_all(m);
-                Eigen::MatrixX<scalar_type> J_all(m, dim);
-                if(m > 0)
-                {
-                    outer->constraints(x, c_all);
-                    outer->constraint_jacobian(x, J_all);
-                }
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, N> Jeq = J_all.topRows(neq);
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, N> Jineq = J_all.bottomRows(nineq);
-                Eigen::VectorX<scalar_type> ceq = c_all.head(neq);
-                Eigen::VectorX<scalar_type> cineq = c_all.tail(nineq);
-                g = detail::augmented_lagrangian_gradient(
-                    g, Jeq, Jineq, ceq, cineq, *lam_eq, *lam_ineq, pen);
-            }
-
-            [[nodiscard]] Eigen::Vector<scalar_type, N> lower_bounds() const { return *lo; }
-            [[nodiscard]] Eigen::Vector<scalar_type, N> upper_bounds() const { return *hi; }
-        };
-
-        subproblem sub{
-            .outer = s.problem,
-            .dim = n,
-            .lo = &s.lower,
-            .hi = &s.upper,
-            .lam_eq = &s.lambda_eq,
-            .lam_ineq = &s.lambda_ineq,
-            .pen = s.mu,
-            .neq = s.n_eq,
-            .nineq = s.n_ineq,
-        };
-
-        // Inner solver: solve the augmented Lagrangian subproblem
         solver_options<> inner_opts;
         inner_opts.max_iterations = inner_max;
         std::get<gradient_tolerance_criterion>(inner_opts.convergence.criteria)
-            .threshold = inner_grad_tol;
+            .threshold = inner_tol;
         std::get<objective_tolerance_criterion>(inner_opts.convergence.criteria)
             .threshold = scalar_type(1e-15);
         std::get<step_tolerance_criterion>(inner_opts.convergence.criteria)
             .threshold = scalar_type(1e-15);
 
-        using rebound_inner = typename InnerPolicy::template rebind<N>;
-        basic_solver<rebound_inner, N, subproblem> inner_solver{sub, s.x, inner_opts};
-        auto inner_result = inner_solver.solve(inner_opts);
+        // Warm-start or cold-start inner solver.
+        const bool warm_start = s.opts.warm_start_inner.value_or(true);
+        if(warm_start && s.inner_solver.has_value())
+        {
+            // Warm restart: preserves compact_lbfgs curvature pairs (S, Y, theta).
+            // Reference: N&W Section 9.2 (compact L-BFGS warm-start rationale).
+            s.inner_solver->reset(s.x);
+        }
+        else
+        {
+            // Cold start: construct fresh inner solver.
+            s.inner_solver.emplace(*s.sub_storage, s.x, inner_opts);
+        }
+
+        auto inner_result = s.inner_solver->solve(inner_opts);
 
         // Extract solution from inner solver
         scalar_type f_old = s.f;
@@ -356,6 +417,9 @@ struct augmented_lagrangian_policy
             s.c_ineq = c_all.tail(s.n_ineq);
         }
         s.outer_iter = 0;
+        // Destroy inner solver; will be reconstructed next step.
+        // Subproblem storage is kept (pointers remain valid).
+        s.inner_solver.reset();
     }
 
     template <typename P>
@@ -367,6 +431,8 @@ struct augmented_lagrangian_policy
         s.lambda_ineq.setZero();
         s.mu = s.opts.mu_init.value_or(scalar_type(0.1));
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
+        s.sub_storage.reset();
+        s.inner_solver.reset();
     }
 };
 
