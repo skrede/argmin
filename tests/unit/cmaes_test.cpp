@@ -214,6 +214,32 @@ TEST_CASE("cmaes_policy: solves bounded Rastrigin", "[cmaes]")
     CHECK(result.objective_value < 1.0);
 }
 
+TEST_CASE("cmaes_policy: Rastrigin 2D global optimum with IPOP", "[cmaes]")
+{
+    // Validates CMA-01 (sigma scaled from bound range: (5.12-(-5.12))/3 = 3.41)
+    // and CMA-02 (lambda >= 4*N = 8 for bounded problem).
+    // Rastrigin is highly multimodal; IPOP restarts explore multiple basins.
+    // Reference: K&W Section 8.7 (CMA-ES benchmark).
+    rastrigin<double> problem{.n = 2};
+
+    Eigen::VectorXd x0{{3.0, 3.0}};
+    solver_options opts;
+    opts.max_iterations = 10000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+
+    cmaes_policy<> policy;
+    policy.options.restart = cmaes_policy<>::restart_strategy::ipop;
+    policy.options.seed = 42u;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value < 1.0);
+    CHECK(solver.state().params.lambda >= 8);
+}
+
 TEST_CASE("cmaes_policy: bounded Rosenbrock", "[cmaes]")
 {
     bounded_rosenbrock problem{

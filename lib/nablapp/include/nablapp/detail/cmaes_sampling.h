@@ -20,20 +20,24 @@ namespace nablapp::detail
 
 // Sample lambda offspring: x_i = mean + sigma * B * D * z_i, z_i ~ N(0,I).
 // Returns n x lambda matrix of offspring.
+// MaxLambda bounds the column storage for stack allocation when known at compile time.
 // Reference: K&W Algorithm 8.10 step 1.
-template <typename Scalar = double, int N = nablapp::dynamic_dimension>
-Eigen::Matrix<Scalar, N, Eigen::Dynamic> sample_offspring(
+template <typename Scalar = double, int N = nablapp::dynamic_dimension, int MaxLambda = Eigen::Dynamic>
+auto sample_offspring(
     const Eigen::Vector<Scalar, N>& mean,
     Scalar sigma,
     const Eigen::Matrix<Scalar, N, N>& B,
     const Eigen::Vector<Scalar, N>& D,
     int lambda,
     std::mt19937& rng)
+    -> Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0,
+        N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxLambda>
 {
     const int n = mean.size();
     std::normal_distribution<Scalar> normal(Scalar(0), Scalar(1));
 
-    Eigen::Matrix<Scalar, N, Eigen::Dynamic> offspring(n, lambda);
+    Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0,
+        N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxLambda> offspring(n, lambda);
     for(int i = 0; i < lambda; ++i)
     {
         Eigen::Vector<Scalar, N> z(n);

@@ -59,6 +59,7 @@ struct cmaes_policy
         restart_strategy restart{restart_strategy::none};
         std::optional<std::uint64_t> seed{};             // RNG seed
         cmaes_options cmaes{};                           // Detection params (Hansen tutorial)
+        std::optional<std::uint32_t> eigendecomposition_skip_generations{}; // Override Hansen formula
     };
 
     template <typename P = void>
@@ -88,6 +89,9 @@ struct cmaes_policy
         double best_ever_value{std::numeric_limits<double>::infinity()};
 
         Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, N, N>> eigen_solver;
+
+        bool covariance_dirty{false};
+        std::uint32_t decomposition_skip_k{1};
     };
 
     options_type options{};
@@ -158,6 +162,21 @@ struct cmaes_policy
         s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
         s.D = Eigen::Vector<double, N>::Ones(n);
         s.eigen_solver.compute(s.C);
+        s.covariance_dirty = false;
+
+        // Hansen (2023) arXiv:1604.00772: eigendecomposition skip period.
+        // K = max(1, floor(1 / (10 * n * (c_1 + c_mu)))).
+        if(options.eigendecomposition_skip_generations.has_value())
+        {
+            s.decomposition_skip_k = options.eigendecomposition_skip_generations.value();
+        }
+        else
+        {
+            double skip_denom = 10.0 * n * (s.params.c_1 + s.params.c_mu);
+            s.decomposition_skip_k = std::max(
+                std::uint32_t{1},
+                static_cast<std::uint32_t>(std::floor(1.0 / skip_denom)));
+        }
 
         if(options.seed.has_value())
             s.rng.seed(static_cast<unsigned>(options.seed.value()));
@@ -179,12 +198,16 @@ struct cmaes_policy
         const int mu = s.params.mu;
         double old_best = s.objective_value;
 
+        // MaxPop covers IPOP doubling for n=16 with K=3 restarts:
+        // lambda_max = 4*16*2^3 = 512.
+        constexpr int MaxPop = 512;
+
         // 1. Sample offspring
-        auto offspring = detail::sample_offspring(
+        auto offspring = detail::sample_offspring<double, N, MaxPop>(
             s.mean, s.sigma, s.B, s.D, lambda, s.rng);
 
         // 2. Evaluate with optional repair+penalty
-        Eigen::VectorXd fitnesses(lambda);
+        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> fitnesses(lambda);
         for(int i = 0; i < lambda; ++i)
         {
             Eigen::Vector<double, N> xi = offspring.col(i);
@@ -237,20 +260,29 @@ struct cmaes_policy
                 * delta_w;
 
         // 10. Compute deltas for covariance update
-        Eigen::Matrix<double, N, Eigen::Dynamic> deltas(n, lambda);
+        Eigen::Matrix<double, N, Eigen::Dynamic, 0,
+            N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxPop> deltas(n, lambda);
         for(int i = 0; i < lambda; ++i)
             deltas.col(i) = (offspring.col(idx[i]) - mean_old) / s.sigma;
 
         // 11. Update covariance
         detail::update_covariance(s.C, s.p_c, h_sigma,
                                   s.params.c_1, s.params.c_mu, s.params.c_c,
-                                  s.params.weights, deltas, s.B, s.D, mu);
+                                  s.params.weights, deltas, s.B, s.D, mu,
+                                  s.covariance_dirty);
 
         // 12. Set new mean
         s.mean = mean_new;
 
-        // 13. Eigendecompose updated C (reuses pre-allocated solver workspace)
-        detail::eigendecompose(s.C, s.B, s.D, s.eigen_solver);
+        // 13. Eigendecompose updated C (reuses pre-allocated solver workspace).
+        // Hansen (2023) arXiv:1604.00772: eigendecomposition skip.
+        // Dirty flag (D-09): skip when covariance unchanged.
+        // Periodic (D-10): decompose every K generations.
+        if(s.covariance_dirty || s.generation % s.decomposition_skip_k == 0)
+        {
+            detail::eigendecompose(s.C, s.B, s.D, s.eigen_solver);
+            s.covariance_dirty = false;
+        }
 
         // 14. Track best
         double gen_best_f = fitnesses[idx[0]];
@@ -314,30 +346,33 @@ struct cmaes_policy
                 // IPOP: double lambda, reset state, keep best.
                 int new_lambda = s.params.lambda * 2;
 
-                // Guard: if MaxPopulation is a compile-time ceiling,
-                // the doubled population must not exceed it.
+                // Guard: the doubled population must not exceed the
+                // stack-allocated ceiling (MaxPop) or the policy template
+                // ceiling (MaxPopulation).
+                bool pop_overflow = (new_lambda > MaxPop);
                 if constexpr(MaxPopulation != dynamic_dimension)
+                    pop_overflow = pop_overflow || (new_lambda > MaxPopulation);
+
+                if(pop_overflow)
                 {
-                    if(new_lambda > MaxPopulation)
-                    {
-                        policy_status = solver_status::stalled;
-                        ++s.generation;
-                        return step_result<double>{
-                            .objective_value = s.objective_value,
-                            .gradient_norm = s.sigma * s.D.maxCoeff(),
-                            .step_size = 0.0,
-                            .objective_change = 0.0,
-                            .improved = false,
-                            .x_norm = s.x.norm(),
-                            .policy_status = policy_status,
-                        };
-                    }
+                    policy_status = solver_status::stalled;
+                    ++s.generation;
+                    return step_result<double>{
+                        .objective_value = s.objective_value,
+                        .gradient_norm = s.sigma * s.D.maxCoeff(),
+                        .step_size = 0.0,
+                        .objective_change = 0.0,
+                        .improved = false,
+                        .x_norm = s.x.norm(),
+                        .policy_status = policy_status,
+                    };
                 }
 
                 s.params = detail::compute_constants(n, new_lambda);
                 s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
                 s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
                 s.D = Eigen::Vector<double, N>::Ones(n);
+                s.covariance_dirty = false;
                 s.p_sigma.setZero();
                 s.p_c.setZero();
                 s.sigma = s.initial_sigma;
