@@ -304,10 +304,13 @@ void run_all_nablapp_solvers(
         run_constrained("augmented_lagrangian", augmented_lagrangian_policy<>{});
 
     // CMA-ES: global problems with bounds.
+    // IPOP restarts are essential for multimodal landscapes — without them
+    // CMA-ES collapses into a single basin and the covariance degenerates.
     if constexpr(is_global && is_bound)
     {
         typename cmaes_policy<>::options_type cmaes_opts{};
         cmaes_opts.seed = seed;
+        cmaes_opts.restart = cmaes_policy<>::restart_strategy::ipop;
         std::vector<trace_entry> trace;
         auto r = run_nablapp_solver<cmaes_policy<>>(
             "cmaes", problem_name, prob, max_iterations, collect_trace, trace,
