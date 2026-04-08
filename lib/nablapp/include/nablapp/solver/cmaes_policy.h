@@ -303,19 +303,22 @@ struct cmaes_policy
         // 15. Status detection: roundoff_limited and diverged (Hansen tutorial)
         std::optional<solver_status> policy_status{};
 
+        // NaN guard: numerical overflow in sigma or eigendecomposition
+        // produces NaN which defeats all subsequent comparisons.
+        if(!std::isfinite(s.sigma) || !std::isfinite(s.D.maxCoeff()))
+            policy_status = solver_status::diverged;
+
         // Sigma collapse detection (roundoff_limited)
         double sigma_collapse_thr = options.cmaes.sigma_collapse_threshold.value_or(1e-12);
-        if(s.sigma * s.D.maxCoeff() < sigma_collapse_thr * s.initial_sigma)
+        if(!policy_status.has_value()
+           && s.sigma * s.D.maxCoeff() < sigma_collapse_thr * s.initial_sigma)
             policy_status = solver_status::roundoff_limited;
 
         // Condition number explosion detection (diverged)
         double cond_limit = options.cmaes.condition_number_limit.value_or(1e14);
         double cond = s.D.maxCoeff() / std::max(s.D.minCoeff(), 1e-30);
-        if(cond * cond > cond_limit)
-        {
-            if(!policy_status.has_value())
-                policy_status = solver_status::diverged;
-        }
+        if(!policy_status.has_value() && cond * cond > cond_limit)
+            policy_status = solver_status::diverged;
 
         // 16. IPOP stagnation check (D-04)
         if(options.restart == restart_strategy::ipop)
