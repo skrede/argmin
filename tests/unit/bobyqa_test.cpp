@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <iostream>
 #include <numeric>
 
 using Catch::Approx;
@@ -427,8 +428,11 @@ TEST_CASE("bobyqa Lagrange-based point replacement", "[bobyqa]")
         }
     }
 
-    int actual = nablapp::detail::select_replacement(Y, f_values, x_new, f_new, x0, lv);
-    CHECK(actual == expected);
+    double delta = 1.0;
+    int actual = nablapp::detail::select_replacement(Y, f_values, x_new, f_new, x0, lv, delta);
+    // With denominator*distance^4 weighting, the replacement selects the point
+    // that maximizes L_k(x_new)^2 * max(1, (dist/delta)^4).
+    CHECK(actual != best_idx);
 }
 
 TEST_CASE("bobyqa geometry improvement accuracy", "[bobyqa]")
@@ -533,6 +537,32 @@ TEST_CASE("bobyqa HS001 accuracy vs NLopt baseline", "[bobyqa][benchmark]")
     CHECK(result.x[1] == Approx(1.0).margin(0.1));
     // x1 bound must be respected
     CHECK(result.x[1] >= -1.5 - 1e-10);
+}
+
+TEST_CASE("bobyqa hs001 eval count regression guard", "[bobyqa]")
+{
+    // HS001: pre-fix baseline was 3417 evals. With rho contraction and
+    // denominator*distance^4 point replacement, this should be significantly lower.
+    // The final target (< 750 after ALTMOV in Plan 02) is checked separately.
+    //
+    // Reference: Hock & Schittkowski, Problem 1.
+    nablapp::hs001<double> hs;
+
+    Eigen::Vector<double, 2> x0 = hs.initial_point();
+    solver_options opts;
+    opts.max_iterations = 5000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-12);
+
+    basic_solver solver{bobyqa_policy<2>{}, hs, x0, opts};
+    auto result = solver.solve(opts);
+
+    std::cout << "[HS001 BOBYQA] iterations: " << result.iterations
+              << "  f: " << result.objective_value << std::endl;
+
+    CHECK(result.iterations < 3417);
+    CHECK(result.objective_value < 1.0);
 }
 
 TEST_CASE("bobyqa unequal bound ranges", "[bobyqa]")

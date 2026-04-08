@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 namespace nablapp::detail
 {
@@ -300,6 +301,35 @@ Scalar update_radius(Scalar delta, Scalar rho, Scalar step_norm, Scalar delta_ma
     return delta;
 }
 
+// Contract rho using Powell's three-regime schedule.
+//
+// When the trust-region radius delta has shrunk to rho, the resolution
+// parameter rho is contracted and a new trust-region round begins.
+// Three regimes based on rho / rho_end:
+//   ratio <= 16:  jump straight to rho_end (close enough)
+//   ratio <= 250: geometric mean sqrt(ratio) * rho_end
+//   ratio > 250:  aggressive 0.1x contraction
+//
+// Returns {rho_new, delta_new}.
+//
+// Reference: Powell 2009, Section 5.
+// Adapted from NLopt bobyqa.c lines 3003-3017.
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L3003
+template <typename Scalar = double>
+std::pair<Scalar, Scalar> contract_rho(Scalar rho, Scalar rho_end)
+{
+    Scalar ratio = rho / rho_end;
+    Scalar rho_new;
+    if(ratio <= Scalar(16))
+        rho_new = rho_end;
+    else if(ratio <= Scalar(250))
+        rho_new = std::sqrt(ratio) * rho_end;
+    else
+        rho_new = Scalar(0.1) * rho;
+    Scalar delta_new = std::max(Scalar(0.5) * rho, rho_new);
+    return {rho_new, delta_new};
+}
+
 // Check if interpolation geometry is adequate.
 //
 // Computes the distance of each interpolation point from x_k. Returns
@@ -331,25 +361,35 @@ int check_geometry(const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
     return worst_idx;
 }
 
-// Select which interpolation point to replace using Lagrange values.
+// Select which interpolation point to replace using denominator * distance^4
+// weighting.
 //
-// Hybrid criterion inspired by Powell 2009 Section 4:
-// - When f_new improves the best: replace worst-f non-best point (preserve
-//   geometry, remove the least useful objective sample).
-// - When f_new does NOT improve: choose the point k that maximizes
-//   |L_k(x_new)| among non-best points. Replacing the point with largest
-//   Lagrange value produces the best-conditioned interpolation update.
+// For each non-best point k, compute:
+//   distsq = ||Y[:,k] - x_ref||^2
+//   temp   = max(1, (distsq / delsq)^2)     -- distance^4 amplification
+//   score  = temp * L_k(x_new)^2
+// Select k with maximum score. Far-away points with large Lagrange
+// influence are strongly preferred for replacement, maintaining both
+// geometry compactness and interpolation conditioning.
+//
+// When f_new < f_best (improvement step), distances are recomputed from
+// x_new instead of x_k, and the better selection is kept.
 //
 // Reference: Powell 2009, Section 4.
+// Adapted from NLopt bobyqa.c lines 2493-2549 and 2656-2707.
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2493
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2656
 template <typename Scalar = double, int N = nablapp::dynamic_dimension, int P = nablapp::dynamic_dimension>
 int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
                        const Eigen::Vector<Scalar, P>& f_values,
                        const Eigen::Vector<Scalar, N>& x_new,
                        Scalar f_new,
                        const Eigen::Vector<Scalar, N>& x_k,
-                       const Eigen::VectorXd& lagrange_values_at_xnew)
+                       const Eigen::VectorXd& lagrange_values_at_xnew,
+                       Scalar delta)
 {
     const int m = Y.cols();
+    const Scalar delsq = delta * delta;
 
     // Find the best point (lowest f) -- never replace it
     int best_idx = 0;
@@ -359,35 +399,55 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
             best_idx = i;
     }
 
-    // Improvement step: replace worst-f non-best point
+    // Score each non-best point: L_k(x_new)^2 * max(1, (dist/delta)^4)
+    // with distances from x_k (current best).
+    int knew = (best_idx == 0) ? 1 : 0;
+    Scalar best_score = Scalar(-1);
+
+    for(int k = 0; k < m; ++k)
+    {
+        if(k == best_idx) continue;
+        Scalar distsq = (Y.col(k) - x_k).squaredNorm();
+        Scalar ratio_sq = distsq / delsq;
+        Scalar temp = std::max(Scalar(1), ratio_sq * ratio_sq);
+        Scalar lk = lagrange_values_at_xnew[k];
+        Scalar score = temp * lk * lk;
+        if(score > best_score)
+        {
+            best_score = score;
+            knew = k;
+        }
+    }
+
+    // When f_new improves the best, recompute with distances from x_new
+    // and keep the better selection.
+    // Adapted from NLopt bobyqa.c lines 2656-2707.
     if(f_new < f_values[best_idx])
     {
-        int worst_idx = (best_idx == 0) ? 1 : 0;
-        for(int i = 0; i < m; ++i)
+        int knew_alt = knew;
+        Scalar best_score_alt = Scalar(-1);
+
+        for(int k = 0; k < m; ++k)
         {
-            if(i == best_idx) continue;
-            if(f_values[i] > f_values[worst_idx])
-                worst_idx = i;
+            if(k == best_idx) continue;
+            Scalar distsq = (Y.col(k) - x_new).squaredNorm();
+            Scalar ratio_sq = distsq / delsq;
+            Scalar temp = std::max(Scalar(1), ratio_sq * ratio_sq);
+            Scalar lk = lagrange_values_at_xnew[k];
+            Scalar score = temp * lk * lk;
+            if(score > best_score_alt)
+            {
+                best_score_alt = score;
+                knew_alt = k;
+            }
         }
-        return worst_idx;
+
+        // Use alternative selection if it has a meaningfully better score
+        if(best_score_alt > best_score)
+            knew = knew_alt;
     }
 
-    // Non-improvement step: Lagrange criterion, max |L_k(x_new)|
-    int chosen = (best_idx == 0) ? 1 : 0;
-    Scalar max_abs_lk = std::abs(lagrange_values_at_xnew[chosen]);
-
-    for(int i = 0; i < m; ++i)
-    {
-        if(i == best_idx) continue;
-        Scalar abs_lk = std::abs(lagrange_values_at_xnew[i]);
-        if(abs_lk > max_abs_lk)
-        {
-            max_abs_lk = abs_lk;
-            chosen = i;
-        }
-    }
-
-    return chosen;
+    return knew;
 }
 
 // Backward-compatible overload: farthest-point heuristic (no Lagrange values).

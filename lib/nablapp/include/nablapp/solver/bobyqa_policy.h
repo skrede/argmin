@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <tuple>
 
 namespace nablapp
 {
@@ -270,16 +271,15 @@ struct bobyqa_policy
         s.delta = detail::update_radius(s.delta, accuracy_ratio, d_norm, s.delta_max,
                                         options.trust);
 
-        // Powell 2009, Section 5: two-radius rho contraction.
-        // Only contract rho when the solver has genuinely stalled at this
-        // scale (non-improving step AND rescue_counter indicates repeated
-        // failure), not from a single bad accuracy ratio shrinking delta.
+        // Powell 2009, Section 5: rho contraction using three-regime schedule.
+        // Only contract when genuinely stalled (non-improving + rescue active),
+        // preventing premature contraction from a single bad accuracy ratio.
+        // Three-regime schedule replaces the fixed 0.5x factor.
+        // Adapted from NLopt bobyqa.c lines 3003-3017.
         if(s.delta <= s.rho)
         {
-            if(!s.last_improved && s.rescue_counter > 0)
-            {
-                s.rho = std::max(s.rho * 0.5, s.rho_end);
-            }
+            if(!s.last_improved && s.rescue_counter > 0 && s.rho > s.rho_end)
+                std::tie(s.rho, s.delta) = detail::contract_rho(s.rho, s.rho_end);
             s.delta = std::max(s.delta, s.rho);
         }
 
@@ -289,7 +289,7 @@ struct bobyqa_policy
         Eigen::VectorXd lv_xnew = detail::compute_lagrange_at_point(
             s.Y, s.f_values, s.x_scaled, x_new_scaled);
         int k = detail::select_replacement(
-            s.Y, s.f_values, x_new_scaled, f_new, s.x_scaled, lv_xnew);
+            s.Y, s.f_values, x_new_scaled, f_new, s.x_scaled, lv_xnew, s.delta);
 
         // Update interpolation set (scaled coordinates)
         s.Y.col(k) = x_new_scaled;
@@ -437,7 +437,7 @@ struct bobyqa_policy
         double effective_change = improved ? obj_change : s.delta;
 
         double grad_proxy = mg.norm();
-        if(s.delta > s.final_trust_radius)
+        if(s.rho > s.rho_end)
             grad_proxy = std::max(grad_proxy, 1.0);
 
         return step_result<double>{
