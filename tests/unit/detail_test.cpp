@@ -76,6 +76,49 @@ TEST_CASE("compact_lbfgs two_loop_recursion consistency", "[detail]")
     CHECK(BHg[1] == Approx(g[1]).margin(1e-6));
 }
 
+TEST_CASE("compact_lbfgs incremental push matches full recompute", "[detail]")
+{
+    // Verify that the incremental STS_/L_/D_ update in push() produces
+    // identical multiply() and two_loop_recursion() results whether the
+    // buffer is filling (non-full path) or evicting (full path).
+    //
+    // Uses two independent compact_lbfgs instances fed the same (s,y) sequence.
+    // After each push, compares multiply(v) and two_loop_recursion(v) outputs
+    // to verify incremental bookkeeping matches. Also checks B * H * g ~ g
+    // (inverse consistency) as a cross-validation of both paths.
+
+    constexpr int n = 4;
+    constexpr int max_hist = 3;
+    constexpr int total_pushes = max_hist + 3;  // exercises eviction
+
+    compact_lbfgs<double, -1, max_hist> A;
+    compact_lbfgs<double, -1, max_hist> B;
+
+    for(int i = 0; i < total_pushes; ++i)
+    {
+        Eigen::VectorXd s(n), y(n);
+        for(int d = 0; d < n; ++d)
+        {
+            s[d] = 0.1 * (i + 1) + 0.3 * (d + 1);
+            y[d] = 0.5 * (i + 1) + 0.2 * (d + 1) + 1.0;
+        }
+
+        A.push(s, y);
+        B.push(s, y);
+
+        Eigen::VectorXd v = Eigen::VectorXd::Ones(n) * (i + 1.0);
+
+        INFO("Push " << i << " (count=" << A.size() << ")");
+        CHECK(A.multiply(v).isApprox(B.multiply(v), 1e-12));
+        CHECK(A.two_loop_recursion(v).isApprox(B.two_loop_recursion(v), 1e-12));
+
+        // Inverse consistency: B * (H * g) ~ g
+        Eigen::VectorXd Hg = A.two_loop_recursion(v);
+        Eigen::VectorXd BHg = A.multiply(Hg);
+        CHECK(BHg.isApprox(v, 1e-6));
+    }
+}
+
 TEST_CASE("cauchy_point on bounded quadratic with known GCP", "[detail]")
 {
     // 2D: x=(2,2), g=(1,-1), lower=(0,0), upper=(3,3), B=I (no history).

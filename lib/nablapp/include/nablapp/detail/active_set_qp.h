@@ -409,7 +409,7 @@ public:
 
         for(int iter = 0; iter < max_iter; ++iter)
         {
-            g_k_.head(n) = G * x + d;
+            g_k_.head(n).noalias() = G * x + d;
 
             const int wsize = static_cast<int>(W_.size());
             for(int k = 0; k < wsize; ++k)

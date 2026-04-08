@@ -26,9 +26,15 @@ namespace nablapp::detail
 // pairs). All history-dimension storage is fixed-size when MaxHistory is
 // known at compile time, eliminating per-iteration heap allocation.
 //
+// STS_, L_, D_ are maintained incrementally in push() at O(n*k) per push
+// instead of O(n*k^2) full recompute. STS_ stores the unscaled S^T*S;
+// theta_ scaling is applied only in recompute_middle().
+//
 // Reference: N&W Section 9.2 (compact representation, eq. 9.15),
 //            N&W Algorithm 9.1 (two-loop recursion),
 //            Byrd, Lu, Nocedal, Zhu 1995 (L-BFGS-B algorithm).
+//            Incremental STS/L/D update: standard rank-1 dot-product
+//            maintenance (see N&W eq. 7.17 for analogous BFGS increments).
 
 template <typename Scalar = double, int N = nablapp::dynamic_dimension, int MaxHistory = 7>
 class compact_lbfgs
@@ -77,6 +83,10 @@ public:
             Y_.col(count_) = y;
             rho_[count_] = Scalar(1) / sTy_effective;
             ++count_;
+
+            // Incremental STS_, L_, D_ for the new column.
+            // Cost: O(n*k) dot products for the new column.
+            update_new_column();
         }
         else
         {
@@ -89,6 +99,12 @@ public:
             S_.col(MaxHistory - 1) = s;
             Y_.col(MaxHistory - 1) = y;
             rho_[MaxHistory - 1] = Scalar(1) / sTy_effective;
+
+            // Shift STS_, L_, D_ to match column eviction, then compute new
+            // column entries. Cost: O(k^2) element shifts + O(n*k) dots.
+            // The .eval() calls are mandatory: without them Eigen lazy
+            // evaluation corrupts overlapping source/destination regions.
+            shift_evict_and_update();
         }
 
         // Initial Hessian scaling: theta = y^T y / s^T y (N&W eq. 9.6, inverse of gamma_0).
@@ -96,7 +112,6 @@ public:
         theta_ = y.squaredNorm() / sTy_effective;
         theta_ = std::clamp(theta_, Scalar(1e-10), Scalar(1e10));
 
-        recompute_LD();
         recompute_middle();
     }
 
@@ -111,10 +126,11 @@ public:
         auto S = S_.leftCols(k);
         auto Y = Y_.leftCols(k);
 
-        // W^T * v (2k x 1)
+        // W^T * v (2k x 1). noalias() safe: Wv segments are distinct from
+        // all source operands (S, Y, v).
         Eigen::Vector<Scalar, 2 * MaxHistory> Wv;
-        Wv.head(k) = theta_ * (S.transpose() * v);
-        Wv.segment(MaxHistory, k) = Y.transpose() * v;
+        Wv.head(k).noalias() = theta_ * (S.transpose() * v);
+        Wv.segment(MaxHistory, k).noalias() = Y.transpose() * v;
 
         // Solve M * z = W^T * v using pre-allocated middle matrix
         auto M = middle_.template topLeftCorner<2 * MaxHistory, 2 * MaxHistory>();
@@ -134,8 +150,11 @@ public:
         Wv_active.tail(k) = Wv.segment(MaxHistory, k);
         Eigen::Matrix<Scalar, Eigen::Dynamic, 1> z = ldlt.solve(Wv_active);
 
-        // B*v = theta*v - W*z
-        Eigen::Vector<Scalar, N> Wz = (theta_ * (S * z.head(k)) + Y * z.tail(k)).eval();
+        // B*v = theta*v - W*z. noalias() safe: Wz is a fresh variable,
+        // distinct from S, Y, z.
+        Eigen::Vector<Scalar, N> Wz(v.size());
+        Wz.noalias() = theta_ * (S * z.head(k));
+        Wz.noalias() += Y * z.tail(k);
         return (theta_ * v - Wz).eval();
     }
 
@@ -269,17 +288,57 @@ public:
     static constexpr int capacity() { return MaxHistory; }
 
 private:
-    void recompute_LD()
+    // Incrementally update STS_, L_, D_ for the newly appended column.
+    // Called after count_ has been incremented and S_/Y_ columns written.
+    // Cost: O(n*k) dot products for the new column.
+    void update_new_column()
     {
         const int k = count_;
-        for(int i = 0; i < k; ++i)
+        const int col = k - 1;
+
+        for(int j = 0; j < k; ++j)
         {
-            D_[i] = S_.col(i).dot(Y_.col(i));
-            for(int j = 0; j < i; ++j)
-                L_(i, j) = S_.col(i).dot(Y_.col(j));
-            for(int j = i; j < k; ++j)
-                L_(i, j) = Scalar(0);
+            Scalar dot = S_.col(j).dot(S_.col(col));
+            STS_(j, col) = dot;
+            STS_(col, j) = dot;
         }
+
+        for(int j = 0; j < col; ++j)
+            L_(col, j) = S_.col(col).dot(Y_.col(j));
+        L_(col, col) = Scalar(0);
+
+        D_[col] = S_.col(col).dot(Y_.col(col));
+    }
+
+    // Shift STS_, L_, D_ after column eviction (row/col 0 removed, remainder
+    // shifted up-left), then compute new entries for the last column.
+    // Cost: O(k^2) element shifts + O(n*k) dot products.
+    void shift_evict_and_update()
+    {
+        const int k = MaxHistory;
+
+        // Shift cached matrices: remove row/col 0, move remainder up-left.
+        // .eval() is mandatory — Eigen lazy evaluation aliases overlapping
+        // source/destination regions in the same matrix.
+        STS_.template topLeftCorner<MaxHistory - 1, MaxHistory - 1>() =
+            STS_.template bottomRightCorner<MaxHistory - 1, MaxHistory - 1>().eval();
+        L_.template topLeftCorner<MaxHistory - 1, MaxHistory - 1>() =
+            L_.template bottomRightCorner<MaxHistory - 1, MaxHistory - 1>().eval();
+        D_.template head<MaxHistory - 1>() = D_.template tail<MaxHistory - 1>().eval();
+
+        // Compute new column/row entries for position k-1
+        for(int j = 0; j < k; ++j)
+        {
+            Scalar dot = S_.col(j).dot(S_.col(k - 1));
+            STS_(j, k - 1) = dot;
+            STS_(k - 1, j) = dot;
+        }
+
+        for(int j = 0; j < k - 1; ++j)
+            L_(k - 1, j) = S_.col(k - 1).dot(Y_.col(j));
+        L_(k - 1, k - 1) = Scalar(0);
+
+        D_[k - 1] = S_.col(k - 1).dot(Y_.col(k - 1));
     }
 
     // Middle matrix M stored in block layout:
@@ -287,13 +346,14 @@ private:
     //   [0..MaxHistory-1, MaxHistory..2*MaxHistory] = L
     //   [MaxHistory.., 0..MaxHistory-1]            = L^T
     //   [MaxHistory.., MaxHistory..]               = -D
+    // Assemble middle matrix M from incrementally maintained STS_, L_, D_.
+    // Cost: O(k^2) block copies instead of O(n*k^2) S^T*S recomputation.
     void recompute_middle()
     {
         const int k = count_;
-        auto S = S_.leftCols(k);
 
         middle_.template topLeftCorner<MaxHistory, MaxHistory>()
-            .topLeftCorner(k, k).noalias() = theta_ * (S.transpose() * S);
+            .topLeftCorner(k, k) = theta_ * STS_.topLeftCorner(k, k);
         middle_.template block<MaxHistory, MaxHistory>(0, MaxHistory)
             .topLeftCorner(k, k) = L_.topLeftCorner(k, k);
         middle_.template block<MaxHistory, MaxHistory>(MaxHistory, 0)
@@ -304,6 +364,7 @@ private:
 
     Eigen::Matrix<Scalar, N, MaxHistory> S_{};
     Eigen::Matrix<Scalar, N, MaxHistory> Y_{};
+    Eigen::Matrix<Scalar, MaxHistory, MaxHistory> STS_{};  // cached unscaled S^T*S
     Eigen::Matrix<Scalar, MaxHistory, MaxHistory> L_{};
     Eigen::Vector<Scalar, MaxHistory> D_{};
     Eigen::Matrix<Scalar, 2 * MaxHistory, 2 * MaxHistory> middle_{};
