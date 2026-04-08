@@ -181,6 +181,55 @@ public:
         return BFF;
     }
 
+    // Build full dense Hessian B = theta*I - W * M^{-1} * W^T.
+    // Single LDLT factorization of 2k x 2k active submatrix instead of n
+    // separate factorizations from n multiply() calls. Returns by value
+    // (NRVO eliminates copy).
+    // Reference: N&W Section 9.2, eq. 9.15 (compact representation).
+    Eigen::Matrix<Scalar, N, N> dense_hessian(int n) const
+    {
+        Eigen::Matrix<Scalar, N, N> B;
+        if constexpr(N != Eigen::Dynamic)
+            B.setIdentity();
+        else
+            B.setIdentity(n, n);
+        B *= theta_;
+
+        if(count_ == 0) return B;
+
+        const int k = count_;
+        auto S = S_.leftCols(k);
+        auto Y = Y_.leftCols(k);
+
+        // W = [theta*S, Y], size n x 2k
+        Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0, N, 2 * MaxHistory> W;
+        if constexpr(N != Eigen::Dynamic)
+            W.resize(N, 2 * k);
+        else
+            W.resize(n, 2 * k);
+        W.leftCols(k).noalias() = theta_ * S;
+        W.rightCols(k) = Y;
+
+        // Extract active 2k x 2k submatrix from middle_ (Pitfall 2: blocks
+        // are at MaxHistory offsets, not contiguous 2k x 2k)
+        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                       0, 2 * MaxHistory, 2 * MaxHistory> M_active(2 * k, 2 * k);
+        M_active.topLeftCorner(k, k) = middle_.topLeftCorner(k, k);
+        M_active.block(0, k, k, k) = middle_.block(0, MaxHistory, k, k);
+        M_active.block(k, 0, k, k) = middle_.block(MaxHistory, 0, k, k);
+        M_active.block(k, k, k, k) = middle_.block(MaxHistory, MaxHistory, k, k);
+
+        // Solve M * Z = W^T => Z = M^{-1} * W^T, size 2k x n
+        Eigen::LDLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                                  0, 2 * MaxHistory, 2 * MaxHistory>> ldlt(M_active);
+        auto Z = ldlt.solve(W.transpose()).eval();
+
+        // B = theta*I - W * Z
+        B.noalias() -= W * Z;
+
+        return B;
+    }
+
     // Two-loop recursion computing H_k * g (N&W Algorithm 9.1).
     // Returns H*g without negation; caller negates for search direction.
     Eigen::Vector<Scalar, N> two_loop_recursion(const Eigen::Vector<Scalar, N>& g) const

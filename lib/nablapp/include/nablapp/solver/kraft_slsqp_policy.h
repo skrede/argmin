@@ -88,7 +88,15 @@ struct kraft_slsqp_policy
         detail::compact_lbfgs<double, N, 10> lbfgs;
         detail::active_set_qp_solver<double, N> qp_solver;
         Eigen::Matrix<double, N, N> B_workspace;
-        Eigen::Vector<double, N> ej_workspace;
+
+        // Pre-allocated constraint workspace (sized in init(), reused in step())
+        Eigen::VectorXd c_all;
+        Eigen::MatrixXd J_all;
+        Eigen::VectorXd b_eq_workspace;
+        Eigen::VectorXd b_ineq_workspace;
+        Eigen::MatrixXd AAt_workspace;
+        Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;
+
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
@@ -144,15 +152,23 @@ struct kraft_slsqp_policy
             const int m = s.n_eq + s.n_ineq;
             if(m > 0)
             {
-                Eigen::VectorXd c_all(m);
-                problem.constraints(x0, c_all);
-                s.c_eq = c_all.head(s.n_eq);
-                s.c_ineq = c_all.tail(s.n_ineq);
+                s.c_all.resize(m);
+                s.J_all.resize(m, n);
+                s.b_eq_workspace.resize(s.n_eq);
+                s.b_ineq_workspace.resize(s.n_ineq);
+                if(s.n_eq > 0)
+                {
+                    s.AAt_workspace.resize(s.n_eq, s.n_eq);
+                    s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(s.n_eq);
+                }
 
-                Eigen::MatrixXd J_all(m, n);
-                problem.constraint_jacobian(x0, J_all);
-                s.J_eq = J_all.topRows(s.n_eq);
-                s.J_ineq = J_all.bottomRows(s.n_ineq);
+                problem.constraints(x0, s.c_all);
+                s.c_eq = s.c_all.head(s.n_eq);
+                s.c_ineq = s.c_all.tail(s.n_ineq);
+
+                problem.constraint_jacobian(x0, s.J_all);
+                s.J_eq = s.J_all.topRows(s.n_eq);
+                s.J_ineq = s.J_all.bottomRows(s.n_ineq);
 
                 s.lambda = Eigen::VectorXd::Zero(m);
             }
@@ -161,12 +177,13 @@ struct kraft_slsqp_policy
         {
             s.n_eq = 0;
             s.n_ineq = 0;
+            s.c_all.resize(0);
+            s.J_all.resize(0, n);
             s.c_eq.resize(0);
             s.c_ineq.resize(0);
             s.J_eq.resize(0, n);
             s.J_ineq.resize(0, n);
             s.lambda.resize(0);
-
         }
 
         s.lbfgs = detail::compact_lbfgs<double, N, 10>{};
@@ -177,7 +194,6 @@ struct kraft_slsqp_policy
         int max_constraints = s.n_eq + s.n_ineq + 2 * n;
         s.qp_solver = detail::active_set_qp_solver<double, N>(n, max_constraints);
         s.B_workspace.setZero(n, n);
-        s.ej_workspace = Eigen::Vector<double, N>::Zero(n);
 
         return s;
     }
@@ -195,36 +211,30 @@ struct kraft_slsqp_policy
             {
                 if(s.n_eq + s.n_ineq > 0)
                 {
-                    Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
-                    s.problem->constraints(s.x, c_all);
-                    s.c_eq = c_all.head(s.n_eq);
-                    s.c_ineq = c_all.tail(s.n_ineq);
+                    s.problem->constraints(s.x, s.c_all);
+                    s.c_eq = s.c_all.head(s.n_eq);
+                    s.c_ineq = s.c_all.tail(s.n_ineq);
 
-                    Eigen::MatrixXd J_all(s.n_eq + s.n_ineq, s.n);
-                    s.problem->constraint_jacobian(s.x, J_all);
-                    s.J_eq = J_all.topRows(s.n_eq);
-                    s.J_ineq = J_all.bottomRows(s.n_ineq);
+                    s.problem->constraint_jacobian(s.x, s.J_all);
+                    s.J_eq = s.J_all.topRows(s.n_eq);
+                    s.J_ineq = s.J_all.bottomRows(s.n_ineq);
                 }
             }
         }
 
         const int n = s.n;
 
-        // Build QP Hessian from compact L-BFGS using pre-allocated workspace
-        for(int j = 0; j < n; ++j)
-        {
-            s.ej_workspace[j] = 1.0;
-            s.B_workspace.col(j) = s.lbfgs.multiply(s.ej_workspace);
-            s.ej_workspace[j] = 0.0;
-        }
+        // Build QP Hessian via single dense operation instead of n multiply() calls.
+        // One 2k x 2k LDLT factorization vs n separate ones.
+        s.B_workspace = s.lbfgs.dense_hessian(n);
 
         // Symmetrize for numerical safety
         s.B_workspace = (0.5 * (s.B_workspace + s.B_workspace.transpose())).eval();
 
         Eigen::Matrix<double, Eigen::Dynamic, N> A_eq = s.J_eq;
-        Eigen::VectorXd b_eq = -s.c_eq;
+        s.b_eq_workspace = -s.c_eq;
         Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq = s.J_ineq;
-        Eigen::VectorXd b_ineq = -s.c_ineq;
+        s.b_ineq_workspace = -s.c_ineq;
 
         // Box bounds on the step
         Eigen::Vector<double, N> p_lower = (Eigen::Vector<double, N>(s.lower) -
@@ -258,11 +268,11 @@ struct kraft_slsqp_policy
         // Fix: use the minimum-norm solution x0 = A^T*(AA^T)^{-1}*b.
         // Reference: N&W Section 16.2, phase-1 feasibility.
         Eigen::Vector<double, N> p_start = Eigen::Vector<double, N>::Zero(n);
-        if(s.n_eq > 0 && b_eq.squaredNorm() > 1e-30)
+        if(s.n_eq > 0 && s.b_eq_workspace.squaredNorm() > 1e-30)
         {
-            Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
-            Eigen::LDLT<Eigen::MatrixXd> ldlt(AAt);
-            Eigen::VectorXd y = ldlt.solve(b_eq);
+            s.AAt_workspace.noalias() = A_eq * A_eq.transpose();
+            s.ldlt_feasibility.compute(s.AAt_workspace);
+            Eigen::VectorXd y = s.ldlt_feasibility.solve(s.b_eq_workspace);
             p_start = Eigen::Vector<double, N>(A_eq.transpose() * y);
 
             for(int i = 0; i < n; ++i)
@@ -270,7 +280,8 @@ struct kraft_slsqp_policy
         }
 
         auto qp_res = s.qp_solver.solve(s.B_workspace, Eigen::Vector<double, N>(s.g),
-                                         A_eq, b_eq, A_ineq, b_ineq,
+                                         A_eq, s.b_eq_workspace, A_ineq,
+                                         s.b_ineq_workspace,
                                          p_lo, p_hi, p_start, qp_opts);
 
         Eigen::Vector<double, N> p = qp_res.x;
@@ -370,15 +381,13 @@ struct kraft_slsqp_policy
         {
             if(s.n_eq + s.n_ineq > 0)
             {
-                Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
-                s.problem->constraints(s.x, c_all);
-                s.c_eq = c_all.head(s.n_eq);
-                s.c_ineq = c_all.tail(s.n_ineq);
+                s.problem->constraints(s.x, s.c_all);
+                s.c_eq = s.c_all.head(s.n_eq);
+                s.c_ineq = s.c_all.tail(s.n_ineq);
 
-                Eigen::MatrixXd J_all(s.n_eq + s.n_ineq, n);
-                s.problem->constraint_jacobian(s.x, J_all);
-                s.J_eq = J_all.topRows(s.n_eq);
-                s.J_ineq = J_all.bottomRows(s.n_ineq);
+                s.problem->constraint_jacobian(s.x, s.J_all);
+                s.J_eq = s.J_all.topRows(s.n_eq);
+                s.J_ineq = s.J_all.bottomRows(s.n_ineq);
             }
         }
 
@@ -444,15 +453,13 @@ struct kraft_slsqp_policy
         {
             if(s.n_eq + s.n_ineq > 0)
             {
-                Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
-                s.problem->constraints(x0, c_all);
-                s.c_eq = c_all.head(s.n_eq);
-                s.c_ineq = c_all.tail(s.n_ineq);
+                s.problem->constraints(x0, s.c_all);
+                s.c_eq = s.c_all.head(s.n_eq);
+                s.c_ineq = s.c_all.tail(s.n_ineq);
 
-                Eigen::MatrixXd J_all(s.n_eq + s.n_ineq, s.n);
-                s.problem->constraint_jacobian(x0, J_all);
-                s.J_eq = J_all.topRows(s.n_eq);
-                s.J_ineq = J_all.bottomRows(s.n_ineq);
+                s.problem->constraint_jacobian(x0, s.J_all);
+                s.J_eq = s.J_all.topRows(s.n_eq);
+                s.J_ineq = s.J_all.bottomRows(s.n_ineq);
             }
         }
         s.iteration = 0;
