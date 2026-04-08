@@ -284,6 +284,8 @@ struct bobyqa_policy
         }
 
         // Powell 2009, Section 4: Lagrange-based point replacement.
+        // Full SVD evaluation retained for accurate point selection;
+        // the main O(m*p^2) saving is in update_model_incremental below.
         Eigen::VectorXd lv_xnew = detail::compute_lagrange_at_point(
             s.Y, s.f_values, s.x_scaled, x_new_scaled);
         int k = detail::select_replacement(
