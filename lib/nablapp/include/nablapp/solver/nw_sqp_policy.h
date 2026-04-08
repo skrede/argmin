@@ -77,6 +77,12 @@ struct nw_sqp_policy
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
+        // Pre-allocated constraint workspace (sized in init(), reused in step())
+        // Eliminates per-step heap allocations for constraint evaluation.
+        Eigen::VectorXd c_all;
+        Eigen::MatrixXd J_all;
+        Eigen::VectorXd c_eq_trial;
+        Eigen::VectorXd c_ineq_trial;
         double objective_value{};
         double sigma{1.0};
         detail::bfgs_hessian<double, N> B;
@@ -121,19 +127,24 @@ struct nw_sqp_policy
         s.objective_value = problem.value(x0);
         problem.gradient(x0, s.g);
 
+        // Pre-allocate constraint workspace (sized once, reused in step()).
+        // Follows the kraft_slsqp pre-allocation pattern.
+        s.c_all.resize(m);
+        s.J_all.resize(m, n);
+        s.c_eq_trial.resize(s.n_eq);
+        s.c_ineq_trial.resize(s.n_ineq);
+
         // Evaluate constraints: single vector, split into eq/ineq
-        Eigen::VectorXd c_all(m);
         if(m > 0)
-            problem.constraints(x0, c_all);
-        s.c_eq = c_all.head(s.n_eq);
-        s.c_ineq = c_all.tail(s.n_ineq);
+            problem.constraints(x0, s.c_all);
+        s.c_eq = s.c_all.head(s.n_eq);
+        s.c_ineq = s.c_all.tail(s.n_ineq);
 
         // Evaluate Jacobian: single matrix, split into eq/ineq
-        Eigen::MatrixXd J_all(m, n);
         if(m > 0)
-            problem.constraint_jacobian(x0, J_all);
-        s.J_eq = J_all.topRows(s.n_eq);
-        s.J_ineq = J_all.bottomRows(s.n_ineq);
+            problem.constraint_jacobian(x0, s.J_all);
+        s.J_eq = s.J_all.topRows(s.n_eq);
+        s.J_ineq = s.J_all.bottomRows(s.n_ineq);
 
         // Box bounds
         if constexpr(bound_constrained<Problem>)
@@ -266,7 +277,6 @@ struct nw_sqp_policy
         const std::uint16_t max_ls = options.line_search.max_iterations;
 
         Eigen::Vector<double, N> x_trial(n);
-        Eigen::VectorXd c_eq_trial, c_ineq_trial;
         double f_trial{};
 
         for(std::uint16_t ls = 0; ls < max_ls; ++ls)
@@ -277,15 +287,12 @@ struct nw_sqp_policy
                 x_trial = detail::project(x_trial, s.lower, s.upper);
 
             f_trial = s.problem->value(x_trial);
-            {
-                Eigen::VectorXd c_all(m);
-                if(m > 0)
-                    s.problem->constraints(x_trial, c_all);
-                c_eq_trial = c_all.head(s.n_eq);
-                c_ineq_trial = c_all.tail(s.n_ineq);
-            }
-            double phi_trial = detail::l1_merit(f_trial, c_eq_trial,
-                                                c_ineq_trial, s.sigma);
+            if(m > 0)
+                s.problem->constraints(x_trial, s.c_all);
+            s.c_eq_trial = s.c_all.head(s.n_eq);
+            s.c_ineq_trial = s.c_all.tail(s.n_ineq);
+            double phi_trial = detail::l1_merit(f_trial, s.c_eq_trial,
+                                                s.c_ineq_trial, s.sigma);
 
             if(phi_trial <= phi0 + ls_c1 * alpha * dphi0)
                 break;
@@ -303,15 +310,12 @@ struct nw_sqp_policy
         s.x = x_trial;
         s.objective_value = f_trial;
         s.problem->gradient(s.x, s.g);
-        s.c_eq = c_eq_trial;
-        s.c_ineq = c_ineq_trial;
-        {
-            Eigen::MatrixXd J_all(m, n);
-            if(m > 0)
-                s.problem->constraint_jacobian(s.x, J_all);
-            s.J_eq = J_all.topRows(s.n_eq);
-            s.J_ineq = J_all.bottomRows(s.n_ineq);
-        }
+        s.c_eq = s.c_eq_trial;
+        s.c_ineq = s.c_ineq_trial;
+        if(m > 0)
+            s.problem->constraint_jacobian(s.x, s.J_all);
+        s.J_eq = s.J_all.topRows(s.n_eq);
+        s.J_ineq = s.J_all.bottomRows(s.n_ineq);
 
         Eigen::Vector<double, N> sk = s.x - x_old;
 
@@ -368,20 +372,14 @@ struct nw_sqp_policy
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
-        {
-            Eigen::VectorXd c_all(m);
-            if(m > 0)
-                s.problem->constraints(x0, c_all);
-            s.c_eq = c_all.head(s.n_eq);
-            s.c_ineq = c_all.tail(s.n_ineq);
-        }
-        {
-            Eigen::MatrixXd J_all(m, n);
-            if(m > 0)
-                s.problem->constraint_jacobian(x0, J_all);
-            s.J_eq = J_all.topRows(s.n_eq);
-            s.J_ineq = J_all.bottomRows(s.n_ineq);
-        }
+        if(m > 0)
+            s.problem->constraints(x0, s.c_all);
+        s.c_eq = s.c_all.head(s.n_eq);
+        s.c_ineq = s.c_all.tail(s.n_ineq);
+        if(m > 0)
+            s.problem->constraint_jacobian(x0, s.J_all);
+        s.J_eq = s.J_all.topRows(s.n_eq);
+        s.J_ineq = s.J_all.bottomRows(s.n_ineq);
         s.iteration = 0;
     }
 
