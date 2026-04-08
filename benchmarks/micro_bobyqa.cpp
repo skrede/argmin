@@ -1,5 +1,6 @@
 // Micro-benchmark: nablapp BOBYQA vs NLopt BOBYQA on HS problems.
 //
+// Three-way comparison: nablapp<2> (fixed-N), nablapp<> (dynamic), NLopt.
 // Profiles per-solve wall time and eval counts for direct comparison.
 // Run under perf for flamegraph analysis:
 //   perf record -F 99999 -g -- ./micro_bobyqa
@@ -14,7 +15,9 @@
 #include <nlopt.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <print>
 
 namespace
@@ -25,6 +28,69 @@ struct timing
     double wall_us;
     double objective;
     std::uint32_t evals;
+};
+
+// Dynamic-dimension HS001 wrapper for bobyqa_policy<> benchmarking.
+struct hs001_dynamic
+{
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr nablapp::problem_class pclass = nablapp::problem_class::bound_constrained;
+
+    [[nodiscard]] int dimension() const { return 2; }
+
+    [[nodiscard]] double value(const Eigen::VectorXd& x) const
+    {
+        double t1 = x[1] - x[0] * x[0];
+        double t2 = 1.0 - x[0];
+        return 100.0 * t1 * t1 + t2 * t2;
+    }
+
+    [[nodiscard]] Eigen::VectorXd lower_bounds() const
+    {
+        Eigen::VectorXd lb(2);
+        lb << -std::numeric_limits<double>::infinity(), -1.5;
+        return lb;
+    }
+
+    [[nodiscard]] Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd::Constant(2, std::numeric_limits<double>::infinity());
+    }
+
+    [[nodiscard]] Eigen::VectorXd initial_point() const
+    {
+        return Eigen::VectorXd{{-2.0, 1.0}};
+    }
+};
+
+// Dynamic-dimension HS005 wrapper for bobyqa_policy<> benchmarking.
+struct hs005_dynamic
+{
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr nablapp::problem_class pclass = nablapp::problem_class::bound_constrained;
+
+    [[nodiscard]] int dimension() const { return 2; }
+
+    [[nodiscard]] double value(const Eigen::VectorXd& x) const
+    {
+        double d = x[0] - x[1];
+        return std::sin(x[0] + x[1]) + d * d - 1.5 * x[0] + 2.5 * x[1] + 1.0;
+    }
+
+    [[nodiscard]] Eigen::VectorXd lower_bounds() const
+    {
+        return Eigen::VectorXd{{-1.5, -3.0}};
+    }
+
+    [[nodiscard]] Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd{{4.0, 3.0}};
+    }
+
+    [[nodiscard]] Eigen::VectorXd initial_point() const
+    {
+        return Eigen::VectorXd{{0.0, 0.0}};
+    }
 };
 
 // NLopt callback for HS001.
@@ -42,8 +108,8 @@ double nlopt_hs005(unsigned, const double* x, double*, void*)
     return std::sin(x[0] + x[1]) + d * d - 1.5 * x[0] + 2.5 * x[1] + 1.0;
 }
 
-template <typename Problem>
-timing bench_nablapp(const Problem& problem, std::uint32_t reps)
+template <typename Policy, typename Problem>
+timing bench_nablapp(Policy policy, const Problem& problem, std::uint32_t reps)
 {
     auto x0 = problem.initial_point();
     nablapp::solver_options opts;
@@ -54,7 +120,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::bobyqa_policy<2>{}, problem, x0, opts};
+        nablapp::basic_solver solver{policy, problem, x0, opts};
         solver.solve();
     }
 
@@ -63,7 +129,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::bobyqa_policy<2>{}, problem, x0, opts};
+        nablapp::basic_solver solver{policy, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -161,20 +227,34 @@ int main()
     std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
 
     // HS001
-    std::println("\n--- HS001 (Rosenbrock variant, x1 >= -1.5) ---");
-    auto na1 = bench_nablapp(nablapp::hs001<double>{}, reps);
-    auto nl1 = bench_nlopt_hs001(reps);
-    print_row("nablapp", na1);
-    print_row("nlopt", nl1);
-    std::println("  ratio: {:.1f}x wall, {:.1f}x evals", na1.wall_us / nl1.wall_us, double(na1.evals) / nl1.evals);
+    {
+        std::println("\n--- HS001 (Rosenbrock variant, x1 >= -1.5) ---");
+        auto fixed = bench_nablapp(nablapp::bobyqa_policy<2>{}, nablapp::hs001<double>{}, reps);
+        auto dyn   = bench_nablapp(nablapp::bobyqa_policy<>{},  hs001_dynamic{}, reps);
+        auto nlopt = bench_nlopt_hs001(reps);
+        print_row("nablapp<2>", fixed);
+        print_row("nablapp<>", dyn);
+        print_row("nlopt", nlopt);
+        std::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
+            fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);
+        std::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
+            dyn.wall_us / nlopt.wall_us, double(dyn.evals) / nlopt.evals);
+    }
 
     // HS005
-    std::println("\n--- HS005 (trigonometric, tight bounds) ---");
-    auto na5 = bench_nablapp(nablapp::hs005<double>{}, reps);
-    auto nl5 = bench_nlopt_hs005(reps);
-    print_row("nablapp", na5);
-    print_row("nlopt", nl5);
-    std::println("  ratio: {:.1f}x wall, {:.1f}x evals", na5.wall_us / nl5.wall_us, double(na5.evals) / nl5.evals);
+    {
+        std::println("\n--- HS005 (trigonometric, tight bounds) ---");
+        auto fixed = bench_nablapp(nablapp::bobyqa_policy<2>{}, nablapp::hs005<double>{}, reps);
+        auto dyn   = bench_nablapp(nablapp::bobyqa_policy<>{},  hs005_dynamic{}, reps);
+        auto nlopt = bench_nlopt_hs005(reps);
+        print_row("nablapp<2>", fixed);
+        print_row("nablapp<>", dyn);
+        print_row("nlopt", nlopt);
+        std::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
+            fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);
+        std::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
+            dyn.wall_us / nlopt.wall_us, double(dyn.evals) / nlopt.evals);
+    }
 
     std::println("\nProfile with:");
     std::println("  perf stat ./micro_bobyqa");
