@@ -14,6 +14,7 @@
 //            6 (geometry check).
 
 #include "nablapp/types.h"
+#include "nablapp/detail/quadratic_model.h"
 #include "nablapp/options/trust_region_options.h"
 #include "nablapp/detail/bound_projection.h"
 
@@ -499,6 +500,266 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
     }
 
     return farthest_idx;
+}
+
+// Compute box-constrained step bounds along a direction from x_opt.
+//
+// For each dimension, tightens slbd/subd so that x_opt + t*direction
+// stays within [lower, upper] for t in [slbd, subd].
+//
+// Reference: Powell 2009, Section 6 (ALTMOV).
+// Adapted from NLopt bobyqa.c lines 891-920.
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L891
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+std::pair<Scalar, Scalar> altmov_clip_step_bounds(
+    const Eigen::Vector<Scalar, N>& x_opt,
+    const Eigen::Vector<Scalar, N>& direction,
+    Scalar adelt,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
+{
+    const int n = x_opt.size();
+    Scalar distsq = direction.squaredNorm();
+    Scalar subd = adelt / std::sqrt(std::max(distsq, std::numeric_limits<Scalar>::epsilon()));
+    Scalar slbd = -subd;
+    Scalar sumin = std::min(Scalar(1), subd);
+
+    for(int i = 0; i < n; ++i)
+    {
+        Scalar t = direction[i];
+        if(t > Scalar(0))
+        {
+            if(slbd * t < lower[i] - x_opt[i])
+                slbd = (lower[i] - x_opt[i]) / t;
+            if(subd * t > upper[i] - x_opt[i])
+                subd = std::max(sumin, (upper[i] - x_opt[i]) / t);
+        }
+        else if(t < Scalar(0))
+        {
+            if(slbd * t > upper[i] - x_opt[i])
+                slbd = (upper[i] - x_opt[i]) / t;
+            if(subd * t < lower[i] - x_opt[i])
+                subd = std::max(sumin, (lower[i] - x_opt[i]) / t);
+        }
+    }
+
+    return {slbd, subd};
+}
+
+// Search through interpolation points for the best line-search candidate
+// maximizing |L_knew(x)|^2 for geometry improvement.
+//
+// For each point k (k != kopt), evaluates L_knew at box-clipped step
+// endpoints along the direction x_opt -> Y[:,k], tracking the candidate
+// with maximum |L_knew|^2. Uses stored pinv_Phi for O(m*p) Lagrange
+// evaluation instead of O(m*p^2) SVD per candidate.
+//
+// Reference: Powell 2009, Section 6 (ALTMOV line search).
+// Adapted from NLopt bobyqa.c lines 864-982.
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L864
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_line_search(
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
+    const Eigen::Vector<Scalar, N>& x_opt,
+    int kopt,
+    int knew,
+    Scalar adelt,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper,
+    const quadratic_model<Scalar, N>& model)
+{
+    const int m = Y.cols();
+    Scalar best_score = Scalar(-1);
+    Eigen::Vector<Scalar, N> best_point = x_opt;
+
+    for(int k = 0; k < m; ++k)
+    {
+        if(k == kopt) continue;
+
+        Eigen::Vector<Scalar, N> d = (Y.col(k) - x_opt).eval();
+        auto [slbd, subd] = altmov_clip_step_bounds(x_opt, d, adelt, lower, upper);
+        if(slbd >= subd) continue;
+
+        // Evaluate L_knew at box-clipped step endpoints
+        for(Scalar t : {slbd, subd})
+        {
+            Eigen::Vector<Scalar, N> candidate = project(
+                (x_opt + t * d).eval(), lower, upper);
+            auto lv = compute_lagrange_incremental(model, model.x_base, candidate);
+            Scalar score = lv[knew] * lv[knew];
+            if(score > best_score)
+            {
+                best_score = score;
+                best_point = candidate;
+            }
+        }
+    }
+
+    return {best_point, best_score};
+}
+
+// Compute the gradient of L_knew at x_opt analytically from the polynomial
+// basis coefficients stored in pinv_Phi.
+//
+// L_knew(x) = pinv_Phi[knew,:] * phi(x) where phi has basis
+// [1, s_1, ..., s_n, 0.5*s_1^2, s_1*s_2, ..., 0.5*s_n^2] with s = x - x_base.
+// The gradient d/dx_j L_knew = pinv_Phi[knew, 1+j] + sum of quadratic terms.
+//
+// Reference: Powell 2009, Section 6 (gradient of Lagrange function).
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> lagrange_gradient(
+    const quadratic_model<Scalar, N>& model,
+    int knew,
+    const Eigen::Vector<Scalar, N>& x)
+{
+    const int n = x.size();
+    Eigen::Vector<Scalar, N> s = (x - model.x_base).eval();
+    Eigen::Vector<Scalar, N> grad(n);
+    const auto& row = model.pinv_Phi.row(knew);
+
+    for(int j = 0; j < n; ++j)
+    {
+        Scalar val = row[1 + j];
+        int idx = 1 + n;
+        for(int a = 0; a < n; ++a)
+        {
+            for(int b = a; b < n; ++b)
+            {
+                if(a == j && b == j)
+                    val += row[idx] * s[j];
+                else if(a == j)
+                    val += row[idx] * s[b];
+                else if(b == j)
+                    val += row[idx] * s[a];
+                ++idx;
+            }
+        }
+        grad[j] = val;
+    }
+
+    return grad;
+}
+
+// Constrained Cauchy step along gradient of L_knew for geometry improvement.
+//
+// Computes the steepest-ascent direction of L_knew at x_opt, projects
+// onto box constraints within the trust region, and selects the candidate
+// maximizing |L_knew|^2. Tries both ascent and descent directions.
+//
+// Reference: Powell 2009, Section 6 (ALTMOV Cauchy step).
+// Adapted from NLopt bobyqa.c lines 1017-1125.
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L1017
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_cauchy_step(
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
+    const Eigen::Vector<Scalar, N>& x_opt,
+    int knew,
+    Scalar adelt,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper,
+    const quadratic_model<Scalar, N>& model)
+{
+    const int n = x_opt.size();
+    Scalar best_score = Scalar(0);
+    Eigen::Vector<Scalar, N> best_point = x_opt;
+
+    Eigen::Vector<Scalar, N> grad = lagrange_gradient(model, knew, x_opt);
+
+    // Try both ascent (+grad) and descent (-grad) per NLopt lines 1138-1156
+    for(int sign = 0; sign < 2; ++sign)
+    {
+        Eigen::Vector<Scalar, N> glag = (sign == 0) ? grad : Eigen::Vector<Scalar, N>(-grad);
+
+        Scalar wfixsq = Scalar(0);
+        Scalar ggfree = Scalar(0);
+        Eigen::Vector<Scalar, N> w = Eigen::Vector<Scalar, N>::Zero(n);
+        Scalar bigstp = Scalar(2) * adelt;
+
+        for(int i = 0; i < n; ++i)
+        {
+            Scalar tempa = std::min(x_opt[i] - lower[i], glag[i]);
+            Scalar tempb = std::max(x_opt[i] - upper[i], glag[i]);
+            if(tempa > Scalar(0) || tempb < Scalar(0))
+            {
+                w[i] = bigstp;
+                ggfree += glag[i] * glag[i];
+            }
+        }
+        if(ggfree <= Scalar(0)) continue;
+
+        // Iteratively fix components that hit bounds
+        Scalar step_len = adelt / std::sqrt(ggfree);
+        for(int iter = 0; iter < n; ++iter)
+        {
+            Scalar wsqsav = wfixsq;
+            Scalar budget = adelt * adelt - wfixsq;
+            if(budget <= Scalar(0)) break;
+            step_len = std::sqrt(budget / std::max(ggfree, std::numeric_limits<Scalar>::epsilon()));
+            ggfree = Scalar(0);
+            for(int i = 0; i < n; ++i)
+            {
+                if(w[i] != bigstp) continue;
+                Scalar trial = x_opt[i] - step_len * glag[i];
+                if(trial <= lower[i])
+                {
+                    w[i] = lower[i] - x_opt[i];
+                    wfixsq += w[i] * w[i];
+                }
+                else if(trial >= upper[i])
+                {
+                    w[i] = upper[i] - x_opt[i];
+                    wfixsq += w[i] * w[i];
+                }
+                else
+                    ggfree += glag[i] * glag[i];
+            }
+            if(wfixsq <= wsqsav || ggfree <= Scalar(0)) break;
+        }
+
+        for(int i = 0; i < n; ++i)
+        {
+            if(w[i] == bigstp)
+                w[i] = -step_len * glag[i];
+        }
+
+        Eigen::Vector<Scalar, N> candidate = project(
+            (x_opt + w).eval(), lower, upper);
+        auto lv = compute_lagrange_incremental(model, model.x_base, candidate);
+        Scalar score = lv[knew] * lv[knew];
+        if(score > best_score)
+        {
+            best_score = score;
+            best_point = candidate;
+        }
+    }
+
+    return {best_point, best_score};
+}
+
+// ALTMOV geometry improvement step: maximize |L_knew(x)| for point replacement.
+//
+// Orchestrates line search through interpolation points and constrained
+// Cauchy step, returning whichever candidate maximizes |L_knew(x)|^2.
+//
+// Reference: Powell 2009, Section 6 (ALTMOV).
+// Adapted from NLopt bobyqa.c lines 743-1159.
+// https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L743
+template <typename Scalar = double, int N = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, N> altmov_geometry_step(
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
+    const Eigen::Vector<Scalar, N>& x_opt,
+    int kopt,
+    int knew,
+    Scalar adelt,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper,
+    const quadratic_model<Scalar, N>& model)
+{
+    auto [line_point, line_score] = altmov_line_search<Scalar, N>(
+        Y, x_opt, kopt, knew, adelt, lower, upper, model);
+    auto [cauchy_point, cauchy_score] = altmov_cauchy_step<Scalar, N>(
+        Y, x_opt, knew, adelt, lower, upper, model);
+    return (cauchy_score > line_score) ? cauchy_point : line_point;
 }
 
 }

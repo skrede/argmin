@@ -272,13 +272,14 @@ struct bobyqa_policy
                                         options.trust);
 
         // Powell 2009, Section 5: rho contraction using three-regime schedule.
-        // Only contract when genuinely stalled (non-improving + rescue active),
-        // preventing premature contraction from a single bad accuracy ratio.
+        // Contract rho when delta and step norm are both at or below rho
+        // and the accuracy ratio was non-positive (step didn't improve).
         // Three-regime schedule replaces the fixed 0.5x factor.
-        // Adapted from NLopt bobyqa.c lines 3003-3017.
+        // Adapted from NLopt bobyqa.c lines 2993-3017.
+        // https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2993
         if(s.delta <= s.rho)
         {
-            if(!s.last_improved && s.rescue_counter > 0 && s.rho > s.rho_end)
+            if(accuracy_ratio <= 0.0 && std::max(s.delta, d_norm) <= s.rho && s.rho > s.rho_end)
                 std::tie(s.rho, s.delta) = detail::contract_rho(s.rho, s.rho_end);
             s.delta = std::max(s.delta, s.rho);
         }
@@ -336,6 +337,10 @@ struct bobyqa_policy
         }
 
         // Powell 2009, Section 6 (ALTMOV concept): geometry improvement.
+        // When the trust-region step is short relative to rho, the model
+        // needs better geometry. Select the point with worst Lagrange
+        // conditioning and place a new point at distance rho in the
+        // direction of the replaced point to maintain interpolation spread.
         // All geometry operations in scaled coordinates.
         if(d_norm < 0.5 * s.rho && s.rho > s.rho_end)
         {
@@ -359,13 +364,12 @@ struct bobyqa_policy
                 }
             }
 
-            // Geometry-improving point in scaled space
             Eigen::Vector<double, N> dir = (s.Y.col(k_geo) - s.x_scaled).eval();
-            double dir_norm = dir.norm();
-            if(dir_norm > 1e-15)
+            double geo_dir_norm = dir.norm();
+            if(geo_dir_norm > 1e-15)
             {
                 Eigen::Vector<double, N> geo_pt_scaled = detail::project(
-                    (s.x_scaled + s.rho * dir / dir_norm).eval(),
+                    (s.x_scaled + s.rho * dir / geo_dir_norm).eval(),
                     s.lower_scaled, s.upper_scaled);
                 Eigen::Vector<double, N> geo_pt_orig =
                     (geo_pt_scaled.array() * s.scale.array()).matrix();
@@ -373,8 +377,6 @@ struct bobyqa_policy
                 s.Y.col(k_geo) = geo_pt_scaled;
                 s.f_values[k_geo] = geo_f;
 
-                // Full rebuild for geometry improvement: geometry points can be far
-                // from x_base, where LDLT pseudoinverse refresh loses accuracy.
                 s.model = detail::build_model(s.Y, s.f_values, s.x_scaled);
 
                 if(geo_f < s.objective_value)
