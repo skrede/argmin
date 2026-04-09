@@ -1,6 +1,8 @@
 #include "nablapp/detail/active_set_qp.h"
+#include "nablapp/detail/givens_qr_update.h"
 
 #include <Eigen/Core>
+#include <Eigen/QR>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -233,4 +235,153 @@ TEST_CASE("solve_qp N&W Example 16.1 equality", "[qp]")
     CHECK(result.x[0] == Approx(2.0).margin(1e-8));
     CHECK(result.x[1] == Approx(-1.0).margin(1e-8));
     CHECK(result.x[2] == Approx(1.0).margin(1e-8));
+}
+
+// Givens QR update tests.
+// Reference: Golub & Van Loan, "Matrix Computations" 4th ed., Algorithm 5.1.3.
+//            N&W Algorithm 16.3 (QR update in active-set context).
+
+TEST_CASE("givens_rotation zeroes target element", "[qp][givens]")
+{
+    auto g = givens_rotation<double>::compute(3.0, 4.0);
+    double r = g.c * 3.0 + g.s * 4.0;
+    double z = -g.s * 3.0 + g.c * 4.0;
+    CHECK(z == Approx(0.0).margin(1e-14));
+    CHECK(r == Approx(5.0).margin(1e-14));
+    CHECK(g.c * g.c + g.s * g.s == Approx(1.0).margin(1e-14));
+}
+
+TEST_CASE("givens_rotation edge cases", "[qp][givens]")
+{
+    SECTION("b = 0")
+    {
+        auto g = givens_rotation<double>::compute(5.0, 0.0);
+        CHECK(g.c == 1.0);
+        CHECK(g.s == 0.0);
+    }
+    SECTION("|b| > |a|")
+    {
+        auto g = givens_rotation<double>::compute(1.0, 10.0);
+        double z = -g.s * 1.0 + g.c * 10.0;
+        CHECK(z == Approx(0.0).margin(1e-14));
+    }
+    SECTION("negative values")
+    {
+        auto g = givens_rotation<double>::compute(-3.0, -4.0);
+        double z = -g.s * (-3.0) + g.c * (-4.0);
+        CHECK(z == Approx(0.0).margin(1e-14));
+    }
+}
+
+TEST_CASE("add_constraint_qr preserves Q*R = A_W^T", "[qp][givens]")
+{
+    // Start with 2 constraints on a 4D problem, add a 3rd.
+    Eigen::MatrixXd A(2, 4);
+    A << 1.0, 0.0, 1.0, 0.0,
+         0.0, 1.0, 0.0, 1.0;
+
+    Eigen::HouseholderQR<Eigen::MatrixXd> qr(A.transpose());
+    Eigen::MatrixXd Q = qr.householderQ() * Eigen::MatrixXd::Identity(4, 4);
+    Eigen::MatrixXd R = Eigen::MatrixXd::Zero(4, 4);
+    auto Rqr = qr.matrixQR();
+    for(int j = 0; j < 2; ++j)
+        for(int i = 0; i <= j; ++i)
+            R(i, j) = Rqr(i, j);
+
+    // Verify initial factorization
+    CHECK((Q * R.leftCols(2) - A.transpose()).norm() < 1e-12);
+
+    // Add a rank-increasing constraint
+    Eigen::VectorXd a_new(4);
+    a_new << 1.0, 1.0, 0.0, 0.0;
+
+    add_constraint_qr<double>(Q, R, a_new, 3);
+
+    // Verify Q*R = [A^T | a_new]
+    Eigen::MatrixXd AT_aug(4, 3);
+    AT_aug.leftCols(2) = A.transpose();
+    AT_aug.col(2) = a_new;
+    CHECK((Q * R.leftCols(3) - AT_aug).norm() < 1e-12);
+
+    // Verify Q orthogonality
+    CHECK((Q.transpose() * Q - Eigen::MatrixXd::Identity(4, 4)).norm() < 1e-12);
+
+    // Verify R is upper triangular
+    for(int j = 0; j < 3; ++j)
+        for(int i = j + 1; i < 4; ++i)
+            CHECK(std::abs(R(i, j)) < 1e-12);
+
+    // Verify null-space: A_aug * Z = 0
+    auto Z = Q.rightCols(1);
+    Eigen::MatrixXd A_aug(3, 4);
+    A_aug.topRows(2) = A;
+    A_aug.row(2) = a_new.transpose();
+    CHECK((A_aug * Z).norm() < 1e-12);
+}
+
+TEST_CASE("remove_constraint_qr preserves Q*R = A_W^T", "[qp][givens]")
+{
+    // Start with 3 constraints on a 4D problem, remove the middle one.
+    Eigen::MatrixXd A(3, 4);
+    A << 1.0, 0.0, 1.0, 0.0,
+         0.0, 1.0, 0.0, 1.0,
+         1.0, 1.0, 0.0, 0.0;
+
+    Eigen::HouseholderQR<Eigen::MatrixXd> qr(A.transpose());
+    Eigen::MatrixXd Q = qr.householderQ() * Eigen::MatrixXd::Identity(4, 4);
+    Eigen::MatrixXd R = Eigen::MatrixXd::Zero(4, 4);
+    auto Rqr = qr.matrixQR();
+    for(int j = 0; j < 3; ++j)
+        for(int i = 0; i <= j; ++i)
+            R(i, j) = Rqr(i, j);
+
+    CHECK((Q * R.leftCols(3) - A.transpose()).norm() < 1e-12);
+
+    // Remove constraint 1 (the middle one)
+    remove_constraint_qr<double>(Q, R, 1, 3);
+
+    // After removal, A_W has rows 0 and 2 of original A
+    Eigen::MatrixXd A_reduced(2, 4);
+    A_reduced.row(0) = A.row(0);
+    A_reduced.row(1) = A.row(2);
+    CHECK((Q * R.leftCols(2) - A_reduced.transpose()).norm() < 1e-10);
+
+    // Verify Q orthogonality
+    CHECK((Q.transpose() * Q - Eigen::MatrixXd::Identity(4, 4)).norm() < 1e-10);
+
+    // Verify null-space: A_reduced * Z = 0
+    auto Z = Q.rightCols(2);
+    CHECK((A_reduced * Z).norm() < 1e-10);
+}
+
+TEST_CASE("stateful solver with Givens matches free-function baseline", "[qp][givens]")
+{
+    // N&W Example 16.3 style problem solved by both paths.
+    Eigen::MatrixXd G = 2.0 * Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd d{{-2.0, -5.0}};
+    Eigen::MatrixXd A_eq(0, 2);
+    Eigen::VectorXd b_eq(0);
+
+    Eigen::MatrixXd A_ineq(5, 2);
+    Eigen::VectorXd b_ineq(5);
+    A_ineq << 1.0, -2.0,
+             -1.0, -2.0,
+             -1.0,  2.0,
+              1.0,  0.0,
+              0.0,  1.0;
+    b_ineq << -2.0, -6.0, -2.0, 0.0, 0.0;
+
+    Eigen::VectorXd x0{{2.0, 0.0}};
+
+    // Free function (no Givens, uses the standalone solve_equality_qp)
+    auto result_free = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    // Stateful solver (uses Givens QR updates)
+    active_set_qp_solver<double> solver(2, 5);
+    auto result_stateful = solver.solve(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    CHECK(result_free.status == qp_status::optimal);
+    CHECK(result_stateful.status == qp_status::optimal);
+    CHECK(result_stateful.x[0] == Approx(result_free.x[0]).margin(1e-10));
+    CHECK(result_stateful.x[1] == Approx(result_free.x[1]).margin(1e-10));
 }

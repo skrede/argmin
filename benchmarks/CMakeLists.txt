@@ -114,6 +114,21 @@ if(NLopt_FOUND)
     endif()
 endif()
 
+# Active-set QP micro-benchmark (nablapp-only, no external dependencies).
+add_executable(micro_active_set_qp micro_active_set_qp.cpp)
+target_link_libraries(micro_active_set_qp PRIVATE nablapp::nablapp)
+target_compile_options(micro_active_set_qp PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(NABLAPP_LTO_SUPPORTED)
+    set_target_properties(micro_active_set_qp PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 option(NABLAPP_BENCH_CERES "Build Ceres comparison benchmarks" ON)
 if(NABLAPP_BENCH_CERES)
     find_package(Ceres CONFIG QUIET)

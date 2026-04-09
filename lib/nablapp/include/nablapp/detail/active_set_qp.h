@@ -12,6 +12,7 @@
 //            N&W eq. 16.29 (blocking step length)
 //            N&W Section 16.5 (indefinite QP extensions)
 
+#include "nablapp/detail/givens_qr_update.h"
 #include "nablapp/types.h"
 #include "nablapp/options/qp_options.h"
 
@@ -21,6 +22,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -347,6 +349,10 @@ class active_set_qp_solver
     // Q matrix: N x N (max-bounded).
     using q_matrix = bounded_matrix<Eigen::Dynamic, Eigen::Dynamic, N, N>;
 
+    // Periodic full refactorization interval to prevent accumulated
+    // Givens rotation floating-point drift.
+    static constexpr uint16_t refactorization_interval{20};
+
 public:
     explicit active_set_qp_solver(int n, int max_constraints)
         : n_(n)
@@ -354,10 +360,10 @@ public:
         , A_full_(max_constraints, n)
         , b_full_(max_constraints)
         , A_W_(max_constraints, n)
-        , qr_(n, n)
         , qr_lambda_(n, n)
         , llt_reduced_(n)
-        , Q_(n, n)
+        , Q_explicit_(n, n)
+        , R_(n, max_constraints)
         , ZtGZ_(n, n)
         , rhs_(n)
         , p_z_(n)
@@ -412,6 +418,8 @@ public:
             constraint_vector(b_view), m_eq, tol, W_);
 
         Eigen::Vector<Scalar, N> x = x0;
+        qr_valid_ = false;
+        givens_update_count_ = 0;
 
         for(int iter = 0; iter < max_iter; ++iter)
         {
@@ -437,6 +445,17 @@ public:
                     res.iterations = iter;
                     return res;
                 }
+                // Remove constraint: Givens QR downdate
+                if(qr_valid_ && wsize > 1)
+                {
+                    remove_constraint_qr<Scalar>(
+                        Q_explicit_, R_, drop, wsize);
+                    ++givens_update_count_;
+                }
+                else
+                {
+                    qr_valid_ = false;
+                }
                 W_.erase(W_.begin() + drop);
             }
             else
@@ -448,7 +467,23 @@ public:
                 x += alpha * p;
 
                 if(alpha < Scalar(1) && blocking_idx >= 0)
+                {
                     W_.push_back(blocking_idx);
+                    // Add constraint: Givens QR update
+                    const int new_wsize = static_cast<int>(W_.size());
+                    if(qr_valid_ && new_wsize <= n)
+                    {
+                        Eigen::Matrix<Scalar, Eigen::Dynamic, 1> a_new =
+                            A_full_.row(blocking_idx).head(n).transpose();
+                        add_constraint_qr<Scalar>(
+                            Q_explicit_, R_, a_new, new_wsize);
+                        ++givens_update_count_;
+                    }
+                    else
+                    {
+                        qr_valid_ = false;
+                    }
+                }
             }
         }
 
@@ -505,8 +540,34 @@ public:
     }
 
 private:
+    // Full QR factorization of A_W^T using Householder, then extract
+    // explicit Q and R matrices. Called on first iteration and
+    // periodically to prevent accumulated Givens drift.
+    void full_qr_factorize(
+        const Eigen::Ref<const constraint_matrix>& A_W,
+        int n,
+        int m)
+    {
+        Eigen::HouseholderQR<qr_matrix> qr(A_W.transpose());
+        Q_explicit_.setIdentity(n, n);
+        Q_explicit_.applyOnTheLeft(qr.householderQ());
+        R_.topLeftCorner(n, m).setZero();
+        auto R_upper = qr.matrixQR();
+        for(int j = 0; j < m; ++j)
+            for(int i = 0; i <= j && i < n; ++i)
+                R_(i, j) = R_upper(i, j);
+        qr_valid_ = true;
+        givens_update_count_ = 0;
+    }
+
     // Solve equality-constrained QP subproblem via null-space method.
+    //
+    // Uses explicit Q/R factorization with Givens-based incremental updates
+    // when the working set changes by one constraint. Falls back to full
+    // HouseholderQR on the first call and periodically to prevent drift.
+    //
     // Reference: N&W Section 16.2, eq. 16.16-16.19.
+    //            N&W Algorithm 16.3 (QR update via Givens rotations).
     std::pair<n_vector, constraint_vector>
     solve_equality_subproblem(
         const Eigen::Ref<const n_square_matrix>& G,
@@ -519,6 +580,7 @@ private:
         {
             llt_reduced_.compute(G);
             n_vector p = llt_reduced_.solve(-g_k);
+            qr_valid_ = false;
             return {p, constraint_vector{}};
         }
 
@@ -530,13 +592,13 @@ private:
             return {p, lambda};
         }
 
-        qr_.compute(A_W.transpose());
-        const int rank = m;  // working set is full rank by construction
+        // Full refactorization if not valid or periodic drift prevention
+        if(!qr_valid_ || givens_update_count_ >= refactorization_interval)
+            full_qr_factorize(A_W, n, m);
 
-        Q_ = qr_.householderQ() * q_matrix::Identity(n, n);
-
-        auto Y_block = Q_.leftCols(rank);
-        auto Z_block = Q_.rightCols(n - rank);
+        const int rank = m;
+        auto Y_block = Q_explicit_.leftCols(rank);
+        auto Z_block = Q_explicit_.rightCols(n - rank);
 
         ZtGZ_.topLeftCorner(n - rank, n - rank).noalias() =
             Z_block.transpose() * G * Z_block;
@@ -561,10 +623,12 @@ private:
     constraint_vector b_full_;
     constraint_matrix A_W_;
 
-    Eigen::HouseholderQR<qr_matrix> qr_;
     Eigen::HouseholderQR<qr_lambda_matrix> qr_lambda_;
     Eigen::LLT<n_square_matrix> llt_reduced_;
-    q_matrix Q_;
+    q_matrix Q_explicit_;
+    qr_matrix R_;
+    bool qr_valid_{false};
+    uint16_t givens_update_count_{0};
     n_square_matrix ZtGZ_;
     n_vector rhs_;
     n_vector p_z_;
