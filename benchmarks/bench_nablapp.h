@@ -195,7 +195,7 @@ auto run_nablapp_solver(std::string_view solver_name,
 
         auto wall_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 
-        benchmark::DoNotOptimize(result.objective_value);
+        benchmark::DoNotOptimize(result);
 
         return benchmark_result{
             .solver = solver_name,
