@@ -46,7 +46,7 @@ auto sample_offspring(
         for(int j = 0; j < n; ++j)
             z[j] = normal(rng);
 
-        offspring.col(i) = mean + sigma * (B * D.asDiagonal() * z);
+        offspring.col(i).noalias() = mean + sigma * (B * D.asDiagonal() * z);
     }
 
     return offspring;

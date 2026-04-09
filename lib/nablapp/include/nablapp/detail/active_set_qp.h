@@ -129,19 +129,25 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp
     // => p_y = 0 (the subproblem has RHS = 0 because we work with p = x - x_k)
     // So p = Z * p_z where (Z^T G Z) p_z = -Z^T g_k  (eq. 16.18)
 
-    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> ZtGZ = Z.transpose() * G * Z;
+    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> ZtGZ(nz, nz);
+    ZtGZ.noalias() = Z.transpose() * G * Z;
     Eigen::LLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> llt(std::move(ZtGZ));
 
     // Check inertia: if reduced Hessian is not positive (semi)definite,
     // the subproblem direction may point to a saddle.
     // For convex QP this won't happen; for indefinite we fall through.
-    Eigen::Matrix<Scalar, Eigen::Dynamic, 1> rhs = -(Z.transpose() * g_k);
+    Eigen::Matrix<Scalar, Eigen::Dynamic, 1> rhs(nz);
+    rhs.noalias() = -(Z.transpose() * g_k);
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1> p_z = llt.solve(rhs);
-    Eigen::Vector<Scalar, N> p = (Z * p_z).eval();
+    Eigen::Vector<Scalar, N> p(n);
+    p.noalias() = Z * p_z;
 
     // Multipliers: (A_W Y)^T lambda = Y^T (g_k + G p)  (eq. 16.19)
-    Eigen::Matrix<Scalar, Eigen::Dynamic, 1> rhs_lam = Y.transpose() * (g_k + G * p);
-    auto qr_ay = (A_W * Y).transpose().householderQr();
+    Eigen::Matrix<Scalar, Eigen::Dynamic, 1> rhs_lam(rank);
+    rhs_lam.noalias() = Y.transpose() * (g_k + G * p);
+    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> AY(m, rank);
+    AY.noalias() = A_W * Y;
+    auto qr_ay = AY.transpose().householderQr();
     Eigen::Vector<Scalar, Mw> lambda = qr_ay.solve(rhs_lam);
 
     return {p, lambda};

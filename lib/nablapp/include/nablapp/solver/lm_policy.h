@@ -140,10 +140,12 @@ struct lm_policy
         const double damp_factor = options.damping_factor.value_or(1.0 / 3.0);
 
         // Gauss-Newton Hessian approximation
-        Eigen::Matrix<double, N, N> H = (s.J.transpose() * s.J).eval();
+        Eigen::Matrix<double, N, N> H(n, n);
+        H.noalias() = s.J.transpose() * s.J;
 
         // Gradient of 0.5*||r||^2: g = J^T * r
-        Eigen::Vector<double, N> g = (s.J.transpose() * s.r).eval();
+        Eigen::Vector<double, N> g(n);
+        g.noalias() = s.J.transpose() * s.r;
 
         // Diagonal-scaled damping (K&W Eq. 6.11)
         for(int i = 0; i < n; ++i)

@@ -412,15 +412,15 @@ struct kraft_slsqp_policy
                 if(s.n_eq > 0 && lam.size() >= s.n_eq)
                 {
                     Eigen::VectorXd lam_eq = lam.head(s.n_eq);
-                    grad_L_old -= J_all_old.topRows(s.n_eq).transpose() * lam_eq;
-                    grad_L_new -= s.J_eq.transpose() * lam_eq;
+                    grad_L_old.noalias() -= J_all_old.topRows(s.n_eq).transpose() * lam_eq;
+                    grad_L_new.noalias() -= s.J_eq.transpose() * lam_eq;
                 }
 
                 if(s.n_ineq > 0 && lam.size() >= s.n_eq + s.n_ineq)
                 {
                     Eigen::VectorXd lam_ineq = lam.segment(s.n_eq, s.n_ineq);
-                    grad_L_old -= J_all_old.bottomRows(s.n_ineq).transpose() * lam_ineq;
-                    grad_L_new -= s.J_ineq.transpose() * lam_ineq;
+                    grad_L_old.noalias() -= J_all_old.bottomRows(s.n_ineq).transpose() * lam_ineq;
+                    grad_L_new.noalias() -= s.J_ineq.transpose() * lam_ineq;
                 }
             }
         }

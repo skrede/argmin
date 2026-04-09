@@ -203,10 +203,11 @@ struct nw_sqp_policy
             // Solve (A_eq A_eq^T) w = b_eq, then p0 = A_eq^T w
             // A*A^T is PSD but may be rank-deficient with numerical noise;
             // LDLT handles indefinite/singular cases that LLT cannot.
-            auto AAt = (A_eq * A_eq.transpose()).eval();
+            Eigen::MatrixXd AAt(A_eq.rows(), A_eq.rows());
+            AAt.noalias() = A_eq * A_eq.transpose();
             Eigen::LDLT<decltype(AAt)> ldlt(AAt);
             auto w = ldlt.solve(b_eq);
-            p0 = A_eq.transpose() * w;
+            p0.noalias() = A_eq.transpose() * w;
         }
 
         // Use embedded QP options with defaults
