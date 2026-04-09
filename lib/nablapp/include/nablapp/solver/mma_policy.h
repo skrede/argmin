@@ -128,7 +128,7 @@ struct mma_policy
 
         s.x = x0;
         s.g.resize(n);
-        s.c_eq = Eigen::Vector<double, MC>{};
+        // c_eq stays zero-size: MMA handles inequality constraints only.
         s.c_ineq.resize(m_ineq);
         s.J_ineq.resize(m_ineq, n);
 
