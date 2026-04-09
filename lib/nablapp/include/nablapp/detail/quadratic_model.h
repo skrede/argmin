@@ -207,7 +207,7 @@ quadratic_model<Scalar, N> build_model(
         for(int i = sv.size(); i < w.size(); ++i)
             w[i] = 0.0;
 
-        model.lagrange_values = U.leftCols(w.size()).template cast<double>() * w;
+        model.lagrange_values = U.template cast<double>() * w.head(m);
     }
 
     // Initialize incremental data structures.
@@ -309,7 +309,7 @@ Eigen::VectorXd compute_lagrange_at_point(
     for(int i = sv.size(); i < w.size(); ++i)
         w[i] = 0.0;
 
-    return U.leftCols(w.size()).template cast<double>() * w;
+    return U.template cast<double>() * w.head(m);
 }
 
 // Update model after replacing interpolation point k with a new point.
