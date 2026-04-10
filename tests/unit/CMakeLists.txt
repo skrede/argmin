@@ -17,6 +17,7 @@ add_executable(nablapp_unit_tests
     multistart_test.cpp
     solver_group_test.cpp
     kraft_slsqp_test.cpp
+    kraft_lsq_qp_test.cpp
     basic_solver_test.cpp
     active_set_qp_test.cpp
     test_functions_test.cpp

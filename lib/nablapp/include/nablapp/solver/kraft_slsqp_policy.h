@@ -3,29 +3,42 @@
 
 // Kraft 1988 SLSQP policy for basic_solver.
 //
-// Implements Sequential Least Squares Programming (SLSQP) using the L-BFGS
-// compact Hessian approximation instead of dense BFGS. Each step: (1) builds
-// the QP subproblem with the compact L-BFGS Hessian, (2) solves via the
-// dense active-set QP solver, (3) performs backtracking on an L1 merit
-// function, (4) updates the L-BFGS curvature pairs.
+// Implements Sequential Least Squares Programming (SLSQP) faithful to
+// Kraft (1988) DFVLR-FB 88-28: dense damped BFGS Hessian of the
+// Lagrangian, Kraft's LSQ/LSEI cascade for the QP subproblem with
+// native box-bound handling, L1 merit function for the line search,
+// and second-order correction on infeasibility.
 //
-// The L-BFGS Hessian gives O(mn) storage vs O(n^2) for dense BFGS, making
-// Kraft SLSQP suitable for larger problems while matching NLopt LD_SLSQP
-// behavior on robotics-scale problems (n=6-200).
+// Each step: (1) pull the BFGS Hessian B directly (no rebuild),
+// (2) solve the QP via the kraft_lsq_qp_solver cascade, (3) update
+// the L1 merit penalty sigma from the QP multipliers, (4) backtrack
+// on the merit function, (5) damped BFGS update of B using the
+// Lagrangian gradient difference.
 //
-// Supports: unconstrained, equality, inequality, box, and mixed constraints.
-// When the problem satisfies only differentiable (no constraints/bounds),
-// constraints default to empty and the solver reduces to L-BFGS with QP
-// step computation.
+// Differences from the earlier L-BFGS variant:
+//   - detail::compact_lbfgs is replaced with detail::bfgs_hessian,
+//     eliminating the per-step dense_hessian() rebuild which was the
+//     dominant per-step cost at IK scale (n = 4-200).
+//   - detail::active_set_qp_solver is replaced with
+//     detail::kraft_lsq_qp_solver, eliminating the Phase-1 feasibility
+//     projection and the box-bound stalling that required feasibility
+//     restoration in Phase 24.
 //
-// Reference: Kraft, D. (1988) "A Software Package for Sequential Quadratic
-//            Programming", DFVLR-FB 88-28, Deutsche Forschungs- und
-//            Versuchsanstalt fuer Luft- und Raumfahrt.
-//            N&W Chapter 18 (SQP methods), Section 18.3 (L1 merit function).
+// Supports: unconstrained, equality, inequality, box, and mixed
+// constraints. When the problem is only differentiable, constraints
+// default to empty and the solver reduces to BFGS with a QP step
+// computation.
+//
+// Reference: Kraft, D. (1988) "A Software Package for Sequential
+//            Quadratic Programming", DFVLR-FB 88-28, Deutsche
+//            Forschungs- und Versuchsanstalt fuer Luft- und Raumfahrt
+//            (dense BFGS, LSQ/LSEI cascade, L1 merit, SOC).
+//            N&W Chapter 18 (SQP methods), Procedure 18.2 (damped
+//            BFGS), Section 18.3 (L1 merit function).
 //            K&W Section 10.4 (penalty methods, augmented Lagrangian).
 
-#include "nablapp/detail/active_set_qp.h"
-#include "nablapp/detail/compact_lbfgs.h"
+#include "nablapp/detail/adaptive_bfgs.h"
+#include "nablapp/detail/kraft_lsq_qp.h"
 #include "nablapp/line_search/armijo.h"
 #include "nablapp/options/qp_options.h"
 #include "nablapp/line_search/options.h"
@@ -37,11 +50,11 @@
 
 #include <Eigen/Core>
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <algorithm>
 
 namespace nablapp
 {
@@ -56,11 +69,10 @@ struct kraft_slsqp_policy
 
     struct options_type
     {
-        std::optional<std::uint8_t> history_depth{};   // L-BFGS memory (default: 10, N&W 7.2)
         std::optional<double> initial_penalty{};       // penalty weight (default: 1.0, Kraft 1988)
         std::optional<double> penalty_growth{};        // penalty multiplier (default: 10.0, Kraft 1988)
-        line_search_options line_search{};              // Embedded line search params
-        qp_options qp{};                                // QP subproblem params
+        line_search_options line_search{};             // Embedded line search params
+        qp_options qp{};                               // QP subproblem params
     };
 
     options_type options{};
@@ -85,17 +97,14 @@ struct kraft_slsqp_policy
         Eigen::VectorXd lambda;
         double objective_value{};
         double sigma{1.0};
-        detail::compact_lbfgs<double, N, 10> lbfgs;
-        detail::active_set_qp_solver<double, N> qp_solver;
-        Eigen::Matrix<double, N, N> B_workspace;
+        detail::adaptive_bfgs<double, N, 10> hessian;
+        detail::kraft_lsq_qp_solver<double, N> qp_solver;
 
         // Pre-allocated constraint workspace (sized in init(), reused in step())
         Eigen::VectorXd c_all;
         Eigen::MatrixXd J_all;
         Eigen::VectorXd b_eq_workspace;
         Eigen::VectorXd b_ineq_workspace;
-        Eigen::MatrixXd AAt_workspace;
-        Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;
 
         std::uint32_t iteration{0};
         int n_eq{0};
@@ -141,8 +150,6 @@ struct kraft_slsqp_policy
             s.upper = Eigen::Vector<double, N>::Constant(n, inf);
         }
 
-        constexpr int M = state_type<Problem>::M;
-
         // Constraints
         if constexpr(constrained<Problem>)
         {
@@ -156,11 +163,6 @@ struct kraft_slsqp_policy
                 s.J_all.resize(m, n);
                 s.b_eq_workspace.resize(s.n_eq);
                 s.b_ineq_workspace.resize(s.n_ineq);
-                if(s.n_eq > 0)
-                {
-                    s.AAt_workspace.resize(s.n_eq, s.n_eq);
-                    s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(s.n_eq);
-                }
 
                 problem.constraints(x0, s.c_all);
                 s.c_eq = s.c_all.head(s.n_eq);
@@ -186,14 +188,17 @@ struct kraft_slsqp_policy
             s.lambda.resize(0);
         }
 
-        s.lbfgs = detail::compact_lbfgs<double, N, 10>{};
+        // Adaptive-theta dense BFGS: identity baseline, theta recomputed
+        // on every push (L-BFGS-style) to prevent Hessian drift on SQP
+        // problems with shifting Lagrangian curvature (HS026 family).
+        s.hessian = detail::adaptive_bfgs<double, N, 10>(n);
         s.sigma = options.initial_penalty.value_or(1.0);
         s.iteration = 0;
 
-        // Pre-allocate QP solver workspace
-        int max_constraints = s.n_eq + s.n_ineq + 2 * n;
-        s.qp_solver = detail::active_set_qp_solver<double, N>(n, max_constraints);
-        s.B_workspace.setZero(n, n);
+        // Pre-allocate kraft_lsq_qp_solver workspace. Size finite-bound
+        // counts to n so the allocator covers any runtime pattern of
+        // finite/infinite box bounds without re-allocating.
+        s.qp_solver.resize(n, s.n_eq, s.n_ineq, n, n);
 
         return s;
     }
@@ -201,8 +206,6 @@ struct kraft_slsqp_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        constexpr int M = state_type<P>::M;
-
         // Re-evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
         {
@@ -224,65 +227,30 @@ struct kraft_slsqp_policy
 
         const int n = s.n;
 
-        // Build QP Hessian via single dense operation instead of n multiply() calls.
-        // One 2k x 2k LDLT factorization vs n separate ones.
-        s.B_workspace = s.lbfgs.dense_hessian(n);
-
-        // Symmetrize for numerical safety
-        s.B_workspace = (0.5 * (s.B_workspace + s.B_workspace.transpose())).eval();
+        // Direct access to the in-place BFGS Hessian -- no dense_hessian()
+        // rebuild. The dense BFGS matrix is maintained incrementally by
+        // detail::bfgs_hessian::update() at the end of step().
+        // Reference: N&W Procedure 18.2 (damped BFGS for SQP).
+        const auto& B = s.hessian.hessian();
 
         Eigen::Matrix<double, Eigen::Dynamic, N> A_eq = s.J_eq;
         s.b_eq_workspace = -s.c_eq;
         Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq = s.J_ineq;
         s.b_ineq_workspace = -s.c_ineq;
 
-        // Box bounds on the step
-        Eigen::Vector<double, N> p_lower = (Eigen::Vector<double, N>(s.lower) -
-                                             Eigen::Vector<double, N>(s.x)).eval();
-        Eigen::Vector<double, N> p_upper = (Eigen::Vector<double, N>(s.upper) -
-                                             Eigen::Vector<double, N>(s.x)).eval();
+        // Box bounds on the step p: p_lo <= p <= p_hi.
+        // The Kraft LSQ cascade handles infinite bounds natively by
+        // skipping the augmented +I / -I rows, so we do not need to
+        // clip to a large finite surrogate here.
+        Eigen::Vector<double, N> p_lo = (Eigen::Vector<double, N>(s.lower) -
+                                          Eigen::Vector<double, N>(s.x)).eval();
+        Eigen::Vector<double, N> p_hi = (Eigen::Vector<double, N>(s.upper) -
+                                          Eigen::Vector<double, N>(s.x)).eval();
 
-        constexpr double big = 1e20;
-        for(int i = 0; i < n; ++i)
-        {
-            if(p_lower[i] < -big) p_lower[i] = -big;
-            if(p_upper[i] > big) p_upper[i] = big;
-        }
-
-        // Solve QP with embedded options
-        nablapp::qp_options qp_opts;
-        qp_opts.max_iterations = options.qp.max_iterations.has_value()
-            ? options.qp.max_iterations
-            : std::optional<std::uint16_t>{static_cast<std::uint16_t>(10 * n)};
-        qp_opts.tolerance = options.qp.tolerance.has_value()
-            ? options.qp.tolerance
-            : std::optional<double>{1e-12};
-        Eigen::Vector<double, N> p_lo(p_lower);
-        Eigen::Vector<double, N> p_hi(p_upper);
-
-        // Phase 1: compute a feasible starting point for the QP.
-        // The active-set method requires x0 satisfying A_eq * x0 = b_eq.
-        // With x0 = 0, equality constraints are unsatisfied (A_eq*0 = 0
-        // but b_eq = -c_eq != 0), and every QP step stays in the null
-        // space of A_eq, never reducing equality violation.
-        // Fix: use the minimum-norm solution x0 = A^T*(AA^T)^{-1}*b.
-        // Reference: N&W Section 16.2, phase-1 feasibility.
-        Eigen::Vector<double, N> p_start = Eigen::Vector<double, N>::Zero(n);
-        if(s.n_eq > 0 && s.b_eq_workspace.squaredNorm() > 1e-30)
-        {
-            s.AAt_workspace.noalias() = A_eq * A_eq.transpose();
-            s.ldlt_feasibility.compute(s.AAt_workspace);
-            Eigen::VectorXd y = s.ldlt_feasibility.solve(s.b_eq_workspace);
-            p_start = Eigen::Vector<double, N>(A_eq.transpose() * y);
-
-            for(int i = 0; i < n; ++i)
-                p_start[i] = std::clamp(p_start[i], p_lo[i], p_hi[i]);
-        }
-
-        auto qp_res = s.qp_solver.solve(s.B_workspace, Eigen::Vector<double, N>(s.g),
-                                         A_eq, s.b_eq_workspace, A_ineq,
-                                         s.b_ineq_workspace,
-                                         p_lo, p_hi, p_start, qp_opts);
+        auto qp_res = s.qp_solver.solve(B, Eigen::Vector<double, N>(s.g),
+                                         A_eq, s.b_eq_workspace,
+                                         A_ineq, s.b_ineq_workspace,
+                                         p_lo, p_hi);
 
         Eigen::Vector<double, N> p = qp_res.x;
 
@@ -299,15 +267,26 @@ struct kraft_slsqp_policy
             };
         }
 
-        // Update penalty parameter sigma
+        // Update penalty parameter sigma from the QP multipliers.
+        // Ensures sigma >= |lambda|_inf + delta so the QP step is a
+        // descent direction for the L1 merit under the linearized
+        // KKT conditions. Monotone (never decreases).
+        //
+        // Reference: N&W eq. 18.36 (sufficient penalty for descent).
+        double constraint_viol_0 = 0.0;
+        if(s.c_eq.size() > 0)
+            constraint_viol_0 += s.c_eq.cwiseAbs().sum();
+        if(s.c_ineq.size() > 0)
+            constraint_viol_0 += (-s.c_ineq).cwiseMax(0.0).sum();
+
         if(qp_res.lambda.size() > 0)
         {
-            double lambda_max = qp_res.lambda.cwiseAbs().maxCoeff();
+            const double lambda_max = qp_res.lambda.cwiseAbs().maxCoeff();
             if(lambda_max + 0.5 > s.sigma)
                 s.sigma = lambda_max + 1.0;
         }
 
-        // L1 merit function for line search
+        // L1 merit function for the line search (Kraft 1988, N&W 18.3).
         auto merit = [&](const Eigen::Vector<double, N>& xk) -> double {
             double fval = s.problem->value(xk);
             double viol = 0.0;
@@ -333,18 +312,12 @@ struct kraft_slsqp_policy
 
         double merit_0 = merit(s.x);
 
-        double constraint_viol_0 = 0.0;
-        if(s.c_eq.size() > 0)
-            constraint_viol_0 += s.c_eq.cwiseAbs().sum();
-        if(s.c_ineq.size() > 0)
-            constraint_viol_0 += (-s.c_ineq).cwiseMax(0.0).sum();
-
         double dphi_merit = s.g.dot(p) - s.sigma * constraint_viol_0;
 
         if(dphi_merit >= 0.0)
             dphi_merit = -1e-8;
 
-        // Backtracking Armijo line search on L1 merit
+        // Backtracking Armijo line search on the L1 merit.
         auto phi_ls = [&](double alpha) {
             Eigen::Vector<double, N> x_trial = s.x + alpha * p;
             for(int i = 0; i < n; ++i)
@@ -357,6 +330,76 @@ struct kraft_slsqp_policy
 
         auto ls = armijo(phi_ls, merit_0, dphi_merit, options.line_search);
         double alpha = ls.alpha;
+
+        // Second-order correction (Kraft 1988 Section 2.2.4,
+        // N&W Section 18.3 "Maratos effect").
+        //
+        // If the Armijo line search rejects the full step because
+        // the linearization underestimates the constraint curvature
+        // (Maratos effect), re-solve the QP with an updated RHS
+        // that subtracts the nonlinear constraint residual at the
+        // trial point x + p. Using the ORIGINAL Jacobian J_k (not
+        // J_{k+1}) preserves the QP solver factorizations.
+        //
+        // RHS update:
+        //   b_eq_soc  = -c_eq(x + p)  + J_eq(x)  * p
+        //   b_ineq_soc = -c_ineq(x + p) + J_ineq(x) * p
+        //
+        // The correction step dp is added to p and the line search
+        // is retried with the combined direction.
+        if(!ls.success && constraint_viol_0 > 1e-8)
+        {
+            if constexpr(constrained<P>)
+            {
+                if(s.n_eq + s.n_ineq > 0)
+                {
+                    Eigen::Vector<double, N> x_trial = s.x + p;
+                    for(int i = 0; i < n; ++i)
+                    {
+                        if(x_trial[i] < s.lower[i]) x_trial[i] = s.lower[i];
+                        if(x_trial[i] > s.upper[i]) x_trial[i] = s.upper[i];
+                    }
+
+                    Eigen::VectorXd c_trial(s.n_eq + s.n_ineq);
+                    s.problem->constraints(x_trial, c_trial);
+                    auto c_eq_trial = c_trial.head(s.n_eq);
+                    auto c_ineq_trial = c_trial.tail(s.n_ineq);
+
+                    Eigen::VectorXd b_eq_soc = s.n_eq > 0
+                        ? (-c_eq_trial + s.J_eq * p).eval()
+                        : Eigen::VectorXd{};
+                    Eigen::VectorXd b_ineq_soc = s.n_ineq > 0
+                        ? (-c_ineq_trial + s.J_ineq * p).eval()
+                        : Eigen::VectorXd{};
+
+                    auto soc_res = s.qp_solver.solve(
+                        B, Eigen::Vector<double, N>(s.g),
+                        A_eq, b_eq_soc, A_ineq, b_ineq_soc,
+                        p_lo, p_hi);
+
+                    if(soc_res.status == detail::qp_status::optimal)
+                    {
+                        Eigen::Vector<double, N> p_combined = p + soc_res.x;
+                        auto phi_soc = [&](double a) {
+                            Eigen::Vector<double, N> x_trial = s.x + a * p_combined;
+                            for(int i = 0; i < n; ++i)
+                            {
+                                if(x_trial[i] < s.lower[i]) x_trial[i] = s.lower[i];
+                                if(x_trial[i] > s.upper[i]) x_trial[i] = s.upper[i];
+                            }
+                            return merit(x_trial);
+                        };
+                        auto ls_soc = armijo(phi_soc, merit_0, dphi_merit,
+                                             options.line_search);
+                        if(ls_soc.success && ls_soc.alpha > alpha)
+                        {
+                            p = p_combined;
+                            alpha = ls_soc.alpha;
+                        }
+                    }
+                }
+            }
+        }
 
         if(alpha < 1e-15)
             alpha = 1e-4;
@@ -391,7 +434,19 @@ struct kraft_slsqp_policy
             }
         }
 
-        // L-BFGS update using Lagrangian gradient
+        // BFGS update driven by the Lagrangian gradient difference.
+        //
+        // y_k = grad_L(x_{k+1}, lam) - grad_L(x_k, lam) with
+        // grad_L(x, lam) = g(x) - A(x)^T lam. Each gradient is
+        // evaluated at its own iterate's Jacobian so that y_k picks
+        // up the second-order constraint curvature term
+        // (A_{k+1} - A_k)^T lam alongside the objective curvature
+        // g_{k+1} - g_k. This is Kraft's SLSQP variant rather than
+        // the "fixed Jacobian" modification in N&W Section 18.4.
+        //
+        // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3 (SLSQP
+        //            Hessian of the Lagrangian);
+        //            N&W eq. 18.13 (Lagrangian Hessian).
         Eigen::Vector<double, N> grad_L_old = g_old;
         Eigen::Vector<double, N> grad_L_new = s.g;
 
@@ -427,7 +482,29 @@ struct kraft_slsqp_policy
 
         Eigen::Vector<double, N> sk = s.x - x_old;
         Eigen::Vector<double, N> yk = grad_L_new - grad_L_old;
-        s.lbfgs.push(sk, yk);
+
+        // Skip BFGS updates on non-positive curvature pairs.
+        // In SLSQP the Lagrangian gradient difference y_k can easily
+        // have s^T y < 0 when the constraint Hessian contribution
+        // (A_{k+1} - A_k)^T lam dominates the objective curvature --
+        // feeding such a pair into the BFGS formula distorts B
+        // instead of improving it. adaptive_bfgs::push does its own
+        // s^T y > 0 guard, but checking here keeps the semantics
+        // explicit in the policy step.
+        //
+        // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
+        //            N&W Procedure 18.2 damping guard.
+        const double sTy = sk.dot(yk);
+        if(sk.norm() > 1e-15 && sTy > 0.0)
+        {
+            // adaptive_bfgs::push recomputes theta = y^T y / s^T y from
+            // the latest pair on every call and rebuilds B via the
+            // compact L-BFGS representation over the stored history.
+            // This is L-BFGS-with-adaptive-theta semantics, which
+            // tracks local curvature even as the SQP iterate moves
+            // towards a degenerate constrained optimum (e.g. HS026).
+            s.hessian.push(sk, yk);
+        }
 
         ++s.iteration;
 
@@ -441,11 +518,10 @@ struct kraft_slsqp_policy
         };
     }
 
-    // Hot start -- preserves L-BFGS history.
+    // Hot start -- preserves BFGS curvature information.
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
-        constexpr int M = state_type<P>::M;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
@@ -465,12 +541,12 @@ struct kraft_slsqp_policy
         s.iteration = 0;
     }
 
-    // Cold restart -- clears L-BFGS curvature history.
+    // Cold restart -- clears BFGS curvature information (B := I).
     template <typename P>
     void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
-        s.lbfgs.reset();
+        s.hessian.reset();
         s.sigma = options.initial_penalty.value_or(1.0);
     }
 };

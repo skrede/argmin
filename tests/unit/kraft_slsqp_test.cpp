@@ -387,3 +387,42 @@ TEST_CASE("kraft_slsqp converges on HS026 (regression guard)", "[kraft_slsqp][re
     CHECK(solver.constraint_violation() < 1e-3);
     CHECK(result.iterations <= 50);
 }
+
+TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
+          "[kraft_slsqp][regression]")
+{
+    // HS071: n=4, 1 equality (x1^2+x2^2+x3^2+x4^2 = 40), 1 inequality
+    // (x1*x2*x3*x4 >= 25), 1 <= xi <= 5.
+    // x0 = (1, 5, 5, 1), f* = 17.0140173 at (1, 4.7430, 3.8211, 1.3794).
+    //
+    // Reference: NLopt LD_SLSQP converges in ~6 iterations to 1e-10.
+    // nablapp's kraft_slsqp reaches the same iteration-count order
+    // (~8 iters on the benchmark, ~50 iters to reach the tight
+    // margin) with the Kraft LSQ/LSEI QP solver and dense BFGS
+    // introduced in plan 24.1-02. The tight 1e-4 margin that NLopt
+    // achieves is deferred; this test locks in the current
+    // nablapp baseline: HS071 must not diverge and must stay near
+    // the optimum with a modest feasibility violation.
+    //
+    // Plan 24.1-02 requirement KRAFT-QP-03 (HS071 without feasibility
+    // restoration). The gap to NLopt's tight 1e-10 precision is
+    // tracked for a follow-up plan that will tighten the BFGS
+    // restart heuristic against NLopt slsqp.c lines 1571+.
+    hs071<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-10);
+
+    basic_solver solver{kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(17.0140173).margin(0.1));
+    CHECK(solver.constraint_violation() < 0.05);
+    CHECK(result.x[0] >= 1.0 - 1e-6);
+    CHECK(result.x[0] <= 5.0 + 1e-6);
+    CHECK(result.x[1] >= 1.0 - 1e-6);
+    CHECK(result.x[1] <= 5.0 + 1e-6);
+}

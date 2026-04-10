@@ -96,6 +96,23 @@ public:
         B_ = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
     }
 
+    // Rescale the Hessian approximation to scale * I.
+    //
+    // Used for the Shanno (1978) / N&W eq. 6.20 initial-Hessian
+    // rescaling trick on the first accepted curvature pair:
+    // B_0 := (y^T y / s^T y) * I. The curvature ratio is a cheap
+    // estimate of the local Lipschitz constant of the gradient and
+    // yields dramatically better first-step directions than the
+    // plain identity initialization.
+    //
+    // Reference: Shanno (1978), Math. Oper. Res. 3, 244-256;
+    //            N&W eq. 6.20.
+    void rescale_identity(Scalar scale)
+    {
+        const int n = static_cast<int>(B_.rows());
+        B_ = scale * Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+    }
+
     int dimension() const { return static_cast<int>(B_.rows()); }
 
 private:
