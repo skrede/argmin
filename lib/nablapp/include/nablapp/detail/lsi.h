@@ -51,12 +51,27 @@ int lsi(
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_w,
     int n, int m_ineq)
 {
-    using matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
-    using vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
+    // Compile-time-sized aliases for N-indexed quantities so Eigen
+    // uses fixed-size kernels (SIMD-unrolled, stack-allocated) when
+    // the caller instantiates this with a concrete N. Constraint-row-
+    // indexed quantities (sizes depending on m_ineq) stay dynamic.
+    // Before this change, the local `matrix_t`/`vector_t` aliases were
+    // fully dynamic even for N-sized temporaries, which defeated the
+    // template parameter and produced the 2.75% self-time
+    // `ColPivHouseholderQR<Matrix<double, -1, -1, ...>>` hotspot in
+    // cartan's UR3e perf profile (the QR of E was constructed with a
+    // dynamic-dimension template parameter even though E itself is
+    // Matrix<Scalar, N, N>, forcing Eigen to copy into a dynamic
+    // matrix for the decomposition).
+    using E_matrix_t = Eigen::Matrix<Scalar, N, N>;
+    using N_vector_t = Eigen::Vector<Scalar, N>;
+    using ineq_matrix_N_cols_t = Eigen::Matrix<Scalar, Eigen::Dynamic, N>;
+    using ineq_matrix_N_rows_t = Eigen::Matrix<Scalar, N, Eigen::Dynamic>;
+    using dyn_vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
 
     // QR factorization of the square n x n matrix E with column pivoting
     // for rank revealing. Matches NLopt's use of hfti_ for the LSI path.
-    Eigen::ColPivHouseholderQR<matrix_t> qr(E);
+    Eigen::ColPivHouseholderQR<E_matrix_t> qr(E);
 
     const Scalar thresh = std::numeric_limits<Scalar>::epsilon()
                           * Scalar(n)
@@ -71,18 +86,19 @@ int lsi(
         return 6;
     }
 
-    // R is the upper triangular top-left n x n block of qr.matrixR().
-    matrix_t R = qr.matrixR().topLeftCorner(n, n)
-                              .template triangularView<Eigen::Upper>();
+    // R is the upper triangular part of qr.matrixR(). E is square
+    // (n = N at the template level), so matrixR() is already N x N
+    // and we don't need a topLeftCorner crop.
+    E_matrix_t R = qr.matrixR().template triangularView<Eigen::Upper>();
 
     // y1 = Q^T f.
-    vector_t y1 = qr.matrixQ().transpose() * f;
+    N_vector_t y1 = qr.matrixQ().transpose() * f;
 
     // Unconstrained case: solution in transformed coordinates is
     // x' = 0, so x = P * R^{-1} * y1.
     if(m_ineq <= 0)
     {
-        vector_t y = R.template triangularView<Eigen::Upper>().solve(y1);
+        N_vector_t y = R.template triangularView<Eigen::Upper>().solve(y1);
         x.noalias() = qr.colsPermutation() * y;
         return 1;
     }
@@ -93,16 +109,18 @@ int lsi(
     //   G x >= h  <=>  (G P R^{-1}) x' >= h - (G P R^{-1}) y1
     //
     // Compute G_t = G * P * R^{-1} by solving R^T * G_t^T = (G P)^T.
-    matrix_t G_perm = G * qr.colsPermutation();
-    matrix_t G_tT = R.transpose()
-                      .template triangularView<Eigen::Lower>()
-                      .solve(G_perm.transpose());
-    matrix_t G_t = G_tT.transpose();
+    // G is (m_ineq x N), so G_perm, G_tT, G_t all have compile-time
+    // N in one dimension and dynamic m_ineq in the other.
+    ineq_matrix_N_cols_t G_perm = G * qr.colsPermutation();
+    ineq_matrix_N_rows_t G_tT = R.transpose()
+                                  .template triangularView<Eigen::Lower>()
+                                  .solve(G_perm.transpose());
+    ineq_matrix_N_cols_t G_t = G_tT.transpose();
 
-    vector_t h_t = h - G_t * y1;
+    dyn_vector_t h_t = h - G_t * y1;
 
     // Solve LDP: min ||x'||^2 s.t. G_t x' >= h_t.
-    Eigen::Vector<Scalar, N> x_prime = Eigen::Vector<Scalar, N>::Zero(n);
+    N_vector_t x_prime = N_vector_t::Zero(n);
 
     int ldp_mode = ldp<Scalar, Eigen::Dynamic, N>(
         G_t, h_t, x_prime, nnls_A, nnls_b, nnls_x_vec, nnls_w, m_ineq, n);
@@ -129,8 +147,8 @@ int lsi(
     }
 
     // Back-transform: x = P * R^{-1} * (x' + y1).
-    vector_t rhs = x_prime + y1;
-    vector_t y = R.template triangularView<Eigen::Upper>().solve(rhs);
+    N_vector_t rhs = x_prime + y1;
+    N_vector_t y = R.template triangularView<Eigen::Upper>().solve(rhs);
     x.noalias() = qr.colsPermutation() * y;
 
     return 1;

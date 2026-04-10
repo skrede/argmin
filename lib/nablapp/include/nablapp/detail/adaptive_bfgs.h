@@ -223,7 +223,16 @@ private:
         // lower-right); Eigen::LDLT copes with this for the small 2k x 2k
         // sizes used here (k <= MaxHistory = 10). Match compact_lbfgs's
         // tolerance by not checking ldlt.info().
-        Eigen::LDLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> ldlt(M_);
+        //
+        // The LDLT template parameter mirrors M_'s fixed-max storage form
+        // (Dynamic rows/cols with compile-time MaxRows/MaxCols = 2*MaxHistory)
+        // so Eigen uses stack-allocated scratch in the decomposition instead
+        // of heap, eliminating the per-push malloc/free pair that showed up
+        // as the 6.34% self-time hotspot in cartan's UR3e perf profile
+        // (Eigen::internal::ldlt_inplace<1>::unblocked on a fully dynamic
+        // Matrix<double, -1, -1>).
+        Eigen::LDLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                                   0, 2 * MaxHistory, 2 * MaxHistory>> ldlt(M_);
         const auto Z = ldlt.solve(W_.transpose()).eval();
 
         // B <- theta * I - W Z
