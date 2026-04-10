@@ -30,6 +30,13 @@ namespace
 //         1 <= xi <= 5
 //   x0 = {1, 5, 5, 1}
 //   f* ~ 17.014
+//
+// This struct uses `problem_dimension = dynamic_dimension` to exercise
+// the runtime-dimension path through kraft_slsqp_policy<-1>,
+// kraft_lsq_qp_solver<double, -1>, and all the dynamic Eigen
+// specializations. See hs071_fixed below for the compile-time N=4
+// variant; comparing the two measures the fraction of per-step cost
+// attributable to N being runtime vs compile-time.
 struct hs071
 {
     static constexpr int problem_dimension = nablapp::dynamic_dimension;
@@ -81,6 +88,76 @@ struct hs071
         J(0, 2) = 2.0 * x[2];
         J(0, 3) = 2.0 * x[3];
         // Inequality Jacobian
+        J(1, 0) = x[1] * x[2] * x[3];
+        J(1, 1) = x[0] * x[2] * x[3];
+        J(1, 2) = x[0] * x[1] * x[3];
+        J(1, 3) = x[0] * x[1] * x[2];
+    }
+};
+
+// Compile-time fixed-N=4 variant of HS071. Exercises the compile-time
+// dimension path through kraft_slsqp_policy<4>,
+// kraft_lsq_qp_solver<double, 4>, adaptive_bfgs<double, 4, 10>, and
+// lsi<double, 4>. The workspace-dimension fixes in adaptive_bfgs.h
+// and lsi.h only take effect on this path; the dynamic-N hs071 struct
+// above is insensitive to them. Comparing per-step timings across the
+// two structs on the same problem isolates the benefit of compile-time
+// dimension propagation at n=4 and tells us what fraction of the per-
+// step cost comes from dynamic-dispatch overhead in Eigen's inner
+// loops.
+//
+// All method signatures mirror hs071 but use Eigen::Vector<double, 4>
+// and Eigen::Matrix<double, 2, 4> for the state types so the solver's
+// state_type picks up the fixed-size storage via CTAD.
+struct hs071_fixed
+{
+    static constexpr int problem_dimension = 4;
+
+    int dimension() const { return 4; }
+
+    double value(const Eigen::Vector<double, 4>& x) const
+    {
+        return x[0] * x[3] * (x[0] + x[1] + x[2]) + x[2];
+    }
+
+    void gradient(const Eigen::Vector<double, 4>& x,
+                  Eigen::Vector<double, 4>& g) const
+    {
+        g[0] = x[3] * (x[0] + x[1] + x[2]) + x[0] * x[3];
+        g[1] = x[0] * x[3];
+        g[2] = x[0] * x[3] + 1.0;
+        g[3] = x[0] * (x[0] + x[1] + x[2]);
+    }
+
+    Eigen::Vector<double, 4> lower_bounds() const
+    {
+        return Eigen::Vector<double, 4>{1.0, 1.0, 1.0, 1.0};
+    }
+
+    Eigen::Vector<double, 4> upper_bounds() const
+    {
+        return Eigen::Vector<double, 4>{5.0, 5.0, 5.0, 5.0};
+    }
+
+    int num_equality() const { return 1; }
+    int num_inequality() const { return 1; }
+
+    void constraints(const Eigen::Vector<double, 4>& x,
+                     Eigen::VectorXd& c) const
+    {
+        c.resize(2);
+        c[0] = x[0] * x[0] + x[1] * x[1] + x[2] * x[2] + x[3] * x[3] - 40.0;
+        c[1] = x[0] * x[1] * x[2] * x[3] - 25.0;
+    }
+
+    void constraint_jacobian(const Eigen::Vector<double, 4>& x,
+                             Eigen::MatrixXd& J) const
+    {
+        J.resize(2, 4);
+        J(0, 0) = 2.0 * x[0];
+        J(0, 1) = 2.0 * x[1];
+        J(0, 2) = 2.0 * x[2];
+        J(0, 3) = 2.0 * x[3];
         J(1, 0) = x[1] * x[2] * x[3];
         J(1, 1) = x[0] * x[2] * x[3];
         J(1, 2) = x[0] * x[1] * x[3];
@@ -164,6 +241,47 @@ timing bench_nablapp(std::uint32_t reps)
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        auto result = solver.solve();
+        fval = result.objective_value;
+        iters = static_cast<std::uint32_t>(result.iterations);
+        total_ls_calls += solver.state().line_search_calls;
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    double per_solve = total_us / reps;
+    double per_step = total_us / (reps * iters);
+    double ls_per_step = static_cast<double>(total_ls_calls) / (reps * iters);
+    return {per_solve, fval, iters, per_step, ls_per_step};
+}
+
+timing bench_nablapp_fixed(std::uint32_t reps)
+{
+    hs071_fixed problem;
+    Eigen::Vector<double, 4> x0{1.0, 5.0, 5.0, 1.0};
+    nablapp::solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-10);
+
+    // Warmup + convergence check.
+    std::uint32_t iters = 0;
+    {
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        auto result = solver.solve();
+        iters = static_cast<std::uint32_t>(result.iterations);
+        if(std::abs(result.objective_value - 17.014) > 0.5)
+            std::println("WARNING: kraft_slsqp<4> did not converge correctly, f={:.6e}",
+                         result.objective_value);
+    }
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    double fval = 0.0;
+    std::uint64_t total_ls_calls = 0;
+    for(std::uint32_t r = 0; r < reps; ++r)
+    {
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<4>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -270,24 +388,33 @@ int main()
     std::println("HS071 (n=4, m_eq=1, m_ineq=1), {} repetitions each\n", reps);
 
     auto kraft = bench_nablapp(reps);
+    auto kraft_fixed = bench_nablapp_fixed(reps);
     auto nw = bench_nablapp_nw_sqp(reps);
     auto nl = bench_nlopt(reps);
 
-    std::println("  {:>12s}  {:>12s}  {:>12s}  {:>10s}  {:>12s}",
+    std::println("  {:>14s}  {:>12s}  {:>12s}  {:>10s}  {:>12s}",
                  "solver", "solve (us)", "step (us)", "iters", "objective");
-    std::println("  {:>12s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "kraft_slsqp", kraft.wall_us, kraft.per_step_us, kraft.evals, kraft.objective);
-    std::println("  {:>12s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
+    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
+                 "kraft_slsqp<-1>", kraft.wall_us, kraft.per_step_us, kraft.evals, kraft.objective);
+    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
+                 "kraft_slsqp<4>", kraft_fixed.wall_us, kraft_fixed.per_step_us, kraft_fixed.evals, kraft_fixed.objective);
+    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
                  "nw_sqp", nw.wall_us, nw.per_step_us, nw.evals, nw.objective);
-    std::println("  {:>12s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
+    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
                  "nlopt", nl.wall_us, nl.per_step_us, nl.evals, nl.objective);
-    std::println("\n  per-solve ratio kraft_slsqp/nlopt: {:.2f}x", kraft.wall_us / nl.wall_us);
-    std::println("  per-step  ratio kraft_slsqp/nlopt: {:.2f}x", kraft.per_step_us / nl.per_step_us);
-    std::println("  per-solve ratio nw_sqp/nlopt:      {:.2f}x", nw.wall_us / nl.wall_us);
-    std::println("  per-step  ratio nw_sqp/nlopt:      {:.2f}x", nw.per_step_us / nl.per_step_us);
+    std::println("\n  per-solve ratio kraft_slsqp<-1>/nlopt: {:.2f}x", kraft.wall_us / nl.wall_us);
+    std::println("  per-step  ratio kraft_slsqp<-1>/nlopt: {:.2f}x", kraft.per_step_us / nl.per_step_us);
+    std::println("  per-solve ratio kraft_slsqp<4>/nlopt:  {:.2f}x", kraft_fixed.wall_us / nl.wall_us);
+    std::println("  per-step  ratio kraft_slsqp<4>/nlopt:  {:.2f}x", kraft_fixed.per_step_us / nl.per_step_us);
+    std::println("  per-step  kraft_slsqp<-1>/<4>:         {:.2f}x  (dynamic overhead on n=4)",
+                 kraft.per_step_us / kraft_fixed.per_step_us);
+    std::println("  per-solve ratio nw_sqp/nlopt:          {:.2f}x", nw.wall_us / nl.wall_us);
+    std::println("  per-step  ratio nw_sqp/nlopt:          {:.2f}x", nw.per_step_us / nl.per_step_us);
 
-    std::println("\n  kraft_slsqp phi_ls calls per step: {:.3f}",
+    std::println("\n  kraft_slsqp<-1> phi_ls calls per step: {:.3f}",
                  kraft.line_search_calls_per_step);
+    std::println("  kraft_slsqp<4>  phi_ls calls per step: {:.3f}",
+                 kraft_fixed.line_search_calls_per_step);
     std::println("  (average number of merit-function evaluations per kraft_slsqp_policy::step()");
     std::println("   invocation, averaged over {} reps x {} iters. Armijo success on first try = 1.0;",
                  reps, kraft.evals);
