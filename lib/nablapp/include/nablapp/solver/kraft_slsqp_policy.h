@@ -106,6 +106,20 @@ struct kraft_slsqp_policy
         Eigen::VectorXd b_eq_workspace;
         Eigen::VectorXd b_ineq_workspace;
 
+        // Cumulative count of phi(alpha) calls made by the Armijo
+        // backtracker across every step() invocation since init/reset.
+        // Counts both the main merit-function line search and the
+        // second-order-correction line search if SOC fires. Incremented
+        // inside phi_ls and phi_soc lambdas. Exposed so benchmarks can
+        // divide by iteration count to get "average backtracks per
+        // step" without needing policy-internal instrumentation.
+        // Rationale: cartan's UR3e perf profile showed ~2.6x more
+        // absolute FK work per pose in nablapp_slsqp than in
+        // nlopt_slsqp; the merit-function line search is the suspected
+        // source and this counter lets us measure the hypothesis
+        // directly.
+        std::uint64_t line_search_calls{0};
+
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
@@ -319,6 +333,7 @@ struct kraft_slsqp_policy
 
         // Backtracking Armijo line search on the L1 merit.
         auto phi_ls = [&](double alpha) {
+            ++s.line_search_calls;
             Eigen::Vector<double, N> x_trial = s.x + alpha * p;
             for(int i = 0; i < n; ++i)
             {
@@ -381,6 +396,7 @@ struct kraft_slsqp_policy
                     {
                         Eigen::Vector<double, N> p_combined = p + soc_res.x;
                         auto phi_soc = [&](double a) {
+                            ++s.line_search_calls;
                             Eigen::Vector<double, N> x_trial = s.x + a * p_combined;
                             for(int i = 0; i < n; ++i)
                             {

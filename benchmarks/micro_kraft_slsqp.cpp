@@ -134,6 +134,7 @@ struct timing
     double objective;
     std::uint32_t evals;
     double per_step_us;
+    double line_search_calls_per_step;  // kraft_slsqp only; 0 for others
 };
 
 timing bench_nablapp(std::uint32_t reps)
@@ -159,19 +160,22 @@ timing bench_nablapp(std::uint32_t reps)
 
     auto t0 = std::chrono::high_resolution_clock::now();
     double fval = 0.0;
+    std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
+        total_ls_calls += solver.state().line_search_calls;
     }
     auto t1 = std::chrono::high_resolution_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * iters);
-    return {per_solve, fval, iters, per_step};
+    double ls_per_step = static_cast<double>(total_ls_calls) / (reps * iters);
+    return {per_solve, fval, iters, per_step, ls_per_step};
 }
 
 timing bench_nablapp_nw_sqp(std::uint32_t reps)
@@ -209,7 +213,7 @@ timing bench_nablapp_nw_sqp(std::uint32_t reps)
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * iters);
-    return {per_solve, fval, iters, per_step};
+    return {per_solve, fval, iters, per_step, 0.0};
 }
 
 timing bench_nlopt(std::uint32_t reps)
@@ -254,7 +258,7 @@ timing bench_nlopt(std::uint32_t reps)
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * evals);
-    return {per_solve, fval, evals, per_step};
+    return {per_solve, fval, evals, per_step, 0.0};
 }
 
 }
@@ -281,6 +285,13 @@ int main()
     std::println("  per-step  ratio kraft_slsqp/nlopt: {:.2f}x", kraft.per_step_us / nl.per_step_us);
     std::println("  per-solve ratio nw_sqp/nlopt:      {:.2f}x", nw.wall_us / nl.wall_us);
     std::println("  per-step  ratio nw_sqp/nlopt:      {:.2f}x", nw.per_step_us / nl.per_step_us);
+
+    std::println("\n  kraft_slsqp phi_ls calls per step: {:.3f}",
+                 kraft.line_search_calls_per_step);
+    std::println("  (average number of merit-function evaluations per kraft_slsqp_policy::step()");
+    std::println("   invocation, averaged over {} reps x {} iters. Armijo success on first try = 1.0;",
+                 reps, kraft.evals);
+    std::println("   2.0 means one backtrack on average; 3.0 means two backtracks.)");
 
     std::println("\nNow profile with:");
     std::println("  perf record -F 99999 -g -- ./micro_kraft_slsqp");
