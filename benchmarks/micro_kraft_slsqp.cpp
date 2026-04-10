@@ -8,6 +8,7 @@
 //            and Mathematical Systems, Vol. 187, Springer.
 
 #include "nablapp/solver/kraft_slsqp_policy.h"
+#include "nablapp/solver/nw_sqp_policy.h"
 #include "nablapp/solver/basic_solver.h"
 
 #include <Eigen/Core>
@@ -145,12 +146,15 @@ timing bench_nablapp(std::uint32_t reps)
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
 
-    // Warmup.
+    // Warmup + convergence check.
     std::uint32_t iters = 0;
     {
         nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
+        if(std::abs(result.objective_value - 17.014) > 0.5)
+            std::println("WARNING: kraft_slsqp did not converge correctly, f={:.6e}",
+                         result.objective_value);
     }
 
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -158,6 +162,44 @@ timing bench_nablapp(std::uint32_t reps)
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        auto result = solver.solve();
+        fval = result.objective_value;
+        iters = static_cast<std::uint32_t>(result.iterations);
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    double per_solve = total_us / reps;
+    double per_step = total_us / (reps * iters);
+    return {per_solve, fval, iters, per_step};
+}
+
+timing bench_nablapp_nw_sqp(std::uint32_t reps)
+{
+    hs071 problem;
+    Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
+    nablapp::solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-10);
+
+    // Warmup + convergence check.
+    std::uint32_t iters = 0;
+    {
+        nablapp::basic_solver solver{nablapp::nw_sqp_policy{}, problem, x0, opts};
+        auto result = solver.solve();
+        iters = static_cast<std::uint32_t>(result.iterations);
+        if(std::abs(result.objective_value - 17.014) > 0.5)
+            std::println("WARNING: nw_sqp did not converge correctly, f={:.6e}",
+                         result.objective_value);
+    }
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    double fval = 0.0;
+    for(std::uint32_t r = 0; r < reps; ++r)
+    {
+        nablapp::basic_solver solver{nablapp::nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -223,17 +265,22 @@ int main()
 
     std::println("HS071 (n=4, m_eq=1, m_ineq=1), {} repetitions each\n", reps);
 
-    auto na = bench_nablapp(reps);
+    auto kraft = bench_nablapp(reps);
+    auto nw = bench_nablapp_nw_sqp(reps);
     auto nl = bench_nlopt(reps);
 
     std::println("  {:>12s}  {:>12s}  {:>12s}  {:>10s}  {:>12s}",
                  "solver", "solve (us)", "step (us)", "iters", "objective");
     std::println("  {:>12s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "nablapp", na.wall_us, na.per_step_us, na.evals, na.objective);
+                 "kraft_slsqp", kraft.wall_us, kraft.per_step_us, kraft.evals, kraft.objective);
+    std::println("  {:>12s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
+                 "nw_sqp", nw.wall_us, nw.per_step_us, nw.evals, nw.objective);
     std::println("  {:>12s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
                  "nlopt", nl.wall_us, nl.per_step_us, nl.evals, nl.objective);
-    std::println("\n  per-solve ratio (nablapp/nlopt): {:.2f}x", na.wall_us / nl.wall_us);
-    std::println("  per-step  ratio (nablapp/nlopt): {:.2f}x", na.per_step_us / nl.per_step_us);
+    std::println("\n  per-solve ratio kraft_slsqp/nlopt: {:.2f}x", kraft.wall_us / nl.wall_us);
+    std::println("  per-step  ratio kraft_slsqp/nlopt: {:.2f}x", kraft.per_step_us / nl.per_step_us);
+    std::println("  per-solve ratio nw_sqp/nlopt:      {:.2f}x", nw.wall_us / nl.wall_us);
+    std::println("  per-step  ratio nw_sqp/nlopt:      {:.2f}x", nw.per_step_us / nl.per_step_us);
 
     std::println("\nNow profile with:");
     std::println("  perf record -F 99999 -g -- ./micro_kraft_slsqp");

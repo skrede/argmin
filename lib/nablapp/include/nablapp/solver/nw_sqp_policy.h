@@ -84,6 +84,10 @@ struct nw_sqp_policy
         Eigen::VectorXd c_eq_trial;
         Eigen::VectorXd c_ineq_trial;
         Eigen::MatrixXd J_all_old;  // Saved Jacobian at x_k for BFGS update (N&W eq. 18.13)
+        Eigen::VectorXd b_eq_workspace;     // QP RHS workspace
+        Eigen::VectorXd b_ineq_workspace;   // QP RHS workspace
+        Eigen::MatrixXd AAt_workspace;      // Feasibility LDLT workspace
+        Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;  // Reusable factorization
         double objective_value{};
         double sigma{1.0};
         detail::bfgs_hessian<double, N> B;
@@ -135,6 +139,13 @@ struct nw_sqp_policy
         s.J_all_old.setZero(m, n);
         s.c_eq_trial.resize(s.n_eq);
         s.c_ineq_trial.resize(s.n_ineq);
+        s.b_eq_workspace.resize(s.n_eq);
+        s.b_ineq_workspace.resize(s.n_ineq);
+        if(s.n_eq > 0)
+        {
+            s.AAt_workspace.resize(s.n_eq, s.n_eq);
+            s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(s.n_eq);
+        }
 
         // Evaluate constraints: single vector, split into eq/ineq
         if(m > 0)
@@ -195,9 +206,9 @@ struct nw_sqp_policy
 
         // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
         Eigen::Matrix<double, Eigen::Dynamic, N> A_eq = s.J_eq;
-        Eigen::VectorXd b_eq = -s.c_eq;
+        s.b_eq_workspace = -s.c_eq;
         Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq = s.J_ineq;
-        Eigen::VectorXd b_ineq = -s.c_ineq;
+        s.b_ineq_workspace = -s.c_ineq;
 
         Eigen::Vector<double, N> p0 = Eigen::Vector<double, N>::Zero(n);
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
@@ -205,10 +216,9 @@ struct nw_sqp_policy
             // Solve (A_eq A_eq^T) w = b_eq, then p0 = A_eq^T w
             // A*A^T is PSD but may be rank-deficient with numerical noise;
             // LDLT handles indefinite/singular cases that LLT cannot.
-            Eigen::MatrixXd AAt(A_eq.rows(), A_eq.rows());
-            AAt.noalias() = A_eq * A_eq.transpose();
-            Eigen::LDLT<decltype(AAt)> ldlt(AAt);
-            auto w = ldlt.solve(b_eq);
+            s.AAt_workspace.noalias() = A_eq * A_eq.transpose();
+            s.ldlt_feasibility.compute(s.AAt_workspace);
+            auto w = s.ldlt_feasibility.solve(s.b_eq_workspace);
             p0.noalias() = A_eq.transpose() * w;
         }
 
@@ -232,13 +242,13 @@ struct nw_sqp_policy
                                                   Eigen::Vector<double, N>(s.x)).eval();
             p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
             qp = s.qp_solver.solve(s.B.hessian(), s.g,
-                                   A_eq, b_eq, A_ineq, b_ineq,
+                                   A_eq, s.b_eq_workspace, A_ineq, s.b_ineq_workspace,
                                    p_lower, p_upper, p0, qp_opts);
         }
         else
         {
             qp = s.qp_solver.solve(s.B.hessian(), s.g,
-                                   A_eq, b_eq, A_ineq, b_ineq,
+                                   A_eq, s.b_eq_workspace, A_ineq, s.b_ineq_workspace,
                                    p0, qp_opts);
         }
 
@@ -356,16 +366,14 @@ struct nw_sqp_policy
         Eigen::Vector<double, N> grad_L_new, grad_L_old;
         if(m > 0)
         {
-            Eigen::Matrix<double, Eigen::Dynamic, N> A_new_full(m, n);
-            if(s.n_eq > 0) A_new_full.topRows(s.n_eq) = s.J_eq;
-            if(s.n_ineq > 0) A_new_full.bottomRows(s.n_ineq) = s.J_ineq;
+            // grad_L = grad_f - J^T * lambda (N&W eq. 18.2-18.3)
+            // Use J_all directly for new point (already updated above)
+            grad_L_new = s.g;
+            grad_L_new.noalias() -= s.J_all.transpose() * lambda_new;
 
-            Eigen::Matrix<double, Eigen::Dynamic, N> A_old_full(m, n);
-            if(s.n_eq > 0) A_old_full.topRows(s.n_eq) = s.J_all_old.topRows(s.n_eq);
-            if(s.n_ineq > 0) A_old_full.bottomRows(s.n_ineq) = s.J_all_old.bottomRows(s.n_ineq);
-
-            grad_L_new = detail::lagrangian_gradient(s.g, A_new_full, lambda_new);
-            grad_L_old = detail::lagrangian_gradient(g_old, A_old_full, lambda_new);
+            // Use J_all_old for old point (saved before Jacobian re-evaluation)
+            grad_L_old = g_old;
+            grad_L_old.noalias() -= s.J_all_old.transpose() * lambda_new;
         }
         else
         {
