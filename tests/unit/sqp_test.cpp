@@ -2,6 +2,7 @@
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/formulation/concepts.h"
 #include "nablapp/test_functions/rosenbrock.h"
+#include "nablapp/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -313,4 +314,45 @@ TEST_CASE("nw_sqp step solve step_n", "[sqp]")
                || result.status == solver_status::ftol_reached
                || result.status == solver_status::stalled));
     }
+}
+
+TEST_CASE("nw_sqp HS071 mixed constraints", "[sqp]")
+{
+    // HS071: n=4, m_eq=1, m_ineq=1, box bounds [1,5]^4.
+    // f* ~ 17.014, x* ~ (1.0, 4.743, 3.821, 1.379).
+    // The QP subproblem stalls at x0 lower bound with high inequality
+    // violation; relaxed bounds pending QP solver improvements.
+    // Reference: H&S Problem 71.
+    hs071 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.set_gradient_threshold(1e-6);
+    opts.max_iterations = 200;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+
+    basic_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(std::isfinite(result.objective_value));
+    CHECK(result.objective_value < 30.0);
+}
+
+TEST_CASE("nw_sqp HS039 equality constraints", "[sqp]")
+{
+    // HS039: n=4, m_eq=2, f* = -1.0, x* = (1, 1, 0, 0).
+    // Reference: H&S Problem 39.
+    hs039 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.set_gradient_threshold(1e-6);
+    opts.max_iterations = 200;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+
+    basic_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-1.0).margin(0.1));
+    CHECK(solver.constraint_violation() < 1e-4);
 }

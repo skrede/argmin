@@ -83,6 +83,7 @@ struct nw_sqp_policy
         Eigen::MatrixXd J_all;
         Eigen::VectorXd c_eq_trial;
         Eigen::VectorXd c_ineq_trial;
+        Eigen::MatrixXd J_all_old;  // Saved Jacobian at x_k for BFGS update (N&W eq. 18.13)
         double objective_value{};
         double sigma{1.0};
         detail::bfgs_hessian<double, N> B;
@@ -131,6 +132,7 @@ struct nw_sqp_policy
         // Follows the kraft_slsqp pre-allocation pattern.
         s.c_all.resize(m);
         s.J_all.resize(m, n);
+        s.J_all_old.setZero(m, n);
         s.c_eq_trial.resize(s.n_eq);
         s.c_ineq_trial.resize(s.n_ineq);
 
@@ -271,6 +273,28 @@ struct nw_sqp_policy
         double dphi0 = detail::l1_merit_directional_derivative(
             s.g.dot(p), s.c_eq, s.c_ineq, s.sigma);
 
+        // If dphi0 >= 0, the penalty is insufficient for descent.
+        // Increase sigma until the SQP direction is a descent direction
+        // for the L1 merit function (N&W eq. 18.36).
+        if(dphi0 >= 0.0)
+        {
+            double grad_f_dot_p = s.g.dot(p);
+            double cv = detail::constraint_violation(s.c_eq, s.c_ineq);
+            if(cv > 1e-15)
+            {
+                s.sigma = std::max(s.sigma, (grad_f_dot_p / cv) + 1.0);
+                phi0 = detail::l1_merit(s.objective_value,
+                                        s.c_eq, s.c_ineq, s.sigma);
+                dphi0 = grad_f_dot_p - s.sigma * cv;
+            }
+            else
+            {
+                dphi0 = grad_f_dot_p;
+                if(dphi0 >= 0.0)
+                    dphi0 = -1e-8;
+            }
+        }
+
         // Backtracking Armijo on L1 merit using embedded line search options
         double alpha = 1.0;
         const double ls_c1 = options.line_search.c1;
@@ -313,6 +337,11 @@ struct nw_sqp_policy
         s.problem->gradient(s.x, s.g);
         s.c_eq = s.c_eq_trial;
         s.c_ineq = s.c_ineq_trial;
+
+        // Save old Jacobian before re-evaluation for BFGS update (N&W eq. 18.13)
+        if(m > 0)
+            s.J_all_old.noalias() = s.J_all;
+
         if(m > 0)
             s.problem->constraint_jacobian(s.x, s.J_all);
         s.J_eq = s.J_all.topRows(s.n_eq);
@@ -320,7 +349,10 @@ struct nw_sqp_policy
 
         Eigen::Vector<double, N> sk = s.x - x_old;
 
-        // Lagrangian gradient at new and old points using new multipliers
+        // Lagrangian gradient at new and old points using new multipliers.
+        // grad_L_old must use the Jacobian at x_old (not x_new) so that
+        // y_k = grad_L_new - grad_L_old captures constraint curvature.
+        // Reference: N&W eq. 18.13.
         Eigen::Vector<double, N> grad_L_new, grad_L_old;
         if(m > 0)
         {
@@ -328,8 +360,12 @@ struct nw_sqp_policy
             if(s.n_eq > 0) A_new_full.topRows(s.n_eq) = s.J_eq;
             if(s.n_ineq > 0) A_new_full.bottomRows(s.n_ineq) = s.J_ineq;
 
+            Eigen::Matrix<double, Eigen::Dynamic, N> A_old_full(m, n);
+            if(s.n_eq > 0) A_old_full.topRows(s.n_eq) = s.J_all_old.topRows(s.n_eq);
+            if(s.n_ineq > 0) A_old_full.bottomRows(s.n_ineq) = s.J_all_old.bottomRows(s.n_ineq);
+
             grad_L_new = detail::lagrangian_gradient(s.g, A_new_full, lambda_new);
-            grad_L_old = detail::lagrangian_gradient(g_old, A_new_full, lambda_new);
+            grad_L_old = detail::lagrangian_gradient(g_old, A_old_full, lambda_new);
         }
         else
         {
