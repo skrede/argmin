@@ -311,8 +311,13 @@ struct nw_sqp_policy
         const double ls_rho = options.line_search.rho;
         const std::uint16_t max_ls = options.line_search.max_iterations;
 
-        Eigen::Vector<double, N> x_trial(n);
-        double f_trial{};
+        // Initialize x_trial from s.x so that the post-loop read at
+        // s.x = x_trial; is well-defined even in the pathological
+        // max_ls == 0 configuration. GCC 15 flags an uninitialized SSE
+        // packet load through this path if x_trial is left default-
+        // constructed after only being assigned inside the loop body.
+        Eigen::Vector<double, N> x_trial = s.x;
+        double f_trial{s.objective_value};
 
         for(std::uint16_t ls = 0; ls < max_ls; ++ls)
         {
