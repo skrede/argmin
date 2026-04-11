@@ -220,25 +220,13 @@ struct kraft_slsqp_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        // Re-evaluate gradient (skip on first iteration -- init already computed it)
-        if(s.iteration != 0)
-        {
-            s.problem->gradient(s.x, s.g);
-            if constexpr(constrained<P>)
-            {
-                if(s.n_eq + s.n_ineq > 0)
-                {
-                    s.problem->constraints(s.x, s.c_all);
-                    s.c_eq = s.c_all.head(s.n_eq);
-                    s.c_ineq = s.c_all.tail(s.n_ineq);
-
-                    s.problem->constraint_jacobian(s.x, s.J_all);
-                    s.J_eq = s.J_all.topRows(s.n_eq);
-                    s.J_ineq = s.J_all.bottomRows(s.n_ineq);
-                }
-            }
-        }
-
+        // Invariant at top of step: s.g, s.c_eq/c_ineq, s.J_eq/J_ineq are
+        // already fresh at s.x. Maintained by init() / reset() / the prior
+        // step()'s post-update block at the bottom of this function, which
+        // writes gradient and constraint data for the accepted new iterate
+        // before returning. basic_solver::step_n does not mutate state.x
+        // between policy.step() calls, so no top-of-step re-evaluation is
+        // needed.
         const int n = s.n;
 
         // Direct access to the in-place BFGS Hessian -- no dense_hessian()
