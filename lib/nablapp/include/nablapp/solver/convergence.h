@@ -205,6 +205,25 @@ using default_convergence = convergence_policy<
     stall_tolerance_criterion
 >;
 
+// NLopt-SLSQP-compatible convergence: matches NLopt's slsqp.c:1140-1220
+// which only stops on ftol_rel/ftol_abs (objective_tolerance_rel_criterion)
+// and xtol_rel/xtol_abs (step_tolerance_rel_criterion). NLopt SLSQP sets
+// acc=0 at slsqp.c:1047 with the literal comment "we do our own convergence
+// tests below", which disables its internal gradient-norm + constraint-
+// violation check. Consumers who want iter-count parity with NLopt on
+// IK-style workloads should instantiate basic_solver with this alias
+// instead of default_convergence. stall_tolerance_criterion is retained
+// as a safety cap -- NLopt relies on its outer max_eval for the same
+// purpose and the stall detector fills the equivalent role here.
+//
+// Reference: K&W 2e Section 4.4 (convergence criteria), N&W 2e Section 2.2
+//            (relative/absolute tolerance tests).
+using slsqp_compatible_convergence = convergence_policy<
+    objective_tolerance_rel_criterion,
+    step_tolerance_rel_criterion,
+    stall_tolerance_criterion
+>;
+
 // Constrained convergence: gates inner convergence on feasibility.
 //
 // Returns std::nullopt (no convergence) if constraint_violation >=

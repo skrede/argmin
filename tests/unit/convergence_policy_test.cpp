@@ -475,3 +475,72 @@ TEST_CASE("convergence_policy last_check_results reports mid-tuple fire when ear
     REQUIRE(results[1].has_value());
     CHECK(*results[1] == solver_status::stalled);
 }
+
+// NLopt-compatible alias: three-criterion policy exposing only the
+// ftol_rel / xtol_rel / stall stops that NLopt SLSQP reports through
+// slsqp.c:1140-1220. Reference: K&W 2e Section 4.4.
+TEST_CASE("slsqp_compatible_convergence fires on relative ftol at iteration >= 2",
+          "[convergence_policy]")
+{
+    slsqp_compatible_convergence policy{};
+    std::get<0>(policy.criteria).threshold = 1e-10;
+    std::get<0>(policy.criteria).stationarity_threshold = 1.0;
+
+    step_result<double> r{};
+    r.objective_value = 2.0;
+    r.objective_change = 1e-12;
+    r.gradient_norm = 1e-3;  // below stationarity gate (1.0), above default 1e-8
+    r.step_size = 1.0;
+    r.x_norm = 1.0;
+    r.constraint_violation = 0.0;
+
+    auto status = policy.check(r, /*iteration=*/5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::ftol_reached);
+
+    const auto& results = policy.last_check_results();
+    REQUIRE(results.size() == 3);
+    REQUIRE(results[0].has_value());
+    CHECK(*results[0] == solver_status::ftol_reached);
+    CHECK(!results[1].has_value());
+    CHECK(!results[2].has_value());
+}
+
+TEST_CASE("slsqp_compatible_convergence fires on relative xtol at iteration >= 2",
+          "[convergence_policy]")
+{
+    slsqp_compatible_convergence policy{};
+    std::get<1>(policy.criteria).threshold = 1e-10;
+
+    step_result<double> r{};
+    r.objective_value = 2.0;
+    r.objective_change = 1.0;            // not near ftol
+    r.gradient_norm = 1.0;
+    r.step_size = 1e-11;
+    r.x_norm = 1.0;                       // step/x ratio = 1e-11 < 1e-10
+    r.constraint_violation = 0.0;
+
+    auto status = policy.check(r, /*iteration=*/5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::xtol_reached);
+
+    const auto& results = policy.last_check_results();
+    REQUIRE(results.size() == 3);
+    CHECK(!results[0].has_value());
+    REQUIRE(results[1].has_value());
+    CHECK(*results[1] == solver_status::xtol_reached);
+    CHECK(!results[2].has_value());
+}
+
+TEST_CASE("slsqp_compatible_convergence does not carry a gradient_tolerance slot",
+          "[convergence_policy]")
+{
+    slsqp_compatible_convergence policy{};
+
+    // Compile-time guarantee that no gradient_tolerance_criterion is in
+    // the tuple: std::get<gradient_tolerance_criterion>(policy.criteria)
+    // would fail to compile. Runtime check: the array length matches the
+    // three-criterion composition.
+    const auto& results = policy.last_check_results();
+    CHECK(results.size() == 3);
+}
