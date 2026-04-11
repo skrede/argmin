@@ -357,6 +357,18 @@ public:
 
         last_status_ = status;
 
+        // Back-copy per-criterion telemetry from the caller-owned opts into
+        // stored_convergence_ when types match, so solver.convergence()
+        // .last_check_results() reflects the most recent step_n(budget, opts)
+        // call. For Convergence != default_convergence (e.g. the
+        // slsqp_compatible_convergence alias), consumers read last_check_results
+        // directly from their own opts.convergence instance.
+        if constexpr(std::is_same_v<Convergence, default_convergence>)
+        {
+            stored_convergence_.last_check_results_ =
+                opts.convergence.last_check_results_;
+        }
+
         auto t1 = std::chrono::steady_clock::now();
 
         return solve_result<scalar_type, N>{

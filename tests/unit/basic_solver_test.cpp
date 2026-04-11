@@ -140,6 +140,67 @@ TEST_CASE("basic_solver step_n_no_opts_uses_stored_convergence", "[solver]")
     CHECK(result.gradient_norm < 1e-4);
 }
 
+TEST_CASE("basic_solver step_n(budget, opts) back-copies last_check_results",
+          "[solver]")
+{
+    quadratic prob;
+    Eigen::VectorXd x0{{3.0, 4.0}};
+    solver_options<> opts;
+    std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
+
+    basic_solver<test::mock_policy> solver{prob, x0, opts};
+
+    // Before any step: all entries are nullopt.
+    const auto& before = solver.convergence().last_check_results();
+    CHECK(!before[0].has_value());
+    CHECK(!before[1].has_value());
+    CHECK(!before[2].has_value());
+    CHECK(!before[3].has_value());
+
+    // Explicit-opts step_n: this is the cartan-side usage pattern that
+    // previously did not back-copy into stored_convergence_.
+    auto result = solver.step_n(1000, opts);
+    REQUIRE(result.status == solver_status::converged);
+
+    // After: solver.convergence().last_check_results() mirrors what was
+    // written into opts.convergence through the const-ref check() calls.
+    const auto& after = solver.convergence().last_check_results();
+    REQUIRE(after[0].has_value());
+    CHECK(*after[0] == solver_status::converged);
+
+    // Same array on both sides -- this is what cartan wanted for the
+    // accessor symmetry between the no-opts and explicit-opts paths.
+    CHECK(after[0] == opts.convergence.last_check_results()[0]);
+}
+
+TEST_CASE("basic_solver step_n(budget, opts) back-copy is gated on Convergence type",
+          "[solver]")
+{
+    quadratic prob;
+    Eigen::VectorXd x0{{3.0, 4.0}};
+    solver_options<slsqp_compatible_convergence> alias_opts;
+    std::get<0>(alias_opts.convergence.criteria).threshold = 1e-10;
+    std::get<0>(alias_opts.convergence.criteria).stationarity_threshold = 1.0;
+    std::get<1>(alias_opts.convergence.criteria).threshold = 1e-10;
+
+    basic_solver<test::non_converging_policy> solver{prob, x0, solver_options<>{}};
+
+    // step_n with non-default Convergence compiles and runs through the
+    // same code path, but the if-constexpr guard skips the back-copy into
+    // stored_convergence_ because default_convergence has four criteria
+    // and slsqp_compatible_convergence has three. Consumers read from
+    // their own alias_opts.convergence in this case.
+    auto result = solver.step_n(5, alias_opts);
+    CHECK(result.iterations == 5);
+
+    // stored_convergence_ is untouched -- still all nullopt.
+    const auto& stored = solver.convergence().last_check_results();
+    CHECK(!stored[0].has_value());
+    CHECK(!stored[1].has_value());
+    CHECK(!stored[2].has_value());
+    CHECK(!stored[3].has_value());
+}
+
 TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
 {
     quadratic prob;
