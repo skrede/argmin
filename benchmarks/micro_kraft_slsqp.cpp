@@ -15,9 +15,11 @@
 
 #include <nlopt.hpp>
 
+#include <array>
+#include <print>
 #include <chrono>
 #include <cstdint>
-#include <print>
+#include <optional>
 
 namespace
 {
@@ -162,6 +164,167 @@ struct hs071_fixed
         J(1, 1) = x[0] * x[2] * x[3];
         J(1, 2) = x[0] * x[1] * x[3];
         J(1, 3) = x[0] * x[1] * x[2];
+    }
+};
+
+// Synthetic 6-DoF ill-conditioned equality-constrained least squares.
+//
+// f(x) = 0.5 * sum_i M_ii^2 * (x_i - x*_i)^2 with a diagonal M whose
+// singular-value spread is exactly 1e4 by construction. Two linear
+// equality constraints place the feasible manifold off the principal
+// axes so the solver must cooperate across all coordinates.
+//
+// The problem is linear-algebra-only. It exercises the same SLSQP hot
+// path that a typical 6-DoF Jacobian-based workload exercises
+// (kraft_slsqp_policy + kraft_lsq_qp_solver + adaptive_bfgs).
+//
+// Optimum lies on the intersection of the two hyperplanes
+//   e^T x = 6  and  [1 -1 1 -1 1 -1]^T x = 0
+// which both pass through x* = (1,1,1,1,1,1), so f_star = 0.
+
+// Condition number kappa(M) = 1e4 by construction:
+// M_ii = 10^(-0.8 * i) for i = 0..5, so M_00 = 1.0 and M_55 = 1e-4.
+inline constexpr std::array<double, 6> synthetic_6dof_m_diag{
+    1.0,
+    1.584893192461114e-1,   // 10^-0.8
+    2.511886431509580e-2,   // 10^-1.6
+    3.981071705534972e-3,   // 10^-2.4
+    6.309573444801934e-4,   // 10^-3.2
+    1.0e-4
+};
+inline constexpr std::array<double, 6> synthetic_6dof_x_star{
+    1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+};
+
+struct synthetic_6dof
+{
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+
+    int dimension() const { return 6; }
+
+    double value(const Eigen::VectorXd& x) const
+    {
+        double f = 0.0;
+        for(std::size_t i = 0; i < 6; ++i)
+        {
+            const double d = x[static_cast<Eigen::Index>(i)]
+                             - synthetic_6dof_x_star[i];
+            f += 0.5 * synthetic_6dof_m_diag[i]
+                     * synthetic_6dof_m_diag[i] * d * d;
+        }
+        return f;
+    }
+
+    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    {
+        for(std::size_t i = 0; i < 6; ++i)
+        {
+            const double d = x[static_cast<Eigen::Index>(i)]
+                             - synthetic_6dof_x_star[i];
+            g[static_cast<Eigen::Index>(i)] = synthetic_6dof_m_diag[i]
+                                            * synthetic_6dof_m_diag[i] * d;
+        }
+    }
+
+    Eigen::VectorXd lower_bounds() const
+    {
+        return Eigen::VectorXd::Constant(6, -1.0e6);
+    }
+
+    Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd::Constant(6, 1.0e6);
+    }
+
+    int num_equality() const { return 2; }
+    int num_inequality() const { return 0; }
+
+    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    {
+        c.resize(2);
+        // Row 0: sum of components = 6
+        c[0] = x.sum() - 6.0;
+        // Row 1: alternating sum = 0
+        c[1] = x[0] - x[1] + x[2] - x[3] + x[4] - x[5];
+    }
+
+    void constraint_jacobian(const Eigen::VectorXd& /*x*/,
+                             Eigen::MatrixXd& J) const
+    {
+        J.resize(2, 6);
+        J.row(0) = Eigen::RowVectorXd::Constant(6, 1.0);
+        J(1, 0) = 1.0;  J(1, 1) = -1.0;
+        J(1, 2) = 1.0;  J(1, 3) = -1.0;
+        J(1, 4) = 1.0;  J(1, 5) = -1.0;
+    }
+};
+
+// Compile-time N=6 variant of synthetic_6dof. Uses
+// Eigen::Vector<double, 6> for x/g state types so the solver's
+// state_type picks up fixed-size storage via CTAD. Constraint vector
+// and Jacobian still use the dynamic types because kraft_slsqp_policy
+// stores them dynamically internally (matching the hs071_fixed
+// precedent).
+struct synthetic_6dof_fixed
+{
+    static constexpr int problem_dimension = 6;
+
+    int dimension() const { return 6; }
+
+    double value(const Eigen::Vector<double, 6>& x) const
+    {
+        double f = 0.0;
+        for(std::size_t i = 0; i < 6; ++i)
+        {
+            const double d = x[static_cast<Eigen::Index>(i)]
+                             - synthetic_6dof_x_star[i];
+            f += 0.5 * synthetic_6dof_m_diag[i]
+                     * synthetic_6dof_m_diag[i] * d * d;
+        }
+        return f;
+    }
+
+    void gradient(const Eigen::Vector<double, 6>& x,
+                  Eigen::Vector<double, 6>& g) const
+    {
+        for(std::size_t i = 0; i < 6; ++i)
+        {
+            const double d = x[static_cast<Eigen::Index>(i)]
+                             - synthetic_6dof_x_star[i];
+            g[static_cast<Eigen::Index>(i)] = synthetic_6dof_m_diag[i]
+                                            * synthetic_6dof_m_diag[i] * d;
+        }
+    }
+
+    Eigen::Vector<double, 6> lower_bounds() const
+    {
+        return Eigen::Vector<double, 6>::Constant(-1.0e6);
+    }
+
+    Eigen::Vector<double, 6> upper_bounds() const
+    {
+        return Eigen::Vector<double, 6>::Constant(1.0e6);
+    }
+
+    int num_equality() const { return 2; }
+    int num_inequality() const { return 0; }
+
+    void constraints(const Eigen::Vector<double, 6>& x,
+                     Eigen::VectorXd& c) const
+    {
+        c.resize(2);
+        c[0] = x.sum() - 6.0;
+        c[1] = x[0] - x[1] + x[2] - x[3] + x[4] - x[5];
+    }
+
+    void constraint_jacobian(const Eigen::Vector<double, 6>& /*x*/,
+                             Eigen::MatrixXd& J) const
+    {
+        J.resize(2, 6);
+        J.row(0) = Eigen::RowVectorXd::Constant(6, 1.0);
+        J(1, 0) = 1.0;  J(1, 1) = -1.0;
+        J(1, 2) = 1.0;  J(1, 3) = -1.0;
+        J(1, 4) = 1.0;  J(1, 5) = -1.0;
     }
 };
 
@@ -379,6 +542,197 @@ timing bench_nlopt(std::uint32_t reps)
     return {per_solve, fval, evals, per_step, 0.0};
 }
 
+// Synthetic 6-DoF NLopt callbacks. Shared constants with the nablapp
+// problem structs via the file-scope synthetic_6dof_m_diag / x_star.
+double nlopt_synthetic_6dof_objective(unsigned, const double* x,
+                                      double* grad, void*)
+{
+    double f = 0.0;
+    for(std::size_t i = 0; i < 6; ++i)
+    {
+        const double d = x[i] - synthetic_6dof_x_star[i];
+        const double m2 = synthetic_6dof_m_diag[i] * synthetic_6dof_m_diag[i];
+        f += 0.5 * m2 * d * d;
+        if(grad)
+            grad[i] = m2 * d;
+    }
+    return f;
+}
+
+// Equality constraint 0: sum_i x_i - 6 = 0.
+double nlopt_synthetic_6dof_eq0(unsigned, const double* x,
+                                double* grad, void*)
+{
+    if(grad)
+    {
+        for(std::size_t i = 0; i < 6; ++i)
+            grad[i] = 1.0;
+    }
+    return x[0] + x[1] + x[2] + x[3] + x[4] + x[5] - 6.0;
+}
+
+// Equality constraint 1: x0 - x1 + x2 - x3 + x4 - x5 = 0.
+double nlopt_synthetic_6dof_eq1(unsigned, const double* x,
+                                double* grad, void*)
+{
+    if(grad)
+    {
+        grad[0] = 1.0; grad[1] = -1.0;
+        grad[2] = 1.0; grad[3] = -1.0;
+        grad[4] = 1.0; grad[5] = -1.0;
+    }
+    return x[0] - x[1] + x[2] - x[3] + x[4] - x[5];
+}
+
+timing bench_nablapp_6dof(std::uint32_t reps)
+{
+    synthetic_6dof problem;
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(6);
+    nablapp::solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-10);
+
+    std::uint32_t iters = 0;
+    {
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        auto result = solver.solve();
+        iters = static_cast<std::uint32_t>(result.iterations);
+        if(!std::isfinite(result.objective_value))
+            std::println("WARNING: kraft_slsqp synthetic 6-DoF diverged, f={:.6e}",
+                         result.objective_value);
+    }
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    double fval = 0.0;
+    std::uint64_t total_ls_calls = 0;
+    for(std::uint32_t r = 0; r < reps; ++r)
+    {
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        auto result = solver.solve();
+        fval = result.objective_value;
+        iters = static_cast<std::uint32_t>(result.iterations);
+        total_ls_calls += solver.state().line_search_calls;
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    double per_solve = total_us / reps;
+    double per_step = total_us / (reps * iters);
+    double ls_per_step = static_cast<double>(total_ls_calls) / (reps * iters);
+    return {per_solve, fval, iters, per_step, ls_per_step};
+}
+
+timing bench_nablapp_6dof_fixed(std::uint32_t reps)
+{
+    synthetic_6dof_fixed problem;
+    Eigen::Vector<double, 6> x0 = Eigen::Vector<double, 6>::Zero();
+    nablapp::solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-10);
+
+    std::uint32_t iters = 0;
+    {
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        auto result = solver.solve();
+        iters = static_cast<std::uint32_t>(result.iterations);
+        if(!std::isfinite(result.objective_value))
+            std::println("WARNING: kraft_slsqp<6> synthetic 6-DoF diverged, f={:.6e}",
+                         result.objective_value);
+    }
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    double fval = 0.0;
+    std::uint64_t total_ls_calls = 0;
+    for(std::uint32_t r = 0; r < reps; ++r)
+    {
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        auto result = solver.solve();
+        fval = result.objective_value;
+        iters = static_cast<std::uint32_t>(result.iterations);
+        total_ls_calls += solver.state().line_search_calls;
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    double per_solve = total_us / reps;
+    double per_step = total_us / (reps * iters);
+    double ls_per_step = static_cast<double>(total_ls_calls) / (reps * iters);
+    return {per_solve, fval, iters, per_step, ls_per_step};
+}
+
+timing bench_nlopt_6dof(std::uint32_t reps)
+{
+    std::uint32_t evals = 0;
+    {
+        nlopt::opt opt(nlopt::LD_SLSQP, 6);
+        opt.set_min_objective(nlopt_synthetic_6dof_objective, nullptr);
+        opt.set_lower_bounds(std::vector<double>(6, -1.0e6));
+        opt.set_upper_bounds(std::vector<double>(6, 1.0e6));
+        opt.add_equality_constraint(nlopt_synthetic_6dof_eq0, nullptr, 1e-10);
+        opt.add_equality_constraint(nlopt_synthetic_6dof_eq1, nullptr, 1e-10);
+        opt.set_maxeval(200);
+        opt.set_ftol_rel(1e-10);
+        opt.set_xtol_rel(1e-10);
+        std::vector<double> x(6, 0.0);
+        double fval;
+        opt.optimize(x, fval);
+        evals = static_cast<std::uint32_t>(opt.get_numevals());
+    }
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    double fval = 0.0;
+    for(std::uint32_t r = 0; r < reps; ++r)
+    {
+        nlopt::opt opt(nlopt::LD_SLSQP, 6);
+        opt.set_min_objective(nlopt_synthetic_6dof_objective, nullptr);
+        opt.set_lower_bounds(std::vector<double>(6, -1.0e6));
+        opt.set_upper_bounds(std::vector<double>(6, 1.0e6));
+        opt.add_equality_constraint(nlopt_synthetic_6dof_eq0, nullptr, 1e-10);
+        opt.add_equality_constraint(nlopt_synthetic_6dof_eq1, nullptr, 1e-10);
+        opt.set_maxeval(200);
+        opt.set_ftol_rel(1e-10);
+        opt.set_xtol_rel(1e-10);
+        std::vector<double> x(6, 0.0);
+        opt.optimize(x, fval);
+        evals = static_cast<std::uint32_t>(opt.get_numevals());
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    double per_solve = total_us / reps;
+    double per_step = total_us / (reps * evals);
+    return {per_solve, fval, evals, per_step, 0.0};
+}
+
+// Pretty-print helper: the four default_convergence criteria in order.
+// Size is hard-coded to 4 to match default_convergence; templating this
+// helper would bloat the bench for no runtime gain.
+void print_last_check_results(
+    const char* label,
+    const std::array<std::optional<nablapp::solver_status>, 4>& results)
+{
+    constexpr std::array<const char*, 4> criterion_names{
+        "gradient_tolerance",
+        "objective_tolerance",
+        "step_tolerance",
+        "stall_tolerance"
+    };
+    std::println("  {} last_check_results:", label);
+    for(std::size_t i = 0; i < results.size(); ++i)
+    {
+        if(results[i])
+            std::println("    [{}] {:<20s} fired -> status code {}",
+                         i, criterion_names[i],
+                         static_cast<int>(*results[i]));
+        else
+            std::println("    [{}] {:<20s} -", i, criterion_names[i]);
+    }
+}
+
 }
 
 int main()
@@ -419,6 +773,97 @@ int main()
     std::println("   invocation, averaged over {} reps x {} iters. Armijo success on first try = 1.0;",
                  reps, kraft.evals);
     std::println("   2.0 means one backtrack on average; 3.0 means two backtracks.)");
+
+    // HS071 per-criterion convergence telemetry. One extra solve per
+    // variant outside the timing loop so it never pollutes the per-step
+    // measurement. Reach path: solver.convergence().last_check_results().
+    std::println("");
+    {
+        hs071 problem;
+        Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
+        nablapp::solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_gradient_threshold(1e-8);
+        opts.set_objective_threshold(1e-10);
+        opts.set_step_threshold(1e-10);
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        (void)solver.solve();
+        print_last_check_results("kraft_slsqp<-1> HS071",
+                                 solver.convergence().last_check_results());
+    }
+    {
+        hs071_fixed problem;
+        Eigen::Vector<double, 4> x0{1.0, 5.0, 5.0, 1.0};
+        nablapp::solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_gradient_threshold(1e-8);
+        opts.set_objective_threshold(1e-10);
+        opts.set_step_threshold(1e-10);
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        (void)solver.solve();
+        print_last_check_results("kraft_slsqp<4>  HS071",
+                                 solver.convergence().last_check_results());
+    }
+
+    // Synthetic 6-DoF benchmarks.
+    std::println("\nSynthetic 6-DoF (n=6, m_eq=2, m_ineq=0, kappa(M)~1e4), {} repetitions each\n",
+                 reps);
+    auto kraft6 = bench_nablapp_6dof(reps);
+    auto kraft6f = bench_nablapp_6dof_fixed(reps);
+    auto nl6 = bench_nlopt_6dof(reps);
+
+    std::println("  {:>14s}  {:>12s}  {:>12s}  {:>10s}  {:>12s}",
+                 "solver", "solve (us)", "step (us)", "iters", "objective");
+    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
+                 "kraft_slsqp<-1>", kraft6.wall_us, kraft6.per_step_us,
+                 kraft6.evals, kraft6.objective);
+    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
+                 "kraft_slsqp<6>", kraft6f.wall_us, kraft6f.per_step_us,
+                 kraft6f.evals, kraft6f.objective);
+    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
+                 "nlopt", nl6.wall_us, nl6.per_step_us, nl6.evals, nl6.objective);
+    std::println("\n  per-solve ratio kraft_slsqp<-1>/nlopt: {:.2f}x",
+                 kraft6.wall_us / nl6.wall_us);
+    std::println("  per-step  ratio kraft_slsqp<-1>/nlopt: {:.2f}x",
+                 kraft6.per_step_us / nl6.per_step_us);
+    std::println("  per-solve ratio kraft_slsqp<6>/nlopt:  {:.2f}x",
+                 kraft6f.wall_us / nl6.wall_us);
+    std::println("  per-step  ratio kraft_slsqp<6>/nlopt:  {:.2f}x",
+                 kraft6f.per_step_us / nl6.per_step_us);
+    std::println("  per-step  kraft_slsqp<-1>/<6>:         {:.2f}x  (dynamic overhead on n=6)",
+                 kraft6.per_step_us / kraft6f.per_step_us);
+    std::println("\n  kraft_slsqp<-1> 6-DoF phi_ls calls per step: {:.3f}",
+                 kraft6.line_search_calls_per_step);
+    std::println("  kraft_slsqp<6>  6-DoF phi_ls calls per step: {:.3f}",
+                 kraft6f.line_search_calls_per_step);
+
+    std::println("");
+    {
+        synthetic_6dof problem;
+        Eigen::VectorXd x0 = Eigen::VectorXd::Zero(6);
+        nablapp::solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_gradient_threshold(1e-8);
+        opts.set_objective_threshold(1e-10);
+        opts.set_step_threshold(1e-10);
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        (void)solver.solve();
+        print_last_check_results("kraft_slsqp<-1> synthetic 6-DoF",
+                                 solver.convergence().last_check_results());
+    }
+    {
+        synthetic_6dof_fixed problem;
+        Eigen::Vector<double, 6> x0 = Eigen::Vector<double, 6>::Zero();
+        nablapp::solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_gradient_threshold(1e-8);
+        opts.set_objective_threshold(1e-10);
+        opts.set_step_threshold(1e-10);
+        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        (void)solver.solve();
+        print_last_check_results("kraft_slsqp<6>  synthetic 6-DoF",
+                                 solver.convergence().last_check_results());
+    }
 
     std::println("\nNow profile with:");
     std::println("  perf record -F 99999 -g -- ./micro_kraft_slsqp");

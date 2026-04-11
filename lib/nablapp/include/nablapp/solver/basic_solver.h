@@ -264,7 +264,14 @@ public:
         opts.max_iterations = max_iterations_;
         opts.max_time = max_time_;
         opts.convergence = stored_convergence_;
-        return step_n(max_iterations_, opts);
+        auto result = step_n(max_iterations_, opts);
+        // Propagate the per-criterion telemetry that step_n writes into
+        // its local opts.convergence back to stored_convergence_ so
+        // solver.convergence().last_check_results() reflects the last
+        // solve's outcome.
+        stored_convergence_.last_check_results_ =
+            opts.convergence.last_check_results_;
+        return result;
     }
 
     // Solve with explicit convergence policy via solver_options.
@@ -281,7 +288,10 @@ public:
         opts.max_iterations = max_iterations_;
         opts.max_time = max_time_;
         opts.convergence = stored_convergence_;
-        return step_n(budget, opts);
+        auto result = step_n(budget, opts);
+        stored_convergence_.last_check_results_ =
+            opts.convergence.last_check_results_;
+        return result;
     }
 
     // Step with budget and explicit convergence policy via solver_options.
@@ -362,6 +372,11 @@ public:
     }
 
     const state_type& state() const { return state_; }
+
+    // Read the stored convergence policy (populated with per-criterion
+    // last_check_results by the most recent step_n() call). Precedent:
+    // line_search_calls on kraft_slsqp_policy::state_type.
+    const auto& convergence() const { return stored_convergence_; }
 
     solver_status status() const { return last_status_; }
 

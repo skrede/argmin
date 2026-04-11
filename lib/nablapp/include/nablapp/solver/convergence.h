@@ -156,15 +156,45 @@ struct convergence_policy
 {
     std::tuple<Criteria...> criteria;
 
+    // Per-criterion statuses from the most recent check() call, exposed
+    // via last_check_results(). Kept public (not private) so the struct
+    // stays an aggregate for designated-initializer construction through
+    // solver_options<>. Mutable because check() is const.
+    mutable std::array<std::optional<solver_status>, sizeof...(Criteria)>
+        last_check_results_{};
+
+    // Populates last_check_results_ with every criterion's per-iteration
+    // status, then returns the first-firing one as the reported
+    // terminator. Short-circuit semantics for the return value are
+    // preserved; per-criterion outcomes are available via
+    // last_check_results(). Reference: K&W 2e Section 4.4.
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
-        std::optional<solver_status> result;
-        auto try_one = [&](const auto& c) {
-            if(!result) result = c.check(r, iteration);
+        std::size_t idx = 0;
+        auto call_one = [&](const auto& c) {
+            last_check_results_[idx] = c.check(r, iteration);
+            ++idx;
         };
-        std::apply([&](const auto&... cs) { (try_one(cs), ...); }, criteria);
-        return result;
+        std::apply([&](const auto&... cs) { (call_one(cs), ...); }, criteria);
+
+        for(const auto& status : last_check_results_)
+        {
+            if(status)
+                return status;
+        }
+        return std::nullopt;
+    }
+
+    // Per-criterion statuses from the most recent check() call. Index
+    // matches declaration order of Criteria...; a nullopt entry means
+    // the criterion did not fire. Reachable from basic_solver via
+    // solver.convergence().last_check_results().
+    [[nodiscard]] const std::array<std::optional<solver_status>,
+                                   sizeof...(Criteria)>&
+    last_check_results() const noexcept
+    {
+        return last_check_results_;
     }
 };
 

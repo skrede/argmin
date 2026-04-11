@@ -392,3 +392,86 @@ TEST_CASE("solver_options<constrained_convergence> convenience setters work",
     CHECK(std::get<step_tolerance_criterion>(inner.criteria).threshold == 1e-8);
     CHECK(opts.convergence.feasibility_threshold == 1e-4);
 }
+
+// -- last_check_results accessor tests --
+//
+// The accessor exposes per-criterion outcomes populated by check() on
+// every iteration, independent of the short-circuit return value.
+// Reference: K&W 2e Section 4.4.
+
+TEST_CASE("convergence_policy last_check_results captures every criterion",
+          "[convergence_policy]")
+{
+    convergence_policy<gradient_tolerance_criterion,
+                       step_tolerance_criterion> policy{};
+    std::get<0>(policy.criteria).threshold = 1e-6;
+    std::get<1>(policy.criteria).threshold = 1e-6;
+
+    step_result<double> r{};
+    r.gradient_norm = 1e-7;  // gradient criterion fires
+    r.step_size = 1e-7;      // step criterion fires too
+    r.objective_value = 0.0;
+    r.constraint_violation = 0.0;
+    r.objective_change = 0.0;
+
+    auto status = policy.check(r, /*iteration=*/5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::converged);  // gradient fires first
+
+    const auto& results = policy.last_check_results();
+    REQUIRE(results.size() == 2);
+    REQUIRE(results[0].has_value());
+    CHECK(*results[0] == solver_status::converged);  // gradient -> converged
+    REQUIRE(results[1].has_value());
+    CHECK(*results[1] == solver_status::stalled);    // step_tolerance -> stalled
+}
+
+TEST_CASE("convergence_policy reports first-firing criterion as status",
+          "[convergence_policy]")
+{
+    convergence_policy<gradient_tolerance_criterion,
+                       step_tolerance_criterion> policy{};
+    std::get<0>(policy.criteria).threshold = 1e-6;
+    std::get<1>(policy.criteria).threshold = 1e-6;
+
+    step_result<double> r{};
+    r.gradient_norm = 1e-7;  // gradient fires
+    r.step_size = 1.0;       // step does not fire
+    r.objective_change = 0.0;
+    r.objective_value = 0.0;
+    r.constraint_violation = 0.0;
+
+    auto status = policy.check(r, /*iteration=*/5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::converged);
+
+    const auto& results = policy.last_check_results();
+    REQUIRE(results[0].has_value());
+    CHECK(*results[0] == solver_status::converged);
+    CHECK(!results[1].has_value());
+}
+
+TEST_CASE("convergence_policy last_check_results reports mid-tuple fire when earlier criterion disabled",
+          "[convergence_policy]")
+{
+    convergence_policy<gradient_tolerance_criterion,
+                       step_tolerance_criterion> policy{};
+    // Gradient criterion disabled (threshold left at std::nullopt).
+    std::get<1>(policy.criteria).threshold = 1e-6;
+
+    step_result<double> r{};
+    r.gradient_norm = 1.0;   // would trigger if gradient were active
+    r.step_size = 1e-7;      // step fires
+    r.objective_change = 0.0;
+    r.objective_value = 0.0;
+    r.constraint_violation = 0.0;
+
+    auto status = policy.check(r, /*iteration=*/5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::stalled);
+
+    const auto& results = policy.last_check_results();
+    CHECK(!results[0].has_value());   // gradient disabled
+    REQUIRE(results[1].has_value());
+    CHECK(*results[1] == solver_status::stalled);
+}
