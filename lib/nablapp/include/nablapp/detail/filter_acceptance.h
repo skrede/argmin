@@ -86,9 +86,12 @@ public:
     // f_j >= f AND h_j >= h.
     void add(Scalar f, Scalar h)
     {
-        std::erase_if(entries_, [f, h](const filter_entry<Scalar>& e) {
-            return e.objective >= f && e.violation >= h;
-        });
+        entries_.erase(
+            std::remove_if(entries_.begin(), entries_.end(),
+                           [f, h](const filter_entry<Scalar>& e) {
+                               return e.objective >= f && e.violation >= h;
+                           }),
+            entries_.end());
         entries_.push_back({f, h});
     }
 
