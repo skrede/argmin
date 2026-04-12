@@ -22,6 +22,7 @@
 #include "nablapp/solver/nw_sqp_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
 #include "nablapp/solver/filter_nw_sqp_policy.h"
+#include "nablapp/solver/filter_slsqp_policy.h"
 #include "nablapp/solver/augmented_lagrangian_policy.h"
 
 #include "nablapp/formulation/concepts.h"
@@ -299,6 +300,10 @@ void run_all_nablapp_solvers(
             }
         }
     }
+
+    // Filter SLSQP: any constrained problem (filter-based L-BFGS SQP).
+    if constexpr(is_constrained && differentiable<Problem> && is_bound)
+        run_constrained("filter_slsqp", filter_slsqp_policy<>{});
 
     // Filter NW SQP: any constrained problem (filter-based dense BFGS SQP).
     if constexpr(is_constrained && differentiable<Problem> && is_bound)

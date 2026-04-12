@@ -17,6 +17,9 @@
 using Catch::Approx;
 using namespace nablapp;
 
+static_assert(nlp_solver<basic_solver<filter_nw_sqp_policy<>>>,
+              "filter_nw_sqp_policy must satisfy nlp_solver concept");
+
 TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
 {
     SECTION("HS071: mixed equality + inequality constraints")
@@ -33,11 +36,8 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
-        // HS071 with equality + inequality is hard for BFGS-based SQP;
-        // the active_set_qp solver may not reach tight precision.
-        // Matches nw_sqp_policy regression guard.
         CHECK(std::isfinite(result.objective_value));
-        CHECK(result.objective_value < 30.0);
+        CHECK(result.objective_value == Approx(17.014).margin(4.0));
     }
 
     SECTION("HS043: inequality constraints only")

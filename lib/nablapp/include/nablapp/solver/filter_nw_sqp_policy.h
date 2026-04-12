@@ -408,9 +408,38 @@ struct filter_nw_sqp_policy
             }
         }
 
-        // If still rejected, return zero step.
+        // If still rejected, attempt feasibility restoration.
+        // Reference: Wachter & Biegler 2006, Section 3.
         if(!accepted)
         {
+            auto rest = run_restoration_(s);
+            if(rest.success)
+            {
+                s.x = rest.x;
+                s.objective_value = s.problem->value(s.x);
+                s.problem->gradient(s.x, s.g);
+                if(m > 0)
+                {
+                    s.problem->constraints(s.x, s.c_all);
+                    s.c_eq = s.c_all.head(s.n_eq);
+                    s.c_ineq = s.c_all.tail(s.n_ineq);
+                    s.problem->constraint_jacobian(s.x, s.J_all);
+                    s.J_eq = s.J_all.topRows(s.n_eq);
+                    s.J_ineq = s.J_all.bottomRows(s.n_ineq);
+                }
+                double h_restored = detail::constraint_violation(s.c_eq, s.c_ineq);
+                s.filter.add(s.objective_value, h_restored);
+                ++s.iteration;
+                return step_result<double>{
+                    .objective_value = s.objective_value,
+                    .gradient_norm = lagrangian_gradient_norm(s),
+                    .step_size = (s.x - rest.x).norm(),
+                    .objective_change = s.objective_value - f_k,
+                    .improved = h_restored < h_k,
+                    .constraint_violation = h_restored,
+                };
+            }
+
             ++s.iteration;
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -543,6 +572,113 @@ private:
         if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
         return detail::lagrangian_gradient(
             Eigen::VectorXd(s.g), A, s.lambda).norm();
+    }
+
+    template <typename P>
+    struct restoration_adapter
+    {
+        const P& problem;
+        int n_eq;
+        int n_ineq;
+
+        void eval_constraints(const Eigen::Vector<double, N>& x,
+                              Eigen::VectorXd& c_eq,
+                              Eigen::VectorXd& c_ineq) const
+        {
+            Eigen::VectorXd c_all(n_eq + n_ineq);
+            problem.constraints(x, c_all);
+            c_eq = c_all.head(n_eq);
+            c_ineq = c_all.tail(n_ineq);
+        }
+
+        void eval_constraint_jacobians(const Eigen::Vector<double, N>& x,
+                                       Eigen::MatrixXd& J_eq,
+                                       Eigen::MatrixXd& J_ineq) const
+        {
+            Eigen::MatrixXd J_all(n_eq + n_ineq, x.size());
+            problem.constraint_jacobian(x, J_all);
+            J_eq = J_all.topRows(n_eq);
+            J_ineq = J_all.bottomRows(n_ineq);
+        }
+    };
+
+    // Reference: Wachter & Biegler 2006 Section 3.
+    template <typename P>
+    detail::restoration_result<double, N> run_restoration_(state_type<P>& s)
+    {
+        restoration_adapter<P> adapter{*s.problem, s.n_eq, s.n_ineq};
+
+        double sigma_restore = 1e4;
+        if(s.lambda.size() > 0)
+            sigma_restore = s.lambda.cwiseAbs().maxCoeff() + 1e-4;
+
+        auto strategy = options.restoration;
+        auto max_steps = options.max_restoration_steps;
+
+        if(strategy == detail::restoration_strategy::l1_penalty ||
+           strategy == detail::restoration_strategy::hybrid)
+        {
+            auto result = detail::restore_l1<double, N>(
+                adapter, s.x, s.g, s.lower, s.upper,
+                sigma_restore, max_steps);
+            if(result.success)
+                return result;
+        }
+
+        // feasibility QP via solve_qp free function
+        if(strategy == detail::restoration_strategy::feasibility_qp ||
+           strategy == detail::restoration_strategy::hybrid)
+        {
+            Eigen::Vector<double, N> x = s.x;
+            for(std::uint16_t step = 0; step < max_steps; ++step)
+            {
+                Eigen::VectorXd c_eq, c_ineq;
+                adapter.eval_constraints(x, c_eq, c_ineq);
+                double h_k = detail::constraint_violation(c_eq, c_ineq);
+                if(h_k < 1e-12)
+                    return {x, h_k, true, step};
+
+                Eigen::MatrixXd J_eq_r, J_ineq_r;
+                adapter.eval_constraint_jacobians(x, J_eq_r, J_ineq_r);
+
+                auto n = x.size();
+                Eigen::MatrixXd H = Eigen::MatrixXd::Identity(n, n);
+                Eigen::VectorXd g_zero = Eigen::VectorXd::Zero(n);
+                Eigen::VectorXd x0_qp = Eigen::VectorXd::Zero(n);
+
+                Eigen::VectorXd neg_c_eq = (-c_eq).eval();
+                Eigen::VectorXd neg_c_ineq = (-c_ineq).eval();
+                auto qp_res = detail::solve_qp(H, g_zero,
+                    J_eq_r, neg_c_eq, J_ineq_r, neg_c_ineq, x0_qp);
+
+                Eigen::Vector<double, N> p = qp_res.x;
+                if(p.norm() < 1e-15)
+                    return {x, h_k, false, step};
+
+                double alpha = 1.0;
+                while(alpha > 1e-10)
+                {
+                    Eigen::Vector<double, N> x_trial =
+                        (x + alpha * p).cwiseMax(s.lower).cwiseMin(s.upper);
+                    Eigen::VectorXd c_eq_t, c_ineq_t;
+                    adapter.eval_constraints(x_trial, c_eq_t, c_ineq_t);
+                    if(detail::constraint_violation(c_eq_t, c_ineq_t) < h_k)
+                    {
+                        x = x_trial;
+                        break;
+                    }
+                    alpha *= 0.5;
+                }
+                if(alpha <= 1e-10)
+                    return {x, h_k, false, step};
+            }
+            Eigen::VectorXd c_eq_f, c_ineq_f;
+            adapter.eval_constraints(x, c_eq_f, c_ineq_f);
+            double h_f = detail::constraint_violation(c_eq_f, c_ineq_f);
+            return {x, h_f, h_f < 1e-12, max_steps};
+        }
+
+        return {s.x, detail::constraint_violation(s.c_eq, s.c_ineq), false, 0};
     }
 };
 
