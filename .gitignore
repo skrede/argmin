@@ -3,6 +3,7 @@ coverage.*
 *_UnitTest
 .DS_Store
 cmake-build-*/
+CMakeFiles/
 *.dylib*
 *.ilk
 *.obj
@@ -41,8 +42,6 @@ ui_*.h
 *.BACKUP*
 *_BACKUP_*
 *_REMOTE_*
-*.BACKUP*
-*_REMOTE_*
 *.BASE*
 *_BASE_*
 *.autosave
@@ -53,8 +52,8 @@ cmake-build-*
 **/build*/
 **/.userfiles/
 
-*.pb.h
-*.pb.cc
+**/*.pb.h
+**/*.pb.cc
 **/*_generated.h
 
 .claude/
@@ -63,5 +62,9 @@ cmake-build-*
 CLAUDE.md
 GEMINI.md
 
-benchmark_traces/
-traces/
+**/*traces*/
+**/*Test*/
+**/*Build*/
+**/*Testing*/
+results*.csv
+
