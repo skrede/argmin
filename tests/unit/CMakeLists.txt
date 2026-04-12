@@ -24,6 +24,7 @@ add_executable(nablapp_unit_tests
     hock_schittkowski_test.cpp
     augmented_lagrangian_test.cpp
     convergence_policy_test.cpp
+    filter_sqp_test.cpp
     zero_copy_test.cpp
     finite_difference_test.cpp
 )
