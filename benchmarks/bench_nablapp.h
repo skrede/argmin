@@ -21,6 +21,7 @@
 #include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
+#include "nablapp/solver/filter_nw_sqp_policy.h"
 #include "nablapp/solver/augmented_lagrangian_policy.h"
 
 #include "nablapp/formulation/concepts.h"
@@ -298,6 +299,10 @@ void run_all_nablapp_solvers(
             }
         }
     }
+
+    // Filter NW SQP: any constrained problem (filter-based dense BFGS SQP).
+    if constexpr(is_constrained && differentiable<Problem> && is_bound)
+        run_constrained("filter_nw_sqp", filter_nw_sqp_policy<>{});
 
     // Augmented Lagrangian (with L-BFGS-B inner): any constrained problem.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)

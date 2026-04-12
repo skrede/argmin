@@ -21,6 +21,7 @@ add_executable(nablapp_unit_tests
     basic_solver_test.cpp
     active_set_qp_test.cpp
     test_functions_test.cpp
+    filter_nw_sqp_test.cpp
     hock_schittkowski_test.cpp
     augmented_lagrangian_test.cpp
     convergence_policy_test.cpp

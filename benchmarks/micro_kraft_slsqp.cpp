@@ -9,6 +9,7 @@
 
 #include "nablapp/solver/kraft_slsqp_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"
+#include "nablapp/solver/filter_nw_sqp_policy.h"
 #include "nablapp/solver/basic_solver.h"
 
 #include <Eigen/Core>
@@ -497,6 +498,43 @@ timing bench_nablapp_nw_sqp(std::uint32_t reps)
     return {per_solve, fval, iters, per_step, 0.0};
 }
 
+timing bench_nablapp_filter_nw_sqp(std::uint32_t reps)
+{
+    hs071 problem;
+    Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
+    nablapp::solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-10);
+
+    std::uint32_t iters = 0;
+    {
+        nablapp::basic_solver solver{nablapp::filter_nw_sqp_policy{}, problem, x0, opts};
+        auto result = solver.solve();
+        iters = static_cast<std::uint32_t>(result.iterations);
+        if(!std::isfinite(result.objective_value))
+            std::println("WARNING: filter_nw_sqp diverged, f={:.6e}",
+                         result.objective_value);
+    }
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    double fval = 0.0;
+    for(std::uint32_t r = 0; r < reps; ++r)
+    {
+        nablapp::basic_solver solver{nablapp::filter_nw_sqp_policy{}, problem, x0, opts};
+        auto result = solver.solve();
+        fval = result.objective_value;
+        iters = static_cast<std::uint32_t>(result.iterations);
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    double per_solve = total_us / reps;
+    double per_step = total_us / (reps * iters);
+    return {per_solve, fval, iters, per_step, 0.0};
+}
+
 timing bench_nlopt(std::uint32_t reps)
 {
     // Warmup.
@@ -744,6 +782,7 @@ int main()
     auto kraft = bench_nablapp(reps);
     auto kraft_fixed = bench_nablapp_fixed(reps);
     auto nw = bench_nablapp_nw_sqp(reps);
+    auto filter_nw = bench_nablapp_filter_nw_sqp(reps);
     auto nl = bench_nlopt(reps);
 
     std::println("  {:>14s}  {:>12s}  {:>12s}  {:>10s}  {:>12s}",
@@ -755,6 +794,8 @@ int main()
     std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
                  "nw_sqp", nw.wall_us, nw.per_step_us, nw.evals, nw.objective);
     std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
+                 "filter_nw_sqp", filter_nw.wall_us, filter_nw.per_step_us, filter_nw.evals, filter_nw.objective);
+    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
                  "nlopt", nl.wall_us, nl.per_step_us, nl.evals, nl.objective);
     std::println("\n  per-solve ratio kraft_slsqp<-1>/nlopt: {:.2f}x", kraft.wall_us / nl.wall_us);
     std::println("  per-step  ratio kraft_slsqp<-1>/nlopt: {:.2f}x", kraft.per_step_us / nl.per_step_us);
@@ -764,6 +805,8 @@ int main()
                  kraft.per_step_us / kraft_fixed.per_step_us);
     std::println("  per-solve ratio nw_sqp/nlopt:          {:.2f}x", nw.wall_us / nl.wall_us);
     std::println("  per-step  ratio nw_sqp/nlopt:          {:.2f}x", nw.per_step_us / nl.per_step_us);
+    std::println("  per-solve ratio filter_nw_sqp/nlopt:   {:.2f}x", filter_nw.wall_us / nl.wall_us);
+    std::println("  per-step  ratio filter_nw_sqp/nlopt:   {:.2f}x", filter_nw.per_step_us / nl.per_step_us);
 
     std::println("\n  kraft_slsqp<-1> phi_ls calls per step: {:.3f}",
                  kraft.line_search_calls_per_step);
