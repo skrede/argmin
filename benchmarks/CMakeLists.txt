@@ -112,6 +112,90 @@ if(NLopt_FOUND)
         set_target_properties(micro_kraft_slsqp PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
+
+    add_executable(micro_cobyla micro_cobyla.cpp)
+    target_link_libraries(micro_cobyla PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_cobyla PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_cobyla PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
+    add_executable(micro_mma micro_mma.cpp)
+    target_link_libraries(micro_mma PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_mma PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_mma PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
+    add_executable(micro_nw_sqp micro_nw_sqp.cpp)
+    target_link_libraries(micro_nw_sqp PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_nw_sqp PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_nw_sqp PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
+    add_executable(micro_filter_slsqp micro_filter_slsqp.cpp)
+    target_link_libraries(micro_filter_slsqp PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_filter_slsqp PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_filter_slsqp PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
+    add_executable(micro_filter_nw_sqp micro_filter_nw_sqp.cpp)
+    target_link_libraries(micro_filter_nw_sqp PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_filter_nw_sqp PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_filter_nw_sqp PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
+    add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
+    target_link_libraries(micro_augmented_lagrangian PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_augmented_lagrangian PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_augmented_lagrangian PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
+    add_executable(micro_isres micro_isres.cpp)
+    target_link_libraries(micro_isres PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_isres PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_isres PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
 endif()
 
 # Active-set QP micro-benchmark (nablapp-only, no external dependencies).
