@@ -43,6 +43,9 @@ struct projected_gn_policy
 {
     using scalar_type = double;
 
+    template <int M>
+    using rebind = projected_gn_policy;
+
     struct options_type
     {
         double initial_lambda{0.0};     // 0 = auto via Nielsen init: tau * max(diag(J^T*J))
