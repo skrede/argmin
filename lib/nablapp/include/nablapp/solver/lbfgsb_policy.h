@@ -65,6 +65,8 @@ struct lbfgsb_policy
         std::optional<std::uint8_t> history_depth{};  // L-BFGS memory depth (default: 10, N&W 7.2)
         line_search_options line_search{};             // Embedded line search params
         lbfgsb_line_search line_search_type{lbfgsb_line_search::strong_wolfe};
+        std::uint16_t stall_window{50};
+        double feasibility_gate{std::numeric_limits<double>::infinity()};
     };
 
     options_type options{};

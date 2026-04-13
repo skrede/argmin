@@ -77,6 +77,8 @@ struct augmented_lagrangian_policy
         // Reference: N&W Algorithm 17.4, Step 2.
         std::optional<scalar_type> inner_tolerance_eta{};         // default: 0.1
         std::optional<scalar_type> inner_tolerance_alpha{};       // default: 0.1
+        std::uint16_t stall_window{100};
+        double feasibility_gate{1e-4};
     };
 
     options_type options{};

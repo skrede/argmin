@@ -1019,3 +1019,125 @@ TEST_CASE("stall criterion does not regress well-behaved L-BFGS-B convergence", 
     CHECK(result.status != solver_status::stalled);
     CHECK(result.objective_value < 1e-8);
 }
+
+// ---------------------------------------------------------------------------
+// Enlarged stall window and feasibility gate tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("stall_tolerance_criterion fires at window=200 not at window=64",
+          "[convergence][stall][enlarged]")
+{
+    stall_tolerance_criterion crit;
+    crit.threshold = 1e-8;
+    crit.window = 200;
+
+    // Feed 200 identical step_results (objective=1.0, cv=0.0).
+    // Stall should NOT fire before iteration 200.
+    for(std::uint32_t i = 0; i < 200; ++i)
+    {
+        step_result<double> r{
+            .objective_value = 1.0,
+            .constraint_violation = 0.0,
+        };
+        auto status = crit.check(r, i);
+        // Must not fire before window is full
+        if(i < 200 - 1)
+            CHECK_FALSE(status.has_value());
+    }
+
+    // At iteration 200, stall should fire (all values identical).
+    step_result<double> r{
+        .objective_value = 1.0,
+        .constraint_violation = 0.0,
+    };
+    auto status = crit.check(r, 200);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::stalled);
+}
+
+TEST_CASE("objective_tolerance_criterion feasibility_gate blocks ftol",
+          "[convergence][feasibility_gate]")
+{
+    objective_tolerance_criterion crit;
+    crit.threshold = 1e-6;
+    crit.stationarity_threshold = 1e2;  // effectively disabled
+    crit.feasibility_gate = 1e-4;
+
+    // Case 1: constraint_violation above gate -- ftol must NOT fire.
+    {
+        step_result<double> r{
+            .objective_value = 1.0,
+            .gradient_norm = 0.0,
+            .objective_change = 1e-10,
+            .constraint_violation = 0.1,
+        };
+        auto status = crit.check(r, 5);
+        CHECK_FALSE(status.has_value());
+    }
+
+    // Case 2: constraint_violation below gate -- ftol should fire.
+    {
+        step_result<double> r{
+            .objective_value = 1.0,
+            .gradient_norm = 0.0,
+            .objective_change = 1e-10,
+            .constraint_violation = 1e-5,
+        };
+        auto status = crit.check(r, 5);
+        REQUIRE(status.has_value());
+        CHECK(*status == solver_status::ftol_reached);
+    }
+}
+
+TEST_CASE("objective_tolerance_criterion default feasibility_gate=infinity allows ftol",
+          "[convergence][feasibility_gate]")
+{
+    objective_tolerance_criterion crit;
+    crit.threshold = 1e-6;
+    crit.stationarity_threshold = 1e2;  // effectively disabled
+
+    // Default gate is infinity, so cv=0.0 passes (0 > infinity is false).
+    step_result<double> r{
+        .objective_value = 1.0,
+        .gradient_norm = 0.0,
+        .objective_change = 1e-10,
+        .constraint_violation = 0.0,
+    };
+    auto status = crit.check(r, 5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::ftol_reached);
+}
+
+TEST_CASE("objective_tolerance_rel_criterion feasibility_gate blocks ftol",
+          "[convergence][feasibility_gate]")
+{
+    objective_tolerance_rel_criterion crit;
+    crit.threshold = 1e-6;
+    crit.stationarity_threshold = 1e2;  // effectively disabled
+    crit.feasibility_gate = 1e-4;
+
+    // Case 1: constraint_violation above gate -- ftol must NOT fire.
+    {
+        step_result<double> r{
+            .objective_value = 1.0,
+            .gradient_norm = 0.0,
+            .objective_change = 1e-10,
+            .constraint_violation = 0.1,
+        };
+        auto status = crit.check(r, 5);
+        CHECK_FALSE(status.has_value());
+    }
+
+    // Case 2: constraint_violation below gate -- ftol should fire.
+    {
+        step_result<double> r{
+            .objective_value = 1.0,
+            .gradient_norm = 0.0,
+            .objective_change = 1e-10,
+            .constraint_violation = 1e-5,
+        };
+        auto status = crit.check(r, 5);
+        REQUIRE(status.has_value());
+        CHECK(*status == solver_status::ftol_reached);
+    }
+}

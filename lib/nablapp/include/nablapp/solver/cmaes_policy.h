@@ -61,6 +61,9 @@ struct cmaes_policy
         std::optional<std::uint64_t> seed{};             // RNG seed
         cmaes_options cmaes{};                           // Detection params (Hansen tutorial)
         std::optional<std::uint32_t> eigendecomposition_skip_generations{}; // Override Hansen formula
+        std::optional<std::uint32_t> stagnation_window{};  // Override Hansen stagnation window formula
+        std::uint16_t stall_window{100};
+        double feasibility_gate{std::numeric_limits<double>::infinity()};
     };
 
     template <typename P = void>
@@ -196,6 +199,8 @@ struct cmaes_policy
         s.stagnation_window_min = std::max(
             std::uint32_t{120},
             static_cast<std::uint32_t>(30.0 * n / s.params.lambda));
+        if(options.stagnation_window.has_value())
+            s.stagnation_window_min = *options.stagnation_window;
 
         s.objective_value = s.problem->value(x0);
         s.x = x0;

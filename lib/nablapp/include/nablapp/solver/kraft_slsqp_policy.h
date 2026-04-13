@@ -73,6 +73,8 @@ struct kraft_slsqp_policy
         std::optional<double> penalty_growth{};        // penalty multiplier (default: 10.0, Kraft 1988)
         line_search_options line_search{};             // Embedded line search params
         qp_options qp{};                               // QP subproblem params
+        std::uint16_t stall_window{50};
+        double feasibility_gate{1e-4};
     };
 
     options_type options{};

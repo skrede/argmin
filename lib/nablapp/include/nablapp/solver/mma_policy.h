@@ -52,6 +52,8 @@ struct mma_policy
         std::optional<double> effective_bounds_scale{};  // default: 10.0
         asymptote_options asymptote{};                   // Embedded asymptote update params
         mma_subproblem_options subproblem{};              // Embedded subproblem params
+        std::uint16_t stall_window{50};
+        double feasibility_gate{1e-4};
     };
 
     template <typename P = void>

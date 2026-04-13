@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <tuple>
 
@@ -33,14 +34,18 @@ struct objective_tolerance_criterion
 {
     std::optional<double> threshold{};
     std::optional<double> stationarity_threshold{};
+    double feasibility_gate{std::numeric_limits<double>::infinity()};
 
-    // K&W 2e Section 4.4: convergence requires stationarity. Small objective
-    // change alone is insufficient -- the gradient must also be small to
-    // distinguish genuine convergence from a non-stationary plateau.
+    // K&W 2e Section 4.4 + feasibility gate: ftol convergence requires
+    // constraint satisfaction. Small objective change alone is insufficient
+    // -- the gradient must also be small and constraints must be satisfied
+    // to distinguish genuine convergence from a non-stationary plateau.
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
+            return std::nullopt;
+        if(r.constraint_violation > feasibility_gate)
             return std::nullopt;
         if(iteration > 1 && std::abs(r.objective_change) < *threshold)
         {
@@ -73,12 +78,16 @@ struct objective_tolerance_rel_criterion
 {
     std::optional<double> threshold{};
     std::optional<double> stationarity_threshold{};
+    double feasibility_gate{std::numeric_limits<double>::infinity()};
 
-    // K&W 2e Section 4.4: stationarity gate applies to relative criterion too.
+    // K&W 2e Section 4.4 + feasibility gate: ftol convergence requires
+    // constraint satisfaction. Stationarity gate applies to relative criterion too.
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
+            return std::nullopt;
+        if(r.constraint_violation > feasibility_gate)
             return std::nullopt;
         if(iteration > 1 &&
            std::abs(r.objective_change) / std::max(std::abs(r.objective_value), 1.0) < *threshold)
@@ -132,13 +141,15 @@ struct stall_tolerance_criterion
         if(!threshold)
             return std::nullopt;
 
+        auto effective_window = std::min(window, max_window);
+
         double metric = r.objective_value + r.constraint_violation;
         buffer_[iteration % max_window] = metric;
 
-        if(iteration < window)
+        if(iteration < effective_window)
             return std::nullopt;
 
-        double old_metric = buffer_[(iteration - window + 1) % max_window];
+        double old_metric = buffer_[(iteration - effective_window + 1) % max_window];
 
         if(std::abs(metric - old_metric) < *threshold * std::max(std::abs(metric), 1.0))
             return solver_status::stalled;
@@ -147,7 +158,7 @@ struct stall_tolerance_criterion
     }
 
 private:
-    static constexpr std::uint16_t max_window = 64;
+    static constexpr std::uint16_t max_window = 512;
     mutable std::array<double, max_window> buffer_{};
 };
 

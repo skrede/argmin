@@ -50,6 +50,8 @@ struct isres_policy
         std::optional<double> ranking_probability{};
         std::optional<double> differential_weight{};
         std::optional<std::uint64_t> seed{};
+        std::uint16_t stall_window{200};
+        double feasibility_gate{1e-4};
     };
 
     template <typename P = void>

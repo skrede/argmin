@@ -38,6 +38,8 @@ struct byrd_lbfgsb_policy
     {
         line_search_options line_search{};
         lbfgsb_line_search line_search_type{lbfgsb_line_search::armijo};
+        std::uint16_t stall_window{50};
+        double feasibility_gate{std::numeric_limits<double>::infinity()};
     };
 
     options_type options{};

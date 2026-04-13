@@ -63,6 +63,8 @@ struct filter_slsqp_policy
         detail::restoration_strategy restoration{detail::restoration_strategy::hybrid};
         std::uint16_t max_restoration_steps{10};
         double soc_violation_threshold{1e-8};
+        std::uint16_t stall_window{50};
+        double feasibility_gate{1e-4};
     };
 
     options_type options{};

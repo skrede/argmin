@@ -51,6 +51,8 @@ struct cobyla_policy
         double initial_trust_radius{0.0};   // 0 means auto (10% of max bound range)
         double final_trust_radius{1e-8};
         double step_convergence_factor{1e-3};
+        std::uint16_t stall_window{50};
+        double feasibility_gate{1e-4};
     };
 
     options_type options{};

@@ -55,6 +55,8 @@ struct nw_sqp_policy
         line_search_options line_search{};  // Replaces hardcoded c1=1e-4, rho=0.5, max_iter=30
         bfgs_options bfgs{};               // BFGS Hessian update params (N&W Proc 18.2)
         qp_options qp{};                   // QP subproblem params
+        std::uint16_t stall_window{50};
+        double feasibility_gate{1e-4};
     };
 
     options_type options{};

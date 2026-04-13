@@ -111,6 +111,8 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
+        if constexpr(requires { policy_.options; })
+            forward_policy_hints(policy_.options);
     }
 
     // CTAD converting constructor: accepts an un-rebound policy and discards
@@ -131,6 +133,8 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
+        if constexpr(requires { policy_.options; })
+            forward_policy_hints(policy_.options);
     }
 
     template <typename P, typename Convergence = default_convergence>
@@ -143,6 +147,8 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
+        if constexpr(requires { policy_.options; })
+            forward_policy_hints(policy_.options);
     }
 
     template <typename P, typename PolicyOpts, typename Convergence = default_convergence>
@@ -160,6 +166,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
         store_convergence(opts.convergence);
+        forward_policy_hints(policy_opts);
     }
 
     // CTAD converting constructor with policy options.
@@ -181,6 +188,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
         store_convergence(opts.convergence);
+        forward_policy_hints(policy_opts);
     }
 
     template <typename P, typename PolicyOpts, typename Convergence = default_convergence>
@@ -196,6 +204,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
         store_convergence(opts.convergence);
+        forward_policy_hints(policy_opts);
     }
 
     // Overload for policies without options_type: the fourth argument is
@@ -212,6 +221,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
+        // No policy hints for policies without options_type.
     }
 
     basic_solver(const basic_solver&) = delete;
@@ -432,6 +442,7 @@ public:
             auto& dst = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
             dst.threshold = c.threshold;
             dst.stationarity_threshold = c.stationarity_threshold;
+            dst.feasibility_gate = c.feasibility_gate;
         }
         else if constexpr(std::same_as<Criterion, step_tolerance_criterion>)
             std::get<step_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
@@ -455,6 +466,21 @@ public:
         if constexpr(requires { conv.inner; })
         {
             store_convergence(conv.inner);
+        }
+    }
+
+    template <typename PolicyOpts>
+    void forward_policy_hints(const PolicyOpts& policy_opts)
+    {
+        if constexpr(requires { policy_opts.stall_window; })
+        {
+            auto& stall = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
+            stall.window = policy_opts.stall_window;
+        }
+        if constexpr(requires { policy_opts.feasibility_gate; })
+        {
+            auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+            ftol.feasibility_gate = policy_opts.feasibility_gate;
         }
     }
 
