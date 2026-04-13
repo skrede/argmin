@@ -19,6 +19,8 @@
 #include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/cobyla_policy.h"
 #include "nablapp/solver/isres_policy.h"
+#include "nablapp/solver/projected_gn_policy.h"
+#include "nablapp/solver/projected_gradient_gn_policy.h"
 #include "nablapp/solver/augmented_lagrangian_policy.h"
 #include "nablapp/test_functions/booth.h"
 #include "nablapp/test_functions/beale.h"
@@ -268,6 +270,9 @@ static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lm_policy<>>>);
 
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::cobyla_policy>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::isres_policy<>>>);
+
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::projected_gn_policy>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::projected_gradient_gn_policy>>);
 
 // problem_dimension concept verification
 static_assert(nablapp::has_problem_dimension<nablapp::himmelblau<>>);

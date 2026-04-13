@@ -92,17 +92,17 @@ struct projected_gradient_gn_policy
         std::function<void(const Eigen::VectorXd&, Eigen::MatrixXd&)> eval_jacobian;
     };
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>& opts, const options_type& policy_opts)
+                    const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
         return self.init(problem, x0, opts);
     }
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>&)
+                    const solver_options<Convergence>&)
     {
         state_type s;
         const int n = static_cast<int>(x0.size());
@@ -228,7 +228,8 @@ private:
 
         // Projected direction (N&W Section 16.7):
         // d = P(x + h, l, u) - x
-        Eigen::VectorXd d = detail::project(s.x + h, s.lower, s.upper) - s.x;
+        Eigen::VectorXd x_plus_h = (s.x + h).eval();
+        Eigen::VectorXd d = detail::project(x_plus_h, s.lower, s.upper) - s.x;
 
         // Directional derivative along projected direction
         double gTd = g.dot(d);
@@ -246,7 +247,8 @@ private:
 
         for(std::uint32_t k = 0; k < max_bt; ++k)
         {
-            x_trial = detail::project(s.x + alpha * d, s.lower, s.upper);
+            Eigen::VectorXd x_candidate = (s.x + alpha * d).eval();
+            x_trial = detail::project(x_candidate, s.lower, s.upper);
             s.eval_residuals(x_trial, r_trial);
             f_trial = 0.5 * r_trial.squaredNorm();
 
@@ -320,7 +322,8 @@ private:
         Eigen::VectorXd h = detail::dogleg_step(s.J, H_free, g_free, free_indices, n, s.delta);
 
         // Project trial point onto bounds (N&W Section 16.7)
-        Eigen::VectorXd x_trial = detail::project(s.x + h, s.lower, s.upper);
+        Eigen::VectorXd x_plus_h = (s.x + h).eval();
+        Eigen::VectorXd x_trial = detail::project(x_plus_h, s.lower, s.upper);
         Eigen::VectorXd d = (x_trial - s.x).eval();
 
         // Evaluate trial residuals

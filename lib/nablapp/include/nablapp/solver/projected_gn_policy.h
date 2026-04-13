@@ -81,17 +81,17 @@ struct projected_gn_policy
         std::function<void(const Eigen::VectorXd&, Eigen::MatrixXd&)> eval_jacobian;
     };
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>& opts, const options_type& policy_opts)
+                    const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         self.options = policy_opts;
         return self.init(problem, x0, opts);
     }
 
-    template <typename Problem>
+    template <typename Problem, typename Convergence = default_convergence>
     state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
-                    const solver_options<double>&)
+                    const solver_options<Convergence>&)
     {
         state_type s;
         const int n = static_cast<int>(x0.size());
@@ -187,7 +187,8 @@ struct projected_gn_policy
         }
 
         // Project trial point onto bounds before evaluating (N&W Section 16.7)
-        Eigen::VectorXd x_trial = detail::project(s.x + h, s.lower, s.upper);
+        Eigen::VectorXd x_plus_h = (s.x + h).eval();
+        Eigen::VectorXd x_trial = detail::project(x_plus_h, s.lower, s.upper);
 
         // Effective step after projection
         Eigen::VectorXd d = (x_trial - s.x).eval();
