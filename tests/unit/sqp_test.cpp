@@ -320,9 +320,22 @@ TEST_CASE("nw_sqp HS071 mixed constraints", "[sqp]")
 {
     // HS071: n=4, m_eq=1, m_ineq=1, box bounds [1,5]^4.
     // f* ~ 17.014, x* ~ (1.0, 4.743, 3.821, 1.379).
-    // The QP subproblem stalls at x0 lower bound with high inequality
-    // violation; relaxed bounds pending QP solver improvements.
-    // Reference: H&S Problem 71.
+    //
+    // Known limitation: active_set_qp_solver returns near-zero steps when
+    // variables sit at box bounds with active inequality constraints. The
+    // QP dual (box-bound multiplier) and inequality multiplier interact to
+    // produce degenerate vertex configurations where the active-set
+    // cycling check fires and the step collapses. This is the same root
+    // cause as the filter_nw_sqp HS071 difficulty, confirming the shared
+    // diagnosis from Phase 24: QP elastic mode or an interior-point QP
+    // subsolver is needed for reliable convergence on box-bound-active
+    // problems.
+    //
+    // Regression guard: verify the solver makes progress (objective < 25)
+    // and does not diverge or crash. Convergence to f* deferred pending
+    // QP solver enhancement.
+    //
+    // Reference: H&S Problem 71; N&W Section 16.5 (active-set QP).
     hs071 problem;
     auto x0 = problem.initial_point();
     solver_options opts;
@@ -335,7 +348,7 @@ TEST_CASE("nw_sqp HS071 mixed constraints", "[sqp]")
     auto result = solver.solve(opts);
 
     CHECK(std::isfinite(result.objective_value));
-    CHECK(result.objective_value < 30.0);
+    CHECK(result.objective_value < 25.0);
 }
 
 TEST_CASE("nw_sqp HS039 equality constraints", "[sqp]")

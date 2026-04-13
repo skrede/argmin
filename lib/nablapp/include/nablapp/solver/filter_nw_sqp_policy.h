@@ -91,6 +91,7 @@ struct filter_nw_sqp_policy
 
         Eigen::VectorXd c_all;
         Eigen::MatrixXd J_all;
+        Eigen::MatrixXd J_all_old;  // Saved Jacobian at x_k for BFGS update (N&W eq. 18.13)
 
         std::uint32_t iteration{0};
         int n_eq{0};
@@ -122,6 +123,7 @@ struct filter_nw_sqp_policy
 
         s.c_all.resize(m);
         s.J_all.resize(m, s.n);
+        s.J_all_old.setZero(m, s.n);
         if(m > 0)
             problem.constraints(x0, s.c_all);
         s.c_eq = s.c_all.head(s.n_eq);
@@ -458,6 +460,10 @@ struct filter_nw_sqp_policy
         Eigen::VectorXd g_old = Eigen::VectorXd(s.g);
         double f_old = s.objective_value;
 
+        // Save Jacobian at x_k before re-evaluation for BFGS y-vector (N&W eq. 18.13).
+        if(m > 0)
+            s.J_all_old.noalias() = s.J_all;
+
         s.x = x_trial;
         s.objective_value = f_trial;
         s.c_eq = c_eq_trial;
@@ -474,18 +480,14 @@ struct filter_nw_sqp_policy
             - Eigen::VectorXd(x_old)).eval();
 
         // Lagrangian gradient at new and old points for BFGS y-vector.
-        // N&W eq. 18.13 / Section 18.4.
+        // N&W eq. 18.13: grad_L_new uses Jacobian at x_{k+1}, grad_L_old uses Jacobian at x_k.
         Eigen::VectorXd grad_L_new, grad_L_old;
         if(m > 0)
         {
-            Eigen::MatrixXd A_new_full(m, n);
-            if(s.n_eq > 0) A_new_full.topRows(s.n_eq) = s.J_eq;
-            if(s.n_ineq > 0) A_new_full.bottomRows(s.n_ineq) = s.J_ineq;
-
             grad_L_new = detail::lagrangian_gradient(
-                Eigen::VectorXd(s.g), A_new_full, lambda_new);
+                Eigen::VectorXd(s.g), s.J_all, lambda_new);
             grad_L_old = detail::lagrangian_gradient(
-                g_old, A_new_full, lambda_new);
+                g_old, s.J_all_old, lambda_new);
         }
         else
         {

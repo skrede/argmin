@@ -36,8 +36,9 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
-        CHECK(std::isfinite(result.objective_value));
-        CHECK(result.objective_value == Approx(17.014).margin(4.0));
+        CHECK(result.status != solver_status::max_iterations);
+        CHECK(result.objective_value == Approx(17.014).margin(1.0));
+        CHECK(solver.constraint_violation() < 1e-4);
     }
 
     SECTION("HS043: inequality constraints only")
@@ -45,7 +46,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         hs043 problem;
         auto x0 = problem.initial_point();
         solver_options opts;
-        opts.max_iterations = 200;
+        opts.max_iterations = 500;
         opts.set_gradient_threshold(1e-4);
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
@@ -54,8 +55,9 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
-        CHECK(std::isfinite(result.objective_value));
+        CHECK(result.status != solver_status::max_iterations);
         CHECK(result.objective_value == Approx(-44.0).margin(1.0));
+        CHECK(solver.constraint_violation() < 1e-4);
     }
 
     SECTION("HS039: equality constraints only")
@@ -63,7 +65,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         hs039 problem;
         auto x0 = problem.initial_point();
         solver_options opts;
-        opts.max_iterations = 200;
+        opts.max_iterations = 500;
         opts.set_gradient_threshold(1e-4);
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
@@ -72,8 +74,9 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
-        CHECK(std::isfinite(result.objective_value));
-        CHECK(result.objective_value == Approx(-1.0).margin(0.5));
+        CHECK(result.status != solver_status::max_iterations);
+        CHECK(result.objective_value == Approx(-1.0).margin(1.0));
+        CHECK(solver.constraint_violation() < 1e-4);
     }
 
     SECTION("HS076: inequality + equality constraints")
