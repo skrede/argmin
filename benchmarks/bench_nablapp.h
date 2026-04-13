@@ -20,9 +20,11 @@
 #include "nablapp/solver/lbfgsb_policy.h"
 #include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"
+#include "nablapp/solver/projected_gn_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
 #include "nablapp/solver/filter_nw_sqp_policy.h"
 #include "nablapp/solver/filter_slsqp_policy.h"
+#include "nablapp/solver/projected_gradient_gn_policy.h"
 #include "nablapp/solver/augmented_lagrangian_policy.h"
 
 #include "nablapp/formulation/concepts.h"
@@ -262,6 +264,13 @@ void run_all_nablapp_solvers(
     // BOBYQA: bound-constrained or global with bounds.
     if constexpr(is_bound && !is_constrained)
         run("bobyqa", bobyqa_policy<>{});
+
+    // Projected GN: bound-constrained least-squares (no general constraints).
+    if constexpr(least_squares<Problem> && is_bound && !is_constrained)
+    {
+        run("projected_gn", projected_gn_policy{});
+        run("projected_gradient_gn", projected_gradient_gn_policy{});
+    }
 
     // SLSQP: any constrained problem.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
