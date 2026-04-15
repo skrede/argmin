@@ -60,6 +60,12 @@ struct restarting_policy
         typename Inner::options_type inner{};
         std::optional<std::uint32_t> stagnation_limit{};
         std::optional<double> population_multiplier{};
+        // stall_window / feasibility_gate intentionally not declared on the decorator.
+        // restarting_policy emits synthetic (obj_change=1.0, step_size=1.0) step_results on
+        // restart and maintains its own internal stall logic (see the restart-trigger block
+        // below). Exposing an external stall_window would double-fire against this internal
+        // logic; feasibility_gate is inner-policy territory. Silent no-op made explicit here —
+        // see forward_policy_hints in basic_solver.h.
     };
 
     template <typename P = void>

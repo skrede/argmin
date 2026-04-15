@@ -43,6 +43,13 @@ struct multistart_policy
         typename Inner::options_type inner{};
         std::optional<std::uint16_t> max_restarts{};
         std::optional<std::uint32_t> stall_budget_per_restart{};
+        // stall_window / feasibility_gate intentionally not declared on the decorator.
+        // multistart_policy emits synthetic (obj_change=1.0, step_size=1.0) step_results on
+        // restart-consuming steps; exposing an external stall_window would double-fire against
+        // the inner policy's own stall logic, which is already forwarded via options.inner.
+        // feasibility_gate is inner-policy territory for the same reason. Silent no-op made
+        // explicit here — see forward_policy_hints in basic_solver.h for the plumbing that
+        // this SKIP deactivates.
     };
 
     template <typename P = void>

@@ -53,6 +53,8 @@ struct gcmma_policy
         std::optional<double> minimum_distance_fraction{};      // default: 0.001 (Svanberg 2002)
         asymptote_options asymptote{};                          // Embedded asymptote params
         mma_subproblem_options subproblem{};                     // Embedded subproblem params
+        std::uint16_t stall_window{50};
+        double feasibility_gate{1e-4};
     };
 
     options_type options{};

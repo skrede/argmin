@@ -69,6 +69,11 @@ struct projected_gradient_gn_policy
         double armijo_c{1e-4};          // Armijo sufficient decrease parameter
         double backtrack_rho{0.5};      // step shrink factor per backtrack
         std::uint32_t max_backtrack{20}; // maximum backtracking iterations
+
+        std::uint16_t stall_window{50};
+        // feasibility_gate intentionally omitted: projected_gradient_gn_policy handles box
+        // bounds via projection — no general nonlinear constraint_violation is emitted, so the
+        // feasibility_gate criterion would gate on 0. Silent no-op made explicit.
     };
 
     options_type options{};
