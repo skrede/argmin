@@ -11,7 +11,10 @@
 #include "nablapp/solver/options.h"
 #include "nablapp/solver/nw_sqp_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
+#include "nablapp/solver/filter_slsqp_policy.h"
+#include "nablapp/solver/filter_nw_sqp_policy.h"
 #include "nablapp/solver/lbfgsb_policy.h"
+#include "nablapp/solver/byrd_lbfgsb_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/gcmma_policy.h"
@@ -19,6 +22,8 @@
 #include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/cobyla_policy.h"
 #include "nablapp/solver/isres_policy.h"
+#include "nablapp/solver/multistart_policy.h"
+#include "nablapp/solver/restarting_policy.h"
 #include "nablapp/solver/projected_gn_policy.h"
 #include "nablapp/solver/projected_gradient_gn_policy.h"
 #include "nablapp/solver/augmented_lagrangian_policy.h"
@@ -257,8 +262,11 @@ static_assert(nablapp::bound_constrained<nablapp::hs035<>>);
 // ---------------------------------------------------------------------------
 
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::nw_sqp_policy<>>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::filter_nw_sqp_policy<>>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::kraft_slsqp_policy<>>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::filter_slsqp_policy<>>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lbfgsb_policy<>>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::byrd_lbfgsb_policy<>>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::bobyqa_policy<>>>);
 
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::augmented_lagrangian_policy<>>>);
@@ -273,6 +281,9 @@ static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::isres_policy<>>
 
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::projected_gn_policy>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::projected_gradient_gn_policy>>);
+
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::multistart_policy<nablapp::bobyqa_policy<>>>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::restarting_policy<nablapp::cmaes_policy<>>>>);
 
 // problem_dimension concept verification
 static_assert(nablapp::has_problem_dimension<nablapp::himmelblau<>>);
