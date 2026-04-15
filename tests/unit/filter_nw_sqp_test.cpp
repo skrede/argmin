@@ -47,7 +47,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
     {
         // step_threshold aligned with the benchmark / NLopt xtol_rel regime
         // (1e-12). The prior 1e-15 value was calibrated to the Powell-damped
-        // bfgs_hessian trajectory; under adaptive_bfgs (N&W Section 7.2,
+        // direct-BFGS trajectory; under adaptive_bfgs (N&W Section 7.2,
         // skip-on-nonpositive-curvature per Procedure 18.2 footnote) the
         // iterate reaches f*=-44.16 at iter 7 and a subsequent filter-
         // acceptance over-rejection (FILTER-05) wanders the iterate to a

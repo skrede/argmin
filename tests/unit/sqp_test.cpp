@@ -324,7 +324,7 @@ TEST_CASE("nw_sqp HS071 mixed constraints", "[sqp]")
     // adaptive_bfgs (Shanno-rescaled compact L-BFGS, N&W eq. 6.20 /
     // Section 7.2; Kraft 1988 DFVLR-FB 88-28 Section 2.2.3) supplies
     // adequate curvature on HS071 where the identity-init Powell-damped
-    // bfgs_hessian previously stalled at f < 25. With the canonical
+    // direct BFGS operator previously stalled at f < 25. With the canonical
     // operator the objective reaches f* = 17.014 within the 17.02
     // tolerance used across kraft_slsqp / filter_slsqp. NLopt LD_SLSQP
     // reaches the same bar in 6 iters; nw_sqp's default_convergence

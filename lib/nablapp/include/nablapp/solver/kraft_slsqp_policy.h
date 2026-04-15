@@ -16,9 +16,13 @@
 // Lagrangian gradient difference.
 //
 // Differences from the earlier L-BFGS variant:
-//   - detail::compact_lbfgs is replaced with detail::bfgs_hessian,
-//     eliminating the per-step dense_hessian() rebuild which was the
-//     dominant per-step cost at IK scale (n = 4-200).
+//   - detail::compact_lbfgs is replaced with detail::adaptive_bfgs
+//     (compact L-BFGS form with per-push Shanno (1978) initial-Hessian
+//     rescaling theta = y^T y / s^T y on each accepted pair; N&W
+//     eq. 6.20; N&W Section 7.2; Kraft 1988 DFVLR-FB 88-28
+//     Section 2.2.3), eliminating the per-step dense_hessian() rebuild
+//     which was the dominant per-step cost at IK scale (n = 4-200)
+//     while retaining a dense B suitable for the LSQ/LSEI QP subproblem.
 //   - detail::active_set_qp_solver is replaced with
 //     detail::kraft_lsq_qp_solver, eliminating the Phase-1 feasibility
 //     projection and the box-bound stalling that required feasibility
@@ -232,9 +236,10 @@ struct kraft_slsqp_policy
         const int n = s.n;
 
         // Direct access to the in-place BFGS Hessian -- no dense_hessian()
-        // rebuild. The dense BFGS matrix is maintained incrementally by
-        // detail::bfgs_hessian::update() at the end of step().
-        // Reference: N&W Procedure 18.2 (damped BFGS for SQP).
+        // rebuild at the QP call site. The dense B is refreshed by
+        // detail::adaptive_bfgs::push() at the end of step() on an
+        // accepted curvature pair (Shanno 1978 / N&W eq. 6.20 rescaling;
+        // N&W Section 7.2; Kraft 1988 DFVLR-FB 88-28 Section 2.2.3).
         const auto& B = s.hessian.hessian();
 
         Eigen::Matrix<double, Eigen::Dynamic, N> A_eq = s.J_eq;

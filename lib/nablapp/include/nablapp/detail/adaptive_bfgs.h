@@ -42,7 +42,6 @@
 //            N&W Section 7.2 (limited-memory BFGS),
 //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.3.
 
-#include "nablapp/options/bfgs_options.h"
 #include "nablapp/types.h"
 
 #include <Eigen/Core>
@@ -88,8 +87,7 @@ public:
     // pair, and the dense B is rebuilt from theta * I augmented with
     // raw rank-2 updates across all stored pairs.
     void push(const Eigen::Vector<Scalar, N>& s,
-              const Eigen::Vector<Scalar, N>& y,
-              const bfgs_options& /*unused*/ = {})
+              const Eigen::Vector<Scalar, N>& y)
     {
         constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
 
