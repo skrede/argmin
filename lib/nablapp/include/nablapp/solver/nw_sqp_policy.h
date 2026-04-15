@@ -18,11 +18,10 @@
 //            globalization per Section 18.5-18.6.
 
 #include "nablapp/detail/lagrangian.h"
+#include "nablapp/detail/adaptive_bfgs.h"
 #include "nablapp/detail/merit_function.h"
-#include "nablapp/detail/bfgs_hessian.h"
 #include "nablapp/detail/active_set_qp.h"
 #include "nablapp/detail/bound_projection.h"
-#include "nablapp/options/bfgs_options.h"
 #include "nablapp/options/qp_options.h"
 #include "nablapp/line_search/options.h"
 #include "nablapp/result/step_result.h"
@@ -53,7 +52,6 @@ struct nw_sqp_policy
     struct options_type
     {
         line_search_options line_search{};  // Replaces hardcoded c1=1e-4, rho=0.5, max_iter=30
-        bfgs_options bfgs{};               // BFGS Hessian update params (N&W Proc 18.2)
         qp_options qp{};                   // QP subproblem params
         std::uint16_t stall_window{50};
         double feasibility_gate{1e-4};
@@ -92,7 +90,8 @@ struct nw_sqp_policy
         Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;  // Reusable factorization
         double objective_value{};
         double sigma{1.0};
-        detail::bfgs_hessian<double, N> B;
+        // Canonical BFGS operator per D-01. References: Shanno 1978 (N&W eq. 6.20); N&W Section 7.2 (L-BFGS); Kraft 1988 DFVLR-FB 88-28 Section 2.2.3.
+        detail::adaptive_bfgs<double, N, 10> hessian;
         detail::active_set_qp_solver<double, N> qp_solver;
         std::uint32_t iteration{0};
         int n_eq{0};
@@ -175,7 +174,7 @@ struct nw_sqp_policy
         }
 
         // BFGS Hessian of Lagrangian, initialized to I
-        s.B = detail::bfgs_hessian<double, N>{n};
+        s.hessian = detail::adaptive_bfgs<double, N, 10>(n);
         // Pre-allocate QP solver workspace: equality + inequality + 2n box bounds
         int max_constraints = s.n_eq + s.n_ineq + 2 * n;
         s.qp_solver = detail::active_set_qp_solver<double, N>(n, max_constraints);
@@ -243,13 +242,13 @@ struct nw_sqp_policy
             Eigen::Vector<double, N> p_upper = (Eigen::Vector<double, N>(s.upper) -
                                                   Eigen::Vector<double, N>(s.x)).eval();
             p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
-            qp = s.qp_solver.solve(s.B.hessian(), s.g,
+            qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                    A_eq, s.b_eq_workspace, A_ineq, s.b_ineq_workspace,
                                    p_lower, p_upper, p0, qp_opts);
         }
         else
         {
-            qp = s.qp_solver.solve(s.B.hessian(), s.g,
+            qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                    A_eq, s.b_eq_workspace, A_ineq, s.b_ineq_workspace,
                                    p0, qp_opts);
         }
@@ -390,9 +389,23 @@ struct nw_sqp_policy
 
         Eigen::Vector<double, N> yk = grad_L_new - grad_L_old;
 
-        // --- 6. Damped BFGS update (N&W Procedure 18.2) ---
-        if(sk.norm() > 1e-15)
-            s.B.update(sk, yk, options.bfgs);
+        // --- 6. BFGS curvature push (adaptive_bfgs with Shanno rescaling) ---
+        // Skip BFGS updates on non-positive curvature pairs.
+        // In SQP the Lagrangian gradient difference y_k can easily
+        // have s^T y < 0 when the constraint Hessian contribution
+        // (A_{k+1} - A_k)^T lam dominates the objective curvature --
+        // feeding such a pair into the BFGS formula distorts B
+        // instead of improving it. adaptive_bfgs::push does its own
+        // s^T y > 0 guard, but checking here keeps the semantics
+        // explicit in the policy step.
+        //
+        // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
+        //            N&W Procedure 18.2 damping guard.
+        const double sTy = sk.dot(yk);
+        if(sk.norm() > 1e-15 && sTy > 0.0)
+        {
+            s.hessian.push(sk, yk);
+        }
 
         // --- 7. Update multipliers and iteration ---
         s.lambda = lambda_new;
@@ -441,7 +454,7 @@ struct nw_sqp_policy
                      const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
-        s.B.reset();
+        s.hessian.reset();
         s.sigma = 1.0;
         s.lambda.setZero();
     }

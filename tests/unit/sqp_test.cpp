@@ -321,21 +321,21 @@ TEST_CASE("nw_sqp HS071 mixed constraints", "[sqp]")
     // HS071: n=4, m_eq=1, m_ineq=1, box bounds [1,5]^4.
     // f* ~ 17.014, x* ~ (1.0, 4.743, 3.821, 1.379).
     //
-    // Known limitation: active_set_qp_solver returns near-zero steps when
-    // variables sit at box bounds with active inequality constraints. The
-    // QP dual (box-bound multiplier) and inequality multiplier interact to
-    // produce degenerate vertex configurations where the active-set
-    // cycling check fires and the step collapses. This is the same root
-    // cause as the filter_nw_sqp HS071 difficulty, confirming the shared
-    // diagnosis from Phase 24: QP elastic mode or an interior-point QP
-    // subsolver is needed for reliable convergence on box-bound-active
-    // problems.
+    // adaptive_bfgs (Shanno-rescaled compact L-BFGS, N&W eq. 6.20 /
+    // Section 7.2; Kraft 1988 DFVLR-FB 88-28 Section 2.2.3) supplies
+    // adequate curvature on HS071 where the identity-init Powell-damped
+    // bfgs_hessian previously stalled at f < 25. With the canonical
+    // operator the objective reaches f* = 17.014 within the 17.02
+    // tolerance used across kraft_slsqp / filter_slsqp. NLopt LD_SLSQP
+    // reaches the same bar in 6 iters; nw_sqp's default_convergence
+    // criterion set does not fire an early-termination on the box-
+    // bounded problem (status stays at max_iterations while f sits on
+    // the optimum) -- same binding-criterion gap documented in Phase
+    // 24.2 on UR3e, out of scope for the operator-only migration and
+    // tracked separately.
     //
-    // Regression guard: verify the solver makes progress (objective < 25)
-    // and does not diverge or crash. Convergence to f* deferred pending
-    // QP solver enhancement.
-    //
-    // Reference: H&S Problem 71; N&W Section 16.5 (active-set QP).
+    // Reference: H&S Problem 71; N&W Section 16.5 (active-set QP);
+    //            N&W Procedure 18.2 damping guard; Shanno 1978.
     hs071 problem;
     auto x0 = problem.initial_point();
     solver_options opts;
@@ -348,7 +348,7 @@ TEST_CASE("nw_sqp HS071 mixed constraints", "[sqp]")
     auto result = solver.solve(opts);
 
     CHECK(std::isfinite(result.objective_value));
-    CHECK(result.objective_value < 25.0);
+    CHECK(result.objective_value <= 17.02);
 }
 
 TEST_CASE("nw_sqp HS039 equality constraints", "[sqp]")
