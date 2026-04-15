@@ -4,11 +4,13 @@
 // Dense BFGS SQP with Fletcher-Leyffer 2002 filter acceptance.
 //
 // Mirrors nw_sqp_policy in QP solver (active_set_qp_solver) and Hessian
-// (bfgs_hessian) but replaces user-tuned L1 merit globalization with a
-// filter-based acceptance test. The filter maintains a set of non-
-// dominated (f, h) pairs. Trial points must be filter-acceptable AND
-// satisfy an Armijo condition on an automatically-derived L1 merit.
-// The penalty sigma is computed from QP multipliers (no user tuning).
+// (adaptive_bfgs, Shanno-rescaled compact L-BFGS per N&W eq. 6.20 /
+// Section 7.2; Kraft 1988 DFVLR-FB 88-28 Section 2.2.3) but replaces
+// user-tuned L1 merit globalization with a filter-based acceptance
+// test. The filter maintains a set of non-dominated (f, h) pairs.
+// Trial points must be filter-acceptable AND satisfy an Armijo
+// condition on an automatically-derived L1 merit. The penalty sigma
+// is computed from QP multipliers (no user tuning).
 //
 // The switching condition distinguishes f-type iterations (near-feasible,
 // Armijo on objective suffices) from h-type iterations (infeasible, aim
@@ -23,7 +25,7 @@
 
 #include "nablapp/detail/lagrangian.h"
 #include "nablapp/detail/merit_function.h"
-#include "nablapp/detail/bfgs_hessian.h"
+#include "nablapp/detail/adaptive_bfgs.h"
 #include "nablapp/detail/active_set_qp.h"
 #include "nablapp/detail/filter_acceptance.h"
 #include "nablapp/detail/filter_restoration.h"
@@ -81,7 +83,12 @@ struct filter_nw_sqp_policy
         Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
         double objective_value{};
-        detail::bfgs_hessian<double> B;
+        // Shanno-rescaled compact L-BFGS operator (N&W eq. 6.20 /
+        // Section 7.2; Kraft 1988 DFVLR-FB 88-28 Section 2.2.3).
+        // Adaptive theta rebuilds B from the stored history with a
+        // fresh theta = y^T y / s^T y on every push, tracking local
+        // Lagrangian curvature rather than freezing at iteration 0.
+        detail::adaptive_bfgs<double, N, 10> hessian;
         detail::filter_set<double> filter;
 
         // Automatically-derived penalty for L1 merit acceptance.
@@ -146,7 +153,7 @@ struct filter_nw_sqp_policy
             s.upper = Eigen::Vector<double, N>::Constant(s.n, inf);
         }
 
-        s.B = detail::bfgs_hessian<double>{s.n};
+        s.hessian = detail::adaptive_bfgs<double, N, 10>(s.n);
         s.sigma = 1.0;
         s.iteration = 0;
 
@@ -223,13 +230,13 @@ struct filter_nw_sqp_policy
             Eigen::VectorXd p_upper = (Eigen::VectorXd(s.upper)
                 - Eigen::VectorXd(s.x)).eval();
             p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
-            qp = detail::solve_qp(s.B.hessian(), Eigen::VectorXd(s.g),
+            qp = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
                                   A_eq, b_eq, A_ineq, b_ineq,
                                   p_lower, p_upper, p0, qp_opts);
         }
         else
         {
-            qp = detail::solve_qp(s.B.hessian(), Eigen::VectorXd(s.g),
+            qp = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
                                   A_eq, b_eq, A_ineq, b_ineq,
                                   p0, qp_opts);
         }
@@ -370,14 +377,14 @@ struct filter_nw_sqp_policy
                     - Eigen::VectorXd(x_trial)).eval();
                 Eigen::VectorXd p_upper_soc = (Eigen::VectorXd(s.upper)
                     - Eigen::VectorXd(x_trial)).eval();
-                qp_soc = detail::solve_qp(s.B.hessian(), Eigen::VectorXd(s.g),
+                qp_soc = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
                                            A_eq, b_eq_soc, A_ineq, b_ineq_soc,
                                            p_lower_soc, p_upper_soc, p_soc_0,
                                            qp_opts);
             }
             else
             {
-                qp_soc = detail::solve_qp(s.B.hessian(), Eigen::VectorXd(s.g),
+                qp_soc = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
                                            A_eq, b_eq_soc, A_ineq, b_ineq_soc,
                                            p_soc_0, qp_opts);
             }
@@ -497,9 +504,25 @@ struct filter_nw_sqp_policy
 
         Eigen::VectorXd yk = grad_L_new - grad_L_old;
 
-        // --- 5. Damped BFGS update (N&W Procedure 18.2) ---
-        if(sk.norm() > 1e-15)
-            s.B.update(sk, yk);
+        // --- 5. BFGS curvature push (adaptive_bfgs with Shanno rescaling) ---
+        // Skip BFGS updates on non-positive curvature pairs.
+        // In filter-SQP the Lagrangian gradient difference y_k can
+        // easily have s^T y < 0 when the constraint Hessian contribution
+        // (A_{k+1} - A_k)^T lam dominates the objective curvature --
+        // feeding such a pair into the BFGS formula distorts B
+        // instead of improving it. adaptive_bfgs::push does its own
+        // s^T y > 0 guard, but checking here keeps the semantics
+        // explicit in the policy step.
+        //
+        // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
+        //            N&W Procedure 18.2 damping guard.
+        const double sTy = sk.dot(yk);
+        if(sk.norm() > 1e-15 && sTy > 0.0)
+        {
+            Eigen::Vector<double, N> sk_fixed = sk;
+            Eigen::Vector<double, N> yk_fixed = yk;
+            s.hessian.push(sk_fixed, yk_fixed);
+        }
 
         // --- 6. Update multipliers and iteration ---
         s.lambda = lambda_new;
@@ -545,7 +568,7 @@ struct filter_nw_sqp_policy
                      const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
-        s.B.reset();
+        s.hessian.reset();
         s.filter.clear();
         s.sigma = 1.0;
         s.lambda.setZero();
