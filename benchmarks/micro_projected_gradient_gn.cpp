@@ -1,11 +1,12 @@
-// Micro-benchmark: nablapp projected GN vs NLopt BOBYQA on bounded Rosenbrock LS.
+// Micro-benchmark: nablapp projected gradient GN vs NLopt BOBYQA on bounded Rosenbrock LS.
 //
-// Compares projected_gn_policy (least-squares residual form with analytic
-// Jacobian) against NLopt LN_BOBYQA (derivative-free, scalar objective) on
-// the same bounded Rosenbrock problem. The comparison is inherently asymmetric:
-// projected GN exploits least-squares structure while BOBYQA is general.
+// Compares projected_gradient_gn_policy (least-squares residual form with
+// analytic Jacobian, projected-gradient inner step) against NLopt LN_BOBYQA
+// (derivative-free, scalar objective) on the same bounded Rosenbrock problem.
+// The comparison is inherently asymmetric: projected gradient GN exploits
+// least-squares structure while BOBYQA is general.
 
-#include "nablapp/solver/projected_gn_policy.h"
+#include "nablapp/solver/projected_gradient_gn_policy.h"
 #include "nablapp/solver/basic_solver.h"
 
 #include <Eigen/Core>
@@ -70,7 +71,7 @@ struct timing
     std::uint32_t evals;
 };
 
-timing bench_nablapp_active_set(std::uint32_t reps)
+timing bench_nablapp_proj_grad(std::uint32_t reps)
 {
     bounded_rosenbrock_ls problem;
     Eigen::VectorXd x0{{-1.0, 1.0}};
@@ -80,7 +81,7 @@ timing bench_nablapp_active_set(std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::projected_gn_policy{}, problem, x0, opts};
+        nablapp::basic_solver solver{nablapp::projected_gradient_gn_policy{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -89,7 +90,7 @@ timing bench_nablapp_active_set(std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::projected_gn_policy{}, problem, x0, opts};
+        nablapp::basic_solver solver{nablapp::projected_gradient_gn_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -149,18 +150,18 @@ int main()
 
     std::println("Bounded Rosenbrock 2D LS, {} repetitions each\n", reps);
 
-    auto na_as = bench_nablapp_active_set(reps);
+    auto na_pg = bench_nablapp_proj_grad(reps);
     auto nl = bench_nlopt_bobyqa(reps);
 
-    std::println("  {:>20s}  {:>10s}  {:>10s}  {:>12s}",
+    std::println("  {:>22s}  {:>10s}  {:>10s}  {:>12s}",
                  "solver", "wall (us)", "evals", "objective");
-    std::println("  {:>20s}  {:10.2f}  {:10d}  {:.6e}",
-                 "projected_gn", na_as.wall_us, na_as.evals, na_as.objective);
-    std::println("  {:>20s}  {:10.2f}  {:10d}  {:.6e}",
+    std::println("  {:>22s}  {:10.2f}  {:10d}  {:.6e}",
+                 "projected_gradient_gn", na_pg.wall_us, na_pg.evals, na_pg.objective);
+    std::println("  {:>22s}  {:10.2f}  {:10d}  {:.6e}",
                  "nlopt_bobyqa", nl.wall_us, nl.evals, nl.objective);
-    std::println("\n  ratio (projected_gn / nlopt):          {:.2f}x", na_as.wall_us / nl.wall_us);
+    std::println("\n  ratio (projected_gradient_gn / nlopt): {:.2f}x", na_pg.wall_us / nl.wall_us);
 
     std::println("\nNow profile with:");
-    std::println("  perf record -F 99999 -g -- ./micro_projected_gn");
+    std::println("  perf record -F 99999 -g -- ./micro_projected_gradient_gn");
     std::println("  perf report --stdio --percent-limit=1.0");
 }

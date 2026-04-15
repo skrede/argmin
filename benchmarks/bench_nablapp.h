@@ -13,15 +13,20 @@
 
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/solver/convergence.h"
+#include "nablapp/solver/lm_policy.h"
 #include "nablapp/solver/cobyla_policy.h"
 #include "nablapp/solver/isres_policy.h"
+#include "nablapp/solver/mma_policy.h"
+#include "nablapp/solver/gcmma_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/lbfgsb_policy.h"
-#include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"
+#include "nablapp/solver/multistart_policy.h"
+#include "nablapp/solver/restarting_policy.h"
 #include "nablapp/solver/projected_gn_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
+#include "nablapp/solver/byrd_lbfgsb_policy.h"
 #include "nablapp/solver/filter_nw_sqp_policy.h"
 #include "nablapp/solver/filter_slsqp_policy.h"
 #include "nablapp/solver/projected_gradient_gn_policy.h"
@@ -261,9 +266,21 @@ void run_all_nablapp_solvers(
     if constexpr(differentiable<Problem> && !is_constrained)
         run("lbfgsb", lbfgsb_policy<>{});
 
+    // Byrd 1995 L-BFGS-B variant: gate identical to lbfgsb_policy.
+    if constexpr(differentiable<Problem> && !is_constrained)
+        run("byrd_lbfgsb", byrd_lbfgsb_policy<>{});
+
+    // Levenberg-Marquardt: unconstrained least-squares.
+    if constexpr(least_squares<Problem> && !is_constrained)
+        run("lm", lm_policy<>{});
+
     // BOBYQA: bound-constrained or global with bounds.
     if constexpr(is_bound && !is_constrained)
         run("bobyqa", bobyqa_policy<>{});
+
+    // Multi-start over BOBYQA: gate mirrors bobyqa (bound-constrained, not general).
+    if constexpr(is_bound && !is_constrained)
+        run("multistart_bobyqa", multistart_policy<bobyqa_policy<>>{});
 
     // Projected GN: bound-constrained least-squares (no general constraints).
     if constexpr(least_squares<Problem> && is_bound && !is_constrained)
@@ -288,6 +305,22 @@ void run_all_nablapp_solvers(
                 std::vector<trace_entry> trace;
                 auto r = run_nablapp_solver<mma_policy<>, constrained_convergence>(
                     "mma", problem_name, prob, max_iterations, collect_trace, trace);
+                results.push_back(r);
+                traces.push_back(std::move(trace));
+            }
+        }
+    }
+
+    // GCMMA: globally-convergent MMA; gate mirrors MMA (inequality-only).
+    if constexpr(is_constrained && differentiable<Problem> && is_bound)
+    {
+        if constexpr(requires { prob.num_equality(); })
+        {
+            if(prob.num_equality() == 0 && prob.num_inequality() > 0)
+            {
+                std::vector<trace_entry> trace;
+                auto r = run_nablapp_solver<gcmma_policy<>, constrained_convergence>(
+                    "gcmma", problem_name, prob, max_iterations, collect_trace, trace);
                 results.push_back(r);
                 traces.push_back(std::move(trace));
             }
@@ -337,6 +370,12 @@ void run_all_nablapp_solvers(
         results.push_back(r);
         traces.push_back(std::move(trace));
     }
+
+    // restarting_policy<cmaes_policy<>>: gate mirrors CMA-ES (global + bounds).
+    // Instantiate with default inner options so the decorator's own restart policy
+    // replaces CMA-ES IPOP (avoids redundant double-IPOP wrapping).
+    if constexpr(is_global && is_bound)
+        run("restarting_cmaes", restarting_policy<cmaes_policy<>>{});
 
     // COBYLA: constrained derivative-free (requires bounds + constraint values).
     if constexpr(constrained_values<Problem> && is_bound)

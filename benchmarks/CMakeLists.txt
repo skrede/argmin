@@ -208,6 +208,18 @@ if(NLopt_FOUND)
         set_target_properties(micro_projected_gn PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
+
+    add_executable(micro_projected_gradient_gn micro_projected_gradient_gn.cpp)
+    target_link_libraries(micro_projected_gradient_gn PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_projected_gradient_gn PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_projected_gradient_gn PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
 endif()
 
 # Active-set QP micro-benchmark (nablapp-only, no external dependencies).
