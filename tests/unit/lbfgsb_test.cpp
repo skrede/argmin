@@ -317,6 +317,140 @@ TEST_CASE("GCP finds interior minimum on bounded quadratic", "[lbfgsb]")
     CHECK(dist_from_x0 > 0.1);
 }
 
+TEST_CASE("GCP multi-breakpoint reduced-direction derivative reconstruction",
+          "[lbfgsb][cauchy_point]")
+{
+    // Regression for the multi-breakpoint reduced-direction derivative
+    // reconstruction. When the generalized Cauchy point walk crosses a
+    // breakpoint and zeros out the newly-bound coordinate, the derivative
+    // f'(t_old+) on the reduced direction must be re-derived from
+    //
+    //     f'(t_old+) = g^T d_new + (x(t_old) - x0)^T B d_new
+    //
+    // where (x(t_old) - x0) is the piecewise-linear accumulated step from
+    // the origin to the current breakpoint (N&W 2e eq. 16.75-16.77;
+    // Byrd, Lu, Nocedal 1995 Algorithm CP, derivative transition formula).
+    //
+    // The approximation (x(t_old) - x0) ~= t_old * d_new is exact for
+    // diagonal B because B d_new has zero entries on the (now-bound)
+    // just-zeroed coordinate, so cross-terms vanish. For non-diagonal B,
+    // B d_new has nonzero entries at the just-zeroed coordinate index, and
+    // the approximation drops the corresponding cross-term. The
+    // multi-breakpoint walk then mis-evaluates the derivative at the
+    // breakpoint entry and lands the GCP on the wrong active set.
+    //
+    // Probe: 3-variable quadratic f(x) = (1/2) x^T B x + g^T x with
+    //   B = [[1, 0.9, 0], [0.9, 1, 0], [0, 0, 1]]  (SPD, non-diagonal)
+    //   g = (1, -1, 0.1)
+    //   box [-1, 1]^3
+    //   x0 = (0.5, 0.5, 0.5)
+    //
+    // Expected path: the unconstrained steepest-descent minimum along the
+    // anti-gradient lies past the first breakpoint at t_1 = 0.5 (coord 1
+    // hits upper bound), so the walk enters the multi-breakpoint branch.
+    //
+    // Reference:
+    //   Byrd, R. H., Lu, P., Nocedal, J. (1995).
+    //     "A limited-memory algorithm for bound-constrained optimization."
+    //     SIAM J. Sci. Comput. 16(5), Algorithm CP.
+    //   Nocedal, J., Wright, S. J. (2006). Numerical Optimization, 2e.
+    //     Section 16.7, eq. 16.75-16.77.
+
+    using namespace nablapp::detail;
+
+    // Mock operator: B v as an explicit 3x3 matrix product.
+    struct mock_operator
+    {
+        Eigen::Matrix<double, 3, 3> B;
+
+        Eigen::Vector<double, 3>
+        multiply(const Eigen::Vector<double, 3>& v) const
+        {
+            return (B * v).eval();
+        }
+    };
+
+    mock_operator op;
+    op.B << 1.0, 0.9, 0.0,
+            0.9, 1.0, 0.0,
+            0.0, 0.0, 1.0;
+
+    Eigen::Vector<double, 3> x{0.5, 0.5, 0.5};
+    Eigen::Vector<double, 3> g{1.0, -1.0, 0.1};
+    Eigen::Vector<double, 3> lower{-1.0, -1.0, -1.0};
+    Eigen::Vector<double, 3> upper{1.0, 1.0, 1.0};
+
+    cauchy_point_solver<double, 3> solver(3);
+    const auto& result = solver.solve(x, g, lower, upper, op);
+
+    // Feasibility: the GCP must lie inside the box.
+    CHECK(result.x_cauchy[0] >= lower[0] - 1e-10);
+    CHECK(result.x_cauchy[0] <= upper[0] + 1e-10);
+    CHECK(result.x_cauchy[1] >= lower[1] - 1e-10);
+    CHECK(result.x_cauchy[1] <= upper[1] + 1e-10);
+    CHECK(result.x_cauchy[2] >= lower[2] - 1e-10);
+    CHECK(result.x_cauchy[2] <= upper[2] + 1e-10);
+
+    // Closed-form derivation of the expected walk:
+    //
+    // Initial direction:  d0 = -g = (-1, 1, -0.1).
+    // Breakpoints (coord i hits a bound at t_i):
+    //   i=0: g[0]>0, hits lower at t_0 = (0.5-(-1))/1 = 1.5
+    //   i=1: g[1]<0, hits upper at t_1 = (0.5 - 1)/(-1) = 0.5
+    //   i=2: g[2]>0, hits lower at t_2 = (0.5-(-1))/0.1 = 15
+    // Sorted:  t_1 = 0.5, t_0 = 1.5, t_2 = 15.
+    //
+    // Segment 1 [0, 0.5], direction d0:
+    //   B d0 = (-1 - 0.9, -0.9 + 1, -0.1) = (-1.9, 0.1, -0.1)
+    //   f'(0)  = g . d0  = -1 - 1 - 0.01 = -2.01
+    //   f''(0) = d0 . B d0 = 2.01
+    //   interior t* = -f'/f'' = 2.01/2.01 = 1.0  > bp.t=0.5 → cross
+    //   f'(0.5-) = f'(0) + 0.5 * f'' = -2.01 + 1.005 = -1.005 < 0 → cross
+    //
+    // Zero out d[1] (coord 1 hit upper). d1 = (-1, 0, -0.1), t_old = 0.5.
+    //   B d1 = (-1, -0.9, -0.1)
+    //   f''(0.5+) = d1 . B d1 = 1 + 0 + 0.01 = 1.01
+    //   (x(0.5) - x0) = (-0.5, 0.5, -0.05)  (projected; coord 1 clipped to
+    //                                         upper so it matches -0.5*d0)
+    //   (x(0.5) - x0) . B d1 = -0.5*(-1) + 0.5*(-0.9) + (-0.05)*(-0.1)
+    //                        = 0.5 - 0.45 + 0.005 = 0.055
+    //   f'(0.5+) = g . d1 + 0.055 = -1.01 + 0.055 = -0.955
+    //
+    // Interior on segment 2 [0.5, 1.5]:
+    //   t* = t_old - f'/f'' = 0.5 + 0.955/1.01 = 0.5 + 0.9455... = 1.4455...
+    //   0.5 <= 1.4455 <= 1.5 → interior minimum inside segment 2.
+    //
+    // GCP = x - t* g with coord 1 at upper (clipped):
+    //   x_cauchy[0] = 0.5 - 1.4455 * 1   = -0.9455...
+    //   x_cauchy[1] = 1.0 (at upper bound, projected)
+    //   x_cauchy[2] = 0.5 - 1.4455 * 0.1 = 0.3554...
+    //
+    // Pre-fix behavior: the reconstruction f' = g.d + t_old * f'' produces
+    //   f'(0.5+) (wrong) = -1.01 + 0.5 * 1.01 = -0.505
+    // → wrong interior t* on segment 2:
+    //   t* (wrong) = 0.5 + 0.505/1.01 = 0.5 + 0.5 = 1.0
+    //   x_cauchy[0] (wrong) = 0.5 - 1.0 * 1   = -0.5
+    //   x_cauchy[1] (wrong) = 1.0 (upper)
+    //   x_cauchy[2] (wrong) = 0.5 - 1.0 * 0.1 = 0.4
+    //
+    // The post-fix values above are the assertion targets below.
+
+    const double t_star_expected = 0.5 + 0.955 / 1.01;  // ~1.4455...
+    const double x0_expected = x[0] - t_star_expected * g[0];
+    const double x2_expected = x[2] - t_star_expected * g[2];
+
+    CHECK(result.x_cauchy[0] == Approx(x0_expected).margin(1e-10));
+    CHECK(result.x_cauchy[1] == Approx(upper[1]).margin(1e-10));
+    CHECK(result.x_cauchy[2] == Approx(x2_expected).margin(1e-10));
+
+    // Active-set classification: coord 1 at upper bound, coords 0 and 2 free.
+    REQUIRE(result.active_indices.size() == 1u);
+    CHECK(result.active_indices[0] == 1);
+    REQUIRE(result.free_indices.size() == 2u);
+    CHECK(result.free_indices[0] == 0);
+    CHECK(result.free_indices[1] == 2);
+}
+
 TEST_CASE("compact_lbfgs accepts small curvature pairs", "[lbfgsb]")
 {
     // Regression guard for curvature pair rejection (BUG-03).
