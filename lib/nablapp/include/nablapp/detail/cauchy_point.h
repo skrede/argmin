@@ -80,6 +80,7 @@ public:
     explicit cauchy_point_solver(int n)
         : d_(n)
         , Bd_(n)
+        , z_(n)
         , x_cauchy_(n)
     {
         bps_.reserve(n);
@@ -164,6 +165,13 @@ public:
 
         Scalar t_old = Scalar(0);
 
+        // Size z_ to n (no-op for fixed N; resize for Dynamic when the
+        // solver was default-constructed before the first solve()).
+        if constexpr(N == Eigen::Dynamic)
+            z_.setZero(n);
+        else
+            z_.setZero();
+
         for(const auto& bp : bps_)
         {
             Scalar dt = bp.t - t_old;
@@ -190,13 +198,42 @@ public:
                 return result_;
             }
 
+            // Accumulate the piecewise-linear step along the (still-current)
+            // direction d_ before zeroing out the newly-bound coordinate.
+            // z_ tracks x(t_old) - x exactly, including bound-projection:
+            // at a breakpoint for coordinate bp.index we have d_[bp.index] * dt
+            // = (bound - x[bp.index]) - z_[bp.index], which keeps z_[bp.index]
+            // pinned to (bound - x[bp.index]) for all subsequent segments.
+            z_.noalias() += dt * d_;
+
             d_[bp.index] = Scalar(0);
             t_old = bp.t;
 
             Bd_ = B.multiply(d_);
             f_double_prime = d_.dot(Bd_);
 
-            f_prime = g.dot(d_) + t_old * f_double_prime;
+            // Reconstruct f'(t_old+) on the new reduced direction from the
+            // quadratic model q(x) = f(x0) + g^T(x - x0) + (1/2)(x - x0)^T B (x - x0):
+            //
+            //     f'(t_old+) = (nabla q at x(t_old))^T d_new
+            //                = g^T d_new + (x(t_old) - x)^T B d_new
+            //                = g.dot(d_) + z_.dot(Bd_)
+            //
+            // The earlier approximation (x(t_old) - x) ~= t_old * d_new is
+            // exact only for diagonal B: it drops the cross-term from
+            // already-bound coordinates (where d_new[i] = 0 but
+            // (B d_new)[i] != 0 for non-diagonal B), which perturbs the
+            // segment-entry derivative and lands the GCP on the wrong
+            // active set on the multi-breakpoint path.
+            //
+            // Reference:
+            //   Byrd, R. H., Lu, P., Nocedal, J. (1995).
+            //     "A limited-memory algorithm for bound-constrained
+            //     optimization." SIAM J. Sci. Comput. 16(5), Algorithm CP,
+            //     derivative transition across a breakpoint.
+            //   Nocedal, J., Wright, S. J. (2006).
+            //     Numerical Optimization, 2e. Section 16.7, eq. 16.75-16.77.
+            f_prime = g.dot(d_) + z_.dot(Bd_);
         }
 
         Scalar t_last = bps_.back().t;
@@ -216,6 +253,7 @@ private:
     std::vector<breakpoint> bps_;
     Eigen::Vector<Scalar, N> d_;
     Eigen::Vector<Scalar, N> Bd_;
+    Eigen::Vector<Scalar, N> z_;
     Eigen::Vector<Scalar, N> x_cauchy_;
     cauchy_result<Scalar, N> result_;
 };
