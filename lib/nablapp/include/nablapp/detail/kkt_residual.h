@@ -80,8 +80,14 @@ Scalar kkt_residual(const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       grad
         dual_feas = std::max(dual_feas, std::max(-mu_ineq[i], Scalar(0)));
 
     // Leg 5 - Complementarity: max_i min(|mu_i|, |c_i|)
+    // Bound the loop by the smaller of the two sizes so a caller passing
+    // mismatched mu_ineq / c_ineq lengths (allowed by the Ref-based
+    // signature) does not read past either vector. All in-tree call sites
+    // currently pass matched n_ineq-sized vectors; the defense mirrors the
+    // diagnostic harness in benchmarks/diagnostic_kkt_breakdown.cpp.
     Scalar complementarity = Scalar(0);
-    for(Eigen::Index i = 0; i < c_ineq.size(); ++i)
+    const Eigen::Index m_comp = std::min(mu_ineq.size(), c_ineq.size());
+    for(Eigen::Index i = 0; i < m_comp; ++i)
         complementarity = std::max(complementarity,
             std::min(std::abs(mu_ineq[i]), std::abs(c_ineq[i])));
 
