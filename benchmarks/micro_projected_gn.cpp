@@ -141,11 +141,58 @@ timing bench_nlopt_bobyqa(std::uint32_t reps)
     return {us, fval, evals};
 }
 
+// kkt_residual regression probe.
+//
+// projected_gn_policy populates step_result::kkt_residual via
+// detail::kkt_residual_bound on every step (projected-gradient
+// infinity-norm for bound-constrained least-squares). This probe runs
+// projected_gn on the bounded Rosenbrock LS problem via step(),
+// confirms the observed step_result carries a populated, non-negative
+// kkt_residual, and prints the value for telemetry parity. Failure
+// prints FAIL and reports through main.
+bool probe_kkt_residual()
+{
+    bounded_rosenbrock_ls problem;
+    Eigen::VectorXd x0{{-1.0, 1.0}};
+    nablapp::solver_options opts;
+    opts.max_iterations = 40;
+    opts.set_gradient_threshold(1e-10);
+
+    nablapp::basic_solver solver{nablapp::projected_gn_policy{}, problem, x0, opts};
+
+    nablapp::step_result<double> last{};
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        last = solver.step();
+        if(last.policy_status)
+            break;
+    }
+
+    if(!last.kkt_residual.has_value())
+    {
+        std::println(stderr, "FAIL: kkt_residual not populated (projected_gn)");
+        return false;
+    }
+    if(last.kkt_residual.value() < 0.0)
+    {
+        std::println(stderr, "FAIL: kkt_residual is negative: {}",
+                     last.kkt_residual.value());
+        return false;
+    }
+    std::println("  projected_gn bounded Rosenbrock LS kkt_residual: {:.6e} "
+                 "(gradient_norm: {:.6e})",
+                 last.kkt_residual.value(), last.gradient_norm);
+    return true;
+}
+
 }
 
 int main()
 {
     constexpr std::uint32_t reps = 10000;
+
+    if(!probe_kkt_residual())
+        return 1;
 
     std::println("Bounded Rosenbrock 2D LS, {} repetitions each\n", reps);
 

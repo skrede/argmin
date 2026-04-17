@@ -418,6 +418,95 @@ TEST_CASE("projected_gn_policy: FD Jacobian fallback", "[projected_gn]")
     CHECK(result.x(0) == Approx(0.5).margin(1e-2));
 }
 
+// projected_gn_policy populates step_result::kkt_residual via
+// detail::kkt_residual_bound on every step. For a bound-constrained
+// least-squares problem the value is the projected-gradient infinity-
+// norm, which equals zero iff the bound-constrained first-order
+// conditions hold.
+//
+// Reference: N&W 2e Section 16.7 (projected gradient optimality).
+TEST_CASE("projected_gn_policy populates kkt_residual", "[projected_gn][kkt]")
+{
+    bounded_rosenbrock_ls problem;
+    Eigen::VectorXd x0{{-1.0, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+
+    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+
+    bool populated = false;
+    for(int i = 0; i < 10; ++i)
+    {
+        auto sr = solver.step();
+        if(sr.kkt_residual.has_value())
+        {
+            populated = true;
+            CHECK(sr.kkt_residual.value() >= 0.0);
+        }
+        if(sr.policy_status)
+            break;
+    }
+    CHECK(populated);
+}
+
+// projected_gradient_gn_policy populates step_result::kkt_residual via
+// detail::kkt_residual_bound on every step through both the backtracking
+// and dogleg return paths.
+//
+// Reference: N&W 2e Section 16.7 (projected gradient optimality).
+TEST_CASE("projected_gradient_gn_policy populates kkt_residual",
+          "[projected_gn][kkt]")
+{
+    bounded_rosenbrock_ls problem;
+    Eigen::VectorXd x0{{-1.0, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+
+    SECTION("backtracking mode")
+    {
+        basic_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
+
+        bool populated = false;
+        for(int i = 0; i < 10; ++i)
+        {
+            auto sr = solver.step();
+            if(sr.kkt_residual.has_value())
+            {
+                populated = true;
+                CHECK(sr.kkt_residual.value() >= 0.0);
+            }
+            if(sr.policy_status)
+                break;
+        }
+        CHECK(populated);
+    }
+
+    SECTION("dogleg mode")
+    {
+        projected_gradient_gn_policy::options_type policy_opts{};
+        policy_opts.use_dogleg = true;
+
+        basic_solver solver{projected_gradient_gn_policy{}, problem, x0, opts,
+                            policy_opts};
+
+        bool populated = false;
+        for(int i = 0; i < 10; ++i)
+        {
+            auto sr = solver.step();
+            if(sr.kkt_residual.has_value())
+            {
+                populated = true;
+                CHECK(sr.kkt_residual.value() >= 0.0);
+            }
+            if(sr.policy_status)
+                break;
+        }
+        CHECK(populated);
+    }
+}
+
 TEST_CASE("projected_gn_policy: active set exercised", "[projected_gn]")
 {
     bounded_rosenbrock_ls problem;

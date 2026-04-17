@@ -1,13 +1,17 @@
-// Micro-benchmark: nablapp L-BFGS-B vs NLopt L-BFGS on a single problem.
+// Micro-benchmark: nablapp byrd_lbfgsb vs NLopt LD_LBFGS on bounded Rosenbrock.
 //
-// Build:
-//   g++ -std=c++23 -O3 -march=native -fno-math-errno -fno-trapping-math \
-//       -I ../lib/nablapp/include -I <eigen-path> \
-//       micro_lbfgsb.cpp -lnlopt -o micro_lbfgsb
+// byrd_lbfgsb_policy is structurally identical to lbfgsb_policy but with
+// Armijo backtracking (instead of Strong Wolfe) and a shorter curvature
+// history depth (5 pairs instead of 10) motivated by non-convex
+// landscapes. Both bench configurations run on the same 2D bounded
+// Rosenbrock used by micro_lbfgsb so the pair of files produces
+// directly comparable timings.
 //
-// Or via CMake target (added below).
+// Reference: Byrd, Lu, Nocedal, Zhu (1995) "A Limited Memory Algorithm
+//            for Bound Constrained Optimization", SIAM J. Sci. Comput.
+//            16(5), pp. 1190-1208.
 
-#include "nablapp/solver/lbfgsb_policy.h"
+#include "nablapp/solver/byrd_lbfgsb_policy.h"
 #include "nablapp/solver/basic_solver.h"
 
 #include <Eigen/Core>
@@ -21,9 +25,8 @@
 namespace
 {
 
-// Rosenbrock 2D — same problem for both libraries.
-// Bounds [-5, 5]^2 are wide enough that the trajectory from x0=(-1.2, 1.0)
-// to the unconstrained optimum (1, 1) never binds; this case exercises
+// Rosenbrock 2D -- same problem for both libraries. Wide bounds
+// [-5, 5]^2 let the trajectory run without hitting a bound, exercising
 // the all-free (two-loop recursion) fast path.
 struct rosenbrock
 {
@@ -49,15 +52,8 @@ struct rosenbrock
 };
 
 // Bounded Rosenbrock 2D with tight bounds that bind during the walk.
-//
-// Starting from x0=(-0.9, -0.9) with bounds [-1, 1]^2, the anti-gradient ray
-// exits the box from the start (both coords have negative gradients from x0
-// values near -1 because the Rosenbrock gradient at (-0.9, -0.9) is
-// g = (-2*(1-(-0.9)) - 400*(-0.9)*(-0.9 - 0.81), 200*(-0.9 - 0.81))
-//   = (-3.8 + 615.6, -342) = (611.8, -342)
-// So the walk hits the coord-0 upper and coord-1 lower breakpoints in early
-// iterations and exercises the multi-breakpoint GCP branch that the
-// reduced-direction derivative reconstruction fix applies to.
+// Starting from x0=(-0.9, -0.9) with bounds [-1, 1]^2 exercises the
+// multi-breakpoint GCP branch (same pattern as micro_lbfgsb).
 struct bounded_rosenbrock
 {
     static constexpr int problem_dimension = nablapp::dynamic_dimension;
@@ -81,8 +77,8 @@ struct bounded_rosenbrock
     Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd{{1.0, 1.0}}; }
 };
 
-// NLopt callback. Shared by both the wide-bounds and tight-bounds cases;
-// the bounds difference is applied on the nlopt::opt instance, not here.
+// NLopt callback. Shared by both bounds cases; the bounds difference is
+// applied on the nlopt::opt instance, not here.
 double nlopt_rosenbrock(unsigned, const double* x, double* grad, void*)
 {
     double t1 = 1.0 - x[0];
@@ -114,7 +110,7 @@ timing bench_nablapp(std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+        nablapp::basic_solver solver{nablapp::byrd_lbfgsb_policy{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -123,7 +119,7 @@ timing bench_nablapp(std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+        nablapp::basic_solver solver{nablapp::byrd_lbfgsb_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -170,8 +166,6 @@ timing bench_nlopt(std::uint32_t reps)
     return {us, fval, evals};
 }
 
-// Bounded-Rosenbrock timings; exercises the multi-breakpoint GCP branch in
-// cauchy_point_solver::solve that is not touched by the wide-bounds case.
 timing bench_nablapp_bounded(std::uint32_t reps)
 {
     bounded_rosenbrock problem;
@@ -184,7 +178,7 @@ timing bench_nablapp_bounded(std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+        nablapp::basic_solver solver{nablapp::byrd_lbfgsb_policy{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -193,7 +187,7 @@ timing bench_nablapp_bounded(std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+        nablapp::basic_solver solver{nablapp::byrd_lbfgsb_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -242,12 +236,13 @@ timing bench_nlopt_bounded(std::uint32_t reps)
 
 // kkt_residual regression probe.
 //
-// lbfgsb_policy populates step_result::kkt_residual via
+// byrd_lbfgsb_policy populates step_result::kkt_residual via
 // detail::kkt_residual_bound on every step (projected-gradient
-// infinity-norm). The probe runs lbfgsb on the bounded Rosenbrock
-// problem via step(), confirms the observed step_result carries a
-// populated, non-negative kkt_residual, and prints the value for
-// telemetry parity. Failure prints FAIL and reports through main.
+// infinity-norm). This probe runs byrd_lbfgsb on the bounded
+// Rosenbrock problem via step(), confirms the observed step_result
+// carries a populated, non-negative kkt_residual, and prints the
+// value for telemetry parity with the existing benchmark output.
+// Failure prints FAIL and reports through the caller's return code.
 bool probe_kkt_residual()
 {
     bounded_rosenbrock problem;
@@ -258,7 +253,7 @@ bool probe_kkt_residual()
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+    nablapp::basic_solver solver{nablapp::byrd_lbfgsb_policy{}, problem, x0, opts};
 
     nablapp::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -270,7 +265,7 @@ bool probe_kkt_residual()
 
     if(!last.kkt_residual.has_value())
     {
-        std::println(stderr, "FAIL: kkt_residual not populated (lbfgsb)");
+        std::println(stderr, "FAIL: kkt_residual not populated (byrd_lbfgsb)");
         return false;
     }
     if(last.kkt_residual.value() < 0.0)
@@ -279,7 +274,7 @@ bool probe_kkt_residual()
                      last.kkt_residual.value());
         return false;
     }
-    std::println("  lbfgsb bounded Rosenbrock kkt_residual: {:.6e} "
+    std::println("  byrd_lbfgsb bounded Rosenbrock kkt_residual: {:.6e} "
                  "(gradient_norm: {:.6e})",
                  last.kkt_residual.value(), last.gradient_norm);
     return true;
@@ -294,7 +289,8 @@ int main()
     if(!probe_kkt_residual())
         return 1;
 
-    std::println("Rosenbrock 2D (wide bounds [-5,5]^2, all-free fast path), {} repetitions each\n", reps);
+    std::println("Rosenbrock 2D (wide bounds [-5,5]^2, all-free fast path), "
+                 "{} repetitions each\n", reps);
 
     auto na = bench_nablapp(reps);
     auto nl = bench_nlopt(reps);
@@ -316,6 +312,6 @@ int main()
     std::println("\n  ratio (nablapp/nlopt): {:.1f}x", nab.wall_us / nlb.wall_us);
 
     std::println("\nNow profile with:");
-    std::println("  perf record -F 99999 -g -- ./micro_lbfgsb");
+    std::println("  perf record -F 99999 -g -- ./micro_byrd_lbfgsb");
     std::println("  perf report --stdio --percent-limit=1.0");
 }

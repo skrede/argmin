@@ -220,6 +220,32 @@ if(NLopt_FOUND)
         set_target_properties(micro_projected_gradient_gn PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
+
+    add_executable(micro_byrd_lbfgsb micro_byrd_lbfgsb.cpp)
+    target_link_libraries(micro_byrd_lbfgsb PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_byrd_lbfgsb PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_byrd_lbfgsb PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+endif()
+
+# Levenberg-Marquardt micro-benchmark (nablapp-only: unconstrained
+# least-squares, no direct NLopt equivalent).
+add_executable(micro_lm micro_lm.cpp)
+target_link_libraries(micro_lm PRIVATE nablapp::nablapp)
+target_compile_options(micro_lm PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native -fno-math-errno -fno-trapping-math
+    >
+)
+if(NABLAPP_LTO_SUPPORTED)
+    set_target_properties(micro_lm PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
 # Active-set QP micro-benchmark (nablapp-only, no external dependencies).

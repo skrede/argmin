@@ -19,6 +19,7 @@
 //            Nielsen, H. B. (1999) "Damping Parameter in Marquardt's Method".
 //            K&W Section 6.3 (Levenberg-Marquardt).
 
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/bound_projection.h"
 #include "nablapp/detail/projected_gn_step.h"
 #include "nablapp/derivative/finite_difference.h"
@@ -270,12 +271,19 @@ struct projected_gn_policy
         // ftol_reached from firing.
         double effective_change = accepted ? (s.objective_value - old_value) : s.lambda;
 
+        // KKT residual for bound-constrained least-squares: projected-gradient
+        // infinity-norm using the gradient g = J^T r of 0.5*||r||^2.
+        // Reference: N&W 2e Section 16.7 (projected gradient optimality).
+        double kkt = detail::kkt_residual_bound<double, dynamic_dimension>(
+            s.x, g, s.lower, s.upper);
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = g.norm(),
             .step_size = h.norm(),
             .objective_change = effective_change,
             .improved = accepted,
+            .kkt_residual = kkt,
         };
     }
 

@@ -208,3 +208,37 @@ TEST_CASE("lm_policy: rejected steps recovery", "[lm]")
     CHECK(result.x(0) == Approx(1.0).margin(1e-4));
     CHECK(result.x(1) == Approx(1.0).margin(1e-4));
 }
+
+// lm_policy populates step_result::kkt_residual as the gradient
+// infinity-norm ||J^T r||_inf. Because lm_policy is unconstrained
+// least-squares, the first-order KKT conditions reduce to
+// stationarity, so the gradient infinity-norm IS the KKT residual;
+// no multiplier or bound-projection term enters.
+//
+// Reference: N&W 2e Section 10.3 (nonlinear least-squares first-order
+//            conditions); N&W 2e Section 12.1 (KKT conditions reduce to
+//            stationarity when no constraints are present).
+TEST_CASE("lm_policy populates kkt_residual", "[lm][kkt]")
+{
+    rosenbrock_ls problem;
+    Eigen::VectorXd x0{{-1.0, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-10);
+
+    basic_solver solver{lm_policy{}, problem, x0, opts};
+
+    bool populated = false;
+    for(int i = 0; i < 10; ++i)
+    {
+        auto sr = solver.step();
+        if(sr.kkt_residual.has_value())
+        {
+            populated = true;
+            CHECK(sr.kkt_residual.value() >= 0.0);
+        }
+        if(sr.policy_status)
+            break;
+    }
+    CHECK(populated);
+}

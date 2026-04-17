@@ -21,6 +21,7 @@
 //            subspace minimization).
 //            K&W Section 6.5 (quasi-Newton methods).
 
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/compact_lbfgs.h"
 #include "nablapp/detail/bound_projection.h"
 #include "nablapp/detail/lbfgsb_direction.h"
@@ -146,6 +147,12 @@ struct lbfgsb_policy
             s.x, s.g, s.lower, s.upper, s.B, s.gcp_solver, s.ssm_solver);
         if(!dir)
         {
+            // KKT residual for bound-constrained optimality: projected-gradient
+            // infinity-norm. For unconstrained problems, s.lower/s.upper are
+            // +/-inf and the expression collapses to ||s.g||_inf.
+            // Reference: N&W 2e Section 16.7 (projected gradient optimality).
+            auto kkt = detail::kkt_residual_bound<double, N>(
+                s.x, s.g, s.lower, s.upper);
             return step_result<double>{
                 .objective_value = s.objective_value,
                 .gradient_norm = s.g.norm(),
@@ -153,6 +160,7 @@ struct lbfgsb_policy
                 .objective_change = 0.0,
                 .improved = false,
                 .x_norm = s.x.norm(),
+                .kkt_residual = kkt,
             };
         }
         auto& [d, alpha_max] = *dir;
@@ -235,6 +243,14 @@ struct lbfgsb_policy
         if(step_norm < eps * std::max(x_norm, 1.0) * 10.0)
             policy_status = solver_status::roundoff_limited;
 
+        // KKT residual for bound-constrained optimality: projected-gradient
+        // infinity-norm at the newly-accepted iterate using the freshly-
+        // evaluated gradient new_g. For unconstrained problems
+        // s.lower/s.upper are +/-inf and this collapses to ||new_g||_inf.
+        // Reference: N&W 2e Section 16.7 (projected gradient optimality).
+        auto kkt = detail::kkt_residual_bound<double, N>(
+            s.x, new_g, s.lower, s.upper);
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = new_g.norm(),
@@ -242,6 +258,7 @@ struct lbfgsb_policy
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
             .x_norm = x_norm,
+            .kkt_residual = kkt,
             .policy_status = policy_status,
         };
     }

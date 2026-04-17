@@ -19,6 +19,7 @@
 //            N&W Sections 9.2 (compact representation), 16.6 (GCP +
 //            subspace minimization).
 
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/lbfgsb_direction.h"
 
 #include "nablapp/solver/lbfgsb_policy.h"
@@ -114,13 +115,28 @@ struct byrd_lbfgsb_policy
             s.x, s.g, s.lower, s.upper, s.B, s.gcp_solver, s.ssm_solver);
         if(!dir)
         {
+            // Null step: generalized Cauchy point / subspace direction
+            // computation returned no usable direction. This is the
+            // documented zero-step path for Byrd L-BFGS-B (GCP collapse
+            // or subspace solve degeneracy). Mark is_null_step so
+            // step_tolerance_criterion exempts this iterate from stall
+            // detection, and populate kkt_residual so
+            // objective_tolerance_criterion can still declare convergence
+            // when the iterate is a genuine projected-gradient KKT point
+            // (a zero direction at a KKT point is the correct answer).
+            // Reference: Byrd, Lu, Nocedal, Zhu 1995 Algorithm CP;
+            //            N&W 2e S16.7 (projected gradient optimality).
+            auto kkt = detail::kkt_residual_bound<double, N>(
+                s.x, s.g, s.lower, s.upper);
             return step_result<double>{
                 .objective_value = s.objective_value,
                 .gradient_norm = s.g.norm(),
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .is_null_step = true,
                 .x_norm = s.x.norm(),
+                .kkt_residual = kkt,
             };
         }
         auto& [d, alpha_max] = *dir;
@@ -186,6 +202,14 @@ struct byrd_lbfgsb_policy
         if(step_norm < eps * std::max(x_norm, 1.0) * 10.0)
             policy_status = solver_status::roundoff_limited;
 
+        // KKT residual for bound-constrained optimality: projected-gradient
+        // infinity-norm at the newly-accepted iterate using the freshly-
+        // evaluated gradient new_g. For unconstrained problems
+        // s.lower/s.upper are +/-inf and this collapses to ||new_g||_inf.
+        // Reference: N&W 2e Section 16.7 (projected gradient optimality).
+        auto kkt = detail::kkt_residual_bound<double, N>(
+            s.x, new_g, s.lower, s.upper);
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = new_g.norm(),
@@ -193,6 +217,7 @@ struct byrd_lbfgsb_policy
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
             .x_norm = x_norm,
+            .kkt_residual = kkt,
             .policy_status = policy_status,
         };
     }

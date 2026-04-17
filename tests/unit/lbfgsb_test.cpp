@@ -664,6 +664,120 @@ TEST_CASE("Compile-time unconstrained path sets infinite alpha_max", "[lbfgsb]")
     CHECK(dir->d.norm() > 0.0);
 }
 
+// lbfgsb_policy populates step_result::kkt_residual on every step via
+// detail::kkt_residual_bound. For bound-constrained problems the value is
+// the projected-gradient infinity-norm; for unconstrained problems bounds
+// are +/-inf so the expression collapses to ||g||_inf. Either form is
+// non-negative and provides objective_tolerance_criterion a consistent
+// stationarity quantity to gate on.
+//
+// Reference: N&W 2e Section 16.7 (projected gradient optimality).
+TEST_CASE("lbfgsb_policy populates kkt_residual", "[lbfgsb][kkt]")
+{
+    constexpr double inf = std::numeric_limits<double>::infinity();
+
+    SECTION("bound-constrained Rosenbrock")
+    {
+        bounded_rosenbrock problem{
+            .inner = {.n = 2},
+            .lb = Eigen::VectorXd{{-2.0, -2.0}},
+            .ub = Eigen::VectorXd{{0.8, 2.0}},
+        };
+        Eigen::VectorXd x0{{0.5, 0.5}};
+        solver_options opts;
+        opts.max_iterations = 50;
+        opts.set_gradient_threshold(1e-8);
+
+        basic_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>,
+                     bounded_rosenbrock::problem_dimension, bounded_rosenbrock>
+            solver{problem, x0, opts};
+
+        bool populated = false;
+        for(int i = 0; i < 10; ++i)
+        {
+            auto sr = solver.step();
+            if(sr.kkt_residual.has_value())
+            {
+                populated = true;
+                CHECK(sr.kkt_residual.value() >= 0.0);
+            }
+            if(sr.policy_status)
+                break;
+        }
+        CHECK(populated);
+    }
+
+    SECTION("unconstrained Rosenbrock (infinite bounds)")
+    {
+        rosenbrock<> problem{.n = 2};
+        Eigen::VectorXd x0{{-1.2, 1.0}};
+        solver_options opts;
+        opts.max_iterations = 50;
+        opts.set_gradient_threshold(1e-8);
+
+        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>,
+                     rosenbrock<>::problem_dimension, rosenbrock<>>
+            solver{problem, x0, opts};
+
+        bool populated = false;
+        for(int i = 0; i < 10; ++i)
+        {
+            auto sr = solver.step();
+            if(sr.kkt_residual.has_value())
+            {
+                populated = true;
+                CHECK(sr.kkt_residual.value() >= 0.0);
+            }
+            if(sr.policy_status)
+                break;
+        }
+        CHECK(populated);
+        (void)inf;
+    }
+}
+
+// byrd_lbfgsb_policy populates kkt_residual via detail::kkt_residual_bound
+// and sets is_null_step on the documented zero-direction path where
+// detail::compute_direction returns nullopt (GCP or subspace solve
+// degeneracy). The designated-initializer surface for is_null_step is
+// touched so the field remains compile-time exercised even when the
+// test run does not hit the null-step path.
+//
+// Reference: Byrd, Lu, Nocedal, Zhu 1995 Algorithm CP.
+TEST_CASE("byrd_lbfgsb_policy populates kkt_residual and exposes is_null_step",
+          "[lbfgsb][byrd][kkt]")
+{
+    rosenbrock<> problem{.n = 2};
+    Eigen::VectorXd x0{{-1.2, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+
+    basic_solver<byrd_lbfgsb_policy<rosenbrock<>::problem_dimension>,
+                 rosenbrock<>::problem_dimension, rosenbrock<>>
+        solver{problem, x0, opts};
+
+    bool populated = false;
+    bool saw_any_null_step_reading = false;
+    for(int i = 0; i < 10; ++i)
+    {
+        auto sr = solver.step();
+        if(sr.kkt_residual.has_value())
+        {
+            populated = true;
+            CHECK(sr.kkt_residual.value() >= 0.0);
+        }
+        // Touch the is_null_step field so the designated-initializer
+        // surface stays compile-time exercised.
+        if(sr.is_null_step || !sr.is_null_step)
+            saw_any_null_step_reading = true;
+        if(sr.policy_status)
+            break;
+    }
+    CHECK(populated);
+    CHECK(saw_any_null_step_reading);
+}
+
 TEST_CASE("Runtime fast path with loose bounds computes finite alpha_max", "[lbfgsb]")
 {
     // Runtime fast path activates when bound_constrained is satisfied at

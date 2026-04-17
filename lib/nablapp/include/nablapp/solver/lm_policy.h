@@ -222,6 +222,16 @@ struct lm_policy
         // ftol_reached from firing.
         double effective_change = accepted ? (s.objective_value - old_value) : s.lambda;
 
+        // KKT residual for unconstrained least-squares: infinity-norm of the
+        // gradient g = J^T r of 0.5*||r||^2. First-order optimality holds iff
+        // ||J^T r||_inf = 0, so the gradient infinity-norm IS the KKT residual
+        // here; no detail::kkt_residual helper is needed because there are no
+        // multipliers or bound projections to compose.
+        // Reference: N&W 2e Section 10.3 (nonlinear least-squares first-order
+        //            conditions); N&W 2e Section 12.1 (KKT conditions reduce
+        //            to stationarity when no constraints are present).
+        double kkt = g.template lpNorm<Eigen::Infinity>();
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = g.norm(),
@@ -229,6 +239,7 @@ struct lm_policy
             .objective_change = effective_change,
             .improved = accepted,
             .x_norm = s.x.norm(),
+            .kkt_residual = kkt,
             .policy_status = policy_status,
         };
     }
