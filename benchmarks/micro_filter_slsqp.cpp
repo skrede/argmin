@@ -540,6 +540,51 @@ bool probe_kkt_residual()
     return true;
 }
 
+// Phase 31.1 regression probe: filter_slsqp on HS026 must reach
+// f < 1e-5 after the Full E-measure (N&W 2e Definition 12.1) blocks
+// the premature ftol that post-phase31 let fire at iter 12 on
+// equality-only problems.
+//
+// Reference: N&W 2e Definition 12.1; post-phase30 baseline.
+bool probe_regression_hs026()
+{
+    nablapp::hs026<> p;
+    Eigen::VectorXd x0 = p.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{
+        nablapp::filter_slsqp_policy<nablapp::hs026<>::problem_dimension>{},
+        p, x0, opts};
+    nablapp::step_result<double> last{};
+    nablapp::step_result<double> last_with_kkt{};
+    bool any_kkt = false;
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        last = solver.step();
+        if(last.kkt_residual.has_value())
+        {
+            last_with_kkt = last;
+            any_kkt = true;
+        }
+        if(last.policy_status)
+            break;
+    }
+
+    const double kkt = any_kkt ? last_with_kkt.kkt_residual.value() : -1.0;
+    const bool ok = last.objective_value < 1e-5;
+    if(!ok)
+        std::println(stderr,
+                     "FAIL: filter_slsqp HS026 f={:.6e} kkt={:.6e}",
+                     last.objective_value, kkt);
+    std::println("  filter_slsqp HS026: f={:.6e} kkt={:.6e}",
+                 last.objective_value, kkt);
+    return ok;
+}
+
 }
 
 int main()
@@ -547,6 +592,8 @@ int main()
     constexpr std::uint32_t reps = 500;
 
     if(!probe_kkt_residual())
+        return 1;
+    if(!probe_regression_hs026())
         return 1;
 
     std::println("Filter SLSQP micro-benchmark, {} repetitions each\n", reps);

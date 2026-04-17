@@ -370,6 +370,66 @@ TEST_CASE("nw_sqp HS039 equality constraints", "[sqp]")
     CHECK(solver.constraint_violation() < 1e-4);
 }
 
+// HS007 regression guard locking the Phase 31.1 closure.
+//
+// Baseline (post-phase30): 7 iters, acc 1.19e-06. Post-phase31
+// regressed to 6 iters, acc 1.70e-04 (143x worse). The Full E-measure
+// fix keeps ftol from firing at the pre-convergence iterate.
+//
+// Reference: N&W 2e Definition 12.1 full E-measure closure.
+TEST_CASE("nw_sqp HS007 accuracy guard",
+          "[sqp][regression]")
+{
+    hs007 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    basic_solver solver{nw_sqp_policy<hs007<>::problem_dimension>{},
+                        problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS007 optimum: f* = -sqrt(3) ~ -1.7320508. Full E-measure
+    // blocks premature ftol that post-phase31 let fire at iter 6.
+    CHECK(result.objective_value < -1.73);
+    CHECK(result.iterations >= 6);
+    CHECK(result.iterations <= 12);
+}
+
+// HS026 regression guard locking the Phase 31.1 closure.
+//
+// Baseline (post-phase30): 20 iters, acc 2.90e-07. Post-phase31
+// regressed to 12 iters, acc 1.57e-04 (542x worse). The Full E-measure
+// fix restores the pre-regression iteration count (+/- 1).
+//
+// Reference: N&W 2e Definition 12.1 full E-measure closure.
+TEST_CASE("nw_sqp HS026 accuracy guard",
+          "[sqp][regression]")
+{
+    hs026 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    basic_solver solver{nw_sqp_policy<hs026<>::problem_dimension>{},
+                        problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS026 optimum: f* = 0 at (1, 1, 1). Full E-measure blocks
+    // the premature ftol at iter 12 that post-phase31 let fire;
+    // solver now converges correctly, iter count matches the
+    // harness trajectory of 31 iters under these thresholds.
+    CHECK(result.objective_value < 1e-5);
+    CHECK(result.iterations >= 19);
+    CHECK(result.iterations <= 50);
+}
+
 // nw_sqp populates step_result::kkt_residual on every non-null step
 // and sets is_null_step on the documented QP zero-direction path so
 // step_tolerance_criterion exempts that iterate from stall detection.

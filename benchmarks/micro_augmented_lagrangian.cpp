@@ -532,6 +532,47 @@ bool probe_kkt_residual()
     return true;
 }
 
+// Phase 31.1 regression probe: augmented_lagrangian on HS039 must
+// reach f < 1e-5. The policy is not itself a regression driver in
+// Phase 31.1 (the Full E-measure rewrite at its kkt call site is
+// the D-C3 feasibility_gate removal, not a convergence path), so
+// this probe asserts stability rather than a tightened iter bound.
+//
+// Reference: N&W 2e Definition 12.1.
+bool probe_regression_hs039()
+{
+    nablapp::hs039<> p;
+    Eigen::VectorXd x0 = p.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{
+        nablapp::augmented_lagrangian_policy<
+            nablapp::lbfgsb_policy<nablapp::hs039<>::problem_dimension>,
+            nablapp::hs039<>::problem_dimension>{},
+        p, x0, opts};
+    nablapp::step_result<double> last{};
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        last = solver.step();
+        if(last.policy_status)
+            break;
+    }
+
+    const double kkt = last.kkt_residual.value_or(-1.0);
+    const bool ok = last.objective_value < -0.999;  // f* = -1
+    if(!ok)
+        std::println(stderr,
+                     "FAIL: augmented_lagrangian HS039 f={:.6e} kkt={:.6e}",
+                     last.objective_value, kkt);
+    std::println("  augmented_lagrangian HS039: f={:.6e} kkt={:.6e}",
+                 last.objective_value, kkt);
+    return ok;
+}
+
 }
 
 int main()
@@ -539,6 +580,8 @@ int main()
     constexpr std::uint32_t reps = 200;
 
     if(!probe_kkt_residual())
+        return 1;
+    if(!probe_regression_hs039())
         return 1;
 
     std::println("Augmented Lagrangian micro-benchmark, {} repetitions each\n", reps);

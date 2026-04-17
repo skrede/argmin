@@ -6,6 +6,7 @@
 #include "nablapp/detail/lbfgsb_direction.h"
 #include "nablapp/formulation/concepts.h"
 #include "nablapp/test_functions/rosenbrock.h"
+#include "nablapp/test_functions/more_garbow_hillstrom.h"
 #include "nablapp/schedule/basic_solver_group.h"
 #include "nablapp/schedule/round_robin_schedule.h"
 
@@ -807,4 +808,37 @@ TEST_CASE("Runtime fast path with loose bounds computes finite alpha_max", "[lbf
     CHECK(std::isfinite(dir->alpha_max));
     CHECK(dir->alpha_max > 0.0);
     CHECK(dir->d.norm() > 0.0);
+}
+
+// brown_badly_scaled is the Phase 31.1 byrd_lbfgsb regression: GCP
+// breakpoint exhaustion on a problem with ||proj_grad||_inf ~ 5e-08 at
+// numerical floor. Pre-fix: the null-step path populated kkt_residual
+// but left policy_status unset, so the solver ran to max_iterations
+// silently. Post-fix: the null-step path sets policy_status =
+// roundoff_limited and basic_solver terminates immediately.
+//
+// Reference: Byrd, Lu, Nocedal, Zhu 1995 Algorithm CP (GCP breakpoint
+//            exhaustion); N&W 2e Section 3.5 (roundoff limitation in
+//            line search).
+TEST_CASE("byrd_lbfgsb brown_badly_scaled terminates roundoff_limited",
+          "[lbfgsb][byrd][regression]")
+{
+    brown_badly_scaled<> problem;
+    Eigen::Vector<double, brown_badly_scaled<>::problem_dimension> x0 =
+        problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 10000;
+    opts.set_gradient_threshold(1e-12);
+    opts.set_objective_threshold(1e-14);
+    opts.set_step_threshold(1e-14);
+
+    basic_solver solver{
+        byrd_lbfgsb_policy<brown_badly_scaled<>::problem_dimension>{},
+        problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // Baseline: 13 iters, acc 6.628e-28 (post-phase30, stalled status).
+    CHECK(result.status == solver_status::roundoff_limited);
+    CHECK(result.iterations < 30);
+    CHECK(std::abs(result.objective_value - 6.627535934050483e-28) < 1e-27);
 }

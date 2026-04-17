@@ -285,6 +285,43 @@ bool probe_kkt_residual()
     return true;
 }
 
+// Phase 31.1 regression probe: lbfgsb on bounded Rosenbrock is a
+// no-op stability check. lbfgsb was touched in Phase 31.1 only to
+// remove the dead feasibility_gate = +inf field (D-C3); the
+// kkt_residual_bound helper is unchanged per D-B3. Probe asserts
+// that the projected-gradient KKT stays below 1e-5 at convergence.
+//
+// Reference: N&W 2e Section 16.7 (projected gradient optimality).
+bool probe_regression_bounded_rosenbrock()
+{
+    bounded_rosenbrock problem;
+    Eigen::VectorXd x0{{-0.9, -0.9}};
+    nablapp::solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+    nablapp::step_result<double> last{};
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        last = solver.step();
+        if(last.policy_status)
+            break;
+    }
+
+    const double kkt = last.kkt_residual.value_or(-1.0);
+    const bool ok = kkt >= 0.0 && kkt < 1e-5;
+    if(!ok)
+        std::println(stderr,
+                     "FAIL: lbfgsb bounded_rosenbrock kkt={:.6e}",
+                     kkt);
+    std::println("  lbfgsb bounded Rosenbrock: f={:.6e} kkt={:.6e}",
+                 last.objective_value, kkt);
+    return ok;
+}
+
 }
 
 int main()
@@ -292,6 +329,8 @@ int main()
     constexpr std::uint32_t reps = 10000;
 
     if(!probe_kkt_residual())
+        return 1;
+    if(!probe_regression_bounded_rosenbrock())
         return 1;
 
     std::println("Rosenbrock 2D (wide bounds [-5,5]^2, all-free fast path), {} repetitions each\n", reps);

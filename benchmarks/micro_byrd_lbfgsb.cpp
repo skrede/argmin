@@ -13,12 +13,14 @@
 
 #include "nablapp/solver/byrd_lbfgsb_policy.h"
 #include "nablapp/solver/basic_solver.h"
+#include "nablapp/test_functions/more_garbow_hillstrom.h"
 
 #include <Eigen/Core>
 
 #include <nlopt.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <print>
 
@@ -280,6 +282,57 @@ bool probe_kkt_residual()
     return true;
 }
 
+// Phase 31.1 regression probe: byrd_lbfgsb on brown_badly_scaled must
+// terminate with solver_status::roundoff_limited in under 30 iters
+// (D-D1). Pre-fix: null-step path populated kkt_residual but left
+// policy_status unset, leading to silent runs to max_iterations.
+//
+// Reference: Byrd, Lu, Nocedal, Zhu 1995 Algorithm CP; N&W 2e
+//            Section 3.5 (roundoff limitation in line search).
+bool probe_regression_brown_badly_scaled()
+{
+    nablapp::brown_badly_scaled<> p;
+    Eigen::Vector<double, nablapp::brown_badly_scaled<>::problem_dimension> x0 =
+        p.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 10000;
+    opts.set_gradient_threshold(1e-12);
+    opts.set_objective_threshold(1e-14);
+    opts.set_step_threshold(1e-14);
+
+    nablapp::basic_solver solver{
+        nablapp::byrd_lbfgsb_policy<nablapp::brown_badly_scaled<>::problem_dimension>{},
+        p, x0, opts};
+    nablapp::step_result<double> last{};
+    std::uint32_t iters = 0;
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        last = solver.step();
+        ++iters;
+        if(last.policy_status)
+            break;
+    }
+
+    const nablapp::solver_status policy_status =
+        last.policy_status.value_or(nablapp::solver_status::running);
+    const bool status_ok = policy_status == nablapp::solver_status::roundoff_limited;
+    const bool iter_ok = iters < 30;
+    const bool objective_ok =
+        std::abs(last.objective_value - 6.627535934050483e-28) < 1e-27;
+    const bool ok = status_ok && iter_ok && objective_ok;
+    if(!ok)
+        std::println(stderr,
+                     "FAIL: byrd_lbfgsb brown_badly_scaled status={} iters={} f={:.6e}",
+                     static_cast<int>(policy_status),
+                     iters,
+                     last.objective_value);
+    std::println("  byrd_lbfgsb brown_badly_scaled: iters={} status={} f={:.6e}",
+                 iters,
+                 static_cast<int>(policy_status),
+                 last.objective_value);
+    return ok;
+}
+
 }
 
 int main()
@@ -287,6 +340,8 @@ int main()
     constexpr std::uint32_t reps = 10000;
 
     if(!probe_kkt_residual())
+        return 1;
+    if(!probe_regression_brown_badly_scaled())
         return 1;
 
     std::println("Rosenbrock 2D (wide bounds [-5,5]^2, all-free fast path), "

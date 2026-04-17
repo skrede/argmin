@@ -356,6 +356,43 @@ bool probe_kkt_residual()
     return true;
 }
 
+// Phase 31.1 regression probe: nw_sqp on HS026 must reach f < 1e-5
+// after the Full E-measure (N&W 2e Definition 12.1) blocks the
+// premature ftol that post-phase31 let fire at iter 12.
+//
+// Reference: N&W 2e Definition 12.1; post-phase30 baseline 20 iters.
+bool probe_regression_hs026()
+{
+    nablapp::hs026<> p;
+    Eigen::VectorXd x0 = p.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{
+        nablapp::nw_sqp_policy<nablapp::hs026<>::problem_dimension>{},
+        p, x0, opts};
+    nablapp::step_result<double> last{};
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        last = solver.step();
+        if(last.policy_status)
+            break;
+    }
+
+    const double kkt = last.kkt_residual.value_or(-1.0);
+    const bool ok = last.objective_value < 1e-5;
+    if(!ok)
+        std::println(stderr,
+                     "FAIL: nw_sqp HS026 f={:.6e} kkt={:.6e}",
+                     last.objective_value, kkt);
+    std::println("  nw_sqp HS026: f={:.6e} kkt={:.6e}",
+                 last.objective_value, kkt);
+    return ok;
+}
+
 }
 
 int main()
@@ -363,6 +400,8 @@ int main()
     constexpr std::uint32_t reps = 500;
 
     if(!probe_kkt_residual())
+        return 1;
+    if(!probe_regression_hs026())
         return 1;
 
     std::println("NW-SQP micro-benchmark, {} repetitions each\n", reps);
