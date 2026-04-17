@@ -120,14 +120,21 @@ auto run_nablapp_solver(std::string_view solver_name,
         // gradient vanishes), and penalty methods (augmented Lagrangian)
         // cycle the augmented gradient during multiplier updates.
         opts.set_gradient_threshold(1e-2);
-        // Relax objective tolerance and disable stationarity gate. Penalty
-        // methods produce objective jumps that prevent tight ftol from
-        // firing; the feasibility gate above is the primary convergence
-        // signal for constrained solvers.
+        // Relax objective tolerance. Penalty methods produce objective
+        // jumps that prevent tight ftol from firing; the feasibility
+        // gate above plus the composite kkt_residual E-measure (N&W 2e
+        // Definition 12.1, eq. 12.34) are the primary convergence
+        // signals for constrained solvers.
         opts.set_objective_threshold(1e-6);
         opts.set_step_threshold(1e-6);
+        // Stationarity threshold gates the full first-order optimality
+        // error E(x, lambda, mu) with primal feasibility folded in.
+        // 1e-4 mirrors the pre-31.1 feasibility_gate on kraft_slsqp /
+        // nw_sqp so the bench regime reflects the intended convergence
+        // criterion -- premature ftol at primal_eq ~ 1e-3 is now
+        // properly blocked by the composite E-measure.
         std::get<objective_tolerance_criterion>(
-            opts.convergence.inner.criteria).stationarity_threshold = 1e2;
+            opts.convergence.inner.criteria).stationarity_threshold = 1e-4;
     }
 
     if(collect_trace)
@@ -194,12 +201,16 @@ auto run_nablapp_solver(std::string_view solver_name,
     }
     else
     {
-        // Use solve() for simplicity when no trace needed.
+        // Use solve(opts) so the full convergence policy (including the
+        // outer constrained_convergence_policy.feasibility_threshold)
+        // gates termination. The no-args solve() path falls through to
+        // stored_convergence_ which is always default_convergence and
+        // drops the outer feasibility gate.
         basic_solver<rebound_policy, N, Problem> solver(prob, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();
-        auto result = solver.solve();
+        auto result = solver.solve(opts);
         auto t1 = std::chrono::high_resolution_clock::now();
 
         auto wall_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();

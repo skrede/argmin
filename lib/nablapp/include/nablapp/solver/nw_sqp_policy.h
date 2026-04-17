@@ -303,6 +303,7 @@ struct nw_sqp_policy
                 .objective_change = 0.0,
                 .improved = false,
                 .is_null_step = true,
+                .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
                 .x_norm = s.x.norm(),
                 .kkt_residual = kkt_null,
             };
@@ -486,6 +487,7 @@ struct nw_sqp_policy
             .step_size = sk.norm(),
             .objective_change = s.objective_value - f_old,
             .improved = phi_new < phi0,
+            .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
         };

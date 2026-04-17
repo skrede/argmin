@@ -44,6 +44,7 @@
 #include "nablapp/detail/adaptive_bfgs.h"
 #include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/kraft_lsq_qp.h"
+#include "nablapp/detail/lagrangian.h"
 #include "nablapp/line_search/armijo.h"
 #include "nablapp/options/qp_options.h"
 #include "nablapp/line_search/options.h"
@@ -551,12 +552,20 @@ struct kraft_slsqp_policy
             lambda_eq_kkt, mu_ineq_kkt,
             s.c_eq, s.c_ineq);
 
+        // Primal feasibility reported via the constraint_violation field so
+        // constrained_convergence_policy can gate termination on feasibility
+        // before deferring to the inner ftol / grad-tol criteria. Equal to
+        // sum_i |c_eq[i]| + sum_j max(-c_ineq[j], 0); zero iff the iterate
+        // is primally feasible under the c_ineq >= 0 convention.
+        //
+        // Reference: N&W 2e Definition 12.1 (KKT primal feasibility).
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.g.norm(),
             .step_size = sk.norm(),
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
+            .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
         };
