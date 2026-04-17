@@ -480,7 +480,6 @@ public:
                 auto& dst = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
                 dst.threshold = c.threshold;
                 dst.stationarity_threshold = c.stationarity_threshold;
-                dst.feasibility_gate = c.feasibility_gate;
             }
         }
         else if constexpr(std::same_as<Criterion, step_tolerance_criterion>)
@@ -496,7 +495,6 @@ public:
                 auto& dst = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
                 dst.threshold = c.threshold;
                 dst.stationarity_threshold = c.stationarity_threshold;
-                dst.feasibility_gate = c.feasibility_gate;
             }
         }
         else if constexpr(std::same_as<Criterion, step_tolerance_rel_criterion>)
@@ -533,14 +531,21 @@ public:
 
     // Forwards solver-level options (currently constraint_tolerance) into
     // the stored convergence criteria. Called at construction time from
-    // every basic_solver ctor; once set here the feasibility_gate persists
-    // through subsequent solve() / step_n(budget) calls that reconstruct
-    // local solver_options from stored state.
+    // every basic_solver ctor; once set here the tightened threshold
+    // persists through subsequent solve() / step_n(budget) calls that
+    // reconstruct local solver_options from stored state.
     //
     // constraint_tolerance is a solver_options field (not a policy_options
     // field), which is why this is a sibling to forward_policy_hints
     // instead of an extension of it -- the two forwarders honor different
     // scopes.
+    //
+    // Mapping rule (max-of-two): user-supplied constraint_tolerance now
+    // gates the composite E-measure (N&W 2e Def 12.1) via
+    // stationarity_threshold rather than a separate primal-feasibility
+    // threshold, since kkt_residual now carries the primal-feasibility
+    // legs directly. The max preserves the pre-31.1 unconstrained default
+    // (1e-8) whenever constraint_tolerance is unset or looser.
     template <typename Convergence>
     void forward_solver_hints(const solver_options<Convergence>& opts)
     {
@@ -549,13 +554,19 @@ public:
         {
             auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
             if(opts.constraint_tolerance)
-                ftol.feasibility_gate = *opts.constraint_tolerance;
+            {
+                const double current = ftol.stationarity_threshold.value_or(1e-8);
+                ftol.stationarity_threshold = std::max(current, *opts.constraint_tolerance);
+            }
         }
         if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
         {
             auto& ftol_rel = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
             if(opts.constraint_tolerance)
-                ftol_rel.feasibility_gate = *opts.constraint_tolerance;
+            {
+                const double current = ftol_rel.stationarity_threshold.value_or(1e-8);
+                ftol_rel.stationarity_threshold = std::max(current, *opts.constraint_tolerance);
+            }
         }
     }
 
@@ -568,14 +579,6 @@ public:
             {
                 auto& stall = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
                 stall.window = policy_opts.stall_window;
-            }
-        }
-        if constexpr(requires { policy_opts.feasibility_gate; })
-        {
-            if constexpr(requires { std::get<objective_tolerance_criterion>(stored_convergence_.criteria); })
-            {
-                auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
-                ftol.feasibility_gate = policy_opts.feasibility_gate;
             }
         }
     }

@@ -3,15 +3,16 @@
 
 // KKT residual helpers.
 //
-// Computes the L-infinity KKT error for gradient-aware optimization
-// policies so convergence criteria have a single, consistent stationarity
-// quantity to gate on. The value is zero iff all first-order KKT
-// conditions hold.
+// Computes the L-infinity first-order optimality error for gradient-aware
+// optimization policies so convergence criteria have a single, consistent
+// stationarity quantity to gate on. The value is zero iff all first-order
+// KKT conditions hold.
 //
-// Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity);
-//            N&W 2e Section 12.1 (KKT conditions: stationarity +
-//            feasibility + complementarity);
-//            N&W 2e Section 16.7 (projected gradient optimality for
+// Reference: Nocedal and Wright, "Numerical Optimization" 2e,
+//            Definition 12.1 (KKT conditions: stationarity + primal
+//            feasibility + dual feasibility + complementarity);
+//            eq. 12.34 (Lagrangian stationarity expression);
+//            Section 16.7 (projected gradient optimality for
 //            bound-constrained problems).
 
 #include "nablapp/types.h"
@@ -24,50 +25,67 @@
 namespace nablapp::detail
 {
 
-// KKT residual for general constrained optimization.
+// Composite first-order optimality error E(x, lambda, mu) as the maximum
+// over five KKT legs for the general constrained NLP
 //
-// Computes the L-infinity KKT error as the maximum of:
-//   1. Stationarity:    ||grad_f - J_eq^T lambda_eq - J_ineq^T mu_ineq||_inf
-//   2. Complementarity: max_i min(|mu_ineq_i|, |c_ineq_i|)
+//     min f(x)  s.t.  c_eq(x) = 0,  c_ineq(x) >= 0
 //
-// Primal feasibility (||c_eq||_inf, ||max(0, -c_ineq)||_inf) is intentionally
-// not folded in here because the convergence criteria already gate on
-// primal feasibility through feasibility_gate on the objective tolerance
-// criteria; keeping the two legs separate preserves the "gate" / "optimum"
-// split that basic_solver relies on.
+// with multipliers lambda_eq (free sign) and mu_ineq (>= 0 by the KKT
+// dual-feasibility condition). Returns a single Scalar; zero iff KKT
+// conditions hold at (x, lambda_eq, mu_ineq).
 //
-// L-infinity is chosen over L1 for dimension-independence and consistency
-// with the convergence analysis used throughout N&W 2e Chapters 12 and 18.
+// Reference: Nocedal and Wright, "Numerical Optimization" 2e, Definition
+//            12.1 (KKT conditions: stationarity + primal feasibility +
+//            dual feasibility + complementarity); eq. 12.34 (Lagrangian
+//            stationarity expression). L-infinity norm throughout
+//            (dimension-independent; matches IPOPT / KNITRO convention).
+//            Unscaled composition; IPOPT-style s_d / s_c scaling is a
+//            refactor-milestone follow-up.
 //
-// Reference: N&W 2e Section 12.3 / eq. 12.34; N&W 2e Section 12.1.
+// Sign convention: nablapp uses c_ineq(x) >= 0 feasible, matching
+//                  detail/lagrangian.h:42-60 and formulation/concepts.h.
+//                  Primal-inequality violation is c_ineq[i] < 0, captured
+//                  as max(-c_ineq[i], 0). Dual feasibility violates when
+//                  mu_ineq[i] < 0, captured as max(-mu_ineq[i], 0).
 template <typename Scalar, int N, int Meq, int Mineq>
-Scalar kkt_residual(const Eigen::Vector<Scalar, N>& grad_f,
-                    const Eigen::Matrix<Scalar, Meq, N>& J_eq,
-                    const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
-                    const Eigen::Vector<Scalar, Meq>& lambda_eq,
-                    const Eigen::Vector<Scalar, Mineq>& mu_ineq,
-                    const Eigen::Vector<Scalar, Mineq>& c_ineq)
+Scalar kkt_residual(const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       grad_f,
+                    const Eigen::Ref<const Eigen::Matrix<Scalar, Meq, N>>&  J_eq,
+                    const Eigen::Ref<const Eigen::Matrix<Scalar, Mineq, N>>& J_ineq,
+                    const Eigen::Ref<const Eigen::Vector<Scalar, Meq>>&     lambda_eq,
+                    const Eigen::Ref<const Eigen::Vector<Scalar, Mineq>>&   mu_ineq,
+                    const Eigen::Ref<const Eigen::Vector<Scalar, Meq>>&     c_eq,
+                    const Eigen::Ref<const Eigen::Vector<Scalar, Mineq>>&   c_ineq)
 {
+    // Leg 1 - Stationarity: ||grad_f - J_eq^T lambda_eq - J_ineq^T mu_ineq||_inf
     Eigen::Vector<Scalar, N> grad_L = grad_f;
-    if(J_eq.rows() > 0)
-        grad_L -= J_eq.transpose() * lambda_eq;
-    if(J_ineq.rows() > 0)
-        grad_L -= J_ineq.transpose() * mu_ineq;
-
-    Scalar stationarity = grad_L.size() > 0
+    if(J_eq.rows()   > 0) grad_L.noalias() -= J_eq.transpose()   * lambda_eq;
+    if(J_ineq.rows() > 0) grad_L.noalias() -= J_ineq.transpose() * mu_ineq;
+    const Scalar stationarity = grad_L.size() > 0
         ? grad_L.template lpNorm<Eigen::Infinity>()
         : Scalar(0);
 
+    // Leg 2 - Primal equality feasibility: ||c_eq||_inf
+    const Scalar primal_eq = c_eq.size() > 0
+        ? c_eq.template lpNorm<Eigen::Infinity>()
+        : Scalar(0);
+
+    // Leg 3 - Primal inequality feasibility: ||max(-c_ineq, 0)||_inf
+    Scalar primal_ineq = Scalar(0);
+    for(Eigen::Index i = 0; i < c_ineq.size(); ++i)
+        primal_ineq = std::max(primal_ineq, std::max(-c_ineq[i], Scalar(0)));
+
+    // Leg 4 - Dual feasibility: ||max(-mu_ineq, 0)||_inf
+    Scalar dual_feas = Scalar(0);
+    for(Eigen::Index i = 0; i < mu_ineq.size(); ++i)
+        dual_feas = std::max(dual_feas, std::max(-mu_ineq[i], Scalar(0)));
+
+    // Leg 5 - Complementarity: max_i min(|mu_i|, |c_i|)
     Scalar complementarity = Scalar(0);
     for(Eigen::Index i = 0; i < c_ineq.size(); ++i)
-    {
-        using std::abs;
-        using std::min;
-        Scalar local = min(abs(mu_ineq[i]), abs(c_ineq[i]));
-        complementarity = std::max(complementarity, local);
-    }
+        complementarity = std::max(complementarity,
+            std::min(std::abs(mu_ineq[i]), std::abs(c_ineq[i])));
 
-    return std::max(stationarity, complementarity);
+    return std::max({stationarity, primal_eq, primal_ineq, dual_feas, complementarity});
 }
 
 // KKT residual for bound-constrained problems.

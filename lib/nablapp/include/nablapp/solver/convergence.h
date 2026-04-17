@@ -33,38 +33,32 @@ struct objective_tolerance_criterion
 {
     std::optional<double> threshold{};
     std::optional<double> stationarity_threshold{};
-    // Default 1e-6 matches the standard constraint tolerance of popular
-    // nonlinear solvers (NLopt, IPOPT). Users override via
-    // solver_options::constraint_tolerance, which basic_solver
-    // forwards into this field at construction time.
+    // Primal feasibility is folded directly into r.kkt_residual via the
+    // full first-order optimality error composition (stationarity + primal
+    // equality + primal inequality + dual feasibility + complementarity).
+    // A separate feasibility knob here would be two-knobs-for-one-test.
     //
-    // Reference: N&W 2e Section 12.1 (KKT conditions require both
-    //            stationarity AND primal feasibility; the previous
-    //            +infinity default silently disabled the feasibility
-    //            leg of the KKT check).
-    double feasibility_gate{1e-6};
+    // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
+    //            Definition 12.1 (KKT conditions); eq. 12.34 (Lagrangian
+    //            stationarity leg); max-composition across the five
+    //            optimality legs.
 
-    // K&W 2e Section 4.4 + feasibility gate: ftol convergence requires
-    // constraint satisfaction. Small objective change alone is insufficient
-    // -- the gradient must also be small and constraints must be satisfied
-    // to distinguish genuine convergence from a non-stationary plateau.
-    // Stationarity is evaluated against kkt_residual (populated by
-    // gradient-aware policies) with a fallback to gradient_norm for
-    // policies that leave kkt_residual nullopt.
+    // K&W 2e Section 4.4: ftol convergence requires a small objective
+    // change AND a small composite KKT residual (which now carries the
+    // primal-feasibility information). Stationarity is evaluated against
+    // kkt_residual (populated by gradient-aware policies) with a fallback
+    // to gradient_norm for policies that leave kkt_residual nullopt.
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
             return std::nullopt;
-        if(r.constraint_violation > feasibility_gate)
-            return std::nullopt;
         if(iteration > 1 && std::abs(r.objective_change) < *threshold)
         {
-            double gate = stationarity_threshold.value_or(1e-8);
-            double kkt = r.kkt_residual.value_or(r.gradient_norm);
+            const double gate = stationarity_threshold.value_or(1e-8);
+            const double kkt  = r.kkt_residual.value_or(r.gradient_norm);
             if(kkt < gate)
                 return solver_status::ftol_reached;
-            return std::nullopt;
         }
         return std::nullopt;
     }
@@ -100,35 +94,34 @@ struct objective_tolerance_rel_criterion
 {
     std::optional<double> threshold{};
     std::optional<double> stationarity_threshold{};
-    // Default 1e-6 matches the standard constraint tolerance of popular
-    // nonlinear solvers (NLopt, IPOPT). Users override via
-    // solver_options::constraint_tolerance, which basic_solver
-    // forwards into this field at construction time.
+    // Primal feasibility is folded directly into r.kkt_residual via the
+    // full first-order optimality error composition (stationarity + primal
+    // equality + primal inequality + dual feasibility + complementarity).
+    // A separate feasibility knob here would be two-knobs-for-one-test.
     //
-    // Reference: N&W 2e Section 12.1 (KKT conditions require both
-    //            stationarity AND primal feasibility).
-    double feasibility_gate{1e-6};
+    // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
+    //            Definition 12.1 (KKT conditions); eq. 12.34 (Lagrangian
+    //            stationarity leg); max-composition across the five
+    //            optimality legs.
 
-    // K&W 2e Section 4.4 + feasibility gate: ftol convergence requires
-    // constraint satisfaction. Stationarity is evaluated against
-    // kkt_residual (populated by gradient-aware policies) with a
-    // fallback to gradient_norm for policies that leave kkt_residual
-    // nullopt.
+    // K&W 2e Section 4.4: ftol convergence requires a small relative
+    // objective change AND a small composite KKT residual (which now
+    // carries the primal-feasibility information). Stationarity is
+    // evaluated against kkt_residual (populated by gradient-aware
+    // policies) with a fallback to gradient_norm for policies that leave
+    // kkt_residual nullopt.
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
             return std::nullopt;
-        if(r.constraint_violation > feasibility_gate)
-            return std::nullopt;
         if(iteration > 1 &&
            std::abs(r.objective_change) / std::max(std::abs(r.objective_value), 1.0) < *threshold)
         {
-            double gate = stationarity_threshold.value_or(1e-8);
-            double kkt = r.kkt_residual.value_or(r.gradient_norm);
+            const double gate = stationarity_threshold.value_or(1e-8);
+            const double kkt  = r.kkt_residual.value_or(r.gradient_norm);
             if(kkt < gate)
                 return solver_status::ftol_reached;
-            return std::nullopt;
         }
         return std::nullopt;
     }

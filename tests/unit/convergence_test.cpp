@@ -1021,7 +1021,7 @@ TEST_CASE("stall criterion does not regress well-behaved L-BFGS-B convergence", 
 }
 
 // ---------------------------------------------------------------------------
-// Enlarged stall window and feasibility gate tests
+// Enlarged stall window and composite KKT residual tests
 // ---------------------------------------------------------------------------
 
 TEST_CASE("stall_tolerance_criterion fires at window=200 not at window=64",
@@ -1055,110 +1055,98 @@ TEST_CASE("stall_tolerance_criterion fires at window=200 not at window=64",
     CHECK(*status == solver_status::stalled);
 }
 
-TEST_CASE("objective_tolerance_criterion feasibility_gate blocks ftol",
-          "[convergence][feasibility_gate]")
+TEST_CASE("objective_tolerance_criterion blocks ftol when kkt_residual exceeds threshold",
+          "[convergence]")
 {
+    // The full E-measure composition folds primal feasibility into
+    // kkt_residual per N&W 2e Definition 12.1. A large c_eq leg makes
+    // kkt_residual large and ftol correctly does not fire.
+    //
+    // Reference: N&W 2e Definition 12.1, eq 12.34.
     objective_tolerance_criterion crit;
     crit.threshold = 1e-6;
-    crit.stationarity_threshold = 1e2;  // effectively disabled
-    crit.feasibility_gate = 1e-4;
+    crit.stationarity_threshold = 1e-8;
 
-    // Case 1: constraint_violation above gate -- ftol must NOT fire.
-    {
-        step_result<double> r{
-            .objective_value = 1.0,
-            .gradient_norm = 0.0,
-            .objective_change = 1e-10,
-            .constraint_violation = 0.1,
-        };
-        auto status = crit.check(r, 5);
-        CHECK_FALSE(status.has_value());
-    }
+    step_result<double> r{};
+    r.objective_change = 1e-10;
+    r.kkt_residual     = 1e-4;   // composite E-measure above gate
 
-    // Case 2: constraint_violation below gate -- ftol should fire.
-    {
-        step_result<double> r{
-            .objective_value = 1.0,
-            .gradient_norm = 0.0,
-            .objective_change = 1e-10,
-            .constraint_violation = 1e-5,
-        };
-        auto status = crit.check(r, 5);
-        REQUIRE(status.has_value());
-        CHECK(*status == solver_status::ftol_reached);
-    }
+    const auto status = crit.check(r, 5);
+    CHECK_FALSE(status.has_value());
 }
 
-TEST_CASE("objective_tolerance_criterion default feasibility_gate=1e-6 allows ftol on feasible iterate",
-          "[convergence][feasibility_gate]")
+TEST_CASE("objective_tolerance_criterion fires ftol when kkt_residual under threshold",
+          "[convergence]")
 {
+    // Composite KKT residual under the stationarity gate and small
+    // objective change together satisfy the ftol test.
+    //
+    // Reference: N&W 2e Definition 12.1, eq 12.34.
     objective_tolerance_criterion crit;
     crit.threshold = 1e-6;
-    crit.stationarity_threshold = 1e2;  // effectively disabled
+    crit.stationarity_threshold = 1e-8;
 
-    // Default gate is 1e-6 (matching N&W 2e Section 12.1 KKT feasibility
-    // requirement and NLopt/IPOPT convention); cv=0.0 < 1e-6 passes.
-    step_result<double> r{
-        .objective_value = 1.0,
-        .gradient_norm = 0.0,
-        .objective_change = 1e-10,
-        .constraint_violation = 0.0,
-    };
-    auto status = crit.check(r, 5);
+    step_result<double> r{};
+    r.objective_change = 1e-10;
+    r.kkt_residual     = 1e-10;   // composite E-measure below gate
+
+    const auto status = crit.check(r, 5);
     REQUIRE(status.has_value());
     CHECK(*status == solver_status::ftol_reached);
 }
 
-TEST_CASE("objective_tolerance_criterion default feasibility_gate blocks ftol on infeasible iterate",
-          "[convergence][feasibility_gate]")
+TEST_CASE("objective_tolerance_criterion does not fire when kkt_residual is at gate",
+          "[convergence]")
 {
+    // Strict-less-than gate: kkt equal to the stationarity threshold
+    // does not fire.
+    //
+    // Reference: N&W 2e Definition 12.1.
     objective_tolerance_criterion crit;
     crit.threshold = 1e-6;
-    crit.stationarity_threshold = 1e2;  // effectively disabled
+    crit.stationarity_threshold = 1e-8;
 
-    // cv=1e-3 is above the default 1e-6 gate -- ftol must NOT fire.
-    // This is the behaviour that previously defaulted to infinity and
-    // silently admitted non-KKT iterates.
-    step_result<double> r{
-        .objective_value = 1.0,
-        .gradient_norm = 0.0,
-        .objective_change = 1e-10,
-        .constraint_violation = 1e-3,
-    };
-    auto status = crit.check(r, 5);
-    CHECK_FALSE(status.has_value());
+    step_result<double> r{};
+    r.objective_change = 1e-10;
+    r.kkt_residual     = 1e-8;    // exactly at gate
+
+    CHECK_FALSE(crit.check(r, 5).has_value());
 }
 
-TEST_CASE("objective_tolerance_rel_criterion feasibility_gate blocks ftol",
-          "[convergence][feasibility_gate]")
+TEST_CASE("objective_tolerance_rel_criterion blocks ftol when kkt_residual exceeds threshold",
+          "[convergence]")
 {
+    // Same E-measure composition under the relative ftol test: a large
+    // composite residual blocks ftol regardless of small relative
+    // objective change.
+    //
+    // Reference: N&W 2e Definition 12.1.
     objective_tolerance_rel_criterion crit;
     crit.threshold = 1e-6;
-    crit.stationarity_threshold = 1e2;  // effectively disabled
-    crit.feasibility_gate = 1e-4;
+    crit.stationarity_threshold = 1e-8;
 
-    // Case 1: constraint_violation above gate -- ftol must NOT fire.
-    {
-        step_result<double> r{
-            .objective_value = 1.0,
-            .gradient_norm = 0.0,
-            .objective_change = 1e-10,
-            .constraint_violation = 0.1,
-        };
-        auto status = crit.check(r, 5);
-        CHECK_FALSE(status.has_value());
-    }
+    step_result<double> r{};
+    r.objective_change = 1e-10;
+    r.objective_value  = 1.0;
+    r.kkt_residual     = 1e-4;
 
-    // Case 2: constraint_violation below gate -- ftol should fire.
-    {
-        step_result<double> r{
-            .objective_value = 1.0,
-            .gradient_norm = 0.0,
-            .objective_change = 1e-10,
-            .constraint_violation = 1e-5,
-        };
-        auto status = crit.check(r, 5);
-        REQUIRE(status.has_value());
-        CHECK(*status == solver_status::ftol_reached);
-    }
+    CHECK_FALSE(crit.check(r, 5).has_value());
+}
+
+TEST_CASE("objective_tolerance_rel_criterion fires ftol when kkt_residual under threshold",
+          "[convergence]")
+{
+    // Reference: N&W 2e Definition 12.1, eq 12.34.
+    objective_tolerance_rel_criterion crit;
+    crit.threshold = 1e-6;
+    crit.stationarity_threshold = 1e-8;
+
+    step_result<double> r{};
+    r.objective_change = 1e-10;
+    r.objective_value  = 1.0;
+    r.kkt_residual     = 1e-10;
+
+    const auto status = crit.check(r, 5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::ftol_reached);
 }
