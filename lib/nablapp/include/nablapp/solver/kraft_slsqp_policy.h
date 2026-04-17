@@ -267,13 +267,52 @@ struct kraft_slsqp_policy
         double p_norm = p.norm();
         if(p_norm < 1e-15)
         {
+            // Zero QP direction: the LSQ/LSEI cascade returned p = 0,
+            // which happens either at a true KKT point (correct solver
+            // behavior at a stationary point) or under active-set
+            // degeneracy. is_null_step = true exempts
+            // step_tolerance_criterion from firing stalled on iter 2;
+            // kkt_residual via the Full E-measure lets
+            // objective_tolerance_criterion declare convergence when
+            // the iterate is a true KKT point; constraint_violation
+            // lets constrained_convergence_policy's feasibility gate
+            // propagate correctly. Mirrors nw_sqp_policy's null-step
+            // return so the two SQP policies behave consistently at
+            // near-optimum initial points.
+            //
+            // Reference: N&W 2e Section 18.3 (SQP null-step semantics);
+            //            Definition 12.1 + eq. 12.34 (full KKT
+            //            first-order optimality E-measure).
+            Eigen::VectorXd lambda_eq_null = Eigen::VectorXd::Zero(s.n_eq);
+            Eigen::VectorXd mu_ineq_null = Eigen::VectorXd::Zero(s.n_ineq);
+            if constexpr(constrained<P>)
+            {
+                if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
+                {
+                    if(s.n_eq > 0)
+                        lambda_eq_null = qp_res.lambda.head(s.n_eq);
+                    if(s.n_ineq > 0)
+                        mu_ineq_null = qp_res.lambda.segment(s.n_eq, s.n_ineq);
+                }
+            }
+            double kkt_null = detail::kkt_residual<double,
+                                                   Eigen::Dynamic,
+                                                   Eigen::Dynamic,
+                                                   Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq,
+                lambda_eq_null, mu_ineq_null,
+                s.c_eq, s.c_ineq);
+
             return step_result<double>{
                 .objective_value = s.objective_value,
                 .gradient_norm = s.g.norm(),
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
                 .x_norm = s.x.norm(),
+                .kkt_residual = kkt_null,
             };
         }
 
