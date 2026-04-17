@@ -156,12 +156,15 @@ struct constrained_mock_policy
         s.objective_value = 0.5 * s.x.squaredNorm();
         s.c_ineq(0) = s.x(0) - 1.0;
 
+        const double violation = std::max(0.0, -s.c_ineq(0));
+
         return nablapp::step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.x.norm(),
             .step_size = s.step_size,
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
+            .constraint_violation = violation,
         };
     }
 

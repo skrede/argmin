@@ -29,6 +29,7 @@ add_executable(nablapp_unit_tests
     filter_sqp_test.cpp
     zero_copy_test.cpp
     finite_difference_test.cpp
+    kkt_residual_test.cpp
 )
 
 target_link_libraries(nablapp_unit_tests

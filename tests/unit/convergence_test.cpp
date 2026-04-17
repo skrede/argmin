@@ -1089,14 +1089,15 @@ TEST_CASE("objective_tolerance_criterion feasibility_gate blocks ftol",
     }
 }
 
-TEST_CASE("objective_tolerance_criterion default feasibility_gate=infinity allows ftol",
+TEST_CASE("objective_tolerance_criterion default feasibility_gate=1e-6 allows ftol on feasible iterate",
           "[convergence][feasibility_gate]")
 {
     objective_tolerance_criterion crit;
     crit.threshold = 1e-6;
     crit.stationarity_threshold = 1e2;  // effectively disabled
 
-    // Default gate is infinity, so cv=0.0 passes (0 > infinity is false).
+    // Default gate is 1e-6 (matching N&W 2e Section 12.1 KKT feasibility
+    // requirement and NLopt/IPOPT convention); cv=0.0 < 1e-6 passes.
     step_result<double> r{
         .objective_value = 1.0,
         .gradient_norm = 0.0,
@@ -1106,6 +1107,26 @@ TEST_CASE("objective_tolerance_criterion default feasibility_gate=infinity allow
     auto status = crit.check(r, 5);
     REQUIRE(status.has_value());
     CHECK(*status == solver_status::ftol_reached);
+}
+
+TEST_CASE("objective_tolerance_criterion default feasibility_gate blocks ftol on infeasible iterate",
+          "[convergence][feasibility_gate]")
+{
+    objective_tolerance_criterion crit;
+    crit.threshold = 1e-6;
+    crit.stationarity_threshold = 1e2;  // effectively disabled
+
+    // cv=1e-3 is above the default 1e-6 gate -- ftol must NOT fire.
+    // This is the behaviour that previously defaulted to infinity and
+    // silently admitted non-KKT iterates.
+    step_result<double> r{
+        .objective_value = 1.0,
+        .gradient_norm = 0.0,
+        .objective_change = 1e-10,
+        .constraint_violation = 1e-3,
+    };
+    auto status = crit.check(r, 5);
+    CHECK_FALSE(status.has_value());
 }
 
 TEST_CASE("objective_tolerance_rel_criterion feasibility_gate blocks ftol",

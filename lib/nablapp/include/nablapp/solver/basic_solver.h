@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <tuple>
 #include <concepts>
 #include <cstdint>
 #include <optional>
@@ -26,6 +27,26 @@ namespace nablapp
 
 template <typename P>
 concept has_options_type = requires { typename P::options_type; };
+
+namespace detail
+{
+// Tuple type membership trait.
+//
+// std::get<T>(tuple) is not SFINAE-friendly when T is not present: it
+// triggers a static_assert ("the type T in std::get<T> must occur exactly
+// once in the tuple") rather than substitution failure. if constexpr on
+// `requires { std::get<T>(t); }` therefore silently passes for missing
+// types and breaks at instantiation. Use this trait to gate the branches.
+template <typename T, typename Tuple>
+struct tuple_contains;
+
+template <typename T, typename... Us>
+struct tuple_contains<T, std::tuple<Us...>>
+    : std::bool_constant<(std::is_same_v<T, Us> || ...)> {};
+
+template <typename T, typename Tuple>
+inline constexpr bool tuple_contains_v = tuple_contains<T, Tuple>::value;
+}
 
 namespace detail
 {
@@ -111,6 +132,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
+        forward_solver_hints(opts);
         if constexpr(requires { policy_.options; })
             forward_policy_hints(policy_.options);
     }
@@ -133,6 +155,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
+        forward_solver_hints(opts);
         if constexpr(requires { policy_.options; })
             forward_policy_hints(policy_.options);
     }
@@ -147,6 +170,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
+        forward_solver_hints(opts);
         if constexpr(requires { policy_.options; })
             forward_policy_hints(policy_.options);
     }
@@ -166,6 +190,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
         store_convergence(opts.convergence);
+        forward_solver_hints(opts);
         forward_policy_hints(policy_opts);
     }
 
@@ -188,6 +213,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
         store_convergence(opts.convergence);
+        forward_solver_hints(opts);
         forward_policy_hints(policy_opts);
     }
 
@@ -204,6 +230,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
         store_convergence(opts.convergence);
+        forward_solver_hints(opts);
         forward_policy_hints(policy_opts);
     }
 
@@ -221,6 +248,7 @@ public:
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
+        forward_solver_hints(opts);
         // No policy hints for policies without options_type.
     }
 
@@ -262,7 +290,12 @@ public:
     step_result<scalar_type> step()
     {
         auto result = policy_.step(state_);
-        result.constraint_violation = constraint_violation();
+        // Central x_norm fill so step_tolerance_rel_criterion can use a
+        // consistent denominator without per-policy churn. Policies own
+        // constraint_violation (previously overwritten here, which destroyed
+        // filter-policy semantics where the reported violation corresponds
+        // to the returned trial/restoration step).
+        result.x_norm = state_.x.norm();
         ++iterations_;
         return result;
     }
@@ -436,21 +469,50 @@ public:
     void store_criterion(const Criterion& c)
     {
         if constexpr(std::same_as<Criterion, gradient_tolerance_criterion>)
-            std::get<gradient_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+        {
+            if constexpr(requires { std::get<gradient_tolerance_criterion>(stored_convergence_.criteria); })
+                std::get<gradient_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+        }
         else if constexpr(std::same_as<Criterion, objective_tolerance_criterion>)
         {
-            auto& dst = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
-            dst.threshold = c.threshold;
-            dst.stationarity_threshold = c.stationarity_threshold;
-            dst.feasibility_gate = c.feasibility_gate;
+            if constexpr(requires { std::get<objective_tolerance_criterion>(stored_convergence_.criteria); })
+            {
+                auto& dst = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+                dst.threshold = c.threshold;
+                dst.stationarity_threshold = c.stationarity_threshold;
+                dst.feasibility_gate = c.feasibility_gate;
+            }
         }
         else if constexpr(std::same_as<Criterion, step_tolerance_criterion>)
-            std::get<step_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+        {
+            if constexpr(requires { std::get<step_tolerance_criterion>(stored_convergence_.criteria); })
+                std::get<step_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+        }
+        else if constexpr(std::same_as<Criterion, objective_tolerance_rel_criterion>)
+        {
+            using criteria_tuple = decltype(stored_convergence_.criteria);
+            if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
+            {
+                auto& dst = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
+                dst.threshold = c.threshold;
+                dst.stationarity_threshold = c.stationarity_threshold;
+                dst.feasibility_gate = c.feasibility_gate;
+            }
+        }
+        else if constexpr(std::same_as<Criterion, step_tolerance_rel_criterion>)
+        {
+            using criteria_tuple = decltype(stored_convergence_.criteria);
+            if constexpr(detail::tuple_contains_v<step_tolerance_rel_criterion, criteria_tuple>)
+                std::get<step_tolerance_rel_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+        }
         else if constexpr(std::same_as<Criterion, stall_tolerance_criterion>)
         {
-            auto& dst = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
-            dst.threshold = c.threshold;
-            dst.window = c.window;
+            if constexpr(requires { std::get<stall_tolerance_criterion>(stored_convergence_.criteria); })
+            {
+                auto& dst = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
+                dst.threshold = c.threshold;
+                dst.window = c.window;
+            }
         }
     }
 
@@ -469,18 +531,52 @@ public:
         }
     }
 
+    // Forwards solver-level options (currently constraint_tolerance) into
+    // the stored convergence criteria. Called at construction time from
+    // every basic_solver ctor; once set here the feasibility_gate persists
+    // through subsequent solve() / step_n(budget) calls that reconstruct
+    // local solver_options from stored state.
+    //
+    // constraint_tolerance is a solver_options field (not a policy_options
+    // field), which is why this is a sibling to forward_policy_hints
+    // instead of an extension of it -- the two forwarders honor different
+    // scopes.
+    template <typename Convergence>
+    void forward_solver_hints(const solver_options<Convergence>& opts)
+    {
+        using criteria_tuple = decltype(stored_convergence_.criteria);
+        if constexpr(detail::tuple_contains_v<objective_tolerance_criterion, criteria_tuple>)
+        {
+            auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+            if(opts.constraint_tolerance)
+                ftol.feasibility_gate = *opts.constraint_tolerance;
+        }
+        if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
+        {
+            auto& ftol_rel = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
+            if(opts.constraint_tolerance)
+                ftol_rel.feasibility_gate = *opts.constraint_tolerance;
+        }
+    }
+
     template <typename PolicyOpts>
     void forward_policy_hints(const PolicyOpts& policy_opts)
     {
         if constexpr(requires { policy_opts.stall_window; })
         {
-            auto& stall = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
-            stall.window = policy_opts.stall_window;
+            if constexpr(requires { std::get<stall_tolerance_criterion>(stored_convergence_.criteria); })
+            {
+                auto& stall = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
+                stall.window = policy_opts.stall_window;
+            }
         }
         if constexpr(requires { policy_opts.feasibility_gate; })
         {
-            auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
-            ftol.feasibility_gate = policy_opts.feasibility_gate;
+            if constexpr(requires { std::get<objective_tolerance_criterion>(stored_convergence_.criteria); })
+            {
+                auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+                ftol.feasibility_gate = policy_opts.feasibility_gate;
+            }
         }
     }
 

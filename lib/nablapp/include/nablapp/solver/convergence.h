@@ -8,7 +8,6 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <tuple>
 
@@ -34,12 +33,24 @@ struct objective_tolerance_criterion
 {
     std::optional<double> threshold{};
     std::optional<double> stationarity_threshold{};
-    double feasibility_gate{std::numeric_limits<double>::infinity()};
+    // Default 1e-6 matches the standard constraint tolerance of popular
+    // nonlinear solvers (NLopt, IPOPT). Users override via
+    // solver_options::constraint_tolerance, which basic_solver
+    // forwards into this field at construction time.
+    //
+    // Reference: N&W 2e Section 12.1 (KKT conditions require both
+    //            stationarity AND primal feasibility; the previous
+    //            +infinity default silently disabled the feasibility
+    //            leg of the KKT check).
+    double feasibility_gate{1e-6};
 
     // K&W 2e Section 4.4 + feasibility gate: ftol convergence requires
     // constraint satisfaction. Small objective change alone is insufficient
     // -- the gradient must also be small and constraints must be satisfied
     // to distinguish genuine convergence from a non-stationary plateau.
+    // Stationarity is evaluated against kkt_residual (populated by
+    // gradient-aware policies) with a fallback to gradient_norm for
+    // policies that leave kkt_residual nullopt.
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
@@ -50,7 +61,8 @@ struct objective_tolerance_criterion
         if(iteration > 1 && std::abs(r.objective_change) < *threshold)
         {
             double gate = stationarity_threshold.value_or(1e-8);
-            if(r.gradient_norm < gate)
+            double kkt = r.kkt_residual.value_or(r.gradient_norm);
+            if(kkt < gate)
                 return solver_status::ftol_reached;
             return std::nullopt;
         }
@@ -62,10 +74,20 @@ struct step_tolerance_criterion
 {
     std::optional<double> threshold{};
 
+    // A null step (step_size == 0 because the policy intentionally made
+    // no move -- SQP zero-step degeneracy, trust-region rho contraction,
+    // restoration exhaustion) is not a stall: it is an algorithmic
+    // signal that the policy needs more iterations, not fewer. Exempting
+    // null steps here avoids false stall detection on iteration 2 for
+    // any policy that sets is_null_step.
+    //
+    // Reference: N&W 2e Section 18.4 (SQP convergence analysis).
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
+            return std::nullopt;
+        if(r.is_null_step)
             return std::nullopt;
         if(iteration > 1 && r.step_size < *threshold)
             return solver_status::stalled;
@@ -78,10 +100,20 @@ struct objective_tolerance_rel_criterion
 {
     std::optional<double> threshold{};
     std::optional<double> stationarity_threshold{};
-    double feasibility_gate{std::numeric_limits<double>::infinity()};
+    // Default 1e-6 matches the standard constraint tolerance of popular
+    // nonlinear solvers (NLopt, IPOPT). Users override via
+    // solver_options::constraint_tolerance, which basic_solver
+    // forwards into this field at construction time.
+    //
+    // Reference: N&W 2e Section 12.1 (KKT conditions require both
+    //            stationarity AND primal feasibility).
+    double feasibility_gate{1e-6};
 
     // K&W 2e Section 4.4 + feasibility gate: ftol convergence requires
-    // constraint satisfaction. Stationarity gate applies to relative criterion too.
+    // constraint satisfaction. Stationarity is evaluated against
+    // kkt_residual (populated by gradient-aware policies) with a
+    // fallback to gradient_norm for policies that leave kkt_residual
+    // nullopt.
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
@@ -93,7 +125,8 @@ struct objective_tolerance_rel_criterion
            std::abs(r.objective_change) / std::max(std::abs(r.objective_value), 1.0) < *threshold)
         {
             double gate = stationarity_threshold.value_or(1e-8);
-            if(r.gradient_norm < gate)
+            double kkt = r.kkt_residual.value_or(r.gradient_norm);
+            if(kkt < gate)
                 return solver_status::ftol_reached;
             return std::nullopt;
         }
@@ -106,10 +139,18 @@ struct step_tolerance_rel_criterion
 {
     std::optional<double> threshold{};
 
+    // Null steps are exempt for the same reason as in
+    // step_tolerance_criterion: a policy-intentional zero move is an
+    // algorithmic signal, not a stall. See step_tolerance_criterion::check
+    // for the detailed rationale.
+    //
+    // Reference: N&W 2e Section 18.4 (SQP convergence analysis).
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
+            return std::nullopt;
+        if(r.is_null_step)
             return std::nullopt;
         if(iteration > 1 &&
            r.step_size / std::max(r.x_norm, 1.0) < *threshold)
