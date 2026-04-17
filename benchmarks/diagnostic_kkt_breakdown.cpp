@@ -60,6 +60,7 @@
 #include <cmath>
 #include <print>
 #include <string_view>
+#include <type_traits>
 
 namespace
 {
@@ -87,31 +88,40 @@ struct kkt_leg_breakdown
 // will fold into the canonical helper. L-infinity norm throughout so
 // the legs compose with a plain std::max in the caller.
 //
+// Templated on every argument so fixed-size solver state vectors
+// (e.g. Eigen::Vector<double, N> for s.g) flow through without being
+// widened into dynamic Eigen::VectorXd copies; the project convention
+// is no dynamic Eigen types in new code.
+//
 // Reference: N&W 2e Definition 12.1 (KKT conditions); N&W 2e
 //            eq. 12.34 (Lagrangian stationarity).
+template<class GradF, class JeqT, class JineqT,
+         class LambdaEq, class MuIneq, class Ceq, class Cineq>
 kkt_leg_breakdown kkt_residual_breakdown(
-    const Eigen::VectorXd& grad_f,
-    const Eigen::MatrixXd& J_eq,
-    const Eigen::MatrixXd& J_ineq,
-    const Eigen::VectorXd& lambda_eq,
-    const Eigen::VectorXd& mu_ineq,
-    const Eigen::VectorXd& c_eq,
-    const Eigen::VectorXd& c_ineq)
+    const GradF& grad_f,
+    const JeqT& J_eq,
+    const JineqT& J_ineq,
+    const LambdaEq& lambda_eq,
+    const MuIneq& mu_ineq,
+    const Ceq& c_eq,
+    const Cineq& c_ineq)
 {
     kkt_leg_breakdown out{};
 
     // Leg 1: stationarity ||grad_f - J_eq^T lambda_eq - J_ineq^T mu_ineq||_inf.
-    Eigen::VectorXd grad_L = grad_f;
+    typename std::remove_cvref_t<GradF>::PlainObject grad_L = grad_f;
     if(J_eq.rows() > 0 && lambda_eq.size() == J_eq.rows())
         grad_L -= J_eq.transpose() * lambda_eq;
     if(J_ineq.rows() > 0 && mu_ineq.size() == J_ineq.rows())
         grad_L -= J_ineq.transpose() * mu_ineq;
     out.stationarity = grad_L.size() > 0
-        ? grad_L.lpNorm<Eigen::Infinity>()
+        ? grad_L.template lpNorm<Eigen::Infinity>()
         : 0.0;
 
     // Leg 2: primal equality ||c_eq||_inf.
-    out.primal_eq = c_eq.size() > 0 ? c_eq.lpNorm<Eigen::Infinity>() : 0.0;
+    out.primal_eq = c_eq.size() > 0
+        ? c_eq.template lpNorm<Eigen::Infinity>()
+        : 0.0;
 
     // Leg 3: primal inequality ||max(-c_ineq, 0)||_inf under the
     // project convention c_ineq >= 0 feasible (see sign-convention
@@ -230,35 +240,31 @@ void run_sqp_case(std::string_view case_label, Problem problem, Policy policy)
         const int fired = first_fired(conv.last_check_results());
 
         const auto& s = solver.state();
-        const Eigen::VectorXd grad_f = s.g;
-        const Eigen::VectorXd c_eq = s.c_eq;
-        const Eigen::VectorXd c_ineq = s.c_ineq;
-        const Eigen::MatrixXd J_eq = s.J_eq;
-        const Eigen::MatrixXd J_ineq = s.J_ineq;
 
         // Split s.lambda into (lambda_eq, mu_ineq) using n_eq/n_ineq.
-        Eigen::VectorXd lambda_eq = Eigen::VectorXd::Zero(s.n_eq);
-        Eigen::VectorXd mu_ineq = Eigen::VectorXd::Zero(s.n_ineq);
-        if(s.lambda.size() >= s.n_eq + s.n_ineq)
-        {
-            if(s.n_eq > 0)
-                lambda_eq = s.lambda.head(s.n_eq);
-            if(s.n_ineq > 0)
-                mu_ineq = s.lambda.segment(s.n_eq, s.n_ineq);
-        }
+        // Use segment expressions directly -- no VectorXd materialization.
+        // If s.lambda is undersized on the first step, pass zero-sized
+        // head/segments so the breakdown helper skips those legs.
+        const bool lambda_ready = s.lambda.size() >= s.n_eq + s.n_ineq;
+        const auto lambda_eq = lambda_ready
+            ? s.lambda.head(s.n_eq)
+            : s.lambda.head(0);
+        const auto mu_ineq = lambda_ready
+            ? s.lambda.segment(s.n_eq, s.n_ineq)
+            : s.lambda.segment(0, 0);
 
         kkt_leg_breakdown legs = kkt_residual_breakdown(
-            grad_f, J_eq, J_ineq,
+            s.g, s.J_eq, s.J_ineq,
             lambda_eq, mu_ineq,
-            c_eq, c_ineq);
+            s.c_eq, s.c_ineq);
 
-        const double c_eq_norm = c_eq.size() > 0
-            ? c_eq.lpNorm<Eigen::Infinity>()
+        const double c_eq_norm = s.c_eq.size() > 0
+            ? s.c_eq.template lpNorm<Eigen::Infinity>()
             : 0.0;
         double c_ineq_violation = 0.0;
-        for(Eigen::Index k = 0; k < c_ineq.size(); ++k)
+        for(Eigen::Index k = 0; k < s.c_ineq.size(); ++k)
             c_ineq_violation = std::max(c_ineq_violation,
-                                        std::max(-c_ineq[k], 0.0));
+                                        std::max(-s.c_ineq[k], 0.0));
 
         const double kkt_current = last.kkt_residual.value_or(-1.0);
         const int policy_status_code = last.policy_status
@@ -356,13 +362,16 @@ void run_byrd_brown_case()
             // so the primal / dual / complementarity legs collapse to
             // zero and stationarity reduces to ||g||_inf; keeps the
             // helper the single source of truth for the CSV row.
+            //
+            // The empty matrices / vectors are built as zero-size slices
+            // of s.g so no dynamic Eigen types are introduced. Column
+            // count on J_eq / J_ineq does not matter when rows() == 0;
+            // the breakdown helper short-circuits before using them.
             const auto& s = solver.state();
-            const Eigen::VectorXd grad_f = s.g;
-            const Eigen::MatrixXd J_eq(0, grad_f.size());
-            const Eigen::MatrixXd J_ineq(0, grad_f.size());
-            const Eigen::VectorXd empty_vec;
+            const auto empty_vec = s.g.head(0);
+            const auto empty_mat = s.g.transpose().topRows(0);
             kkt_leg_breakdown legs = kkt_residual_breakdown(
-                grad_f, J_eq, J_ineq,
+                s.g, empty_mat, empty_mat,
                 empty_vec, empty_vec,
                 empty_vec, empty_vec);
 
