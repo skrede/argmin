@@ -394,7 +394,12 @@ TEST_CASE("nw_sqp HS007 accuracy guard",
 
     // HS007 optimum: f* = -sqrt(3) ~ -1.7320508. Full E-measure
     // blocks premature ftol that post-phase31 let fire at iter 6.
-    CHECK(result.objective_value < -1.73);
+    // Measured post-31.1: f = -1.73205... (|f - f*| = 1.18e-06).
+    // Threshold -1.7320 permits at most |f - f*| ~= 5e-05 -- ~40x
+    // the measured accuracy, tight enough to detect a ~10-40x
+    // degradation while tolerating floating-point noise. The old
+    // -1.73 bound permitted a 1700x degradation.
+    CHECK(result.objective_value < -1.7320);
     CHECK(result.iterations >= 6);
     CHECK(result.iterations <= 12);
 }
@@ -425,7 +430,10 @@ TEST_CASE("nw_sqp HS026 accuracy guard",
     // the premature ftol at iter 12 that post-phase31 let fire;
     // solver now converges correctly, iter count matches the
     // harness trajectory of 31 iters under these thresholds.
-    CHECK(result.objective_value < 1e-5);
+    // Measured post-31.1 accuracy: 2.90e-07. Threshold 1e-6 is ~3x
+    // the measured value -- tight enough to detect a ~10x degradation
+    // while tolerating floating-point noise.
+    CHECK(result.objective_value < 1e-6);
     CHECK(result.iterations >= 19);
     CHECK(result.iterations <= 50);
 }

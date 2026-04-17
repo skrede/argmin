@@ -395,7 +395,11 @@ TEST_CASE("kraft_slsqp converges on HS026 (regression guard)", "[kraft_slsqp][re
     auto result = solver.solve(opts);
 
     // HS026 optimum: f* = 0 at (1, 1, 1).
-    CHECK(result.objective_value < 1e-5);
+    // Measured post-31.1 accuracy: 2.90e-07. Threshold 1e-6 is ~3x
+    // the measured value -- tight enough to detect a ~10x degradation
+    // from the current implementation while still giving numerical
+    // headroom for run-to-run floating-point noise.
+    CHECK(result.objective_value < 1e-6);
     CHECK(solver.constraint_violation() < 1e-3);
     CHECK(result.iterations >= 19);
     CHECK(result.iterations <= 50);
@@ -499,7 +503,10 @@ TEST_CASE("kraft_slsqp HS006 accuracy guard",
     // Baseline harness: 9 iters under 1e-15 thresholds; bench
     // defaults land similar or tighter. Full E-measure blocks
     // premature ftol that post-phase31 let fire at iter 6.
-    CHECK(result.objective_value < 1e-5);
+    // Measured post-31.1 accuracy: 9.24e-08. Threshold 1e-6 is ~10x
+    // the measured value -- tight enough to catch a ~10x degradation
+    // while tolerating normal floating-point noise.
+    CHECK(result.objective_value < 1e-6);
     CHECK(result.iterations >= 6);
     CHECK(result.iterations <= 12);
 }
