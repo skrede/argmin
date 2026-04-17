@@ -263,6 +263,27 @@ if(NABLAPP_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Diagnostic KKT-breakdown harness (throwaway; emits per-iter CSV across
+# the four SQP premature-ftol regressions, the byrd_lbfgsb null-step
+# termination gap, and the hs071 diagnostic byproduct case). Opt-in
+# build via EXCLUDE_FROM_ALL so it does not enter the default target
+# set; invoke explicitly with `cmake --build <dir> --target
+# diagnostic_kkt_breakdown`.
+add_executable(diagnostic_kkt_breakdown EXCLUDE_FROM_ALL
+    diagnostic_kkt_breakdown.cpp)
+target_link_libraries(diagnostic_kkt_breakdown PRIVATE nablapp::nablapp)
+target_compile_options(diagnostic_kkt_breakdown PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(NABLAPP_LTO_SUPPORTED)
+    set_target_properties(diagnostic_kkt_breakdown PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 option(NABLAPP_BENCH_CERES "Build Ceres comparison benchmarks" ON)
 if(NABLAPP_BENCH_CERES)
     find_package(Ceres CONFIG QUIET)
