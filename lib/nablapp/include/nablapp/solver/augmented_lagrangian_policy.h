@@ -79,7 +79,6 @@ struct augmented_lagrangian_policy
         std::optional<scalar_type> inner_tolerance_eta{};         // default: 0.1
         std::optional<scalar_type> inner_tolerance_alpha{};       // default: 0.1
         std::uint16_t stall_window{100};
-        double feasibility_gate{1e-4};
     };
 
     options_type options{};
@@ -383,13 +382,30 @@ struct augmented_lagrangian_policy
                 s.lambda_eq, s.lambda_ineq, s.mu);
             reported_grad_norm = aug_grad.norm();
 
-            kkt = detail::kkt_residual<scalar_type>(
-                Eigen::VectorX<scalar_type>(grad_f),
-                Eigen::MatrixX<scalar_type>(J_eq_new),
-                Eigen::MatrixX<scalar_type>(J_ineq_new),
-                s.lambda_eq,
-                s.lambda_ineq,
-                s.c_ineq);
+            // Reference: N&W 2e Definition 12.1 (KKT conditions:
+            //            stationarity, primal feasibility, dual
+            //            feasibility, complementarity); eq. 12.34
+            //            (Lagrangian stationarity leg). Dual
+            //            feasibility leg is identically zero here
+            //            because detail::update_multipliers projects
+            //            lambda_ineq onto the non-negative orthant
+            //            per N&W 17.55.
+            //
+            // Template parameters are specified explicitly because
+            // auglag's locally-constructed grad_f (Vector<Scalar, N>)
+            // and J_eq_new (Matrix<Scalar, Dynamic, N>) combine
+            // compile-time and dynamic-sized dimensions in a way that
+            // cannot be deduced from the fully-dynamic multiplier and
+            // constraint vectors (VectorX<Scalar>). We instantiate the
+            // fully-dynamic variant so the Ref-based parameters bind
+            // all argument types uniformly.
+            kkt = detail::kkt_residual<scalar_type,
+                                       Eigen::Dynamic,
+                                       Eigen::Dynamic,
+                                       Eigen::Dynamic>(
+                grad_f, J_eq_new, J_ineq_new,
+                s.lambda_eq, s.lambda_ineq,
+                s.c_eq, s.c_ineq);
         }
         else
         {

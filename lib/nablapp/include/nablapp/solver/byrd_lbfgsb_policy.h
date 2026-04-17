@@ -40,7 +40,6 @@ struct byrd_lbfgsb_policy
         line_search_options line_search{};
         lbfgsb_line_search line_search_type{lbfgsb_line_search::armijo};
         std::uint16_t stall_window{50};
-        double feasibility_gate{std::numeric_limits<double>::infinity()};
     };
 
     options_type options{};
@@ -115,17 +114,30 @@ struct byrd_lbfgsb_policy
             s.x, s.g, s.lower, s.upper, s.B, s.gcp_solver, s.ssm_solver);
         if(!dir)
         {
-            // Null step: generalized Cauchy point / subspace direction
-            // computation returned no usable direction. This is the
-            // documented zero-step path for Byrd L-BFGS-B (GCP collapse
-            // or subspace solve degeneracy). Mark is_null_step so
-            // step_tolerance_criterion exempts this iterate from stall
-            // detection, and populate kkt_residual so
-            // objective_tolerance_criterion can still declare convergence
-            // when the iterate is a genuine projected-gradient KKT point
-            // (a zero direction at a KKT point is the correct answer).
-            // Reference: Byrd, Lu, Nocedal, Zhu 1995 Algorithm CP;
-            //            N&W 2e S16.7 (projected gradient optimality).
+            // Null step: compute_direction returned nullopt because
+            // GCP breakpoint exhaustion or subspace solve degeneracy
+            // left no usable direction. This is the canonical
+            // roundoff-floor signal on badly-scaled problems. Report
+            // roundoff_limited rather than running to max_iterations
+            // silently; the accepted-step path at lines 200-203 uses
+            // the same status for the sibling "step too small relative
+            // to iterate magnitude" roundoff case. is_null_step stays
+            // true so step_tolerance_criterion still exempts this
+            // iterate from stall detection; kkt_residual is populated
+            // via the projected-gradient infinity-norm so
+            // objective_tolerance_criterion can still declare
+            // convergence when the iterate is a genuine KKT point (a
+            // zero direction at a KKT point is the correct answer).
+            //
+            // Reference: Byrd, Lu, Nocedal, Zhu 1995 Algorithm CP (GCP
+            //            breakpoint exhaustion); N&W 2e Section 3.5
+            //            (roundoff limitation in line search); N&W 2e
+            //            Section 10.7 (problem scaling is the user's
+            //            responsibility, so the honest response is an
+            //            explicit termination status rather than a
+            //            rescaled metric); N&W 2e Section 16.7
+            //            (projected gradient optimality for
+            //            bound-constrained first-order conditions).
             auto kkt = detail::kkt_residual_bound<double, N>(
                 s.x, s.g, s.lower, s.upper);
             return step_result<double>{
@@ -137,6 +149,7 @@ struct byrd_lbfgsb_policy
                 .is_null_step = true,
                 .x_norm = s.x.norm(),
                 .kkt_residual = kkt,
+                .policy_status = solver_status::roundoff_limited,
             };
         }
         auto& [d, alpha_max] = *dir;

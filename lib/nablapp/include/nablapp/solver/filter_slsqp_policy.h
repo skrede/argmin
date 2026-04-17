@@ -65,7 +65,6 @@ struct filter_slsqp_policy
         std::uint16_t max_restoration_steps{10};
         double soc_violation_threshold{1e-8};
         std::uint16_t stall_window{50};
-        double feasibility_gate{1e-4};
     };
 
     options_type options{};
@@ -599,15 +598,17 @@ struct filter_slsqp_policy
         if constexpr(constrained<P>)
             h_new = detail::constraint_violation(s.c_eq, s.c_ineq);
 
-        // KKT residual using least-squares multiplier estimates
-        // (N&W eq. 18.15). filter_slsqp uses L-BFGS with no explicit
-        // multiplier update from the QP, so s.lambda is the only
-        // multiplier source. Equality multipliers occupy the first
-        // n_eq entries of s.lambda; inequality multipliers follow.
+        // KKT residual: full first-order optimality error E(x, lambda,
+        // mu) using least-squares multiplier estimates (N&W eq. 18.15).
+        // filter_slsqp uses L-BFGS with no explicit multiplier update
+        // from the QP, so s.lambda is the only multiplier source.
+        // Equality multipliers occupy the first n_eq entries of
+        // s.lambda; inequality multipliers follow.
         //
-        // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian
-        //            stationarity); N&W 2e Section 12.1 (KKT
-        //            conditions); N&W eq. 18.15 (multiplier LS).
+        // Reference: N&W 2e Definition 12.1 (KKT conditions:
+        //            stationarity, primal feasibility, dual feasibility,
+        //            complementarity); eq. 12.34 (Lagrangian
+        //            stationarity leg); eq. 18.15 (multiplier LS).
         Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
         Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
         if constexpr(constrained<P>)
@@ -620,13 +621,13 @@ struct filter_slsqp_policy
                     mu_ineq_kkt = s.lambda.segment(s.n_eq, s.n_ineq);
             }
         }
-        double kkt = detail::kkt_residual<double>(
-            Eigen::VectorXd(s.g),
-            Eigen::MatrixXd(s.J_eq),
-            Eigen::MatrixXd(s.J_ineq),
-            lambda_eq_kkt,
-            mu_ineq_kkt,
-            Eigen::VectorXd(s.c_ineq));
+        double kkt = detail::kkt_residual<double,
+                                          Eigen::Dynamic,
+                                          Eigen::Dynamic,
+                                          Eigen::Dynamic>(
+            s.g, s.J_eq, s.J_ineq,
+            lambda_eq_kkt, mu_ineq_kkt,
+            s.c_eq, s.c_ineq);
 
         return step_result<double>{
             .objective_value = s.objective_value,

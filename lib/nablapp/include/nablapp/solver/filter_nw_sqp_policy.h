@@ -65,7 +65,6 @@ struct filter_nw_sqp_policy
         std::uint16_t max_restoration_steps{10};
         double soc_violation_threshold{1e-8};
         std::uint16_t stall_window{50};
-        double feasibility_gate{1e-4};
     };
 
     options_type options{};
@@ -549,27 +548,29 @@ struct filter_nw_sqp_policy
         double phi_new = detail::l1_merit(
             s.objective_value, s.c_eq, s.c_ineq, s.sigma);
 
-        // KKT residual via the active-set QP multipliers. Equality
-        // multipliers occupy the first n_eq entries of lambda_new;
-        // inequality multipliers follow. When m == 0 the helper
-        // collapses to ||grad_f||_inf (N&W Section 12.1).
+        // KKT residual: full first-order optimality error E(x, lambda,
+        // mu) via the active-set QP multipliers. Equality multipliers
+        // occupy the first n_eq entries of lambda_new; inequality
+        // multipliers follow. When m == 0 the helper collapses to
+        // ||grad_f||_inf.
         //
-        // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian
-        //            stationarity); N&W 2e Section 12.1 (KKT
-        //            conditions).
+        // Reference: N&W 2e Definition 12.1 (KKT conditions:
+        //            stationarity, primal feasibility, dual feasibility,
+        //            complementarity); eq. 12.34 (Lagrangian
+        //            stationarity leg).
         Eigen::VectorXd lambda_eq_kkt = s.n_eq > 0
             ? Eigen::VectorXd(lambda_new.head(s.n_eq))
             : Eigen::VectorXd::Zero(0);
         Eigen::VectorXd mu_ineq_kkt = s.n_ineq > 0
             ? Eigen::VectorXd(lambda_new.segment(s.n_eq, s.n_ineq))
             : Eigen::VectorXd::Zero(0);
-        double kkt = detail::kkt_residual<double>(
-            Eigen::VectorXd(s.g),
-            Eigen::MatrixXd(s.J_eq),
-            Eigen::MatrixXd(s.J_ineq),
-            lambda_eq_kkt,
-            mu_ineq_kkt,
-            Eigen::VectorXd(s.c_ineq));
+        double kkt = detail::kkt_residual<double,
+                                          Eigen::Dynamic,
+                                          Eigen::Dynamic,
+                                          Eigen::Dynamic>(
+            s.g, s.J_eq, s.J_ineq,
+            lambda_eq_kkt, mu_ineq_kkt,
+            s.c_eq, s.c_ineq);
 
         return step_result<double>{
             .objective_value = s.objective_value,
