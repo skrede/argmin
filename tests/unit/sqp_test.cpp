@@ -433,8 +433,14 @@ TEST_CASE("nw_sqp HS026 accuracy guard",
     // Measured post-31.1 accuracy: 2.90e-07. Threshold 1e-6 is ~3x
     // the measured value -- tight enough to detect a ~10x degradation
     // while tolerating floating-point noise.
+    //
+    // No lower bound on iterations: the current iter count is
+    // inflated by a BFGS tail-drift issue deferred to a follow-up
+    // plan. A future fix that reduces the iter count from ~20 to
+    // ~15 is NOT a regression -- a regression guard must not
+    // require slow convergence. The upper bound alone protects
+    // against premature termination at a non-optimum iterate.
     CHECK(result.objective_value < 1e-6);
-    CHECK(result.iterations >= 19);
     CHECK(result.iterations <= 50);
 }
 

@@ -399,9 +399,16 @@ TEST_CASE("kraft_slsqp converges on HS026 (regression guard)", "[kraft_slsqp][re
     // the measured value -- tight enough to detect a ~10x degradation
     // from the current implementation while still giving numerical
     // headroom for run-to-run floating-point noise.
+    //
+    // No lower bound on iterations: the current iter count of ~20 is
+    // inflated by the BFGS tail-drift documented at kraft_slsqp_test
+    // line 380-385 and deferred to a follow-up plan. When that fix
+    // lands, the iter count is expected to drop, and that is NOT a
+    // regression -- a regression guard must not require slow
+    // convergence. The upper bound alone protects against premature
+    // termination at a non-optimum iterate.
     CHECK(result.objective_value < 1e-6);
     CHECK(solver.constraint_violation() < 1e-3);
-    CHECK(result.iterations >= 19);
     CHECK(result.iterations <= 50);
 }
 
