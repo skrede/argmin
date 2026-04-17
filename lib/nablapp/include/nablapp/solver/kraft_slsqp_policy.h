@@ -42,6 +42,7 @@
 //            K&W Section 10.4 (penalty methods, augmented Lagrangian).
 
 #include "nablapp/detail/adaptive_bfgs.h"
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/kraft_lsq_qp.h"
 #include "nablapp/line_search/armijo.h"
 #include "nablapp/options/qp_options.h"
@@ -519,6 +520,36 @@ struct kraft_slsqp_policy
 
         ++s.iteration;
 
+        // KKT residual: combines Lagrangian stationarity and
+        // complementarity using the QP multipliers as the current
+        // multiplier estimate. Equality multipliers occupy the first
+        // n_eq entries of qp_res.lambda; inequality multipliers follow.
+        // When m == 0 the helper collapses to ||grad_f||_inf (N&W
+        // Section 12.1).
+        //
+        // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian
+        //            stationarity); N&W 2e Section 12.1 (KKT
+        //            conditions).
+        Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
+        Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
+        if constexpr(constrained<P>)
+        {
+            if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
+            {
+                if(s.n_eq > 0)
+                    lambda_eq_kkt = qp_res.lambda.head(s.n_eq);
+                if(s.n_ineq > 0)
+                    mu_ineq_kkt = qp_res.lambda.segment(s.n_eq, s.n_ineq);
+            }
+        }
+        double kkt = detail::kkt_residual<double>(
+            Eigen::VectorXd(s.g),
+            Eigen::MatrixXd(s.J_eq),
+            Eigen::MatrixXd(s.J_ineq),
+            lambda_eq_kkt,
+            mu_ineq_kkt,
+            Eigen::VectorXd(s.c_ineq));
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.g.norm(),
@@ -526,6 +557,7 @@ struct kraft_slsqp_policy
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
             .x_norm = s.x.norm(),
+            .kkt_residual = kkt,
         };
     }
 

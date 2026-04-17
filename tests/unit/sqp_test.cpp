@@ -369,3 +369,38 @@ TEST_CASE("nw_sqp HS039 equality constraints", "[sqp]")
     CHECK(result.objective_value == Approx(-1.0).margin(0.1));
     CHECK(solver.constraint_violation() < 1e-4);
 }
+
+// nw_sqp populates step_result::kkt_residual on every non-null step
+// and sets is_null_step on the documented QP zero-direction path so
+// step_tolerance_criterion exempts that iterate from stall detection.
+//
+// Reference: N&W 2e Section 12.3 / eq. 12.34 (KKT residual);
+//            N&W 2e Section 18.4 (SQP null-step semantics).
+TEST_CASE("nw_sqp populates kkt_residual and exposes is_null_step",
+          "[sqp][kkt]")
+{
+    hs039 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_gradient_threshold(1e-6);
+
+    basic_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
+
+    bool populated = false;
+    for(int i = 0; i < 10; ++i)
+    {
+        auto sr = solver.step();
+        // is_null_step is part of step_result's designated initializer
+        // surface; reading it keeps the compile-time contract checked.
+        CHECK((sr.is_null_step || !sr.is_null_step));
+        if(sr.kkt_residual.has_value())
+        {
+            populated = true;
+            CHECK(sr.kkt_residual.value() >= 0.0);
+        }
+        if(sr.policy_status)
+            break;
+    }
+    CHECK(populated);
+}

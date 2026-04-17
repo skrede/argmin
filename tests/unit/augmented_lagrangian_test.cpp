@@ -337,3 +337,40 @@ TEST_CASE("augmented lagrangian cold-start still works on HS071",
     CHECK(result.objective_value == Approx(17.0140173).margin(1e-1));
     CHECK(solver.constraint_violation() < 1e-2);
 }
+
+// augmented_lagrangian populates step_result::kkt_residual on every
+// outer iteration via detail::kkt_residual using the outer-loop
+// multiplier estimates (s.lambda_eq, s.lambda_ineq) and the Jacobians
+// already materialized for the augmented-gradient reporting path.
+//
+// Reference: N&W 2e Section 12.3 / eq. 12.34.
+TEST_CASE("augmented lagrangian populates kkt_residual",
+          "[augmented_lagrangian][kkt]")
+{
+    hs076 problem;
+    auto x0 = problem.initial_point();
+
+    solver_options<constrained_convergence> opts;
+    opts.max_iterations = 30;
+    opts.set_gradient_threshold(1e-5);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+    opts.set_feasibility_threshold(1e-4);
+
+    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+        problem, x0, opts};
+
+    bool populated = false;
+    for(int i = 0; i < 10; ++i)
+    {
+        auto sr = solver.step();
+        if(sr.kkt_residual.has_value())
+        {
+            populated = true;
+            CHECK(sr.kkt_residual.value() >= 0.0);
+        }
+        if(sr.policy_status)
+            break;
+    }
+    CHECK(populated);
+}

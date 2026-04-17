@@ -809,11 +809,62 @@ void print_last_check_results(
     }
 }
 
+// kkt_residual regression probe.
+//
+// Gradient-aware constrained policies must populate
+// step_result::kkt_residual on every non-restoration step so
+// objective_tolerance_criterion has a meaningful stationarity
+// quantity to gate on. This probe runs kraft_slsqp on HS071 via
+// step_n() with a small budget and confirms the terminal
+// step_result carries a populated, non-negative kkt_residual.
+//
+// Failure prints FAIL and reports through the caller's return code;
+// success prints the measured value alongside gradient_norm for
+// telemetry parity with the existing benchmark output.
+bool probe_kkt_residual()
+{
+    hs071 problem;
+    Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
+    nablapp::solver_options opts;
+    opts.max_iterations = 40;
+    opts.set_gradient_threshold(1e-10);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+
+    nablapp::step_result<double> last{};
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        last = solver.step();
+        if(last.policy_status)
+            break;
+    }
+
+    if(!last.kkt_residual.has_value())
+    {
+        std::println("FAIL: kkt_residual not populated (kraft_slsqp)");
+        return false;
+    }
+    if(last.kkt_residual.value() < 0.0)
+    {
+        std::println("FAIL: kkt_residual is negative: {}",
+                     last.kkt_residual.value());
+        return false;
+    }
+    std::println("  kraft_slsqp HS071 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
+                 last.kkt_residual.value(), last.gradient_norm);
+    return true;
+}
+
 }
 
 int main()
 {
     constexpr std::uint32_t reps = 10000;
+
+    if(!probe_kkt_residual())
+        return 1;
 
     std::println("HS071 (n=4, m_eq=1, m_ineq=1), {} repetitions each\n", reps);
 

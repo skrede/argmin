@@ -19,6 +19,7 @@
 
 #include "nablapp/detail/lagrangian.h"
 #include "nablapp/detail/adaptive_bfgs.h"
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/merit_function.h"
 #include "nablapp/detail/active_set_qp.h"
 #include "nablapp/detail/bound_projection.h"
@@ -255,16 +256,54 @@ struct nw_sqp_policy
 
         Eigen::Vector<double, N> p = qp.x;
 
-        // Zero step check
+        // Zero step check.
+        //
+        // Null step: QP returned a zero direction (degeneracy or
+        // active-set cycling). N&W 2e S18.4.
+        //
+        // is_null_step=true exempts this iterate from step_tolerance
+        // stall detection so basic_solver gives the policy another
+        // iteration to break the degeneracy rather than flagging
+        // solver_status::stalled on iter 2.
+        //
+        // The QP still returns multipliers at a zero-direction
+        // solution, so the KKT residual on this iterate is a
+        // faithful stationarity measure even though no step was
+        // taken. Reporting it lets objective_tolerance_criterion
+        // terminate when the iterate is a true KKT point (zero
+        // direction is the correct QP answer at an optimum) rather
+        // than running out max_iterations on a converged problem.
         if(p.norm() < 1e-15)
         {
+            Eigen::VectorXd lambda_null = Eigen::VectorXd::Zero(m);
+            if(m > 0 && qp.lambda.size() >= m)
+                lambda_null = qp.lambda.head(m);
+            else if(m > 0 && qp.lambda.size() > 0)
+                lambda_null.head(qp.lambda.size()) = qp.lambda;
+
+            Eigen::VectorXd lambda_eq_null = s.n_eq > 0
+                ? Eigen::VectorXd(lambda_null.head(s.n_eq))
+                : Eigen::VectorXd::Zero(0);
+            Eigen::VectorXd mu_ineq_null = s.n_ineq > 0
+                ? Eigen::VectorXd(lambda_null.segment(s.n_eq, s.n_ineq))
+                : Eigen::VectorXd::Zero(0);
+            double kkt_null = detail::kkt_residual<double>(
+                Eigen::VectorXd(s.g),
+                Eigen::MatrixXd(s.J_eq),
+                Eigen::MatrixXd(s.J_ineq),
+                lambda_eq_null,
+                mu_ineq_null,
+                Eigen::VectorXd(s.c_ineq));
+
             return step_result<double>{
                 .objective_value = s.objective_value,
                 .gradient_norm = lagrangian_gradient_norm(s),
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .is_null_step = true,
                 .x_norm = s.x.norm(),
+                .kkt_residual = kkt_null,
             };
         }
 
@@ -416,6 +455,28 @@ struct nw_sqp_policy
         double phi_new = detail::l1_merit(s.objective_value,
                                             s.c_eq, s.c_ineq, s.sigma);
 
+        // KKT residual via the active-set QP multipliers. Equality
+        // multipliers occupy the first n_eq entries of lambda_new;
+        // inequality multipliers follow. When m == 0 the helper
+        // collapses to ||grad_f||_inf (N&W Section 12.1).
+        //
+        // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian
+        //            stationarity); N&W 2e Section 12.1 (KKT
+        //            conditions).
+        Eigen::VectorXd lambda_eq_kkt = s.n_eq > 0
+            ? Eigen::VectorXd(lambda_new.head(s.n_eq))
+            : Eigen::VectorXd::Zero(0);
+        Eigen::VectorXd mu_ineq_kkt = s.n_ineq > 0
+            ? Eigen::VectorXd(lambda_new.segment(s.n_eq, s.n_ineq))
+            : Eigen::VectorXd::Zero(0);
+        double kkt = detail::kkt_residual<double>(
+            Eigen::VectorXd(s.g),
+            Eigen::MatrixXd(s.J_eq),
+            Eigen::MatrixXd(s.J_ineq),
+            lambda_eq_kkt,
+            mu_ineq_kkt,
+            Eigen::VectorXd(s.c_ineq));
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = grad_L_norm,
@@ -423,6 +484,7 @@ struct nw_sqp_policy
             .objective_change = s.objective_value - f_old,
             .improved = phi_new < phi0,
             .x_norm = s.x.norm(),
+            .kkt_residual = kkt,
         };
     }
 

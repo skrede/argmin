@@ -485,11 +485,67 @@ void print_row(std::string_view solver, const timing& t)
     std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
 }
 
+// kkt_residual regression probe.
+//
+// filter_nw_sqp uses the active-set QP multipliers; normal (accepted)
+// steps populate kkt_residual, while null-step and restoration paths
+// leave it unset. This probe runs the policy on HS043 via step_n()
+// with a small budget and confirms that at least one step in the
+// trajectory carries a populated, non-negative kkt_residual.
+//
+// Reference: N&W 2e Section 12.3 / eq. 12.34.
+bool probe_kkt_residual()
+{
+    hs043_dynamic problem;
+    auto x0 = problem.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-10);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{nablapp::filter_nw_sqp_policy<>{}, problem, x0, opts};
+
+    nablapp::step_result<double> last_with_kkt{};
+    bool any_kkt = false;
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        auto r = solver.step();
+        if(r.kkt_residual.has_value())
+        {
+            last_with_kkt = r;
+            any_kkt = true;
+        }
+        if(r.policy_status)
+            break;
+    }
+
+    if(!any_kkt)
+    {
+        std::println("FAIL: kkt_residual not populated (filter_nw_sqp)");
+        return false;
+    }
+    if(last_with_kkt.kkt_residual.value() < 0.0)
+    {
+        std::println("FAIL: kkt_residual is negative: {}",
+                     last_with_kkt.kkt_residual.value());
+        return false;
+    }
+    std::println("  filter_nw_sqp HS043 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
+                 last_with_kkt.kkt_residual.value(),
+                 last_with_kkt.gradient_norm);
+    return true;
+}
+
 }
 
 int main()
 {
     constexpr std::uint32_t reps = 500;
+
+    if(!probe_kkt_residual())
+        return 1;
+
     std::println("Filter NW-SQP micro-benchmark, {} repetitions each\n", reps);
     std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
 

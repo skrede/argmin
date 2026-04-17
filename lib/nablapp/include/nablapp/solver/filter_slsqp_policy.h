@@ -27,6 +27,7 @@
 #include "nablapp/detail/adaptive_bfgs.h"
 #include "nablapp/detail/filter_acceptance.h"
 #include "nablapp/detail/filter_restoration.h"
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/kraft_lsq_qp.h"
 #include "nablapp/detail/lagrangian.h"
 #include "nablapp/detail/merit_function.h"
@@ -255,6 +256,14 @@ struct filter_slsqp_policy
                 }
             }
 
+            // Null step: QP zero direction with high constraint
+            // violation; filter blocks all trial steps. Kraft 1988
+            // Section 2.2.3.
+            //
+            // is_null_step=true exempts this iterate from
+            // step_tolerance stall detection so basic_solver does not
+            // double-report the stall via the tolerance criterion on
+            // top of the policy-reported solver_status::stalled below.
             ++s.iteration;
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -262,6 +271,7 @@ struct filter_slsqp_policy
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .is_null_step = true,
                 .constraint_violation = h_zero,
                 .x_norm = s.x.norm(),
                 .policy_status = h_zero > 1e-8
@@ -589,6 +599,35 @@ struct filter_slsqp_policy
         if constexpr(constrained<P>)
             h_new = detail::constraint_violation(s.c_eq, s.c_ineq);
 
+        // KKT residual using least-squares multiplier estimates
+        // (N&W eq. 18.15). filter_slsqp uses L-BFGS with no explicit
+        // multiplier update from the QP, so s.lambda is the only
+        // multiplier source. Equality multipliers occupy the first
+        // n_eq entries of s.lambda; inequality multipliers follow.
+        //
+        // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian
+        //            stationarity); N&W 2e Section 12.1 (KKT
+        //            conditions); N&W eq. 18.15 (multiplier LS).
+        Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
+        Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
+        if constexpr(constrained<P>)
+        {
+            if(s.lambda.size() >= s.n_eq + s.n_ineq)
+            {
+                if(s.n_eq > 0)
+                    lambda_eq_kkt = s.lambda.head(s.n_eq);
+                if(s.n_ineq > 0)
+                    mu_ineq_kkt = s.lambda.segment(s.n_eq, s.n_ineq);
+            }
+        }
+        double kkt = detail::kkt_residual<double>(
+            Eigen::VectorXd(s.g),
+            Eigen::MatrixXd(s.J_eq),
+            Eigen::MatrixXd(s.J_ineq),
+            lambda_eq_kkt,
+            mu_ineq_kkt,
+            Eigen::VectorXd(s.c_ineq));
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.g.norm(),
@@ -597,6 +636,7 @@ struct filter_slsqp_policy
             .improved = s.objective_value < old_f,
             .constraint_violation = h_new,
             .x_norm = s.x.norm(),
+            .kkt_residual = kkt,
         };
     }
 

@@ -426,3 +426,36 @@ TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
     CHECK(result.x[1] >= 1.0 - 1e-6);
     CHECK(result.x[1] <= 5.0 + 1e-6);
 }
+
+// kraft_slsqp populates step_result::kkt_residual on every accepted
+// step via detail::kkt_residual. Gradient-aware constrained policies
+// must carry a KKT residual so objective_tolerance_criterion gates
+// stationarity on the true KKT error rather than the heterogeneous
+// gradient_norm proxy.
+//
+// Reference: N&W 2e Section 12.3 / eq. 12.34.
+TEST_CASE("kraft_slsqp populates kkt_residual", "[kraft_slsqp][kkt]")
+{
+    hs071<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_gradient_threshold(1e-6);
+
+    basic_solver solver{kraft_slsqp_policy<hs071<>::problem_dimension>{},
+                        problem, x0, opts};
+
+    bool populated = false;
+    for(int i = 0; i < 10; ++i)
+    {
+        auto sr = solver.step();
+        if(sr.kkt_residual.has_value())
+        {
+            populated = true;
+            CHECK(sr.kkt_residual.value() >= 0.0);
+        }
+        if(sr.policy_status)
+            break;
+    }
+    CHECK(populated);
+}

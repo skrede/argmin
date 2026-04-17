@@ -27,6 +27,7 @@
 #include "nablapp/detail/merit_function.h"
 #include "nablapp/detail/adaptive_bfgs.h"
 #include "nablapp/detail/active_set_qp.h"
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/filter_acceptance.h"
 #include "nablapp/detail/filter_restoration.h"
 #include "nablapp/detail/bound_projection.h"
@@ -245,6 +246,13 @@ struct filter_nw_sqp_policy
 
         if(p.norm() < 1e-15)
         {
+            // Null step: QP returned a zero direction (degeneracy or
+            // active-set cycling). N&W 2e S18.4.
+            //
+            // is_null_step=true exempts this iterate from
+            // step_tolerance stall detection so basic_solver gives
+            // the policy another iteration to break the degeneracy
+            // rather than flagging solver_status::stalled on iter 2.
             double h_cur = detail::constraint_violation(s.c_eq, s.c_ineq);
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -252,6 +260,7 @@ struct filter_nw_sqp_policy
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .is_null_step = true,
                 .constraint_violation = h_cur,
             };
         }
@@ -451,6 +460,14 @@ struct filter_nw_sqp_policy
                 };
             }
 
+            // Null step: feasibility restoration exhausted without
+            // reducing constraint violation.
+            //
+            // is_null_step=true prevents step_tolerance_criterion
+            // from labelling the zero step as a stall; the iterate
+            // is carried forward without movement while the outer
+            // loop retains flexibility (restoration may succeed on
+            // a future iteration once the filter envelope relaxes).
             ++s.iteration;
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -458,6 +475,7 @@ struct filter_nw_sqp_policy
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
+                .is_null_step = true,
                 .constraint_violation = h_k,
             };
         }
@@ -531,6 +549,28 @@ struct filter_nw_sqp_policy
         double phi_new = detail::l1_merit(
             s.objective_value, s.c_eq, s.c_ineq, s.sigma);
 
+        // KKT residual via the active-set QP multipliers. Equality
+        // multipliers occupy the first n_eq entries of lambda_new;
+        // inequality multipliers follow. When m == 0 the helper
+        // collapses to ||grad_f||_inf (N&W Section 12.1).
+        //
+        // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian
+        //            stationarity); N&W 2e Section 12.1 (KKT
+        //            conditions).
+        Eigen::VectorXd lambda_eq_kkt = s.n_eq > 0
+            ? Eigen::VectorXd(lambda_new.head(s.n_eq))
+            : Eigen::VectorXd::Zero(0);
+        Eigen::VectorXd mu_ineq_kkt = s.n_ineq > 0
+            ? Eigen::VectorXd(lambda_new.segment(s.n_eq, s.n_ineq))
+            : Eigen::VectorXd::Zero(0);
+        double kkt = detail::kkt_residual<double>(
+            Eigen::VectorXd(s.g),
+            Eigen::MatrixXd(s.J_eq),
+            Eigen::MatrixXd(s.J_ineq),
+            lambda_eq_kkt,
+            mu_ineq_kkt,
+            Eigen::VectorXd(s.c_ineq));
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = grad_L_new.norm(),
@@ -538,6 +578,7 @@ struct filter_nw_sqp_policy
             .objective_change = s.objective_value - f_old,
             .improved = phi_new < phi0,
             .constraint_violation = h_trial,
+            .kkt_residual = kkt,
         };
     }
 

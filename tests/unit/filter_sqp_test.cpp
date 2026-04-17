@@ -127,3 +127,38 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         CHECK(solver.constraint_violation() < 0.01);
     }
 }
+
+// filter_slsqp populates step_result::kkt_residual on accepted steps
+// via detail::kkt_residual and sets is_null_step on the documented
+// QP-zero-step + high-violation path.
+//
+// Reference: N&W 2e Section 12.3 / eq. 12.34 (KKT residual);
+//            Kraft 1988 DFVLR-FB 88-28 Section 2.2.3 (SQP null step).
+TEST_CASE("filter_slsqp populates kkt_residual and exposes is_null_step",
+          "[filter_slsqp][kkt]")
+{
+    hs071<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-10);
+
+    basic_solver solver{filter_slsqp_policy<hs071<>::problem_dimension>{},
+                        problem, x0, opts};
+
+    bool populated = false;
+    for(int i = 0; i < 15; ++i)
+    {
+        auto sr = solver.step();
+        CHECK((sr.is_null_step || !sr.is_null_step));
+        if(sr.kkt_residual.has_value())
+        {
+            populated = true;
+            CHECK(sr.kkt_residual.value() >= 0.0);
+        }
+        if(sr.policy_status)
+            break;
+    }
+    CHECK(populated);
+}

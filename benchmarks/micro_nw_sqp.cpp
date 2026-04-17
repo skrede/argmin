@@ -312,11 +312,59 @@ void print_row(std::string_view solver, const timing& t)
     std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
 }
 
+// kkt_residual regression probe.
+//
+// nw_sqp is gradient-aware and must populate step_result::kkt_residual
+// on every non-null step. This probe runs nw_sqp on HS039 via step_n()
+// with a small budget and confirms the terminal step_result carries a
+// populated, non-negative kkt_residual value.
+//
+// Reference: N&W 2e Section 12.3 / eq. 12.34.
+bool probe_kkt_residual()
+{
+    hs039_dynamic problem;
+    auto x0 = problem.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-10);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{nablapp::nw_sqp_policy<>{}, problem, x0, opts};
+
+    nablapp::step_result<double> last{};
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        last = solver.step();
+        if(last.policy_status)
+            break;
+    }
+
+    if(!last.kkt_residual.has_value())
+    {
+        std::println("FAIL: kkt_residual not populated (nw_sqp)");
+        return false;
+    }
+    if(last.kkt_residual.value() < 0.0)
+    {
+        std::println("FAIL: kkt_residual is negative: {}",
+                     last.kkt_residual.value());
+        return false;
+    }
+    std::println("  nw_sqp HS039 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
+                 last.kkt_residual.value(), last.gradient_norm);
+    return true;
+}
+
 }
 
 int main()
 {
     constexpr std::uint32_t reps = 500;
+
+    if(!probe_kkt_residual())
+        return 1;
+
     std::println("NW-SQP micro-benchmark, {} repetitions each\n", reps);
     std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
 

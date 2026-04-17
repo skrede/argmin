@@ -28,6 +28,7 @@
 
 #include "nablapp/detail/augmented_lagrangian.h"
 #include "nablapp/detail/lagrangian.h"
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/bound_projection.h"
 #include "nablapp/solver/lbfgsb_policy.h"
 #include "nablapp/solver/basic_solver.h"
@@ -345,8 +346,18 @@ struct augmented_lagrangian_policy
 
         scalar_type step_norm = (s.x - x_old).norm();
 
-        // Actual augmented Lagrangian gradient norm at current iterate
+        // Actual augmented Lagrangian gradient norm at current iterate,
+        // and KKT residual via the outer-loop multiplier estimates
+        // (s.lambda_eq, s.lambda_ineq). For derivative-free inner
+        // solvers we have no objective gradient at hand and leave the
+        // KKT residual unset; the convergence criteria then fall back
+        // to gradient_norm.value_or(step_norm).
+        //
+        // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian
+        //            stationarity); N&W 2e Section 12.1 (KKT
+        //            conditions).
         scalar_type reported_grad_norm;
+        std::optional<scalar_type> kkt{};
         if constexpr(differentiable<P, scalar_type>)
         {
             constexpr int PD = P::problem_dimension;
@@ -371,6 +382,14 @@ struct augmented_lagrangian_policy
                 grad_f, J_eq_new, J_ineq_new, s.c_eq, s.c_ineq,
                 s.lambda_eq, s.lambda_ineq, s.mu);
             reported_grad_norm = aug_grad.norm();
+
+            kkt = detail::kkt_residual<scalar_type>(
+                Eigen::VectorX<scalar_type>(grad_f),
+                Eigen::MatrixX<scalar_type>(J_eq_new),
+                Eigen::MatrixX<scalar_type>(J_ineq_new),
+                s.lambda_eq,
+                s.lambda_ineq,
+                s.c_ineq);
         }
         else
         {
@@ -402,6 +421,7 @@ struct augmented_lagrangian_policy
             .improved = s.f < f_old || viol < con_tol,
             .constraint_violation = viol,
             .x_norm = s.x.norm(),
+            .kkt_residual = kkt,
         };
     }
 

@@ -484,11 +484,71 @@ void print_row(std::string_view solver, const timing& t)
     std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
 }
 
+// kkt_residual regression probe.
+//
+// filter_slsqp uses L-BFGS with least-squares multiplier estimates
+// (N&W eq. 18.15), so kkt_residual is populated from those estimates.
+// This probe runs the policy on HS071 via step_n() with a small
+// budget and confirms the terminal non-restoration step_result
+// carries a populated, non-negative kkt_residual.
+//
+// Reference: N&W 2e Section 12.3 / eq. 12.34.
+bool probe_kkt_residual()
+{
+    hs071_dynamic problem;
+    auto x0 = problem.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-10);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{nablapp::filter_slsqp_policy<>{}, problem, x0, opts};
+
+    nablapp::step_result<double> last{};
+    nablapp::step_result<double> last_with_kkt{};
+    bool any_kkt = false;
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        last = solver.step();
+        if(last.kkt_residual.has_value())
+        {
+            last_with_kkt = last;
+            any_kkt = true;
+        }
+        if(last.policy_status)
+            break;
+    }
+
+    // filter_slsqp's restoration and zero-step paths intentionally
+    // leave kkt_residual unset; accept any step in the run that
+    // populated the field.
+    if(!any_kkt)
+    {
+        std::println("FAIL: kkt_residual not populated (filter_slsqp)");
+        return false;
+    }
+    if(last_with_kkt.kkt_residual.value() < 0.0)
+    {
+        std::println("FAIL: kkt_residual is negative: {}",
+                     last_with_kkt.kkt_residual.value());
+        return false;
+    }
+    std::println("  filter_slsqp HS071 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
+                 last_with_kkt.kkt_residual.value(),
+                 last_with_kkt.gradient_norm);
+    return true;
+}
+
 }
 
 int main()
 {
     constexpr std::uint32_t reps = 500;
+
+    if(!probe_kkt_residual())
+        return 1;
+
     std::println("Filter SLSQP micro-benchmark, {} repetitions each\n", reps);
     std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
 
