@@ -120,13 +120,23 @@ auto run_nablapp_solver(std::string_view solver_name,
         // Constrained solvers: the raw objective gradient is nonzero at a
         // constrained optimum (only the Lagrangian gradient vanishes), and
         // penalty methods (augmented Lagrangian) cycle the augmented gradient
-        // during multiplier updates -- relax gradient/step/objective gates.
+        // during multiplier updates. The composite kkt_residual E-measure
+        // (N&W 2e Definition 12.1 / eq. 12.34) is the proper stationarity
+        // test for constrained problems; it folds primal feasibility and
+        // dual feasibility into a single scalar that vanishes at a KKT
+        // point. Relax objective/step gates and drive termination through
+        // the stationarity test via objective_tolerance_criterion's
+        // kkt_residual leg.
         //
-        // Stationarity threshold gates the composite kkt_residual E-measure
-        // (N&W 2e Definition 12.1, eq. 12.34) with primal feasibility folded
-        // in; 1e-4 matches the prior outer-wrapper value so the bench regime
-        // is preserved after the wrapper removal.
-        opts.set_gradient_threshold(1e-2);
+        // gradient_threshold is NOT set here: the current SQP and
+        // augmented-lagrangian policies write raw ||grad_f||_inf into
+        // step_result.gradient_norm rather than the Lagrangian gradient
+        // norm, so a loose gradient_tolerance fires prematurely on
+        // non-optimum iterates where ||grad_f|| drops but primal
+        // feasibility has not converged. Policy-level gradient_norm
+        // semantics is the subject of seeds SEED-003 / SEED-004 queued
+        // for Phase 36 (SQP) / Phase 37 (auglag). Until then the
+        // composite kkt_residual alone gates the constrained regime.
         opts.set_objective_threshold(1e-6);
         opts.set_step_threshold(1e-6);
         opts.set_stationarity_threshold(1e-4);
@@ -160,6 +170,12 @@ auto run_nablapp_solver(std::string_view solver_name,
             };
 
             final_obj = sr.objective_value;
+
+            if(sr.policy_status)
+            {
+                final_status = *sr.policy_status;
+                break;
+            }
 
             auto conv = opts.convergence.check(sr, static_cast<std::uint32_t>(i + 1));
             if(conv)
