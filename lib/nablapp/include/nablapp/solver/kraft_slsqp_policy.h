@@ -275,10 +275,10 @@ struct kraft_slsqp_policy
             // kkt_residual via the Full E-measure lets
             // objective_tolerance_criterion declare convergence when
             // the iterate is a true KKT point; constraint_violation
-            // lets constrained_convergence_policy's feasibility gate
-            // propagate correctly. Mirrors nw_sqp_policy's null-step
-            // return so the two SQP policies behave consistently at
-            // near-optimum initial points.
+            // reports L-infinity primal feasibility for dimensional
+            // consistency with kkt_residual. Mirrors nw_sqp_policy's
+            // null-step return so the two SQP policies behave
+            // consistently at near-optimum initial points.
             //
             // Reference: N&W 2e Section 18.3 (SQP null-step semantics);
             //            Definition 12.1 + eq. 12.34 (full KKT
@@ -310,7 +310,7 @@ struct kraft_slsqp_policy
                 .objective_change = 0.0,
                 .improved = false,
                 .is_null_step = true,
-                .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 .x_norm = s.x.norm(),
                 .kkt_residual = kkt_null,
             };
@@ -591,11 +591,10 @@ struct kraft_slsqp_policy
             lambda_eq_kkt, mu_ineq_kkt,
             s.c_eq, s.c_ineq);
 
-        // Primal feasibility reported via the constraint_violation field so
-        // constrained_convergence_policy can gate termination on feasibility
-        // before deferring to the inner ftol / grad-tol criteria. Equal to
-        // sum_i |c_eq[i]| + sum_j max(-c_ineq[j], 0); zero iff the iterate
-        // is primally feasible under the c_ineq >= 0 convention.
+        // Primal feasibility (L-infinity) reported into
+        // step_result.constraint_violation for dimensional consistency with
+        // step_result.kkt_residual. L1-merit internal paths keep L1 per
+        // N&W eq. 15.24 (merit semantics distinct from reporting semantics).
         //
         // Reference: N&W 2e Definition 12.1 (KKT primal feasibility).
         return step_result<double>{
@@ -604,7 +603,7 @@ struct kraft_slsqp_policy
             .step_size = sk.norm(),
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
-            .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
+            .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
         };

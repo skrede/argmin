@@ -253,12 +253,12 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
     {
         hs035 problem;
         auto x0 = problem.initial_point();
-        solver_options<constrained_convergence> opts;
+        solver_options opts;
         opts.max_iterations = 50;
         opts.set_gradient_threshold(1e-6);
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
-        opts.set_feasibility_threshold(1e-4);
+        opts.set_stationarity_threshold(1e-4);
 
         basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
             problem, x0, opts};

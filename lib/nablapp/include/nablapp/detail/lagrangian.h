@@ -59,6 +59,35 @@ Scalar constraint_violation(
     return v;
 }
 
+// Primal feasibility (L-infinity): max(||c_eq||_inf, ||max(-c_ineq, 0)||_inf).
+// L-infinity composition matches kkt_residual legs 2 and 3 so
+// step_result.constraint_violation is dimensionally consistent with
+// step_result.kkt_residual (both L-infinity). This is the reporting
+// convention used by IPOPT (primal_inf) and matches the KKT primal-
+// feasibility measure.
+//
+// Note: the sibling detail::constraint_violation uses the L1 convention
+// (sum |c_eq[i]| + sum max(-c_ineq[j], 0)) required by filter theory
+// (Fletcher-Leyffer 2002 Section 2 filter dominance ordering) and L1
+// merit functions (N&W eq. 15.24 / 17.44).
+//
+// Reference: N&W 2e Definition 12.1 (KKT primal feasibility).
+template <typename Scalar,
+          int Meq = nablapp::dynamic_dimension,
+          int Mineq = nablapp::dynamic_dimension>
+Scalar primal_feasibility_inf(
+    const Eigen::Vector<Scalar, Meq>& c_eq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq)
+{
+    const Scalar eq_leg = c_eq.size() > 0
+        ? c_eq.template lpNorm<Eigen::Infinity>()
+        : Scalar{0};
+    const Scalar ineq_leg = c_ineq.size() > 0
+        ? (-c_ineq).cwiseMax(Scalar{0}).template lpNorm<Eigen::Infinity>()
+        : Scalar{0};
+    return std::max(eq_leg, ineq_leg);
+}
+
 // Estimate Lagrange multipliers via least-squares.
 //
 // Solves min_lambda ||grad_f - A^T lambda||_2 which gives

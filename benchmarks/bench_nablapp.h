@@ -90,8 +90,11 @@ using rebind_policy_t = typename rebind_policy<Policy, N>::type;
 //
 // Policy must be a valid basic_solver policy.
 // Problem must provide value, gradient, dimension, optimal_value, initial_point.
-// Convergence selects the convergence policy: default_convergence for
-// unconstrained solvers, constrained_convergence for constrained solvers.
+//
+// bench uses `default_convergence` uniformly across solver families; each
+// solver sets its inner `objective_tolerance_criterion::stationarity_threshold`
+// directly, and the composite kkt_residual E-measure (N&W 2e Definition 12.1,
+// eq. 12.34) carries primal feasibility into the single termination test.
 template <typename Policy, typename Convergence = default_convergence,
           typename Problem, typename... PolicyOpts>
 auto run_nablapp_solver(std::string_view solver_name,
@@ -112,29 +115,21 @@ auto run_nablapp_solver(std::string_view solver_name,
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    if constexpr(requires(solver_options<Convergence>& o) { o.set_feasibility_threshold(1e-4); })
+    if constexpr(constrained<Problem>)
     {
-        opts.set_feasibility_threshold(1e-4);
-        // Relax gradient threshold for constrained solvers: the raw objective
-        // gradient is nonzero at a constrained optimum (only the Lagrangian
-        // gradient vanishes), and penalty methods (augmented Lagrangian)
-        // cycle the augmented gradient during multiplier updates.
+        // Constrained solvers: the raw objective gradient is nonzero at a
+        // constrained optimum (only the Lagrangian gradient vanishes), and
+        // penalty methods (augmented Lagrangian) cycle the augmented gradient
+        // during multiplier updates -- relax gradient/step/objective gates.
+        //
+        // Stationarity threshold gates the composite kkt_residual E-measure
+        // (N&W 2e Definition 12.1, eq. 12.34) with primal feasibility folded
+        // in; 1e-4 matches the prior outer-wrapper value so the bench regime
+        // is preserved after the wrapper removal.
         opts.set_gradient_threshold(1e-2);
-        // Relax objective tolerance. Penalty methods produce objective
-        // jumps that prevent tight ftol from firing; the feasibility
-        // gate above plus the composite kkt_residual E-measure (N&W 2e
-        // Definition 12.1, eq. 12.34) are the primary convergence
-        // signals for constrained solvers.
         opts.set_objective_threshold(1e-6);
         opts.set_step_threshold(1e-6);
-        // Stationarity threshold gates the full first-order optimality
-        // error E(x, lambda, mu) with primal feasibility folded in.
-        // 1e-4 mirrors the pre-31.1 feasibility_gate on kraft_slsqp /
-        // nw_sqp so the bench regime reflects the intended convergence
-        // criterion -- premature ftol at primal_eq ~ 1e-3 is now
-        // properly blocked by the composite E-measure.
-        std::get<objective_tolerance_criterion>(
-            opts.convergence.inner.criteria).stationarity_threshold = 1e-4;
+        opts.set_stationarity_threshold(1e-4);
     }
 
     if(collect_trace)
@@ -201,11 +196,10 @@ auto run_nablapp_solver(std::string_view solver_name,
     }
     else
     {
-        // Use solve(opts) so the full convergence policy (including the
-        // outer constrained_convergence_policy.feasibility_threshold)
-        // gates termination. The no-args solve() path falls through to
-        // stored_convergence_ which is always default_convergence and
-        // drops the outer feasibility gate.
+        // Use solve(opts) so the active opts.convergence (including any
+        // per-solver stationarity_threshold overrides) gates termination.
+        // The no-args solve() path falls through to stored_convergence_
+        // which is always default-constructed default_convergence.
         basic_solver<rebound_policy, N, Problem> solver(prob, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
@@ -263,7 +257,7 @@ void run_all_nablapp_solvers(
 
     auto run_constrained = [&]<typename Policy>(std::string_view name, Policy) {
         std::vector<trace_entry> trace;
-        auto r = run_nablapp_solver<Policy, constrained_convergence>(
+        auto r = run_nablapp_solver<Policy, default_convergence>(
             name, problem_name, prob, max_iterations, collect_trace, trace);
         results.push_back(r);
         traces.push_back(std::move(trace));
@@ -314,7 +308,7 @@ void run_all_nablapp_solvers(
             if(prob.num_equality() == 0 && prob.num_inequality() > 0)
             {
                 std::vector<trace_entry> trace;
-                auto r = run_nablapp_solver<mma_policy<>, constrained_convergence>(
+                auto r = run_nablapp_solver<mma_policy<>, default_convergence>(
                     "mma", problem_name, prob, max_iterations, collect_trace, trace);
                 results.push_back(r);
                 traces.push_back(std::move(trace));
@@ -330,7 +324,7 @@ void run_all_nablapp_solvers(
             if(prob.num_equality() == 0 && prob.num_inequality() > 0)
             {
                 std::vector<trace_entry> trace;
-                auto r = run_nablapp_solver<gcmma_policy<>, constrained_convergence>(
+                auto r = run_nablapp_solver<gcmma_policy<>, default_convergence>(
                     "gcmma", problem_name, prob, max_iterations, collect_trace, trace);
                 results.push_back(r);
                 traces.push_back(std::move(trace));
@@ -346,7 +340,7 @@ void run_all_nablapp_solvers(
             if(prob.num_equality() > 0)
             {
                 std::vector<trace_entry> trace;
-                auto r = run_nablapp_solver<nw_sqp_policy<>, constrained_convergence>(
+                auto r = run_nablapp_solver<nw_sqp_policy<>, default_convergence>(
                     "nw_sqp", problem_name, prob, max_iterations, collect_trace, trace);
                 results.push_back(r);
                 traces.push_back(std::move(trace));
@@ -398,7 +392,7 @@ void run_all_nablapp_solvers(
         typename isres_policy<>::options_type isres_opts{};
         isres_opts.seed = seed;
         std::vector<trace_entry> trace;
-        auto r = run_nablapp_solver<isres_policy<>, constrained_convergence>(
+        auto r = run_nablapp_solver<isres_policy<>, default_convergence>(
             "isres", problem_name, prob, max_iterations, collect_trace, trace,
             isres_opts);
         results.push_back(r);

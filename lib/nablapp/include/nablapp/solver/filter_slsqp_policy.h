@@ -219,10 +219,17 @@ struct filter_slsqp_policy
         {
             // Zero step with high constraint violation: attempt restoration
             // before giving up, since the QP may be infeasible at box bounds.
-            double h_zero = detail::constraint_violation(s.c_eq, s.c_ineq);
+            //
+            // Dual convention: step_result.constraint_violation reports the
+            // L-infinity primal feasibility (dimensionally consistent with
+            // kkt_residual per N&W 2e Definition 12.1); filter_set entries
+            // retain L1 h_k per Fletcher-Leyffer 2002 Section 2 dominance
+            // ordering. The `h_zero > 1e-8` restoration trigger keeps the
+            // L1 form for consistency with filter semantics at that gate.
+            double h_zero_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
             if constexpr(constrained<P>)
             {
-                if(h_zero > 1e-8 && s.n_eq + s.n_ineq > 0)
+                if(h_zero_l1 > 1e-8 && s.n_eq + s.n_ineq > 0)
                 {
                     auto rest = run_restoration_(s);
                     if(rest.success)
@@ -238,8 +245,8 @@ struct filter_slsqp_policy
                         s.J_eq = s.J_all.topRows(s.n_eq);
                         s.J_ineq = s.J_all.bottomRows(s.n_ineq);
 
-                        double h_rest = detail::constraint_violation(s.c_eq, s.c_ineq);
-                        s.filter.add(s.objective_value, h_rest);
+                        const double h_rest_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
+                        s.filter.add(s.objective_value, h_rest_l1);
 
                         ++s.iteration;
                         return step_result<double>{
@@ -248,7 +255,7 @@ struct filter_slsqp_policy
                             .step_size = rest.constraint_violation,
                             .objective_change = s.objective_value - s.objective_value,
                             .improved = false,
-                            .constraint_violation = h_rest,
+                            .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
                         };
                     }
@@ -271,9 +278,9 @@ struct filter_slsqp_policy
                 .objective_change = 0.0,
                 .improved = false,
                 .is_null_step = true,
-                .constraint_violation = h_zero,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 .x_norm = s.x.norm(),
-                .policy_status = h_zero > 1e-8
+                .policy_status = h_zero_l1 > 1e-8
                     ? std::optional{solver_status::stalled}
                     : std::nullopt,
             };
@@ -478,8 +485,8 @@ struct filter_slsqp_policy
                         s.J_eq = s.J_all.topRows(s.n_eq);
                         s.J_ineq = s.J_all.bottomRows(s.n_ineq);
 
-                        double h_rest = detail::constraint_violation(s.c_eq, s.c_ineq);
-                        s.filter.add(s.objective_value, h_rest);
+                        const double h_rest_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
+                        s.filter.add(s.objective_value, h_rest_l1);
 
                         ++s.iteration;
                         return step_result<double>{
@@ -488,7 +495,7 @@ struct filter_slsqp_policy
                             .step_size = (s.x - restoration_result.x).norm(),
                             .objective_change = s.objective_value - f_k,
                             .improved = s.objective_value < f_k,
-                            .constraint_violation = h_rest,
+                            .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
                         };
                     }
@@ -500,7 +507,7 @@ struct filter_slsqp_policy
                         .step_size = 0.0,
                         .objective_change = 0.0,
                         .improved = false,
-                        .constraint_violation = h_k,
+                        .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                         .x_norm = s.x.norm(),
                         .policy_status = solver_status::stalled,
                     };
@@ -594,9 +601,14 @@ struct filter_slsqp_policy
 
         ++s.iteration;
 
+        // Primal feasibility (L-infinity) reported into
+        // step_result.constraint_violation for dimensional consistency
+        // with step_result.kkt_residual per N&W 2e Definition 12.1.
+        // Filter set internals (filter.add / is_acceptable elsewhere in
+        // this policy) retain L1 per Fletcher-Leyffer 2002 Section 2.
         double h_new = 0.0;
         if constexpr(constrained<P>)
-            h_new = detail::constraint_violation(s.c_eq, s.c_ineq);
+            h_new = detail::primal_feasibility_inf(s.c_eq, s.c_ineq);
 
         // KKT residual: full first-order optimality error E(x, lambda,
         // mu) using least-squares multiplier estimates (N&W eq. 18.15).

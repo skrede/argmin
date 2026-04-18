@@ -20,12 +20,12 @@ TEST_CASE("augmented lagrangian converges on HS076", "[augmented_lagrangian]")
     hs076 problem;
     auto x0 = problem.initial_point();
 
-    solver_options<constrained_convergence> opts;
+    solver_options opts;
     opts.max_iterations = 60;
     opts.set_gradient_threshold(1e-6);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
-    opts.set_feasibility_threshold(1e-4);
+    opts.set_stationarity_threshold(1e-4);
 
     basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
@@ -40,12 +40,12 @@ TEST_CASE("augmented lagrangian converges on HS035", "[augmented_lagrangian]")
     hs035 problem;
     auto x0 = problem.initial_point();
 
-    solver_options<constrained_convergence> opts;
+    solver_options opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-6);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
-    opts.set_feasibility_threshold(1e-4);
+    opts.set_stationarity_threshold(1e-4);
 
     basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
         problem, x0, opts};
@@ -61,12 +61,12 @@ TEST_CASE("augmented lagrangian on HS071 (equality + inequality)",
     hs071 problem;
     auto x0 = problem.initial_point();
 
-    solver_options<constrained_convergence> opts;
+    solver_options opts;
     opts.max_iterations = 80;
     opts.set_gradient_threshold(1e-4);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
-    opts.set_feasibility_threshold(1e-2);
+    opts.set_stationarity_threshold(1e-2);
 
     basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
         problem, x0, opts};
@@ -128,12 +128,12 @@ TEST_CASE("augmented lagrangian step and solve consistency",
     hs035 problem;
     auto x0 = problem.initial_point();
 
-    solver_options<constrained_convergence> opts;
+    solver_options opts;
     opts.max_iterations = 30;
     opts.set_gradient_threshold(1e-5);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
-    opts.set_feasibility_threshold(1e-4);
+    opts.set_stationarity_threshold(1e-4);
 
     SECTION("step returns finite values")
     {
@@ -175,12 +175,12 @@ TEST_CASE("augmented lagrangian reports actual gradient norm",
     hs076 problem;
     auto x0 = problem.initial_point();
 
-    solver_options<constrained_convergence> opts;
+    solver_options opts;
     opts.max_iterations = 60;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
-    opts.set_feasibility_threshold(1e-4);
+    opts.set_stationarity_threshold(1e-4);
 
     basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
@@ -195,18 +195,18 @@ TEST_CASE("augmented lagrangian reports actual gradient norm",
     CHECK(result.constraint_violation < 1e-3);
 }
 
-TEST_CASE("augmented lagrangian convergence on HS076 with constrained_convergence",
+TEST_CASE("augmented lagrangian convergence on HS076 with stationarity_threshold gate",
           "[augmented_lagrangian]")
 {
     hs076 problem;
     auto x0 = problem.initial_point();
 
-    solver_options<constrained_convergence> opts;
+    solver_options opts;
     opts.max_iterations = 60;
     opts.set_gradient_threshold(1e-6);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
-    opts.set_feasibility_threshold(1e-4);
+    opts.set_stationarity_threshold(1e-4);
 
     basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
@@ -350,12 +350,12 @@ TEST_CASE("augmented lagrangian populates kkt_residual",
     hs076 problem;
     auto x0 = problem.initial_point();
 
-    solver_options<constrained_convergence> opts;
+    solver_options opts;
     opts.max_iterations = 30;
     opts.set_gradient_threshold(1e-5);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
-    opts.set_feasibility_threshold(1e-4);
+    opts.set_stationarity_threshold(1e-4);
 
     basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};

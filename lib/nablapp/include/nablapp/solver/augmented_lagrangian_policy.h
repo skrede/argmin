@@ -340,8 +340,20 @@ struct augmented_lagrangian_policy
             s.c_ineq = c_all.tail(s.n_ineq);
         }
 
-        // Constraint violation
-        scalar_type viol = detail::constraint_violation(s.c_eq, s.c_ineq);
+        // Constraint violation (L-infinity).
+        //
+        // step_result.constraint_violation reports primal feasibility at the
+        // L-infinity norm: max(||c_eq||_inf, ||max(-c_ineq, 0)||_inf). The
+        // single-scalar form is scale-invariant per CGT 1991 Section 3 and
+        // dimensionally consistent with kkt_residual (N&W 2e Definition 12.1).
+        // augmented_lagrangian adopts this convention via the combined
+        // measure; the outer-loop multiplier update machinery
+        // (Hestenes-Powell) is unaffected.
+        //
+        // Reference: N&W 2e Definition 12.1 (KKT primal feasibility);
+        //            Conn-Gould-Toint 1991 Section 3 (scale invariance of
+        //            feasibility-progress gates).
+        scalar_type viol = detail::primal_feasibility_inf(s.c_eq, s.c_ineq);
 
         scalar_type step_norm = (s.x - x_old).norm();
 

@@ -1,18 +1,21 @@
 // Tests for convergence policy types and criterion composition.
 //
-// Validates each convergence criterion in isolation, then tests
-// convergence_policy fold-expression composition and
-// constrained_convergence_policy feasibility gating.
+// Validates each convergence criterion in isolation and the
+// convergence_policy fold-expression composition. Also covers the
+// detail::primal_feasibility_inf helper used by constrained-policy
+// step_result writes.
 //
 // Reference: N&W 2e Section 2.2, K&W 2e Section 2.3,
-//            N&W 2e Section 12.1 (KKT feasibility).
+//            N&W 2e Definition 12.1 (KKT primal feasibility).
 
+#include "nablapp/detail/lagrangian.h"
 #include "nablapp/solver/options.h"
 #include "nablapp/solver/convergence.h"
 
 #include "nablapp/result/status.h"
 #include "nablapp/result/step_result.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 using namespace nablapp;
@@ -307,90 +310,50 @@ TEST_CASE("convergence_policy with stationarity gate does not fire on stagnant n
     CHECK(!status.has_value());
 }
 
-// -- constrained_convergence_policy tests --
+// Primal feasibility is carried inside kkt_residual per the full E-measure
+// composite (N&W 2e eq. 12.34) and consumed by objective_tolerance_criterion
+// via stationarity_threshold. The two TEST_CASEs below lock that behaviour.
 
-TEST_CASE("constrained_convergence_policy blocks when infeasible",
+TEST_CASE("objective_tolerance_criterion blocks ftol when kkt_residual is large",
           "[convergence_policy]")
 {
-    constrained_convergence_policy<default_convergence> cp{
-        .inner = {.criteria = {
-            gradient_tolerance_criterion{.threshold = 1e-6},
-            objective_tolerance_criterion{},
-            step_tolerance_criterion{},
-            stall_tolerance_criterion{},
-        }},
-        .feasibility_threshold = 1e-4,
+    // When primal feasibility (carried inside kkt_residual per the full
+    // E-measure) exceeds stationarity_threshold, ftol must not fire even
+    // if objective_change is below threshold.
+    //
+    // Reference: N&W 2e Definition 12.1 (KKT optimality requires feasibility).
+    objective_tolerance_criterion c{
+        .threshold = 1e-10,
+        .stationarity_threshold = 1e-4,
     };
 
     step_result<double> r{
-        .gradient_norm = 1e-8,
-        .constraint_violation = 0.5,
+        .objective_change = 1e-15,
+        .kkt_residual = 0.5,
     };
 
-    auto status = cp.check(r, 5);
+    auto status = c.check(r, 5);
     CHECK(!status.has_value());
 }
 
-TEST_CASE("constrained_convergence_policy passes when feasible",
+TEST_CASE("objective_tolerance_criterion fires when kkt_residual is small",
           "[convergence_policy]")
 {
-    constrained_convergence_policy<default_convergence> cp{
-        .inner = {.criteria = {
-            gradient_tolerance_criterion{.threshold = 1e-6},
-            objective_tolerance_criterion{},
-            step_tolerance_criterion{},
-            stall_tolerance_criterion{},
-        }},
-        .feasibility_threshold = 1e-4,
+    // Counterpart to the block-when-large test: small kkt_residual below the
+    // stationarity gate allows ftol_reached to fire.
+    objective_tolerance_criterion c{
+        .threshold = 1e-10,
+        .stationarity_threshold = 1e-4,
     };
 
     step_result<double> r{
-        .gradient_norm = 1e-8,
-        .constraint_violation = 1e-6,
+        .objective_change = 1e-15,
+        .kkt_residual = 1e-6,
     };
 
-    auto status = cp.check(r, 5);
+    auto status = c.check(r, 5);
     REQUIRE(status.has_value());
-    CHECK(*status == solver_status::converged);
-}
-
-TEST_CASE("constrained_convergence_policy with nullopt threshold delegates directly",
-          "[convergence_policy]")
-{
-    constrained_convergence_policy<default_convergence> cp{
-        .inner = {.criteria = {
-            gradient_tolerance_criterion{.threshold = 1e-6},
-            objective_tolerance_criterion{},
-            step_tolerance_criterion{},
-            stall_tolerance_criterion{},
-        }},
-        .feasibility_threshold = std::nullopt,
-    };
-
-    step_result<double> r{
-        .gradient_norm = 1e-8,
-        .constraint_violation = 100.0,
-    };
-
-    auto status = cp.check(r, 5);
-    REQUIRE(status.has_value());
-    CHECK(*status == solver_status::converged);
-}
-
-TEST_CASE("solver_options<constrained_convergence> convenience setters work",
-          "[convergence_policy]")
-{
-    solver_options<constrained_convergence> opts;
-    opts.set_gradient_threshold(1e-6);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-8);
-    opts.set_feasibility_threshold(1e-4);
-
-    auto& inner = opts.convergence.inner;
-    CHECK(std::get<gradient_tolerance_criterion>(inner.criteria).threshold == 1e-6);
-    CHECK(std::get<objective_tolerance_criterion>(inner.criteria).threshold == 1e-10);
-    CHECK(std::get<step_tolerance_criterion>(inner.criteria).threshold == 1e-8);
-    CHECK(opts.convergence.feasibility_threshold == 1e-4);
+    CHECK(*status == solver_status::ftol_reached);
 }
 
 // -- last_check_results accessor tests --
@@ -543,4 +506,35 @@ TEST_CASE("slsqp_compatible_convergence does not carry a gradient_tolerance slot
     // three-criterion composition.
     const auto& results = policy.last_check_results();
     CHECK(results.size() == 3);
+}
+
+// -- detail::primal_feasibility_inf tests --
+//
+// Locks the L-infinity composition used at step_result.constraint_violation
+// write sites across the 5 constrained policies. Dimensionally consistent
+// with detail::kkt_residual legs 2 and 3 (both L-infinity).
+//
+// Reference: N&W 2e Definition 12.1 (KKT primal feasibility).
+TEST_CASE("detail::primal_feasibility_inf returns L-infinity composite",
+          "[lagrangian][primal_feasibility]")
+{
+    using Catch::Approx;
+
+    SECTION("mixed eq + ineq with both legs non-zero")
+    {
+        Eigen::VectorXd c_eq(3); c_eq << 1.0, -2.0, 0.5;
+        Eigen::VectorXd c_ineq(3); c_ineq << 2.0, -0.3, 1.0;
+        CHECK(detail::primal_feasibility_inf(c_eq, c_ineq) == Approx(2.0));
+    }
+    SECTION("empty c_eq, non-empty c_ineq")
+    {
+        Eigen::VectorXd c_eq(0);
+        Eigen::VectorXd c_ineq(2); c_ineq << -0.3, 1.0;
+        CHECK(detail::primal_feasibility_inf(c_eq, c_ineq) == Approx(0.3));
+    }
+    SECTION("both empty returns zero")
+    {
+        Eigen::VectorXd c_eq(0), c_ineq(0);
+        CHECK(detail::primal_feasibility_inf(c_eq, c_ineq) == Approx(0.0));
+    }
 }

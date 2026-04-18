@@ -269,34 +269,6 @@ using slsqp_compatible_convergence = convergence_policy<
     stall_tolerance_criterion
 >;
 
-// Constrained convergence: gates inner convergence on feasibility.
-//
-// Returns std::nullopt (no convergence) if constraint_violation >=
-// feasibility_threshold, regardless of what the inner policy says.
-// This ensures constrained solvers only declare convergence when
-// both optimality criteria AND feasibility are satisfied.
-//
-// Reference: N&W 2e Section 12.1 (KKT conditions require feasibility).
-template <typename Inner = default_convergence>
-struct constrained_convergence_policy
-{
-    Inner inner{};
-    std::optional<double> feasibility_threshold{};
-
-    std::optional<solver_status> check(const step_result<double>& r,
-                                       std::uint32_t iteration) const
-    {
-        if(feasibility_threshold)
-        {
-            if(r.constraint_violation >= *feasibility_threshold)
-                return std::nullopt;
-        }
-        return inner.check(r, iteration);
-    }
-};
-
-using constrained_convergence = constrained_convergence_policy<default_convergence>;
-
 }
 
 #endif

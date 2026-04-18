@@ -252,7 +252,12 @@ struct filter_nw_sqp_policy
             // step_tolerance stall detection so basic_solver gives
             // the policy another iteration to break the degeneracy
             // rather than flagging solver_status::stalled on iter 2.
-            double h_cur = detail::constraint_violation(s.c_eq, s.c_ineq);
+            //
+            // Dual convention: step_result.constraint_violation reports
+            // L-infinity primal feasibility (dimensionally consistent with
+            // kkt_residual per N&W 2e Definition 12.1); filter_set entries
+            // elsewhere in this policy retain L1 h_k per Fletcher-Leyffer
+            // 2002 Section 2 filter dominance ordering.
             return step_result<double>{
                 .objective_value = s.objective_value,
                 .gradient_norm = lagrangian_gradient_norm(s),
@@ -260,7 +265,7 @@ struct filter_nw_sqp_policy
                 .objective_change = 0.0,
                 .improved = false,
                 .is_null_step = true,
-                .constraint_violation = h_cur,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             };
         }
 
@@ -446,16 +451,16 @@ struct filter_nw_sqp_policy
                     s.J_eq = s.J_all.topRows(s.n_eq);
                     s.J_ineq = s.J_all.bottomRows(s.n_ineq);
                 }
-                double h_restored = detail::constraint_violation(s.c_eq, s.c_ineq);
-                s.filter.add(s.objective_value, h_restored);
+                const double h_restored_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
+                s.filter.add(s.objective_value, h_restored_l1);
                 ++s.iteration;
                 return step_result<double>{
                     .objective_value = s.objective_value,
                     .gradient_norm = lagrangian_gradient_norm(s),
                     .step_size = (s.x - rest.x).norm(),
                     .objective_change = s.objective_value - f_k,
-                    .improved = h_restored < h_k,
-                    .constraint_violation = h_restored,
+                    .improved = h_restored_l1 < h_k,
+                    .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 };
             }
 
@@ -467,6 +472,11 @@ struct filter_nw_sqp_policy
             // is carried forward without movement while the outer
             // loop retains flexibility (restoration may succeed on
             // a future iteration once the filter envelope relaxes).
+            //
+            // step_result.constraint_violation reports L-infinity primal
+            // feasibility (kkt_residual-consistent). The local h_k (L1)
+            // is consumed by filter dominance checks per Fletcher-Leyffer
+            // 2002 Section 2.
             ++s.iteration;
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -475,7 +485,7 @@ struct filter_nw_sqp_policy
                 .objective_change = 0.0,
                 .improved = false,
                 .is_null_step = true,
-                .constraint_violation = h_k,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             };
         }
 
@@ -572,13 +582,18 @@ struct filter_nw_sqp_policy
             lambda_eq_kkt, mu_ineq_kkt,
             s.c_eq, s.c_ineq);
 
+        // Primal feasibility (L-infinity) reported into step_result for
+        // dimensional consistency with kkt_residual per N&W 2e Definition
+        // 12.1. The loop-local h_trial (L1) above was consumed by
+        // filter.is_acceptable at the line-search step per Fletcher-Leyffer
+        // 2002 Section 2 dominance ordering.
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = grad_L_new.norm(),
             .step_size = sk.norm(),
             .objective_change = s.objective_value - f_old,
             .improved = phi_new < phi0,
-            .constraint_violation = h_trial,
+            .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .kkt_residual = kkt,
         };
     }

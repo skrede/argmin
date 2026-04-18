@@ -303,7 +303,7 @@ struct nw_sqp_policy
                 .objective_change = 0.0,
                 .improved = false,
                 .is_null_step = true,
-                .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 .x_norm = s.x.norm(),
                 .kkt_residual = kkt_null,
             };
@@ -481,13 +481,19 @@ struct nw_sqp_policy
             lambda_eq_kkt, mu_ineq_kkt,
             s.c_eq, s.c_ineq);
 
+        // Primal feasibility (L-infinity) reported into
+        // step_result.constraint_violation for dimensional consistency
+        // with step_result.kkt_residual. The L1-merit local `cv` above
+        // keeps L1 per N&W eq. 15.24 (merit function semantics).
+        //
+        // Reference: N&W 2e Definition 12.1 (KKT primal feasibility).
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = grad_L_norm,
             .step_size = sk.norm(),
             .objective_change = s.objective_value - f_old,
             .improved = phi_new < phi0,
-            .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
+            .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
         };
