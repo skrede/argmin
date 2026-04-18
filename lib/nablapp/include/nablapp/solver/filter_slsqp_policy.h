@@ -621,6 +621,14 @@ struct filter_slsqp_policy
         //            stationarity, primal feasibility, dual feasibility,
         //            complementarity); eq. 12.34 (Lagrangian
         //            stationarity leg); eq. 18.15 (multiplier LS).
+        // cwiseMax(0.0) enforces mu_ineq >= 0 (KKT dual feasibility) after
+        // the LS re-estimation at :559 — the least-squares fit is not
+        // sign-preserving on the inequality slice, and a negative mu_ineq
+        // entry otherwise lights up kkt_residual's dual-feasibility leg
+        // and blocks the composite E-measure from terminating at a true
+        // KKT point (hs024 three-inequality closure).
+        //
+        // Reference: N&W 2e Definition 12.1 (KKT dual feasibility).
         Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
         Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
         if constexpr(constrained<P>)
@@ -630,7 +638,8 @@ struct filter_slsqp_policy
                 if(s.n_eq > 0)
                     lambda_eq_kkt = s.lambda.head(s.n_eq);
                 if(s.n_ineq > 0)
-                    mu_ineq_kkt = s.lambda.segment(s.n_eq, s.n_ineq);
+                    mu_ineq_kkt =
+                        s.lambda.segment(s.n_eq, s.n_ineq).cwiseMax(0.0);
             }
         }
         double kkt = detail::kkt_residual<double,

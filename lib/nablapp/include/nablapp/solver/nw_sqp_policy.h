@@ -272,6 +272,10 @@ struct nw_sqp_policy
         // terminate when the iterate is a true KKT point (zero
         // direction is the correct QP answer at an optimum) rather
         // than running out max_iterations on a converged problem.
+        //
+        // Null-step branch: x_{k+1} = x_k so QP multipliers are
+        // measured at the current iterate; no staleness. Multiplier
+        // re-estimation not applied here.
         if(p.norm() < 1e-15)
         {
             Eigen::VectorXd lambda_null = Eigen::VectorXd::Zero(m);
@@ -457,22 +461,35 @@ struct nw_sqp_policy
         double phi_new = detail::l1_merit(s.objective_value,
                                             s.c_eq, s.c_ineq, s.sigma);
 
-        // KKT residual: full first-order optimality error E(x, lambda,
-        // mu) via the active-set QP multipliers. Equality multipliers
-        // occupy the first n_eq entries of lambda_new; inequality
-        // multipliers follow. When m == 0 the helper collapses to
-        // ||grad_f||_inf.
+        // Multiplier re-estimation at x_{k+1} via least-squares projection.
+        // The QP-derived lambda_new satisfies the linearised KKT at x_k, not
+        // at x_{k+1} where the gradient and Jacobian have moved. Reusing
+        // lambda_new at the new iterate produces a stationarity leg that
+        // oscillates with the remaining problem curvature; the LS projection
+        // replaces them with the lambda best-explaining grad_f at the current
+        // iterate. The inequality slice is projected to >= 0 via cwiseMax
+        // (dual feasibility leg of the KKT conditions). lambda_reest is local
+        // to this kkt evaluation; BFGS curvature-pair construction above at
+        // :419-423 already used lambda_new (QP multipliers), so inter-
+        // iteration BFGS semantics are unchanged.
         //
-        // Reference: N&W 2e Definition 12.1 (KKT conditions:
-        //            stationarity, primal feasibility, dual feasibility,
-        //            complementarity); eq. 12.34 (Lagrangian
-        //            stationarity leg).
-        Eigen::VectorXd lambda_eq_kkt = s.n_eq > 0
-            ? Eigen::VectorXd(lambda_new.head(s.n_eq))
-            : Eigen::VectorXd::Zero(0);
-        Eigen::VectorXd mu_ineq_kkt = s.n_ineq > 0
-            ? Eigen::VectorXd(lambda_new.segment(s.n_eq, s.n_ineq))
-            : Eigen::VectorXd::Zero(0);
+        // Reference: N&W 2e Section 18.3 (multiplier re-estimation);
+        //            eq. 18.15 (least-squares lambda);
+        //            Definition 12.1 (KKT conditions require mu_ineq >= 0);
+        //            eq. 12.34 (Lagrangian stationarity leg).
+        Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
+        Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
+        if(m > 0)
+        {
+            Eigen::VectorXd g_dyn = s.g;
+            Eigen::VectorXd lambda_reest =
+                detail::estimate_multipliers(g_dyn, s.J_all);
+            if(s.n_eq > 0)
+                lambda_eq_kkt = lambda_reest.head(s.n_eq);
+            if(s.n_ineq > 0)
+                mu_ineq_kkt =
+                    lambda_reest.segment(s.n_eq, s.n_ineq).cwiseMax(0.0);
+        }
         double kkt = detail::kkt_residual<double,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic,
