@@ -393,6 +393,41 @@ bool probe_regression_hs026()
     return ok;
 }
 
+// Regression probe: nw_sqp HS007 iter bound -- Lagrangian-stationarity
+// tail-drift closure via multiplier re-estimation at x_{k+1} (N&W 2e
+// Section 18.3 eq. 18.15). Reusing QP multipliers produced a stale
+// stationarity leg that oscillated with the remaining problem curvature;
+// the least-squares projection replaces them with the lambda best-
+// explaining grad_f at the current iterate.
+//
+// Reference: N&W 2e Section 18.3 (multiplier re-estimation);
+//            eq. 18.15 (least-squares lambda).
+bool probe_regression_hs007_iter_bound()
+{
+    nablapp::hs007<> p;
+    Eigen::VectorXd x0 = p.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{
+        nablapp::nw_sqp_policy<nablapp::hs007<>::problem_dimension>{},
+        p, x0, opts};
+    auto result = solver.solve(opts);
+
+    const bool ok = result.iterations <= 12
+        && result.objective_value < -1.7320;
+    if(!ok)
+        std::println(stderr,
+                     "FAIL: nw_sqp HS007 iters={} f={:.6e} (expected <= 12 @ f < -1.7320)",
+                     result.iterations, result.objective_value);
+    std::println("  nw_sqp HS007: iters={} f={:.6e}",
+                 result.iterations, result.objective_value);
+    return ok;
+}
+
 }
 
 int main()
@@ -402,6 +437,8 @@ int main()
     if(!probe_kkt_residual())
         return 1;
     if(!probe_regression_hs026())
+        return 1;
+    if(!probe_regression_hs007_iter_bound())
         return 1;
 
     std::println("NW-SQP micro-benchmark, {} repetitions each\n", reps);

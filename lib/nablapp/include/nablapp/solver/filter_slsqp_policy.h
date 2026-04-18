@@ -270,6 +270,40 @@ struct filter_slsqp_policy
             // step_tolerance stall detection so basic_solver does not
             // double-report the stall via the tolerance criterion on
             // top of the policy-reported solver_status::stalled below.
+            //
+            // Null-step branch: x_{k+1} = x_k so the active-set LS
+            // re-estimate is measured at the current iterate with no
+            // staleness. Populating kkt_residual here lets the outer
+            // convergence check terminate on a true KKT point even when
+            // the QP returns zero at the optimum (otherwise the composite
+            // gate falls back to gradient_norm = ||grad_f||_inf which is
+            // not zero at constrained optima and blocks termination).
+            Eigen::VectorXd lambda_eq_null = Eigen::VectorXd::Zero(s.n_eq);
+            Eigen::VectorXd mu_ineq_null = Eigen::VectorXd::Zero(s.n_ineq);
+            if constexpr(constrained<P>)
+            {
+                if(s.n_eq + s.n_ineq > 0)
+                {
+                    Eigen::Vector<double, N> g_fixed = s.g;
+                    Eigen::VectorXd lambda_reest =
+                        detail::estimate_multipliers_active_set<double,
+                                                                N,
+                                                                Eigen::Dynamic,
+                                                                Eigen::Dynamic>(
+                            g_fixed, s.J_eq, s.J_ineq, s.c_ineq);
+                    if(s.n_eq > 0)
+                        lambda_eq_null = lambda_reest.head(s.n_eq);
+                    if(s.n_ineq > 0)
+                        mu_ineq_null = lambda_reest.segment(s.n_eq, s.n_ineq);
+                }
+            }
+            double kkt_null = detail::kkt_residual<double,
+                                                   Eigen::Dynamic,
+                                                   Eigen::Dynamic,
+                                                   Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq,
+                lambda_eq_null, mu_ineq_null,
+                s.c_eq, s.c_ineq);
             ++s.iteration;
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -280,6 +314,7 @@ struct filter_slsqp_policy
                 .is_null_step = true,
                 .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 .x_norm = s.x.norm(),
+                .kkt_residual = kkt_null,
                 .policy_status = h_zero_l1 > 1e-8
                     ? std::optional{solver_status::stalled}
                     : std::nullopt,
@@ -621,25 +656,38 @@ struct filter_slsqp_policy
         //            stationarity, primal feasibility, dual feasibility,
         //            complementarity); eq. 12.34 (Lagrangian
         //            stationarity leg); eq. 18.15 (multiplier LS).
-        // cwiseMax(0.0) enforces mu_ineq >= 0 (KKT dual feasibility) after
-        // the LS re-estimation at :559 — the least-squares fit is not
-        // sign-preserving on the inequality slice, and a negative mu_ineq
-        // entry otherwise lights up kkt_residual's dual-feasibility leg
-        // and blocks the composite E-measure from terminating at a true
-        // KKT point (hs024 three-inequality closure).
+        // Active-set multiplier re-estimation at x_{k+1} for the kkt leg.
+        // The store at :559 (s.lambda = estimate_multipliers(...)) is the
+        // raw LS fit used for BFGS curvature-pair construction above; the
+        // kkt path here uses a separate active-set LS that detects binding
+        // inequalities (|c_ineq[i]| < 1e-8), restricts the LS to the
+        // equality + active rows, and clips mu_ineq to >= 0. Plain LS +
+        // cwiseMax breaks on optima with parallel inequality gradients
+        // (HS024: row 2 = -row 3 of J_ineq at x*) because the min-norm
+        // split between parallel rows is not KKT-valid after sign
+        // projection.
         //
-        // Reference: N&W 2e Definition 12.1 (KKT dual feasibility).
+        // Reference: N&W 2e Section 18.3 + Algorithm 18.3 (working-set
+        //            identification);
+        //            eq. 18.15 (least-squares lambda);
+        //            Definition 12.1 (KKT dual feasibility).
         Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
         Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
         if constexpr(constrained<P>)
         {
-            if(s.lambda.size() >= s.n_eq + s.n_ineq)
+            if(s.n_eq + s.n_ineq > 0)
             {
+                Eigen::Vector<double, N> g_fixed = s.g;
+                Eigen::VectorXd lambda_reest =
+                    detail::estimate_multipliers_active_set<double,
+                                                            N,
+                                                            Eigen::Dynamic,
+                                                            Eigen::Dynamic>(
+                        g_fixed, s.J_eq, s.J_ineq, s.c_ineq);
                 if(s.n_eq > 0)
-                    lambda_eq_kkt = s.lambda.head(s.n_eq);
+                    lambda_eq_kkt = lambda_reest.head(s.n_eq);
                 if(s.n_ineq > 0)
-                    mu_ineq_kkt =
-                        s.lambda.segment(s.n_eq, s.n_ineq).cwiseMax(0.0);
+                    mu_ineq_kkt = lambda_reest.segment(s.n_eq, s.n_ineq);
             }
         }
         double kkt = detail::kkt_residual<double,

@@ -582,6 +582,42 @@ bool probe_regression_hs026()
     return ok;
 }
 
+// Regression probe: filter_nw_sqp HS024 iter bound -- Lagrangian-
+// stationarity closure via multiplier re-estimation at x_{k+1}
+// (N&W 2e Section 18.3 eq. 18.15). Filter internals retain L1 h_k
+// per Fletcher-Leyffer 2002 Section 2 dominance ordering;
+// step_result reporting uses the composite kkt_residual (N&W 2e
+// eq. 12.34) with mu_ineq >= 0 projection for dual feasibility.
+//
+// Reference: N&W 2e Section 18.3 (multiplier re-estimation);
+//            eq. 18.15 (least-squares lambda);
+//            eq. 12.34 (full first-order optimality E-measure).
+bool probe_regression_hs024_iter_bound()
+{
+    nablapp::hs024<> p;
+    Eigen::VectorXd x0 = p.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{
+        nablapp::filter_nw_sqp_policy<nablapp::hs024<>::problem_dimension>{},
+        p, x0, opts};
+    auto result = solver.solve(opts);
+
+    const bool ok = result.iterations <= 14
+        && std::abs(result.objective_value - (-1.0)) < 1e-6;
+    if(!ok)
+        std::println(stderr,
+                     "FAIL: filter_nw_sqp HS024 iters={} f={:.6e} (expected <= 14 @ -1.0)",
+                     result.iterations, result.objective_value);
+    std::println("  filter_nw_sqp HS024: iters={} f={:.6e}",
+                 result.iterations, result.objective_value);
+    return ok;
+}
+
 }
 
 int main()
@@ -591,6 +627,8 @@ int main()
     if(!probe_kkt_residual())
         return 1;
     if(!probe_regression_hs026())
+        return 1;
+    if(!probe_regression_hs024_iter_bound())
         return 1;
 
     std::println("Filter NW-SQP micro-benchmark, {} repetitions each\n", reps);

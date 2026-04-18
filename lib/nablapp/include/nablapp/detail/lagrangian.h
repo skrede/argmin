@@ -108,6 +108,90 @@ Eigen::Vector<Scalar, M> estimate_multipliers(
     return qr.solve(grad_f);
 }
 
+// Active-set least-squares multiplier estimate.
+//
+// Detects active inequalities (|c_ineq[i]| < active_tol), solves the
+// min-residual LS problem on the union of equality and active inequality
+// rows only, and returns the full (n_eq + n_ineq) multiplier vector in
+// the canonical [lambda_eq; mu_ineq] layout. Inactive mu_ineq entries
+// are zero; active mu_ineq entries are projected to >= 0 (KKT dual
+// feasibility).
+//
+// This is strictly more correct than estimate_multipliers + cwiseMax on
+// problems where two inequalities have parallel constraint gradients at
+// the optimum and only one is binding: standard LS picks an arbitrary
+// split between the parallel rows that breaks dual feasibility after
+// sign projection, leaving the stationarity leg positive at the KKT
+// point. Restricting the LS to the binding rows only recovers the
+// textbook active-set multiplier.
+//
+// Reference: N&W 2e Section 18.3 + Algorithm 18.3 (working-set / active-
+//            set identification);
+//            eq. 18.15 (least-squares lambda);
+//            Definition 12.1 (KKT conditions require mu_ineq >= 0 and
+//            complementarity).
+template <typename Scalar,
+          int N = nablapp::dynamic_dimension,
+          int Meq = nablapp::dynamic_dimension,
+          int Mineq = nablapp::dynamic_dimension>
+Eigen::Vector<Scalar, Eigen::Dynamic> estimate_multipliers_active_set(
+    const Eigen::Vector<Scalar, N>& grad_f,
+    const Eigen::Matrix<Scalar, Meq, N>& J_eq,
+    const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq,
+    Scalar active_tol = Scalar(1e-8))
+{
+    const Eigen::Index n = grad_f.size();
+    const Eigen::Index n_eq = J_eq.rows();
+    const Eigen::Index n_ineq = J_ineq.rows();
+
+    Eigen::Vector<Scalar, Eigen::Dynamic> lambda_full =
+        Eigen::Vector<Scalar, Eigen::Dynamic>::Zero(n_eq + n_ineq);
+
+    // Count active inequalities (|c_ineq[i]| < active_tol).
+    Eigen::Index n_active = 0;
+    for(Eigen::Index i = 0; i < n_ineq; ++i)
+        if(std::abs(c_ineq[i]) < active_tol)
+            ++n_active;
+
+    const Eigen::Index m_active = n_eq + n_active;
+    if(m_active == 0)
+        return lambda_full;
+
+    // Build reduced constraint Jacobian: [J_eq; J_ineq_active].
+    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> A_active(m_active, n);
+    if(n_eq > 0)
+        A_active.topRows(n_eq) = J_eq;
+    Eigen::Index row = n_eq;
+    for(Eigen::Index i = 0; i < n_ineq; ++i)
+        if(std::abs(c_ineq[i]) < active_tol)
+        {
+            A_active.row(row) = J_ineq.row(i);
+            ++row;
+        }
+
+    // LS on the reduced system (N&W eq. 18.15).
+    auto qr = A_active.transpose().colPivHouseholderQr();
+    Eigen::Vector<Scalar, Eigen::Dynamic> grad_f_dyn(n);
+    grad_f_dyn = grad_f;
+    Eigen::Vector<Scalar, Eigen::Dynamic> lambda_active = qr.solve(grad_f_dyn);
+
+    // Equality multipliers: sign is unrestricted.
+    if(n_eq > 0)
+        lambda_full.head(n_eq) = lambda_active.head(n_eq);
+
+    // Active inequality multipliers: clipped to >= 0 for dual feasibility.
+    Eigen::Index ak = 0;
+    for(Eigen::Index i = 0; i < n_ineq; ++i)
+        if(std::abs(c_ineq[i]) < active_tol)
+        {
+            lambda_full[n_eq + i] = std::max(Scalar(0), lambda_active[n_eq + ak]);
+            ++ak;
+        }
+
+    return lambda_full;
+}
+
 }
 
 #endif

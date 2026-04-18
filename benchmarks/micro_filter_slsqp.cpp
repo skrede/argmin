@@ -585,6 +585,46 @@ bool probe_regression_hs026()
     return ok;
 }
 
+// Regression probe: filter_slsqp HS024 termination closure via the
+// composite kkt_residual (N&W 2e eq. 12.34). Prior behaviour: the
+// outer constrained-convergence wrapper gated termination on the L1
+// sum of inequality violations h_k, which for multi-constraint
+// problems (HS024: 3 inequalities) sat above the per-constraint
+// feasibility threshold. With the wrapper removed, kkt_residual
+// carries primal feasibility at the L-infinity norm and the
+// least-squares lambda estimate is mu-projected (cwiseMax(0.0)) so
+// the dual-feasibility leg no longer fires spuriously.
+//
+// Reference: N&W 2e Definition 12.1 (KKT primal + dual feasibility);
+//            eq. 12.34 (full first-order optimality E-measure);
+//            eq. 18.15 (least-squares lambda). Post-phase30 baseline
+//            13 iters; target within 1.
+bool probe_regression_hs024()
+{
+    nablapp::hs024<> p;
+    Eigen::VectorXd x0 = p.initial_point();
+    nablapp::solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    nablapp::basic_solver solver{
+        nablapp::filter_slsqp_policy<nablapp::hs024<>::problem_dimension>{},
+        p, x0, opts};
+    auto result = solver.solve(opts);
+
+    const bool ok = result.iterations <= 14
+        && std::abs(result.objective_value - (-1.0)) < 1e-6;
+    if(!ok)
+        std::println(stderr,
+                     "FAIL: filter_slsqp HS024 iters={} f={:.6e} (expected <= 14 @ -1.0)",
+                     result.iterations, result.objective_value);
+    std::println("  filter_slsqp HS024: iters={} f={:.6e}",
+                 result.iterations, result.objective_value);
+    return ok;
+}
+
 }
 
 int main()
@@ -594,6 +634,8 @@ int main()
     if(!probe_kkt_residual())
         return 1;
     if(!probe_regression_hs026())
+        return 1;
+    if(!probe_regression_hs024())
         return 1;
 
     std::println("Filter SLSQP micro-benchmark, {} repetitions each\n", reps);

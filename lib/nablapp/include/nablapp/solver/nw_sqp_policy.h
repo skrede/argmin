@@ -461,34 +461,43 @@ struct nw_sqp_policy
         double phi_new = detail::l1_merit(s.objective_value,
                                             s.c_eq, s.c_ineq, s.sigma);
 
-        // Multiplier re-estimation at x_{k+1} via least-squares projection.
-        // The QP-derived lambda_new satisfies the linearised KKT at x_k, not
-        // at x_{k+1} where the gradient and Jacobian have moved. Reusing
+        // Active-set multiplier re-estimation at x_{k+1}. The QP-derived
+        // lambda_new satisfies the linearised KKT at x_k, not at x_{k+1}
+        // where grad_f and the constraint Jacobian have moved; reusing
         // lambda_new at the new iterate produces a stationarity leg that
-        // oscillates with the remaining problem curvature; the LS projection
-        // replaces them with the lambda best-explaining grad_f at the current
-        // iterate. The inequality slice is projected to >= 0 via cwiseMax
-        // (dual feasibility leg of the KKT conditions). lambda_reest is local
-        // to this kkt evaluation; BFGS curvature-pair construction above at
-        // :419-423 already used lambda_new (QP multipliers), so inter-
-        // iteration BFGS semantics are unchanged.
+        // oscillates with the remaining problem curvature. Active-set LS
+        // detects binding inequalities (|c_ineq[i]| < 1e-8) and solves the
+        // reduced LS problem on just the equality + active rows, with
+        // mu_ineq clamped to >= 0 for dual feasibility. Plain LS +
+        // cwiseMax fails on optima with parallel inequality gradients
+        // (HS024: row 2 = -row 3 of J_ineq at x*) because the min-norm
+        // split between the parallel rows is not KKT-valid after sign
+        // projection. lambda_reest is local to this kkt evaluation;
+        // BFGS curvature-pair construction above at :419-423 continues
+        // to use lambda_new (QP multipliers) so inter-iteration BFGS
+        // semantics are unchanged.
         //
-        // Reference: N&W 2e Section 18.3 (multiplier re-estimation);
+        // Reference: N&W 2e Section 18.3 and Algorithm 18.3 (working-set
+        //            identification);
         //            eq. 18.15 (least-squares lambda);
-        //            Definition 12.1 (KKT conditions require mu_ineq >= 0);
+        //            Definition 12.1 (KKT conditions: stationarity +
+        //            dual feasibility + complementarity);
         //            eq. 12.34 (Lagrangian stationarity leg).
         Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
         Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
         if(m > 0)
         {
-            Eigen::VectorXd g_dyn = s.g;
+            Eigen::Vector<double, N> g_fixed = s.g;
             Eigen::VectorXd lambda_reest =
-                detail::estimate_multipliers(g_dyn, s.J_all);
+                detail::estimate_multipliers_active_set<double,
+                                                        N,
+                                                        Eigen::Dynamic,
+                                                        Eigen::Dynamic>(
+                    g_fixed, s.J_eq, s.J_ineq, s.c_ineq);
             if(s.n_eq > 0)
                 lambda_eq_kkt = lambda_reest.head(s.n_eq);
             if(s.n_ineq > 0)
-                mu_ineq_kkt =
-                    lambda_reest.segment(s.n_eq, s.n_ineq).cwiseMax(0.0);
+                mu_ineq_kkt = lambda_reest.segment(s.n_eq, s.n_ineq);
         }
         double kkt = detail::kkt_residual<double,
                                           Eigen::Dynamic,
