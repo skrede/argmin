@@ -253,8 +253,16 @@ struct mma_policy
         Eigen::Vector<double, MC> g_mma = -s.c_ineq;
         Eigen::Matrix<double, MC, N> dg_mma = -s.J_ineq;
 
+        // Svanberg 1987 baseline MMA: pass raa_0 = 0 and zero raa vector.
+        // The subproblem's 0.001 * |grad| stabilizer (Svanberg 2002 Section
+        // 3, active regardless of raa) reproduces the 1987 reference
+        // implementation; GCMMA adds adaptive raa on top of the same
+        // coefficient path.
+        const Eigen::Vector<double, MC> raa_zero =
+            Eigen::Vector<double, MC>::Zero(m);
         s.subproblem->compute_coefficients(
             s.x, s.f, s.g, g_mma, dg_mma, s.L, s.U,
+            0.0, raa_zero,
             s.opts.subproblem);
 
         // 4. Solve dual subproblem with proper bounds

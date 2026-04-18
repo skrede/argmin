@@ -220,14 +220,19 @@ TEST_CASE("fixed-dim mma_subproblem_solver: zero dynamic allocation", "[zero-cop
     Eigen::Vector<double, N> x_max;
     x_max << 2.0, 3.0, 4.0;
 
+    // Svanberg 2002 Section 3 regularization arguments. Zero raa recovers
+    // the Svanberg 1987 baseline (0.001 * |grad| stabilizer only).
+    const double raa_0 = 0.0;
+    Eigen::VectorXd raa = Eigen::VectorXd::Zero(m);
+
     // Warm-up: compute coefficients and solve once
-    sub.compute_coefficients(x, 1.0, grad_f, g, dg, L, U);
+    sub.compute_coefficients(x, 1.0, grad_f, g, dg, L, U, raa_0, raa);
     sub.dual_solve(L, U, x_min, x_max);
 
     // Second run should be allocation-free
     Eigen::internal::set_is_malloc_allowed(false);
 
-    sub.compute_coefficients(x, 1.0, grad_f, g, dg, L, U);
+    sub.compute_coefficients(x, 1.0, grad_f, g, dg, L, U, raa_0, raa);
     auto x_opt = sub.dual_solve(L, U, x_min, x_max);
 
     Eigen::internal::set_is_malloc_allowed(true);

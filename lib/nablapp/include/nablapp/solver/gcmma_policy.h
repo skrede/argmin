@@ -3,18 +3,27 @@
 
 // Globally Convergent MMA (GCMMA) policy.
 //
-// Wraps MMA with a conservatism loop that tightens asymptotes
-// until the actual function/constraint values are bounded by their
-// convex separable approximations (sufficient decrease condition).
-// This guarantees global convergence under standard assumptions.
+// Wraps MMA with a conservativity loop per Svanberg 2002 Section 4.2.
+// On each outer iteration, the asymptotes (L, U) are updated once and
+// held fixed; an inner loop then repeatedly builds the convex separable
+// approximation, solves the dual subproblem, and checks whether the
+// approximation is conservative at the trial point:
+//     f_trial    <= approx_f    + epsimin
+//     g_i_trial  <= approx_g_i  + epsimin   for all i.
+// If non-conservative, the per-component conservativity regularizers
+// raa_0 / raa_i grow (objective grows iff the objective was
+// non-conservative; each raa_i grows iff constraint i was violating),
+// and the inner loop retries. On max-inner exhaustion a null step is
+// returned so the paper's global convergence proof is preserved.
 //
 // Reference: Svanberg 2002, "A class of globally convergent
 //            optimization methods based on conservative convex
-//            separable approximations".
+//            separable approximations", SIAM J. Optim. 12(2).
 
 #include "nablapp/solver/mma_policy.h"
 #include "nablapp/detail/asymptote_update.h"
 #include "nablapp/detail/mma_subproblem.h"
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/lagrangian.h"
 #include "nablapp/options/asymptote_options.h"
 #include "nablapp/options/mma_subproblem_options.h"
@@ -48,9 +57,35 @@ struct gcmma_policy
     {
         typename mma_policy<N>::options_type mma_opts{};
         std::optional<std::uint16_t> max_inner_iterations{};    // default: 15 (Svanberg 2002)
-        std::optional<double> raa0{};                           // default: 1e-5 (Svanberg 2002)
-        std::optional<double> tighten_factor{};                 // default: 0.7 (Svanberg 2002)
-        std::optional<double> minimum_distance_fraction{};      // default: 0.001 (Svanberg 2002)
+
+        // Svanberg 2002 Section 4.2 initial regularization floor.
+        // raa_0 and raa_i are state members that adapt (grow) on
+        // non-conservative trials; raa0 is both the floor they cannot
+        // drop below and the initial value they start from at outer
+        // iteration 0 (scaled by the asymp formula).
+        std::optional<double> raa0{};                           // default: 1e-5 (floor + initial)
+
+        // Svanberg 2002 Section 4.2 per-component conservativity growth
+        // controls.
+        //
+        // raa_growth: multiplicative factor applied to raa on
+        //             non-conservative trials. Svanberg 2002 uses 1.1
+        //             (paper default); nablapp default is 2.0 (approximately
+        //             4 inner iterations to reach the 10x ceiling, versus
+        //             7-8 at 1.1x).
+        //
+        // raa_max_factor: 10x ceiling on raa growth within a single outer
+        //                 iteration (Svanberg 2002 cap).
+        //
+        // conservativity_slack: epsimin in the paper; a fixed positive
+        //                       slack on the conservativity inequality,
+        //                       independent of the adaptive raa.
+        //
+        // Reference: Svanberg 2002, Section 4.2.
+        std::optional<double> raa_growth{};                     // default: 2.0
+        std::optional<double> raa_max_factor{};                 // default: 10.0
+        std::optional<double> conservativity_slack{};           // default: 1e-7 (epsimin)
+
         asymptote_options asymptote{};                          // Embedded asymptote params
         mma_subproblem_options subproblem{};                     // Embedded subproblem params
         std::uint16_t stall_window{50};
@@ -70,6 +105,18 @@ struct gcmma_policy
         typename mma_policy<N>::template state_type<P> mma_state;
         options_type opts;
 
+        // Svanberg 2002 Section 4.2 per-component conservativity
+        // coefficients. Persistent across outer iterations (global
+        // algorithm state; not reset per outer). raa_0 scales the
+        // objective regularization; raa[i] scales the constraint-i
+        // regularization. Both grow on non-conservative inner iterations
+        // within a single outer iter.
+        //
+        // Reference: Svanberg 2002, Section 3 (regularization role);
+        //            Section 4.2 (growth rule).
+        double raa_0{0.0};
+        Eigen::Vector<double, M> raa;
+
         // Proxy members for basic_solver compatibility (it accesses state_.x,
         // state_.c_eq, state_.c_ineq directly).
         Eigen::Vector<double, N>& x = mma_state.x;
@@ -79,10 +126,12 @@ struct gcmma_policy
         state_type() = default;
         state_type(const state_type& o)
             : mma_state{o.mma_state}, opts{o.opts}
+            , raa_0{o.raa_0}, raa{o.raa}
             , x{mma_state.x}, c_eq{mma_state.c_eq}, c_ineq{mma_state.c_ineq}
         {}
         state_type(state_type&& o) noexcept
             : mma_state{std::move(o.mma_state)}, opts{std::move(o.opts)}
+            , raa_0{o.raa_0}, raa{std::move(o.raa)}
             , x{mma_state.x}, c_eq{mma_state.c_eq}, c_ineq{mma_state.c_ineq}
         {}
         state_type& operator=(const state_type& o)
@@ -91,6 +140,8 @@ struct gcmma_policy
             {
                 mma_state = o.mma_state;
                 opts = o.opts;
+                raa_0 = o.raa_0;
+                raa = o.raa;
             }
             return *this;
         }
@@ -100,6 +151,8 @@ struct gcmma_policy
             {
                 mma_state = std::move(o.mma_state);
                 opts = std::move(o.opts);
+                raa_0 = o.raa_0;
+                raa = std::move(o.raa);
             }
             return *this;
         }
@@ -125,6 +178,12 @@ struct gcmma_policy
     {
         state_type<Problem> s;
         s.mma_state = mma_policy<N>{}.init(problem, x0, sopts);
+
+        // raa_0 / raa are zero-initialized; the first step() detects
+        // the zero-state at iteration 0 and seeds from the asymp formula.
+        const int m = static_cast<int>(s.mma_state.c_ineq.size());
+        s.raa.resize(m);
+        s.raa.setZero();
         return s;
     }
 
@@ -137,138 +196,241 @@ struct gcmma_policy
         const int n = static_cast<int>(ms.x.size());
         const int m = static_cast<int>(ms.c_ineq.size());
 
-        double asym_init = ms.opts.asymptote_init.value_or(0.5);
-        double asym_dec = ms.opts.asymptote_decrease.value_or(0.7);
-        double asym_inc = ms.opts.asymptote_increase.value_or(1.2);
-        double move_lim = ms.opts.move_limit.value_or(0.2);
-        double eff_scale = ms.opts.effective_bounds_scale.value_or(10.0);
-        std::uint16_t max_inner = s.opts.max_inner_iterations.value_or(15);
-        double raa0_val = s.opts.raa0.value_or(1e-5);
-        double tighten = s.opts.tighten_factor.value_or(0.7);
-        double min_dist_frac = s.opts.minimum_distance_fraction.value_or(0.001);
+        const double asym_init = ms.opts.asymptote_init.value_or(0.5);
+        const double asym_dec = ms.opts.asymptote_decrease.value_or(0.7);
+        const double asym_inc = ms.opts.asymptote_increase.value_or(1.2);
+        const double move_lim = ms.opts.move_limit.value_or(0.2);
+        const double eff_scale = ms.opts.effective_bounds_scale.value_or(10.0);
+        const std::uint16_t max_inner = s.opts.max_inner_iterations.value_or(15);
+        const double raa0_floor = s.opts.raa0.value_or(1e-5);
+        const double raa_growth = s.opts.raa_growth.value_or(2.0);
+        const double raa_max_factor = s.opts.raa_max_factor.value_or(10.0);
+        const double epsimin = s.opts.conservativity_slack.value_or(1e-7);
 
-        // Re-evaluate at current x (skip on first iteration)
-        if(ms.iteration != 0)
-        {
-            ms.f = ms.problem->value(ms.x);
-            ms.problem->gradient(ms.x, ms.g);
-            if(m > 0)
-            {
-                Eigen::VectorXd c_tmp(m);
-                ms.problem->constraints(ms.x, c_tmp);
-                ms.c_ineq = c_tmp;
-            }
-            if(m > 0)
-            {
-                Eigen::MatrixXd J_tmp(m, n);
-                ms.problem->constraint_jacobian(ms.x, J_tmp);
-                ms.J_ineq = J_tmp;
-            }
-        }
+        // Effective bounds for asymptote update (open-box handling).
+        Eigen::Vector<double, N> x_min_eff =
+            effective_bounds(ms.lower, ms.x, n, false, eff_scale);
+        Eigen::Vector<double, N> x_max_eff =
+            effective_bounds(ms.upper, ms.x, n, true, eff_scale);
 
-        // Effective bounds for asymptote update
-        Eigen::Vector<double, N> x_min_eff = effective_bounds(ms.lower, ms.x, n, false, eff_scale);
-        Eigen::Vector<double, N> x_max_eff = effective_bounds(ms.upper, ms.x, n, true, eff_scale);
-
-        // Update asymptotes, passing embedded options
+        // Update asymptotes ONCE per outer iteration. Svanberg 2002
+        // Section 4.2 keeps (L, U) fixed across the inner loop; only
+        // raa_0 / raa grow.
         detail::update_asymptotes(
             ms.L, ms.U, ms.x, ms.x_old1, ms.x_old2,
             x_min_eff, x_max_eff,
             ms.iteration, asym_init, asym_dec, asym_inc,
             s.opts.asymptote);
 
-        // Work with copies of L, U for inner tightening
-        Eigen::Vector<double, N> L_inner = ms.L;
-        Eigen::Vector<double, N> U_inner = ms.U;
+        // Svanberg 2002 Section 4.2 initial raa per problem scale
+        // (computed once at outer iteration 0 when state is fresh):
+        //     raa_0_init = max( raa0_floor, (0.1 / n) * |grad_f| dot (U-L) )
+        //     raa_i_init = max( raa0_floor, (0.1 / n) * |grad_g_i| dot (U-L) )
+        // Subsequent outer iterations carry the grown value forward.
+        //
+        // Reference: Svanberg 2002 Section 4.2; arjendeetman/GCMMA-MMA-Python
+        //            src/mmapy/mma.py asymp initializer.
+        if(ms.iteration == 0 && s.raa_0 == 0.0)
+        {
+            const Eigen::Vector<double, N> UL_range =
+                (ms.U - ms.L).cwiseMax(1e-12);
+            const double inv_n = 1.0 / static_cast<double>(n);
+            const double grad_scale = ms.g.cwiseAbs().dot(UL_range);
+            s.raa_0 = std::max(raa0_floor, 0.1 * grad_scale * inv_n);
 
-        // MMA convention: g_i <= 0 form
+            if(static_cast<int>(s.raa.size()) != m)
+                s.raa.resize(m);
+            for(int i = 0; i < m; ++i)
+            {
+                const double dg_row_scale =
+                    ms.J_ineq.row(i).cwiseAbs().dot(UL_range);
+                s.raa[i] = std::max(raa0_floor, 0.1 * dg_row_scale * inv_n);
+            }
+        }
+
+        // Svanberg 1987 Section 3 eq. (3.3)-(3.5) subproblem bounds:
+        // asymptote-safety-shift the current iterate inward within (L, U),
+        // intersect with the true variable bounds, then apply a
+        // sigma-based move limit (scale-adaptive via the asymptote
+        // half-width). Computed ONCE per outer iter because the inner
+        // conservativity loop keeps asymptotes fixed.
+        //
+        // Reference: Svanberg 1987, Section 3 eq. (3.3)-(3.5);
+        //            NLopt ccsa_quadratic sigma-based move limit pattern.
+        Eigen::Vector<double, N> alpha(n);
+        Eigen::Vector<double, N> beta(n);
+        for(int j = 0; j < n; ++j)
+        {
+            const double L_safe = ms.L[j] + 0.01 * (ms.x[j] - ms.L[j]);
+            const double U_safe = ms.U[j] - 0.01 * (ms.U[j] - ms.x[j]);
+
+            alpha[j] = std::max(L_safe, ms.lower[j]);
+            beta[j]  = std::min(U_safe, ms.upper[j]);
+
+            const double sigma_j = 0.5 * (ms.U[j] - ms.L[j]);
+            const double delta_j = move_lim * sigma_j;
+            alpha[j] = std::max(alpha[j], ms.x[j] - delta_j);
+            beta[j]  = std::min(beta[j],  ms.x[j] + delta_j);
+
+            if(alpha[j] >= beta[j])
+            {
+                const double mid = 0.5 * (alpha[j] + beta[j]);
+                alpha[j] = mid - 1e-10;
+                beta[j]  = mid + 1e-10;
+            }
+        }
+
+        // MMA convention: g_i <= 0 form (nablapp uses c_ineq >= 0).
         Eigen::Vector<double, MC> g_mma = -ms.c_ineq;
         Eigen::Matrix<double, MC, N> dg_mma = -ms.J_ineq;
 
         Eigen::Vector<double, N> x_trial(n);
         double f_trial{};
-        Eigen::VectorXd c_ineq_trial(m);
+        Eigen::Vector<double, MC> c_ineq_trial(m);
 
+        // Svanberg 2002 Section 4.2 inner conservativity loop.
+        // On non-conservative trials, per-component raa grows (objective
+        // iff objective was non-conservative, constraint i iff that
+        // constraint was violating). On max-inner exhaustion a null step
+        // is returned so the global convergence proof is preserved.
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
-            // Compute coefficients with current (possibly tightened) asymptotes
             ms.subproblem->compute_coefficients(
-                ms.x, ms.f, ms.g, g_mma, dg_mma, L_inner, U_inner,
+                ms.x, ms.f, ms.g, g_mma, dg_mma,
+                ms.L, ms.U,
+                s.raa_0, s.raa,
                 s.opts.subproblem);
 
-            // Solve dual subproblem using pre-allocated solver.
-            // Feasible region = tightened asymptote interval, not effective bounds.
-            // Svanberg (2002): subproblem solution must lie within (L_inner, U_inner)
-            // for the conservatism check to succeed without post-hoc distortion.
             x_trial = ms.subproblem->dual_solve(
-                L_inner, U_inner, L_inner, U_inner,
+                ms.L, ms.U, alpha, beta,
                 s.opts.subproblem);
 
-            // Apply move limits
-            for(int j = 0; j < n; ++j)
-            {
-                double range = finite_range(ms.lower[j], ms.upper[j]);
-                double delta = move_lim * range;
-                x_trial[j] = std::clamp(x_trial[j],
-                    std::max(ms.x[j] - delta, ms.lower[j]),
-                    std::min(ms.x[j] + delta, ms.upper[j]));
-            }
-
-            // Evaluate actual values at trial point
             f_trial = ms.problem->value(x_trial);
             if(m > 0)
-                ms.problem->constraints(x_trial, c_ineq_trial);
-
-            // Check conservatism: actual <= approximation for objective
-            // and for each constraint (in g <= 0 form)
-            double approx_f = ms.subproblem->subproblem_value(
-                x_trial, L_inner, U_inner);
-
-            bool conservative = (f_trial <= approx_f + raa0_val);
-
-            if(conservative && m > 0)
             {
-                for(int i = 0; i < m; ++i)
+                Eigen::VectorXd c_tmp(m);
+                ms.problem->constraints(x_trial, c_tmp);
+                c_ineq_trial = c_tmp;
+            }
+
+            // Conservativity test per Svanberg 2002 Section 3.
+            const double approx_f = ms.subproblem->subproblem_value(
+                x_trial, ms.L, ms.U);
+
+            bool conservative_obj = (f_trial <= approx_f + epsimin);
+            bool conservative_ineq = true;
+            for(int i = 0; i < m && conservative_ineq; ++i)
+            {
+                const double g_actual = -c_ineq_trial[i];
+                const double g_approx = ms.subproblem->subproblem_constraint(
+                    i, x_trial, ms.L, ms.U);
+                if(g_actual > g_approx + epsimin)
+                    conservative_ineq = false;
+            }
+
+            if(conservative_obj && conservative_ineq)
+                break;
+
+            // Svanberg 2002 Section 4.2 raacof: step-geometry-scaled
+            // growth factor computed from the actual trial displacement.
+            //
+            // Reference: arjendeetman/GCMMA-MMA-Python raaupdate
+            //            (Svanberg MATLAB port).
+            double raacof = 0.0;
+            for(int j = 0; j < n; ++j)
+            {
+                const double dx = x_trial[j] - ms.x[j];
+                const double denom_ux =
+                    std::max(ms.U[j] - x_trial[j], 1e-12);
+                const double denom_xl =
+                    std::max(x_trial[j] - ms.L[j], 1e-12);
+                const double xxux = dx / denom_ux;
+                const double xxxl = dx / denom_xl;
+                const double scale_range =
+                    std::max(ms.upper[j] - ms.lower[j], 1.0);
+                const double ulxx = (ms.U[j] - ms.L[j]) / scale_range;
+                raacof += (xxux * xxxl) * ulxx;
+            }
+            raacof = std::max(raacof, 1e-12);
+
+            // Objective grows iff non-conservative; the 10x cap is
+            // Svanberg 2002's paper-faithful ceiling on per-outer-iter
+            // growth.
+            if(!conservative_obj)
+            {
+                const double delta = (f_trial - approx_f) / raacof;
+                s.raa_0 = std::min(
+                    raa_growth * (s.raa_0 + delta),
+                    raa_max_factor * s.raa_0);
+            }
+
+            // Per-constraint growth on violating components only.
+            for(int i = 0; i < m; ++i)
+            {
+                const double g_actual = -c_ineq_trial[i];
+                const double g_approx =
+                    ms.subproblem->subproblem_constraint(
+                        i, x_trial, ms.L, ms.U);
+                if(g_actual > g_approx + epsimin)
                 {
-                    double g_actual = -c_ineq_trial[i];
-                    double g_approx = ms.subproblem->subproblem_constraint(
-                        i, x_trial, L_inner, U_inner);
-                    if(g_actual > g_approx + raa0_val)
-                    {
-                        conservative = false;
-                        break;
-                    }
+                    const double delta = (g_actual - g_approx) / raacof;
+                    s.raa[i] = std::min(
+                        raa_growth * (s.raa[i] + delta),
+                        raa_max_factor * s.raa[i]);
                 }
             }
 
-            if(conservative)
-                break;
-
-            // Tighten asymptotes: move L, U closer by tighten_factor
-            for(int j = 0; j < n; ++j)
+            // Max-inner exhaustion: return null step so the Svanberg 2002
+            // global convergence proof holds (no non-conservative accept).
+            // Null steps are exempt from step_tolerance per the framework
+            // contract; raa will be tighter on the next outer iter.
+            //
+            // Reference: Svanberg 2002 Section 4.2 (closure condition of
+            //            the convergence proof).
+            if(inner + 1 == max_inner)
             {
-                L_inner[j] = ms.x[j] - tighten * (ms.x[j] - L_inner[j]);
-                U_inner[j] = ms.x[j] + tighten * (U_inner[j] - ms.x[j]);
+                const Eigen::Matrix<double, 0, N> J_eq_empty_ex(0, n);
+                const Eigen::Vector<double, 0> lambda_eq_empty_ex;
+                const Eigen::Vector<double, 0> c_eq_empty_ex;
+                const auto& mu_ineq_ex = ms.subproblem->multipliers();
+                const double kkt_ex =
+                    detail::kkt_residual<double, N, 0, MC>(
+                        ms.g,
+                        J_eq_empty_ex,
+                        ms.J_ineq,
+                        lambda_eq_empty_ex,
+                        mu_ineq_ex,
+                        c_eq_empty_ex,
+                        ms.c_ineq);
 
-                // Safety: keep minimum distance
-                double range = finite_range(ms.lower[j], ms.upper[j]);
-                double min_dist = min_dist_frac * range;
-                L_inner[j] = std::min(L_inner[j], ms.x[j] - min_dist);
-                U_inner[j] = std::max(U_inner[j], ms.x[j] + min_dist);
+                return step_result<double>{
+                    .objective_value = ms.f,
+                    .gradient_norm = ms.g.norm(),
+                    .step_size = 0.0,
+                    .objective_change = 0.0,
+                    .improved = false,
+                    .is_null_step = true,
+                    .constraint_violation =
+                        detail::primal_feasibility_inf(
+                            ms.c_eq, ms.c_ineq),
+                    .x_norm = ms.x.norm(),
+                    .kkt_residual = kkt_ex,
+                };
             }
         }
 
-        // Accept trial point
-        double f_old = ms.f;
-        double step_size = (x_trial - ms.x).norm();
+        // Accept the conservative trial point.
+        const double f_old = ms.f;
+        const double step_size = (x_trial - ms.x).norm();
 
         ms.x_old2 = ms.x_old1;
         ms.x_old1 = ms.x;
         ms.x = x_trial;
         ms.f = f_trial;
-        ms.c_ineq = c_ineq_trial;
+        if(m > 0)
+            ms.c_ineq = c_ineq_trial;
 
-        // Re-evaluate gradient and Jacobian at new point
+        // Re-evaluate gradient and Jacobian at the accepted iterate.
         ms.problem->gradient(ms.x, ms.g);
         if(m > 0)
         {
@@ -279,16 +441,37 @@ struct gcmma_policy
 
         ++ms.iteration;
 
-        double violation = detail::constraint_violation(ms.c_eq, ms.c_ineq);
-        double grad_norm = std::max(ms.g.norm(), violation);
+        // E-measure KKT residual via the subproblem dual multipliers
+        // (mirrors the MMA accept-step wire). MMA / GCMMA share the same
+        // subproblem form; sign convention is identical (y_i = mu_ineq_i
+        // with no flip; see mma_subproblem.h multipliers() comment).
+        //
+        // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
+        //            Definition 12.1 + eq. 12.34 (E-measure composition);
+        //            Svanberg 1987 Section 5; Svanberg 2002 Section 5.
+        const Eigen::Matrix<double, 0, N> J_eq_empty_acc(0, n);
+        const Eigen::Vector<double, 0> lambda_eq_empty_acc;
+        const Eigen::Vector<double, 0> c_eq_empty_acc;
+        const auto& mu_ineq_acc = ms.subproblem->multipliers();
+        const double kkt_acc = detail::kkt_residual<double, N, 0, MC>(
+            ms.g,
+            J_eq_empty_acc,
+            ms.J_ineq,
+            lambda_eq_empty_acc,
+            mu_ineq_acc,
+            c_eq_empty_acc,
+            ms.c_ineq);
 
         return step_result<double>{
             .objective_value = ms.f,
-            .gradient_norm = grad_norm,
+            .gradient_norm = ms.g.norm(),
             .step_size = step_size,
             .objective_change = ms.f - f_old,
             .improved = ms.f < f_old,
+            .constraint_violation = detail::primal_feasibility_inf(
+                ms.c_eq, ms.c_ineq),
             .x_norm = ms.x.norm(),
+            .kkt_residual = kkt_acc,
         };
     }
 
@@ -296,27 +479,21 @@ struct gcmma_policy
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         mma_policy<N>{}.template reset<P>(s.mma_state, x0);
+        // Reset adaptive conservativity state so the next step() re-seeds
+        // the asymp formula from the gradient at x0.
+        s.raa_0 = 0.0;
+        s.raa.setZero();
     }
 
     template <typename P>
     void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         mma_policy<N>{}.template reset_clear<P>(s.mma_state, x0);
+        s.raa_0 = 0.0;
+        s.raa.setZero();
     }
 
 private:
-    static double finite_range(double lo, double hi)
-    {
-        constexpr double inf = std::numeric_limits<double>::infinity();
-        if(lo <= -inf && hi >= inf)
-            return 1.0;
-        if(lo <= -inf)
-            return std::max(std::abs(hi), 1.0);
-        if(hi >= inf)
-            return std::max(std::abs(lo), 1.0);
-        return std::max(hi - lo, 1e-10);
-    }
-
     static Eigen::Vector<double, N> effective_bounds(
         const Eigen::Vector<double, N>& bounds, const Eigen::Vector<double, N>& x,
         int n, bool is_upper, double scale = 10.0)

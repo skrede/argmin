@@ -49,11 +49,28 @@ struct mma_coeffs
 // g:      constraint values at x (m), with g[i] >= 0 feasible
 // dg:     constraint Jacobian at x (m x n)
 // L, U:   lower/upper asymptotes (n)
-// epsilon: regularization for strict convexity
+// raa_0:  objective conservativity regularizer (0 for Svanberg 1987 MMA;
+//         adaptive state for Svanberg 2002 GCMMA)
+// raa:    per-constraint conservativity regularizer (zeros for MMA;
+//         adaptive state vector for GCMMA)
+// opts:   subproblem options; regularization_epsilon is a division-hygiene
+//         floor only, NOT the primary regularizer.
 //
-// The approximation matches function and gradient values at x.
+// Svanberg 2002 Section 3 structured regularization:
+//     p_0j = (U_j - x_j)^2 * ( max(df/dx_j, 0) + 0.001 * |df/dx_j|
+//                              + raa_0 / (U_j - L_j) ) + eps_floor
+//     q_0j = (x_j - L_j)^2 * ( max(-df/dx_j, 0) + 0.001 * |df/dx_j|
+//                              + raa_0 / (U_j - L_j) ) + eps_floor
+// with |g| = max(g, 0) + max(-g, 0) (split-gradient magnitude).
 //
-// Reference: Svanberg 1987, eq. (2.1)-(2.5).
+// The 0.001 * |g| stabilizer is active even at raa_0 = 0: this recovers
+// Svanberg's own 1987 baseline mmasub.m coefficient form. The
+// raa_0 / (U - L) term is Svanberg 2002's GCMMA-specific addition which
+// grows adaptively on non-conservative trials.
+//
+// Reference: Svanberg 2002, SIAM J. Optim. 12(2), Section 3 (paper
+//            notation rho_0j == raa_0); Svanberg 1987, IJNME 24,
+//            Section 3 (recovered by raa_0 = 0).
 template <typename Scalar, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 mma_coeffs<Scalar, N, M> mma_coefficients(
     const Eigen::Vector<Scalar, N>& x,
@@ -63,11 +80,14 @@ mma_coeffs<Scalar, N, M> mma_coefficients(
     const Eigen::Matrix<Scalar, M, N>& dg,
     const Eigen::Vector<Scalar, N>& L,
     const Eigen::Vector<Scalar, N>& U,
+    Scalar raa_0,
+    const Eigen::Vector<Scalar, M>& raa,
     const mma_subproblem_options& opts = {})
 {
     const int n = static_cast<int>(x.size());
     const int m = static_cast<int>(g.size());
-    const auto epsilon = static_cast<Scalar>(opts.regularization_epsilon.value_or(1e-7));
+    const auto eps_floor = static_cast<Scalar>(
+        opts.regularization_epsilon.value_or(1e-10));
 
     mma_coeffs<Scalar, N, M> c;
     c.p0.resize(n);
@@ -77,31 +97,51 @@ mma_coeffs<Scalar, N, M> mma_coefficients(
     c.r0.resize(1);
     c.ri.resize(m);
 
-    // Objective coefficients
+    // Objective coefficients (Svanberg 2002 Section 3).
     Scalar r0_val = f;
     for(int j = 0; j < n; ++j)
     {
-        Scalar ux = U[j] - x[j];
-        Scalar xl = x[j] - L[j];
+        const Scalar ux = U[j] - x[j];
+        const Scalar xl = x[j] - L[j];
+        const Scalar inv_UL = Scalar(1) / (U[j] - L[j]);
 
-        c.p0[j] = ux * ux * std::max(grad_f[j], Scalar(0)) + epsilon;
-        c.q0[j] = xl * xl * std::max(-grad_f[j], Scalar(0)) + epsilon;
+        const Scalar gp = std::max(grad_f[j], Scalar(0));
+        const Scalar gn = std::max(-grad_f[j], Scalar(0));
+        const Scalar abs_g = gp + gn;
+
+        c.p0[j] = ux * ux
+            * (gp + Scalar(0.001) * abs_g + raa_0 * inv_UL)
+            + eps_floor;
+        c.q0[j] = xl * xl
+            * (gn + Scalar(0.001) * abs_g + raa_0 * inv_UL)
+            + eps_floor;
 
         r0_val -= c.p0[j] / ux + c.q0[j] / xl;
     }
     c.r0[0] = r0_val;
 
-    // Constraint coefficients
+    // Constraint coefficients: same structure with per-constraint raa[i].
+    //
+    // Reference: Svanberg 2002, Section 3 (constraint-level regularization).
     for(int i = 0; i < m; ++i)
     {
         Scalar ri_val = g[i];
         for(int j = 0; j < n; ++j)
         {
-            Scalar ux = U[j] - x[j];
-            Scalar xl = x[j] - L[j];
+            const Scalar ux = U[j] - x[j];
+            const Scalar xl = x[j] - L[j];
+            const Scalar inv_UL = Scalar(1) / (U[j] - L[j]);
 
-            c.pi(i, j) = ux * ux * std::max(dg(i, j), Scalar(0)) + epsilon;
-            c.qi(i, j) = xl * xl * std::max(-dg(i, j), Scalar(0)) + epsilon;
+            const Scalar dgp = std::max(dg(i, j), Scalar(0));
+            const Scalar dgn = std::max(-dg(i, j), Scalar(0));
+            const Scalar abs_dg = dgp + dgn;
+
+            c.pi(i, j) = ux * ux
+                * (dgp + Scalar(0.001) * abs_dg + raa[i] * inv_UL)
+                + eps_floor;
+            c.qi(i, j) = xl * xl
+                * (dgn + Scalar(0.001) * abs_dg + raa[i] * inv_UL)
+                + eps_floor;
 
             ri_val -= c.pi(i, j) / ux + c.qi(i, j) / xl;
         }
@@ -194,7 +234,13 @@ public:
 
     // Compute MMA approximation coefficients into pre-allocated workspace.
     //
-    // Reference: Svanberg 1987, eq. (2.1)-(2.5).
+    // raa_0, raa: conservativity regularizers. Zero for Svanberg 1987 MMA
+    //             (the 0.001 * |grad| stabilizer is always active);
+    //             adaptive state members for Svanberg 2002 GCMMA.
+    //
+    // Reference: Svanberg 2002, SIAM J. Optim. 12(2), Section 3
+    //            (structured regularization); Svanberg 1987 Section 3
+    //            (baseline recovered by raa_0 = 0).
     void compute_coefficients(
         const Eigen::Vector<Scalar, N>& x,
         Scalar f,
@@ -203,33 +249,61 @@ public:
         const constraint_matrix& dg,
         const Eigen::Vector<Scalar, N>& L,
         const Eigen::Vector<Scalar, N>& U,
+        Scalar raa_0,
+        const constraint_vector& raa,
         const mma_subproblem_options& opts = {})
     {
-        const auto epsilon = static_cast<Scalar>(opts.regularization_epsilon.value_or(1e-7));
+        const auto eps_floor = static_cast<Scalar>(
+            opts.regularization_epsilon.value_or(1e-10));
 
+        // Objective coefficients (Svanberg 2002 Section 3):
+        //     p_0j = (U-x)^2 * ( max(df/dx, 0) + 0.001 * |df/dx|
+        //                        + raa_0 / (U-L) ) + eps_floor
+        //     q_0j = (x-L)^2 * ( max(-df/dx, 0) + 0.001 * |df/dx|
+        //                        + raa_0 / (U-L) ) + eps_floor
         Scalar r0_val = f;
         for(int j = 0; j < n_; ++j)
         {
-            Scalar ux = U[j] - x[j];
-            Scalar xl = x[j] - L[j];
+            const Scalar ux = U[j] - x[j];
+            const Scalar xl = x[j] - L[j];
+            const Scalar inv_UL = Scalar(1) / (U[j] - L[j]);
 
-            coeffs_.p0[j] = ux * ux * std::max(grad_f[j], Scalar(0)) + epsilon;
-            coeffs_.q0[j] = xl * xl * std::max(-grad_f[j], Scalar(0)) + epsilon;
+            const Scalar gp = std::max(grad_f[j], Scalar(0));
+            const Scalar gn = std::max(-grad_f[j], Scalar(0));
+            const Scalar abs_g = gp + gn;
+
+            coeffs_.p0[j] = ux * ux
+                * (gp + Scalar(0.001) * abs_g + raa_0 * inv_UL)
+                + eps_floor;
+            coeffs_.q0[j] = xl * xl
+                * (gn + Scalar(0.001) * abs_g + raa_0 * inv_UL)
+                + eps_floor;
 
             r0_val -= coeffs_.p0[j] / ux + coeffs_.q0[j] / xl;
         }
         coeffs_.r0[0] = r0_val;
 
+        // Constraint coefficients: same Svanberg 2002 Section 3 structure
+        // with per-constraint raa[i] in place of raa_0.
         for(int i = 0; i < m_; ++i)
         {
             Scalar ri_val = g[i];
             for(int j = 0; j < n_; ++j)
             {
-                Scalar ux = U[j] - x[j];
-                Scalar xl = x[j] - L[j];
+                const Scalar ux = U[j] - x[j];
+                const Scalar xl = x[j] - L[j];
+                const Scalar inv_UL = Scalar(1) / (U[j] - L[j]);
 
-                coeffs_.pi(i, j) = ux * ux * std::max(dg(i, j), Scalar(0)) + epsilon;
-                coeffs_.qi(i, j) = xl * xl * std::max(-dg(i, j), Scalar(0)) + epsilon;
+                const Scalar dgp = std::max(dg(i, j), Scalar(0));
+                const Scalar dgn = std::max(-dg(i, j), Scalar(0));
+                const Scalar abs_dg = dgp + dgn;
+
+                coeffs_.pi(i, j) = ux * ux
+                    * (dgp + Scalar(0.001) * abs_dg + raa[i] * inv_UL)
+                    + eps_floor;
+                coeffs_.qi(i, j) = xl * xl
+                    * (dgn + Scalar(0.001) * abs_dg + raa[i] * inv_UL)
+                    + eps_floor;
 
                 ri_val -= coeffs_.pi(i, j) / ux + coeffs_.qi(i, j) / xl;
             }
