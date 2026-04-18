@@ -284,6 +284,26 @@ if(NABLAPP_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Diagnostic MMA/GCMMA-breakdown harness (throwaway; emits per-iter CSV
+# for MMA on HS043, GCMMA on HS035, GCMMA on HS043, plus a one-time
+# sign-convention probe on HS076 MMA). EXCLUDE_FROM_ALL so it does not
+# enter the default target set; invoke with
+# `cmake --build <dir> --target diagnostic_mma_breakdown`.
+add_executable(diagnostic_mma_breakdown EXCLUDE_FROM_ALL
+    diagnostic_mma_breakdown.cpp)
+target_link_libraries(diagnostic_mma_breakdown PRIVATE nablapp::nablapp)
+target_compile_options(diagnostic_mma_breakdown PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(NABLAPP_LTO_SUPPORTED)
+    set_target_properties(diagnostic_mma_breakdown PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 option(NABLAPP_BENCH_CERES "Build Ceres comparison benchmarks" ON)
 if(NABLAPP_BENCH_CERES)
     find_package(Ceres CONFIG QUIET)
