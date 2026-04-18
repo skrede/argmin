@@ -1,25 +1,35 @@
 // Throwaway diagnostic harness: emits per-iteration 5-leg KKT residual
-// breakdown across the post-Phase-31 regression cases so the convergence
-// fix in the following plan can be authored against measured evidence
-// rather than hypothesis.
+// breakdown plus a 4-column lagrangian-gradient decomposition
+// (grad_f_component, J^T lambda_QP, J^T lambda_reest,
+// lagrangian_gradient_delta) across 24 (problem x policy) SQP
+// combinations -- {hs006, hs007, hs024, hs026, hs043, hs071} x
+// {kraft_slsqp, nw_sqp, filter_slsqp, filter_nw_sqp} -- so the
+// Phase 31.2 multiplier re-estimation fix (D-4) and the
+// constrained_convergence_policy removal (D-1) can be authored
+// against measured evidence rather than hypothesis. A 25th reference
+// case (byrd_lbfgsb brown_badly_scaled) is retained as a non-SQP
+// trajectory carried over from the Phase 31.1 regression sweep.
 //
-// The six target cases (4 SQP premature-ftol regressions, 1 byrd_lbfgsb
-// null-step termination gap, 1 hs071 diagnostic byproduct) are defined
-// at the top of main(). Each case drives basic_solver::step() in a
-// loop, inspects solver.state() + the returned step_result + the
-// per-criterion last_check_results(), and emits one CSV row per step
-// on stdout.
+// Each SQP case drives basic_solver::step() in a loop, inspects
+// solver.state() + the returned step_result + the per-criterion
+// last_check_results(), and emits one CSV row per step on stdout.
+// Convergence thresholds are deliberately tight (1e-14 / 1e-18) so
+// the default convergence tests do NOT terminate the solver --
+// the full iter-20-to-50 tail is the signal of interest for
+// tail-drift analysis.
 //
 // The 5-leg breakdown lives in kkt_residual_breakdown() below. It is
 // deliberately a local free function (NOT exported to
 // lib/nablapp/include/nablapp/detail/) -- this file is deletable once
-// the permanent convergence fix lands. The canonical kkt_residual
-// rewrite in detail/kkt_residual.h is a separate plan's deliverable.
+// the Phase 31.2 convergence fix and its bench snapshot land. The
+// canonical kkt_residual helper in detail/kkt_residual.h is separate.
 //
 // Reference: Nocedal & Wright, "Numerical Optimization" 2nd ed. (2006),
 //            Definition 12.1 (KKT conditions: stationarity + primal
 //            feasibility + dual feasibility + complementarity);
 //            eq. 12.34 (Lagrangian stationarity leg);
+//            Section 18.3 + eq. 18.15 (least-squares multiplier
+//            re-estimation at the new iterate);
 //            Byrd, Lu, Nocedal, Zhu (1995), "A Limited Memory Algorithm
 //            for Bound Constrained Optimization", SIAM J. Sci. Comput.
 //            16(5), 1190-1208 (byrd_lbfgsb GCP path).
@@ -44,10 +54,13 @@
 // mu_ineq >= 0 under the same sign convention.
 
 #include "nablapp/solver/byrd_lbfgsb_policy.h"
+#include "nablapp/solver/filter_nw_sqp_policy.h"
+#include "nablapp/solver/filter_slsqp_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/solver/nw_sqp_policy.h"
 #include "nablapp/solver/convergence.h"
+#include "nablapp/detail/lagrangian.h"
 #include "nablapp/solver/options.h"
 #include "nablapp/test_functions/hock_schittkowski.h"
 #include "nablapp/test_functions/more_garbow_hillstrom.h"
@@ -79,6 +92,10 @@ struct kkt_leg_breakdown
     double primal_ineq{};
     double dual_feas{};
     double complementarity{};
+    double grad_f_component{};              // ||grad_f||_inf at current iterate
+    double J_eq_T_lambda_component_QP{};    // ||J_all^T lambda_QP||_inf
+    double J_eq_T_lambda_component_reest{}; // ||J_all^T lambda_reest||_inf
+    double lagrangian_gradient_delta{};     // ||grad_f - J_all^T lambda_reest||_inf
 };
 
 // Diagnostic-only 5-leg composition of the first-order KKT error,
@@ -170,12 +187,19 @@ void print_header(std::string_view case_label)
                  "complementarity_leg,dual_feasibility_leg,primal_eq_leg,"
                  "primal_ineq_leg,kkt_current,gradient_norm,x_norm,"
                  "step_size,feasibility_gate_effective,fired_criterion,"
-                 "policy_status");
+                 "policy_status,grad_f_component,J_eq_T_lambda_component_QP,"
+                 "J_eq_T_lambda_component_reest,lagrangian_gradient_delta");
 }
 
 // Emits one CSV data row. `fired_criterion` is the index of the first
 // criterion that fired on the last check; `policy_status_code` is the
 // solver_status numeric code returned by the policy (or -1 if none).
+//
+// Columns 17-20 (grad_f_component, J_eq_T_lambda_component_QP / _reest,
+// lagrangian_gradient_delta) carry the lagrangian-gradient decomposition
+// attributing the stationarity leg to the gradient magnitude, the
+// QP-multiplier contribution, and the re-estimated-multiplier
+// contribution -- per N&W 2e eq. 18.15 (least-squares lambda).
 void print_row(std::uint32_t iter,
                double f, double c_eq_norm, double c_ineq_violation,
                const kkt_leg_breakdown& legs,
@@ -185,13 +209,96 @@ void print_row(std::uint32_t iter,
                int fired_criterion, int policy_status_code)
 {
     std::println("{},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},"
-                 "{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{},{}",
+                 "{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{},{},"
+                 "{:.6e},{:.6e},{:.6e},{:.6e}",
                  iter, f, c_eq_norm, c_ineq_violation,
                  legs.stationarity, legs.complementarity, legs.dual_feas,
                  legs.primal_eq, legs.primal_ineq,
                  kkt_current, gradient_norm, x_norm, step_size,
                  feasibility_gate_effective, fired_criterion,
-                 policy_status_code);
+                 policy_status_code,
+                 legs.grad_f_component,
+                 legs.J_eq_T_lambda_component_QP,
+                 legs.J_eq_T_lambda_component_reest,
+                 legs.lagrangian_gradient_delta);
+}
+
+// Computes the lagrangian-gradient decomposition columns from the
+// current iterate's state: grad_f at x_{k+1}, the stacked full Jacobian
+// A_full = [J_eq; J_ineq], the "policy-current" lambda stack (QP-derived
+// for kraft_slsqp / nw_sqp / filter_nw_sqp; already-re-estimated for
+// filter_slsqp per its :540-554 block), and the re-estimated lambda
+// stack via detail::estimate_multipliers.
+//
+// The breakdown attributes the stationarity leg to three components:
+//   grad_f_component   = ||grad_f(x_{k+1})||_inf
+//   J_eq_T_lambda_QP   = ||A_full^T lambda_policy||_inf (stale for 3 of 4 policies)
+//   J_eq_T_lambda_reest= ||A_full^T lambda_reest||_inf (theoretically correct)
+//
+// lagrangian_gradient_delta = ||grad_f - A_full^T lambda_reest||_inf
+// measures the residual stationarity leg *after* re-estimation --
+// if this is small while stationarity_leg is large, the stale-multiplier
+// hypothesis (D-4) is confirmed.
+//
+// No mu_ineq.cwiseMax(0.0) projection is applied on the re-estimated
+// stack -- the diagnostic purpose is to observe the raw LS fit so
+// Plan 03's needed dual-feasibility projection is measurable as a
+// dedicated signal (any negative mu_ineq entries show up in the
+// re-estimated stack before downstream clamp).
+//
+// Reference: N&W 2e Section 18.3 (multiplier re-estimation);
+//            eq. 18.15 (least-squares lambda).
+template <typename State>
+kkt_leg_breakdown compute_lagrangian_breakdown(
+    const kkt_leg_breakdown& existing_legs,
+    const State& s)
+{
+    kkt_leg_breakdown out = existing_legs;
+
+    const Eigen::Index n = s.g.size();
+    const Eigen::Index m_eq = s.n_eq;
+    const Eigen::Index m_ineq = s.n_ineq;
+    const Eigen::Index m = m_eq + m_ineq;
+
+    out.grad_f_component = n > 0
+        ? s.g.template lpNorm<Eigen::Infinity>()
+        : 0.0;
+
+    if(m == 0 || n == 0)
+    {
+        out.J_eq_T_lambda_component_QP = 0.0;
+        out.J_eq_T_lambda_component_reest = 0.0;
+        out.lagrangian_gradient_delta = out.grad_f_component;
+        return out;
+    }
+
+    Eigen::MatrixXd A_full(m, n);
+    if(m_eq > 0)
+        A_full.topRows(m_eq) = s.J_eq;
+    if(m_ineq > 0)
+        A_full.bottomRows(m_ineq) = s.J_ineq;
+
+    // Policy-current lambda stack: s.lambda as written by the policy.
+    // filter_slsqp already re-estimates into s.lambda at :540-554, so
+    // for that policy the QP / reest columns should coincide; for the
+    // other three SQP policies s.lambda carries the QP-derived stack
+    // directly (D-4 insertion target).
+    Eigen::VectorXd lambda_policy = Eigen::VectorXd::Zero(m);
+    if(s.lambda.size() >= m)
+        lambda_policy = s.lambda.head(m);
+
+    Eigen::VectorXd g_dyn = s.g;
+    Eigen::VectorXd lambda_reest =
+        nablapp::detail::estimate_multipliers(g_dyn, A_full);
+
+    out.J_eq_T_lambda_component_QP =
+        (A_full.transpose() * lambda_policy).template lpNorm<Eigen::Infinity>();
+    out.J_eq_T_lambda_component_reest =
+        (A_full.transpose() * lambda_reest).template lpNorm<Eigen::Infinity>();
+    out.lagrangian_gradient_delta =
+        (g_dyn - A_full.transpose() * lambda_reest).template lpNorm<Eigen::Infinity>();
+
+    return out;
 }
 
 // -----------------------------------------------------------------
@@ -210,10 +317,16 @@ void run_sqp_case(std::string_view case_label, Problem problem, Policy policy)
 
     auto x0 = problem.initial_point();
     nablapp::solver_options opts;
+    // Thresholds set liberally so the solver does NOT terminate via the
+    // default convergence tests -- we want the full iteration trajectory
+    // for decomposition analysis. max_iterations = 50 caps runtime.
+    // The iter-20-to-50 tail is the signal of interest per 31.1
+    // DIAGNOSIS Case 2 (kraft_slsqp hs026 BFGS tail-drift).
     opts.max_iterations = 50;
-    opts.set_gradient_threshold(1e-6);
-    opts.set_objective_threshold(1e-15);
-    opts.set_step_threshold(1e-15);
+    opts.set_gradient_threshold(1e-14);
+    opts.set_objective_threshold(1e-18);
+    opts.set_step_threshold(1e-18);
+    opts.set_stationarity_threshold(1e-14);
 
     nablapp::basic_solver solver{policy, problem, x0, opts};
 
@@ -257,6 +370,13 @@ void run_sqp_case(std::string_view case_label, Problem problem, Policy policy)
             s.g, s.J_eq, s.J_ineq,
             lambda_eq, mu_ineq,
             s.c_eq, s.c_ineq);
+
+        // Extend the 5-leg breakdown with the lagrangian-gradient
+        // decomposition (grad_f_component, J_eq_T_lambda_component_QP /
+        // _reest, lagrangian_gradient_delta). The QP column reads
+        // s.lambda as written by the policy -- policy-current, not
+        // a structural "QP before re-estimation" snapshot.
+        legs = compute_lagrangian_breakdown(legs, s);
 
         const double c_eq_norm = s.c_eq.size() > 0
             ? s.c_eq.template lpNorm<Eigen::Infinity>()
@@ -406,48 +526,90 @@ void run_byrd_brown_case()
 
 }
 
+// -----------------------------------------------------------------
+// Phase 31.2 Plan 01 diagnostic matrix: 24 cases over
+// {hs006, hs007, hs024, hs026, hs043, hs071} x
+// {kraft_slsqp, nw_sqp, filter_slsqp, filter_nw_sqp}. Each
+// run_sqp_case emits per-iter rows with the full 20-column CSV
+// (original 16 legs + 4 new lagrangian-gradient decomposition
+// columns) so the DIAGNOSIS author can grep by policy x problem.
+//
+// The byrd_lbfgsb brown_badly_scaled case is retained at the end
+// as it remains the only non-SQP reference trajectory in this
+// harness (unrelated to D-4 / D-1, kept for context after phase
+// 31.1 surfaced the roundoff_limited regression there).
+// -----------------------------------------------------------------
+
 int main()
 {
     using Hs006 = nablapp::hs006<double>;
     using Hs007 = nablapp::hs007<double>;
+    using Hs024 = nablapp::hs024<double>;
     using Hs026 = nablapp::hs026<double>;
+    using Hs043 = nablapp::hs043<double>;
     using Hs071 = nablapp::hs071<double>;
 
-    // 1. kraft_slsqp on hs006 -- post-phase31 6 iters / acc 2.16e-06 vs
-    //    post-phase30 7 iters / acc 9.24e-08 (23x worse).
-    run_sqp_case("kraft_slsqp hs006",
-                 Hs006{},
+    // ---- kraft_slsqp: 6 cases -------------------------------------
+    run_sqp_case("kraft_slsqp hs006", Hs006{},
                  nablapp::kraft_slsqp_policy<Hs006::problem_dimension>{});
-
-    // 2. kraft_slsqp on hs026 -- post-phase31 12 iters / 1.57e-04 vs
-    //    post-phase30 20 iters / 2.90e-07 (542x worse).
-    run_sqp_case("kraft_slsqp hs026",
-                 Hs026{},
+    run_sqp_case("kraft_slsqp hs007", Hs007{},
+                 nablapp::kraft_slsqp_policy<Hs007::problem_dimension>{});
+    run_sqp_case("kraft_slsqp hs024", Hs024{},
+                 nablapp::kraft_slsqp_policy<Hs024::problem_dimension>{});
+    run_sqp_case("kraft_slsqp hs026", Hs026{},
                  nablapp::kraft_slsqp_policy<Hs026::problem_dimension>{});
+    run_sqp_case("kraft_slsqp hs043", Hs043{},
+                 nablapp::kraft_slsqp_policy<Hs043::problem_dimension>{});
+    run_sqp_case("kraft_slsqp hs071", Hs071{},
+                 nablapp::kraft_slsqp_policy<Hs071::problem_dimension>{});
 
-    // 3. nw_sqp on hs007 -- post-phase31 6 iters / 1.70e-04 vs
-    //    post-phase30 7 iters / 1.19e-06 (143x worse).
-    run_sqp_case("nw_sqp hs007",
-                 Hs007{},
+    // ---- nw_sqp: 6 cases ------------------------------------------
+    run_sqp_case("nw_sqp hs006", Hs006{},
+                 nablapp::nw_sqp_policy<Hs006::problem_dimension>{});
+    run_sqp_case("nw_sqp hs007", Hs007{},
                  nablapp::nw_sqp_policy<Hs007::problem_dimension>{});
-
-    // 4. nw_sqp on hs026 -- byte-identical mechanism to (2).
-    run_sqp_case("nw_sqp hs026",
-                 Hs026{},
+    run_sqp_case("nw_sqp hs024", Hs024{},
+                 nablapp::nw_sqp_policy<Hs024::problem_dimension>{});
+    run_sqp_case("nw_sqp hs026", Hs026{},
                  nablapp::nw_sqp_policy<Hs026::problem_dimension>{});
-
-    // 5. byrd_lbfgsb on brown_badly_scaled -- 13 iters stalled pre vs
-    //    10000 iters max_iterations post, identical acc 6.628e-28.
-    run_byrd_brown_case();
-
-    // 6. nw_sqp on hs071 -- D-E4 diagnostic-only sixth case. Post-phase31
-    //    ftol_reached at acc=3.56 iter 8; unchanged from pre-phase31
-    //    accuracy. Logs the 5-leg breakdown at the iter-8 ftol iterate
-    //    so the Plan 02 author can judge whether the Full E-measure
-    //    will close it as a side effect.
-    run_sqp_case("nw_sqp hs071",
-                 Hs071{},
+    run_sqp_case("nw_sqp hs043", Hs043{},
+                 nablapp::nw_sqp_policy<Hs043::problem_dimension>{});
+    run_sqp_case("nw_sqp hs071", Hs071{},
                  nablapp::nw_sqp_policy<Hs071::problem_dimension>{});
+
+    // ---- filter_slsqp: 6 cases ------------------------------------
+    run_sqp_case("filter_slsqp hs006", Hs006{},
+                 nablapp::filter_slsqp_policy<Hs006::problem_dimension>{});
+    run_sqp_case("filter_slsqp hs007", Hs007{},
+                 nablapp::filter_slsqp_policy<Hs007::problem_dimension>{});
+    run_sqp_case("filter_slsqp hs024", Hs024{},
+                 nablapp::filter_slsqp_policy<Hs024::problem_dimension>{});
+    run_sqp_case("filter_slsqp hs026", Hs026{},
+                 nablapp::filter_slsqp_policy<Hs026::problem_dimension>{});
+    run_sqp_case("filter_slsqp hs043", Hs043{},
+                 nablapp::filter_slsqp_policy<Hs043::problem_dimension>{});
+    run_sqp_case("filter_slsqp hs071", Hs071{},
+                 nablapp::filter_slsqp_policy<Hs071::problem_dimension>{});
+
+    // ---- filter_nw_sqp: 6 cases -----------------------------------
+    run_sqp_case("filter_nw_sqp hs006", Hs006{},
+                 nablapp::filter_nw_sqp_policy<Hs006::problem_dimension>{});
+    run_sqp_case("filter_nw_sqp hs007", Hs007{},
+                 nablapp::filter_nw_sqp_policy<Hs007::problem_dimension>{});
+    run_sqp_case("filter_nw_sqp hs024", Hs024{},
+                 nablapp::filter_nw_sqp_policy<Hs024::problem_dimension>{});
+    run_sqp_case("filter_nw_sqp hs026", Hs026{},
+                 nablapp::filter_nw_sqp_policy<Hs026::problem_dimension>{});
+    run_sqp_case("filter_nw_sqp hs043", Hs043{},
+                 nablapp::filter_nw_sqp_policy<Hs043::problem_dimension>{});
+    run_sqp_case("filter_nw_sqp hs071", Hs071{},
+                 nablapp::filter_nw_sqp_policy<Hs071::problem_dimension>{});
+
+    // Retained non-SQP reference trajectory (unrelated to the
+    // 24-case D-4/D-1 matrix above; preserved from the 31.1 harness
+    // for continuity of the brown_badly_scaled roundoff_limited
+    // investigation).
+    run_byrd_brown_case();
 
     return 0;
 }
