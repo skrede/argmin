@@ -4,11 +4,10 @@
 // lagrangian_gradient_delta) across 24 (problem x policy) SQP
 // combinations -- {hs006, hs007, hs024, hs026, hs043, hs071} x
 // {kraft_slsqp, nw_sqp, filter_slsqp, filter_nw_sqp} -- so the
-// Phase 31.2 multiplier re-estimation fix (D-4) and the
-// constrained_convergence_policy removal (D-1) can be authored
-// against measured evidence rather than hypothesis. A 25th reference
-// case (byrd_lbfgsb brown_badly_scaled) is retained as a non-SQP
-// trajectory carried over from the Phase 31.1 regression sweep.
+// multiplier re-estimation fix and the outer-wrapper removal can be
+// authored against measured evidence rather than hypothesis. A 25th
+// reference case (byrd_lbfgsb brown_badly_scaled) is retained as a
+// non-SQP trajectory carried over from the prior regression sweep.
 //
 // Each SQP case drives basic_solver::step() in a loop, inspects
 // solver.state() + the returned step_result + the per-criterion
