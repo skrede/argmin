@@ -62,8 +62,10 @@
 
 #include <Eigen/Core>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <algorithm>
 #include <string_view>
 
 namespace
