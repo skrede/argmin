@@ -162,3 +162,44 @@ TEST_CASE("filter_slsqp populates kkt_residual and exposes is_null_step",
     }
     CHECK(populated);
 }
+
+// HS024 regression guard: locks the active-set multiplier re-estimation
+// closure on a problem where the constraint Jacobian has parallel rows
+// (J_ineq row 2 = -row 3 at x* = (3, sqrt(3))). Plain LS + cwiseMax on the
+// full Jacobian picks a min-norm split that is not KKT-valid after sign
+// projection, leaving stationarity positive at the optimum. Active-set LS
+// restricts the projection to binding inequalities (|c_ineq[i]| < 1e-8)
+// and recovers the textbook multipliers. Null-step branches populate
+// kkt_residual so the composite convergence check can terminate on
+// iterates where the QP returns zero direction at the optimum.
+//
+// Reference baseline (post-phase30): 13 iters @ f = -1.0. Regression
+// target: iterations within 1.
+//
+// Reference: N&W 2e Section 18.3 + Algorithm 18.3 (working-set);
+//            eq. 18.15 (least-squares lambda);
+//            Definition 12.1 (KKT conditions);
+//            eq. 12.34 (composite first-order optimality).
+TEST_CASE("filter_slsqp HS024 regression guard",
+          "[filter_slsqp][regression]")
+{
+    using namespace nablapp;
+
+    hs024<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    basic_solver solver{
+        filter_slsqp_policy<hs024<>::problem_dimension>{},
+        problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-1.0).margin(1e-6));
+    CHECK(result.iterations <= 14);
+    CHECK(solver.constraint_violation() < 1e-6);
+}
+

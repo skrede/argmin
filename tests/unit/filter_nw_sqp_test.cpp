@@ -142,3 +142,35 @@ TEST_CASE("filter_nw_sqp populates kkt_residual and exposes is_null_step",
     }
     CHECK(populated);
 }
+
+// HS024 regression guard on the nw-variant filter SQP policy. Same closure
+// mechanism as filter_slsqp HS024: the active-set multiplier re-estimation
+// restricts the LS projection to binding inequalities (|c_ineq[i]| < 1e-8),
+// clamps active mu_ineq to >= 0, and the null-step branch populates
+// kkt_residual so the composite convergence test can fire at the optimum.
+//
+// Reference baseline (post-phase30): 13 iters @ f = -1.0. Regression target:
+// iterations within 1 of baseline.
+//
+// Reference: N&W 2e Section 18.3 + Algorithm 18.3 (working-set);
+//            eq. 18.15 (least-squares lambda);
+//            eq. 12.34 (composite first-order optimality).
+TEST_CASE("filter_nw_sqp HS024 regression guard",
+          "[filter_nw_sqp][regression]")
+{
+    hs024<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    basic_solver solver{filter_nw_sqp_policy<hs024<>::problem_dimension>{},
+                        problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-1.0).margin(1e-6));
+    CHECK(result.iterations <= 14);
+    CHECK(solver.constraint_violation() < 1e-6);
+}
