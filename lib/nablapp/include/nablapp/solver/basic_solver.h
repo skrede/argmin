@@ -581,6 +581,40 @@ public:
                 stall.window = policy_opts.stall_window;
             }
         }
+
+        // MMA / GCMMA kkt_tolerance option -> stationarity_threshold via
+        // the max-of-two rule. Preserves the user's explicit
+        // stationarity_threshold while honoring the policy hint as a
+        // floor. Mirrors the pattern in forward_solver_hints above for
+        // constraint_tolerance -> stationarity_threshold.
+        //
+        // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
+        //            Definition 12.1 (KKT stationarity); canonical
+        //            max-of-two mapping rule per forward_solver_hints.
+        if constexpr(requires { policy_opts.kkt_tolerance; })
+        {
+            using criteria_tuple = decltype(stored_convergence_.criteria);
+            if constexpr(detail::tuple_contains_v<objective_tolerance_criterion, criteria_tuple>)
+            {
+                auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+                if(policy_opts.kkt_tolerance)
+                {
+                    const double current = ftol.stationarity_threshold.value_or(1e-8);
+                    ftol.stationarity_threshold =
+                        std::max(current, *policy_opts.kkt_tolerance);
+                }
+            }
+            if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
+            {
+                auto& ftol_rel = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
+                if(policy_opts.kkt_tolerance)
+                {
+                    const double current = ftol_rel.stationarity_threshold.value_or(1e-8);
+                    ftol_rel.stationarity_threshold =
+                        std::max(current, *policy_opts.kkt_tolerance);
+                }
+            }
+        }
     }
 
 private:

@@ -410,6 +410,25 @@ public:
 
     const mma_coeffs<Scalar, N, M>& coefficients() const { return coeffs_; }
 
+    // Returns the subproblem dual multipliers y_ as populated by the last
+    // dual_solve call. Valid immediately after dual_solve returns; callers
+    // must read before the next compute_coefficients / dual_solve round.
+    //
+    // Zero-overhead const reference: no copy, no allocation, noexcept.
+    //
+    // Sign convention: y_i >= 0 is the dual feasibility condition for the
+    // MMA constraint g_i(x) <= 0. Under nablapp's c_ineq >= 0 convention
+    // with g_i = -c_ineq_i, the stationarity expression reads
+    //     grad_L = grad_f - sum_i y_i * grad(c_ineq_i),
+    // matching nablapp's Lagrangian sign convention in
+    // detail/lagrangian.h (lines 42-60) -- y_i maps directly to nablapp's
+    // mu_ineq_i with no flip.
+    //
+    // Reference: Svanberg 1987, "The method of moving asymptotes",
+    //            Section 5 (dual KKT); Svanberg 2002, SIAM J. Optim.
+    //            12(2), Section 5.
+    const constraint_vector& multipliers() const noexcept { return y_; }
+
 private:
     int n_{0};
     int m_{0};

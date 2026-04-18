@@ -13,6 +13,7 @@
 
 #include "nablapp/detail/asymptote_update.h"
 #include "nablapp/detail/mma_subproblem.h"
+#include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/lagrangian.h"
 #include "nablapp/options/asymptote_options.h"
 #include "nablapp/options/mma_subproblem_options.h"
@@ -44,7 +45,7 @@ struct mma_policy
 
     struct options_type
     {
-        std::optional<double> move_limit{};              // default: 0.5 (Svanberg 1987)
+        std::optional<double> move_limit{};              // default: 0.9 (Svanberg 1987 Section 5)
         std::optional<double> asymptote_init{};          // default: 0.5 (Svanberg 1987)
         std::optional<double> asymptote_decrease{};      // default: 0.7 (Svanberg 1987)
         std::optional<double> asymptote_increase{};      // default: 1.2 (Svanberg 1987)
@@ -194,7 +195,7 @@ struct mma_policy
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
 
-        double move_lim = s.opts.move_limit.value_or(0.5);
+        double move_lim = s.opts.move_limit.value_or(0.9);
         double asym_init = s.opts.asymptote_init.value_or(0.5);
         double asym_dec = s.opts.asymptote_decrease.value_or(0.7);
         double asym_inc = s.opts.asymptote_increase.value_or(1.2);
@@ -261,68 +262,39 @@ struct mma_policy
             s.L, s.U, alpha, beta,
             s.opts.subproblem);
 
-        // 5. L1 merit function line search.
-        // Prevents oscillation between feasible and infeasible points by
-        // rejecting steps that worsen the merit function phi(x) = f(x) +
-        // mu * cv(x). Backtrack along the MMA direction until merit
-        // improves; accept null step if all backtracks fail.
-        // Reference: Nocedal & Wright, Section 18.3.
-        double f_old = s.f;
-        double cv_old = detail::constraint_violation(s.c_eq, s.c_ineq);
-        constexpr double mu = 10.0;
-        double merit_old = s.f + mu * cv_old;
+        // 5. Unconditional accept of the subproblem solution.
+        //
+        // Svanberg 1987 Section 5 prescribes accepting x_new directly.
+        // Oscillation handling is delegated to the asymptote_update
+        // (asym_dec = 0.7 on oscillation detection between outer
+        // iterations), which is the paper's designated globalization
+        // mechanism. An L1 merit line search grafted on the accept path
+        // double-counts the mechanism and traps the iterate at
+        // step_size = 0 when the subproblem proposes a step that worsens
+        // the L1 merit value -- documented failure mode on HS043.
+        //
+        // Reference: Svanberg 1987, "The method of moving asymptotes",
+        //            Section 5 (unconditional accept);
+        //            detail/asymptote_update.h (oscillation detection).
+        const double f_old = s.f;
+        const Eigen::Vector<double, N> x_old = s.x;
 
-        Eigen::Vector<double, N> dx = x_new - s.x;
-
-        // Evaluate full step
-        double f_trial = s.problem->value(x_new);
-        Eigen::VectorXd c_eq_trial{};
+        const double f_trial = s.problem->value(x_new);
         Eigen::VectorXd c_ineq_trial(m);
         if(m > 0)
             s.problem->constraints(x_new, c_ineq_trial);
-        double cv_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
-        double merit_trial = f_trial + mu * cv_trial;
-
-        for(int bt = 0; bt < 4 && merit_trial > merit_old; ++bt)
-        {
-            double step_alpha = 1.0 / (1 << (bt + 1));
-            x_new = s.x + step_alpha * dx;
-            f_trial = s.problem->value(x_new);
-            if(m > 0)
-                s.problem->constraints(x_new, c_ineq_trial);
-            cv_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
-            merit_trial = f_trial + mu * cv_trial;
-        }
-
-        // Null step with asymptote contraction: if all backtracks failed,
-        // stay at current iterate but tighten asymptotes. This contracts
-        // the trust region so the next iteration proposes a smaller step,
-        // breaking the reject-repeat cycle.
-        if(merit_trial > merit_old)
-        {
-            for(int j = 0; j < n; ++j)
-            {
-                s.L[j] = s.x[j] - asym_dec * (s.x[j] - s.L[j]);
-                s.U[j] = s.x[j] + asym_dec * (s.U[j] - s.x[j]);
-            }
-            x_new = s.x;
-            f_trial = s.f;
-            c_eq_trial = s.c_eq;
-            c_ineq_trial = s.c_ineq;
-            cv_trial = cv_old;
-        }
 
         // 6. Shift history
         s.x_old2 = s.x_old1;
         s.x_old1 = s.x;
 
         // 7. Accept step
-        double step_size = (x_new - s.x).norm();
+        const double step_size = (x_new - s.x).norm();
         s.x = x_new;
         s.f = f_trial;
         s.problem->gradient(s.x, s.g);
-        s.c_eq = c_eq_trial;
-        s.c_ineq = c_ineq_trial;
+        if(m > 0)
+            s.c_ineq = c_ineq_trial;
         if(m > 0)
         {
             Eigen::MatrixXd J_tmp(m, n);
@@ -333,17 +305,54 @@ struct mma_policy
         // 8. Iteration++
         ++s.iteration;
 
-        double violation = cv_trial;
-        double grad_norm = std::max(s.g.norm(), violation);
+        // 9. Composite first-order optimality (N&W 2e Definition 12.1 +
+        //    eq. 12.34). MMA is inequality-only (equalities rejected in
+        //    init()); the primal-equality leg is zero by construction.
+        //
+        // Sign convention: the subproblem dual y_ maps directly to the
+        // nablapp mu_ineq multiplier without a flip. MMA's KKT reads
+        //     grad_L_MMA = grad_f + sum_i y_i * grad(g_i)
+        //                = grad_f - sum_i y_i * grad(c_ineq_i)    // g = -c_ineq
+        // and nablapp's Lagrangian reads
+        //     grad_L     = grad_f - sum_i mu_i * grad(c_ineq_i).
+        // Setting mu_i = y_i gives the identical expression (verified
+        // detail/lagrangian.h lines 42-60 and Svanberg 1987 Section 5).
+        //
+        // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
+        //            Definition 12.1 + eq. 12.34 (E-measure composition);
+        //            Svanberg 1987, Section 5 (MMA dual KKT);
+        //            Svanberg 2002, Section 5.
+        const Eigen::Matrix<double, 0, N> J_eq_empty(0, n);
+        const Eigen::Vector<double, 0> lambda_eq_empty;
+        const Eigen::Vector<double, 0> c_eq_empty;
 
+        const auto& mu_ineq = s.subproblem->multipliers();
+        const double kkt = detail::kkt_residual<double, N, 0, MC>(
+            s.g,
+            J_eq_empty,
+            s.J_ineq,
+            lambda_eq_empty,
+            mu_ineq,
+            c_eq_empty,
+            s.c_ineq);
+
+        // Primal feasibility reported as L-infinity (matches the
+        // dimensional form used by the E-measure legs 2 and 3). Other
+        // constrained policies migrated to L-infinity in an earlier
+        // convergence-polish pass.
+        //
+        // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
+        //            Definition 12.1 (primal feasibility).
         return step_result<double>{
             .objective_value = s.f,
-            .gradient_norm = grad_norm,
+            .gradient_norm = s.g.norm(),
             .step_size = step_size,
             .objective_change = s.f - f_old,
             .improved = s.f < f_old,
-            .constraint_violation = violation,
+            .constraint_violation = detail::primal_feasibility_inf(
+                c_eq_empty, s.c_ineq),
             .x_norm = s.x.norm(),
+            .kkt_residual = kkt,
         };
     }
 
@@ -391,18 +400,6 @@ struct mma_policy
     }
 
 private:
-    static double finite_range(double lo, double hi)
-    {
-        constexpr double inf = std::numeric_limits<double>::infinity();
-        if(lo <= -inf && hi >= inf)
-            return 1.0;
-        if(lo <= -inf)
-            return std::max(std::abs(hi), 1.0);
-        if(hi >= inf)
-            return std::max(std::abs(lo), 1.0);
-        return std::max(hi - lo, 1e-10);
-    }
-
     static Eigen::Vector<double, N> effective_bounds(
         const Eigen::Vector<double, N>& bounds, const Eigen::Vector<double, N>& x,
         int n, bool is_upper, double scale = 10.0)
