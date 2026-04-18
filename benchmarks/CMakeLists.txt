@@ -137,6 +137,18 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
+    add_executable(micro_gcmma micro_gcmma.cpp)
+    target_link_libraries(micro_gcmma PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_compile_options(micro_gcmma PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(NABLAPP_LTO_SUPPORTED)
+        set_target_properties(micro_gcmma PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
     add_executable(micro_nw_sqp micro_nw_sqp.cpp)
     target_link_libraries(micro_nw_sqp PRIVATE nablapp::nablapp NLopt::nlopt)
     target_compile_options(micro_nw_sqp PRIVATE

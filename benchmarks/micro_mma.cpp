@@ -3,8 +3,14 @@
 // MMA handles inequality constraints only, using gradient-based convex
 // separable approximations with moving asymptotes.
 //
+// Threshold convention: relative objective tolerance (1e-12) matches
+// NLopt's ftol_rel on LD_MMA; previously an absolute threshold caused
+// nablapp to exit earlier than NLopt by construction and made post-fix
+// measurements uninterpretable.
+//
 // Reference: Svanberg 1987, "The method of moving asymptotes --
-//            a new method for structural optimization".
+//            a new method for structural optimization";
+//            NLopt 2.10.0 src/algs/mma/mma.c (ftol_rel convention).
 
 #include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/basic_solver.h"
@@ -251,11 +257,15 @@ template <typename Problem>
 timing bench_nablapp(const Problem& problem, std::uint32_t reps)
 {
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    // NLopt-parity convergence: LD_MMA uses ftol_rel on the objective.
+    // slsqp_compatible_convergence mirrors NLopt's ftol_rel + xtol_rel
+    // convention so cross-bench measurements are meaningful; absolute
+    // ftol made nablapp exit earlier than NLopt by construction
+    // regardless of fix quality.
+    nablapp::solver_options<nablapp::slsqp_compatible_convergence> opts;
     opts.max_iterations = 5000;
-    opts.set_gradient_threshold(1e-10);
-    opts.set_objective_threshold(1e-8);
-    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold_rel(1e-12);
+    opts.set_step_threshold_rel(1e-12);
 
     // Warmup.
     {
