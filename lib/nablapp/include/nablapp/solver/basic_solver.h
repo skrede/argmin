@@ -155,6 +155,29 @@ public:
     using scalar_type = typename Policy::scalar_type;
     using state_type = detail::resolve_state_t<Policy, Problem>;
 
+    // Rebinds the incoming problem reference onto the class-template
+    // Problem slot so step_n can call value()/constraints() directly
+    // instead of probing policy state for a cached (f, cv) pair.
+    // Returns nullptr when Problem==void (the legacy non-template
+    // state_type policies, e.g. projected_gn, where no class-level
+    // Problem type exists); returns &problem otherwise. Lifetime
+    // follows the caller-owned problem object -- the same constraint
+    // already applies to every policy state that caches &problem.
+    template <typename P>
+    static constexpr const Problem* bind_problem(const P& problem) noexcept
+    {
+        if constexpr(std::is_same_v<Problem, void>)
+            return nullptr;
+        else
+        {
+            static_assert(std::is_same_v<P, Problem>,
+                          "basic_solver: constructor problem type must "
+                          "match class-template Problem (CTAD normally "
+                          "guarantees this)");
+            return &problem;
+        }
+    }
+
     template <typename P, typename Convergence = default_convergence>
     basic_solver(Policy policy, const P& problem,
                  const Eigen::VectorX<scalar_type>& x0,
@@ -164,6 +187,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
@@ -187,6 +211,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
@@ -202,6 +227,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
@@ -222,6 +248,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
         store_convergence(opts.convergence);
@@ -245,6 +272,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
         store_convergence(opts.convergence);
@@ -262,6 +290,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
         store_convergence(opts.convergence);
@@ -280,6 +309,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
         store_convergence(opts.convergence);
@@ -297,6 +327,7 @@ public:
         , max_time_{other.max_time_}
         , constraint_tolerance_{other.constraint_tolerance_}
         , stored_convergence_{other.stored_convergence_}
+        , problem_ptr_{other.problem_ptr_}
         , state_{std::move(other.state_)}
         , iterations_{other.iterations_}
         , last_status_{other.last_status_}
@@ -313,6 +344,7 @@ public:
             max_time_ = other.max_time_;
             constraint_tolerance_ = other.constraint_tolerance_;
             stored_convergence_ = other.stored_convergence_;
+            problem_ptr_ = other.problem_ptr_;
             state_ = std::move(other.state_);
             iterations_ = other.iterations_;
             last_status_ = other.last_status_;
@@ -391,17 +423,25 @@ public:
 
         // Best-seen tracking (NLopt convention: the returned solve_result
         // reports the best point encountered across the entire loop, not
-        // the terminal trial). Initialize from the entry iterate x_0 so
-        // that immediate divergence or first-step failure still returns
-        // the starting point. Entry f / cv are probed from the policy
-        // state when available; otherwise seeded with extremum sentinels
-        // so any real evaluation wins the first comparison.
+        // the terminal trial). Seed from the entry iterate x_0 via an
+        // explicit pre-loop evaluation -- no state-field probing. The
+        // problem interface guarantees value() on every supported
+        // Problem (objective concept); cv is seeded from the policy's
+        // cached c_eq/c_ineq (populated by policy.init at x_0) using the
+        // L-infinity primal-feasibility measure so best_cv is
+        // dimensionally consistent with step_result.constraint_violation
+        // reported downstream. Policies without a problem binding
+        // (projected_gn family, where Problem==void) fall back to +inf
+        // sentinels; the first accepted step becomes the best-seen
+        // baseline in that case, which still preserves the entry
+        // invariant because state_.x is unchanged until step() runs.
         //
         // Reference: nlopt/src/api/nlopt.c nlopt_optimize (best-solution-
-        //            returned semantics).
+        //            returned semantics); N&W 2e Def 12.1 (primal
+        //            feasibility, L-infinity composition).
         vector<scalar_type, N> best_x = state_.x;
-        scalar_type best_f = extract_best_f_init();
-        scalar_type best_cv = extract_best_cv_init();
+        scalar_type best_f = seed_best_f();
+        scalar_type best_cv = seed_best_cv();
         // User-supplied constraint_tolerance takes precedence over the
         // baked-in feasibility_tolerance default: a caller who bothered
         // to tighten the KKT residual gate expects the best-seen
@@ -686,26 +726,40 @@ public:
     }
 
 private:
-    // Seed best-seen f at step_n entry. Policies that cache f(x) in
-    // state_.f (mma, augmented_lagrangian, ...) or in a nested
-    // state_.mma_state.f proxy (gcmma) provide a real value. Policies
-    // that do not (filter-SQP, kraft, cobyla, ...) seed with +inf so
-    // the first evaluated step always supersedes the sentinel; in that
-    // case the first accepted iterate (not x_0) is adopted as the
-    // best-seen baseline.
-    scalar_type extract_best_f_init() const
+    // Seed best-seen f at step_n entry via a direct problem evaluation.
+    // Requires Problem != void (i.e. the class-template Problem slot was
+    // filled by CTAD or explicit instantiation). Legacy non-template
+    // state_type policies (projected_gn, projected_gradient_gn -- which
+    // target least_squares only) fall back to the +inf sentinel so the
+    // first accepted step becomes the best-seen baseline; x_0 is still
+    // returned via best_x if no step succeeds.
+    //
+    // Reference: nablapp::objective concept (nablapp/formulation/
+    //            concepts.h) -- value(x) is total across supported
+    //            Problem types.
+    scalar_type seed_best_f() const
     {
-        if constexpr(requires { state_.f; })
-            return static_cast<scalar_type>(state_.f);
-        else if constexpr(requires { state_.mma_state.f; })
-            return static_cast<scalar_type>(state_.mma_state.f);
+        if constexpr(!std::is_same_v<Problem, void>)
+            return static_cast<scalar_type>(problem_ptr_->value(state_.x));
         else
             return std::numeric_limits<scalar_type>::infinity();
     }
 
-    scalar_type extract_best_cv_init() const
+    // Seed best-seen cv at step_n entry from the policy's cached
+    // constraint values (populated by policy.init at x_0). L-infinity
+    // composition matches step_result.constraint_violation reporting
+    // downstream, so is_better compares like-against-like in the best-
+    // seen branch. Unconstrained / bound-constrained-only Problems have
+    // empty c_eq / c_ineq and yield cv = 0.
+    //
+    // Reference: detail::primal_feasibility_inf (nablapp/detail/
+    //            lagrangian.h); N&W 2e Def 12.1.
+    scalar_type seed_best_cv() const
     {
-        return constraint_violation();
+        if constexpr(requires { state_.c_eq; state_.c_ineq; })
+            return detail::primal_feasibility_inf(state_.c_eq, state_.c_ineq);
+        else
+            return scalar_type(0);
     }
 
     Policy policy_{};
@@ -714,6 +768,7 @@ private:
     std::optional<std::chrono::nanoseconds> max_time_{};
     std::optional<double> constraint_tolerance_{};
     default_convergence stored_convergence_{};
+    const Problem* problem_ptr_{nullptr};
     state_type state_;
     std::uint32_t iterations_{0};
     solver_status last_status_{solver_status::running};

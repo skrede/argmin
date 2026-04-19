@@ -30,17 +30,19 @@ struct solver_options
     // comparator: an iterate with constraint_violation <= this value
     // is treated as feasible when selecting the returned point.
     //
-    // Default 1e-4 matches the typical primal-feasibility residual of
-    // converged SQP/interior-point iterates and avoids regressing to x_0
-    // when the terminating iterate has a sub-KKT constraint residual.
-    // Tests that demand strict feasibility can override per-call via
-    // opts.constraint_tolerance (which takes precedence) or by setting
-    // opts.feasibility_tolerance directly.
+    // Default 1e-6 matches nablapp's KKT primal-feasibility convention
+    // (detail::kkt_residual L-infinity leg threshold). Callers whose
+    // inner solver floors primal feasibility above 1e-6 (derivative-free
+    // families, coarse-tolerance AL loops, ...) must widen this per-call
+    // via opts.constraint_tolerance (which takes precedence) or by
+    // setting opts.feasibility_tolerance directly. The namespace default
+    // reflects the numerical convention, not the loosest tolerated test
+    // residual.
     //
     // Reference: NLopt nlopt_optimize best-solution-returned convention
     //            (nlopt/src/api/nlopt.c); N&W 2e Definition 12.1
     //            (primal feasibility).
-    double feasibility_tolerance{1e-4};
+    double feasibility_tolerance{1e-6};
     Convergence convergence{};
 
     // Convenience accessors for common convergence criteria thresholds.
