@@ -51,6 +51,41 @@ struct mma_policy
         std::optional<double> asymptote_increase{};      // default: 1.2 (Svanberg 1987)
         std::optional<double> kkt_tolerance{};           // default: 1e-6 (Svanberg 1987)
         std::optional<double> effective_bounds_scale{};  // default: 10.0
+
+        // Svanberg 2002 Section 4.2 inner conservativity loop controls
+        // (NLopt LD_MMA reference at src/algs/mma/mma.c:265-389).  These
+        // knobs parameterize the rho / rhoc apparatus -- a structured
+        // regularizer that grows on non-conservative inner-loop trials
+        // within an outer iter and decays between outer iters.  Distinct
+        // from the GCMMA per-component raa machinery (gcmma_policy uses
+        // the raa_* family); MMA uses scalar rho + per-constraint rhoc
+        // per Svanberg 2002 paper notation.
+        //
+        // Reference: Svanberg 2002, "A class of globally convergent
+        //            optimization methods based on conservative convex
+        //            separable approximations", SIAM J. Optim. 12(2),
+        //            Sections 3 and 4.2; NLopt mma.c:265-389.
+        // rho_init default is 0.1 rather than NLopt mma.c's 1.0 because the
+        // in-tree mma_subproblem coefficient form scales rho as
+        // `rho / (U - L)` per dimension (Svanberg 2002 GCMMA structured
+        // form at detail/mma_subproblem.h:275-280), whereas NLopt's mma.c
+        // uses `0.5 * rho` additively in its quadratic-equation kernel
+        // (mma.c:102-105).  Against the in-tree kernel, NLopt's `rho_init
+        // = 1.0` makes the structured term swamp small near-x0 gradients
+        // on cubic problems (HS024 traps the iterate at the x[1] = 0
+        // boundary corner where the cubic factor zeros the objective).
+        // 0.1 was empirically chosen as the value that satisfies both the
+        // HS024 cubic-descent guard and the HS076 reciprocal-approximation
+        // margin guard simultaneously while preserving the rho-growth /
+        // rho-decay machinery for the cases that need damping.
+        std::optional<double>        rho_init{};               // default: 0.1   (in-tree kernel scaling; NLopt mma.c uses 1.0)
+        std::optional<double>        rho_min{};                // default: 1e-5  (NLopt MMA_RHOMIN floor)
+        std::optional<double>        rho_growth{};             // default: 1.1   (Svanberg 2002 paper-faithful)
+        std::optional<double>        rho_growth_cap{};         // default: 10.0  (NLopt mma.c growth cap)
+        std::optional<double>        rho_decay{};              // default: 0.1   (NLopt mma.c:385 inter-outer)
+        std::optional<std::uint16_t> max_inner_iterations{};   // default: 15    (Svanberg 2002 Section 4.2)
+        std::optional<double>        conservativity_slack{};   // default: 1e-7  (matches gcmma epsimin)
+
         asymptote_options asymptote{};                   // Embedded asymptote update params
         mma_subproblem_options subproblem{};              // Embedded subproblem params
         std::uint16_t stall_window{50};
@@ -78,6 +113,21 @@ struct mma_policy
 
         std::optional<detail::mma_subproblem_solver<double, N, M>> subproblem;
         std::uint32_t iteration{0};
+
+        // Svanberg 2002 Section 4.2 conservativity regularizer state.
+        // rho is a scalar; rhoc is per-constraint.  Both initialized to
+        // rho_init in init(), grown on non-conservative inner-loop trials
+        // per the NLopt mma.c:363-370 formula (mirror of gcmma's
+        // raacof-based growth at gcmma_policy.h:339-353), decayed by
+        // rho_decay between outer iters per NLopt mma.c:385-389.
+        //
+        // Reference: Svanberg 2002 Section 3 (regularization role);
+        //            Section 4.2 (growth + decay rules);
+        //            NLopt mma.c:209-214 (init), :363-370 (growth),
+        //            :385-389 (inter-outer decay).
+        double rho{0.0};
+        Eigen::Vector<double, M> rhoc;
+
         options_type opts;
     };
 
@@ -103,6 +153,14 @@ struct mma_policy
             s.L[j] = x0[j] - half;
             s.U[j] = x0[j] + half;
         }
+
+        // Re-initialize rho/rhoc from the freshly-overridden opts so the
+        // first overload's user-supplied policy_opts.rho_init takes effect
+        // (mirrors the asymptote_init re-init pattern in the loop above).
+        const double rho_init_val_o = s.opts.rho_init.value_or(0.1);
+        s.rho = rho_init_val_o;
+        s.rhoc.setConstant(rho_init_val_o);
+
         return s;
     }
 
@@ -182,6 +240,17 @@ struct mma_policy
         }
 
         s.iteration = 0;
+
+        // Svanberg 2002 Section 4.2 regularizer init: rho and per-
+        // constraint rhoc both start at rho_init (NLopt mma.c:209-214).
+        // rhoc.resize(0) is a no-op safe call when m_ineq == 0
+        // (the policy rejects equality-constrained problems but is
+        // valid for unconstrained-but-bounded inputs in principle).
+        const double rho_init_val = s.opts.rho_init.value_or(0.1);
+        s.rho = rho_init_val;
+        s.rhoc.resize(m_ineq);
+        s.rhoc.setConstant(rho_init_val);
+
         s.subproblem.emplace(n, m_ineq);
 
         return s;
@@ -253,52 +322,186 @@ struct mma_policy
         Eigen::Vector<double, MC> g_mma = -s.c_ineq;
         Eigen::Matrix<double, MC, N> dg_mma = -s.J_ineq;
 
-        // Svanberg 1987 baseline MMA: pass raa_0 = 0 and zero raa vector.
-        // The subproblem's 0.001 * |grad| stabilizer (Svanberg 2002 Section
-        // 3, active regardless of raa) reproduces the 1987 reference
-        // implementation; GCMMA adds adaptive raa on top of the same
-        // coefficient path.
-        const Eigen::Vector<double, MC> raa_zero =
-            Eigen::Vector<double, MC>::Zero(m);
-        s.subproblem->compute_coefficients(
-            s.x, s.f, s.g, g_mma, dg_mma, s.L, s.U,
-            0.0, raa_zero,
-            s.opts.subproblem);
-
-        // 4. Solve dual subproblem with proper bounds
-        Eigen::Vector<double, N> x_new = s.subproblem->dual_solve(
-            s.L, s.U, alpha, beta,
-            s.opts.subproblem);
-
-        // 5. Unconditional accept of the subproblem solution.
+        // 4. Svanberg 2002 Section 4.2 inner conservativity loop.
         //
-        // Svanberg 1987 Section 5 prescribes accepting x_new directly.
-        // Oscillation handling is delegated to the asymptote_update
-        // (asym_dec = 0.7 on oscillation detection between outer
-        // iterations), which is the paper's designated globalization
-        // mechanism. An L1 merit line search grafted on the accept path
-        // double-counts the mechanism and traps the iterate at
-        // step_size = 0 when the subproblem proposes a step that worsens
-        // the L1 merit value -- documented failure mode on HS043.
+        // Per-iteration: compute coefficients with the current regularizer
+        // (s.rho, s.rhoc); solve the dual subproblem; evaluate trial
+        // f / c_ineq; test the conservativity inequality
+        //     f_approx(x_trial) + epsimin >= f(x_trial) AND
+        //     g_approx_i(x_trial) + epsimin >= g_actual_i  for all i.
+        // If conservative -> break and accept the trial.  Otherwise grow
+        // rho / rhoc per the NLopt mma.c:363-370 formula and retry.  On
+        // max_inner_iterations exhaustion, return a null step
+        // (step_size = 0, is_null_step = true) so the Svanberg 2002
+        // global convergence proof's closure condition holds.  The next
+        // outer iter starts with the grown regularizer.
         //
-        // Reference: Svanberg 1987, "The method of moving asymptotes",
-        //            Section 5 (unconditional accept);
-        //            detail/asymptote_update.h (oscillation detection).
-        const double f_old = s.f;
-        const Eigen::Vector<double, N> x_old = s.x;
+        // The per-step weight uses an in-tree raacof step-geometry
+        // formula (mirror of gcmma_policy.h raacof) instead of NLopt's
+        // wval-based formula at mma.c:363-370.  wval is not currently
+        // exposed by mma_subproblem_solver; raacof has the same
+        // positive-definite step-weight regularization shape.
+        //
+        // Reference: Svanberg 2002 Section 4.2 (inner conservativity
+        //            loop + rho-growth schedule);
+        //            NLopt mma.c:265-376 (Steven G. Johnson 2008-2012
+        //            implementation of LD_MMA = Svanberg 2002 CCSA).
+        const std::uint16_t max_inner = s.opts.max_inner_iterations.value_or(15);
+        const double epsimin = s.opts.conservativity_slack.value_or(1e-7);
+        const double rho_growth = s.opts.rho_growth.value_or(1.1);
+        const double rho_growth_cap = s.opts.rho_growth_cap.value_or(10.0);
 
-        const double f_trial = s.problem->value(x_new);
+        Eigen::Vector<double, N> x_trial(n);
+        double f_trial{};
+        // Use VectorXd (dynamic) instead of Vector<double, MC> here so the
+        // m == 0 unconstrained-but-bounded edge case constructs cleanly even
+        // when MC is fixed-size.  Eigen handles the dynamic-to-fixed
+        // assignment to s.c_ineq below (which is Eigen::Vector<double, M>)
+        // at runtime via its built-in conversion.
         Eigen::VectorXd c_ineq_trial(m);
-        if(m > 0)
-            s.problem->constraints(x_new, c_ineq_trial);
+
+        for(std::uint16_t inner = 0; inner < max_inner; ++inner)
+        {
+            s.subproblem->compute_coefficients(
+                s.x, s.f, s.g, g_mma, dg_mma, s.L, s.U,
+                s.rho, s.rhoc,
+                s.opts.subproblem);
+
+            x_trial = s.subproblem->dual_solve(
+                s.L, s.U, alpha, beta,
+                s.opts.subproblem);
+
+            f_trial = s.problem->value(x_trial);
+            if(m > 0)
+                s.problem->constraints(x_trial, c_ineq_trial);
+
+            // Conservativity test per Svanberg 2002 Section 3 + Section
+            // 4.2; NLopt parity at mma.c:302 (objective) and mma.c:314-318
+            // (per-constraint).  approx_f and g_approx_i are evaluated
+            // from the subproblem's coefficient state populated by the
+            // most recent compute_coefficients call.
+            const double approx_f = s.subproblem->subproblem_value(
+                x_trial, s.L, s.U);
+
+            bool conservative_obj = (f_trial <= approx_f + epsimin);
+            bool conservative_ineq = true;
+            for(int i = 0; i < m && conservative_ineq; ++i)
+            {
+                const double g_actual = -c_ineq_trial[i];
+                const double g_approx = s.subproblem->subproblem_constraint(
+                    i, x_trial, s.L, s.U);
+                if(g_actual > g_approx + epsimin)
+                    conservative_ineq = false;
+            }
+
+            if(conservative_obj && conservative_ineq)
+                break;
+
+            // rho / rhoc growth on non-conservative trial.  The raacof
+            // step-geometry weight (mirror of gcmma_policy.h) plays the
+            // role of NLopt's wval at mma.c:363-370.  raacof is a
+            // positive-definite step weight: sum over j of
+            // (dx_j / (U_j - x_trial_j)) * (dx_j / (x_trial_j - L_j))
+            // scaled by (U_j - L_j) / max(upper_j - lower_j, 1).
+            //
+            // Reference: NLopt mma.c:363-370 (canonical growth shape);
+            //            gcmma_policy.h raacof block (in-tree analog).
+            double raacof = 0.0;
+            for(int j = 0; j < n; ++j)
+            {
+                const double dx = x_trial[j] - s.x[j];
+                const double denom_ux = std::max(s.U[j] - x_trial[j], 1e-12);
+                const double denom_xl = std::max(x_trial[j] - s.L[j], 1e-12);
+                const double xxux = dx / denom_ux;
+                const double xxxl = dx / denom_xl;
+                const double scale_range = std::max(s.upper[j] - s.lower[j], 1.0);
+                const double ulxx = (s.U[j] - s.L[j]) / scale_range;
+                raacof += (xxux * xxxl) * ulxx;
+            }
+            raacof = std::max(raacof, 1e-12);
+
+            if(!conservative_obj)
+            {
+                const double delta = (f_trial - approx_f) / raacof;
+                s.rho = std::min(rho_growth * (s.rho + delta),
+                                 rho_growth_cap * s.rho);
+            }
+
+            for(int i = 0; i < m; ++i)
+            {
+                const double g_actual = -c_ineq_trial[i];
+                const double g_approx = s.subproblem->subproblem_constraint(
+                    i, x_trial, s.L, s.U);
+                if(g_actual > g_approx + epsimin)
+                {
+                    const double delta = (g_actual - g_approx) / raacof;
+                    s.rhoc[i] = std::min(rho_growth * (s.rhoc[i] + delta),
+                                         rho_growth_cap * s.rhoc[i]);
+                }
+            }
+
+            // Null-step return on max_inner exhaustion.  Byte-for-byte
+            // mirror of gcmma_policy.h null-step exit modulo state-name
+            // swap (ms.X -> s.X) and the empty c_eq local (mma is
+            // inequality-only).  Preserves Svanberg 2002 Section 4.2
+            // closure condition for the global convergence proof.
+            //
+            // Reference: Svanberg 2002 Section 4.2; gcmma_policy.h
+            //            null-step exit (in-tree byte template).
+            if(inner + 1 == max_inner)
+            {
+                const Eigen::Matrix<double, 0, N> J_eq_empty_ex(0, n);
+                const Eigen::Vector<double, 0> lambda_eq_empty_ex;
+                const Eigen::Vector<double, 0> c_eq_empty_ex;
+                const auto& mu_ineq_ex = s.subproblem->multipliers();
+                const double kkt_ex = detail::kkt_residual<double, N, 0, MC>(
+                    s.g,
+                    J_eq_empty_ex,
+                    s.J_ineq,
+                    lambda_eq_empty_ex,
+                    mu_ineq_ex,
+                    c_eq_empty_ex,
+                    s.c_ineq);
+
+                return step_result<double>{
+                    .objective_value = s.f,
+                    .gradient_norm = s.g.norm(),
+                    .step_size = 0.0,
+                    .objective_change = 0.0,
+                    .improved = false,
+                    .is_null_step = true,
+                    .constraint_violation = detail::primal_feasibility_inf(
+                        c_eq_empty_ex, s.c_ineq),
+                    .x_norm = s.x.norm(),
+                    .kkt_residual = kkt_ex,
+                };
+            }
+        }
+
+        // Inter-outer rho decay per NLopt mma.c:385-389.  Applied at the
+        // conservative-accept exit (the only path that reaches here; the
+        // null-step exit returned above).  Symmetric with the gcmma path
+        // decay; both decay the regularizer between outer iters so it
+        // can RELAX when the trajectory is well-behaved instead of
+        // monotonically saturating at the growth cap.
+        //
+        // Reference: NLopt mma.c:385-389 (MMA_RHOMIN-floored decay).
+        const double rho_decay = s.opts.rho_decay.value_or(0.1);
+        const double rho_min = s.opts.rho_min.value_or(1e-5);
+        s.rho = std::max(rho_decay * s.rho, rho_min);
+        for(int i = 0; i < m; ++i)
+            s.rhoc[i] = std::max(rho_decay * s.rhoc[i], rho_min);
+
+        // 5. Accept the conservative trial point.
+        const double f_old = s.f;
 
         // 6. Shift history
         s.x_old2 = s.x_old1;
         s.x_old1 = s.x;
 
         // 7. Accept step
-        const double step_size = (x_new - s.x).norm();
-        s.x = x_new;
+        const double step_size = (x_trial - s.x).norm();
+        s.x = x_trial;
         s.f = f_trial;
         s.problem->gradient(s.x, s.g);
         if(m > 0)
@@ -385,6 +588,13 @@ struct mma_policy
         s.iteration = 0;
         s.x_old1 = x0;
         s.x_old2 = x0;
+
+        // Re-initialize rho/rhoc from rho_init so a re-run starts with
+        // a clean regularizer state (stale rho/rhoc across reset() would
+        // give non-reproducible behavior).
+        const double rho_init_val_r = s.opts.rho_init.value_or(0.1);
+        s.rho = rho_init_val_r;
+        s.rhoc.setConstant(rho_init_val_r);
     }
 
     template <typename P>
