@@ -6,7 +6,7 @@
 // Solves inequality-constrained optimization problems by iteratively
 // building convex separable reciprocal approximations around moving
 // asymptotes and solving the resulting dual subproblem. Equality
-// constraints are rejected (D-06).
+// constraints are rejected (use SQP or augmented Lagrangian instead).
 //
 // Reference: Svanberg 1987, "The method of moving asymptotes --
 //            a new method for structural optimization".
@@ -116,7 +116,7 @@ struct mma_policy
         static_assert(constrained<Problem>,
                       "mma_policy requires constrained<Problem>");
 
-        // D-06: MMA handles inequality constraints only.
+        // MMA handles inequality constraints only;
         // num_equality() is not constexpr, so checked at runtime.
         assert(problem.num_equality() == 0
                && "MMA handles inequality constraints only. "

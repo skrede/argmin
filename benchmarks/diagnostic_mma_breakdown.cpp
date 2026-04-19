@@ -74,10 +74,10 @@ namespace
 // Replicates detail::mma_dual_solve but captures the dual variable y at
 // convergence so the sign-convention probe has access to the subproblem
 // multiplier. The lib-side dual solve is a free function whose y is
-// strictly local; Plan 01 may not edit library code, so the harness
-// carries its own copy. The structure mirrors detail/mma_subproblem.h
-// (the dual_solve free function) verbatim in numerics; only the return
-// shape changes.
+// strictly local; this read-only diagnostic cannot edit library code,
+// so the harness carries its own copy. The structure mirrors
+// detail/mma_subproblem.h (the dual_solve free function) verbatim in
+// numerics; only the return shape changes.
 //
 // Reference: Svanberg 1987, dual formulation; Svanberg 2002, Section 5.
 template <typename Scalar, int N, int M>
