@@ -23,23 +23,16 @@ static_assert(constrained<hs035<>>);
 
 // MMA on HS076 (inequality + bound-constrained, f* = -4.6818).
 //
-// Post-fix behavior: with Svanberg 1987 Section 5 unconditional accept
-// (merit line-search removed) plus Svanberg 2002 Section 3 structured
-// regularization of the subproblem coefficients, MMA converges to the
-// neighborhood of f* but drifts approximately 0.011 above it due to the
-// reciprocal approximation's late-iter oscillation on this constraint
-// geometry. The drift is stable across builds and has not shifted under
-// either the merit-removal or the structured-regularization surgery.
-//
-// The 0.02 margin below reflects this measured post-fix plateau
-// (best_feasible approximately -4.6713 at iter 25 vs f* = -4.6818).
-// Tightening below 0.015 would require either a finer-than-MMA
-// globalization (GCMMA conservativity) or a step-quality policy change;
-// both are out of MMA's algorithmic capability on this problem.
+// Outer-loop best-seen termination in basic_solver::step_n returns the
+// best feasible iterate encountered during the iteration, not the
+// terminal oscillation trial. MMA's reciprocal approximation drifts
+// approximately 0.011 above f* on this problem; the 0.012 margin locks
+// that measured algorithmic ceiling without over-claiming convergence.
 //
 // Reference: Svanberg 1987, "The method of moving asymptotes", Section 5
 //            (unconditional-accept convergence guarantee, which does not
 //            assert quadratic asymptotic rate).
+//            NLopt nlopt_optimize best-solution-returned convention.
 TEST_CASE("mma converges on HS076", "[mma]")
 {
     hs076 problem;
@@ -51,20 +44,14 @@ TEST_CASE("mma converges on HS076", "[mma]")
     opts.set_objective_threshold(1e-15);
 
     basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    const auto result = solver.solve(opts);
 
-    double best_feasible = 1e10;
-    for(int i = 0; i < 500; ++i)
-    {
-        auto sr = solver.step();
-        if(solver.constraint_violation() < 1e-3
-           && sr.objective_value < best_feasible)
-        {
-            best_feasible = sr.objective_value;
-        }
-    }
-
-    // MMA converges within 0.02 of the optimum (-4.6818...).
-    CHECK(best_feasible == Approx(problem.optimal_value()).margin(0.02));
+    // MMA on HS076 reaches best_feasible approximately -4.6713 within
+    // the 500-iter budget (0.0105 above f* = -4.6818). The returned
+    // solve_result carries that best iterate under the best-seen
+    // termination convention.
+    CHECK(result.objective_value == Approx(problem.optimal_value()).margin(0.012));
+    CHECK(result.constraint_violation <= 1e-6);
 }
 
 // MMA on HS024 (inequality + bound-constrained cubic, f* = -1.0).

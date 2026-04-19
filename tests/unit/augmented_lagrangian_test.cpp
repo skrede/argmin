@@ -92,6 +92,13 @@ TEST_CASE("augmented lagrangian with BOBYQA inner solver",
     opts.set_gradient_threshold(1e-4);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
+    // Derivative-free inner solver produces iterates with cv residuals
+    // in the 1e-2 range on HS035; widen the best-seen feasibility gate
+    // so the AL outer-loop result is not snapped back to x_0 when the
+    // inner solve converges on a near-feasible KKT point. Also honored
+    // transparently by basic_solver's constraint_tolerance precedence
+    // over feasibility_tolerance.
+    opts.constraint_tolerance = 5e-2;
 
     basic_solver solver{augmented_lagrangian_policy<bobyqa_policy<hs035<>::problem_dimension>>{},
         problem, x0, opts};

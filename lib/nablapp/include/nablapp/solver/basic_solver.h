@@ -13,12 +13,13 @@
 
 #include <Eigen/Core>
 
-#include <atomic>
-#include <chrono>
 #include <cmath>
 #include <tuple>
-#include <concepts>
+#include <atomic>
+#include <chrono>
+#include <limits>
 #include <cstdint>
+#include <concepts>
 #include <optional>
 #include <type_traits>
 
@@ -46,6 +47,40 @@ struct tuple_contains<T, std::tuple<Us...>>
 
 template <typename T, typename Tuple>
 inline constexpr bool tuple_contains_v = tuple_contains<T, Tuple>::value;
+}
+
+namespace detail
+{
+// Feasibility-first best-seen comparator used by basic_solver::step_n
+// to select the returned iterate.
+//
+// Tiered ordering:
+//   1. Feasible beats infeasible unconditionally.
+//   2. Both feasible: prefer lower objective.
+//   3. Both infeasible: prefer lower constraint violation.
+//
+// An iterate is "feasible" when its constraint_violation is <= feas_tol;
+// unconstrained problems (cv = 0) always take the feasible branch.
+//
+// Reference: NLopt nlopt_optimize convention (nlopt/src/api/nlopt.c) --
+//            the caller receives the best point encountered, not the
+//            terminal trial. This monotonically improves the reported
+//            solve_result for oscillation-prone policies (MMA, GCMMA,
+//            ISRES, CMA-ES) without regressing well-behaved policies
+//            whose terminal iterate is already their best.
+template <typename Scalar>
+constexpr bool is_better(Scalar f_cand, Scalar cv_cand,
+                         Scalar f_best, Scalar cv_best,
+                         Scalar feas_tol) noexcept
+{
+    const bool cand_feasible = cv_cand <= feas_tol;
+    const bool best_feasible = cv_best <= feas_tol;
+    if(cand_feasible && !best_feasible) return true;
+    if(!cand_feasible && best_feasible) return false;
+    if(cand_feasible && best_feasible)
+        return f_cand < f_best;
+    return cv_cand < cv_best;
+}
 }
 
 namespace detail
@@ -354,6 +389,26 @@ public:
         solver_status status = solver_status::running;
         step_result<scalar_type> last{};
 
+        // Best-seen tracking (NLopt convention: the returned solve_result
+        // reports the best point encountered across the entire loop, not
+        // the terminal trial). Initialize from the entry iterate x_0 so
+        // that immediate divergence or first-step failure still returns
+        // the starting point. Entry f / cv are probed from the policy
+        // state when available; otherwise seeded with extremum sentinels
+        // so any real evaluation wins the first comparison.
+        //
+        // Reference: nlopt/src/api/nlopt.c nlopt_optimize (best-solution-
+        //            returned semantics).
+        vector<scalar_type, N> best_x = state_.x;
+        scalar_type best_f = extract_best_f_init();
+        scalar_type best_cv = extract_best_cv_init();
+        // User-supplied constraint_tolerance takes precedence over the
+        // baked-in feasibility_tolerance default: a caller who bothered
+        // to tighten the KKT residual gate expects the best-seen
+        // comparator to honor the same floor.
+        const scalar_type feas_tol = static_cast<scalar_type>(
+            opts.constraint_tolerance.value_or(opts.feasibility_tolerance));
+
         for(std::uint32_t i = 0; i < budget; ++i)
         {
             if(abort_flag_.load(std::memory_order_relaxed))
@@ -374,6 +429,19 @@ public:
             }
 
             last = step();
+
+            // Best-seen update: compare after every step including the
+            // one that triggers policy_status or convergence, so the
+            // terminal iterate itself is eligible to be the winner.
+            // state_.x has already been updated by policy.step(); the
+            // policy-reported (f, cv) in last are the values at that x.
+            if(detail::is_better(last.objective_value, last.constraint_violation,
+                                 best_f, best_cv, feas_tol))
+            {
+                best_x = state_.x;
+                best_f = last.objective_value;
+                best_cv = last.constraint_violation;
+            }
 
             // Policy-reported failure is final (D-16)
             if(last.policy_status)
@@ -418,10 +486,10 @@ public:
             .status = status,
             .iterations = iterations_,
             .function_evaluations = iterations_,
-            .objective_value = last.objective_value,
+            .objective_value = best_f,
             .gradient_norm = last.gradient_norm,
-            .constraint_violation = constraint_violation(),
-            .x = state_.x,
+            .constraint_violation = best_cv,
+            .x = best_x,
             .wall_time = t1 - t0,
         };
     }
@@ -618,6 +686,28 @@ public:
     }
 
 private:
+    // Seed best-seen f at step_n entry. Policies that cache f(x) in
+    // state_.f (mma, augmented_lagrangian, ...) or in a nested
+    // state_.mma_state.f proxy (gcmma) provide a real value. Policies
+    // that do not (filter-SQP, kraft, cobyla, ...) seed with +inf so
+    // the first evaluated step always supersedes the sentinel; in that
+    // case the first accepted iterate (not x_0) is adopted as the
+    // best-seen baseline.
+    scalar_type extract_best_f_init() const
+    {
+        if constexpr(requires { state_.f; })
+            return static_cast<scalar_type>(state_.f);
+        else if constexpr(requires { state_.mma_state.f; })
+            return static_cast<scalar_type>(state_.mma_state.f);
+        else
+            return std::numeric_limits<scalar_type>::infinity();
+    }
+
+    scalar_type extract_best_cv_init() const
+    {
+        return constraint_violation();
+    }
+
     Policy policy_{};
     std::uint32_t max_iterations_{1000};
     std::uint8_t verbosity_{0};
