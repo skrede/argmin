@@ -12,13 +12,25 @@
 //     g_i_trial  <= approx_g_i  + epsimin   for all i.
 // If non-conservative, the per-component conservativity regularizers
 // raa_0 / raa_i grow (objective grows iff the objective was
-// non-conservative; each raa_i grows iff constraint i was violating),
-// and the inner loop retries. On max-inner exhaustion a null step is
+// non-conservative; each raa_i grows iff constraint i was violating)
+// via the arjendeetman/GCMMA-MMA-Python raacof step-geometry weight
+// (in-tree analog of NLopt mma.c's wval-based growth formula), and
+// the inner loop retries. On max-inner exhaustion a null step is
 // returned so the paper's global convergence proof is preserved.
+// Per-outer raa decay (NLopt mma.c:385-389 mirror, MMA_RHOMIN-floored)
+// is applied at both the conservative-accept exit and the null-step
+// exit so the regularizer relaxes between outer iters instead of
+// saturating at the per-outer growth cap.
 //
-// Reference: Svanberg 2002, "A class of globally convergent
-//            optimization methods based on conservative convex
-//            separable approximations", SIAM J. Optim. 12(2).
+// References:
+//   Svanberg 2002, "A class of globally convergent optimization
+//     methods based on conservative convex separable approximations",
+//     SIAM J. Optim. 12(2):555-573.
+//   arjendeetman/GCMMA-MMA-Python (Svanberg MATLAB port): raacof
+//     step-geometry-scaled growth factor.
+//   NLopt LD_MMA reference (Steven G. Johnson 2008-2012 implementation
+//     of Svanberg 2002 CCSA): src/algs/mma/mma.c lines 265-389
+//     (inner conservativity loop + inter-outer rho/raa decay).
 
 #include "nablapp/solver/mma_policy.h"
 #include "nablapp/detail/asymptote_update.h"

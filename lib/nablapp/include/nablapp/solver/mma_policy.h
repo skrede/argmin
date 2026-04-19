@@ -5,11 +5,23 @@
 //
 // Solves inequality-constrained optimization problems by iteratively
 // building convex separable reciprocal approximations around moving
-// asymptotes and solving the resulting dual subproblem. Equality
-// constraints are rejected (use SQP or augmented Lagrangian instead).
+// asymptotes and solving the resulting dual subproblem under a
+// Svanberg 2002 inner conservativity loop.  Asymptote schedule per
+// Svanberg 1987 Section 3; structured regularization, per-iter
+// rho-growth on non-conservative trials, and inter-outer rho decay
+// per Svanberg 2002 Sections 3 and 4.2 (NLopt LD_MMA reference port
+// at src/algs/mma/mma.c lines 265-389).  Equality constraints are
+// rejected (use SQP or augmented Lagrangian for equality-constrained
+// NLPs).
 //
-// Reference: Svanberg 1987, "The method of moving asymptotes --
-//            a new method for structural optimization".
+// References:
+//   Svanberg 1987, "The method of moving asymptotes -- a new method
+//     for structural optimization", IJNME 24:359-373.
+//   Svanberg 2002, "A class of globally convergent optimization
+//     methods based on conservative convex separable approximations",
+//     SIAM J. Optim. 12(2):555-573.
+//   NLopt LD_MMA reference (Steven G. Johnson 2008-2012 implementation
+//     of Svanberg 2002 CCSA): src/algs/mma/mma.c lines 265-389.
 
 #include "nablapp/detail/asymptote_update.h"
 #include "nablapp/detail/mma_subproblem.h"

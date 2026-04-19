@@ -68,9 +68,6 @@
 namespace
 {
 
-constexpr std::string_view log_dir =
-    ".planning/phases/32.3-mma-gcmma-asymptote-diagnosis/logs/";
-
 constexpr std::string_view csv_header =
     "problem,policy,iter,inner_iter,f,f_trial,f_approx_at_trial,"
     "step_size,x_norm,sign_flip_count,asymptote_factor_mean,"
@@ -311,7 +308,7 @@ void run_case_with_policy_opts(std::string_view problem_label,
     emit_trace(problem_label, policy_label, problem, solver, budget, out);
 }
 
-std::ofstream open_csv(std::string_view leafname)
+std::ofstream open_csv(std::string_view log_dir, std::string_view leafname)
 {
     std::string path{log_dir};
     path.append(leafname);
@@ -323,8 +320,26 @@ std::ofstream open_csv(std::string_view leafname)
 
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    // Default: ./logs/ relative to the current working directory.  No
+    // planning-tool path embedded in source.  Runners override the
+    // destination via --log-dir <path>.
+    std::string log_dir = "./logs/";
+    for(int i = 1; i + 1 < argc; ++i)
+    {
+        if(std::string_view{argv[i]} == "--log-dir")
+        {
+            log_dir = argv[i + 1];
+            // Append a trailing '/' if missing so path concatenation
+            // works identically to the prior file-scope-constant
+            // behavior (open_csv just appends the leaf name).
+            if(!log_dir.empty() && log_dir.back() != '/')
+                log_dir.push_back('/');
+            break;
+        }
+    }
+
     std::filesystem::create_directories(log_dir);
 
     std::fprintf(stderr, "Running diagnostic_mma_asymptote_trace: 7 runs\n");
@@ -333,7 +348,7 @@ int main()
     {
         std::fprintf(stderr,
             "  [1/7] mma_policy HS043 default move_limit 10000 iters\n");
-        auto out = open_csv("mma_hs043_trace.csv");
+        auto out = open_csv(log_dir, "mma_hs043_trace.csv");
         run_case_default("hs043", "mma",
                          nablapp::hs043<double>{},
                          nablapp::mma_policy<4>{},
@@ -344,7 +359,7 @@ int main()
     {
         std::fprintf(stderr,
             "  [2/7] mma_policy HS076 default move_limit 10000 iters\n");
-        auto out = open_csv("mma_hs076_trace.csv");
+        auto out = open_csv(log_dir, "mma_hs076_trace.csv");
         run_case_default("hs076", "mma",
                          nablapp::hs076<double>{},
                          nablapp::mma_policy<4>{},
@@ -355,7 +370,7 @@ int main()
     {
         std::fprintf(stderr,
             "  [3/7] gcmma_policy HS076 default 10000 iters\n");
-        auto out = open_csv("gcmma_hs076_trace.csv");
+        auto out = open_csv(log_dir, "gcmma_hs076_trace.csv");
         run_case_default("hs076", "gcmma",
                          nablapp::hs076<double>{},
                          nablapp::gcmma_policy<4>{},
@@ -379,7 +394,7 @@ int main()
         std::fprintf(stderr,
             "  [%d/7] mma_policy HS043 move_limit=%.2f 200 iters\n",
             entry.idx, entry.ml);
-        auto out = open_csv(entry.leaf);
+        auto out = open_csv(log_dir, entry.leaf);
         typename nablapp::mma_policy<4>::options_type policy_opts;
         policy_opts.move_limit = entry.ml;
         run_case_with_policy_opts("hs043", "mma",
@@ -393,14 +408,14 @@ int main()
     {
         std::fprintf(stderr,
             "  [7/7] mma_policy HS035 default 100 iters (control)\n");
-        auto out = open_csv("mma_hs035_control.csv");
+        auto out = open_csv(log_dir, "mma_hs035_control.csv");
         run_case_default("hs035", "mma",
                          nablapp::hs035<double>{},
                          nablapp::mma_policy<3>{},
                          100u, out);
     }
 
-    std::fprintf(stderr, "Done. Wrote 7 CSV files under %.*s\n",
-                 static_cast<int>(log_dir.size()), log_dir.data());
+    std::fprintf(stderr, "Done. Wrote 7 CSV files under %s\n",
+                 log_dir.c_str());
     return 0;
 }

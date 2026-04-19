@@ -304,8 +304,17 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
 
     SECTION("HS024")
     {
-        // HS024 cubic objective is hard for MMA's reciprocal
-        // approximation; verify improvement from initial point
+        // HS024 cubic: pre-port MMA reached only the reciprocal
+        // plateau approximately -0.58 due to the unconditional-accept
+        // path admitting non-conservative trials.  Post-port (Svanberg
+        // 2002 inner conservativity loop) descends to approximately
+        // -0.73 at the as-shipped rho_init = 0.1 default.  The
+        // `< -0.7` guard locks the as-shipped descent quality and
+        // mirrors the dedicated HS024 case in mma_test.cpp.  The
+        // historical `< problem.value(x0)` monotonic-improvement
+        // guard is preserved as the pre-port reference.  The
+        // theoretical f* = -1.0 target is unreachable at the
+        // as-shipped rho_init default and is tracked under SEED-008.
         hs024 problem;
         auto x0 = problem.initial_point();
         basic_solver solver{mma_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
@@ -321,6 +330,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
             }
         }
 
+        CHECK(best_feasible < -0.7);
         CHECK(best_feasible < problem.value(x0));
     }
 
