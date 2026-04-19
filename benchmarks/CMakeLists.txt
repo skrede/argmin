@@ -316,6 +316,27 @@ if(NABLAPP_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Diagnostic MMA/GCMMA asymptote-oscillation harness (throwaway; emits
+# per-outer-iteration CSV for mma_policy on HS043/HS076, gcmma_policy
+# on HS076, HS035 control, plus an mma_policy HS043 move_limit A/B
+# sweep at 0.5/0.7/0.9). EXCLUDE_FROM_ALL so it does not enter the
+# default target set; invoke with
+# `cmake --build <dir> --target diagnostic_mma_asymptote_trace`.
+add_executable(diagnostic_mma_asymptote_trace EXCLUDE_FROM_ALL
+    diagnostic_mma_asymptote_trace.cpp)
+target_link_libraries(diagnostic_mma_asymptote_trace PRIVATE nablapp::nablapp)
+target_compile_options(diagnostic_mma_asymptote_trace PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(NABLAPP_LTO_SUPPORTED)
+    set_target_properties(diagnostic_mma_asymptote_trace PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 option(NABLAPP_BENCH_CERES "Build Ceres comparison benchmarks" ON)
 if(NABLAPP_BENCH_CERES)
     find_package(Ceres CONFIG QUIET)
