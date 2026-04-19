@@ -68,10 +68,10 @@
 namespace
 {
 
-constexpr std::string_view kLogDir =
+constexpr std::string_view log_dir =
     ".planning/phases/32.3-mma-gcmma-asymptote-diagnosis/logs/";
 
-constexpr std::string_view kCsvHeader =
+constexpr std::string_view csv_header =
     "problem,policy,iter,inner_iter,f,f_trial,f_approx_at_trial,"
     "step_size,x_norm,sign_flip_count,asymptote_factor_mean,"
     "L_U_width_min,L_U_width_max,rho,rhoc_max,raa_0,raa_max,"
@@ -115,7 +115,7 @@ void emit_trace(std::string_view problem_label,
     // MMA_RHOMIN=1e-5 per mma.c:36-41.
     double shadow_rho = 1.0;
     double shadow_rhoc_max = 1.0;
-    constexpr double kShadowRhoMin = 1e-5;
+    constexpr double shadow_rho_min = 1e-5;
 
     out << std::setprecision(17);
 
@@ -234,7 +234,7 @@ void emit_trace(std::string_view problem_label,
             shadow_rho = std::min(10.0 * shadow_rho,
                                   1.1 * (shadow_rho + (fcur - fapprox) / wval));
         else
-            shadow_rho = std::max(0.1 * shadow_rho, kShadowRhoMin);
+            shadow_rho = std::max(0.1 * shadow_rho, shadow_rho_min);
         shadow_rhoc_max = shadow_rho;
 
         // GCMMA raa readouts; NaN for MMA.
@@ -313,10 +313,10 @@ void run_case_with_policy_opts(std::string_view problem_label,
 
 std::ofstream open_csv(std::string_view leafname)
 {
-    std::string path{kLogDir};
+    std::string path{log_dir};
     path.append(leafname);
     std::ofstream f{path};
-    f << kCsvHeader;
+    f << csv_header;
     f << std::setprecision(17);
     return f;
 }
@@ -325,7 +325,7 @@ std::ofstream open_csv(std::string_view leafname)
 
 int main()
 {
-    std::filesystem::create_directories(kLogDir);
+    std::filesystem::create_directories(log_dir);
 
     std::fprintf(stderr, "Running diagnostic_mma_asymptote_trace: 7 runs\n");
 
@@ -401,6 +401,6 @@ int main()
     }
 
     std::fprintf(stderr, "Done. Wrote 7 CSV files under %.*s\n",
-                 static_cast<int>(kLogDir.size()), kLogDir.data());
+                 static_cast<int>(log_dir.size()), log_dir.data());
     return 0;
 }
