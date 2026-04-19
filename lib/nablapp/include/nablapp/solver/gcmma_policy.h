@@ -86,6 +86,21 @@ struct gcmma_policy
         std::optional<double> raa_max_factor{};                 // default: 10.0
         std::optional<double> conservativity_slack{};           // default: 1e-7 (epsimin)
 
+        // Svanberg 2002 Section 4.2 inter-outer raa decay (NLopt
+        // mma.c:385-389 MMA_RHOMIN-floored decay).  raa_decay is the
+        // per-outer multiplicative factor applied AFTER the inner loop
+        // exits; raa_min is the floor below which raa cannot decay
+        // (analogous to NLopt's MMA_RHOMIN constant).  Without this
+        // decay, raa monotonically saturates at raa_max_factor *
+        // initial_raa for the rest of the run, which prevents the
+        // regularizer from relaxing between outer iterations on
+        // well-behaved trajectories.
+        //
+        // Reference: NLopt mma.c:385-389; Svanberg 2002 Section 4.2
+        //            (per-outer regularizer decay).
+        std::optional<double> raa_decay{};                       // default: 0.1   (NLopt mma.c:385)
+        std::optional<double> raa_min{};                         // default: 1e-5  (NLopt MMA_RHOMIN)
+
         asymptote_options asymptote{};                          // Embedded asymptote params
         mma_subproblem_options subproblem{};                     // Embedded subproblem params
         std::uint16_t stall_window{50};
@@ -403,6 +418,18 @@ struct gcmma_policy
                         c_eq_empty_ex,
                         ms.c_ineq);
 
+                // Svanberg 2002 Section 4.2 inter-outer raa decay
+                // (NLopt mma.c:385-389 mirror, applied here at the
+                // null-step exit so the next outer iter starts from a
+                // relaxed regularizer rather than the saturated cap).
+                {
+                    const double raa_decay_val = s.opts.raa_decay.value_or(0.1);
+                    const double raa_min_val = s.opts.raa_min.value_or(1e-5);
+                    s.raa_0 = std::max(raa_decay_val * s.raa_0, raa_min_val);
+                    for(int i = 0; i < m; ++i)
+                        s.raa[i] = std::max(raa_decay_val * s.raa[i], raa_min_val);
+                }
+
                 return step_result<double>{
                     .objective_value = ms.f,
                     .gradient_norm = ms.g.norm(),
@@ -437,6 +464,18 @@ struct gcmma_policy
             Eigen::MatrixXd J_tmp(m, n);
             ms.problem->constraint_jacobian(ms.x, J_tmp);
             ms.J_ineq = J_tmp;
+        }
+
+        // Svanberg 2002 Section 4.2 inter-outer raa decay
+        // (NLopt mma.c:385-389 mirror, applied at the conservative-accept
+        // exit before the next outer iter; symmetric with the null-step
+        // exit decay above).
+        {
+            const double raa_decay_val = s.opts.raa_decay.value_or(0.1);
+            const double raa_min_val = s.opts.raa_min.value_or(1e-5);
+            s.raa_0 = std::max(raa_decay_val * s.raa_0, raa_min_val);
+            for(int i = 0; i < m; ++i)
+                s.raa[i] = std::max(raa_decay_val * s.raa[i], raa_min_val);
         }
 
         ++ms.iteration;

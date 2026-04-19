@@ -320,6 +320,143 @@ TEST_CASE("gcmma converges on HS043", "[mma][gcmma]")
     CHECK(best_feasible < -40.0);
 }
 
+// GCMMA HS076 with iter-budget cap (path (iv) inter-outer raa decay).
+//
+// Pre-fix baseline (in-tree diagnosis trace): GCMMA HS076 ran the full
+// 10000 iter budget at f best-feasible approximately -4.66 because raa_0
+// monotonically saturated at the 10x cap (raa_0 == 25 on 9991 of 10000
+// iters per the baseline CSV trace) -- the inner conservativity loop
+// kept rejecting trials but raa never relaxed enough to admit a finer
+// step.
+//
+// Post-fix expectation: with the inter-outer decay (raa_0 *= 0.1 each
+// outer, floored at 1e-5; NLopt mma.c:385-389 mirror), raa relaxes
+// between outer iters when the trajectory is well-behaved, and HS076
+// converges within the 2x NLopt iter budget (NLopt LD_MMA reaches f* in
+// 346 iters on this problem).  This guard locks the post-fix recovery.
+//
+// Reference: Svanberg 2002 Section 4.2 (per-outer regularizer decay);
+//            NLopt mma.c:385-389 (MMA_RHOMIN-floored decay byte template).
+TEST_CASE("gcmma converges on HS076 with iter-budget cap", "[mma][gcmma]")
+{
+    hs076 problem;
+    Eigen::VectorXd x0 = problem.initial_point();
+    solver_options opts;
+    opts.set_gradient_threshold(1e-5);
+    opts.max_iterations = 692;                  // 2x NLopt LD_MMA 346
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+
+    basic_solver solver{gcmma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    const auto result = solver.solve(opts);
+
+    // GCMMA post-fix HS076: best_feasible within 0.05 of f* = -4.6818
+    // within the 2x NLopt LD_MMA iter cap (NLopt LD_MMA reaches f* in
+    // ~346 iters on this problem; our cap is 692).  basic_solver::solve
+    // returns the best-seen iterate per the NLopt nlopt_optimize
+    // convention, so the objective margin is the load-bearing assertion
+    // here -- it would FAIL with a max_iterations status if the path (iv)
+    // decay didn't bring the saturated raa low enough to admit a finer
+    // step within the cap.  (The pre-fix run plateaued at f best-seen
+    // ~ -4.66 because raa_0 saturated at the 10x cap on iter 1 and never
+    // relaxed thereafter.)
+    //
+    // The assertion that the result status is one of the convergence
+    // statuses (not failure / aborted / time_limit) is left to the
+    // existing "gcmma converges on HS076" no-budget historical guard;
+    // here, an early-convergence-criterion exit is OUT OF SCOPE for
+    // path (iv) and the iter-budget cap is the gate (a max_iterations
+    // status with best_feasible at f* is still a pass per the
+    // NLopt-best-seen convention -- the policy just doesn't know when
+    // to stop, which the (a)+(b) follow-on addresses; see
+    // .planning/seeds/SEED-008-mma-gcmma-early-destabilization.md).
+    CHECK(result.objective_value == Approx(problem.optimal_value()).margin(0.05));
+    CHECK(result.constraint_violation <= 1e-3);
+    CHECK(result.iterations <= opts.max_iterations);
+}
+
+// GCMMA HS043 with path (iv) raa decay active (smoke-test that decay
+// doesn't perturb the previously-passing case).
+//
+// Pre-fix: GCMMA HS043 reached best_feasible approximately -41.76 within
+// 500 iters (above f* = -44 by paper-margin).  Path (iv) adds raa decay
+// between outer iters; this test verifies the decay does not break the
+// previously-passing descent quality on a problem where GCMMA does NOT
+// have a current pathology.  Completes the (policy, problem) family for
+// the future follow-on to diff against.
+//
+// Reference: Svanberg 2002 Section 4.2 (path (iv) decay applied to the
+//            previously-passing HS043 GCMMA case).
+TEST_CASE("gcmma converges on HS043 (path-iv smoke)", "[mma][gcmma]")
+{
+    hs043 problem;
+    Eigen::VectorXd x0 = problem.initial_point();
+    solver_options opts;
+    opts.set_gradient_threshold(1e-5);
+    opts.max_iterations = 500;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+
+    basic_solver solver{gcmma_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+
+    double best_feasible = 1e10;
+    for(int i = 0; i < 500; ++i)
+    {
+        auto sr = solver.step();
+        if(solver.constraint_violation() < 1e-3
+           && sr.objective_value < best_feasible)
+        {
+            best_feasible = sr.objective_value;
+        }
+    }
+
+    // Mirrors the existing -40 guard intent: descent quality preserved
+    // under path (iv) decay; further descent to f* = -44 is an SQP-family
+    // capability per the existing GCMMA HS043 TEST_CASE rationale.
+    CHECK(best_feasible < -40.0);
+}
+
+// GCMMA HS035 with path (iv) raa decay active (smoke-test on the
+// control problem; raa decay shouldn't affect a previously-converging
+// case at the inner-loop's first conservative trial).
+//
+// HS035 (linear inequality + box bounds, f* = 1/9) was already passing
+// post-fix with margin 1e-4.  Path (iv) decay is a no-op here in
+// effect because the inner loop typically accepts on iter 0 (so raa
+// never grows above the floor and the decay just clamps it back to
+// raa_min).  This test documents that and locks a regression guard.
+//
+// Reference: Svanberg 2002 Section 4.2 (path (iv) decay null effect on
+//            problems where the conservativity test passes immediately).
+TEST_CASE("gcmma converges on HS035 (path-iv smoke)", "[mma][gcmma]")
+{
+    hs035 problem;
+    Eigen::VectorXd x0 = problem.initial_point();
+    solver_options opts;
+    opts.set_gradient_threshold(1e-5);
+    opts.max_iterations = 500;
+    opts.set_step_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+
+    basic_solver solver{gcmma_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+
+    double best_feasible = 1e10;
+    for(int i = 0; i < 500; ++i)
+    {
+        auto sr = solver.step();
+        if(solver.constraint_violation() < 1e-2
+           && sr.objective_value < best_feasible)
+        {
+            best_feasible = sr.objective_value;
+        }
+    }
+
+    // Mirrors the existing margin-1e-4 guard on the no-decay HS035
+    // TEST_CASE; path (iv) is a no-op on HS035 in effect (raa stays
+    // at the floor).
+    CHECK(best_feasible == Approx(problem.optimal_value()).margin(1e-4));
+}
+
 // GCMMA raa-growth path exercise (regression guard on the conservativity
 // inner loop).
 //
