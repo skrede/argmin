@@ -671,27 +671,48 @@ struct mma_policy
         //            mma.c:380) instead of policy-internal detection.
         std::optional<solver_status> policy_status{};
 
-        // Signal 1: asymptote-floor consecutive.  The asymptote safety
-        // floor used by the alpha / beta computation above is the
-        // 0.01 * (U - L) shift per dimension (lines computing L_safe /
-        // U_safe); "at the floor" means the minimum L_U half-width
-        // across dimensions equals the safety-floor width within a
-        // small epsilon.
+        // Signal 1: asymptote-floor consecutive.  Fires when x has been
+        // pushed to within 1% of one end of the asymptote interval
+        // (U_j - L_j) for K consecutive outer iters.  The 0.01
+        // threshold matches the L_safe / U_safe safety-shift convention
+        // at the alpha / beta clipping step above (alpha / beta keep
+        // trial x at least 1% inside the asymptote interval; if the
+        // accepted iterate itself has reached this same 1% boundary
+        // consistently, the asymptote schedule cannot contract further
+        // productively).
+        //
+        // The ratio formulation (half-distance / interval width) uses
+        // only asymptote state (s.L, s.U) and the current iterate
+        // (s.x); it is well-defined regardless of problem box bounds,
+        // including the unconstrained case where s.upper / s.lower hold
+        // +/- infinity.  The previous floor-width formulation was
+        // relative to (s.upper - s.lower) and degenerated to infinity
+        // on unbounded dimensions, which made the comparison trivially
+        // true and caused the counter to increment every iter.
+        //
+        // Reference: Svanberg 1987 Theorem 5.1 (Cauchy-sequence
+        //            convergence).  The 0.01 constant matches the
+        //            in-file L_safe / U_safe asymptote-interior safety
+        //            convention.
         const std::uint16_t K_asymptote =
             s.opts.asymptote_floor_stall_consecutive_count.value_or(5);
-        double L_U_width_min = std::numeric_limits<double>::infinity();
-        double floor_width_min = std::numeric_limits<double>::infinity();
+        constexpr double asymptote_floor_ratio = 0.01;
+        constexpr double asymptote_interval_floor = 1e-300;
+        double min_ratio = std::numeric_limits<double>::infinity();
         for(Eigen::Index j = 0; j < n; ++j)
         {
-            const double width = std::min(s.x[j] - s.L[j],
-                                          s.U[j] - s.x[j]);
-            L_U_width_min = std::min(L_U_width_min, width);
-            const double floor_width =
-                0.01 * std::max(s.upper[j] - s.lower[j], 1.0);
-            floor_width_min = std::min(floor_width_min, floor_width);
+            const double interval = s.U[j] - s.L[j];
+            if(interval < asymptote_interval_floor)
+            {
+                min_ratio = 0.0;
+                break;
+            }
+            const double half_width = std::min(s.x[j] - s.L[j],
+                                               s.U[j] - s.x[j]);
+            const double ratio = half_width / interval;
+            min_ratio = std::min(min_ratio, ratio);
         }
-        const double asymptote_floor_epsilon = 1e-12;
-        if(L_U_width_min <= floor_width_min + asymptote_floor_epsilon)
+        if(min_ratio <= asymptote_floor_ratio)
             ++s.asymptote_floor_consecutive_count;
         else
             s.asymptote_floor_consecutive_count = 0;
