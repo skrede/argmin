@@ -207,6 +207,20 @@ struct gcmma_policy
         std::uint16_t raa_saturated_consecutive_count{0};
         double        kkt_previous{0.0};
 
+        // Per-step flag set inside the inner conservativity loop whenever
+        // the raa_0 growth rule hits its per-iter cap (raa_max_factor *
+        // raa_0 term winning the min over raa_growth * (raa_0 + delta)).
+        // Reset at step() entry and evaluated at Signal 2 on the accept
+        // path.  This is what "raa saturated" actually means
+        // algorithmically -- a fixed absolute threshold on raa_0 is
+        // scale-dependent and fires spuriously on problems whose
+        // initial raa_0 (max(raa0_floor, 0.1 * |grad| / n)) already
+        // sits above the fixed threshold.
+        //
+        // Reference: Svanberg 2002 Section 4.2 Proposition 1 (GCMMA
+        //            per-constraint conservativity regularization).
+        bool raa_cap_hit_in_inner{false};
+
         // Proxy members for basic_solver compatibility (it accesses state_.x,
         // state_.c_eq, state_.c_ineq directly).
         Eigen::Vector<double, N>& x = mma_state.x;
@@ -219,6 +233,7 @@ struct gcmma_policy
             , raa_0{o.raa_0}, raa{o.raa}
             , raa_saturated_consecutive_count{o.raa_saturated_consecutive_count}
             , kkt_previous{o.kkt_previous}
+            , raa_cap_hit_in_inner{o.raa_cap_hit_in_inner}
             , x{mma_state.x}, c_eq{mma_state.c_eq}, c_ineq{mma_state.c_ineq}
         {}
         state_type(state_type&& o) noexcept
@@ -226,6 +241,7 @@ struct gcmma_policy
             , raa_0{o.raa_0}, raa{std::move(o.raa)}
             , raa_saturated_consecutive_count{o.raa_saturated_consecutive_count}
             , kkt_previous{o.kkt_previous}
+            , raa_cap_hit_in_inner{o.raa_cap_hit_in_inner}
             , x{mma_state.x}, c_eq{mma_state.c_eq}, c_ineq{mma_state.c_ineq}
         {}
         state_type& operator=(const state_type& o)
@@ -238,6 +254,7 @@ struct gcmma_policy
                 raa = o.raa;
                 raa_saturated_consecutive_count = o.raa_saturated_consecutive_count;
                 kkt_previous = o.kkt_previous;
+                raa_cap_hit_in_inner = o.raa_cap_hit_in_inner;
             }
             return *this;
         }
@@ -251,6 +268,7 @@ struct gcmma_policy
                 raa = std::move(o.raa);
                 raa_saturated_consecutive_count = o.raa_saturated_consecutive_count;
                 kkt_previous = o.kkt_previous;
+                raa_cap_hit_in_inner = o.raa_cap_hit_in_inner;
             }
             return *this;
         }
@@ -391,6 +409,11 @@ struct gcmma_policy
         // iff objective was non-conservative, constraint i iff that
         // constraint was violating). On max-inner exhaustion a null step
         // is returned so the global convergence proof is preserved.
+
+        // Reset the per-step saturation flag before the inner loop;
+        // Signal 2 reads this after the loop exits conservatively.
+        s.raa_cap_hit_in_inner = false;
+
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
             ms.subproblem->compute_coefficients(
@@ -457,9 +480,11 @@ struct gcmma_policy
             if(!conservative_obj)
             {
                 const double delta = (f_trial - approx_f) / raacof;
-                s.raa_0 = std::min(
-                    raa_growth * (s.raa_0 + delta),
-                    raa_max_factor * s.raa_0);
+                const double grown = raa_growth * (s.raa_0 + delta);
+                const double capped = raa_max_factor * s.raa_0;
+                if(capped < grown)
+                    s.raa_cap_hit_in_inner = true;
+                s.raa_0 = std::min(grown, capped);
             }
 
             // Per-constraint growth on violating components only.
@@ -768,20 +793,30 @@ struct gcmma_policy
         if(ms.asymptote_floor_consecutive_count >= K_asymptote)
             policy_status = solver_status::stalled;
 
-        // Signal 2: raa saturated consecutive.  "raa_0 at cap" means
-        // s.raa_0 >= raa_max_factor * raa0_floor (the algebraic ceiling
-        // of the inner-loop growth rule) within a small epsilon.  The
-        // inner loop may run to max_inner_iterations (null-step return)
-        // without ever finding a conservative trial; this signal fires
-        // when that pathology repeats across consecutive outer iters.
+        // Signal 2: raa saturated consecutive.  Fires when the inner
+        // conservativity loop hit the per-iter raa_0 growth cap
+        // (raa_max_factor * raa_0 term winning the min over
+        // raa_growth * (raa_0 + delta)) at least once within the inner
+        // loop, for K consecutive outer iters.  This measures "inner
+        // loop is exhausting growth" directly via the growth rule's
+        // own saturation signal, rather than comparing raa_0 to a
+        // fixed absolute threshold (raa_max_factor * raa0_floor).  The
+        // fixed-threshold form is scale-dependent and fires
+        // spuriously on problems whose initial raa_0 is already above
+        // the threshold; recall that raa_0 is initialized to
+        // max(raa0_floor, 0.1 * |grad| / n), which on non-trivial
+        // problems sits orders of magnitude above raa0_floor.
+        //
+        // The s.raa_cap_hit_in_inner flag is reset at step() entry
+        // and set inside the inner loop on any inner iter where the
+        // cap branch of the growth min wins; it reflects this step's
+        // inner loop only.
         //
         // Reference: Svanberg 2002 Section 4.2 Proposition 1 (GCMMA
         //            per-constraint conservativity regularization).
         const std::uint16_t K_saturation =
             s.opts.raa_saturated_stall_consecutive_count.value_or(5);
-        const double raa_saturation_threshold =
-            raa_max_factor * raa0_floor * (1.0 - 1e-9);
-        if(s.raa_0 >= raa_saturation_threshold)
+        if(s.raa_cap_hit_in_inner)
             ++s.raa_saturated_consecutive_count;
         else
             s.raa_saturated_consecutive_count = 0;

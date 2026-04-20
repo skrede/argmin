@@ -199,6 +199,20 @@ struct mma_policy
         std::uint16_t rho_saturated_consecutive_count{0};
         double        kkt_previous{0.0};
 
+        // Per-step flag set inside the inner conservativity loop whenever
+        // the rho growth rule hits its per-iter cap (i.e., the
+        // rho_growth_cap * rho term wins over raa_growth * (rho + delta)
+        // in the min).  Reset at step() entry and evaluated at Signal 2
+        // on the accept path.  This is what "rho saturated" actually
+        // means algorithmically -- not "rho has grown above some fixed
+        // absolute threshold," which is scale-dependent and spurious on
+        // any problem whose initial rho is already above the fixed
+        // threshold.
+        //
+        // Reference: Svanberg 2002 Section 4.2 Proposition 1 (the inner
+        //            conservativity loop's growth rule).
+        bool rho_cap_hit_in_inner{false};
+
         options_type opts;
     };
 
@@ -431,6 +445,10 @@ struct mma_policy
         // at runtime via its built-in conversion.
         Eigen::VectorXd c_ineq_trial(m);
 
+        // Reset the per-step saturation flag before the inner loop; Signal 2
+        // reads this after the loop exits conservatively.
+        s.rho_cap_hit_in_inner = false;
+
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
             s.subproblem->compute_coefficients(
@@ -494,8 +512,11 @@ struct mma_policy
             if(!conservative_obj)
             {
                 const double delta = (f_trial - approx_f) / raacof;
-                s.rho = std::min(rho_growth * (s.rho + delta),
-                                 rho_growth_cap * s.rho);
+                const double grown = rho_growth * (s.rho + delta);
+                const double capped = rho_growth_cap * s.rho;
+                if(capped < grown)
+                    s.rho_cap_hit_in_inner = true;
+                s.rho = std::min(grown, capped);
             }
 
             for(int i = 0; i < m; ++i)
@@ -801,18 +822,27 @@ struct mma_policy
         if(s.asymptote_floor_consecutive_count >= K_asymptote)
             policy_status = solver_status::stalled;
 
-        // Signal 2: rho saturated consecutive.  "rho at cap" means
-        // s.rho >= rho_growth_cap * rho_init (the algebraic ceiling of
-        // the inner-loop growth rule) within a small epsilon.  The
-        // inner loop may run to max_inner_iterations (null-step return)
-        // without ever finding a conservative trial; this signal fires
-        // when that pathology repeats across consecutive outer iters.
+        // Signal 2: rho saturated consecutive.  Fires when the inner
+        // conservativity loop hit the per-iter rho growth cap
+        // (rho_growth_cap * rho term winning the min over the
+        // rho_growth * (rho + delta) term) at least once within the
+        // inner loop, for K consecutive outer iters.  This measures
+        // "inner loop is exhausting growth" directly via the growth
+        // rule's own saturation signal, rather than comparing rho to
+        // a fixed absolute threshold that is scale-dependent and
+        // fires spuriously on problems whose initial rho is already
+        // near or above the fixed threshold.
+        //
+        // The s.rho_cap_hit_in_inner flag is reset at step() entry
+        // and set inside the inner loop on any inner iter where the
+        // cap branch of the growth min wins; it reflects this single
+        // step's inner loop only.
+        //
+        // Reference: Svanberg 2002 Section 4.2 Proposition 1 (inner
+        //            conservativity loop growth rule).
         const std::uint16_t K_saturation =
             s.opts.rho_saturated_stall_consecutive_count.value_or(5);
-        const double rho_init_for_cap = s.opts.rho_init.value_or(0.1);
-        const double rho_saturation_threshold =
-            rho_growth_cap * rho_init_for_cap * (1.0 - 1e-9);
-        if(s.rho >= rho_saturation_threshold)
+        if(s.rho_cap_hit_in_inner)
             ++s.rho_saturated_consecutive_count;
         else
             s.rho_saturated_consecutive_count = 0;
