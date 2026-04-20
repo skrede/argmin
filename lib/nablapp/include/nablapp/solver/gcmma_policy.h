@@ -113,6 +113,35 @@ struct gcmma_policy
         std::optional<double> raa_decay{};                       // default: 0.1   (NLopt mma.c:385)
         std::optional<double> raa_min{};                         // default: 1e-5  (NLopt MMA_RHOMIN)
 
+        // Svanberg 1987 Theorem 5.1 Cauchy-sequence convergence
+        // precondition: finite-iteration termination detection is the
+        // mechanical realization of the theorem's implicit terminal
+        // behavior.  These three thresholds parameterize the policy-
+        // internal stall / divergence signal cascade surfaced via
+        // step_result.policy_status.  All three are std::optional with
+        // value_or() defaults at the usage sites so users can override
+        // per-problem without reaching into the cascade logic.
+        //
+        // asymptote_floor_stall_consecutive_count: number of consecutive
+        //     outer iterations in which the asymptote schedule sits at
+        //     its safety floor before firing the stall signal.
+        // raa_saturated_stall_consecutive_count: number of consecutive
+        //     outer iterations in which the raa_0 regularizer saturates
+        //     at raa_max_factor before firing the stall signal
+        //     (symmetric with mma's rho_saturated signal, renamed for
+        //     the per-component raa machinery).
+        // kkt_jump_threshold_factor: single-event multiplicative ratio
+        //     of kkt_residual between two consecutive outer iterations
+        //     that fires the destabilization signal.
+        //
+        // Reference: Svanberg 1987, "The method of moving asymptotes",
+        //            IJNME 24:359-373, Theorem 5.1; Svanberg 2002,
+        //            Section 4.2 Proposition 1 (conservativity
+        //            precondition).
+        std::optional<std::uint16_t> asymptote_floor_stall_consecutive_count{}; // default: 5
+        std::optional<std::uint16_t> raa_saturated_stall_consecutive_count{};   // default: 5
+        std::optional<double>        kkt_jump_threshold_factor{};               // default: 1000.0
+
         asymptote_options asymptote{};                          // Embedded asymptote params
         mma_subproblem_options subproblem{};                     // Embedded subproblem params
         std::uint16_t stall_window{50};
@@ -144,6 +173,23 @@ struct gcmma_policy
         double raa_0{0.0};
         Eigen::Vector<double, M> raa;
 
+        // Svanberg 1987 Theorem 5.1 Cauchy-sequence precondition:
+        // finite-iteration termination detection is mathematically well-
+        // defined.  raa_saturated_consecutive_count and kkt_previous
+        // are gcmma-owned counters alongside raa_0 / raa; the third
+        // counter (asymptote_floor_consecutive_count) lives on the
+        // inner mma_state because the asymptote machinery is mma-
+        // subproblem-owned.  The rolling counter increments on
+        // consecutive signal fires and resets to zero on non-fire;
+        // kkt_previous stores the prior outer iter's kkt_residual for
+        // the single-event ratio comparison.
+        //
+        // Reference: Svanberg 1987, "The method of moving asymptotes",
+        //            IJNME 24:359-373, Theorem 5.1; Svanberg 2002,
+        //            Section 4.2 Proposition 1.
+        std::uint16_t raa_saturated_consecutive_count{0};
+        double        kkt_previous{0.0};
+
         // Proxy members for basic_solver compatibility (it accesses state_.x,
         // state_.c_eq, state_.c_ineq directly).
         Eigen::Vector<double, N>& x = mma_state.x;
@@ -154,11 +200,15 @@ struct gcmma_policy
         state_type(const state_type& o)
             : mma_state{o.mma_state}, opts{o.opts}
             , raa_0{o.raa_0}, raa{o.raa}
+            , raa_saturated_consecutive_count{o.raa_saturated_consecutive_count}
+            , kkt_previous{o.kkt_previous}
             , x{mma_state.x}, c_eq{mma_state.c_eq}, c_ineq{mma_state.c_ineq}
         {}
         state_type(state_type&& o) noexcept
             : mma_state{std::move(o.mma_state)}, opts{std::move(o.opts)}
             , raa_0{o.raa_0}, raa{std::move(o.raa)}
+            , raa_saturated_consecutive_count{o.raa_saturated_consecutive_count}
+            , kkt_previous{o.kkt_previous}
             , x{mma_state.x}, c_eq{mma_state.c_eq}, c_ineq{mma_state.c_ineq}
         {}
         state_type& operator=(const state_type& o)
@@ -169,6 +219,8 @@ struct gcmma_policy
                 opts = o.opts;
                 raa_0 = o.raa_0;
                 raa = o.raa;
+                raa_saturated_consecutive_count = o.raa_saturated_consecutive_count;
+                kkt_previous = o.kkt_previous;
             }
             return *this;
         }
@@ -180,6 +232,8 @@ struct gcmma_policy
                 opts = std::move(o.opts);
                 raa_0 = o.raa_0;
                 raa = std::move(o.raa);
+                raa_saturated_consecutive_count = o.raa_saturated_consecutive_count;
+                kkt_previous = o.kkt_previous;
             }
             return *this;
         }
@@ -442,6 +496,25 @@ struct gcmma_policy
                         s.raa[i] = std::max(raa_decay_val * s.raa[i], raa_min_val);
                 }
 
+                // Null-step path: only the kkt-jump signal applies here.
+                // The asymptote-floor and raa-saturation counters are
+                // tied to the outer-iter accept-commit which the null
+                // step does NOT reach; incrementing them on null steps
+                // would double-count.  s.kkt_previous is NOT updated
+                // here because the null step does not commit a new
+                // outer iter; it stays anchored to the last committed
+                // outer iter.
+                //
+                // Reference: Svanberg 1987 Theorem 5.1 (Cauchy-sequence
+                //            convergence); Svanberg 2002 Section 4.2
+                //            Proposition 1 (conservativity precondition).
+                std::optional<solver_status> policy_status_ex{};
+                const double kkt_jump_factor_ex =
+                    s.opts.kkt_jump_threshold_factor.value_or(1000.0);
+                if(ms.iteration >= 2 && s.kkt_previous > 0.0
+                   && kkt_ex / s.kkt_previous > kkt_jump_factor_ex)
+                    policy_status_ex = solver_status::stalled;
+
                 return step_result<double>{
                     .objective_value = ms.f,
                     .gradient_norm = ms.g.norm(),
@@ -454,6 +527,7 @@ struct gcmma_policy
                             ms.c_eq, ms.c_ineq),
                     .x_norm = ms.x.norm(),
                     .kkt_residual = kkt_ex,
+                    .policy_status = policy_status_ex,
                 };
             }
         }
@@ -513,6 +587,90 @@ struct gcmma_policy
             c_eq_empty_acc,
             ms.c_ineq);
 
+        // Svanberg 1987 Theorem 5.1 Cauchy-sequence convergence
+        // precondition: finite-iteration termination detection is the
+        // mechanical realization of the theorem's implicit terminal
+        // behavior.  The three signals below mirror the mma-side
+        // cascade with gcmma-specific adjustments: the asymptote-
+        // floor counter lives on the inner mma_state (asymptote
+        // machinery is mma-subproblem-owned), while raa-saturation and
+        // kkt-previous are outer-state gcmma-owned.
+        //   1. asymptote-floor consecutive: asymptote schedule at
+        //      safety floor for K consecutive outer iters.
+        //   2. raa-saturated consecutive: raa_0 has hit
+        //      raa_max_factor * raa0_floor for K consecutive outer
+        //      iters (the symmetric analog of mma's rho-saturated
+        //      signal for the per-component raa machinery).
+        //   3. kkt-jump single-event: kkt_residual jumps by more than
+        //      kkt_jump_threshold_factor across two consecutive outer
+        //      iters (destabilization signature).  Guarded with
+        //      ms.iteration >= 2 and s.kkt_previous > 0.0 per the
+        //      first-iter guard convention.
+        //
+        // Reference: Svanberg 1987 Theorem 5.1 (Cauchy-sequence
+        //            convergence); Svanberg 2002 Section 4.2
+        //            Proposition 1 (GCMMA per-constraint conservativity
+        //            regularization + monotone-objective precondition).
+        std::optional<solver_status> policy_status{};
+
+        // Signal 1: asymptote-floor consecutive.  The counter lives on
+        // the inner mma_state because the asymptote machinery is mma-
+        // subproblem-owned; ms.x / ms.L / ms.U / ms.lower / ms.upper
+        // are the mma-owned fields.
+        const std::uint16_t K_asymptote =
+            s.opts.asymptote_floor_stall_consecutive_count.value_or(5);
+        double L_U_width_min = std::numeric_limits<double>::infinity();
+        double floor_width_min = std::numeric_limits<double>::infinity();
+        for(Eigen::Index j = 0; j < n; ++j)
+        {
+            const double width = std::min(ms.x[j] - ms.L[j],
+                                          ms.U[j] - ms.x[j]);
+            L_U_width_min = std::min(L_U_width_min, width);
+            const double floor_width =
+                0.01 * std::max(ms.upper[j] - ms.lower[j], 1.0);
+            floor_width_min = std::min(floor_width_min, floor_width);
+        }
+        const double asymptote_floor_epsilon = 1e-12;
+        if(L_U_width_min <= floor_width_min + asymptote_floor_epsilon)
+            ++ms.asymptote_floor_consecutive_count;
+        else
+            ms.asymptote_floor_consecutive_count = 0;
+        if(ms.asymptote_floor_consecutive_count >= K_asymptote)
+            policy_status = solver_status::stalled;
+
+        // Signal 2: raa saturated consecutive.  "raa_0 at cap" means
+        // s.raa_0 >= raa_max_factor * raa0_floor (the algebraic ceiling
+        // of the inner-loop growth rule) within a small epsilon.  The
+        // inner loop may run to max_inner_iterations (null-step return)
+        // without ever finding a conservative trial; this signal fires
+        // when that pathology repeats across consecutive outer iters.
+        //
+        // Reference: Svanberg 2002 Section 4.2 Proposition 1 (GCMMA
+        //            per-constraint conservativity regularization).
+        const std::uint16_t K_saturation =
+            s.opts.raa_saturated_stall_consecutive_count.value_or(5);
+        const double raa_saturation_threshold =
+            raa_max_factor * raa0_floor * (1.0 - 1e-9);
+        if(s.raa_0 >= raa_saturation_threshold)
+            ++s.raa_saturated_consecutive_count;
+        else
+            s.raa_saturated_consecutive_count = 0;
+        if(!policy_status.has_value()
+           && s.raa_saturated_consecutive_count >= K_saturation)
+            policy_status = solver_status::stalled;
+
+        // Signal 3: kkt jump single-event.  Guarded with
+        // ms.iteration >= 2 and s.kkt_previous > 0.0 so iter 0 / iter 1
+        // kkt values (not reliably comparable across outer iters) do
+        // not spuriously fire the signal.
+        const double kkt_jump_factor =
+            s.opts.kkt_jump_threshold_factor.value_or(1000.0);
+        if(!policy_status.has_value()
+           && ms.iteration >= 2 && s.kkt_previous > 0.0
+           && kkt_acc / s.kkt_previous > kkt_jump_factor)
+            policy_status = solver_status::stalled;
+        s.kkt_previous = kkt_acc;
+
         return step_result<double>{
             .objective_value = ms.f,
             .gradient_norm = ms.g.norm(),
@@ -523,6 +681,7 @@ struct gcmma_policy
                 ms.c_eq, ms.c_ineq),
             .x_norm = ms.x.norm(),
             .kkt_residual = kkt_acc,
+            .policy_status = policy_status,
         };
     }
 

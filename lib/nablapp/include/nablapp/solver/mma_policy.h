@@ -98,6 +98,32 @@ struct mma_policy
         std::optional<std::uint16_t> max_inner_iterations{};   // default: 15    (Svanberg 2002 Section 4.2)
         std::optional<double>        conservativity_slack{};   // default: 1e-7  (matches gcmma epsimin)
 
+        // Svanberg 1987 Theorem 5.1 Cauchy-sequence convergence
+        // precondition: finite-iteration termination detection is the
+        // mechanical realization of the theorem's implicit terminal
+        // behavior.  These three thresholds parameterize the policy-
+        // internal stall / divergence signal cascade surfaced via
+        // step_result.policy_status.  All three are std::optional with
+        // value_or() defaults at the usage sites so users can override
+        // per-problem without reaching into the cascade logic.
+        //
+        // asymptote_floor_stall_consecutive_count: number of consecutive
+        //     outer iterations in which the asymptote schedule sits at
+        //     its safety floor before firing the stall signal.
+        // rho_saturated_stall_consecutive_count: number of consecutive
+        //     outer iterations in which the conservativity regularizer
+        //     saturates at rho_growth_cap before firing the stall
+        //     signal.
+        // kkt_jump_threshold_factor: single-event multiplicative ratio
+        //     of kkt_residual between two consecutive outer iterations
+        //     that fires the destabilization signal.
+        //
+        // Reference: Svanberg 1987, "The method of moving asymptotes",
+        //            IJNME 24:359-373, Theorem 5.1.
+        std::optional<std::uint16_t> asymptote_floor_stall_consecutive_count{}; // default: 5
+        std::optional<std::uint16_t> rho_saturated_stall_consecutive_count{};   // default: 5
+        std::optional<double>        kkt_jump_threshold_factor{};               // default: 1000.0
+
         asymptote_options asymptote{};                   // Embedded asymptote update params
         mma_subproblem_options subproblem{};              // Embedded subproblem params
         std::uint16_t stall_window{50};
@@ -139,6 +165,22 @@ struct mma_policy
         //            :385-389 (inter-outer decay).
         double rho{0.0};
         Eigen::Vector<double, M> rhoc;
+
+        // Svanberg 1987 Theorem 5.1 Cauchy-sequence precondition:
+        // finite-iteration termination detection is mathematically well-
+        // defined.  The three policy_status signals are the mechanical
+        // realization of that termination.  All three counters
+        // initialized to zero; the two rolling counters increment on
+        // consecutive signal fires and reset to zero on non-fire;
+        // kkt_previous stores the prior outer iter's kkt_residual for
+        // the single-event ratio comparison.
+        //
+        // Reference: Svanberg 1987, "The method of moving asymptotes",
+        //            IJNME 24:359-373, Theorem 5.1 (Cauchy-sequence
+        //            convergence).
+        std::uint16_t asymptote_floor_consecutive_count{0};
+        std::uint16_t rho_saturated_consecutive_count{0};
+        double        kkt_previous{0.0};
 
         options_type opts;
     };
@@ -475,6 +517,28 @@ struct mma_policy
                     c_eq_empty_ex,
                     s.c_ineq);
 
+                // Null-step path: only the kkt-jump signal applies here.
+                // The asymptote-floor and rho-saturation counters are
+                // tied to the outer-iter accept-commit which the null
+                // step does NOT reach; incrementing them on null steps
+                // would double-count.  The null step itself already
+                // signals an iteration that could not produce a
+                // conservative trial; layering the kkt-jump comparison
+                // on top catches the destabilization-within-exhaustion
+                // case.  s.kkt_previous is NOT updated here because the
+                // null step does not commit a new outer iter; it stays
+                // anchored to the last committed outer iter.
+                //
+                // Reference: Svanberg 1987 Theorem 5.1 (Cauchy-sequence
+                //            convergence); Svanberg 2002 Section 4.2
+                //            Proposition 1 (conservativity precondition).
+                std::optional<solver_status> policy_status_ex{};
+                const double kkt_jump_factor_ex =
+                    s.opts.kkt_jump_threshold_factor.value_or(1000.0);
+                if(s.iteration >= 2 && s.kkt_previous > 0.0
+                   && kkt_ex / s.kkt_previous > kkt_jump_factor_ex)
+                    policy_status_ex = solver_status::stalled;
+
                 return step_result<double>{
                     .objective_value = s.f,
                     .gradient_norm = s.g.norm(),
@@ -486,6 +550,7 @@ struct mma_policy
                         c_eq_empty_ex, s.c_ineq),
                     .x_norm = s.x.norm(),
                     .kkt_residual = kkt_ex,
+                    .policy_status = policy_status_ex,
                 };
             }
         }
@@ -559,6 +624,96 @@ struct mma_policy
             c_eq_empty,
             s.c_ineq);
 
+        // Svanberg 1987 Theorem 5.1 Cauchy-sequence convergence
+        // precondition: finite-iteration termination detection is the
+        // mechanical realization of the theorem's implicit terminal
+        // behavior.  The three signals below are derived from the in-
+        // tree diagnosis traces of the early-convergence-then-
+        // destabilization mechanism observed on the HS043 hot-path:
+        //   1. asymptote-floor consecutive: schedule is at its safety
+        //      floor for K consecutive outer iters (structurally cannot
+        //      contract further).
+        //   2. rho-saturated consecutive: rho has hit rho_growth_cap
+        //      for K consecutive outer iters with no conservative
+        //      trial -- inner conservativity loop is exhausting growth.
+        //   3. kkt-jump single-event: kkt_residual jumps by more than
+        //      kkt_jump_threshold_factor across two consecutive outer
+        //      iters (destabilization signature).  Guarded with
+        //      s.iteration >= 2 and s.kkt_previous > 0.0 per the same
+        //      first-iter guard convention used by
+        //      objective_tolerance_criterion::check (iter 0 / iter 1
+        //      kkt values are not reliably comparable across outer
+        //      iters).
+        //
+        // Reference: Svanberg 1987 Theorem 5.1 (Cauchy-sequence
+        //            convergence); Svanberg 2002 Section 4.2
+        //            Proposition 1 (conservativity precondition).  The
+        //            NLopt LD_MMA reference (mma.c:253-389) relies on
+        //            wrapper-level ftol_rel / xtol_rel
+        //            (nlopt_stop_ftol at mma.c:378 and nlopt_stop_x at
+        //            mma.c:380) instead of policy-internal detection.
+        std::optional<solver_status> policy_status{};
+
+        // Signal 1: asymptote-floor consecutive.  The asymptote safety
+        // floor used by the alpha / beta computation above is the
+        // 0.01 * (U - L) shift per dimension (lines computing L_safe /
+        // U_safe); "at the floor" means the minimum L_U half-width
+        // across dimensions equals the safety-floor width within a
+        // small epsilon.
+        const std::uint16_t K_asymptote =
+            s.opts.asymptote_floor_stall_consecutive_count.value_or(5);
+        double L_U_width_min = std::numeric_limits<double>::infinity();
+        double floor_width_min = std::numeric_limits<double>::infinity();
+        for(Eigen::Index j = 0; j < n; ++j)
+        {
+            const double width = std::min(s.x[j] - s.L[j],
+                                          s.U[j] - s.x[j]);
+            L_U_width_min = std::min(L_U_width_min, width);
+            const double floor_width =
+                0.01 * std::max(s.upper[j] - s.lower[j], 1.0);
+            floor_width_min = std::min(floor_width_min, floor_width);
+        }
+        const double asymptote_floor_epsilon = 1e-12;
+        if(L_U_width_min <= floor_width_min + asymptote_floor_epsilon)
+            ++s.asymptote_floor_consecutive_count;
+        else
+            s.asymptote_floor_consecutive_count = 0;
+        if(s.asymptote_floor_consecutive_count >= K_asymptote)
+            policy_status = solver_status::stalled;
+
+        // Signal 2: rho saturated consecutive.  "rho at cap" means
+        // s.rho >= rho_growth_cap * rho_init (the algebraic ceiling of
+        // the inner-loop growth rule) within a small epsilon.  The
+        // inner loop may run to max_inner_iterations (null-step return)
+        // without ever finding a conservative trial; this signal fires
+        // when that pathology repeats across consecutive outer iters.
+        const std::uint16_t K_saturation =
+            s.opts.rho_saturated_stall_consecutive_count.value_or(5);
+        const double rho_init_for_cap = s.opts.rho_init.value_or(0.1);
+        const double rho_saturation_threshold =
+            rho_growth_cap * rho_init_for_cap * (1.0 - 1e-9);
+        if(s.rho >= rho_saturation_threshold)
+            ++s.rho_saturated_consecutive_count;
+        else
+            s.rho_saturated_consecutive_count = 0;
+        if(!policy_status.has_value()
+           && s.rho_saturated_consecutive_count >= K_saturation)
+            policy_status = solver_status::stalled;
+
+        // Signal 3: kkt jump single-event.  Guarded with
+        // s.iteration >= 2 and s.kkt_previous > 0.0 so that iter 0 /
+        // iter 1 kkt values (which are not reliably comparable across
+        // outer iters) do not spuriously fire the signal; matches the
+        // first-iter guard convention used elsewhere in the convergence
+        // machinery.
+        const double kkt_jump_factor =
+            s.opts.kkt_jump_threshold_factor.value_or(1000.0);
+        if(!policy_status.has_value()
+           && s.iteration >= 2 && s.kkt_previous > 0.0
+           && kkt / s.kkt_previous > kkt_jump_factor)
+            policy_status = solver_status::stalled;
+        s.kkt_previous = kkt;
+
         // Primal feasibility reported as L-infinity (matches the
         // dimensional form used by the E-measure legs 2 and 3). Other
         // constrained policies migrated to L-infinity in an earlier
@@ -576,6 +731,7 @@ struct mma_policy
                 c_eq_empty, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
+            .policy_status = policy_status,
         };
     }
 
