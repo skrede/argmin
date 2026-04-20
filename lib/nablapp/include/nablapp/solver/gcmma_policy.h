@@ -549,6 +549,59 @@ struct gcmma_policy
             }
         }
 
+        // Svanberg 2002 Section 4.2 Proposition 1 second precondition
+        // mirror (sibling of mma_policy descent rejection): the outer
+        // iterate sequence must be descent-monotone.  On f_trial >
+        // ms.f + descent_slack reject the conservative trial with a
+        // null-step.  Inner loop stays pure per Svanberg 2002
+        // Section 4.2 invariant.  This block is symmetric with the
+        // mma_policy::step descent rejection; both policies share the
+        // conservativity-accept-without-descent structure and the
+        // same B1 pure-objective monotone rejection form.
+        //
+        // Rejection path returns BEFORE the accept-commit below AND
+        // BEFORE the inter-outer raa decay that follows the commit.
+        // raa stays at its current-grown value so the next outer
+        // iter begins with the regularizer already grown, forcing
+        // asymptote-schedule contraction on the next step.
+        // policy_status is deliberately left unset -- a rejection
+        // is neither a stall, a convergence, nor a divergence; it
+        // is a retry request.
+        //
+        // Reference: Svanberg 2002, SIAM J. Optim. 12(2):555-573,
+        //            Section 4.2 Proposition 1 (descent-monotone
+        //            precondition + closure condition for the
+        //            global convergence proof).
+        const double descent_slack = 1e-12;
+        if(f_trial > ms.f + descent_slack)
+        {
+            const Eigen::Matrix<double, 0, N> J_eq_empty_dr(0, n);
+            const Eigen::Vector<double, 0> lambda_eq_empty_dr;
+            const Eigen::Vector<double, 0> c_eq_empty_dr;
+            const auto& mu_ineq_dr = ms.subproblem->multipliers();
+            const double kkt_dr = detail::kkt_residual<double, N, 0, MC>(
+                ms.g,
+                J_eq_empty_dr,
+                ms.J_ineq,
+                lambda_eq_empty_dr,
+                mu_ineq_dr,
+                c_eq_empty_dr,
+                ms.c_ineq);
+
+            return step_result<double>{
+                .objective_value = ms.f,
+                .gradient_norm = ms.g.norm(),
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::primal_feasibility_inf(
+                    ms.c_eq, ms.c_ineq),
+                .x_norm = ms.x.norm(),
+                .kkt_residual = kkt_dr,
+            };
+        }
+
         // Accept the conservative trial point.
         const double f_old = ms.f;
         const double step_size = (x_trial - ms.x).norm();

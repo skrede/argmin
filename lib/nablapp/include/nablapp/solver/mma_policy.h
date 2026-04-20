@@ -572,6 +572,69 @@ struct mma_policy
             }
         }
 
+        // Svanberg 2002 Section 4.2 Proposition 1 second precondition:
+        // the outer iterate sequence must be descent-monotone for the
+        // convergence theorem to hold.  The inner conservativity loop
+        // above enforces approximation-validity (first precondition),
+        // NOT descent-monotonicity -- those are independent
+        // preconditions.  On f_trial > s.f + descent_slack (pure
+        // objective monotone rejection per the B1 variant of the
+        // in-tree decomposition), reject the conservative trial with
+        // a null-step return and let the next outer iter's asymptote
+        // schedule contract.  The null-step mechanism is already
+        // paper-faithful per Section 4.2 closure condition; descent
+        // rejection is an OUTER-loop mechanism applied to the
+        // conservative trial post-loop-exit, NOT a modification to
+        // the inner loop.
+        //
+        // The f_trial > s.f + descent_slack form is B1 per the
+        // in-tree decomposition; escalation to cv-aware (B2), filter
+        // (B3), or L1 merit (B4) forms is deferred to a separate
+        // follow-on if B1 underperforms.
+        //
+        // The rejection path returns BEFORE the inter-outer rho decay
+        // below: the state stays anchored at s.x / s.f, and rho stays
+        // at its current-grown value so the next outer iter starts
+        // with the regularizer already grown, forcing asymptote
+        // schedule contraction on the next step.  policy_status is
+        // deliberately left unset here -- a rejection is neither a
+        // stall, nor a convergence, nor a divergence; it is a retry
+        // request.
+        //
+        // Reference: Svanberg 2002, SIAM J. Optim. 12(2):555-573,
+        //            Section 4.2 Proposition 1 (descent-monotone
+        //            precondition + closure condition for the global
+        //            convergence proof).
+        const double descent_slack = 1e-12;
+        if(f_trial > s.f + descent_slack)
+        {
+            const Eigen::Matrix<double, 0, N> J_eq_empty_dr(0, n);
+            const Eigen::Vector<double, 0> lambda_eq_empty_dr;
+            const Eigen::Vector<double, 0> c_eq_empty_dr;
+            const auto& mu_ineq_dr = s.subproblem->multipliers();
+            const double kkt_dr = detail::kkt_residual<double, N, 0, MC>(
+                s.g,
+                J_eq_empty_dr,
+                s.J_ineq,
+                lambda_eq_empty_dr,
+                mu_ineq_dr,
+                c_eq_empty_dr,
+                s.c_ineq);
+
+            return step_result<double>{
+                .objective_value = s.f,
+                .gradient_norm = s.g.norm(),
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::primal_feasibility_inf(
+                    c_eq_empty_dr, s.c_ineq),
+                .x_norm = s.x.norm(),
+                .kkt_residual = kkt_dr,
+            };
+        }
+
         // Inter-outer rho decay per NLopt mma.c:385-389.  Applied at the
         // conservative-accept exit (the only path that reaches here; the
         // null-step exit returned above).  Symmetric with the gcmma path
