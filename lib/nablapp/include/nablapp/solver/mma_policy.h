@@ -572,6 +572,88 @@ struct mma_policy
             }
         }
 
+        // Svanberg 2002 Section 4.2 Proposition 1 second precondition
+        // (descent-monotone outer iterate sequence) with cv-aware
+        // relaxation per the filter-method acceptance test (Fletcher
+        // and Leyffer 2002 Section 2): the inner conservativity loop
+        // above enforces approximation-validity (first precondition);
+        // this block enforces a descent-or-feasibility-restoration
+        // gate on the accepted trial.  Reject the conservative trial
+        // ONLY when BOTH (a) the objective worsens and (b) primal
+        // feasibility does not improve.  Any strict cv decrease gives
+        // the trial a pass regardless of f rise -- the feasibility-
+        // restoration trial is what pure-f rejection could not admit,
+        // and the cv-aware form is the minimal extension that makes
+        // the descent-monotone precondition correct across constraint-
+        // boundary-crossing trajectories.
+        //
+        // The rejection path returns BEFORE the inter-outer rho decay
+        // below: s.x / s.f stay anchored and rho stays at its current-
+        // grown value, forcing asymptote schedule contraction on the
+        // next outer iter.  policy_status is deliberately left unset
+        // -- a rejection is a retry request, not a stall, convergence,
+        // or divergence.
+        //
+        // Reference: Svanberg 2002, SIAM J. Optim. 12(2):555-573,
+        //            Section 4.2 Proposition 1 (descent-monotone
+        //            precondition + closure condition).
+        //            Fletcher and Leyffer 2002, SIAM J. Optim.
+        //            13(1):44-59, Section 2 (filter acceptance:
+        //            non-dominated in (f, cv)).  The in-tree
+        //            filter_set implementation (used by
+        //            filter_slsqp_policy and filter_nw_sqp_policy) is
+        //            the fuller form; this block is the minimal cv-
+        //            axis specialization that keeps the mma_policy
+        //            step shape simple.
+        const double descent_slack = 1e-12;
+        const double cv_improvement_slack = 0.0;
+        const double feasibility_tolerance = 1e-9;
+        const Eigen::Matrix<double, 0, N> J_eq_empty_dr(0, n);
+        const Eigen::Vector<double, 0> lambda_eq_empty_dr;
+        const Eigen::Vector<double, 0> c_eq_empty_dr;
+        const double cv_current = detail::primal_feasibility_inf(
+            c_eq_empty_dr, s.c_ineq);
+        const double cv_trial = detail::primal_feasibility_inf(
+            c_eq_empty_dr, c_ineq_trial);
+        // Already-feasible case: when both iterates satisfy feasibility
+        // within tolerance, the cv axis is not a discriminator (both
+        // effectively cv = 0 and strict cv-decrease is unmeasurable at
+        // floating-point roundoff).  Admit the trial unconditionally in
+        // this regime -- the descent-monotone precondition applies
+        // cleanly only when the cv axis can distinguish trials.  The
+        // Fletcher-Leyffer 2002 filter reduces to the same behavior
+        // when all entries lie on the cv = 0 contour.
+        const bool both_already_feasible =
+            cv_current <= feasibility_tolerance
+            && cv_trial <= feasibility_tolerance;
+        const bool f_worsened = f_trial > s.f + descent_slack;
+        const bool cv_improved =
+            cv_trial < cv_current - cv_improvement_slack;
+        if(!both_already_feasible && f_worsened && !cv_improved)
+        {
+            const auto& mu_ineq_dr = s.subproblem->multipliers();
+            const double kkt_dr = detail::kkt_residual<double, N, 0, MC>(
+                s.g,
+                J_eq_empty_dr,
+                s.J_ineq,
+                lambda_eq_empty_dr,
+                mu_ineq_dr,
+                c_eq_empty_dr,
+                s.c_ineq);
+
+            return step_result<double>{
+                .objective_value = s.f,
+                .gradient_norm = s.g.norm(),
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = cv_current,
+                .x_norm = s.x.norm(),
+                .kkt_residual = kkt_dr,
+            };
+        }
+
         // Inter-outer rho decay per NLopt mma.c:385-389.  Applied at the
         // conservative-accept exit (the only path that reaches here; the
         // null-step exit returned above).  Symmetric with the gcmma path
