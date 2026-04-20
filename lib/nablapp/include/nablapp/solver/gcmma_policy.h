@@ -142,6 +142,23 @@ struct gcmma_policy
         std::optional<std::uint16_t> raa_saturated_stall_consecutive_count{};   // default: 5
         std::optional<double>        kkt_jump_threshold_factor{};               // default: 1000.0
 
+        // Svanberg 1987 Theorem 5.1 Cauchy-sequence convergence precondition:
+        // the stall_tolerance_criterion framework-side mechanism requires a
+        // threshold to be non-nullopt to activate (the criterion's
+        // `if(!threshold) return std::nullopt;` short-circuit disables it
+        // when the option is unset).  The framework-side wire at
+        // basic_solver::forward_policy_hints consumes this option via
+        // value_or and also auto-enables the best_seen_feasible metric for
+        // the MMA / GCMMA policy family, which is robust against the
+        // objective-oscillation mode documented in in-tree diagnosis traces.
+        // Unspecified => wire applies default 1e-6 per the forward-hint
+        // rule; the criterion then fires on a stalled best-seen-feasible
+        // metric inside the rolling window.
+        //
+        // Reference: Svanberg 1987, "The method of moving asymptotes",
+        //            IJNME 24:359-373, Theorem 5.1.
+        std::optional<double> stall_tolerance_threshold{};  // default: 1e-6 (wired at forward_policy_hints)
+
         asymptote_options asymptote{};                          // Embedded asymptote params
         mma_subproblem_options subproblem{};                     // Embedded subproblem params
         std::uint16_t stall_window{50};

@@ -618,6 +618,7 @@ public:
                 auto& dst = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
                 dst.threshold = c.threshold;
                 dst.window = c.window;
+                dst.track_best_seen_feasible = c.track_best_seen_feasible;
             }
         }
     }
@@ -720,6 +721,43 @@ public:
                     const double current = ftol_rel.stationarity_threshold.value_or(1e-8);
                     ftol_rel.stationarity_threshold =
                         std::max(current, *policy_opts.kkt_tolerance);
+                }
+            }
+        }
+
+        // MMA / GCMMA stall_tolerance_threshold option -> stall_tolerance_criterion.
+        // Unconditional set via value_or(default): the criterion's
+        // `if(!threshold) return std::nullopt;` short-circuit means a nullopt
+        // threshold disables the criterion silently.  stall_tolerance_threshold
+        // has no baseline; this wire is what enables the criterion for the
+        // MMA / GCMMA policy family.  Mirrors the canonical forward_solver_hints
+        // constraint_tolerance -> stationarity_threshold precedent above but
+        // uses value_or rather than max-of-two because stall detection has no
+        // pre-existing default to preserve.
+        //
+        // The best_seen_feasible metric flag is auto-enabled when the policy
+        // has the rho_init option (MMA) or the raa0 option (GCMMA), which
+        // together identify the MMA policy family and the early-convergence-
+        // then-destabilization mechanism documented in in-tree diagnosis
+        // traces.  Non-MMA policies that happen to expose
+        // stall_tolerance_threshold (none today) leave the flag in its
+        // defaulted false state; the criterion then uses the combined
+        // (objective + constraint_violation) metric byte-for-byte.
+        //
+        // Reference: Svanberg 1987, "The method of moving asymptotes",
+        //            IJNME 24:359-373, Theorem 5.1 (Cauchy-sequence
+        //            convergence precondition).
+        if constexpr(requires { policy_opts.stall_tolerance_threshold; })
+        {
+            using criteria_tuple = decltype(stored_convergence_.criteria);
+            if constexpr(detail::tuple_contains_v<stall_tolerance_criterion, criteria_tuple>)
+            {
+                auto& stall = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
+                stall.threshold = policy_opts.stall_tolerance_threshold.value_or(1e-6);
+                if constexpr(requires { policy_opts.rho_init; }
+                          || requires { policy_opts.raa0; })
+                {
+                    stall.track_best_seen_feasible = true;
                 }
             }
         }
