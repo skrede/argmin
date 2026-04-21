@@ -81,11 +81,28 @@ void update_asymptotes(
         L[j] = x[j] - gamma * (x_old1[j] - L[j]);
         U[j] = x[j] + gamma * (U[j] - x_old1[j]);
 
-        // Safety clamp: asymptotes must not get too close to iterate.
-        // Minimum distance is minimum_distance_fraction * range (Svanberg 1987).
+        // Lower clamp: asymptotes must not collapse onto the iterate. The
+        // reciprocal approximation p_ij / (U_j - x_j) + q_ij / (x_j - L_j)
+        // has a denominator singularity as (U - x) or (x - L) -> 0.
+        //
+        // Reference: Svanberg 1987, Section 3.
         Scalar min_dist = static_cast<Scalar>(opts.minimum_distance_fraction.value_or(0.01)) * range;
         L[j] = std::min(L[j], x[j] - min_dist);
         U[j] = std::max(U[j], x[j] + min_dist);
+
+        // Upper clamp: asymptotes must not run away via repeated gamma =
+        // asyminc expansions on monotone-descent iterate sequences. Without
+        // this bound, (U - L) grows as asyminc^k on any stretch of k
+        // same-sign consecutive differences, inflating the trust region
+        // well past the scale at which the MMA approximation is accurate
+        // and producing overshoot near convergence.
+        //
+        // Reference: Svanberg 2002, Section 4.2 (CCSA conservativity
+        //            preconditions); arjendeetman/GCMMA-MMA-Python mmasub
+        //            (paper port: albefaup = 10 default).
+        Scalar max_dist = static_cast<Scalar>(opts.maximum_distance_fraction.value_or(10.0)) * range;
+        L[j] = std::max(L[j], x[j] - max_dist);
+        U[j] = std::min(U[j], x[j] + max_dist);
     }
 }
 
