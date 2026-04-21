@@ -419,8 +419,9 @@ int main(int argc, char** argv)
     // Tests the Signal 2 consecutive-inner-cap-hit threshold at
     // K values bracketing the paper-form-calibrated default (5).
     // Below-5 values are diagnostic-only (confirm problem direction);
-    // >=5 values are ship candidates, smallest-K-closing-HS076 wins
-    // per the selection rule in the accompanying verification doc.
+    // >=5 values are ship candidates. Selection rule: smallest K such
+    // that GCMMA on HS076 reaches the KKT-stationary optimum within
+    // the 1000-iter budget.
     const std::uint16_t K_values[] = {1, 2, 3, 5, 10, 15, 20, 25};
     int k_idx = 8;
     for(auto K : K_values)
