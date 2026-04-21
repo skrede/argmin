@@ -415,7 +415,35 @@ int main(int argc, char** argv)
                          100u, out);
     }
 
-    std::fprintf(stderr, "Done. Wrote 7 CSV files under %s\n",
+    // Runs 8-15: GCMMA HS076 K_saturation sweep, 1000 iters each.
+    // Tests the Signal 2 consecutive-inner-cap-hit threshold at
+    // K values bracketing the paper-form-calibrated default (5).
+    // Below-5 values are diagnostic-only (confirm problem direction);
+    // >=5 values are ship candidates, smallest-K-closing-HS076 wins
+    // per the selection rule in the accompanying verification doc.
+    const std::uint16_t K_values[] = {1, 2, 3, 5, 10, 15, 20, 25};
+    int k_idx = 8;
+    for(auto K : K_values)
+    {
+        std::fprintf(stderr,
+            "  [%d/15] gcmma_policy HS076 K_saturation=%u 1000 iters\n",
+            k_idx, static_cast<unsigned>(K));
+        char leaf_buf[32];
+        std::snprintf(leaf_buf, sizeof(leaf_buf),
+                      "gcmma_hs076_K%02u.csv",
+                      static_cast<unsigned>(K));
+        auto out = open_csv(log_dir, leaf_buf);
+        typename nablapp::gcmma_policy<4>::options_type policy_opts;
+        policy_opts.raa_saturated_stall_consecutive_count = K;
+        run_case_with_policy_opts("hs076", "gcmma",
+                                  nablapp::hs076<double>{},
+                                  nablapp::gcmma_policy<4>{},
+                                  policy_opts,
+                                  1000u, out);
+        ++k_idx;
+    }
+
+    std::fprintf(stderr, "Done. Wrote 15 CSV files under %s\n",
                  log_dir.c_str());
     return 0;
 }
