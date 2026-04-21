@@ -328,7 +328,7 @@ struct gcmma_policy
         const double asym_init = ms.opts.asymptote_init.value_or(0.5);
         const double asym_dec = ms.opts.asymptote_decrease.value_or(0.7);
         const double asym_inc = ms.opts.asymptote_increase.value_or(1.2);
-        const double move_lim = ms.opts.move_limit.value_or(0.2);
+        const double move_lim = ms.opts.move_limit.value_or(0.9);
         const double eff_scale = ms.opts.effective_bounds_scale.value_or(10.0);
         const std::uint16_t max_inner = s.opts.max_inner_iterations.value_or(15);
         const double raa0_floor = s.opts.raa0.value_or(1e-5);
