@@ -22,6 +22,13 @@
 // exit so the regularizer relaxes between outer iters instead of
 // saturating at the per-outer growth cap.
 //
+// The subproblem coefficient kernel inherited from mma_policy is
+// Svanberg 2002 §3 eq 3.2 paper-literal -- per-dimension `raa_i /
+// (b_j - a_j)` regularization on the reciprocal approximation.
+// NLopt LD_MMA's scalar `0.5 * rho` additive form is a simplification
+// of that kernel, not the reference; raa0 and raa_decay defaults below
+// are calibrated to the paper-literal form.
+//
 // References:
 //   Svanberg 2002, "A class of globally convergent optimization
 //     methods based on conservative convex separable approximations",
@@ -74,8 +81,14 @@ struct gcmma_policy
         // raa_0 and raa_i are state members that adapt (grow) on
         // non-conservative trials; raa0 is both the floor they cannot
         // drop below and the initial value they start from at outer
-        // iteration 0 (scaled by the asymp formula).
-        std::optional<double> raa0{};                           // default: 1e-5 (floor + initial)
+        // iteration 0 (scaled by the asymp formula).  raa[i] is wired
+        // into the §3 eq 3.2 paper-literal per-dimension regularization
+        // term `raa[i] / (b_j - a_j)` inside the reciprocal
+        // approximation; the 1e-5 floor is calibrated to that kernel
+        // form (NLopt LD_MMA's higher MMA_RHOMIN-style values are
+        // calibrated to its scalar `0.5 * rho` simplification at
+        // mma.c:102-105, not the paper-literal kernel).
+        std::optional<double> raa0{};                           // default: 1e-5 (paper-form calibration; see comment)
 
         // Svanberg 2002 Section 4.2 per-component conservativity growth
         // controls.

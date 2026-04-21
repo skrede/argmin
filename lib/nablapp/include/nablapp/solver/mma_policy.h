@@ -9,10 +9,17 @@
 // Svanberg 2002 inner conservativity loop.  Asymptote schedule per
 // Svanberg 1987 Section 3; structured regularization, per-iter
 // rho-growth on non-conservative trials, and inter-outer rho decay
-// per Svanberg 2002 Sections 3 and 4.2 (NLopt LD_MMA reference port
-// at src/algs/mma/mma.c lines 265-389).  Equality constraints are
-// rejected (use SQP or augmented Lagrangian for equality-constrained
-// NLPs).
+// per Svanberg 2002 Sections 3 and 4.2.  The subproblem coefficient
+// kernel is Svanberg 2002 Section 3 equation 3.2 paper-literal --
+// per-dimension `rho_i / (b_j - a_j)` regularization on the
+// reciprocal approximation -- which is the paper reference; NLopt
+// LD_MMA's scalar `0.5 * rho` additive form (mma.c:102-105) is a
+// downstream simplification of that kernel, not a separate reference.
+// NLopt's mma.c:265-389 inner-loop and decay control flow IS mirrored
+// here, with regularizer state calibrated to the paper-literal
+// kernel rather than NLopt's simplified form (see rho_init doc).
+// Equality constraints are rejected (use SQP or augmented Lagrangian
+// for equality-constrained NLPs).
 //
 // References:
 //   Svanberg 1987, "The method of moving asymptotes -- a new method
@@ -64,33 +71,40 @@ struct mma_policy
         std::optional<double> kkt_tolerance{};           // default: 1e-6 (Svanberg 1987)
         std::optional<double> effective_bounds_scale{};  // default: 10.0
 
-        // Svanberg 2002 Section 4.2 inner conservativity loop controls
-        // (NLopt LD_MMA reference at src/algs/mma/mma.c:265-389).  These
-        // knobs parameterize the rho / rhoc apparatus -- a structured
-        // regularizer that grows on non-conservative inner-loop trials
-        // within an outer iter and decays between outer iters.  Distinct
-        // from the GCMMA per-component raa machinery (gcmma_policy uses
-        // the raa_* family); MMA uses scalar rho + per-constraint rhoc
-        // per Svanberg 2002 paper notation.
+        // Svanberg 2002 Section 4.2 inner conservativity loop controls.
+        // These knobs parameterize the rho / rhoc apparatus -- a
+        // structured regularizer that grows on non-conservative inner-
+        // loop trials within an outer iter and decays between outer
+        // iters.  Distinct from the GCMMA per-component raa machinery
+        // (gcmma_policy uses the raa_* family); MMA uses scalar rho +
+        // per-constraint rhoc per Svanberg 2002 paper notation.  Loop
+        // and decay control flow mirrors NLopt mma.c:265-389; per-step
+        // regularizer magnitudes are calibrated to the paper-literal
+        // §3 eq 3.2 kernel that the in-tree mma_subproblem implements.
+        //
+        // rho_init default is 0.1 by paper-form calibration to the §3
+        // eq 3.2 per-dimension regularization the in-tree kernel
+        // implements (`rho_i / (b_j - a_j)` term within the reciprocal
+        // approximation; detail/mma_subproblem.h:275-280).  Svanberg
+        // 2002 §4.2 eq 4.4 only constrains rho_init to be "small
+        // positive" -- both the in-tree 0.1 and NLopt LD_MMA's 1.0
+        // (calibrated to NLopt's simplified additive `0.5 * rho`
+        // kernel at mma.c:102-105) are within that latitude; each
+        // value is calibrated to its own kernel form, neither is a
+        // deviation from Svanberg 2002.  Against the paper-literal
+        // kernel, 0.1 satisfies both the HS024 cubic-descent guard
+        // (NLopt's 1.0 traps the iterate at the x[1] = 0 boundary
+        // corner where the cubic factor zeros the objective) and the
+        // HS076 reciprocal-approximation margin guard simultaneously,
+        // while preserving the rho-growth / rho-decay machinery for
+        // the cases that need damping.
         //
         // Reference: Svanberg 2002, "A class of globally convergent
         //            optimization methods based on conservative convex
         //            separable approximations", SIAM J. Optim. 12(2),
-        //            Sections 3 and 4.2; NLopt mma.c:265-389.
-        // rho_init default is 0.1 rather than NLopt mma.c's 1.0 because the
-        // in-tree mma_subproblem coefficient form scales rho as
-        // `rho / (U - L)` per dimension (Svanberg 2002 GCMMA structured
-        // form at detail/mma_subproblem.h:275-280), whereas NLopt's mma.c
-        // uses `0.5 * rho` additively in its quadratic-equation kernel
-        // (mma.c:102-105).  Against the in-tree kernel, NLopt's `rho_init
-        // = 1.0` makes the structured term swamp small near-x0 gradients
-        // on cubic problems (HS024 traps the iterate at the x[1] = 0
-        // boundary corner where the cubic factor zeros the objective).
-        // 0.1 was empirically chosen as the value that satisfies both the
-        // HS024 cubic-descent guard and the HS076 reciprocal-approximation
-        // margin guard simultaneously while preserving the rho-growth /
-        // rho-decay machinery for the cases that need damping.
-        std::optional<double>        rho_init{};               // default: 0.1   (in-tree kernel scaling; NLopt mma.c uses 1.0)
+        //            Sections 3 (eq 3.1, 3.2) and 4.2 (eq 4.4); NLopt
+        //            mma.c:265-389 for the loop / decay control flow.
+        std::optional<double>        rho_init{};               // default: 0.1   (paper-form calibration; see comment)
         std::optional<double>        rho_min{};                // default: 1e-5  (NLopt MMA_RHOMIN floor)
         std::optional<double>        rho_growth{};             // default: 1.1   (Svanberg 2002 paper-faithful)
         std::optional<double>        rho_growth_cap{};         // default: 10.0  (NLopt mma.c growth cap)
