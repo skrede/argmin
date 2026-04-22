@@ -24,6 +24,9 @@
 #ifdef NABLAPP_HAS_DLIB
 #include "bench_dlib.h"
 #endif
+#ifdef NABLAPP_HAS_IPOPT
+#include "bench_ipopt.h"
+#endif
 
 #include <chrono>
 #include <cstdint>
@@ -121,6 +124,9 @@ int main(int argc, char** argv)
 #endif
 #ifdef NABLAPP_HAS_DLIB
     nablapp::bench::run_dlib_benchmarks(results);
+#endif
+#ifdef NABLAPP_HAS_IPOPT
+    nablapp::bench::run_ipopt_benchmarks(results);
 #endif
 
     auto t1 = std::chrono::high_resolution_clock::now();
