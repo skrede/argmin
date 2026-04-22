@@ -79,32 +79,27 @@ struct mma_policy
         // (gcmma_policy uses the raa_* family); MMA uses scalar rho +
         // per-constraint rhoc per Svanberg 2002 paper notation.  Loop
         // and decay control flow mirrors NLopt mma.c:265-389; per-step
-        // regularizer magnitudes are calibrated to the paper-literal
-        // §3 eq 3.2 kernel that the in-tree mma_subproblem implements.
+        // regularizer magnitudes are calibrated to the Svanberg 1987
+        // §3 / NLopt mma.c:101-107 additive kernel that the in-tree
+        // mma_subproblem implements.
         //
-        // rho_init default is 0.1 by paper-form calibration to the §3
-        // eq 3.2 per-dimension regularization the in-tree kernel
-        // implements (`rho_i / (b_j - a_j)` term within the reciprocal
-        // approximation; detail/mma_subproblem.h:275-280).  Svanberg
-        // 2002 §4.2 eq 4.4 only constrains rho_init to be "small
-        // positive" -- both the in-tree 0.1 and NLopt LD_MMA's 1.0
-        // (calibrated to NLopt's simplified additive `0.5 * rho`
-        // kernel at mma.c:102-105) are within that latitude; each
-        // value is calibrated to its own kernel form, neither is a
-        // deviation from Svanberg 2002.  Against the paper-literal
-        // kernel, 0.1 satisfies both the HS024 cubic-descent guard
-        // (NLopt's 1.0 traps the iterate at the x[1] = 0 boundary
-        // corner where the cubic factor zeros the objective) and the
-        // HS076 reciprocal-approximation margin guard simultaneously,
-        // while preserving the rho-growth / rho-decay machinery for
-        // the cases that need damping.
+        // rho_init default is 1.0 by Svanberg 1987 §3 / NLopt mma.c:209
+        // calibration against the additive kernel's coupled-pair
+        // stabilizer + regularizer form (`|df| * sigma + 0.5 * rho`
+        // divided by sigma^2; detail/mma_subproblem.h compute_coefficients).
+        // The earlier 0.1 default belonged to the Svanberg 2002 §3
+        // eq 3.2 per-dim regularizer (`rho_i / (b_j - a_j)`) and no
+        // longer applies under the additive kernel.  The lower floor
+        // stays at MMA_RHOMIN = 1e-5 (NLopt mma.c:36-41); gcmma_policy
+        // mirrors it via raa0_floor.
         //
-        // Reference: Svanberg 2002, "A class of globally convergent
-        //            optimization methods based on conservative convex
-        //            separable approximations", SIAM J. Optim. 12(2),
-        //            Sections 3 (eq 3.1, 3.2) and 4.2 (eq 4.4); NLopt
-        //            mma.c:265-389 for the loop / decay control flow.
-        std::optional<double>        rho_init{};               // default: 0.1   (paper-form calibration; see comment)
+        // Reference: Svanberg 1987, "The method of moving asymptotes",
+        //            IJNME 24:359-373, Section 3 (additive kernel);
+        //            NLopt mma.c:101-107 (coupled-pair stabilizer +
+        //            regularizer), mma.c:209 (rho_init = 1.0 default),
+        //            mma.c:265-389 (loop / decay control flow),
+        //            mma.c:36-41 (MMA_RHOMIN floor).
+        std::optional<double>        rho_init{};               // default: 1.0   (Svanberg 1987 §3 / NLopt mma.c:209; see comment)
         std::optional<double>        rho_min{};                // default: 1e-5  (NLopt MMA_RHOMIN floor)
         std::optional<double>        rho_growth{};             // default: 1.1   (Svanberg 2002 paper-faithful)
         std::optional<double>        rho_growth_cap{};         // default: 10.0  (NLopt mma.c growth cap)
@@ -256,7 +251,12 @@ struct mma_policy
         // Re-initialize rho/rhoc from the freshly-overridden opts so the
         // first overload's user-supplied policy_opts.rho_init takes effect
         // (mirrors the asymptote_init re-init pattern in the loop above).
-        const double rho_init_val_o = s.opts.rho_init.value_or(0.1);
+        //
+        // Default 1.0 matches Svanberg 1987 §3 / NLopt mma.c:209 under the
+        // additive kernel form now used by compute_coefficients.  The
+        // earlier 0.1 default belonged to the Svanberg 2002 §3 eq. 3.2
+        // per-dim regularizer and no longer applies.
+        const double rho_init_val_o = s.opts.rho_init.value_or(1.0);
         s.rho = rho_init_val_o;
         s.rhoc.setConstant(rho_init_val_o);
 
@@ -340,12 +340,17 @@ struct mma_policy
 
         s.iteration = 0;
 
-        // Svanberg 2002 Section 4.2 regularizer init: rho and per-
-        // constraint rhoc both start at rho_init (NLopt mma.c:209-214).
+        // Svanberg 1987 §3 / NLopt mma.c:209-214 init: rho and per-
+        // constraint rhoc both start at rho_init.  Default 1.0 matches
+        // NLopt's LD_MMA calibration for the additive kernel used by
+        // compute_coefficients (the lower floor is MMA_RHOMIN = 1e-5 at
+        // NLopt mma.c:36-41, which gcmma_policy.h:334 raa0_floor already
+        // mirrors).
+        //
         // rhoc.resize(0) is a no-op safe call when m_ineq == 0
         // (the policy rejects equality-constrained problems but is
         // valid for unconstrained-but-bounded inputs in principle).
-        const double rho_init_val = s.opts.rho_init.value_or(0.1);
+        const double rho_init_val = s.opts.rho_init.value_or(1.0);
         s.rho = rho_init_val;
         s.rhoc.resize(m_ineq);
         s.rhoc.setConstant(rho_init_val);
@@ -924,7 +929,11 @@ struct mma_policy
         // Re-initialize rho/rhoc from rho_init so a re-run starts with
         // a clean regularizer state (stale rho/rhoc across reset() would
         // give non-reproducible behavior).
-        const double rho_init_val_r = s.opts.rho_init.value_or(0.1);
+        //
+        // Reset path: rho_init default 1.0 matches the two init sites
+        // above (Svanberg 1987 §3 / NLopt mma.c:209 under additive
+        // kernel).
+        const double rho_init_val_r = s.opts.rho_init.value_or(1.0);
         s.rho = rho_init_val_r;
         s.rhoc.setConstant(rho_init_val_r);
     }
