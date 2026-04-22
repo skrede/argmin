@@ -318,13 +318,19 @@ endif()
 
 # Diagnostic MMA/GCMMA asymptote-oscillation harness (throwaway; emits
 # per-outer-iteration CSV for mma_policy on HS043/HS076, gcmma_policy
-# on HS076, HS035 control, plus an mma_policy HS043 move_limit A/B
-# sweep at 0.5/0.7/0.9). EXCLUDE_FROM_ALL so it does not enter the
-# default target set; invoke with
+# on HS076, HS035 control, an mma_policy HS043 move_limit A/B sweep at
+# 0.5/0.7/0.9, a GCMMA HS076 K_saturation sweep, and row-matched NLopt
+# LD_MMA reference trajectories on three inequality-constrained HS
+# cells. EXCLUDE_FROM_ALL so it does not enter the default target set;
+# invoke with
 # `cmake --build <dir> --target diagnostic_mma_asymptote_trace`.
 add_executable(diagnostic_mma_asymptote_trace EXCLUDE_FROM_ALL
     diagnostic_mma_asymptote_trace.cpp)
 target_link_libraries(diagnostic_mma_asymptote_trace PRIVATE nablapp::nablapp)
+if(NLopt_FOUND)
+    target_link_libraries(diagnostic_mma_asymptote_trace PRIVATE NLopt::nlopt)
+    target_compile_definitions(diagnostic_mma_asymptote_trace PRIVATE NABLAPP_HAS_NLOPT)
+endif()
 target_compile_options(diagnostic_mma_asymptote_trace PRIVATE
     $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
         -march=native

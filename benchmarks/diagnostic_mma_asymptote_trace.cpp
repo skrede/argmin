@@ -54,6 +54,7 @@
 #include "nablapp/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
+#include <nlopt.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -62,18 +63,25 @@
 #include <fstream>
 #include <iomanip>
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <string_view>
 
 namespace
 {
 
+// Max per-coordinate block width.  HS024 n=2, HS043 n=4, HS076 n=4
+// in the cells the harness targets; fix the CSV width at 4 so every
+// row has the same column count regardless of dimension.  Entries
+// beyond the problem dimension are emitted as "nan".
+constexpr int max_x_columns = 4;
+
 constexpr std::string_view csv_header =
     "problem,policy,iter,inner_iter,f,f_trial,f_approx_at_trial,"
     "step_size,x_norm,sign_flip_count,asymptote_factor_mean,"
     "L_U_width_min,L_U_width_max,rho,rhoc_max,raa_0,raa_max,"
     "kkt_residual,constraint_violation_Linf,inner_max_hit,"
-    "policy_status\n";
+    "policy_status,x_0,x_1,x_2,x_3\n";
 
 // Builds a solver_options with the suppressed-convergence thresholds
 // from diagnostic_mma_breakdown.cpp:304-309. The tight thresholds let
@@ -269,7 +277,19 @@ void emit_trace(std::string_view problem_label,
             << L_U_width_min << ',' << L_U_width_max << ',' << shadow_rho
             << ',' << shadow_rhoc_max << ',' << raa_0 << ',' << raa_max
             << ',' << kkt << ',' << cv_linf << ',' << inner_max_hit << ','
-            << policy_status << '\n';
+            << policy_status;
+        // Per-coordinate trailing block (x_0..x_{max_x_columns-1});
+        // NaN padding for columns past the problem dimension keeps
+        // every row the same column count.
+        for(int j = 0; j < max_x_columns; ++j)
+        {
+            out << ',';
+            if(j < N)
+                out << inner_post.x[j];
+            else
+                out << "nan";
+        }
+        out << '\n';
 
         // Do NOT break on sr.policy_status: the traces target the full
         // budget pathology. Only exit on budget via the for-loop.
@@ -318,6 +338,192 @@ std::ofstream open_csv(std::string_view log_dir, std::string_view leafname)
     return f;
 }
 
+// NLopt reference-trace support.
+//
+// The harness reuses the nlopt::opt C++ wrapper that bench_nlopt.cpp
+// already uses on the inequality-constrained HS cells (LD_MMA branch
+// at bench_nlopt.cpp:469-479 in the inequality dispatch path).  Runs
+// 16-18 emit one CSV row per NLopt f-eval; NLopt's MMA port fires the
+// objective callback once per inner conservativity check, which is
+// the row-matched per-outer trial-point proxy the trajectory-diff
+// needs.
+//
+// References
+//   Svanberg 1987, "The method of moving asymptotes", IJNME 24,
+//     Section 3 (additive regularizer 0.5*rho*sigma_j^2 target of the
+//     c1 kernel-swap decision this harness feeds).
+//   NLopt LD_MMA is Steven G. Johnson's port of Svanberg 2002 CCSA
+//     with the Svanberg 1987 additive regularizer; src/algs/mma/mma.c
+//     at :101-107 (coefficient kernel form) and :295 (per-inner f-eval
+//     callback fire).
+//
+// Sign convention on inequalities: NLopt uses c(x) <= 0 feasible;
+// nablapp uses c(x) >= 0 feasible.  The mconstraint trampoline
+// negates both c and its Jacobian row entries so the NLopt run sees
+// the exact same feasible region as the nablapp run.
+
+struct nlopt_trace_data
+{
+    int eval_count = 0;
+    std::ofstream* out = nullptr;
+    std::string_view problem_label;
+    int n = 0;
+};
+
+// Emits a single NLopt reference row matching the 25-column CSV
+// schema.  Columns the NLopt run does not observe are written as
+// "nan" (asymptote state, rho trajectory, raa readouts) or as 0
+// (sign_flip_count, inner_max_hit, policy_status — NLopt has no
+// equivalent instrumentation).
+inline void emit_nlopt_row(nlopt_trace_data& td,
+                           const double* x,
+                           unsigned n,
+                           double f)
+{
+    Eigen::Map<const Eigen::VectorXd> x_map(x, static_cast<int>(n));
+    const double x_norm = x_map.norm();
+    // Leading 21-column block (mirrors emit_trace's layout exactly).
+    (*td.out) << td.problem_label << ",nlopt_mma,"
+              << td.eval_count << ",-1,"
+              << f << ',' << f << ",nan,"
+              << "nan,"                              // step_size N/A
+              << x_norm << ",0,nan,"                 // sign_flip=0; asym_factor_mean N/A
+              << "nan,nan,"                          // L_U_width_{min,max} N/A
+              << "nan,nan,"                          // rho, rhoc_max N/A
+              << "nan,nan,"                          // raa_0, raa_max N/A
+              << "nan,nan,0,"                        // kkt, cv_linf, inner_max_hit
+              << "-1";                               // policy_status sentinel
+    for(int j = 0; j < max_x_columns; ++j)
+    {
+        (*td.out) << ',';
+        if(j < static_cast<int>(n))
+            (*td.out) << x[j];
+        else
+            (*td.out) << "nan";
+    }
+    (*td.out) << '\n';
+}
+
+// Objective trampoline bound to a single HS problem instance.  Calls
+// prob.value / prob.gradient, emits a per-f-eval CSV row, and returns
+// f to NLopt.  The tuple `(problem*, trace_data*)` is passed via
+// NLopt's void* callback slot (mirrors bench_nlopt.cpp:43-57 pattern).
+template <typename Problem>
+double nlopt_trace_objective(unsigned n,
+                             const double* x,
+                             double* grad,
+                             void* data)
+{
+    auto* ctx = static_cast<std::pair<Problem*, nlopt_trace_data*>*>(data);
+    auto* prob = ctx->first;
+    auto* td = ctx->second;
+
+    Eigen::Map<const Eigen::VectorXd> xmap(x, static_cast<int>(n));
+    Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
+    const double f = prob->value(xv);
+
+    if(grad)
+    {
+        Eigen::Vector<double, Problem::problem_dimension> g;
+        prob->gradient(xv, g);
+        Eigen::Map<Eigen::VectorXd>(grad, static_cast<int>(n)) = g;
+    }
+
+    emit_nlopt_row(*td, x, n, f);
+    ++td->eval_count;
+    return f;
+}
+
+// Inequality mconstraint trampoline (file-local mirror of
+// benchmarks/bench_nlopt.cpp:62-90; negates sign to map nablapp's
+// c(x)>=0 convention onto NLopt's c(x)<=0 convention).  Callback
+// signature matches nlopt::opt::add_inequality_mconstraint ABI.
+template <typename Problem>
+void nlopt_trace_ineq_mconstraint(unsigned m,
+                                  double* result,
+                                  unsigned n,
+                                  const double* x,
+                                  double* grad,
+                                  void* data)
+{
+    auto* prob = static_cast<Problem*>(data);
+
+    Eigen::Map<const Eigen::VectorXd> xmap(x, static_cast<int>(n));
+    Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
+
+    const int n_eq = prob->num_equality();
+    const int total_constraints = n_eq + static_cast<int>(m);
+    Eigen::VectorXd c(total_constraints);
+    prob->constraints(xv, c);
+
+    for(unsigned i = 0; i < m; ++i)
+        result[i] = -c[n_eq + static_cast<int>(i)];
+
+    if(grad)
+    {
+        Eigen::MatrixXd J(total_constraints, static_cast<int>(n));
+        prob->constraint_jacobian(xv, J);
+        for(unsigned i = 0; i < m; ++i)
+            for(unsigned j = 0; j < n; ++j)
+                grad[i * n + j] = -J(n_eq + static_cast<int>(i),
+                                     static_cast<int>(j));
+    }
+}
+
+// Drives one NLopt LD_MMA reference run on `prob` and writes row-
+// matched per-f-eval CSV rows into `out`.  Reads bounds / x0 / ineq
+// count directly from the problem struct (no hardcoded literals).
+// Tolerances / maxeval: ftol_rel=1e-15, xtol_rel=1e-15, maxeval=1000
+// (matches the suppressed-convergence regime the nablapp-side runs
+// use via make_suppressed_convergence_opts).
+template <typename Problem>
+void run_nlopt_mma_reference(std::string_view problem_label,
+                             Problem prob,
+                             std::ofstream& out)
+{
+    const unsigned n = static_cast<unsigned>(prob.dimension());
+    nlopt::opt opt(nlopt::LD_MMA, n);
+
+    auto lb = prob.lower_bounds();
+    auto ub = prob.upper_bounds();
+    opt.set_lower_bounds(std::vector<double>(lb.data(), lb.data() + n));
+    opt.set_upper_bounds(std::vector<double>(ub.data(), ub.data() + n));
+
+    nlopt_trace_data td{};
+    td.out = &out;
+    td.problem_label = problem_label;
+    td.n = static_cast<int>(n);
+
+    std::pair<Problem*, nlopt_trace_data*> ctx{&prob, &td};
+    opt.set_min_objective(nlopt_trace_objective<Problem>, &ctx);
+
+    if(prob.num_inequality() > 0)
+    {
+        std::vector<double> tol(
+            static_cast<std::size_t>(prob.num_inequality()), 1e-8);
+        opt.add_inequality_mconstraint(
+            nlopt_trace_ineq_mconstraint<Problem>, &prob, tol);
+    }
+
+    opt.set_ftol_rel(1e-15);
+    opt.set_xtol_rel(1e-15);
+    opt.set_maxeval(1000);
+
+    auto x0 = prob.initial_point();
+    std::vector<double> x(x0.data(), x0.data() + n);
+    double min_f{};
+    try
+    {
+        opt.optimize(x, min_f);
+    }
+    catch(const std::exception&)
+    {
+        // NLopt may throw on roundoff / maxeval termination; per-eval
+        // rows have already been emitted by the trampoline, so the
+        // trajectory is preserved.  Nothing to do here.
+    }
+}
+
 }
 
 int main(int argc, char** argv)
@@ -342,7 +548,7 @@ int main(int argc, char** argv)
 
     std::filesystem::create_directories(log_dir);
 
-    std::fprintf(stderr, "Running diagnostic_mma_asymptote_trace: 7 runs\n");
+    std::fprintf(stderr, "Running diagnostic_mma_asymptote_trace: 18 runs\n");
 
     // Run 1: MMA HS043, default, 10000 iters.
     {
@@ -444,7 +650,49 @@ int main(int argc, char** argv)
         ++k_idx;
     }
 
-    std::fprintf(stderr, "Done. Wrote 15 CSV files under %s\n",
+    // Runs 16-18: NLopt LD_MMA reference trajectories on HS024, HS043,
+    // HS076.  One CSV row per NLopt f-eval (NLopt's mma.c:295 fires
+    // the objective callback once per inner conservativity check,
+    // which is the row-matched per-outer trial-point proxy the
+    // trajectory-diff needs).
+    //
+    // Bounds / x0 / ineq count are read directly from each problem
+    // struct in lib/nablapp/include/nablapp/test_functions/
+    // hock_schittkowski.h — the same instance feeds the nablapp run
+    // and this NLopt run, so byte-identical wiring is guaranteed by
+    // construction.
+    //
+    // References
+    //   Svanberg 1987, §3 (additive regularizer form).
+    //   Svanberg 2002, §3 eq. 3.2 (current in-tree paper-literal form).
+    //   NLopt src/algs/mma/mma.c:101-107 (additive kernel coefficient
+    //     shape v = |dfdx[j]|*sigma[j] + 0.5*rho; reference oracle).
+    {
+        std::fprintf(stderr,
+            "  [16/18] nlopt_mma HS024 reference trajectory\n");
+        auto out = open_csv(log_dir, "nlopt_hs024_trace.csv");
+        run_nlopt_mma_reference("hs024",
+                                nablapp::hs024<double>{},
+                                out);
+    }
+    {
+        std::fprintf(stderr,
+            "  [17/18] nlopt_mma HS043 reference trajectory\n");
+        auto out = open_csv(log_dir, "nlopt_hs043_trace.csv");
+        run_nlopt_mma_reference("hs043",
+                                nablapp::hs043<double>{},
+                                out);
+    }
+    {
+        std::fprintf(stderr,
+            "  [18/18] nlopt_mma HS076 reference trajectory\n");
+        auto out = open_csv(log_dir, "nlopt_hs076_trace.csv");
+        run_nlopt_mma_reference("hs076",
+                                nablapp::hs076<double>{},
+                                out);
+    }
+
+    std::fprintf(stderr, "Done. Wrote 18 CSV files under %s\n",
                  log_dir.c_str());
     return 0;
 }
