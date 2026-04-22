@@ -99,15 +99,15 @@ struct projected_gradient_gn_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
                     const solver_options<Convergence>&)
     {
         state_type s;
@@ -118,7 +118,7 @@ struct projected_gradient_gn_policy
         s.upper = problem.upper_bounds();
         s.x = detail::project(x0, s.lower, s.upper);
         s.num_residuals = problem.num_residuals();
-        s.delta = self.options.trust_region_radius.value_or(1.0);
+        s.delta = options.trust_region_radius.value_or(1.0);
 
         // Capture closures (problem must outlive solver)
         s.eval_value = [&problem](const Eigen::VectorXd& v) {
@@ -156,15 +156,15 @@ struct projected_gradient_gn_policy
         s.objective_value = 0.5 * s.r.squaredNorm();
 
         // Initialize lambda (Nielsen 1999)
-        if(self.options.initial_lambda > 0.0)
+        if(options.initial_lambda > 0.0)
         {
-            s.lambda = self.options.initial_lambda;
+            s.lambda = options.initial_lambda;
         }
         else
         {
             Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
             double max_diag = diag.maxCoeff();
-            s.lambda = (max_diag > 0.0) ? self.options.tau * max_diag : 1e-4;
+            s.lambda = (max_diag > 0.0) ? options.tau * max_diag : 1e-4;
         }
 
         s.nu = 2.0;
@@ -176,7 +176,7 @@ struct projected_gradient_gn_policy
     // Default mode: solves full damped system, projects onto bounds, applies
     // Armijo backtracking on the projected step (N&W Algorithm 16.1).
     // Dogleg mode: same trust-region approach as projected_gn_policy.
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         const int n = static_cast<int>(s.x.size());
 
@@ -186,13 +186,13 @@ struct projected_gradient_gn_policy
         // Gradient of 0.5*||r||^2: g = J^T r
         Eigen::VectorXd g = (s.J.transpose() * s.r).eval();
 
-        if(self.options.use_dogleg)
-            return self.step_dogleg(s, H, g, n);
+        if(options.use_dogleg)
+            return step_dogleg(s, H, g, n);
 
-        return self.step_backtracking(s, H, g, n);
+        return step_backtracking(s, H, g, n);
     }
 
-    void reset(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
         s.r.resize(s.num_residuals);
@@ -206,13 +206,13 @@ struct projected_gradient_gn_policy
         double max_diag = diag.maxCoeff();
         s.lambda = (max_diag > 0.0) ? 1e-3 * max_diag : 1e-4;
         s.nu = 2.0;
-        s.delta = self.options.trust_region_radius.value_or(1.0);
+        s.delta = options.trust_region_radius.value_or(1.0);
         s.iteration = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 
 private:
@@ -222,13 +222,13 @@ private:
     // to get direction d = P(x + h) - x, then backtracks alpha until the
     // Armijo sufficient decrease condition holds on the projected trial point.
     step_result<double> step_backtracking(
-        this auto&& self, state_type& s,
+        state_type& s,
         const Eigen::MatrixXd& H, const Eigen::VectorXd& g, int n)
     {
         // Solve full damped system: (H + lambda*D) h = -g
         Eigen::MatrixXd H_damped = H;
         for(int i = 0; i < n; ++i)
-            H_damped(i, i) += s.lambda * std::max(H(i, i), self.options.diagonal_min_clamp);
+            H_damped(i, i) += s.lambda * std::max(H(i, i), options.diagonal_min_clamp);
 
         Eigen::VectorXd h = H_damped.ldlt().solve(-g);
 
@@ -242,9 +242,9 @@ private:
 
         // Armijo backtracking (N&W Algorithm 16.1)
         double alpha = 1.0;
-        const double c = self.options.armijo_c;
-        const double rho_bt = self.options.backtrack_rho;
-        const std::uint32_t max_bt = self.options.max_backtrack;
+        const double c = options.armijo_c;
+        const double rho_bt = options.backtrack_rho;
+        const std::uint32_t max_bt = options.max_backtrack;
 
         bool accepted = false;
         Eigen::VectorXd x_trial(n);
@@ -279,7 +279,7 @@ private:
             // Nielsen (1999) lambda update using gain ratio
             double actual = old_value - f_trial;
             double predicted = detail::predicted_reduction_lm(
-                d, g, s.lambda, self.options.diagonal_min_clamp, H.diagonal());
+                d, g, s.lambda, options.diagonal_min_clamp, H.diagonal());
             double rho = (std::abs(predicted) < 1e-30) ? 1.0 : actual / predicted;
 
             double factor = 1.0 - std::pow(2.0 * rho - 1.0, 3.0);
@@ -294,7 +294,7 @@ private:
         }
 
         // Clamp lambda
-        s.lambda = std::clamp(s.lambda, self.options.lambda_min, self.options.lambda_max);
+        s.lambda = std::clamp(s.lambda, options.lambda_min, options.lambda_max);
 
         ++s.iteration;
 
@@ -322,7 +322,7 @@ private:
     // dogleg interpolation on free subspace, projection onto bounds, gain-ratio
     // acceptance with trust-region radius update.
     step_result<double> step_dogleg(
-        this auto&& self, state_type& s,
+        state_type& s,
         const Eigen::MatrixXd& H, const Eigen::VectorXd& g, int n)
     {
         // Active-set identification for dogleg (N&W Section 16.6)
@@ -352,8 +352,8 @@ private:
         const double old_value = s.objective_value;
         bool accepted = rho > 0.0;
 
-        double expand_thresh = self.options.trust_region_expand_threshold.value_or(0.75);
-        double shrink_thresh = self.options.trust_region_shrink_threshold.value_or(0.25);
+        double expand_thresh = options.trust_region_expand_threshold.value_or(0.75);
+        double shrink_thresh = options.trust_region_shrink_threshold.value_or(0.25);
 
         if(accepted)
         {
@@ -366,7 +366,7 @@ private:
         detail::update_trust_region(s.delta, rho, d.norm(), expand_thresh, shrink_thresh);
 
         // Clamp lambda
-        s.lambda = std::clamp(s.lambda, self.options.lambda_min, self.options.lambda_max);
+        s.lambda = std::clamp(s.lambda, options.lambda_min, options.lambda_max);
 
         ++s.iteration;
 

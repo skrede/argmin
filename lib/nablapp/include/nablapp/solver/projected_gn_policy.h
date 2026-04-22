@@ -88,15 +88,15 @@ struct projected_gn_policy
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
-        self.options = policy_opts;
-        return self.init(problem, x0, opts);
+        options = policy_opts;
+        return init(problem, x0, opts);
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(this auto&& self, const Problem& problem, const Eigen::VectorXd& x0,
+    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
                     const solver_options<Convergence>&)
     {
         state_type s;
@@ -107,7 +107,7 @@ struct projected_gn_policy
         s.upper = problem.upper_bounds();
         s.x = detail::project(x0, s.lower, s.upper);
         s.num_residuals = problem.num_residuals();
-        s.delta = self.options.trust_region_radius.value_or(1.0);
+        s.delta = options.trust_region_radius.value_or(1.0);
 
         // Capture closures (problem must outlive solver)
         s.eval_value = [&problem](const Eigen::VectorXd& v) {
@@ -145,15 +145,15 @@ struct projected_gn_policy
         s.objective_value = 0.5 * s.r.squaredNorm();
 
         // Initialize lambda (Nielsen 1999)
-        if(self.options.initial_lambda > 0.0)
+        if(options.initial_lambda > 0.0)
         {
-            s.lambda = self.options.initial_lambda;
+            s.lambda = options.initial_lambda;
         }
         else
         {
             Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
             double max_diag = diag.maxCoeff();
-            s.lambda = (max_diag > 0.0) ? self.options.tau * max_diag : 1e-4;
+            s.lambda = (max_diag > 0.0) ? options.tau * max_diag : 1e-4;
         }
 
         s.nu = 2.0;
@@ -162,7 +162,7 @@ struct projected_gn_policy
 
     // One projected GN iteration with active-set identification and
     // Nielsen (1999) / dogleg (N&W 4.1) globalization.
-    step_result<double> step(this auto&& self, state_type& s)
+    step_result<double> step(state_type& s)
     {
         const int n = static_cast<int>(s.x.size());
 
@@ -176,7 +176,7 @@ struct projected_gn_policy
         auto free_indices = detail::identify_free_set(s.x, g, s.lower, s.upper);
 
         Eigen::VectorXd h;
-        if(self.options.use_dogleg)
+        if(options.use_dogleg)
         {
             // Extract reduced system for dogleg
             Eigen::MatrixXd H_free;
@@ -189,7 +189,7 @@ struct projected_gn_policy
         {
             // Nielsen/LM mode: solve damped reduced system
             h = detail::solve_reduced_gn(H, g, free_indices,
-                                         s.lambda, self.options.diagonal_min_clamp);
+                                         s.lambda, options.diagonal_min_clamp);
         }
 
         // Project trial point onto bounds before evaluating (N&W Section 16.7)
@@ -207,14 +207,14 @@ struct projected_gn_policy
         // Gain ratio
         double actual = s.objective_value - f_trial;
         double predicted;
-        if(self.options.use_dogleg)
+        if(options.use_dogleg)
         {
             predicted = detail::predicted_reduction_tr(d, g, H);
         }
         else
         {
             predicted = detail::predicted_reduction_lm(
-                d, g, s.lambda, self.options.diagonal_min_clamp, H.diagonal());
+                d, g, s.lambda, options.diagonal_min_clamp, H.diagonal());
         }
 
         double rho = (std::abs(predicted) < 1e-30) ? 1.0 : actual / predicted;
@@ -223,8 +223,8 @@ struct projected_gn_policy
         const double old_value = s.objective_value;
         bool accepted = rho > 0.0;
 
-        double expand_thresh = self.options.trust_region_expand_threshold.value_or(0.75);
-        double shrink_thresh = self.options.trust_region_shrink_threshold.value_or(0.25);
+        double expand_thresh = options.trust_region_expand_threshold.value_or(0.75);
+        double shrink_thresh = options.trust_region_shrink_threshold.value_or(0.25);
 
         if(accepted)
         {
@@ -233,7 +233,7 @@ struct projected_gn_policy
             s.eval_jacobian(s.x, s.J);
             s.objective_value = f_trial;
 
-            if(self.options.use_dogleg)
+            if(options.use_dogleg)
             {
                 detail::update_trust_region(s.delta, rho, d.norm(),
                                             expand_thresh, shrink_thresh);
@@ -248,7 +248,7 @@ struct projected_gn_policy
         }
         else
         {
-            if(self.options.use_dogleg)
+            if(options.use_dogleg)
             {
                 detail::update_trust_region(s.delta, rho, d.norm(),
                                             expand_thresh, shrink_thresh);
@@ -261,7 +261,7 @@ struct projected_gn_policy
         }
 
         // Clamp lambda
-        s.lambda = std::clamp(s.lambda, self.options.lambda_min, self.options.lambda_max);
+        s.lambda = std::clamp(s.lambda, options.lambda_min, options.lambda_max);
 
         ++s.iteration;
 
@@ -287,7 +287,7 @@ struct projected_gn_policy
         };
     }
 
-    void reset(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.lower = s.lower;  // bounds already cached
         s.upper = s.upper;
@@ -303,13 +303,13 @@ struct projected_gn_policy
         double max_diag = diag.maxCoeff();
         s.lambda = (max_diag > 0.0) ? 1e-3 * max_diag : 1e-4;
         s.nu = 2.0;
-        s.delta = self.options.trust_region_radius.value_or(1.0);
+        s.delta = options.trust_region_radius.value_or(1.0);
         s.iteration = 0;
     }
 
-    void reset_clear(this auto&& self, state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        self.reset(s, x0);
+        reset(s, x0);
     }
 };
 
