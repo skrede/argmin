@@ -56,23 +56,21 @@ struct mma_coeffs
 // opts:   subproblem options; regularization_epsilon is a division-hygiene
 //         floor only, NOT the primary regularizer.
 //
-// Svanberg 1987 Section 3 additive kernel / NLopt mma.c:101-107
-// coupled-pair stabilizer+regularizer (sigma_j = 0.5 * (U_j - L_j)):
-//     p_0j = (U_j - x_j)^2 * ( max(df/dx_j, 0)
-//                              + ( |df/dx_j| * sigma_j + 0.5 * raa_0 )
-//                                / sigma_j^2 ) + eps_floor
-//     q_0j = (x_j - L_j)^2 * ( max(-df/dx_j, 0)
-//                              + ( |df/dx_j| * sigma_j + 0.5 * raa_0 )
-//                                / sigma_j^2 ) + eps_floor
+// Svanberg 2002 Section 3 structured regularization:
+//     p_0j = (U_j - x_j)^2 * ( max(df/dx_j, 0) + 0.001 * |df/dx_j|
+//                              + raa_0 / (U_j - L_j) ) + eps_floor
+//     q_0j = (x_j - L_j)^2 * ( max(-df/dx_j, 0) + 0.001 * |df/dx_j|
+//                              + raa_0 / (U_j - L_j) ) + eps_floor
 // with |g| = max(g, 0) + max(-g, 0) (split-gradient magnitude).
 //
-// The |df/dx| * sigma_j scaled-gradient stabilizer and the 0.5 * raa_0
-// additive regularizer are a coupled pair under NLopt mma.c:101-107;
-// rho_init = 1.0 is calibrated against exactly this pair. raa_0 = 0
-// recovers the Svanberg 1987 zero-regularizer baseline.
+// The 0.001 * |g| stabilizer is active even at raa_0 = 0: this recovers
+// Svanberg's own 1987 baseline mmasub.m coefficient form. The
+// raa_0 / (U - L) term is Svanberg 2002's GCMMA-specific addition which
+// grows adaptively on non-conservative trials.
 //
-// Reference: Svanberg 1987, IJNME 24, Section 3 (additive kernel);
-//            NLopt mma.c:101-107 (coupled-pair stabilizer + regularizer).
+// Reference: Svanberg 2002, SIAM J. Optim. 12(2), Section 3 (paper
+//            notation rho_0j == raa_0); Svanberg 1987, IJNME 24,
+//            Section 3 (recovered by raa_0 = 0).
 template <typename Scalar, int N = nablapp::dynamic_dimension, int M = nablapp::dynamic_dimension>
 mma_coeffs<Scalar, N, M> mma_coefficients(
     const Eigen::Vector<Scalar, N>& x,
@@ -99,37 +97,32 @@ mma_coeffs<Scalar, N, M> mma_coefficients(
     c.r0.resize(1);
     c.ri.resize(m);
 
-    // Objective coefficients (Svanberg 1987 Section 3 additive kernel;
-    // NLopt mma.c:101-107 coupled-pair stabilizer+regularizer).
+    // Objective coefficients (Svanberg 2002 Section 3).
     Scalar r0_val = f;
     for(int j = 0; j < n; ++j)
     {
         const Scalar ux = U[j] - x[j];
         const Scalar xl = x[j] - L[j];
+        const Scalar inv_UL = Scalar(1) / (U[j] - L[j]);
 
         const Scalar gp = std::max(grad_f[j], Scalar(0));
         const Scalar gn = std::max(-grad_f[j], Scalar(0));
         const Scalar abs_g = gp + gn;
 
-        // Reference: Svanberg 1987, IJNME 24, Section 3 (additive
-        //            kernel); NLopt mma.c:101-107 (scaled-gradient
-        //            stabilizer |df|*sigma paired with 0.5*rho
-        //            additive regularizer; sigma_j = 0.5 * (U_j - L_j)).
-        const Scalar sigma_j = Scalar(0.5) * (U[j] - L[j]);
-        const Scalar inv_sigma_sq = Scalar(1) / (sigma_j * sigma_j);
         c.p0[j] = ux * ux
-            * (gp + (abs_g * sigma_j + Scalar(0.5) * raa_0) * inv_sigma_sq)
+            * (gp + Scalar(0.001) * abs_g + raa_0 * inv_UL)
             + eps_floor;
         c.q0[j] = xl * xl
-            * (gn + (abs_g * sigma_j + Scalar(0.5) * raa_0) * inv_sigma_sq)
+            * (gn + Scalar(0.001) * abs_g + raa_0 * inv_UL)
             + eps_floor;
 
         r0_val -= c.p0[j] / ux + c.q0[j] / xl;
     }
     c.r0[0] = r0_val;
 
-    // Constraint coefficients: same Svanberg 1987 Section 3 / NLopt
-    // mma.c:101-107 coupled-pair structure with per-constraint raa[i].
+    // Constraint coefficients: same structure with per-constraint raa[i].
+    //
+    // Reference: Svanberg 2002, Section 3 (constraint-level regularization).
     for(int i = 0; i < m; ++i)
     {
         Scalar ri_val = g[i];
@@ -137,22 +130,17 @@ mma_coeffs<Scalar, N, M> mma_coefficients(
         {
             const Scalar ux = U[j] - x[j];
             const Scalar xl = x[j] - L[j];
+            const Scalar inv_UL = Scalar(1) / (U[j] - L[j]);
 
             const Scalar dgp = std::max(dg(i, j), Scalar(0));
             const Scalar dgn = std::max(-dg(i, j), Scalar(0));
             const Scalar abs_dg = dgp + dgn;
 
-            // Reference: Svanberg 1987, IJNME 24, Section 3; NLopt
-            //            mma.c:101-107 (same coupled-pair form;
-            //            sigma_j = 0.5 * (U_j - L_j); per-constraint
-            //            regularizer raa[i] substitutes raa_0).
-            const Scalar sigma_j = Scalar(0.5) * (U[j] - L[j]);
-            const Scalar inv_sigma_sq = Scalar(1) / (sigma_j * sigma_j);
             c.pi(i, j) = ux * ux
-                * (dgp + (abs_dg * sigma_j + Scalar(0.5) * raa[i]) * inv_sigma_sq)
+                * (dgp + Scalar(0.001) * abs_dg + raa[i] * inv_UL)
                 + eps_floor;
             c.qi(i, j) = xl * xl
-                * (dgn + (abs_dg * sigma_j + Scalar(0.5) * raa[i]) * inv_sigma_sq)
+                * (dgn + Scalar(0.001) * abs_dg + raa[i] * inv_UL)
                 + eps_floor;
 
             ri_val -= c.pi(i, j) / ux + c.qi(i, j) / xl;
@@ -247,15 +235,12 @@ public:
     // Compute MMA approximation coefficients into pre-allocated workspace.
     //
     // raa_0, raa: conservativity regularizers. Zero for Svanberg 1987 MMA
-    //             (the |df|*sigma scaled-gradient stabilizer is always
-    //             active and recovers the zero-regularizer baseline);
-    //             adaptive state members for Svanberg 2002 GCMMA (paired
-    //             with the 0.5*rho additive regularizer per NLopt
-    //             mma.c:101-107 coupling convention).
+    //             (the 0.001 * |grad| stabilizer is always active);
+    //             adaptive state members for Svanberg 2002 GCMMA.
     //
-    // Reference: Svanberg 1987, IJNME 24, Section 3 (additive kernel);
-    //            NLopt mma.c:101-107 (coupled-pair stabilizer +
-    //            regularizer; sigma_j = 0.5 * (U_j - L_j)).
+    // Reference: Svanberg 2002, SIAM J. Optim. 12(2), Section 3
+    //            (structured regularization); Svanberg 1987 Section 3
+    //            (baseline recovered by raa_0 = 0).
     void compute_coefficients(
         const Eigen::Vector<Scalar, N>& x,
         Scalar f,
@@ -271,46 +256,35 @@ public:
         const auto eps_floor = static_cast<Scalar>(
             opts.regularization_epsilon.value_or(1e-10));
 
-        // Objective coefficients (Svanberg 1987 Section 3 additive kernel;
-        // NLopt mma.c:101-107 coupled-pair stabilizer+regularizer):
-        //     sigma_j = 0.5 * (U_j - L_j)
-        //     p_0j = (U-x)^2 * ( max(df/dx, 0)
-        //                        + (|df/dx| * sigma_j + 0.5 * raa_0)
-        //                          / sigma_j^2 ) + eps_floor
-        //     q_0j = (x-L)^2 * ( max(-df/dx, 0)
-        //                        + (|df/dx| * sigma_j + 0.5 * raa_0)
-        //                          / sigma_j^2 ) + eps_floor
-        // raa_0 = 0 recovers the Svanberg 1987 zero-regularizer baseline.
+        // Objective coefficients (Svanberg 2002 Section 3):
+        //     p_0j = (U-x)^2 * ( max(df/dx, 0) + 0.001 * |df/dx|
+        //                        + raa_0 / (U-L) ) + eps_floor
+        //     q_0j = (x-L)^2 * ( max(-df/dx, 0) + 0.001 * |df/dx|
+        //                        + raa_0 / (U-L) ) + eps_floor
         Scalar r0_val = f;
         for(int j = 0; j < n_; ++j)
         {
             const Scalar ux = U[j] - x[j];
             const Scalar xl = x[j] - L[j];
+            const Scalar inv_UL = Scalar(1) / (U[j] - L[j]);
 
             const Scalar gp = std::max(grad_f[j], Scalar(0));
             const Scalar gn = std::max(-grad_f[j], Scalar(0));
             const Scalar abs_g = gp + gn;
 
-            // Reference: Svanberg 1987, IJNME 24, Section 3 (additive
-            //            kernel); NLopt mma.c:101-107 (scaled-gradient
-            //            stabilizer |df|*sigma paired with 0.5*rho
-            //            additive regularizer; sigma_j = 0.5 * (U_j - L_j)).
-            const Scalar sigma_j = Scalar(0.5) * (U[j] - L[j]);
-            const Scalar inv_sigma_sq = Scalar(1) / (sigma_j * sigma_j);
             coeffs_.p0[j] = ux * ux
-                * (gp + (abs_g * sigma_j + Scalar(0.5) * raa_0) * inv_sigma_sq)
+                * (gp + Scalar(0.001) * abs_g + raa_0 * inv_UL)
                 + eps_floor;
             coeffs_.q0[j] = xl * xl
-                * (gn + (abs_g * sigma_j + Scalar(0.5) * raa_0) * inv_sigma_sq)
+                * (gn + Scalar(0.001) * abs_g + raa_0 * inv_UL)
                 + eps_floor;
 
             r0_val -= coeffs_.p0[j] / ux + coeffs_.q0[j] / xl;
         }
         coeffs_.r0[0] = r0_val;
 
-        // Constraint coefficients: same Svanberg 1987 Section 3 / NLopt
-        // mma.c:101-107 coupled-pair structure with per-constraint raa[i]
-        // in place of raa_0.
+        // Constraint coefficients: same Svanberg 2002 Section 3 structure
+        // with per-constraint raa[i] in place of raa_0.
         for(int i = 0; i < m_; ++i)
         {
             Scalar ri_val = g[i];
@@ -318,22 +292,17 @@ public:
             {
                 const Scalar ux = U[j] - x[j];
                 const Scalar xl = x[j] - L[j];
+                const Scalar inv_UL = Scalar(1) / (U[j] - L[j]);
 
                 const Scalar dgp = std::max(dg(i, j), Scalar(0));
                 const Scalar dgn = std::max(-dg(i, j), Scalar(0));
                 const Scalar abs_dg = dgp + dgn;
 
-                // Reference: Svanberg 1987, IJNME 24, Section 3; NLopt
-                //            mma.c:101-107 (same coupled-pair form;
-                //            sigma_j = 0.5 * (U_j - L_j); per-constraint
-                //            regularizer raa[i] substitutes raa_0).
-                const Scalar sigma_j = Scalar(0.5) * (U[j] - L[j]);
-                const Scalar inv_sigma_sq = Scalar(1) / (sigma_j * sigma_j);
                 coeffs_.pi(i, j) = ux * ux
-                    * (dgp + (abs_dg * sigma_j + Scalar(0.5) * raa[i]) * inv_sigma_sq)
+                    * (dgp + Scalar(0.001) * abs_dg + raa[i] * inv_UL)
                     + eps_floor;
                 coeffs_.qi(i, j) = xl * xl
-                    * (dgn + (abs_dg * sigma_j + Scalar(0.5) * raa[i]) * inv_sigma_sq)
+                    * (dgn + Scalar(0.001) * abs_dg + raa[i] * inv_UL)
                     + eps_floor;
 
                 ri_val -= coeffs_.pi(i, j) / ux + coeffs_.qi(i, j) / xl;
