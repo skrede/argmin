@@ -121,12 +121,22 @@ auto run_nablapp_solver(std::string_view solver_name,
     static constexpr int N = problem_dimension_v<Problem>;
     using rebound_policy = detail::rebind_policy_t<Policy, N>;
 
+    // Tolerance / iteration budget sourced from bench_config so library_defaults
+    // (ftol_rel = xtol_rel = 1e-12, max_iter = 10000) preserves the prior
+    // nablapp_bench behavior byte-for-byte while publication mode tightens
+    // both gates to 1e-16 so the DM tau-grid down to 1e-12 is observable.
+    //
+    // Wall-time gap: nablapp's solver_options does not currently expose a
+    // wall-clock budget knob. config.max_wall_time_s is intentionally NOT
+    // enforced here; the gap is documented in the publication-mode
+    // methodology write-up. A future seed may add a wall-clock check at
+    // the basic_solver step-loop level if non-trivial work justifies it.
     auto x0 = prob.initial_point();
     solver_options<Convergence> opts{};
     opts.max_iterations = max_iterations;
     opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-12);
-    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(config.ftol_rel);
+    opts.set_step_threshold(config.xtol_rel);
 
     if constexpr(constrained<Problem>)
     {
@@ -150,9 +160,16 @@ auto run_nablapp_solver(std::string_view solver_name,
         // semantics is the subject of seeds SEED-003 / SEED-004 queued
         // for Phase 36 (SQP) / Phase 37 (auglag). Until then the
         // composite kkt_residual alone gates the constrained regime.
+        //
+        // The relaxed objective/step gates (1e-6) are correctness-driven
+        // per the rationale above and stay constant across modes; the
+        // stationarity_threshold scales with config.ftol_rel so publication
+        // mode (1e-16) drives the kkt_residual gate tighter than
+        // library_defaults (1e-12 → 1e-4 effective).
         opts.set_objective_threshold(1e-6);
         opts.set_step_threshold(1e-6);
-        opts.set_stationarity_threshold(1e-4);
+        constexpr double stationarity_scale = 1e8;  // 1e-12 ftol -> 1e-4 stationarity
+        opts.set_stationarity_threshold(config.ftol_rel * stationarity_scale);
     }
 
     if(collect_trace)

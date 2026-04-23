@@ -352,7 +352,7 @@ struct ipopt_variant
 template <typename Problem>
 auto run_ipopt_solver(std::string_view problem_name,
                       Problem& prob,
-                      int max_evals,
+                      int /*max_evals_legacy*/,
                       const ipopt_variant& variant,
                       const bench_config& config,
                       std::vector<trace_entry>& local_trace) -> benchmark_result
@@ -362,19 +362,7 @@ auto run_ipopt_solver(std::string_view problem_name,
     using wrapped_t = counting_problem<Problem>;
 
     auto tnlp = Ipopt::SmartPtr<ipopt_tnlp<wrapped_t>>(
-        new ipopt_tnlp<wrapped_t>(wrapped, problem_name, max_evals));
-
-    // Per-iter trace wiring (Pattern 3 in 32.8-RESEARCH.md). Under
-    // library_defaults, trace_out is null and the intermediate_callback
-    // short-circuits; under publication, the callback appends rows into
-    // local_trace using the IPOPT-native (obj_value, inf_pr, d_norm,
-    // max(inf_pr, inf_du)) composite.
-    if(config.trace_enabled)
-    {
-        const auto t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::high_resolution_clock::now().time_since_epoch()).count();
-        tnlp->enable_trace(&local_trace, t0_us, prob.optimal_value());
-    }
+        new ipopt_tnlp<wrapped_t>(wrapped, problem_name, config.max_iter));
 
     Ipopt::SmartPtr<Ipopt::IpoptApplication> app =
         IpoptApplicationFactory();
@@ -385,9 +373,14 @@ auto run_ipopt_solver(std::string_view problem_name,
     app->Options()->SetStringValue("limited_memory_update_type",
                                    std::string(variant.lm_update_type));
 
-    // Stopping criteria comparable to NLopt wrapper's ftol_rel=1e-12.
-    app->Options()->SetNumericValue("tol", 1e-12);
-    app->Options()->SetIntegerValue("max_iter", max_evals);
+    // Stopping criteria sourced from bench_config so library_defaults keeps
+    // the prior 1e-12 / 10 000-iter regime byte-identical while publication
+    // mode tightens to 1e-16 + 10 s wall budget. IPOPT's `max_wall_time`
+    // option enforces a hard wall-clock budget per (seed, solver, problem)
+    // triple per CONTEXT D-C2.
+    app->Options()->SetNumericValue("tol", config.ftol_rel);
+    app->Options()->SetIntegerValue("max_iter", config.max_iter);
+    app->Options()->SetNumericValue("max_wall_time", config.max_wall_time_s);
 
     // Silence stdout spam during bench; interior-point is chatty by default.
     app->Options()->SetIntegerValue("print_level", 0);
@@ -422,7 +415,20 @@ auto run_ipopt_solver(std::string_view problem_name,
         };
     }
 
+    // Per-iter trace wiring. Under library_defaults, trace_out is null and
+    // the intermediate_callback short-circuits; under publication, the
+    // callback appends rows into local_trace using the IPOPT-native
+    // (obj_value, inf_pr, d_norm, max(inf_pr, inf_du)) composite. The
+    // `t0_us` baseline is captured immediately before OptimizeTNLP() so
+    // per-iter wall_us excludes IpoptApplicationFactory + Initialize setup,
+    // matching the summary wall_time_us baseline (the t0 captured here).
     auto t0 = std::chrono::high_resolution_clock::now();
+    if(config.trace_enabled)
+    {
+        const auto t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            t0.time_since_epoch()).count();
+        tnlp->enable_trace(&local_trace, t0_us, prob.optimal_value());
+    }
     auto app_status = app->OptimizeTNLP(tnlp);
     auto t1 = std::chrono::high_resolution_clock::now();
     auto wall_us = std::chrono::duration_cast<
@@ -433,19 +439,43 @@ auto run_ipopt_solver(std::string_view problem_name,
 
     // Map Ipopt::ApplicationReturnStatus -> status_string when the TNLP
     // wasn't finalized (e.g. initialization failure short-circuited).
+    //
+    // Under publication-mode tolerances (1e-16) IPOPT routinely returns
+    // Search_Direction_Becomes_Too_Small or Solved_To_Acceptable_Level
+    // because tol=1e-16 is below typical machine-precision floors for
+    // the inf_pr / inf_du composites. Both are operationally a
+    // converged-at-machine-precision event, not a failure; map them to
+    // "ftol_reached" (the publication grade analog of "tightened past
+    // what the algorithm can deliver"). Genuine failure modes
+    // (Diverging_Iterates, Restoration_Failed, Invalid_Number_Detected,
+    // Insufficient_Memory, Internal_Error, Unrecoverable_Exception,
+    // NonIpopt_Exception_Thrown) continue to map to "failed".
     std::string_view status_str;
     if(app_status == Ipopt::Solve_Succeeded
        || app_status == Ipopt::Solved_To_Acceptable_Level)
     {
         status_str = ipopt_status_string(tnlp->status());
     }
+    else if(app_status == Ipopt::Search_Direction_Becomes_Too_Small)
+    {
+        status_str = "ftol_reached";
+    }
     else if(app_status == Ipopt::Maximum_Iterations_Exceeded)
     {
         status_str = "max_iterations";
     }
+    else if(app_status == Ipopt::Maximum_CpuTime_Exceeded
+            || app_status == Ipopt::Maximum_WallTime_Exceeded)
+    {
+        status_str = "maxtime_reached";
+    }
     else if(app_status == Ipopt::Infeasible_Problem_Detected)
     {
         status_str = "infeasible";
+    }
+    else if(app_status == Ipopt::Diverging_Iterates)
+    {
+        status_str = "diverged";
     }
     else
     {

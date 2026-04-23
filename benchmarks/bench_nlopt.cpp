@@ -218,7 +218,7 @@ auto run_nlopt_solver(nlopt::algorithm algo,
                       std::string_view solver_name,
                       std::string_view problem_name,
                       Problem& prob,
-                      int max_evals,
+                      int /*max_evals_legacy*/,
                       const bench_config& config,
                       std::vector<trace_entry>& local_trace) -> benchmark_result
 {
@@ -230,13 +230,15 @@ auto run_nlopt_solver(nlopt::algorithm algo,
 
     // Trace wrapper is only consulted when config.trace_enabled is true; the
     // bare counting_problem<Problem>* path preserves byte-identical
-    // library_defaults behavior.
-    const auto t0_us_for_trace = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    // library_defaults behavior. The `t0_us` baseline is captured AFTER all
+    // setup completes (right before opt.optimize() below) so that per-iter
+    // wall_us measures only solve time, matching the summary wall_time_us
+    // baseline. The wrapper is constructed here with t0_us=0 and the field
+    // is patched right before optimize() is called.
     nlopt_trace_wrapper<Problem> tw{
         .prob           = &wrapped,
         .trace          = &local_trace,
-        .t0_us          = t0_us_for_trace,
+        .t0_us          = 0,
         .f_star         = prob.optimal_value(),
     };
 
@@ -278,14 +280,24 @@ auto run_nlopt_solver(nlopt::algorithm algo,
         }
     }
 
-    // Stopping criteria.
-    opt.set_maxeval(max_evals);
-    opt.set_ftol_rel(1e-12);
+    // Stopping criteria sourced from bench_config so library_defaults and
+    // publication modes drive distinct solver behavior. The 1e-12 / 1e-16
+    // ftol gap between the two modes is the central methodology lever
+    // making every tau in the publication-grade DM grid observable.
+    opt.set_maxeval(config.max_f_evals);
+    opt.set_ftol_rel(config.ftol_rel);
+    opt.set_xtol_rel(config.xtol_rel);
+    opt.set_maxtime(config.max_wall_time_s);
 
     // Initial point.
     auto x0 = prob.initial_point();
     std::vector<double> x(x0.data(), x0.data() + n);
     double minf{};
+
+    // Patch the trace baseline immediately before solve so per-iter wall_us
+    // matches the summary's t0 reference frame (both exclude setup overhead).
+    tw.t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 
     // Solve with timing.
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -341,7 +353,7 @@ auto run_nlopt_solver(nlopt::algorithm algo,
 template <typename Problem>
 auto run_nlopt_auglag(std::string_view problem_name,
                       Problem& prob,
-                      int max_evals,
+                      int /*max_evals_legacy*/,
                       const bench_config& config,
                       std::vector<trace_entry>& local_trace) -> benchmark_result
 {
@@ -351,17 +363,19 @@ auto run_nlopt_auglag(std::string_view problem_name,
     auto n = static_cast<unsigned>(prob.dimension());
     nlopt::opt opt(nlopt::LD_AUGLAG, n);
 
-    // Subsidiary solver for augmented Lagrangian inner loop.
+    // Subsidiary solver for augmented Lagrangian inner loop. Inner ftol/xtol
+    // mirror the outer config so the inner L-BFGS does not stop short of the
+    // outer publication-mode tolerance regime.
     nlopt::opt local_opt(nlopt::LD_LBFGS, n);
-    local_opt.set_ftol_rel(1e-12);
+    local_opt.set_ftol_rel(config.ftol_rel);
+    local_opt.set_xtol_rel(config.xtol_rel);
+    local_opt.set_maxeval(config.max_f_evals);
     opt.set_local_optimizer(local_opt);
 
-    const auto t0_us_for_trace = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     nlopt_trace_wrapper<Problem> tw{
         .prob           = &wrapped,
         .trace          = &local_trace,
-        .t0_us          = t0_us_for_trace,
+        .t0_us          = 0,
         .f_star         = prob.optimal_value(),
     };
 
@@ -398,12 +412,17 @@ auto run_nlopt_auglag(std::string_view problem_name,
         }
     }
 
-    opt.set_maxeval(max_evals);
-    opt.set_ftol_rel(1e-12);
+    opt.set_maxeval(config.max_f_evals);
+    opt.set_ftol_rel(config.ftol_rel);
+    opt.set_xtol_rel(config.xtol_rel);
+    opt.set_maxtime(config.max_wall_time_s);
 
     auto x0 = prob.initial_point();
     std::vector<double> x(x0.data(), x0.data() + n);
     double minf{};
+
+    tw.t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -463,7 +482,7 @@ auto run_nlopt_auglag(std::string_view problem_name,
 template <typename Problem>
 auto run_nlopt_isres(std::string_view problem_name,
                      Problem& prob,
-                     int max_evals,
+                     int /*max_evals_legacy*/,
                      const bench_config& config,
                      std::vector<trace_entry>& local_trace) -> benchmark_result
 {
@@ -476,12 +495,10 @@ auto run_nlopt_isres(std::string_view problem_name,
     // Deterministic seed for reproducible benchmarks.
     nlopt::srand(static_cast<unsigned long>(config.seed));
 
-    const auto t0_us_for_trace = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     nlopt_trace_wrapper<Problem> tw{
         .prob           = &wrapped,
         .trace          = &local_trace,
-        .t0_us          = t0_us_for_trace,
+        .t0_us          = 0,
         .f_star         = prob.optimal_value(),
     };
 
@@ -524,14 +541,20 @@ auto run_nlopt_isres(std::string_view problem_name,
         }
     }
 
-    // ISRES is evolutionary and needs many evaluations; relaxed ftol.
-    opt.set_maxeval(max_evals);
-    opt.set_ftol_rel(1e-8);
-    opt.set_xtol_rel(1e-8);
+    // ISRES is evolutionary; tolerances and budgets sourced from bench_config
+    // so library_defaults preserves the prior 1e-12 stopping behavior while
+    // publication mode tightens to 1e-16 + 10 s wall budget.
+    opt.set_maxeval(config.max_f_evals);
+    opt.set_ftol_rel(config.ftol_rel);
+    opt.set_xtol_rel(config.xtol_rel);
+    opt.set_maxtime(config.max_wall_time_s);
 
     auto x0 = prob.initial_point();
     std::vector<double> x(x0.data(), x0.data() + n);
     double minf{};
+
+    tw.t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 
     auto t0 = std::chrono::high_resolution_clock::now();
 

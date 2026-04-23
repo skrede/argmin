@@ -90,10 +90,20 @@ struct dlib_gradient
 }
 
 // Run dlib L-BFGS with box constraints on a problem.
+//
+// Tolerance / iteration budget sourced from bench_config:
+//   ftol_rel  -> objective_delta_stop_strategy delta (1e-12 default vs 1e-16
+//                under publication mode; this is the dlib equivalent of
+//                NLopt's set_ftol_rel for an absolute objective-delta gate).
+//   max_iter  -> objective_delta_stop_strategy max-iter cap.
+//
+// Wall-time gap: dlib's find_min_box_constrained has no built-in wall-clock
+// budget API. config.max_wall_time_s is intentionally NOT enforced here;
+// the gap is documented in the publication-mode methodology write-up.
 template <typename Problem>
 auto run_dlib_lbfgs_box(std::string_view problem_name,
                         const Problem& prob,
-                        int max_evals,
+                        int /*max_evals_legacy*/,
                         const bench_config& config) -> benchmark_result
 {
     eval_counts counts;
@@ -113,7 +123,7 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
     {
         dlib::find_min_box_constrained(
             dlib::lbfgs_search_strategy(10),
-            dlib::objective_delta_stop_strategy(1e-12, max_evals),
+            dlib::objective_delta_stop_strategy(config.ftol_rel, config.max_iter),
             obj, grad, x0, lb, ub);
     }
     catch(const std::exception&)
@@ -153,10 +163,22 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
 }
 
 // Run dlib BOBYQA (derivative-free, bound-constrained) on a problem.
+//
+// Tolerance / eval budget sourced from bench_config:
+//   ftol_rel    -> rhoend (BOBYQA final trust-region radius; tightening this
+//                  drives the trust-region contraction floor and is BOBYQA's
+//                  closest analog to NLopt's ftol_rel for the publication
+//                  protocol).
+//   max_f_evals -> 7th positional arg of find_min_bobyqa (function-evaluation
+//                  cap inside the trust-region loop).
+//
+// Wall-time gap: dlib's find_min_bobyqa accepts no time-budget argument;
+// config.max_wall_time_s is intentionally NOT enforced. Documented in the
+// publication-mode methodology write-up.
 template <typename Problem>
 auto run_dlib_bobyqa(std::string_view problem_name,
                      const Problem& prob,
-                     int max_evals,
+                     int /*max_evals_legacy*/,
                      const bench_config& config) -> benchmark_result
 {
     eval_counts counts;
@@ -170,8 +192,10 @@ auto run_dlib_bobyqa(std::string_view problem_name,
 
     int n = prob.dimension();
     // BOBYQA initial trust region radius: reasonable fraction of bound range.
+    // rhoend tracks config.ftol_rel so publication mode contracts the trust
+    // region down to 1e-16 before declaring convergence.
     double rhobeg = 1.0;
-    double rhoend = 1e-8;
+    double rhoend = config.ftol_rel;
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -181,7 +205,7 @@ auto run_dlib_bobyqa(std::string_view problem_name,
     {
         minf = dlib::find_min_bobyqa(
             obj, x0, 2 * n + 1,
-            lb, ub, rhobeg, rhoend, max_evals);
+            lb, ub, rhobeg, rhoend, config.max_f_evals);
     }
     catch(const std::exception&)
     {
@@ -221,10 +245,16 @@ auto run_dlib_bobyqa(std::string_view problem_name,
 }
 
 // Run dlib global optimizer on a problem.
+//
+// Eval / wall budgets sourced from bench_config. find_min_global supports
+// both a `max_function_calls` cap and a `std::chrono::duration` runtime cap
+// natively (the global optimizer is the one dlib API surface that does
+// expose a wall-clock budget); both are consumed so the publication-mode
+// 10 s budget actually fires for stochastic global search.
 template <typename Problem>
 auto run_dlib_global(std::string_view problem_name,
                      const Problem& prob,
-                     int max_evals,
+                     int /*max_evals_legacy*/,
                      const bench_config& config) -> benchmark_result
 {
     eval_counts counts;
@@ -241,9 +271,13 @@ auto run_dlib_global(std::string_view problem_name,
     dlib::function_evaluation result;
     try
     {
+        const auto wall_budget = std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+                std::chrono::duration<double>(config.max_wall_time_s));
         result = dlib::find_min_global(
             obj, lb, ub,
-            dlib::max_function_calls(max_evals));
+            dlib::max_function_calls(config.max_f_evals),
+            wall_budget);
     }
     catch(const std::exception&)
     {

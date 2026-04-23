@@ -138,7 +138,7 @@ struct ceres_trace_callback : public ceres::IterationCallback
 template <typename Problem>
 auto run_ceres_solver(std::string_view problem_name,
                       const Problem& prob,
-                      int max_iterations,
+                      int /*max_iterations_legacy*/,
                       const bench_config& config,
                       std::vector<trace_entry>& local_trace) -> benchmark_result
 {
@@ -153,11 +153,19 @@ auto run_ceres_solver(std::string_view problem_name,
     auto* adapter = new ceres_first_order_adapter<Problem>(&wrapped);
     ceres::GradientProblem gradient_problem(adapter);
 
+    // Stopping criteria sourced from bench_config. Ceres' GradientProblemSolver
+    // exposes function_tolerance (objective relative change) and
+    // parameter_tolerance (iterate relative change); both are tightened to
+    // 1e-16 under publication mode so the DM tau-grid down to 1e-12 is
+    // observable. max_solver_time_in_seconds caps wall time per
+    // (seed, solver, problem) triple at the publication-mode budget.
     ceres::GradientProblemSolver::Options options;
-    options.max_num_iterations = max_iterations;
+    options.max_num_iterations = config.max_iter;
     options.line_search_direction_type = ceres::LBFGS;
-    options.function_tolerance = 1e-12;
+    options.function_tolerance = config.ftol_rel;
+    options.parameter_tolerance = config.xtol_rel;
     options.gradient_tolerance = 1e-10;
+    options.max_solver_time_in_seconds = config.max_wall_time_s;
     options.logging_type = ceres::SILENT;
     // Pitfall 4 (32.8-RESEARCH.md): without this flag the IterationSummary
     // received by the callback reflects the line-search trial point instead
@@ -165,21 +173,24 @@ auto run_ceres_solver(std::string_view problem_name,
     // when callbacks are also registered, which library_defaults does not do.
     options.update_state_every_iteration = true;
 
+    std::vector<double> x(x0.data(), x0.data() + prob.dimension());
+
+    ceres::GradientProblemSolver::Summary summary;
+
     // Per-iter trace registration (Pattern 4 in 32.8-RESEARCH.md). Stack
     // lifetime extends across Solve(); the callback is unregistered when
-    // options goes out of scope after the call returns.
+    // options goes out of scope after the call returns. The `t0_us` baseline
+    // is captured immediately before ceres::Solve so per-iter wall_us
+    // excludes adapter / GradientProblem construction and matches the
+    // summary wall_time_us baseline (the t0 captured below).
+    auto t0 = std::chrono::high_resolution_clock::now();
     const auto t0_us_for_trace = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        t0.time_since_epoch()).count();
     ceres_trace_callback cb(&local_trace, &counts, t0_us_for_trace,
                             prob.optimal_value());
     if(config.trace_enabled)
         options.callbacks.push_back(&cb);
 
-    std::vector<double> x(x0.data(), x0.data() + prob.dimension());
-
-    ceres::GradientProblemSolver::Summary summary;
-
-    auto t0 = std::chrono::high_resolution_clock::now();
     ceres::Solve(options, gradient_problem, x.data(), &summary);
     auto t1 = std::chrono::high_resolution_clock::now();
 
