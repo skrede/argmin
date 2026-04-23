@@ -25,11 +25,13 @@
 // supplied because nablapp problem types do not currently advertise one.
 
 #include "bench_ipopt.h"
+#include "counting_problem.h"
 #include "problem_registry.h"
 
 #include "nablapp/formulation/concepts.h"
 
 #include <IpIpoptApplication.hpp>
+#include <IpSolveStatistics.hpp>
 #include <IpTNLP.hpp>
 
 #include <array>
@@ -49,6 +51,10 @@ namespace detail
 // TNLP adapter wrapping any nablapp constrained problem.
 // Problem must satisfy the differentiable + constrained concepts (or
 // bound_constrained for bound-only subset).
+//
+// `Problem` is a counting_problem<InnerProblem>; every value/gradient/
+// constraints/constraint_jacobian invocation bumps the shared counters
+// the bench summary CSV reads back into the {f,g,c,J}_evals columns.
 template <typename Problem>
 class ipopt_tnlp : public Ipopt::TNLP
 {
@@ -62,7 +68,6 @@ public:
     [[nodiscard]] auto solution() const -> const std::vector<double>& { return x_final_; }
     [[nodiscard]] auto objective() const -> double { return obj_final_; }
     [[nodiscard]] auto status() const -> Ipopt::SolverReturn { return status_; }
-    [[nodiscard]] auto eval_count() const -> int { return eval_count_; }
 
     bool get_nlp_info(Ipopt::Index& n, Ipopt::Index& m,
                       Ipopt::Index& nnz_jac_g, Ipopt::Index& nnz_h_lag,
@@ -147,7 +152,6 @@ public:
         Eigen::Map<const Eigen::VectorXd> xmap(x, n);
         Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
         obj_value = prob_->value(xv);
-        ++eval_count_;
         return true;
     }
 
@@ -236,7 +240,6 @@ private:
     Problem* prob_;
     std::string_view problem_name_;
     int max_evals_;
-    int eval_count_{0};
     Ipopt::SolverReturn status_{Ipopt::INTERNAL_ERROR};
     double obj_final_{std::numeric_limits<double>::quiet_NaN()};
     std::vector<double> x_final_;
@@ -282,10 +285,15 @@ template <typename Problem>
 auto run_ipopt_solver(std::string_view problem_name,
                       Problem& prob,
                       int max_evals,
-                      const ipopt_variant& variant) -> benchmark_result
+                      const ipopt_variant& variant,
+                      const bench_config& config) -> benchmark_result
 {
-    auto tnlp = Ipopt::SmartPtr<ipopt_tnlp<Problem>>(
-        new ipopt_tnlp<Problem>(prob, problem_name, max_evals));
+    eval_counts counts;
+    counting_problem<Problem> wrapped{prob, counts};
+    using wrapped_t = counting_problem<Problem>;
+
+    auto tnlp = Ipopt::SmartPtr<ipopt_tnlp<wrapped_t>>(
+        new ipopt_tnlp<wrapped_t>(wrapped, problem_name, max_evals));
 
     Ipopt::SmartPtr<Ipopt::IpoptApplication> app =
         IpoptApplicationFactory();
@@ -311,13 +319,20 @@ auto run_ipopt_solver(std::string_view problem_name,
     if(init_status != Ipopt::Solve_Succeeded)
     {
         return benchmark_result{
-            .solver = "ipopt",
+            .solver = variant.solver_name,
             .library = "ipopt",
             .problem = problem_name,
             .pclass = prob.pclass,
             .dimension = prob.dimension(),
+            .seed = config.seed,
+            .mode = (config.the_mode == bench_config::mode::publication)
+                        ? std::string_view{"publication"}
+                        : std::string_view{"library_defaults"},
+            .solver_iters = 0,
             .f_evals = 0,
             .g_evals = 0,
+            .c_evals = 0,
+            .J_evals = 0,
             .wall_time_us = 0,
             .final_objective = std::numeric_limits<double>::quiet_NaN(),
             .known_optimum = prob.optimal_value(),
@@ -356,14 +371,26 @@ auto run_ipopt_solver(std::string_view problem_name,
         status_str = "failed";
     }
 
+    int solver_iters = 0;
+    auto stats = app->Statistics();
+    if(IsValid(stats))
+        solver_iters = stats->IterationCount();
+
     return benchmark_result{
         .solver = variant.solver_name,
         .library = "ipopt",
         .problem = problem_name,
         .pclass = prob.pclass,
         .dimension = prob.dimension(),
-        .f_evals = tnlp->eval_count(),
-        .g_evals = tnlp->eval_count(),
+        .seed = config.seed,
+        .mode = (config.the_mode == bench_config::mode::publication)
+                    ? std::string_view{"publication"}
+                    : std::string_view{"library_defaults"},
+        .solver_iters = solver_iters,
+        .f_evals = counts.f,
+        .g_evals = counts.g,
+        .c_evals = counts.c,
+        .J_evals = counts.J,
         .wall_time_us = wall_us,
         .final_objective = final_obj,
         .known_optimum = known_opt,
@@ -386,13 +413,9 @@ constexpr std::array<ipopt_variant, 3> ipopt_variants{{
 
 void run_ipopt_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
 {
-    // bench_config consumption: mode::library_defaults preserves existing
-    // byte-identical behavior (this plan scope). A follow-on plan branches
-    // on config.the_mode == mode::publication for tightened tolerances +
-    // trace emission and routes problem callbacks through
-    // counting_problem<P>.
-    (void)config;  // unused in this scaffold — consumed in follow-on plans.
-
+    // Each adapter call wraps prob through counting_problem<P>, populating
+    // problem-level {f,g,c,J}_evals. solver_iters reads back IPOPT's
+    // native iteration counter via app->Statistics()->IterationCount().
     constexpr int max_evals = 10000;
 
     for_each_problem([&](std::string_view name, auto&& prob) {
@@ -413,7 +436,7 @@ void run_ipopt_benchmarks(std::vector<benchmark_result>& results, const bench_co
         {
             for(const auto& variant : detail::ipopt_variants)
                 results.push_back(
-                    detail::run_ipopt_solver(name, p, max_evals, variant));
+                    detail::run_ipopt_solver(name, p, max_evals, variant, config));
         }
     });
 }

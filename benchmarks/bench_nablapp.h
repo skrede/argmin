@@ -8,6 +8,7 @@
 // applicable nablapp policies on a given problem.
 
 #include "bench_config.h"
+#include "counting_problem.h"
 #include "benchmark_result.h"
 #include "trace_entry.h"
 #include "problem_registry.h"
@@ -108,11 +109,13 @@ auto run_nablapp_solver(std::string_view solver_name,
                         PolicyOpts&&... policy_opts) -> benchmark_result
 {
     // bench_config consumption: mode::library_defaults preserves existing
-    // byte-identical behavior in this scaffold. A follow-on plan branches
-    // on config.the_mode == mode::publication for tightened tolerances +
-    // trace emission and routes problem callbacks through
-    // counting_problem<P>.
-    (void)config;  // unused in this scaffold — consumed in follow-on plans.
+    // byte-identical behavior on the pre-existing column set. The new
+    // {f,g,c,J}_evals columns are populated from the counting_problem<P>
+    // wrapper that intercepts every problem callback the policy makes;
+    // solver_iters continues to come from the policy's native iter count
+    // for diagnostic parity with per-library expectations.
+    eval_counts counts;
+    counting_problem<Problem> wrapped{prob, counts};
 
     static constexpr int N = problem_dimension_v<Problem>;
     using rebound_policy = detail::rebind_policy_t<Policy, N>;
@@ -157,7 +160,8 @@ auto run_nablapp_solver(std::string_view solver_name,
         trace.clear();
         trace.resize(static_cast<std::size_t>(max_iterations));
 
-        basic_solver<rebound_policy, N, Problem> solver(prob, x0, opts,
+        using wrapped_t = counting_problem<Problem>;
+        basic_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();
@@ -173,6 +177,10 @@ auto run_nablapp_solver(std::string_view solver_name,
 
             trace[static_cast<std::size_t>(i)] = trace_entry{
                 .iter = i,
+                .f_evals = counts.f,
+                .g_evals = counts.g,
+                .c_evals = counts.c,
+                .J_evals = counts.J,
                 .f_current = sr.objective_value,
                 .cv = sr.constraint_violation,
             };
@@ -214,10 +222,10 @@ auto run_nablapp_solver(std::string_view solver_name,
                         ? std::string_view{"publication"}
                         : std::string_view{"library_defaults"},
             .solver_iters = iters,
-            .f_evals = iters,
-            .g_evals = iters,
-            .c_evals = 0,
-            .J_evals = 0,
+            .f_evals = counts.f,
+            .g_evals = counts.g,
+            .c_evals = counts.c,
+            .J_evals = counts.J,
             .wall_time_us = wall_us,
             .final_objective = final_obj,
             .known_optimum = prob.optimal_value(),
@@ -231,7 +239,8 @@ auto run_nablapp_solver(std::string_view solver_name,
         // per-solver stationarity_threshold overrides) gates termination.
         // The no-args solve() path falls through to stored_convergence_
         // which is always default-constructed default_convergence.
-        basic_solver<rebound_policy, N, Problem> solver(prob, x0, opts,
+        using wrapped_t = counting_problem<Problem>;
+        basic_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();
@@ -253,10 +262,10 @@ auto run_nablapp_solver(std::string_view solver_name,
                         ? std::string_view{"publication"}
                         : std::string_view{"library_defaults"},
             .solver_iters = static_cast<int>(result.function_evaluations),
-            .f_evals = static_cast<int>(result.function_evaluations),
-            .g_evals = static_cast<int>(result.function_evaluations),
-            .c_evals = 0,
-            .J_evals = 0,
+            .f_evals = counts.f,
+            .g_evals = counts.g,
+            .c_evals = counts.c,
+            .J_evals = counts.J,
             .wall_time_us = wall_us,
             .final_objective = result.objective_value,
             .known_optimum = prob.optimal_value(),

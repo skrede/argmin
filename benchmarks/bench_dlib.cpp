@@ -22,6 +22,7 @@
 // (controlled by NABLAPP_HAS_DLIB compile definition from CMake).
 
 #include "bench_dlib.h"
+#include "counting_problem.h"
 #include "problem_registry.h"
 
 #include "nablapp/formulation/concepts.h"
@@ -41,37 +42,35 @@ namespace nablapp::bench
 namespace detail
 {
 
-// Counting objective functor -- wraps a nablapp problem for dlib, tracking
-// function evaluation count (dlib does not expose this).
+// Forwarding objective functor -- routes dlib callbacks through a
+// counting_problem<P> wrapper so the {f,g}_evals counters in the bench
+// summary are populated independently of dlib's (absent) eval-count
+// reporting.
 template <typename Problem>
-struct counting_objective
+struct dlib_objective
 {
-    Problem prob;
-    mutable int f_count{0};
+    counting_problem<Problem>* wrapped;
 
     double operator()(const dlib::matrix<double, 0, 1>& x) const
     {
-        ++f_count;
         Eigen::Map<const Eigen::VectorXd> xv(x.begin(), x.size());
-        return prob.value(xv);
+        return wrapped->value(xv);
     }
 };
 
-// Counting gradient functor for dlib's find_min_box_constrained.
+// Forwarding gradient functor for dlib's find_min_box_constrained.
 template <typename Problem>
-struct counting_gradient
+struct dlib_gradient
 {
-    Problem prob;
-    mutable int g_count{0};
+    counting_problem<Problem>* wrapped;
 
     dlib::matrix<double, 0, 1> operator()(
         const dlib::matrix<double, 0, 1>& x) const
     {
-        ++g_count;
         Eigen::Map<const Eigen::VectorXd> xmap(x.begin(), x.size());
         Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
         Eigen::Vector<double, Problem::problem_dimension> g;
-        prob.gradient(xv, g);
+        wrapped->gradient(xv, g);
 
         dlib::matrix<double, 0, 1> result(x.size());
         for(long i = 0; i < x.size(); ++i)
@@ -94,10 +93,14 @@ struct counting_gradient
 template <typename Problem>
 auto run_dlib_lbfgs_box(std::string_view problem_name,
                         const Problem& prob,
-                        int max_evals) -> benchmark_result
+                        int max_evals,
+                        const bench_config& config) -> benchmark_result
 {
-    counting_objective<Problem> obj{prob};
-    counting_gradient<Problem> grad{prob};
+    eval_counts counts;
+    counting_problem<Problem> wrapped{prob, counts};
+
+    dlib_objective<Problem> obj{&wrapped};
+    dlib_gradient<Problem> grad{&wrapped};
 
     auto x0 = to_dlib(prob.initial_point());
     auto lb = to_dlib(prob.lower_bounds());
@@ -132,8 +135,15 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
         .problem = problem_name,
         .pclass = prob.pclass,
         .dimension = prob.dimension(),
-        .f_evals = obj.f_count,
-        .g_evals = grad.g_count,
+        .seed = config.seed,
+        .mode = (config.the_mode == bench_config::mode::publication)
+                    ? std::string_view{"publication"}
+                    : std::string_view{"library_defaults"},
+        .solver_iters = 0,
+        .f_evals = counts.f,
+        .g_evals = counts.g,
+        .c_evals = counts.c,
+        .J_evals = counts.J,
         .wall_time_us = wall_us,
         .final_objective = final_obj,
         .known_optimum = known_opt,
@@ -146,9 +156,13 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
 template <typename Problem>
 auto run_dlib_bobyqa(std::string_view problem_name,
                      const Problem& prob,
-                     int max_evals) -> benchmark_result
+                     int max_evals,
+                     const bench_config& config) -> benchmark_result
 {
-    counting_objective<Problem> obj{prob};
+    eval_counts counts;
+    counting_problem<Problem> wrapped{prob, counts};
+
+    dlib_objective<Problem> obj{&wrapped};
 
     auto x0 = to_dlib(prob.initial_point());
     auto lb = to_dlib(prob.lower_bounds());
@@ -189,8 +203,15 @@ auto run_dlib_bobyqa(std::string_view problem_name,
         .problem = problem_name,
         .pclass = prob.pclass,
         .dimension = prob.dimension(),
-        .f_evals = obj.f_count,
-        .g_evals = 0,
+        .seed = config.seed,
+        .mode = (config.the_mode == bench_config::mode::publication)
+                    ? std::string_view{"publication"}
+                    : std::string_view{"library_defaults"},
+        .solver_iters = 0,
+        .f_evals = counts.f,
+        .g_evals = counts.g,
+        .c_evals = counts.c,
+        .J_evals = counts.J,
         .wall_time_us = wall_us,
         .final_objective = minf,
         .known_optimum = known_opt,
@@ -203,9 +224,13 @@ auto run_dlib_bobyqa(std::string_view problem_name,
 template <typename Problem>
 auto run_dlib_global(std::string_view problem_name,
                      const Problem& prob,
-                     int max_evals) -> benchmark_result
+                     int max_evals,
+                     const bench_config& config) -> benchmark_result
 {
-    counting_objective<Problem> obj{prob};
+    eval_counts counts;
+    counting_problem<Problem> wrapped{prob, counts};
+
+    dlib_objective<Problem> obj{&wrapped};
 
     auto lb = to_dlib(prob.lower_bounds());
     auto ub = to_dlib(prob.upper_bounds());
@@ -238,8 +263,15 @@ auto run_dlib_global(std::string_view problem_name,
         .problem = problem_name,
         .pclass = prob.pclass,
         .dimension = prob.dimension(),
-        .f_evals = obj.f_count,
-        .g_evals = 0,
+        .seed = config.seed,
+        .mode = (config.the_mode == bench_config::mode::publication)
+                    ? std::string_view{"publication"}
+                    : std::string_view{"library_defaults"},
+        .solver_iters = 0,
+        .f_evals = counts.f,
+        .g_evals = counts.g,
+        .c_evals = counts.c,
+        .J_evals = counts.J,
         .wall_time_us = wall_us,
         .final_objective = final_obj,
         .known_optimum = known_opt,
@@ -252,13 +284,10 @@ auto run_dlib_global(std::string_view problem_name,
 
 void run_dlib_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
 {
-    // bench_config consumption: mode::library_defaults preserves existing
-    // byte-identical behavior (this plan scope). A follow-on plan branches
-    // on config.the_mode == mode::publication for tightened tolerances +
-    // trace emission and routes problem callbacks through
-    // counting_problem<P>.
-    (void)config;  // unused in this scaffold — consumed in follow-on plans.
-
+    // Each adapter call wraps prob through counting_problem<P>;
+    // {f,g,c,J}_evals come from the wrapper. dlib does not expose its own
+    // iter count for any of the find_min_* variants, so solver_iters is
+    // populated as 0 (treated as a diagnostic "n/a" by post-processing).
     constexpr int max_evals = 10000;
 
     for_each_problem([&](std::string_view name, auto&& prob) {
@@ -282,19 +311,19 @@ void run_dlib_benchmarks(std::vector<benchmark_result>& results, const bench_con
         // Bound-constrained (no general constraints): L-BFGS box + BOBYQA.
         if constexpr(is_bound && !has_constraints && !is_global && has_gradient)
             results.push_back(
-                detail::run_dlib_lbfgs_box(name, prob, max_evals));
+                detail::run_dlib_lbfgs_box(name, prob, max_evals, config));
 
         if constexpr(is_bound && !has_constraints && !is_global)
             results.push_back(
-                detail::run_dlib_bobyqa(name, prob, max_evals));
+                detail::run_dlib_bobyqa(name, prob, max_evals, config));
 
         // Global problems with bounds: global optimizer + BOBYQA.
         if constexpr(is_global && is_bound)
         {
             results.push_back(
-                detail::run_dlib_global(name, prob, max_evals));
+                detail::run_dlib_global(name, prob, max_evals, config));
             results.push_back(
-                detail::run_dlib_bobyqa(name, prob, max_evals));
+                detail::run_dlib_bobyqa(name, prob, max_evals, config));
         }
     });
 }

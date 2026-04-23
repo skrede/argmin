@@ -76,7 +76,27 @@ if(NABLAPP_BENCH_OPTIM)
             )
             add_library(optim::optim ALIAS nablapp_optim_header_only)
         endif()
-        target_sources(nablapp_bench PRIVATE bench_optim.cpp)
+        # Upstream ships the algorithm bodies as .cpp files alongside the
+        # public headers (configure-time `--header-only-version` would
+        # inline them, but FetchContent grabs the standard layout). Pull
+        # them in directly so the optim symbols link.
+        set(NABLAPP_BENCH_OPTIM_SOURCES
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/bfgs.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/cg.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/de.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/de_prmm.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/gd.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/lbfgs.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/newton.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/nm.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/pso.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/unconstrained/pso_dv.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/constrained/sumt.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/line_search/more_thuente.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/zeros/broyden.cpp"
+            "${kthohr_optim_SOURCE_DIR}/src/zeros/broyden_df.cpp"
+        )
+        target_sources(nablapp_bench PRIVATE bench_optim.cpp ${NABLAPP_BENCH_OPTIM_SOURCES})
         target_link_libraries(nablapp_bench PRIVATE optim::optim)
         target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_OPTIM)
     else()

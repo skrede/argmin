@@ -11,6 +11,7 @@
 //   Unconstrained: ceres::LBFGS -> "ceres_lbfgs"
 
 #include "bench_ceres.h"
+#include "counting_problem.h"
 #include "problem_registry.h"
 
 #include <ceres/gradient_problem.h>
@@ -28,13 +29,17 @@ namespace detail
 {
 
 // Adapts any nablapp problem as a ceres::FirstOrderFunction.
-// Problem must provide value(), gradient(), dimension().
+//
+// Stores a pointer to a caller-owned counting_problem<Problem>; every
+// Evaluate() invocation routes through the wrapper so the shared
+// eval_counts get bumped on each value/gradient call. Caller must keep
+// the counting_problem alive for the full Solve() lifetime.
 template <typename Problem>
 class ceres_first_order_adapter : public ceres::FirstOrderFunction
 {
 public:
-    explicit ceres_first_order_adapter(Problem prob)
-        : prob_{std::move(prob)}
+    explicit ceres_first_order_adapter(counting_problem<Problem>* wrapped)
+        : wrapped_{wrapped}
     {
     }
 
@@ -42,15 +47,15 @@ public:
                   double* cost,
                   double* gradient) const override
     {
-        Eigen::Map<const Eigen::VectorXd> xmap(parameters, prob_.dimension());
+        Eigen::Map<const Eigen::VectorXd> xmap(parameters, wrapped_->dimension());
         Eigen::Vector<double, Problem::problem_dimension> x(xmap);
-        *cost = prob_.value(x);
+        *cost = wrapped_->value(x);
 
         if(gradient)
         {
             Eigen::Vector<double, Problem::problem_dimension> g;
-            prob_.gradient(x, g);
-            Eigen::Map<Eigen::VectorXd>(gradient, prob_.dimension()) = g;
+            wrapped_->gradient(x, g);
+            Eigen::Map<Eigen::VectorXd>(gradient, wrapped_->dimension()) = g;
         }
 
         return true;
@@ -58,11 +63,11 @@ public:
 
     int NumParameters() const override
     {
-        return prob_.dimension();
+        return wrapped_->dimension();
     }
 
 private:
-    Problem prob_;
+    counting_problem<Problem>* wrapped_;
 };
 
 [[nodiscard]] auto ceres_status_string(ceres::TerminationType t)
@@ -82,13 +87,19 @@ private:
 // Run Ceres LBFGS on a problem and return a benchmark_result.
 template <typename Problem>
 auto run_ceres_solver(std::string_view problem_name,
-                      Problem prob,
-                      int max_iterations) -> benchmark_result
+                      const Problem& prob,
+                      int max_iterations,
+                      const bench_config& config) -> benchmark_result
 {
+    eval_counts counts;
+    counting_problem<Problem> wrapped{prob, counts};
+
     auto x0 = prob.initial_point();
 
-    // GradientProblem takes ownership of the raw pointer.
-    auto* adapter = new ceres_first_order_adapter<Problem>(prob);
+    // GradientProblem takes ownership of the raw adapter pointer; the
+    // adapter holds a non-owning pointer to `wrapped` which lives on the
+    // local stack frame for the duration of the Solve() call.
+    auto* adapter = new ceres_first_order_adapter<Problem>(&wrapped);
     ceres::GradientProblem gradient_problem(adapter);
 
     ceres::GradientProblemSolver::Options options;
@@ -117,8 +128,15 @@ auto run_ceres_solver(std::string_view problem_name,
         .problem = problem_name,
         .pclass = prob.pclass,
         .dimension = prob.dimension(),
-        .f_evals = summary.num_cost_evaluations,
-        .g_evals = summary.num_gradient_evaluations,
+        .seed = config.seed,
+        .mode = (config.the_mode == bench_config::mode::publication)
+                    ? std::string_view{"publication"}
+                    : std::string_view{"library_defaults"},
+        .solver_iters = static_cast<int>(summary.iterations.size()),
+        .f_evals = counts.f,
+        .g_evals = counts.g,
+        .c_evals = counts.c,
+        .J_evals = counts.J,
         .wall_time_us = wall_us,
         .final_objective = summary.final_cost,
         .known_optimum = known_opt,
@@ -131,21 +149,19 @@ auto run_ceres_solver(std::string_view problem_name,
 
 void run_ceres_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
 {
-    // bench_config consumption: mode::library_defaults preserves existing
-    // byte-identical behavior (this plan scope). A follow-on plan branches
-    // on config.the_mode == mode::publication for tightened tolerances +
-    // trace emission and routes problem callbacks through
-    // counting_problem<P>.
-    (void)config;  // unused in this scaffold — consumed in follow-on plans.
-
+    // bench_config consumption: every adapter call wraps prob through
+    // counting_problem<P>; {f,g,c,J}_evals come from the wrapper, while
+    // solver_iters reads back Ceres' native iteration count from the
+    // GradientProblemSolver::Summary.iterations vector.
     constexpr int max_iterations = 10000;
 
     // Ceres only does unconstrained -- use for_each_problem_of_class.
     for_each_problem_of_class(problem_class::unconstrained,
         [&](std::string_view name, auto&& prob) {
             using P = std::remove_cvref_t<decltype(prob)>;
+            P p{};
             results.push_back(
-                detail::run_ceres_solver(name, P{}, max_iterations));
+                detail::run_ceres_solver(name, p, max_iterations, config));
         });
 }
 

@@ -19,6 +19,7 @@
 // Reference: NLopt documentation, Algorithms section.
 
 #include "bench_nlopt.h"
+#include "counting_problem.h"
 #include "problem_registry.h"
 
 #include "nablapp/formulation/concepts.h"
@@ -39,10 +40,15 @@ namespace detail
 
 // Wraps any nablapp problem as an NLopt objective callback.
 // Problem must provide value() and gradient().
+//
+// `data` points at a counting_problem<Problem>; every value()/gradient()
+// invocation bumps the shared eval_counts so summary CSV columns
+// {f,g,c,J}_evals are populated independently of NLopt's native
+// get_numevals() (which folds value+gradient into one invocation).
 template <typename Problem>
 double nlopt_objective(unsigned n, const double* x, double* grad, void* data)
 {
-    auto* prob = static_cast<Problem*>(data);
+    auto* prob = static_cast<counting_problem<Problem>*>(data);
     Eigen::Map<const Eigen::VectorXd> xmap(x, n);
     Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
 
@@ -64,7 +70,7 @@ void nlopt_ineq_mconstraint(unsigned m, double* result,
                             unsigned n, const double* x,
                             double* grad, void* data)
 {
-    auto* prob = static_cast<Problem*>(data);
+    auto* prob = static_cast<counting_problem<Problem>*>(data);
     Eigen::Map<const Eigen::VectorXd> xmap(x, n);
     Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
 
@@ -96,8 +102,9 @@ void nlopt_eq_mconstraint(unsigned m, double* result,
                           unsigned n, const double* x,
                           double* grad, void* data)
 {
-    auto* prob = static_cast<Problem*>(data);
-    Eigen::Map<const Eigen::VectorXd> xv(x, n);
+    auto* prob = static_cast<counting_problem<Problem>*>(data);
+    Eigen::Map<const Eigen::VectorXd> xmap(x, n);
+    Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
 
     int total_constraints = static_cast<int>(m) + prob->num_inequality();
     Eigen::VectorXd c(total_constraints);
@@ -139,13 +146,17 @@ auto run_nlopt_solver(nlopt::algorithm algo,
                       std::string_view solver_name,
                       std::string_view problem_name,
                       Problem& prob,
-                      int max_evals) -> benchmark_result
+                      int max_evals,
+                      const bench_config& config) -> benchmark_result
 {
+    eval_counts counts;
+    counting_problem<Problem> wrapped{prob, counts};
+
     auto n = static_cast<unsigned>(prob.dimension());
     nlopt::opt opt(algo, n);
 
     // Set objective.
-    opt.set_min_objective(nlopt_objective<Problem>, &prob);
+    opt.set_min_objective(nlopt_objective<Problem>, &wrapped);
 
     // Set bounds if the problem provides them.
     if constexpr(bound_constrained<Problem>)
@@ -168,13 +179,13 @@ auto run_nlopt_solver(nlopt::algorithm algo,
         {
             std::vector<double> tol(static_cast<std::size_t>(n_ineq), 1e-8);
             opt.add_inequality_mconstraint(
-                nlopt_ineq_mconstraint<Problem>, &prob, tol);
+                nlopt_ineq_mconstraint<Problem>, &wrapped, tol);
         }
         if(n_eq > 0)
         {
             std::vector<double> tol(static_cast<std::size_t>(n_eq), 1e-8);
             opt.add_equality_mconstraint(
-                nlopt_eq_mconstraint<Problem>, &prob, tol);
+                nlopt_eq_mconstraint<Problem>, &wrapped, tol);
         }
     }
 
@@ -212,7 +223,6 @@ auto run_nlopt_solver(nlopt::algorithm algo,
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
-    int f_evals = opt.get_numevals();
     double known_opt = prob.optimal_value();
 
     return benchmark_result{
@@ -221,8 +231,15 @@ auto run_nlopt_solver(nlopt::algorithm algo,
         .problem = problem_name,
         .pclass = prob.pclass,
         .dimension = prob.dimension(),
-        .f_evals = f_evals,
-        .g_evals = f_evals,
+        .seed = config.seed,
+        .mode = (config.the_mode == bench_config::mode::publication)
+                    ? std::string_view{"publication"}
+                    : std::string_view{"library_defaults"},
+        .solver_iters = opt.get_numevals(),
+        .f_evals = counts.f,
+        .g_evals = counts.g,
+        .c_evals = counts.c,
+        .J_evals = counts.J,
         .wall_time_us = wall_us,
         .final_objective = minf,
         .known_optimum = known_opt,
@@ -235,8 +252,12 @@ auto run_nlopt_solver(nlopt::algorithm algo,
 template <typename Problem>
 auto run_nlopt_auglag(std::string_view problem_name,
                       Problem& prob,
-                      int max_evals) -> benchmark_result
+                      int max_evals,
+                      const bench_config& config) -> benchmark_result
 {
+    eval_counts counts;
+    counting_problem<Problem> wrapped{prob, counts};
+
     auto n = static_cast<unsigned>(prob.dimension());
     nlopt::opt opt(nlopt::LD_AUGLAG, n);
 
@@ -245,7 +266,7 @@ auto run_nlopt_auglag(std::string_view problem_name,
     local_opt.set_ftol_rel(1e-12);
     opt.set_local_optimizer(local_opt);
 
-    opt.set_min_objective(nlopt_objective<Problem>, &prob);
+    opt.set_min_objective(nlopt_objective<Problem>, &wrapped);
 
     if constexpr(bound_constrained<Problem>)
     {
@@ -265,13 +286,13 @@ auto run_nlopt_auglag(std::string_view problem_name,
         {
             std::vector<double> tol(static_cast<std::size_t>(n_ineq), 1e-8);
             opt.add_inequality_mconstraint(
-                nlopt_ineq_mconstraint<Problem>, &prob, tol);
+                nlopt_ineq_mconstraint<Problem>, &wrapped, tol);
         }
         if(n_eq > 0)
         {
             std::vector<double> tol(static_cast<std::size_t>(n_eq), 1e-8);
             opt.add_equality_mconstraint(
-                nlopt_eq_mconstraint<Problem>, &prob, tol);
+                nlopt_eq_mconstraint<Problem>, &wrapped, tol);
         }
     }
 
@@ -305,7 +326,6 @@ auto run_nlopt_auglag(std::string_view problem_name,
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
-    int f_evals = opt.get_numevals();
     double known_opt = prob.optimal_value();
 
     return benchmark_result{
@@ -314,8 +334,15 @@ auto run_nlopt_auglag(std::string_view problem_name,
         .problem = problem_name,
         .pclass = prob.pclass,
         .dimension = prob.dimension(),
-        .f_evals = f_evals,
-        .g_evals = f_evals,
+        .seed = config.seed,
+        .mode = (config.the_mode == bench_config::mode::publication)
+                    ? std::string_view{"publication"}
+                    : std::string_view{"library_defaults"},
+        .solver_iters = opt.get_numevals(),
+        .f_evals = counts.f,
+        .g_evals = counts.g,
+        .c_evals = counts.c,
+        .J_evals = counts.J,
         .wall_time_us = wall_us,
         .final_objective = minf,
         .known_optimum = known_opt,
@@ -334,16 +361,20 @@ auto run_nlopt_auglag(std::string_view problem_name,
 template <typename Problem>
 auto run_nlopt_isres(std::string_view problem_name,
                      Problem& prob,
-                     int max_evals) -> benchmark_result
+                     int max_evals,
+                     const bench_config& config) -> benchmark_result
 {
+    eval_counts counts;
+    counting_problem<Problem> wrapped{prob, counts};
+
     auto n = static_cast<unsigned>(prob.dimension());
     nlopt::opt opt(nlopt::GN_ISRES, n);
 
     // Deterministic seed for reproducible benchmarks.
-    nlopt::srand(42);
+    nlopt::srand(static_cast<unsigned long>(config.seed));
 
     // ISRES uses derivative-free objective evaluation.
-    opt.set_min_objective(nlopt_objective<Problem>, &prob);
+    opt.set_min_objective(nlopt_objective<Problem>, &wrapped);
 
     // Bounds are required for ISRES.
     if constexpr(bound_constrained<Problem>)
@@ -368,13 +399,13 @@ auto run_nlopt_isres(std::string_view problem_name,
         {
             std::vector<double> tol(static_cast<std::size_t>(n_ineq), 1e-6);
             opt.add_inequality_mconstraint(
-                nlopt_ineq_mconstraint<Problem>, &prob, tol);
+                nlopt_ineq_mconstraint<Problem>, &wrapped, tol);
         }
         if(n_eq > 0)
         {
             std::vector<double> tol(static_cast<std::size_t>(n_eq), 1e-6);
             opt.add_equality_mconstraint(
-                nlopt_eq_mconstraint<Problem>, &prob, tol);
+                nlopt_eq_mconstraint<Problem>, &wrapped, tol);
         }
     }
 
@@ -411,7 +442,6 @@ auto run_nlopt_isres(std::string_view problem_name,
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
-    int f_evals = opt.get_numevals();
     double known_opt = prob.optimal_value();
 
     return benchmark_result{
@@ -420,8 +450,15 @@ auto run_nlopt_isres(std::string_view problem_name,
         .problem = problem_name,
         .pclass = prob.pclass,
         .dimension = prob.dimension(),
-        .f_evals = f_evals,
-        .g_evals = 0,
+        .seed = config.seed,
+        .mode = (config.the_mode == bench_config::mode::publication)
+                    ? std::string_view{"publication"}
+                    : std::string_view{"library_defaults"},
+        .solver_iters = opt.get_numevals(),
+        .f_evals = counts.f,
+        .g_evals = counts.g,
+        .c_evals = counts.c,
+        .J_evals = counts.J,
         .wall_time_us = wall_us,
         .final_objective = minf,
         .known_optimum = known_opt,
@@ -434,13 +471,10 @@ auto run_nlopt_isres(std::string_view problem_name,
 
 void run_nlopt_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
 {
-    // bench_config consumption: mode::library_defaults preserves existing
-    // byte-identical behavior (this plan scope). A follow-on plan branches
-    // on config.the_mode == mode::publication for tightened tolerances +
-    // trace emission and routes problem callbacks through
-    // counting_problem<P>.
-    (void)config;  // unused in this scaffold — consumed in follow-on plans.
-
+    // bench_config consumption: every adapter call now wraps prob through
+    // counting_problem<P>; `seed` and `mode` populate from config; the
+    // existing byte-identical max_evals budget is preserved here, with
+    // tighter publication-mode tolerances landing in a follow-on plan.
     constexpr int max_evals = 10000;
 
     for_each_problem([&](std::string_view name, auto&& prob) {
@@ -465,48 +499,48 @@ void run_nlopt_benchmarks(std::vector<benchmark_result>& results, const bench_co
         if constexpr(is_unconstrained && has_gradient)
             results.push_back(
                 detail::run_nlopt_solver(nlopt::LD_LBFGS, "nlopt_lbfgs",
-                                         name, p, max_evals));
+                                         name, p, max_evals, config));
 
         // Bound-constrained (non-global): BOBYQA.
         if constexpr(is_bound && !is_ineq && !is_eq && !is_mixed && !is_global)
             results.push_back(
                 detail::run_nlopt_solver(nlopt::LN_BOBYQA, "nlopt_bobyqa",
-                                         name, p, max_evals));
+                                         name, p, max_evals, config));
 
         // Inequality-constrained: SLSQP and MMA.
         if constexpr((is_ineq || is_mixed) && has_gradient && bound_constrained<P>)
         {
             results.push_back(
                 detail::run_nlopt_solver(nlopt::LD_SLSQP, "nlopt_slsqp",
-                                         name, p, max_evals));
+                                         name, p, max_evals, config));
 
             // MMA only supports inequality (no equality).
             if constexpr(!is_eq && !is_mixed)
                 results.push_back(
                     detail::run_nlopt_solver(nlopt::LD_MMA, "nlopt_mma",
-                                             name, p, max_evals));
+                                             name, p, max_evals, config));
         }
 
         // Equality or mixed constrained: AUGLAG with LBFGS subsidiary.
         if constexpr((is_eq || is_mixed) && has_gradient && bound_constrained<P>)
             results.push_back(
-                detail::run_nlopt_auglag(name, p, max_evals));
+                detail::run_nlopt_auglag(name, p, max_evals, config));
 
         // COBYLA: derivative-free constrained (no gradient needed).
         // Disabled: dominates perf profiles (~98% CPU), masking nablapp data.
         // if constexpr((is_ineq || is_mixed || is_eq) && bound_constrained<P>)
         //     results.push_back(
         //         detail::run_nlopt_solver(nlopt::LN_COBYLA, "nlopt_cobyla",
-        //                                  name, p, max_evals));
+        //                                  name, p, max_evals, config));
 
         // Global: CRS2 and ISRES (require bounds).
         if constexpr(is_global && bound_constrained<P>)
         {
             results.push_back(
                 detail::run_nlopt_solver(nlopt::GN_CRS2_LM, "nlopt_crs2",
-                                         name, p, max_evals));
+                                         name, p, max_evals, config));
             results.push_back(
-                detail::run_nlopt_isres(name, p, max_evals));
+                detail::run_nlopt_isres(name, p, max_evals, config));
         }
 
         // ISRES on constrained problems with bounds (evolutionary
@@ -515,7 +549,7 @@ void run_nlopt_benchmarks(std::vector<benchmark_result>& results, const bench_co
         if constexpr((is_ineq || is_eq || is_mixed) && bound_constrained<P>
                      && !is_global)
             results.push_back(
-                detail::run_nlopt_isres(name, p, max_evals));
+                detail::run_nlopt_isres(name, p, max_evals, config));
     });
 }
 
