@@ -25,6 +25,7 @@
 // supplied because nablapp problem types do not currently advertise one.
 
 #include "bench_ipopt.h"
+#include "trace_entry.h"
 #include "counting_problem.h"
 #include "problem_registry.h"
 
@@ -236,6 +237,66 @@ public:
         x_final_.assign(x, x + n);
     }
 
+    // Per-iter trace hook (Pattern 3 in 32.8-RESEARCH.md). Wired by the
+    // run_ipopt_solver wrapper before OptimizeTNLP() is invoked; trace_out_
+    // points at a per-problem local_trace owned by the caller. Maps the
+    // IPOPT-native composite (obj_value, inf_pr, d_norm, max(inf_pr, inf_du))
+    // into the D-C3 12-column schema. ALWAYS returns true: under the
+    // publication protocol, stopping is governed by max_iter / max_wall_time
+    // configured on the IpoptApplication, never by USER_REQUESTED_STOP.
+    bool intermediate_callback(
+        Ipopt::AlgorithmMode  /*mode*/,
+        Ipopt::Index          iter,
+        Ipopt::Number         obj_value,
+        Ipopt::Number         inf_pr,
+        Ipopt::Number         inf_du,
+        Ipopt::Number         /*mu*/,
+        Ipopt::Number         d_norm,
+        Ipopt::Number         /*regularization_size*/,
+        Ipopt::Number         /*alpha_du*/,
+        Ipopt::Number         /*alpha_pr*/,
+        Ipopt::Index          /*ls_trials*/,
+        const Ipopt::IpoptData*           /*ip_data*/,
+        Ipopt::IpoptCalculatedQuantities* /*ip_cq*/
+    ) override
+    {
+        if(!trace_enabled_)
+            return true;
+
+        f_best_running_ = std::min(f_best_running_, obj_value);
+
+        const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+
+        trace_out_->push_back(trace_entry{
+            .iter         = static_cast<int>(iter),
+            .f_evals      = prob_->counts->f,
+            .g_evals      = prob_->counts->g,
+            .c_evals      = prob_->counts->c,
+            .J_evals      = prob_->counts->J,
+            .wall_us      = now_us - t0_us_,
+            .f_current    = obj_value,
+            .f_best       = f_best_running_,
+            .accuracy     = std::abs(obj_value - f_star_),
+            .cv           = inf_pr,
+            .step_norm    = d_norm,
+            .kkt_residual = std::max(inf_pr, inf_du),
+        });
+        return true;
+    }
+
+    // Trace wiring; populated by the run_ipopt_solver wrapper after
+    // construction and before OptimizeTNLP() is invoked.
+    void enable_trace(std::vector<trace_entry>* trace_out,
+                      std::int64_t              t0_us,
+                      double                    f_star)
+    {
+        trace_out_     = trace_out;
+        t0_us_         = t0_us;
+        f_star_        = f_star;
+        trace_enabled_ = (trace_out_ != nullptr);
+    }
+
 private:
     Problem* prob_;
     std::string_view problem_name_;
@@ -243,6 +304,13 @@ private:
     Ipopt::SolverReturn status_{Ipopt::INTERNAL_ERROR};
     double obj_final_{std::numeric_limits<double>::quiet_NaN()};
     std::vector<double> x_final_;
+
+    // Per-iter trace state.
+    std::vector<trace_entry>* trace_out_{nullptr};
+    std::int64_t              t0_us_{0};
+    double                    f_star_{};
+    double                    f_best_running_{std::numeric_limits<double>::infinity()};
+    bool                      trace_enabled_{false};
 };
 
 [[nodiscard]] inline auto ipopt_status_string(Ipopt::SolverReturn s) -> std::string_view
@@ -286,7 +354,8 @@ auto run_ipopt_solver(std::string_view problem_name,
                       Problem& prob,
                       int max_evals,
                       const ipopt_variant& variant,
-                      const bench_config& config) -> benchmark_result
+                      const bench_config& config,
+                      std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
     counting_problem<Problem> wrapped{prob, counts};
@@ -294,6 +363,18 @@ auto run_ipopt_solver(std::string_view problem_name,
 
     auto tnlp = Ipopt::SmartPtr<ipopt_tnlp<wrapped_t>>(
         new ipopt_tnlp<wrapped_t>(wrapped, problem_name, max_evals));
+
+    // Per-iter trace wiring (Pattern 3 in 32.8-RESEARCH.md). Under
+    // library_defaults, trace_out is null and the intermediate_callback
+    // short-circuits; under publication, the callback appends rows into
+    // local_trace using the IPOPT-native (obj_value, inf_pr, d_norm,
+    // max(inf_pr, inf_du)) composite.
+    if(config.trace_enabled)
+    {
+        const auto t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        tnlp->enable_trace(&local_trace, t0_us, prob.optimal_value());
+    }
 
     Ipopt::SmartPtr<Ipopt::IpoptApplication> app =
         IpoptApplicationFactory();
@@ -411,11 +492,19 @@ constexpr std::array<ipopt_variant, 3> ipopt_variants{{
 
 } // detail
 
-void run_ipopt_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
+void run_ipopt_benchmarks(std::vector<benchmark_result>& results,
+                          std::vector<std::vector<trace_entry>>& traces,
+                          const bench_config& config)
 {
     // Each adapter call wraps prob through counting_problem<P>, populating
     // problem-level {f,g,c,J}_evals. solver_iters reads back IPOPT's
     // native iteration counter via app->Statistics()->IterationCount().
+    //
+    // Under config.trace_enabled, each variant invocation appends per-iter
+    // trace rows into local_trace via TNLP::intermediate_callback; that
+    // vector is moved into traces[] alongside the corresponding result.
+    // Under library_defaults, an empty trace vector is pushed to preserve
+    // the results[i] <-> traces[i] index invariant.
     constexpr int max_evals = 10000;
 
     for_each_problem([&](std::string_view name, auto&& prob) {
@@ -435,8 +524,13 @@ void run_ipopt_benchmarks(std::vector<benchmark_result>& results, const bench_co
         if constexpr(has_gradient && !is_global)
         {
             for(const auto& variant : detail::ipopt_variants)
+            {
+                std::vector<trace_entry> local_trace;
                 results.push_back(
-                    detail::run_ipopt_solver(name, p, max_evals, variant, config));
+                    detail::run_ipopt_solver(name, p, max_evals, variant,
+                                             config, local_trace));
+                traces.push_back(std::move(local_trace));
+            }
         }
     });
 }

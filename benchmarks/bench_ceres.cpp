@@ -11,14 +11,18 @@
 //   Unconstrained: ceres::LBFGS -> "ceres_lbfgs"
 
 #include "bench_ceres.h"
+#include "trace_entry.h"
 #include "counting_problem.h"
 #include "problem_registry.h"
 
+#include <ceres/iteration_callback.h>
 #include <ceres/gradient_problem.h>
 #include <ceres/gradient_problem_solver.h>
 
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <string_view>
 #include <vector>
 
@@ -84,12 +88,59 @@ private:
     }
 }
 
+// Per-iter trace callback (Pattern 4 in 32.8-RESEARCH.md). Registered on
+// GradientProblemSolver::Options::callbacks alongside
+// update_state_every_iteration=true (Pitfall 4) so the IterationSummary
+// reflects the accepted iterate's cost rather than the trial point. cv is
+// always 0 because Ceres has no constrained surface; kkt_residual is NaN
+// per the D-C3 capability footnote.
+struct ceres_trace_callback : public ceres::IterationCallback
+{
+    std::vector<trace_entry>* trace{nullptr};
+    const eval_counts*        counts{nullptr};
+    std::int64_t              t0_us{0};
+    double                    f_star{};
+    double                    f_best_running{std::numeric_limits<double>::infinity()};
+
+    ceres_trace_callback(std::vector<trace_entry>* tr,
+                         const eval_counts*        c,
+                         std::int64_t              t0,
+                         double                    fs)
+        : trace{tr}, counts{c}, t0_us{t0}, f_star{fs}
+    {
+    }
+
+    ceres::CallbackReturnType operator()(const ceres::IterationSummary& s) override
+    {
+        const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        f_best_running = std::min(f_best_running, s.cost);
+
+        trace->push_back(trace_entry{
+            .iter         = s.iteration,
+            .f_evals      = counts->f,
+            .g_evals      = counts->g,
+            .c_evals      = 0,
+            .J_evals      = 0,
+            .wall_us      = now_us - t0_us,
+            .f_current    = s.cost,
+            .f_best       = f_best_running,
+            .accuracy     = std::abs(s.cost - f_star),
+            .cv           = 0.0,
+            .step_norm    = s.step_norm,
+            .kkt_residual = std::numeric_limits<double>::quiet_NaN(),
+        });
+        return ceres::SOLVER_CONTINUE;
+    }
+};
+
 // Run Ceres LBFGS on a problem and return a benchmark_result.
 template <typename Problem>
 auto run_ceres_solver(std::string_view problem_name,
                       const Problem& prob,
                       int max_iterations,
-                      const bench_config& config) -> benchmark_result
+                      const bench_config& config,
+                      std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
     counting_problem<Problem> wrapped{prob, counts};
@@ -108,6 +159,21 @@ auto run_ceres_solver(std::string_view problem_name,
     options.function_tolerance = 1e-12;
     options.gradient_tolerance = 1e-10;
     options.logging_type = ceres::SILENT;
+    // Pitfall 4 (32.8-RESEARCH.md): without this flag the IterationSummary
+    // received by the callback reflects the line-search trial point instead
+    // of the accepted iterate. Set unconditionally; behavior only changes
+    // when callbacks are also registered, which library_defaults does not do.
+    options.update_state_every_iteration = true;
+
+    // Per-iter trace registration (Pattern 4 in 32.8-RESEARCH.md). Stack
+    // lifetime extends across Solve(); the callback is unregistered when
+    // options goes out of scope after the call returns.
+    const auto t0_us_for_trace = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    ceres_trace_callback cb(&local_trace, &counts, t0_us_for_trace,
+                            prob.optimal_value());
+    if(config.trace_enabled)
+        options.callbacks.push_back(&cb);
 
     std::vector<double> x(x0.data(), x0.data() + prob.dimension());
 
@@ -147,12 +213,20 @@ auto run_ceres_solver(std::string_view problem_name,
 
 }
 
-void run_ceres_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
+void run_ceres_benchmarks(std::vector<benchmark_result>& results,
+                          std::vector<std::vector<trace_entry>>& traces,
+                          const bench_config& config)
 {
     // bench_config consumption: every adapter call wraps prob through
     // counting_problem<P>; {f,g,c,J}_evals come from the wrapper, while
     // solver_iters reads back Ceres' native iteration count from the
     // GradientProblemSolver::Summary.iterations vector.
+    //
+    // Under config.trace_enabled, the IterationCallback appends per-iter
+    // rows into a per-problem local_trace; that vector is moved into
+    // traces[] alongside the result. Under library_defaults, the callback
+    // is not registered and local_trace stays empty — the empty vector is
+    // pushed to preserve the results[i] <-> traces[i] index invariant.
     constexpr int max_iterations = 10000;
 
     // Ceres only does unconstrained -- use for_each_problem_of_class.
@@ -160,8 +234,11 @@ void run_ceres_benchmarks(std::vector<benchmark_result>& results, const bench_co
         [&](std::string_view name, auto&& prob) {
             using P = std::remove_cvref_t<decltype(prob)>;
             P p{};
+            std::vector<trace_entry> local_trace;
             results.push_back(
-                detail::run_ceres_solver(name, p, max_iterations, config));
+                detail::run_ceres_solver(name, p, max_iterations, config,
+                                         local_trace));
+            traces.push_back(std::move(local_trace));
         });
 }
 

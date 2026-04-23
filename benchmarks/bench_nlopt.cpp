@@ -19,6 +19,7 @@
 // Reference: NLopt documentation, Algorithms section.
 
 #include "bench_nlopt.h"
+#include "trace_entry.h"
 #include "counting_problem.h"
 #include "problem_registry.h"
 
@@ -37,6 +38,29 @@ namespace nablapp::bench
 
 namespace detail
 {
+
+// Trace wrapper bundling the counting_problem<P> with a destination trace
+// vector and the timing baseline so the publication-mode objective callback
+// can append per-invocation trace rows while still bumping the four
+// problem-level eval counters (Pattern 5 in 32.8-RESEARCH.md).
+//
+// NLopt has no native per-iter callback hook; the objective callback fires
+// once per (value, gradient) invocation pair, so "iter" in the NLopt trace
+// becomes a monotonic eval index. Constraint callbacks still go through the
+// bare counting_problem<P>* and do not emit trace rows; their f/g/c/J counter
+// bumps are visible in the NEXT objective-callback trace row's counter
+// fields, which is consistent with the eval-budget interpretation used by
+// the post-processing dm_profile.py.
+template <typename Problem>
+struct nlopt_trace_wrapper
+{
+    counting_problem<Problem>* prob{nullptr};
+    std::vector<trace_entry>*  trace{nullptr};
+    std::int64_t               t0_us{0};
+    double                     f_star{};
+    double                     f_best_running{std::numeric_limits<double>::infinity()};
+    int                        iter_count{0};
+};
 
 // Wraps any nablapp problem as an NLopt objective callback.
 // Problem must provide value() and gradient().
@@ -60,6 +84,50 @@ double nlopt_objective(unsigned n, const double* x, double* grad, void* data)
     }
 
     return prob->value(xv);
+}
+
+// Trace-emitting objective callback used under publication mode.
+// `data` points at an nlopt_trace_wrapper<Problem>; every invocation
+// appends a trace_entry row populated from the four problem-level counters
+// plus the running-min objective. step_norm and kkt_residual are NaN per
+// CONTEXT D-C3 capability footnote (NLopt's objective callback does not
+// surface either quantity).
+template <typename Problem>
+double nlopt_trace_objective(unsigned n, const double* x, double* grad, void* data)
+{
+    auto* w = static_cast<nlopt_trace_wrapper<Problem>*>(data);
+    Eigen::Map<const Eigen::VectorXd> xmap(x, n);
+    Eigen::Vector<double, Problem::problem_dimension> xv(xmap);
+
+    if(grad)
+    {
+        Eigen::Vector<double, Problem::problem_dimension> g;
+        w->prob->gradient(xv, g);
+        Eigen::Map<Eigen::VectorXd>(grad, n) = g;
+    }
+    const double f = w->prob->value(xv);
+
+    w->f_best_running = std::min(w->f_best_running, f);
+
+    const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+
+    w->trace->push_back(trace_entry{
+        .iter         = w->iter_count++,
+        .f_evals      = w->prob->counts->f,
+        .g_evals      = w->prob->counts->g,
+        .c_evals      = w->prob->counts->c,
+        .J_evals      = w->prob->counts->J,
+        .wall_us      = now_us - w->t0_us,
+        .f_current    = f,
+        .f_best       = w->f_best_running,
+        .accuracy     = std::abs(f - w->f_star),
+        .cv           = std::numeric_limits<double>::quiet_NaN(),
+        .step_norm    = std::numeric_limits<double>::quiet_NaN(),
+        .kkt_residual = std::numeric_limits<double>::quiet_NaN(),
+    });
+
+    return f;
 }
 
 // Wraps nablapp vectorised constraints for NLopt's mconstraint interface.
@@ -141,13 +209,18 @@ void nlopt_eq_mconstraint(unsigned m, double* result,
 }
 
 // Run a single NLopt solver on a problem and return a benchmark_result.
+//
+// Under config.trace_enabled, each objective-callback invocation appends a
+// trace_entry row into local_trace via nlopt_trace_wrapper<Problem>; the
+// caller pushes the populated local_trace into the per-problem traces[].
 template <typename Problem>
 auto run_nlopt_solver(nlopt::algorithm algo,
                       std::string_view solver_name,
                       std::string_view problem_name,
                       Problem& prob,
                       int max_evals,
-                      const bench_config& config) -> benchmark_result
+                      const bench_config& config,
+                      std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
     counting_problem<Problem> wrapped{prob, counts};
@@ -155,8 +228,24 @@ auto run_nlopt_solver(nlopt::algorithm algo,
     auto n = static_cast<unsigned>(prob.dimension());
     nlopt::opt opt(algo, n);
 
-    // Set objective.
-    opt.set_min_objective(nlopt_objective<Problem>, &wrapped);
+    // Trace wrapper is only consulted when config.trace_enabled is true; the
+    // bare counting_problem<Problem>* path preserves byte-identical
+    // library_defaults behavior.
+    const auto t0_us_for_trace = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    nlopt_trace_wrapper<Problem> tw{
+        .prob           = &wrapped,
+        .trace          = &local_trace,
+        .t0_us          = t0_us_for_trace,
+        .f_star         = prob.optimal_value(),
+    };
+
+    // Set objective; route through the trace wrapper only under publication
+    // mode, otherwise keep the legacy data pointer wiring.
+    if(config.trace_enabled)
+        opt.set_min_objective(nlopt_trace_objective<Problem>, &tw);
+    else
+        opt.set_min_objective(nlopt_objective<Problem>, &wrapped);
 
     // Set bounds if the problem provides them.
     if constexpr(bound_constrained<Problem>)
@@ -253,7 +342,8 @@ template <typename Problem>
 auto run_nlopt_auglag(std::string_view problem_name,
                       Problem& prob,
                       int max_evals,
-                      const bench_config& config) -> benchmark_result
+                      const bench_config& config,
+                      std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
     counting_problem<Problem> wrapped{prob, counts};
@@ -266,7 +356,19 @@ auto run_nlopt_auglag(std::string_view problem_name,
     local_opt.set_ftol_rel(1e-12);
     opt.set_local_optimizer(local_opt);
 
-    opt.set_min_objective(nlopt_objective<Problem>, &wrapped);
+    const auto t0_us_for_trace = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    nlopt_trace_wrapper<Problem> tw{
+        .prob           = &wrapped,
+        .trace          = &local_trace,
+        .t0_us          = t0_us_for_trace,
+        .f_star         = prob.optimal_value(),
+    };
+
+    if(config.trace_enabled)
+        opt.set_min_objective(nlopt_trace_objective<Problem>, &tw);
+    else
+        opt.set_min_objective(nlopt_objective<Problem>, &wrapped);
 
     if constexpr(bound_constrained<Problem>)
     {
@@ -362,7 +464,8 @@ template <typename Problem>
 auto run_nlopt_isres(std::string_view problem_name,
                      Problem& prob,
                      int max_evals,
-                     const bench_config& config) -> benchmark_result
+                     const bench_config& config,
+                     std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
     counting_problem<Problem> wrapped{prob, counts};
@@ -373,8 +476,20 @@ auto run_nlopt_isres(std::string_view problem_name,
     // Deterministic seed for reproducible benchmarks.
     nlopt::srand(static_cast<unsigned long>(config.seed));
 
+    const auto t0_us_for_trace = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    nlopt_trace_wrapper<Problem> tw{
+        .prob           = &wrapped,
+        .trace          = &local_trace,
+        .t0_us          = t0_us_for_trace,
+        .f_star         = prob.optimal_value(),
+    };
+
     // ISRES uses derivative-free objective evaluation.
-    opt.set_min_objective(nlopt_objective<Problem>, &wrapped);
+    if(config.trace_enabled)
+        opt.set_min_objective(nlopt_trace_objective<Problem>, &tw);
+    else
+        opt.set_min_objective(nlopt_objective<Problem>, &wrapped);
 
     // Bounds are required for ISRES.
     if constexpr(bound_constrained<Problem>)
@@ -469,13 +584,24 @@ auto run_nlopt_isres(std::string_view problem_name,
 
 } // detail
 
-void run_nlopt_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
+void run_nlopt_benchmarks(std::vector<benchmark_result>& results,
+                          std::vector<std::vector<trace_entry>>& traces,
+                          const bench_config& config)
 {
-    // bench_config consumption: every adapter call now wraps prob through
-    // counting_problem<P>; `seed` and `mode` populate from config; the
-    // existing byte-identical max_evals budget is preserved here, with
-    // tighter publication-mode tolerances landing in a follow-on plan.
+    // bench_config consumption: every adapter call wraps prob through
+    // counting_problem<P>. Under config.trace_enabled, each runner appends a
+    // per-invocation trace_entry row into a per-problem local_trace via the
+    // nlopt_trace_wrapper<Problem>; that vector is moved into traces[]
+    // alongside the corresponding result. Under library_defaults, an empty
+    // trace vector is pushed to preserve the results[i] <-> traces[i]
+    // index invariant.
     constexpr int max_evals = 10000;
+
+    auto run_emitting = [&](auto runner_call) {
+        std::vector<trace_entry> local_trace;
+        results.push_back(runner_call(local_trace));
+        traces.push_back(std::move(local_trace));
+    };
 
     for_each_problem([&](std::string_view name, auto&& prob) {
         using P = std::remove_cvref_t<decltype(prob)>;
@@ -497,50 +623,53 @@ void run_nlopt_benchmarks(std::vector<benchmark_result>& results, const bench_co
 
         // Unconstrained: LD_LBFGS.
         if constexpr(is_unconstrained && has_gradient)
-            results.push_back(
-                detail::run_nlopt_solver(nlopt::LD_LBFGS, "nlopt_lbfgs",
-                                         name, p, max_evals, config));
+            run_emitting([&](std::vector<trace_entry>& t) {
+                return detail::run_nlopt_solver(
+                    nlopt::LD_LBFGS, "nlopt_lbfgs", name, p, max_evals, config, t);
+            });
 
         // Bound-constrained (non-global): BOBYQA.
         if constexpr(is_bound && !is_ineq && !is_eq && !is_mixed && !is_global)
-            results.push_back(
-                detail::run_nlopt_solver(nlopt::LN_BOBYQA, "nlopt_bobyqa",
-                                         name, p, max_evals, config));
+            run_emitting([&](std::vector<trace_entry>& t) {
+                return detail::run_nlopt_solver(
+                    nlopt::LN_BOBYQA, "nlopt_bobyqa", name, p, max_evals, config, t);
+            });
 
         // Inequality-constrained: SLSQP and MMA.
         if constexpr((is_ineq || is_mixed) && has_gradient && bound_constrained<P>)
         {
-            results.push_back(
-                detail::run_nlopt_solver(nlopt::LD_SLSQP, "nlopt_slsqp",
-                                         name, p, max_evals, config));
+            run_emitting([&](std::vector<trace_entry>& t) {
+                return detail::run_nlopt_solver(
+                    nlopt::LD_SLSQP, "nlopt_slsqp", name, p, max_evals, config, t);
+            });
 
             // MMA only supports inequality (no equality).
             if constexpr(!is_eq && !is_mixed)
-                results.push_back(
-                    detail::run_nlopt_solver(nlopt::LD_MMA, "nlopt_mma",
-                                             name, p, max_evals, config));
+                run_emitting([&](std::vector<trace_entry>& t) {
+                    return detail::run_nlopt_solver(
+                        nlopt::LD_MMA, "nlopt_mma", name, p, max_evals, config, t);
+                });
         }
 
         // Equality or mixed constrained: AUGLAG with LBFGS subsidiary.
         if constexpr((is_eq || is_mixed) && has_gradient && bound_constrained<P>)
-            results.push_back(
-                detail::run_nlopt_auglag(name, p, max_evals, config));
+            run_emitting([&](std::vector<trace_entry>& t) {
+                return detail::run_nlopt_auglag(name, p, max_evals, config, t);
+            });
 
         // COBYLA: derivative-free constrained (no gradient needed).
         // Disabled: dominates perf profiles (~98% CPU), masking nablapp data.
-        // if constexpr((is_ineq || is_mixed || is_eq) && bound_constrained<P>)
-        //     results.push_back(
-        //         detail::run_nlopt_solver(nlopt::LN_COBYLA, "nlopt_cobyla",
-        //                                  name, p, max_evals, config));
 
         // Global: CRS2 and ISRES (require bounds).
         if constexpr(is_global && bound_constrained<P>)
         {
-            results.push_back(
-                detail::run_nlopt_solver(nlopt::GN_CRS2_LM, "nlopt_crs2",
-                                         name, p, max_evals, config));
-            results.push_back(
-                detail::run_nlopt_isres(name, p, max_evals, config));
+            run_emitting([&](std::vector<trace_entry>& t) {
+                return detail::run_nlopt_solver(
+                    nlopt::GN_CRS2_LM, "nlopt_crs2", name, p, max_evals, config, t);
+            });
+            run_emitting([&](std::vector<trace_entry>& t) {
+                return detail::run_nlopt_isres(name, p, max_evals, config, t);
+            });
         }
 
         // ISRES on constrained problems with bounds (evolutionary
@@ -548,8 +677,9 @@ void run_nlopt_benchmarks(std::vector<benchmark_result>& results, const bench_co
         // based constrained solvers since ISRES is derivative-free.
         if constexpr((is_ineq || is_eq || is_mixed) && bound_constrained<P>
                      && !is_global)
-            results.push_back(
-                detail::run_nlopt_isres(name, p, max_evals, config));
+            run_emitting([&](std::vector<trace_entry>& t) {
+                return detail::run_nlopt_isres(name, p, max_evals, config, t);
+            });
     });
 }
 

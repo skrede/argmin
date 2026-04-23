@@ -129,21 +129,28 @@ int main(int argc, char** argv)
     });
 
     // Run comparison library benchmarks (if detected at build time).
+    // Each adapter receives the same `traces` out-parameter; the four
+    // trace-capable adapters (nablapp / NLopt / IPOPT / Ceres) populate
+    // per-iter rows under config.trace_enabled, and the two summary-only
+    // adapters (dlib / kthohr_optim) push empty trace vectors per result
+    // row to preserve the results[i] <-> traces[i] index invariant. Under
+    // nablapp_bench's library_defaults config, every adapter pushes empty
+    // vectors — no per-iter trace files are ever produced from this driver.
 #ifdef NABLAPP_HAS_NLOPT
     nlopt::srand(static_cast<unsigned long>(cfg.seed));
-    nablapp::bench::run_nlopt_benchmarks(results, config);
+    nablapp::bench::run_nlopt_benchmarks(results, traces, config);
 #endif
 #ifdef NABLAPP_HAS_CERES
-    nablapp::bench::run_ceres_benchmarks(results, config);
+    nablapp::bench::run_ceres_benchmarks(results, traces, config);
 #endif
 #ifdef NABLAPP_HAS_DLIB
-    nablapp::bench::run_dlib_benchmarks(results, config);
+    nablapp::bench::run_dlib_benchmarks(results, traces, config);
 #endif
 #ifdef NABLAPP_HAS_IPOPT
-    nablapp::bench::run_ipopt_benchmarks(results, config);
+    nablapp::bench::run_ipopt_benchmarks(results, traces, config);
 #endif
 #ifdef NABLAPP_HAS_OPTIM
-    nablapp::bench::run_optim_benchmarks(results, config);
+    nablapp::bench::run_optim_benchmarks(results, traces, config);
 #endif
 
     auto t1 = std::chrono::high_resolution_clock::now();

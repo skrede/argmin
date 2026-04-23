@@ -342,8 +342,22 @@ void dispatch_global(std::string_view name,
 
 }
 
-void run_optim_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
+void run_optim_benchmarks(std::vector<benchmark_result>& results,
+                          std::vector<std::vector<trace_entry>>& traces,
+                          const bench_config& config)
 {
+    // kthohr/optim is summary-only per D-D5 (research-amended): algo_settings_t
+    // exposes no user-callback field on any algorithm (BFGS / L-BFGS / CG /
+    // Newton / NM / GD / DE / PSO / SUMT). We push an empty trace vector per
+    // result row to preserve results[i] <-> traces[i] index alignment with
+    // the driver's traces[] array; the driver writes nothing for empty
+    // trace vectors.
+    auto push_empty_for = [&](std::size_t before) {
+        const std::size_t after = results.size();
+        for(std::size_t i = before; i < after; ++i)
+            traces.push_back(std::vector<trace_entry>{});
+    };
+
     for_each_problem([&](std::string_view name, auto&& prob) {
         using P = std::remove_cvref_t<decltype(prob)>;
 
@@ -367,16 +381,27 @@ void run_optim_benchmarks(std::vector<benchmark_result>& results, const bench_co
         // gradient nor derivative-free can attempt the problem.
         if constexpr(has_gradient && !has_constraints && !is_global
                      && (is_unconstrained || is_bound))
+        {
+            const std::size_t before = results.size();
             detail::dispatch_unconstrained_or_bound(name, prob, config, results);
+            push_empty_for(before);
+        }
 
         // General constrained problems: SUMT routes through the
         // counting wrapper for both objective and constraint evaluations.
         if constexpr(has_constraints && has_gradient && bound_constrained<P>)
+        {
             results.push_back(detail::run_optim_sumt(name, prob, config));
+            traces.push_back(std::vector<trace_entry>{});
+        }
 
         // Global (stochastic) problems with bounds: DE + PSO.
         if constexpr(is_global && is_bound)
+        {
+            const std::size_t before = results.size();
             detail::dispatch_global(name, prob, config, results);
+            push_empty_for(before);
+        }
     });
 }
 

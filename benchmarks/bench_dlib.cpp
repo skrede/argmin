@@ -282,8 +282,16 @@ auto run_dlib_global(std::string_view problem_name,
 
 }
 
-void run_dlib_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
+void run_dlib_benchmarks(std::vector<benchmark_result>& results,
+                         std::vector<std::vector<trace_entry>>& traces,
+                         const bench_config& config)
 {
+    // dlib is summary-only per D-D4: no per-iter callback surface in
+    // find_min_box_constrained / find_min_bobyqa / find_min_global.
+    // We push an empty trace vector per result row to preserve
+    // results[i] <-> traces[i] index alignment with the driver's traces[]
+    // array; the driver writes nothing for empty trace vectors.
+    //
     // Each adapter call wraps prob through counting_problem<P>;
     // {f,g,c,J}_evals come from the wrapper. dlib does not expose its own
     // iter count for any of the find_min_* variants, so solver_iters is
@@ -310,20 +318,28 @@ void run_dlib_benchmarks(std::vector<benchmark_result>& results, const bench_con
 
         // Bound-constrained (no general constraints): L-BFGS box + BOBYQA.
         if constexpr(is_bound && !has_constraints && !is_global && has_gradient)
+        {
             results.push_back(
                 detail::run_dlib_lbfgs_box(name, prob, max_evals, config));
+            traces.push_back(std::vector<trace_entry>{});
+        }
 
         if constexpr(is_bound && !has_constraints && !is_global)
+        {
             results.push_back(
                 detail::run_dlib_bobyqa(name, prob, max_evals, config));
+            traces.push_back(std::vector<trace_entry>{});
+        }
 
         // Global problems with bounds: global optimizer + BOBYQA.
         if constexpr(is_global && is_bound)
         {
             results.push_back(
                 detail::run_dlib_global(name, prob, max_evals, config));
+            traces.push_back(std::vector<trace_entry>{});
             results.push_back(
                 detail::run_dlib_bobyqa(name, prob, max_evals, config));
+            traces.push_back(std::vector<trace_entry>{});
         }
     });
 }

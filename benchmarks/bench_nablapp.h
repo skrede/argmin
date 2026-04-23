@@ -43,6 +43,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <string_view>
 #include <type_traits>
@@ -156,9 +157,18 @@ auto run_nablapp_solver(std::string_view solver_name,
 
     if(collect_trace)
     {
-        // Step loop with trace collection (per D-09).
+        // Step loop with trace collection (per D-09); rows populate the
+        // D-C3 12-column publication schema. f_best is a running-min over
+        // f_current; accuracy is |f_current - prob.optimal_value()|;
+        // step_norm pulls from step_result.step_size (the policy-native
+        // step length); kkt_residual pulls from step_result.kkt_residual
+        // (nablapp's 31.1 E-measure composite, NaN when the policy does
+        // not populate it).
         trace.clear();
         trace.resize(static_cast<std::size_t>(max_iterations));
+
+        const double f_star = prob.optimal_value();
+        double f_best_running = std::numeric_limits<double>::infinity();
 
         using wrapped_t = counting_problem<Problem>;
         basic_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
@@ -175,17 +185,31 @@ auto run_nablapp_solver(std::string_view solver_name,
             auto sr = solver.step();
             ++iters;
 
+            const double f_current = static_cast<double>(sr.objective_value);
+            f_best_running = std::min(f_best_running, f_current);
+
+            const auto t_now = std::chrono::high_resolution_clock::now();
+            const auto wall_us_now = std::chrono::duration_cast<std::chrono::microseconds>(
+                t_now - t0).count();
+
             trace[static_cast<std::size_t>(i)] = trace_entry{
-                .iter = i,
-                .f_evals = counts.f,
-                .g_evals = counts.g,
-                .c_evals = counts.c,
-                .J_evals = counts.J,
-                .f_current = sr.objective_value,
-                .cv = sr.constraint_violation,
+                .iter         = i,
+                .f_evals      = counts.f,
+                .g_evals      = counts.g,
+                .c_evals      = counts.c,
+                .J_evals      = counts.J,
+                .wall_us      = wall_us_now,
+                .f_current    = f_current,
+                .f_best       = f_best_running,
+                .accuracy     = std::abs(f_current - f_star),
+                .cv           = static_cast<double>(sr.constraint_violation),
+                .step_norm    = static_cast<double>(sr.step_size),
+                .kkt_residual = sr.kkt_residual.has_value()
+                                    ? static_cast<double>(*sr.kkt_residual)
+                                    : std::numeric_limits<double>::quiet_NaN(),
             };
 
-            final_obj = sr.objective_value;
+            final_obj = f_current;
 
             if(sr.policy_status)
             {
