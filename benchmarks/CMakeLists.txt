@@ -55,6 +55,35 @@ if(NABLAPP_BENCH_NLOPT)
     endif()
 endif()
 
+# Optional kthohr/optim comparator (FetchContent; no system package).
+option(NABLAPP_BENCH_OPTIM "Build kthohr/optim comparison benchmarks" ON)
+if(NABLAPP_BENCH_OPTIM)
+    if(NABLAPP_CMAKE_FETCH_DEPS)
+        include(FetchContent)
+        FetchContent_Declare(
+            kthohr_optim
+            GIT_REPOSITORY https://github.com/kthohr/optim.git
+            GIT_TAG        5453f48aca695e6fef123677f35cb4d22e356e73
+        )
+        FetchContent_MakeAvailable(kthohr_optim)
+        if(NOT TARGET optim::optim)
+            add_library(nablapp_optim_header_only INTERFACE)
+            target_include_directories(nablapp_optim_header_only INTERFACE
+                "${kthohr_optim_SOURCE_DIR}/include"
+            )
+            target_compile_definitions(nablapp_optim_header_only INTERFACE
+                OPTIM_ENABLE_EIGEN_WRAPPERS
+            )
+            add_library(optim::optim ALIAS nablapp_optim_header_only)
+        endif()
+        target_sources(nablapp_bench PRIVATE bench_optim.cpp)
+        target_link_libraries(nablapp_bench PRIVATE optim::optim)
+        target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_OPTIM)
+    else()
+        message(STATUS "kthohr/optim requires NABLAPP_CMAKE_FETCH_DEPS=ON; skipping optim benchmarks")
+    endif()
+endif()
+
 # Micro-benchmarks for single-solver profiling.
 if(NLopt_FOUND)
     add_executable(micro_lbfgsb micro_lbfgsb.cpp)

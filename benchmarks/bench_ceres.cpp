@@ -129,8 +129,15 @@ auto run_ceres_solver(std::string_view problem_name,
 
 }
 
-void run_ceres_benchmarks(std::vector<benchmark_result>& results)
+void run_ceres_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
 {
+    // bench_config consumption: mode::library_defaults preserves existing
+    // byte-identical behavior (this plan scope). A follow-on plan branches
+    // on config.the_mode == mode::publication for tightened tolerances +
+    // trace emission and routes problem callbacks through
+    // counting_problem<P>.
+    (void)config;  // unused in this scaffold — consumed in follow-on plans.
+
     constexpr int max_iterations = 10000;
 
     // Ceres only does unconstrained -- use for_each_problem_of_class.

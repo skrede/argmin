@@ -7,6 +7,7 @@
 // produce a benchmark_result, and run_all_nablapp_solvers() to run all
 // applicable nablapp policies on a given problem.
 
+#include "bench_config.h"
 #include "benchmark_result.h"
 #include "trace_entry.h"
 #include "problem_registry.h"
@@ -103,8 +104,16 @@ auto run_nablapp_solver(std::string_view solver_name,
                         int max_iterations,
                         bool collect_trace,
                         std::vector<trace_entry>& trace,
+                        const bench_config& config,
                         PolicyOpts&&... policy_opts) -> benchmark_result
 {
+    // bench_config consumption: mode::library_defaults preserves existing
+    // byte-identical behavior in this scaffold. A follow-on plan branches
+    // on config.the_mode == mode::publication for tightened tolerances +
+    // trace emission and routes problem callbacks through
+    // counting_problem<P>.
+    (void)config;  // unused in this scaffold — consumed in follow-on plans.
+
     static constexpr int N = problem_dimension_v<Problem>;
     using rebound_policy = detail::rebind_policy_t<Policy, N>;
 
@@ -163,10 +172,9 @@ auto run_nablapp_solver(std::string_view solver_name,
             ++iters;
 
             trace[static_cast<std::size_t>(i)] = trace_entry{
-                .iteration = i,
-                .objective_value = sr.objective_value,
-                .gradient_norm = sr.gradient_norm,
-                .constraint_violation = sr.constraint_violation,
+                .iter = i,
+                .f_current = sr.objective_value,
+                .cv = sr.constraint_violation,
             };
 
             final_obj = sr.objective_value;
@@ -201,8 +209,15 @@ auto run_nablapp_solver(std::string_view solver_name,
             .problem = problem_name,
             .pclass = prob.pclass,
             .dimension = prob.dimension(),
+            .seed = config.seed,
+            .mode = (config.the_mode == bench_config::mode::publication)
+                        ? std::string_view{"publication"}
+                        : std::string_view{"library_defaults"},
+            .solver_iters = iters,
             .f_evals = iters,
             .g_evals = iters,
+            .c_evals = 0,
+            .J_evals = 0,
             .wall_time_us = wall_us,
             .final_objective = final_obj,
             .known_optimum = prob.optimal_value(),
@@ -233,8 +248,15 @@ auto run_nablapp_solver(std::string_view solver_name,
             .problem = problem_name,
             .pclass = prob.pclass,
             .dimension = prob.dimension(),
+            .seed = config.seed,
+            .mode = (config.the_mode == bench_config::mode::publication)
+                        ? std::string_view{"publication"}
+                        : std::string_view{"library_defaults"},
+            .solver_iters = static_cast<int>(result.function_evaluations),
             .f_evals = static_cast<int>(result.function_evaluations),
             .g_evals = static_cast<int>(result.function_evaluations),
+            .c_evals = 0,
+            .J_evals = 0,
             .wall_time_us = wall_us,
             .final_objective = result.objective_value,
             .known_optimum = prob.optimal_value(),
@@ -261,12 +283,18 @@ void run_all_nablapp_solvers(
     bool collect_trace,
     std::vector<benchmark_result>& results,
     std::vector<std::vector<trace_entry>>& traces,
+    const bench_config& config,
     std::uint64_t seed = 42)
 {
+    (void)config;  // forwarded to run_nablapp_solver below; this scope only
+                   // dispatches policies. Future plans branch here on
+                   // config.the_mode for solver-set selection per CONTEXT D-A3.
+
     auto run = [&]<typename Policy>(std::string_view name, Policy) {
         std::vector<trace_entry> trace;
         auto r = run_nablapp_solver<Policy>(
-            name, problem_name, prob, max_iterations, collect_trace, trace);
+            name, problem_name, prob, max_iterations, collect_trace, trace,
+            config);
         results.push_back(r);
         traces.push_back(std::move(trace));
     };
@@ -274,7 +302,8 @@ void run_all_nablapp_solvers(
     auto run_constrained = [&]<typename Policy>(std::string_view name, Policy) {
         std::vector<trace_entry> trace;
         auto r = run_nablapp_solver<Policy, default_convergence>(
-            name, problem_name, prob, max_iterations, collect_trace, trace);
+            name, problem_name, prob, max_iterations, collect_trace, trace,
+            config);
         results.push_back(r);
         traces.push_back(std::move(trace));
     };
@@ -325,7 +354,8 @@ void run_all_nablapp_solvers(
             {
                 std::vector<trace_entry> trace;
                 auto r = run_nablapp_solver<mma_policy<>, default_convergence>(
-                    "mma", problem_name, prob, max_iterations, collect_trace, trace);
+                    "mma", problem_name, prob, max_iterations, collect_trace, trace,
+                    config);
                 results.push_back(r);
                 traces.push_back(std::move(trace));
             }
@@ -341,7 +371,8 @@ void run_all_nablapp_solvers(
             {
                 std::vector<trace_entry> trace;
                 auto r = run_nablapp_solver<gcmma_policy<>, default_convergence>(
-                    "gcmma", problem_name, prob, max_iterations, collect_trace, trace);
+                    "gcmma", problem_name, prob, max_iterations, collect_trace, trace,
+                    config);
                 results.push_back(r);
                 traces.push_back(std::move(trace));
             }
@@ -357,7 +388,8 @@ void run_all_nablapp_solvers(
             {
                 std::vector<trace_entry> trace;
                 auto r = run_nablapp_solver<nw_sqp_policy<>, default_convergence>(
-                    "nw_sqp", problem_name, prob, max_iterations, collect_trace, trace);
+                    "nw_sqp", problem_name, prob, max_iterations, collect_trace, trace,
+                    config);
                 results.push_back(r);
                 traces.push_back(std::move(trace));
             }
@@ -387,7 +419,7 @@ void run_all_nablapp_solvers(
         std::vector<trace_entry> trace;
         auto r = run_nablapp_solver<cmaes_policy<>>(
             "cmaes", problem_name, prob, max_iterations, collect_trace, trace,
-            cmaes_opts);
+            config, cmaes_opts);
         results.push_back(r);
         traces.push_back(std::move(trace));
     }
@@ -410,7 +442,7 @@ void run_all_nablapp_solvers(
         std::vector<trace_entry> trace;
         auto r = run_nablapp_solver<isres_policy<>, default_convergence>(
             "isres", problem_name, prob, max_iterations, collect_trace, trace,
-            isres_opts);
+            config, isres_opts);
         results.push_back(r);
         traces.push_back(std::move(trace));
     }

@@ -18,8 +18,13 @@ struct benchmark_result
     std::string_view problem;
     problem_class pclass{};
     int dimension{};
+    std::uint64_t seed{};
+    std::string_view mode;
+    int solver_iters{};
     int f_evals{};
     int g_evals{};
+    int c_evals{};
+    int J_evals{};
     std::int64_t wall_time_us{};
     double final_objective{};
     double known_optimum{};
@@ -29,16 +34,19 @@ struct benchmark_result
 
 [[nodiscard]] inline auto csv_header() -> std::string_view
 {
-    return "solver,library,problem,class,dimension,f_evals,g_evals,"
-           "wall_time_us,final_objective,known_optimum,accuracy,status";
+    return "solver,library,problem,class,dimension,seed,mode,solver_iters,"
+           "f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,"
+           "known_optimum,accuracy,status";
 }
 
 [[nodiscard]] inline auto csv_row(const benchmark_result& r) -> std::string
 {
-    return std::format("{},{},{},{},{},{},{},{},{:.15e},{:.15e},{:.15e},{}",
+    return std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{:.15e},{:.15e},{:.15e},{}",
                        r.solver, r.library, r.problem,
                        to_string(r.pclass), r.dimension,
-                       r.f_evals, r.g_evals, r.wall_time_us,
+                       r.seed, r.mode, r.solver_iters,
+                       r.f_evals, r.g_evals, r.c_evals, r.J_evals,
+                       r.wall_time_us,
                        r.final_objective, r.known_optimum,
                        r.accuracy, r.status);
 }

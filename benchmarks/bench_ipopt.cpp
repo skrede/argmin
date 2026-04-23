@@ -384,8 +384,15 @@ constexpr std::array<ipopt_variant, 3> ipopt_variants{{
 
 } // detail
 
-void run_ipopt_benchmarks(std::vector<benchmark_result>& results)
+void run_ipopt_benchmarks(std::vector<benchmark_result>& results, const bench_config& config)
 {
+    // bench_config consumption: mode::library_defaults preserves existing
+    // byte-identical behavior (this plan scope). A follow-on plan branches
+    // on config.the_mode == mode::publication for tightened tolerances +
+    // trace emission and routes problem callbacks through
+    // counting_problem<P>.
+    (void)config;  // unused in this scaffold — consumed in follow-on plans.
+
     constexpr int max_evals = 10000;
 
     for_each_problem([&](std::string_view name, auto&& prob) {

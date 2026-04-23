@@ -8,6 +8,7 @@
 //   ./nablapp_bench [-o results.csv] [--no-trace] [--compare-trace]
 //                   [--trace-dir traces/]
 
+#include "bench_config.h"
 #include "bench_nablapp.h"
 #include "benchmark_result.h"
 #include "problem_registry.h"
@@ -26,6 +27,9 @@
 #endif
 #ifdef NABLAPP_HAS_IPOPT
 #include "bench_ipopt.h"
+#endif
+#ifdef NABLAPP_HAS_OPTIM
+#include "bench_optim.h"
 #endif
 
 #include <chrono>
@@ -76,12 +80,15 @@ void write_trace_csv(const std::filesystem::path& path,
                      const std::vector<nablapp::bench::trace_entry>& trace)
 {
     std::ofstream out(path);
-    out << "iteration,objective_value,gradient_norm,constraint_violation\n";
+    out << "iter,f_evals,g_evals,c_evals,J_evals,wall_us,"
+           "f_current,f_best,accuracy,cv,step_norm,kkt_residual\n";
     for(const auto& t : trace)
     {
-        out << std::format("{},{:.15e},{:.15e},{:.15e}\n",
-                           t.iteration, t.objective_value,
-                           t.gradient_norm, t.constraint_violation);
+        out << std::format("{},{},{},{},{},{},{:.15e},{:.15e},{:.15e},{:.15e},{:.15e},{:.15e}\n",
+                           t.iter, t.f_evals, t.g_evals, t.c_evals, t.J_evals,
+                           t.wall_us,
+                           t.f_current, t.f_best, t.accuracy, t.cv,
+                           t.step_norm, t.kkt_residual);
     }
 }
 
@@ -102,6 +109,13 @@ int main(int argc, char** argv)
 {
     auto cfg = parse_args(argc, argv);
 
+    // Library-defaults bench_config recovers existing nablapp_bench
+    // behavior on the pre-existing column set; new columns
+    // (seed, mode, solver_iters, c_evals, J_evals) populate from this
+    // config + adapter-native counters.
+    auto config = nablapp::bench::bench_config::library_defaults();
+    config.seed = cfg.seed;
+
     std::vector<nablapp::bench::benchmark_result> results;
     std::vector<std::vector<nablapp::bench::trace_entry>> traces;
 
@@ -111,22 +125,25 @@ int main(int argc, char** argv)
     nablapp::bench::for_each_problem([&](std::string_view name, auto&& prob) {
         nablapp::bench::run_all_nablapp_solvers(
             name, prob, max_iterations, cfg.trace_enabled, results, traces,
-            cfg.seed);
+            config, cfg.seed);
     });
 
     // Run comparison library benchmarks (if detected at build time).
 #ifdef NABLAPP_HAS_NLOPT
     nlopt::srand(static_cast<unsigned long>(cfg.seed));
-    nablapp::bench::run_nlopt_benchmarks(results);
+    nablapp::bench::run_nlopt_benchmarks(results, config);
 #endif
 #ifdef NABLAPP_HAS_CERES
-    nablapp::bench::run_ceres_benchmarks(results);
+    nablapp::bench::run_ceres_benchmarks(results, config);
 #endif
 #ifdef NABLAPP_HAS_DLIB
-    nablapp::bench::run_dlib_benchmarks(results);
+    nablapp::bench::run_dlib_benchmarks(results, config);
 #endif
 #ifdef NABLAPP_HAS_IPOPT
-    nablapp::bench::run_ipopt_benchmarks(results);
+    nablapp::bench::run_ipopt_benchmarks(results, config);
+#endif
+#ifdef NABLAPP_HAS_OPTIM
+    nablapp::bench::run_optim_benchmarks(results, config);
 #endif
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -165,7 +182,7 @@ int main(int argc, char** argv)
         nablapp::bench::for_each_problem([&](std::string_view name, auto&& prob) {
             nablapp::bench::run_all_nablapp_solvers(
                 name, prob, max_iterations, false, no_trace_results, no_trace_traces,
-                cfg.seed);
+                config, cfg.seed);
         });
 
         for(std::size_t i = 0; i < results.size() && i < no_trace_results.size(); ++i)
