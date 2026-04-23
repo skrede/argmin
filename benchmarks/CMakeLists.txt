@@ -41,6 +41,24 @@ if(NABLAPP_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# publish_bench -- publication-grade Dolan-More measurement driver.
+add_executable(publish_bench
+    publish_driver.cpp
+)
+target_link_libraries(publish_bench PRIVATE nablapp::nablapp benchmark::benchmark)
+
+target_compile_options(publish_bench PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(NABLAPP_LTO_SUPPORTED)
+    set_target_properties(publish_bench PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Optional comparison library hooks (per D-03).
 
 option(NABLAPP_BENCH_NLOPT "Build NLopt comparison benchmarks" ON)
@@ -50,6 +68,10 @@ if(NABLAPP_BENCH_NLOPT)
         target_sources(nablapp_bench PRIVATE bench_nlopt.cpp)
         target_link_libraries(nablapp_bench PRIVATE NLopt::nlopt)
         target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_NLOPT)
+
+        target_sources(publish_bench PRIVATE bench_nlopt.cpp)
+        target_link_libraries(publish_bench PRIVATE NLopt::nlopt)
+        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_NLOPT)
     else()
         message(STATUS "NLopt not found, skipping NLopt benchmarks")
     endif()
@@ -99,6 +121,10 @@ if(NABLAPP_BENCH_OPTIM)
         target_sources(nablapp_bench PRIVATE bench_optim.cpp ${NABLAPP_BENCH_OPTIM_SOURCES})
         target_link_libraries(nablapp_bench PRIVATE optim::optim)
         target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_OPTIM)
+
+        target_sources(publish_bench PRIVATE bench_optim.cpp ${NABLAPP_BENCH_OPTIM_SOURCES})
+        target_link_libraries(publish_bench PRIVATE optim::optim)
+        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_OPTIM)
     else()
         message(STATUS "kthohr/optim requires NABLAPP_CMAKE_FETCH_DEPS=ON; skipping optim benchmarks")
     endif()
@@ -399,6 +425,10 @@ if(NABLAPP_BENCH_CERES)
         target_sources(nablapp_bench PRIVATE bench_ceres.cpp)
         target_link_libraries(nablapp_bench PRIVATE Ceres::ceres)
         target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_CERES)
+
+        target_sources(publish_bench PRIVATE bench_ceres.cpp)
+        target_link_libraries(publish_bench PRIVATE Ceres::ceres)
+        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_CERES)
     else()
         message(STATUS "Ceres not found, skipping Ceres benchmarks")
     endif()
@@ -411,6 +441,10 @@ if(NABLAPP_BENCH_DLIB)
         target_sources(nablapp_bench PRIVATE bench_dlib.cpp)
         target_link_libraries(nablapp_bench PRIVATE dlib::dlib)
         target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_DLIB)
+
+        target_sources(publish_bench PRIVATE bench_dlib.cpp)
+        target_link_libraries(publish_bench PRIVATE dlib::dlib)
+        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_DLIB)
     else()
         message(STATUS "dlib not found, skipping dlib benchmarks")
     endif()
@@ -425,6 +459,10 @@ if(NABLAPP_BENCH_IPOPT)
             target_sources(nablapp_bench PRIVATE bench_ipopt.cpp)
             target_link_libraries(nablapp_bench PRIVATE PkgConfig::IPOPT)
             target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_IPOPT)
+
+            target_sources(publish_bench PRIVATE bench_ipopt.cpp)
+            target_link_libraries(publish_bench PRIVATE PkgConfig::IPOPT)
+            target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_IPOPT)
         else()
             message(STATUS "IPOPT not found via pkg-config, skipping IPOPT benchmarks")
         endif()
