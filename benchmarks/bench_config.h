@@ -18,7 +18,7 @@ namespace nablapp::bench
 
 struct bench_config
 {
-    enum class mode { library_defaults, publication };
+    enum class mode : std::uint8_t { library_defaults, publication };
 
     mode the_mode{mode::library_defaults};
     double ftol_rel{1e-12};
