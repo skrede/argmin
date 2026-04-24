@@ -89,6 +89,16 @@ struct dlib_gradient
     return m;
 }
 
+// Clamp x into [lb, ub] element-wise. dlib's find_min_bobyqa aborts if the
+// start point violates box bounds (DLIB_ASSERT is non-recoverable).
+inline void clamp_to_box(dlib::matrix<double, 0, 1>& x,
+                         const dlib::matrix<double, 0, 1>& lb,
+                         const dlib::matrix<double, 0, 1>& ub)
+{
+    for(long i = 0; i < x.size(); ++i)
+        x(i) = std::clamp(x(i), lb(i), ub(i));
+}
+
 // Run dlib L-BFGS with box constraints on a problem.
 //
 // Tolerance / iteration budget sourced from bench_config:
@@ -115,6 +125,7 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
     auto x0 = to_dlib(prob.initial_point());
     auto lb = to_dlib(prob.lower_bounds());
     auto ub = to_dlib(prob.upper_bounds());
+    clamp_to_box(x0, lb, ub);
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -189,6 +200,7 @@ auto run_dlib_bobyqa(std::string_view problem_name,
     auto x0 = to_dlib(prob.initial_point());
     auto lb = to_dlib(prob.lower_bounds());
     auto ub = to_dlib(prob.upper_bounds());
+    clamp_to_box(x0, lb, ub);
 
     int n = prob.dimension();
     // BOBYQA initial trust region radius: reasonable fraction of bound range.
