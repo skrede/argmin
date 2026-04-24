@@ -616,7 +616,7 @@ TEST_CASE("gcmma converges on HS035 (path-iv smoke)", "[mma][gcmma]")
 //
 // Reference: Svanberg 2002, Section 4.2 (raa growth rule + 10x
 //            per-outer-iter ceiling).
-TEST_CASE("gcmma conservativity raa-growth path exercise", "[mma][gcmma]")
+TEST_CASE("gcmma conservativity rho-growth path exercise", "[mma][gcmma]")
 {
     hs076 problem;
     Eigen::VectorXd x0 = problem.initial_point();
@@ -626,9 +626,9 @@ TEST_CASE("gcmma conservativity raa-growth path exercise", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    // Tight raa0 forces growth on most iterations.
+    // Low rho_init forces rho growth on most inner iterations.
     typename gcmma_policy<hs076<>::problem_dimension>::options_type gcmma_opts;
-    gcmma_opts.raa0 = 1e-12;
+    gcmma_opts.mma_opts.rho_init = 1e-6;
 
     basic_solver solver{gcmma_policy<hs076<>::problem_dimension>{},
                         problem, x0, opts, gcmma_opts};

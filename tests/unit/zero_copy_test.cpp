@@ -206,34 +206,27 @@ TEST_CASE("fixed-dim mma_subproblem_solver: zero dynamic allocation", "[zero-cop
     x << 1.0, 2.0, 3.0;
     Eigen::Vector<double, N> grad_f;
     grad_f << 0.5, -0.3, 0.1;
-    Eigen::VectorXd g(m);
-    g << -0.5;
-    Eigen::Matrix<double, Eigen::Dynamic, N> dg(m, N);
-    dg << 1.0, 0.0, -1.0;
-    Eigen::Vector<double, N> L;
-    L << -1.0, 0.0, 1.0;
-    Eigen::Vector<double, N> U;
-    U << 3.0, 4.0, 5.0;
+    Eigen::VectorXd fc(m);
+    fc << -0.5;
+    Eigen::Matrix<double, Eigen::Dynamic, N> dfc(m, N);
+    dfc << 1.0, 0.0, -1.0;
+    Eigen::Vector<double, N> sigma;
+    sigma << 2.0, 2.0, 2.0;
+    Eigen::Vector<double, N> lb;
+    lb << 0.0, 1.0, 2.0;
+    Eigen::Vector<double, N> ub;
+    ub << 2.0, 3.0, 4.0;
 
-    Eigen::Vector<double, N> x_min;
-    x_min << 0.0, 1.0, 2.0;
-    Eigen::Vector<double, N> x_max;
-    x_max << 2.0, 3.0, 4.0;
+    const double rho = 1.0;
+    Eigen::VectorXd rhoc = Eigen::VectorXd::Ones(m);
 
-    // Svanberg 2002 Section 3 regularization arguments. Zero raa recovers
-    // the Svanberg 1987 baseline (0.001 * |grad| stabilizer only).
-    const double raa_0 = 0.0;
-    Eigen::VectorXd raa = Eigen::VectorXd::Zero(m);
+    // Warm-up: solve once to populate all internal buffers.
+    sub.solve(x, 1.0, grad_f, fc, dfc, sigma, rho, rhoc, lb, ub);
 
-    // Warm-up: compute coefficients and solve once
-    sub.compute_coefficients(x, 1.0, grad_f, g, dg, L, U, raa_0, raa);
-    sub.dual_solve(L, U, x_min, x_max);
-
-    // Second run should be allocation-free
+    // Second run should be allocation-free.
     Eigen::internal::set_is_malloc_allowed(false);
 
-    sub.compute_coefficients(x, 1.0, grad_f, g, dg, L, U, raa_0, raa);
-    auto x_opt = sub.dual_solve(L, U, x_min, x_max);
+    auto x_opt = sub.solve(x, 1.0, grad_f, fc, dfc, sigma, rho, rhoc, lb, ub);
 
     Eigen::internal::set_is_malloc_allowed(true);
 
