@@ -583,17 +583,27 @@ public:
         }
         else if constexpr(std::same_as<Criterion, objective_tolerance_criterion>)
         {
-            if constexpr(requires { std::get<objective_tolerance_criterion>(stored_convergence_.criteria); })
+            using criteria_tuple = decltype(stored_convergence_.criteria);
+            if constexpr(detail::tuple_contains_v<objective_tolerance_criterion, criteria_tuple>)
             {
                 auto& dst = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+                dst.threshold = c.threshold;
+                dst.stationarity_threshold = c.stationarity_threshold;
+            }
+            else if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
+            {
+                auto& dst = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
                 dst.threshold = c.threshold;
                 dst.stationarity_threshold = c.stationarity_threshold;
             }
         }
         else if constexpr(std::same_as<Criterion, step_tolerance_criterion>)
         {
-            if constexpr(requires { std::get<step_tolerance_criterion>(stored_convergence_.criteria); })
+            using criteria_tuple = decltype(stored_convergence_.criteria);
+            if constexpr(detail::tuple_contains_v<step_tolerance_criterion, criteria_tuple>)
                 std::get<step_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+            else if constexpr(detail::tuple_contains_v<step_tolerance_rel_criterion, criteria_tuple>)
+                std::get<step_tolerance_rel_criterion>(stored_convergence_.criteria).threshold = c.threshold;
         }
         else if constexpr(std::same_as<Criterion, objective_tolerance_rel_criterion>)
         {
@@ -604,12 +614,20 @@ public:
                 dst.threshold = c.threshold;
                 dst.stationarity_threshold = c.stationarity_threshold;
             }
+            else if constexpr(detail::tuple_contains_v<objective_tolerance_criterion, criteria_tuple>)
+            {
+                auto& dst = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+                dst.threshold = c.threshold;
+                dst.stationarity_threshold = c.stationarity_threshold;
+            }
         }
         else if constexpr(std::same_as<Criterion, step_tolerance_rel_criterion>)
         {
             using criteria_tuple = decltype(stored_convergence_.criteria);
             if constexpr(detail::tuple_contains_v<step_tolerance_rel_criterion, criteria_tuple>)
                 std::get<step_tolerance_rel_criterion>(stored_convergence_.criteria).threshold = c.threshold;
+            else if constexpr(detail::tuple_contains_v<step_tolerance_criterion, criteria_tuple>)
+                std::get<step_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
         }
         else if constexpr(std::same_as<Criterion, stall_tolerance_criterion>)
         {
