@@ -128,7 +128,8 @@ TEST_CASE("LDP simple 2D halfspace", "[ldp]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = ldp<double, m, n>(G, h, x, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
+    Eigen::Vector<double, m> ldp_lambda;
+    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(0.5).margin(1e-12));
@@ -154,7 +155,8 @@ TEST_CASE("LDP triangle constraint", "[ldp]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = ldp<double, m, n>(G, h, x, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
+    Eigen::Vector<double, m> ldp_lambda;
+    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(1.5).margin(1e-9));
@@ -183,7 +185,8 @@ TEST_CASE("LDP trivial: origin is feasible", "[ldp]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = ldp<double, m, n>(G, h, x, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
+    Eigen::Vector<double, m> ldp_lambda;
+    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
 
     // Caller of LDP (LSI) treats mode != 1 as "origin is the solution"
     // in this degenerate case; we just check x is numerically zero.
@@ -208,7 +211,8 @@ TEST_CASE("LDP infeasible constraints", "[ldp]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = ldp<double, m, n>(G, h, x, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
+    Eigen::Vector<double, m> ldp_lambda;
+    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
 
     CHECK(mode != 1);
 }
@@ -234,7 +238,8 @@ TEST_CASE("LSI unconstrained reduces to ordinary LS", "[lsi]")
 
     nablapp::detail::lsi_workspace<double> ws;
     ws.resize(n, 0);
-    int mode = lsi<double, n>(E, f, G, h, x, ws,
+    Eigen::VectorXd lambda_ineq;
+    int mode = lsi<double, n>(E, f, G, h, x, lambda_ineq, ws,
                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 0);
 
     CHECK(mode == 1);
@@ -265,7 +270,8 @@ TEST_CASE("LSI 2D with one active inequality", "[lsi]")
 
     nablapp::detail::lsi_workspace<double> ws;
     ws.resize(n, m);
-    int mode = lsi<double, n>(E, f, G, h, x, ws,
+    Eigen::VectorXd lambda_ineq;
+    int mode = lsi<double, n>(E, f, G, h, x, lambda_ineq, ws,
                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m);
 
     CHECK(mode == 1);
@@ -295,7 +301,8 @@ TEST_CASE("LSI 2D with inactive inequality", "[lsi]")
 
     nablapp::detail::lsi_workspace<double> ws;
     ws.resize(n, m);
-    int mode = lsi<double, n>(E, f, G, h, x, ws,
+    Eigen::VectorXd lambda_ineq;
+    int mode = lsi<double, n>(E, f, G, h, x, lambda_ineq, ws,
                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m);
 
     CHECK(mode == 1);
@@ -333,7 +340,8 @@ TEST_CASE("LSEI equality only", "[lsei]")
 
     nablapp::detail::lsei_workspace<double> ws;
     ws.resize(n, 1, 0);
-    int mode = lsei<double, n>(C, d, E, f, G, h, x, ws,
+    Eigen::VectorXd lambda_eq, lambda_ineq;
+    int mode = lsei<double, n>(C, d, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
                                nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 1, 0);
 
     CHECK(mode == 1);
@@ -365,7 +373,8 @@ TEST_CASE("LSEI equality plus inactive inequality", "[lsei]")
 
     nablapp::detail::lsei_workspace<double> ws;
     ws.resize(n, 1, 1);
-    int mode = lsei<double, n>(C, d, E, f, G, h, x, ws,
+    Eigen::VectorXd lambda_eq, lambda_ineq;
+    int mode = lsei<double, n>(C, d, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
                                nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 1, 1);
 
     CHECK(mode == 1);
@@ -400,7 +409,8 @@ TEST_CASE("LSEI equality plus active inequality", "[lsei]")
 
     nablapp::detail::lsei_workspace<double> ws;
     ws.resize(n, 1, 1);
-    int mode = lsei<double, n>(C, d, E, f, G, h, x, ws,
+    Eigen::VectorXd lambda_eq, lambda_ineq;
+    int mode = lsei<double, n>(C, d, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
                                nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 1, 1);
 
     CHECK(mode == 1);
@@ -430,7 +440,8 @@ TEST_CASE("LSEI rank deficient equality is reported", "[lsei]")
 
     nablapp::detail::lsei_workspace<double> ws;
     ws.resize(n, 2, 0);
-    int mode = lsei<double, n>(C, d, E, f, G, h, x, ws,
+    Eigen::VectorXd lambda_eq, lambda_ineq;
+    int mode = lsei<double, n>(C, d, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
                                nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 2, 0);
 
     CHECK(mode == 6);

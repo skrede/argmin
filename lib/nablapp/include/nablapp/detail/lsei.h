@@ -53,6 +53,11 @@ struct lsei_workspace
     Eigen::HouseholderQR<matrix_t> qr_c;
     Eigen::HouseholderQR<matrix_t> qr_e;
 
+    // Buffers used to recover lambda_eq from the gradient projection on
+    // the y_1 subspace at the LSEI optimum. Sized to n.
+    vector_t lambda_eq_resid;   // E*x - f, then Q_c^T * grad
+    vector_t lambda_eq_qgrad;   // E^T * resid - G^T * lambda_ineq
+
     // Nested workspace for the inner lsi() call. Sized for the reduced
     // problem (n2, m_ineq) and reused across solves.
     lsi_workspace<Scalar> lsi_ws;
@@ -77,6 +82,8 @@ struct lsei_workspace
             y2_dyn.resize(n2);
         }
         y.resize(n);
+        lambda_eq_resid.resize(n);
+        lambda_eq_qgrad.resize(n);
 
         // Worst-case shape for inner lsi: when m_eq == 0 (pure LSI
         // fallback), lsi sees the original n; otherwise it sees the
@@ -98,13 +105,23 @@ struct lsei_workspace
 // must also ensure they can hold the dual NNLS problem (see ldp()
 // documentation).
 //
+// lambda_eq is (m_eq) output: equality multipliers, sign-free.
+// lambda_ineq is (m_ineq) output: inequality multipliers, lambda_ineq
+// >= 0, complementary with the active set of G x >= h. The inequality
+// multipliers come from the inner LSI/LDP cascade; the equality
+// multipliers are recovered from the gradient projection
+//   R_c * lambda_eq = (Q_c^T (E^T (E x - f) - G^T lambda_ineq))[0..m_eq]
+// where Q_c R_c = QR(C^T). This avoids the post-hoc least-squares fit
+// previously done in the QP caller.
+//
 // Return code:
 //   1 on success,
 //   4 if the inequality system is incompatible,
 //   6 if the equality matrix C is rank deficient.
 //
-// Reference: Kraft 1988 DFVLR-FB 88-28, Section 3.2, eq. 3.19-3.21.
-//            Lawson & Hanson 1974, Ch. 23.6.
+// Reference: Kraft 1988 DFVLR-FB 88-28, Section 3.2, eq. 3.19-3.21;
+//            Lawson & Hanson 1974, Ch. 23.6;
+//            N&W 2e Section 16.5 (KKT multiplier recovery via QR(C^T)).
 template <typename Scalar, int N>
 int lsei(
     const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& C,
@@ -114,6 +131,8 @@ int lsei(
     const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& G,
     const Eigen::Vector<Scalar, Eigen::Dynamic>& h,
     Eigen::Vector<Scalar, N>& x,
+    Eigen::Vector<Scalar, Eigen::Dynamic>& lambda_eq,
+    Eigen::Vector<Scalar, Eigen::Dynamic>& lambda_ineq,
     lsei_workspace<Scalar>& ws,
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>& nnls_A,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
@@ -126,10 +145,16 @@ int lsei(
     // ------------------------------------------------------------------
     if(m_eq <= 0)
     {
+        if(lambda_eq.size() != 0) lambda_eq.setZero();
         return lsi<Scalar, N>(
-            E, f, G, h, x, ws.lsi_ws,
+            E, f, G, h, x, lambda_ineq, ws.lsi_ws,
             nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m_ineq);
     }
+
+    if(lambda_eq.size() != m_eq) lambda_eq.resize(m_eq);
+    lambda_eq.setZero();
+    if(lambda_ineq.size() != m_ineq) lambda_ineq.resize(m_ineq);
+    lambda_ineq.setZero();
 
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
 
@@ -234,8 +259,10 @@ int lsei(
 
             ws.y2_dyn.setZero();
 
+            if(lambda_ineq.size() != m_ineq) lambda_ineq.resize(m_ineq);
             int lsi_mode = lsi<Scalar, Eigen::Dynamic>(
                 ws.E_small, ws.f_small_vec, ws.G_small, ws.h_red, ws.y2_dyn,
+                lambda_ineq,
                 ws.lsi_ws,
                 nnls_A, nnls_b, nnls_x_vec, nnls_w, n2, m_ineq);
 
@@ -253,6 +280,38 @@ int lsei(
         ws.y.tail(n2) = ws.y2_dyn;
 
     x.noalias() = ws.Qc * ws.y;
+
+    // ------------------------------------------------------------------
+    // Recover equality multipliers from the gradient projection on y_1.
+    //
+    // KKT for LSEI:
+    //   E^T (E x - f) = C^T lambda_eq + G^T lambda_ineq
+    //
+    // In y coordinates (x = Q_c y) the equality block becomes:
+    //   (Q_c^T (E^T (E x - f) - G^T lambda_ineq))[0..m_eq] = R_c lambda_eq
+    //
+    // because (C Q_c)^T = [R_c; 0]. R_c is the upper triangular block
+    // already extracted as ws.R_c_upper. lambda_ineq is filled by the
+    // inner LSI call (or zero on the m_ineq <= 0 reduced-LS branch).
+    //
+    // Reference: N&W 2e Section 16.5, eq. 16.50 (KKT multiplier recovery
+    //            via QR(C^T)); Kraft 1988 DFVLR-FB 88-28 Section 3.2.
+    // ------------------------------------------------------------------
+    if(ws.lambda_eq_resid.size() != n) ws.lambda_eq_resid.resize(n);
+    if(ws.lambda_eq_qgrad.size() != n) ws.lambda_eq_qgrad.resize(n);
+
+    ws.lambda_eq_resid.noalias() = E * x;
+    ws.lambda_eq_resid -= f;
+
+    ws.lambda_eq_qgrad.noalias() = E.transpose() * ws.lambda_eq_resid;
+    if(m_ineq > 0)
+        ws.lambda_eq_qgrad.noalias() -= G.transpose() * lambda_ineq;
+
+    // Re-use lambda_eq_resid as Q_c^T * qgrad scratch.
+    ws.lambda_eq_resid.noalias() = ws.Qc.transpose() * ws.lambda_eq_qgrad;
+
+    lambda_eq = ws.R_c_upper.template triangularView<Eigen::Upper>()
+                            .solve(ws.lambda_eq_resid.head(m_eq).eval());
 
     return 1;
 }

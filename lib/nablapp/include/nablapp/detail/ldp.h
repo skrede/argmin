@@ -25,23 +25,31 @@ namespace nablapp::detail
 
 // Solve min ||x||^2 s.t. G*x >= h.
 //
-// G is (m x n), h is (m), x is (n) output.
+// G is (m x n), h is (m), x is (n) output, lambda is (m) output Lagrange
+// multipliers (>= 0, complementary with the inequality constraints).
 // nnls_A/b/x_vec/w are scratch vectors sized for the dual NNLS problem:
 //   nnls_A must be at least ((n+1) x m),
 //   nnls_b must be at least (n+1),
 //   nnls_x_vec must be at least (m),
 //   nnls_w must be at least (m).
 //
+// The LDP KKT condition x = G^T lambda gives lambda = u / fac where
+// u is the dual NNLS primal and fac = 1 - h^T u; this routine returns
+// that lambda directly so the caller can use it as the Lagrange
+// multiplier vector for inequality-constrained-LS chains (LSI / LSEI /
+// kraft QP) without re-solving a separate KKT system.
+//
 // Return code: 1 on success, 4 if the inequality system is incompatible
 // (no feasible point, empty intersection of half-spaces).
 //
 // Reference: Lawson, C.L. & Hanson, R.J. (1974). Solving Least Squares
-//            Problems. Ch. 23.4, Algorithm LDP.
+//            Problems. Ch. 23.4, Algorithm LDP, eq. 23.18 (KKT lambda).
 template <typename Scalar, int M, int N>
 int ldp(
     const Eigen::Matrix<Scalar, M, N>& G,
     const Eigen::Vector<Scalar, M>& h,
     Eigen::Vector<Scalar, N>& x,
+    Eigen::Vector<Scalar, M>& lambda,
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>& nnls_A,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_x_vec,
@@ -50,12 +58,16 @@ int ldp(
 {
     using std::sqrt;
 
-    // Trivial case: no constraints -> x = 0 is the optimum.
+    // Trivial case: no constraints -> x = 0 is the optimum, lambda is empty.
     if(m <= 0)
     {
         x.setZero();
+        if(lambda.size() != 0) lambda.setZero();
         return 1;
     }
+
+    if(lambda.size() != m) lambda.resize(m);
+    lambda.setZero();
 
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
 
@@ -121,6 +133,14 @@ int ldp(
 
     for(int i = 0; i < n; ++i)
         x[i] = r[i] / fac;
+
+    // KKT lambda for the LDP min ||x||^2 s.t. G x >= h is the rescaled
+    // dual NNLS primal: lambda = u / fac, lambda >= 0 by NNLS dual
+    // feasibility plus fac > 0 verified above.
+    //
+    // Reference: Lawson & Hanson 1974 eq. 23.18.
+    for(int j = 0; j < m; ++j)
+        lambda[j] = nnls_x_vec[j] / fac;
 
     return 1;
 }

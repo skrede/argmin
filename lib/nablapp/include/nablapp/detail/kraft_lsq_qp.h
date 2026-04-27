@@ -74,15 +74,10 @@ public:
         // finite box bounds.
         lsei_ws_.resize(n, m_eq, m_aug_max);
 
-        // Multiplier-recovery workspace (post-hoc KKT projection in solve()).
-        // Worst-case active-set size: every equality + every inequality +
-        // both bounds on every variable. Sized once here so solve() does
-        // not allocate.
-        const int mult_max_rows = m_eq + m_ineq + 2 * n;
-        mult_A_act_.resize(mult_max_rows, n);
-        mult_row_slot_.assign(mult_max_rows, -1);
-        mult_r_.resize(n);
-        mult_lam_act_.resize(mult_max_rows);
+        // Multiplier output buffers from lsei. Sized to the maximum
+        // problem shape so solve() does not allocate.
+        qp_lambda_eq_.resize(m_eq);
+        qp_lambda_ineq_.resize(m_aug_max);
     }
 
     // Solve the QP subproblem.
@@ -217,12 +212,35 @@ public:
 
         // -------------------------------------------------------------
         // Call LSEI.
+        //
+        // lsei now returns equality and inequality multipliers directly
+        // from the cascade: lambda_eq is recovered via R_c-triangular
+        // solve from the gradient projection on Q_c's y_1 subspace, and
+        // lambda_ineq comes from the inner LDP's NNLS-dual u rescaled by
+        // fac (Lawson-Hanson eq. 23.18). This replaces the prior post-
+        // hoc Householder QR fit on the active-set rows.
+        //
+        // The augmented inequality block lsei sees has m_aug = m_ineq +
+        // n_finite_lower + n_finite_upper rows, of which the first
+        // m_ineq map to A_ineq and the remainder are box-bound rows.
+        // Box multipliers occupy the tail of the lsei lambda_ineq
+        // vector and are discarded; downstream SQP consumers only use
+        // the (eq, real-ineq) block for the Lagrangian BFGS update.
+        //
+        // Reference: Kraft 1988 DFVLR-FB 88-28 Section 3.2 (multiplier
+        //            recovery); Lawson & Hanson 1974 eq. 23.18 (LDP
+        //            KKT lambda); N&W 2e Section 16.5 (KKT recovery
+        //            via QR(C^T)).
         // -------------------------------------------------------------
+        if(qp_lambda_eq_.size() != m_eq) qp_lambda_eq_.resize(m_eq);
+        if(qp_lambda_ineq_.size() != m_aug) qp_lambda_ineq_.resize(m_aug);
+
         int mode = lsei<Scalar, N>(
             A_eq_buf_, b_eq_buf_,
             E_, f_,
             G_aug_, h_aug_,
             x_out_,
+            qp_lambda_eq_, qp_lambda_ineq_,
             lsei_ws_,
             nnls_A_, nnls_b_, nnls_x_vec_, nnls_w_,
             n, m_eq, m_aug);
@@ -246,126 +264,20 @@ public:
             break;
         }
 
-        // -------------------------------------------------------------
-        // Multiplier recovery via post-hoc KKT projection.
-        //
-        // At the QP optimum p* the stationarity condition reads
-        //   B p* + g = A_eq^T lam_eq + A_act_ineq^T lam_act_ineq
-        //            + sum_{j in A_box} e_j lam_box_j
-        // where the active set collects equality rows, inequality rows
-        // whose residual is near zero, and box-bound indices where
-        // p_j is at either bound (with the appropriate sign on the
-        // normal). Box-bound multipliers must be included in the QR
-        // solve so they do not leak into the equality / inequality
-        // slots; they are discarded after the solve since downstream
-        // consumers only need the "real" constraint multipliers for
-        // the Lagrangian BFGS update.
-        //
-        // Solving the overdetermined system A_full^T lam = r with
-        // r = B p + g by a Householder QR of A_full^T gives a
-        // least-squares multiplier estimate that is exact when the
-        // active rows are linearly independent and otherwise returns
-        // the minimum-norm fit -- the standard SQP recipe.
-        //
-        // Inequality multipliers are clipped at zero to preserve the
-        // dual-feasibility sign convention lam >= 0.
-        //
-        // Reference: N&W Section 16.5, p. 472 (multiplier recovery);
-        //            Kraft 1988 DFVLR-FB 88-28 Section 3.2 (KKT).
-        // -------------------------------------------------------------
+        // Scatter lsei multipliers into the QP output convention:
+        // lambda[0..m_eq] = lambda_eq; lambda[m_eq..m_eq+m_ineq] = the
+        // first m_ineq entries of lambda_ineq (the augmented box rows
+        // in lambda_ineq[m_ineq..m_aug] are discarded). Inequality
+        // multipliers from the cascade are already non-negative by
+        // NNLS dual feasibility.
         const int m_real = m_eq + m_ineq;
         out.lambda.setZero(m_real);
-
-        if(m_real > 0)
+        if(mode == 1 && m_real > 0)
         {
-            const Scalar active_tol = std::sqrt(std::numeric_limits<Scalar>::epsilon());
-
-            // Workspace pre-sized in resize(); no allocation in this block
-            // unless solve() is invoked at a larger problem shape than
-            // resize() was given.
-            const int mult_max_rows = m_eq + m_ineq + 2 * n;
-            if(mult_A_act_.rows() < mult_max_rows || mult_A_act_.cols() != n)
-                mult_A_act_.resize(mult_max_rows, n);
-            if(static_cast<int>(mult_row_slot_.size()) < mult_max_rows)
-                mult_row_slot_.assign(mult_max_rows, -1);
-            if(mult_r_.size() != n) mult_r_.resize(n);
-            if(mult_lam_act_.size() < mult_max_rows) mult_lam_act_.resize(mult_max_rows);
-
-            int act_rows = 0;
-
             if(m_eq > 0)
-            {
-                mult_A_act_.topRows(m_eq) = A_eq;
-                for(int i = 0; i < m_eq; ++i)
-                    mult_row_slot_[i] = i;
-                act_rows = m_eq;
-            }
-
-            for(int i = 0; i < m_ineq; ++i)
-            {
-                const Scalar lhs = A_ineq.row(i).dot(out.x);
-                if(std::abs(lhs - b_ineq[i]) <= active_tol * (Scalar(1) + std::abs(b_ineq[i])))
-                {
-                    mult_A_act_.row(act_rows) = A_ineq.row(i);
-                    mult_row_slot_[act_rows] = m_eq + i;
-                    ++act_rows;
-                }
-            }
-
-            // Active box bounds: p_j at lower bound (row +e_j) or at
-            // upper bound (row -e_j). Use the cascade's active_tol.
-            for(int j = 0; j < n; ++j)
-            {
-                if(std::isfinite(p_lo[j])
-                   && std::abs(out.x[j] - p_lo[j]) <= active_tol * (Scalar(1) + std::abs(p_lo[j])))
-                {
-                    mult_A_act_.row(act_rows).setZero();
-                    mult_A_act_(act_rows, j) = Scalar(1);
-                    mult_row_slot_[act_rows] = -1;
-                    ++act_rows;
-                }
-            }
-            for(int j = 0; j < n; ++j)
-            {
-                if(std::isfinite(p_hi[j])
-                   && std::abs(out.x[j] - p_hi[j]) <= active_tol * (Scalar(1) + std::abs(p_hi[j])))
-                {
-                    mult_A_act_.row(act_rows).setZero();
-                    mult_A_act_(act_rows, j) = Scalar(-1);
-                    mult_row_slot_[act_rows] = -1;
-                    ++act_rows;
-                }
-            }
-
-            if(act_rows > 0)
-            {
-                mult_r_ = B * out.x + g;
-
-                // Solve A_act^T * lam = r in the least-squares sense.
-                // The HouseholderQR is reused across calls; its internal
-                // m_qr / m_hCoeffs / m_temp storage is reallocated only
-                // when the active-set shape exceeds previous calls.
-                mult_qr_.compute(mult_A_act_.topRows(act_rows).transpose());
-                mult_lam_act_.head(act_rows) = mult_qr_.solve(mult_r_);
-
-                // Scatter lam_act back into (eq, ineq) slots; box rows
-                // (row_slot == -1) are discarded.
-                for(int i = 0; i < act_rows; ++i)
-                {
-                    const int slot = mult_row_slot_[i];
-                    if(slot < 0) continue;
-                    if(slot < m_eq)
-                    {
-                        out.lambda[slot] = mult_lam_act_[i];
-                    }
-                    else
-                    {
-                        // Clip at zero: SQP Lagrangian BFGS update
-                        // needs lam_ineq >= 0 (dual feasibility).
-                        out.lambda[slot] = std::max(Scalar(0), mult_lam_act_[i]);
-                    }
-                }
-            }
+                out.lambda.head(m_eq) = qp_lambda_eq_.head(m_eq);
+            if(m_ineq > 0)
+                out.lambda.segment(m_eq, m_ineq) = qp_lambda_ineq_.head(m_ineq);
         }
 
         return out;
@@ -385,11 +297,14 @@ private:
     Eigen::Vector<Scalar, Eigen::Dynamic> nnls_x_vec_;
     Eigen::Vector<Scalar, Eigen::Dynamic> nnls_w_;
 
-    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> mult_A_act_;
-    std::vector<int> mult_row_slot_;
-    Eigen::Vector<Scalar, Eigen::Dynamic> mult_r_;
-    Eigen::Vector<Scalar, Eigen::Dynamic> mult_lam_act_;
-    Eigen::HouseholderQR<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> mult_qr_;
+    // Lambda outputs from lsei: equality multipliers (size m_eq) and
+    // inequality multipliers (size m_aug = m_ineq + n_finite_lower +
+    // n_finite_upper, since lsei sees the augmented bound block as
+    // additional inequality rows). Box-bound multipliers occupy the
+    // tail of qp_lambda_ineq_ and are discarded in the scatter to
+    // out.lambda.
+    Eigen::Vector<Scalar, Eigen::Dynamic> qp_lambda_eq_;
+    Eigen::Vector<Scalar, Eigen::Dynamic> qp_lambda_ineq_;
 
     lsei_workspace<Scalar> lsei_ws_;
 };

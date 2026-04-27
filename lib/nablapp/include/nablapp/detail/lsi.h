@@ -44,6 +44,7 @@ struct lsi_workspace
     vector_t x_prime;
     vector_t rhs;
     vector_t y;
+    vector_t ldp_lambda;  // Inequality multipliers from inner LDP solve.
 
     void resize(int n, int m_ineq)
     {
@@ -57,6 +58,7 @@ struct lsi_workspace
         x_prime.resize(n);
         rhs.resize(n);
         y.resize(n);
+        ldp_lambda.resize(m_ineq);
     }
 };
 
@@ -72,11 +74,18 @@ struct lsi_workspace
 // must also ensure they can hold the dual NNLS problem (see ldp()
 // documentation).
 //
+// lambda_ineq is (m_ineq) output: Lagrange multipliers for the inequality
+// constraints at the LSI optimum, lambda_ineq >= 0, complementary with
+// the active set of G x >= h. The LSI inequality multipliers equal the
+// inner LDP multipliers because the QR(E) transformation does not
+// reshuffle constraint rows -- the change of variables x -> x' is
+// applied to the LS objective only.
+//
 // Return code: 1 on success, 4 if the inequality system is incompatible,
 // 6 if E is rank deficient.
 //
 // Reference: Lawson, C.L. & Hanson, R.J. (1974). Solving Least Squares
-//            Problems. Ch. 23.5, Algorithm LSI.
+//            Problems. Ch. 23.5, Algorithm LSI; eq. 23.18 for KKT lambda.
 template <typename Scalar, int N>
 int lsi(
     Eigen::Matrix<Scalar, N, N>& E,
@@ -84,6 +93,7 @@ int lsi(
     const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& G,
     const Eigen::Vector<Scalar, Eigen::Dynamic>& h,
     Eigen::Vector<Scalar, N>& x,
+    Eigen::Vector<Scalar, Eigen::Dynamic>& lambda_ineq,
     lsi_workspace<Scalar>& ws,
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>& nnls_A,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
@@ -143,8 +153,12 @@ int lsi(
         if(ws.y.size() != n) ws.y.resize(n);
         ws.y = ws.R.template triangularView<Eigen::Upper>().solve(ws.y1);
         x.noalias() = ws.qr.colsPermutation() * ws.y;
+        if(lambda_ineq.size() != 0) lambda_ineq.setZero();
         return 1;
     }
+
+    if(lambda_ineq.size() != m_ineq) lambda_ineq.resize(m_ineq);
+    lambda_ineq.setZero();
 
     // Transform inequality constraints into the x' coordinate system.
     //
@@ -173,9 +187,16 @@ int lsi(
     if(ws.x_prime.size() != n) ws.x_prime.resize(n);
     ws.x_prime.setZero();
 
+    if(ws.ldp_lambda.size() != m_ineq) ws.ldp_lambda.resize(m_ineq);
     int ldp_mode = ldp<Scalar, Eigen::Dynamic, Eigen::Dynamic>(
-        ws.G_t, ws.h_t, ws.x_prime, nnls_A, nnls_b, nnls_x_vec, nnls_w,
+        ws.G_t, ws.h_t, ws.x_prime, ws.ldp_lambda,
+        nnls_A, nnls_b, nnls_x_vec, nnls_w,
         m_ineq, n);
+
+    // LSI inequality multipliers = LDP multipliers (constraint rows
+    // unaffected by the QR(E) variable change). Forward immediately so
+    // the caller has them even if the LDP fallback below recovers x.
+    lambda_ineq = ws.ldp_lambda;
 
     if(ldp_mode != 1)
     {
