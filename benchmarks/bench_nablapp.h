@@ -19,6 +19,8 @@
 #include "nablapp/solver/cobyla_policy.h"
 #include "nablapp/solver/isres_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
+#include "nablapp/solver/mma_policy.h"
+#include "nablapp/solver/gcmma_policy.h"
 #include "nablapp/solver/ccsa_quadratic_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/lbfgsb_policy.h"
@@ -392,20 +394,37 @@ void run_all_nablapp_solvers(
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
         run_constrained("kraft_slsqp", kraft_slsqp_policy<>{});
 
-    // MMA: inequality-constrained (no equality).
+    // MMA family: inequality-constrained (no equality).
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
     {
         if constexpr(requires { prob.num_equality(); })
         {
-            // CCSA quadratic (Svanberg 2002 §4.2): inequality-only.
             if(prob.num_equality() == 0 && prob.num_inequality() > 0)
             {
-                std::vector<trace_entry> trace;
-                auto r = run_nablapp_solver<ccsa_quadratic_policy<>, default_convergence>(
-                    "ccsa_quadratic", problem_name, prob, max_iterations, collect_trace, trace,
-                    config);
-                results.push_back(r);
-                traces.push_back(std::move(trace));
+                {
+                    std::vector<trace_entry> trace;
+                    auto r = run_nablapp_solver<mma_policy<>, default_convergence>(
+                        "mma", problem_name, prob, max_iterations, collect_trace, trace,
+                        config);
+                    results.push_back(r);
+                    traces.push_back(std::move(trace));
+                }
+                {
+                    std::vector<trace_entry> trace;
+                    auto r = run_nablapp_solver<gcmma_policy<>, default_convergence>(
+                        "gcmma", problem_name, prob, max_iterations, collect_trace, trace,
+                        config);
+                    results.push_back(r);
+                    traces.push_back(std::move(trace));
+                }
+                {
+                    std::vector<trace_entry> trace;
+                    auto r = run_nablapp_solver<ccsa_quadratic_policy<>, default_convergence>(
+                        "ccsa_quadratic", problem_name, prob, max_iterations, collect_trace, trace,
+                        config);
+                    results.push_back(r);
+                    traces.push_back(std::move(trace));
+                }
             }
         }
     }

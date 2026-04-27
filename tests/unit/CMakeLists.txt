@@ -4,7 +4,7 @@ add_executable(nablapp_unit_tests
     detail_test.cpp
     lm_test.cpp
     sqp_test.cpp
-    mma_test.cpp
+    ccsa_quadratic_test.cpp
     mma_reciprocal_test.cpp
     gcmma_move_limit_shrink_test.cpp
     gcmma_rho_wval_test.cpp
