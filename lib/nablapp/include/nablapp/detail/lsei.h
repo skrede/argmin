@@ -53,6 +53,10 @@ struct lsei_workspace
     Eigen::HouseholderQR<matrix_t> qr_c;
     Eigen::HouseholderQR<matrix_t> qr_e;
 
+    // Nested workspace for the inner lsi() call. Sized for the reduced
+    // problem (n2, m_ineq) and reused across solves.
+    lsi_workspace<Scalar> lsi_ws;
+
     void resize(int n, int m_eq, int m_ineq)
     {
         const int n2 = n - m_eq;
@@ -73,6 +77,12 @@ struct lsei_workspace
             y2_dyn.resize(n2);
         }
         y.resize(n);
+
+        // Worst-case shape for inner lsi: when m_eq == 0 (pure LSI
+        // fallback), lsi sees the original n; otherwise it sees the
+        // reduced n2. Size for the original n and m_ineq so both
+        // entry paths are covered.
+        lsi_ws.resize(n, m_ineq);
     }
 };
 
@@ -117,7 +127,8 @@ int lsei(
     if(m_eq <= 0)
     {
         return lsi<Scalar, N>(
-            E, f, G, h, x, nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m_ineq);
+            E, f, G, h, x, ws.lsi_ws,
+            nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m_ineq);
     }
 
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
@@ -225,6 +236,7 @@ int lsei(
 
             int lsi_mode = lsi<Scalar, Eigen::Dynamic>(
                 ws.E_small, ws.f_small_vec, ws.G_small, ws.h_red, ws.y2_dyn,
+                ws.lsi_ws,
                 nnls_A, nnls_b, nnls_x_vec, nnls_w, n2, m_ineq);
 
             if(lsi_mode != 1)

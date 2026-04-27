@@ -232,7 +232,9 @@ TEST_CASE("LSI unconstrained reduces to ordinary LS", "[lsi]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = lsi<double, n>(E, f, G, h, x,
+    nablapp::detail::lsi_workspace<double> ws;
+    ws.resize(n, 0);
+    int mode = lsi<double, n>(E, f, G, h, x, ws,
                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 0);
 
     CHECK(mode == 1);
@@ -261,7 +263,9 @@ TEST_CASE("LSI 2D with one active inequality", "[lsi]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = lsi<double, n>(E, f, G, h, x,
+    nablapp::detail::lsi_workspace<double> ws;
+    ws.resize(n, m);
+    int mode = lsi<double, n>(E, f, G, h, x, ws,
                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m);
 
     CHECK(mode == 1);
@@ -289,7 +293,9 @@ TEST_CASE("LSI 2D with inactive inequality", "[lsi]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = lsi<double, n>(E, f, G, h, x,
+    nablapp::detail::lsi_workspace<double> ws;
+    ws.resize(n, m);
+    int mode = lsi<double, n>(E, f, G, h, x, ws,
                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m);
 
     CHECK(mode == 1);

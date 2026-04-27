@@ -24,14 +24,53 @@
 namespace nablapp::detail
 {
 
+// Persistent workspace for lsi() so the routine does not allocate per
+// call. Sized once via resize() at the maximum problem shape; subsequent
+// calls at smaller shapes reuse the existing storage.
+template <typename Scalar>
+struct lsi_workspace
+{
+    using matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
+    using vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
+
+    matrix_t E_dyn;
+    Eigen::ColPivHouseholderQR<matrix_t> qr;
+    matrix_t R;
+    vector_t y1;
+    matrix_t G_perm;
+    matrix_t G_tT;
+    matrix_t G_t;
+    vector_t h_t;
+    vector_t x_prime;
+    vector_t rhs;
+    vector_t y;
+
+    void resize(int n, int m_ineq)
+    {
+        E_dyn.resize(n, n);
+        R.resize(n, n);
+        y1.resize(n);
+        G_perm.resize(m_ineq, n);
+        G_tT.resize(n, m_ineq);
+        G_t.resize(m_ineq, n);
+        h_t.resize(m_ineq);
+        x_prime.resize(n);
+        rhs.resize(n);
+        y.resize(n);
+    }
+};
+
 // Solve min ||E*x - f||^2 s.t. G*x >= h.
 //
 // E is (n x n), f is (n), G is (m_ineq x n), h is (m_ineq), x is (n).
 // E and f are read and may be modified by the routine.
 //
-// The nnls_* scratch buffers are passed through to the underlying LDP
-// solver; the caller must ensure they can hold the dual NNLS problem
-// (see ldp() documentation).
+// The lsi_workspace ws holds matrix / vector / QR factorization state
+// used by lsi itself; the caller owns it and is responsible for sizing
+// it via ws.resize() at problem configuration time. The nnls_* scratch
+// buffers are passed through to the underlying LDP solver; the caller
+// must also ensure they can hold the dual NNLS problem (see ldp()
+// documentation).
 //
 // Return code: 1 on success, 4 if the inequality system is incompatible,
 // 6 if E is rank deficient.
@@ -45,6 +84,7 @@ int lsi(
     const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& G,
     const Eigen::Vector<Scalar, Eigen::Dynamic>& h,
     Eigen::Vector<Scalar, N>& x,
+    lsi_workspace<Scalar>& ws,
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>& nnls_A,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_x_vec,
@@ -55,36 +95,29 @@ int lsi(
     //
     // The caller ABI keeps E as Matrix<Scalar, N, N> so fixed-N callers
     // benefit from compile-time storage on the input. For the column-
-    // pivoting Householder QR itself, however, we copy E into a local
-    // Matrix<Scalar, Dynamic, Dynamic> and factor the copy. At runtime
-    // N=6 this routes through Eigen's dynamic-size ColPivHouseholderQR
-    // kernel, which profiles measurably faster than the fixed-size 6x6
-    // specialization on the downstream workloads this routine is called
-    // from. The copy is one cache line (36 doubles = 288 B at N=6) and
-    // does not show up as a measurable cost in any micro-benchmark.
+    // pivoting Householder QR itself, however, we copy E into a dynamic
+    // buffer (ws.E_dyn) and factor the copy. At runtime N=6 this routes
+    // through Eigen's dynamic-size ColPivHouseholderQR kernel, which
+    // profiles measurably faster than the fixed-size 6x6 specialization
+    // on the downstream workloads this routine is called from.
     //
-    // Downstream quantities (R, y1, x_prime, rhs, y) stay on the
-    // fixed-size aliases so the solve, back-transform, and constraint
-    // projection continue to use the compile-time kernels.
+    // Downstream quantities (R, y1, x_prime, rhs, y) live in the
+    // workspace as dynamic vectors; the back-transform writes the final
+    // result into the fixed-size x output.
     //
     // Reference: Lawson, C.L. & Hanson, R.J. (1974). Solving Least
     //            Squares Problems. Ch. 23.5, Algorithm LSI.
-    using E_matrix_t = Eigen::Matrix<Scalar, N, N>;
-    using QR_matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
-    using N_vector_t = Eigen::Vector<Scalar, N>;
-    using ineq_matrix_N_cols_t = Eigen::Matrix<Scalar, Eigen::Dynamic, N>;
-    using ineq_matrix_N_rows_t = Eigen::Matrix<Scalar, N, Eigen::Dynamic>;
-    using dyn_vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
 
-    // Copy E into a dynamic-dimension local; QR factorizes the copy.
-    QR_matrix_t E_dyn = E;
-    Eigen::ColPivHouseholderQR<QR_matrix_t> qr(E_dyn);
+    // Copy E into the dynamic-dimension workspace; QR factorizes in place.
+    if(ws.E_dyn.rows() != n || ws.E_dyn.cols() != n) ws.E_dyn.resize(n, n);
+    ws.E_dyn = E;
+    ws.qr.compute(ws.E_dyn);
 
     const Scalar thresh = std::numeric_limits<Scalar>::epsilon()
                           * Scalar(n)
-                          * qr.maxPivot();
-    qr.setThreshold(thresh);
-    const int rank = static_cast<int>(qr.rank());
+                          * ws.qr.maxPivot();
+    ws.qr.setThreshold(thresh);
+    const int rank = static_cast<int>(ws.qr.rank());
     if(rank < n)
     {
         // E must be full rank for LSI to reduce to an LDP cleanly. A
@@ -94,19 +127,22 @@ int lsi(
     }
 
     // R is the upper triangular part of qr.matrixR(). E is square
-    // (n = N at the template level), so matrixR() is already N x N
+    // (n = N at the template level), so matrixR() is already n x n
     // and we don't need a topLeftCorner crop.
-    E_matrix_t R = qr.matrixR().template triangularView<Eigen::Upper>();
+    if(ws.R.rows() != n || ws.R.cols() != n) ws.R.resize(n, n);
+    ws.R = ws.qr.matrixR().template triangularView<Eigen::Upper>();
 
     // y1 = Q^T f.
-    N_vector_t y1 = qr.matrixQ().transpose() * f;
+    if(ws.y1.size() != n) ws.y1.resize(n);
+    ws.y1.noalias() = ws.qr.matrixQ().transpose() * f;
 
     // Unconstrained case: solution in transformed coordinates is
     // x' = 0, so x = P * R^{-1} * y1.
     if(m_ineq <= 0)
     {
-        N_vector_t y = R.template triangularView<Eigen::Upper>().solve(y1);
-        x.noalias() = qr.colsPermutation() * y;
+        if(ws.y.size() != n) ws.y.resize(n);
+        ws.y = ws.R.template triangularView<Eigen::Upper>().solve(ws.y1);
+        x.noalias() = ws.qr.colsPermutation() * ws.y;
         return 1;
     }
 
@@ -116,21 +152,30 @@ int lsi(
     //   G x >= h  <=>  (G P R^{-1}) x' >= h - (G P R^{-1}) y1
     //
     // Compute G_t = G * P * R^{-1} by solving R^T * G_t^T = (G P)^T.
-    // G is (m_ineq x N), so G_perm, G_tT, G_t all have compile-time
-    // N in one dimension and dynamic m_ineq in the other.
-    ineq_matrix_N_cols_t G_perm = G * qr.colsPermutation();
-    ineq_matrix_N_rows_t G_tT = R.transpose()
-                                  .template triangularView<Eigen::Lower>()
-                                  .solve(G_perm.transpose());
-    ineq_matrix_N_cols_t G_t = G_tT.transpose();
+    if(ws.G_perm.rows() != m_ineq || ws.G_perm.cols() != n)
+        ws.G_perm.resize(m_ineq, n);
+    ws.G_perm.noalias() = G * ws.qr.colsPermutation();
 
-    dyn_vector_t h_t = h - G_t * y1;
+    if(ws.G_tT.rows() != n || ws.G_tT.cols() != m_ineq)
+        ws.G_tT.resize(n, m_ineq);
+    ws.G_tT = ws.R.transpose()
+                  .template triangularView<Eigen::Lower>()
+                  .solve(ws.G_perm.transpose());
+
+    if(ws.G_t.rows() != m_ineq || ws.G_t.cols() != n)
+        ws.G_t.resize(m_ineq, n);
+    ws.G_t = ws.G_tT.transpose();
+
+    if(ws.h_t.size() != m_ineq) ws.h_t.resize(m_ineq);
+    ws.h_t.noalias() = h - ws.G_t * ws.y1;
 
     // Solve LDP: min ||x'||^2 s.t. G_t x' >= h_t.
-    N_vector_t x_prime = N_vector_t::Zero(n);
+    if(ws.x_prime.size() != n) ws.x_prime.resize(n);
+    ws.x_prime.setZero();
 
-    int ldp_mode = ldp<Scalar, Eigen::Dynamic, N>(
-        G_t, h_t, x_prime, nnls_A, nnls_b, nnls_x_vec, nnls_w, m_ineq, n);
+    int ldp_mode = ldp<Scalar, Eigen::Dynamic, Eigen::Dynamic>(
+        ws.G_t, ws.h_t, ws.x_prime, nnls_A, nnls_b, nnls_x_vec, nnls_w,
+        m_ineq, n);
 
     if(ldp_mode != 1)
     {
@@ -142,7 +187,7 @@ int lsi(
                                 * Scalar(n) * Scalar(10);
         for(int i = 0; i < m_ineq; ++i)
         {
-            if(h_t[i] > feas_eps)
+            if(ws.h_t[i] > feas_eps)
             {
                 feasible = false;
                 break;
@@ -150,13 +195,16 @@ int lsi(
         }
         if(!feasible)
             return 4;
-        x_prime.setZero();
+        ws.x_prime.setZero();
     }
 
     // Back-transform: x = P * R^{-1} * (x' + y1).
-    N_vector_t rhs = x_prime + y1;
-    N_vector_t y = R.template triangularView<Eigen::Upper>().solve(rhs);
-    x.noalias() = qr.colsPermutation() * y;
+    if(ws.rhs.size() != n) ws.rhs.resize(n);
+    ws.rhs.noalias() = ws.x_prime + ws.y1;
+
+    if(ws.y.size() != n) ws.y.resize(n);
+    ws.y = ws.R.template triangularView<Eigen::Upper>().solve(ws.rhs);
+    x.noalias() = ws.qr.colsPermutation() * ws.y;
 
     return 1;
 }
