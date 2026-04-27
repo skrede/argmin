@@ -6,6 +6,7 @@ add_executable(nablapp_unit_tests
     sqp_test.cpp
     mma_test.cpp
     mma_reciprocal_test.cpp
+    gcmma_move_limit_shrink_test.cpp
     isres_test.cpp
     cobyla_test.cpp
     bobyqa_test.cpp
