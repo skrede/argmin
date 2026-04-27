@@ -180,3 +180,48 @@ TEST_CASE("filter_nw_sqp HS024 regression guard",
     CHECK(result.iterations <= 14);
     CHECK(solver.constraint_violation() < 1e-6);
 }
+
+// Warm-start regression guard: hot-start reset() must clear the filter
+// envelope, otherwise a second solve from the same x0 enters the line
+// search with the prior run's converged near-optimum already in the
+// filter, every trial point is dominance-rejected, and the outer loop
+// stalls at alpha -> 0. Cold-start tests do not exercise this path
+// because each constructs a fresh basic_solver. Surfaced by ctrlpp
+// nanobench harness reusing the nmpc instance across cells.
+//
+// Reference: Wachter & Biegler 2006, Section 3.3 (filter
+//            re-initialization between independent runs);
+//            N&W 2e Section 15.4 (filter SQP semantics).
+TEST_CASE("filter_nw_sqp reset() clears filter for warm-start convergence",
+          "[filter_nw_sqp][regression][warm_start]")
+{
+    hs039<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-10);
+
+    basic_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
+                        problem, x0, opts};
+
+    auto first = solver.solve(opts);
+    REQUIRE(first.iterations < 50);
+
+    // Hot-start back to the same x0. Without filter.clear() in reset(),
+    // the filter still contains entries from the first solve and the
+    // line search rejects every trial step (Wachter-Biegler oscillation
+    // at alpha -> 0).
+    solver.reset(x0);
+    auto second = solver.solve(opts);
+
+    CHECK(second.iterations < 50);
+    CHECK(second.objective_value == Approx(first.objective_value).margin(1e-6));
+    CHECK(solver.constraint_violation() < 1e-6);
+
+    // Iter count for the second solve should be in the same band as the
+    // first; BFGS is preserved so the second can be slightly faster (a
+    // few iters), but it should not regress significantly.
+    CHECK(second.iterations <= first.iterations + 5);
+}
