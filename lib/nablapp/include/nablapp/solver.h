@@ -3,6 +3,7 @@
 
 #include "nablapp/solver/options.h"
 #include "nablapp/solver/lm_policy.h"
+#include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/isres_policy.h"
