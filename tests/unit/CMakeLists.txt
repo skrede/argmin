@@ -8,6 +8,7 @@ add_executable(nablapp_unit_tests
     mma_reciprocal_test.cpp
     gcmma_move_limit_shrink_test.cpp
     gcmma_rho_wval_test.cpp
+    gcmma_raa_augmented_test.cpp
     isres_test.cpp
     cobyla_test.cpp
     bobyqa_test.cpp
