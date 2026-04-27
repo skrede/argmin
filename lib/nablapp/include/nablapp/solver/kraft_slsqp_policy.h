@@ -375,7 +375,57 @@ struct kraft_slsqp_policy
 
         double merit_0 = merit(s.x);
 
-        double dphi_merit = s.g.dot(p) - s.sigma * constraint_viol_0;
+        // NLopt slsqp.c slsqpb_ lines 2014-2017 descent guard for Kraft
+        // 1988 §3.4 inconsistent-linearization recovery. When the QP
+        // wrapper produced the step via augmentation (relaxation_factor
+        // > 0), weight the constraint-violation term in the L1-merit
+        // descent test by h4 = 1 - s_aug. If the resulting directional
+        // derivative is non-negative, the augmented step is not a
+        // descent direction for the merit even with the relaxation
+        // accounted for; reset BFGS to identity and return as a null
+        // step (NLopt's L110 behavior: the next outer iter restarts
+        // with B = I). For the direct path (relaxation_factor = 0),
+        // h4 = 1 and the formula reduces to the unweighted descent
+        // test -- direct-path behavior is unchanged.
+        const double h4 = 1.0 - qp_res.relaxation_factor;
+        double dphi_merit = s.g.dot(p) - s.sigma * constraint_viol_0 * h4;
+
+        if(qp_res.relaxation_factor > 0.0 && dphi_merit >= 0.0)
+        {
+            s.hessian.reset();
+
+            Eigen::VectorXd lambda_eq_reset = Eigen::VectorXd::Zero(s.n_eq);
+            Eigen::VectorXd mu_ineq_reset = Eigen::VectorXd::Zero(s.n_ineq);
+            if constexpr(constrained<P>)
+            {
+                if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
+                {
+                    if(s.n_eq > 0)
+                        lambda_eq_reset = qp_res.lambda.head(s.n_eq);
+                    if(s.n_ineq > 0)
+                        mu_ineq_reset = qp_res.lambda.segment(s.n_eq, s.n_ineq);
+                }
+            }
+            double kkt_reset = detail::kkt_residual<double,
+                                                    Eigen::Dynamic,
+                                                    Eigen::Dynamic,
+                                                    Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq,
+                lambda_eq_reset, mu_ineq_reset,
+                s.c_eq, s.c_ineq);
+
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = s.g.norm(),
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .x_norm = s.x.norm(),
+                .kkt_residual = kkt_reset,
+            };
+        }
 
         if(dphi_merit >= 0.0)
             dphi_merit = -1e-8;
