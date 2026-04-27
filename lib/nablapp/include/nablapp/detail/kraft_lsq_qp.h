@@ -68,6 +68,16 @@ public:
         nnls_b_.resize(n2_max + 1);
         nnls_x_vec_.resize(m_aug_max);
         nnls_w_.resize(m_aug_max);
+
+        // Multiplier-recovery workspace (post-hoc KKT projection in solve()).
+        // Worst-case active-set size: every equality + every inequality +
+        // both bounds on every variable. Sized once here so solve() does
+        // not allocate.
+        const int mult_max_rows = m_eq + m_ineq + 2 * n;
+        mult_A_act_.resize(mult_max_rows, n);
+        mult_row_slot_.assign(mult_max_rows, -1);
+        mult_r_.resize(n);
+        mult_lam_act_.resize(mult_max_rows);
     }
 
     // Solve the QP subproblem.
@@ -262,28 +272,26 @@ public:
 
         if(m_real > 0)
         {
-            using dynmat = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
-            using dynvec = Eigen::Vector<Scalar, Eigen::Dynamic>;
-
             const Scalar active_tol = std::sqrt(std::numeric_limits<Scalar>::epsilon());
 
-            // Worst-case row count: m_eq + all m_ineq + both bounds on
-            // every variable. The actual row count (act_rows) is
-            // determined dynamically.
-            const int max_rows = m_eq + m_ineq + 2 * n;
-            dynmat A_act(max_rows, n);
-            int act_rows = 0;
+            // Workspace pre-sized in resize(); no allocation in this block
+            // unless solve() is invoked at a larger problem shape than
+            // resize() was given.
+            const int mult_max_rows = m_eq + m_ineq + 2 * n;
+            if(mult_A_act_.rows() < mult_max_rows || mult_A_act_.cols() != n)
+                mult_A_act_.resize(mult_max_rows, n);
+            if(static_cast<int>(mult_row_slot_.size()) < mult_max_rows)
+                mult_row_slot_.assign(mult_max_rows, -1);
+            if(mult_r_.size() != n) mult_r_.resize(n);
+            if(mult_lam_act_.size() < mult_max_rows) mult_lam_act_.resize(mult_max_rows);
 
-            // Track which slot each active row corresponds to so we
-            // can scatter multipliers back into the (eq, ineq) vector
-            // while ignoring the box rows.
-            std::vector<int> row_slot(max_rows, -1);  // -1 = box row
+            int act_rows = 0;
 
             if(m_eq > 0)
             {
-                A_act.topRows(m_eq) = A_eq;
+                mult_A_act_.topRows(m_eq) = A_eq;
                 for(int i = 0; i < m_eq; ++i)
-                    row_slot[i] = i;
+                    mult_row_slot_[i] = i;
                 act_rows = m_eq;
             }
 
@@ -292,8 +300,8 @@ public:
                 const Scalar lhs = A_ineq.row(i).dot(out.x);
                 if(std::abs(lhs - b_ineq[i]) <= active_tol * (Scalar(1) + std::abs(b_ineq[i])))
                 {
-                    A_act.row(act_rows) = A_ineq.row(i);
-                    row_slot[act_rows] = m_eq + i;
+                    mult_A_act_.row(act_rows) = A_ineq.row(i);
+                    mult_row_slot_[act_rows] = m_eq + i;
                     ++act_rows;
                 }
             }
@@ -305,9 +313,9 @@ public:
                 if(std::isfinite(p_lo[j])
                    && std::abs(out.x[j] - p_lo[j]) <= active_tol * (Scalar(1) + std::abs(p_lo[j])))
                 {
-                    A_act.row(act_rows).setZero();
-                    A_act(act_rows, j) = Scalar(1);
-                    row_slot[act_rows] = -1;
+                    mult_A_act_.row(act_rows).setZero();
+                    mult_A_act_(act_rows, j) = Scalar(1);
+                    mult_row_slot_[act_rows] = -1;
                     ++act_rows;
                 }
             }
@@ -316,37 +324,39 @@ public:
                 if(std::isfinite(p_hi[j])
                    && std::abs(out.x[j] - p_hi[j]) <= active_tol * (Scalar(1) + std::abs(p_hi[j])))
                 {
-                    A_act.row(act_rows).setZero();
-                    A_act(act_rows, j) = Scalar(-1);
-                    row_slot[act_rows] = -1;
+                    mult_A_act_.row(act_rows).setZero();
+                    mult_A_act_(act_rows, j) = Scalar(-1);
+                    mult_row_slot_[act_rows] = -1;
                     ++act_rows;
                 }
             }
 
             if(act_rows > 0)
             {
-                dynvec r = (B * out.x + g).eval();
+                mult_r_ = B * out.x + g;
 
                 // Solve A_act^T * lam = r in the least-squares sense.
-                dynmat At = A_act.topRows(act_rows).transpose();
-                Eigen::HouseholderQR<dynmat> qr(At);
-                dynvec lam_act = qr.solve(r);
+                // The HouseholderQR is reused across calls; its internal
+                // m_qr / m_hCoeffs / m_temp storage is reallocated only
+                // when the active-set shape exceeds previous calls.
+                mult_qr_.compute(mult_A_act_.topRows(act_rows).transpose());
+                mult_lam_act_.head(act_rows) = mult_qr_.solve(mult_r_);
 
                 // Scatter lam_act back into (eq, ineq) slots; box rows
                 // (row_slot == -1) are discarded.
                 for(int i = 0; i < act_rows; ++i)
                 {
-                    const int slot = row_slot[i];
+                    const int slot = mult_row_slot_[i];
                     if(slot < 0) continue;
                     if(slot < m_eq)
                     {
-                        out.lambda[slot] = lam_act[i];
+                        out.lambda[slot] = mult_lam_act_[i];
                     }
                     else
                     {
                         // Clip at zero: SQP Lagrangian BFGS update
                         // needs lam_ineq >= 0 (dual feasibility).
-                        out.lambda[slot] = std::max(Scalar(0), lam_act[i]);
+                        out.lambda[slot] = std::max(Scalar(0), mult_lam_act_[i]);
                     }
                 }
             }
@@ -368,6 +378,12 @@ private:
     Eigen::Vector<Scalar, Eigen::Dynamic> nnls_b_;
     Eigen::Vector<Scalar, Eigen::Dynamic> nnls_x_vec_;
     Eigen::Vector<Scalar, Eigen::Dynamic> nnls_w_;
+
+    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> mult_A_act_;
+    std::vector<int> mult_row_slot_;
+    Eigen::Vector<Scalar, Eigen::Dynamic> mult_r_;
+    Eigen::Vector<Scalar, Eigen::Dynamic> mult_lam_act_;
+    Eigen::HouseholderQR<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> mult_qr_;
 };
 
 }
