@@ -38,7 +38,7 @@ struct ccsa_dual_problem
 {
     static constexpr int problem_dimension = M;
 
-    // Outer problem data (pointers into the mma_policy state; valid
+    // Outer problem data (pointers into the ccsa_quadratic_policy state; valid
     // for the lifetime of one step() call).
     const Eigen::Vector<Scalar, N>* x_out{};
     Scalar f_out{};

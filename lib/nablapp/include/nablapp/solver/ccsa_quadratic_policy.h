@@ -1,11 +1,11 @@
-#ifndef HPP_GUARD_NABLAPP_SOLVER_MMA_POLICY_H
-#define HPP_GUARD_NABLAPP_SOLVER_MMA_POLICY_H
+#ifndef HPP_GUARD_NABLAPP_SOLVER_CCSA_QUADRATIC_POLICY_H
+#define HPP_GUARD_NABLAPP_SOLVER_CCSA_QUADRATIC_POLICY_H
 
-// Method of Moving Asymptotes (MMA) policy — CCSA quadratic form.
+// CCSA quadratic-penalty policy (Svanberg 2002 §4.2 / NLopt LD_CCSAQ).
 //
 // Solves inequality-constrained optimization problems using the CCSA
 // (Conservative Convex Separable Approximations) framework of Svanberg
-// 2002 with the quadratic penalty approximation used by NLopt LD_MMA:
+// 2002 with the quadratic penalty approximation:
 //
 //   g_0(x) = f + grad_f . dx + 0.5 rho  ||dx/sigma||^2
 //   g_i(x) = fc_i + dfc_i . dx + 0.5 rhoc_i  ||dx/sigma||^2
@@ -56,12 +56,12 @@ namespace nablapp
 
 template <int N = dynamic_dimension,
           template<int> typename DualPolicy = lbfgsb_policy>
-struct mma_policy
+struct ccsa_quadratic_policy
 {
     using scalar_type = double;
 
     template <int M>
-    using rebind = mma_policy<M, DualPolicy>;
+    using rebind = ccsa_quadratic_policy<M, DualPolicy>;
 
     struct options_type
     {
@@ -173,9 +173,9 @@ struct mma_policy
                              const solver_options<Convergence>&)
     {
         static_assert(differentiable<Problem>,
-                      "mma_policy requires differentiable<Problem>");
+                      "ccsa_quadratic_policy requires differentiable<Problem>");
         static_assert(constrained<Problem>,
-                      "mma_policy requires constrained<Problem>");
+                      "ccsa_quadratic_policy requires constrained<Problem>");
         assert(problem.num_equality() == 0
                && "MMA handles inequality constraints only. "
                   "Use SQP or augmented Lagrangian for equality constraints.");

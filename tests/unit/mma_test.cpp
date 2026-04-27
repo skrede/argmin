@@ -1,5 +1,4 @@
-#include "nablapp/solver/mma_policy.h"
-#include "nablapp/solver/gcmma_policy.h"
+#include "nablapp/solver/ccsa_quadratic_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/formulation/concepts.h"
 #include "nablapp/test_functions/hock_schittkowski.h"
@@ -43,7 +42,7 @@ TEST_CASE("mma converges on HS076", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     // MMA on HS076 reaches best_feasible approximately -4.6713 within
@@ -72,7 +71,7 @@ TEST_CASE("mma converges on HS076", "[mma]")
 // routed through the SEED-008 priority field by the verifier per the
 // outcome-band specification.
 //
-// Note on the gate form: mma_policy::step does NOT populate
+// Note on the gate form: ccsa_quadratic_policy::step does NOT populate
 // step_result::policy_status (no early-exit-on-near-optimum mechanism
 // is implemented in the policy itself; the (a) leg of SEED-008
 // addresses this).  The gate is therefore expressed via
@@ -95,7 +94,7 @@ TEST_CASE("mma converges on HS076 with iter-budget cap", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     // Post-port best_feasible within 0.012 of f* = -4.6818
@@ -127,7 +126,7 @@ TEST_CASE("mma converges on HS076 with iter-budget cap", "[mma]")
 // mma_subproblem coefficient kernel scaling rho per-dimension as
 // rho/(U-L) (Svanberg 2002 GCMMA structured form) rather than the
 // NLopt mma.c additive 0.5*rho kernel: the empirically-chosen
-// rho_init = 0.1 default (see mma_policy.h field doc-comment) is the
+// rho_init = 0.1 default (see ccsa_quadratic_policy.h field doc-comment) is the
 // only value satisfying both this test and the HS076 reciprocal-
 // approximation margin guard simultaneously.  The `< -0.7` guard
 // locks the post-port descent quality at the as-shipped default
@@ -148,7 +147,7 @@ TEST_CASE("mma converges on HS024", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{mma_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -211,7 +210,7 @@ TEST_CASE("mma converges on HS043", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{mma_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -253,7 +252,7 @@ TEST_CASE("mma converges on HS043", "[mma]")
 // phase-success threshold.
 //
 // Note on the gate form and bound: as in the HS076 iter-budget case
-// above, mma_policy::step does NOT populate step_result::policy_status
+// above, ccsa_quadratic_policy::step does NOT populate step_result::policy_status
 // (early-exit-on-near-optimum is the (a) leg of SEED-008).  The gate
 // is therefore expressed via solver.solve(opts) + result.iterations
 // <= max_iterations.  The objective bound mirrors the as-shipped
@@ -273,7 +272,7 @@ TEST_CASE("mma converges on HS043 with iter-budget cap", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{mma_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     // Post-port best_feasible measured at -41.87 within the 546-iter
@@ -306,7 +305,7 @@ TEST_CASE("mma converges on HS035", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{mma_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -350,7 +349,7 @@ TEST_CASE("gcmma converges on HS076", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{gcmma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -400,7 +399,7 @@ TEST_CASE("gcmma converges on HS035", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{gcmma_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -446,7 +445,7 @@ TEST_CASE("gcmma converges on HS043", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{gcmma_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -492,7 +491,7 @@ TEST_CASE("gcmma converges on HS076 with iter-budget cap", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{gcmma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     // GCMMA post-fix HS076: best_feasible within 0.05 of f* = -4.6818
@@ -542,7 +541,7 @@ TEST_CASE("gcmma converges on HS043 (path-iv smoke)", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{gcmma_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -583,7 +582,7 @@ TEST_CASE("gcmma converges on HS035 (path-iv smoke)", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{gcmma_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+    basic_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -627,11 +626,11 @@ TEST_CASE("gcmma conservativity rho-growth path exercise", "[mma][gcmma]")
     opts.set_objective_threshold(1e-15);
 
     // Low rho_init forces rho growth on most inner iterations.
-    typename gcmma_policy<hs076<>::problem_dimension>::options_type gcmma_opts;
-    gcmma_opts.mma_opts.rho_init = 1e-6;
+    typename ccsa_quadratic_policy<hs076<>::problem_dimension>::options_type policy_opts;
+    policy_opts.rho_init = 1e-6;
 
-    basic_solver solver{gcmma_policy<hs076<>::problem_dimension>{},
-                        problem, x0, opts, gcmma_opts};
+    basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{},
+                        problem, x0, opts, policy_opts};
 
     // Track best objective regardless of feasibility.
     double best_obj = 1e10;
@@ -656,7 +655,7 @@ TEST_CASE("mma rejects equality constraints", "[mma]")
     // that MMA is not intended for such problems.
     hs071 problem;
     CHECK(problem.num_equality() == 1);
-    // mma_policy{}.init(problem, problem.initial_point(), {})
+    // ccsa_quadratic_policy{}.init(problem, problem.initial_point(), {})
     // would trigger: assert(problem.num_equality() == 0 && "...")
 }
 
@@ -672,7 +671,7 @@ TEST_CASE("mma step and step_n consistency", "[mma]")
 
     SECTION("step returns finite values")
     {
-        basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
         {
@@ -685,7 +684,7 @@ TEST_CASE("mma step and step_n consistency", "[mma]")
 
     SECTION("step_n reaches similar result as solve")
     {
-        basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.step_n(200);
         CHECK(std::isfinite(result.objective_value));
         CHECK(result.objective_value < problem.value(x0));

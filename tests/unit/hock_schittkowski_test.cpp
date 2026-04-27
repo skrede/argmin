@@ -12,8 +12,7 @@
 #include "nablapp/solver/augmented_lagrangian_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"
-#include "nablapp/solver/gcmma_policy.h"
-#include "nablapp/solver/mma_policy.h"
+#include "nablapp/solver/ccsa_quadratic_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/test_functions/hock_schittkowski.h"
 
@@ -285,7 +284,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
     {
         hs076 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -317,7 +316,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
         // as-shipped rho_init default and is tracked under SEED-008.
         hs024 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{mma_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+        basic_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -338,7 +337,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
     {
         hs035 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{mma_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        basic_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -371,7 +370,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
     {
         hs076 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{gcmma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -399,7 +398,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
         // crashing, even though it does not converge.
         hs024 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{gcmma_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+        basic_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
 
         for(int i = 0; i < 50; ++i)
         {
@@ -413,7 +412,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
     {
         hs035 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{gcmma_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        basic_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)

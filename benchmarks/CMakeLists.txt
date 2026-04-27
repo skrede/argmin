@@ -212,18 +212,6 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
-    add_executable(micro_gcmma micro_gcmma.cpp)
-    target_link_libraries(micro_gcmma PRIVATE nablapp::nablapp NLopt::nlopt)
-    target_compile_options(micro_gcmma PRIVATE
-        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-            -march=native -fno-math-errno -fno-trapping-math
-        >
-    )
-    if(NABLAPP_LTO_SUPPORTED)
-        set_target_properties(micro_gcmma PROPERTIES
-            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-    endif()
-
     add_executable(micro_nw_sqp micro_nw_sqp.cpp)
     target_link_libraries(micro_nw_sqp PRIVATE nablapp::nablapp NLopt::nlopt)
     target_compile_options(micro_nw_sqp PRIVATE
@@ -368,53 +356,6 @@ target_compile_options(diagnostic_kkt_breakdown PRIVATE
 )
 if(NABLAPP_LTO_SUPPORTED)
     set_target_properties(diagnostic_kkt_breakdown PROPERTIES
-        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-endif()
-
-# Diagnostic MMA/GCMMA-breakdown harness (throwaway; emits per-iter CSV
-# for MMA on HS043, GCMMA on HS035, GCMMA on HS043, plus a one-time
-# sign-convention probe on HS076 MMA). EXCLUDE_FROM_ALL so it does not
-# enter the default target set; invoke with
-# `cmake --build <dir> --target diagnostic_mma_breakdown`.
-add_executable(diagnostic_mma_breakdown EXCLUDE_FROM_ALL
-    diagnostic_mma_breakdown.cpp)
-target_link_libraries(diagnostic_mma_breakdown PRIVATE nablapp::nablapp)
-target_compile_options(diagnostic_mma_breakdown PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-        -march=native
-        -fno-math-errno
-        -fno-trapping-math
-    >
-)
-if(NABLAPP_LTO_SUPPORTED)
-    set_target_properties(diagnostic_mma_breakdown PROPERTIES
-        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-endif()
-
-# Diagnostic MMA/GCMMA asymptote-oscillation harness (throwaway; emits
-# per-outer-iteration CSV for mma_policy on HS043/HS076, gcmma_policy
-# on HS076, HS035 control, an mma_policy HS043 move_limit A/B sweep at
-# 0.5/0.7/0.9, a GCMMA HS076 K_saturation sweep, and row-matched NLopt
-# LD_MMA reference trajectories on three inequality-constrained HS
-# cells. EXCLUDE_FROM_ALL so it does not enter the default target set;
-# invoke with
-# `cmake --build <dir> --target diagnostic_mma_asymptote_trace`.
-add_executable(diagnostic_mma_asymptote_trace EXCLUDE_FROM_ALL
-    diagnostic_mma_asymptote_trace.cpp)
-target_link_libraries(diagnostic_mma_asymptote_trace PRIVATE nablapp::nablapp)
-if(NLopt_FOUND)
-    target_link_libraries(diagnostic_mma_asymptote_trace PRIVATE NLopt::nlopt)
-    target_compile_definitions(diagnostic_mma_asymptote_trace PRIVATE NABLAPP_HAS_NLOPT)
-endif()
-target_compile_options(diagnostic_mma_asymptote_trace PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-        -march=native
-        -fno-math-errno
-        -fno-trapping-math
-    >
-)
-if(NABLAPP_LTO_SUPPORTED)
-    set_target_properties(diagnostic_mma_asymptote_trace PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 

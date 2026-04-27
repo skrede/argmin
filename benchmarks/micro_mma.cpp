@@ -12,7 +12,7 @@
 //            a new method for structural optimization";
 //            NLopt 2.10.0 src/algs/mma/mma.c (ftol_rel convention).
 
-#include "nablapp/solver/mma_policy.h"
+#include "nablapp/solver/ccsa_quadratic_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/test_functions/hock_schittkowski.h"
 
@@ -382,7 +382,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::mma_policy<>{}, wrapped, x0, opts};
+        nablapp::basic_solver solver{nablapp::ccsa_quadratic_policy<>{}, wrapped, x0, opts};
         solver.solve();
     }
 
@@ -393,7 +393,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         counts.reset();
-        nablapp::basic_solver solver{nablapp::mma_policy<>{}, wrapped, x0, opts};
+        nablapp::basic_solver solver{nablapp::ccsa_quadratic_policy<>{}, wrapped, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         outer_g = static_cast<std::uint32_t>(counts.g);  // grad calls = outer iters

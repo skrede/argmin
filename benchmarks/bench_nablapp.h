@@ -18,9 +18,8 @@
 #include "nablapp/solver/lm_policy.h"
 #include "nablapp/solver/cobyla_policy.h"
 #include "nablapp/solver/isres_policy.h"
-#include "nablapp/solver/mma_policy.h"
-#include "nablapp/solver/gcmma_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
+#include "nablapp/solver/ccsa_quadratic_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/lbfgsb_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"
@@ -322,7 +321,7 @@ auto run_nablapp_solver(std::string_view solver_name,
 //   - Unconstrained: lbfgsb_policy
 //   - Bound-constrained: lbfgsb_policy, bobyqa_policy
 //   - Inequality/equality/mixed: kraft_slsqp_policy, augmented_lagrangian_policy
-//   - Inequality: mma_policy (inequality only, no equality)
+//   - Inequality: ccsa_quadratic_policy (inequality only, no equality)
 //   - Equality/mixed: nw_sqp_policy
 //   - Global: cmaes_policy, bobyqa_policy (if has bounds)
 template <typename Problem>
@@ -398,30 +397,12 @@ void run_all_nablapp_solvers(
     {
         if constexpr(requires { prob.num_equality(); })
         {
-            // Only use MMA when problem has no equality constraints.
-            // Check at compile time if possible via static member, otherwise runtime.
+            // CCSA quadratic (Svanberg 2002 §4.2): inequality-only.
             if(prob.num_equality() == 0 && prob.num_inequality() > 0)
             {
                 std::vector<trace_entry> trace;
-                auto r = run_nablapp_solver<mma_policy<>, default_convergence>(
-                    "mma", problem_name, prob, max_iterations, collect_trace, trace,
-                    config);
-                results.push_back(r);
-                traces.push_back(std::move(trace));
-            }
-        }
-    }
-
-    // GCMMA: globally-convergent MMA; gate mirrors MMA (inequality-only).
-    if constexpr(is_constrained && differentiable<Problem> && is_bound)
-    {
-        if constexpr(requires { prob.num_equality(); })
-        {
-            if(prob.num_equality() == 0 && prob.num_inequality() > 0)
-            {
-                std::vector<trace_entry> trace;
-                auto r = run_nablapp_solver<gcmma_policy<>, default_convergence>(
-                    "gcmma", problem_name, prob, max_iterations, collect_trace, trace,
+                auto r = run_nablapp_solver<ccsa_quadratic_policy<>, default_convergence>(
+                    "ccsa_quadratic", problem_name, prob, max_iterations, collect_trace, trace,
                     config);
                 results.push_back(r);
                 traces.push_back(std::move(trace));

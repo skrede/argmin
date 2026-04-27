@@ -8,7 +8,7 @@
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/solver/lbfgsb_policy.h"
 #include "nablapp/solver/kraft_slsqp_policy.h"
-#include "nablapp/solver/mma_policy.h"
+#include "nablapp/solver/ccsa_quadratic_policy.h"
 #include "nablapp/types.h"
 #include "nablapp/detail/compact_lbfgs.h"
 #include "nablapp/detail/cauchy_point.h"

@@ -17,9 +17,8 @@
 #include "nablapp/solver/byrd_lbfgsb_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
-#include "nablapp/solver/gcmma_policy.h"
 #include "nablapp/solver/lm_policy.h"
-#include "nablapp/solver/mma_policy.h"
+#include "nablapp/solver/ccsa_quadratic_policy.h"
 #include "nablapp/solver/cobyla_policy.h"
 #include "nablapp/solver/isres_policy.h"
 #include "nablapp/solver/multistart_policy.h"
@@ -270,8 +269,7 @@ static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::byrd_lbfgsb_pol
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::bobyqa_policy<>>>);
 
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::augmented_lagrangian_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::mma_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::gcmma_policy<>>>);
+static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::ccsa_quadratic_policy<>>>);
 
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::cmaes_policy<>>>);
 static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lm_policy<>>>);

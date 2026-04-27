@@ -646,7 +646,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            basic_solver solver{mma_policy<hs076<>::problem_dimension>{}, problem, problem.initial_point(), opts};
+            basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, problem.initial_point(), opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -665,7 +665,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{0.5, 0.5}};
-            basic_solver solver{mma_policy<rosenbrock_constrained::problem_dimension>{}, problem, x0, opts};
+            basic_solver solver{ccsa_quadratic_policy<rosenbrock_constrained::problem_dimension>{}, problem, x0, opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -684,7 +684,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             beam_design problem;
             Eigen::VectorXd x0{{2.0, 2.0}};
-            basic_solver solver{mma_policy<beam_design::problem_dimension>{}, problem, x0, opts};
+            basic_solver solver{ccsa_quadratic_policy<beam_design::problem_dimension>{}, problem, x0, opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -714,7 +714,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            basic_solver solver{gcmma_policy<hs076<>::problem_dimension>{}, problem, problem.initial_point(), opts};
+            basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, problem.initial_point(), opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -733,7 +733,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{0.5, 0.5}};
-            basic_solver solver{gcmma_policy<rosenbrock_constrained::problem_dimension>{}, problem, x0, opts};
+            basic_solver solver{ccsa_quadratic_policy<rosenbrock_constrained::problem_dimension>{}, problem, x0, opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
@@ -752,7 +752,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             beam_design problem;
             Eigen::VectorXd x0{{2.0, 2.0}};
-            basic_solver solver{gcmma_policy<beam_design::problem_dimension>{}, problem, x0, opts};
+            basic_solver solver{ccsa_quadratic_policy<beam_design::problem_dimension>{}, problem, x0, opts};
 
             double best_feasible = 1e10;
             for(int i = 0; i < 500; ++i)
