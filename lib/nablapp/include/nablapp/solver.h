@@ -6,6 +6,7 @@
 #include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/solver/cmaes_policy.h"
+#include "nablapp/solver/gcmma_policy.h"
 #include "nablapp/solver/isres_policy.h"
 #include "nablapp/solver/bobyqa_policy.h"
 #include "nablapp/solver/cobyla_policy.h"
