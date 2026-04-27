@@ -16,6 +16,8 @@
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/test_functions/hock_schittkowski.h"
 
+#include "counting_problem.h"
+
 #include <Eigen/Core>
 
 #include <nlopt.hpp>
@@ -33,7 +35,18 @@ struct timing
 {
     double wall_us;
     double objective;
-    std::uint32_t evals;
+    std::uint32_t iters;     // outer iters (counts.g for nablapp; grad-bearing obj calls for nlopt)
+    std::uint32_t f_evals;   // total obj-callback count
+    std::uint32_t inner;     // f_evals - iters: conservativity-loop trials
+};
+
+// NLopt obj-callback counter passed via user-data. grad != nullptr means
+// the call is on an outer iter (CCSA requests obj+grad once per outer);
+// grad == nullptr means an inner conservativity trial.
+struct nlopt_counts
+{
+    std::uint32_t outer{0};
+    std::uint32_t inner{0};
 };
 
 // Dynamic-dimension HS024 wrapper (inequality, n=2).
@@ -166,8 +179,9 @@ struct hs043_dynamic
 };
 
 // NLopt callbacks for HS024.
-double nlopt_hs024_obj(unsigned, const double* x, double* grad, void*)
+double nlopt_hs024_obj(unsigned, const double* x, double* grad, void* data)
 {
+    if(data) { auto* c = static_cast<nlopt_counts*>(data); grad ? ++c->outer : ++c->inner; }
     double k = 1.0 / (27.0 * std::sqrt(3.0));
     double t = (x[0] - 3.0) * (x[0] - 3.0) - 9.0;
     if(grad)
@@ -200,8 +214,9 @@ double nlopt_hs024_ineq2(unsigned, const double* x, double* grad, void*)
 }
 
 // NLopt callbacks for HS043.
-double nlopt_hs043_obj(unsigned, const double* x, double* grad, void*)
+double nlopt_hs043_obj(unsigned, const double* x, double* grad, void* data)
 {
+    if(data) { auto* c = static_cast<nlopt_counts*>(data); grad ? ++c->outer : ++c->inner; }
     if(grad)
     {
         grad[0] = 2.0 * x[0] - 5.0;
@@ -253,6 +268,101 @@ double nlopt_hs043_ineq2(unsigned, const double* x, double* grad, void*)
            + x[2] * x[2] + 2.0 * x[0] - x[1] - x[3]) - 5.0;
 }
 
+// Dynamic-dimension HS076 wrapper (inequality, n=4, x >= 0, f* = -4.6818..).
+struct hs076_dynamic
+{
+    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr nablapp::problem_class pclass =
+        nablapp::problem_class::inequality | nablapp::problem_class::bound_constrained;
+
+    [[nodiscard]] int dimension() const { return 4; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 3; }
+
+    [[nodiscard]] double value(const Eigen::VectorXd& x) const
+    {
+        return x[0] * x[0] + 0.5 * x[1] * x[1]
+               + x[2] * x[2] + 0.5 * x[3] * x[3]
+               - x[0] * x[2] + x[2] * x[3]
+               - x[0] - 3.0 * x[1] + x[2] - x[3];
+    }
+
+    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    {
+        g[0] = 2.0 * x[0] - x[2] - 1.0;
+        g[1] = x[1] - 3.0;
+        g[2] = 2.0 * x[2] - x[0] + x[3] + 1.0;
+        g[3] = x[3] + x[2] - 1.0;
+    }
+
+    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    {
+        c.resize(3);
+        c[0] = 5.0 - (x[0] + 2.0 * x[1] + x[2] + x[3]);
+        c[1] = 4.0 - (3.0 * x[0] + x[1] + 2.0 * x[2] - x[3]);
+        c[2] = x[1] + 4.0 * x[2] - 1.5;
+    }
+
+    void constraint_jacobian(const Eigen::VectorXd&, Eigen::MatrixXd& J) const
+    {
+        J.resize(3, 4);
+        J << -1.0, -2.0, -1.0, -1.0,
+             -3.0, -1.0, -2.0,  1.0,
+              0.0,  1.0,  4.0,  0.0;
+    }
+
+    [[nodiscard]] Eigen::VectorXd lower_bounds() const
+    {
+        return Eigen::VectorXd::Zero(4);
+    }
+
+    [[nodiscard]] Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd::Constant(
+            4, std::numeric_limits<double>::infinity());
+    }
+
+    [[nodiscard]] Eigen::VectorXd initial_point() const
+    {
+        return Eigen::VectorXd::Constant(4, 0.5);
+    }
+};
+
+// NLopt callbacks for HS076.
+double nlopt_hs076_obj(unsigned, const double* x, double* grad, void* data)
+{
+    if(data) { auto* c = static_cast<nlopt_counts*>(data); grad ? ++c->outer : ++c->inner; }
+    if(grad)
+    {
+        grad[0] = 2.0 * x[0] - x[2] - 1.0;
+        grad[1] = x[1] - 3.0;
+        grad[2] = 2.0 * x[2] - x[0] + x[3] + 1.0;
+        grad[3] = x[3] + x[2] - 1.0;
+    }
+    return x[0] * x[0] + 0.5 * x[1] * x[1]
+           + x[2] * x[2] + 0.5 * x[3] * x[3]
+           - x[0] * x[2] + x[2] * x[3]
+           - x[0] - 3.0 * x[1] + x[2] - x[3];
+}
+
+double nlopt_hs076_ineq0(unsigned, const double* x, double* grad, void*)
+{
+    if(grad) { grad[0] = 1.0; grad[1] = 2.0; grad[2] = 1.0; grad[3] = 1.0; }
+    return -(5.0 - (x[0] + 2.0 * x[1] + x[2] + x[3]));
+}
+
+double nlopt_hs076_ineq1(unsigned, const double* x, double* grad, void*)
+{
+    if(grad) { grad[0] = 3.0; grad[1] = 1.0; grad[2] = 2.0; grad[3] = -1.0; }
+    return -(4.0 - (3.0 * x[0] + x[1] + 2.0 * x[2] - x[3]));
+}
+
+double nlopt_hs076_ineq2(unsigned, const double* x, double* grad, void*)
+{
+    if(grad) { grad[0] = 0.0; grad[1] = -1.0; grad[2] = -4.0; grad[3] = 0.0; }
+    return -(x[1] + 4.0 * x[2] - 1.5);
+}
+
 template <typename Problem>
 timing bench_nablapp(const Problem& problem, std::uint32_t reps)
 {
@@ -267,38 +377,45 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
     opts.set_objective_threshold_rel(1e-12);
     opts.set_step_threshold_rel(1e-12);
 
+    nablapp::bench::eval_counts counts;
+    nablapp::bench::counting_problem<Problem> wrapped{problem, counts};
+
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::mma_policy<>{}, problem, x0, opts};
+        nablapp::basic_solver solver{nablapp::mma_policy<>{}, wrapped, x0, opts};
         solver.solve();
     }
 
     auto t0 = std::chrono::high_resolution_clock::now();
     double fval = 0.0;
-    std::uint32_t iters = 0;
+    std::uint32_t outer_g = 0;
+    std::uint32_t f_evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::mma_policy<>{}, problem, x0, opts};
+        counts.reset();
+        nablapp::basic_solver solver{nablapp::mma_policy<>{}, wrapped, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
-        iters = result.iterations;
+        outer_g = static_cast<std::uint32_t>(counts.g);  // grad calls = outer iters
+        f_evals = static_cast<std::uint32_t>(counts.f);
     }
     auto t1 = std::chrono::high_resolution_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
-    return {us, fval, iters};
+    std::uint32_t inner = f_evals > outer_g ? f_evals - outer_g : 0;
+    return {us, fval, outer_g, f_evals, inner};
 }
 
 timing bench_nlopt_hs024(std::uint32_t reps)
 {
     {
-        nlopt::opt opt(nlopt::LD_MMA, 2);
+        nlopt::opt opt(nlopt::LD_CCSAQ, 2);
         opt.set_min_objective(nlopt_hs024_obj, nullptr);
         opt.set_lower_bounds({0.0, 0.0});
         opt.set_upper_bounds({1e20, 1e20});
         opt.add_inequality_constraint(nlopt_hs024_ineq0, nullptr, 1e-10);
         opt.add_inequality_constraint(nlopt_hs024_ineq1, nullptr, 1e-10);
         opt.add_inequality_constraint(nlopt_hs024_ineq2, nullptr, 1e-10);
-        opt.set_maxeval(5000);
+        opt.set_maxeval(200);
         opt.set_ftol_rel(1e-12);
         opt.set_xtol_rel(1e-12);
         std::vector<double> x = {1.0, 0.5};
@@ -308,37 +425,37 @@ timing bench_nlopt_hs024(std::uint32_t reps)
 
     auto t0 = std::chrono::high_resolution_clock::now();
     double fval = 0.0;
-    std::uint32_t evals = 0;
+    nlopt_counts nl{};
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nlopt::opt opt(nlopt::LD_MMA, 2);
-        opt.set_min_objective(nlopt_hs024_obj, nullptr);
+        nl = {};
+        nlopt::opt opt(nlopt::LD_CCSAQ, 2);
+        opt.set_min_objective(nlopt_hs024_obj, &nl);
         opt.set_lower_bounds({0.0, 0.0});
         opt.set_upper_bounds({1e20, 1e20});
         opt.add_inequality_constraint(nlopt_hs024_ineq0, nullptr, 1e-10);
         opt.add_inequality_constraint(nlopt_hs024_ineq1, nullptr, 1e-10);
         opt.add_inequality_constraint(nlopt_hs024_ineq2, nullptr, 1e-10);
-        opt.set_maxeval(5000);
+        opt.set_maxeval(200);
         opt.set_ftol_rel(1e-12);
         opt.set_xtol_rel(1e-12);
         std::vector<double> x = {1.0, 0.5};
         opt.optimize(x, fval);
-        evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
     auto t1 = std::chrono::high_resolution_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
-    return {us, fval, evals};
+    return {us, fval, nl.outer, nl.outer + nl.inner, nl.inner};
 }
 
 timing bench_nlopt_hs043(std::uint32_t reps)
 {
     {
-        nlopt::opt opt(nlopt::LD_MMA, 4);
+        nlopt::opt opt(nlopt::LD_CCSAQ, 4);
         opt.set_min_objective(nlopt_hs043_obj, nullptr);
         opt.add_inequality_constraint(nlopt_hs043_ineq0, nullptr, 1e-10);
         opt.add_inequality_constraint(nlopt_hs043_ineq1, nullptr, 1e-10);
         opt.add_inequality_constraint(nlopt_hs043_ineq2, nullptr, 1e-10);
-        opt.set_maxeval(5000);
+        opt.set_maxeval(200);
         opt.set_ftol_rel(1e-12);
         opt.set_xtol_rel(1e-12);
         std::vector<double> x = {0.0, 0.0, 0.0, 0.0};
@@ -348,58 +465,112 @@ timing bench_nlopt_hs043(std::uint32_t reps)
 
     auto t0 = std::chrono::high_resolution_clock::now();
     double fval = 0.0;
-    std::uint32_t evals = 0;
+    nlopt_counts nl{};
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nlopt::opt opt(nlopt::LD_MMA, 4);
-        opt.set_min_objective(nlopt_hs043_obj, nullptr);
+        nl = {};
+        nlopt::opt opt(nlopt::LD_CCSAQ, 4);
+        opt.set_min_objective(nlopt_hs043_obj, &nl);
         opt.add_inequality_constraint(nlopt_hs043_ineq0, nullptr, 1e-10);
         opt.add_inequality_constraint(nlopt_hs043_ineq1, nullptr, 1e-10);
         opt.add_inequality_constraint(nlopt_hs043_ineq2, nullptr, 1e-10);
-        opt.set_maxeval(5000);
+        opt.set_maxeval(200);
         opt.set_ftol_rel(1e-12);
         opt.set_xtol_rel(1e-12);
         std::vector<double> x = {0.0, 0.0, 0.0, 0.0};
         opt.optimize(x, fval);
-        evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
     auto t1 = std::chrono::high_resolution_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
-    return {us, fval, evals};
+    return {us, fval, nl.outer, nl.outer + nl.inner, nl.inner};
+}
+
+timing bench_nlopt_hs076(std::uint32_t reps)
+{
+    {
+        nlopt::opt opt(nlopt::LD_CCSAQ, 4);
+        opt.set_min_objective(nlopt_hs076_obj, nullptr);
+        opt.set_lower_bounds({0.0, 0.0, 0.0, 0.0});
+        opt.set_upper_bounds({1e20, 1e20, 1e20, 1e20});
+        opt.add_inequality_constraint(nlopt_hs076_ineq0, nullptr, 1e-10);
+        opt.add_inequality_constraint(nlopt_hs076_ineq1, nullptr, 1e-10);
+        opt.add_inequality_constraint(nlopt_hs076_ineq2, nullptr, 1e-10);
+        opt.set_maxeval(200);
+        opt.set_ftol_rel(1e-12);
+        opt.set_xtol_rel(1e-12);
+        std::vector<double> x = {0.5, 0.5, 0.5, 0.5};
+        double fval;
+        opt.optimize(x, fval);
+    }
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+    double fval = 0.0;
+    nlopt_counts nl{};
+    for(std::uint32_t r = 0; r < reps; ++r)
+    {
+        nl = {};
+        nlopt::opt opt(nlopt::LD_CCSAQ, 4);
+        opt.set_min_objective(nlopt_hs076_obj, &nl);
+        opt.set_lower_bounds({0.0, 0.0, 0.0, 0.0});
+        opt.set_upper_bounds({1e20, 1e20, 1e20, 1e20});
+        opt.add_inequality_constraint(nlopt_hs076_ineq0, nullptr, 1e-10);
+        opt.add_inequality_constraint(nlopt_hs076_ineq1, nullptr, 1e-10);
+        opt.add_inequality_constraint(nlopt_hs076_ineq2, nullptr, 1e-10);
+        opt.set_maxeval(200);
+        opt.set_ftol_rel(1e-12);
+        opt.set_xtol_rel(1e-12);
+        std::vector<double> x = {0.5, 0.5, 0.5, 0.5};
+        opt.optimize(x, fval);
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+    double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
+    return {us, fval, nl.outer, nl.outer + nl.inner, nl.inner};
 }
 
 void print_row(std::string_view solver, const timing& t)
 {
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
+    double per_iter = t.iters > 0 ? double(t.inner) / t.iters : 0.0;
+    std::println("  {:>12s}  {:10.2f}  {:8d}  {:8d}  {:8d}  {:>5.2f}  {:.6e}",
+        solver, t.wall_us, t.iters, t.f_evals, t.inner, per_iter, t.objective);
 }
 
 }
 
 int main()
 {
-    constexpr std::uint32_t reps = 500;
+    constexpr std::uint32_t reps = 100;
     std::println("MMA micro-benchmark, {} repetitions each\n", reps);
-    std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
+    std::println("  iters  = outer iters (nablapp counts.g | nlopt grad-bearing obj calls)");
+    std::println("  f_evals = total obj-callback count");
+    std::println("  inner  = f_evals - iters (conservativity-loop trials)");
+    std::println("  in/it  = inner / iters (avg conservativity trials per outer)");
+    std::println("  {:>12s}  {:>10s}  {:>8s}  {:>8s}  {:>8s}  {:>5s}  {:>12s}",
+        "solver", "wall (us)", "iters", "f_evals", "inner", "in/it", "objective");
 
-    // HS024
+    auto print_block = [](std::string_view name, const timing& nab, const timing& nlop) {
+        std::println("\n--- {} ---", name);
+        print_row("nablapp", nab);
+        print_row("nlopt", nlop);
+        std::println("  ratio nablapp/nlopt: {:.2f}x wall, {:.2f}x iters, {:.2f}x f_evals, {:.2f}x inner",
+            nab.wall_us / nlop.wall_us,
+            nlop.iters > 0 ? double(nab.iters) / nlop.iters : 0.0,
+            double(nab.f_evals) / nlop.f_evals,
+            nlop.inner > 0 ? double(nab.inner) / nlop.inner : 0.0);
+    };
+
     {
-        std::println("\n--- HS024 (inequality, n=2, f*=-1) ---");
         auto nab  = bench_nablapp(hs024_dynamic{}, reps);
         auto nlop = bench_nlopt_hs024(reps);
-        print_row("nablapp", nab);
-        print_row("nlopt", nlop);
-        std::println("  ratio nablapp/nlopt: {:.1f}x wall, {:.1f}x evals",
-            nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
+        print_block("HS024 (inequality, n=2, f*=-1)", nab, nlop);
     }
-
-    // HS043
     {
-        std::println("\n--- HS043 (inequality, n=4, f*=-44) ---");
         auto nab  = bench_nablapp(hs043_dynamic{}, reps);
         auto nlop = bench_nlopt_hs043(reps);
-        print_row("nablapp", nab);
-        print_row("nlopt", nlop);
-        std::println("  ratio nablapp/nlopt: {:.1f}x wall, {:.1f}x evals",
-            nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
+        print_block("HS043 (inequality, n=4, f*=-44)", nab, nlop);
+    }
+    {
+        auto nab  = bench_nablapp(hs076_dynamic{}, reps);
+        auto nlop = bench_nlopt_hs076(reps);
+        print_block("HS076 (inequality, n=4, f*=-4.6818)", nab, nlop);
     }
 }
