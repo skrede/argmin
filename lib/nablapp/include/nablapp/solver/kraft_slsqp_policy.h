@@ -97,8 +97,8 @@ struct kraft_slsqp_policy
         Eigen::Vector<double, N> g;
         Eigen::VectorXd c_eq;
         Eigen::VectorXd c_ineq;
-        Eigen::MatrixXd J_eq;
-        Eigen::MatrixXd J_ineq;
+        Eigen::Matrix<double, Eigen::Dynamic, N> J_eq;
+        Eigen::Matrix<double, Eigen::Dynamic, N> J_ineq;
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
@@ -112,6 +112,17 @@ struct kraft_slsqp_policy
         Eigen::MatrixXd J_all;
         Eigen::VectorXd b_eq_workspace;
         Eigen::VectorXd b_ineq_workspace;
+
+        // Per-step buffers reused across step() invocations to avoid heap
+        // allocation in the BFGS curvature-pair update path. J_all_old is
+        // populated by problem.constraint_jacobian(x_old, ...) inside step()
+        // when computing the Lagrangian gradient at the previous iterate;
+        // lam_buf / lam_eq_buf / lam_ineq_buf hold per-step QP multiplier
+        // copies so the multiplier scatter is allocation-free.
+        Eigen::MatrixXd J_all_old;
+        Eigen::VectorXd lam_buf;
+        Eigen::VectorXd lam_eq_buf;
+        Eigen::VectorXd lam_ineq_buf;
 
         // Cumulative count of phi(alpha) calls made by the Armijo
         // backtracker across every step() invocation since init/reset.
@@ -184,6 +195,10 @@ struct kraft_slsqp_policy
                 s.J_all.resize(m, n);
                 s.b_eq_workspace.resize(s.n_eq);
                 s.b_ineq_workspace.resize(s.n_ineq);
+                s.J_all_old.resize(m, n);
+                s.lam_buf.resize(m);
+                s.lam_eq_buf.resize(s.n_eq);
+                s.lam_ineq_buf.resize(s.n_ineq);
 
                 problem.constraints(x0, s.c_all);
                 s.c_eq = s.c_all.head(s.n_eq);
@@ -243,9 +258,7 @@ struct kraft_slsqp_policy
         // N&W Section 7.2; Kraft 1988 DFVLR-FB 88-28 Section 2.2.3).
         const auto& B = s.hessian.hessian();
 
-        Eigen::Matrix<double, Eigen::Dynamic, N> A_eq = s.J_eq;
         s.b_eq_workspace = -s.c_eq;
-        Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq = s.J_ineq;
         s.b_ineq_workspace = -s.c_ineq;
 
         // Box bounds on the step p: p_lo <= p <= p_hi.
@@ -258,8 +271,8 @@ struct kraft_slsqp_policy
                                           Eigen::Vector<double, N>(s.x)).eval();
 
         auto qp_res = s.qp_solver.solve(B, Eigen::Vector<double, N>(s.g),
-                                         A_eq, s.b_eq_workspace,
-                                         A_ineq, s.b_ineq_workspace,
+                                         s.J_eq, s.b_eq_workspace,
+                                         s.J_ineq, s.b_ineq_workspace,
                                          p_lo, p_hi);
 
         Eigen::Vector<double, N> p = qp_res.x;
@@ -424,7 +437,7 @@ struct kraft_slsqp_policy
 
                     auto soc_res = s.qp_solver.solve(
                         B, Eigen::Vector<double, N>(s.g),
-                        A_eq, b_eq_soc, A_ineq, b_ineq_soc,
+                        s.J_eq, b_eq_soc, s.J_ineq, b_ineq_soc,
                         p_lo, p_hi);
 
                     if(soc_res.status == detail::qp_status::optimal)
@@ -505,28 +518,33 @@ struct kraft_slsqp_policy
         {
             if(s.n_eq + s.n_ineq > 0 && qp_res.lambda.size() > 0)
             {
-                int m_total = s.n_eq + s.n_ineq;
-                auto lam = qp_res.lambda.head(
-                    std::min(m_total, static_cast<int>(qp_res.lambda.size()))).eval();
+                const int m_total = s.n_eq + s.n_ineq;
+                const int lam_take = std::min(m_total,
+                                              static_cast<int>(qp_res.lambda.size()));
+                if(s.lam_buf.size() < lam_take) s.lam_buf.resize(lam_take);
+                s.lam_buf.head(lam_take) = qp_res.lambda.head(lam_take);
 
-                if(lam.size() == m_total)
-                    s.lambda = lam;
+                if(lam_take == m_total)
+                    s.lambda = s.lam_buf.head(m_total);
 
-                Eigen::MatrixXd J_all_old(s.n_eq + s.n_ineq, n);
-                s.problem->constraint_jacobian(x_old, J_all_old);
+                s.problem->constraint_jacobian(x_old, s.J_all_old);
 
-                if(s.n_eq > 0 && lam.size() >= s.n_eq)
+                if(s.n_eq > 0 && lam_take >= s.n_eq)
                 {
-                    Eigen::VectorXd lam_eq = lam.head(s.n_eq);
-                    grad_L_old.noalias() -= J_all_old.topRows(s.n_eq).transpose() * lam_eq;
-                    grad_L_new.noalias() -= s.J_eq.transpose() * lam_eq;
+                    s.lam_eq_buf.head(s.n_eq) = s.lam_buf.head(s.n_eq);
+                    grad_L_old.noalias() -= s.J_all_old.topRows(s.n_eq).transpose()
+                                           * s.lam_eq_buf.head(s.n_eq);
+                    grad_L_new.noalias() -= s.J_eq.transpose()
+                                           * s.lam_eq_buf.head(s.n_eq);
                 }
 
-                if(s.n_ineq > 0 && lam.size() >= s.n_eq + s.n_ineq)
+                if(s.n_ineq > 0 && lam_take >= s.n_eq + s.n_ineq)
                 {
-                    Eigen::VectorXd lam_ineq = lam.segment(s.n_eq, s.n_ineq);
-                    grad_L_old.noalias() -= J_all_old.bottomRows(s.n_ineq).transpose() * lam_ineq;
-                    grad_L_new.noalias() -= s.J_ineq.transpose() * lam_ineq;
+                    s.lam_ineq_buf.head(s.n_ineq) = s.lam_buf.segment(s.n_eq, s.n_ineq);
+                    grad_L_old.noalias() -= s.J_all_old.bottomRows(s.n_ineq).transpose()
+                                           * s.lam_ineq_buf.head(s.n_ineq);
+                    grad_L_new.noalias() -= s.J_ineq.transpose()
+                                           * s.lam_ineq_buf.head(s.n_ineq);
                 }
             }
         }
