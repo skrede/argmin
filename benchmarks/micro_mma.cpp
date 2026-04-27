@@ -12,8 +12,12 @@
 //            a new method for structural optimization";
 //            NLopt 2.10.0 src/algs/mma/mma.c (ftol_rel convention).
 
-#include "nablapp/solver/ccsa_quadratic_policy.h"
+#include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/basic_solver.h"
+#include "nablapp/solver/ccsa_quadratic_policy.h"
+#include "nablapp/solver/alternative/gcmma/rho_wval_policy.h"
+#include "nablapp/solver/alternative/gcmma/raa_augmented_policy.h"
+#include "nablapp/solver/alternative/gcmma/move_limit_shrink_policy.h"
 #include "nablapp/test_functions/hock_schittkowski.h"
 
 #include "counting_problem.h"
@@ -363,15 +367,13 @@ double nlopt_hs076_ineq2(unsigned, const double* x, double* grad, void*)
     return -(x[1] + 4.0 * x[2] - 1.5);
 }
 
-template <typename Problem>
+template <typename Policy, typename Problem>
 timing bench_nablapp(const Problem& problem, std::uint32_t reps)
 {
     auto x0 = problem.initial_point();
-    // NLopt-parity convergence: LD_MMA uses ftol_rel on the objective.
-    // slsqp_compatible_convergence mirrors NLopt's ftol_rel + xtol_rel
-    // convention so cross-bench measurements are meaningful; absolute
-    // ftol made nablapp exit earlier than NLopt by construction
-    // regardless of fix quality.
+    // NLopt-parity convergence: ftol_rel + xtol_rel via
+    // slsqp_compatible_convergence so cross-bench measurements are
+    // meaningful.
     nablapp::solver_options<nablapp::slsqp_compatible_convergence> opts;
     opts.max_iterations = 5000;
     opts.set_objective_threshold_rel(1e-12);
@@ -382,7 +384,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::ccsa_quadratic_policy<>{}, wrapped, x0, opts};
+        nablapp::basic_solver solver{Policy{}, wrapped, x0, opts};
         solver.solve();
     }
 
@@ -393,10 +395,10 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         counts.reset();
-        nablapp::basic_solver solver{nablapp::ccsa_quadratic_policy<>{}, wrapped, x0, opts};
+        nablapp::basic_solver solver{Policy{}, wrapped, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
-        outer_g = static_cast<std::uint32_t>(counts.g);  // grad calls = outer iters
+        outer_g = static_cast<std::uint32_t>(counts.g);
         f_evals = static_cast<std::uint32_t>(counts.f);
     }
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -538,7 +540,7 @@ void print_row(std::string_view solver, const timing& t)
 
 int main()
 {
-    constexpr std::uint32_t reps = 100;
+    constexpr std::uint32_t reps = 20;
     std::println("MMA micro-benchmark, {} repetitions each\n", reps);
     std::println("  iters  = outer iters (nablapp counts.g | nlopt grad-bearing obj calls)");
     std::println("  f_evals = total obj-callback count");
@@ -547,30 +549,38 @@ int main()
     std::println("  {:>12s}  {:>10s}  {:>8s}  {:>8s}  {:>8s}  {:>5s}  {:>12s}",
         "solver", "wall (us)", "iters", "f_evals", "inner", "in/it", "objective");
 
-    auto print_block = [](std::string_view name, const timing& nab, const timing& nlop) {
-        std::println("\n--- {} ---", name);
-        print_row("nablapp", nab);
-        print_row("nlopt", nlop);
-        std::println("  ratio nablapp/nlopt: {:.2f}x wall, {:.2f}x iters, {:.2f}x f_evals, {:.2f}x inner",
-            nab.wall_us / nlop.wall_us,
-            nlop.iters > 0 ? double(nab.iters) / nlop.iters : 0.0,
-            double(nab.f_evals) / nlop.f_evals,
-            nlop.inner > 0 ? double(nab.inner) / nlop.inner : 0.0);
+    // 7-way comparison per problem:
+    //   nablapp policies (5):
+    //     - mma             (Svanberg 1987 plain reciprocal)
+    //     - ccsa_quadratic  (Svanberg 2002 §4.2 quadratic, current production)
+    //     - shrink          (alt: move-limit shrinkage GCMMA variant)
+    //     - rho_wval        (alt: NLopt-style rho/wval GCMMA variant)
+    //     - raa_augmented   (alt: strict Svanberg 2002 GCMMA variant)
+    //   NLopt comparators (1 here, LD_CCSAQ; LD_MMA can be added later):
+    //     - nlopt_ccsaq     (NLopt's LD_CCSAQ)
+    auto print_problem = [&](std::string_view name, auto problem_factory,
+                             auto nlopt_runner) {
+        std::println("\n=== {} ===", name);
+        print_row("mma",
+            bench_nablapp<nablapp::mma_policy<>>(problem_factory(), reps));
+        print_row("ccsa_quadratic",
+            bench_nablapp<nablapp::ccsa_quadratic_policy<>>(problem_factory(), reps));
+        print_row("shrink",
+            bench_nablapp<nablapp::alternative::gcmma::move_limit_shrink_policy<>>(
+                problem_factory(), reps));
+        print_row("rho_wval",
+            bench_nablapp<nablapp::alternative::gcmma::rho_wval_policy<>>(
+                problem_factory(), reps));
+        print_row("raa_augmented",
+            bench_nablapp<nablapp::alternative::gcmma::raa_augmented_policy<>>(
+                problem_factory(), reps));
+        print_row("nlopt_ccsaq", nlopt_runner(reps));
     };
 
-    {
-        auto nab  = bench_nablapp(hs024_dynamic{}, reps);
-        auto nlop = bench_nlopt_hs024(reps);
-        print_block("HS024 (inequality, n=2, f*=-1)", nab, nlop);
-    }
-    {
-        auto nab  = bench_nablapp(hs043_dynamic{}, reps);
-        auto nlop = bench_nlopt_hs043(reps);
-        print_block("HS043 (inequality, n=4, f*=-44)", nab, nlop);
-    }
-    {
-        auto nab  = bench_nablapp(hs076_dynamic{}, reps);
-        auto nlop = bench_nlopt_hs076(reps);
-        print_block("HS076 (inequality, n=4, f*=-4.6818)", nab, nlop);
-    }
+    print_problem("HS024 (n=2, m=3 ineq+bound, f*=-1)",
+        []{ return hs024_dynamic{}; }, bench_nlopt_hs024);
+    print_problem("HS043 (n=4, m=3 ineq, f*=-44)",
+        []{ return hs043_dynamic{}; }, bench_nlopt_hs043);
+    print_problem("HS076 (n=4, m=3 ineq+bound, f*=-4.6818)",
+        []{ return hs076_dynamic{}; }, bench_nlopt_hs076);
 }
