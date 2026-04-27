@@ -44,6 +44,7 @@
 #include "nablapp/detail/adaptive_bfgs.h"
 #include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/kraft_lsq_qp.h"
+#include "nablapp/detail/kraft_lsq_qp_recovery.h"
 #include "nablapp/detail/lagrangian.h"
 #include "nablapp/line_search/armijo.h"
 #include "nablapp/options/qp_options.h"
@@ -105,7 +106,7 @@ struct kraft_slsqp_policy
         double objective_value{};
         double sigma{1.0};
         detail::adaptive_bfgs<double, N, 10> hessian;
-        detail::kraft_lsq_qp_solver<double, N> qp_solver;
+        detail::kraft_lsq_qp_recovery_solver<double, N> qp_solver;
 
         // Pre-allocated constraint workspace (sized in init(), reused in step())
         Eigen::VectorXd c_all;

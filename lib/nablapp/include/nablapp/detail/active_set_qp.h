@@ -38,6 +38,14 @@ struct qp_result
     Eigen::Vector<Scalar, M> lambda;
     qp_status status{qp_status::optimal};
     int iterations{0};
+
+    // Set by kraft_lsq_qp_recovery_solver when the inner cascade returned
+    // infeasible/rank-deficient and Kraft 1988 §3.4 augmented-QP recovery
+    // produced the step. Range [0, 1]: 0 means recovery was unnecessary
+    // (or the direct path succeeded); positive values give the slack
+    // variable s at the augmented optimum, where s=1 corresponds to full
+    // constraint relaxation. Direct path always returns 0.
+    Scalar relaxation_factor{Scalar(0)};
 };
 
 // Determine initial working set from feasible point x0.

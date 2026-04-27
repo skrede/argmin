@@ -29,6 +29,7 @@
 #include "nablapp/detail/filter_restoration.h"
 #include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/kraft_lsq_qp.h"
+#include "nablapp/detail/kraft_lsq_qp_recovery.h"
 #include "nablapp/detail/lagrangian.h"
 #include "nablapp/detail/merit_function.h"
 #include "nablapp/options/qp_options.h"
@@ -89,7 +90,7 @@ struct filter_slsqp_policy
         Eigen::VectorXd lambda;
         double objective_value{};
         detail::adaptive_bfgs<double, N, 10> hessian;
-        detail::kraft_lsq_qp_solver<double, N> qp_solver;
+        detail::kraft_lsq_qp_recovery_solver<double, N> qp_solver;
         detail::filter_set<double> filter;
 
         Eigen::VectorXd c_all;
