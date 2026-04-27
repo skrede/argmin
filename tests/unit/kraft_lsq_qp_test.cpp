@@ -325,7 +325,9 @@ TEST_CASE("LSEI equality only", "[lsei]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = lsei<double, n>(C, d, E, f, G, h, x,
+    nablapp::detail::lsei_workspace<double> ws;
+    ws.resize(n, 1, 0);
+    int mode = lsei<double, n>(C, d, E, f, G, h, x, ws,
                                nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 1, 0);
 
     CHECK(mode == 1);
@@ -355,7 +357,9 @@ TEST_CASE("LSEI equality plus inactive inequality", "[lsei]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = lsei<double, n>(C, d, E, f, G, h, x,
+    nablapp::detail::lsei_workspace<double> ws;
+    ws.resize(n, 1, 1);
+    int mode = lsei<double, n>(C, d, E, f, G, h, x, ws,
                                nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 1, 1);
 
     CHECK(mode == 1);
@@ -388,7 +392,9 @@ TEST_CASE("LSEI equality plus active inequality", "[lsei]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = lsei<double, n>(C, d, E, f, G, h, x,
+    nablapp::detail::lsei_workspace<double> ws;
+    ws.resize(n, 1, 1);
+    int mode = lsei<double, n>(C, d, E, f, G, h, x, ws,
                                nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 1, 1);
 
     CHECK(mode == 1);
@@ -416,7 +422,9 @@ TEST_CASE("LSEI rank deficient equality is reported", "[lsei]")
     Eigen::VectorXd nnls_x_vec;
     Eigen::VectorXd nnls_w;
 
-    int mode = lsei<double, n>(C, d, E, f, G, h, x,
+    nablapp::detail::lsei_workspace<double> ws;
+    ws.resize(n, 2, 0);
+    int mode = lsei<double, n>(C, d, E, f, G, h, x, ws,
                                nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 2, 0);
 
     CHECK(mode == 6);

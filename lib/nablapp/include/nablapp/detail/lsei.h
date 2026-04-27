@@ -26,10 +26,67 @@
 namespace nablapp::detail
 {
 
+// Persistent workspace for lsei() so the routine does not allocate per
+// call. Sized once via resize() at the maximum problem shape; subsequent
+// calls at smaller shapes reuse the existing storage.
+template <typename Scalar>
+struct lsei_workspace
+{
+    using matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
+    using vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
+
+    matrix_t Qc;
+    matrix_t R_c_upper;
+    vector_t y1;
+    matrix_t E_tilde;
+    vector_t f_red;
+    matrix_t G_tilde;
+    vector_t h_red;
+    matrix_t R_e;
+    vector_t Qt_f;
+    matrix_t E_small;
+    vector_t f_small_vec;
+    matrix_t G_small;
+    vector_t y2_dyn;
+    vector_t y;
+
+    Eigen::HouseholderQR<matrix_t> qr_c;
+    Eigen::HouseholderQR<matrix_t> qr_e;
+
+    void resize(int n, int m_eq, int m_ineq)
+    {
+        const int n2 = n - m_eq;
+        Qc.resize(n, n);
+        R_c_upper.resize(m_eq, m_eq);
+        y1.resize(m_eq);
+        E_tilde.resize(n, n);
+        f_red.resize(n);
+        G_tilde.resize(m_ineq, n);
+        h_red.resize(m_ineq);
+        if(n2 > 0)
+        {
+            R_e.resize(n2, n2);
+            Qt_f.resize(n);
+            E_small.resize(n2, n2);
+            f_small_vec.resize(n2);
+            G_small.resize(m_ineq, n2);
+            y2_dyn.resize(n2);
+        }
+        y.resize(n);
+    }
+};
+
 // Solve min ||E*x - f||^2 s.t. C*x = d, G*x >= h.
 //
 // C is (m_eq x n), d is (m_eq), E is (n x n), f is (n),
 // G is (m_ineq x n), h is (m_ineq), x is (n) output.
+//
+// The lsei_workspace ws holds matrix / vector / QR factorization state
+// used by lsei itself; the caller owns it and is responsible for sizing
+// it via ws.resize() at problem configuration time. The nnls_* scratch
+// buffers are passed through to the underlying LDP solver; the caller
+// must also ensure they can hold the dual NNLS problem (see ldp()
+// documentation).
 //
 // Return code:
 //   1 on success,
@@ -47,15 +104,13 @@ int lsei(
     const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& G,
     const Eigen::Vector<Scalar, Eigen::Dynamic>& h,
     Eigen::Vector<Scalar, N>& x,
+    lsei_workspace<Scalar>& ws,
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>& nnls_A,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_x_vec,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_w,
     int n, int m_eq, int m_ineq)
 {
-    using matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
-    using vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
-
     // ------------------------------------------------------------------
     // Pure LSI fallback: no equality constraints.
     // ------------------------------------------------------------------
@@ -74,34 +129,41 @@ int lsei(
     //   C * Q_C * y = R_C^T * y = d  (acting on the leading m_eq entries)
     // which is a lower-triangular system for y1 = y(0..m_eq-1).
     // ------------------------------------------------------------------
-    Eigen::HouseholderQR<matrix_t> qr_c(C.transpose());
-    matrix_t Qc = qr_c.householderQ() * matrix_t::Identity(n, n);
+    ws.qr_c.compute(C.transpose());
+    if(ws.Qc.rows() != n || ws.Qc.cols() != n) ws.Qc.resize(n, n);
+    ws.Qc = ws.qr_c.householderQ()
+            * decltype(ws.Qc)::Identity(n, n);
 
     // R_c is m_eq x m_eq upper triangular, extracted from qr_c.matrixQR().
-    matrix_t R_c_upper = qr_c.matrixQR().topLeftCorner(m_eq, m_eq)
-                              .template triangularView<Eigen::Upper>();
+    if(ws.R_c_upper.rows() != m_eq || ws.R_c_upper.cols() != m_eq)
+        ws.R_c_upper.resize(m_eq, m_eq);
+    ws.R_c_upper = ws.qr_c.matrixQR().topLeftCorner(m_eq, m_eq)
+                          .template triangularView<Eigen::Upper>();
 
     // Check rank via diagonal of R_c.
     for(int i = 0; i < m_eq; ++i)
     {
-        if(std::abs(R_c_upper(i, i)) <= eps * Scalar(n) * Scalar(10))
+        if(std::abs(ws.R_c_upper(i, i)) <= eps * Scalar(n) * Scalar(10))
             return 6;
     }
 
     // Solve R_c^T * y1 = d for y1 (lower triangular solve).
-    vector_t y1 = R_c_upper.transpose()
-                           .template triangularView<Eigen::Lower>()
-                           .solve(d);
+    if(ws.y1.size() != m_eq) ws.y1.resize(m_eq);
+    ws.y1 = ws.R_c_upper.transpose()
+                        .template triangularView<Eigen::Lower>()
+                        .solve(d);
 
     // ------------------------------------------------------------------
     // Change variables: E_tilde = E * Q_c, split into [E1 (n x m_eq),
-    // E2 (n x (n - m_eq))]. Similarly for G.
+    // E2 (n x (n - m_eq))]. Similarly for G. The split is referenced
+    // below via leftCols / rightCols on E_tilde directly to avoid a
+    // separate E1 / E2 allocation.
     // ------------------------------------------------------------------
-    matrix_t E_tilde = E * Qc;
-    matrix_t E1 = E_tilde.leftCols(m_eq);
-    matrix_t E2 = E_tilde.rightCols(n - m_eq);
+    if(ws.E_tilde.rows() != n || ws.E_tilde.cols() != n) ws.E_tilde.resize(n, n);
+    ws.E_tilde.noalias() = E * ws.Qc;
 
-    vector_t f_red = f - E1 * y1;
+    if(ws.f_red.size() != n) ws.f_red.resize(n);
+    ws.f_red.noalias() = f - ws.E_tilde.leftCols(m_eq) * ws.y1;
 
     // ------------------------------------------------------------------
     // Reduced LS problem in the free variables y2 (length n - m_eq):
@@ -113,69 +175,72 @@ int lsei(
     // ------------------------------------------------------------------
     const int n2 = n - m_eq;
 
-    matrix_t G_tilde;
-    vector_t h_red;
     if(m_ineq > 0)
     {
-        G_tilde = G * Qc;
-        h_red = h - G_tilde.leftCols(m_eq) * y1;
+        if(ws.G_tilde.rows() != m_ineq || ws.G_tilde.cols() != n)
+            ws.G_tilde.resize(m_ineq, n);
+        ws.G_tilde.noalias() = G * ws.Qc;
+        if(ws.h_red.size() != m_ineq) ws.h_red.resize(m_ineq);
+        ws.h_red.noalias() = h - ws.G_tilde.leftCols(m_eq) * ws.y1;
     }
-
-    // y2 solution vector in the reduced problem.
-    vector_t y2 = vector_t::Zero(n2);
 
     if(n2 > 0)
     {
         // QR of E2 (n x n2). E2 = Q_e * [R_e; 0] with R_e of size n2 x n2.
-        Eigen::HouseholderQR<matrix_t> qr_e(E2);
-        matrix_t R_e = qr_e.matrixQR().topLeftCorner(n2, n2)
-                                      .template triangularView<Eigen::Upper>();
+        ws.qr_e.compute(ws.E_tilde.rightCols(n2));
+        if(ws.R_e.rows() != n2 || ws.R_e.cols() != n2) ws.R_e.resize(n2, n2);
+        ws.R_e = ws.qr_e.matrixQR().topLeftCorner(n2, n2)
+                        .template triangularView<Eigen::Upper>();
 
-        vector_t Qt_f = qr_e.householderQ().transpose() * f_red;
-        vector_t f_small = Qt_f.head(n2);
+        if(ws.Qt_f.size() != n) ws.Qt_f.resize(n);
+        ws.Qt_f.noalias() = ws.qr_e.householderQ().transpose() * ws.f_red;
+
+        if(ws.y2_dyn.size() != n2) ws.y2_dyn.resize(n2);
 
         if(m_ineq <= 0)
         {
-            // Pure equality-constrained LS: solve R_e y2 = f_small.
+            // Pure equality-constrained LS: solve R_e y2 = Qt_f.head(n2).
             // Check R_e rank.
             for(int i = 0; i < n2; ++i)
             {
-                if(std::abs(R_e(i, i)) <= eps * Scalar(n) * Scalar(10))
+                if(std::abs(ws.R_e(i, i)) <= eps * Scalar(n) * Scalar(10))
                     return 6;
             }
-            y2 = R_e.template triangularView<Eigen::Upper>().solve(f_small);
+            ws.y2_dyn = ws.R_e.template triangularView<Eigen::Upper>()
+                              .solve(ws.Qt_f.head(n2).eval());
         }
         else
         {
             // Build a square n2 x n2 E for the inner LSI call.
-            Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> E_small = R_e;
-            Eigen::Vector<Scalar, Eigen::Dynamic> f_small_vec = f_small;
-            Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> G_small =
-                G_tilde.rightCols(n2);
+            if(ws.E_small.rows() != n2 || ws.E_small.cols() != n2)
+                ws.E_small.resize(n2, n2);
+            ws.E_small = ws.R_e;
+            if(ws.f_small_vec.size() != n2) ws.f_small_vec.resize(n2);
+            ws.f_small_vec = ws.Qt_f.head(n2);
+            if(ws.G_small.rows() != m_ineq || ws.G_small.cols() != n2)
+                ws.G_small.resize(m_ineq, n2);
+            ws.G_small = ws.G_tilde.rightCols(n2);
 
-            Eigen::Vector<Scalar, Eigen::Dynamic> y2_dyn =
-                Eigen::Vector<Scalar, Eigen::Dynamic>::Zero(n2);
+            ws.y2_dyn.setZero();
 
             int lsi_mode = lsi<Scalar, Eigen::Dynamic>(
-                E_small, f_small_vec, G_small, h_red, y2_dyn,
+                ws.E_small, ws.f_small_vec, ws.G_small, ws.h_red, ws.y2_dyn,
                 nnls_A, nnls_b, nnls_x_vec, nnls_w, n2, m_ineq);
 
             if(lsi_mode != 1)
                 return lsi_mode;
-
-            y2 = y2_dyn;
         }
     }
 
     // ------------------------------------------------------------------
     // Assemble y = [y1; y2] and back-transform x = Q_c * y.
     // ------------------------------------------------------------------
-    vector_t y(n);
-    y.head(m_eq) = y1;
+    if(ws.y.size() != n) ws.y.resize(n);
+    ws.y.head(m_eq) = ws.y1;
     if(n2 > 0)
-        y.tail(n2) = y2;
+        ws.y.tail(n2) = ws.y2_dyn;
 
-    x.noalias() = Qc * y;
+    x.noalias() = ws.Qc * ws.y;
 
     return 1;
 }

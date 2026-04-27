@@ -69,6 +69,11 @@ public:
         nnls_x_vec_.resize(m_aug_max);
         nnls_w_.resize(m_aug_max);
 
+        // LSEI workspace. The augmented inequality block lsei sees has
+        // up to m_aug_max rows after the kraft_lsq_qp side folds in
+        // finite box bounds.
+        lsei_ws_.resize(n, m_eq, m_aug_max);
+
         // Multiplier-recovery workspace (post-hoc KKT projection in solve()).
         // Worst-case active-set size: every equality + every inequality +
         // both bounds on every variable. Sized once here so solve() does
@@ -218,6 +223,7 @@ public:
             E_, f_,
             G_aug_, h_aug_,
             x_out_,
+            lsei_ws_,
             nnls_A_, nnls_b_, nnls_x_vec_, nnls_w_,
             n, m_eq, m_aug);
 
@@ -384,6 +390,8 @@ private:
     Eigen::Vector<Scalar, Eigen::Dynamic> mult_r_;
     Eigen::Vector<Scalar, Eigen::Dynamic> mult_lam_act_;
     Eigen::HouseholderQR<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> mult_qr_;
+
+    lsei_workspace<Scalar> lsei_ws_;
 };
 
 }
