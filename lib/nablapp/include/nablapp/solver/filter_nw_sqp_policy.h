@@ -651,7 +651,22 @@ struct filter_nw_sqp_policy
         };
     }
 
-    // Hot start: preserves BFGS Hessian.
+    // Hot start: preserves BFGS Hessian, but clears the filter envelope.
+    //
+    // The filter is a per-run dominance set: entries added during one
+    // solve represent (objective, violation) pairs that were rejected
+    // along that trajectory. Carrying them across to a new run on the
+    // same state object causes the canonical Wachter-Biegler oscillation
+    // -- a converged near-optimum entry from the prior run dominates
+    // virtually every trial point of the new run, the filter rejects
+    // every line-search step, and the outer loop stalls at alpha -> 0.
+    //
+    // BFGS Hessian curvature, on the other hand, IS transferable across
+    // runs that approach the same local model, so reset() preserves it.
+    //
+    // Reference: Wachter & Biegler 2006, Section 3.3 (filter
+    //            re-initialization between independent runs);
+    //            N&W 2e Section 15.4 (filter SQP semantics).
     template <typename Problem>
     void reset(state_type<Problem>& s,
                const Eigen::Vector<double, N>& x0)
@@ -669,17 +684,20 @@ struct filter_nw_sqp_policy
             s.J_eq = s.J_all.topRows(s.n_eq);
             s.J_ineq = s.J_all.bottomRows(s.n_ineq);
         }
+        s.filter.clear();
         s.iteration = 0;
     }
 
-    // Cold restart: clears BFGS Hessian, filter, and penalty.
+    // Cold restart: clears BFGS Hessian, filter envelope (with new
+    // h_max derived from the new x0), and penalty.
     template <typename Problem>
     void reset_clear(state_type<Problem>& s,
                      const Eigen::Vector<double, N>& x0)
     {
         reset(s, x0);
         s.hessian.reset();
-        s.filter.clear();
+        const double h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
+        s.filter.initialize(1e4 * std::max(1.0, h_0));
         s.sigma = 1.0;
         s.lambda.setZero();
     }
