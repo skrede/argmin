@@ -22,6 +22,9 @@
 #include "nablapp/solver/mma_policy.h"
 #include "nablapp/solver/gcmma_policy.h"
 #include "nablapp/solver/ccsa_quadratic_policy.h"
+#include "nablapp/solver/alternative/gcmma/rho_wval_policy.h"
+#include "nablapp/solver/alternative/gcmma/raa_augmented_policy.h"
+#include "nablapp/solver/alternative/gcmma/move_limit_shrink_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/lbfgsb_policy.h"
 #include "nablapp/solver/nw_sqp_policy.h"
@@ -435,6 +438,31 @@ void run_all_nablapp_solvers(
                     auto r = run_nablapp_solver<ccsa_quadratic_policy<>, default_convergence>(
                         "ccsa_quadratic", problem_name, prob, max_iterations, collect_trace, trace,
                         config);
+                    results.push_back(r);
+                    traces.push_back(std::move(trace));
+                }
+                // Alternative GCMMA variants (research artifacts; preserved
+                // for the published comparison even after the production
+                // gcmma_policy is aliased to one of them). gcmma above
+                // emits as the alias winner; alt rows below preserve the
+                // losing variants for the comparison table.
+                {
+                    std::vector<trace_entry> trace;
+                    auto r = run_nablapp_solver<
+                        alternative::gcmma::move_limit_shrink_policy<>,
+                        default_convergence>(
+                        "gcmma_move_limit_shrink", problem_name, prob,
+                        max_iterations, collect_trace, trace, config);
+                    results.push_back(r);
+                    traces.push_back(std::move(trace));
+                }
+                {
+                    std::vector<trace_entry> trace;
+                    auto r = run_nablapp_solver<
+                        alternative::gcmma::raa_augmented_policy<>,
+                        default_convergence>(
+                        "gcmma_raa_augmented", problem_name, prob,
+                        max_iterations, collect_trace, trace, config);
                     results.push_back(r);
                     traces.push_back(std::move(trace));
                 }
