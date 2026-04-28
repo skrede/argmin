@@ -447,8 +447,35 @@ struct kraft_slsqp_policy
         const double h4 = 1.0 - qp_res.relaxation_factor;
         double dphi_merit = s.g.dot(p) - s.sigma * constraint_viol_0 * h4;
 
+        // If the L1 merit directional derivative is non-negative, the
+        // penalty parameter sigma is too small to make p a descent
+        // direction. Solve directly for the minimum sigma that makes
+        // dphi_merit strictly negative and bump sigma to that value:
+        //
+        //   dphi_merit < 0  <=>  sigma > g^T p / (viol * h4)
+        //
+        // Set sigma_target = g^T p / (viol * h4) + 1, which yields
+        // dphi_merit_new = -viol * h4 < 0 when viol * h4 > 0.
+        // Caps sigma at 1e10 to bound runaway growth on near-feasible
+        // iterates. Replaces an earlier dphi_merit = -1e-8 clamp that
+        // forced a fake-descent slope rather than fixing the penalty.
+        //
+        // Reference: Powell (1978) "A fast algorithm for nonlinearly
+        //            constrained optimization calculations", §6;
+        //            N&W 2e Section 18.5 eq. 18.36.
         if(dphi_merit >= 0.0)
-            dphi_merit = -1e-8;
+        {
+            const double viol_h4 = constraint_viol_0 * h4;
+            if(viol_h4 > 1e-12)
+            {
+                const double sigma_target = s.g.dot(p) / viol_h4 + 1.0;
+                if(sigma_target > s.sigma)
+                {
+                    s.sigma = std::min(sigma_target, 1e10);
+                    dphi_merit = s.g.dot(p) - s.sigma * viol_h4;
+                }
+            }
+        }
 
         // Backtracking Armijo line search on the L1 merit.
         auto phi_ls = [&](double alpha) {
