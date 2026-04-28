@@ -122,9 +122,12 @@ struct kraft_slsqp_policy
         Eigen::VectorXd b_ineq_workspace;
 
         // Per-step buffers reused across step() invocations to avoid heap
-        // allocation in the BFGS curvature-pair update path. J_all_old is
-        // populated by problem.constraint_jacobian(x_old, ...) inside step()
-        // when computing the Lagrangian gradient at the previous iterate;
+        // allocation in the BFGS curvature-pair update path. J_all_old
+        // holds J(x_k) for the Lagrangian gradient at the previous
+        // iterate; populated by copying s.J_all just before the
+        // J(x_{k+1}) re-evaluation overwrites it, eliminating the
+        // separate constraint_jacobian(x_old, ...) call that the SLSQP
+        // BFGS pair previously required (one J-eval/iter instead of two).
         // lam_buf / lam_eq_buf / lam_ineq_buf hold per-step QP multiplier
         // copies so the multiplier scatter is allocation-free.
         Eigen::MatrixXd J_all_old;
@@ -647,6 +650,17 @@ struct kraft_slsqp_policy
         {
             if(s.n_eq + s.n_ineq > 0)
             {
+                // Cache J(x_k) into J_all_old before the next-iter
+                // Jacobian overwrites s.J_all. The BFGS curvature-pair
+                // update below needs J(x_old) = J(x_k) to compute
+                // grad_L_old = g_k - J(x_k)^T lambda; with this cache
+                // there is no second constraint_jacobian(x_old, ...) call.
+                // First-step initialization is correct: init() at line
+                // 264 populates s.J_all with J(x_0) and the first step's
+                // x_old is x_0, so the cache holds J(x_0) on entry to
+                // the BFGS block.
+                s.J_all_old = s.J_all;
+
                 s.problem->constraints(s.x, s.c_all);
                 s.c_eq = s.c_all.head(s.n_eq);
                 s.c_ineq = s.c_all.tail(s.n_ineq);
@@ -687,8 +701,6 @@ struct kraft_slsqp_policy
 
                 if(lam_take == m_total)
                     s.lambda = s.lam_buf.head(m_total);
-
-                s.problem->constraint_jacobian(x_old, s.J_all_old);
 
                 if(s.n_eq > 0 && lam_take >= s.n_eq)
                 {
