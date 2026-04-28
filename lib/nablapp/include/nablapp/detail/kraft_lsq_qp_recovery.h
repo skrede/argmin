@@ -18,14 +18,15 @@
 //
 // The augmentation column is derived from the linearized constraint RHS
 // passed to the QP. nablapp's outer SQP convention sets b = -c (constraint
-// values), so the NLopt-style augmentation column "-c[j]" for equalities
-// equals b_eq[j]; for inequalities it is "max(-c[j], 0)" = "max(b_ineq[j], 0)".
+// values), so the §3.4 augmentation column "-c[j]" for equalities equals
+// b_eq[j]; for inequalities it is "max(-c[j], 0)" = "max(b_ineq[j], 0)".
 //
 // At s=0 the augmented problem reduces to the original (feasible iff the
 // linearization is feasible). At s=1 the relaxed constraints are
-// trivially satisfied (set the original RHS to zero). The penalty rho on
-// the diagonal of the augmented Hessian discourages large s; growth
-// schedule rho_k = 100 * 10^k for k=0..4 matches NLopt's slsqpb_.
+// trivially satisfied (the original RHS multiplied by (1-s) is zero).
+// The penalty rho on the diagonal of the augmented Hessian discourages
+// large s; per §3.4 rho is grown geometrically across retries until the
+// augmented QP is feasible or the retry cap is exhausted.
 //
 // On the optimal direct-path return the wrapper is bit-identical to
 // kraft_lsq_qp_solver -- only the augmented retry adds work, and only on
@@ -34,9 +35,8 @@
 // allocate.
 //
 // Reference: Kraft, D. (1988). A Software Package for Sequential
-//            Quadratic Programming. DFVLR-FB 88-28, §3.4.
-//            NLopt slsqp.c slsqpb_ lines 1923-1963 (S.G. Johnson 2009
-//            translation).
+//            Quadratic Programming. DFVLR-FB 88-28, §3.4 (Inconsistent
+//            Linearization).
 
 #include "nablapp/detail/kraft_lsq_qp.h"
 #include "nablapp/detail/active_set_qp.h"
@@ -203,6 +203,11 @@ public:
     }
 
 private:
+    // Penalty schedule and retry cap per Kraft 1988 §3.4: rho_0 = 100,
+    // rho_{k+1} = 10 * rho_k, k_max = 5. Adjusting these changes the
+    // tradeoff between aggressive relaxation (smaller initial penalty,
+    // more attempts) and tight constraint satisfaction (larger initial
+    // penalty, fewer attempts before declaring failure).
     static constexpr Scalar penalty_initial_ = Scalar(100);
     static constexpr Scalar penalty_growth_  = Scalar(10);
     static constexpr int    max_attempts_    = 5;
