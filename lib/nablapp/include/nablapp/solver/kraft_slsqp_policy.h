@@ -78,6 +78,13 @@ struct kraft_slsqp_policy
     {
         std::optional<double> initial_penalty{};       // penalty weight (default: 1.0, Kraft 1988)
         std::optional<double> penalty_growth{};        // penalty multiplier (default: 10.0, Kraft 1988)
+        // Minimum constraint violation at x_k below which the second-order
+        // correction (Maratos retry) is skipped on Armijo failure. Below this
+        // threshold the linearization is consistent enough that the SoC step
+        // adds work without materially changing the search direction.
+        // Default 1e-3 (Kraft 1988 §2.2.4 / N&W §18.3 conventional choice);
+        // the prior 1e-8 effectively always fired the retry.
+        std::optional<double> soc_min_violation{};
         line_search_options line_search{};             // Embedded line search params
         qp_options qp{};                               // QP subproblem params
         std::uint16_t stall_window{50};
@@ -509,7 +516,8 @@ struct kraft_slsqp_policy
         //
         // The correction step dp is added to p and the line search
         // is retried with the combined direction.
-        if(!ls.success && constraint_viol_0 > 1e-8)
+        const double soc_min_violation = options.soc_min_violation.value_or(1e-3);
+        if(!ls.success && constraint_viol_0 > soc_min_violation)
         {
             if constexpr(constrained<P>)
             {
