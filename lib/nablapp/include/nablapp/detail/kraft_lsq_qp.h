@@ -136,14 +136,19 @@ public:
         if(E_.rows() != n || E_.cols() != n) E_.resize(n, n);
         if(f_.size() != n) f_.resize(n);
 
-        Eigen::Matrix<Scalar, N, N> L = llt.matrixL();
+        // matrixLLT() returns a const ref to the LLT factorization's
+        // internal storage; the lower triangle holds L. Reading L(j, i)
+        // directly off the storage matrix avoids the per-call dense
+        // copy that the prior `Eigen::Matrix<Scalar, N, N> L = llt.matrixL()`
+        // construction performed.
+        const auto& LM = llt.matrixLLT();
         E_.setZero();
         for(int i = 0; i < n; ++i)
             for(int j = i; j < n; ++j)
-                E_(i, j) = L(j, i);
+                E_(i, j) = LM(j, i);
 
         // f = -L^{-1} g via a single forward triangular solve.
-        f_ = -L.template triangularView<Eigen::Lower>().solve(g);
+        f_ = -LM.template triangularView<Eigen::Lower>().solve(g);
 
         // -------------------------------------------------------------
         // Count finite bounds and build augmented inequality block.
