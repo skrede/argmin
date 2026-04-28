@@ -295,8 +295,13 @@ struct augmented_lagrangian_policy
         // inner_tol = max(eta / mu^alpha, tol_final)
         // Early outer iterations (large mu) get loose tolerance; as mu
         // decreases the inner solve tightens toward the final tolerance.
+        // CGT 1991 §3 prescribes alpha >= 0.9 to couple inner/outer
+        // iterations meaningfully; the prior alpha = 0.1 default left
+        // the schedule essentially flat across the mu range, effectively
+        // running the inner solver to its default tolerance on every
+        // outer iter regardless of penalty.
         const scalar_type tol_eta = s.opts.inner_tolerance_eta.value_or(scalar_type(0.1));
-        const scalar_type tol_alpha = s.opts.inner_tolerance_alpha.value_or(scalar_type(0.1));
+        const scalar_type tol_alpha = s.opts.inner_tolerance_alpha.value_or(scalar_type(0.9));
         const scalar_type inner_tol = std::max(
             static_cast<scalar_type>(tol_eta / std::pow(s.mu, tol_alpha)),
             inner_grad_tol);

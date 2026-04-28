@@ -66,5 +66,5 @@ GEMINI.md
 **/*Test*/
 **/*Build*/
 **/*Testing*/
-results*.csv
+**/*results*.csv
 
