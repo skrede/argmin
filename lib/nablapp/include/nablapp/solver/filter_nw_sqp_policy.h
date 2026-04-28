@@ -185,21 +185,14 @@ struct filter_nw_sqp_policy
         const int n = s.n;
         const int m = s.n_eq + s.n_ineq;
 
-        // Re-evaluate at current x (skip first iteration; init did it).
-        if(s.iteration != 0)
-        {
-            s.objective_value = s.problem->value(s.x);
-            s.problem->gradient(s.x, s.g);
-            if(m > 0)
-            {
-                s.problem->constraints(s.x, s.c_all);
-                s.c_eq = s.c_all.head(s.n_eq);
-                s.c_ineq = s.c_all.tail(s.n_ineq);
-                s.problem->constraint_jacobian(s.x, s.J_all);
-                s.J_eq = s.J_all.topRows(s.n_eq);
-                s.J_ineq = s.J_all.bottomRows(s.n_ineq);
-            }
-        }
+        // Invariant: s.objective_value, s.g, s.c_eq/c_ineq, s.J_eq/J_ineq
+        // are fresh at s.x. Init() seeds them at x_0; each step()'s
+        // bottom block (or the restoration branch) updates them at the
+        // accepted iterate before returning. basic_solver does not
+        // mutate state.x between policy.step() calls, so the redundant
+        // top-of-step re-evaluation that this branch used to perform is
+        // pure overhead (one wasted gradient + Jacobian + constraints
+        // call per outer iter from iter 1 onward).
 
         // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
         Eigen::MatrixXd A_eq = s.J_eq;
@@ -346,8 +339,8 @@ struct filter_nw_sqp_policy
             grad_f_dot_p, s.c_eq, s.c_ineq, s.sigma);
 
         double alpha = 1.0;
-        constexpr double c1 = 1e-4;
-        constexpr double rho_shrink = 0.5;
+        const double c1 = options.line_search.c1;
+        const double rho_shrink = options.line_search.rho;
         const int max_ls = options.line_search.max_iterations;
 
         Eigen::Vector<double, N> x_trial(n);
