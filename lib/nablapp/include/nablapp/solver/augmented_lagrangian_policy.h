@@ -102,6 +102,15 @@ struct augmented_lagrangian_policy
 
         scalar_type mu{};
         scalar_type prev_viol{};
+        // Penalty value used by the most recent inner solve. Tracked so
+        // step() can detect a mu change between outer iters and force a
+        // cold-start: the inner solver's L-BFGS curvature pairs are
+        // built from the *previous* penalty's augmented Lagrangian and
+        // become a stale Hessian approximation once mu shrinks (CGT 1991
+        // §3 prescribes a fresh inner state after each penalty
+        // reduction). Multiplier-only updates leave mu fixed and are
+        // small enough that warm-starting is OK.
+        std::optional<scalar_type> mu_at_last_inner_solve{};
 
         Eigen::Vector<scalar_type, N> lower;
         Eigen::Vector<scalar_type, N> upper;
@@ -316,7 +325,23 @@ struct augmented_lagrangian_policy
             .threshold = scalar_type(1e-15);
 
         // Warm-start or cold-start inner solver.
-        const bool warm_start = s.opts.warm_start_inner.value_or(true);
+        //
+        // Warm-start is correct only when the augmented Lagrangian has
+        // not changed materially since the last inner solve. CGT 1991
+        // §3 prescribes a fresh inner state after each penalty
+        // reduction because the L-BFGS curvature pairs encode the
+        // inverse Hessian of the *previous* penalty's AL function and
+        // are a stale approximation once mu shrinks. Multiplier-only
+        // updates leave mu fixed and the change is small (lambda shifts
+        // by O(c/mu)), so warm-starting through them is OK.
+        //
+        // Force cold-start when mu changed since the last inner solve;
+        // honor the user's warm_start_inner request only when mu is
+        // stable (the multiplier-only-update branch).
+        const bool warm_start_requested = s.opts.warm_start_inner.value_or(true);
+        const bool mu_changed = s.mu_at_last_inner_solve.has_value()
+                                && *s.mu_at_last_inner_solve != s.mu;
+        const bool warm_start = warm_start_requested && !mu_changed;
         if(warm_start && s.inner_solver.has_value())
         {
             // Warm restart: preserves compact_lbfgs curvature pairs (S, Y, theta).
@@ -328,6 +353,7 @@ struct augmented_lagrangian_policy
             // Cold start: construct fresh inner solver.
             s.inner_solver.emplace(*s.sub_storage, s.x, inner_opts);
         }
+        s.mu_at_last_inner_solve = s.mu;
 
         auto inner_result = s.inner_solver->solve(inner_opts);
 
