@@ -244,6 +244,11 @@ struct filter_slsqp_policy
                     auto rest = run_restoration_(s);
                     if(rest.success)
                     {
+                        // Capture x before the restoration assignment so
+                        // step_size below reports the actual primal step
+                        // norm (||rest.x - x_old||) rather than the
+                        // residual constraint violation.
+                        const double rest_step_norm = (rest.x - s.x).norm();
                         s.x = rest.x;
                         s.objective_value = s.problem->value(s.x);
                         s.problem->gradient(s.x, s.g);
@@ -262,7 +267,7 @@ struct filter_slsqp_policy
                         return step_result<double>{
                             .objective_value = s.objective_value,
                             .gradient_norm = s.g.norm(),
-                            .step_size = rest.constraint_violation,
+                            .step_size = rest_step_norm,
                             .objective_change = s.objective_value - s.objective_value,
                             .improved = false,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
@@ -519,6 +524,11 @@ struct filter_slsqp_policy
                     auto restoration_result = run_restoration_(s);
                     if(restoration_result.success)
                     {
+                        // Capture x before the restoration assignment so
+                        // step_size below reports the actual primal step
+                        // norm rather than zero.
+                        const double rest_step_norm =
+                            (restoration_result.x - s.x).norm();
                         s.x = restoration_result.x;
                         s.objective_value = s.problem->value(s.x);
                         s.problem->gradient(s.x, s.g);
@@ -537,7 +547,7 @@ struct filter_slsqp_policy
                         return step_result<double>{
                             .objective_value = s.objective_value,
                             .gradient_norm = s.g.norm(),
-                            .step_size = (s.x - restoration_result.x).norm(),
+                            .step_size = rest_step_norm,
                             .objective_change = s.objective_value - f_k,
                             .improved = s.objective_value < f_k,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),

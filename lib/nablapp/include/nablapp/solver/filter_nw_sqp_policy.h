@@ -471,6 +471,10 @@ struct filter_nw_sqp_policy
             auto rest = run_restoration_(s);
             if(rest.success)
             {
+                // Capture x before the restoration assignment so
+                // step_size below reports the actual primal step
+                // norm rather than zero.
+                const double rest_step_norm = (rest.x - s.x).norm();
                 s.x = rest.x;
                 s.objective_value = s.problem->value(s.x);
                 s.problem->gradient(s.x, s.g);
@@ -489,7 +493,7 @@ struct filter_nw_sqp_policy
                 return step_result<double>{
                     .objective_value = s.objective_value,
                     .gradient_norm = lagrangian_gradient_norm(s),
-                    .step_size = (s.x - rest.x).norm(),
+                    .step_size = rest_step_norm,
                     .objective_change = s.objective_value - f_k,
                     .improved = h_restored_l1 < h_k,
                     .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
