@@ -125,6 +125,25 @@ struct kraft_slsqp_policy
         Eigen::VectorXd lam_eq_buf;
         Eigen::VectorXd lam_ineq_buf;
 
+        // Per-step / per-line-search trial buffers. Sized in init() to
+        // (n) or (n_eq + n_ineq); reused on every step() and on every
+        // Armijo backtrack inside the line-search lambdas (phi_ls /
+        // phi_soc / merit). Eliminates the heap allocation that the
+        // earlier inline `Eigen::Vector<double, N> x_trial = ...`
+        // expression triggered on every merit-function evaluation,
+        // which dominated wall time on small constrained HS problems
+        // where Armijo can call phi() ~5-20x per outer iteration.
+        Eigen::Vector<double, N> x_trial_buf;
+        Eigen::Vector<double, N> p_lo_buf;
+        Eigen::Vector<double, N> p_hi_buf;
+        Eigen::Vector<double, N> p_buf;
+        Eigen::Vector<double, N> p_combined_buf;
+        Eigen::Vector<double, N> x_old_buf;
+        Eigen::Vector<double, N> g_old_buf;
+        Eigen::VectorXd c_trial_buf;
+        Eigen::VectorXd b_eq_soc_buf;
+        Eigen::VectorXd b_ineq_soc_buf;
+
         // Cumulative count of phi(alpha) calls made by the Armijo
         // backtracker across every step() invocation since init/reset.
         // Counts both the main merit-function line search and the
@@ -170,6 +189,15 @@ struct kraft_slsqp_policy
         s.objective_value = problem.value(x0);
         problem.gradient(x0, s.g);
 
+        // Per-step / per-line-search trial buffers.
+        s.x_trial_buf.resize(n);
+        s.p_lo_buf.resize(n);
+        s.p_hi_buf.resize(n);
+        s.p_buf.resize(n);
+        s.p_combined_buf.resize(n);
+        s.x_old_buf.resize(n);
+        s.g_old_buf.resize(n);
+
         // Bounds
         if constexpr(bound_constrained<Problem>)
         {
@@ -200,6 +228,9 @@ struct kraft_slsqp_policy
                 s.lam_buf.resize(m);
                 s.lam_eq_buf.resize(s.n_eq);
                 s.lam_ineq_buf.resize(s.n_ineq);
+                s.c_trial_buf.resize(m);
+                s.b_eq_soc_buf.resize(s.n_eq);
+                s.b_ineq_soc_buf.resize(s.n_ineq);
 
                 problem.constraints(x0, s.c_all);
                 s.c_eq = s.c_all.head(s.n_eq);
@@ -266,17 +297,16 @@ struct kraft_slsqp_policy
         // The Kraft LSQ cascade handles infinite bounds natively by
         // skipping the augmented +I / -I rows, so we do not need to
         // clip to a large finite surrogate here.
-        Eigen::Vector<double, N> p_lo = (Eigen::Vector<double, N>(s.lower) -
-                                          Eigen::Vector<double, N>(s.x)).eval();
-        Eigen::Vector<double, N> p_hi = (Eigen::Vector<double, N>(s.upper) -
-                                          Eigen::Vector<double, N>(s.x)).eval();
+        s.p_lo_buf.noalias() = s.lower - s.x;
+        s.p_hi_buf.noalias() = s.upper - s.x;
 
-        auto qp_res = s.qp_solver.solve(B, Eigen::Vector<double, N>(s.g),
+        auto qp_res = s.qp_solver.solve(B, s.g,
                                          s.J_eq, s.b_eq_workspace,
                                          s.J_ineq, s.b_ineq_workspace,
-                                         p_lo, p_hi);
+                                         s.p_lo_buf, s.p_hi_buf);
 
-        Eigen::Vector<double, N> p = qp_res.x;
+        s.p_buf = qp_res.x;
+        Eigen::Vector<double, N>& p = s.p_buf;
 
         double p_norm = p.norm();
         if(p_norm < 1e-15)
@@ -358,10 +388,9 @@ struct kraft_slsqp_policy
             {
                 if(s.n_eq + s.n_ineq > 0)
                 {
-                    Eigen::VectorXd c_all(s.n_eq + s.n_ineq);
-                    s.problem->constraints(xk, c_all);
-                    auto ceq = c_all.head(s.n_eq);
-                    auto cineq = c_all.tail(s.n_ineq);
+                    s.problem->constraints(xk, s.c_trial_buf);
+                    auto ceq = s.c_trial_buf.head(s.n_eq);
+                    auto cineq = s.c_trial_buf.tail(s.n_ineq);
 
                     if(ceq.size() > 0)
                         viol += ceq.cwiseAbs().sum();
@@ -406,13 +435,13 @@ struct kraft_slsqp_policy
         // Backtracking Armijo line search on the L1 merit.
         auto phi_ls = [&](double alpha) {
             ++s.line_search_calls;
-            Eigen::Vector<double, N> x_trial = s.x + alpha * p;
+            s.x_trial_buf.noalias() = s.x + alpha * p;
             for(int i = 0; i < n; ++i)
             {
-                if(x_trial[i] < s.lower[i]) x_trial[i] = s.lower[i];
-                if(x_trial[i] > s.upper[i]) x_trial[i] = s.upper[i];
+                if(s.x_trial_buf[i] < s.lower[i]) s.x_trial_buf[i] = s.lower[i];
+                if(s.x_trial_buf[i] > s.upper[i]) s.x_trial_buf[i] = s.upper[i];
             }
-            return merit(x_trial);
+            return merit(s.x_trial_buf);
         };
 
         auto ls = armijo(phi_ls, merit_0, dphi_merit, options.line_search);
@@ -441,48 +470,45 @@ struct kraft_slsqp_policy
             {
                 if(s.n_eq + s.n_ineq > 0)
                 {
-                    Eigen::Vector<double, N> x_trial = s.x + p;
+                    s.x_trial_buf.noalias() = s.x + p;
                     for(int i = 0; i < n; ++i)
                     {
-                        if(x_trial[i] < s.lower[i]) x_trial[i] = s.lower[i];
-                        if(x_trial[i] > s.upper[i]) x_trial[i] = s.upper[i];
+                        if(s.x_trial_buf[i] < s.lower[i]) s.x_trial_buf[i] = s.lower[i];
+                        if(s.x_trial_buf[i] > s.upper[i]) s.x_trial_buf[i] = s.upper[i];
                     }
 
-                    Eigen::VectorXd c_trial(s.n_eq + s.n_ineq);
-                    s.problem->constraints(x_trial, c_trial);
-                    auto c_eq_trial = c_trial.head(s.n_eq);
-                    auto c_ineq_trial = c_trial.tail(s.n_ineq);
+                    s.problem->constraints(s.x_trial_buf, s.c_trial_buf);
+                    auto c_eq_trial = s.c_trial_buf.head(s.n_eq);
+                    auto c_ineq_trial = s.c_trial_buf.tail(s.n_ineq);
 
-                    Eigen::VectorXd b_eq_soc = s.n_eq > 0
-                        ? (-c_eq_trial + s.J_eq * p).eval()
-                        : Eigen::VectorXd{};
-                    Eigen::VectorXd b_ineq_soc = s.n_ineq > 0
-                        ? (-c_ineq_trial + s.J_ineq * p).eval()
-                        : Eigen::VectorXd{};
+                    if(s.n_eq > 0)
+                        s.b_eq_soc_buf.noalias() = -c_eq_trial + s.J_eq * p;
+                    if(s.n_ineq > 0)
+                        s.b_ineq_soc_buf.noalias() = -c_ineq_trial + s.J_ineq * p;
 
                     auto soc_res = s.qp_solver.solve(
-                        B, Eigen::Vector<double, N>(s.g),
-                        s.J_eq, b_eq_soc, s.J_ineq, b_ineq_soc,
-                        p_lo, p_hi);
+                        B, s.g,
+                        s.J_eq, s.b_eq_soc_buf, s.J_ineq, s.b_ineq_soc_buf,
+                        s.p_lo_buf, s.p_hi_buf);
 
                     if(soc_res.status == detail::qp_status::optimal)
                     {
-                        Eigen::Vector<double, N> p_combined = p + soc_res.x;
+                        s.p_combined_buf.noalias() = p + soc_res.x;
                         auto phi_soc = [&](double a) {
                             ++s.line_search_calls;
-                            Eigen::Vector<double, N> x_trial = s.x + a * p_combined;
+                            s.x_trial_buf.noalias() = s.x + a * s.p_combined_buf;
                             for(int i = 0; i < n; ++i)
                             {
-                                if(x_trial[i] < s.lower[i]) x_trial[i] = s.lower[i];
-                                if(x_trial[i] > s.upper[i]) x_trial[i] = s.upper[i];
+                                if(s.x_trial_buf[i] < s.lower[i]) s.x_trial_buf[i] = s.lower[i];
+                                if(s.x_trial_buf[i] > s.upper[i]) s.x_trial_buf[i] = s.upper[i];
                             }
-                            return merit(x_trial);
+                            return merit(s.x_trial_buf);
                         };
                         auto ls_soc = armijo(phi_soc, merit_0, dphi_merit,
                                              options.line_search);
                         if(ls_soc.success && ls_soc.alpha > alpha)
                         {
-                            p = p_combined;
+                            p = s.p_combined_buf;
                             alpha = ls_soc.alpha;
                             ls_success = true;
                         }
@@ -547,7 +573,8 @@ struct kraft_slsqp_policy
             alpha = 1e-4;
 
         // Update iterate
-        Eigen::Vector<double, N> x_old = s.x;
+        s.x_old_buf = s.x;
+        Eigen::Vector<double, N>& x_old = s.x_old_buf;
         double old_f = s.objective_value;
         s.x = s.x + alpha * p;
 
@@ -559,7 +586,8 @@ struct kraft_slsqp_policy
 
         s.objective_value = s.problem->value(s.x);
 
-        Eigen::Vector<double, N> g_old = s.g;
+        s.g_old_buf = s.g;
+        Eigen::Vector<double, N>& g_old = s.g_old_buf;
         s.problem->gradient(s.x, s.g);
 
         if constexpr(constrained<P>)
