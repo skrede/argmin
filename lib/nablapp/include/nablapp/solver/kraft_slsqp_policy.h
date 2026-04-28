@@ -375,57 +375,30 @@ struct kraft_slsqp_policy
 
         double merit_0 = merit(s.x);
 
-        // NLopt slsqp.c slsqpb_ lines 2014-2017 descent guard for Kraft
-        // 1988 §3.4 inconsistent-linearization recovery. When the QP
-        // wrapper produced the step via augmentation (relaxation_factor
-        // > 0), weight the constraint-violation term in the L1-merit
-        // descent test by h4 = 1 - s_aug. If the resulting directional
-        // derivative is non-negative, the augmented step is not a
-        // descent direction for the merit even with the relaxation
-        // accounted for; reset BFGS to identity and return as a null
-        // step (NLopt's L110 behavior: the next outer iter restarts
-        // with B = I). For the direct path (relaxation_factor = 0),
-        // h4 = 1 and the formula reduces to the unweighted descent
-        // test -- direct-path behavior is unchanged.
+        // h4-weighted directional derivative of the L1 merit (Kraft
+        // 1988 §3.4). When the QP wrapper produced the step via
+        // augmentation (relaxation_factor > 0), the augmented step
+        // targets a (1 - s_aug)-scaled relaxation of the original
+        // linearized constraints; weighting the violation term by
+        // h4 = 1 - s_aug gives the slope of the merit along p that
+        // reflects the residual violation the step actually attacks.
+        // For the direct path (relaxation_factor = 0), h4 = 1 and
+        // dphi_merit reduces to the standard unweighted slope.
+        //
+        // The h4 slope feeds the Armijo line search below; rejection
+        // of the augmented step is deferred to a post-line-search
+        // guard so an alpha-shrunk version of p has a chance to
+        // satisfy the merit decrease test even when the unit-step
+        // slope is non-negative. Only when the line search and the
+        // second-order correction both fail to find a decreasing
+        // step do we reset BFGS and null-step on the augmented path.
+        //
+        // Reference: Kraft, D. (1988). DFVLR-FB 88-28, §3 (line
+        //            search) and §3.4 (Inconsistent Linearization).
+        //            Nocedal & Wright (2006). Numerical Optimization,
+        //            2e, §18.3 (L1 merit function for SQP line search).
         const double h4 = 1.0 - qp_res.relaxation_factor;
         double dphi_merit = s.g.dot(p) - s.sigma * constraint_viol_0 * h4;
-
-        if(qp_res.relaxation_factor > 0.0 && dphi_merit >= 0.0)
-        {
-            s.hessian.reset();
-
-            Eigen::VectorXd lambda_eq_reset = Eigen::VectorXd::Zero(s.n_eq);
-            Eigen::VectorXd mu_ineq_reset = Eigen::VectorXd::Zero(s.n_ineq);
-            if constexpr(constrained<P>)
-            {
-                if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
-                {
-                    if(s.n_eq > 0)
-                        lambda_eq_reset = qp_res.lambda.head(s.n_eq);
-                    if(s.n_ineq > 0)
-                        mu_ineq_reset = qp_res.lambda.segment(s.n_eq, s.n_ineq);
-                }
-            }
-            double kkt_reset = detail::kkt_residual<double,
-                                                    Eigen::Dynamic,
-                                                    Eigen::Dynamic,
-                                                    Eigen::Dynamic>(
-                s.g, s.J_eq, s.J_ineq,
-                lambda_eq_reset, mu_ineq_reset,
-                s.c_eq, s.c_ineq);
-
-            return step_result<double>{
-                .objective_value = s.objective_value,
-                .gradient_norm = s.g.norm(),
-                .step_size = 0.0,
-                .objective_change = 0.0,
-                .improved = false,
-                .is_null_step = true,
-                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
-                .x_norm = s.x.norm(),
-                .kkt_residual = kkt_reset,
-            };
-        }
 
         if(dphi_merit >= 0.0)
             dphi_merit = -1e-8;
@@ -444,6 +417,7 @@ struct kraft_slsqp_policy
 
         auto ls = armijo(phi_ls, merit_0, dphi_merit, options.line_search);
         double alpha = ls.alpha;
+        bool ls_success = ls.success;
 
         // Second-order correction (Kraft 1988 Section 2.2.4,
         // N&W Section 18.3 "Maratos effect").
@@ -510,10 +484,63 @@ struct kraft_slsqp_policy
                         {
                             p = p_combined;
                             alpha = ls_soc.alpha;
+                            ls_success = true;
                         }
                     }
                 }
             }
+        }
+
+        // Deferred descent guard for the augmented-QP path (Kraft 1988
+        // §3.4 inconsistent-linearization recovery). If the Armijo line
+        // search and the second-order correction retry both failed to
+        // find a step that decreases the L1 merit, the augmented
+        // direction is not a usable descent direction even after alpha
+        // shrinking. Reset BFGS to identity and return as a null step
+        // so the next outer iter restarts with B = I.
+        //
+        // The direct path (relaxation_factor = 0) is intentionally not
+        // null-stepped here: it keeps the alpha=1e-4 fallback below,
+        // matching SLSQP's behavior of taking a small forced step on
+        // rare unit-step descent failures rather than discarding the
+        // BFGS history. Resetting BFGS only on the augmented path
+        // localizes the guard to cells where inconsistent linearization
+        // is the actual mechanism (Kraft 1988 §3 line-search recovery).
+        if(!ls_success && qp_res.relaxation_factor > 0.0)
+        {
+            s.hessian.reset();
+
+            Eigen::VectorXd lambda_eq_reset = Eigen::VectorXd::Zero(s.n_eq);
+            Eigen::VectorXd mu_ineq_reset = Eigen::VectorXd::Zero(s.n_ineq);
+            if constexpr(constrained<P>)
+            {
+                if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
+                {
+                    if(s.n_eq > 0)
+                        lambda_eq_reset = qp_res.lambda.head(s.n_eq);
+                    if(s.n_ineq > 0)
+                        mu_ineq_reset = qp_res.lambda.segment(s.n_eq, s.n_ineq);
+                }
+            }
+            double kkt_reset = detail::kkt_residual<double,
+                                                    Eigen::Dynamic,
+                                                    Eigen::Dynamic,
+                                                    Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq,
+                lambda_eq_reset, mu_ineq_reset,
+                s.c_eq, s.c_ineq);
+
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = s.g.norm(),
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .x_norm = s.x.norm(),
+                .kkt_residual = kkt_reset,
+            };
         }
 
         if(alpha < 1e-15)
