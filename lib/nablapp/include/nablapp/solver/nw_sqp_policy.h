@@ -300,9 +300,26 @@ struct nw_sqp_policy
                 lambda_eq_null, mu_ineq_null,
                 s.c_eq, s.c_ineq);
 
+            // Use the CURRENT QP multipliers (lambda_eq_null /
+            // mu_ineq_null) to form the Lagrangian-gradient norm.
+            // The previous lagrangian_gradient_norm(s) call read
+            // s.lambda from the prior successful step, which is stale
+            // on a zero-step bailout and made gradient_tolerance_criterion
+            // fire silently at non-stationary HS071 iterates.
+            double grad_L_null_norm = s.g.norm();
+            if(m > 0)
+            {
+                Eigen::Vector<double, N> grad_L = s.g;
+                if(s.n_eq > 0)
+                    grad_L.noalias() -= s.J_eq.transpose() * lambda_eq_null;
+                if(s.n_ineq > 0)
+                    grad_L.noalias() -= s.J_ineq.transpose() * mu_ineq_null;
+                grad_L_null_norm = grad_L.norm();
+            }
+
             return step_result<double>{
                 .objective_value = s.objective_value,
-                .gradient_norm = lagrangian_gradient_norm(s),
+                .gradient_norm = grad_L_null_norm,
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
