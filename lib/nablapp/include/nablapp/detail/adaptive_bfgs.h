@@ -194,7 +194,8 @@ private:
     void rebuild_()
     {
         const int n = static_cast<int>(B_.rows());
-        B_ = theta_ * Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+        B_.setIdentity(n, n);
+        B_ *= theta_;
 
         const int k = count_;
         if(k == 0) return;
@@ -219,22 +220,15 @@ private:
         // Solve M * Z = W^T  ->  Z = M^{-1} W^T   (2k x n).
         // M is symmetric indefinite (it has a -D diagonal block in the
         // lower-right); Eigen::LDLT copes with this for the small 2k x 2k
-        // sizes used here (k <= MaxHistory = 10). Match compact_lbfgs's
+        // sizes used here (k <= MaxHistory). Match compact_lbfgs's
         // tolerance by not checking ldlt.info().
-        //
-        // The LDLT template parameter mirrors M_'s fixed-max storage form
-        // (Dynamic rows/cols with compile-time MaxRows/MaxCols = 2*MaxHistory)
-        // so Eigen uses stack-allocated scratch in the decomposition instead
-        // of heap, eliminating the per-push malloc/free pair that showed up
-        // as the 6.34% self-time hotspot in cartan's UR3e perf profile
-        // (Eigen::internal::ldlt_inplace<1>::unblocked on a fully dynamic
-        // Matrix<double, -1, -1>).
-        Eigen::LDLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
-                                   0, 2 * MaxHistory, 2 * MaxHistory>> ldlt(M_);
-        const auto Z = ldlt.solve(W_.transpose()).eval();
+        ldlt_.compute(M_);
+        Z_.resize(2 * k, n);
+        Z_ = W_.transpose();
+        ldlt_.solveInPlace(Z_);
 
         // B <- theta * I - W Z
-        B_.noalias() -= W_ * Z;
+        B_.noalias() -= W_ * Z_;
     }
 
     Eigen::Matrix<Scalar, N, N> B_;
@@ -244,9 +238,18 @@ private:
     Eigen::Matrix<Scalar, MaxHistory, MaxHistory> STS_;
     Eigen::Matrix<Scalar, MaxHistory, MaxHistory> STY_;
     Eigen::Matrix<Scalar, MaxHistory, 1> sTy_;
+
+    // M_, W_, Z_ have Dynamic runtime extents bounded at compile time by
+    // (2 * MaxHistory) on the history axis, which lets Eigen route the
+    // resize / factorization / solve through stack-allocated scratch
+    // instead of per-push heap allocation. ldlt_ is hoisted to a member
+    // so its internal m_matrix copy reuses the same fixed-max storage.
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, 0,
                    2 * MaxHistory, 2 * MaxHistory> M_;
     Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0, N, 2 * MaxHistory> W_;
+    Eigen::Matrix<Scalar, Eigen::Dynamic, N, 0, 2 * MaxHistory, N> Z_;
+    Eigen::LDLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, 0,
+                               2 * MaxHistory, 2 * MaxHistory>> ldlt_;
     int head_;
     int count_;
 };
