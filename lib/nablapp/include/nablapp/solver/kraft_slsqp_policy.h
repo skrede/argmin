@@ -140,9 +140,21 @@ struct kraft_slsqp_policy
         Eigen::Vector<double, N> p_combined_buf;
         Eigen::Vector<double, N> x_old_buf;
         Eigen::Vector<double, N> g_old_buf;
+        Eigen::Vector<double, N> grad_L_old_buf;
+        Eigen::Vector<double, N> grad_L_new_buf;
+        Eigen::Vector<double, N> sk_buf;
+        Eigen::Vector<double, N> yk_buf;
         Eigen::VectorXd c_trial_buf;
         Eigen::VectorXd b_eq_soc_buf;
         Eigen::VectorXd b_ineq_soc_buf;
+
+        // Shared buffer for the lambda_eq / mu_ineq scatter in the
+        // null-step, deferred-guard reset, and end-of-step KKT residual
+        // paths. At most one of those paths fires per step() call and
+        // none survive across calls, so the same buffer pair is safe
+        // to reuse instead of zero-allocating fresh VectorXds.
+        Eigen::VectorXd kkt_lambda_eq_buf;
+        Eigen::VectorXd kkt_mu_ineq_buf;
 
         // Cumulative count of phi(alpha) calls made by the Armijo
         // backtracker across every step() invocation since init/reset.
@@ -197,6 +209,10 @@ struct kraft_slsqp_policy
         s.p_combined_buf.resize(n);
         s.x_old_buf.resize(n);
         s.g_old_buf.resize(n);
+        s.grad_L_old_buf.resize(n);
+        s.grad_L_new_buf.resize(n);
+        s.sk_buf.resize(n);
+        s.yk_buf.resize(n);
 
         // Bounds
         if constexpr(bound_constrained<Problem>)
@@ -231,6 +247,8 @@ struct kraft_slsqp_policy
                 s.c_trial_buf.resize(m);
                 s.b_eq_soc_buf.resize(s.n_eq);
                 s.b_ineq_soc_buf.resize(s.n_ineq);
+                s.kkt_lambda_eq_buf.resize(s.n_eq);
+                s.kkt_mu_ineq_buf.resize(s.n_ineq);
 
                 problem.constraints(x0, s.c_all);
                 s.c_eq = s.c_all.head(s.n_eq);
@@ -327,16 +345,16 @@ struct kraft_slsqp_policy
             // Reference: N&W 2e Section 18.3 (SQP null-step semantics);
             //            Definition 12.1 + eq. 12.34 (full KKT
             //            first-order optimality E-measure).
-            Eigen::VectorXd lambda_eq_null = Eigen::VectorXd::Zero(s.n_eq);
-            Eigen::VectorXd mu_ineq_null = Eigen::VectorXd::Zero(s.n_ineq);
+            s.kkt_lambda_eq_buf.setZero(s.n_eq);
+            s.kkt_mu_ineq_buf.setZero(s.n_ineq);
             if constexpr(constrained<P>)
             {
                 if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
                 {
                     if(s.n_eq > 0)
-                        lambda_eq_null = qp_res.lambda.head(s.n_eq);
+                        s.kkt_lambda_eq_buf = qp_res.lambda.head(s.n_eq);
                     if(s.n_ineq > 0)
-                        mu_ineq_null = qp_res.lambda.segment(s.n_eq, s.n_ineq);
+                        s.kkt_mu_ineq_buf = qp_res.lambda.segment(s.n_eq, s.n_ineq);
                 }
             }
             double kkt_null = detail::kkt_residual<double,
@@ -344,7 +362,7 @@ struct kraft_slsqp_policy
                                                    Eigen::Dynamic,
                                                    Eigen::Dynamic>(
                 s.g, s.J_eq, s.J_ineq,
-                lambda_eq_null, mu_ineq_null,
+                s.kkt_lambda_eq_buf, s.kkt_mu_ineq_buf,
                 s.c_eq, s.c_ineq);
 
             return step_result<double>{
@@ -536,16 +554,16 @@ struct kraft_slsqp_policy
         {
             s.hessian.reset();
 
-            Eigen::VectorXd lambda_eq_reset = Eigen::VectorXd::Zero(s.n_eq);
-            Eigen::VectorXd mu_ineq_reset = Eigen::VectorXd::Zero(s.n_ineq);
+            s.kkt_lambda_eq_buf.setZero(s.n_eq);
+            s.kkt_mu_ineq_buf.setZero(s.n_ineq);
             if constexpr(constrained<P>)
             {
                 if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
                 {
                     if(s.n_eq > 0)
-                        lambda_eq_reset = qp_res.lambda.head(s.n_eq);
+                        s.kkt_lambda_eq_buf = qp_res.lambda.head(s.n_eq);
                     if(s.n_ineq > 0)
-                        mu_ineq_reset = qp_res.lambda.segment(s.n_eq, s.n_ineq);
+                        s.kkt_mu_ineq_buf = qp_res.lambda.segment(s.n_eq, s.n_ineq);
                 }
             }
             double kkt_reset = detail::kkt_residual<double,
@@ -553,7 +571,7 @@ struct kraft_slsqp_policy
                                                     Eigen::Dynamic,
                                                     Eigen::Dynamic>(
                 s.g, s.J_eq, s.J_ineq,
-                lambda_eq_reset, mu_ineq_reset,
+                s.kkt_lambda_eq_buf, s.kkt_mu_ineq_buf,
                 s.c_eq, s.c_ineq);
 
             return step_result<double>{
@@ -617,8 +635,10 @@ struct kraft_slsqp_policy
         // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3 (SLSQP
         //            Hessian of the Lagrangian);
         //            N&W eq. 18.13 (Lagrangian Hessian).
-        Eigen::Vector<double, N> grad_L_old = g_old;
-        Eigen::Vector<double, N> grad_L_new = s.g;
+        s.grad_L_old_buf = g_old;
+        s.grad_L_new_buf = s.g;
+        Eigen::Vector<double, N>& grad_L_old = s.grad_L_old_buf;
+        Eigen::Vector<double, N>& grad_L_new = s.grad_L_new_buf;
 
         if constexpr(constrained<P>)
         {
@@ -655,8 +675,10 @@ struct kraft_slsqp_policy
             }
         }
 
-        Eigen::Vector<double, N> sk = s.x - x_old;
-        Eigen::Vector<double, N> yk = grad_L_new - grad_L_old;
+        s.sk_buf.noalias() = s.x - x_old;
+        s.yk_buf.noalias() = grad_L_new - grad_L_old;
+        Eigen::Vector<double, N>& sk = s.sk_buf;
+        Eigen::Vector<double, N>& yk = s.yk_buf;
 
         // Skip BFGS updates on non-positive curvature pairs.
         // In SLSQP the Lagrangian gradient difference y_k can easily
@@ -695,16 +717,16 @@ struct kraft_slsqp_policy
         //            stationarity, primal feasibility, dual feasibility,
         //            complementarity); eq. 12.34 (Lagrangian
         //            stationarity leg).
-        Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
-        Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
+        s.kkt_lambda_eq_buf.setZero(s.n_eq);
+        s.kkt_mu_ineq_buf.setZero(s.n_ineq);
         if constexpr(constrained<P>)
         {
             if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
             {
                 if(s.n_eq > 0)
-                    lambda_eq_kkt = qp_res.lambda.head(s.n_eq);
+                    s.kkt_lambda_eq_buf = qp_res.lambda.head(s.n_eq);
                 if(s.n_ineq > 0)
-                    mu_ineq_kkt = qp_res.lambda.segment(s.n_eq, s.n_ineq);
+                    s.kkt_mu_ineq_buf = qp_res.lambda.segment(s.n_eq, s.n_ineq);
             }
         }
         double kkt = detail::kkt_residual<double,
@@ -712,7 +734,7 @@ struct kraft_slsqp_policy
                                           Eigen::Dynamic,
                                           Eigen::Dynamic>(
             s.g, s.J_eq, s.J_ineq,
-            lambda_eq_kkt, mu_ineq_kkt,
+            s.kkt_lambda_eq_buf, s.kkt_mu_ineq_buf,
             s.c_eq, s.c_ineq);
 
         // Primal feasibility (L-infinity) reported into
