@@ -194,11 +194,17 @@ struct cmaes_policy
         else
             s.rng = detail::xoshiro256{static_cast<std::uint64_t>(std::random_device{}())};
 
-        // Hansen stagnation window: max(120, 30*n/lambda).
-        // Reference: Hansen (2023) arXiv:1604.00772, Section B.3.
-        s.stagnation_window_min = std::max(
-            std::uint32_t{120},
-            static_cast<std::uint32_t>(30.0 * n / s.params.lambda));
+        // Hansen stagnation window: 120 + ceil(30*n/lambda) (additive,
+        // not max). Pre-fix the `max(120, 30*n/lambda)` form picked 120
+        // for any (n, lambda) where 30*n/lambda <= 120 -- which is
+        // basically every typical low-n CMA-ES run (n=2, lambda=6:
+        // 30*2/6 = 10, max picks 120; n=10, lambda=10: 30*10/10 = 30,
+        // max picks 120). Stagnation then fired at gen=120 regardless
+        // of elapsed history. The Hansen 2023 §B.3 formula is additive
+        // -- 120 + ceil(30*n/lambda) -- so the term scales with the
+        // dimension/popsize ratio rather than being clamped out.
+        s.stagnation_window_min = std::uint32_t{120}
+            + static_cast<std::uint32_t>(std::ceil(30.0 * n / s.params.lambda));
         if(options.stagnation_window.has_value())
             s.stagnation_window_min = *options.stagnation_window;
 
@@ -368,9 +374,19 @@ struct cmaes_policy
                 stagnated = true;
 
             // Hansen B.3 item 5: Stagnation criterion with median history window.
-            // When both histories have >= min_window entries, check if the median
+            // When both histories have >= window entries, check if the median
             // of the last 30% is not improving vs the median of the first 30%.
-            auto window = static_cast<std::size_t>(s.stagnation_window_min);
+            //
+            // Dynamic cap: as the search progresses, expand the comparison
+            // window so stagnation becomes harder to fire late in the run
+            // (Hansen 2023 §B.3 "0.2 * generation" cap). Effective window
+            // grows from `stagnation_window_min` (early) to
+            // `ceil(0.2 * generation)` (late). This keeps the stagnation
+            // detector usable across the full IPOP-style restart sweep
+            // without needing a per-restart hand-tune.
+            auto window = std::max(
+                static_cast<std::size_t>(s.stagnation_window_min),
+                static_cast<std::size_t>(std::ceil(0.2 * static_cast<double>(s.generation))));
             if(!stagnated && s.best_fitness_history.size() >= window)
             {
                 auto check_stagnation = [](const std::vector<double>& history,
