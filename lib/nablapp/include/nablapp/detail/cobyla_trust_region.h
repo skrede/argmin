@@ -125,7 +125,8 @@ public:
         Scalar rho,
         const Eigen::Vector<Scalar, N>& lower,
         const Eigen::Vector<Scalar, N>& upper,
-        const Eigen::Vector<Scalar, N>& x_current)
+        const Eigen::Vector<Scalar, N>& x_current,
+        Scalar parmu)
     {
         const int m = static_cast<int>(constraint_offsets.size());
         int m_expanded = m + n_eq;
@@ -141,7 +142,14 @@ public:
         }
 
         d_.setZero();
-        Scalar penalty = Scalar(10);
+        // The inner projected-gradient loop needs a non-zero penalty to
+        // make progress on constraint violation when parmu is small or
+        // zero. Powell's TRSTLP solves the LP exactly, no penalty needed,
+        // but our projected-gradient surrogate (C2 in the static audit,
+        // deferred to v0.3.x rewrite) requires a positive weight. Use
+        // max(parmu, 1) so adapted parmu drives the inner loop once it
+        // grows, while a sane default keeps iter-0 progress.
+        Scalar penalty = std::max(parmu, Scalar(1));
         Scalar step_size = rho * Scalar(0.5);
 
         for(int iter = 0; iter < 100; ++iter)
@@ -210,13 +218,14 @@ Eigen::Vector<Scalar, N> solve_linear_subproblem(
     Scalar rho,
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper,
-    const Eigen::Vector<Scalar, N>& x_current)
+    const Eigen::Vector<Scalar, N>& x_current,
+    Scalar parmu = Scalar(10))
 {
     const int n = static_cast<int>(obj_gradient.size());
     const int m = static_cast<int>(constraint_offsets.size());
     cobyla_trust_region_solver<Scalar, N, M> solver(n, m, n_eq);
     return solver.solve(obj_gradient, constraint_gradients, constraint_offsets,
-                        n_eq, rho, lower, upper, x_current);
+                        n_eq, rho, lower, upper, x_current, parmu);
 }
 
 // Update trust radius following Powell's COBYLA schedule.

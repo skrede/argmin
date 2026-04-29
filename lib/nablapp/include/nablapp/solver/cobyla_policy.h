@@ -73,6 +73,14 @@ struct cobyla_policy
         double rho{};
         double rho_end{};
         double objective_value{};
+        // Adaptive merit penalty (Powell 1994 §5). Starts at zero and
+        // adapts upward via barmu = prerec / prerem with the rule
+        // parmu_new = max(parmu, 2*barmu) when parmu < 1.5*barmu. Used
+        // by the trust-region inner loop, the actual/predicted reduction
+        // comparison, and the find_best_point merit. Replaces the
+        // pre-fix hardcoded penalty=10.0 (trust region + step()) and
+        // 1e6 (find_best_point) flagged by static-audit C1.
+        double parmu{0.0};
         Eigen::VectorXd c_eq;
         Eigen::VectorXd c_ineq;
         Eigen::VectorXd lower;
@@ -176,7 +184,10 @@ struct cobyla_policy
         // Compute linearised constraint offsets at best point
         Eigen::VectorXd constraint_offsets = compute_constraint_offsets(s);
 
-        // Solve trust-region subproblem using pre-allocated solver
+        // Solve trust-region subproblem using pre-allocated solver.
+        // Adaptive parmu drives the inner projected-gradient penalty;
+        // the solver internally floors at max(parmu, 1) so iter-0 with
+        // parmu = 0 still produces a feasible-leaning step.
         Eigen::VectorXd d = s.trust_region_solver->solve(
             models.objective_gradient,
             models.constraint_gradients,
@@ -185,7 +196,8 @@ struct cobyla_policy
             s.rho,
             s.lower,
             s.upper,
-            s.x);
+            s.x,
+            s.parmu);
 
         double d_norm = d.norm();
 
@@ -205,16 +217,37 @@ struct cobyla_policy
         if(s.m_total > 0)
             s.problem->constraints(x_trial, c_trial);
 
-        // Predicted vs actual reduction (using merit: f + penalty * violation)
-        double penalty = 10.0;
+        // Powell adaptive parmu (Powell 1994 §5). Compute predicted
+        // reductions in objective (prerec) and constraint violation
+        // (prerem); set barmu = prerec / prerem when prerem > 0; if the
+        // current parmu is below 1.5 * barmu, raise it to 2 * barmu so
+        // the merit comparison and find_best_point honour the new
+        // constraint-vs-objective trade-off. Then re-find the best
+        // simplex vertex under the new parmu, since the merit ranking
+        // can change. Pre-fix this routine used a constant parmu = 10
+        // that trapped HS024 at f = -0.30 instead of f* = -1.0
+        // (static-audit C1).
         double viol_old = current_violation(s);
         double viol_trial = compute_violation(c_trial, s.n_eq, s.n_ineq);
 
+        double prerec = -models.objective_gradient.dot(d);
+        double linearised_viol_d = linearised_violation_at(
+            models.constraint_gradients, constraint_offsets, s.n_eq, d);
+        double prerem = viol_old - linearised_viol_d;
+
+        if(prerem > 0.0)
+        {
+            double barmu = prerec / prerem;
+            if(s.parmu < 1.5 * barmu)
+                s.parmu = std::max(s.parmu, 2.0 * barmu);
+        }
+
+        // Re-find best vertex under updated parmu (merit ranking may shift).
+        s.best_idx = find_best_point(s);
+
+        double penalty = s.parmu;
         double actual = (old_f + penalty * viol_old) - (f_trial + penalty * viol_trial);
-        double predicted = -models.objective_gradient.dot(d) +
-                           penalty * (viol_old - linearised_violation_at(
-                               models.constraint_gradients, constraint_offsets,
-                               s.n_eq, d));
+        double predicted = prerec + penalty * prerem;
 
         // Update trust radius
         s.rho = detail::compute_rho_update(s.rho, s.rho_end, actual, predicted);
@@ -296,13 +329,27 @@ struct cobyla_policy
 
 private:
 
-    // Find the best simplex vertex, preferring feasible points.
+    // Find the best simplex vertex via Powell's adaptive merit
+    // psi = f + parmu * viol. The merit weight is the same parmu used
+    // by the trust-region inner loop and the actual/predicted reduction
+    // comparison; when parmu has not yet adapted (early iterations,
+    // value still small), a feasibility-first floor keeps an infeasible
+    // vertex from winning over a feasible one purely on objective. Once
+    // parmu adapts upward past the floor, the adaptive value takes over
+    // and feasibility tradeoffs follow Powell's recipe.
+    //
+    // Reference: Powell 1994 §5 (merit function); static-audit C1.
     template <typename P>
     static int find_best_point(const state_type<P>& s)
     {
         const int nv = static_cast<int>(s.f_simplex.size());
         int best = 0;
         double best_merit = std::numeric_limits<double>::infinity();
+        // Floor at 1e3 -- enough to keep a small-violation infeasible
+        // vertex from beating a feasible one on a slightly higher f,
+        // small enough that any meaningful adapted parmu (typical
+        // values 10-1e6 on HS-class problems) takes over.
+        const double weight = std::max(s.parmu, 1e3);
 
         for(int i = 0; i < nv; ++i)
         {
@@ -310,8 +357,7 @@ private:
             if(s.m_total > 0)
                 viol = compute_violation(s.c_simplex.col(i), s.n_eq, s.n_ineq);
 
-            // Feasibility-first: feasible beats infeasible regardless of objective
-            double merit = s.f_simplex[i] + 1e6 * viol;
+            double merit = s.f_simplex[i] + weight * viol;
             if(merit < best_merit)
             {
                 best_merit = merit;
