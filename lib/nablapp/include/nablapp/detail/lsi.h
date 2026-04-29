@@ -33,8 +33,16 @@ struct lsi_workspace
     using matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
     using vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
 
+    // Plain Householder QR (not column-pivoting). E in this LSI call site
+    // is full rank by construction: it arrives either as a Cholesky-derived
+    // upper triangular E = L^T (kraft_lsq_qp path) or as the residual R_e
+    // from an outer LSEI QR(E_tilde.rightCols). Column-pivoting buys us
+    // nothing in either case, while costing a per-column max-norm scan,
+    // permutation tracking, and the heap-resident permutation matrix on
+    // every solve. Mirrors NLopt slsqp.c lsi_ which uses plain Householder
+    // (h12_) for the same reason.
     matrix_t E_dyn;
-    Eigen::ColPivHouseholderQR<matrix_t> qr;
+    Eigen::HouseholderQR<matrix_t> qr;
     matrix_t R;
     vector_t y1;
     matrix_t G_perm;
@@ -101,19 +109,12 @@ int lsi(
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_w,
     int n, int m_ineq)
 {
-    // QR call site dispatch note.
-    //
-    // The caller ABI keeps E as Matrix<Scalar, N, N> so fixed-N callers
-    // benefit from compile-time storage on the input. For the column-
-    // pivoting Householder QR itself, however, we copy E into a dynamic
-    // buffer (ws.E_dyn) and factor the copy. At runtime N=6 this routes
-    // through Eigen's dynamic-size ColPivHouseholderQR kernel, which
-    // profiles measurably faster than the fixed-size 6x6 specialization
-    // on the downstream workloads this routine is called from.
-    //
-    // Downstream quantities (R, y1, x_prime, rhs, y) live in the
-    // workspace as dynamic vectors; the back-transform writes the final
-    // result into the fixed-size x output.
+    // Plain HouseholderQR (no column pivoting). E in this call site is
+    // full rank by construction: either E = L^T from a Cholesky upstream
+    // (kraft_lsq_qp) or R_e from an outer LSEI QR step (lsei). Pivoting
+    // adds per-column max-norm scanning and a permutation matrix that we
+    // otherwise have no use for. Matches NLopt slsqp.c lsi_ which uses
+    // plain Householder reflectors via h12_.
     //
     // Reference: Lawson, C.L. & Hanson, R.J. (1974). Solving Least
     //            Squares Problems. Ch. 23.5, Algorithm LSI.
@@ -123,36 +124,35 @@ int lsi(
     ws.E_dyn = E;
     ws.qr.compute(ws.E_dyn);
 
-    const Scalar thresh = std::numeric_limits<Scalar>::epsilon()
-                          * Scalar(n)
-                          * ws.qr.maxPivot();
-    ws.qr.setThreshold(thresh);
-    const int rank = static_cast<int>(ws.qr.rank());
-    if(rank < n)
-    {
-        // E must be full rank for LSI to reduce to an LDP cleanly. A
-        // rank-deficient E in this context indicates a degenerate
-        // Hessian factorization.
-        return 6;
-    }
-
-    // R is the upper triangular part of qr.matrixR(). E is square
-    // (n = N at the template level), so matrixR() is already n x n
-    // and we don't need a topLeftCorner crop.
+    // R is the upper triangular part of qr.matrixQR(). E is square
+    // (n = N at the template level), so matrixQR() is already n x n.
+    // Rank check via diagonal of R: a zero on the diagonal indicates
+    // E is singular, in which case the LDP back-substitution divides
+    // by zero. Mirrors NLopt slsqp.c lsi_ which checks |e[j,j]| < epmach.
     if(ws.R.rows() != n || ws.R.cols() != n) ws.R.resize(n, n);
-    ws.R = ws.qr.matrixR().template triangularView<Eigen::Upper>();
+    ws.R = ws.qr.matrixQR().template triangularView<Eigen::Upper>();
+
+    {
+        const Scalar rank_eps = std::numeric_limits<Scalar>::epsilon()
+                                * Scalar(n) * Scalar(10);
+        for(int i = 0; i < n; ++i)
+        {
+            if(std::abs(ws.R(i, i)) <= rank_eps)
+                return 6;
+        }
+    }
 
     // y1 = Q^T f.
     if(ws.y1.size() != n) ws.y1.resize(n);
-    ws.y1.noalias() = ws.qr.matrixQ().transpose() * f;
+    ws.y1.noalias() = ws.qr.householderQ().transpose() * f;
 
     // Unconstrained case: solution in transformed coordinates is
-    // x' = 0, so x = P * R^{-1} * y1.
+    // x' = 0, so x = R^{-1} * y1.
     if(m_ineq <= 0)
     {
         if(ws.y.size() != n) ws.y.resize(n);
         ws.y = ws.R.template triangularView<Eigen::Upper>().solve(ws.y1);
-        x.noalias() = ws.qr.colsPermutation() * ws.y;
+        x = ws.y;
         if(lambda_ineq.size() != 0) lambda_ineq.setZero();
         return 1;
     }
@@ -162,19 +162,15 @@ int lsi(
 
     // Transform inequality constraints into the x' coordinate system.
     //
-    //   x' = R * (P^T x) - y1
-    //   G x >= h  <=>  (G P R^{-1}) x' >= h - (G P R^{-1}) y1
+    //   x' = R * x - y1
+    //   G x >= h  <=>  (G R^{-1}) x' >= h - (G R^{-1}) y1
     //
-    // Compute G_t = G * P * R^{-1} by solving R^T * G_t^T = (G P)^T.
-    if(ws.G_perm.rows() != m_ineq || ws.G_perm.cols() != n)
-        ws.G_perm.resize(m_ineq, n);
-    ws.G_perm.noalias() = G * ws.qr.colsPermutation();
-
+    // Compute G_t = G * R^{-1} by solving R^T * G_t^T = G^T.
     if(ws.G_tT.rows() != n || ws.G_tT.cols() != m_ineq)
         ws.G_tT.resize(n, m_ineq);
     ws.G_tT = ws.R.transpose()
                   .template triangularView<Eigen::Lower>()
-                  .solve(ws.G_perm.transpose());
+                  .solve(G.transpose());
 
     if(ws.G_t.rows() != m_ineq || ws.G_t.cols() != n)
         ws.G_t.resize(m_ineq, n);
@@ -219,13 +215,13 @@ int lsi(
         ws.x_prime.setZero();
     }
 
-    // Back-transform: x = P * R^{-1} * (x' + y1).
+    // Back-transform: x = R^{-1} * (x' + y1).
     if(ws.rhs.size() != n) ws.rhs.resize(n);
     ws.rhs.noalias() = ws.x_prime + ws.y1;
 
     if(ws.y.size() != n) ws.y.resize(n);
     ws.y = ws.R.template triangularView<Eigen::Upper>().solve(ws.rhs);
-    x.noalias() = ws.qr.colsPermutation() * ws.y;
+    x = ws.y;
 
     return 1;
 }

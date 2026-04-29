@@ -35,7 +35,12 @@ struct lsei_workspace
     using matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
     using vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
 
-    matrix_t Qc;
+    // Q_c is no longer materialized — it lives implicitly as the
+    // householder reflector sequence inside qr_c. Each use site (E*Q_c,
+    // G*Q_c, x = Q_c*y, Q_c^T*v) drives an in-place reflector apply that
+    // costs O(n^2 * m_eq) instead of the O(n^3) materialize-then-GEMM
+    // path. NLopt slsqp.c lsei_ uses the same implicit-apply pattern via
+    // h12_.
     matrix_t R_c_upper;
     vector_t y1;
     matrix_t E_tilde;
@@ -65,7 +70,6 @@ struct lsei_workspace
     void resize(int n, int m_eq, int m_ineq)
     {
         const int n2 = n - m_eq;
-        Qc.resize(n, n);
         R_c_upper.resize(m_eq, m_eq);
         y1.resize(m_eq);
         E_tilde.resize(n, n);
@@ -164,11 +168,13 @@ int lsei(
     // Then with x = Q_C * y the equality C*x = d becomes
     //   C * Q_C * y = R_C^T * y = d  (acting on the leading m_eq entries)
     // which is a lower-triangular system for y1 = y(0..m_eq-1).
+    //
+    // Q_C is kept implicit as the householder reflector sequence inside
+    // qr_c — every subsequent use (E*Q_C, G*Q_C, x = Q_C*y, Q_C^T*v) is
+    // an applyThisOnTheRight/Left call that costs O(n^2 * m_eq) instead
+    // of O(n^3) materialize + GEMM.
     // ------------------------------------------------------------------
     ws.qr_c.compute(C.transpose());
-    if(ws.Qc.rows() != n || ws.Qc.cols() != n) ws.Qc.resize(n, n);
-    ws.Qc = ws.qr_c.householderQ()
-            * decltype(ws.Qc)::Identity(n, n);
 
     // R_c is m_eq x m_eq upper triangular, extracted from qr_c.matrixQR().
     if(ws.R_c_upper.rows() != m_eq || ws.R_c_upper.cols() != m_eq)
@@ -194,9 +200,14 @@ int lsei(
     // E2 (n x (n - m_eq))]. Similarly for G. The split is referenced
     // below via leftCols / rightCols on E_tilde directly to avoid a
     // separate E1 / E2 allocation.
+    //
+    // Implicit Q_c apply: copy E into E_tilde, then apply the qr_c
+    // reflector sequence on the right in place. Total cost O(n^2 * m_eq)
+    // vs the prior O(n^3) GEMM after Q_c materialization.
     // ------------------------------------------------------------------
     if(ws.E_tilde.rows() != n || ws.E_tilde.cols() != n) ws.E_tilde.resize(n, n);
-    ws.E_tilde.noalias() = E * ws.Qc;
+    ws.E_tilde = E;
+    ws.E_tilde.applyOnTheRight(ws.qr_c.householderQ());
 
     if(ws.f_red.size() != n) ws.f_red.resize(n);
     ws.f_red.noalias() = f - ws.E_tilde.leftCols(m_eq) * ws.y1;
@@ -215,7 +226,8 @@ int lsei(
     {
         if(ws.G_tilde.rows() != m_ineq || ws.G_tilde.cols() != n)
             ws.G_tilde.resize(m_ineq, n);
-        ws.G_tilde.noalias() = G * ws.Qc;
+        ws.G_tilde = G;
+        ws.G_tilde.applyOnTheRight(ws.qr_c.householderQ());
         if(ws.h_red.size() != m_ineq) ws.h_red.resize(m_ineq);
         ws.h_red.noalias() = h - ws.G_tilde.leftCols(m_eq) * ws.y1;
     }
@@ -273,13 +285,17 @@ int lsei(
 
     // ------------------------------------------------------------------
     // Assemble y = [y1; y2] and back-transform x = Q_c * y.
+    //
+    // Q_c is applied via the qr_c reflector sequence in place on x —
+    // O(n * m_eq) work, no Q_c materialization required.
     // ------------------------------------------------------------------
     if(ws.y.size() != n) ws.y.resize(n);
     ws.y.head(m_eq) = ws.y1;
     if(n2 > 0)
         ws.y.tail(n2) = ws.y2_dyn;
 
-    x.noalias() = ws.Qc * ws.y;
+    x = ws.y;
+    x.applyOnTheLeft(ws.qr_c.householderQ());
 
     // ------------------------------------------------------------------
     // Recover equality multipliers from the gradient projection on y_1.
@@ -307,8 +323,10 @@ int lsei(
     if(m_ineq > 0)
         ws.lambda_eq_qgrad.noalias() -= G.transpose() * lambda_ineq;
 
-    // Re-use lambda_eq_resid as Q_c^T * qgrad scratch.
-    ws.lambda_eq_resid.noalias() = ws.Qc.transpose() * ws.lambda_eq_qgrad;
+    // Re-use lambda_eq_resid as Q_c^T * qgrad scratch. Apply Q_c^T in
+    // place via the qr_c reflector sequence (adjoint) — O(n * m_eq).
+    ws.lambda_eq_resid = ws.lambda_eq_qgrad;
+    ws.lambda_eq_resid.applyOnTheLeft(ws.qr_c.householderQ().adjoint());
 
     lambda_eq = ws.R_c_upper.template triangularView<Eigen::Upper>()
                             .solve(ws.lambda_eq_resid.head(m_eq).eval());
