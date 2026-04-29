@@ -32,13 +32,19 @@ namespace nablapp::detail
 //     -(mu/2)*lambda_ineq[i]^2
 //
 // Note: inequality convention is c_ineq >= 0.
-template <typename Scalar, int Meq = nablapp::dynamic_dimension, int Mineq = nablapp::dynamic_dimension>
+//
+// All Eigen-vector parameters are template-deduced expression types so
+// the policy can pass head() / tail() segments of a maintained buffer
+// without materializing temporaries (static-audit AL4/AL5).
+template <typename Scalar,
+          typename CeqExpr, typename CineqExpr,
+          typename LeqExpr, typename LineqExpr>
 Scalar augmented_lagrangian_value(
     Scalar f,
-    const Eigen::Vector<Scalar, Meq>& c_eq,
-    const Eigen::Vector<Scalar, Mineq>& c_ineq,
-    const Eigen::Vector<Scalar, Meq>& lambda_eq,
-    const Eigen::Vector<Scalar, Mineq>& lambda_ineq,
+    const Eigen::DenseBase<CeqExpr>& c_eq,
+    const Eigen::DenseBase<CineqExpr>& c_ineq,
+    const Eigen::DenseBase<LeqExpr>& lambda_eq,
+    const Eigen::DenseBase<LineqExpr>& lambda_ineq,
     Scalar mu)
 {
     Scalar val = f;
@@ -60,45 +66,68 @@ Scalar augmented_lagrangian_value(
     return val;
 }
 
-// Augmented Lagrangian gradient.
+// Augmented Lagrangian gradient (in-place mutation of g).
+//
+// On entry g must contain grad_f at the current x. On exit g contains
+// grad_f minus the Lagrangian / penalty contributions.
 //
 // Equality contribution (N&W eq. 17.47 derivative):
-//   g -= (lambda_eq[i] - c_eq[i]/mu) * J_eq.row(i)^T
+//   g -= J_eq^T * (lambda_eq - c_eq / mu)
 //
-// Inequality contribution:
-//   effective = lambda_ineq[i] - c_ineq[i]/mu
-//   if effective > 0: g -= effective * J_ineq.row(i)^T
+// Inequality contribution (with the Rockafellar / N&W eq. 17.58 mask):
+//   effective = (lambda_ineq - c_ineq / mu).cwiseMax(0)
+//   g -= J_ineq^T * effective
 //
-// J_eq and J_ineq are the constraint Jacobians (m_eq x n) and (m_ineq x n).
-template <typename Scalar, int N = nablapp::dynamic_dimension,
-          int Meq = nablapp::dynamic_dimension, int Mineq = nablapp::dynamic_dimension>
+// Both contributions are single mat-vec products instead of the prior
+// row-by-row accumulation (static-audit AL9). All Eigen parameters are
+// template-deduced expression types so the policy can pass topRows /
+// bottomRows / head / tail segments of maintained buffers without
+// materializing temporaries (static-audit AL4 / AL5).
+//
+// J_eq is (m_eq x n); J_ineq is (m_ineq x n).
+template <typename Scalar, int N,
+          typename JeqExpr, typename JineqExpr,
+          typename CeqExpr, typename CineqExpr,
+          typename LeqExpr, typename LineqExpr>
+void augmented_lagrangian_gradient_inplace(
+    Eigen::Vector<Scalar, N>& g,
+    const Eigen::DenseBase<JeqExpr>& J_eq,
+    const Eigen::DenseBase<JineqExpr>& J_ineq,
+    const Eigen::DenseBase<CeqExpr>& c_eq,
+    const Eigen::DenseBase<CineqExpr>& c_ineq,
+    const Eigen::DenseBase<LeqExpr>& lambda_eq,
+    const Eigen::DenseBase<LineqExpr>& lambda_ineq,
+    Scalar mu)
+{
+    if(c_eq.size() > 0)
+        g.noalias() -= J_eq.derived().transpose()
+                       * (lambda_eq.derived() - c_eq.derived() / mu);
+    if(c_ineq.size() > 0)
+        g.noalias() -= J_ineq.derived().transpose()
+                       * (lambda_ineq.derived() - c_ineq.derived() / mu).cwiseMax(Scalar(0));
+}
+
+// Backward-compatible return-by-value wrapper. Allocates a copy of
+// grad_f internally; the in-place form above should be preferred on the
+// hot path. Kept for the AL convergence-diagnostic call site that
+// computes a one-shot Lagrangian gradient norm.
+template <typename Scalar, int N,
+          typename JeqExpr, typename JineqExpr,
+          typename CeqExpr, typename CineqExpr,
+          typename LeqExpr, typename LineqExpr>
 Eigen::Vector<Scalar, N> augmented_lagrangian_gradient(
     const Eigen::Vector<Scalar, N>& grad_f,
-    const Eigen::Matrix<Scalar, Meq, N>& J_eq,
-    const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
-    const Eigen::Vector<Scalar, Meq>& c_eq,
-    const Eigen::Vector<Scalar, Mineq>& c_ineq,
-    const Eigen::Vector<Scalar, Meq>& lambda_eq,
-    const Eigen::Vector<Scalar, Mineq>& lambda_ineq,
+    const Eigen::DenseBase<JeqExpr>& J_eq,
+    const Eigen::DenseBase<JineqExpr>& J_ineq,
+    const Eigen::DenseBase<CeqExpr>& c_eq,
+    const Eigen::DenseBase<CineqExpr>& c_ineq,
+    const Eigen::DenseBase<LeqExpr>& lambda_eq,
+    const Eigen::DenseBase<LineqExpr>& lambda_ineq,
     Scalar mu)
 {
     Eigen::Vector<Scalar, N> g = grad_f;
-
-    // Equality contribution
-    for(int i = 0; i < c_eq.size(); ++i)
-    {
-        Scalar coeff = lambda_eq[i] - c_eq[i] / mu;
-        g -= coeff * J_eq.row(i).transpose();
-    }
-
-    // Inequality contribution
-    for(int i = 0; i < c_ineq.size(); ++i)
-    {
-        Scalar effective = lambda_ineq[i] - c_ineq[i] / mu;
-        if(effective > Scalar(0))
-            g -= effective * J_ineq.row(i).transpose();
-    }
-
+    augmented_lagrangian_gradient_inplace(
+        g, J_eq, J_ineq, c_eq, c_ineq, lambda_eq, lambda_ineq, mu);
     return g;
 }
 

@@ -119,6 +119,18 @@ struct augmented_lagrangian_policy
         int n_ineq = 0;
         std::uint32_t outer_iter = 0;
 
+        // Pre-allocated subproblem evaluation buffers (static-audit AL4/AL5).
+        // Mutated per-inner-iter by subproblem::value / gradient via pointers
+        // held in the subproblem struct; storing them here lets the subproblem
+        // remain a stateless view while inner f / g calls become alloc-free.
+        // c_all_buf is sized (m_eq + m_ineq); J_all_buf is sized
+        // (m_eq + m_ineq, dim); g_tmp_buf is the dimension-bridge fast-path
+        // temporary used when the inner solver's compile-time N differs from
+        // the outer problem's.
+        Eigen::VectorX<scalar_type> c_all_buf;
+        Eigen::MatrixX<scalar_type> J_all_buf;
+        Eigen::Vector<scalar_type, P::problem_dimension> g_tmp_buf;
+
         options_type opts;
 
         // Synthetic subproblem for the inner solver.
@@ -135,6 +147,13 @@ struct augmented_lagrangian_policy
             const Eigen::VectorX<scalar_type>* lam_eq;
             const Eigen::VectorX<scalar_type>* lam_ineq;
             const scalar_type* pen;
+            // Pointers to state-owned per-inner-iter buffers; mutated by
+            // value() / gradient() through the indirection. Eliminates the
+            // O(outer * inner * m) c_all / J_all / g_tmp allocations the
+            // pre-fix subproblem incurred (static-audit AL4 / AL5).
+            Eigen::VectorX<scalar_type>* c_all_buf;
+            Eigen::MatrixX<scalar_type>* J_all_buf;
+            Eigen::Vector<scalar_type, P::problem_dimension>* g_tmp_buf;
             int neq, nineq;
 
             [[nodiscard]] int dimension() const { return dim; }
@@ -143,13 +162,13 @@ struct augmented_lagrangian_policy
             {
                 scalar_type fval = outer->value(x);
                 const int m = neq + nineq;
-                Eigen::VectorX<scalar_type> c_all(m);
                 if(m > 0)
-                    outer->constraints(x, c_all);
-                Eigen::VectorX<scalar_type> ceq = c_all.head(neq);
-                Eigen::VectorX<scalar_type> cineq = c_all.tail(nineq);
+                    outer->constraints(x, *c_all_buf);
                 return detail::augmented_lagrangian_value(
-                    fval, ceq, cineq, *lam_eq, *lam_ineq, *pen);
+                    fval,
+                    c_all_buf->head(neq),
+                    c_all_buf->tail(nineq),
+                    *lam_eq, *lam_ineq, *pen);
             }
 
             void gradient(const Eigen::Vector<scalar_type, N>& x,
@@ -157,27 +176,31 @@ struct augmented_lagrangian_policy
             {
                 constexpr int PD = P::problem_dimension;
                 if constexpr(N == PD)
+                {
                     outer->gradient(x, g);
+                }
                 else
                 {
-                    Eigen::Vector<scalar_type, PD> g_tmp(g.size());
-                    outer->gradient(Eigen::Vector<scalar_type, N>(x), g_tmp);
-                    g = g_tmp;
+                    outer->gradient(Eigen::Vector<scalar_type, N>(x), *g_tmp_buf);
+                    g = *g_tmp_buf;
                 }
                 const int m = neq + nineq;
-                Eigen::VectorX<scalar_type> c_all(m);
-                Eigen::MatrixX<scalar_type> J_all(m, dim);
                 if(m > 0)
                 {
-                    outer->constraints(x, c_all);
-                    outer->constraint_jacobian(x, J_all);
+                    outer->constraints(x, *c_all_buf);
+                    outer->constraint_jacobian(x, *J_all_buf);
                 }
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, N> Jeq = J_all.topRows(neq);
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, N> Jineq = J_all.bottomRows(nineq);
-                Eigen::VectorX<scalar_type> ceq = c_all.head(neq);
-                Eigen::VectorX<scalar_type> cineq = c_all.tail(nineq);
-                g = detail::augmented_lagrangian_gradient(
-                    g, Jeq, Jineq, ceq, cineq, *lam_eq, *lam_ineq, *pen);
+                // In-place mat-vec gradient (AL9). topRows / bottomRows /
+                // head / tail are passed as Eigen expressions that the
+                // helper consumes via DenseBase template deduction --
+                // zero materialization.
+                detail::augmented_lagrangian_gradient_inplace(
+                    g,
+                    J_all_buf->topRows(neq),
+                    J_all_buf->bottomRows(nineq),
+                    c_all_buf->head(neq),
+                    c_all_buf->tail(nineq),
+                    *lam_eq, *lam_ineq, *pen);
             }
 
             [[nodiscard]] Eigen::Vector<scalar_type, N> lower_bounds() const { return *lo; }
@@ -226,13 +249,18 @@ struct augmented_lagrangian_policy
         s.x = x0;
         s.f = problem.value(x0);
 
-        // Evaluate constraints
+        // Pre-allocate per-inner-iter subproblem buffers (static-audit
+        // AL4 / AL5). Reused across all inner f / g calls; subproblem
+        // mutates them via pointers held in its struct.
         const int m = s.n_eq + s.n_ineq;
-        Eigen::VectorX<scalar_type> c_all(m);
+        s.c_all_buf.resize(m);
+        s.J_all_buf.resize(m, n);
+        s.g_tmp_buf.resize(n);
+
         if(m > 0)
-            problem.constraints(x0, c_all);
-        s.c_eq = c_all.head(s.n_eq);
-        s.c_ineq = c_all.tail(s.n_ineq);
+            problem.constraints(x0, s.c_all_buf);
+        s.c_eq = s.c_all_buf.head(s.n_eq);
+        s.c_ineq = s.c_all_buf.tail(s.n_ineq);
 
         // Initialize multipliers to zero
         s.lambda_eq = Eigen::VectorX<scalar_type>::Zero(s.n_eq);
@@ -295,6 +323,9 @@ struct augmented_lagrangian_policy
                 .lam_eq = &s.lambda_eq,
                 .lam_ineq = &s.lambda_ineq,
                 .pen = &s.mu,
+                .c_all_buf = &s.c_all_buf,
+                .J_all_buf = &s.J_all_buf,
+                .g_tmp_buf = &s.g_tmp_buf,
                 .neq = s.n_eq,
                 .nineq = s.n_ineq,
             });
