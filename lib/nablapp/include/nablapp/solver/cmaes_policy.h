@@ -101,6 +101,20 @@ struct cmaes_policy
 
         bool covariance_dirty{false};
         std::uint32_t decomposition_skip_k{1};
+
+        // Per-step buffers (static-audit G10). Pre-allocated to MaxPop
+        // so step() does not heap-resize them on the hot path. lambda
+        // (current popsize) may be smaller than MaxPop on early
+        // generations / pre-IPOP-doubling runs; the working size is
+        // tracked by the per-step `lambda` argument and segments are
+        // sized via .head(lambda) / .leftCols(lambda).
+        static constexpr int MaxPop = 512;
+        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> fitnesses_buf;
+        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> unpenalized_buf;
+        std::vector<int> idx_buf;
+        Eigen::Matrix<double, N, Eigen::Dynamic, 0,
+                      N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxPop> deltas_buf;
+        std::vector<double> gen_fitnesses_buf;
     };
 
     options_type options{};
@@ -164,6 +178,17 @@ struct cmaes_policy
             pop_lambda = std::max(4 * n,
                 static_cast<int>(4 + std::floor(3.0 * std::log(n))));
         s.params = detail::compute_constants(n, pop_lambda);
+
+        // Pre-allocate per-step buffers (static-audit G10). Sized to
+        // current lambda; step() uses .head(lambda) / .leftCols(lambda)
+        // to track the working size, and re-resizes only on IPOP
+        // doublings. The MaxPop=512 cap on the matrix template still
+        // protects against pathological growth.
+        s.fitnesses_buf.resize(s.params.lambda);
+        s.unpenalized_buf.resize(s.params.lambda);
+        s.idx_buf.resize(static_cast<std::size_t>(s.params.lambda));
+        s.deltas_buf.resize(n, s.params.lambda);
+        s.gen_fitnesses_buf.resize(static_cast<std::size_t>(s.params.lambda));
 
         s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
         s.p_sigma = Eigen::Vector<double, N>::Zero(n);
@@ -240,8 +265,21 @@ struct cmaes_policy
         // caller should see as `s.objective_value` -- the penalized
         // value is meaningless for cross-library benchmark comparison.
         // Static-audit G12.
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> fitnesses(lambda);
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> unpenalized(lambda);
+        //
+        // Buffers live on s (state-owned, static-audit G10). On the
+        // first IPOP doubling lambda may exceed the buffers' current
+        // size; resize on demand (one-time alloc per lambda growth).
+        if(static_cast<int>(s.fitnesses_buf.size()) < lambda)
+        {
+            s.fitnesses_buf.resize(lambda);
+            s.unpenalized_buf.resize(lambda);
+            s.idx_buf.resize(static_cast<std::size_t>(lambda));
+            s.deltas_buf.resize(n, lambda);
+            s.gen_fitnesses_buf.resize(static_cast<std::size_t>(lambda));
+        }
+        auto fitnesses = s.fitnesses_buf.head(lambda);
+        auto unpenalized = s.unpenalized_buf.head(lambda);
+
         for(int i = 0; i < lambda; ++i)
         {
             Eigen::Vector<double, N> xi = offspring.col(i);
@@ -255,9 +293,9 @@ struct cmaes_policy
         }
 
         // 3. Rank offspring (ascending -- minimization)
-        std::vector<int> idx(lambda);
-        std::iota(idx.begin(), idx.end(), 0);
-        std::sort(idx.begin(), idx.end(), [&](int a, int b) {
+        auto& idx = s.idx_buf;
+        std::iota(idx.begin(), idx.begin() + lambda, 0);
+        std::sort(idx.begin(), idx.begin() + lambda, [&](int a, int b) {
             return fitnesses[a] < fitnesses[b];
         });
 
@@ -295,9 +333,10 @@ struct cmaes_policy
               + h_sigma * std::sqrt(s.params.c_c * (2.0 - s.params.c_c) * s.params.mu_eff)
                 * delta_w;
 
-        // 10. Compute deltas for covariance update
-        Eigen::Matrix<double, N, Eigen::Dynamic, 0,
-            N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxPop> deltas(n, lambda);
+        // 10. Compute deltas for covariance update (state-owned buffer
+        // per static-audit G10). Working width is `lambda`; deltas_buf
+        // was sized to current lambda in init() / on IPOP growth above.
+        auto deltas = s.deltas_buf.leftCols(lambda);
         for(int i = 0; i < lambda; ++i)
             deltas.col(i) = (offspring.col(idx[i]) - mean_old) / s.sigma;
 
@@ -374,12 +413,18 @@ struct cmaes_policy
             // penalized one. Static-audit G12.
             s.best_fitness_history.push_back(fitnesses[best_offspring]);
             {
-                // Compute median fitness of this generation.
-                std::vector<double> gen_fitnesses(lambda);
+                // Compute median fitness of this generation. Reuses
+                // the state-owned buffer (static-audit G10); nth_element
+                // mutates it in place, but the values are read-only
+                // after the median extraction so the next-generation
+                // overwrite is fine.
+                auto& gen_fitnesses = s.gen_fitnesses_buf;
                 for(int i = 0; i < lambda; ++i)
-                    gen_fitnesses[i] = fitnesses[i];
+                    gen_fitnesses[static_cast<std::size_t>(i)] = fitnesses[i];
                 auto mid = gen_fitnesses.begin() + lambda / 2;
-                std::nth_element(gen_fitnesses.begin(), mid, gen_fitnesses.end());
+                std::nth_element(gen_fitnesses.begin(),
+                                 mid,
+                                 gen_fitnesses.begin() + lambda);
                 s.median_fitness_history.push_back(*mid);
             }
             // Cap history size.
