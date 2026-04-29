@@ -231,8 +231,17 @@ struct cmaes_policy
         auto offspring = detail::sample_offspring<double, N, MaxPop>(
             s.mean, s.sigma, s.B, s.D, lambda, s.rng);
 
-        // 2. Evaluate with optional repair+penalty
+        // 2. Evaluate with optional repair+penalty.
+        //
+        // Two parallel arrays: `fitnesses` carries the penalty-inflated
+        // value used for ranking and Hansen selection; `unpenalized`
+        // carries `problem.value(repaired_xi)`, the feasible objective
+        // at the repaired point. The unpenalized value is what the
+        // caller should see as `s.objective_value` -- the penalized
+        // value is meaningless for cross-library benchmark comparison.
+        // Static-audit G12.
         Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> fitnesses(lambda);
+        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> unpenalized(lambda);
         for(int i = 0; i < lambda; ++i)
         {
             Eigen::Vector<double, N> xi = offspring.col(i);
@@ -240,7 +249,9 @@ struct cmaes_policy
             if(s.has_bounds)
                 penalty = detail::repair_and_penalize(xi, s.lower, s.upper);
             offspring.col(i) = xi;
-            fitnesses[i] = s.problem->value(xi) + penalty;
+            double f_raw = s.problem->value(xi);
+            unpenalized[i] = f_raw;
+            fitnesses[i] = f_raw + penalty;
         }
 
         // 3. Rank offspring (ascending -- minimization)
@@ -309,19 +320,25 @@ struct cmaes_policy
             s.covariance_dirty = false;
         }
 
-        // 14. Track best across the offspring (Hansen Algorithm 11 line 11
-        // -- best ranked offspring is the candidate, not the new mean).
-        // Pre-fix this routine also evaluated `s.problem->value(s.mean)`
-        // every generation and replaced s.x / objective_value if the
-        // mean came in lower. That added ~1 evaluation per generation
-        // (~16% inflation at popsize 6) for no algorithmic reason --
-        // Hansen Algorithm 11 does not evaluate the mean and the search
-        // distribution updates do not require it. Static-audit G6.
-        double gen_best_f = fitnesses[idx[0]];
+        // 14. Track best across the offspring. Hansen Algorithm 11 line 11:
+        // best-ranked offspring (selected by penalized fitness) is the
+        // candidate. We rank by `fitnesses` but record the unpenalized
+        // `problem.value(repaired_xi)` in `s.objective_value` so a
+        // cross-library benchmark reads a comparable feasible-objective
+        // value rather than a repair-penalty-inflated number. Static-
+        // audit G12.
+        //
+        // Pre-fix step() also evaluated `s.problem->value(s.mean)` every
+        // generation and replaced s.x / objective_value if the mean came
+        // in lower; that added ~1 eval per gen (~16% inflation at popsize
+        // 6) for no algorithmic reason. Static-audit G6 (removed in the
+        // commit immediately preceding this one).
+        const int best_offspring = idx[0];
+        double gen_best_f = unpenalized[best_offspring];
         if(gen_best_f < s.objective_value)
         {
             s.objective_value = gen_best_f;
-            s.x = offspring.col(idx[0]);
+            s.x = offspring.col(best_offspring);
         }
         if(s.objective_value < s.best_ever_value)
             s.best_ever_value = s.objective_value;
@@ -350,8 +367,12 @@ struct cmaes_policy
         // Reference: Hansen (2023) arXiv:1604.00772, Section B.3.
         if(options.restart == restart_strategy::ipop)
         {
-            // Track fitness history for stagnation detection.
-            s.best_fitness_history.push_back(gen_best_f);
+            // Track fitness history for stagnation detection. Use the
+            // PENALIZED fitness here (what the search actually optimizes)
+            // -- the unpenalized value is what we expose to callers as
+            // s.objective_value, but the search's progress signal is the
+            // penalized one. Static-audit G12.
+            s.best_fitness_history.push_back(fitnesses[best_offspring]);
             {
                 // Compute median fitness of this generation.
                 std::vector<double> gen_fitnesses(lambda);
