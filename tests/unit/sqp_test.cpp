@@ -319,23 +319,30 @@ TEST_CASE("nw_sqp step solve step_n", "[sqp]")
 TEST_CASE("nw_sqp HS071 mixed constraints", "[sqp]")
 {
     // HS071: n=4, m_eq=1, m_ineq=1, box bounds [1,5]^4.
-    // f* ~ 17.014, x* ~ (1.0, 4.743, 3.821, 1.379).
+    // f* = 17.014, x* approximately (1.0, 4.743, 3.821, 1.379).
     //
-    // adaptive_bfgs (Shanno-rescaled compact L-BFGS, N&W eq. 6.20 /
-    // Section 7.2; Kraft 1988 DFVLR-FB 88-28 Section 2.2.3) supplies
-    // adequate curvature on HS071 where the identity-init Powell-damped
-    // direct BFGS operator previously stalled at f < 25. With the canonical
-    // operator the objective reaches f* = 17.014 within the 17.02
-    // tolerance used across kraft_slsqp / filter_slsqp. NLopt LD_SLSQP
-    // reaches the same bar in 6 iters; nw_sqp's default_convergence
-    // criterion set does not fire an early-termination on the box-
-    // bounded problem (status stays at max_iterations while f sits on
-    // the optimum) -- same binding-criterion gap documented in Phase
-    // 24.2 on UR3e, out of scope for the operator-only migration and
-    // tracked separately.
+    // Baseline lock for nw_sqp on HS071. The reference SLSQP family
+    // (kraft_slsqp on HS071) reaches f within 0.1 of f* with cv < 0.05.
+    // nw_sqp does not: its L1 merit admits an iter-0 step that satisfies
+    // the linearized inequality constraint but nonlinearly violates
+    // x1*x2*x3*x4 >= 25, leaving the iterate strongly infeasible
+    // (cv approximately 6.5) at f approximately 13.77 -- which is below
+    // f* and therefore unreachable from the feasible region. The run
+    // then exhausts max_iterations from that infeasible parking spot.
+    //
+    // Earlier this test asserted `objective_value <= 17.02` with a
+    // comment claiming "f sits on the optimum"; that interpretation was
+    // false (the bar passes precisely because the infeasible side has
+    // lower f). The bar is left intentionally weak (<= 30.0, matching
+    // hock_schittkowski_test.cpp) until the underlying merit issue is
+    // addressed.
+    //
+    // Tracked: SEED-015 (nw_sqp HS071 L1 merit infeasibility).
     //
     // Reference: H&S Problem 71; N&W Section 16.5 (active-set QP);
-    //            N&W Procedure 18.2 damping guard; Shanno 1978.
+    //            N&W Section 18.3 (Maratos effect); N&W Section 15.3
+    //            (L1 merit / penalty parameter); N&W Procedure 18.2
+    //            damping guard; Shanno 1978.
     hs071 problem;
     auto x0 = problem.initial_point();
     solver_options opts;
@@ -348,7 +355,7 @@ TEST_CASE("nw_sqp HS071 mixed constraints", "[sqp]")
     auto result = solver.solve(opts);
 
     CHECK(std::isfinite(result.objective_value));
-    CHECK(result.objective_value <= 17.02);
+    CHECK(result.objective_value < 30.0);
 }
 
 TEST_CASE("nw_sqp HS039 equality constraints", "[sqp]")
