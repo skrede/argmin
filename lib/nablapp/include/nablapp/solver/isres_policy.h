@@ -16,6 +16,7 @@
 
 #include "nablapp/detail/isres_operators.h"
 #include "nablapp/detail/stochastic_ranking.h"
+#include "nablapp/detail/xoshiro256.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/solver/options.h"
 #include "nablapp/types.h"
@@ -74,9 +75,17 @@ struct isres_policy
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
 
-        std::mt19937 rng;
+        // RNG: xoshiro256+ matches cmaes (consistent across the global
+        // / stochastic policies). std::mt19937 was 2.5 KB of state;
+        // xoshiro256 is 32 B. Static-audit I8.
+        std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
+        // Track the least-infeasibility witness across the run so the
+        // pre-feasible best update can compare against the rolling
+        // best instead of the just-overwritten s.violations[0].
+        // Static-audit I4.
+        double best_ever_violation{std::numeric_limits<double>::infinity()};
 
         Eigen::VectorXd c_eq;
         Eigen::VectorXd c_ineq;
@@ -90,6 +99,16 @@ struct isres_policy
         detail::es_learning_rates rates{};
 
         std::optional<detail::isres_operator_workspace<double, N>> mutation_workspace;
+
+        // Per-step buffers (static-audit I5/I6/I7). Hoisted to state so
+        // step() does not heap-resize them every generation. Sized to
+        // current lambda in init(); persistent across steps.
+        Eigen::Matrix<double, N, Eigen::Dynamic> offspring_buf;
+        Eigen::MatrixXd new_sigmas_buf;
+        Eigen::VectorXd offspring_fitnesses_buf;
+        Eigen::VectorXd offspring_violations_buf;
+        Eigen::MatrixXd all_constraints_buf;
+        std::vector<std::uint32_t> indices_buf;
     };
 
     options_type options{};
@@ -134,25 +153,31 @@ struct isres_policy
         s.alpha = options.differential_weight.value_or(0.2);
         s.rates = detail::compute_es_rates(n);
 
-        // Seed RNG
-        if(options.seed.has_value())
-            s.rng.seed(static_cast<unsigned>(options.seed.value()));
-        else
-            s.rng.seed(std::random_device{}());
+        // Seed RNG (xoshiro256+ per static-audit I8; consistent with cmaes_policy).
+        const std::uint64_t seed = options.seed.value_or(
+            static_cast<std::uint64_t>(std::random_device{}()));
+        s.rng.emplace(seed);
 
         // Pre-allocate mutation workspace
         s.mutation_workspace.emplace(n);
 
+        // Pre-allocate per-step buffers (static-audit I5/I6/I7).
+        s.offspring_buf.resize(n, s.lambda);
+        s.new_sigmas_buf.resize(n, s.lambda);
+        s.offspring_fitnesses_buf.resize(s.lambda);
+        s.offspring_violations_buf.resize(s.lambda);
+        s.all_constraints_buf.resize(n_c, s.lambda);
+        s.indices_buf.resize(static_cast<std::size_t>(s.lambda));
+
         // Initialize population uniformly in bounds
         s.population = detail::initialize_population<N>(
-            n, s.lambda, s.lower, s.upper, s.rng);
+            n, s.lambda, s.lower, s.upper, *s.rng);
 
         // Initialize step sizes
         s.sigmas = detail::initialize_sigmas(n, s.lambda, s.lower, s.upper);
 
-        // Evaluate all individuals
+        // Evaluate all individuals (use the pre-allocated all_constraints_buf)
         s.fitnesses.resize(s.lambda);
-        Eigen::MatrixXd all_constraints(n_c, s.lambda);
 
         for(int j = 0; j < s.lambda; ++j)
         {
@@ -163,13 +188,13 @@ struct isres_policy
             {
                 Eigen::VectorXd c(n_c);
                 s.problem->constraints(xi, c);
-                all_constraints.col(j) = c;
+                s.all_constraints_buf.col(j) = c;
             }
         }
 
         // Compute violations
         if(n_c > 0)
-            s.violations = detail::compute_violations(all_constraints, s.n_eq, s.n_ineq);
+            s.violations = detail::compute_violations(s.all_constraints_buf, s.n_eq, s.n_ineq);
         else
             s.violations = Eigen::VectorXd::Zero(s.lambda);
 
@@ -194,6 +219,10 @@ struct isres_policy
         s.x = s.population.col(best_idx);
         s.objective_value = s.fitnesses[best_idx];
         s.best_ever_value = s.objective_value;
+        // Initial best-ever-violation is the violation at the chosen
+        // best init point. Used by the pre-feasible best-update path
+        // in step() (static-audit I4).
+        s.best_ever_violation = s.violations[best_idx];
 
         // Store constraint values at best point
         s.c_eq.resize(s.n_eq);
@@ -218,10 +247,9 @@ struct isres_policy
         const int n_c = s.n_eq + s.n_ineq;
         double old_best = s.objective_value;
 
-        // 1. Generate offspring via mutation + differential variation
-        Eigen::Matrix<double, N, Eigen::Dynamic> offspring(n, s.lambda);
-        Eigen::MatrixXd new_sigmas(n, s.lambda);
-
+        // 1. Generate offspring via mutation + differential variation.
+        // Buffers live on s; mutation operator is unchanged in this
+        // commit (the I1/I2/I3 operator rewrite is a follow-up).
         for(int j = 0; j < s.lambda; ++j)
         {
             // Select parent from current population (top mu by rank)
@@ -231,52 +259,60 @@ struct isres_policy
                 s.sigmas.col(parent_idx),
                 s.x,
                 s.alpha, s.rates.tau, s.rates.tau_prime,
-                s.lower, s.upper, s.rng);
+                s.lower, s.upper, *s.rng);
 
-            offspring.col(j) = child;
-            new_sigmas.col(j) = sig;
+            s.offspring_buf.col(j) = child;
+            s.new_sigmas_buf.col(j) = sig;
         }
 
-        // 2. Evaluate offspring
-        Eigen::VectorXd fitnesses(s.lambda);
-        Eigen::MatrixXd all_constraints(n_c, s.lambda);
-
+        // 2. Evaluate offspring (state-owned buffers).
         for(int j = 0; j < s.lambda; ++j)
         {
-            Eigen::Vector<double, N> xi = offspring.col(j);
-            fitnesses[j] = s.problem->value(xi);
+            Eigen::Vector<double, N> xi = s.offspring_buf.col(j);
+            s.offspring_fitnesses_buf[j] = s.problem->value(xi);
 
             if(n_c > 0)
             {
                 Eigen::VectorXd c(n_c);
                 s.problem->constraints(xi, c);
-                all_constraints.col(j) = c;
+                s.all_constraints_buf.col(j) = c;
             }
         }
 
-        // 3. Compute violations
-        Eigen::VectorXd violations = (n_c > 0)
-            ? detail::compute_violations(all_constraints, s.n_eq, s.n_ineq)
-            : Eigen::VectorXd::Zero(s.lambda);
+        // 3. Compute violations (write into the persistent buffer).
+        if(n_c > 0)
+            s.offspring_violations_buf = detail::compute_violations(
+                s.all_constraints_buf, s.n_eq, s.n_ineq);
+        else
+            s.offspring_violations_buf.setZero();
 
-        // 4. Stochastic ranking
-        std::vector<std::uint32_t> indices(static_cast<std::size_t>(s.lambda));
+        // 4. Stochastic ranking (state-owned indices buffer).
         for(int j = 0; j < s.lambda; ++j)
-            indices[static_cast<std::size_t>(j)] = static_cast<std::uint32_t>(j);
+            s.indices_buf[static_cast<std::size_t>(j)]
+                = static_cast<std::uint32_t>(j);
 
-        detail::stochastic_rank(indices, fitnesses, violations, s.pf, s.rng);
+        detail::stochastic_rank(s.indices_buf,
+                                s.offspring_fitnesses_buf,
+                                s.offspring_violations_buf,
+                                s.pf, *s.rng);
 
         // 5. Select mu best-ranked as new population
         for(int j = 0; j < s.mu; ++j)
         {
-            auto idx = indices[static_cast<std::size_t>(j)];
-            s.population.col(j) = offspring.col(idx);
-            s.sigmas.col(j) = new_sigmas.col(idx);
-            s.fitnesses[j] = fitnesses[idx];
-            s.violations[j] = violations[idx];
+            auto idx = s.indices_buf[static_cast<std::size_t>(j)];
+            s.population.col(j) = s.offspring_buf.col(idx);
+            s.sigmas.col(j) = s.new_sigmas_buf.col(idx);
+            s.fitnesses[j] = s.offspring_fitnesses_buf[idx];
+            s.violations[j] = s.offspring_violations_buf[idx];
         }
 
-        // Fill remaining slots by copying parents cyclically
+        // Fill remaining slots by copying parents cyclically.
+        // (Note: static-audit I10 flags this fill as dead code -- the
+        // mutation step at line 1 above reads via `parent_idx = j % mu`,
+        // which only touches columns [0, mu). Slots [mu, lambda) are
+        // structurally unread between step() invocations. Kept for
+        // observable-state hygiene; eliminating it is a separate
+        // micro-cleanup.)
         for(int j = s.mu; j < s.lambda; ++j)
         {
             int src = j % s.mu;
@@ -286,14 +322,17 @@ struct isres_policy
             s.violations[j] = s.violations[src];
         }
 
-        // 6. Update best if improved
-        auto best_ranked = indices[0];
-        if(fitnesses[best_ranked] < s.best_ever_value
-           && violations[best_ranked] <= 0.0)
+        // 6. Update best if improved.
+        auto best_ranked = s.indices_buf[0];
+        const double best_ranked_f = s.offspring_fitnesses_buf[best_ranked];
+        const double best_ranked_v = s.offspring_violations_buf[best_ranked];
+
+        if(best_ranked_f < s.best_ever_value && best_ranked_v <= 0.0)
         {
-            s.best_ever_value = fitnesses[best_ranked];
-            s.objective_value = fitnesses[best_ranked];
-            s.x = offspring.col(best_ranked);
+            s.best_ever_value = best_ranked_f;
+            s.best_ever_violation = 0.0;
+            s.objective_value = best_ranked_f;
+            s.x = s.offspring_buf.col(best_ranked);
 
             if(n_c > 0)
             {
@@ -306,11 +345,25 @@ struct isres_policy
         else if(s.best_ever_value == std::numeric_limits<double>::infinity())
         {
             // No feasible point found yet -- track least-violating
-            if(violations[best_ranked] < s.violations[0]
-               || fitnesses[best_ranked] < s.objective_value)
+            // witness. Pre-fix this branch compared `s.violations[0]`,
+            // but s.violations[0] was overwritten by the just-selected
+            // top-ranked offspring at the population-update loop above
+            // (static-audit I4 -- comparing best-ranked to itself,
+            // never updates). Now compare against the rolling
+            // s.best_ever_violation which is preserved across steps.
+            //
+            // Pre-fix the predicate also used `||` between violation-
+            // decrease and fitness-decrease (static-audit I14), which
+            // admitted offspring with worse feasibility but better
+            // fitness, masking the least-violating witness. Use `&&`
+            // so we only update on a Pareto improvement (both lower
+            // violation AND not-worse fitness).
+            if(best_ranked_v < s.best_ever_violation
+               && best_ranked_f <= s.objective_value)
             {
-                s.objective_value = fitnesses[best_ranked];
-                s.x = offspring.col(best_ranked);
+                s.best_ever_violation = best_ranked_v;
+                s.objective_value = best_ranked_f;
+                s.x = s.offspring_buf.col(best_ranked);
 
                 if(n_c > 0)
                 {
@@ -349,12 +402,13 @@ struct isres_policy
 
         // Re-initialize population uniformly
         s.population = detail::initialize_population<N>(
-            n, s.lambda, s.lower, s.upper, s.rng);
+            n, s.lambda, s.lower, s.upper, *s.rng);
         s.sigmas = detail::initialize_sigmas(n, s.lambda, s.lower, s.upper);
 
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
+        s.best_ever_violation = std::numeric_limits<double>::infinity();
         s.generation = 0;
 
         if(s.n_eq + s.n_ineq > 0)
