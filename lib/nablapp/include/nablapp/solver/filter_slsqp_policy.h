@@ -632,22 +632,24 @@ struct filter_slsqp_policy
 
                 s.problem->constraint_jacobian(x_old, s.J_all_old);
 
-                if(s.n_eq > 0 && lam_take >= s.n_eq)
+                // Single combined J^T lambda subtraction for the BFGS
+                // curvature pair (eq + ineq fused). Matches NLopt
+                // slsqp.c slsqpb_'s u-update loop. Falls back to the
+                // eq-only path when the QP returned partial multipliers.
+                if(lam_take == m_total && m_total > 0)
+                {
+                    grad_L_old.noalias() -= s.J_all_old.topRows(m_total).transpose()
+                                           * s.lam_buf.head(m_total);
+                    grad_L_new.noalias() -= s.J_all.topRows(m_total).transpose()
+                                           * s.lam_buf.head(m_total);
+                }
+                else if(s.n_eq > 0 && lam_take >= s.n_eq)
                 {
                     s.lam_eq_buf.head(s.n_eq) = s.lam_buf.head(s.n_eq);
                     grad_L_old.noalias() -= s.J_all_old.topRows(s.n_eq).transpose()
                                            * s.lam_eq_buf.head(s.n_eq);
                     grad_L_new.noalias() -= s.J_eq.transpose()
                                            * s.lam_eq_buf.head(s.n_eq);
-                }
-
-                if(s.n_ineq > 0 && lam_take >= s.n_eq + s.n_ineq)
-                {
-                    s.lam_ineq_buf.head(s.n_ineq) = s.lam_buf.segment(s.n_eq, s.n_ineq);
-                    grad_L_old.noalias() -= s.J_all_old.bottomRows(s.n_ineq).transpose()
-                                           * s.lam_ineq_buf.head(s.n_ineq);
-                    grad_L_new.noalias() -= s.J_ineq.transpose()
-                                           * s.lam_ineq_buf.head(s.n_ineq);
                 }
             }
         }

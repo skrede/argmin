@@ -72,8 +72,14 @@ struct nw_sqp_policy
         Eigen::Vector<double, N> g;
         Eigen::VectorXd c_eq;
         Eigen::VectorXd c_ineq;
-        Eigen::MatrixXd J_eq;
-        Eigen::MatrixXd J_ineq;
+        // J_eq / J_ineq match the QP solver's expected
+        // Matrix<Scalar, Meq, N> shape so the policy can pass them
+        // directly into qp_solver.solve without an A_eq/A_ineq local
+        // copy (the prior pattern existed because s.J_eq was MatrixXd
+        // — fully dynamic cols — and would not deduce to Matrix<,, N>
+        // on the templated solve call when N is a compile-time bound).
+        Eigen::Matrix<double, Eigen::Dynamic, N> J_eq;
+        Eigen::Matrix<double, Eigen::Dynamic, N> J_ineq;
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
@@ -206,21 +212,23 @@ struct nw_sqp_policy
         const int m = s.n_eq + s.n_ineq;
 
         // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
-        Eigen::Matrix<double, Eigen::Dynamic, N> A_eq = s.J_eq;
+        // Pass s.J_eq / s.J_ineq directly into the QP solver — the
+        // state matrices already match the Matrix<Scalar, Meq, N> shape
+        // the templated solve() expects, so no local A_eq/A_ineq copy
+        // is needed.
         s.b_eq_workspace = -s.c_eq;
-        Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq = s.J_ineq;
         s.b_ineq_workspace = -s.c_ineq;
 
         Eigen::Vector<double, N> p0 = Eigen::Vector<double, N>::Zero(n);
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
         {
-            // Solve (A_eq A_eq^T) w = b_eq, then p0 = A_eq^T w
-            // A*A^T is PSD but may be rank-deficient with numerical noise;
+            // Solve (J_eq J_eq^T) w = b_eq, then p0 = J_eq^T w
+            // J*J^T is PSD but may be rank-deficient with numerical noise;
             // LDLT handles indefinite/singular cases that LLT cannot.
-            s.AAt_workspace.noalias() = A_eq * A_eq.transpose();
+            s.AAt_workspace.noalias() = s.J_eq * s.J_eq.transpose();
             s.ldlt_feasibility.compute(s.AAt_workspace);
             auto w = s.ldlt_feasibility.solve(s.b_eq_workspace);
-            p0.noalias() = A_eq.transpose() * w;
+            p0.noalias() = s.J_eq.transpose() * w;
         }
 
         // Use embedded QP options with defaults
@@ -243,13 +251,13 @@ struct nw_sqp_policy
                                                   Eigen::Vector<double, N>(s.x)).eval();
             p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
-                                   A_eq, s.b_eq_workspace, A_ineq, s.b_ineq_workspace,
+                                   s.J_eq, s.b_eq_workspace, s.J_ineq, s.b_ineq_workspace,
                                    p_lower, p_upper, p0, qp_opts);
         }
         else
         {
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
-                                   A_eq, s.b_eq_workspace, A_ineq, s.b_ineq_workspace,
+                                   s.J_eq, s.b_eq_workspace, s.J_ineq, s.b_ineq_workspace,
                                    p0, qp_opts);
         }
 

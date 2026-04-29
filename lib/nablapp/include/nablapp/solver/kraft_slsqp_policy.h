@@ -702,22 +702,31 @@ struct kraft_slsqp_policy
                 if(lam_take == m_total)
                     s.lambda = s.lam_buf.head(m_total);
 
-                if(s.n_eq > 0 && lam_take >= s.n_eq)
+                // Single combined J^T lambda subtraction across all
+                // (eq, ineq) constraints. The prior split into two
+                // separate GEMVs (eq then ineq) ran two BLAS calls and
+                // walked the buffers twice; J_all / J_all_old are
+                // already laid out as the eq-then-ineq concatenation,
+                // so a single J^T * lambda matches the storage and
+                // halves the GEMV count. Mirrors NLopt slsqp.c
+                // slsqpb_'s u[i] = g[i] - sum_j a[j,i]*r[j] loop.
+                if(lam_take == m_total)
                 {
-                    s.lam_eq_buf.head(s.n_eq) = s.lam_buf.head(s.n_eq);
-                    grad_L_old.noalias() -= s.J_all_old.topRows(s.n_eq).transpose()
-                                           * s.lam_eq_buf.head(s.n_eq);
-                    grad_L_new.noalias() -= s.J_eq.transpose()
-                                           * s.lam_eq_buf.head(s.n_eq);
+                    grad_L_old.noalias() -= s.J_all_old.topRows(m_total).transpose()
+                                           * s.lam_buf.head(m_total);
+                    grad_L_new.noalias() -= s.J_all.topRows(m_total).transpose()
+                                           * s.lam_buf.head(m_total);
                 }
-
-                if(s.n_ineq > 0 && lam_take >= s.n_eq + s.n_ineq)
+                else
                 {
-                    s.lam_ineq_buf.head(s.n_ineq) = s.lam_buf.segment(s.n_eq, s.n_ineq);
-                    grad_L_old.noalias() -= s.J_all_old.bottomRows(s.n_ineq).transpose()
-                                           * s.lam_ineq_buf.head(s.n_ineq);
-                    grad_L_new.noalias() -= s.J_ineq.transpose()
-                                           * s.lam_ineq_buf.head(s.n_ineq);
+                    if(s.n_eq > 0 && lam_take >= s.n_eq)
+                    {
+                        s.lam_eq_buf.head(s.n_eq) = s.lam_buf.head(s.n_eq);
+                        grad_L_old.noalias() -= s.J_all_old.topRows(s.n_eq).transpose()
+                                               * s.lam_eq_buf.head(s.n_eq);
+                        grad_L_new.noalias() -= s.J_eq.transpose()
+                                               * s.lam_eq_buf.head(s.n_eq);
+                    }
                 }
             }
         }
