@@ -91,6 +91,7 @@ public:
         A_ineq_aug_.resize(m_ineq, n_aug);
         p_lo_aug_.resize(n_aug);
         p_hi_aug_.resize(n_aug);
+        B_recover_.resize(n, n);
     }
 
     // Solve the QP subproblem with augmented-QP recovery on infeasibility.
@@ -202,6 +203,113 @@ public:
         return direct;
     }
 
+    // Variant of solve() that consumes a pre-factored Hessian (E, f) for
+    // the direct path, where E^T E = B and E^T f = -g. The caller
+    // (typically a BFGS approximation maintained as packed L D L^T)
+    // produces (E, f) at O(n^2) cost via dense_ldl_bfgs::factor_to_E_and_f,
+    // replacing the O(n^3 / 3) LLT that solve(B, g, ...) runs internally.
+    //
+    // On the rare recovery path (Kraft §3.4 augmented retry), B is
+    // reconstructed from E (O(n^3 / 2)) so the augmented solver can build
+    // the block-diagonal augmented Hessian. Recovery fires only when the
+    // direct LSEI cascade reports infeasibility / rank deficiency, so the
+    // reconstruction cost is amortized away on optimal SQP runs.
+    template <int M = nablapp::dynamic_dimension>
+    qp_result<Scalar, N, M> solve_with_factored_hessian(
+        const Eigen::Matrix<Scalar, N, N>& E,
+        const Eigen::Vector<Scalar, N>& f,
+        const Eigen::Vector<Scalar, N>& g,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_ineq,
+        const Eigen::Vector<Scalar, N>& p_lo,
+        const Eigen::Vector<Scalar, N>& p_hi)
+    {
+        auto direct = solver_.template solve_with_factored_hessian<M>(
+            E, f, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+
+        if(direct.status == qp_status::optimal)
+            return direct;
+
+        // -------------------------------------------------------------
+        // Recovery: reconstruct B = E^T E and run the augmented loop.
+        // -------------------------------------------------------------
+        const int n      = static_cast<int>(E.rows());
+        const int m_eq   = static_cast<int>(A_eq.rows());
+        const int m_ineq = static_cast<int>(A_ineq.rows());
+        const int n_aug  = n + 1;
+
+        if(B_recover_.rows() != n || B_recover_.cols() != n)
+            B_recover_.resize(n, n);
+        B_recover_.setZero();
+        B_recover_.template selfadjointView<Eigen::Lower>()
+            .rankUpdate(E.transpose());
+        B_recover_.template triangularView<Eigen::StrictlyUpper>() =
+            B_recover_.transpose();
+
+        if(B_aug_.rows() != n_aug || B_aug_.cols() != n_aug)
+            B_aug_.resize(n_aug, n_aug);
+        if(g_aug_.size() != n_aug) g_aug_.resize(n_aug);
+        if(A_eq_aug_.rows() != m_eq || A_eq_aug_.cols() != n_aug)
+            A_eq_aug_.resize(m_eq, n_aug);
+        if(A_ineq_aug_.rows() != m_ineq || A_ineq_aug_.cols() != n_aug)
+            A_ineq_aug_.resize(m_ineq, n_aug);
+        if(p_lo_aug_.size() != n_aug) p_lo_aug_.resize(n_aug);
+        if(p_hi_aug_.size() != n_aug) p_hi_aug_.resize(n_aug);
+
+        if(m_eq > 0)
+        {
+            A_eq_aug_.leftCols(n) = A_eq;
+            A_eq_aug_.col(n) = b_eq;
+        }
+        if(m_ineq > 0)
+        {
+            A_ineq_aug_.leftCols(n) = A_ineq;
+            for(int j = 0; j < m_ineq; ++j)
+                A_ineq_aug_(j, n) = std::max(b_ineq[j], Scalar(0));
+        }
+
+        p_lo_aug_.head(n) = p_lo;
+        p_lo_aug_[n] = Scalar(0);
+        p_hi_aug_.head(n) = p_hi;
+        p_hi_aug_[n] = Scalar(1);
+
+        g_aug_.head(n) = g;
+        g_aug_[n] = Scalar(0);
+
+        B_aug_.setZero();
+        B_aug_.topLeftCorner(n, n) = B_recover_;
+
+        Scalar rho = penalty_initial_;
+
+        for(int attempt = 0; attempt < max_attempts_; ++attempt)
+        {
+            B_aug_(n, n) = rho;
+
+            auto aug = solver_aug_.template solve<M>(
+                B_aug_, g_aug_, A_eq_aug_, b_eq, A_ineq_aug_, b_ineq,
+                p_lo_aug_, p_hi_aug_);
+
+            if(aug.status == qp_status::optimal)
+            {
+                qp_result<Scalar, N, M> out;
+                out.x.resize(n);
+                out.x = aug.x.head(n);
+                out.lambda = aug.lambda;
+                out.status = qp_status::optimal;
+                out.iterations = attempt + 2;
+                out.relaxation_factor = aug.x[n];
+                return out;
+            }
+
+            rho *= penalty_growth_;
+        }
+
+        direct.relaxation_factor = Scalar(1);
+        return direct;
+    }
+
 private:
     // Penalty schedule and retry cap per Kraft 1988 §3.4: rho_0 = 100,
     // rho_{k+1} = 10 * rho_k, k_max = 5. Adjusting these changes the
@@ -221,6 +329,12 @@ private:
     Eigen::Matrix<Scalar, Eigen::Dynamic, N_aug>    A_ineq_aug_;
     Eigen::Vector<Scalar, N_aug>                    p_lo_aug_;
     Eigen::Vector<Scalar, N_aug>                    p_hi_aug_;
+
+    // Scratch for the recovery path of solve_with_factored_hessian: B
+    // is reconstructed from E (B = E^T E) only when the direct LSEI
+    // cascade reports infeasibility. Held as a member so the rare
+    // recovery does not allocate.
+    Eigen::Matrix<Scalar, N, N>                     B_recover_;
 };
 
 }

@@ -35,6 +35,7 @@ add_executable(nablapp_unit_tests
     zero_copy_test.cpp
     finite_difference_test.cpp
     kkt_residual_test.cpp
+    dense_ldl_bfgs_test.cpp
 )
 
 target_link_libraries(nablapp_unit_tests

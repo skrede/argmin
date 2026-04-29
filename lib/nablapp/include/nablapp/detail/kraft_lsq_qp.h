@@ -80,13 +80,19 @@ public:
         qp_lambda_ineq_.resize(m_aug_max);
     }
 
-    // Solve the QP subproblem.
+    // Solve the QP subproblem from a dense Hessian.
     //
     // B must be symmetric positive definite (the caller is responsible
     // for ensuring this via, e.g., BFGS Powell damping). The returned
     // qp_result contains the step p, the constraint multipliers (only
     // the m_eq + m_ineq "real" constraints; bound multipliers are not
     // currently exposed), and a status code.
+    //
+    // Internally this runs a Cholesky factorization of B to obtain the
+    // LSQ-cast E = L^T and f = -L^{-1} g; consumers that already
+    // maintain B in an LDL^T form (detail::dense_ldl_bfgs) should call
+    // solve_with_factored_hessian() to skip the LLT and pass E, f
+    // directly.
     template <int M = nablapp::dynamic_dimension>
     qp_result<Scalar, N, M> solve(
         const Eigen::Matrix<Scalar, N, N>& B,
@@ -98,8 +104,6 @@ public:
         const Eigen::Vector<Scalar, N>& p_lo,
         const Eigen::Vector<Scalar, N>& p_hi)
     {
-        using std::isfinite;
-
         const int n = static_cast<int>(B.rows());
         const int m_eq = static_cast<int>(A_eq.rows());
         const int m_ineq = static_cast<int>(A_ineq.rows());
@@ -149,6 +153,62 @@ public:
 
         // f = -L^{-1} g via a single forward triangular solve.
         f_ = -LM.template triangularView<Eigen::Lower>().solve(g);
+
+        return solve_lsei_<M>(out, n, m_eq, m_ineq,
+                              A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+    }
+
+    // Solve the QP subproblem from a pre-factored Hessian.
+    //
+    // E must be the upper-triangular factor satisfying E^T E = B and
+    // f the corresponding LSQ-cast RHS solving E^T f = -g (i.e. f =
+    // -L^{-1} g where L = E^T). detail::dense_ldl_bfgs::factor_to_E_and_f
+    // populates E and f directly from the packed L, D factors at O(n^2)
+    // cost, replacing the O(n^3 / 3) Eigen::LLT call inside solve().
+    template <int M = nablapp::dynamic_dimension>
+    qp_result<Scalar, N, M> solve_with_factored_hessian(
+        const Eigen::Matrix<Scalar, N, N>& E,
+        const Eigen::Vector<Scalar, N>& f,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_ineq,
+        const Eigen::Vector<Scalar, N>& p_lo,
+        const Eigen::Vector<Scalar, N>& p_hi)
+    {
+        const int n = static_cast<int>(E.rows());
+        const int m_eq = static_cast<int>(A_eq.rows());
+        const int m_ineq = static_cast<int>(A_ineq.rows());
+
+        qp_result<Scalar, N, M> out;
+        out.x.setZero(n);
+
+        if(E_.rows() != n || E_.cols() != n) E_.resize(n, n);
+        if(f_.size() != n) f_.resize(n);
+
+        E_ = E;
+        f_ = f;
+
+        return solve_lsei_<M>(out, n, m_eq, m_ineq,
+                              A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+    }
+
+private:
+    // LSEI cascade body shared by solve() and solve_with_factored_hessian().
+    // Assumes E_ and f_ already populated; runs the augmented inequality
+    // build, the LSEI call, and the multiplier scatter into the result.
+    template <int M>
+    qp_result<Scalar, N, M> solve_lsei_(
+        qp_result<Scalar, N, M>& out,
+        int n, int m_eq, int m_ineq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_ineq,
+        const Eigen::Vector<Scalar, N>& p_lo,
+        const Eigen::Vector<Scalar, N>& p_hi)
+    {
+        using std::isfinite;
 
         // -------------------------------------------------------------
         // Count finite bounds and build augmented inequality block.

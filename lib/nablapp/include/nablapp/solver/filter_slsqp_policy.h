@@ -4,7 +4,8 @@
 // Filter SQP policy for basic_solver.
 //
 // Mirrors kraft_slsqp_policy in QP solver (kraft_lsq_qp), Hessian
-// (adaptive_bfgs), and constraint handling. Differs in globalization:
+// (dense_ldl_bfgs, packed L D L^T), and constraint handling. Differs
+// in globalization:
 // Fletcher-Leyffer 2002 filter acceptance with Wachter-Biegler 2006
 // switching condition replaces the L1 merit function, eliminating the
 // penalty parameter sigma.
@@ -24,7 +25,7 @@
 //            N&W Section 15.5 (filter methods).
 //            Kraft 1988 DFVLR-FB 88-28 (QP solver, Hessian update).
 
-#include "nablapp/detail/adaptive_bfgs.h"
+#include "nablapp/detail/dense_ldl_bfgs.h"
 #include "nablapp/detail/filter_acceptance.h"
 #include "nablapp/detail/filter_restoration.h"
 #include "nablapp/detail/kkt_residual.h"
@@ -89,7 +90,7 @@ struct filter_slsqp_policy
         Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
         double objective_value{};
-        detail::adaptive_bfgs<double, N, 10> hessian;
+        detail::dense_ldl_bfgs<double, N> hessian;
         detail::kraft_lsq_qp_recovery_solver<double, N> qp_solver;
         detail::filter_set<double> filter;
 
@@ -104,6 +105,14 @@ struct filter_slsqp_policy
         Eigen::VectorXd lam_buf;
         Eigen::VectorXd lam_eq_buf;
         Eigen::VectorXd lam_ineq_buf;
+
+        // Pre-factored Hessian buffers for the dense_ldl_bfgs ->
+        // kraft_lsq_qp_recovery_solver direct path. See kraft_slsqp_policy
+        // for the rationale: factor_to_E_and_f writes E = sqrt(D) * L^T
+        // and f = -D^{-1/2} L^{-1} g at O(n^2), replacing the O(n^3 / 3)
+        // LLT(B) the QP solver runs internally on every solve.
+        Eigen::Matrix<double, N, N> E_buf;
+        Eigen::Vector<double, N> f_buf;
 
         std::uint64_t line_search_calls{0};
         std::uint32_t iteration{0};
@@ -192,7 +201,9 @@ struct filter_slsqp_policy
             s.lambda.resize(0);
         }
 
-        s.hessian = detail::adaptive_bfgs<double, N, 10>(n);
+        s.hessian = detail::dense_ldl_bfgs<double, N>(n);
+        s.E_buf.resize(n, n);
+        s.f_buf.resize(n);
         s.iteration = 0;
 
         // Initialize filter with h_max per Wachter-Biegler 2006 eq. (8).
@@ -207,7 +218,12 @@ struct filter_slsqp_policy
     step_result<double> step(state_type<P>& s)
     {
         const int n = s.n;
-        const auto& B = s.hessian.hessian();
+
+        // Factor the BFGS LDL Hessian into (E, f) directly off the
+        // packed L, D factors -- skipping the O(n^3 / 3) LLT(B) the QP
+        // solver would otherwise run on every solve. See
+        // detail::dense_ldl_bfgs::factor_to_E_and_f.
+        s.hessian.factor_to_E_and_f(s.E_buf, s.g, s.f_buf);
 
         // QP subproblem: identical to kraft_slsqp.
         s.b_eq_workspace = -s.c_eq;
@@ -218,10 +234,11 @@ struct filter_slsqp_policy
         Eigen::Vector<double, N> p_hi = (Eigen::Vector<double, N>(s.upper) -
                                           Eigen::Vector<double, N>(s.x)).eval();
 
-        auto qp_res = s.qp_solver.solve(B, Eigen::Vector<double, N>(s.g),
-                                         s.J_eq, s.b_eq_workspace,
-                                         s.J_ineq, s.b_ineq_workspace,
-                                         p_lo, p_hi);
+        auto qp_res = s.qp_solver.solve_with_factored_hessian(
+            s.E_buf, s.f_buf, Eigen::Vector<double, N>(s.g),
+            s.J_eq, s.b_eq_workspace,
+            s.J_ineq, s.b_ineq_workspace,
+            p_lo, p_hi);
 
         Eigen::Vector<double, N> p = qp_res.x;
         double p_norm = p.norm();
@@ -448,8 +465,11 @@ struct filter_slsqp_policy
                         ? (-c_ineq_full + s.J_ineq * p).eval()
                         : Eigen::VectorXd{};
 
-                    auto soc_res = s.qp_solver.solve(
-                        B, Eigen::Vector<double, N>(s.g),
+                    // Reuse the (E, f) factored on this step's main QP
+                    // solve: Hessian and gradient unchanged, only the
+                    // constraint RHS differs (SOC retry).
+                    auto soc_res = s.qp_solver.solve_with_factored_hessian(
+                        s.E_buf, s.f_buf, Eigen::Vector<double, N>(s.g),
                         s.J_eq, b_eq_soc, s.J_ineq, b_ineq_soc,
                         p_lo, p_hi);
 

@@ -18,7 +18,7 @@
 //            globalization per Section 18.5-18.6.
 
 #include "nablapp/detail/lagrangian.h"
-#include "nablapp/detail/adaptive_bfgs.h"
+#include "nablapp/detail/dense_ldl_bfgs.h"
 #include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/merit_function.h"
 #include "nablapp/detail/active_set_qp.h"
@@ -97,7 +97,7 @@ struct nw_sqp_policy
         double objective_value{};
         double sigma{1.0};
         // Canonical BFGS operator per D-01. References: Shanno 1978 (N&W eq. 6.20); N&W Section 7.2 (L-BFGS); Kraft 1988 DFVLR-FB 88-28 Section 2.2.3.
-        detail::adaptive_bfgs<double, N, 10> hessian;
+        detail::dense_ldl_bfgs<double, N> hessian;
         detail::active_set_qp_solver<double, N> qp_solver;
         std::uint32_t iteration{0};
         int n_eq{0};
@@ -180,7 +180,7 @@ struct nw_sqp_policy
         }
 
         // BFGS Hessian of Lagrangian, initialized to I
-        s.hessian = detail::adaptive_bfgs<double, N, 10>(n);
+        s.hessian = detail::dense_ldl_bfgs<double, N>(n);
         // Pre-allocate QP solver workspace: equality + inequality + 2n box bounds
         int max_constraints = s.n_eq + s.n_ineq + 2 * n;
         s.qp_solver = detail::active_set_qp_solver<double, N>(n, max_constraints);
@@ -459,15 +459,14 @@ struct nw_sqp_policy
 
         Eigen::Vector<double, N> yk = grad_L_new - grad_L_old;
 
-        // --- 6. BFGS curvature push (adaptive_bfgs with Shanno rescaling) ---
-        // Skip BFGS updates on non-positive curvature pairs.
-        // In SQP the Lagrangian gradient difference y_k can easily
-        // have s^T y < 0 when the constraint Hessian contribution
-        // (A_{k+1} - A_k)^T lam dominates the objective curvature --
-        // feeding such a pair into the BFGS formula distorts B
-        // instead of improving it. adaptive_bfgs::push does its own
-        // s^T y > 0 guard, but checking here keeps the semantics
-        // explicit in the policy step.
+        // --- 6. BFGS curvature push (dense_ldl_bfgs, Powell-damped) ---
+        // Skip BFGS updates on near-zero or non-positive curvature
+        // pairs. In SQP the Lagrangian gradient difference y_k can
+        // easily have s^T y < 0 when the constraint Hessian contribution
+        // (A_{k+1} - A_k)^T lam dominates the objective curvature; the
+        // dense_ldl_bfgs::push call below applies Powell damping per
+        // N&W eq. 18.22-18.24 internally, but the explicit guard here
+        // keeps the policy-step semantics legible.
         //
         // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
         //            N&W Procedure 18.2 damping guard.

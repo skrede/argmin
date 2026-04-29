@@ -16,17 +16,18 @@
 // Lagrangian gradient difference.
 //
 // Differences from the earlier L-BFGS variant:
-//   - detail::compact_lbfgs is replaced with detail::adaptive_bfgs
-//     (compact L-BFGS form with per-push Shanno (1978) initial-Hessian
-//     rescaling theta = y^T y / s^T y on each accepted pair; N&W
-//     eq. 6.20; N&W Section 7.2; Kraft 1988 DFVLR-FB 88-28
-//     Section 2.2.3), eliminating the per-step dense_hessian() rebuild
-//     which was the dominant per-step cost at IK scale (n = 4-200)
-//     while retaining a dense B suitable for the LSQ/LSEI QP subproblem.
+//   - detail::compact_lbfgs is replaced with detail::dense_ldl_bfgs
+//     (packed L D L^T BFGS approximation with Powell-damped rank-1
+//     updates per Fletcher & Powell 1974; Shanno 1978 initial-Hessian
+//     rescaling theta = y^T y / s^T y is applied only on the first
+//     push after construction or reset, after which the LDL absorbs
+//     curvature evolution incrementally at O(n^2) per push). The
+//     packed factor is consumed directly by the QP via factor_to_E_and_f
+//     (skipping LLT(B) at the QP call site).
 //   - detail::active_set_qp_solver is replaced with
 //     detail::kraft_lsq_qp_solver, eliminating the Phase-1 feasibility
 //     projection and the box-bound stalling that required feasibility
-//     restoration in Phase 24.
+//     restoration earlier.
 //
 // Supports: unconstrained, equality, inequality, box, and mixed
 // constraints. When the problem is only differentiable, constraints
@@ -41,7 +42,7 @@
 //            BFGS), Section 18.3 (L1 merit function).
 //            K&W Section 10.4 (penalty methods, augmented Lagrangian).
 
-#include "nablapp/detail/adaptive_bfgs.h"
+#include "nablapp/detail/dense_ldl_bfgs.h"
 #include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/kraft_lsq_qp.h"
 #include "nablapp/detail/kraft_lsq_qp_recovery.h"
@@ -112,7 +113,7 @@ struct kraft_slsqp_policy
         Eigen::VectorXd lambda;
         double objective_value{};
         double sigma{1.0};
-        detail::adaptive_bfgs<double, N, 10> hessian;
+        detail::dense_ldl_bfgs<double, N> hessian;
         detail::kraft_lsq_qp_recovery_solver<double, N> qp_solver;
 
         // Pre-allocated constraint workspace (sized in init(), reused in step())
@@ -154,6 +155,15 @@ struct kraft_slsqp_policy
         Eigen::Vector<double, N> grad_L_new_buf;
         Eigen::Vector<double, N> sk_buf;
         Eigen::Vector<double, N> yk_buf;
+
+        // Pre-factored Hessian buffers for the kraft_lsq_qp_recovery_solver
+        // direct path: E = sqrt(D) * L^T (upper triangular) and f =
+        // -D^{-1/2} * L^{-1} * g, both produced in O(n^2) by
+        // detail::dense_ldl_bfgs::factor_to_E_and_f. Replaces the
+        // O(n^3 / 3) Eigen::LLT(B) the QP solver runs internally on every
+        // solve when given a dense B. Sized in init().
+        Eigen::Matrix<double, N, N> E_buf;
+        Eigen::Vector<double, N> f_buf;
         Eigen::VectorXd c_trial_buf;
         Eigen::VectorXd b_eq_soc_buf;
         Eigen::VectorXd b_ineq_soc_buf;
@@ -284,10 +294,14 @@ struct kraft_slsqp_policy
             s.lambda.resize(0);
         }
 
-        // Adaptive-theta dense BFGS: identity baseline, theta recomputed
-        // on every push (L-BFGS-style) to prevent Hessian drift on SQP
-        // problems with shifting Lagrangian curvature (HS026 family).
-        s.hessian = detail::adaptive_bfgs<double, N, 10>(n);
+        // Packed LDL^T BFGS Hessian (Fletcher-Powell 1974). Initialized
+        // at L = I, D = I (B_0 = I) and updated by Powell-damped rank-1
+        // LDL updates per push (NLopt slsqp.c slsqpb_); replaces the
+        // adaptive-theta compact L-BFGS path that rebuilt B from scratch
+        // every push at O(M * n^2) cost.
+        s.hessian = detail::dense_ldl_bfgs<double, N>(n);
+        s.E_buf.resize(n, n);
+        s.f_buf.resize(n);
         s.sigma = options.initial_penalty.value_or(1.0);
         s.iteration = 0;
 
@@ -311,12 +325,16 @@ struct kraft_slsqp_policy
         // needed.
         const int n = s.n;
 
-        // Direct access to the in-place BFGS Hessian -- no dense_hessian()
-        // rebuild at the QP call site. The dense B is refreshed by
-        // detail::adaptive_bfgs::push() at the end of step() on an
-        // accepted curvature pair (Shanno 1978 / N&W eq. 6.20 rescaling;
-        // N&W Section 7.2; Kraft 1988 DFVLR-FB 88-28 Section 2.2.3).
-        const auto& B = s.hessian.hessian();
+        // Pre-factor the BFGS Hessian into E = sqrt(D) * L^T and f =
+        // -D^{-1/2} * L^{-1} * g directly off the packed L, D factors
+        // maintained by detail::dense_ldl_bfgs. The recovery solver's
+        // direct path consumes (E, f) at no further factorization cost,
+        // skipping the O(n^3 / 3) Eigen::LLT(B) the previous code ran
+        // inside kraft_lsq_qp_solver::solve on every step.
+        // Reference: NLopt slsqp.c lsq_ (lines 1234-1340) for the
+        // E = sqrt(D) * L^T reconstruction; Kraft 1988 DFVLR-FB 88-28
+        // Section 2.2.3 (BFGS update), Section 3.2 (LSQ cast).
+        s.hessian.factor_to_E_and_f(s.E_buf, s.g, s.f_buf);
 
         s.b_eq_workspace = -s.c_eq;
         s.b_ineq_workspace = -s.c_ineq;
@@ -328,10 +346,11 @@ struct kraft_slsqp_policy
         s.p_lo_buf.noalias() = s.lower - s.x;
         s.p_hi_buf.noalias() = s.upper - s.x;
 
-        auto qp_res = s.qp_solver.solve(B, s.g,
-                                         s.J_eq, s.b_eq_workspace,
-                                         s.J_ineq, s.b_ineq_workspace,
-                                         s.p_lo_buf, s.p_hi_buf);
+        auto qp_res = s.qp_solver.solve_with_factored_hessian(
+            s.E_buf, s.f_buf, s.g,
+            s.J_eq, s.b_eq_workspace,
+            s.J_ineq, s.b_ineq_workspace,
+            s.p_lo_buf, s.p_hi_buf);
 
         s.p_buf = qp_res.x;
         Eigen::Vector<double, N>& p = s.p_buf;
@@ -542,8 +561,12 @@ struct kraft_slsqp_policy
                     if(s.n_ineq > 0)
                         s.b_ineq_soc_buf.noalias() = -c_ineq_trial + s.J_ineq * p;
 
-                    auto soc_res = s.qp_solver.solve(
-                        B, s.g,
+                    // Reuse the (E, f) factored on this step's main QP
+                    // solve: the Hessian and gradient have not changed
+                    // between the main solve and this SOC retry, only
+                    // the constraint RHS (b_eq_soc_buf, b_ineq_soc_buf).
+                    auto soc_res = s.qp_solver.solve_with_factored_hessian(
+                        s.E_buf, s.f_buf, s.g,
                         s.J_eq, s.b_eq_soc_buf, s.J_ineq, s.b_ineq_soc_buf,
                         s.p_lo_buf, s.p_hi_buf);
 
@@ -736,26 +759,28 @@ struct kraft_slsqp_policy
         Eigen::Vector<double, N>& sk = s.sk_buf;
         Eigen::Vector<double, N>& yk = s.yk_buf;
 
-        // Skip BFGS updates on non-positive curvature pairs.
-        // In SLSQP the Lagrangian gradient difference y_k can easily
-        // have s^T y < 0 when the constraint Hessian contribution
-        // (A_{k+1} - A_k)^T lam dominates the objective curvature --
-        // feeding such a pair into the BFGS formula distorts B
-        // instead of improving it. adaptive_bfgs::push does its own
-        // s^T y > 0 guard, but checking here keeps the semantics
-        // explicit in the policy step.
+        // Skip BFGS updates on near-zero or non-positive curvature
+        // pairs. In SLSQP the Lagrangian gradient difference y_k can
+        // easily have s^T y < 0 when the constraint Hessian contribution
+        // (A_{k+1} - A_k)^T lam dominates the objective curvature; the
+        // dense_ldl_bfgs::push call below applies Powell damping per
+        // N&W eq. 18.22-18.24 internally, but the explicit guard here
+        // keeps the policy-step semantics legible and avoids the
+        // damping logic for the trivial null-step / non-curvature case.
         //
         // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
         //            N&W Procedure 18.2 damping guard.
         const double sTy = sk.dot(yk);
         if(sk.norm() > 1e-15 && sTy > 0.0)
         {
-            // adaptive_bfgs::push recomputes theta = y^T y / s^T y from
-            // the latest pair on every call and rebuilds B via the
-            // compact L-BFGS representation over the stored history.
-            // This is L-BFGS-with-adaptive-theta semantics, which
-            // tracks local curvature even as the SQP iterate moves
-            // towards a degenerate constrained optimum (e.g. HS026).
+            // dense_ldl_bfgs::push applies the Shanno (1978) initial
+            // scaling theta = y^T y / s^T y on the first call after
+            // construction or reset (N&W eq. 6.20), then evolves the
+            // packed L D L^T factor by Powell-damped rank-1 LDL updates
+            // for every subsequent pair (Fletcher-Powell 1974). The
+            // damping safeguard ensures B remains SPD even when the
+            // Lagrangian curvature shifts toward a degenerate
+            // constrained optimum (HS026 family).
             s.hessian.push(sk, yk);
         }
 

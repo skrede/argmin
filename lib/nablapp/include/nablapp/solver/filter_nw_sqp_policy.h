@@ -4,10 +4,10 @@
 // Dense BFGS SQP with Fletcher-Leyffer 2002 filter acceptance.
 //
 // Mirrors nw_sqp_policy in QP solver (active_set_qp_solver) and Hessian
-// (adaptive_bfgs, Shanno-rescaled compact L-BFGS per N&W eq. 6.20 /
-// Section 7.2; Kraft 1988 DFVLR-FB 88-28 Section 2.2.3) but replaces
-// user-tuned L1 merit globalization with a filter-based acceptance
-// test. The filter maintains a set of non-dominated (f, h) pairs.
+// (dense_ldl_bfgs, Powell-damped packed L D L^T BFGS per Fletcher-Powell
+// 1974; Shanno 1978 initial-Hessian rescale on the first push only;
+// Kraft 1988 DFVLR-FB 88-28 Section 2.2.3) but replaces user-tuned L1
+// merit globalization with a filter-based acceptance test. The filter maintains a set of non-dominated (f, h) pairs.
 // Trial points must be filter-acceptable AND satisfy an Armijo
 // condition on an automatically-derived L1 merit. The penalty sigma
 // is computed from QP multipliers (no user tuning).
@@ -25,7 +25,7 @@
 
 #include "nablapp/detail/lagrangian.h"
 #include "nablapp/detail/merit_function.h"
-#include "nablapp/detail/adaptive_bfgs.h"
+#include "nablapp/detail/dense_ldl_bfgs.h"
 #include "nablapp/detail/active_set_qp.h"
 #include "nablapp/detail/kkt_residual.h"
 #include "nablapp/detail/filter_acceptance.h"
@@ -88,7 +88,7 @@ struct filter_nw_sqp_policy
         // Adaptive theta rebuilds B from the stored history with a
         // fresh theta = y^T y / s^T y on every push, tracking local
         // Lagrangian curvature rather than freezing at iteration 0.
-        detail::adaptive_bfgs<double, N, 10> hessian;
+        detail::dense_ldl_bfgs<double, N> hessian;
         detail::filter_set<double> filter;
 
         // Automatically-derived penalty for L1 merit acceptance.
@@ -153,7 +153,7 @@ struct filter_nw_sqp_policy
             s.upper = Eigen::Vector<double, N>::Constant(s.n, inf);
         }
 
-        s.hessian = detail::adaptive_bfgs<double, N, 10>(s.n);
+        s.hessian = detail::dense_ldl_bfgs<double, N>(s.n);
         s.sigma = 1.0;
         s.iteration = 0;
 
@@ -560,15 +560,14 @@ struct filter_nw_sqp_policy
 
         Eigen::VectorXd yk = grad_L_new - grad_L_old;
 
-        // --- 5. BFGS curvature push (adaptive_bfgs with Shanno rescaling) ---
-        // Skip BFGS updates on non-positive curvature pairs.
-        // In filter-SQP the Lagrangian gradient difference y_k can
-        // easily have s^T y < 0 when the constraint Hessian contribution
-        // (A_{k+1} - A_k)^T lam dominates the objective curvature --
-        // feeding such a pair into the BFGS formula distorts B
-        // instead of improving it. adaptive_bfgs::push does its own
-        // s^T y > 0 guard, but checking here keeps the semantics
-        // explicit in the policy step.
+        // --- 5. BFGS curvature push (dense_ldl_bfgs, Powell-damped) ---
+        // Skip BFGS updates on near-zero or non-positive curvature
+        // pairs. In filter-SQP the Lagrangian gradient difference y_k
+        // can easily have s^T y < 0 when the constraint Hessian
+        // contribution (A_{k+1} - A_k)^T lam dominates the objective
+        // curvature; the dense_ldl_bfgs::push call below applies
+        // Powell damping per N&W eq. 18.22-18.24 internally, but the
+        // explicit guard here keeps the policy-step semantics legible.
         //
         // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
         //            N&W Procedure 18.2 damping guard.
