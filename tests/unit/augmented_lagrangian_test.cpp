@@ -282,11 +282,21 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
     auto cold_result = cold_solver.solve();
     int cold_iters = cold_result.iterations;
 
-    // Both paths should converge; warm-start preserves curvature for
-    // faster inner convergence, though outer iteration count may vary
-    // slightly due to adaptive tolerance interaction.
+    INFO("warm iters: " << warm_iters);
+    INFO("cold iters: " << cold_iters);
     CHECK(warm_result.objective_value == Approx(17.0140173).margin(1e-1));
     CHECK(cold_result.objective_value == Approx(17.0140173).margin(1e-1));
+    // AL7 cold-start fix (commit 0abbde9, "Fix: cold-start
+    // augmented_lagrangian inner solver after each penalty reduction
+    // (CGT 1991)") restored warm-start's curvature-preservation benefit
+    // by ensuring the inner solver's L-BFGS history is fresh for each
+    // outer iter's modified subproblem. Pre-AL7 the warm path could
+    // take MORE outer iters than cold because a stale Hessian
+    // approximation drove poor inner trajectories. The assertion below
+    // locks the AL7 expectation that warm <= cold on HS071. If a future
+    // change regresses to warm > cold, that's a signal the inner
+    // history reset is no longer firing correctly.
+    CHECK(warm_iters <= cold_iters);
 }
 
 TEST_CASE("augmented lagrangian adaptive tolerance converges on HS071",
