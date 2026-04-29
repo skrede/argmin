@@ -44,6 +44,13 @@ struct nnls_result
 // The iteration limit is fixed at 3*n, matching Lawson & Hanson and the
 // NLopt / SciPy convention; on exhaustion the routine returns mode=3.
 //
+// Per-call workspace: r, A_p, z_p, p_list, in_P live in thread_local
+// storage to eliminate the per-inner-iter heap allocation that the
+// prior `Eigen::Matrix Ap(m, nsetp)` + `Ap.householderQr().solve()`
+// path triggered. NNLS is invoked from inside LDP -> LSI / LSEI on
+// every QP solve in kraft_slsqp; the allocator churn was a measurable
+// fraction of per-step wall time on small constrained HS problems.
+//
 // Reference: Lawson, C.L. & Hanson, R.J. (1974). Solving Least Squares
 //            Problems. Ch. 23.3, Algorithm NNLS.
 template <typename Scalar, int M, int N>
@@ -67,32 +74,49 @@ nnls_result<Scalar> nnls(
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
     const int max_iter = 3 * n;
 
-    // Keep immutable copies of the problem for residual and dual
-    // evaluations. The active-set iteration is entirely driven from
-    // these copies; the caller's A and b may still be touched, but the
-    // algorithm itself uses the local snapshots.
-    const Eigen::Matrix<Scalar, M, N> A_ref = A;
-    const Eigen::Vector<Scalar, M> b_ref = b;
+    // Thread-local workspaces. Sized lazily on first use; subsequent
+    // calls at smaller shapes reuse the existing storage. The QR
+    // factorization object is also hoisted so its internal Householder
+    // tau / hCoeffs storage is reused.
+    thread_local Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> A_buf;
+    thread_local Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> Ap_buf;
+    thread_local Eigen::Vector<Scalar, Eigen::Dynamic> b_buf;
+    thread_local Eigen::Vector<Scalar, Eigen::Dynamic> r_buf;
+    thread_local Eigen::Vector<Scalar, Eigen::Dynamic> z_buf;
+    thread_local Eigen::Vector<Scalar, Eigen::Dynamic> zp_buf;
+    thread_local Eigen::Vector<int, Eigen::Dynamic> in_P_buf;
+    thread_local Eigen::Vector<int, Eigen::Dynamic> p_list_buf;
+    thread_local Eigen::HouseholderQR<
+        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> qr;
+
+    if(A_buf.rows() < m || A_buf.cols() < n) A_buf.resize(m, n);
+    if(Ap_buf.rows() < m || Ap_buf.cols() < n) Ap_buf.resize(m, n);
+    if(b_buf.size() < m) b_buf.resize(m);
+    if(r_buf.size() < m) r_buf.resize(m);
+    if(z_buf.size() < n) z_buf.resize(n);
+    if(zp_buf.size() < n) zp_buf.resize(n);
+    if(in_P_buf.size() < n) in_P_buf.resize(n);
+    if(p_list_buf.size() < n) p_list_buf.resize(n);
+
+    auto A_ref = A_buf.topLeftCorner(m, n);
+    auto b_ref = b_buf.head(m);
+    A_ref = A;
+    b_ref = b;
+
+    auto z = z_buf.head(n);
+    auto in_P = in_P_buf.head(n);
+    auto p_list = p_list_buf.head(n);
 
     x.setZero();
     w.setZero();
-
-    // in_P[j] = true if column j currently lies in the positive set P.
-    Eigen::Vector<int, N> in_P(n);
     in_P.setZero();
-
-    // Order-preserving list of P columns (for building submatrices).
-    Eigen::Vector<int, N> p_list(n);
     int nsetp = 0;
-
-    // Scratch for the free-set LS solution (size up to n).
-    Eigen::Vector<Scalar, N> z(n);
 
     int iter = 0;
     for(; iter < max_iter; ++iter)
     {
         // Compute residual r = b - A x and dual w = A^T r.
-        Eigen::Vector<Scalar, M> r(m);
+        auto r = r_buf.head(m);
         r.noalias() = b_ref - A_ref * x;
         w.noalias() = A_ref.transpose() * r;
 
@@ -126,17 +150,16 @@ nnls_result<Scalar> nnls(
         while(inner_iter++ < inner_max)
         {
             // Solve LS for the current P: min || A_P z_P - b ||.
-            Eigen::Matrix<Scalar, M, Eigen::Dynamic> Ap(m, nsetp);
+            // Build Ap into the hoisted workspace via column-gather.
             for(int k = 0; k < nsetp; ++k)
-                Ap.col(k) = A_ref.col(p_list[k]);
-
-            Eigen::Vector<Scalar, Eigen::Dynamic> zp =
-                Ap.householderQr().solve(b_ref);
+                Ap_buf.col(k).head(m) = A_ref.col(p_list[k]);
+            qr.compute(Ap_buf.topLeftCorner(m, nsetp));
+            zp_buf.head(nsetp) = qr.solve(b_ref);
 
             // Scatter zp into z using the full n layout.
             z.setZero();
             for(int k = 0; k < nsetp; ++k)
-                z[p_list[k]] = zp[k];
+                z[p_list[k]] = zp_buf[k];
 
             // Check if all P components of z are strictly positive.
             Scalar alpha = std::numeric_limits<Scalar>::max();
@@ -198,7 +221,7 @@ nnls_result<Scalar> nnls(
         result.mode = 3;
 
     // Final residual norm on the ORIGINAL system.
-    Eigen::Vector<Scalar, M> r_final(m);
+    auto r_final = r_buf.head(m);
     r_final.noalias() = b_ref - A_ref * x;
     result.residual_norm = r_final.norm();
 
