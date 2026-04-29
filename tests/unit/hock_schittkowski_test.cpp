@@ -437,6 +437,11 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
 {
     SECTION("HS024")
     {
+        // Phase 33 hotfix baseline: f = -0.652 with cv = 0 (truthful
+        // post-parmu-adaptation result). Pre-fix this passed at
+        // f = -0.30 silently. Tightened bar locks the gain; gap to
+        // f* = -1.0 closes with the v0.3.x faithfulness rewrite.
+        // Rationale duplicated at tests/unit/cobyla_test.cpp HS024.
         hs024 problem;
         auto x0 = problem.initial_point();
         solver_options opts;
@@ -448,8 +453,11 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         basic_solver solver{cobyla_policy{}, problem, x0, opts};
         auto result = solver.solve();
 
-        CHECK(result.objective_value == Approx(-1.0).margin(1.0));
-        CHECK(solver.constraint_violation() < 0.5);
+        INFO("HS024 objective: " << result.objective_value);
+        INFO("HS024 cv:        " << solver.constraint_violation());
+        CHECK(result.objective_value < -0.5);
+        CHECK(result.objective_value > -1.05);
+        CHECK(solver.constraint_violation() < 1e-4);
     }
 
     SECTION("HS035")

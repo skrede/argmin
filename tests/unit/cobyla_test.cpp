@@ -98,6 +98,25 @@ TEST_CASE("cobyla_policy: simple constrained 2D", "[cobyla]")
 
 TEST_CASE("cobyla_policy: HS024", "[cobyla][hs]")
 {
+    // HS024 in 2D, f* = -1.0 at x* = (3, sqrt(3)). Pre-Phase-33-hotfix
+    // nablapp returned f = -0.30 with cv ~ 0 (silent wrong-optimum, the
+    // dominant motivator of the static-audit C1 finding). The previous
+    // test bar `Approx(-1.0).margin(1.0)` and `cv < 0.5` was wide
+    // enough to pass on that wrong answer.
+    //
+    // Phase 33 hotfix (Powell adaptive parmu + parmu-gated termination
+    // + denormalized-simplex fix + tightened geometry threshold)
+    // moves nablapp to f = -0.652 with cv = 0 -- still not f*, but a
+    // 50% closure of the gap. The remaining gap to f* = -1.0 requires
+    // the v0.3.x faithfulness rewrite (static-audit C2 trstlp,
+    // C3 select-replacement-vertex, C10 geometry step). The bar below
+    // locks the hotfix gain (must beat the prior wrong-optimum f =
+    // -0.30 by a wide margin) and the feasibility (must be exactly
+    // feasible to match the corrected merit), while staying above f*
+    // (cannot claim to reach the true optimum yet).
+    //
+    // When the v0.3.x rewrite lands, tighten this to
+    // `Approx(-1.0).margin(0.01)` and `cv < 1e-6`.
     hs024 problem;
     auto x0 = problem.initial_point();
     solver_options opts;
@@ -109,9 +128,14 @@ TEST_CASE("cobyla_policy: HS024", "[cobyla][hs]")
     basic_solver solver{cobyla_policy{}, problem, x0, opts};
     auto result = solver.solve();
 
-    // COBYLA is derivative-free; relaxed tolerance for convergence direction.
-    CHECK(result.objective_value == Approx(-1.0).margin(1.0));
-    CHECK(solver.constraint_violation() < 0.5);
+    INFO("HS024 objective: " << result.objective_value);
+    INFO("HS024 cv:        " << solver.constraint_violation());
+    // Beats the pre-hotfix wrong optimum f = -0.30 by a wide margin:
+    CHECK(result.objective_value < -0.5);
+    // Doesn't claim to hit f* = -1.0 (deferred to v0.3.x rewrite):
+    CHECK(result.objective_value > -1.05);
+    // Feasibility is now exact under adaptive parmu:
+    CHECK(solver.constraint_violation() < 1e-4);
 }
 
 TEST_CASE("cobyla_policy: basic_solver_group compatibility", "[cobyla][solver_group]")
