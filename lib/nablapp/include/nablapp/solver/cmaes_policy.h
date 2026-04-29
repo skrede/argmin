@@ -309,18 +309,19 @@ struct cmaes_policy
             s.covariance_dirty = false;
         }
 
-        // 14. Track best
+        // 14. Track best across the offspring (Hansen Algorithm 11 line 11
+        // -- best ranked offspring is the candidate, not the new mean).
+        // Pre-fix this routine also evaluated `s.problem->value(s.mean)`
+        // every generation and replaced s.x / objective_value if the
+        // mean came in lower. That added ~1 evaluation per generation
+        // (~16% inflation at popsize 6) for no algorithmic reason --
+        // Hansen Algorithm 11 does not evaluate the mean and the search
+        // distribution updates do not require it. Static-audit G6.
         double gen_best_f = fitnesses[idx[0]];
         if(gen_best_f < s.objective_value)
         {
             s.objective_value = gen_best_f;
             s.x = offspring.col(idx[0]);
-        }
-        double mean_f = s.problem->value(s.mean);
-        if(mean_f < s.objective_value)
-        {
-            s.objective_value = mean_f;
-            s.x = s.mean;
         }
         if(s.objective_value < s.best_ever_value)
             s.best_ever_value = s.objective_value;
