@@ -71,6 +71,7 @@ struct cobyla_policy
         Eigen::VectorXd f_simplex;     // objective at each vertex
         Eigen::MatrixXd c_simplex;     // all constraints at each vertex, m x (n+1)
         double rho{};
+        double rho_initial{};          // Initial trust radius, restored on reset_clear (static-audit C7).
         double rho_end{};
         double objective_value{};
         // Adaptive merit penalty (Powell 1994 §5). Starts at zero and
@@ -81,6 +82,11 @@ struct cobyla_policy
         // pre-fix hardcoded penalty=10.0 (trust region + step()) and
         // 1e6 (find_best_point) flagged by static-audit C1.
         double parmu{0.0};
+        // Set to true when the most recent step's parmu adaptation
+        // raised parmu; gates the small-step convergence test so we
+        // do not declare convergence while the merit landscape is
+        // still settling (static-audit C5).
+        bool parmu_grew_last_step{false};
         Eigen::VectorXd c_eq;
         Eigen::VectorXd c_ineq;
         Eigen::VectorXd lower;
@@ -135,6 +141,7 @@ struct cobyla_policy
             h = (max_range > 0.0) ? 0.1 * max_range : 1.0;
         }
         s.rho = h;
+        s.rho_initial = h;
         s.rho_end = options.final_trust_radius;
 
         // Pre-allocate stateful solvers
@@ -201,9 +208,17 @@ struct cobyla_policy
 
         double d_norm = d.norm();
 
-        // Convergence: step too small relative to trust radius
+        // Early-exit convergence test (static-audit C5). Pre-fix this
+        // returned `converged` whenever d_norm < rho * factor and rho
+        // had reached rho_end, with no feasibility / multiplier check
+        // -- HS024 hit the test at f = -0.30 (a non-KKT point) and
+        // exited silently. Now gated on `!parmu_grew_last_step`: if
+        // the previous step's parmu adaptation raised parmu, the merit
+        // landscape just shifted and we should not declare convergence
+        // until the new merit settles.
         if(d_norm < s.rho * options.step_convergence_factor &&
-           s.rho <= s.rho_end)
+           s.rho <= s.rho_end &&
+           !s.parmu_grew_last_step)
         {
             return make_converged_result(s, models.objective_gradient.norm());
         }
@@ -235,12 +250,14 @@ struct cobyla_policy
             models.constraint_gradients, constraint_offsets, s.n_eq, d);
         double prerem = viol_old - linearised_viol_d;
 
+        const double parmu_before_adapt = s.parmu;
         if(prerem > 0.0)
         {
             double barmu = prerec / prerem;
             if(s.parmu < 1.5 * barmu)
                 s.parmu = std::max(s.parmu, 2.0 * barmu);
         }
+        s.parmu_grew_last_step = (s.parmu > parmu_before_adapt);
 
         // Re-find best vertex under updated parmu (merit ranking may shift).
         s.best_idx = find_best_point(s);
@@ -307,6 +324,15 @@ struct cobyla_policy
         const int n = static_cast<int>(x0.size());
         s.x = detail::project(x0, s.lower, s.upper);
         s.iteration = 0;
+
+        // Restore rho and parmu to their initial values so a second
+        // solve doesn't start at the prior solve's rho_end (which would
+        // collapse to a single-step "converged" exit) and isn't biased
+        // by a parmu that adapted to the prior problem instance.
+        // Static-audit C7: reset_clear leaked s.rho.
+        s.rho = s.rho_initial;
+        s.parmu = 0.0;
+        s.parmu_grew_last_step = false;
 
         s.simplex = detail::build_simplex(s.x, s.rho, s.lower, s.upper);
 

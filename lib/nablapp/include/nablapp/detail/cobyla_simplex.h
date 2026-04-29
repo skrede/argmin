@@ -60,10 +60,29 @@ Eigen::Matrix<Scalar, N, Eigen::Dynamic> build_simplex(
     for(int i = 0; i < n; ++i)
     {
         Eigen::Vector<Scalar, N> pt = x0;
-        pt[i] = std::min(pt[i] + rho, upper[i]);
+        const Scalar upward_room   = upper[i] - x0[i];
+        const Scalar downward_room = x0[i] - lower[i];
 
-        if(std::abs(pt[i] - x0[i]) < Scalar(1e-15) * rho)
-            pt[i] = std::max(x0[i] - rho, lower[i]);
+        // Pre-fix this used `pt[i] = min(pt[i] + rho, upper[i])` and
+        // only flipped to -rho when the upward step was clipped to
+        // *zero* (`abs(...) < 1e-15 * rho`). For an x0 close to but
+        // not at the upper bound (e.g. x0[i] = upper[i] - 0.3 * rho)
+        // the simplex got an asymmetric 0.3 * rho displacement,
+        // 3x ill-scaled with no trigger. Static-audit C8.
+        //
+        // Choose +rho if there is full upward room; else -rho if there
+        // is full downward room; else fall back to whichever bound
+        // gives the larger displacement (move all the way to that
+        // bound). This guarantees a displacement of at least
+        // min(rho, max(upward_room, downward_room)).
+        if(upward_room >= rho)
+            pt[i] = x0[i] + rho;
+        else if(downward_room >= rho)
+            pt[i] = x0[i] - rho;
+        else if(upward_room >= downward_room)
+            pt[i] = upper[i];
+        else
+            pt[i] = lower[i];
 
         simplex.col(1 + i) = pt;
     }
@@ -162,7 +181,12 @@ public:
         auto lu = D_.fullPivLu();
         Scalar cond = Scalar(1) / lu.rcond();
 
-        if(cond > Scalar(1e10) || !std::isfinite(cond))
+        // Threshold tightened from 1e10 to 1e7: the prior value tolerated
+        // near-singular D and let the linear-model gradients drift on
+        // poorly-scaled simplices. 1e7 is conservative for double-
+        // precision; below that, linear-model interpolation gradients
+        // remain accurate to roughly 1e-9 relative. Static-audit C11.
+        if(cond > Scalar(1e7) || !std::isfinite(cond))
         {
             int worst = vertex_map_[0];
             Scalar min_dist = (simplex.col(worst) - x_best).squaredNorm();
