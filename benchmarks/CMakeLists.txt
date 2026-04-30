@@ -391,6 +391,87 @@ if(NABLAPP_BENCH_DLIB)
     endif()
 endif()
 
+option(NABLAPP_BENCH_LIBCMAES "Build libcmaes comparison benchmarks" ON)
+if(NABLAPP_BENCH_LIBCMAES)
+    if(NABLAPP_CMAKE_FETCH_DEPS)
+        include(FetchContent)
+        # libcmaes v0.10 ships unconditional install(EXPORT ...) and bare
+        # export(TARGETS cmaes ...) commands at top level which fail when
+        # used as a FetchContent subdirectory because nablapp's
+        # eigen_headers (the alias backing Eigen3::Eigen under FETCH_DEPS)
+        # is not in any export set. We do not need the export at all --
+        # we only consume the cmaes target from a sibling target. Wrap
+        # the MakeAvailable in a block() and shadow install / export
+        # with no-op functions inside the block so the override does not
+        # leak to the parent scope.
+        #
+        # The cmake_minimum_required(VERSION 3.1) inside libcmaes is
+        # rejected by CMake 4+; CMAKE_POLICY_VERSION_MINIMUM is the
+        # documented escape hatch.
+        block()
+            function(install)
+            endfunction()
+            function(export)
+            endfunction()
+            set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+            set(LIBCMAES_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+            set(LIBCMAES_BUILD_PYTHON      OFF CACHE BOOL "" FORCE)
+            set(LIBCMAES_BUILD_TESTS       OFF CACHE BOOL "" FORCE)
+            set(LIBCMAES_BUILD_EXAMPLES    OFF CACHE BOOL "" FORCE)
+            set(LIBCMAES_USE_OPENMP        OFF CACHE BOOL "" FORCE)
+            set(LIBCMAES_ENABLE_SURROG     OFF CACHE BOOL "" FORCE)
+            # Upstream libcmaes/src/CMakeLists.txt:81 generates
+            # cmaes_export.h under ${CMAKE_BINARY_DIR}/include/libcmaes/
+            # but the cmaes target's include path uses
+            # ${PROJECT_BINARY_DIR}/include, which only coincide when
+            # libcmaes is the top-level project. Under FetchContent the
+            # generated header lands in the parent project's build dir
+            # and is not on cmaes's include path. Patch the upstream
+            # call to use PROJECT_BINARY_DIR so the header lands where
+            # the include path expects it.
+            FetchContent_Declare(
+                libcmaes
+                GIT_REPOSITORY https://github.com/CMA-ES/libcmaes.git
+                GIT_TAG        v0.10
+                GIT_SHALLOW    TRUE
+                EXCLUDE_FROM_ALL
+                PATCH_COMMAND  sed -i
+                    "s|\\\${CMAKE_BINARY_DIR}/include/libcmaes/cmaes_export.h|\\\${PROJECT_BINARY_DIR}/include/libcmaes/cmaes_export.h|g"
+                    "<SOURCE_DIR>/src/CMakeLists.txt"
+                UPDATE_DISCONNECTED TRUE
+            )
+            FetchContent_MakeAvailable(libcmaes)
+        endblock()
+        unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
+
+        # Eigen ABI alignment: nablapp's bench targets compile with
+        # -march=native, which under AVX gives Eigen 32-byte-aligned
+        # fixed-size types. libcmaes built with default flags keeps
+        # 16-byte alignment. Mixing Eigen-allocated objects across
+        # the two ABI boundaries triggers heap corruption (double-free
+        # at frame teardown). Force the cmaes target to compile with
+        # the same vectorization flags so allocation/deallocation
+        # alignments match across the boundary.
+        target_compile_options(cmaes PRIVATE
+            $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+                -march=native
+                -fno-math-errno
+                -fno-trapping-math
+            >
+        )
+
+        target_sources(nablapp_bench PRIVATE bench_libcmaes.cpp)
+        target_link_libraries(nablapp_bench PRIVATE libcmaes::cmaes)
+        target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_LIBCMAES)
+
+        target_sources(publish_bench PRIVATE bench_libcmaes.cpp)
+        target_link_libraries(publish_bench PRIVATE libcmaes::cmaes)
+        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_LIBCMAES)
+    else()
+        message(STATUS "libcmaes requires NABLAPP_CMAKE_FETCH_DEPS=ON; skipping libcmaes benchmarks")
+    endif()
+endif()
+
 option(NABLAPP_BENCH_IPOPT "Build IPOPT comparison benchmarks" ON)
 if(NABLAPP_BENCH_IPOPT)
     find_package(PkgConfig QUIET)

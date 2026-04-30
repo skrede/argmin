@@ -37,6 +37,10 @@
 #include "bench_optim.h"
 #endif
 
+#ifdef NABLAPP_HAS_LIBCMAES
+#include "bench_libcmaes.h"
+#endif
+
 #include <chrono>
 #include <print>
 #include <format>
@@ -217,6 +221,9 @@ int main(int argc, char** argv)
         #endif
         #ifdef NABLAPP_HAS_OPTIM
         nablapp::bench::run_optim_benchmarks(results, traces, cfg);
+        #endif
+        #ifdef NABLAPP_HAS_LIBCMAES
+        nablapp::bench::run_libcmaes_benchmarks(results, traces, cfg);
         #endif
 
         for(std::size_t i = 0; i < results.size(); ++i)
