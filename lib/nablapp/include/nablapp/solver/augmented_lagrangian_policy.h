@@ -91,6 +91,14 @@ struct augmented_lagrangian_policy
             else return dynamic_dimension;
         }();
 
+        // Inner-solver dimension for the gradient bridge buffer.
+        // P::problem_dimension when P is a real problem; falls back to
+        // Eigen::Dynamic for state_type<void> (concept-satisfaction probe).
+        static constexpr int g_tmp_buf_dim = [] {
+            if constexpr(has_problem_dimension<P>) return P::problem_dimension;
+            else return Eigen::Dynamic;
+        }();
+
         const P* problem{nullptr};
         Eigen::Vector<scalar_type, N> x;
         scalar_type f{};
@@ -129,7 +137,7 @@ struct augmented_lagrangian_policy
         // the outer problem's.
         Eigen::VectorX<scalar_type> c_all_buf;
         Eigen::MatrixX<scalar_type> J_all_buf;
-        Eigen::Vector<scalar_type, P::problem_dimension> g_tmp_buf;
+        Eigen::Vector<scalar_type, g_tmp_buf_dim> g_tmp_buf;
 
         options_type opts;
 
@@ -153,7 +161,7 @@ struct augmented_lagrangian_policy
             // pre-fix subproblem incurred (static-audit AL4 / AL5).
             Eigen::VectorX<scalar_type>* c_all_buf;
             Eigen::MatrixX<scalar_type>* J_all_buf;
-            Eigen::Vector<scalar_type, P::problem_dimension>* g_tmp_buf;
+            Eigen::Vector<scalar_type, g_tmp_buf_dim>* g_tmp_buf;
             int neq, nineq;
 
             [[nodiscard]] int dimension() const { return dim; }
