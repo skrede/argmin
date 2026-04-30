@@ -12,16 +12,20 @@
 //            Evolutionary Optimization", IEEE Trans. SMC-C.
 //            K&W Section 8.6 (evolution strategies).
 
+#include "nablapp/detail/tuple_contains.h"
+#include "nablapp/solver/convergence.h"
 #include "nablapp/types.h"
 
 #include <Eigen/Core>
 
 #include <cmath>
-#include <cstdint>
+#include <tuple>
 #include <limits>
 #include <random>
-#include <type_traits>
+#include <vector>
+#include <cstdint>
 #include <utility>
+#include <type_traits>
 
 namespace nablapp::detail
 {
@@ -244,6 +248,166 @@ inline es_learning_rates compute_es_rates(int n)
         .tau = 1.0 / std::sqrt(2.0 * nd),
         .tau_prime = 1.0 / std::sqrt(2.0 * std::sqrt(nd)),
     };
+}
+
+// Differential variation operator (Runarsson-Yao 2005, Algorithm 1).
+//
+// Top-mu DE-style recombination: for k in [0, mu),
+//   x[rk] += gamma * (x0_snapshot[anchor_k] - x0_snapshot[anchor_(k+1)])
+// componentwise. Caller is responsible for selecting anchor semantics
+// (NLopt-faithful: physical-slot indices into the unsorted snapshot;
+// runarsson_yao_paper: rank-permuted indices into the snapshot). For
+// k+1 == mu the corresponding column is left unmodified; the caller
+// owns the standard-mutation fallback for that boundary case.
+//
+// The lower / upper arguments are accepted for caller-side anchor
+// continuity (subsequent variant code may want them for inline bounds
+// checks); the operator itself does not clip - bounds enforcement is
+// the caller's responsibility (resample-on-bound or clip).
+//
+// Reference: Runarsson, T. P., and Yao, X. (2005), "Search Biases in
+//            Constrained Evolutionary Optimization," IEEE Trans. Systems,
+//            Man, and Cybernetics, Part C, 35(2):233-243.
+//            K&W 2e Section 8.6.
+//            NLopt 2.10.0 isres.c lines 254-260 (operator body).
+template <int N = nablapp::dynamic_dimension, typename Scalar = double>
+inline void differential_variation(
+    Eigen::Ref<Eigen::Matrix<Scalar, N, Eigen::Dynamic>> population,
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& x0_snapshot,
+    const std::vector<std::uint32_t>& indices,
+    int mu,
+    Scalar gamma,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
+{
+    (void)lower;
+    (void)upper;
+    for(int k = 0; k + 1 < mu; ++k)
+    {
+        const std::uint32_t rk = indices[static_cast<std::size_t>(k)];
+        population.col(rk).array() += gamma
+            * (x0_snapshot.col(0).array()
+               - x0_snapshot.col(k + 1).array());
+    }
+}
+
+// Log-normal self-adaptation of sigma with optional upper clamp.
+//
+// sigma_new = min(sigma * exp(tau_prime_rand + tau * N(0, 1)),
+//                 sigma_max).
+// Caller pre-samples the per-individual `tau_prime_rand` once per
+// individual (constant across components within a single mutation) and
+// provides the per-component upper clamp `sigma_max`. To disable the
+// clamp pass std::numeric_limits<Scalar>::infinity() for sigma_max.
+//
+// Reference: Runarsson, T. P., and Yao, X. (2005), IEEE Trans. SMC-C
+//            35(2):233-243, Section III; K&W 2e Section 8.6.
+//            NLopt 2.10.0 isres.c lines 240-244 (sigma_max =
+//            (ub-lb)/sqrt(n) plus per-mutation clamp placement).
+template <typename Scalar = double, typename Rng>
+inline Scalar log_normal_mutate(
+    Scalar sigma,
+    Scalar tau,
+    Scalar tau_prime_rand,
+    Scalar sigma_max,
+    Rng& rng)
+{
+    std::normal_distribution<Scalar> normal(Scalar(0), Scalar(1));
+    const Scalar sigma_new = sigma
+        * std::exp(tau_prime_rand + tau * normal(rng));
+    return std::min(sigma_new, sigma_max);
+}
+
+// Sigma-collapse predicate (bound-relative form).
+//
+// Returns true when the population's mean per-individual sigma over the
+// top-mu survivors falls below `ratio * mean(ub - lb) / sqrt(n)`.
+// Default ratio 1e-9 (1000x looser than CMA-ES sigma_collapse_threshold
+// because per-individual ISRES sigma is noisier than CMA-ES's
+// covariance scaling).
+//
+// State must expose `s.sigmas` as an N-row matrix and `s.mu` as the
+// active survivor count. The function reads only `s.sigmas.leftCols(mu)`.
+//
+// Reference: Runarsson, T. P., and Yao, X. (2005), IEEE Trans. SMC-C
+//            35(2):233-243, Section V (termination); K&W 2e Section 8.6.
+//            Hansen, N. (2023), "The CMA Evolution Strategy: A Tutorial,"
+//            arXiv:1604.00772, Section B.5 (TolX termination convention,
+//            design rationale only).
+template <typename State, int N>
+inline bool sigma_collapsed_bound_relative(
+    const State& s,
+    double ratio,
+    int n,
+    const Eigen::Vector<double, N>& lower,
+    const Eigen::Vector<double, N>& upper)
+{
+    const double mean_sigma = s.sigmas.leftCols(s.mu).mean();
+    const double mean_range = (upper - lower).mean();
+    return mean_sigma < ratio * mean_range / std::sqrt(static_cast<double>(n));
+}
+
+// Sigma-collapse predicate (xtol-coupled form, convergence-policy template).
+//
+// Reads the user-set step_tolerance_criterion::threshold from the
+// convergence policy; if the policy lacks step_tolerance_criterion OR
+// the threshold is std::nullopt, silently falls back to the
+// bound-relative form with the variant's `fallback_ratio`. The
+// tuple_contains_v gate keeps the function compilable against any
+// convergence type (`slsqp_compatible_convergence`, which only carries
+// step_tolerance_rel_criterion, takes the fallback path).
+//
+// Reference: Runarsson, T. P., and Yao, X. (2005), IEEE Trans. SMC-C
+//            35(2):233-243, Section V (termination); K&W 2e Section 8.6.
+template <typename State, typename Convergence, int N>
+inline bool sigma_collapsed_xtol_coupled(
+    const State& s,
+    const Convergence& convergence,
+    double fallback_ratio,
+    int n,
+    const Eigen::Vector<double, N>& lower,
+    const Eigen::Vector<double, N>& upper)
+{
+    const double mean_sigma = s.sigmas.leftCols(s.mu).mean();
+    if constexpr(tuple_contains_v<step_tolerance_criterion,
+                                  decltype(convergence.criteria)>)
+    {
+        const auto& crit = std::get<step_tolerance_criterion>(convergence.criteria);
+        if(crit.threshold)
+            return mean_sigma < *crit.threshold;
+    }
+    const double mean_range = (upper - lower).mean();
+    return mean_sigma < fallback_ratio * mean_range
+                          / std::sqrt(static_cast<double>(n));
+}
+
+// Sigma-collapse predicate (xtol-coupled form, captured-threshold overload).
+//
+// Variant `step()` bodies cannot thread the Convergence type through
+// state_type<P>, so init() captures the threshold value at policy
+// init-time (`s.convergence_xtol_threshold = std::optional<double>`)
+// and step() calls THIS overload with the captured value. If the caller
+// passes a finite, positive `threshold_value`, the predicate uses it;
+// otherwise it falls back to the bound-relative form with
+// `fallback_ratio`.
+//
+// Reference: Runarsson, T. P., and Yao, X. (2005), IEEE Trans. SMC-C
+//            35(2):233-243, Section V (termination); K&W 2e Section 8.6.
+template <typename State, int N>
+inline bool sigma_collapsed_xtol_coupled(
+    const State& s,
+    double threshold_value,
+    double fallback_ratio,
+    int n,
+    const Eigen::Vector<double, N>& lower,
+    const Eigen::Vector<double, N>& upper)
+{
+    const double mean_sigma = s.sigmas.leftCols(s.mu).mean();
+    if(std::isfinite(threshold_value) && threshold_value > 0.0)
+        return mean_sigma < threshold_value;
+    const double mean_range = (upper - lower).mean();
+    return mean_sigma < fallback_ratio * mean_range
+                          / std::sqrt(static_cast<double>(n));
 }
 
 }

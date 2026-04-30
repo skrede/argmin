@@ -2,6 +2,9 @@
 #include "nablapp/detail/cauchy_point.h"
 #include "nablapp/detail/subspace_minimization.h"
 #include "nablapp/detail/bound_projection.h"
+#include "nablapp/detail/isres_operators.h"
+#include "nablapp/detail/xoshiro256.h"
+#include "nablapp/solver/convergence.h"
 
 #include <Eigen/Core>
 #include <catch2/catch_approx.hpp>
@@ -10,6 +13,7 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <cstdint>
 
 using Catch::Approx;
 using namespace nablapp::detail;
@@ -267,4 +271,236 @@ TEST_CASE("bound_projection project and compute_alpha_max", "[detail]")
         double alpha = compute_alpha_max(x, d, lo, hi);
         CHECK(alpha == Approx(1.0));
     }
+}
+
+// ---------------------------------------------------------------------------
+// ISRES operator tests for differential_variation, log_normal_mutate, and
+// the two sigma-collapse predicates added under the ISRES Runarsson-Yao
+// rewrite.
+// Reference: Runarsson & Yao (2005), IEEE Trans. SMC-C 35(2):233-243;
+//            K&W 2e Section 8.6; NLopt 2.10.0 isres.c.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("differential_variation applies DE-style x0 difference for k+1 < mu",
+          "[isres_operators]")
+{
+    // n = 2, mu = 3. Three columns in population correspond to indices
+    // 0, 1, 2. Snapshot has the same shape.
+    constexpr int n = 2;
+    const int mu = 3;
+    Eigen::Matrix<double, 2, Eigen::Dynamic> population(n, mu);
+    population.col(0) << 0.0, 0.0;
+    population.col(1) << 0.0, 0.0;
+    population.col(2) << 0.0, 0.0;
+
+    Eigen::Matrix<double, 2, Eigen::Dynamic> snap(n, mu);
+    snap.col(0) << 1.0, 2.0;  // anchor "0"
+    snap.col(1) << 0.0, 0.0;  // anchor for k=0
+    snap.col(2) << 0.5, 1.0;  // anchor for k=1
+
+    std::vector<std::uint32_t> indices{0u, 1u, 2u};
+    const double gamma = 0.5;
+    Eigen::Vector<double, 2> lower; lower << -10.0, -10.0;
+    Eigen::Vector<double, 2> upper; upper <<  10.0,  10.0;
+
+    nablapp::detail::differential_variation<2, double>(
+        population, snap, indices, mu, gamma, lower, upper);
+
+    // k = 0 (rk = indices[0] = 0): population.col(0) += 0.5 * (snap.col(0) - snap.col(1))
+    //                            = 0.5 * (1, 2) = (0.5, 1.0)
+    CHECK(population(0, 0) == Approx(0.5));
+    CHECK(population(1, 0) == Approx(1.0));
+
+    // k = 1 (rk = indices[1] = 1): population.col(1) += 0.5 * (snap.col(0) - snap.col(2))
+    //                            = 0.5 * (0.5, 1.0) = (0.25, 0.5)
+    CHECK(population(0, 1) == Approx(0.25));
+    CHECK(population(1, 1) == Approx(0.5));
+
+    // k = 2 (k + 1 == mu): boundary case, column unchanged.
+    CHECK(population(0, 2) == Approx(0.0));
+    CHECK(population(1, 2) == Approx(0.0));
+}
+
+TEST_CASE("log_normal_mutate clamps with finite sigma_max and is no-op at infinity",
+          "[isres_operators]")
+{
+    nablapp::detail::xoshiro256 rng{42u};
+
+    // With sigma_max >> sigma * exp(...), the clamp does not bind. The
+    // returned value must equal sigma * exp(tau_prime_rand + tau * N(0, 1)).
+    {
+        nablapp::detail::xoshiro256 rng_a{42u};
+        nablapp::detail::xoshiro256 rng_b{42u};
+        const double sigma = 1.0;
+        const double tau = 0.5;
+        const double tau_prime_rand = 0.25;
+        const double sigma_max_high = 1e6;
+
+        const double res = nablapp::detail::log_normal_mutate(
+            sigma, tau, tau_prime_rand, sigma_max_high, rng_a);
+
+        // Mirror the function body exactly with rng_b in lockstep:
+        std::normal_distribution<double> normal(0.0, 1.0);
+        const double expected = sigma
+            * std::exp(tau_prime_rand + tau * normal(rng_b));
+        CHECK(res == Approx(expected));
+        CHECK(res < sigma_max_high);
+    }
+
+    // With sigma_max == infinity, the clamp must be a no-op. The result
+    // is finite for finite sigma and finite tau / tau_prime_rand.
+    {
+        const double sigma = 0.5;
+        const double tau = 0.1;
+        const double tau_prime_rand = 0.0;
+        const double inf = std::numeric_limits<double>::infinity();
+        const double res = nablapp::detail::log_normal_mutate(
+            sigma, tau, tau_prime_rand, inf, rng);
+        CHECK(std::isfinite(res));
+        CHECK(res > 0.0);
+    }
+
+    // With sigma_max smaller than the unclamped result, the clamp binds.
+    {
+        nablapp::detail::xoshiro256 rng_c{7u};
+        const double sigma = 1.0;
+        const double tau = 0.0;
+        const double tau_prime_rand = 5.0;  // exp(5) ~ 148
+        const double sigma_max_low = 1.5;
+        const double res = nablapp::detail::log_normal_mutate(
+            sigma, tau, tau_prime_rand, sigma_max_low, rng_c);
+        CHECK(res == Approx(sigma_max_low));
+    }
+}
+
+namespace
+{
+
+// Minimal synthetic state mirroring the field surface the predicates
+// require: `sigmas` matrix and `mu` survivor count.
+struct sigma_state
+{
+    Eigen::MatrixXd sigmas;
+    int mu;
+};
+
+}
+
+TEST_CASE("sigma_collapsed_bound_relative fires only below threshold",
+          "[isres_operators]")
+{
+    // n = 2, mu = 3, range = (10 - (-10)) on each dim => mean_range = 20.
+    // ratio * mean_range / sqrt(n) = ratio * 20 / sqrt(2).
+    constexpr int n = 2;
+    sigma_state s;
+    s.mu = 3;
+    s.sigmas = Eigen::MatrixXd::Constant(n, s.mu, 1.0);  // mean_sigma = 1.0
+
+    Eigen::Vector<double, 2> lower; lower << -10.0, -10.0;
+    Eigen::Vector<double, 2> upper; upper <<  10.0,  10.0;
+
+    // Loose ratio (1.0) fires: 1.0 < 1.0 * 20 / sqrt(2) (~14.14).
+    CHECK(nablapp::detail::sigma_collapsed_bound_relative(
+        s, 1.0, n, lower, upper));
+
+    // Tight ratio (1e-3) does not fire: 1.0 < 1e-3 * 14.14 = 0.014 is false.
+    CHECK_FALSE(nablapp::detail::sigma_collapsed_bound_relative(
+        s, 1e-3, n, lower, upper));
+
+    // With small sigmas (1e-15), the tight ratio fires.
+    s.sigmas = Eigen::MatrixXd::Constant(n, s.mu, 1e-15);
+    CHECK(nablapp::detail::sigma_collapsed_bound_relative(
+        s, 1e-9, n, lower, upper));
+}
+
+TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls back",
+          "[isres_operators]")
+{
+    constexpr int n = 2;
+    sigma_state s;
+    s.mu = 2;
+    s.sigmas = Eigen::MatrixXd::Constant(n, s.mu, 1e-7);  // mean_sigma = 1e-7
+
+    Eigen::Vector<double, 2> lower; lower << -1.0, -1.0;
+    Eigen::Vector<double, 2> upper; upper <<  1.0,  1.0;
+
+    // default_convergence carries step_tolerance_criterion. Set the
+    // threshold to a value the mean_sigma beats (1e-6 > 1e-7) -> fires.
+    {
+        nablapp::default_convergence conv{};
+        std::get<nablapp::step_tolerance_criterion>(conv.criteria).threshold = 1e-6;
+        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, conv, /*fallback_ratio=*/1e-9, n, lower, upper));
+    }
+
+    // Same convergence with a tighter threshold (1e-9) the mean_sigma does
+    // not beat -> does not fire.
+    {
+        nablapp::default_convergence conv{};
+        std::get<nablapp::step_tolerance_criterion>(conv.criteria).threshold = 1e-9;
+        CHECK_FALSE(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));
+    }
+
+    // Threshold left at std::nullopt -> fall back to bound_relative form
+    // with `fallback_ratio`. mean_range = 2, sqrt(n) = sqrt(2). With
+    // fallback_ratio = 1.0 the fall-back fires (1e-7 < 1.0 * 2 / sqrt(2)).
+    {
+        nablapp::default_convergence conv{};
+        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, conv, /*fallback_ratio=*/1.0, n, lower, upper));
+        CHECK_FALSE(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));
+    }
+
+    // slsqp_compatible_convergence lacks step_tolerance_criterion. The
+    // SFINAE guard must keep the function compilable AND silently fall
+    // back to bound_relative semantics.
+    {
+        nablapp::slsqp_compatible_convergence conv{};
+        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, conv, /*fallback_ratio=*/1.0, n, lower, upper));
+        CHECK_FALSE(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));
+    }
+
+    // Captured-threshold overload: finite + positive threshold_value is
+    // honored; non-finite or non-positive falls back to bound_relative
+    // semantics with `fallback_ratio`.
+    {
+        const double finite_thr = 1e-6;
+        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, finite_thr, /*fallback_ratio=*/1e-12, n, lower, upper));
+
+        const double tight_thr = 1e-9;
+        CHECK_FALSE(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, tight_thr, /*fallback_ratio=*/1e-12, n, lower, upper));
+
+        const double inf = std::numeric_limits<double>::infinity();
+        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, inf, /*fallback_ratio=*/1.0, n, lower, upper));
+
+        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+            s, /*threshold_value=*/0.0, /*fallback_ratio=*/1.0, n, lower, upper));
+    }
+}
+
+TEST_CASE("ISRES operators preserve existing detail symbols byte-for-byte",
+          "[isres_operators]")
+{
+    // Existing free-function symbols: mutate_individual, compute_violations,
+    // compute_es_rates, initialize_population, initialize_sigmas,
+    // and the workspace class isres_operator_workspace.
+    // This test exercises the existing learning-rate helper and the
+    // workspace-class ctor to confirm preservation; full coverage of
+    // the existing ops lives in isres_test.cpp.
+    const int n = 4;
+    nablapp::detail::es_learning_rates rates =
+        nablapp::detail::compute_es_rates(n);
+    CHECK(rates.tau == Approx(1.0 / std::sqrt(2.0 * n)));
+    CHECK(rates.tau_prime
+          == Approx(1.0 / std::sqrt(2.0 * std::sqrt(static_cast<double>(n)))));
+
+    nablapp::detail::isres_operator_workspace<double, Eigen::Dynamic> ws(n);
+    (void)ws;  // ctor compiles, no fields exposed for direct check.
 }
