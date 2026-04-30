@@ -54,6 +54,7 @@
 
 #include "nablapp/detail/isres_operators.h"
 #include "nablapp/detail/stochastic_ranking.h"
+#include "nablapp/detail/tuple_contains.h"
 #include "nablapp/detail/xoshiro256.h"
 #include "nablapp/result/step_result.h"
 #include "nablapp/result/status.h"
@@ -179,6 +180,16 @@ struct runarsson_yao_paper_policy
         // copied here BEFORE the differential-variation update; col(0)
         // is rank-0 (best) and is the BEST anchor for the DE update.
         Eigen::Matrix<double, N, Eigen::Dynamic, 0, RowsCap, MaxMu> x0_snapshot_buf;
+
+        // User-set step_tolerance threshold captured at init() time when
+        // the convergence policy carries a step_tolerance_criterion. step()
+        // cannot thread the Convergence template through state_type<P>, so
+        // the threshold value is captured here. Stays std::nullopt for
+        // convergence policies that lack step_tolerance_criterion (e.g.
+        // slsqp_compatible_convergence carries step_tolerance_rel_criterion
+        // only); xtol_coupled sigma-collapse falls back to bound-relative
+        // semantics in that case.
+        std::optional<double> convergence_xtol_threshold;
     };
 
     options_type options{};
@@ -197,7 +208,7 @@ struct runarsson_yao_paper_policy
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
     state_type<Problem> init(const Problem& problem,
                              const Eigen::Vector<double, N>& x0,
-                             const solver_options<Convergence>& /*opts*/)
+                             const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
         state_type<Problem> s;
@@ -306,6 +317,24 @@ struct runarsson_yao_paper_policy
             s.problem->constraints(s.x, c);
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
+        }
+
+        // Capture the user-set step_tolerance_criterion threshold (if the
+        // convergence policy carries one) so step()'s xtol_coupled
+        // sigma-collapse predicate can read it without threading the
+        // Convergence type through state_type. The tuple_contains gate
+        // keeps init() compilable against convergence policies that lack
+        // step_tolerance_criterion (e.g. slsqp_compatible_convergence,
+        // which carries step_tolerance_rel_criterion only); the field
+        // stays std::nullopt and step() silently falls back to the
+        // bound-relative form.
+        if constexpr(detail::tuple_contains_v<
+                         step_tolerance_criterion,
+                         decltype(opts.convergence.criteria)>)
+        {
+            const auto& crit = std::get<step_tolerance_criterion>(
+                opts.convergence.criteria);
+            s.convergence_xtol_threshold = crit.threshold;
         }
 
         return s;
@@ -524,11 +553,53 @@ struct runarsson_yao_paper_policy
 
         ++s.generation;
 
-        // (8) Return step_result with policy_status default-empty.
-        //     Plan 05 plumbs the sigma-collapse + feasibility predicate
-        //     emission to set policy_status = solver_status::ftol_reached
-        //     when both conditions hold.
+        // (8) Return step_result with sigma-collapse + feasibility status
+        //     emission per Runarsson-Yao 2005 Section V (termination).
+        //     Emit solver_status::ftol_reached when the population's mean
+        //     step size has collapsed AND the rank-0 individual's violation
+        //     sits within the feasibility gate. Two sigma-collapse forms
+        //     are available via the runtime selector
+        //     options.sigma_collapse_form:
+        //
+        //       - bound_relative_configurable: compares mean_sigma against
+        //         `ratio * mean(ub - lb) / sqrt(n)` (default ratio 1e-9).
+        //       - xtol_coupled: compares mean_sigma against the user-set
+        //         step_tolerance threshold captured in
+        //         s.convergence_xtol_threshold at init() time. If the
+        //         convergence policy lacked step_tolerance_criterion or
+        //         its threshold is std::nullopt, the predicate silently
+        //         falls back to the bound-relative form using `ratio`
+        //         (Q4 (c) fail-safe).
         const double mean_sigma = s.sigmas.leftCols(mu).mean();
+
+        const std::uint32_t rank0 = s.indices_buf[0];
+        const double v_best = s.violations[rank0];
+        const bool feasible = (v_best <= options.feasibility_gate);
+
+        const double collapse_ratio =
+            options.sigma_collapse_ratio.value_or(1e-9);
+
+        bool collapsed;
+        if(options.sigma_collapse_form
+           == sigma_collapse_form_type::xtol_coupled)
+        {
+            const double threshold_value =
+                s.convergence_xtol_threshold.value_or(
+                    std::numeric_limits<double>::quiet_NaN());
+            collapsed = detail::sigma_collapsed_xtol_coupled(
+                s, threshold_value, collapse_ratio, n,
+                s.lower, s.upper);
+        }
+        else
+        {
+            collapsed = detail::sigma_collapsed_bound_relative(
+                s, collapse_ratio, n, s.lower, s.upper);
+        }
+
+        std::optional<solver_status> emitted_status;
+        if(collapsed && feasible)
+            emitted_status = solver_status::ftol_reached;
+
         return step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = std::numeric_limits<double>::infinity(),
@@ -536,7 +607,7 @@ struct runarsson_yao_paper_policy
             .objective_change = std::abs(s.best_ever_value - prev_best_ever_value),
             .improved = (s.best_ever_value < prev_best_ever_value),
             .x_norm = s.x.norm(),
-            .policy_status = std::nullopt,
+            .policy_status = emitted_status,
         };
     }
 

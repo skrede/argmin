@@ -111,7 +111,11 @@ TEST_CASE("isres_policy: simple constrained 2D", "[isres]")
     simple_constrained problem;
     Eigen::VectorXd x0{{2.0, 2.0}};
     solver_options opts;
-    opts.max_iterations = 500;
+    // The production isres_policy is now an alias to nlopt_faithful, whose
+    // DE-style operator converges more slowly than the prior pull-to-best
+    // operator on this 2D problem; max_iterations re-baselined from 500 to
+    // 1000 to keep this regression guard meaningful under the new operator.
+    opts.max_iterations = 1000;
     opts.set_gradient_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
