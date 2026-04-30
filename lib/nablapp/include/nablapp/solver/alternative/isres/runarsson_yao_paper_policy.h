@@ -569,7 +569,7 @@ struct runarsson_yao_paper_policy
         //         convergence policy lacked step_tolerance_criterion or
         //         its threshold is std::nullopt, the predicate silently
         //         falls back to the bound-relative form using `ratio`
-        //         (Q4 (c) fail-safe).
+        //         (fail-safe).
         const double mean_sigma = s.sigmas.leftCols(mu).mean();
 
         const std::uint32_t rank0 = s.indices_buf[0];

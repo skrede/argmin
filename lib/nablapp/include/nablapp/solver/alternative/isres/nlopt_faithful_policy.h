@@ -694,8 +694,7 @@ struct nlopt_faithful_policy
         //     s.convergence_xtol_threshold at init() time. If the
         //     convergence policy lacked step_tolerance_criterion or its
         //     threshold is std::nullopt, the predicate silently falls
-        //     back to the bound-relative form using `ratio` (Q4 (c)
-        //     fail-safe).
+        //     back to the bound-relative form using `ratio` (fail-safe).
         const double mean_sigma = s.sigmas.leftCols(mu).mean();
         const double grad_proxy =
             mean_sigma * std::sqrt(static_cast<double>(n));

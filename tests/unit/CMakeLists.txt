@@ -10,6 +10,7 @@ add_executable(nablapp_unit_tests
     gcmma_rho_wval_test.cpp
     gcmma_raa_augmented_test.cpp
     isres_test.cpp
+    isres_alternatives_test.cpp
     cobyla_test.cpp
     bobyqa_test.cpp
     lbfgsb_test.cpp

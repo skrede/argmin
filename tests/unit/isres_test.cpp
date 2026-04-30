@@ -5,6 +5,9 @@
 // and isres_policy, and basic_solver_group compatibility.
 
 #include "nablapp/solver/isres_policy.h"
+#include "nablapp/solver/alternative/isres/nlopt_faithful_policy.h"
+#include "nablapp/solver/alternative/isres/original_nablapp_policy.h"
+#include "nablapp/solver/alternative/isres/runarsson_yao_paper_policy.h"
 #include "nablapp/solver/restarting_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/basic_solver.h"
@@ -105,6 +108,23 @@ static_assert(std::same_as<
 static_assert(std::same_as<
     restarting_policy<isres_policy<>>::rebind<3>,
     restarting_policy<isres_policy<3>>>);
+
+// ISRES alternative-variant restarting_policy::rebind transparency check.
+static_assert(std::same_as<
+    restarting_policy<
+        alternative::isres::nlopt_faithful_policy<>>::rebind<3>,
+    restarting_policy<
+        alternative::isres::nlopt_faithful_policy<3>>>);
+static_assert(std::same_as<
+    restarting_policy<
+        alternative::isres::original_nablapp_policy<>>::rebind<3>,
+    restarting_policy<
+        alternative::isres::original_nablapp_policy<3>>>);
+static_assert(std::same_as<
+    restarting_policy<
+        alternative::isres::runarsson_yao_paper_policy<>>::rebind<3>,
+    restarting_policy<
+        alternative::isres::runarsson_yao_paper_policy<3>>>);
 
 TEST_CASE("isres_policy: simple constrained 2D", "[isres]")
 {
