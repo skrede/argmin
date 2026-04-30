@@ -526,6 +526,17 @@ void run_all_nablapp_solvers(
         run_constrained("cobyla", cobyla_policy{});
 
     // ISRES: global constrained (requires bounds + constraint values).
+    //
+    // Bench-row decision: keep ONE row pointing at the production alias.
+    // ISRES alternative-variant per-row split is intentionally NOT
+    // emitted from this harness. The wider nablapp_bench produces the
+    // single 'isres' row resolved through the production alias in
+    // solver/isres_policy.h (currently aliased to
+    // alternative::isres::nlopt_faithful_policy). Empirical per-variant
+    // comparison runs through benchmarks/micro_isres.cpp instead;
+    // bench_nablapp.h stays variant-agnostic to keep the publication CSV
+    // schema stable for downstream consumers (Dolan-More profiles,
+    // phaseXX-baseline.csv, etc.).
     if constexpr(is_global && constrained_values<Problem> && is_bound)
     {
         typename isres_policy<>::options_type isres_opts{};
