@@ -160,8 +160,13 @@ struct nlopt_faithful_policy
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       MaxLambda> sigmas;
 
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxLambda, 1> fitnesses;
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxLambda, 1> violations;
+        // fitnesses / violations stay as Eigen::VectorXd (the
+        // canonical Eigen::Vector<double, Dynamic> typedef) so
+        // detail::stochastic_rank's Eigen::Vector<Scalar, Lambda> ref
+        // signature deduces cleanly. The dominant cost in this variant
+        // is the n x lambda matrices, which DO use bounded storage.
+        Eigen::VectorXd fitnesses;
+        Eigen::VectorXd violations;
 
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
@@ -381,6 +386,290 @@ struct nlopt_faithful_policy
         }
 
         return s;
+    }
+
+    // step() : one ISRES generation, NLopt isres.c-faithful body.
+    //
+    // Order of operations (matches NLopt isres.c lines 233-280):
+    //   1. Stochastic ranking populates s.indices_buf so that
+    //      s.indices_buf[0] is the best-ranked individual; ties broken
+    //      probabilistically per Runarsson-Yao 2005 eq. 2.
+    //   2. Snapshot the top-mu PHYSICAL slots of the population into
+    //      s.x0_snapshot_buf (D-08; NLopt isres.c:253). The snapshot
+    //      is NOT rank-permuted; it captures slots [0, mu) as-is, so
+    //      that the differential-variation difference at line 260 of
+    //      NLopt isres.c reads physical-slot[0] - physical-slot[k+1].
+    //      This is the operator semantics the Plan 01 free function
+    //      detail::differential_variation() encodes; the body inlines
+    //      the per-component form to interleave the boundary-fallback
+    //      check that the per-column free function cannot express.
+    //   3. Top-mu DE-style differential variation. The k+1 == mu
+    //      boundary case and OOB components fall back to the standard
+    //      log-normal mutation + bounded resample.
+    //   4. Bottom [mu, lambda) standard mutation only -- no DE here.
+    //      The dead [mu, lambda) cyclic fill present in the production
+    //      isres_policy.h:316-323 is removed (D-17): the irank[k]
+    //      pairing makes those slots overwritten by mutation, so the
+    //      copy was unread.
+    //   5. Evaluate offspring and aggregate violations as
+    //         v_k = sum_i c_eq[i]^2 + sum_j max(0, -c_ineq[j])^2
+    //      (D-19; NLopt isres.c:151,163). Differs from production
+    //      isres_policy which uses L1 via detail::compute_violations.
+    //   6. Best-ever bookkeeping mirrors the post-66c0fc0 production
+    //      pattern (rolling best_ever_violation; tightened
+    //      Pareto-improvement predicate).
+    //   7. Return step_result with policy_status defaulted to
+    //      std::nullopt; Plan 05 plumbs the sigma-collapse + feasibility
+    //      predicate-and-emission into this slot.
+    //
+    // Reference: NLopt 2.10.0 isres.c lines 233-280;
+    //            Runarsson & Yao (2005), IEEE Trans. SMC-C
+    //            35(2):233-243; K&W 2e §8.6.
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
+    {
+        const int n = static_cast<int>(s.x.size());
+        const int mu = s.mu;
+        const int lambda = s.lambda;
+        const int n_c = s.n_eq + s.n_ineq;
+        auto& rng = *s.rng;
+        std::normal_distribution<double> normal(0.0, 1.0);
+
+        // Capture pre-step best for objective_change / improved
+        // bookkeeping. Plan 05 references this name when plumbing the
+        // status emission, so it must exist verbatim (W7).
+        const double prev_best_ever_value = s.best_ever_value;
+
+        const double gamma =
+            options.differential_variation_gamma.value_or(0.85);
+        const double alpha =
+            options.sigma_smoothing_weight.value_or(0.2);
+        const std::uint16_t resample_budget =
+            options.bound_resample_budget.value_or(
+                static_cast<std::uint16_t>(100));
+
+        // (1) Stochastic ranking. The buffer must start as the identity
+        // permutation [0, lambda); stochastic_rank sorts in place.
+        for(int j = 0; j < lambda; ++j)
+            s.indices_buf[static_cast<std::size_t>(j)]
+                = static_cast<std::uint32_t>(j);
+
+        detail::stochastic_rank(s.indices_buf,
+                                s.fitnesses,
+                                s.violations,
+                                s.pf,
+                                rng);
+
+        // (2) x0 snapshot of the top-mu PHYSICAL slots
+        // (D-08; NLopt isres.c:253). NOT rank-permuted.
+        for(int j = 0; j < mu; ++j)
+            s.x0_snapshot_buf.col(j) = s.population.col(j);
+
+        // (3) Top-mu DE-style differential variation (D-06; NLopt
+        // isres.c:254-260). The per-component fallback check at the
+        // boundary makes the body inline rather than calling the
+        // column-level free function detail::differential_variation();
+        // the operator is, however, the same: x[rk] += gamma *
+        // (x0_snapshot[0] - x0_snapshot[k+1]).
+        for(int k = 0; k < mu; ++k)
+        {
+            const std::uint32_t rk =
+                s.indices_buf[static_cast<std::size_t>(k)];
+            const double taup_rand = s.rates.tau_prime * normal(rng);
+
+            for(int j = 0; j < n; ++j)
+            {
+                const double xi = s.population(j, rk);
+                if(k + 1 < mu)
+                    s.population(j, rk) += gamma
+                        * (s.x0_snapshot_buf(j, 0)
+                           - s.x0_snapshot_buf(j, k + 1));
+
+                const bool need_fallback = (k + 1 == mu)
+                    || s.population(j, rk) < s.lower(j)
+                    || s.population(j, rk) > s.upper(j);
+                if(need_fallback)
+                {
+                    // D-09: per-mutation sigma upper clamp
+                    // sigma_max = (ub - lb) / sqrt(n).
+                    const double sigmamax = (s.upper(j) - s.lower(j))
+                        / std::sqrt(static_cast<double>(n));
+                    const double sigi = s.sigmas(j, rk);
+
+                    // D-10 per_mutation form: log-normal sigma update
+                    // with the upper clamp folded inside the operator.
+                    s.sigmas(j, rk) = detail::log_normal_mutate(
+                        sigi, s.rates.tau, taup_rand, sigmamax, rng);
+
+                    // D-18 + RESEARCH Q5: bounded resample on bound;
+                    // budget=100 default. On exhaustion, std::clamp
+                    // fallback (vs NLopt's unbounded do/while).
+                    for(std::uint16_t try_k = 0;
+                        try_k < resample_budget;
+                        ++try_k)
+                    {
+                        s.population(j, rk) =
+                            xi + s.sigmas(j, rk) * normal(rng);
+                        if(s.population(j, rk) >= s.lower(j)
+                           && s.population(j, rk) <= s.upper(j))
+                            break;
+                        if(try_k + 1 == resample_budget)
+                            s.population(j, rk) = std::clamp(
+                                s.population(j, rk),
+                                s.lower(j), s.upper(j));
+                    }
+
+                    // D-11: alpha-smoothing on sigma.
+                    //   sigma_out = sigma_parent
+                    //             + alpha * (sigma_new - sigma_parent)
+                    s.sigmas(j, rk) =
+                        sigi + alpha * (s.sigmas(j, rk) - sigi);
+                }
+            }
+        }
+
+        // (4) Bottom [mu, lambda) standard mutation only
+        // (NLopt isres.c:266-277). Parent for slot k is the rank-(k%mu)
+        // individual (NLopt convention); no differential variation
+        // because there is no second anchor.
+        for(int k = mu; k < lambda; ++k)
+        {
+            const std::uint32_t rk =
+                s.indices_buf[static_cast<std::size_t>(k)];
+            const std::uint32_t ri =
+                s.indices_buf[static_cast<std::size_t>(k % mu)];
+            const double taup_rand = s.rates.tau_prime * normal(rng);
+
+            for(int j = 0; j < n; ++j)
+            {
+                const double sigmamax = (s.upper(j) - s.lower(j))
+                    / std::sqrt(static_cast<double>(n));
+                const double sigi = s.sigmas(j, ri);
+
+                s.sigmas(j, rk) = detail::log_normal_mutate(
+                    sigi, s.rates.tau, taup_rand, sigmamax, rng);
+
+                for(std::uint16_t try_k = 0;
+                    try_k < resample_budget;
+                    ++try_k)
+                {
+                    s.population(j, rk) = s.population(j, ri)
+                        + s.sigmas(j, rk) * normal(rng);
+                    if(s.population(j, rk) >= s.lower(j)
+                       && s.population(j, rk) <= s.upper(j))
+                        break;
+                    if(try_k + 1 == resample_budget)
+                        s.population(j, rk) = std::clamp(
+                            s.population(j, rk),
+                            s.lower(j), s.upper(j));
+                }
+                s.sigmas(j, rk) =
+                    sigi + alpha * (s.sigmas(j, rk) - sigi);
+            }
+        }
+
+        // (5) Evaluate offspring and aggregate violations
+        // (D-19; NLopt isres.c:151,163). The mutation step writes
+        // directly into s.population, so we evaluate s.population
+        // (no offspring_buf needed in this variant -- the irank[k]
+        // pairing makes mutation idempotent on the active slot).
+        for(int k = 0; k < lambda; ++k)
+        {
+            const Eigen::Vector<double, N> xk = s.population.col(k);
+            s.fitnesses[k] = s.problem->value(xk);
+
+            if(n_c > 0)
+            {
+                Eigen::VectorXd c(n_c);
+                s.problem->constraints(xk, c);
+                s.all_constraints_buf.col(k) = c;
+            }
+
+            // Inline L2-squared aggregation. NLopt's c_ineq >= 0
+            // feasible convention: ineq slack = max(0, -c_ineq[j]).
+            double violation_sum = 0.0;
+            for(int j_eq = 0; j_eq < s.n_eq; ++j_eq)
+            {
+                const double ce = s.all_constraints_buf(j_eq, k);
+                violation_sum += ce * ce;
+            }
+            for(int j_in = 0; j_in < s.n_ineq; ++j_in)
+            {
+                const double slack = std::max(
+                    0.0,
+                    -s.all_constraints_buf(s.n_eq + j_in, k));
+                violation_sum += slack * slack;
+            }
+            s.violations[k] = violation_sum;
+        }
+
+        // (6) Best-ever bookkeeping. Mirrors production isres_policy
+        // post-66c0fc0: rolling best_ever_violation, Pareto-tightened
+        // pre-feasible update predicate.
+        const std::uint32_t best_ranked = s.indices_buf[0];
+        const double best_ranked_f = s.fitnesses[best_ranked];
+        const double best_ranked_v = s.violations[best_ranked];
+
+        if(best_ranked_f < s.best_ever_value && best_ranked_v <= 0.0)
+        {
+            s.best_ever_value = best_ranked_f;
+            s.best_ever_violation = 0.0;
+            s.objective_value = best_ranked_f;
+            s.x = s.population.col(best_ranked);
+
+            if(n_c > 0)
+            {
+                Eigen::VectorXd c(n_c);
+                s.problem->constraints(s.x, c);
+                s.c_eq = c.head(s.n_eq);
+                s.c_ineq = c.tail(s.n_ineq);
+            }
+        }
+        else if(s.best_ever_value
+                == std::numeric_limits<double>::infinity())
+        {
+            // Pre-feasible witness: only update on Pareto improvement
+            // (lower violation AND not-worse fitness).
+            if(best_ranked_v < s.best_ever_violation
+               && best_ranked_f <= s.objective_value)
+            {
+                s.best_ever_violation = best_ranked_v;
+                s.objective_value = best_ranked_f;
+                s.x = s.population.col(best_ranked);
+
+                if(n_c > 0)
+                {
+                    Eigen::VectorXd c(n_c);
+                    s.problem->constraints(s.x, c);
+                    s.c_eq = c.head(s.n_eq);
+                    s.c_ineq = c.tail(s.n_ineq);
+                }
+            }
+        }
+
+        ++s.generation;
+
+        // (7) Step report. policy_status stays std::nullopt; Plan 05
+        // emits solver_status::ftol_reached on
+        // sigma_collapse_predicate(s) AND
+        // (best_ranked_v <= options.feasibility_gate).
+        const double mean_sigma = s.sigmas.leftCols(mu).mean();
+        const double grad_proxy =
+            mean_sigma * std::sqrt(static_cast<double>(n));
+        const bool improved = (s.best_ever_value < prev_best_ever_value);
+        const double objective_change = improved
+            ? (s.best_ever_value - prev_best_ever_value)
+            : mean_sigma;
+
+        return step_result<double>{
+            .objective_value = s.objective_value,
+            .gradient_norm = grad_proxy,
+            .step_size = mean_sigma,
+            .objective_change = objective_change,
+            .improved = improved,
+            .x_norm = s.x.norm(),
+            .policy_status = std::nullopt,
+        };
     }
 
     template <typename P>
