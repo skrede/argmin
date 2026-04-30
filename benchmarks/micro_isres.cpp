@@ -16,7 +16,7 @@
 // z-score column resolves the noise floor on small differences between
 // stochastic runs (per the micro_kraft_slsqp 10000-rep precedent).
 //
-// Test set per the phase-CONTEXT D-22 contract:
+// Test set:
 //   HS006, HS024, HS035, HS076 (Hock-Schittkowski subset), Rastrigin 2D,
 //   Rastrigin 5D, Schwefel 2D, Schwefel 5D, plus a bounds-degenerate
 //   problem (one dimension with near-zero feasible interval) that

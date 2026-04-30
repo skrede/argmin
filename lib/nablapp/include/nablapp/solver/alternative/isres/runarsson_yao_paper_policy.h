@@ -30,7 +30,7 @@
 //   - L2-squared violation aggregation;
 //   - removal of the dead [mu, lambda) cyclic fill.
 //
-// Citation-gap on numeric defaults (RESEARCH Pitfall 1):
+// Citation-gap on numeric defaults:
 //
 //   Paper specifies the operator FORMS but does not pin gamma or
 //   alpha numerically; defaults match NLopt (gamma=0.85, alpha=0.2)
@@ -100,19 +100,19 @@ struct runarsson_yao_paper_policy
         std::uint16_t stall_window{200};
         double feasibility_gate{1e-4};
 
-        // RESEARCH Pitfall 1 + Q1: numeric values are NOT paper-pinned.
+        // Numeric values are NOT paper-pinned (see file-header citation gap).
         // Defaults match NLopt for cross-implementation comparability.
         // Field names use the paper_ prefix to mark the citation gap.
         std::optional<double> paper_gamma{};   // default 0.85 (citation gap; not in paper text)
         std::optional<double> paper_alpha{};   // default 0.2  (citation gap; not in paper text)
 
-        // Sigma-collapse predicate threshold (Plan 05 plumbs the predicate).
+        // Sigma-collapse predicate threshold.
         std::optional<double> sigma_collapse_ratio{};  // default 1e-9
 
-        // Bounded resample budget (RESEARCH Q5).
+        // Bounded resample budget — caps NLopt's unbounded retry loop.
         std::optional<std::uint16_t> bound_resample_budget{};  // default 100
 
-        // Plan 05 runtime selectors (data-only at this point).
+        // Operator-axis runtime selectors.
         sigma_clamp_placement_type sigma_clamp_placement{
             sigma_clamp_placement_type::per_mutation};
         sigma_collapse_form_type sigma_collapse_form{
@@ -128,13 +128,13 @@ struct runarsson_yao_paper_policy
         }();
 
         // Bounded-storage scaffolding shared with nlopt_faithful_policy
-        // (RESEARCH Q7 + Pattern 1; cmaes_policy MaxPop=512 idiom).
-        // For fixed-N specializations the row count is exact (N); for
-        // dynamic_dimension the row count is heap-sized (Eigen::Dynamic).
-        // Column count is capped at MaxLambda / MaxMu so the column axis
-        // does not heap-resize on the hot path. fitnesses / violations
-        // remain ordinary VectorXd because detail::stochastic_rank takes
-        // an Eigen::Vector<Scalar, N> (no Max-cap) signature.
+        // (cmaes_policy MaxPop=512 idiom). For fixed-N specializations the
+        // row count is exact (N); for dynamic_dimension the row count is
+        // heap-sized (Eigen::Dynamic). Column count is capped at MaxLambda
+        // / MaxMu so the column axis does not heap-resize on the hot path.
+        // fitnesses / violations remain ordinary VectorXd because
+        // detail::stochastic_rank takes an Eigen::Vector<Scalar, N>
+        // (no Max-cap) signature.
         static constexpr int MaxN = 64;
         static constexpr int MaxMu = 256;
         static constexpr int MaxLambda = 1792;
@@ -170,7 +170,7 @@ struct runarsson_yao_paper_policy
         double alpha{0.2};
         detail::es_learning_rates rates{};
 
-        // Per-step buffers (hoisted to state per static-audit I5/I6/I7).
+        // Per-step buffers hoisted to state to keep step() alloc-free.
         Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0,
                       Eigen::Dynamic, MaxLambda> all_constraints_buf;
         std::vector<std::uint32_t> indices_buf;
@@ -260,8 +260,8 @@ struct runarsson_yao_paper_policy
             }
         }
 
-        // L2-squared violation aggregation (paper-NLopt agreement;
-        // RESEARCH Q1 violation-aggregation row, NLopt isres.c:151,163).
+        // L2-squared violation aggregation: paper and NLopt agree on this
+        // axis (NLopt isres.c:151,163).
         if(n_c > 0)
         {
             for(int j = 0; j < s.lambda; ++j)
@@ -343,9 +343,9 @@ struct runarsson_yao_paper_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        // W7: capture previous best-ever for objective_change / improved
-        // bookkeeping. Plan 05 references this name when plumbing the
-        // status emission and MUST NOT have to re-derive it.
+        // Capture previous best-ever for objective_change / improved
+        // bookkeeping; also referenced by the sigma-collapse status
+        // emission below.
         const double prev_best_ever_value = s.best_ever_value;
 
         const int n = static_cast<int>(s.x.size());
@@ -379,8 +379,8 @@ struct runarsson_yao_paper_policy
         //     Skip k=0 since that IS x_1 itself; k=0 is mutated via the
         //     standard log-normal ES path. OOB / last-survivor fallback
         //     uses standard mutation; treating "differential variation
-        //     for survivors" as covering OOB recovery would be incorrect
-        //     (PATTERNS.md anti-pattern).
+        //     for survivors" as covering OOB recovery would conflate the
+        //     two operator regimes.
         for(int k = 0; k < mu; ++k)
         {
             const std::uint32_t rk = s.indices_buf[static_cast<std::size_t>(k)];
@@ -432,7 +432,7 @@ struct runarsson_yao_paper_policy
 
         // (4) Bottom [mu, lambda) standard mutation. The paper does NOT
         //     specify this leg; NLopt convention (parent = rank-(k % mu))
-        //     is the dominant practice (PATTERNS.md / RESEARCH Q1 last row).
+        //     is the dominant practice across reference implementations.
         for(int k = mu; k < lambda; ++k)
         {
             const std::uint32_t rk = s.indices_buf[static_cast<std::size_t>(k)];
@@ -463,9 +463,8 @@ struct runarsson_yao_paper_policy
             }
         }
 
-        // (5) Evaluation + L2-squared violation aggregation
-        //     (paper-NLopt agreement; RESEARCH Q1 violation-aggregation row;
-        //     NLopt isres.c:151,163).
+        // (5) Evaluation + L2-squared violation aggregation. Paper and
+        //     NLopt agree on this axis (NLopt isres.c:151,163).
         for(int k = 0; k < lambda; ++k)
         {
             Eigen::Vector<double, N> xk = s.population.col(k);
@@ -510,9 +509,9 @@ struct runarsson_yao_paper_policy
                 = static_cast<std::uint32_t>(j);
         detail::stochastic_rank(s.indices_buf, s.fitnesses, s.violations, s.pf, rng);
 
-        // (7) Best-update + best_ever bookkeeping. Mirror production
-        //     isres_policy.h:325-376: feasible improvement first, then
-        //     least-infeasibility witness with the I4 / I14 fix.
+        // (7) Best-update + best_ever bookkeeping: feasible improvement
+        //     first, then a Pareto-tightened pre-feasible least-infeasibility
+        //     witness (rolling best_ever_violation).
         const std::uint32_t best_ranked = s.indices_buf[0];
         const double best_ranked_f = s.fitnesses[best_ranked];
         const double best_ranked_v = s.violations[best_ranked];

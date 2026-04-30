@@ -72,9 +72,7 @@ struct nlopt_faithful_policy
     template <int M>
     using rebind = nlopt_faithful_policy<M>;
 
-    // Runtime selectors (D-10, D-14). Both ship as data-only fields in
-    // this plan; the conditional logic that interprets them is plumbed
-    // by Plan 05.
+    // Runtime selectors for the two operator-axis variants.
     enum class sigma_clamp_placement_type { per_mutation, end_of_step };
     enum class sigma_collapse_form_type { bound_relative_configurable, xtol_coupled };
 
@@ -92,34 +90,33 @@ struct nlopt_faithful_policy
         std::uint16_t stall_window{200};
         double feasibility_gate{1e-4};                       // L2-squared in this variant
 
-        // D-07 + D-11 + D-12: NLopt-faithful operator constants.
-        // gamma = 0.85, alpha = 0.2; engineering defaults from NLopt
-        // isres.c:67-68 (NOT pinned numerically by Runarsson-Yao 2005).
-        // gamma is the differential-variation strength
-        // (Runarsson-Yao 2005 §III); name preserves the paper's symbol
-        // per project citation policy.
+        // NLopt-faithful operator constants. gamma = 0.85, alpha = 0.2 are
+        // engineering defaults from NLopt isres.c:67-68 (NOT pinned
+        // numerically by Runarsson-Yao 2005). gamma is the
+        // differential-variation strength (Runarsson-Yao 2005 §III); name
+        // preserves the paper's symbol per project citation policy.
         std::optional<double> differential_variation_gamma{};  // default 0.85
         std::optional<double> sigma_smoothing_weight{};        // default 0.2
 
-        // D-14: sigma-collapse predicate threshold (bound-relative form).
-        // 1e-9 default per RESEARCH Q3 (1000x looser than CMA-ES's
-        // 1e-12 because per-individual ISRES sigma is noisier than
-        // CMA-ES covariance scaling).
+        // Sigma-collapse predicate threshold (bound-relative form).
+        // 1e-9 default — 1000x looser than CMA-ES's 1e-12 because
+        // per-individual ISRES sigma is noisier than CMA-ES covariance
+        // scaling.
         std::optional<double> sigma_collapse_ratio{};          // default 1e-9
 
-        // D-18 + RESEARCH Q5: bounded retry on resample-on-bound to
-        // avoid infinite loop on degenerate-geometry problems
-        // (NLopt isres.c:245-248 unbounded loop). On budget exhaustion,
-        // fall back to std::clamp clip semantics.
+        // Bounded retry on resample-on-bound to avoid infinite loop on
+        // degenerate-geometry problems (NLopt isres.c:245-248 uses an
+        // unbounded loop). On budget exhaustion, fall back to std::clamp
+        // clip semantics.
         std::optional<std::uint16_t> bound_resample_budget{};  // default 100
 
-        // D-10 axis: clamp placement runtime selector.
+        // Sigma-clamp placement axis: clamp inside the per-mutation operator
+        // body, or apply once at end-of-step.
         sigma_clamp_placement_type sigma_clamp_placement{
             sigma_clamp_placement_type::per_mutation};
 
-        // D-14 axis: sigma-collapse form runtime selector. Plumbed in
-        // step() during Plan 05; value here is data-only at this point
-        // in the phase.
+        // Sigma-collapse form axis: bound-relative ratio threshold, or
+        // coupled to the user-set step_tolerance.
         sigma_collapse_form_type sigma_collapse_form{
             sigma_collapse_form_type::bound_relative_configurable};
     };
@@ -132,12 +129,12 @@ struct nlopt_faithful_policy
             else return dynamic_dimension;
         }();
 
-        // RESEARCH Q7 sizing rationale:
-        //   MaxN  = 64    -- 2x headroom over current Phase 26 ISRES
-        //                    test-set max (n=20).
-        //   MaxMu = 256   -- ceil((20*(MaxN+1))/7) rounded to power of 2.
-        //   MaxLambda = 7 * MaxMu -- 1792, used for full-population
-        //                    buffers (population, sigmas, offspring).
+        // Bounded-storage sizing:
+        //   MaxN      = 64   -- 2x headroom over the current ISRES
+        //                       test-set max (n=20).
+        //   MaxMu     = 256  -- ceil((20*(MaxN+1))/7) rounded to power of 2.
+        //   MaxLambda = 1792 -- 7 * MaxMu, used for full-population buffers
+        //                       (population, sigmas, offspring).
         static constexpr int MaxN = 64;
         static constexpr int MaxMu = 256;
         static constexpr int MaxLambda = 1792;
@@ -146,10 +143,9 @@ struct nlopt_faithful_policy
         Eigen::Vector<double, N> x;
         double objective_value{};
 
-        // Bounded-storage population matrices (RESEARCH Q7;
-        // feedback_no_dynamic_eigen). Heap is used only when N is
-        // dynamic_dimension; with a concrete N these are stack-resident
-        // up to their compile-time max bounds.
+        // Bounded-storage population matrices. Heap is used only when N is
+        // dynamic_dimension; with a concrete N these are stack-resident up
+        // to their compile-time max bounds.
         Eigen::Matrix<double,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       Eigen::Dynamic, 0,
@@ -173,8 +169,8 @@ struct nlopt_faithful_policy
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
 
-        // RNG: xoshiro256+ shared with cmaes_policy + production
-        // isres_policy (commit 66c0fc0). 32 B vs std::mt19937's 2.5 KB.
+        // RNG: xoshiro256+ shared with cmaes_policy and the production
+        // isres_policy alias. 32 B vs std::mt19937's 2.5 KB.
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
@@ -192,22 +188,21 @@ struct nlopt_faithful_policy
         int lambda{0};
         int mu{0};
         double pf{0.45};
-        // alpha here is the sigma-smoothing weight (D-11/D-12),
-        // re-mapped from its prior pull-to-best meaning.
+        // alpha is the sigma-smoothing weight, re-mapped from its prior
+        // pull-to-best meaning in the production isres_policy.
         double alpha{0.2};
         detail::es_learning_rates rates{};
 
-        // D-08: x0 snapshot of the top-mu physical slots, captured at
+        // x0 snapshot of the top-mu physical slots, captured at
         // start-of-step before mutation. Read by the differential
-        // variation operator in Plan 03 Task 2.
+        // variation operator in step().
         Eigen::Matrix<double,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       Eigen::Dynamic, 0,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       MaxMu> x0_snapshot_buf;
 
-        // Per-step buffers (hoisted per RESEARCH Q7;
-        // feedback_no_dynamic_eigen).
+        // Per-step buffers hoisted into state to keep step() alloc-free.
         Eigen::Matrix<double,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       Eigen::Dynamic, 0,
@@ -277,13 +272,13 @@ struct nlopt_faithful_policy
         const double frac = options.parent_fraction.value_or(1.0 / 7.0);
         s.mu = std::max(1, static_cast<int>(s.lambda * frac));
         s.pf = options.ranking_probability.value_or(0.45);
-        // D-12 remap: the alpha state field now carries the
-        // sigma-smoothing weight, NOT pull-to-best (which this variant
-        // does not implement). Default 0.2 from NLopt isres.c:67.
+        // The alpha state field carries the sigma-smoothing weight,
+        // NOT pull-to-best (which this variant does not implement).
+        // Default 0.2 from NLopt isres.c:67.
         s.alpha = options.sigma_smoothing_weight.value_or(0.2);
         s.rates = detail::compute_es_rates(n);
 
-        // Seed RNG (xoshiro256+ per static-audit I8).
+        // Seed RNG (xoshiro256+).
         const std::uint64_t seed = options.seed.value_or(
             static_cast<std::uint64_t>(std::random_device{}()));
         s.rng.emplace(seed);
@@ -302,8 +297,8 @@ struct nlopt_faithful_policy
         s.all_constraints_buf.resize(std::max(n_c, 0), s.lambda);
         s.indices_buf.resize(static_cast<std::size_t>(s.lambda));
 
-        // D-08: x0 snapshot buffer (n x mu). Required by step() Task 2;
-        // sizing here so step() does not index a zero-sized buffer.
+        // x0 snapshot buffer (n x mu). Sized here so step() does not index
+        // a zero-sized buffer.
         s.x0_snapshot_buf.resize(n, s.mu);
 
         // Initialize population uniformly in bounds. The free-function
@@ -333,7 +328,7 @@ struct nlopt_faithful_policy
             }
         }
 
-        // D-19: L2-squared violation aggregation (NLopt isres.c:151,163).
+        // L2-squared violation aggregation (NLopt isres.c:151,163).
         // Caller convention: c_ineq[j] >= 0 feasible, equality term is
         // c_eq[j]^2.
         if(n_c > 0)
@@ -425,32 +420,29 @@ struct nlopt_faithful_policy
     //      s.indices_buf[0] is the best-ranked individual; ties broken
     //      probabilistically per Runarsson-Yao 2005 eq. 2.
     //   2. Snapshot the top-mu PHYSICAL slots of the population into
-    //      s.x0_snapshot_buf (D-08; NLopt isres.c:253). The snapshot
-    //      is NOT rank-permuted; it captures slots [0, mu) as-is, so
-    //      that the differential-variation difference at line 260 of
-    //      NLopt isres.c reads physical-slot[0] - physical-slot[k+1].
-    //      This is the operator semantics the Plan 01 free function
-    //      detail::differential_variation() encodes; the body inlines
-    //      the per-component form to interleave the boundary-fallback
-    //      check that the per-column free function cannot express.
+    //      s.x0_snapshot_buf (NLopt isres.c:253). The snapshot is NOT
+    //      rank-permuted; it captures slots [0, mu) as-is, so that the
+    //      differential-variation difference at line 260 of NLopt
+    //      isres.c reads physical-slot[0] - physical-slot[k+1]. This is
+    //      the operator semantics that detail::differential_variation()
+    //      encodes; the body inlines the per-component form to interleave
+    //      the boundary-fallback check that the per-column free function
+    //      cannot express.
     //   3. Top-mu DE-style differential variation. The k+1 == mu
     //      boundary case and OOB components fall back to the standard
     //      log-normal mutation + bounded resample.
     //   4. Bottom [mu, lambda) standard mutation only -- no DE here.
     //      The dead [mu, lambda) cyclic fill present in the production
-    //      isres_policy.h:316-323 is removed (D-17): the irank[k]
-    //      pairing makes those slots overwritten by mutation, so the
-    //      copy was unread.
+    //      isres_policy.h:316-323 is removed: the irank[k] pairing makes
+    //      those slots overwritten by mutation, so the copy was unread.
     //   5. Evaluate offspring and aggregate violations as
     //         v_k = sum_i c_eq[i]^2 + sum_j max(0, -c_ineq[j])^2
-    //      (D-19; NLopt isres.c:151,163). Differs from production
-    //      isres_policy which uses L1 via detail::compute_violations.
-    //   6. Best-ever bookkeeping mirrors the post-66c0fc0 production
-    //      pattern (rolling best_ever_violation; tightened
-    //      Pareto-improvement predicate).
-    //   7. Return step_result with policy_status defaulted to
-    //      std::nullopt; Plan 05 plumbs the sigma-collapse + feasibility
-    //      predicate-and-emission into this slot.
+    //      (NLopt isres.c:151,163). Differs from the prior production
+    //      isres_policy which used L1 via detail::compute_violations.
+    //   6. Best-ever bookkeeping uses a rolling best_ever_violation with
+    //      a Pareto-tightened pre-feasible update predicate.
+    //   7. Return step_result with policy_status set when sigma-collapse
+    //      and feasibility both hold (see step 7's body).
     //
     // Reference: NLopt 2.10.0 isres.c lines 233-280;
     //            Runarsson & Yao (2005), IEEE Trans. SMC-C
@@ -466,8 +458,7 @@ struct nlopt_faithful_policy
         std::normal_distribution<double> normal(0.0, 1.0);
 
         // Capture pre-step best for objective_change / improved
-        // bookkeeping. Plan 05 references this name when plumbing the
-        // status emission, so it must exist verbatim (W7).
+        // bookkeeping and for the sigma-collapse status emission below.
         const double prev_best_ever_value = s.best_ever_value;
 
         const double gamma =
@@ -491,11 +482,11 @@ struct nlopt_faithful_policy
                                 rng);
 
         // (2) x0 snapshot of the top-mu PHYSICAL slots
-        // (D-08; NLopt isres.c:253). NOT rank-permuted.
+        // (NLopt isres.c:253). NOT rank-permuted.
         for(int j = 0; j < mu; ++j)
             s.x0_snapshot_buf.col(j) = s.population.col(j);
 
-        // (3) Top-mu DE-style differential variation (D-06; NLopt
+        // (3) Top-mu DE-style differential variation (NLopt
         // isres.c:254-260). The per-component fallback check at the
         // boundary makes the body inline rather than calling the
         // column-level free function detail::differential_variation();
@@ -520,20 +511,20 @@ struct nlopt_faithful_policy
                     || s.population(j, rk) > s.upper(j);
                 if(need_fallback)
                 {
-                    // D-09: per-mutation sigma upper clamp
-                    // sigma_max = (ub - lb) / sqrt(n).
+                    // Per-mutation sigma upper clamp:
+                    //   sigma_max = (ub - lb) / sqrt(n).
                     const double sigmamax = (s.upper(j) - s.lower(j))
                         / std::sqrt(static_cast<double>(n));
                     const double sigi = s.sigmas(j, rk);
 
-                    // D-10 per_mutation form: log-normal sigma update
-                    // with the upper clamp folded inside the operator.
+                    // Per-mutation form: log-normal sigma update with the
+                    // upper clamp folded inside the operator.
                     s.sigmas(j, rk) = detail::log_normal_mutate(
                         sigi, s.rates.tau, taup_rand, sigmamax, rng);
 
-                    // D-18 + RESEARCH Q5: bounded resample on bound;
-                    // budget=100 default. On exhaustion, std::clamp
-                    // fallback (vs NLopt's unbounded do/while).
+                    // Bounded resample on bound; budget=100 default. On
+                    // exhaustion, std::clamp fallback (vs NLopt's unbounded
+                    // do/while at isres.c:245-248).
                     for(std::uint16_t try_k = 0;
                         try_k < resample_budget;
                         ++try_k)
@@ -549,7 +540,7 @@ struct nlopt_faithful_policy
                                 s.lower(j), s.upper(j));
                     }
 
-                    // D-11: alpha-smoothing on sigma.
+                    // Alpha-smoothing on sigma:
                     //   sigma_out = sigma_parent
                     //             + alpha * (sigma_new - sigma_parent)
                     s.sigmas(j, rk) =
@@ -599,10 +590,10 @@ struct nlopt_faithful_policy
         }
 
         // (5) Evaluate offspring and aggregate violations
-        // (D-19; NLopt isres.c:151,163). The mutation step writes
-        // directly into s.population, so we evaluate s.population
-        // (no offspring_buf needed in this variant -- the irank[k]
-        // pairing makes mutation idempotent on the active slot).
+        // (NLopt isres.c:151,163). The mutation step writes directly
+        // into s.population, so we evaluate s.population (no
+        // offspring_buf needed in this variant -- the irank[k] pairing
+        // makes mutation idempotent on the active slot).
         for(int k = 0; k < lambda; ++k)
         {
             const Eigen::Vector<double, N> xk = s.population.col(k);
@@ -633,9 +624,8 @@ struct nlopt_faithful_policy
             s.violations[k] = violation_sum;
         }
 
-        // (6) Best-ever bookkeeping. Mirrors production isres_policy
-        // post-66c0fc0: rolling best_ever_violation, Pareto-tightened
-        // pre-feasible update predicate.
+        // (6) Best-ever bookkeeping: rolling best_ever_violation with a
+        // Pareto-tightened pre-feasible update predicate.
         const std::uint32_t best_ranked = s.indices_buf[0];
         const double best_ranked_f = s.fitnesses[best_ranked];
         const double best_ranked_v = s.violations[best_ranked];
