@@ -530,6 +530,24 @@ struct cmaes_policy
                 }
 
                 s.params = detail::compute_constants(n, new_lambda);
+
+                // Hansen 2023 (arXiv:1604.00772) section B.3 paragraph
+                // "Stagnation": the minimum stagnation history window is
+                // 120 + ceil(30 * n / lambda) and depends on the CURRENT
+                // lambda. libcmaes recomputes this implicitly per-iter via
+                // _max_hist (cmasolutions.cc:111). nablapp computes it once
+                // in init(); on an IPOP restart lambda has just doubled, so
+                // the floor must be recomputed for the new lambda. Without
+                // this recompute the dynamic ceil(0.2 * generation) cap
+                // regrows from zero each restart against the obsolete
+                // init-time floor and stagnation refires too early, driving
+                // the lambda-doubling staircase reported in the
+                // 2026-04-30 libcmaes head-to-head.
+                s.stagnation_window_min = std::uint32_t{120}
+                    + static_cast<std::uint32_t>(
+                        std::ceil(30.0 * static_cast<double>(n)
+                                  / static_cast<double>(s.params.lambda)));
+
                 s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
                 s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
                 s.D = Eigen::Vector<double, N>::Ones(n);

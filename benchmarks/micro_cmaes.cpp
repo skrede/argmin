@@ -10,7 +10,10 @@
 
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/basic_solver.h"
+#include "nablapp/test_functions/ackley.h"
 #include "nablapp/test_functions/rastrigin.h"
+
+#include "counting_problem.h"
 
 #include <Eigen/Core>
 
@@ -18,6 +21,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <iostream>
 #include <print>
 
 namespace
@@ -267,6 +271,62 @@ int main()
             fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);
         std::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
             dyn.wall_us / nlopt.wall_us, double(dyn.evals) / nlopt.evals);
+    }
+
+    // Ackley 2D IPOP f_evals upper-bound assertion.
+    //
+    // Hansen 2023 (arXiv:1604.00772) section B.3 + Auger & Hansen (2005)
+    // "A Restart CMA Evolution Strategy with Increasing Population Size":
+    // the offspring loop is the ONLY problem.value() call site inside
+    // cmaes_policy::step() (init() adds exactly 1 evaluation). With IPOP
+    // lambda doubling capped at MaxPop=512, the absolute upper bound for
+    // K iterations is 1 + MaxPop * K. We assert a 2x-slack relative bound
+    // against MaxPop * iters_observed to catch any regression that
+    // introduces an extra value() call outside the offspring loop or
+    // reintroduces per-step bench-side multiplication.
+    {
+        std::println("\n--- Ackley 2D IPOP f_evals upper-bound check ---");
+        nablapp::ackley<double, 2> ackley_prob;
+        nablapp::bench::eval_counts counts;
+        nablapp::bench::counting_problem<nablapp::ackley<double, 2>>
+            wrapped{ackley_prob, counts};
+
+        Eigen::Vector<double, 2> x0 = ackley_prob.initial_point();
+        nablapp::solver_options opts;
+        opts.max_iterations = 1000;
+        opts.set_gradient_threshold(1e-12);
+        opts.set_objective_threshold(1e-12);
+        opts.set_step_threshold(1e-12);
+
+        nablapp::cmaes_policy<2>::options_type cmaes_opts{};
+        cmaes_opts.seed = 42u;
+        cmaes_opts.restart = nablapp::cmaes_policy<2>::restart_strategy::ipop;
+
+        nablapp::basic_solver solver{
+            nablapp::cmaes_policy<2>{}, wrapped, x0, opts, cmaes_opts};
+        auto result = solver.solve();
+
+        constexpr int max_pop = 512;  // matches MaxPop in cmaes_policy.h
+        const std::uint64_t observed_iters =
+            static_cast<std::uint64_t>(result.iterations);
+        const std::uint64_t f_evals_bound =
+            1ull
+            + 2ull * static_cast<std::uint64_t>(max_pop) * observed_iters
+            + 16ull;
+
+        std::println("  iters: {}, f_evals: {}, bound: {}, objective: {:.6e}",
+            observed_iters,
+            static_cast<std::uint64_t>(counts.f),
+            f_evals_bound,
+            result.objective_value);
+
+        if(static_cast<std::uint64_t>(counts.f) > f_evals_bound)
+        {
+            std::cerr << "micro_cmaes: f_evals upper bound violated: "
+                      << counts.f << " > " << f_evals_bound
+                      << " (iters=" << observed_iters << ")\n";
+            return 2;
+        }
     }
 
     std::println("\nProfile with:");

@@ -29,6 +29,13 @@ struct bench_config
     bool trace_enabled{false};
     int trace_every_n{1};
     std::uint64_t seed{42};
+    // NOTE: Dead in the publish_bench dispatch path. publish_driver.cpp,
+    // bench_nablapp.h, and bench_libcmaes.cpp do not consume this field
+    // (verified 2026-05-01). Each (seed, problem, solver) tuple runs ONCE
+    // per publish_bench invocation. Per-bench repetition is owned by the
+    // micro_*.cpp binaries via their own local `reps` constants. The field
+    // is retained for the bench_config API stability; do not assume it
+    // means averaging in publish_summary.csv reports.
     int repetitions{1};
 
     [[nodiscard]] static auto library_defaults() -> bench_config
@@ -48,7 +55,7 @@ struct bench_config
             .trace_enabled = true,
             .trace_every_n = 1,
             .seed = s,
-            .repetitions = 11,
+            .repetitions = 11,  // retained for API stability; not consumed by publish_bench (see field comment above)
         };
     }
 };
