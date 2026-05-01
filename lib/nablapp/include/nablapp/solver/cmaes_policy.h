@@ -236,8 +236,22 @@ struct cmaes_policy
         s.initial_d_max = s.D.maxCoeff();
         s.axis_cycle_index = 0;
 
-        // Hansen (2023) arXiv:1604.00772: eigendecomposition skip period.
-        // K = max(1, floor(1 / (10 * n * (c_1 + c_mu)))).
+        // Hansen 2023 (arXiv:1604.00772) §B.2 (Strategy internal numerical
+        // effort): the skip factor floor(1 / (10*n*(c_1 + c_mu))) degenerates
+        // to 0 for low n with default weights (e.g. n=2, default lambda=6:
+        // c_1 ~= 0.18, c_mu ~= 0.04, denom = 10*2*0.22 = 4.4, floor(1/4.4)
+        // = 0), so the max(1, ...) guard pins K to 1 and a SelfAdjointEigen-
+        // Solver<2> compute() runs every iter. K=1 is accepted at low n:
+        // a 2x2 self-adjoint eigendecomposition is sub-microsecond on
+        // commodity hardware, while the publish_bench wall_us per iter on
+        // n=2 cells is ~25 us (5-seed snapshot at
+        // 2026-04-30-libcmaes-comparison: ackley_2 1322 iters / 35.4 ms),
+        // putting per-iter eigendecomp cost below 1% of total per-iter wall
+        // and below the bench noise floor. libcmaes uses a counter-based
+        // equivalent (`eigeneval - counteval > lambda / (10*(c_1 + c_mu))`,
+        // src/cmastrategy.cc::optimize_), which gives a numerically-similar
+        // skip frequency in this regime. K = max(1, floor(1 / (10 * n *
+        // (c_1 + c_mu)))).
         if(options.eigendecomposition_skip_generations.has_value())
         {
             s.decomposition_skip_k = options.eigendecomposition_skip_generations.value();
@@ -428,10 +442,32 @@ struct cmaes_policy
         if(!std::isfinite(s.sigma) || !std::isfinite(s.D.maxCoeff()))
             policy_status = solver_status::diverged;
 
-        // Sigma collapse detection (roundoff_limited)
-        double sigma_collapse_thr = options.cmaes.sigma_collapse_threshold.value_or(1e-12);
+        // Hansen 2023 (arXiv:1604.00772) §B.3 item 7 (TolX): legacy
+        // single-axis sigma collapse check. The §B.3 paper criterion checks
+        // `sigma * sqrt(C(i,i))` in ALL coordinates AND `|sigma * p_c(i)|`
+        // in ALL components against `1e-12 * initial_sigma`; that
+        // strictly-stricter all-coord-AND-p_c form is implemented by the
+        // §B.3 EXIT-only TolX block below (item 7) and is the canonical
+        // disposition for the criterion. This site is RETAINED as a
+        // user-override hook for legacy callers that explicitly set
+        // `cmaes_options::sigma_collapse_threshold`. The
+        // `value_or(value_or(default))` chain documents precedence:
+        //   1. explicit `sigma_collapse_threshold`,
+        //   2. else explicit `step_size_tolerance` (so a user setting the
+        //      §B.3 TolX option transparently lifts the legacy single-axis
+        //      check to the same threshold; the two checks then share a
+        //      numerical baseline and the §B.3 per-coord TolX strictly
+        //      subsumes this max-axis legacy check),
+        //   3. else the §B.3 default 1e-12 * initial_sigma.
+        // The legacy probe also remains an IPOP restart trigger (recycled
+        // by the {Stagnation, sigma_collapse, ConditionCov} restart-set
+        // logic below), while the §B.3 EXIT-only criteria always exit and
+        // are never recycled.
+        const double legacy_tol_factor =
+            options.cmaes.sigma_collapse_threshold.value_or(
+                options.cmaes.step_size_tolerance.value_or(1e-12));
         if(!policy_status.has_value()
-           && s.sigma * s.D.maxCoeff() < sigma_collapse_thr * s.initial_sigma)
+           && s.sigma * s.D.maxCoeff() < legacy_tol_factor * s.initial_sigma)
             policy_status = solver_status::roundoff_limited;
 
         // Condition number explosion detection (diverged)

@@ -409,6 +409,15 @@ TEST_CASE("cmaes_policy: ipop stagnation_window_min recompute", "[cmaes]")
     // at the 1e-12 default).
     policy.options.cmaes.objective_value_tolerance = 1e-30;
     policy.options.cmaes.step_size_tolerance = 1e-30;
+    // Pin the legacy single-axis sigma_collapse threshold to the §B.3
+    // default 1e-12 explicitly. The legacy probe falls back through the
+    // value_or precedence chain (sigma_collapse_threshold ->
+    // step_size_tolerance -> 1e-12), so when step_size_tolerance is set
+    // to 1e-30 above (to defeat §B.3 TolX) the legacy probe would
+    // inherit that 1e-30 unless sigma_collapse_threshold is explicitly
+    // set. Pinning to 1e-12 keeps the legacy probe active at its paper
+    // baseline while TolX is defeated.
+    policy.options.cmaes.sigma_collapse_threshold = 1e-12;
 
     basic_solver solver{policy, problem, x0, opts};
 
@@ -703,6 +712,54 @@ TEST_CASE("cmaes_policy: objective_value_tolerance user override", "[cmaes]")
     CHECK(iters_loose < iters_default);
 }
 
+TEST_CASE("cmaes_policy: sigma_collapse_threshold user override", "[cmaes]")
+{
+    // Legacy single-axis sigma collapse check is RETAINED as a user
+    // override hook for callers that explicitly set
+    // `cmaes_options::sigma_collapse_threshold`. This test pins the
+    // user-override path so a future cleanup that drops the field would
+    // flip a deterministic inequality.
+    //
+    // Setup mirrors the `objective_value_tolerance user override` test:
+    // two runs differ only in the override field. A loose threshold
+    // (1e-6) MUST fire the legacy probe earlier (fewer iterations) than
+    // the default 1e-12 baseline. The §B.3 EXIT-only criteria are all
+    // defeated to 1e-30 so the legacy max-axis probe is the determining
+    // exit criterion in both runs.
+    rosenbrock<double> problem{};
+
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    auto run = [&](std::optional<double> threshold) -> std::uint32_t {
+        cmaes_policy<> policy;
+        policy.options.initial_sigma = 0.5;
+        policy.options.seed = 42u;
+        // Defeat the §B.3 EXIT-only criteria so the legacy single-axis
+        // probe is the only path to roundoff_limited.
+        policy.options.cmaes.objective_value_tolerance = 1e-30;
+        policy.options.cmaes.step_size_tolerance = 1e-30;
+        if(threshold.has_value())
+            policy.options.cmaes.sigma_collapse_threshold = threshold;
+        basic_solver solver{policy, problem, x0, opts};
+        auto result = solver.solve(opts);
+        REQUIRE(result.status == solver_status::roundoff_limited);
+        return result.iterations;
+    };
+
+    const std::uint32_t iters_default = run(std::nullopt);
+    const std::uint32_t iters_loose = run(1e-6);
+
+    // The loose user threshold MUST fire earlier (fewer iterations) than
+    // the default 1e-12 baseline. This proves the legacy override hook
+    // is still wired through the `value_or` precedence chain.
+    CHECK(iters_loose < iters_default);
+}
+
 TEST_CASE("cmaes_policy: no_effect_axis exit", "[cmaes]")
 {
     // Hansen 2023 (arXiv:1604.00772) section B.3 item 1 (NoEffectAxis),
@@ -905,6 +962,13 @@ TEST_CASE("cmaes_policy: ipop decomposition_skip_k recompute", "[cmaes]")
     policy.options.seed = 42u;
     policy.options.cmaes.objective_value_tolerance = 1e-30;
     policy.options.cmaes.step_size_tolerance = 1e-30;
+    // Pin sigma_collapse_threshold to the §B.3 default so the legacy
+    // probe stays active despite step_size_tolerance defeating TolX. The
+    // legacy probe falls back through value_or precedence
+    // (sigma_collapse_threshold -> step_size_tolerance -> 1e-12), so
+    // setting step_size_tolerance to 1e-30 would otherwise drag the
+    // legacy threshold to 1e-30 too.
+    policy.options.cmaes.sigma_collapse_threshold = 1e-12;
 
     basic_solver solver{policy, problem, x0, opts};
 
