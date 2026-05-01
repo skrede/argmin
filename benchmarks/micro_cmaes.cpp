@@ -23,6 +23,17 @@
 // instead of lambda. Per the project's 10000-rep micro_cmaes bench-noise
 // floor convention this resolves <5% per-step changes.
 //
+// Sampling variant default (Plan 05 of phase 34.2): production
+// detail/cmaes_sampling.h forwards to detail::alternative::marsaglia
+// (Marsaglia & Bray 1964 polar method on top of xoshiro256+; thread_local
+// pair cache). Empirical winner of the perf-record A/B on this harness:
+// drops std::normal_distribution<xoshiro256+> 10.55% self-time slice to
+// marsaglia_normal 8.39% at a 5-rep median wall of 495 ms vs 507 ms
+// for production. Ziggurat (detail/alternative/cmaes_sampling_ziggurat.h)
+// is buildable for re-comparison via temporary include swap in
+// detail/cmaes_sampling.h; perf-record snapshots are at /tmp/ab_results/
+// during the A/B and copied into the plan's verdict doc post-run.
+//
 // Run under perf for flamegraph analysis:
 //   perf record -F 99999 -g -- ./micro_cmaes
 //   perf report --stdio --percent-limit=1.0
