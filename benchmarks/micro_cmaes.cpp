@@ -12,6 +12,7 @@
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/test_functions/ackley.h"
 #include "nablapp/test_functions/rastrigin.h"
+#include "nablapp/result/status.h"
 
 #include "counting_problem.h"
 
@@ -32,6 +33,21 @@ struct timing
     double wall_us;
     double objective;
     std::uint32_t evals;
+};
+
+// Smooth quadratic centered at the origin used by the TolFun-bound
+// regression cell at the bottom of main(). Defined at file scope so it
+// satisfies the structural requirements of nablapp's `objective` concept
+// (a class type with the required constexpr static members) without the
+// local-class restriction that forbids constexpr static data members.
+struct smooth_quadratic_2d
+{
+    static constexpr int problem_dimension = 2;
+    int dimension() const { return 2; }
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        return x.squaredNorm();
+    }
 };
 
 // NLopt callback for Rastrigin.
@@ -326,6 +342,54 @@ int main()
                       << counts.f << " > " << f_evals_bound
                       << " (iters=" << observed_iters << ")\n";
             return 2;
+        }
+    }
+
+    // Smooth-quadratic TolFun-bound regression cell.
+    //
+    // Hansen 2023 (arXiv:1604.00772) section B.3 item 6 (TolFun): default
+    // `objective_value_tolerance = 1e-12` per the paper text "10^-12 is a
+    // conservative first guess". On a smooth quadratic centered at the
+    // origin, CMA-ES converges and the range of the best-of-generation
+    // history (and the current generation's offspring) drops below 1e-12,
+    // exiting the policy with solver_status::ftol_reached. The cell pins
+    // this behaviour as a per-step regression: changes that re-route the
+    // exit through a different §B.3 criterion (e.g., turning off the
+    // history-window machinery) will fail this assertion.
+    {
+        std::println("\n--- Smooth quadratic 2D TolFun-bound exit ---");
+
+        smooth_quadratic_2d prob;
+
+        Eigen::Vector<double, 2> x0{{2.0, 2.0}};
+        nablapp::solver_options opts;
+        opts.max_iterations = 5000;
+        opts.set_gradient_threshold(1e-30);
+        opts.set_objective_threshold(1e-30);
+        opts.set_step_threshold(1e-30);
+
+        nablapp::cmaes_policy<2>::options_type cmaes_opts{};
+        cmaes_opts.seed = 42u;
+        // Defeat TolX so TolFun is the criterion that owns the exit on
+        // this run.
+        cmaes_opts.cmaes.step_size_tolerance = 1e-30;
+
+        nablapp::basic_solver solver{
+            nablapp::cmaes_policy<2>{}, prob, x0, opts, cmaes_opts};
+        auto result = solver.solve();
+
+        std::println("  iters: {}, status: {}, objective: {:.6e}",
+            result.iterations,
+            static_cast<int>(result.status),
+            result.objective_value);
+
+        if(result.status != nablapp::solver_status::ftol_reached)
+        {
+            std::cerr << "micro_cmaes: TolFun-bound cell did not exit on "
+                         "ftol_reached: status="
+                      << static_cast<int>(result.status)
+                      << " objective=" << result.objective_value << "\n";
+            return 3;
         }
     }
 

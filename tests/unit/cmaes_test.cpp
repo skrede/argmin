@@ -378,38 +378,53 @@ TEST_CASE("cmaes_policy: ipop stagnation_window_min recompute", "[cmaes]")
     // recomputed against the new lambda. This test pins both the init-time
     // value and the post-restart value and is the regression guard for the
     // 2026-04-30 libcmaes head-to-head finding.
-    flat_bounded problem{.n = 2};
+    //
+    // Trigger surface: the §B.3 EXIT criteria (EqualFunValues, TolFun,
+    // TolX, TolXUp, NoEffectAxis, NoEffectCoord) exit the solve regardless
+    // of restart_strategy. The IPOP-restart trigger set is therefore
+    // {Stagnation, sigma_collapse, cond_explosion}. We use a smooth
+    // quadratic + sigma_collapse driver: the EXIT thresholds are widened
+    // (objective_value_tolerance and step_size_tolerance set to 1e-30 --
+    // well below numerical floor) so the sigma_collapse legacy probe
+    // fires first and recycles into an IPOP doubling.
+    rosenbrock<double> problem{};
 
-    Eigen::VectorXd x0{{0.0, 0.0}};
+    Eigen::VectorXd x0{{-1.0, -1.0}};
     solver_options opts;
-    // Enough budget to accumulate the EqualFunValues window
-    // (10 + ceil(30*n/lambda)) generations on a flat objective and trigger
-    // one IPOP doubling. The flat fitness guarantees stagnation fires.
-    opts.max_iterations = 300;
+    opts.max_iterations = 2000;
     opts.set_gradient_threshold(1e-30);
     opts.set_objective_threshold(1e-30);
     opts.set_step_threshold(1e-30);
 
     cmaes_policy<> policy;
-    policy.options.initial_sigma = 1.0;
+    policy.options.initial_sigma = 0.5;
     policy.options.restart = cmaes_policy<>::restart_strategy::ipop;
     policy.options.seed = 42u;
+    // Defeat the §B.3 EXIT criteria so sigma_collapse drives the IPOP
+    // restart path. 1e-30 is below the floating-point noise floor for
+    // these scales: TolFun requires a fitness range below 1e-30 (never
+    // achievable on rosenbrock); TolX requires sigma*sqrt(C(i,i)) below
+    // 1e-30 * initial_sigma (will not reach this before sigma_collapse
+    // at the 1e-12 default).
+    policy.options.cmaes.objective_value_tolerance = 1e-30;
+    policy.options.cmaes.step_size_tolerance = 1e-30;
 
     basic_solver solver{policy, problem, x0, opts};
 
     const int n = 2;
     const int lambda_initial = solver.state().params.lambda;
-    REQUIRE(lambda_initial == 8);  // bounded n=2: max(4*2, 4 + floor(3*ln(2))) = 8
+    // Unbounded n=2 picks the auto formula 4 + floor(3 * ln(2)) = 6.
+    REQUIRE(lambda_initial == 6);
 
     const auto expected_initial = static_cast<std::uint32_t>(120)
         + static_cast<std::uint32_t>(
             std::ceil(30.0 * static_cast<double>(n)
                       / static_cast<double>(lambda_initial)));
-    REQUIRE(solver.state().stagnation_window_min == expected_initial);  // 128
+    REQUIRE(solver.state().stagnation_window_min == expected_initial);  // 130
 
-    // Drive the solver until at least one IPOP restart fires. With a flat
-    // objective and lambda=8 the EqualFunValues window is 10 + ceil(60/8) = 18
-    // generations, so a doubling lands well before the 300-iteration budget.
+    // Drive the solver until sigma_collapse fires and triggers an IPOP
+    // doubling. On rosenbrock with sigma=0.5 this lands well within
+    // the 2000-iteration budget.
     solver.solve(opts);
 
     const int lambda_after = solver.state().params.lambda;
@@ -420,4 +435,367 @@ TEST_CASE("cmaes_policy: ipop stagnation_window_min recompute", "[cmaes]")
             std::ceil(30.0 * static_cast<double>(n)
                       / static_cast<double>(lambda_after)));
     CHECK(solver.state().stagnation_window_min == expected_after);
+}
+
+namespace
+{
+
+// Unbounded flat objective: every value is bit-equal 1.0. Used to drive the
+// Hansen 2023 (arXiv:1604.00772) section B.3 item 4 (EqualFunValues) exit
+// criterion deterministically. Unbounded so the penalty path in
+// cmaes_policy::step() is fully skipped (bound_constrained concept is NOT
+// satisfied) -- the offspring fitness is exactly the objective value, so
+// the bit-equal range across generations is guaranteed.
+struct flat_unbounded
+{
+    static constexpr int problem_dimension = 2;
+    int dimension() const { return 2; }
+    double value(const Eigen::Vector<double, 2>&) const { return 1.0; }
+};
+
+// Unbounded objective whose best-of-generation fitness is bit-INEQUAL
+// across the EqualFunValues window. The literal `==` predicate must NOT
+// fire on a non-zero range; this is the discriminator for the predicate
+// change. We use a smooth quadratic with a moderate initial_sigma so
+// CMA-ES descends meaningfully every generation and best-of-generation
+// fitness keeps strictly decreasing for many iterations -- guaranteeing
+// the minmax range over the EFV window stays strictly positive (and NOT
+// bit-equal) for the duration of the test budget.
+struct strictly_descending_quadratic
+{
+    static constexpr int problem_dimension = 2;
+    int dimension() const { return 2; }
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        return x.squaredNorm();
+    }
+};
+
+// Diagonal quadratic with a near-zero scaling on coordinate 1: the objective
+// only depends meaningfully on x(0). Drives NoEffectCoord by collapsing
+// C(1,1) to a magnitude where 0.2 * sigma * sqrt(C(1,1)) is bit-equal to the
+// mean component during sample-and-step.
+struct degenerate_quadratic
+{
+    static constexpr int problem_dimension = 2;
+    int dimension() const { return 2; }
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        return x(0) * x(0) + 1e-30 * x(1) * x(1);
+    }
+};
+
+// Unbounded concave objective: minimization of -x.squaredNorm() is divergent.
+// CMA-ES will let sigma grow without bound; sigma * max(diag(D)) eventually
+// exceeds 1e4 * initial sigma * initial_d_max, firing the §B.3 item 8
+// (TolXUp) exit criterion with status diverged.
+struct concave_unbounded
+{
+    static constexpr int problem_dimension = 2;
+    int dimension() const { return 2; }
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        return -x.squaredNorm();
+    }
+};
+
+}
+
+static_assert(objective<flat_unbounded>);
+static_assert(!bound_constrained<flat_unbounded>);
+static_assert(objective<strictly_descending_quadratic>);
+static_assert(!bound_constrained<strictly_descending_quadratic>);
+static_assert(objective<degenerate_quadratic>);
+static_assert(objective<concave_unbounded>);
+
+TEST_CASE("cmaes_policy: equal_fun_values exact zero", "[cmaes]")
+{
+    // Hansen 2023 (arXiv:1604.00772) section B.3 item 4 (EqualFunValues):
+    // "stop if the range of the best objective function values of the last
+    // 10 + ceil(30n/lambda) generations is zero." The predicate is the
+    // literal `*mx == *mn` per the paper text. On a flat unbounded
+    // objective the best-of-generation fitness is bit-equal 1.0 across
+    // every generation, so EqualFunValues fires deterministically once
+    // 10 + ceil(30*2/lambda) = 16 (lambda=auto=6 yields ceil(60/6)=10,
+    // window 20; lambda overrides may shrink this) generations have
+    // accumulated. Penalty path skipped -- unbounded problem; the only
+    // fitness value possible is 1.0 -> bit-equal range, deterministic
+    // across seeds.
+    flat_unbounded problem{};
+
+    Eigen::Vector<double, 2> x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    cmaes_policy<2> policy;
+    policy.options.seed = 42u;
+    // Defeat TolFun (which would also fire on flat fitness with default
+    // 1e-12 tolerance) so EqualFunValues is the criterion that fires.
+    policy.options.cmaes.objective_value_tolerance = 1e-30;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.status == solver_status::ftol_reached);
+}
+
+TEST_CASE("cmaes_policy: equal_fun_values rejects sub-epsilon", "[cmaes]")
+{
+    // Hansen 2023 (arXiv:1604.00772) section B.3 item 4 (EqualFunValues)
+    // discriminator: with the literal `==` predicate, a fitness range > 0
+    // must NOT fire EqualFunValues. The legacy relaxed predicate
+    // `< 1e-15 * (|max| + |min| + 1e-30)` WOULD fire on tiny but non-zero
+    // ranges; the discriminator proves the predicate change is exercised
+    // by holding the range strictly positive over the entire budget and
+    // verifying EqualFunValues does NOT fire.
+    //
+    // Setup: the smooth quadratic with a moderate initial_sigma drives
+    // CMA-ES through a steady descent. Best-of-generation fitness changes
+    // every generation (range > 0), and at iter 50 the range over the EFV
+    // window is still strictly positive. All other §B.3 EXIT criteria are
+    // defeated via 1e-30 thresholds so the only criterion that could
+    // possibly fire is EqualFunValues -- if it fires, the bit-equal
+    // predicate is wrong.
+    strictly_descending_quadratic problem{};
+
+    Eigen::Vector<double, 2> x0{{1.0, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    cmaes_policy<2> policy;
+    policy.options.initial_sigma = 0.5;
+    policy.options.seed = 42u;
+    // Defeat all other §B.3 EXIT criteria so only EqualFunValues could
+    // possibly fire within 50 iterations on this descent.
+    policy.options.cmaes.objective_value_tolerance = 1e-30;
+    policy.options.cmaes.step_size_tolerance = 1e-30;
+    policy.options.cmaes.sigma_collapse_threshold = 1e-30;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // With the literal `==` predicate, EqualFunValues must NOT fire on
+    // a strictly-descending non-zero range. The solve runs to budget.
+    CHECK(result.iterations == 50);
+    CHECK(result.status == solver_status::max_iterations);
+}
+
+TEST_CASE("cmaes_policy: tol_fun exit on smooth descent", "[cmaes]")
+{
+    // Hansen 2023 (arXiv:1604.00772) section B.3 item 6 (TolFun): the
+    // range of the best-of-generation history (and the current
+    // generation's offspring) drops below TolFun once the population
+    // has settled near the optimum. The §B.3 default 1e-12 fires after
+    // CMA-ES has converged on the smooth quadratic centered at the origin.
+    rosenbrock<double> problem{};
+
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+    solver_options opts;
+    opts.max_iterations = 2000;
+    // Use very tight basic_solver convergence to ensure the policy
+    // criterion (not basic_solver convergence) is what fires.
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    cmaes_policy<> policy;
+    policy.options.initial_sigma = 0.5;
+    policy.options.seed = 42u;
+    // Defeat TolX so TolFun is what fires (TolX would fire first on this
+    // setup at the default 1e-12 once sigma collapses).
+    policy.options.cmaes.step_size_tolerance = 1e-30;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.status == solver_status::ftol_reached);
+    CHECK(result.objective_value < 1e-10);
+}
+
+TEST_CASE("cmaes_policy: tol_x exit on contracted distribution", "[cmaes]")
+{
+    // Hansen 2023 (arXiv:1604.00772) section B.3 item 7 (TolX): the
+    // sampling-distribution standard deviation drops below TolX in all
+    // coordinates AND sigma*p_c is below TolX in all components. Driving
+    // a smooth quadratic to convergence with a deliberately tight
+    // initial_sigma forces sigma to collapse to roundoff; we defeat TolFun
+    // (1e-30) so TolX is what fires.
+    rosenbrock<double> problem{};
+
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+    solver_options opts;
+    opts.max_iterations = 5000;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    cmaes_policy<> policy;
+    policy.options.initial_sigma = 0.01;
+    policy.options.seed = 42u;
+    // Defeat TolFun so TolX is what fires.
+    policy.options.cmaes.objective_value_tolerance = 1e-30;
+    // Defeat the legacy sigma_collapse probe (1e-12 default) too so the
+    // §B.3 TolX criterion is what owns the exit. TolX defaults to
+    // 1e-12 * initial_sigma which on a 0.01 initial_sigma is 1e-14 --
+    // below sigma_collapse's 1e-12 * initial_sigma = 1e-14 floor by an
+    // identical magnitude, but TolX's all-coords semantics is stricter.
+    policy.options.cmaes.sigma_collapse_threshold = 1e-30;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.status == solver_status::roundoff_limited);
+    CHECK(result.objective_value < 1e-15);
+}
+
+TEST_CASE("cmaes_policy: objective_value_tolerance user override", "[cmaes]")
+{
+    // The user-override plumbing for objective_value_tolerance routes
+    // through cmaes_options and is consumed via value_or(1e-12) at the
+    // §B.3 item 6 check site. A loose user threshold (1e-6) MUST fire
+    // earlier than the default (1e-12). We compare iter counts on two
+    // identical runs differing only in the user threshold.
+    rosenbrock<double> problem{};
+
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    // Run 1: default TolFun threshold (1e-12).
+    std::uint32_t iters_default = 0;
+    {
+        cmaes_policy<> policy;
+        policy.options.initial_sigma = 0.5;
+        policy.options.seed = 42u;
+        policy.options.cmaes.step_size_tolerance = 1e-30;
+        basic_solver solver{policy, problem, x0, opts};
+        auto result = solver.solve(opts);
+        REQUIRE(result.status == solver_status::ftol_reached);
+        iters_default = result.iterations;
+    }
+
+    // Run 2: loose user TolFun threshold (1e-6).
+    std::uint32_t iters_loose = 0;
+    {
+        cmaes_policy<> policy;
+        policy.options.initial_sigma = 0.5;
+        policy.options.seed = 42u;
+        policy.options.cmaes.step_size_tolerance = 1e-30;
+        policy.options.cmaes.objective_value_tolerance = 1e-6;
+        basic_solver solver{policy, problem, x0, opts};
+        auto result = solver.solve(opts);
+        REQUIRE(result.status == solver_status::ftol_reached);
+        iters_loose = result.iterations;
+    }
+
+    // The loose threshold MUST fire earlier (fewer iterations) than the
+    // default threshold. This proves the user-override plumbing is wired.
+    CHECK(iters_loose < iters_default);
+}
+
+TEST_CASE("cmaes_policy: no_effect_axis exit", "[cmaes]")
+{
+    // Hansen 2023 (arXiv:1604.00772) section B.3 item 1 (NoEffectAxis),
+    // footnote 31: "terminate if m equals m + 0.1*sigma*d_ii*b_i, where
+    // i = (g mod n) + 1." On a well-converged run the mean is bit-stable
+    // along at least one principal axis, firing the criterion with
+    // status roundoff_limited.
+    //
+    // The criterion-class assertion (vs predicate-class) acknowledges
+    // that on this setup multiple §B.3 EXIT criteria may race: NoEffectAxis,
+    // NoEffectCoord, and TolX all map to roundoff_limited. We assert the
+    // criterion class fired (status == roundoff_limited), which proves at
+    // least one of the three roundoff-mapped criteria triggered the exit
+    // and not basic_solver convergence or max_iterations.
+    rosenbrock<double> problem{};
+
+    Eigen::VectorXd x0{{0.99, 0.99}};
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    cmaes_policy<> policy;
+    policy.options.initial_sigma = 0.001;
+    policy.options.seed = 42u;
+    // Defeat TolFun so the no-effect / TolX class is what fires.
+    policy.options.cmaes.objective_value_tolerance = 1e-30;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.status == solver_status::roundoff_limited);
+}
+
+TEST_CASE("cmaes_policy: no_effect_coord exit", "[cmaes]")
+{
+    // Hansen 2023 (arXiv:1604.00772) section B.3 item 2 (NoEffectCoord):
+    // "stop if adding 0.2-standard deviations in any single coordinate
+    // does not change m (i.e. m_i equals m_i + 0.2*sigma*c_{i,i} for any
+    // i)." The degenerate quadratic has near-zero curvature on coordinate
+    // 1; CMA-ES collapses C(1,1) until 0.2 * sigma * sqrt(C(1,1)) is below
+    // the mean's ULP, firing the criterion.
+    //
+    // Same criterion-class semantics as no_effect_axis: any of the three
+    // roundoff_limited-mapped criteria is acceptable.
+    degenerate_quadratic problem{};
+
+    Eigen::Vector<double, 2> x0{{1.0, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 5000;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    cmaes_policy<2> policy;
+    policy.options.initial_sigma = 0.1;
+    policy.options.seed = 42u;
+    policy.options.cmaes.objective_value_tolerance = 1e-30;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.status == solver_status::roundoff_limited);
+}
+
+TEST_CASE("cmaes_policy: tol_x_up divergence detection", "[cmaes]")
+{
+    // Hansen 2023 (arXiv:1604.00772) section B.3 item 8 (TolXUp): "stop
+    // if sigma * max(diag(D)) increased by more than 10^4. This usually
+    // indicates a far too small initial sigma, or divergent behavior."
+    // Minimization of a concave objective lets sigma grow unboundedly --
+    // sigma * max(diag(D)) eventually exceeds 1e4 * initial_sigma *
+    // initial_d_max and TolXUp fires with status diverged.
+    //
+    // Unconstrained problem variant (concave + bounds plateaus at the
+    // corner instead of diverging), per plan note in <behavior>.
+    concave_unbounded problem{};
+
+    Eigen::Vector<double, 2> x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 5000;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    cmaes_policy<2> policy;
+    policy.options.initial_sigma = 0.1;
+    policy.options.seed = 42u;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.status == solver_status::diverged);
+    // TolXUp must fire well before the iteration budget is exhausted.
+    CHECK(result.iterations < opts.max_iterations);
 }

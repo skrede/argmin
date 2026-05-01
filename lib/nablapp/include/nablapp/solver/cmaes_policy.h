@@ -97,6 +97,23 @@ struct cmaes_policy
         std::vector<double> median_fitness_history;
         std::uint32_t stagnation_window_min{120};
 
+        // Hansen 2023 (arXiv:1604.00772) section B.3 item 1 NoEffectAxis,
+        // footnote 31: the axis index cycles 0..n-1 across calls per the
+        // formula `i = (g mod n) + 1`. We carry the cycle position in
+        // state so each step() advances to the next axis. Preserved across
+        // IPOP restarts: although s.generation resets to 0 in the IPOP
+        // branch, the cycle position is independent of generation count.
+        int axis_cycle_index{0};
+
+        // Hansen 2023 (arXiv:1604.00772) section B.3 item 8 TolXUp baseline:
+        // sigma * max(diag(D)) at init time. The criterion fires when the
+        // current value exceeds 1e4 * (initial sigma * initial max(D)).
+        // D defaults to all-ones at init, so initial_d_max == 1.0 in the
+        // canonical case; we record the actual init-time value to be
+        // robust to any future init() change. Preserved across IPOP
+        // restart (same baseline, same divergence cap).
+        double initial_d_max{1.0};
+
         Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, N, N>> eigen_solver;
 
         bool covariance_dirty{false};
@@ -197,6 +214,13 @@ struct cmaes_policy
         s.D = Eigen::Vector<double, N>::Ones(n);
         s.eigen_solver.compute(s.C);
         s.covariance_dirty = false;
+
+        // Hansen 2023 (arXiv:1604.00772) section B.3 item 8 (TolXUp) baseline.
+        // Recorded at init so the divergence cap survives even if the D
+        // initialization is changed in the future. With the canonical D = 1
+        // initialization, initial_d_max == 1.0.
+        s.initial_d_max = s.D.maxCoeff();
+        s.axis_cycle_index = 0;
 
         // Hansen (2023) arXiv:1604.00772: eigendecomposition skip period.
         // K = max(1, floor(1 / (10 * n * (c_1 + c_mu)))).
@@ -402,42 +426,248 @@ struct cmaes_policy
         if(!policy_status.has_value() && cond * cond > cond_limit)
             policy_status = solver_status::diverged;
 
-        // 16. IPOP stagnation check using Hansen's criteria.
-        // Reference: Hansen (2023) arXiv:1604.00772, Section B.3.
-        if(options.restart == restart_strategy::ipop)
-        {
-            // Track fitness history for stagnation detection. Use the
-            // PENALIZED fitness here (what the search actually optimizes)
-            // -- the unpenalized value is what we expose to callers as
-            // s.objective_value, but the search's progress signal is the
-            // penalized one. Static-audit G12.
-            s.best_fitness_history.push_back(fitnesses[best_offspring]);
-            {
-                // Compute median fitness of this generation. Reuses
-                // the state-owned buffer (static-audit G10); nth_element
-                // mutates it in place, but the values are read-only
-                // after the median extraction so the next-generation
-                // overwrite is fine.
-                auto& gen_fitnesses = s.gen_fitnesses_buf;
-                for(int i = 0; i < lambda; ++i)
-                    gen_fitnesses[static_cast<std::size_t>(i)] = fitnesses[i];
-                auto mid = gen_fitnesses.begin() + lambda / 2;
-                std::nth_element(gen_fitnesses.begin(),
-                                 mid,
-                                 gen_fitnesses.begin() + lambda);
-                s.median_fitness_history.push_back(*mid);
-            }
-            // Cap history size.
-            if(s.best_fitness_history.size() > 20000)
-            {
-                s.best_fitness_history.erase(s.best_fitness_history.begin());
-                s.median_fitness_history.erase(s.median_fitness_history.begin());
-            }
+        // Snapshot the pre-EXIT-criteria status so the IPOP block (below)
+        // can distinguish (sigma_collapse / cond_explosion -> recycle as
+        // restart trigger) from (§B.3 EXIT criterion -> always exit, never
+        // recycle). The new EXIT criteria below are gated on
+        // `!policy_status.has_value()` so they cannot fire if either of
+        // sigma_collapse / cond_explosion already set policy_status.
+        const bool legacy_status_pre_exit = policy_status.has_value();
 
+        // 16. Hansen 2023 (arXiv:1604.00772) section B.3 termination criteria.
+        //
+        // History tracking runs unconditionally so the §B.3 EXIT criteria
+        // (TolFun, EqualFunValues) can read it regardless of restart_strategy.
+        // The penalized fitness is the search's progress signal (the
+        // unpenalized value is what we expose to callers as s.objective_value;
+        // see static-audit G12). median_fitness_history is only consumed by
+        // the IPOP-mode Stagnation detector but is cheap to maintain and
+        // simplifies the gating below.
+        s.best_fitness_history.push_back(fitnesses[best_offspring]);
+        {
+            // Compute median fitness of this generation. Reuses the
+            // state-owned buffer (static-audit G10); nth_element mutates it
+            // in place, but the values are read-only after the median
+            // extraction so the next-generation overwrite is fine.
+            auto& gen_fitnesses = s.gen_fitnesses_buf;
+            for(int i = 0; i < lambda; ++i)
+                gen_fitnesses[static_cast<std::size_t>(i)] = fitnesses[i];
+            auto mid = gen_fitnesses.begin() + lambda / 2;
+            std::nth_element(gen_fitnesses.begin(),
+                             mid,
+                             gen_fitnesses.begin() + lambda);
+            s.median_fitness_history.push_back(*mid);
+        }
+        if(s.best_fitness_history.size() > 20000)
+        {
+            s.best_fitness_history.erase(s.best_fitness_history.begin());
+            s.median_fitness_history.erase(s.median_fitness_history.begin());
+        }
+
+        // EXIT-only §B.3 criteria. These run regardless of restart_strategy
+        // and return immediately on fire, mapping the §B.3 paper criterion
+        // to the appropriate solver_status. The `policy_status` flow is
+        // single-shot: once one of these fires we set it and return; the
+        // IPOP-restart block below cannot subsequently restart on the same
+        // step. The IPOP path stays gated on Stagnation (and the existing
+        // sigma_collapse / condition-number probes set above) -- not on
+        // these new exit criteria, per the EXIT-only contract.
+
+        // Hansen 2023 §B.3 item 6 (TolFun): "stop if the range of the best
+        // objective function values of the last 10 + ceil(30n/lambda)
+        // generations and all function values of the recent generation is
+        // below TolFun. Choosing TolFun depends on the problem, while
+        // 10^-12 is a conservative first guess." User-tunable via
+        // cmaes_options::objective_value_tolerance.
+        // Status mapping: ftol_reached.
+        if(!policy_status.has_value())
+        {
+            const double tol_fun = options.cmaes.objective_value_tolerance.value_or(1e-12);
+            const auto tol_fun_window = static_cast<std::size_t>(
+                10 + std::ceil(30.0 * static_cast<double>(n)
+                               / static_cast<double>(s.params.lambda)));
+            if(s.best_fitness_history.size() >= tol_fun_window)
+            {
+                auto win_begin = s.best_fitness_history.end()
+                                 - static_cast<std::ptrdiff_t>(tol_fun_window);
+                auto [hist_min, hist_max] =
+                    std::minmax_element(win_begin, s.best_fitness_history.end());
+                auto [gen_min, gen_max] =
+                    std::minmax_element(fitnesses.data(), fitnesses.data() + lambda);
+                const double full_min = std::min(*hist_min, *gen_min);
+                const double full_max = std::max(*hist_max, *gen_max);
+                if(full_max - full_min < tol_fun)
+                    policy_status = solver_status::ftol_reached;
+            }
+        }
+
+        // Hansen 2023 §B.3 item 4 (EqualFunValues): "stop if the range of
+        // the best objective function values of the last 10 + ceil(30n/lambda)
+        // generations is zero." The paper text is the literal "is zero" --
+        // not a relaxed 1e-15 epsilon. The relaxed form widens the trigger
+        // into TolHistFun-style behaviour, which is a different §B.3
+        // criterion (TolFun, above). On a true plateau (offspring resampling
+        // the same x bits, or a flat objective) the bit-equal range IS
+        // achievable.
+        // Status mapping: ftol_reached, matching libcmaes's
+        // bench_libcmaes.cpp:122-138 EQUALFUNVALS -> ftol_reached convention.
+        // EqualFunValues exits the solve even under restart_strategy::ipop --
+        // it does NOT trigger a restart -- so the IPOP-restart trigger set
+        // is {Stagnation, sigma_collapse, ConditionCov}, with EqualFunValues
+        // and the other §B.3 EXIT criteria deciding "stop" not "restart".
+        if(!policy_status.has_value())
+        {
+            const auto efv_window = static_cast<std::size_t>(
+                10 + std::ceil(30.0 * static_cast<double>(n)
+                               / static_cast<double>(s.params.lambda)));
+            if(s.best_fitness_history.size() >= efv_window)
+            {
+                auto it = s.best_fitness_history.end()
+                          - static_cast<std::ptrdiff_t>(efv_window);
+                auto [mn, mx] = std::minmax_element(it, s.best_fitness_history.end());
+                if(*mx == *mn)
+                    policy_status = solver_status::ftol_reached;
+            }
+        }
+
+        // Hansen 2023 §B.3 item 7 (TolX): "stop if the standard deviation
+        // of the normal distribution is smaller than TolX in all coordinates
+        // and sigma*p_c is smaller than TolX in all components. By default
+        // we set TolX to 10^-12 times the initial sigma." User-tunable via
+        // cmaes_options::step_size_tolerance (interpreted as a multiplicative
+        // factor against initial_sigma, matching Hansen's "10^-12 times the
+        // initial sigma" formulation).
+        // Status mapping: roundoff_limited (numerical floor reached).
+        if(!policy_status.has_value())
+        {
+            const double tol_x = options.cmaes.step_size_tolerance.value_or(1e-12)
+                                 * s.initial_sigma;
+            bool tol_x_all_coords = true;
+            for(int i = 0; i < n; ++i)
+            {
+                const double std_i = s.sigma * std::sqrt(s.C(i, i));
+                if(std_i >= tol_x)
+                {
+                    tol_x_all_coords = false;
+                    break;
+                }
+            }
+            bool tol_x_all_pc = true;
+            if(tol_x_all_coords)
+            {
+                for(int i = 0; i < n; ++i)
+                {
+                    if(std::abs(s.sigma * s.p_c(i)) >= tol_x)
+                    {
+                        tol_x_all_pc = false;
+                        break;
+                    }
+                }
+            }
+            if(tol_x_all_coords && tol_x_all_pc)
+                policy_status = solver_status::roundoff_limited;
+        }
+
+        // Hansen 2023 §B.3 item 8 (TolXUp): "stop if sigma * max(diag(D))
+        // increased by more than 10^4. This usually indicates a far too
+        // small initial sigma, or divergent behavior."
+        // Status mapping: diverged (matches the paper's "divergent
+        // behavior" attribution).
+        if(!policy_status.has_value())
+        {
+            constexpr double tol_x_up_factor = 1.0e4;
+            const double current_max_d = s.D.maxCoeff();
+            if(s.sigma * current_max_d
+               > tol_x_up_factor * s.initial_sigma * s.initial_d_max)
+                policy_status = solver_status::diverged;
+        }
+
+        // Hansen 2023 §B.3 item 1 (NoEffectAxis), footnote 31: "terminate
+        // if m equals m + 0.1*sigma*d_ii*b_i, where i = (g mod n) + 1, and
+        // d_ii^2 and b_i are respectively the i-th eigenvalue and
+        // eigenvector of C." The (g mod n) cycle ensures every axis is
+        // checked over n consecutive generations. nablapp implements the
+        // cycle via state_type::axis_cycle_index advanced once per step()
+        // call so the index does not depend on s.generation (which resets
+        // on IPOP restart).
+        // Status mapping: roundoff_limited (the mean is bit-stable along
+        // that axis, which is a numerical-floor signal).
+        if(!policy_status.has_value())
+        {
+            const int axis_i = s.axis_cycle_index;
+            s.axis_cycle_index = (s.axis_cycle_index + 1) % n;
+            const double d_ii = s.D(axis_i);
+            const double scale = 0.1 * s.sigma * d_ii;
+            bool no_effect_axis = true;
+            for(int j = 0; j < n; ++j)
+            {
+                const double m_j = s.mean(j);
+                const double m_j_perturbed = m_j + scale * s.B(j, axis_i);
+                if(m_j != m_j_perturbed)
+                {
+                    no_effect_axis = false;
+                    break;
+                }
+            }
+            if(no_effect_axis)
+                policy_status = solver_status::roundoff_limited;
+        }
+
+        // Hansen 2023 §B.3 item 2 (NoEffectCoord): "stop if adding 0.2-
+        // standard deviations in any single coordinate does not change m
+        // (i.e. m_i equals m_i + 0.2*sigma*c_{i,i} for any i)."
+        // Note the §B.3 text uses c_{i,i} for the i-th covariance diagonal;
+        // the paper's typesetting is ambiguous about whether that means the
+        // variance entry C(i,i) or the standard-deviation entry sqrt(C(i,i)).
+        // libcmaes uses sqrt(C(i,i)) (cmaes/src/cmastopcriteria.cc), and
+        // this matches the §B.3 footnote phrasing "0.2-standard deviations";
+        // we follow libcmaes here.
+        // Status mapping: roundoff_limited.
+        if(!policy_status.has_value())
+        {
+            for(int i = 0; i < n; ++i)
+            {
+                const double m_i = s.mean(i);
+                const double m_i_perturbed = m_i + 0.2 * s.sigma * std::sqrt(s.C(i, i));
+                if(m_i == m_i_perturbed)
+                {
+                    policy_status = solver_status::roundoff_limited;
+                    break;
+                }
+            }
+        }
+
+        // 17. IPOP restart machinery. Trigger set is
+        // {Stagnation, ConditionCov, sigma_collapse}. The §B.3 EXIT-only
+        // criteria (TolFun, TolX, TolXUp, NoEffectAxis, NoEffectCoord,
+        // EqualFunValues) above set policy_status and bypass restart --
+        // they exit the solve regardless of restart_strategy. The legacy
+        // sigma_collapse (`policy_status == roundoff_limited` from line
+        // ~420) and ConditionCov (`policy_status == diverged` from line
+        // ~426) probes set above are RECYCLED here in IPOP mode: instead
+        // of exiting we clear them to fire a restart.
+        // Reference: Hansen (2023) arXiv:1604.00772, Section B.3 item 5.
+        // EXIT-criterion-fired test: a §B.3 EXIT criterion fired iff
+        // policy_status is currently set AND the pre-EXIT snapshot was
+        // empty. In that case the IPOP restart machinery must be skipped
+        // entirely: the EXIT contract is "always exit, never recycle".
+        const bool exit_criterion_fired =
+            policy_status.has_value() && !legacy_status_pre_exit;
+
+        if(options.restart == restart_strategy::ipop && !exit_criterion_fired)
+        {
             bool stagnated = false;
 
-            // Collapsed: sigma * max(D) too small
-            if(policy_status == solver_status::roundoff_limited)
+            // Recycle the legacy sigma_collapse / cond_explosion probes
+            // (§B.3 ConditionCov-aligned) as IPOP triggers. Gated by
+            // legacy_status_pre_exit so that a §B.3 EXIT criterion
+            // setting roundoff_limited / diverged is NOT mistaken for
+            // a legacy probe signal -- the EXIT contract is preserved
+            // by the outer `!exit_criterion_fired` guard, and this
+            // inner check then narrows to just the legacy probes.
+            if(legacy_status_pre_exit
+               && (policy_status == solver_status::roundoff_limited
+                   || policy_status == solver_status::diverged))
                 stagnated = true;
 
             // Hansen B.3 item 5: Stagnation criterion with median history window.
@@ -454,7 +684,7 @@ struct cmaes_policy
             auto window = std::max(
                 static_cast<std::size_t>(s.stagnation_window_min),
                 static_cast<std::size_t>(std::ceil(0.2 * static_cast<double>(s.generation))));
-            if(!stagnated && s.best_fitness_history.size() >= window)
+            if(s.best_fitness_history.size() >= window)
             {
                 auto check_stagnation = [](const std::vector<double>& history,
                                            std::size_t win) {
@@ -481,26 +711,6 @@ struct cmaes_policy
                    && check_stagnation(s.median_fitness_history, window))
                     stagnated = true;
             }
-
-            // Hansen B.3 item 4: EqualFunValues.
-            // Stop if range of best values over last K generations is zero.
-            if(!stagnated)
-            {
-                auto efv_window = static_cast<std::size_t>(
-                    10 + std::ceil(30.0 * n / s.params.lambda));
-                if(s.best_fitness_history.size() >= efv_window)
-                {
-                    auto it = s.best_fitness_history.end()
-                              - static_cast<std::ptrdiff_t>(efv_window);
-                    auto [mn, mx] = std::minmax_element(it, s.best_fitness_history.end());
-                    if(*mx - *mn < 1e-15 * (std::abs(*mx) + std::abs(*mn) + 1e-30))
-                        stagnated = true;
-                }
-            }
-
-            // Condition number too large
-            if(policy_status == solver_status::diverged)
-                stagnated = true;
 
             if(stagnated)
             {
