@@ -18,6 +18,7 @@
 #include "nablapp/solver/restarting_policy.h"
 #include "nablapp/solver/cmaes_policy.h"
 #include "nablapp/solver/basic_solver.h"
+#include "nablapp/detail/cmaes_constants.h"
 #include "nablapp/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -185,4 +186,92 @@ TEST_CASE("restarting_policy seed plumbing through restarts", "[restarting_polic
         std::bit_cast<std::uint64_t>(result_42.objective_value)
         != std::bit_cast<std::uint64_t>(result_43.objective_value);
     REQUIRE(different);
+}
+
+// When restarting_policy::reinit bumps the inner's options.lambda and
+// calls reset_clear, cmaes_policy::reset MUST recompute s.inner.params
+// via detail::compute_constants(n, new_lambda). Without the recompute,
+// s.inner.params holds init-time values (mu, mueff, c_sigma, d_sigma,
+// c_c, c_1, c_mu, weights, chi_n) that no longer match the bumped
+// lambda; the inner policy then adapts incorrectly on the new
+// generation.
+//
+// inner_policy_ is private (no public accessor), so we drive the
+// lambda bump through the decorator's natural restart trigger: a tiny
+// stagnation_limit forces reinit() to fire after the budget runs out;
+// reinit() bumps inner.options.lambda to initial_lambda * 2 and calls
+// reset_clear, which (post-fix) recomputes s.inner.params via
+// detail::compute_constants. We then compare s.inner.params against a
+// freshly-computed reference cmaes_params at the post-restart lambda.
+//
+// References:
+//   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
+//   libcmaes ipopcmastrategy.cc::reset_search_state.
+TEST_CASE("restarting_policy: lambda bump propagates to inner params after reset",
+          "[restarting_policy][cmaes]")
+{
+    bounded_ackley problem{
+        .n  = 2,
+        .lb = Eigen::VectorXd::Constant(2, -5.0),
+        .ub = Eigen::VectorXd::Constant(2,  5.0),
+    };
+    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, 0.0);
+    solver_options opts;
+    opts.max_iterations = 1;
+
+    // Drive the lambda bump through the decorator's inner_policy()
+    // accessor, mirroring the surface that reinit() uses internally
+    // (inner_policy_.options.lambda = new_pop; inner_policy_.reset_clear(...)).
+    // The accessor is the test-side equivalent of the private
+    // mutation reinit() performs -- both paths converge on
+    // cmaes_policy::reset, where the F-R-01 fix lives.
+    restarting_policy<cmaes_policy<>> rp;
+    rp.options.inner.seed = 42u;
+    rp.options.inner.lambda = 6u;
+    auto state = rp.init(problem, x0, opts);
+    const auto params_before = state.inner.params;
+    REQUIRE(params_before.lambda == 6);
+    REQUIRE(static_cast<std::uint32_t>(params_before.lambda)
+            == state.initial_lambda);
+
+    // Simulate one IPOP-decorator restart: bump inner.options.lambda
+    // and call reset_clear. The F-R-01 fix in cmaes_policy::reset
+    // recomputes s.inner.params via detail::compute_constants on the
+    // bumped lambda.
+    const std::uint32_t new_lambda = state.initial_lambda * 2u;
+    rp.inner_policy().options.lambda = new_lambda;
+    rp.reset_clear(state, x0);
+
+    const auto& params_after = state.inner.params;
+    REQUIRE(params_after.lambda == static_cast<int>(new_lambda));
+    REQUIRE(params_after.mu == params_after.lambda / 2);
+    REQUIRE(params_after.weights.size() == params_after.lambda);
+
+    // Cross-check against a freshly-computed reference: the
+    // post-restart inner.params must match what compute_constants
+    // would produce at the post-restart lambda. This is the strongest
+    // form of the F-R-01 contract -- not just "lambda updated" but
+    // "every dependent strategy parameter (mu, mueff, c_sigma,
+    // d_sigma, c_c, c_1, c_mu, weights, chi_n) refreshed".
+    const auto reference = nablapp::detail::compute_constants<double>(
+        static_cast<int>(state.dimension),
+        static_cast<int>(new_lambda));
+    REQUIRE(params_after.lambda == reference.lambda);
+    REQUIRE(params_after.mu == reference.mu);
+    REQUIRE(params_after.mu_eff == reference.mu_eff);
+    REQUIRE(params_after.c_sigma == reference.c_sigma);
+    REQUIRE(params_after.d_sigma == reference.d_sigma);
+    REQUIRE(params_after.c_c == reference.c_c);
+    REQUIRE(params_after.c_1 == reference.c_1);
+    REQUIRE(params_after.c_mu == reference.c_mu);
+    REQUIRE(params_after.chi_n == reference.chi_n);
+    REQUIRE(params_after.weights.size() == reference.weights.size());
+    for(int i = 0; i < params_after.weights.size(); ++i)
+        REQUIRE(params_after.weights[i] == reference.weights[i]);
+
+    // Pre/post sanity: at least one strategy parameter must differ
+    // between the init-time and post-bump snapshots; otherwise we
+    // have not exercised the contract.
+    REQUIRE(params_before.mu_eff != params_after.mu_eff);
+    REQUIRE(params_before.c_1 != params_after.c_1);
 }

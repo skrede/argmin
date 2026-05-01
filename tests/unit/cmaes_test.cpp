@@ -1262,3 +1262,47 @@ TEST_CASE("alternative::cmaes::no_repair_adaptive_penalty_policy: caller-facing 
         CHECK(state.x[i] <= prob.ub[i] + 1e-12);
     }
 }
+
+// Lock the cmaes_policy::reset contract -- a caller that bumps
+// options.lambda and calls reset() must see refreshed strategy
+// parameters (mu, mueff, c_sigma, d_sigma, c_c, c_1, c_mu, weights,
+// chi_n). Mirrors the in-policy IPOP branch's recompute and the
+// libcmaes ipopcmastrategy.cc::reset_search_state contract.
+//
+// References:
+//   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
+//   libcmaes ipopcmastrategy.cc::reset_search_state.
+TEST_CASE("cmaes_policy: reset refreshes params on lambda bump", "[cmaes]")
+{
+    bounded_rosenbrock prob{
+        .n  = 2,
+        .lb = Eigen::VectorXd::Constant(2, -2.0),
+        .ub = Eigen::VectorXd::Constant(2,  2.0),
+    };
+    Eigen::VectorXd x0{{-1.0, 1.0}};
+    solver_options opts;
+    opts.max_iterations = 1;
+
+    cmaes_policy<> policy;
+    policy.options.lambda = 6u;
+    policy.options.seed = 42u;
+
+    auto state = policy.init(prob, x0, opts);
+    const auto params_before = state.params;
+    REQUIRE(params_before.lambda == 6);
+    REQUIRE(params_before.mu == 3);
+
+    // Caller bumps lambda then calls reset(): same surface as the
+    // restarting_policy decorator's reinit path (which calls reset_clear
+    // -> reset internally).
+    policy.options.lambda = 12u;
+    policy.reset(state, x0);
+
+    const auto& params_after = state.params;
+    REQUIRE(params_after.lambda == 12);
+    REQUIRE(params_after.mu == 6);
+    REQUIRE(params_after.weights.size() == 12);
+    CHECK(params_after.mu_eff != Approx(params_before.mu_eff));
+    CHECK(params_after.c_1 != Approx(params_before.c_1));
+    CHECK(params_after.c_mu != Approx(params_before.c_mu));
+}
