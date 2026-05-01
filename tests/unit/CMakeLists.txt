@@ -15,6 +15,7 @@ add_executable(nablapp_unit_tests
     bobyqa_test.cpp
     lbfgsb_test.cpp
     cmaes_test.cpp
+    restarting_policy_test.cpp
     tolerance_test.cpp
     scheduling_test.cpp
     convergence_test.cpp

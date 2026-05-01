@@ -96,6 +96,29 @@ struct restarting_policy
     {
         inner_policy_.options = options.inner;
 
+        // Reproducibility: when no inner seed has been specified, plumb a
+        // deterministic default into the inner policy's local options copy.
+        // Without this, population-based inner policies (cmaes, isres, ...)
+        // fall through to a std::random_device fallback at init() time,
+        // which gives every rebuild a different RNG seed and breaks
+        // bit-identity of the final objective across rebuilds at the same
+        // SHA / same caller-visible configuration. The default-constructed
+        // decorator is the relevant case: bench harnesses and concept
+        // probes instantiate `restarting_policy<cmaes_policy<>>{}` without
+        // supplying a seed, and a stochastic inner default propagates into
+        // user-visible numeric output. Callers that want stochastic
+        // seeding set `options.inner.seed` explicitly before constructing
+        // the decorator (e.g. per-seed publish_bench sweeps); that path is
+        // unaffected because we only fill the field when it is empty.
+        //
+        // Reference: Hansen (2023), "The CMA Evolution Strategy: A
+        //            Tutorial", arXiv:1604.00772 §B.5 (reproducibility).
+        if constexpr(requires { inner_policy_.options.seed; })
+        {
+            if(!inner_policy_.options.seed.has_value())
+                inner_policy_.options.seed = std::uint64_t{1};
+        }
+
         state_type<Problem> s;
         s.problem = &problem;
         s.x0_saved = x0;
