@@ -93,21 +93,16 @@ cmaes_params<Scalar, Lambda> compute_constants(int n, int lambda_override = 0)
     for(int i = 0; i < p.mu; ++i)
         p.weights[i] /= sum_pos;
 
-    // Normalize negative weights: sum of |w_i| for i >= mu equals
-    // (1 + c_1/c_mu) if feasible, else normalize to sum to -1.
-    // Hansen tutorial, Section 3.
-    Scalar sum_neg = Scalar(0);
+    // Vanilla CMA-ES: zero the tail (i >= mu). Active-CMA negative-weight
+    // rescaling is out of scope for this milestone; a future variant may
+    // surface it as a guarded option under solver/alternative/cmaes/.
+    //
+    // References:
+    //   Hansen (2023) arXiv:1604.00772 §B.1 eq (49)-(50).
+    //   libcmaes covarianceupdate.cc:69-75 (positive-weights only).
+    //   K&W (2025) §8.7.
     for(int i = p.mu; i < p.lambda; ++i)
-        sum_neg += std::abs(p.weights[i]);
-
-    if(sum_neg > Scalar(0))
-    {
-        Scalar target = Scalar(1) + p.c_1 / std::max(p.c_mu, Scalar(1e-20));
-        // Clamp target to reasonable range
-        Scalar scale = std::min(target, Scalar(1) + Scalar(2) * p.mu_eff / (p.mu_eff + Scalar(2)));
-        for(int i = p.mu; i < p.lambda; ++i)
-            p.weights[i] = p.weights[i] / sum_neg * (-scale);
-    }
+        p.weights[i] = Scalar(0);
 
     return p;
 }

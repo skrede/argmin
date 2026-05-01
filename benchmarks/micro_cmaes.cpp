@@ -13,6 +13,16 @@
 // compare nablapp_cmaes against same-class same-algorithm. Reference:
 // Hansen (2023) arXiv:1604.00772; Auger & Hansen (2005) IPOP-CMA-ES.
 //
+// Vanilla-weights default (Plan 02 of phase 34.2): the rank-mu
+// accumulator now runs i = 0..mu-1 (positive weights only) per Hansen
+// 2023 §B.1 eq (49)-(50) and libcmaes covarianceupdate.cc:67-75. Every
+// per-step number on every cell below changed shape under this fix --
+// the diagonal-decay coefficient drops from c_mu * sum_abs_w to literal
+// c_mu, the per-step inv_sqrt_delta allocation in the negative-weight
+// branch is gone, and the rank-mu loop iterates mu = lambda/2 entries
+// instead of lambda. Per the project's 10000-rep micro_cmaes bench-noise
+// floor convention this resolves <5% per-step changes.
+//
 // Run under perf for flamegraph analysis:
 //   perf record -F 99999 -g -- ./micro_cmaes
 //   perf report --stdio --percent-limit=1.0

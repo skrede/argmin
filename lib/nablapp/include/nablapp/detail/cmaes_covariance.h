@@ -49,17 +49,23 @@ void eigendecompose(const Eigen::Matrix<Scalar, N, N>& C,
     D = es.eigenvalues().cwiseMax(Scalar(1e-20)).cwiseSqrt();
 }
 
-// Rank-one + rank-mu covariance update.
+// Rank-one + rank-mu covariance update (vanilla CMA-ES; positive weights only).
 //
-// C_new = (1 + c_1*(1-h_sigma)*c_c*(2-c_c) - c_1 - c_mu*sum(|w_i|)) * C
+// C_new = (1 + c_1*(1-h_sigma)*c_c*(2-c_c) - c_1 - c_mu) * C
 //       + c_1 * p_c * p_c^T
-//       + c_mu * sum(w'_i * delta_i * delta_i^T)
+//       + c_mu * sum_{i=0..mu-1}(w_i * delta_i * delta_i^T)
 //
-// For negative weights (i >= mu), scale by n / ||C^{-1/2} * delta_i||^2.
 // Enforces symmetry via (C + C^T) / 2 after update.
 //
+// The B and D parameters are kept in the signature for ABI stability with
+// callers that still pass them (cmaes_policy.h:396-399). With vanilla
+// positive-only weights they are unreferenced; active-CMA negative-weight
+// rescaling using B*D^{-1}*B^T is out of scope for this milestone (see
+// cmaes_constants.h tail-zero block).
+//
 // deltas: n x lambda matrix where column i = (x_{i:lambda} - mean_old) / sigma.
-// Reference: K&W Eq. 8.28-8.31.
+// Reference: K&W Eq. 8.28-8.31; Hansen (2023) arXiv:1604.00772 §B.2 eq (47);
+//            libcmaes covarianceupdate.cc:67-78.
 template <typename Scalar = double, int N = nablapp::dynamic_dimension,
           int Lambda = nablapp::dynamic_dimension, typename DeltaMatrix = Eigen::Matrix<Scalar, N, Lambda>>
 void update_covariance(Eigen::Matrix<Scalar, N, N>& C,
@@ -70,43 +76,32 @@ void update_covariance(Eigen::Matrix<Scalar, N, N>& C,
                        Scalar c_c,
                        const Eigen::Vector<Scalar, Lambda>& weights,
                        const DeltaMatrix& deltas,
-                       const Eigen::Matrix<Scalar, N, N>& B,
-                       const Eigen::Vector<Scalar, N>& D,
+                       [[maybe_unused]] const Eigen::Matrix<Scalar, N, N>& B,
+                       [[maybe_unused]] const Eigen::Vector<Scalar, N>& D,
                        int mu,
                        bool& covariance_dirty)
 {
     const int n = C.rows();
-    const int lambda = weights.size();
 
-    // Sum of absolute weights for the diagonal decay factor
-    Scalar sum_abs_w = Scalar(0);
-    for(int i = 0; i < lambda; ++i)
-        sum_abs_w += std::abs(weights[i]);
-
-    // Diagonal decay factor
+    // Diagonal decay factor (vanilla CMA-ES; positive-weight sum = 1.0).
+    //
+    // References:
+    //   Hansen (2023) arXiv:1604.00772 §B.2 eq (47).
+    //   libcmaes covarianceupdate.cc:78.
     Scalar alpha = Scalar(1) + c_1 * (Scalar(1) - h_sigma) * c_c * (Scalar(2) - c_c)
-                 - c_1 - c_mu * sum_abs_w;
+                 - c_1 - c_mu;
     alpha = std::max(alpha, Scalar(0));
 
-    // Rank-mu contribution
+    // Rank-mu contribution (vanilla CMA-ES; positive weights only).
+    //
+    // References:
+    //   Hansen (2023) arXiv:1604.00772 §B.2 eq (47).
+    //   libcmaes covarianceupdate.cc:67-75.
     Eigen::Matrix<Scalar, N, N> rank_mu = Eigen::Matrix<Scalar, N, N>::Zero(n, n);
-    for(int i = 0; i < lambda; ++i)
+    for(int i = 0; i < mu; ++i)
     {
-        Scalar w_i = weights[i];
+        const Scalar w_i = weights[i];
         const auto di = deltas.col(i);
-
-        if(i >= mu && w_i < Scalar(0))
-        {
-            // Negative weight scaling: n / ||C^{-1/2} * delta_i||^2
-            // C^{-1/2} * v = B * D^{-1} * B^T * v
-            // K&W Eq. 8.31
-            Eigen::Vector<Scalar, N> inv_sqrt_delta =
-                (B * D.cwiseInverse().asDiagonal() * (B.transpose() * di)).eval();
-            Scalar denom = inv_sqrt_delta.squaredNorm();
-            if(denom > Scalar(1e-30))
-                w_i *= static_cast<Scalar>(n) / denom;
-        }
-
         rank_mu.noalias() += w_i * di * di.transpose();
     }
 
