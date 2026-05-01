@@ -903,6 +903,19 @@ struct repair_l2_penalty_policy
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
+        // Refresh strategy parameters for the current options.lambda value
+        // so any caller that updates options.lambda and then calls reset()
+        // gets a refreshed adaptation parameter set (mu, mueff, c_sigma,
+        // d_sigma, c_c, c_1, c_mu, weights, chi_n). Mirrors the in-policy
+        // IPOP branch's recompute (in step()) and the libcmaes contract
+        // (cmaparameters.cc::initialize_parameters re-invoked from
+        // ipopcmastrategy.cc on each lambda bump).
+        //
+        // References:
+        //   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
+        //   libcmaes ipopcmastrategy.cc::reset_search_state.
+        s.params = detail::compute_constants(n,
+            static_cast<int>(options.lambda.value_or(0)));
         s.mean = x0;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
