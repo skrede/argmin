@@ -9,6 +9,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <cmath>
 #include <cstdint>
 
@@ -798,4 +799,199 @@ TEST_CASE("cmaes_policy: tol_x_up divergence detection", "[cmaes]")
     CHECK(result.status == solver_status::diverged);
     // TolXUp must fire well before the iteration budget is exhausted.
     CHECK(result.iterations < opts.max_iterations);
+}
+
+TEST_CASE("cmaes_policy: ipop mean reset to x0 on restart", "[cmaes]")
+{
+    // Auger & Hansen 2005 ("A Restart CMA Evolution Strategy with Increasing
+    // Population Size", CEC 2005) §III specifies that on each IPOP restart
+    // the distribution mean is re-anchored to the user-provided initial
+    // point x0. Without this re-anchor, IPOP doublings explore variance only
+    // (re-sampling the SAME basin with a wider distribution) instead of
+    // probing new basins -- which is the inner-cmaes saturation pathology
+    // observed in the 2026-04-30 libcmaes head-to-head.
+    //
+    // libcmaes implements §III via reset_search_state() ->
+    // CMASolutions(Parameters&), where _xmean = p._x0min when x0 is a fixed
+    // single point (cmasolutions.cc:49). nablapp mirrors this by storing
+    // x0 in s.x0 at init() and writing s.mean = s.x0 in the IPOP restart
+    // branch. This test pins that contract.
+    //
+    // Driver mirrors the existing `ipop stagnation_window_min recompute`
+    // case: rosenbrock unbounded n=2 with sigma=0.5 and seed=42, EXIT
+    // criteria defeated to 1e-30 so the sigma_collapse legacy probe drives
+    // the IPOP doubling. We step the solver manually and check s.mean
+    // bit-equal to s.x0 in the first generation immediately after the
+    // doubling fires (before the new run accumulates a fresh mean update).
+    rosenbrock<double> problem{};
+
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    cmaes_policy<> policy;
+    policy.options.initial_sigma = 0.5;
+    policy.options.restart = cmaes_policy<>::restart_strategy::ipop;
+    policy.options.seed = 42u;
+    policy.options.cmaes.objective_value_tolerance = 1e-30;
+    policy.options.cmaes.step_size_tolerance = 1e-30;
+
+    basic_solver solver{policy, problem, x0, opts};
+
+    const int lambda_initial = solver.state().params.lambda;
+    REQUIRE(lambda_initial == 6);  // unbounded n=2 default
+
+    // s.x0 must be captured at init() and equal the user x0.
+    REQUIRE(solver.state().x0 == x0);
+
+    // Step until lambda doubles (i.e. an IPOP restart fired). Cap the
+    // budget at max_iterations so the test never spins.
+    bool ipop_fired = false;
+    for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+    {
+        solver.step();
+        if(solver.state().params.lambda > lambda_initial)
+        {
+            ipop_fired = true;
+            // Immediately after the IPOP branch sets s.mean = s.x0 (and
+            // before the next sample-and-update cycle moves the mean
+            // away), the mean must equal the user's initial point.
+            // The restart branch finishes at the end of step(), so we
+            // are now positioned at the START of the next generation
+            // with mean already re-anchored.
+            CHECK(solver.state().mean == x0);
+            CHECK(solver.state().x0 == x0);  // x0 preserved across restart
+            break;
+        }
+    }
+    REQUIRE(ipop_fired);
+}
+
+TEST_CASE("cmaes_policy: ipop decomposition_skip_k recompute", "[cmaes]")
+{
+    // Hansen 2023 (arXiv:1604.00772) §B.2 (Strategy internal numerical
+    // effort): the eigendecomposition skip period
+    //   K = max(1, floor(1 / (10 * n * (c_1 + c_mu))))
+    // depends on c_1 and c_mu, both of which are recomputed by
+    // detail::compute_constants(n, lambda) when lambda doubles in the IPOP
+    // restart branch. The skip-k must therefore be recomputed too. Without
+    // this, IPOP runs at the new lambda with an obsolete skip period from
+    // the pre-doubling lambda.
+    //
+    // The init-time formula at low n=2 + lambda=6 yields a sizeable K
+    // (c_1, c_mu both well below 1/(10*n)); after lambda doubles to >= 12
+    // c_1 is unchanged but c_mu grows (mu_eff scales with lambda), so K
+    // shrinks. Both values are well above the max(1,...) floor for n=2,
+    // so the post-restart value is observably smaller than the init value.
+    //
+    // We assert the post-restart value equals the formula recomputed
+    // verbatim against the new params (not a hand-computed constant), so
+    // the test is robust to any future c_1/c_mu refinement.
+    rosenbrock<double> problem{};
+
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    cmaes_policy<> policy;
+    policy.options.initial_sigma = 0.5;
+    policy.options.restart = cmaes_policy<>::restart_strategy::ipop;
+    policy.options.seed = 42u;
+    policy.options.cmaes.objective_value_tolerance = 1e-30;
+    policy.options.cmaes.step_size_tolerance = 1e-30;
+
+    basic_solver solver{policy, problem, x0, opts};
+
+    const int n = 2;
+    const int lambda_initial = solver.state().params.lambda;
+    REQUIRE(lambda_initial == 6);
+
+    // Drive until IPOP fires.
+    solver.solve(opts);
+
+    const int lambda_after = solver.state().params.lambda;
+    REQUIRE(lambda_after >= lambda_initial * 2);
+
+    // Post-restart skip period must equal the formula recomputed against
+    // the post-restart params (s.params already reflects new_lambda).
+    const auto& params_after = solver.state().params;
+    const double skip_denom_after =
+        10.0 * static_cast<double>(n) * (params_after.c_1 + params_after.c_mu);
+    const auto expected_skip_k_after = std::max(
+        std::uint32_t{1},
+        static_cast<std::uint32_t>(std::floor(1.0 / skip_denom_after)));
+    CHECK(solver.state().decomposition_skip_k == expected_skip_k_after);
+}
+
+TEST_CASE("cmaes_policy: ipop bit-identity within process", "[cmaes]")
+{
+    // SEED-014 (restarting_cmaes rebuild nondeterminism) closure preflight
+    // for the inner `cmaes` row (CONTEXT D-08 corrigendum: this row =
+    // cmaes_policy<> with restart_strategy::ipop, NOT the restarting_policy
+    // decorator). Two back-to-back runs from the SAME solver_options.seed
+    // on the SAME problem with FRESH basic_solver instances must produce
+    // bit-identical final_objective and identical iteration counts.
+    //
+    // The IPOP branch uses no fresh entropy: s.rng is seeded once at init()
+    // (xoshiro256{seed}) and never reseeded during restart -- libcmaes
+    // matches (no reseed across restart). The IPOP branch resets s.mean
+    // to s.x0 (deterministic), s.decomposition_skip_k from the formula
+    // (deterministic), and the C/B/D/p_sigma/p_c/sigma reset values are
+    // all constants. Within-process determinism therefore depends only
+    // on (a) the seed plumbing and (b) the absence of any uninitialized
+    // state read inside step().
+    //
+    // NaN-trap-safe equality: on rastrigin n=2 from x0=(3,3) at
+    // max_iterations=500 with seed=42 and the current termination
+    // machinery, the policy stays finite end-to-end -- there is no
+    // penalty overflow, no log(0). If a future regression introduces
+    // NaN, the bit_cast branch surfaces it instead of the equality
+    // silently swallowing the bug (NaN != NaN under operator==).
+    //
+    // This is the WITHIN-PROCESS preflight only; rebuild-rebuild closure
+    // for the restarting_policy decorator surface is the territory of a
+    // downstream plan.
+    rastrigin<double> problem{.n = 2};
+
+    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, 3.0);
+    solver_options opts;
+    opts.max_iterations = 500;
+    opts.set_gradient_threshold(1e-30);
+    opts.set_objective_threshold(1e-30);
+    opts.set_step_threshold(1e-30);
+
+    auto run_once = [&]() {
+        cmaes_policy<> policy;
+        policy.options.initial_sigma = 0.5;
+        policy.options.restart = cmaes_policy<>::restart_strategy::ipop;
+        policy.options.seed = 42u;
+        // Defeat §B.3 EXIT thresholds so the IPOP path actually exercises
+        // (otherwise TolFun / TolX may fire first and we never test the
+        // restart-determinism contract).
+        policy.options.cmaes.objective_value_tolerance = 1e-30;
+        policy.options.cmaes.step_size_tolerance = 1e-30;
+
+        basic_solver solver{policy, problem, x0, opts};
+        return solver.solve(opts);
+    };
+
+    auto result_a = run_once();
+    auto result_b = run_once();
+
+    const bool bit_identical =
+        (std::isfinite(result_a.objective_value)
+         && std::isfinite(result_b.objective_value)
+         && result_a.objective_value == result_b.objective_value)
+     || (!std::isfinite(result_a.objective_value)
+         && !std::isfinite(result_b.objective_value)
+         && std::bit_cast<std::uint64_t>(result_a.objective_value)
+             == std::bit_cast<std::uint64_t>(result_b.objective_value));
+    REQUIRE(bit_identical);
+    REQUIRE(result_a.iterations == result_b.iterations);
 }

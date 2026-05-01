@@ -74,6 +74,17 @@ struct cmaes_policy
         double objective_value{};
 
         Eigen::Vector<double, N> mean;
+
+        // Auger & Hansen 2005 ("A Restart CMA Evolution Strategy with
+        // Increasing Population Size", CEC 2005) §III: on each IPOP restart
+        // the distribution mean is re-anchored to the user-provided initial
+        // point x0. We capture x0 at init() and preserve it across restarts
+        // so the IPOP branch can write `s.mean = s.x0` (libcmaes parity:
+        // see cmasolutions.cc:49 _xmean = p._x0min within
+        // CMASolutions(Parameters&), invoked from
+        // ipopcmastrategy.cc:reset_search_state per restart).
+        Eigen::Vector<double, N> x0;
+
         Eigen::Matrix<double, N, N> C;
         Eigen::Matrix<double, N, N> B;
         Eigen::Vector<double, N> D;
@@ -155,6 +166,9 @@ struct cmaes_policy
         s.problem = &problem;
 
         s.mean = x0;
+        // Captured for the IPOP restart re-anchor per Auger & Hansen 2005
+        // §III: each restart sets s.mean back to the user's initial point.
+        s.x0 = x0;
 
         if constexpr(bound_constrained<Problem>)
         {
@@ -757,6 +771,42 @@ struct cmaes_policy
                     + static_cast<std::uint32_t>(
                         std::ceil(30.0 * static_cast<double>(n)
                                   / static_cast<double>(s.params.lambda)));
+
+                // Auger & Hansen 2005, "A Restart CMA Evolution Strategy
+                // with Increasing Population Size", CEC 2005 §III: each
+                // IPOP restart re-anchors the distribution mean to the
+                // user-provided initial point x0. Without this re-anchor
+                // the lambda-doubling staircase only widens the sampling
+                // distribution around the prior run's terminal mean and
+                // re-explores the SAME basin. libcmaes-aligned per
+                // ipopcmastrategy.cc reset_search_state ->
+                // CMASolutions(Parameters&) at cmasolutions.cc:49
+                // (_xmean = p._x0min for the fixed-x0 case).
+                s.mean = s.x0;
+
+                // Hansen 2023 (arXiv:1604.00772) §B.2 (Strategy internal
+                // numerical effort): K = max(1, floor(1 / (10 * n *
+                // (c_1 + c_mu)))). Both c_1 and c_mu were just refreshed
+                // by detail::compute_constants(n, new_lambda) above, so
+                // the eigendecomposition skip period must be recomputed
+                // against the new params. Honors any user override on
+                // options.eigendecomposition_skip_generations exactly
+                // like init() does.
+                if(options.eigendecomposition_skip_generations.has_value())
+                {
+                    s.decomposition_skip_k =
+                        options.eigendecomposition_skip_generations.value();
+                }
+                else
+                {
+                    const double skip_denom =
+                        10.0 * static_cast<double>(n)
+                        * (s.params.c_1 + s.params.c_mu);
+                    s.decomposition_skip_k = std::max(
+                        std::uint32_t{1},
+                        static_cast<std::uint32_t>(
+                            std::floor(1.0 / skip_denom)));
+                }
 
                 s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
                 s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
