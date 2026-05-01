@@ -161,7 +161,7 @@ if(NLopt_FOUND)
     endif()
 
     add_executable(micro_cmaes micro_cmaes.cpp)
-    target_link_libraries(micro_cmaes PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_cmaes PRIVATE nablapp::nablapp)
     target_compile_options(micro_cmaes PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native
@@ -467,6 +467,14 @@ if(NABLAPP_BENCH_LIBCMAES)
         target_sources(publish_bench PRIVATE bench_libcmaes.cpp)
         target_link_libraries(publish_bench PRIVATE libcmaes::cmaes)
         target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_LIBCMAES)
+
+        # micro_cmaes uses libcmaes CMAES_DEFAULT as its same-class
+        # comparator; keep ABI alignment via the same -march=native
+        # already wired on cmaes above.
+        if(TARGET micro_cmaes)
+            target_link_libraries(micro_cmaes PRIVATE libcmaes::cmaes)
+            target_compile_definitions(micro_cmaes PRIVATE NABLAPP_HAS_LIBCMAES)
+        endif()
     else()
         message(STATUS "libcmaes requires NABLAPP_CMAKE_FETCH_DEPS=ON; skipping libcmaes benchmarks")
     endif()

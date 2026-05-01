@@ -1,9 +1,18 @@
-// Micro-benchmark: nablapp CMA-ES vs NLopt CRS2_LM on global problems.
+// Micro-benchmark: nablapp CMA-ES vs libcmaes CMAES_DEFAULT on global problems.
 //
-// Three-way comparison: nablapp<N> (fixed-N), nablapp<> (dynamic), NLopt CRS2_LM.
-// IPOP restarts enabled for nablapp variants -- essential for multimodal
-// landscape coverage. NLopt CRS2_LM is the closest comparable global
-// optimizer (NLopt has no CMA-ES implementation).
+// Three-way comparison: nablapp<N> (fixed-N), nablapp<> (dynamic), libcmaes
+// CMAES_DEFAULT. IPOP restarts enabled for nablapp variants -- essential for
+// multimodal landscape coverage.
+//
+// Comparator switched from NLopt's controlled-random-search global
+// solver to libcmaes CMAES_DEFAULT. CRS is a different algorithm class
+// and not a same-class baseline for CMA-ES quality measurement; the
+// libcmaes head-to-head is the canonical comparator (see benchmarks/
+// bench_libcmaes.{h,cpp}, commit 0c30662). Aligning the micro-bench
+// with the publish_bench adapter wiring means per-step z-score numbers
+// compare nablapp_cmaes against same-class same-algorithm. Reference:
+// Hansen (2023) arXiv:1604.00772; Auger & Hansen (2005) IPOP-CMA-ES.
+//
 // Run under perf for flamegraph analysis:
 //   perf record -F 99999 -g -- ./micro_cmaes
 //   perf report --stdio --percent-limit=1.0
@@ -18,12 +27,17 @@
 
 #include <Eigen/Core>
 
-#include <nlopt.hpp>
+#include <libcmaes/cmaes.h>
+#include <libcmaes/cmaparameters.h>
+#include <libcmaes/cmasolutions.h>
+#include <libcmaes/genopheno.h>
+#include <libcmaes/pwq_bound_strategy.h>
 
 #include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <print>
+#include <vector>
 
 namespace
 {
@@ -50,24 +64,24 @@ struct smooth_quadratic_2d
     }
 };
 
-// NLopt callback for Rastrigin.
-double nlopt_rastrigin(unsigned n, const double* x, double*, void*)
+// Plain-array Rastrigin objective for the libcmaes FitFunc.
+double rastrigin_libcmaes(const double* x, const int& n)
 {
     constexpr double two_pi = 2.0 * 3.14159265358979323846;
-    double f = 10.0 * n;
-    for(unsigned i = 0; i < n; ++i)
+    double f = 10.0 * static_cast<double>(n);
+    for(int i = 0; i < n; ++i)
         f += x[i] * x[i] - 10.0 * std::cos(two_pi * x[i]);
     return f;
 }
 
-// NLopt callback for Rosenbrock.
-double nlopt_rosenbrock(unsigned n, const double* x, double*, void*)
+// Plain-array Rosenbrock objective for the libcmaes FitFunc.
+double rosenbrock_libcmaes(const double* x, const int& n)
 {
     double f = 0.0;
-    for(unsigned i = 0; i + 1 < n; ++i)
+    for(int i = 0; i + 1 < n; ++i)
     {
-        double t1 = 1.0 - x[i];
-        double t2 = x[i + 1] - x[i] * x[i];
+        const double t1 = 1.0 - x[i];
+        const double t2 = x[i + 1] - x[i] * x[i];
         f += t1 * t1 + 100.0 * t2 * t2;
     }
     return f;
@@ -184,39 +198,63 @@ timing bench_nablapp(Policy policy, const Problem& problem,
     return {us, fval, iters};
 }
 
-timing bench_nlopt_cma(int n, nlopt_func obj, const std::vector<double>& x0,
-                       const std::vector<double>& lb, const std::vector<double>& ub,
-                       std::uint32_t reps, std::uint32_t max_eval)
+// libcmaes CMAES_DEFAULT comparator, mirroring the bench_libcmaes adapter
+// pattern (benchmarks/bench_libcmaes.cpp run_libcmaes_solver) for fairness.
+// sigma initialization mirrors that adapter: max(ub - lb) / 3 (Hansen 2023
+// recommends sigma in [search_range / 4, search_range / 3]). lambda is
+// passed as -1 so libcmaes auto-computes 4 + floor(3*ln(n)), matching
+// libcmaes's own default tuning rather than imposing nablapp's lambda
+// choice across the boundary.
+timing bench_libcmaes_cma(int n, libcmaes::FitFunc obj,
+                          const std::vector<double>& x0,
+                          const std::vector<double>& lb,
+                          const std::vector<double>& ub,
+                          std::uint32_t reps, std::uint32_t max_iter)
 {
+    using gp_type = libcmaes::GenoPheno<libcmaes::pwqBoundStrategy>;
+
+    double max_range = 0.0;
+    for(int i = 0; i < n; ++i)
+    {
+        const double range = ub[i] - lb[i];
+        if(std::isfinite(range))
+            max_range = std::max(max_range, range);
+    }
+    const double sigma0 = max_range > 0.0 ? max_range / 3.0 : 0.3;
+
+    gp_type gp(lb.data(), ub.data(), n);
+
+    auto run_one = [&](double& fval, std::uint32_t& evals) {
+        libcmaes::CMAParameters<gp_type> params(
+            x0, sigma0, /*lambda=*/-1, /*seed=*/42u, gp);
+        params.set_algo(::CMAES_DEFAULT);
+        params.set_max_iter(max_iter);
+        params.set_quiet(true);
+
+        try
+        {
+            auto sols = libcmaes::cmaes<gp_type>(obj, params);
+            fval = sols.best_candidate().get_fvalue();
+            evals = static_cast<std::uint32_t>(sols.fevals());
+        }
+        catch(...)
+        {
+            fval = std::numeric_limits<double>::quiet_NaN();
+            evals = 0;
+        }
+    };
+
     // Warmup.
     {
-        nlopt::opt opt(nlopt::GN_CRS2_LM, n);
-        opt.set_min_objective(obj, nullptr);
-        opt.set_lower_bounds(lb);
-        opt.set_upper_bounds(ub);
-        opt.set_maxeval(max_eval);
-        std::vector<double> x = x0;
-        double fval;
-        try { opt.optimize(x, fval); } catch(...) {}
+        double fval; std::uint32_t evals;
+        run_one(fval, evals);
     }
 
     auto t0 = std::chrono::high_resolution_clock::now();
     double fval = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
-    {
-        // NLopt has no CMA-ES; GN_CRS2_LM is the closest comparable
-        // global derivative-free optimizer.
-        nlopt::opt opt(nlopt::GN_CRS2_LM, n);
-        opt.set_min_objective(obj, nullptr);
-        opt.set_lower_bounds(lb);
-        opt.set_upper_bounds(ub);
-        opt.set_maxeval(max_eval);
-        opt.set_ftol_rel(1e-14);
-        std::vector<double> x = x0;
-        try { opt.optimize(x, fval); } catch(...) {}
-        evals = static_cast<std::uint32_t>(opt.get_numevals());
-    }
+        run_one(fval, evals);
     auto t1 = std::chrono::high_resolution_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, evals};
@@ -242,15 +280,15 @@ int main()
         nablapp::rastrigin<double>    dyn_prob{.n = 2};
         auto fixed = bench_nablapp(nablapp::cmaes_policy<2>{}, fixed_prob, reps, 10000);
         auto dyn   = bench_nablapp(nablapp::cmaes_policy<>{},  dyn_prob,  reps, 10000);
-        auto nlopt = bench_nlopt_cma(2, nlopt_rastrigin,
+        auto libc  = bench_libcmaes_cma(2, rastrigin_libcmaes,
             {2.5, 2.5}, {-5.12, -5.12}, {5.12, 5.12}, reps, 10000);
         print_row("nablapp<2>", fixed);
         print_row("nablapp<>", dyn);
-        print_row("nlopt CRS2_LM", nlopt);
-        std::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
-            fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);
-        std::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
-            dyn.wall_us / nlopt.wall_us, double(dyn.evals) / nlopt.evals);
+        print_row("libcmaes_cmaes", libc);
+        std::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
+            fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
+        std::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
+            dyn.wall_us / libc.wall_us, double(dyn.evals) / libc.evals);
     }
 
     // Rastrigin 5D
@@ -261,14 +299,14 @@ int main()
         std::vector<double> x0(5, 2.5), lb(5, -5.12), ub(5, 5.12);
         auto fixed = bench_nablapp(nablapp::cmaes_policy<5>{}, fixed_prob, reps, 50000);
         auto dyn   = bench_nablapp(nablapp::cmaes_policy<>{},  dyn_prob,  reps, 50000);
-        auto nlopt = bench_nlopt_cma(5, nlopt_rastrigin, x0, lb, ub, reps, 50000);
+        auto libc  = bench_libcmaes_cma(5, rastrigin_libcmaes, x0, lb, ub, reps, 50000);
         print_row("nablapp<5>", fixed);
         print_row("nablapp<>", dyn);
-        print_row("nlopt CRS2_LM", nlopt);
-        std::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
-            fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);
-        std::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
-            dyn.wall_us / nlopt.wall_us, double(dyn.evals) / nlopt.evals);
+        print_row("libcmaes_cmaes", libc);
+        std::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
+            fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
+        std::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
+            dyn.wall_us / libc.wall_us, double(dyn.evals) / libc.evals);
     }
 
     // Rosenbrock 2D (bounded, unimodal -- tests CMA-ES on smooth landscape)
@@ -278,15 +316,15 @@ int main()
         bounded_rosenbrock_dynamic  dyn_prob;
         auto fixed = bench_nablapp(nablapp::cmaes_policy<2>{}, fixed_prob, reps, 10000);
         auto dyn   = bench_nablapp(nablapp::cmaes_policy<>{},  dyn_prob,  reps, 10000);
-        auto nlopt = bench_nlopt_cma(2, nlopt_rosenbrock,
+        auto libc  = bench_libcmaes_cma(2, rosenbrock_libcmaes,
             {-1.2, 1.0}, {-5.0, -5.0}, {5.0, 5.0}, reps, 10000);
         print_row("nablapp<2>", fixed);
         print_row("nablapp<>", dyn);
-        print_row("nlopt CRS2_LM", nlopt);
-        std::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
-            fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);
-        std::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
-            dyn.wall_us / nlopt.wall_us, double(dyn.evals) / nlopt.evals);
+        print_row("libcmaes_cmaes", libc);
+        std::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
+            fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
+        std::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
+            dyn.wall_us / libc.wall_us, double(dyn.evals) / libc.evals);
     }
 
     // Ackley 2D IPOP f_evals upper-bound assertion.
