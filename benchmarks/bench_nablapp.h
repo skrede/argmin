@@ -516,10 +516,23 @@ void run_all_nablapp_solvers(
     }
 
     // restarting_policy<cmaes_policy<>>: gate mirrors CMA-ES (global + bounds).
-    // Instantiate with default inner options so the decorator's own restart policy
-    // replaces CMA-ES IPOP (avoids redundant double-IPOP wrapping).
+    // Plumb the per-row seed through options.inner so the decorator's inner
+    // cmaes_policy uses publish_bench's caller-visible seed rather than the
+    // deterministic-default fallback now produced by restarting_policy::init()
+    // when options.inner.seed is empty. The decorator's own restart policy
+    // replaces CMA-ES IPOP (avoids redundant double-IPOP wrapping); the inner
+    // restart_strategy is therefore left at its default.
     if constexpr(is_global && is_bound)
-        run("restarting_cmaes", restarting_policy<cmaes_policy<>>{});
+    {
+        typename restarting_policy<cmaes_policy<>>::options_type rcmaes_opts{};
+        rcmaes_opts.inner.seed = seed;
+        std::vector<trace_entry> trace;
+        auto r = run_nablapp_solver<restarting_policy<cmaes_policy<>>>(
+            "restarting_cmaes", problem_name, prob, max_iterations, collect_trace, trace,
+            config, rcmaes_opts);
+        results.push_back(r);
+        traces.push_back(std::move(trace));
+    }
 
     // COBYLA: constrained derivative-free (requires bounds + constraint values).
     if constexpr(constrained_values<Problem> && is_bound)
