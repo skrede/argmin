@@ -1,4 +1,7 @@
 #include "nablapp/solver/cmaes_policy.h"
+#include "nablapp/solver/alternative/cmaes/repair_l2_penalty_policy.h"
+#include "nablapp/solver/alternative/cmaes/pwq_reparameterization_policy.h"
+#include "nablapp/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/test_functions/rosenbrock.h"
 #include "nablapp/test_functions/rastrigin.h"
@@ -1144,5 +1147,115 @@ TEST_CASE("cmaes_policy: weights tail is zero in vanilla default", "[cmaes]")
         CHECK(sum_pos == Approx(1.0).margin(1e-12));
         for(int i = mu; i < lambda; ++i)
             CHECK(weights[i] == 0.0);
+    }
+}
+
+// Phase 34 G12 caller-facing-unpenalized contract: for any
+// boundary-handling variant, state.objective_value MUST equal
+// problem.value(state.x) at termination -- the caller can re-evaluate
+// the objective at the policy's reported iterate and read back the
+// same number. Each variant achieves this differently:
+//   - repair_l2_penalty: state.x is the L2-repaired offspring;
+//     unpenalized = problem.value(state.x).
+//   - pwq_reparameterization: state.x is the pheno coord; unpenalized
+//     = problem.value(g(geno)) = problem.value(state.x).
+//   - no_repair_adaptive_penalty: state.x is the clipped repaired
+//     point; unpenalized = problem.value(state.x).
+//
+// Reference: Phase 34 G12 (caller-facing-unpenalized contract).
+TEST_CASE("alternative::cmaes::repair_l2_penalty_policy: caller-facing "
+          "objective is feasible", "[cmaes]")
+{
+    bounded_rosenbrock prob{
+        .n  = 2,
+        .lb = Eigen::VectorXd::Constant(2, -2.0),
+        .ub = Eigen::VectorXd::Constant(2,  2.0)
+    };
+    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, 1.5);
+    solver_options opts;
+    opts.max_iterations = 50;
+
+    alternative::cmaes::repair_l2_penalty_policy<> policy;
+    policy.options.lambda = 6u;
+    policy.options.seed = 42u;
+    policy.options.restart =
+        alternative::cmaes::repair_l2_penalty_policy<>::restart_strategy::ipop;
+
+    basic_solver solver{policy, prob, x0, opts};
+    (void) solver.solve();
+    const auto& state = solver.state();
+
+    const double f_at_x = prob.value(state.x);
+    CHECK(state.objective_value == Approx(f_at_x).margin(1e-12));
+}
+
+TEST_CASE("alternative::cmaes::pwq_reparameterization_policy: caller-facing "
+          "objective is feasible", "[cmaes]")
+{
+    bounded_rosenbrock prob{
+        .n  = 2,
+        .lb = Eigen::VectorXd::Constant(2, -2.0),
+        .ub = Eigen::VectorXd::Constant(2,  2.0)
+    };
+    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, 1.5);
+    solver_options opts;
+    opts.max_iterations = 50;
+
+    alternative::cmaes::pwq_reparameterization_policy<> policy;
+    policy.options.lambda = 6u;
+    policy.options.seed = 42u;
+    policy.options.restart =
+        alternative::cmaes::pwq_reparameterization_policy<>::restart_strategy::ipop;
+
+    basic_solver solver{policy, prob, x0, opts};
+    (void) solver.solve();
+    const auto& state = solver.state();
+
+    // The pwq variant stores state.x as the pheno coord, so
+    // problem.value(state.x) is the same as the unpenalized value
+    // recorded at the best-of-generation pheno point.
+    const double f_at_x = prob.value(state.x);
+    CHECK(state.objective_value == Approx(f_at_x).margin(1e-12));
+    // state.x must be inside the box (the pheno transform image is
+    // the closed box [lower, upper]).
+    for(int i = 0; i < state.x.size(); ++i)
+    {
+        CHECK(state.x[i] >= prob.lb[i] - 1e-12);
+        CHECK(state.x[i] <= prob.ub[i] + 1e-12);
+    }
+}
+
+TEST_CASE("alternative::cmaes::no_repair_adaptive_penalty_policy: caller-facing "
+          "objective is feasible", "[cmaes]")
+{
+    bounded_rosenbrock prob{
+        .n  = 2,
+        .lb = Eigen::VectorXd::Constant(2, -2.0),
+        .ub = Eigen::VectorXd::Constant(2,  2.0)
+    };
+    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, 1.5);
+    solver_options opts;
+    opts.max_iterations = 50;
+
+    alternative::cmaes::no_repair_adaptive_penalty_policy<> policy;
+    policy.options.lambda = 6u;
+    policy.options.seed = 42u;
+    policy.options.restart =
+        alternative::cmaes::no_repair_adaptive_penalty_policy<>::restart_strategy::ipop;
+
+    basic_solver solver{policy, prob, x0, opts};
+    (void) solver.solve();
+    const auto& state = solver.state();
+
+    // The no-repair variant stores state.x as the clipped repaired
+    // point, so problem.value(state.x) is the same as the unpenalized
+    // value recorded at the repaired best-of-generation point.
+    const double f_at_x = prob.value(state.x);
+    CHECK(state.objective_value == Approx(f_at_x).margin(1e-12));
+    // state.x must be inside the box (the repair clips into [lb, ub]).
+    for(int i = 0; i < state.x.size(); ++i)
+    {
+        CHECK(state.x[i] >= prob.lb[i] - 1e-12);
+        CHECK(state.x[i] <= prob.ub[i] + 1e-12);
     }
 }

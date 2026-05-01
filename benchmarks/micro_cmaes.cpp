@@ -28,6 +28,9 @@
 //   perf report --stdio --percent-limit=1.0
 
 #include "nablapp/solver/cmaes_policy.h"
+#include "nablapp/solver/alternative/cmaes/repair_l2_penalty_policy.h"
+#include "nablapp/solver/alternative/cmaes/pwq_reparameterization_policy.h"
+#include "nablapp/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
 #include "nablapp/solver/basic_solver.h"
 #include "nablapp/test_functions/ackley.h"
 #include "nablapp/test_functions/rastrigin.h"
@@ -299,6 +302,54 @@ int main()
             fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
         std::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
             dyn.wall_us / libc.wall_us, double(dyn.evals) / libc.evals);
+    }
+
+    // Boundary-handling variant A/B on Rastrigin 2D bounded.
+    //
+    // Persistent comparison of the three solver/alternative/cmaes/
+    // boundary-handling variants. Production cmaes_policy<> aliases
+    // the empirical winner (see solver/alternative/cmaes/README.md).
+    // These per-variant cells stay here so the comparison can be
+    // re-run on any future commit.
+    // Reference: 34.2-03-AB-RESULT.md verdict doc.
+    {
+        std::println("\n--- Rastrigin 2D boundary-handling variant A/B ---");
+        nablapp::rastrigin<double> dyn_prob{.n = 2};
+        auto repair_l2 = bench_nablapp(
+            nablapp::alternative::cmaes::repair_l2_penalty_policy<>{},
+            dyn_prob, reps, 10000);
+        auto pwq = bench_nablapp(
+            nablapp::alternative::cmaes::pwq_reparameterization_policy<>{},
+            dyn_prob, reps, 10000);
+        auto no_repair = bench_nablapp(
+            nablapp::alternative::cmaes::no_repair_adaptive_penalty_policy<>{},
+            dyn_prob, reps, 10000);
+        auto libc = bench_libcmaes_cma(2, rastrigin_libcmaes,
+            {2.5, 2.5}, {-5.12, -5.12}, {5.12, 5.12}, reps, 10000);
+        print_row("repair_l2", repair_l2);
+        print_row("pwq_reparam", pwq);
+        print_row("no_repair_adapt", no_repair);
+        print_row("libcmaes_cmaes", libc);
+    }
+
+    // Boundary-handling variant A/B on Ackley 2D bounded (the box is
+    // symmetric and the optimum is at the origin -- a non-boundary-
+    // active landscape; expected: variants tie within noise).
+    {
+        std::println("\n--- Ackley 2D boundary-handling variant A/B ---");
+        nablapp::ackley<double> dyn_prob{.n = 2};
+        auto repair_l2 = bench_nablapp(
+            nablapp::alternative::cmaes::repair_l2_penalty_policy<>{},
+            dyn_prob, reps, 10000);
+        auto pwq = bench_nablapp(
+            nablapp::alternative::cmaes::pwq_reparameterization_policy<>{},
+            dyn_prob, reps, 10000);
+        auto no_repair = bench_nablapp(
+            nablapp::alternative::cmaes::no_repair_adaptive_penalty_policy<>{},
+            dyn_prob, reps, 10000);
+        print_row("repair_l2", repair_l2);
+        print_row("pwq_reparam", pwq);
+        print_row("no_repair_adapt", no_repair);
     }
 
     // Rastrigin 5D

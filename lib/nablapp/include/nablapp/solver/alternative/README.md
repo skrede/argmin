@@ -28,6 +28,22 @@ See `benchmarks/micro_mma.cpp` for the comparison harness and the commit
 history (commits `f37d28e`, `d845463`, `4a591f7`, `e75ca6a`, `635bd2e`)
 for the empirical decision trail.
 
+### `cmaes/` — boundary-handling variants for CMA-ES on bounded problems
+
+Three different boundary-handling mechanisms for CMA-ES. The
+production `solver/cmaes_policy.h` aliases the empirical winner
+(`pwq_reparameterization_policy`).
+
+| Variant | Mechanism | Reference | Empirical role |
+|---|---|---|---|
+| `repair_l2_penalty_policy.h` | Clip x_i to [lower, upper]; add Σd² penalty to objective; CMA-ES sees repaired x. | Hansen (2009) §2 boundary tutorial. | Loses on the boundary-active cells (schwefel_2, griewank_2): the L2 penalty introduces non-physical gradient signal at the box boundary. Preserved as the prior production behavior for empirical reproducibility. |
+| `pwq_reparameterization_policy.h` | Piecewise-quadratic invertible geno→pheno transform; objective evaluated at pheno. No penalty term. | libcmaes `pwq_bound_strategy.cc:35-125`. | **Production winner**: only variant that ever reaches the `libcmaes_ipop` optimum on `schwefel_2` at fixed seed; lowest 5-seed median on `griewank_2`. |
+| `no_repair_adaptive_penalty_policy.h` | Evaluate at unrepaired x; penalty Σ w_i (x_i − clip_i)² with adaptive w_i (EMA of rank-mu diagonal). | Hansen (2009) §3. | Smallest objective on `ackley_*` (where the optimum is at the origin and boundary handling is not load-bearing); does not reach the libcmaes_ipop optimum on `schwefel_2`. |
+
+See the per-variant table at `solver/alternative/cmaes/README.md` for
+the full A/B verdict; `benchmarks/micro_cmaes.cpp` is the persistent
+comparison harness.
+
 ## Lifecycle
 
 These variants are compiled, tested, and benchmarked alongside the
