@@ -15,6 +15,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
 
 using Catch::Approx;
 using namespace nablapp;
@@ -1305,4 +1306,108 @@ TEST_CASE("cmaes_policy: reset refreshes params on lambda bump", "[cmaes]")
     CHECK(params_after.mu_eff != Approx(params_before.mu_eff));
     CHECK(params_after.c_1 != Approx(params_before.c_1));
     CHECK(params_after.c_mu != Approx(params_before.c_mu));
+}
+
+// Lock the cmaes_policy::MaxPopulation contract: when a caller explicitly
+// instantiates `cmaes_policy<N, M>` with `M > 512`, the per-step buffer
+// cap (`state_type<P>::MaxPop`) MUST honor `M`, not silently fall back
+// to the hardcoded 512. The IPOP escalation guard then fires at the
+// caller-chosen ceiling rather than at the buffer's hidden floor.
+//
+// Without honoring the template parameter, `state_type<P>::MaxPop`
+// stays pinned to 512 independent of `MaxPopulation`; the inner
+// `Eigen::Matrix<..., 0, 512, 1>::resize(lambda)` is undefined
+// behavior at lambda > 512 and surfaces as a segfault on any deep
+// IPOP restart trajectory (Auger & Hansen 2005, IPOP-CMA-ES doubles
+// lambda each restart, so a sufficient restart count crosses any
+// fixed compile-time ceiling).
+//
+// The contract has three observable consequences exercised below:
+//   1. state_type<P>::MaxPop reflects MaxPopulation when set explicitly,
+//      and falls back to 512 when MaxPopulation is dynamic_dimension.
+//   2. init() with options.lambda > 512 succeeds when MaxPopulation
+//      is wide enough (no buffer-overflow UB), and step() runs at
+//      that wide population without crashing.
+//   3. init() with options.lambda > MaxPop throws std::runtime_error.
+//
+// Reference:
+//   Auger, A. & Hansen, N. (2005). A Restart CMA Evolution Strategy
+//   with Increasing Population Size. CEC 2005. IPOP-CMA-ES doubles
+//   the population at each restart trigger.
+TEST_CASE("cmaes_policy: MaxPopulation template parameter widens IPOP cap",
+          "[cmaes][maxpop]")
+{
+    // (1) MaxPop reflects MaxPopulation when set, falls back to 512 otherwise.
+    using policy_default_t = cmaes_policy<>;
+    using policy_wide_t    = cmaes_policy<2, 1024>;
+    using policy_narrow_t  = cmaes_policy<2, 256>;
+    using state_default_t  = policy_default_t::state_type<rastrigin<double>>;
+    using state_wide_t     = policy_wide_t::state_type<rastrigin<double>>;
+    using state_narrow_t   = policy_narrow_t::state_type<rastrigin<double>>;
+    STATIC_REQUIRE(state_default_t::MaxPop == 512);
+    STATIC_REQUIRE(state_wide_t::MaxPop == 1024);
+    STATIC_REQUIRE(state_narrow_t::MaxPop == 256);
+
+    // (2) init() + step() at lambda=800 succeeds under MaxPopulation=1024.
+    // The buffers are sized via state_type::MaxPop, which now derives
+    // from the template parameter; resize past the legacy 512 floor is
+    // safe.
+    rastrigin<double> problem{.n = 2};
+    Eigen::VectorXd x0{{3.0, 3.0}};
+    solver_options opts;
+    opts.max_iterations = 1;
+
+    policy_wide_t policy;
+    policy.options.seed = 42u;
+    policy.options.lambda = 800u;       // > 512, <= 1024
+    auto state = policy.init(problem, x0, opts);
+    REQUIRE(state.params.lambda == 800);
+    REQUIRE(state.fitnesses_buf.size() >= 800);
+
+    // step() must not crash at lambda > 512.
+    auto r = policy.step(state);
+    CHECK(state.params.lambda == 800);
+    const bool stalled_before_512 =
+        r.policy_status.has_value()
+        && *r.policy_status == solver_status::stalled
+        && state.params.lambda <= 512;
+    CHECK_FALSE(stalled_before_512);
+
+    // (3) init() with options.lambda > MaxPop throws std::runtime_error.
+    policy_narrow_t narrow_policy;
+    narrow_policy.options.seed = 42u;
+    narrow_policy.options.lambda = 257u;    // > MaxPop=256
+    REQUIRE_THROWS_AS(narrow_policy.init(problem, x0, opts), std::runtime_error);
+}
+
+// Lock the init()-time lambda<=MaxPop assertion. A bounded problem
+// with n=130 + default `cmaes_policy<>` (MaxPop=512) silently
+// UB-resizes the per-step buffers at auto-lambda = 4*130 = 520 > 512
+// when init() does not validate. Once init() asserts, the call must
+// throw std::runtime_error with an actionable message.
+//
+// Reference:
+//   Hansen, N. (2023). The CMA Evolution Strategy: A Tutorial.
+//   arXiv:1604.00772 §B.1: default population size lambda = 4 + floor(3*ln(n)).
+//   The bounded heuristic in this codebase widens the default to
+//   max(4*n, 4 + floor(3*ln(n))) for box-constrained inputs.
+TEST_CASE("cmaes_policy: init throws when auto-lambda exceeds MaxPop",
+          "[cmaes][maxpop]")
+{
+    constexpr int n = 130;
+    bounded_rosenbrock problem{
+        .n  = n,
+        .lb = Eigen::VectorXd::Constant(n, -5.0),
+        .ub = Eigen::VectorXd::Constant(n,  5.0),
+    };
+    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(n, 0.0);
+    solver_options opts;
+    opts.max_iterations = 1;
+
+    cmaes_policy<> policy;          // default MaxPopulation -> MaxPop = 512
+    policy.options.seed = 42u;
+
+    // Auto-computed pop_lambda for n=130 (bounded) is
+    // max(4*n, 4 + floor(3*ln(n))) = max(520, 18) = 520 > 512.
+    REQUIRE_THROWS_AS(policy.init(problem, x0, opts), std::runtime_error);
 }

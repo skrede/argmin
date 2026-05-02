@@ -54,6 +54,7 @@
 #include <numeric>
 #include <optional>
 #include <random>
+#include <stdexcept>
 #include <vector>
 
 namespace nablapp::alternative::cmaes
@@ -152,7 +153,15 @@ struct repair_l2_penalty_policy
         // generations / pre-IPOP-doubling runs; the working size is
         // tracked by the per-step `lambda` argument and segments are
         // sized via .head(lambda) / .leftCols(lambda).
-        static constexpr int MaxPop = 512;
+        //
+        // MaxPop derives from the policy's MaxPopulation template
+        // parameter so a caller that opts into a wider population
+        // (e.g. restarting_policy with deep IPOP escalation per
+        // Auger & Hansen 2005) gets matching buffer capacity. The
+        // `dynamic_dimension` default keeps the historical 512 cap
+        // for callers that do not opt in.
+        static constexpr int MaxPop =
+            (MaxPopulation == nablapp::dynamic_dimension) ? 512 : MaxPopulation;
         Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> fitnesses_buf;
         Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> unpenalized_buf;
         std::vector<int> idx_buf;
@@ -226,11 +235,23 @@ struct repair_l2_penalty_policy
                 static_cast<int>(4 + std::floor(3.0 * std::log(n))));
         s.params = detail::compute_constants(n, pop_lambda);
 
+        // Convert the silent UB at lambda > MaxPop into a hard
+        // failure: s.fitnesses_buf et al. are
+        // `Eigen::Matrix<..., 0, MaxPop, ...>` with a static
+        // maximum-rows compile-time bound; a resize past MaxPop is
+        // undefined behavior. Throw with an actionable message so
+        // the caller knows to widen the MaxPopulation template
+        // parameter.
+        if(s.params.lambda > state_type<Problem>::MaxPop)
+            throw std::runtime_error(
+                "cmaes::init: auto-computed lambda exceeds MaxPop -- "
+                "raise the MaxPopulation template parameter on cmaes_policy");
+
         // Pre-allocate per-step buffers (static-audit G10). Sized to
         // current lambda; step() uses .head(lambda) / .leftCols(lambda)
         // to track the working size, and re-resizes only on IPOP
-        // doublings. The MaxPop=512 cap on the matrix template still
-        // protects against pathological growth.
+        // doublings. The compile-time MaxPop cap on the matrix
+        // template still protects against pathological growth.
         s.fitnesses_buf.resize(s.params.lambda);
         s.unpenalized_buf.resize(s.params.lambda);
         s.idx_buf.resize(static_cast<std::size_t>(s.params.lambda));
@@ -287,15 +308,11 @@ struct repair_l2_penalty_policy
         else
             s.rng = detail::xoshiro256{static_cast<std::uint64_t>(std::random_device{}())};
 
-        // Hansen stagnation window: 120 + ceil(30*n/lambda) (additive,
-        // not max). Pre-fix the `max(120, 30*n/lambda)` form picked 120
-        // for any (n, lambda) where 30*n/lambda <= 120 -- which is
-        // basically every typical low-n CMA-ES run (n=2, lambda=6:
-        // 30*2/6 = 10, max picks 120; n=10, lambda=10: 30*10/10 = 30,
-        // max picks 120). Stagnation then fired at gen=120 regardless
-        // of elapsed history. The Hansen 2023 §B.3 formula is additive
-        // -- 120 + ceil(30*n/lambda) -- so the term scales with the
-        // dimension/popsize ratio rather than being clamped out.
+        // Hansen 2023 (arXiv:1604.00772) §B.3 paragraph "Stagnation":
+        // minimum stagnation history window is 120 + ceil(30 * n / lambda).
+        // The 30*n/lambda term scales the window with the
+        // dimension/popsize ratio; the 120 floor is the paper's lower
+        // bound for short-history runs.
         s.stagnation_window_min = std::uint32_t{120}
             + static_cast<std::uint32_t>(std::ceil(30.0 * n / s.params.lambda));
         if(options.stagnation_window.has_value())
@@ -316,9 +333,10 @@ struct repair_l2_penalty_policy
         const int mu = s.params.mu;
         double old_best = s.objective_value;
 
-        // MaxPop covers IPOP doubling for n=16 with K=3 restarts:
-        // lambda_max = 4*16*2^3 = 512.
-        constexpr int MaxPop = 512;
+        // The local MaxPop alias derives from the state_type cap so
+        // both compile-time ceilings stay in lockstep with the policy's
+        // MaxPopulation template parameter.
+        constexpr int MaxPop = state_type<P>::MaxPop;
 
         // 1. Sample offspring
         auto offspring = detail::sample_offspring<double, N, MaxPop>(
@@ -784,11 +802,10 @@ struct repair_l2_penalty_policy
                 int new_lambda = s.params.lambda * 2;
 
                 // Guard: the doubled population must not exceed the
-                // stack-allocated ceiling (MaxPop) or the policy template
-                // ceiling (MaxPopulation).
-                bool pop_overflow = (new_lambda > MaxPop);
-                if constexpr(MaxPopulation != dynamic_dimension)
-                    pop_overflow = pop_overflow || (new_lambda > MaxPopulation);
+                // compile-time MaxPop ceiling. Since MaxPop derives from
+                // the MaxPopulation template parameter, both ceilings
+                // collapse to the same value here.
+                bool pop_overflow = (new_lambda > state_type<P>::MaxPop);
 
                 if(pop_overflow)
                 {
@@ -916,6 +933,10 @@ struct repair_l2_penalty_policy
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
         s.params = detail::compute_constants(n,
             static_cast<int>(options.lambda.value_or(0)));
+        if(s.params.lambda > state_type<P>::MaxPop)
+            throw std::runtime_error(
+                "cmaes::reset: options.lambda exceeds MaxPop -- "
+                "raise the MaxPopulation template parameter on cmaes_policy");
         s.mean = x0;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
