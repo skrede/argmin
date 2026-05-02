@@ -471,10 +471,40 @@ struct repair_l2_penalty_policy
         // 15. Status detection: roundoff_limited and diverged (Hansen tutorial)
         std::optional<solver_status> policy_status{};
 
-        // NaN guard: numerical overflow in sigma or eigendecomposition
-        // produces NaN which defeats all subsequent comparisons.
-        if(!std::isfinite(s.sigma) || !std::isfinite(s.D.maxCoeff()))
-            policy_status = solver_status::diverged;
+        // NaN guard: numerical overflow in sigma, the eigendecomposition
+        // (s.D), or the covariance matrix (s.C) produces NaN which
+        // defeats all subsequent comparisons AND every recovery path
+        // (a sigma reset still leaves NaN in C; the next step re-injects
+        // via the rank-one / rank-mu covariance update,
+        // Hansen 2023 (arXiv:1604.00772) §B.2). This is an always-exit
+        // signal, not a stagnation signal: the IPOP recycle gate below
+        // intentionally never sees this NaN exit, so a NaN-induced
+        // divergence cannot be mistaken for a recoverable stagnation
+        // trigger.
+        //
+        // Eigen::DenseBase::allFinite() is used (not
+        // !std::isfinite(maxCoeff())) because under IEEE 754 (Std
+        // 754-2019 §6.2) max-reduction semantics, std::max(NaN, finite)
+        // returns the finite operand, so a non-maximum NaN entry is
+        // invisible to the maxCoeff() form. allFinite() iterates every
+        // coefficient and returns false on the first non-finite entry,
+        // which is the correct predicate for "no NaN anywhere in the
+        // distribution shape". s.C is checked because a NaN inside the
+        // covariance silently re-injects every step via the rank-one /
+        // rank-mu update.
+        if(!std::isfinite(s.sigma) || !s.D.allFinite() || !s.C.allFinite())
+        {
+            ++s.generation;
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = 0.0,
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .x_norm = s.x.allFinite() ? s.x.norm() : 0.0,
+                .policy_status = solver_status::diverged,
+            };
+        }
 
         // Hansen 2023 (arXiv:1604.00772) §B.3 item 7 (TolX): legacy
         // single-axis sigma collapse check. The §B.3 paper criterion checks
@@ -500,8 +530,7 @@ struct repair_l2_penalty_policy
         const double legacy_tol_factor =
             options.cmaes.sigma_collapse_threshold.value_or(
                 options.cmaes.step_size_tolerance.value_or(1e-12));
-        if(!policy_status.has_value()
-           && s.sigma * s.D.maxCoeff() < legacy_tol_factor * s.initial_sigma)
+        if(s.sigma * s.D.maxCoeff() < legacy_tol_factor * s.initial_sigma)
             policy_status = solver_status::roundoff_limited;
 
         // Condition number explosion detection (diverged)
@@ -513,9 +542,11 @@ struct repair_l2_penalty_policy
         // Snapshot the pre-EXIT-criteria status so the IPOP block (below)
         // can distinguish (sigma_collapse / cond_explosion -> recycle as
         // restart trigger) from (§B.3 EXIT criterion -> always exit, never
-        // recycle). The new EXIT criteria below are gated on
-        // `!policy_status.has_value()` so they cannot fire if either of
-        // sigma_collapse / cond_explosion already set policy_status.
+        // recycle). The NaN guard above already returned, so this snapshot
+        // never captures a NaN-induced diverged. The §B.3 EXIT criteria
+        // below are gated on `!policy_status.has_value()` so they cannot
+        // fire if either of sigma_collapse / cond_explosion already set
+        // policy_status.
         const bool legacy_status_pre_exit = policy_status.has_value();
 
         // 16. Hansen 2023 (arXiv:1604.00772) section B.3 termination criteria.

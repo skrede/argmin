@@ -1411,3 +1411,85 @@ TEST_CASE("cmaes_policy: init throws when auto-lambda exceeds MaxPop",
     // max(4*n, 4 + floor(3*ln(n))) = max(520, 18) = 520 > 512.
     REQUIRE_THROWS_AS(policy.init(problem, x0, opts), std::runtime_error);
 }
+
+// Lock the NaN-guard always-exit contract: a NaN in s.sigma, s.D, or
+// s.C must produce step_result.policy_status == diverged AND must NOT
+// trigger an IPOP restart. The IPOP recycle gate is intended to fire
+// on legacy stagnation probes (sigma collapse / cond explosion) only;
+// a NaN in the distribution shape is a hard failure with no recovery
+// story (Hansen 2023 (arXiv:1604.00772) §B.2: rank-one + rank-mu
+// covariance updates depend on a finite C; restart with NaN in C
+// re-injects via the very next update).
+TEST_CASE("cmaes_policy: NaN guard exits without IPOP recycle",
+          "[cmaes][nan-guard]")
+{
+    bounded_rosenbrock problem{
+        .n  = 2,
+        .lb = Eigen::VectorXd::Constant(2, -2.0),
+        .ub = Eigen::VectorXd::Constant(2,  2.0),
+    };
+    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, -1.0);
+    solver_options opts;
+    opts.max_iterations = 1;
+
+    cmaes_policy<> policy;
+    policy.options.seed = 42u;
+    policy.options.restart = cmaes_policy<>::restart_strategy::ipop;
+
+    auto state = policy.init(problem, x0, opts);
+    const int lambda_init = state.params.lambda;
+    REQUIRE(lambda_init >= 4);
+
+    // Inject NaN into D[0] (the dominant eigenvalue). The NaN guard
+    // must fire and the early-return must occur before the IPOP
+    // recycle gate snapshots policy_status.
+    state.D[0] = std::numeric_limits<double>::quiet_NaN();
+
+    auto r = policy.step(state);
+
+    // Always-exit contract: returned step_result reports diverged and
+    // the IPOP recycle has NOT fired (lambda unchanged from init).
+    REQUIRE(r.policy_status.has_value());
+    REQUIRE(*r.policy_status == solver_status::diverged);
+    REQUIRE(state.params.lambda == lambda_init);
+}
+
+// Lock the allFinite() upgrade: a non-maximum NaN in s.D must be
+// caught. With state.D[0] = 5.0 and state.D[1] = NaN, the
+// `!std::isfinite(s.D.maxCoeff())` form returns false because
+// std::max(NaN, 5.0) returns 5.0 under IEEE 754 max-reduction
+// semantics (Std 754-2019 §6.2). Eigen::DenseBase::allFinite()
+// iterates every coefficient and returns false on the first
+// non-finite entry, which is the correct predicate for "no NaN
+// anywhere in the distribution shape".
+//
+// Reference:
+//   IEEE Std 754-2019 §6.2 (NaN handling under max-reductions).
+//   Eigen DenseBase::allFinite() documentation.
+TEST_CASE("cmaes_policy: NaN guard catches non-maximum NaN entry",
+          "[cmaes][nan-guard]")
+{
+    bounded_rosenbrock problem{
+        .n  = 2,
+        .lb = Eigen::VectorXd::Constant(2, -2.0),
+        .ub = Eigen::VectorXd::Constant(2,  2.0),
+    };
+    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, -1.0);
+    solver_options opts;
+    opts.max_iterations = 1;
+
+    cmaes_policy<2> policy;
+    policy.options.seed = 42u;
+
+    auto state = policy.init(problem, x0, opts);
+
+    // D[0] dominant + finite, D[1] NaN. maxCoeff() returns D[0]=5.0
+    // (finite); allFinite() iterates and catches the NaN.
+    state.D[0] = 5.0;
+    state.D[1] = std::numeric_limits<double>::quiet_NaN();
+
+    auto r = policy.step(state);
+
+    REQUIRE(r.policy_status.has_value());
+    REQUIRE(*r.policy_status == solver_status::diverged);
+}
