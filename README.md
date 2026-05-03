@@ -6,11 +6,11 @@
 
 Header-only C++23 nonlinear optimization library. Every solver is a policy that plugs into `basic_solver<Policy>` and exposes a uniform `step()` / `solve()` / `step_n(budget)` interface. Algorithms are textbook-cited (Kochenderfer & Wheeler 2e, Nocedal & Wright 2e, plus original papers).
 
-The aim is to be a drop-in replacement for NLopt where compile-time dimensions, native C++ types, and step-level execution control matter — for example, embedding an inner solve inside a control loop, IK chain, or MPC tick.
+The library is built around three properties that matter when the optimiser sits inside a larger system: compile-time dimensions that propagate into Eigen types, header-only distribution with no compiled artifacts, and step-level execution control suitable for control loops, IK chains, or MPC ticks.
 
 ## Status
 
-**Public preview.** API surface and policy lineup are stabilising; expect breaking changes through the v0.2.x line. Test suite is 368 cases / 2852 assertions; benchmarks compare against NLopt 2.10, IPOPT, Ceres, libcmaes, dlib, and kthohr/optim.
+**Public preview.** API surface and policy lineup are stabilising; expect breaking changes through the v0.2.x line. Test suite is 368 cases / 2852 assertions. A cross-library benchmark harness lives under `benchmarks/` and is documented separately.
 
 What is solid:
 - L-BFGS-B (`lbfgsb`, `byrd_lbfgsb`) — unconstrained and box-constrained smooth problems
@@ -24,7 +24,7 @@ What is solid:
 Known limitations at the current HEAD:
 - `nw_sqp` and `filter_nw_sqp` can accept an infeasible iter-0 step on HS071-style problems and park there. Use `kraft_slsqp` or `filter_slsqp` instead until this is closed.
 - COBYLA was hotfixed for HS024 but is unreliable on HS048/050/051-class problems; a full Powell-faithfulness rewrite is scheduled for v0.3.x.
-- CMA-ES is several orders of magnitude behind `libcmaes_ipop` on Ackley and Schwefel; an active-CMA variant is pending.
+- CMA-ES converges to local minima on Ackley and Schwefel; an active-CMA variant is pending for landscapes with very flat basins.
 
 See [docs/choosing-a-solver.md](docs/choosing-a-solver.md) for a problem-class-to-policy map.
 
@@ -141,10 +141,6 @@ Every algorithm header cites its source. Primary references:
 - Byrd, Lu, Nocedal, Zhu, *A Limited Memory Algorithm for Bound Constrained Optimization* (SIAM J. Sci. Comput. 16(5), 1995)
 - Fletcher & Leyffer, *Nonlinear programming without a penalty function* (Math. Programming 91, 2002)
 - Runarsson & Yao, *Search biases in constrained evolutionary optimization* (IEEE Trans. SMC-C 35(2), 2005)
-
-## Acknowledgements
-
-Algorithm-faithful reimplementations cross-checked against the reference implementations in NLopt 2.10 (Steven G. Johnson), libcmaes (Emmanuel Benazera), and IPOPT (Andreas Wächter). Cross-library benchmarks live alongside the source and use the same problem set the references publish against.
 
 ## License
 

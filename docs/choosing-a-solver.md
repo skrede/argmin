@@ -43,13 +43,13 @@ Phase 33 hotfixed COBYLA's adaptive `parmu` parameter, closing the silent-wrong-
 
 ### CMA-ES on Ackley / Schwefel
 
-`cmaes` and `restarting_cmaes` are several orders of magnitude behind `libcmaes_ipop` on `ackley_2`, `ackley_10`, and `schwefel_2`. The local-minimum escape is weaker than the Hansen-Auger active-CMA reference. On Rastrigin (2-D and 10-D) and Griewank (2-D) the median seed reaches machine zero; the gap is concentrated on landscapes with very flat basins.
+`cmaes` and `restarting_cmaes` converge to local minima rather than the global optimum on `ackley_2`, `ackley_10`, and `schwefel_2`. The local-minimum escape is weaker than the Hansen-Auger active-CMA reference. On Rastrigin (2-D and 10-D) and Griewank (2-D) the median seed reaches machine zero; the gap is concentrated on landscapes with very flat basins.
 
 **Workaround:** for those specific landscapes, run with multiple seeds and take the best, or use `restarting_cmaes` which improves the success rate on Rastrigin / Griewank but does not close the Ackley / Schwefel gap. An active-CMA variant is in the v0.3.x scope.
 
 ### MMA / GCMMA conjoined-gate FAILs
 
-MMA and GCMMA reach the correct objective on the cells they were designed for (HS076 within 1e-3 of NLopt LD_MMA), but fail the conjoined "objective AND iteration-count" gate on HS043 and a handful of related cells when tightened to NLopt-parity iteration budget. This is a convergence-speed issue, not a wrong-answer issue — the solvers reach the right objective; they just take more iterations than the NLopt reference. Ongoing, tracked under `SEED-009` (cv-aware descent rejection).
+MMA and GCMMA reach the correct objective on the cells they were designed for (HS076 within 1e-3 of the published reference value), but fail the conjoined "objective AND iteration-count" gate on HS043 and a handful of related cells when the iteration budget is tightened against the published reference budget. This is a convergence-speed issue, not a wrong-answer issue — the solvers reach the right objective; they just take more iterations than the reference. Ongoing, tracked under `SEED-009` (cv-aware descent rejection).
 
 ## How to choose between near-equivalent options
 
