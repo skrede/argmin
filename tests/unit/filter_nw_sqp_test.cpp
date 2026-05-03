@@ -6,16 +6,16 @@
 //
 // Reference: Hock & Schittkowski 1981; Fletcher & Leyffer 2002.
 
-#include "nablapp/solver/filter_nw_sqp_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/formulation/concepts.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/filter_nw_sqp_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/formulation/concepts.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 static_assert(nlp_solver<basic_solver<filter_nw_sqp_policy<>>>,
               "filter_nw_sqp_policy must satisfy nlp_solver concept");

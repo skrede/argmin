@@ -1,7 +1,7 @@
-#include "nablapp/solver/filter_slsqp_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/formulation/concepts.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/filter_slsqp_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/formulation/concepts.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -9,9 +9,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::filter_slsqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::filter_slsqp_policy<>>>);
 
 TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
 {
@@ -183,7 +183,7 @@ TEST_CASE("filter_slsqp populates kkt_residual and exposes is_null_step",
 TEST_CASE("filter_slsqp HS024 regression guard",
           "[filter_slsqp][regression]")
 {
-    using namespace nablapp;
+    using namespace argmin;
 
     hs024<> problem;
     auto x0 = problem.initial_point();

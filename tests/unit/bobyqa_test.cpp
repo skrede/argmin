@@ -1,8 +1,8 @@
-#include "nablapp/detail/quadratic_model.h"
-#include "nablapp/solver/bobyqa_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/formulation/concepts.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/detail/quadratic_model.h"
+#include "argmin/solver/bobyqa_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/formulation/concepts.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -14,7 +14,7 @@
 #include <numeric>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
@@ -353,7 +353,7 @@ TEST_CASE("bobyqa Lagrange values partition of unity", "[bobyqa]")
         f_values[1 + n + i] = rosenbrock(pt);
     }
 
-    auto model = nablapp::detail::build_model(Y, f_values, x0);
+    auto model = argmin::detail::build_model(Y, f_values, x0);
 
     // Partition of unity: sum_k L_k(x) = 1 for any x.
     CHECK(model.lagrange_values.size() == m);
@@ -404,7 +404,7 @@ TEST_CASE("bobyqa Lagrange-based point replacement", "[bobyqa]")
     double f_new = quadratic(x_new);
 
     // Compute Lagrange values at x_new
-    auto lv = nablapp::detail::compute_lagrange_at_point(Y, f_values, x0, x_new);
+    auto lv = argmin::detail::compute_lagrange_at_point(Y, f_values, x0, x_new);
     CHECK(lv.size() == m);
 
     // Find the expected replacement index (max |L_k| among non-best)
@@ -429,7 +429,7 @@ TEST_CASE("bobyqa Lagrange-based point replacement", "[bobyqa]")
     }
 
     double delta = 1.0;
-    int actual = nablapp::detail::select_replacement(Y, f_values, x_new, f_new, x0, lv, delta);
+    int actual = argmin::detail::select_replacement(Y, f_values, x_new, f_new, x0, lv, delta);
     // With denominator*distance^4 weighting, the replacement selects the point
     // that maximizes L_k(x_new)^2 * max(1, (dist/delta)^4).
     CHECK(actual != best_idx);
@@ -517,7 +517,7 @@ TEST_CASE("bobyqa HS001 accuracy vs NLopt baseline", "[bobyqa][benchmark]")
     // Optimal: f* = 0 at (1, 1). NLopt BOBYQA reaches f* ~ 0 at ~353 evals.
     //
     // Reference: Hock & Schittkowski, Problem 1.
-    nablapp::hs001<double> hs;
+    argmin::hs001<double> hs;
 
     Eigen::Vector<double, 2> x0 = hs.initial_point();
     solver_options opts;
@@ -542,13 +542,13 @@ TEST_CASE("bobyqa HS001 accuracy vs NLopt baseline", "[bobyqa][benchmark]")
 TEST_CASE("bobyqa hs001 eval count regression guard", "[bobyqa]")
 {
     // HS001: With BMAT/ZMAT factored interpolation system and ALTMOV
-    // geometry improvement, nablapp achieves ~540 iterations vs NLopt's 358.
+    // geometry improvement, argmin achieves ~540 iterations vs NLopt's 358.
     // The remaining gap is due to differences in step acceptance logic.
     // Previous baselines: 3417 (original), 2509 (rho contraction), now ~540
     // with BMAT/ZMAT + ALTMOV.
     //
     // Reference: Hock & Schittkowski, Problem 1.
-    nablapp::hs001<double> hs;
+    argmin::hs001<double> hs;
 
     Eigen::Vector<double, 2> x0 = hs.initial_point();
     solver_options opts;
@@ -576,7 +576,7 @@ TEST_CASE("bobyqa hs002 and hs005 regression guard", "[bobyqa]")
     //
     // Reference: Hock & Schittkowski, Problems 2 and 5.
     {
-        nablapp::hs005<double> hs5;
+        argmin::hs005<double> hs5;
         Eigen::Vector<double, 2> x0 = hs5.initial_point();
         solver_options opts;
         opts.max_iterations = 500;

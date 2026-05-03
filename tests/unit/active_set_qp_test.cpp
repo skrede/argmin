@@ -1,5 +1,5 @@
-#include "nablapp/detail/active_set_qp.h"
-#include "nablapp/detail/givens_qr_update.h"
+#include "argmin/detail/active_set_qp.h"
+#include "argmin/detail/givens_qr_update.h"
 
 #include <Eigen/Core>
 #include <Eigen/QR>
@@ -10,8 +10,8 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
-using namespace nablapp::detail;
+using namespace argmin;
+using namespace argmin::detail;
 
 TEST_CASE("solve_qp unconstrained", "[qp]")
 {

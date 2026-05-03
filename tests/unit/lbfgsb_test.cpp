@@ -1,14 +1,14 @@
-#include "nablapp/solver/lbfgsb_policy.h"
-#include "nablapp/solver/byrd_lbfgsb_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/detail/cauchy_point.h"
-#include "nablapp/detail/compact_lbfgs.h"
-#include "nablapp/detail/lbfgsb_direction.h"
-#include "nablapp/formulation/concepts.h"
-#include "nablapp/test_functions/rosenbrock.h"
-#include "nablapp/test_functions/more_garbow_hillstrom.h"
-#include "nablapp/schedule/basic_solver_group.h"
-#include "nablapp/schedule/round_robin_schedule.h"
+#include "argmin/solver/lbfgsb_policy.h"
+#include "argmin/solver/byrd_lbfgsb_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/detail/cauchy_point.h"
+#include "argmin/detail/compact_lbfgs.h"
+#include "argmin/detail/lbfgsb_direction.h"
+#include "argmin/formulation/concepts.h"
+#include "argmin/test_functions/rosenbrock.h"
+#include "argmin/test_functions/more_garbow_hillstrom.h"
+#include "argmin/schedule/basic_solver_group.h"
+#include "argmin/schedule/round_robin_schedule.h"
 
 #include <Eigen/Core>
 
@@ -19,7 +19,7 @@
 #include <limits>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
@@ -27,11 +27,11 @@ namespace
 // Bound-constrained Rosenbrock wrapper for testing box constraints.
 struct bounded_rosenbrock
 {
-    nablapp::rosenbrock<> inner{.n = 2};
+    argmin::rosenbrock<> inner{.n = 2};
     Eigen::VectorXd lb;
     Eigen::VectorXd ub;
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return inner.dimension(); }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
@@ -277,7 +277,7 @@ TEST_CASE("GCP finds interior minimum on bounded quadratic", "[lbfgsb]")
     // x(t) first hits a bound or the quadratic minimum, whichever comes first.
     //
     // With corrected sign, f'' = d^T B d > 0 triggers the interior check.
-    using namespace nablapp::detail;
+    using namespace argmin::detail;
 
     compact_lbfgs<double> B;
 
@@ -357,7 +357,7 @@ TEST_CASE("GCP multi-breakpoint reduced-direction derivative reconstruction",
     //   Nocedal, J., Wright, S. J. (2006). Numerical Optimization, 2e.
     //     Section 16.7, eq. 16.75-16.77.
 
-    using namespace nablapp::detail;
+    using namespace argmin::detail;
 
     // Mock operator: B v as an explicit 3x3 matrix product.
     struct mock_operator
@@ -459,7 +459,7 @@ TEST_CASE("compact_lbfgs accepts small curvature pairs", "[lbfgsb]")
     // s^T y <= eps * ||s||^2, accepting pairs with small positive curvature.
     //
     // Reference: N&W Section 9.1 (curvature condition).
-    using namespace nablapp::detail;
+    using namespace argmin::detail;
 
     compact_lbfgs<double> B;
 
@@ -497,7 +497,7 @@ TEST_CASE("compact_lbfgs damped curvature accepts near-orthogonal pairs", "[lbfg
     // The damped update clamps small positive s^T y to max(s^T y, eps * ||s||^2)
     // instead of rejecting. Negative/zero curvature is still rejected.
     // Reference: Powell (damped BFGS), N&W Section 9.1.
-    using namespace nablapp::detail;
+    using namespace argmin::detail;
 
     compact_lbfgs<double> B;
 
@@ -572,7 +572,7 @@ TEST_CASE("Two-loop fast path direction equivalence", "[lbfgsb]")
     // Reference: N&W Algorithm 9.1 (two-loop recursion),
     //            N&W Section 16.6 (GCP + subspace minimization).
 
-    using namespace nablapp::detail;
+    using namespace argmin::detail;
 
     rosenbrock<> problem{.n = 2};
     Eigen::VectorXd x = Eigen::VectorXd{{-1.2, 1.0}};
@@ -644,7 +644,7 @@ TEST_CASE("Compile-time unconstrained path sets infinite alpha_max", "[lbfgsb]")
     //
     // Reference: N&W Algorithm 9.1 (two-loop recursion, no bounds).
 
-    using namespace nablapp::detail;
+    using namespace argmin::detail;
 
     rosenbrock<> problem{.n = 2};
     Eigen::VectorXd x = Eigen::VectorXd{{-1.2, 1.0}};
@@ -787,7 +787,7 @@ TEST_CASE("Runtime fast path with loose bounds computes finite alpha_max", "[lbf
     //
     // Reference: Byrd, Lu, Nocedal, Zhu 1995 (breakpoint definition).
 
-    using namespace nablapp::detail;
+    using namespace argmin::detail;
 
     rosenbrock<> rosen{.n = 2};
     Eigen::VectorXd x = Eigen::VectorXd{{-1.2, 1.0}};

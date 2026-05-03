@@ -1,1 +1,1 @@
-add_subdirectory(nablapp)
+add_subdirectory(argmin)

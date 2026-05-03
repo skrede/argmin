@@ -1,5 +1,5 @@
-#include "nablapp/detail/kraft_lsq_qp.h"
-#include "nablapp/detail/kraft_lsq_qp_recovery.h"
+#include "argmin/detail/kraft_lsq_qp.h"
+#include "argmin/detail/kraft_lsq_qp_recovery.h"
 
 #include <Eigen/Core>
 
@@ -7,8 +7,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 using Catch::Approx;
-using namespace nablapp;
-using namespace nablapp::detail;
+using namespace argmin;
+using namespace argmin::detail;
 
 // ---------------------------------------------------------------------------
 // Bit-identity with direct kraft_lsq_qp_solver on feasible QPs.

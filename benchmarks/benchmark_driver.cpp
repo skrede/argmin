@@ -1,34 +1,34 @@
-// Benchmark driver for nablapp.
+// Benchmark driver for argmin.
 //
 // Custom main() with CSV output, CLI argument parsing, and optional
 // convergence trace export.  Google Benchmark is used for timing
 // internals only -- not BENCHMARK_MAIN.
 //
 // Usage:
-//   ./nablapp_bench [-o results.csv] [--no-trace] [--compare-trace]
+//   ./argmin_bench [-o results.csv] [--no-trace] [--compare-trace]
 //                   [--trace-dir traces/]
 
 #include "bench_config.h"
-#include "bench_nablapp.h"
+#include "bench_argmin.h"
 #include "benchmark_result.h"
 #include "problem_registry.h"
 #include "trace_entry.h"
 
-#ifdef NABLAPP_HAS_NLOPT
+#ifdef ARGMIN_HAS_NLOPT
 #include "bench_nlopt.h"
 
 #include <nlopt.hpp>
 #endif
-#ifdef NABLAPP_HAS_CERES
+#ifdef ARGMIN_HAS_CERES
 #include "bench_ceres.h"
 #endif
-#ifdef NABLAPP_HAS_DLIB
+#ifdef ARGMIN_HAS_DLIB
 #include "bench_dlib.h"
 #endif
-#ifdef NABLAPP_HAS_IPOPT
+#ifdef ARGMIN_HAS_IPOPT
 #include "bench_ipopt.h"
 #endif
-#ifdef NABLAPP_HAS_OPTIM
+#ifdef ARGMIN_HAS_OPTIM
 #include "bench_optim.h"
 #endif
 
@@ -77,7 +77,7 @@ auto parse_args(int argc, char** argv) -> driver_config
 }
 
 void write_trace_csv(const std::filesystem::path& path,
-                     const std::vector<nablapp::bench::trace_entry>& trace)
+                     const std::vector<argmin::bench::trace_entry>& trace)
 {
     std::ofstream out(path);
     out << "iter,f_evals,g_evals,c_evals,J_evals,wall_us,"
@@ -92,7 +92,7 @@ void write_trace_csv(const std::filesystem::path& path,
     }
 }
 
-void print_summary(const std::vector<nablapp::bench::benchmark_result>& results,
+void print_summary(const std::vector<argmin::bench::benchmark_result>& results,
                    std::chrono::microseconds elapsed)
 {
     auto secs = static_cast<double>(elapsed.count()) / 1e6;
@@ -109,48 +109,48 @@ int main(int argc, char** argv)
 {
     auto cfg = parse_args(argc, argv);
 
-    // Library-defaults bench_config recovers existing nablapp_bench
+    // Library-defaults bench_config recovers existing argmin_bench
     // behavior on the pre-existing column set; new columns
     // (seed, mode, solver_iters, c_evals, J_evals) populate from this
     // config + adapter-native counters.
-    auto config = nablapp::bench::bench_config::library_defaults();
+    auto config = argmin::bench::bench_config::library_defaults();
     config.seed = cfg.seed;
 
-    std::vector<nablapp::bench::benchmark_result> results;
-    std::vector<std::vector<nablapp::bench::trace_entry>> traces;
+    std::vector<argmin::bench::benchmark_result> results;
+    std::vector<std::vector<argmin::bench::trace_entry>> traces;
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    // Run nablapp solvers on all registered problems.
-    nablapp::bench::for_each_problem([&](std::string_view name, auto&& prob) {
-        nablapp::bench::run_all_nablapp_solvers(
+    // Run argmin solvers on all registered problems.
+    argmin::bench::for_each_problem([&](std::string_view name, auto&& prob) {
+        argmin::bench::run_all_argmin_solvers(
             name, prob, max_iterations, cfg.trace_enabled, results, traces,
             config, cfg.seed);
     });
 
     // Run comparison library benchmarks (if detected at build time).
     // Each adapter receives the same `traces` out-parameter; the four
-    // trace-capable adapters (nablapp / NLopt / IPOPT / Ceres) populate
+    // trace-capable adapters (argmin / NLopt / IPOPT / Ceres) populate
     // per-iter rows under config.trace_enabled, and the two summary-only
     // adapters (dlib / kthohr_optim) push empty trace vectors per result
     // row to preserve the results[i] <-> traces[i] index invariant. Under
-    // nablapp_bench's library_defaults config, every adapter pushes empty
+    // argmin_bench's library_defaults config, every adapter pushes empty
     // vectors — no per-iter trace files are ever produced from this driver.
-#ifdef NABLAPP_HAS_NLOPT
+#ifdef ARGMIN_HAS_NLOPT
     nlopt::srand(static_cast<unsigned long>(cfg.seed));
-    nablapp::bench::run_nlopt_benchmarks(results, traces, config);
+    argmin::bench::run_nlopt_benchmarks(results, traces, config);
 #endif
-#ifdef NABLAPP_HAS_CERES
-    nablapp::bench::run_ceres_benchmarks(results, traces, config);
+#ifdef ARGMIN_HAS_CERES
+    argmin::bench::run_ceres_benchmarks(results, traces, config);
 #endif
-#ifdef NABLAPP_HAS_DLIB
-    nablapp::bench::run_dlib_benchmarks(results, traces, config);
+#ifdef ARGMIN_HAS_DLIB
+    argmin::bench::run_dlib_benchmarks(results, traces, config);
 #endif
-#ifdef NABLAPP_HAS_IPOPT
-    nablapp::bench::run_ipopt_benchmarks(results, traces, config);
+#ifdef ARGMIN_HAS_IPOPT
+    argmin::bench::run_ipopt_benchmarks(results, traces, config);
 #endif
-#ifdef NABLAPP_HAS_OPTIM
-    nablapp::bench::run_optim_benchmarks(results, traces, config);
+#ifdef ARGMIN_HAS_OPTIM
+    argmin::bench::run_optim_benchmarks(results, traces, config);
 #endif
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -159,9 +159,9 @@ int main(int argc, char** argv)
     // Write main results CSV.
     {
         std::ofstream csv(cfg.output_file);
-        csv << nablapp::bench::csv_header() << '\n';
+        csv << argmin::bench::csv_header() << '\n';
         for(const auto& r : results)
-            csv << nablapp::bench::csv_row(r) << '\n';
+            csv << argmin::bench::csv_row(r) << '\n';
     }
 
     // Write per-solver/problem convergence trace CSVs.
@@ -183,18 +183,18 @@ int main(int argc, char** argv)
     if(cfg.compare_trace)
     {
         std::println("\n--- Trace Overhead Comparison ---");
-        std::vector<nablapp::bench::benchmark_result> no_trace_results;
-        std::vector<std::vector<nablapp::bench::trace_entry>> no_trace_traces;
+        std::vector<argmin::bench::benchmark_result> no_trace_results;
+        std::vector<std::vector<argmin::bench::trace_entry>> no_trace_traces;
 
-        nablapp::bench::for_each_problem([&](std::string_view name, auto&& prob) {
-            nablapp::bench::run_all_nablapp_solvers(
+        argmin::bench::for_each_problem([&](std::string_view name, auto&& prob) {
+            argmin::bench::run_all_argmin_solvers(
                 name, prob, max_iterations, false, no_trace_results, no_trace_traces,
                 config, cfg.seed);
         });
 
         for(std::size_t i = 0; i < results.size() && i < no_trace_results.size(); ++i)
         {
-            if(results[i].library != "nablapp")
+            if(results[i].library != "argmin")
                 continue;
             auto delta = results[i].wall_time_us - no_trace_results[i].wall_time_us;
             std::println("  {}/{}: {:+d} us overhead",
@@ -205,7 +205,7 @@ int main(int argc, char** argv)
         {
             std::ofstream csv(cfg.output_file, std::ios::app);
             for(const auto& r : no_trace_results)
-                csv << nablapp::bench::csv_row(r) << '\n';
+                csv << argmin::bench::csv_row(r) << '\n';
         }
     }
 

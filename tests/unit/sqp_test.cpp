@@ -1,8 +1,8 @@
-#include "nablapp/solver/nw_sqp_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/formulation/concepts.h"
-#include "nablapp/test_functions/rosenbrock.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/nw_sqp_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/formulation/concepts.h"
+#include "argmin/test_functions/rosenbrock.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -13,7 +13,7 @@
 #include <limits>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
@@ -22,9 +22,9 @@ namespace
 // Satisfies differentiable && constrained with zero constraints.
 struct unconstrained_rosenbrock
 {
-    nablapp::rosenbrock<> inner{.n = 2};
+    argmin::rosenbrock<> inner{.n = 2};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return inner.dimension(); }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
@@ -46,7 +46,7 @@ struct unconstrained_rosenbrock
 // Solution: x* = (0.5, 0.5), f* = 0.5
 struct equality_constrained_quadratic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
 
@@ -85,9 +85,9 @@ struct equality_constrained_quadratic
 // Solution: (1, 1) is inside the circle (1+1=2, boundary), so x*=(1,1).
 struct inequality_constrained_rosenbrock
 {
-    nablapp::rosenbrock<> inner{.n = 2};
+    argmin::rosenbrock<> inner{.n = 2};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
@@ -115,9 +115,9 @@ struct inequality_constrained_rosenbrock
 // Proper version with x-dependent Jacobian
 struct inequality_rosenbrock
 {
-    nablapp::rosenbrock<> inner{.n = 2};
+    argmin::rosenbrock<> inner{.n = 2};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }
@@ -148,9 +148,9 @@ struct inequality_rosenbrock
 // True minimum (1,1) excluded by bounds.
 struct box_constrained_rosenbrock
 {
-    nablapp::rosenbrock<> inner{.n = 2};
+    argmin::rosenbrock<> inner{.n = 2};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
     double value(const Eigen::VectorXd& x) const { return inner.value(x); }

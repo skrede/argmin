@@ -1,14 +1,14 @@
-// Micro-benchmark: nablapp L-BFGS-B vs NLopt L-BFGS on a single problem.
+// Micro-benchmark: argmin L-BFGS-B vs NLopt L-BFGS on a single problem.
 //
 // Build:
 //   g++ -std=c++23 -O3 -march=native -fno-math-errno -fno-trapping-math \
-//       -I ../lib/nablapp/include -I <eigen-path> \
+//       -I ../lib/argmin/include -I <eigen-path> \
 //       micro_lbfgsb.cpp -lnlopt -o micro_lbfgsb
 //
 // Or via CMake target (added below).
 
-#include "nablapp/solver/lbfgsb_policy.h"
-#include "nablapp/solver/basic_solver.h"
+#include "argmin/solver/lbfgsb_policy.h"
+#include "argmin/solver/basic_solver.h"
 
 #include <Eigen/Core>
 
@@ -27,7 +27,7 @@ namespace
 // the all-free (two-loop recursion) fast path.
 struct rosenbrock
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
 
@@ -60,7 +60,7 @@ struct rosenbrock
 // reduced-direction derivative reconstruction fix applies to.
 struct bounded_rosenbrock
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
 
@@ -102,11 +102,11 @@ struct timing
     std::uint32_t evals;
 };
 
-timing bench_nablapp(std::uint32_t reps)
+timing bench_argmin(std::uint32_t reps)
 {
     rosenbrock problem;
     Eigen::VectorXd x0{{-1.2, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 1000;
     opts.set_gradient_threshold(1e-12);
     opts.set_objective_threshold(1e-14);
@@ -114,7 +114,7 @@ timing bench_nablapp(std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::lbfgsb_policy{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -123,7 +123,7 @@ timing bench_nablapp(std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::lbfgsb_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -172,11 +172,11 @@ timing bench_nlopt(std::uint32_t reps)
 
 // Bounded-Rosenbrock timings; exercises the multi-breakpoint GCP branch in
 // cauchy_point_solver::solve that is not touched by the wide-bounds case.
-timing bench_nablapp_bounded(std::uint32_t reps)
+timing bench_argmin_bounded(std::uint32_t reps)
 {
     bounded_rosenbrock problem;
     Eigen::VectorXd x0{{-0.9, -0.9}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 1000;
     opts.set_gradient_threshold(1e-12);
     opts.set_objective_threshold(1e-14);
@@ -184,7 +184,7 @@ timing bench_nablapp_bounded(std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::lbfgsb_policy{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -193,7 +193,7 @@ timing bench_nablapp_bounded(std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::lbfgsb_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -252,15 +252,15 @@ bool probe_kkt_residual()
 {
     bounded_rosenbrock problem;
     Eigen::VectorXd x0{{-0.9, -0.9}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 40;
     opts.set_gradient_threshold(1e-12);
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
+    argmin::basic_solver solver{argmin::lbfgsb_policy{}, problem, x0, opts};
 
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -296,14 +296,14 @@ bool probe_regression_bounded_rosenbrock()
 {
     bounded_rosenbrock problem;
     Eigen::VectorXd x0{{-0.9, -0.9}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    nablapp::basic_solver solver{nablapp::lbfgsb_policy{}, problem, x0, opts};
-    nablapp::step_result<double> last{};
+    argmin::basic_solver solver{argmin::lbfgsb_policy{}, problem, x0, opts};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -335,24 +335,24 @@ int main()
 
     std::println("Rosenbrock 2D (wide bounds [-5,5]^2, all-free fast path), {} repetitions each\n", reps);
 
-    auto na = bench_nablapp(reps);
+    auto na = bench_argmin(reps);
     auto nl = bench_nlopt(reps);
 
     std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "nablapp", na.wall_us, na.evals, na.objective);
+    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "argmin", na.wall_us, na.evals, na.objective);
     std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "nlopt", nl.wall_us, nl.evals, nl.objective);
-    std::println("\n  ratio (nablapp/nlopt): {:.1f}x", na.wall_us / nl.wall_us);
+    std::println("\n  ratio (argmin/nlopt): {:.1f}x", na.wall_us / nl.wall_us);
 
     std::println("\nBounded Rosenbrock 2D (tight bounds [-1,1]^2, multi-breakpoint GCP branch), "
                  "{} repetitions each\n", reps);
 
-    auto nab = bench_nablapp_bounded(reps);
+    auto nab = bench_argmin_bounded(reps);
     auto nlb = bench_nlopt_bounded(reps);
 
     std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "nablapp", nab.wall_us, nab.evals, nab.objective);
+    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "argmin", nab.wall_us, nab.evals, nab.objective);
     std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "nlopt", nlb.wall_us, nlb.evals, nlb.objective);
-    std::println("\n  ratio (nablapp/nlopt): {:.1f}x", nab.wall_us / nlb.wall_us);
+    std::println("\n  ratio (argmin/nlopt): {:.1f}x", nab.wall_us / nlb.wall_us);
 
     std::println("\nNow profile with:");
     std::println("  perf record -F 99999 -g -- ./micro_lbfgsb");

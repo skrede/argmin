@@ -1,6 +1,6 @@
 # Choosing a solver
 
-nablapp ships 18 policies. The right one depends on three things about your problem: whether gradients are available, what kind of constraints there are, and how large `n` is. This page maps problem class to policy with one-line rationale and known caveats.
+argmin ships 18 policies. The right one depends on three things about your problem: whether gradients are available, what kind of constraints there are, and how large `n` is. This page maps problem class to policy with one-line rationale and known caveats.
 
 If you only remember one rule: **`lbfgsb` for unconstrained / box-constrained, `kraft_slsqp` for general constrained, `cmaes` for global / non-smooth.** Everything else is for cases where those don't fit.
 
@@ -65,7 +65,7 @@ MMA and GCMMA reach the correct objective on the cells they were designed for (H
 
 ## Compile-time vs dynamic dimensions
 
-Every policy template takes an `N` parameter that propagates to inner Eigen types. Pass a concrete `int` for fixed dimensions (`lbfgsb_policy<2>` for a 2-D problem) and `nablapp::dynamic_dimension` (the default) for runtime-sized problems. Fixed dimensions enable stack allocation, more aggressive inlining, and eliminate heap traffic in the hot path — the difference is meaningful for small `n` in tight loops (IK, MPC).
+Every policy template takes an `N` parameter that propagates to inner Eigen types. Pass a concrete `int` for fixed dimensions (`lbfgsb_policy<2>` for a 2-D problem) and `argmin::dynamic_dimension` (the default) for runtime-sized problems. Fixed dimensions enable stack allocation, more aggressive inlining, and eliminate heap traffic in the hot path — the difference is meaningful for small `n` in tight loops (IK, MPC).
 
 ```cpp
 basic_solver<lbfgsb_policy<2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};

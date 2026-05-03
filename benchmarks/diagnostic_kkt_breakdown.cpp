@@ -19,7 +19,7 @@
 //
 // The 5-leg breakdown lives in kkt_residual_breakdown() below. It is
 // deliberately a local free function (NOT exported to
-// lib/nablapp/include/nablapp/detail/) -- this file is deletable once
+// lib/argmin/include/argmin/detail/) -- this file is deletable once
 // the Phase 31.2 convergence fix and its bench snapshot land. The
 // canonical kkt_residual helper in detail/kkt_residual.h is separate.
 //
@@ -37,8 +37,8 @@
 // Sign convention for the primal-inequality leg
 // ---------------------------------------------------------------------
 //
-// Per lib/nablapp/include/nablapp/detail/lagrangian.h lines 42-60 and
-// lib/nablapp/include/nablapp/formulation/concepts.h lines 87-93, the
+// Per lib/argmin/include/argmin/detail/lagrangian.h lines 42-60 and
+// lib/argmin/include/argmin/formulation/concepts.h lines 87-93, the
 // canonical project convention is `c_ineq >= 0` feasible; a negative
 // entry is the violation magnitude. Verbatim from lagrangian.h:
 //
@@ -52,17 +52,17 @@
 // this: `max_i max(-mu_ineq[i], 0)` captures the KKT requirement
 // mu_ineq >= 0 under the same sign convention.
 
-#include "nablapp/solver/byrd_lbfgsb_policy.h"
-#include "nablapp/solver/filter_nw_sqp_policy.h"
-#include "nablapp/solver/filter_slsqp_policy.h"
-#include "nablapp/solver/kraft_slsqp_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/solver/nw_sqp_policy.h"
-#include "nablapp/solver/convergence.h"
-#include "nablapp/detail/lagrangian.h"
-#include "nablapp/solver/options.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
-#include "nablapp/test_functions/more_garbow_hillstrom.h"
+#include "argmin/solver/byrd_lbfgsb_policy.h"
+#include "argmin/solver/filter_nw_sqp_policy.h"
+#include "argmin/solver/filter_slsqp_policy.h"
+#include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/nw_sqp_policy.h"
+#include "argmin/solver/convergence.h"
+#include "argmin/detail/lagrangian.h"
+#include "argmin/solver/options.h"
+#include "argmin/test_functions/hock_schittkowski.h"
+#include "argmin/test_functions/more_garbow_hillstrom.h"
 
 #include <Eigen/Core>
 
@@ -167,7 +167,7 @@ kkt_leg_breakdown kkt_residual_breakdown(
 // Returns the index of the first fired criterion in last_check_results,
 // or -1 if none fired on this step.
 template <std::size_t K>
-int first_fired(const std::array<std::optional<nablapp::solver_status>, K>& results)
+int first_fired(const std::array<std::optional<argmin::solver_status>, K>& results)
 {
     for(std::size_t i = 0; i < results.size(); ++i)
     {
@@ -288,7 +288,7 @@ kkt_leg_breakdown compute_lagrangian_breakdown(
 
     Eigen::VectorXd g_dyn = s.g;
     Eigen::VectorXd lambda_reest =
-        nablapp::detail::estimate_multipliers(g_dyn, A_full);
+        argmin::detail::estimate_multipliers(g_dyn, A_full);
 
     out.J_eq_T_lambda_component_QP =
         (A_full.transpose() * lambda_policy).template lpNorm<Eigen::Infinity>();
@@ -315,7 +315,7 @@ void run_sqp_case(std::string_view case_label, Problem problem, Policy policy)
     print_header(case_label);
 
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     // Thresholds set liberally so the solver does NOT terminate via the
     // default convergence tests -- we want the full iteration trajectory
     // for decomposition analysis. max_iterations = 50 caps runtime.
@@ -327,13 +327,13 @@ void run_sqp_case(std::string_view case_label, Problem problem, Policy policy)
     opts.set_step_threshold(1e-18);
     opts.set_stationarity_threshold(1e-14);
 
-    nablapp::basic_solver solver{policy, problem, x0, opts};
+    argmin::basic_solver solver{policy, problem, x0, opts};
 
     const double feasibility_gate_effective = opts.constraint_tolerance
         ? *opts.constraint_tolerance
         : 1e-6;
 
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     std::uint32_t final_iter = 0;
     int final_status_code = -1;
 
@@ -431,10 +431,10 @@ void run_byrd_brown_case()
 {
     print_header("byrd_lbfgsb brown_badly_scaled");
 
-    using Problem = nablapp::brown_badly_scaled<double>;
+    using Problem = argmin::brown_badly_scaled<double>;
     Problem problem;
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     // The post-Phase-31 regression runs to max_iterations silently;
     // cap at 10000 to reproduce the snapshot behaviour. Reading 10000
     // rows per-iter is overkill -- subsample by emitting only every
@@ -445,14 +445,14 @@ void run_byrd_brown_case()
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    nablapp::basic_solver solver{nablapp::byrd_lbfgsb_policy{}, problem, x0, opts};
+    argmin::basic_solver solver{argmin::byrd_lbfgsb_policy{}, problem, x0, opts};
 
     // byrd_lbfgsb default feasibility_gate is +inf (no primal-feasibility
     // gate; bound-constrained projected-gradient already absorbs it).
     constexpr double feasibility_gate_effective =
         std::numeric_limits<double>::infinity();
 
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     std::uint32_t final_iter = 0;
     int final_status_code = -1;
     constexpr std::uint32_t subsample = 250;
@@ -541,68 +541,68 @@ void run_byrd_brown_case()
 
 int main()
 {
-    using Hs006 = nablapp::hs006<double>;
-    using Hs007 = nablapp::hs007<double>;
-    using Hs024 = nablapp::hs024<double>;
-    using Hs026 = nablapp::hs026<double>;
-    using Hs043 = nablapp::hs043<double>;
-    using Hs071 = nablapp::hs071<double>;
+    using Hs006 = argmin::hs006<double>;
+    using Hs007 = argmin::hs007<double>;
+    using Hs024 = argmin::hs024<double>;
+    using Hs026 = argmin::hs026<double>;
+    using Hs043 = argmin::hs043<double>;
+    using Hs071 = argmin::hs071<double>;
 
     // ---- kraft_slsqp: 6 cases -------------------------------------
     run_sqp_case("kraft_slsqp hs006", Hs006{},
-                 nablapp::kraft_slsqp_policy<Hs006::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<Hs006::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs007", Hs007{},
-                 nablapp::kraft_slsqp_policy<Hs007::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<Hs007::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs024", Hs024{},
-                 nablapp::kraft_slsqp_policy<Hs024::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<Hs024::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs026", Hs026{},
-                 nablapp::kraft_slsqp_policy<Hs026::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<Hs026::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs043", Hs043{},
-                 nablapp::kraft_slsqp_policy<Hs043::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<Hs043::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs071", Hs071{},
-                 nablapp::kraft_slsqp_policy<Hs071::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<Hs071::problem_dimension>{});
 
     // ---- nw_sqp: 6 cases ------------------------------------------
     run_sqp_case("nw_sqp hs006", Hs006{},
-                 nablapp::nw_sqp_policy<Hs006::problem_dimension>{});
+                 argmin::nw_sqp_policy<Hs006::problem_dimension>{});
     run_sqp_case("nw_sqp hs007", Hs007{},
-                 nablapp::nw_sqp_policy<Hs007::problem_dimension>{});
+                 argmin::nw_sqp_policy<Hs007::problem_dimension>{});
     run_sqp_case("nw_sqp hs024", Hs024{},
-                 nablapp::nw_sqp_policy<Hs024::problem_dimension>{});
+                 argmin::nw_sqp_policy<Hs024::problem_dimension>{});
     run_sqp_case("nw_sqp hs026", Hs026{},
-                 nablapp::nw_sqp_policy<Hs026::problem_dimension>{});
+                 argmin::nw_sqp_policy<Hs026::problem_dimension>{});
     run_sqp_case("nw_sqp hs043", Hs043{},
-                 nablapp::nw_sqp_policy<Hs043::problem_dimension>{});
+                 argmin::nw_sqp_policy<Hs043::problem_dimension>{});
     run_sqp_case("nw_sqp hs071", Hs071{},
-                 nablapp::nw_sqp_policy<Hs071::problem_dimension>{});
+                 argmin::nw_sqp_policy<Hs071::problem_dimension>{});
 
     // ---- filter_slsqp: 6 cases ------------------------------------
     run_sqp_case("filter_slsqp hs006", Hs006{},
-                 nablapp::filter_slsqp_policy<Hs006::problem_dimension>{});
+                 argmin::filter_slsqp_policy<Hs006::problem_dimension>{});
     run_sqp_case("filter_slsqp hs007", Hs007{},
-                 nablapp::filter_slsqp_policy<Hs007::problem_dimension>{});
+                 argmin::filter_slsqp_policy<Hs007::problem_dimension>{});
     run_sqp_case("filter_slsqp hs024", Hs024{},
-                 nablapp::filter_slsqp_policy<Hs024::problem_dimension>{});
+                 argmin::filter_slsqp_policy<Hs024::problem_dimension>{});
     run_sqp_case("filter_slsqp hs026", Hs026{},
-                 nablapp::filter_slsqp_policy<Hs026::problem_dimension>{});
+                 argmin::filter_slsqp_policy<Hs026::problem_dimension>{});
     run_sqp_case("filter_slsqp hs043", Hs043{},
-                 nablapp::filter_slsqp_policy<Hs043::problem_dimension>{});
+                 argmin::filter_slsqp_policy<Hs043::problem_dimension>{});
     run_sqp_case("filter_slsqp hs071", Hs071{},
-                 nablapp::filter_slsqp_policy<Hs071::problem_dimension>{});
+                 argmin::filter_slsqp_policy<Hs071::problem_dimension>{});
 
     // ---- filter_nw_sqp: 6 cases -----------------------------------
     run_sqp_case("filter_nw_sqp hs006", Hs006{},
-                 nablapp::filter_nw_sqp_policy<Hs006::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<Hs006::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs007", Hs007{},
-                 nablapp::filter_nw_sqp_policy<Hs007::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<Hs007::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs024", Hs024{},
-                 nablapp::filter_nw_sqp_policy<Hs024::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<Hs024::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs026", Hs026{},
-                 nablapp::filter_nw_sqp_policy<Hs026::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<Hs026::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs043", Hs043{},
-                 nablapp::filter_nw_sqp_policy<Hs043::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<Hs043::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs071", Hs071{},
-                 nablapp::filter_nw_sqp_policy<Hs071::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<Hs071::problem_dimension>{});
 
     // Retained non-SQP reference trajectory (unrelated to the
     // 24-case D-4/D-1 matrix above; preserved from the 31.1 harness

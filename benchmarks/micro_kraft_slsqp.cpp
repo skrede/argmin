@@ -1,4 +1,4 @@
-// Micro-benchmark: nablapp kraft_slsqp vs NLopt LD_SLSQP on HS071.
+// Micro-benchmark: argmin kraft_slsqp vs NLopt LD_SLSQP on HS071.
 //
 // HS071 is a mixed-constraint problem (n=4, m_eq=1, m_ineq=1) at
 // IK-relevant scale, testing per-step wall time for constrained SQP.
@@ -7,12 +7,12 @@
 //            Nonlinear Programming Codes", Lecture Notes in Economics
 //            and Mathematical Systems, Vol. 187, Springer.
 
-#include "nablapp/solver/kraft_slsqp_policy.h"
-#include "nablapp/solver/nw_sqp_policy.h"
-#include "nablapp/solver/filter_nw_sqp_policy.h"
-#include "nablapp/solver/filter_slsqp_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/nw_sqp_policy.h"
+#include "argmin/solver/filter_nw_sqp_policy.h"
+#include "argmin/solver/filter_slsqp_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -44,7 +44,7 @@ namespace
 // attributable to N being runtime vs compile-time.
 struct hs071
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 4; }
 
@@ -201,7 +201,7 @@ inline constexpr std::array<double, 6> synthetic_6dof_x_star{
 
 struct synthetic_6dof
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 6; }
 
@@ -380,11 +380,11 @@ struct timing
     double line_search_calls_per_step;  // kraft_slsqp only; 0 for others
 };
 
-timing bench_nablapp(std::uint32_t reps)
+timing bench_argmin(std::uint32_t reps)
 {
     hs071 problem;
     Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
@@ -393,7 +393,7 @@ timing bench_nablapp(std::uint32_t reps)
     // Warmup + convergence check.
     std::uint32_t iters = 0;
     {
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
@@ -406,7 +406,7 @@ timing bench_nablapp(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -421,11 +421,11 @@ timing bench_nablapp(std::uint32_t reps)
     return {per_solve, fval, iters, per_step, ls_per_step};
 }
 
-timing bench_nablapp_fixed(std::uint32_t reps)
+timing bench_argmin_fixed(std::uint32_t reps)
 {
     hs071_fixed problem;
     Eigen::Vector<double, 4> x0{1.0, 5.0, 5.0, 1.0};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
@@ -434,7 +434,7 @@ timing bench_nablapp_fixed(std::uint32_t reps)
     // Warmup + convergence check.
     std::uint32_t iters = 0;
     {
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
@@ -447,7 +447,7 @@ timing bench_nablapp_fixed(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -462,11 +462,11 @@ timing bench_nablapp_fixed(std::uint32_t reps)
     return {per_solve, fval, iters, per_step, ls_per_step};
 }
 
-timing bench_nablapp_nw_sqp(std::uint32_t reps)
+timing bench_argmin_nw_sqp(std::uint32_t reps)
 {
     hs071 problem;
     Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
@@ -475,7 +475,7 @@ timing bench_nablapp_nw_sqp(std::uint32_t reps)
     // Warmup + convergence check.
     std::uint32_t iters = 0;
     {
-        nablapp::basic_solver solver{nablapp::nw_sqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
@@ -487,7 +487,7 @@ timing bench_nablapp_nw_sqp(std::uint32_t reps)
     double fval = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::nw_sqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -500,11 +500,11 @@ timing bench_nablapp_nw_sqp(std::uint32_t reps)
     return {per_solve, fval, iters, per_step, 0.0};
 }
 
-timing bench_nablapp_filter_slsqp(std::uint32_t reps)
+timing bench_argmin_filter_slsqp(std::uint32_t reps)
 {
     hs071 problem;
     Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
@@ -512,7 +512,7 @@ timing bench_nablapp_filter_slsqp(std::uint32_t reps)
 
     std::uint32_t iters = 0;
     {
-        nablapp::basic_solver solver{nablapp::filter_slsqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::filter_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
@@ -524,7 +524,7 @@ timing bench_nablapp_filter_slsqp(std::uint32_t reps)
     double fval = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::filter_slsqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::filter_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -537,11 +537,11 @@ timing bench_nablapp_filter_slsqp(std::uint32_t reps)
     return {per_solve, fval, iters, per_step, 0.0};
 }
 
-timing bench_nablapp_filter_nw_sqp(std::uint32_t reps)
+timing bench_argmin_filter_nw_sqp(std::uint32_t reps)
 {
     hs071 problem;
     Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
@@ -549,7 +549,7 @@ timing bench_nablapp_filter_nw_sqp(std::uint32_t reps)
 
     std::uint32_t iters = 0;
     {
-        nablapp::basic_solver solver{nablapp::filter_nw_sqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::filter_nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
@@ -561,7 +561,7 @@ timing bench_nablapp_filter_nw_sqp(std::uint32_t reps)
     double fval = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::filter_nw_sqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::filter_nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -619,7 +619,7 @@ timing bench_nlopt(std::uint32_t reps)
     return {per_solve, fval, evals, per_step, 0.0};
 }
 
-// Synthetic 6-DoF NLopt callbacks. Shared constants with the nablapp
+// Synthetic 6-DoF NLopt callbacks. Shared constants with the argmin
 // problem structs via the file-scope synthetic_6dof_m_diag / x_star.
 double nlopt_synthetic_6dof_objective(unsigned, const double* x,
                                       double* grad, void*)
@@ -661,11 +661,11 @@ double nlopt_synthetic_6dof_eq1(unsigned, const double* x,
     return x[0] - x[1] + x[2] - x[3] + x[4] - x[5];
 }
 
-timing bench_nablapp_6dof(std::uint32_t reps)
+timing bench_argmin_6dof(std::uint32_t reps)
 {
     synthetic_6dof problem;
     Eigen::VectorXd x0 = Eigen::VectorXd::Zero(6);
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
@@ -673,7 +673,7 @@ timing bench_nablapp_6dof(std::uint32_t reps)
 
     std::uint32_t iters = 0;
     {
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
@@ -686,7 +686,7 @@ timing bench_nablapp_6dof(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -701,11 +701,11 @@ timing bench_nablapp_6dof(std::uint32_t reps)
     return {per_solve, fval, iters, per_step, ls_per_step};
 }
 
-timing bench_nablapp_6dof_fixed(std::uint32_t reps)
+timing bench_argmin_6dof_fixed(std::uint32_t reps)
 {
     synthetic_6dof_fixed problem;
     Eigen::Vector<double, 6> x0 = Eigen::Vector<double, 6>::Zero();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
@@ -713,7 +713,7 @@ timing bench_nablapp_6dof_fixed(std::uint32_t reps)
 
     std::uint32_t iters = 0;
     {
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
@@ -726,7 +726,7 @@ timing bench_nablapp_6dof_fixed(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -790,7 +790,7 @@ timing bench_nlopt_6dof(std::uint32_t reps)
 // helper would bloat the bench for no runtime gain.
 void print_last_check_results(
     const char* label,
-    const std::array<std::optional<nablapp::solver_status>, 4>& results)
+    const std::array<std::optional<argmin::solver_status>, 4>& results)
 {
     constexpr std::array<const char*, 4> criterion_names{
         "gradient_tolerance",
@@ -826,15 +826,15 @@ bool probe_kkt_residual()
 {
     hs071 problem;
     Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 40;
     opts.set_gradient_threshold(1e-10);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+    argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
 
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -865,18 +865,18 @@ bool probe_kkt_residual()
 // Reference: N&W 2e Definition 12.1; post-phase30 baseline 20 iters.
 bool probe_regression_hs026()
 {
-    nablapp::hs026<> p;
+    argmin::hs026<> p;
     Eigen::VectorXd x0 = p.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    nablapp::basic_solver solver{
-        nablapp::kraft_slsqp_policy<nablapp::hs026<>::problem_dimension>{},
+    argmin::basic_solver solver{
+        argmin::kraft_slsqp_policy<argmin::hs026<>::problem_dimension>{},
         p, x0, opts};
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -908,11 +908,11 @@ int main()
 
     std::println("HS071 (n=4, m_eq=1, m_ineq=1), {} repetitions each\n", reps);
 
-    auto kraft = bench_nablapp(reps);
-    auto kraft_fixed = bench_nablapp_fixed(reps);
-    auto nw = bench_nablapp_nw_sqp(reps);
-    auto filter_slsqp = bench_nablapp_filter_slsqp(reps);
-    auto filter_nw = bench_nablapp_filter_nw_sqp(reps);
+    auto kraft = bench_argmin(reps);
+    auto kraft_fixed = bench_argmin_fixed(reps);
+    auto nw = bench_argmin_nw_sqp(reps);
+    auto filter_slsqp = bench_argmin_filter_slsqp(reps);
+    auto filter_nw = bench_argmin_filter_nw_sqp(reps);
     auto nl = bench_nlopt(reps);
 
     std::println("  {:>14s}  {:>12s}  {:>12s}  {:>10s}  {:>12s}",
@@ -958,12 +958,12 @@ int main()
     {
         hs071 problem;
         Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
-        nablapp::solver_options opts;
+        argmin::solver_options opts;
         opts.max_iterations = 200;
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<-1> HS071",
                                  solver.convergence().last_check_results());
@@ -971,12 +971,12 @@ int main()
     {
         hs071_fixed problem;
         Eigen::Vector<double, 4> x0{1.0, 5.0, 5.0, 1.0};
-        nablapp::solver_options opts;
+        argmin::solver_options opts;
         opts.max_iterations = 200;
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<4>  HS071",
                                  solver.convergence().last_check_results());
@@ -985,8 +985,8 @@ int main()
     // Synthetic 6-DoF benchmarks.
     std::println("\nSynthetic 6-DoF (n=6, m_eq=2, m_ineq=0, kappa(M)~1e4), {} repetitions each\n",
                  reps);
-    auto kraft6 = bench_nablapp_6dof(reps);
-    auto kraft6f = bench_nablapp_6dof_fixed(reps);
+    auto kraft6 = bench_argmin_6dof(reps);
+    auto kraft6f = bench_argmin_6dof_fixed(reps);
     auto nl6 = bench_nlopt_6dof(reps);
 
     std::println("  {:>14s}  {:>12s}  {:>12s}  {:>10s}  {:>12s}",
@@ -1018,12 +1018,12 @@ int main()
     {
         synthetic_6dof problem;
         Eigen::VectorXd x0 = Eigen::VectorXd::Zero(6);
-        nablapp::solver_options opts;
+        argmin::solver_options opts;
         opts.max_iterations = 200;
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<-1> synthetic 6-DoF",
                                  solver.convergence().last_check_results());
@@ -1031,12 +1031,12 @@ int main()
     {
         synthetic_6dof_fixed problem;
         Eigen::Vector<double, 6> x0 = Eigen::Vector<double, 6>::Zero();
-        nablapp::solver_options opts;
+        argmin::solver_options opts;
         opts.max_iterations = 200;
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        nablapp::basic_solver solver{nablapp::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<6>  synthetic 6-DoF",
                                  solver.convergence().last_check_results());

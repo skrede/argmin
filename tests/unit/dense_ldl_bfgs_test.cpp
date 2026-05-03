@@ -1,4 +1,4 @@
-#include "nablapp/detail/dense_ldl_bfgs.h"
+#include "argmin/detail/dense_ldl_bfgs.h"
 
 #include <Eigen/Core>
 #include <Eigen/Cholesky>
@@ -9,7 +9,7 @@
 #include <random>
 
 using Catch::Approx;
-using namespace nablapp::detail;
+using namespace argmin::detail;
 
 namespace
 {
@@ -217,7 +217,7 @@ TEST_CASE("dense_ldl_bfgs sequence of pushes preserves SPD", "[dense_ldl_bfgs]")
 TEST_CASE("dense_ldl_bfgs dynamic-N constructor", "[dense_ldl_bfgs]")
 {
     // Dynamic-dimension instantiation must work the same as fixed-N.
-    dense_ldl_bfgs<double, nablapp::dynamic_dimension> bfgs(4);
+    dense_ldl_bfgs<double, argmin::dynamic_dimension> bfgs(4);
 
     Eigen::Vector<double, Eigen::Dynamic> s(4), y(4);
     s << 1.0, 0.5, -0.3, 0.7;

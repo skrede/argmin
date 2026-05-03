@@ -1,16 +1,16 @@
-#ifndef HPP_GUARD_NABLAPP_TESTS_MOCK_POLICY_H
-#define HPP_GUARD_NABLAPP_TESTS_MOCK_POLICY_H
+#ifndef HPP_GUARD_ARGMIN_TESTS_MOCK_POLICY_H
+#define HPP_GUARD_ARGMIN_TESTS_MOCK_POLICY_H
 
-#include "nablapp/result/step_result.h"
-#include "nablapp/result/status.h"
-#include "nablapp/solver/options.h"
+#include "argmin/result/step_result.h"
+#include "argmin/result/status.h"
+#include "argmin/solver/options.h"
 
 #include <Eigen/Core>
 
 #include <cmath>
 #include <cstdint>
 
-namespace nablapp::test
+namespace argmin::test
 {
 
 // Mock policy for testing basic_solver.
@@ -30,9 +30,9 @@ struct mock_policy
         double step_size{0.5};
     };
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&)
+                    const argmin::solver_options<Convergence>&)
     {
         return state_type{
             .x = x0,
@@ -40,13 +40,13 @@ struct mock_policy
         };
     }
 
-    nablapp::step_result<double> step(state_type& s)
+    argmin::step_result<double> step(state_type& s)
     {
         double old_f = s.objective_value;
         s.x *= (1.0 - s.step_size);
         s.objective_value = 0.5 * s.x.squaredNorm();
 
-        return nablapp::step_result<double>{
+        return argmin::step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.x.norm(),
             .step_size = s.step_size,
@@ -81,9 +81,9 @@ struct non_converging_policy
         int step_count{0};
     };
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&)
+                    const argmin::solver_options<Convergence>&)
     {
         return state_type{
             .x = x0,
@@ -91,10 +91,10 @@ struct non_converging_policy
         };
     }
 
-    nablapp::step_result<double> step(state_type& s)
+    argmin::step_result<double> step(state_type& s)
     {
         ++s.step_count;
-        return nablapp::step_result<double>{
+        return argmin::step_result<double>{
             .objective_value = 100.0,
             .gradient_norm = 10.0,
             .step_size = 1.0,
@@ -134,9 +134,9 @@ struct constrained_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&)
+                    const argmin::solver_options<Convergence>&)
     {
         Eigen::VectorXd c_ineq(1);
         c_ineq(0) = x0(0) - 1.0;
@@ -149,7 +149,7 @@ struct constrained_mock_policy
         };
     }
 
-    nablapp::step_result<double> step(state_type& s)
+    argmin::step_result<double> step(state_type& s)
     {
         double old_f = s.objective_value;
         s.x *= (1.0 - s.step_size);
@@ -158,7 +158,7 @@ struct constrained_mock_policy
 
         const double violation = std::max(0.0, -s.c_ineq(0));
 
-        return nablapp::step_result<double>{
+        return argmin::step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.x.norm(),
             .step_size = s.step_size,
@@ -196,9 +196,9 @@ struct feasible_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&)
+                    const argmin::solver_options<Convergence>&)
     {
         return state_type{
             .x = x0,
@@ -208,9 +208,9 @@ struct feasible_mock_policy
         };
     }
 
-    nablapp::step_result<double> step(state_type& s)
+    argmin::step_result<double> step(state_type& s)
     {
-        return nablapp::step_result<double>{
+        return argmin::step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.x.norm(),
             .step_size = 0.1,
@@ -245,9 +245,9 @@ struct infeasible_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&)
+                    const argmin::solver_options<Convergence>&)
     {
         return state_type{
             .x = x0,
@@ -257,9 +257,9 @@ struct infeasible_mock_policy
         };
     }
 
-    nablapp::step_result<double> step(state_type& s)
+    argmin::step_result<double> step(state_type& s)
     {
-        return nablapp::step_result<double>{
+        return argmin::step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.x.norm(),
             .step_size = 0.1,
@@ -294,9 +294,9 @@ struct high_violation_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&)
+                    const argmin::solver_options<Convergence>&)
     {
         return state_type{
             .x = x0,
@@ -306,9 +306,9 @@ struct high_violation_mock_policy
         };
     }
 
-    nablapp::step_result<double> step(state_type& s)
+    argmin::step_result<double> step(state_type& s)
     {
-        return nablapp::step_result<double>{
+        return argmin::step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.x.norm(),
             .step_size = 0.1,
@@ -342,19 +342,19 @@ struct roundoff_mock_policy
         std::uint32_t step_count{};
     };
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&)
+                    const argmin::solver_options<Convergence>&)
     {
         return {.x = x0, .objective_value = 0.5 * x0.squaredNorm()};
     }
 
-    nablapp::step_result<double> step(state_type& s)
+    argmin::step_result<double> step(state_type& s)
     {
         ++s.step_count;
         s.x *= 0.5;
         s.objective_value = 0.5 * s.x.squaredNorm();
-        nablapp::step_result<double> r{
+        argmin::step_result<double> r{
             .objective_value = s.objective_value,
             .gradient_norm = s.x.norm(),
             .step_size = 0.5,
@@ -363,7 +363,7 @@ struct roundoff_mock_policy
             .x_norm = s.x.norm(),
         };
         if(s.step_count >= 3)
-            r.policy_status = nablapp::solver_status::roundoff_limited;
+            r.policy_status = argmin::solver_status::roundoff_limited;
         return r;
     }
 
@@ -394,19 +394,19 @@ struct diverging_mock_policy
         std::uint32_t step_count{};
     };
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&)
+                    const argmin::solver_options<Convergence>&)
     {
         return {.x = x0, .objective_value = 1.0};
     }
 
-    nablapp::step_result<double> step(state_type& s)
+    argmin::step_result<double> step(state_type& s)
     {
         ++s.step_count;
         s.objective_value *= 10.0;
         s.x *= 2.0;
-        nablapp::step_result<double> r{
+        argmin::step_result<double> r{
             .objective_value = s.objective_value,
             .gradient_norm = 100.0,
             .step_size = 1.0,
@@ -415,7 +415,7 @@ struct diverging_mock_policy
             .x_norm = s.x.norm(),
         };
         if(s.step_count >= 5)
-            r.policy_status = nablapp::solver_status::diverged;
+            r.policy_status = argmin::solver_status::diverged;
         return r;
     }
 
@@ -452,29 +452,29 @@ struct mock_policy_with_opts
         double step_size{0.5};
     };
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&)
+                    const argmin::solver_options<Convergence>&)
     {
         return {.x = x0, .objective_value = 0.5 * x0.squaredNorm()};
     }
 
-    template <typename Problem, typename Convergence = nablapp::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const nablapp::solver_options<Convergence>&,
+                    const argmin::solver_options<Convergence>&,
                     const options_type& policy_opts)
     {
         return {.x = x0, .objective_value = 0.5 * x0.squaredNorm(),
                 .step_size = policy_opts.custom_step_size};
     }
 
-    nablapp::step_result<double> step(state_type& s)
+    argmin::step_result<double> step(state_type& s)
     {
         double old_f = s.objective_value;
         s.x *= (1.0 - s.step_size);
         s.objective_value = 0.5 * s.x.squaredNorm();
 
-        return nablapp::step_result<double>{
+        return argmin::step_result<double>{
             .objective_value = s.objective_value,
             .gradient_norm = s.x.norm(),
             .step_size = s.step_size,

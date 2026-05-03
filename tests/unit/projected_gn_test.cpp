@@ -1,7 +1,7 @@
-#include "nablapp/solver/projected_gn_policy.h"
-#include "nablapp/solver/projected_gradient_gn_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/formulation/concepts.h"
+#include "argmin/solver/projected_gn_policy.h"
+#include "argmin/solver/projected_gradient_gn_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -13,7 +13,7 @@
 #include <numbers>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {

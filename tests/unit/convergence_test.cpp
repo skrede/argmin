@@ -10,16 +10,16 @@
 // Reference: Kochenderfer & Wheeler Ch. B (test functions),
 //            Hock & Schittkowski (1981) test problems.
 
-#include "nablapp/nablapp.h"
-#include "nablapp/schedule/round_robin_schedule.h"
-#include "nablapp/schedule/basic_solver_group.h"
-#include "nablapp/test_functions/rosenbrock.h"
-#include "nablapp/test_functions/rastrigin.h"
-#include "nablapp/test_functions/himmelblau.h"
-#include "nablapp/test_functions/ackley.h"
-#include "nablapp/test_functions/booth.h"
-#include "nablapp/test_functions/beale.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/argmin.h"
+#include "argmin/schedule/round_robin_schedule.h"
+#include "argmin/schedule/basic_solver_group.h"
+#include "argmin/test_functions/rosenbrock.h"
+#include "argmin/test_functions/rastrigin.h"
+#include "argmin/test_functions/himmelblau.h"
+#include "argmin/test_functions/ackley.h"
+#include "argmin/test_functions/booth.h"
+#include "argmin/test_functions/beale.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -30,7 +30,7 @@
 #include <limits>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 // ---------------------------------------------------------------------------
 // Local test problem types (anonymous namespace)
@@ -873,7 +873,7 @@ TEST_CASE("Solver group: lbfgsb + cmaes racing", "[convergence][solver_group]")
     opts.set_objective_threshold(1e-15);
 
     basic_solver_group<round_robin_schedule,
-                       nablapp::dynamic_dimension,
+                       argmin::dynamic_dimension,
                        rosenbrock<double>,
                        lbfgsb_policy<>,
                        cmaes_policy<>> group(problem, x0, opts);

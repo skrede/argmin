@@ -20,9 +20,9 @@
 //            Int. J. Numer. Methods Engng 24:359-373, Section 5
 //            (separability assumption for convergence).
 
-#include "nablapp/solver/mma_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/mma_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -32,13 +32,13 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace {
 
 // Beam-design surrogate: separable objective, separable constraint, the
 // classic structural-optimization shape MMA was invented for. Minimize
-// f(x) = x0^2 + x1^2 subject to 1/x0 + 1/x1 <= 2 (i.e. nablapp
+// f(x) = x0^2 + x1^2 subject to 1/x0 + 1/x1 <= 2 (i.e. argmin
 // convention c0 = 2 - 1/x0 - 1/x1 >= 0), bounds 0.1 <= x_i <= 10.
 // The optimum is at x0 = x1 = 1 with f* = 2.
 struct separable_beam

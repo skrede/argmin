@@ -15,9 +15,9 @@
 //   Doornik (2005) -- Ziggurat tail-handling refinements.
 //   Knuth, TAOCP Vol. 2, §3.3.1 -- chi-square goodness-of-fit.
 
-#include "nablapp/detail/alternative/cmaes_sampling_marsaglia.h"
-#include "nablapp/detail/alternative/cmaes_sampling_ziggurat.h"
-#include "nablapp/detail/xoshiro256.h"
+#include "argmin/detail/alternative/cmaes_sampling_marsaglia.h"
+#include "argmin/detail/alternative/cmaes_sampling_ziggurat.h"
+#include "argmin/detail/xoshiro256.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -73,13 +73,13 @@ double chi_square_statistic(const std::array<int, K_BINS>& counts, int n)
 TEST_CASE("cmaes_sampling: marsaglia_polar passes chi-square goodness-of-fit",
           "[cmaes_sampling]")
 {
-    nablapp::detail::xoshiro256 rng{42u};
+    argmin::detail::xoshiro256 rng{42u};
 
     std::array<int, K_BINS> counts{};
     int outliers = 0;
     for(int i = 0; i < N_SAMPLES; ++i)
     {
-        const double z = nablapp::detail::alternative::marsaglia::marsaglia_normal<double>(rng);
+        const double z = argmin::detail::alternative::marsaglia::marsaglia_normal<double>(rng);
         const int bin = bin_index(z);
         if(bin >= 0) ++counts[bin];
         else ++outliers;
@@ -102,13 +102,13 @@ TEST_CASE("cmaes_sampling: marsaglia_polar passes chi-square goodness-of-fit",
 TEST_CASE("cmaes_sampling: ziggurat_normal passes chi-square goodness-of-fit",
           "[cmaes_sampling]")
 {
-    nablapp::detail::xoshiro256 rng{42u};
+    argmin::detail::xoshiro256 rng{42u};
 
     std::array<int, K_BINS> counts{};
     int outliers = 0;
     for(int i = 0; i < N_SAMPLES; ++i)
     {
-        const double z = nablapp::detail::alternative::ziggurat::ziggurat_normal<double>(rng);
+        const double z = argmin::detail::alternative::ziggurat::ziggurat_normal<double>(rng);
         const int bin = bin_index(z);
         if(bin >= 0) ++counts[bin];
         else ++outliers;
@@ -131,14 +131,14 @@ TEST_CASE("cmaes_sampling: ziggurat_normal tail draws are finite and nonzero",
     // Ziggurat tail-handling has historically had edge-case bugs in
     // published implementations. This test exercises tail draws
     // (|x| > 3.5) and verifies they are finite + nonzero.
-    nablapp::detail::xoshiro256 rng{42u};
+    argmin::detail::xoshiro256 rng{42u};
 
     int tail_count = 0;
     int positive_tail = 0;
     int negative_tail = 0;
     for(int i = 0; i < 1'000'000; ++i)
     {
-        const double z = nablapp::detail::alternative::ziggurat::ziggurat_normal<double>(rng);
+        const double z = argmin::detail::alternative::ziggurat::ziggurat_normal<double>(rng);
         if(std::abs(z) > 3.5)
         {
             ++tail_count;

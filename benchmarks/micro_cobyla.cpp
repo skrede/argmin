@@ -1,4 +1,4 @@
-// Micro-benchmark: nablapp COBYLA vs NLopt COBYLA on constrained HS problems.
+// Micro-benchmark: argmin COBYLA vs NLopt COBYLA on constrained HS problems.
 //
 // COBYLA is a derivative-free constrained optimizer using trust-region
 // linear models. Benchmarked on inequality-constrained problems that
@@ -8,9 +8,9 @@
 //            method that models the objective and constraint functions
 //            by linear interpolation."
 
-#include "nablapp/solver/cobyla_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/cobyla_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -42,9 +42,9 @@ struct timing
 //   x0 = (1, 0.5), f* = -1.
 struct hs024_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::inequality | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::inequality | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -87,9 +87,9 @@ struct hs024_dynamic
 //   f* = -4.6818...
 struct hs076_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::inequality | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::inequality | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -178,17 +178,17 @@ double nlopt_hs076_ineq2(unsigned, const double* x, double*, void*)
 }
 
 template <typename Problem>
-timing bench_nablapp(const Problem& problem, std::uint32_t reps)
+timing bench_argmin(const Problem& problem, std::uint32_t reps)
 {
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 10000;
     opts.set_objective_threshold(1e-8);
     opts.set_step_threshold(1e-12);
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::cobyla_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::cobyla_policy{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -197,7 +197,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::cobyla_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::cobyla_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -307,22 +307,22 @@ int main()
     // HS024
     {
         std::println("\n--- HS024 (inequality, n=2, f*=-1) ---");
-        auto nab  = bench_nablapp(hs024_dynamic{}, reps);
+        auto nab  = bench_argmin(hs024_dynamic{}, reps);
         auto nlop = bench_nlopt_hs024(reps);
-        print_row("nablapp", nab);
+        print_row("argmin", nab);
         print_row("nlopt", nlop);
-        std::println("  ratio nablapp/nlopt: {:.1f}x wall, {:.1f}x evals",
+        std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
             nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
     }
 
     // HS076
     {
         std::println("\n--- HS076 (inequality + box, n=4, f*=-4.68) ---");
-        auto nab  = bench_nablapp(hs076_dynamic{}, reps);
+        auto nab  = bench_argmin(hs076_dynamic{}, reps);
         auto nlop = bench_nlopt_hs076(reps);
-        print_row("nablapp", nab);
+        print_row("argmin", nab);
         print_row("nlopt", nlop);
-        std::println("  ratio nablapp/nlopt: {:.1f}x wall, {:.1f}x evals",
+        std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
             nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
     }
 }

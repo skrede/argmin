@@ -2,20 +2,20 @@
 // to enable the runtime malloc-checking machinery.
 #define EIGEN_RUNTIME_NO_MALLOC
 
-#include "nablapp/test_functions/beale.h"
-#include "nablapp/test_functions/booth.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/solver/lbfgsb_policy.h"
-#include "nablapp/solver/kraft_slsqp_policy.h"
-#include "nablapp/solver/ccsa_quadratic_policy.h"
-#include "nablapp/types.h"
-#include "nablapp/detail/compact_lbfgs.h"
-#include "nablapp/detail/cauchy_point.h"
-#include "nablapp/detail/bound_projection.h"
-#include "nablapp/detail/subspace_minimization.h"
-#include "nablapp/detail/active_set_qp.h"
-#include "nablapp/detail/mma_subproblem.h"
+#include "argmin/test_functions/beale.h"
+#include "argmin/test_functions/booth.h"
+#include "argmin/test_functions/hock_schittkowski.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/lbfgsb_policy.h"
+#include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/ccsa_quadratic_policy.h"
+#include "argmin/types.h"
+#include "argmin/detail/compact_lbfgs.h"
+#include "argmin/detail/cauchy_point.h"
+#include "argmin/detail/bound_projection.h"
+#include "argmin/detail/subspace_minimization.h"
+#include "argmin/detail/active_set_qp.h"
+#include "argmin/detail/mma_subproblem.h"
 
 #include <Eigen/Core>
 
@@ -24,7 +24,7 @@
 #include <cmath>
 #include <type_traits>
 
-using namespace nablapp;
+using namespace argmin;
 
 TEST_CASE("fixed-dim value+gradient: zero dynamic allocation", "[zero-copy]")
 {

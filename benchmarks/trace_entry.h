@@ -1,9 +1,9 @@
-#ifndef HPP_GUARD_NABLAPP_BENCHMARKS_TRACE_ENTRY_H
-#define HPP_GUARD_NABLAPP_BENCHMARKS_TRACE_ENTRY_H
+#ifndef HPP_GUARD_ARGMIN_BENCHMARKS_TRACE_ENTRY_H
+#define HPP_GUARD_ARGMIN_BENCHMARKS_TRACE_ENTRY_H
 
 #include <cstdint>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 struct trace_entry

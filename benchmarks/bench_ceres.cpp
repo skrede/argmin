@@ -1,4 +1,4 @@
-// Ceres Solver comparison benchmarks for nablapp benchmark suite.
+// Ceres Solver comparison benchmarks for argmin benchmark suite.
 //
 // Each Ceres solver is benchmarked on applicable problems using Ceres' native
 // API (per D-01: no common adapter interface). Results are collected as
@@ -26,13 +26,13 @@
 #include <string_view>
 #include <vector>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 namespace detail
 {
 
-// Adapts any nablapp problem as a ceres::FirstOrderFunction.
+// Adapts any argmin problem as a ceres::FirstOrderFunction.
 //
 // Stores a pointer to a caller-owned counting_problem<Problem>; every
 // Evaluate() invocation routes through the wrapper so the shared

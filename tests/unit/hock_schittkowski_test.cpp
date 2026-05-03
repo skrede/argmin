@@ -7,14 +7,14 @@
 // Reference: Hock & Schittkowski, "Test Examples for Nonlinear
 //            Programming Codes", Springer, 1981.
 
-#include "nablapp/solver/cobyla_policy.h"
-#include "nablapp/solver/isres_policy.h"
-#include "nablapp/solver/augmented_lagrangian_policy.h"
-#include "nablapp/solver/kraft_slsqp_policy.h"
-#include "nablapp/solver/nw_sqp_policy.h"
-#include "nablapp/solver/ccsa_quadratic_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/cobyla_policy.h"
+#include "argmin/solver/isres_policy.h"
+#include "argmin/solver/augmented_lagrangian_policy.h"
+#include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/nw_sqp_policy.h"
+#include "argmin/solver/ccsa_quadratic_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -24,7 +24,7 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 // ---------------------------------------------------------------------------
 // nw_sqp on HS problems

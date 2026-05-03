@@ -1,6 +1,6 @@
-#include "nablapp/line_search/armijo.h"
-#include "nablapp/line_search/strong_wolfe.h"
-#include "nablapp/test_functions/rosenbrock.h"
+#include "argmin/line_search/armijo.h"
+#include "argmin/line_search/strong_wolfe.h"
+#include "argmin/test_functions/rosenbrock.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -8,7 +8,7 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 // ---------------------------------------------------------------------------
 // Armijo tests

@@ -1,19 +1,19 @@
-#ifndef HPP_GUARD_NABLAPP_BENCHMARKS_BENCH_CONFIG_H
-#define HPP_GUARD_NABLAPP_BENCHMARKS_BENCH_CONFIG_H
+#ifndef HPP_GUARD_ARGMIN_BENCHMARKS_BENCH_CONFIG_H
+#define HPP_GUARD_ARGMIN_BENCHMARKS_BENCH_CONFIG_H
 
-// Shared run-mode configuration for the nablapp benchmark adapters.
+// Shared run-mode configuration for the argmin benchmark adapters.
 //
 // `bench_config` carries tolerance / budget / trace / seed / repetition
-// fields consumed by every comparator-library adapter (nablapp, NLopt,
+// fields consumed by every comparator-library adapter (argmin, NLopt,
 // IPOPT, Ceres, dlib, kthohr/optim). The default-constructed value
-// (mode::library_defaults) reproduces the existing nablapp_bench
+// (mode::library_defaults) reproduces the existing argmin_bench
 // behavior on the pre-existing column set; the publication() factory
 // returns the tightened tolerance / longer budget / per-iter trace
 // configuration consumed by the second `publish_bench` binary.
 
 #include <cstdint>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 struct bench_config
@@ -30,7 +30,7 @@ struct bench_config
     int trace_every_n{1};
     std::uint64_t seed{42};
     // NOTE: Dead in the publish_bench dispatch path. publish_driver.cpp,
-    // bench_nablapp.h, and bench_libcmaes.cpp do not consume this field
+    // bench_argmin.h, and bench_libcmaes.cpp do not consume this field
     // (verified 2026-05-01). Each (seed, problem, solver) tuple runs ONCE
     // per publish_bench invocation. Per-bench repetition is owned by the
     // micro_*.cpp binaries via their own local `reps` constants. The field

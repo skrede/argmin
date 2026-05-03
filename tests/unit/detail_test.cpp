@@ -1,10 +1,10 @@
-#include "nablapp/detail/compact_lbfgs.h"
-#include "nablapp/detail/cauchy_point.h"
-#include "nablapp/detail/subspace_minimization.h"
-#include "nablapp/detail/bound_projection.h"
-#include "nablapp/detail/isres_operators.h"
-#include "nablapp/detail/xoshiro256.h"
-#include "nablapp/solver/convergence.h"
+#include "argmin/detail/compact_lbfgs.h"
+#include "argmin/detail/cauchy_point.h"
+#include "argmin/detail/subspace_minimization.h"
+#include "argmin/detail/bound_projection.h"
+#include "argmin/detail/isres_operators.h"
+#include "argmin/detail/xoshiro256.h"
+#include "argmin/solver/convergence.h"
 
 #include <Eigen/Core>
 #include <catch2/catch_approx.hpp>
@@ -16,7 +16,7 @@
 #include <cstdint>
 
 using Catch::Approx;
-using namespace nablapp::detail;
+using namespace argmin::detail;
 
 TEST_CASE("compact_lbfgs multiply matches explicit dense BFGS", "[detail]")
 {
@@ -303,7 +303,7 @@ TEST_CASE("differential_variation applies DE-style x0 difference for k+1 < mu",
     Eigen::Vector<double, 2> lower; lower << -10.0, -10.0;
     Eigen::Vector<double, 2> upper; upper <<  10.0,  10.0;
 
-    nablapp::detail::differential_variation<2, double>(
+    argmin::detail::differential_variation<2, double>(
         population, snap, indices, mu, gamma, lower, upper);
 
     // k = 0 (rk = indices[0] = 0): population.col(0) += 0.5 * (snap.col(0) - snap.col(1))
@@ -324,19 +324,19 @@ TEST_CASE("differential_variation applies DE-style x0 difference for k+1 < mu",
 TEST_CASE("log_normal_mutate clamps with finite sigma_max and is no-op at infinity",
           "[isres_operators]")
 {
-    nablapp::detail::xoshiro256 rng{42u};
+    argmin::detail::xoshiro256 rng{42u};
 
     // With sigma_max >> sigma * exp(...), the clamp does not bind. The
     // returned value must equal sigma * exp(tau_prime_rand + tau * N(0, 1)).
     {
-        nablapp::detail::xoshiro256 rng_a{42u};
-        nablapp::detail::xoshiro256 rng_b{42u};
+        argmin::detail::xoshiro256 rng_a{42u};
+        argmin::detail::xoshiro256 rng_b{42u};
         const double sigma = 1.0;
         const double tau = 0.5;
         const double tau_prime_rand = 0.25;
         const double sigma_max_high = 1e6;
 
-        const double res = nablapp::detail::log_normal_mutate(
+        const double res = argmin::detail::log_normal_mutate(
             sigma, tau, tau_prime_rand, sigma_max_high, rng_a);
 
         // Mirror the function body exactly with rng_b in lockstep:
@@ -354,7 +354,7 @@ TEST_CASE("log_normal_mutate clamps with finite sigma_max and is no-op at infini
         const double tau = 0.1;
         const double tau_prime_rand = 0.0;
         const double inf = std::numeric_limits<double>::infinity();
-        const double res = nablapp::detail::log_normal_mutate(
+        const double res = argmin::detail::log_normal_mutate(
             sigma, tau, tau_prime_rand, inf, rng);
         CHECK(std::isfinite(res));
         CHECK(res > 0.0);
@@ -362,12 +362,12 @@ TEST_CASE("log_normal_mutate clamps with finite sigma_max and is no-op at infini
 
     // With sigma_max smaller than the unclamped result, the clamp binds.
     {
-        nablapp::detail::xoshiro256 rng_c{7u};
+        argmin::detail::xoshiro256 rng_c{7u};
         const double sigma = 1.0;
         const double tau = 0.0;
         const double tau_prime_rand = 5.0;  // exp(5) ~ 148
         const double sigma_max_low = 1.5;
-        const double res = nablapp::detail::log_normal_mutate(
+        const double res = argmin::detail::log_normal_mutate(
             sigma, tau, tau_prime_rand, sigma_max_low, rng_c);
         CHECK(res == Approx(sigma_max_low));
     }
@@ -400,16 +400,16 @@ TEST_CASE("sigma_collapsed_bound_relative fires only below threshold",
     Eigen::Vector<double, 2> upper; upper <<  10.0,  10.0;
 
     // Loose ratio (1.0) fires: 1.0 < 1.0 * 20 / sqrt(2) (~14.14).
-    CHECK(nablapp::detail::sigma_collapsed_bound_relative(
+    CHECK(argmin::detail::sigma_collapsed_bound_relative(
         s, 1.0, n, lower, upper));
 
     // Tight ratio (1e-3) does not fire: 1.0 < 1e-3 * 14.14 = 0.014 is false.
-    CHECK_FALSE(nablapp::detail::sigma_collapsed_bound_relative(
+    CHECK_FALSE(argmin::detail::sigma_collapsed_bound_relative(
         s, 1e-3, n, lower, upper));
 
     // With small sigmas (1e-15), the tight ratio fires.
     s.sigmas = Eigen::MatrixXd::Constant(n, s.mu, 1e-15);
-    CHECK(nablapp::detail::sigma_collapsed_bound_relative(
+    CHECK(argmin::detail::sigma_collapsed_bound_relative(
         s, 1e-9, n, lower, upper));
 }
 
@@ -427,18 +427,18 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // default_convergence carries step_tolerance_criterion. Set the
     // threshold to a value the mean_sigma beats (1e-6 > 1e-7) -> fires.
     {
-        nablapp::default_convergence conv{};
-        std::get<nablapp::step_tolerance_criterion>(conv.criteria).threshold = 1e-6;
-        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+        argmin::default_convergence conv{};
+        std::get<argmin::step_tolerance_criterion>(conv.criteria).threshold = 1e-6;
+        CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1e-9, n, lower, upper));
     }
 
     // Same convergence with a tighter threshold (1e-9) the mean_sigma does
     // not beat -> does not fire.
     {
-        nablapp::default_convergence conv{};
-        std::get<nablapp::step_tolerance_criterion>(conv.criteria).threshold = 1e-9;
-        CHECK_FALSE(nablapp::detail::sigma_collapsed_xtol_coupled(
+        argmin::default_convergence conv{};
+        std::get<argmin::step_tolerance_criterion>(conv.criteria).threshold = 1e-9;
+        CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));
     }
 
@@ -446,10 +446,10 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // with `fallback_ratio`. mean_range = 2, sqrt(n) = sqrt(2). With
     // fallback_ratio = 1.0 the fall-back fires (1e-7 < 1.0 * 2 / sqrt(2)).
     {
-        nablapp::default_convergence conv{};
-        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+        argmin::default_convergence conv{};
+        CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1.0, n, lower, upper));
-        CHECK_FALSE(nablapp::detail::sigma_collapsed_xtol_coupled(
+        CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));
     }
 
@@ -457,10 +457,10 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // SFINAE guard must keep the function compilable AND silently fall
     // back to bound_relative semantics.
     {
-        nablapp::slsqp_compatible_convergence conv{};
-        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+        argmin::slsqp_compatible_convergence conv{};
+        CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1.0, n, lower, upper));
-        CHECK_FALSE(nablapp::detail::sigma_collapsed_xtol_coupled(
+        CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));
     }
 
@@ -469,18 +469,18 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // semantics with `fallback_ratio`.
     {
         const double finite_thr = 1e-6;
-        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+        CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, finite_thr, /*fallback_ratio=*/1e-12, n, lower, upper));
 
         const double tight_thr = 1e-9;
-        CHECK_FALSE(nablapp::detail::sigma_collapsed_xtol_coupled(
+        CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, tight_thr, /*fallback_ratio=*/1e-12, n, lower, upper));
 
         const double inf = std::numeric_limits<double>::infinity();
-        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+        CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, inf, /*fallback_ratio=*/1.0, n, lower, upper));
 
-        CHECK(nablapp::detail::sigma_collapsed_xtol_coupled(
+        CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, /*threshold_value=*/0.0, /*fallback_ratio=*/1.0, n, lower, upper));
     }
 }
@@ -495,12 +495,12 @@ TEST_CASE("ISRES operators preserve existing detail symbols byte-for-byte",
     // workspace-class ctor to confirm preservation; full coverage of
     // the existing ops lives in isres_test.cpp.
     const int n = 4;
-    nablapp::detail::es_learning_rates rates =
-        nablapp::detail::compute_es_rates(n);
+    argmin::detail::es_learning_rates rates =
+        argmin::detail::compute_es_rates(n);
     CHECK(rates.tau == Approx(1.0 / std::sqrt(2.0 * n)));
     CHECK(rates.tau_prime
           == Approx(1.0 / std::sqrt(2.0 * std::sqrt(static_cast<double>(n)))));
 
-    nablapp::detail::isres_operator_workspace<double, Eigen::Dynamic> ws(n);
+    argmin::detail::isres_operator_workspace<double, Eigen::Dynamic> ws(n);
     (void)ws;  // ctor compiles, no fields exposed for direct check.
 }

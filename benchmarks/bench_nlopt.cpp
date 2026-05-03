@@ -1,4 +1,4 @@
-// NLopt comparison benchmarks for nablapp benchmark suite.
+// NLopt comparison benchmarks for argmin benchmark suite.
 //
 // Each NLopt solver is benchmarked on applicable problems using NLopt's native
 // C++ API (per D-01: no common adapter interface). Results are collected as
@@ -23,7 +23,7 @@
 #include "counting_problem.h"
 #include "problem_registry.h"
 
-#include "nablapp/formulation/concepts.h"
+#include "argmin/formulation/concepts.h"
 
 #include <nlopt.hpp>
 
@@ -33,7 +33,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 namespace detail
@@ -62,7 +62,7 @@ struct nlopt_trace_wrapper
     int                        iter_count{0};
 };
 
-// Wraps any nablapp problem as an NLopt objective callback.
+// Wraps any argmin problem as an NLopt objective callback.
 // Problem must provide value() and gradient().
 //
 // `data` points at a counting_problem<Problem>; every value()/gradient()
@@ -130,9 +130,9 @@ double nlopt_trace_objective(unsigned n, const double* x, double* grad, void* da
     return f;
 }
 
-// Wraps nablapp vectorised constraints for NLopt's mconstraint interface.
-// NLopt inequality: c(x) <= 0.  nablapp convention: c(x) >= 0.
-// We negate: result[i] = -c_nablapp[i].
+// Wraps argmin vectorised constraints for NLopt's mconstraint interface.
+// NLopt inequality: c(x) <= 0.  argmin convention: c(x) >= 0.
+// We negate: result[i] = -c_argmin[i].
 template <typename Problem>
 void nlopt_ineq_mconstraint(unsigned m, double* result,
                             unsigned n, const double* x,
@@ -163,8 +163,8 @@ void nlopt_ineq_mconstraint(unsigned m, double* result,
     }
 }
 
-// Wraps nablapp equality constraints for NLopt's mconstraint interface.
-// NLopt equality: h(x) = 0.  nablapp convention: c_eq(x) = 0 (same).
+// Wraps argmin equality constraints for NLopt's mconstraint interface.
+// NLopt equality: h(x) = 0.  argmin convention: c_eq(x) = 0 (same).
 template <typename Problem>
 void nlopt_eq_mconstraint(unsigned m, double* result,
                           unsigned n, const double* x,
@@ -681,7 +681,7 @@ void run_nlopt_benchmarks(std::vector<benchmark_result>& results,
             });
 
         // COBYLA: derivative-free constrained (no gradient needed).
-        // Disabled: dominates perf profiles (~98% CPU), masking nablapp data.
+        // Disabled: dominates perf profiles (~98% CPU), masking argmin data.
 
         // Global: CRS2 and ISRES (require bounds).
         if constexpr(is_global && bound_constrained<P>)

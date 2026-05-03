@@ -1,6 +1,6 @@
 // libcmaes (Beyer-Schwefel-Hansen-Benazera, MIT) comparison benchmarks.
 //
-// Reference target for the nablapp CMA-ES policy: a fair head-to-head
+// Reference target for the argmin CMA-ES policy: a fair head-to-head
 // against another C++ CMA-ES implementation rather than against the
 // stock NLopt CRS2 / ISRES baseline (which are different algorithm
 // classes, not different CMA-ES implementations).
@@ -23,7 +23,7 @@
 #include "counting_problem.h"
 #include "problem_registry.h"
 
-#include "nablapp/formulation/concepts.h"
+#include "argmin/formulation/concepts.h"
 
 #include <libcmaes/cmaes.h>
 #include <libcmaes/cmaparameters.h>
@@ -38,7 +38,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 namespace detail
@@ -116,7 +116,7 @@ auto make_trace_objective(libcmaes_trace_wrapper<Problem>& tw)
 {
     // libcmaes CMAStopCriteria codes (cmastopcriteria.h, libcmaes 0.10).
     // Positive codes denote successful termination on a stop criterion;
-    // negative codes denote error/abort. Mapping to nablapp's status
+    // negative codes denote error/abort. Mapping to argmin's status
     // vocabulary keeps the publish_summary `status` column comparable
     // across libraries.
     switch(run_status)
@@ -163,7 +163,7 @@ auto run_libcmaes_solver(int algo,
     std::vector<double> lb_vec(lb.data(), lb.data() + n);
     std::vector<double> ub_vec(ub.data(), ub.data() + n);
 
-    // sigma initialization mirrors nablapp's cmaes_policy::init() default
+    // sigma initialization mirrors argmin's cmaes_policy::init() default
     // for bound-constrained problems: max(ub - lb) / 3, with a floor of
     // 0.3 if every range is non-finite. Hansen (2023) recommends sigma in
     // [search_range / 4, search_range / 3].
@@ -179,10 +179,10 @@ auto run_libcmaes_solver(int algo,
     libcmaes_genopheno gp(lb_vec.data(), ub_vec.data(), n);
 
     // lambda = -1 -> libcmaes auto-computes 4 + floor(3*ln(n)). This
-    // matches the unbounded-problem default. nablapp's policy uses
+    // matches the unbounded-problem default. argmin's policy uses
     // 4*n on bounded problems; we keep libcmaes on its own default to
     // benchmark each implementation under its own auto-tuning, not
-    // nablapp's choice imposed externally.
+    // argmin's choice imposed externally.
     libcmaes_parameters params(x0, sigma0, /*lambda=*/-1, config.seed, gp);
     params.set_algo(algo);
     params.set_max_iter(config.max_iter);

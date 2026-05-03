@@ -1,4 +1,4 @@
-// Micro-benchmark: nablapp NW-SQP vs NLopt LD_SLSQP on equality/mixed HS problems.
+// Micro-benchmark: argmin NW-SQP vs NLopt LD_SLSQP on equality/mixed HS problems.
 //
 // NW-SQP implements Nocedal & Wright Chapter 18 line-search SQP with
 // damped BFGS and L1 merit function. Tested on problems with equality
@@ -6,9 +6,9 @@
 //
 // Reference: Nocedal & Wright, Chapter 18, Sections 18.1-18.6.
 
-#include "nablapp/solver/nw_sqp_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/nw_sqp_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -37,7 +37,7 @@ struct timing
 //   x0 = (2,2,2,2), f* = -1.
 struct hs039_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 2; }
@@ -89,7 +89,7 @@ struct hs039_dynamic
 // Reused from micro_kraft_slsqp pattern.
 struct hs071_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -201,10 +201,10 @@ double nlopt_hs071_ineq(unsigned, const double* x, double* grad, void*)
 }
 
 template <typename Problem>
-timing bench_nablapp(const Problem& problem, std::uint32_t reps)
+timing bench_argmin(const Problem& problem, std::uint32_t reps)
 {
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 5000;
     opts.set_gradient_threshold(1e-10);
     opts.set_objective_threshold(1e-8);
@@ -212,7 +212,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::nw_sqp_policy<>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::nw_sqp_policy<>{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -221,7 +221,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::nw_sqp_policy<>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::nw_sqp_policy<>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -324,15 +324,15 @@ bool probe_kkt_residual()
 {
     hs039_dynamic problem;
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-10);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    nablapp::basic_solver solver{nablapp::nw_sqp_policy<>{}, problem, x0, opts};
+    argmin::basic_solver solver{argmin::nw_sqp_policy<>{}, problem, x0, opts};
 
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -363,18 +363,18 @@ bool probe_kkt_residual()
 // Reference: N&W 2e Definition 12.1; post-phase30 baseline 20 iters.
 bool probe_regression_hs026()
 {
-    nablapp::hs026<> p;
+    argmin::hs026<> p;
     Eigen::VectorXd x0 = p.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    nablapp::basic_solver solver{
-        nablapp::nw_sqp_policy<nablapp::hs026<>::problem_dimension>{},
+    argmin::basic_solver solver{
+        argmin::nw_sqp_policy<argmin::hs026<>::problem_dimension>{},
         p, x0, opts};
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -404,16 +404,16 @@ bool probe_regression_hs026()
 //            eq. 18.15 (least-squares lambda).
 bool probe_regression_hs007_iter_bound()
 {
-    nablapp::hs007<> p;
+    argmin::hs007<> p;
     Eigen::VectorXd x0 = p.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    nablapp::basic_solver solver{
-        nablapp::nw_sqp_policy<nablapp::hs007<>::problem_dimension>{},
+    argmin::basic_solver solver{
+        argmin::nw_sqp_policy<argmin::hs007<>::problem_dimension>{},
         p, x0, opts};
     auto result = solver.solve(opts);
 
@@ -447,22 +447,22 @@ int main()
     // HS039
     {
         std::println("\n--- HS039 (equality, n=4, f*=-1) ---");
-        auto nab  = bench_nablapp(hs039_dynamic{}, reps);
+        auto nab  = bench_argmin(hs039_dynamic{}, reps);
         auto nlop = bench_nlopt_hs039(reps);
-        print_row("nablapp", nab);
+        print_row("argmin", nab);
         print_row("nlopt", nlop);
-        std::println("  ratio nablapp/nlopt: {:.1f}x wall, {:.1f}x evals",
+        std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
             nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
     }
 
     // HS071
     {
         std::println("\n--- HS071 (mixed, n=4, f*~17.014) ---");
-        auto nab  = bench_nablapp(hs071_dynamic{}, reps);
+        auto nab  = bench_argmin(hs071_dynamic{}, reps);
         auto nlop = bench_nlopt_hs071(reps);
-        print_row("nablapp", nab);
+        print_row("argmin", nab);
         print_row("nlopt", nlop);
-        std::println("  ratio nablapp/nlopt: {:.1f}x wall, {:.1f}x evals",
+        std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
             nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
     }
 }

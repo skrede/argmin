@@ -11,7 +11,7 @@
 //            eq. 12.34 (Lagrangian stationarity);
 //            Section 16.7 (projected gradient optimality).
 
-#include "nablapp/detail/kkt_residual.h"
+#include "argmin/detail/kkt_residual.h"
 
 #include <Eigen/Core>
 
@@ -19,7 +19,7 @@
 
 #include <limits>
 
-using namespace nablapp;
+using namespace argmin;
 
 TEST_CASE("kkt_residual at KKT point returns near-zero", "[kkt_residual]")
 {

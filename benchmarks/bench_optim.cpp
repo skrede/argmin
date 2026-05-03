@@ -1,4 +1,4 @@
-// kthohr/optim comparison benchmarks for nablapp benchmark suite.
+// kthohr/optim comparison benchmarks for argmin benchmark suite.
 //
 // Per D-01: native API adapter, no common interface. Wires kthohr/optim
 // gradient-based and derivative-free algorithms through the
@@ -15,11 +15,11 @@
 //   Global (bounded):     DE (Differential Evolution), PSO (Particle Swarm).
 //
 // Newton is intentionally skipped: kthohr/optim's newton() requires a
-// problem-supplied Hessian, which the nablapp test_functions/ structs do
+// problem-supplied Hessian, which the argmin test_functions/ structs do
 // not advertise.
 //
 // Sign convention: kthohr/optim treats all inequality constraints as
-// c(x) <= 0; nablapp uses c_ineq(x) >= 0 feasible. The constraint
+// c(x) <= 0; argmin uses c_ineq(x) >= 0 feasible. The constraint
 // adapter negates inequality rows on the boundary; equality rows are
 // duplicated as (c_eq, -c_eq) since SUMT's penalty model expects scalar
 // inequalities.
@@ -32,7 +32,7 @@
 #include "benchmark_result.h"
 #include "problem_registry.h"
 
-#include "nablapp/formulation/concepts.h"
+#include "argmin/formulation/concepts.h"
 
 #include <optim.hpp>
 
@@ -42,7 +42,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 namespace detail
@@ -95,7 +95,7 @@ double optim_objective(const Eigen::VectorXd& x,
 }
 
 // Build a SUMT-compatible constraint function. Returns a column vector
-// of constraint values c(x) <= 0; nablapp's c_ineq >= 0 rows are
+// of constraint values c(x) <= 0; argmin's c_ineq >= 0 rows are
 // negated, equality rows c_eq = 0 are emitted as (c_eq, -c_eq) so SUMT
 // drives both sides to zero via the penalty model.
 template <typename Problem>
@@ -122,7 +122,7 @@ Eigen::VectorXd optim_constraints(const Eigen::VectorXd& x,
         out[2 * i]     =  c[i];
         out[2 * i + 1] = -c[i];
     }
-    // Inequality block: nablapp c_ineq >= 0 -> optim -c_ineq <= 0.
+    // Inequality block: argmin c_ineq >= 0 -> optim -c_ineq <= 0.
     for(int i = 0; i < n_ineq; ++i)
         out[2 * n_eq + i] = -c[n_eq + i];
 
@@ -156,7 +156,7 @@ struct optim_run_inputs
     std::string_view solver_name;
     std::string_view problem_name;
     int dimension;
-    ::nablapp::problem_class pclass;
+    ::argmin::problem_class pclass;
     double known_optimum;
     double final_objective;
     bool ok;

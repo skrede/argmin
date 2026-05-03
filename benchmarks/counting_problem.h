@@ -1,14 +1,14 @@
-#ifndef HPP_GUARD_NABLAPP_BENCHMARKS_COUNTING_PROBLEM_H
-#define HPP_GUARD_NABLAPP_BENCHMARKS_COUNTING_PROBLEM_H
+#ifndef HPP_GUARD_ARGMIN_BENCHMARKS_COUNTING_PROBLEM_H
+#define HPP_GUARD_ARGMIN_BENCHMARKS_COUNTING_PROBLEM_H
 
-// Bench-side template wrapper for any nablapp test-function problem struct.
+// Bench-side template wrapper for any argmin test-function problem struct.
 //
 // Routes every problem entry point (value, gradient, constraints,
 // constraint_jacobian, residuals, jacobian, lower_bounds, upper_bounds,
 // dimension, num_equality, num_inequality, num_residuals, optimal_value,
 // initial_point) through a shared four-counter eval tracker. Concept
 // pass-through preserves all compile-time traits and member signatures
-// required by nablapp's differentiable / bound_constrained / constrained
+// required by argmin's differentiable / bound_constrained / constrained
 // / constrained_values / least_squares concepts, so any wrapped
 // counting_problem<P> still satisfies the same concepts as the inner P.
 //
@@ -26,12 +26,12 @@
 // the wrapper. Standard C++ lifetime idiom; the wrapper does not own
 // either object.
 
-#include "nablapp/test_functions/problem_class.h"
-#include "nablapp/formulation/concepts.h"
+#include "argmin/test_functions/problem_class.h"
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 // Four-counter eval tracker. reset() zeroes every counter for the next
@@ -46,7 +46,7 @@ struct eval_counts
     void reset() { f = g = c = J = 0; }
 };
 
-// Template wrapper around any nablapp problem struct. Forwards every
+// Template wrapper around any argmin problem struct. Forwards every
 // concept-required member to the inner problem while bumping the shared
 // eval counters. Compile-time traits (problem_dimension, pclass) are
 // re-exposed verbatim so concept satisfaction transfers from Problem to
@@ -55,7 +55,7 @@ template <typename Problem>
 struct counting_problem
 {
     static constexpr int problem_dimension = Problem::problem_dimension;
-    static constexpr ::nablapp::problem_class pclass = Problem::pclass;
+    static constexpr ::argmin::problem_class pclass = Problem::pclass;
 
     const Problem* inner{nullptr};
     eval_counts* counts{nullptr};

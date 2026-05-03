@@ -1,7 +1,7 @@
-#include "nablapp/solver/ccsa_quadratic_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/formulation/concepts.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/ccsa_quadratic_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/formulation/concepts.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -11,7 +11,7 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 // --- Concept satisfaction (compile-time) ---
 static_assert(differentiable<hs076<>>);

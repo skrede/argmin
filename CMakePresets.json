@@ -9,8 +9,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "NABLAPP_BUILD_TESTS": "ON",
-                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+                "ARGMIN_BUILD_TESTS": "ON",
+                "ARGMIN_CMAKE_FETCH_DEPS": "ON"
             }
         },
         {
@@ -21,11 +21,11 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "NABLAPP_BUILD_TESTS": "ON",
-                "NABLAPP_BUILD_EXAMPLES": "ON",
-                "NABLAPP_BUILD_FUZZ_TESTS": "ON",
-                "NABLAPP_BUILD_PROPERTY_TESTS": "ON",
-                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+                "ARGMIN_BUILD_TESTS": "ON",
+                "ARGMIN_BUILD_EXAMPLES": "ON",
+                "ARGMIN_BUILD_FUZZ_TESTS": "ON",
+                "ARGMIN_BUILD_PROPERTY_TESTS": "ON",
+                "ARGMIN_CMAKE_FETCH_DEPS": "ON"
             }
         },
         {
@@ -35,7 +35,7 @@
             "binaryDir": "${sourceDir}/build/release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+                "ARGMIN_CMAKE_FETCH_DEPS": "ON"
             }
         },
         {
@@ -46,8 +46,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_CXX_FLAGS": "--coverage -fprofile-arcs -ftest-coverage",
-                "NABLAPP_BUILD_TESTS": "ON",
-                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+                "ARGMIN_BUILD_TESTS": "ON",
+                "ARGMIN_CMAKE_FETCH_DEPS": "ON"
             }
         },
         {
@@ -59,8 +59,8 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
                 "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
-                "NABLAPP_BUILD_TESTS": "ON",
-                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+                "ARGMIN_BUILD_TESTS": "ON",
+                "ARGMIN_CMAKE_FETCH_DEPS": "ON"
             }
         },
         {
@@ -70,12 +70,12 @@
             "binaryDir": "${sourceDir}/build/bench",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "NABLAPP_BUILD_BENCHMARKS": "ON",
-                "NABLAPP_CMAKE_FETCH_DEPS": "ON",
-                "NABLAPP_BENCH_NLOPT": "ON",
-                "NABLAPP_BENCH_CERES": "ON",
-                "NABLAPP_BENCH_DLIB": "ON",
-                "NABLAPP_BENCH_LIBCMAES": "ON"
+                "ARGMIN_BUILD_BENCHMARKS": "ON",
+                "ARGMIN_CMAKE_FETCH_DEPS": "ON",
+                "ARGMIN_BENCH_NLOPT": "ON",
+                "ARGMIN_BENCH_CERES": "ON",
+                "ARGMIN_BENCH_DLIB": "ON",
+                "ARGMIN_BENCH_LIBCMAES": "ON"
             }
         },
         {
@@ -85,8 +85,8 @@
             "binaryDir": "${sourceDir}/build/fuzz",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "NABLAPP_BUILD_FUZZ_TESTS": "ON",
-                "NABLAPP_CMAKE_FETCH_DEPS": "ON"
+                "ARGMIN_BUILD_FUZZ_TESTS": "ON",
+                "ARGMIN_CMAKE_FETCH_DEPS": "ON"
             }
         }
     ],

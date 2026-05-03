@@ -1,4 +1,4 @@
-// IPOPT comparison benchmarks for nablapp benchmark suite.
+// IPOPT comparison benchmarks for argmin benchmark suite.
 //
 // IPOPT (Interior Point OPTimizer, COIN-OR) solves large-scale nonlinear
 // programs of the form:
@@ -16,20 +16,20 @@
 // L-BFGS applied inside the interior-point subproblem.
 //
 // Sign convention note:
-//   nablapp inequalities:  c_ineq(x) >= 0 feasible (mu_ineq >= 0)
+//   argmin inequalities:  c_ineq(x) >= 0 feasible (mu_ineq >= 0)
 //   IPOPT g bounds:        g_l <= g(x) <= g_u
 //   Mapping for inequality c_ineq(x) >= 0:  g_l = 0, g_u = 2e19 (IPOPT_INF).
 //   Mapping for equality c_eq(x) = 0:       g_l = g_u = 0.
 //
 // Hessian approximation: quasi-newton (L-BFGS). Analytical Hessian not
-// supplied because nablapp problem types do not currently advertise one.
+// supplied because argmin problem types do not currently advertise one.
 
 #include "bench_ipopt.h"
 #include "trace_entry.h"
 #include "counting_problem.h"
 #include "problem_registry.h"
 
-#include "nablapp/formulation/concepts.h"
+#include "argmin/formulation/concepts.h"
 
 #include <IpIpoptApplication.hpp>
 #include <IpSolveStatistics.hpp>
@@ -43,13 +43,13 @@
 #include <string_view>
 #include <vector>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 namespace detail
 {
 
-// TNLP adapter wrapping any nablapp constrained problem.
+// TNLP adapter wrapping any argmin constrained problem.
 // Problem must satisfy the differentiable + constrained concepts (or
 // bound_constrained for bound-only subset).
 //
@@ -125,7 +125,7 @@ public:
                 }
                 else
                 {
-                    g_l[i] = 0.0;    // nablapp: c_ineq(x) >= 0 feasible
+                    g_l[i] = 0.0;    // argmin: c_ineq(x) >= 0 feasible
                     g_u[i] = inf;
                 }
             }
@@ -367,7 +367,7 @@ auto run_ipopt_solver(std::string_view problem_name,
     Ipopt::SmartPtr<Ipopt::IpoptApplication> app =
         IpoptApplicationFactory();
 
-    // Quasi-Newton (limited-memory) Hessian approximation — nablapp problem
+    // Quasi-Newton (limited-memory) Hessian approximation — argmin problem
     // types do not currently expose analytical second derivatives.
     app->Options()->SetStringValue("hessian_approximation", "limited-memory");
     app->Options()->SetStringValue("limited_memory_update_type",
@@ -549,7 +549,7 @@ void run_ipopt_benchmarks(std::vector<benchmark_result>& results,
         // Appropriate on any differentiable problem that is not a global
         // (stochastic / evolutionary) case. This covers unconstrained
         // (box-free Newton on the barrier), bound-constrained (the L-BFGS-B
-        // peer case vs nablapp's lbfgsb / byrd_lbfgsb), and any combination
+        // peer case vs argmin's lbfgsb / byrd_lbfgsb), and any combination
         // of equality / inequality constraints with optional bounds.
         if constexpr(has_gradient && !is_global)
         {

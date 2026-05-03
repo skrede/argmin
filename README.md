@@ -1,4 +1,4 @@
-# nablapp
+# argmin
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
@@ -41,13 +41,13 @@ See [docs/choosing-a-solver.md](docs/choosing-a-solver.md) for a problem-class-t
 ```cmake
 include(FetchContent)
 FetchContent_Declare(
-    nablapp
-    GIT_REPOSITORY https://github.com/skrede/nablapp.git
+    argmin
+    GIT_REPOSITORY https://github.com/skrede/argmin.git
     GIT_TAG        master
 )
-FetchContent_MakeAvailable(nablapp)
+FetchContent_MakeAvailable(argmin)
 
-target_link_libraries(my_app PRIVATE nablapp::nablapp)
+target_link_libraries(my_app PRIVATE argmin::argmin)
 ```
 
 ### find_package
@@ -55,8 +55,8 @@ target_link_libraries(my_app PRIVATE nablapp::nablapp)
 After `cmake --install`:
 
 ```cmake
-find_package(nablapp CONFIG REQUIRED)
-target_link_libraries(my_app PRIVATE nablapp::nablapp)
+find_package(argmin CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE argmin::argmin)
 ```
 
 ## Quickstart
@@ -64,16 +64,16 @@ target_link_libraries(my_app PRIVATE nablapp::nablapp)
 Minimise the 2-D Rosenbrock function with L-BFGS-B:
 
 ```cpp
-#include <nablapp/nablapp.h>
-#include <nablapp/solver/lbfgsb_policy.h>
-#include <nablapp/test_functions/rosenbrock.h>
+#include <argmin/argmin.h>
+#include <argmin/solver/lbfgsb_policy.h>
+#include <argmin/test_functions/rosenbrock.h>
 
 #include <Eigen/Core>
 #include <iostream>
 
 int main()
 {
-    using namespace nablapp;
+    using namespace argmin;
 
     rosenbrock<> problem{.n = 2};
     Eigen::VectorXd x0{{-1.2, 1.0}};
@@ -91,7 +91,7 @@ int main()
 }
 ```
 
-Bring your own problem by satisfying the `differentiable` concept (and `bound_constrained`, `equality_constrained`, `inequality_constrained` as appropriate). See `lib/nablapp/include/nablapp/formulation/concepts.h`.
+Bring your own problem by satisfying the `differentiable` concept (and `bound_constrained`, `equality_constrained`, `inequality_constrained` as appropriate). See `lib/argmin/include/argmin/formulation/concepts.h`.
 
 ## Step-level execution
 
@@ -108,13 +108,13 @@ This matters when the optimiser is one stage of a larger loop — IK with a fram
 ## Project layout
 
 ```
-lib/nablapp/include/nablapp/   public headers (header-only library)
+lib/argmin/include/argmin/   public headers (header-only library)
   solver/                      policies (lbfgsb, kraft_slsqp, cmaes, ...)
   detail/                      implementation details (BFGS variants, QR, QP, ...)
   test_functions/              Hock-Schittkowski, More-Garbow-Hillstrom, K&W test set
   formulation/                 problem concepts
 tests/                         unit and compile-time tests
-benchmarks/                    nablapp_bench (cross-library) and publish_bench (publication-grade)
+benchmarks/                    argmin_bench (cross-library) and publish_bench (publication-grade)
 ```
 
 ## Building tests and benchmarks
@@ -124,8 +124,8 @@ cmake --preset dev            # tests
 cmake --build build/dev
 ctest --test-dir build/dev
 
-cmake --preset bench          # nablapp_bench + publish_bench
-cmake --build build/bench --target nablapp_bench publish_bench
+cmake --preset bench          # argmin_bench + publish_bench
+cmake --build build/bench --target argmin_bench publish_bench
 ```
 
 ## Citations

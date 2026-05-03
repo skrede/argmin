@@ -10,7 +10,7 @@
 // Reference: N&W Algorithm 16.1, pp. 460-463 (active-set method).
 //            N&W Algorithm 16.3 (QR update via Givens rotations).
 
-#include "nablapp/detail/active_set_qp.h"
+#include "argmin/detail/active_set_qp.h"
 
 #include <Eigen/Core>
 
@@ -20,7 +20,7 @@
 #include <random>
 #include <vector>
 
-using namespace nablapp::detail;
+using namespace argmin::detail;
 
 namespace
 {

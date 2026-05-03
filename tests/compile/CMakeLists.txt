@@ -1,9 +1,9 @@
 add_executable(concept_satisfaction_test concept_satisfaction_test.cpp)
-target_link_libraries(concept_satisfaction_test PRIVATE nablapp::nablapp)
-target_compile_options(concept_satisfaction_test PRIVATE ${NABLAPP_TEST_RELEASE_FLAGS})
+target_link_libraries(concept_satisfaction_test PRIVATE argmin::argmin)
+target_compile_options(concept_satisfaction_test PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
 add_test(NAME concept_satisfaction_test COMMAND concept_satisfaction_test)
 
 add_executable(include_test include_test.cpp)
-target_link_libraries(include_test PRIVATE nablapp::nablapp)
-target_compile_options(include_test PRIVATE ${NABLAPP_TEST_RELEASE_FLAGS})
+target_link_libraries(include_test PRIVATE argmin::argmin)
+target_compile_options(include_test PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
 add_test(NAME include_test COMMAND include_test)

@@ -1,5 +1,5 @@
-#ifndef HPP_GUARD_NABLAPP_BENCHMARKS_BENCH_CERES_H
-#define HPP_GUARD_NABLAPP_BENCHMARKS_BENCH_CERES_H
+#ifndef HPP_GUARD_ARGMIN_BENCHMARKS_BENCH_CERES_H
+#define HPP_GUARD_ARGMIN_BENCHMARKS_BENCH_CERES_H
 
 #include "bench_config.h"
 #include "trace_entry.h"
@@ -7,7 +7,7 @@
 
 #include <vector>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 void run_ceres_benchmarks(std::vector<benchmark_result>& results,

@@ -1,12 +1,12 @@
-#include "nablapp/derivative/finite_difference.h"
-#include "nablapp/test_functions/rosenbrock.h"
-#include "nablapp/test_functions/booth.h"
+#include "argmin/derivative/finite_difference.h"
+#include "argmin/test_functions/rosenbrock.h"
+#include "argmin/test_functions/booth.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 TEST_CASE("fd_gradient on Rosenbrock", "[finite_difference]")
 {
@@ -59,7 +59,7 @@ namespace
 {
 struct half_norm_sq
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 3; }
     double value(const Eigen::VectorXd& x) const { return 0.5 * x.squaredNorm(); }

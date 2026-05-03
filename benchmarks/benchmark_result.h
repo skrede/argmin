@@ -1,14 +1,14 @@
-#ifndef HPP_GUARD_NABLAPP_BENCHMARKS_BENCHMARK_RESULT_H
-#define HPP_GUARD_NABLAPP_BENCHMARKS_BENCHMARK_RESULT_H
+#ifndef HPP_GUARD_ARGMIN_BENCHMARKS_BENCHMARK_RESULT_H
+#define HPP_GUARD_ARGMIN_BENCHMARKS_BENCHMARK_RESULT_H
 
-#include "nablapp/test_functions/problem_class.h"
+#include "argmin/test_functions/problem_class.h"
 
 #include <cstdint>
 #include <format>
 #include <string>
 #include <string_view>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 struct benchmark_result

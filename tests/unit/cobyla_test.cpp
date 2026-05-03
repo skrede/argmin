@@ -3,12 +3,12 @@
 // Validates concept satisfaction, basic convergence on a simple constrained
 // problem, HS024 convergence, and basic_solver_group compatibility.
 
-#include "nablapp/solver/cobyla_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/schedule/basic_solver_group.h"
-#include "nablapp/schedule/round_robin_schedule.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
-#include "nablapp/formulation/concepts.h"
+#include "argmin/solver/cobyla_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/schedule/basic_solver_group.h"
+#include "argmin/schedule/round_robin_schedule.h"
+#include "argmin/test_functions/hock_schittkowski.h"
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -18,13 +18,13 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
 
 // Simple constrained problem: minimise x0^2 + x1^2
-// subject to x0 + x1 >= 1 (nablapp: c >= 0)
+// subject to x0 + x1 >= 1 (argmin: c >= 0)
 // with box bounds [-10, 10]^2.
 //
 // Satisfies constrained_values && bound_constrained but NOT constrained
@@ -99,14 +99,14 @@ TEST_CASE("cobyla_policy: simple constrained 2D", "[cobyla]")
 TEST_CASE("cobyla_policy: HS024", "[cobyla][hs]")
 {
     // HS024 in 2D, f* = -1.0 at x* = (3, sqrt(3)). Pre-Phase-33-hotfix
-    // nablapp returned f = -0.30 with cv ~ 0 (silent wrong-optimum, the
+    // argmin returned f = -0.30 with cv ~ 0 (silent wrong-optimum, the
     // dominant motivator of the static-audit C1 finding). The previous
     // test bar `Approx(-1.0).margin(1.0)` and `cv < 0.5` was wide
     // enough to pass on that wrong answer.
     //
     // Phase 33 hotfix (Powell adaptive parmu + parmu-gated termination
     // + denormalized-simplex fix + tightened geometry threshold)
-    // moves nablapp to f = -0.652 with cv = 0 -- still not f*, but a
+    // moves argmin to f = -0.652 with cv = 0 -- still not f*, but a
     // 50% closure of the gap. The remaining gap to f* = -1.0 requires
     // the v0.3.x faithfulness rewrite (static-audit C2 trstlp,
     // C3 select-replacement-vertex, C10 geometry step). The bar below

@@ -1,9 +1,9 @@
-// Micro-benchmark: nablapp Levenberg-Marquardt on Rosenbrock least-squares.
+// Micro-benchmark: argmin Levenberg-Marquardt on Rosenbrock least-squares.
 //
 // lm_policy is unconstrained nonlinear least-squares with Nielsen (1999)
 // adaptive damping. NLopt has no direct L-M equivalent (LD_LBFGS /
 // LN_BOBYQA are not least-squares solvers), so this bench is
-// nablapp-only and focuses on per-step timing and the kkt_residual
+// argmin-only and focuses on per-step timing and the kkt_residual
 // regression probe. Profile numbers pair with micro_projected_gn.cpp
 // (same Rosenbrock residuals but with bound constraints) and
 // micro_projected_gradient_gn.cpp for relative cost of LM vs projected
@@ -14,8 +14,8 @@
 //            K&W Section 6.3-6.4 Algorithm 6.3 (Levenberg-Marquardt).
 //            N&W Section 10.2-10.3 (nonlinear least-squares).
 
-#include "nablapp/solver/lm_policy.h"
-#include "nablapp/solver/basic_solver.h"
+#include "argmin/solver/lm_policy.h"
+#include "argmin/solver/basic_solver.h"
 
 #include <Eigen/Core>
 
@@ -34,7 +34,7 @@ namespace
 // Unconstrained minimum at (1, 1), f* = 0.
 struct rosenbrock_ls
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
     int num_residuals() const { return 2; }
@@ -68,11 +68,11 @@ struct timing
     std::uint32_t evals;
 };
 
-timing bench_nablapp(std::uint32_t reps)
+timing bench_argmin(std::uint32_t reps)
 {
     rosenbrock_ls problem;
     Eigen::VectorXd x0{{-1.0, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-12);
     opts.set_objective_threshold(1e-14);
@@ -80,7 +80,7 @@ timing bench_nablapp(std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::lm_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::lm_policy{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -89,7 +89,7 @@ timing bench_nablapp(std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::lm_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::lm_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -113,15 +113,15 @@ bool probe_kkt_residual()
 {
     rosenbrock_ls problem;
     Eigen::VectorXd x0{{-1.0, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 40;
     opts.set_gradient_threshold(1e-12);
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    nablapp::basic_solver solver{nablapp::lm_policy{}, problem, x0, opts};
+    argmin::basic_solver solver{argmin::lm_policy{}, problem, x0, opts};
 
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -158,12 +158,12 @@ int main()
     std::println("\nRosenbrock 2D LS (unconstrained, analytic Jacobian), "
                  "{} repetitions each\n", reps);
 
-    auto na = bench_nablapp(reps);
+    auto na = bench_argmin(reps);
 
     std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}",
                  "solver", "wall (us)", "iters", "objective");
     std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}",
-                 "nablapp_lm", na.wall_us, na.evals, na.objective);
+                 "argmin_lm", na.wall_us, na.evals, na.objective);
 
     std::println("\nNow profile with:");
     std::println("  perf record -F 99999 -g -- ./micro_lm");

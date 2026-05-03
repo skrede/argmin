@@ -24,9 +24,9 @@ jobs:
       - name: Configure
         run: |
           cmake . -B build -A x64 `
-            -DNABLAPP_BUILD_TESTS=ON `
-            -DNABLAPP_BUILD_EXAMPLES=OFF `
-            -DNABLAPP_CMAKE_FETCH_DEPS=ON `
+            -DARGMIN_BUILD_TESTS=ON `
+            -DARGMIN_BUILD_EXAMPLES=OFF `
+            -DARGMIN_CMAKE_FETCH_DEPS=ON `
             '-DCMAKE_CXX_FLAGS=/std:c++latest /W4'
 
       - name: Build
@@ -47,7 +47,7 @@ jobs:
         run: |
           cmake . -B build -A x64 `
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install" `
-            -DNABLAPP_CMAKE_FETCH_DEPS=OFF `
+            -DARGMIN_CMAKE_FETCH_DEPS=OFF `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             '-DCMAKE_CXX_FLAGS=/std:c++latest'
 

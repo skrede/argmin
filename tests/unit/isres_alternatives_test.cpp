@@ -1,17 +1,17 @@
 // Tests for the ISRES alternative-variant policies (nlopt_faithful,
-// original_nablapp, runarsson_yao_paper). Covers (1) nlp_solver concept
+// original_argmin, runarsson_yao_paper). Covers (1) nlp_solver concept
 // satisfaction, (2) restarting_policy<variant>::rebind static_asserts,
 // (3) simple_constrained smoke runs, and (4) synthetic-state
 // ftol_reached emission tests per Runarsson-Yao 2005 termination
 // convention.
 
-#include "nablapp/solver/alternative/isres/nlopt_faithful_policy.h"
-#include "nablapp/solver/alternative/isres/original_nablapp_policy.h"
-#include "nablapp/solver/alternative/isres/runarsson_yao_paper_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/solver/restarting_policy.h"
-#include "nablapp/result/status.h"
-#include "nablapp/formulation/concepts.h"
+#include "argmin/solver/alternative/isres/nlopt_faithful_policy.h"
+#include "argmin/solver/alternative/isres/original_argmin_policy.h"
+#include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/restarting_policy.h"
+#include "argmin/result/status.h"
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -21,7 +21,7 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
@@ -72,7 +72,7 @@ struct simple_constrained
 static_assert(nlp_solver<
     basic_solver<alternative::isres::nlopt_faithful_policy<>>>);
 static_assert(nlp_solver<
-    basic_solver<alternative::isres::original_nablapp_policy<>>>);
+    basic_solver<alternative::isres::original_argmin_policy<>>>);
 static_assert(nlp_solver<
     basic_solver<alternative::isres::runarsson_yao_paper_policy<>>>);
 
@@ -90,9 +90,9 @@ static_assert(std::same_as<
 
 static_assert(std::same_as<
     restarting_policy<
-        alternative::isres::original_nablapp_policy<>>::rebind<3>,
+        alternative::isres::original_argmin_policy<>>::rebind<3>,
     restarting_policy<
-        alternative::isres::original_nablapp_policy<3>>>);
+        alternative::isres::original_argmin_policy<3>>>);
 
 static_assert(std::same_as<
     restarting_policy<
@@ -127,8 +127,8 @@ TEST_CASE("nlopt_faithful: simple_constrained smoke",
     CHECK(std::isfinite(result.objective_value));
 }
 
-TEST_CASE("original_nablapp: simple_constrained smoke",
-          "[isres][alternatives][original_nablapp]")
+TEST_CASE("original_argmin: simple_constrained smoke",
+          "[isres][alternatives][original_argmin]")
 {
     simple_constrained problem;
     Eigen::VectorXd x0{{2.0, 2.0}};
@@ -138,7 +138,7 @@ TEST_CASE("original_nablapp: simple_constrained smoke",
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    alternative::isres::original_nablapp_policy<> policy;
+    alternative::isres::original_argmin_policy<> policy;
     policy.options.seed = 42u;
 
     basic_solver solver{policy, problem, x0, opts};
@@ -282,15 +282,15 @@ TEST_CASE("nlopt_faithful: no ftol_reached on infeasible rank-0",
     CHECK_FALSE(sr.policy_status.has_value());
 }
 
-TEST_CASE("original_nablapp: never emits ftol_reached (frozen baseline)",
-          "[isres][alternatives][original_nablapp][status]")
+TEST_CASE("original_argmin: never emits ftol_reached (frozen baseline)",
+          "[isres][alternatives][original_argmin][status]")
 {
     simple_constrained problem;
     Eigen::VectorXd x0{{0.5, 0.5}};
     solver_options opts;
     opts.max_iterations = 1;
 
-    alternative::isres::original_nablapp_policy<> policy;
+    alternative::isres::original_argmin_policy<> policy;
     policy.options.seed = 42u;
 
     auto s = policy.init(problem, x0, opts);

@@ -1,14 +1,14 @@
-// Micro-benchmark: nablapp BOBYQA vs NLopt BOBYQA on HS problems.
+// Micro-benchmark: argmin BOBYQA vs NLopt BOBYQA on HS problems.
 //
-// Three-way comparison: nablapp<2> (fixed-N), nablapp<> (dynamic), NLopt.
+// Three-way comparison: argmin<2> (fixed-N), argmin<> (dynamic), NLopt.
 // Profiles per-solve wall time and eval counts for direct comparison.
 // Run under perf for flamegraph analysis:
 //   perf record -F 99999 -g -- ./micro_bobyqa
 //   perf report --stdio --percent-limit=1.0
 
-#include "nablapp/solver/bobyqa_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/bobyqa_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -33,8 +33,8 @@ struct timing
 // Dynamic-dimension HS001 wrapper for bobyqa_policy<> benchmarking.
 struct hs001_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass = nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass = argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
 
@@ -66,8 +66,8 @@ struct hs001_dynamic
 // Dynamic-dimension HS005 wrapper for bobyqa_policy<> benchmarking.
 struct hs005_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass = nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass = argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
 
@@ -109,10 +109,10 @@ double nlopt_hs005(unsigned, const double* x, double*, void*)
 }
 
 template <typename Policy, typename Problem>
-timing bench_nablapp(Policy policy, const Problem& problem, std::uint32_t reps)
+timing bench_argmin(Policy policy, const Problem& problem, std::uint32_t reps)
 {
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 5000;
     opts.set_gradient_threshold(1e-15);
     opts.set_objective_threshold(1e-10);
@@ -120,7 +120,7 @@ timing bench_nablapp(Policy policy, const Problem& problem, std::uint32_t reps)
 
     // Warmup.
     {
-        nablapp::basic_solver solver{policy, problem, x0, opts};
+        argmin::basic_solver solver{policy, problem, x0, opts};
         solver.solve();
     }
 
@@ -129,7 +129,7 @@ timing bench_nablapp(Policy policy, const Problem& problem, std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{policy, problem, x0, opts};
+        argmin::basic_solver solver{policy, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -229,11 +229,11 @@ int main()
     // HS001
     {
         std::println("\n--- HS001 (Rosenbrock variant, x1 >= -1.5) ---");
-        auto fixed = bench_nablapp(nablapp::bobyqa_policy<2>{}, nablapp::hs001<double>{}, reps);
-        auto dyn   = bench_nablapp(nablapp::bobyqa_policy<>{},  hs001_dynamic{}, reps);
+        auto fixed = bench_argmin(argmin::bobyqa_policy<2>{}, argmin::hs001<double>{}, reps);
+        auto dyn   = bench_argmin(argmin::bobyqa_policy<>{},  hs001_dynamic{}, reps);
         auto nlopt = bench_nlopt_hs001(reps);
-        print_row("nablapp<2>", fixed);
-        print_row("nablapp<>", dyn);
+        print_row("argmin<2>", fixed);
+        print_row("argmin<>", dyn);
         print_row("nlopt", nlopt);
         std::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);
@@ -244,11 +244,11 @@ int main()
     // HS005
     {
         std::println("\n--- HS005 (trigonometric, tight bounds) ---");
-        auto fixed = bench_nablapp(nablapp::bobyqa_policy<2>{}, nablapp::hs005<double>{}, reps);
-        auto dyn   = bench_nablapp(nablapp::bobyqa_policy<>{},  hs005_dynamic{}, reps);
+        auto fixed = bench_argmin(argmin::bobyqa_policy<2>{}, argmin::hs005<double>{}, reps);
+        auto dyn   = bench_argmin(argmin::bobyqa_policy<>{},  hs005_dynamic{}, reps);
         auto nlopt = bench_nlopt_hs005(reps);
-        print_row("nablapp<2>", fixed);
-        print_row("nablapp<>", dyn);
+        print_row("argmin<2>", fixed);
+        print_row("argmin<>", dyn);
         print_row("nlopt", nlopt);
         std::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);

@@ -1,5 +1,5 @@
 // Tests for the rho/wval GCMMA variant
-// (nablapp::alternative::gcmma::rho_wval_policy).
+// (argmin::alternative::gcmma::rho_wval_policy).
 //
 // NLopt-mma.c-style globalization: rho-augmented MMA approximation
 // with wval-based rho-growth on non-conservative trials. Numerical
@@ -12,9 +12,9 @@
 // comparison in the published benchmark suite captures the
 // quantitative trade-off.
 
-#include "nablapp/solver/alternative/gcmma/rho_wval_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/alternative/gcmma/rho_wval_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -24,7 +24,7 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 TEST_CASE("gcmma rho-wval converges on HS024", "[gcmma_rho_wval]")
 {

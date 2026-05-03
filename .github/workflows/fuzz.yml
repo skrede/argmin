@@ -35,8 +35,8 @@ jobs:
           cmake -B build
           -DCMAKE_C_COMPILER=clang
           -DCMAKE_CXX_COMPILER=clang++
-          -DNABLAPP_BUILD_FUZZ_TESTS=ON
-          -DNABLAPP_CMAKE_FETCH_DEPS=ON
+          -DARGMIN_BUILD_FUZZ_TESTS=ON
+          -DARGMIN_CMAKE_FETCH_DEPS=ON
 
       - name: Build fuzz targets
         run: cmake --build build -j$(nproc)

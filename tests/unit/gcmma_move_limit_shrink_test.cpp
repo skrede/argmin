@@ -1,5 +1,5 @@
 // Tests for the move-limit-shrink GCMMA variant
-// (nablapp::alternative::gcmma::move_limit_shrink_policy).
+// (argmin::alternative::gcmma::move_limit_shrink_policy).
 //
 // This is one of three GCMMA conservativity-globalization variants kept
 // in solver/alternative/gcmma/ for empirical comparison. Production
@@ -12,9 +12,9 @@
 // in the published benchmark suite captures the actual convergence
 // behavior across all three variants on the full problem set.
 
-#include "nablapp/solver/alternative/gcmma/move_limit_shrink_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/alternative/gcmma/move_limit_shrink_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -24,7 +24,7 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 // HS024 (n=2, m=3 inequality + bound, f* = -1). Move-limit-shrink
 // converges fully on this problem.

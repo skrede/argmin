@@ -1,11 +1,11 @@
-#include "nablapp/solver/cmaes_policy.h"
-#include "nablapp/solver/alternative/cmaes/repair_l2_penalty_policy.h"
-#include "nablapp/solver/alternative/cmaes/pwq_reparameterization_policy.h"
-#include "nablapp/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/rosenbrock.h"
-#include "nablapp/test_functions/rastrigin.h"
-#include "nablapp/formulation/concepts.h"
+#include "argmin/solver/cmaes_policy.h"
+#include "argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h"
+#include "argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h"
+#include "argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/rosenbrock.h"
+#include "argmin/test_functions/rastrigin.h"
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -18,7 +18,7 @@
 #include <stdexcept>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
@@ -33,7 +33,7 @@ struct bounded_rosenbrock
     Eigen::VectorXd lb;
     Eigen::VectorXd ub;
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return n; }
 
@@ -301,7 +301,7 @@ struct flat_bounded
     double lower_bound{-5.0};
     double upper_bound{5.0};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return n; }
 
@@ -390,7 +390,7 @@ TEST_CASE("cmaes_policy: ipop stagnation_window_min recompute", "[cmaes]")
     // Hansen 2023 (arXiv:1604.00772) section B.3 specifies the Stagnation
     // minimum window as 120 + ceil(30 * n / lambda) with an explicit
     // dependence on the CURRENT lambda. libcmaes recomputes this implicitly
-    // every iteration via the _max_hist cap. nablapp computes it once in
+    // every iteration via the _max_hist cap. argmin computes it once in
     // init(); on an IPOP restart lambda doubles and the window must be
     // recomputed against the new lambda. This test pins both the init-time
     // value and the post-restart value and is the regression guard for the
@@ -899,7 +899,7 @@ TEST_CASE("cmaes_policy: ipop mean reset to x0 on restart", "[cmaes]")
     //
     // libcmaes implements §III via reset_search_state() ->
     // CMASolutions(Parameters&), where _xmean = p._x0min when x0 is a fixed
-    // single point (cmasolutions.cc:49). nablapp mirrors this by storing
+    // single point (cmasolutions.cc:49). argmin mirrors this by storing
     // x0 in s.x0 at init() and writing s.mean = s.x0 in the IPOP restart
     // branch. This test pins that contract.
     //

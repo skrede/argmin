@@ -1,24 +1,24 @@
-// Micro-benchmark: nablapp MMA vs NLopt LD_MMA on inequality-constrained HS problems.
+// Micro-benchmark: argmin MMA vs NLopt LD_MMA on inequality-constrained HS problems.
 //
 // MMA handles inequality constraints only, using gradient-based convex
 // separable approximations with moving asymptotes.
 //
 // Threshold convention: relative objective tolerance (1e-12) matches
 // NLopt's ftol_rel on LD_MMA; previously an absolute threshold caused
-// nablapp to exit earlier than NLopt by construction and made post-fix
+// argmin to exit earlier than NLopt by construction and made post-fix
 // measurements uninterpretable.
 //
 // Reference: Svanberg 1987, "The method of moving asymptotes --
 //            a new method for structural optimization";
 //            NLopt 2.10.0 src/algs/mma/mma.c (ftol_rel convention).
 
-#include "nablapp/solver/mma_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/solver/ccsa_quadratic_policy.h"
-#include "nablapp/solver/alternative/gcmma/rho_wval_policy.h"
-#include "nablapp/solver/alternative/gcmma/raa_augmented_policy.h"
-#include "nablapp/solver/alternative/gcmma/move_limit_shrink_policy.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/mma_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/ccsa_quadratic_policy.h"
+#include "argmin/solver/alternative/gcmma/rho_wval_policy.h"
+#include "argmin/solver/alternative/gcmma/raa_augmented_policy.h"
+#include "argmin/solver/alternative/gcmma/move_limit_shrink_policy.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include "counting_problem.h"
 
@@ -39,7 +39,7 @@ struct timing
 {
     double wall_us;
     double objective;
-    std::uint32_t iters;     // outer iters (counts.g for nablapp; grad-bearing obj calls for nlopt)
+    std::uint32_t iters;     // outer iters (counts.g for argmin; grad-bearing obj calls for nlopt)
     std::uint32_t f_evals;   // total obj-callback count
     std::uint32_t inner;     // f_evals - iters: conservativity-loop trials
 };
@@ -56,9 +56,9 @@ struct nlopt_counts
 // Dynamic-dimension HS024 wrapper (inequality, n=2).
 struct hs024_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::inequality | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::inequality | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -116,8 +116,8 @@ struct hs024_dynamic
 // Dynamic-dimension HS043 wrapper (inequality, n=4).
 struct hs043_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass = nablapp::problem_class::inequality;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass = argmin::problem_class::inequality;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -275,9 +275,9 @@ double nlopt_hs043_ineq2(unsigned, const double* x, double* grad, void*)
 // Dynamic-dimension HS076 wrapper (inequality, n=4, x >= 0, f* = -4.6818..).
 struct hs076_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::inequality | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::inequality | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -368,23 +368,23 @@ double nlopt_hs076_ineq2(unsigned, const double* x, double* grad, void*)
 }
 
 template <typename Policy, typename Problem>
-timing bench_nablapp(const Problem& problem, std::uint32_t reps)
+timing bench_argmin(const Problem& problem, std::uint32_t reps)
 {
     auto x0 = problem.initial_point();
     // NLopt-parity convergence: ftol_rel + xtol_rel via
     // slsqp_compatible_convergence so cross-bench measurements are
     // meaningful.
-    nablapp::solver_options<nablapp::slsqp_compatible_convergence> opts;
+    argmin::solver_options<argmin::slsqp_compatible_convergence> opts;
     opts.max_iterations = 5000;
     opts.set_objective_threshold_rel(1e-12);
     opts.set_step_threshold_rel(1e-12);
 
-    nablapp::bench::eval_counts counts;
-    nablapp::bench::counting_problem<Problem> wrapped{problem, counts};
+    argmin::bench::eval_counts counts;
+    argmin::bench::counting_problem<Problem> wrapped{problem, counts};
 
     // Warmup.
     {
-        nablapp::basic_solver solver{Policy{}, wrapped, x0, opts};
+        argmin::basic_solver solver{Policy{}, wrapped, x0, opts};
         solver.solve();
     }
 
@@ -395,7 +395,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         counts.reset();
-        nablapp::basic_solver solver{Policy{}, wrapped, x0, opts};
+        argmin::basic_solver solver{Policy{}, wrapped, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         outer_g = static_cast<std::uint32_t>(counts.g);
@@ -542,7 +542,7 @@ int main()
 {
     constexpr std::uint32_t reps = 20;
     std::println("MMA micro-benchmark, {} repetitions each\n", reps);
-    std::println("  iters  = outer iters (nablapp counts.g | nlopt grad-bearing obj calls)");
+    std::println("  iters  = outer iters (argmin counts.g | nlopt grad-bearing obj calls)");
     std::println("  f_evals = total obj-callback count");
     std::println("  inner  = f_evals - iters (conservativity-loop trials)");
     std::println("  in/it  = inner / iters (avg conservativity trials per outer)");
@@ -550,7 +550,7 @@ int main()
         "solver", "wall (us)", "iters", "f_evals", "inner", "in/it", "objective");
 
     // 7-way comparison per problem:
-    //   nablapp policies (5):
+    //   argmin policies (5):
     //     - mma             (Svanberg 1987 plain reciprocal)
     //     - ccsa_quadratic  (Svanberg 2002 §4.2 quadratic, current production)
     //     - shrink          (alt: move-limit shrinkage GCMMA variant)
@@ -562,17 +562,17 @@ int main()
                              auto nlopt_runner) {
         std::println("\n=== {} ===", name);
         print_row("mma",
-            bench_nablapp<nablapp::mma_policy<>>(problem_factory(), reps));
+            bench_argmin<argmin::mma_policy<>>(problem_factory(), reps));
         print_row("ccsa_quadratic",
-            bench_nablapp<nablapp::ccsa_quadratic_policy<>>(problem_factory(), reps));
+            bench_argmin<argmin::ccsa_quadratic_policy<>>(problem_factory(), reps));
         print_row("shrink",
-            bench_nablapp<nablapp::alternative::gcmma::move_limit_shrink_policy<>>(
+            bench_argmin<argmin::alternative::gcmma::move_limit_shrink_policy<>>(
                 problem_factory(), reps));
         print_row("rho_wval",
-            bench_nablapp<nablapp::alternative::gcmma::rho_wval_policy<>>(
+            bench_argmin<argmin::alternative::gcmma::rho_wval_policy<>>(
                 problem_factory(), reps));
         print_row("raa_augmented",
-            bench_nablapp<nablapp::alternative::gcmma::raa_augmented_policy<>>(
+            bench_argmin<argmin::alternative::gcmma::raa_augmented_policy<>>(
                 problem_factory(), reps));
         print_row("nlopt_ccsaq", nlopt_runner(reps));
     };

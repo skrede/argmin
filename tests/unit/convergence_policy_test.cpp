@@ -8,17 +8,17 @@
 // Reference: N&W 2e Section 2.2, K&W 2e Section 2.3,
 //            N&W 2e Definition 12.1 (KKT primal feasibility).
 
-#include "nablapp/detail/lagrangian.h"
-#include "nablapp/solver/options.h"
-#include "nablapp/solver/convergence.h"
+#include "argmin/detail/lagrangian.h"
+#include "argmin/solver/options.h"
+#include "argmin/solver/convergence.h"
 
-#include "nablapp/result/status.h"
-#include "nablapp/result/step_result.h"
+#include "argmin/result/status.h"
+#include "argmin/result/step_result.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-using namespace nablapp;
+using namespace argmin;
 
 // -- Test 1: gradient_tolerance_criterion fires on small gradient --
 

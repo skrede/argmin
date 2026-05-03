@@ -1,8 +1,8 @@
-#include "nablapp/solver/augmented_lagrangian_policy.h"
-#include "nablapp/solver/bobyqa_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
-#include "nablapp/formulation/concepts.h"
+#include "argmin/solver/augmented_lagrangian_policy.h"
+#include "argmin/solver/bobyqa_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -13,7 +13,7 @@
 #include <cstdint>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 TEST_CASE("augmented lagrangian converges on HS076", "[augmented_lagrangian]")
 {

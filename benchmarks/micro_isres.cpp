@@ -1,11 +1,11 @@
-// Micro-benchmark: nablapp ISRES variants vs NLopt GN_ISRES.
+// Micro-benchmark: argmin ISRES variants vs NLopt GN_ISRES.
 //
 // Multi-variant comparison harness covering all four ISRES policies that
 // ship in the project:
 //   - isres_policy<>                    (production alias; currently
 //                                        nlopt_faithful_policy)
 //   - alternative::isres::nlopt_faithful_policy<>     (NLopt isres.c form)
-//   - alternative::isres::original_nablapp_policy<>   (frozen baseline,
+//   - alternative::isres::original_argmin_policy<>   (frozen baseline,
 //                                                      pre-rewrite)
 //   - alternative::isres::runarsson_yao_paper_policy<>(paper-form DE)
 // plus the NLopt GN_ISRES control.
@@ -31,13 +31,13 @@
 //     Strategies).
 //   NLopt 2.10.0 isres.c (Steven G. Johnson 2009).
 
-#include "nablapp/solver/isres_policy.h"
-#include "nablapp/solver/alternative/isres/nlopt_faithful_policy.h"
-#include "nablapp/solver/alternative/isres/original_nablapp_policy.h"
-#include "nablapp/solver/alternative/isres/runarsson_yao_paper_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/rastrigin.h"
-#include "nablapp/test_functions/schwefel.h"
+#include "argmin/solver/isres_policy.h"
+#include "argmin/solver/alternative/isres/nlopt_faithful_policy.h"
+#include "argmin/solver/alternative/isres/original_argmin_policy.h"
+#include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/rastrigin.h"
+#include "argmin/test_functions/schwefel.h"
 
 #include <Eigen/Core>
 
@@ -77,9 +77,9 @@ struct rastrigin_box
 {
     int n;
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::global | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::global | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return n; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -119,9 +119,9 @@ struct schwefel_box
 {
     int n;
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::global | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::global | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return n; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -167,9 +167,9 @@ struct schwefel_box
 // init.
 struct hs006_box
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::equality | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::equality | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -208,9 +208,9 @@ struct hs006_box
 // region; the optimum sits well inside.
 struct hs024_box
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::inequality | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::inequality | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -252,9 +252,9 @@ struct hs024_box
 // f* = 1/9. Box [0, 10]^3.
 struct hs035_box
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::inequality | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::inequality | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 3; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -295,9 +295,9 @@ struct hs035_box
 // support).
 struct hs076_box
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::inequality | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::inequality | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -341,9 +341,9 @@ struct hs076_box
 // may exhaust the budget and fall back to clamp.
 struct bounds_degenerate
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::global | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::global | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -418,7 +418,7 @@ void nlopt_ineq_mcallback(unsigned m, double* result,
         xv[static_cast<int>(i)] = x[i];
     Eigen::VectorXd c(static_cast<int>(p.num_equality() + p.num_inequality()));
     p.constraints(xv, c);
-    // nablapp convention: c_ineq[i] >= 0 feasible. NLopt convention:
+    // argmin convention: c_ineq[i] >= 0 feasible. NLopt convention:
     // ineq result[i] <= 0 feasible. Negate to translate.
     const int n_eq = p.num_equality();
     for(unsigned i = 0; i < m; ++i)
@@ -512,15 +512,15 @@ timing bench_nlopt(const Problem& problem, std::uint32_t reps,
 }
 
 // ---------------------------------------------------------------------
-// Templated nablapp bench harness.
+// Templated argmin bench harness.
 // ---------------------------------------------------------------------
 
 template <typename Policy, typename Problem>
-timing bench_nablapp(const Problem& problem, std::uint32_t reps,
+timing bench_argmin(const Problem& problem, std::uint32_t reps,
                      std::uint32_t seed_start, std::uint32_t seed_count)
 {
     const auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 50000;
     opts.set_objective_threshold(1e-6);
     opts.set_step_threshold(1e-12);
@@ -535,7 +535,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps,
     {
         Policy policy;
         policy.options.seed = seed_start;
-        nablapp::basic_solver solver{policy, problem, x0, opts};
+        argmin::basic_solver solver{policy, problem, x0, opts};
         solver.solve();
     }
 
@@ -552,7 +552,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps,
         for(std::uint32_t r = 0; r < reps; ++r)
         {
             const auto t0 = std::chrono::high_resolution_clock::now();
-            nablapp::basic_solver solver{policy, problem, x0, opts};
+            argmin::basic_solver solver{policy, problem, x0, opts};
             const auto result = solver.solve();
             const auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -656,7 +656,7 @@ int main(int argc, char** argv)
     std::println("  Variants per problem (5 rows):");
     std::println("    1. isres (production alias) -> alternative::isres::nlopt_faithful_policy");
     std::println("    2. nlopt_faithful           -> alternative::isres::nlopt_faithful_policy");
-    std::println("    3. original_nablapp         -> alternative::isres::original_nablapp_policy (frozen baseline)");
+    std::println("    3. original_argmin         -> alternative::isres::original_argmin_policy (frozen baseline)");
     std::println("    4. runarsson_yao_paper      -> alternative::isres::runarsson_yao_paper_policy");
     std::println("    5. nlopt_isres              -> NLopt 2.10.0 GN_ISRES (control; z-score reference)");
 
@@ -668,21 +668,21 @@ int main(int argc, char** argv)
 
         const auto nlopt_t = bench_nlopt(problem, reps, seed_start, seed_count);
 
-        const auto t_alias = bench_nablapp<nablapp::isres_policy<>>(
+        const auto t_alias = bench_argmin<argmin::isres_policy<>>(
             problem, reps, seed_start, seed_count);
-        const auto t_faith = bench_nablapp<
-            nablapp::alternative::isres::nlopt_faithful_policy<>>(
+        const auto t_faith = bench_argmin<
+            argmin::alternative::isres::nlopt_faithful_policy<>>(
                 problem, reps, seed_start, seed_count);
-        const auto t_orig = bench_nablapp<
-            nablapp::alternative::isres::original_nablapp_policy<>>(
+        const auto t_orig = bench_argmin<
+            argmin::alternative::isres::original_argmin_policy<>>(
                 problem, reps, seed_start, seed_count);
-        const auto t_paper = bench_nablapp<
-            nablapp::alternative::isres::runarsson_yao_paper_policy<>>(
+        const auto t_paper = bench_argmin<
+            argmin::alternative::isres::runarsson_yao_paper_policy<>>(
                 problem, reps, seed_start, seed_count);
 
         print_row("isres (production alias)", t_alias, nlopt_t);
         print_row("nlopt_faithful", t_faith, nlopt_t);
-        print_row("original_nablapp", t_orig, nlopt_t);
+        print_row("original_argmin", t_orig, nlopt_t);
         print_row("runarsson_yao_paper", t_paper, nlopt_t);
         print_row("nlopt_isres", nlopt_t, nlopt_t);
     };

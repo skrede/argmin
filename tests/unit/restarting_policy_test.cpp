@@ -15,11 +15,11 @@
 //            algorithm); Hansen (2023), "The CMA Evolution Strategy:
 //            A Tutorial", arXiv:1604.00772 §B.5 (reproducibility).
 
-#include "nablapp/solver/restarting_policy.h"
-#include "nablapp/solver/cmaes_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/detail/cmaes_constants.h"
-#include "nablapp/formulation/concepts.h"
+#include "argmin/solver/restarting_policy.h"
+#include "argmin/solver/cmaes_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/detail/cmaes_constants.h"
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -29,7 +29,7 @@
 #include <cmath>
 #include <cstdint>
 
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
@@ -41,7 +41,7 @@ namespace
 // project's seed/backlog tracker).
 struct bounded_ackley
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int n{2};
     Eigen::VectorXd lb;
@@ -110,7 +110,7 @@ TEST_CASE("restarting_policy bit-identity within process", "[restarting_policy][
     opts.set_step_threshold(1e-30);
 
     auto run_once = [&]() {
-        // Default-constructed decorator -- mirrors bench_nablapp.h
+        // Default-constructed decorator -- mirrors bench_argmin.h
         // wiring of the `restarting_cmaes` row. The fix at
         // restarting_policy::init() must guarantee a deterministic
         // inner seed in this exact configuration; without it, the
@@ -253,7 +253,7 @@ TEST_CASE("restarting_policy: lambda bump propagates to inner params after reset
     // form of the F-R-01 contract -- not just "lambda updated" but
     // "every dependent strategy parameter (mu, mueff, c_sigma,
     // d_sigma, c_c, c_1, c_mu, weights, chi_n) refreshed".
-    const auto reference = nablapp::detail::compute_constants<double>(
+    const auto reference = argmin::detail::compute_constants<double>(
         static_cast<int>(state.dimension),
         static_cast<int>(new_lambda));
     REQUIRE(params_after.lambda == reference.lambda);

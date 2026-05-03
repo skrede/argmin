@@ -1,4 +1,4 @@
-// dlib comparison benchmarks for nablapp benchmark suite.
+// dlib comparison benchmarks for argmin benchmark suite.
 //
 // Each dlib solver is benchmarked on applicable problems using dlib's native
 // API (per D-01: no common adapter interface). Results are collected as
@@ -19,13 +19,13 @@
 // only bound-constrained and global problems are benchmarked.
 //
 // NOTE: This file is only compiled when dlib is found via find_package
-// (controlled by NABLAPP_HAS_DLIB compile definition from CMake).
+// (controlled by ARGMIN_HAS_DLIB compile definition from CMake).
 
 #include "bench_dlib.h"
 #include "counting_problem.h"
 #include "problem_registry.h"
 
-#include "nablapp/formulation/concepts.h"
+#include "argmin/formulation/concepts.h"
 
 #include <dlib/global_optimization.h>
 #include <dlib/matrix.h>
@@ -36,7 +36,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nablapp::bench
+namespace argmin::bench
 {
 
 namespace detail

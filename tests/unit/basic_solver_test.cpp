@@ -1,13 +1,13 @@
 #include "mock_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/solver/convergence.h"
-#include "nablapp/result/status.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/convergence.h"
+#include "argmin/result/status.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 // Dummy problem type -- mock_policy ignores it, but basic_solver needs one.
 struct quadratic

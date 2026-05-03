@@ -1,8 +1,8 @@
-#include "nablapp/detail/halton.h"
-#include "nablapp/solver/multistart_policy.h"
-#include "nablapp/solver/bobyqa_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/formulation/concepts.h"
+#include "argmin/detail/halton.h"
+#include "argmin/solver/multistart_policy.h"
+#include "argmin/solver/bobyqa_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -12,7 +12,7 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {

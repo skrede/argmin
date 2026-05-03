@@ -1,8 +1,8 @@
-#include "nablapp/solver/kraft_slsqp_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/formulation/concepts.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
-#include "nablapp/test_functions/rosenbrock.h"
+#include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/formulation/concepts.h"
+#include "argmin/test_functions/hock_schittkowski.h"
+#include "argmin/test_functions/rosenbrock.h"
 
 #include <Eigen/Core>
 
@@ -13,7 +13,7 @@
 #include <limits>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
@@ -22,7 +22,7 @@ namespace
 // Solution: (0.5, 0.5), f* = 0.5.
 struct equality_quadratic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
 
@@ -59,9 +59,9 @@ struct equality_quadratic
 // Inequality convention: c_ineq(x) >= 0, so c_ineq = 2 - x0^2 - x1^2.
 struct ineq_rosenbrock
 {
-    nablapp::rosenbrock<> inner{.n = 2};
+    argmin::rosenbrock<> inner{.n = 2};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
 
@@ -92,9 +92,9 @@ struct ineq_rosenbrock
 // Box-constrained Rosenbrock: 0 <= x <= 0.8.
 struct box_rosenbrock
 {
-    nablapp::rosenbrock<> inner{.n = 2};
+    argmin::rosenbrock<> inner{.n = 2};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
 
@@ -119,9 +119,9 @@ struct box_rosenbrock
 // Box-constrained Rosenbrock for liepp-like budget test.
 struct liepp_box_rosenbrock
 {
-    nablapp::rosenbrock<> inner{.n = 2};
+    argmin::rosenbrock<> inner{.n = 2};
 
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
 
@@ -423,12 +423,12 @@ TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
     // x0 = (1, 5, 5, 1), f* = 17.0140173 at (1, 4.7430, 3.8211, 1.3794).
     //
     // Reference: NLopt LD_SLSQP converges in ~6 iterations to 1e-10.
-    // nablapp's kraft_slsqp reaches the same iteration-count order
+    // argmin's kraft_slsqp reaches the same iteration-count order
     // (~8 iters on the benchmark, ~50 iters to reach the tight
     // margin) with the Kraft LSQ/LSEI QP solver and dense BFGS
     // introduced in plan 24.1-02. The tight 1e-4 margin that NLopt
     // achieves is deferred; this test locks in the current
-    // nablapp baseline: HS071 must not diverge and must stay near
+    // argmin baseline: HS071 must not diverge and must stay near
     // the optimum with a modest feasibility violation.
     //
     // Plan 24.1-02 requirement KRAFT-QP-03 (HS071 without feasibility

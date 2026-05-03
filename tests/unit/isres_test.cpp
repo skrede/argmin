@@ -4,17 +4,17 @@
 // selection preference, restarting_policy composition with cmaes_policy
 // and isres_policy, and basic_solver_group compatibility.
 
-#include "nablapp/solver/isres_policy.h"
-#include "nablapp/solver/alternative/isres/nlopt_faithful_policy.h"
-#include "nablapp/solver/alternative/isres/original_nablapp_policy.h"
-#include "nablapp/solver/alternative/isres/runarsson_yao_paper_policy.h"
-#include "nablapp/solver/restarting_policy.h"
-#include "nablapp/solver/cmaes_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/schedule/basic_solver_group.h"
-#include "nablapp/schedule/round_robin_schedule.h"
-#include "nablapp/test_functions/rosenbrock.h"
-#include "nablapp/formulation/concepts.h"
+#include "argmin/solver/isres_policy.h"
+#include "argmin/solver/alternative/isres/nlopt_faithful_policy.h"
+#include "argmin/solver/alternative/isres/original_argmin_policy.h"
+#include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
+#include "argmin/solver/restarting_policy.h"
+#include "argmin/solver/cmaes_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/schedule/basic_solver_group.h"
+#include "argmin/schedule/round_robin_schedule.h"
+#include "argmin/test_functions/rosenbrock.h"
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -24,7 +24,7 @@
 #include <cmath>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
@@ -117,9 +117,9 @@ static_assert(std::same_as<
         alternative::isres::nlopt_faithful_policy<3>>>);
 static_assert(std::same_as<
     restarting_policy<
-        alternative::isres::original_nablapp_policy<>>::rebind<3>,
+        alternative::isres::original_argmin_policy<>>::rebind<3>,
     restarting_policy<
-        alternative::isres::original_nablapp_policy<3>>>);
+        alternative::isres::original_argmin_policy<3>>>);
 static_assert(std::same_as<
     restarting_policy<
         alternative::isres::runarsson_yao_paper_policy<>>::rebind<3>,

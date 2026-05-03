@@ -1,7 +1,7 @@
-// Micro-benchmark: nablapp CMA-ES vs libcmaes CMAES_DEFAULT on global problems.
+// Micro-benchmark: argmin CMA-ES vs libcmaes CMAES_DEFAULT on global problems.
 //
-// Three-way comparison: nablapp<N> (fixed-N), nablapp<> (dynamic), libcmaes
-// CMAES_DEFAULT. IPOP restarts enabled for nablapp variants -- essential for
+// Three-way comparison: argmin<N> (fixed-N), argmin<> (dynamic), libcmaes
+// CMAES_DEFAULT. IPOP restarts enabled for argmin variants -- essential for
 // multimodal landscape coverage.
 //
 // Comparator switched from NLopt's controlled-random-search global
@@ -10,7 +10,7 @@
 // libcmaes head-to-head is the canonical comparator (see benchmarks/
 // bench_libcmaes.{h,cpp}, commit 0c30662). Aligning the micro-bench
 // with the publish_bench adapter wiring means per-step z-score numbers
-// compare nablapp_cmaes against same-class same-algorithm. Reference:
+// compare argmin_cmaes against same-class same-algorithm. Reference:
 // Hansen (2023) arXiv:1604.00772; Auger & Hansen (2005) IPOP-CMA-ES.
 //
 // Vanilla-weights default (Plan 02 of phase 34.2): the rank-mu
@@ -38,14 +38,14 @@
 //   perf record -F 99999 -g -- ./micro_cmaes
 //   perf report --stdio --percent-limit=1.0
 
-#include "nablapp/solver/cmaes_policy.h"
-#include "nablapp/solver/alternative/cmaes/repair_l2_penalty_policy.h"
-#include "nablapp/solver/alternative/cmaes/pwq_reparameterization_policy.h"
-#include "nablapp/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/ackley.h"
-#include "nablapp/test_functions/rastrigin.h"
-#include "nablapp/result/status.h"
+#include "argmin/solver/cmaes_policy.h"
+#include "argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h"
+#include "argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h"
+#include "argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/ackley.h"
+#include "argmin/test_functions/rastrigin.h"
+#include "argmin/result/status.h"
 
 #include "counting_problem.h"
 
@@ -75,7 +75,7 @@ struct timing
 
 // Smooth quadratic centered at the origin used by the TolFun-bound
 // regression cell at the bottom of main(). Defined at file scope so it
-// satisfies the structural requirements of nablapp's `objective` concept
+// satisfies the structural requirements of argmin's `objective` concept
 // (a class type with the required constexpr static members) without the
 // local-class restriction that forbids constexpr static data members.
 struct smooth_quadratic_2d
@@ -117,8 +117,8 @@ template <int N>
 struct bounded_rosenbrock
 {
     static constexpr int problem_dimension = N;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::global | nablapp::problem_class::bound_constrained;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::global | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return N; }
 
@@ -157,9 +157,9 @@ struct bounded_rosenbrock
 // Dynamic-dimension bounded Rosenbrock (for cmaes_policy<>).
 struct bounded_rosenbrock_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::global | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::global | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 2; }
 
@@ -187,11 +187,11 @@ struct bounded_rosenbrock_dynamic
 };
 
 template <typename Policy, typename Problem>
-timing bench_nablapp(Policy policy, const Problem& problem,
+timing bench_argmin(Policy policy, const Problem& problem,
                      std::uint32_t reps, std::uint32_t max_iter)
 {
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = max_iter;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-12);
@@ -203,7 +203,7 @@ timing bench_nablapp(Policy policy, const Problem& problem,
 
     // Warmup.
     {
-        nablapp::basic_solver solver{policy, problem, x0, opts, cmaes_opts};
+        argmin::basic_solver solver{policy, problem, x0, opts, cmaes_opts};
         solver.solve();
     }
 
@@ -212,7 +212,7 @@ timing bench_nablapp(Policy policy, const Problem& problem,
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{policy, problem, x0, opts, cmaes_opts};
+        argmin::basic_solver solver{policy, problem, x0, opts, cmaes_opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -227,7 +227,7 @@ timing bench_nablapp(Policy policy, const Problem& problem,
 // sigma initialization mirrors that adapter: max(ub - lb) / 3 (Hansen 2023
 // recommends sigma in [search_range / 4, search_range / 3]). lambda is
 // passed as -1 so libcmaes auto-computes 4 + floor(3*ln(n)), matching
-// libcmaes's own default tuning rather than imposing nablapp's lambda
+// libcmaes's own default tuning rather than imposing argmin's lambda
 // choice across the boundary.
 timing bench_libcmaes_cma(int n, libcmaes::FitFunc obj,
                           const std::vector<double>& x0,
@@ -300,14 +300,14 @@ int main()
     // Rastrigin 2D
     {
         std::println("\n--- Rastrigin 2D (global minimum at 0, multimodal) ---");
-        nablapp::rastrigin<double, 2> fixed_prob;
-        nablapp::rastrigin<double>    dyn_prob{.n = 2};
-        auto fixed = bench_nablapp(nablapp::cmaes_policy<2>{}, fixed_prob, reps, 10000);
-        auto dyn   = bench_nablapp(nablapp::cmaes_policy<>{},  dyn_prob,  reps, 10000);
+        argmin::rastrigin<double, 2> fixed_prob;
+        argmin::rastrigin<double>    dyn_prob{.n = 2};
+        auto fixed = bench_argmin(argmin::cmaes_policy<2>{}, fixed_prob, reps, 10000);
+        auto dyn   = bench_argmin(argmin::cmaes_policy<>{},  dyn_prob,  reps, 10000);
         auto libc  = bench_libcmaes_cma(2, rastrigin_libcmaes,
             {2.5, 2.5}, {-5.12, -5.12}, {5.12, 5.12}, reps, 10000);
-        print_row("nablapp<2>", fixed);
-        print_row("nablapp<>", dyn);
+        print_row("argmin<2>", fixed);
+        print_row("argmin<>", dyn);
         print_row("libcmaes_cmaes", libc);
         std::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
@@ -325,15 +325,15 @@ int main()
     // Reference: 34.2-03-AB-RESULT.md verdict doc.
     {
         std::println("\n--- Rastrigin 2D boundary-handling variant A/B ---");
-        nablapp::rastrigin<double> dyn_prob{.n = 2};
-        auto repair_l2 = bench_nablapp(
-            nablapp::alternative::cmaes::repair_l2_penalty_policy<>{},
+        argmin::rastrigin<double> dyn_prob{.n = 2};
+        auto repair_l2 = bench_argmin(
+            argmin::alternative::cmaes::repair_l2_penalty_policy<>{},
             dyn_prob, reps, 10000);
-        auto pwq = bench_nablapp(
-            nablapp::alternative::cmaes::pwq_reparameterization_policy<>{},
+        auto pwq = bench_argmin(
+            argmin::alternative::cmaes::pwq_reparameterization_policy<>{},
             dyn_prob, reps, 10000);
-        auto no_repair = bench_nablapp(
-            nablapp::alternative::cmaes::no_repair_adaptive_penalty_policy<>{},
+        auto no_repair = bench_argmin(
+            argmin::alternative::cmaes::no_repair_adaptive_penalty_policy<>{},
             dyn_prob, reps, 10000);
         auto libc = bench_libcmaes_cma(2, rastrigin_libcmaes,
             {2.5, 2.5}, {-5.12, -5.12}, {5.12, 5.12}, reps, 10000);
@@ -348,15 +348,15 @@ int main()
     // active landscape; expected: variants tie within noise).
     {
         std::println("\n--- Ackley 2D boundary-handling variant A/B ---");
-        nablapp::ackley<double> dyn_prob{.n = 2};
-        auto repair_l2 = bench_nablapp(
-            nablapp::alternative::cmaes::repair_l2_penalty_policy<>{},
+        argmin::ackley<double> dyn_prob{.n = 2};
+        auto repair_l2 = bench_argmin(
+            argmin::alternative::cmaes::repair_l2_penalty_policy<>{},
             dyn_prob, reps, 10000);
-        auto pwq = bench_nablapp(
-            nablapp::alternative::cmaes::pwq_reparameterization_policy<>{},
+        auto pwq = bench_argmin(
+            argmin::alternative::cmaes::pwq_reparameterization_policy<>{},
             dyn_prob, reps, 10000);
-        auto no_repair = bench_nablapp(
-            nablapp::alternative::cmaes::no_repair_adaptive_penalty_policy<>{},
+        auto no_repair = bench_argmin(
+            argmin::alternative::cmaes::no_repair_adaptive_penalty_policy<>{},
             dyn_prob, reps, 10000);
         print_row("repair_l2", repair_l2);
         print_row("pwq_reparam", pwq);
@@ -366,14 +366,14 @@ int main()
     // Rastrigin 5D
     {
         std::println("\n--- Rastrigin 5D (global minimum at 0, multimodal) ---");
-        nablapp::rastrigin<double, 5> fixed_prob;
-        nablapp::rastrigin<double>    dyn_prob{.n = 5};
+        argmin::rastrigin<double, 5> fixed_prob;
+        argmin::rastrigin<double>    dyn_prob{.n = 5};
         std::vector<double> x0(5, 2.5), lb(5, -5.12), ub(5, 5.12);
-        auto fixed = bench_nablapp(nablapp::cmaes_policy<5>{}, fixed_prob, reps, 50000);
-        auto dyn   = bench_nablapp(nablapp::cmaes_policy<>{},  dyn_prob,  reps, 50000);
+        auto fixed = bench_argmin(argmin::cmaes_policy<5>{}, fixed_prob, reps, 50000);
+        auto dyn   = bench_argmin(argmin::cmaes_policy<>{},  dyn_prob,  reps, 50000);
         auto libc  = bench_libcmaes_cma(5, rastrigin_libcmaes, x0, lb, ub, reps, 50000);
-        print_row("nablapp<5>", fixed);
-        print_row("nablapp<>", dyn);
+        print_row("argmin<5>", fixed);
+        print_row("argmin<>", dyn);
         print_row("libcmaes_cmaes", libc);
         std::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
@@ -386,12 +386,12 @@ int main()
         std::println("\n--- Rosenbrock 2D bounded [-5,5]^2 ---");
         bounded_rosenbrock<2>       fixed_prob;
         bounded_rosenbrock_dynamic  dyn_prob;
-        auto fixed = bench_nablapp(nablapp::cmaes_policy<2>{}, fixed_prob, reps, 10000);
-        auto dyn   = bench_nablapp(nablapp::cmaes_policy<>{},  dyn_prob,  reps, 10000);
+        auto fixed = bench_argmin(argmin::cmaes_policy<2>{}, fixed_prob, reps, 10000);
+        auto dyn   = bench_argmin(argmin::cmaes_policy<>{},  dyn_prob,  reps, 10000);
         auto libc  = bench_libcmaes_cma(2, rosenbrock_libcmaes,
             {-1.2, 1.0}, {-5.0, -5.0}, {5.0, 5.0}, reps, 10000);
-        print_row("nablapp<2>", fixed);
-        print_row("nablapp<>", dyn);
+        print_row("argmin<2>", fixed);
+        print_row("argmin<>", dyn);
         print_row("libcmaes_cmaes", libc);
         std::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
@@ -412,24 +412,24 @@ int main()
     // reintroduces per-step bench-side multiplication.
     {
         std::println("\n--- Ackley 2D IPOP f_evals upper-bound check ---");
-        nablapp::ackley<double, 2> ackley_prob;
-        nablapp::bench::eval_counts counts;
-        nablapp::bench::counting_problem<nablapp::ackley<double, 2>>
+        argmin::ackley<double, 2> ackley_prob;
+        argmin::bench::eval_counts counts;
+        argmin::bench::counting_problem<argmin::ackley<double, 2>>
             wrapped{ackley_prob, counts};
 
         Eigen::Vector<double, 2> x0 = ackley_prob.initial_point();
-        nablapp::solver_options opts;
+        argmin::solver_options opts;
         opts.max_iterations = 1000;
         opts.set_gradient_threshold(1e-12);
         opts.set_objective_threshold(1e-12);
         opts.set_step_threshold(1e-12);
 
-        nablapp::cmaes_policy<2>::options_type cmaes_opts{};
+        argmin::cmaes_policy<2>::options_type cmaes_opts{};
         cmaes_opts.seed = 42u;
-        cmaes_opts.restart = nablapp::cmaes_policy<2>::restart_strategy::ipop;
+        cmaes_opts.restart = argmin::cmaes_policy<2>::restart_strategy::ipop;
 
-        nablapp::basic_solver solver{
-            nablapp::cmaes_policy<2>{}, wrapped, x0, opts, cmaes_opts};
+        argmin::basic_solver solver{
+            argmin::cmaes_policy<2>{}, wrapped, x0, opts, cmaes_opts};
         auto result = solver.solve();
 
         constexpr int max_pop = 512;  // matches MaxPop in cmaes_policy.h
@@ -472,20 +472,20 @@ int main()
         smooth_quadratic_2d prob;
 
         Eigen::Vector<double, 2> x0{{2.0, 2.0}};
-        nablapp::solver_options opts;
+        argmin::solver_options opts;
         opts.max_iterations = 5000;
         opts.set_gradient_threshold(1e-30);
         opts.set_objective_threshold(1e-30);
         opts.set_step_threshold(1e-30);
 
-        nablapp::cmaes_policy<2>::options_type cmaes_opts{};
+        argmin::cmaes_policy<2>::options_type cmaes_opts{};
         cmaes_opts.seed = 42u;
         // Defeat TolX so TolFun is the criterion that owns the exit on
         // this run.
         cmaes_opts.cmaes.step_size_tolerance = 1e-30;
 
-        nablapp::basic_solver solver{
-            nablapp::cmaes_policy<2>{}, prob, x0, opts, cmaes_opts};
+        argmin::basic_solver solver{
+            argmin::cmaes_policy<2>{}, prob, x0, opts, cmaes_opts};
         auto result = solver.solve();
 
         std::println("  iters: {}, status: {}, objective: {:.6e}",
@@ -493,7 +493,7 @@ int main()
             static_cast<int>(result.status),
             result.objective_value);
 
-        if(result.status != nablapp::solver_status::ftol_reached)
+        if(result.status != argmin::solver_status::ftol_reached)
         {
             std::cerr << "micro_cmaes: TolFun-bound cell did not exit on "
                          "ftol_reached: status="

@@ -7,17 +7,17 @@
 //            K&W 2e Section 2.3 (stopping conditions).
 
 #include "mock_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/solver/convergence.h"
-#include "nablapp/result/status.h"
-#include "nablapp/schedule/basic_solver_group.h"
-#include "nablapp/schedule/round_robin_schedule.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/convergence.h"
+#include "argmin/result/status.h"
+#include "argmin/schedule/basic_solver_group.h"
+#include "argmin/schedule/round_robin_schedule.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
 
-using namespace nablapp;
+using namespace argmin;
 
 namespace
 {
@@ -155,7 +155,7 @@ TEST_CASE("solver_group retires roundoff_limited policy", "[tolerance]")
 
     quadratic prob;
     Eigen::VectorXd x0{{3.0, 4.0}};
-    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension, void,
+    basic_solver_group<round_robin_schedule, argmin::dynamic_dimension, void,
                        test::roundoff_mock_policy,
                        test::mock_policy> group(prob, x0, opts);
     auto result = group.step_n(200, opts);
@@ -178,7 +178,7 @@ TEST_CASE("solver_group results provides per-policy info", "[tolerance]")
 
     quadratic prob;
     Eigen::VectorXd x0{{2.0, 2.0}};
-    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension, void,
+    basic_solver_group<round_robin_schedule, argmin::dynamic_dimension, void,
                        test::roundoff_mock_policy,
                        test::mock_policy> group(prob, x0, opts);
     auto result = group.step_n(200, opts);
@@ -202,7 +202,7 @@ TEST_CASE("solver_group all retired stops iteration", "[tolerance]")
 
     quadratic prob;
     Eigen::VectorXd x0{{2.0, 2.0}};
-    basic_solver_group<round_robin_schedule, nablapp::dynamic_dimension, void,
+    basic_solver_group<round_robin_schedule, argmin::dynamic_dimension, void,
                        test::roundoff_mock_policy,
                        test::diverging_mock_policy> group(prob, x0, opts);
     auto result = group.step_n(1000, opts);

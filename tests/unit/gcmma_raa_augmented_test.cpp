@@ -1,9 +1,9 @@
 // Tests for the strict Svanberg 2002 raa-augmented GCMMA variant
-// (nablapp::alternative::gcmma::raa_augmented_policy).
+// (argmin::alternative::gcmma::raa_augmented_policy).
 
-#include "nablapp/solver/alternative/gcmma/raa_augmented_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/alternative/gcmma/raa_augmented_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -11,7 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 using Catch::Approx;
-using namespace nablapp;
+using namespace argmin;
 
 TEST_CASE("gcmma raa-augmented converges on HS024", "[gcmma_raa]")
 {

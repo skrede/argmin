@@ -1,14 +1,14 @@
-#include "nablapp/schedule/round_robin_schedule.h"
-#include "nablapp/schedule/time_boxed_schedule.h"
-#include "nablapp/schedule/fallback_schedule.h"
-#include "nablapp/result/step_result.h"
+#include "argmin/schedule/round_robin_schedule.h"
+#include "argmin/schedule/time_boxed_schedule.h"
+#include "argmin/schedule/fallback_schedule.h"
+#include "argmin/result/step_result.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <set>
 #include <thread>
 
-using namespace nablapp;
+using namespace argmin;
 
 TEST_CASE("round_robin_schedule", "[scheduling]")
 {

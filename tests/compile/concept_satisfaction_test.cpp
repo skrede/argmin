@@ -6,89 +6,89 @@
 // If this file compiles, all assertions pass. If any assertion fails,
 // the build fails with a clear concept-violation error.
 
-#include "nablapp/formulation/concepts.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/solver/options.h"
-#include "nablapp/solver/nw_sqp_policy.h"
-#include "nablapp/solver/kraft_slsqp_policy.h"
-#include "nablapp/solver/filter_slsqp_policy.h"
-#include "nablapp/solver/filter_nw_sqp_policy.h"
-#include "nablapp/solver/lbfgsb_policy.h"
-#include "nablapp/solver/byrd_lbfgsb_policy.h"
-#include "nablapp/solver/bobyqa_policy.h"
-#include "nablapp/solver/cmaes_policy.h"
-#include "nablapp/solver/lm_policy.h"
-#include "nablapp/solver/ccsa_quadratic_policy.h"
-#include "nablapp/solver/cobyla_policy.h"
-#include "nablapp/solver/isres_policy.h"
-#include "nablapp/solver/multistart_policy.h"
-#include "nablapp/solver/restarting_policy.h"
-#include "nablapp/solver/projected_gn_policy.h"
-#include "nablapp/solver/projected_gradient_gn_policy.h"
-#include "nablapp/solver/augmented_lagrangian_policy.h"
-#include "nablapp/test_functions/booth.h"
-#include "nablapp/test_functions/beale.h"
-#include "nablapp/test_functions/ackley.h"
-#include "nablapp/test_functions/schwefel.h"
-#include "nablapp/test_functions/griewank.h"
-#include "nablapp/test_functions/rastrigin.h"
-#include "nablapp/test_functions/rosenbrock.h"
-#include "nablapp/test_functions/himmelblau.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
-#include "nablapp/test_functions/more_garbow_hillstrom.h"
+#include "argmin/formulation/concepts.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/options.h"
+#include "argmin/solver/nw_sqp_policy.h"
+#include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/filter_slsqp_policy.h"
+#include "argmin/solver/filter_nw_sqp_policy.h"
+#include "argmin/solver/lbfgsb_policy.h"
+#include "argmin/solver/byrd_lbfgsb_policy.h"
+#include "argmin/solver/bobyqa_policy.h"
+#include "argmin/solver/cmaes_policy.h"
+#include "argmin/solver/lm_policy.h"
+#include "argmin/solver/ccsa_quadratic_policy.h"
+#include "argmin/solver/cobyla_policy.h"
+#include "argmin/solver/isres_policy.h"
+#include "argmin/solver/multistart_policy.h"
+#include "argmin/solver/restarting_policy.h"
+#include "argmin/solver/projected_gn_policy.h"
+#include "argmin/solver/projected_gradient_gn_policy.h"
+#include "argmin/solver/augmented_lagrangian_policy.h"
+#include "argmin/test_functions/booth.h"
+#include "argmin/test_functions/beale.h"
+#include "argmin/test_functions/ackley.h"
+#include "argmin/test_functions/schwefel.h"
+#include "argmin/test_functions/griewank.h"
+#include "argmin/test_functions/rastrigin.h"
+#include "argmin/test_functions/rosenbrock.h"
+#include "argmin/test_functions/himmelblau.h"
+#include "argmin/test_functions/hock_schittkowski.h"
+#include "argmin/test_functions/more_garbow_hillstrom.h"
 
 // ---------------------------------------------------------------------------
 // Positive tests: all six test functions satisfy objective and differentiable
 // ---------------------------------------------------------------------------
 
-static_assert(nablapp::objective<nablapp::rosenbrock<>>);
-static_assert(nablapp::differentiable<nablapp::rosenbrock<>>);
+static_assert(argmin::objective<argmin::rosenbrock<>>);
+static_assert(argmin::differentiable<argmin::rosenbrock<>>);
 
-static_assert(nablapp::objective<nablapp::booth<>>);
-static_assert(nablapp::differentiable<nablapp::booth<>>);
+static_assert(argmin::objective<argmin::booth<>>);
+static_assert(argmin::differentiable<argmin::booth<>>);
 
-static_assert(nablapp::objective<nablapp::beale<>>);
-static_assert(nablapp::differentiable<nablapp::beale<>>);
+static_assert(argmin::objective<argmin::beale<>>);
+static_assert(argmin::differentiable<argmin::beale<>>);
 
-static_assert(nablapp::objective<nablapp::himmelblau<>>);
-static_assert(nablapp::differentiable<nablapp::himmelblau<>>);
+static_assert(argmin::objective<argmin::himmelblau<>>);
+static_assert(argmin::differentiable<argmin::himmelblau<>>);
 
-static_assert(nablapp::objective<nablapp::rastrigin<>>);
-static_assert(nablapp::differentiable<nablapp::rastrigin<>>);
+static_assert(argmin::objective<argmin::rastrigin<>>);
+static_assert(argmin::differentiable<argmin::rastrigin<>>);
 
-static_assert(nablapp::objective<nablapp::ackley<>>);
-static_assert(nablapp::differentiable<nablapp::ackley<>>);
+static_assert(argmin::objective<argmin::ackley<>>);
+static_assert(argmin::differentiable<argmin::ackley<>>);
 
 // ---------------------------------------------------------------------------
 // Float scalar support (D-07)
 // ---------------------------------------------------------------------------
 
-static_assert(nablapp::objective<nablapp::rosenbrock<float>, float>);
-static_assert(nablapp::differentiable<nablapp::rosenbrock<float>, float>);
+static_assert(argmin::objective<argmin::rosenbrock<float>, float>);
+static_assert(argmin::differentiable<argmin::rosenbrock<float>, float>);
 
-static_assert(nablapp::objective<nablapp::booth<float>, float>);
-static_assert(nablapp::differentiable<nablapp::booth<float>, float>);
+static_assert(argmin::objective<argmin::booth<float>, float>);
+static_assert(argmin::differentiable<argmin::booth<float>, float>);
 
-static_assert(nablapp::objective<nablapp::beale<float>, float>);
-static_assert(nablapp::differentiable<nablapp::beale<float>, float>);
+static_assert(argmin::objective<argmin::beale<float>, float>);
+static_assert(argmin::differentiable<argmin::beale<float>, float>);
 
-static_assert(nablapp::objective<nablapp::himmelblau<float>, float>);
-static_assert(nablapp::differentiable<nablapp::himmelblau<float>, float>);
+static_assert(argmin::objective<argmin::himmelblau<float>, float>);
+static_assert(argmin::differentiable<argmin::himmelblau<float>, float>);
 
-static_assert(nablapp::objective<nablapp::rastrigin<float>, float>);
-static_assert(nablapp::differentiable<nablapp::rastrigin<float>, float>);
+static_assert(argmin::objective<argmin::rastrigin<float>, float>);
+static_assert(argmin::differentiable<argmin::rastrigin<float>, float>);
 
-static_assert(nablapp::objective<nablapp::ackley<float>, float>);
-static_assert(nablapp::differentiable<nablapp::ackley<float>, float>);
+static_assert(argmin::objective<argmin::ackley<float>, float>);
+static_assert(argmin::differentiable<argmin::ackley<float>, float>);
 
 // ---------------------------------------------------------------------------
 // Test functions should NOT satisfy higher-order concepts
 // ---------------------------------------------------------------------------
 
-static_assert(!nablapp::second_order<nablapp::rosenbrock<>>);
-static_assert(!nablapp::bound_constrained<nablapp::rosenbrock<>>);
-static_assert(!nablapp::constrained<nablapp::rosenbrock<>>);
-static_assert(!nablapp::least_squares<nablapp::rosenbrock<>>);
+static_assert(!argmin::second_order<argmin::rosenbrock<>>);
+static_assert(!argmin::bound_constrained<argmin::rosenbrock<>>);
+static_assert(!argmin::constrained<argmin::rosenbrock<>>);
+static_assert(!argmin::least_squares<argmin::rosenbrock<>>);
 
 // ---------------------------------------------------------------------------
 // Negative tests: mock types that intentionally lack required methods
@@ -101,40 +101,40 @@ namespace
 struct objective_only
 {
     double value(const Eigen::VectorXd&) const { return 0.0; }
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 1; }
 };
 
-static_assert(nablapp::objective<objective_only>);
-static_assert(!nablapp::differentiable<objective_only>);
-static_assert(!nablapp::second_order<objective_only>);
-static_assert(!nablapp::bound_constrained<objective_only>);
-static_assert(!nablapp::constrained<objective_only>);
-static_assert(!nablapp::least_squares<objective_only>);
+static_assert(argmin::objective<objective_only>);
+static_assert(!argmin::differentiable<objective_only>);
+static_assert(!argmin::second_order<objective_only>);
+static_assert(!argmin::bound_constrained<objective_only>);
+static_assert(!argmin::constrained<objective_only>);
+static_assert(!argmin::least_squares<objective_only>);
 
 // A type with value() + gradient() -- differentiable but NOT second_order
 struct differentiable_only
 {
     double value(const Eigen::VectorXd&) const { return 0.0; }
     void gradient(const Eigen::VectorXd&, Eigen::VectorXd&) const {}
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 1; }
 };
 
-static_assert(nablapp::differentiable<differentiable_only>);
-static_assert(!nablapp::second_order<differentiable_only>);
+static_assert(argmin::differentiable<differentiable_only>);
+static_assert(!argmin::second_order<differentiable_only>);
 
 // An empty struct -- satisfies nothing
 struct empty_type {};
 
-static_assert(!nablapp::objective<empty_type>);
-static_assert(!nablapp::differentiable<empty_type>);
-static_assert(!nablapp::second_order<empty_type>);
-static_assert(!nablapp::bound_constrained<empty_type>);
-static_assert(!nablapp::constrained<empty_type>);
-static_assert(!nablapp::least_squares<empty_type>);
+static_assert(!argmin::objective<empty_type>);
+static_assert(!argmin::differentiable<empty_type>);
+static_assert(!argmin::second_order<empty_type>);
+static_assert(!argmin::bound_constrained<empty_type>);
+static_assert(!argmin::constrained<empty_type>);
+static_assert(!argmin::least_squares<empty_type>);
 
 // ---------------------------------------------------------------------------
 // Concept refinement: a type satisfying all concepts simultaneously
@@ -154,17 +154,17 @@ struct full_problem
     void residuals(const Eigen::VectorXd&, Eigen::VectorXd&) const {}
     void jacobian(const Eigen::VectorXd&, Eigen::MatrixXd&) const {}
     int num_residuals() const { return 0; }
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 1; }
 };
 
-static_assert(nablapp::objective<full_problem>);
-static_assert(nablapp::differentiable<full_problem>);
-static_assert(nablapp::second_order<full_problem>);
-static_assert(nablapp::bound_constrained<full_problem>);
-static_assert(nablapp::constrained<full_problem>);
-static_assert(nablapp::least_squares<full_problem>);
+static_assert(argmin::objective<full_problem>);
+static_assert(argmin::differentiable<full_problem>);
+static_assert(argmin::second_order<full_problem>);
+static_assert(argmin::bound_constrained<full_problem>);
+static_assert(argmin::constrained<full_problem>);
+static_assert(argmin::least_squares<full_problem>);
 
 // ---------------------------------------------------------------------------
 // Fixed-dimension concept satisfaction
@@ -177,8 +177,8 @@ struct fixed_2d_objective
     int dimension() const { return 2; }
 };
 
-static_assert(nablapp::objective<fixed_2d_objective>);
-static_assert(!nablapp::differentiable<fixed_2d_objective>);
+static_assert(argmin::objective<fixed_2d_objective>);
+static_assert(!argmin::differentiable<fixed_2d_objective>);
 
 struct fixed_2d_differentiable
 {
@@ -188,7 +188,7 @@ struct fixed_2d_differentiable
     int dimension() const { return 2; }
 };
 
-static_assert(nablapp::differentiable<fixed_2d_differentiable>);
+static_assert(argmin::differentiable<fixed_2d_differentiable>);
 
 struct fixed_2d_full
 {
@@ -208,30 +208,30 @@ struct fixed_2d_full
     int dimension() const { return 2; }
 };
 
-static_assert(nablapp::objective<fixed_2d_full>);
-static_assert(nablapp::differentiable<fixed_2d_full>);
-static_assert(nablapp::second_order<fixed_2d_full>);
-static_assert(nablapp::bound_constrained<fixed_2d_full>);
-static_assert(nablapp::constrained<fixed_2d_full>);
-static_assert(nablapp::least_squares<fixed_2d_full>);
+static_assert(argmin::objective<fixed_2d_full>);
+static_assert(argmin::differentiable<fixed_2d_full>);
+static_assert(argmin::second_order<fixed_2d_full>);
+static_assert(argmin::bound_constrained<fixed_2d_full>);
+static_assert(argmin::constrained<fixed_2d_full>);
+static_assert(argmin::least_squares<fixed_2d_full>);
 
 // A mock solver type missing constraint_violation -- must NOT satisfy nlp_solver
 struct mock_solver_no_cv
 {
     using scalar_type = double;
     using state_type = int;
-    nablapp::step_result<double> step() { return {}; }
-    nablapp::solve_result<double> solve() { return {}; }
-    nablapp::solve_result<double> step_n(int) { return {}; }
+    argmin::step_result<double> step() { return {}; }
+    argmin::solve_result<double> solve() { return {}; }
+    argmin::solve_result<double> step_n(int) { return {}; }
     const state_type& state() const { static state_type s{}; return s; }
-    nablapp::solver_status status() const { return {}; }
+    argmin::solver_status status() const { return {}; }
     void reset(const Eigen::VectorXd&) {}
     void reset_clear(const Eigen::VectorXd&) {}
     void abort() {}
     // deliberately omitting constraint_violation()
 };
 
-static_assert(!nablapp::nlp_solver<mock_solver_no_cv>);
+static_assert(!argmin::nlp_solver<mock_solver_no_cv>);
 
 }
 
@@ -239,61 +239,61 @@ static_assert(!nablapp::nlp_solver<mock_solver_no_cv>);
 // HS test functions satisfy constrained + differentiable + bound_constrained
 // ---------------------------------------------------------------------------
 
-static_assert(nablapp::constrained<nablapp::hs071<>>);
-static_assert(nablapp::differentiable<nablapp::hs071<>>);
-static_assert(nablapp::bound_constrained<nablapp::hs071<>>);
+static_assert(argmin::constrained<argmin::hs071<>>);
+static_assert(argmin::differentiable<argmin::hs071<>>);
+static_assert(argmin::bound_constrained<argmin::hs071<>>);
 
-static_assert(nablapp::constrained<nablapp::hs076<>>);
-static_assert(nablapp::differentiable<nablapp::hs076<>>);
-static_assert(nablapp::bound_constrained<nablapp::hs076<>>);
+static_assert(argmin::constrained<argmin::hs076<>>);
+static_assert(argmin::differentiable<argmin::hs076<>>);
+static_assert(argmin::bound_constrained<argmin::hs076<>>);
 
-static_assert(nablapp::constrained<nablapp::hs024<>>);
-static_assert(nablapp::differentiable<nablapp::hs024<>>);
-static_assert(nablapp::bound_constrained<nablapp::hs024<>>);
+static_assert(argmin::constrained<argmin::hs024<>>);
+static_assert(argmin::differentiable<argmin::hs024<>>);
+static_assert(argmin::bound_constrained<argmin::hs024<>>);
 
-static_assert(nablapp::constrained<nablapp::hs035<>>);
-static_assert(nablapp::differentiable<nablapp::hs035<>>);
-static_assert(nablapp::bound_constrained<nablapp::hs035<>>);
+static_assert(argmin::constrained<argmin::hs035<>>);
+static_assert(argmin::differentiable<argmin::hs035<>>);
+static_assert(argmin::bound_constrained<argmin::hs035<>>);
 
 // ---------------------------------------------------------------------------
 // nlp_solver concept satisfaction (INTG-02)
 // basic_solver<Policy> satisfies nlp_solver for all solver policies
 // ---------------------------------------------------------------------------
 
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::nw_sqp_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::filter_nw_sqp_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::kraft_slsqp_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::filter_slsqp_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lbfgsb_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::byrd_lbfgsb_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::bobyqa_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::filter_nw_sqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::kraft_slsqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::filter_slsqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::lbfgsb_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::byrd_lbfgsb_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::bobyqa_policy<>>>);
 
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::augmented_lagrangian_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::ccsa_quadratic_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::augmented_lagrangian_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::ccsa_quadratic_policy<>>>);
 
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::cmaes_policy<>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::lm_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::cmaes_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::lm_policy<>>>);
 
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::cobyla_policy>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::isres_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::cobyla_policy>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::isres_policy<>>>);
 
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::projected_gn_policy>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::projected_gradient_gn_policy>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::projected_gn_policy>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::projected_gradient_gn_policy>>);
 
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::multistart_policy<nablapp::bobyqa_policy<>>>>);
-static_assert(nablapp::nlp_solver<nablapp::basic_solver<nablapp::restarting_policy<nablapp::cmaes_policy<>>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::multistart_policy<argmin::bobyqa_policy<>>>>);
+static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::restarting_policy<argmin::cmaes_policy<>>>>);
 
 // problem_dimension concept verification
-static_assert(nablapp::has_problem_dimension<nablapp::himmelblau<>>);
-static_assert(nablapp::problem_dimension_v<nablapp::himmelblau<>> == 2);
-static_assert(nablapp::problem_dimension_v<nablapp::rosenbrock<>> == nablapp::dynamic_dimension);
-static_assert(nablapp::problem_dimension_v<nablapp::beale<>> == 2);
-static_assert(nablapp::problem_dimension_v<nablapp::booth<>> == 2);
-static_assert(nablapp::problem_dimension_v<nablapp::hs001<>> == 2);
-static_assert(nablapp::problem_dimension_v<nablapp::powell_singular<>> == 4);
-static_assert(nablapp::problem_dimension_v<nablapp::helical_valley<>> == 3);
+static_assert(argmin::has_problem_dimension<argmin::himmelblau<>>);
+static_assert(argmin::problem_dimension_v<argmin::himmelblau<>> == 2);
+static_assert(argmin::problem_dimension_v<argmin::rosenbrock<>> == argmin::dynamic_dimension);
+static_assert(argmin::problem_dimension_v<argmin::beale<>> == 2);
+static_assert(argmin::problem_dimension_v<argmin::booth<>> == 2);
+static_assert(argmin::problem_dimension_v<argmin::hs001<>> == 2);
+static_assert(argmin::problem_dimension_v<argmin::powell_singular<>> == 4);
+static_assert(argmin::problem_dimension_v<argmin::helical_valley<>> == 3);
 
 // Negative: type without problem_dimension does NOT satisfy objective
-static_assert(!nablapp::objective<empty_type>);
+static_assert(!argmin::objective<empty_type>);
 
 int main() { return 0; }

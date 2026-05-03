@@ -1,6 +1,6 @@
 include(Catch)
 
-add_executable(nablapp_unit_tests
+add_executable(argmin_unit_tests
     detail_test.cpp
     lm_test.cpp
     sqp_test.cpp
@@ -41,16 +41,16 @@ add_executable(nablapp_unit_tests
     dense_ldl_bfgs_test.cpp
 )
 
-target_link_libraries(nablapp_unit_tests
+target_link_libraries(argmin_unit_tests
     PRIVATE
-        nablapp::nablapp
+        argmin::argmin
         Catch2::Catch2WithMain
 )
 
-target_compile_options(nablapp_unit_tests PRIVATE ${NABLAPP_TEST_RELEASE_FLAGS})
-if(NABLAPP_LTO_SUPPORTED)
-    set_target_properties(nablapp_unit_tests PROPERTIES
+target_compile_options(argmin_unit_tests PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(argmin_unit_tests PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
-catch_discover_tests(nablapp_unit_tests)
+catch_discover_tests(argmin_unit_tests)

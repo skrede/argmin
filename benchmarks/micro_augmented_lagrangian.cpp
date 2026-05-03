@@ -1,4 +1,4 @@
-// Micro-benchmark: nablapp augmented_lagrangian vs NLopt LD_AUGLAG on constrained HS problems.
+// Micro-benchmark: argmin augmented_lagrangian vs NLopt LD_AUGLAG on constrained HS problems.
 //
 // Augmented Lagrangian wraps an inner L-BFGS-B solver and converts it
 // into a constrained optimizer via penalty/multiplier updates. Tested
@@ -7,9 +7,9 @@
 // Reference: K&W Section 10.9, Algorithm 10.2;
 //            N&W Section 17.4, Algorithm 17.4.
 
-#include "nablapp/solver/augmented_lagrangian_policy.h"
-#include "nablapp/solver/basic_solver.h"
-#include "nablapp/test_functions/hock_schittkowski.h"
+#include "argmin/solver/augmented_lagrangian_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
@@ -36,7 +36,7 @@ struct timing
 // Dynamic-dimension HS039 wrapper (equality, n=4).
 struct hs039_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 2; }
@@ -87,7 +87,7 @@ struct hs039_dynamic
 // Dynamic-dimension HS071 wrapper (mixed, n=4).
 struct hs071_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -141,9 +141,9 @@ struct hs071_dynamic
 // Dynamic-dimension HS076 wrapper (inequality + box, n=4).
 struct hs076_dynamic
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
-    static constexpr nablapp::problem_class pclass =
-        nablapp::problem_class::inequality | nablapp::problem_class::bound_constrained;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    static constexpr argmin::problem_class pclass =
+        argmin::problem_class::inequality | argmin::problem_class::bound_constrained;
 
     [[nodiscard]] int dimension() const { return 4; }
     [[nodiscard]] int num_equality() const { return 0; }
@@ -292,17 +292,17 @@ double nlopt_hs076_ineq2(unsigned, const double* x, double* grad, void*)
 }
 
 template <typename Problem>
-timing bench_nablapp(const Problem& problem, std::uint32_t reps)
+timing bench_argmin(const Problem& problem, std::uint32_t reps)
 {
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 10000;
     opts.set_objective_threshold(1e-8);
     opts.set_step_threshold(1e-12);
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::augmented_lagrangian_policy<>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::augmented_lagrangian_policy<>{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -311,7 +311,7 @@ timing bench_nablapp(const Problem& problem, std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::augmented_lagrangian_policy<>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::augmented_lagrangian_policy<>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -500,15 +500,15 @@ bool probe_kkt_residual()
 {
     hs039_dynamic problem;
     auto x0 = problem.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 30;
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    nablapp::basic_solver solver{nablapp::augmented_lagrangian_policy<>{},
+    argmin::basic_solver solver{argmin::augmented_lagrangian_policy<>{},
                                  problem, x0, opts};
 
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -541,20 +541,20 @@ bool probe_kkt_residual()
 // Reference: N&W 2e Definition 12.1.
 bool probe_regression_hs039()
 {
-    nablapp::hs039<> p;
+    argmin::hs039<> p;
     Eigen::VectorXd x0 = p.initial_point();
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    nablapp::basic_solver solver{
-        nablapp::augmented_lagrangian_policy<
-            nablapp::lbfgsb_policy<nablapp::hs039<>::problem_dimension>,
-            nablapp::hs039<>::problem_dimension>{},
+    argmin::basic_solver solver{
+        argmin::augmented_lagrangian_policy<
+            argmin::lbfgsb_policy<argmin::hs039<>::problem_dimension>,
+            argmin::hs039<>::problem_dimension>{},
         p, x0, opts};
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -590,13 +590,13 @@ int main()
     // HS039
     {
         std::println("\n--- HS039 (equality, n=4, f*=-1) ---");
-        auto nab  = bench_nablapp(hs039_dynamic{}, reps);
+        auto nab  = bench_argmin(hs039_dynamic{}, reps);
         auto nlop = bench_nlopt_hs039(reps);
-        print_row("nablapp", nab);
+        print_row("argmin", nab);
         if(nlop)
         {
             print_row("nlopt", *nlop);
-            std::println("  ratio nablapp/nlopt: {:.1f}x wall, {:.1f}x evals",
+            std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
                 nab.wall_us / nlop->wall_us, double(nab.evals) / nlop->evals);
         }
     }
@@ -604,13 +604,13 @@ int main()
     // HS071
     {
         std::println("\n--- HS071 (mixed, n=4, f*~17.014) ---");
-        auto nab  = bench_nablapp(hs071_dynamic{}, reps);
+        auto nab  = bench_argmin(hs071_dynamic{}, reps);
         auto nlop = bench_nlopt_hs071(reps);
-        print_row("nablapp", nab);
+        print_row("argmin", nab);
         if(nlop)
         {
             print_row("nlopt", *nlop);
-            std::println("  ratio nablapp/nlopt: {:.1f}x wall, {:.1f}x evals",
+            std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
                 nab.wall_us / nlop->wall_us, double(nab.evals) / nlop->evals);
         }
     }
@@ -618,13 +618,13 @@ int main()
     // HS076
     {
         std::println("\n--- HS076 (inequality + box, n=4, f*=-4.68) ---");
-        auto nab  = bench_nablapp(hs076_dynamic{}, reps);
+        auto nab  = bench_argmin(hs076_dynamic{}, reps);
         auto nlop = bench_nlopt_hs076(reps);
-        print_row("nablapp", nab);
+        print_row("argmin", nab);
         if(nlop)
         {
             print_row("nlopt", *nlop);
-            std::println("  ratio nablapp/nlopt: {:.1f}x wall, {:.1f}x evals",
+            std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
                 nab.wall_us / nlop->wall_us, double(nab.evals) / nlop->evals);
         }
     }

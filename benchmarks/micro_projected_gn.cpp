@@ -1,12 +1,12 @@
-// Micro-benchmark: nablapp projected GN vs NLopt BOBYQA on bounded Rosenbrock LS.
+// Micro-benchmark: argmin projected GN vs NLopt BOBYQA on bounded Rosenbrock LS.
 //
 // Compares projected_gn_policy (least-squares residual form with analytic
 // Jacobian) against NLopt LN_BOBYQA (derivative-free, scalar objective) on
 // the same bounded Rosenbrock problem. The comparison is inherently asymmetric:
 // projected GN exploits least-squares structure while BOBYQA is general.
 
-#include "nablapp/solver/projected_gn_policy.h"
-#include "nablapp/solver/basic_solver.h"
+#include "argmin/solver/projected_gn_policy.h"
+#include "argmin/solver/basic_solver.h"
 
 #include <Eigen/Core>
 
@@ -25,7 +25,7 @@ namespace
 // Constrained optimum at (0.5, 0.25), f* = 0.125.
 struct bounded_rosenbrock_ls
 {
-    static constexpr int problem_dimension = nablapp::dynamic_dimension;
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
 
     int dimension() const { return 2; }
     int num_residuals() const { return 2; }
@@ -70,17 +70,17 @@ struct timing
     std::uint32_t evals;
 };
 
-timing bench_nablapp_active_set(std::uint32_t reps)
+timing bench_argmin_active_set(std::uint32_t reps)
 {
     bounded_rosenbrock_ls problem;
     Eigen::VectorXd x0{{-1.0, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
     // Warmup.
     {
-        nablapp::basic_solver solver{nablapp::projected_gn_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::projected_gn_policy{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -89,7 +89,7 @@ timing bench_nablapp_active_set(std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        nablapp::basic_solver solver{nablapp::projected_gn_policy{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::projected_gn_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -154,13 +154,13 @@ bool probe_kkt_residual()
 {
     bounded_rosenbrock_ls problem;
     Eigen::VectorXd x0{{-1.0, 1.0}};
-    nablapp::solver_options opts;
+    argmin::solver_options opts;
     opts.max_iterations = 40;
     opts.set_gradient_threshold(1e-10);
 
-    nablapp::basic_solver solver{nablapp::projected_gn_policy{}, problem, x0, opts};
+    argmin::basic_solver solver{argmin::projected_gn_policy{}, problem, x0, opts};
 
-    nablapp::step_result<double> last{};
+    argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
     {
         last = solver.step();
@@ -196,7 +196,7 @@ int main()
 
     std::println("Bounded Rosenbrock 2D LS, {} repetitions each\n", reps);
 
-    auto na_as = bench_nablapp_active_set(reps);
+    auto na_as = bench_argmin_active_set(reps);
     auto nl = bench_nlopt_bobyqa(reps);
 
     std::println("  {:>20s}  {:>10s}  {:>10s}  {:>12s}",

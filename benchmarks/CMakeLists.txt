@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.28)
-project(nablapp_benchmarks LANGUAGES CXX)
+project(argmin_benchmarks LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Google Benchmark via FetchContent (per D-03/BNCH-01).
 include(FetchContent)
-if(NABLAPP_CMAKE_FETCH_DEPS)
+if(ARGMIN_CMAKE_FETCH_DEPS)
     FetchContent_Declare(
         benchmark
         GIT_REPOSITORY https://github.com/google/benchmark.git
@@ -21,23 +21,23 @@ else()
 endif()
 
 include(CheckIPOSupported)
-check_ipo_supported(RESULT NABLAPP_LTO_SUPPORTED)
+check_ipo_supported(RESULT ARGMIN_LTO_SUPPORTED)
 
 # Main benchmark executable (always builds).
-add_executable(nablapp_bench
+add_executable(argmin_bench
     benchmark_driver.cpp
 )
-target_link_libraries(nablapp_bench PRIVATE nablapp::nablapp benchmark::benchmark)
+target_link_libraries(argmin_bench PRIVATE argmin::argmin benchmark::benchmark)
 
-target_compile_options(nablapp_bench PRIVATE
+target_compile_options(argmin_bench PRIVATE
     $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
         -march=native
         -fno-math-errno
         -fno-trapping-math
     >
 )
-if(NABLAPP_LTO_SUPPORTED)
-    set_target_properties(nablapp_bench PROPERTIES
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(argmin_bench PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
@@ -45,7 +45,7 @@ endif()
 add_executable(publish_bench
     publish_driver.cpp
 )
-target_link_libraries(publish_bench PRIVATE nablapp::nablapp benchmark::benchmark)
+target_link_libraries(publish_bench PRIVATE argmin::argmin benchmark::benchmark)
 
 target_compile_options(publish_bench PRIVATE
     $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
@@ -54,33 +54,33 @@ target_compile_options(publish_bench PRIVATE
         -fno-trapping-math
     >
 )
-if(NABLAPP_LTO_SUPPORTED)
+if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(publish_bench PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
 # Optional comparison library hooks (per D-03).
 
-option(NABLAPP_BENCH_NLOPT "Build NLopt comparison benchmarks" ON)
-if(NABLAPP_BENCH_NLOPT)
+option(ARGMIN_BENCH_NLOPT "Build NLopt comparison benchmarks" ON)
+if(ARGMIN_BENCH_NLOPT)
     find_package(NLopt CONFIG QUIET)
     if(NLopt_FOUND)
-        target_sources(nablapp_bench PRIVATE bench_nlopt.cpp)
-        target_link_libraries(nablapp_bench PRIVATE NLopt::nlopt)
-        target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_NLOPT)
+        target_sources(argmin_bench PRIVATE bench_nlopt.cpp)
+        target_link_libraries(argmin_bench PRIVATE NLopt::nlopt)
+        target_compile_definitions(argmin_bench PRIVATE ARGMIN_HAS_NLOPT)
 
         target_sources(publish_bench PRIVATE bench_nlopt.cpp)
         target_link_libraries(publish_bench PRIVATE NLopt::nlopt)
-        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_NLOPT)
+        target_compile_definitions(publish_bench PRIVATE ARGMIN_HAS_NLOPT)
     else()
         message(STATUS "NLopt not found, skipping NLopt benchmarks")
     endif()
 endif()
 
 # Optional kthohr/optim comparator (FetchContent; no system package).
-option(NABLAPP_BENCH_OPTIM "Build kthohr/optim comparison benchmarks" ON)
-if(NABLAPP_BENCH_OPTIM)
-    if(NABLAPP_CMAKE_FETCH_DEPS)
+option(ARGMIN_BENCH_OPTIM "Build kthohr/optim comparison benchmarks" ON)
+if(ARGMIN_BENCH_OPTIM)
+    if(ARGMIN_CMAKE_FETCH_DEPS)
         include(FetchContent)
         FetchContent_Declare(
             kthohr_optim
@@ -89,20 +89,20 @@ if(NABLAPP_BENCH_OPTIM)
         )
         FetchContent_MakeAvailable(kthohr_optim)
         if(NOT TARGET optim::optim)
-            add_library(nablapp_optim_header_only INTERFACE)
-            target_include_directories(nablapp_optim_header_only INTERFACE
+            add_library(argmin_optim_header_only INTERFACE)
+            target_include_directories(argmin_optim_header_only INTERFACE
                 "${kthohr_optim_SOURCE_DIR}/include"
             )
-            target_compile_definitions(nablapp_optim_header_only INTERFACE
+            target_compile_definitions(argmin_optim_header_only INTERFACE
                 OPTIM_ENABLE_EIGEN_WRAPPERS
             )
-            add_library(optim::optim ALIAS nablapp_optim_header_only)
+            add_library(optim::optim ALIAS argmin_optim_header_only)
         endif()
         # Upstream ships the algorithm bodies as .cpp files alongside the
         # public headers (configure-time `--header-only-version` would
         # inline them, but FetchContent grabs the standard layout). Pull
         # them in directly so the optim symbols link.
-        set(NABLAPP_BENCH_OPTIM_SOURCES
+        set(ARGMIN_BENCH_OPTIM_SOURCES
             "${kthohr_optim_SOURCE_DIR}/src/unconstrained/bfgs.cpp"
             "${kthohr_optim_SOURCE_DIR}/src/unconstrained/cg.cpp"
             "${kthohr_optim_SOURCE_DIR}/src/unconstrained/de.cpp"
@@ -118,22 +118,22 @@ if(NABLAPP_BENCH_OPTIM)
             "${kthohr_optim_SOURCE_DIR}/src/zeros/broyden.cpp"
             "${kthohr_optim_SOURCE_DIR}/src/zeros/broyden_df.cpp"
         )
-        target_sources(nablapp_bench PRIVATE bench_optim.cpp ${NABLAPP_BENCH_OPTIM_SOURCES})
-        target_link_libraries(nablapp_bench PRIVATE optim::optim)
-        target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_OPTIM)
+        target_sources(argmin_bench PRIVATE bench_optim.cpp ${ARGMIN_BENCH_OPTIM_SOURCES})
+        target_link_libraries(argmin_bench PRIVATE optim::optim)
+        target_compile_definitions(argmin_bench PRIVATE ARGMIN_HAS_OPTIM)
 
-        target_sources(publish_bench PRIVATE bench_optim.cpp ${NABLAPP_BENCH_OPTIM_SOURCES})
+        target_sources(publish_bench PRIVATE bench_optim.cpp ${ARGMIN_BENCH_OPTIM_SOURCES})
         target_link_libraries(publish_bench PRIVATE optim::optim)
-        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_OPTIM)
+        target_compile_definitions(publish_bench PRIVATE ARGMIN_HAS_OPTIM)
     else()
-        message(STATUS "kthohr/optim requires NABLAPP_CMAKE_FETCH_DEPS=ON; skipping optim benchmarks")
+        message(STATUS "kthohr/optim requires ARGMIN_CMAKE_FETCH_DEPS=ON; skipping optim benchmarks")
     endif()
 endif()
 
 # Micro-benchmarks for single-solver profiling.
 if(NLopt_FOUND)
     add_executable(micro_lbfgsb micro_lbfgsb.cpp)
-    target_link_libraries(micro_lbfgsb PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_lbfgsb PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_lbfgsb PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native
@@ -141,13 +141,13 @@ if(NLopt_FOUND)
             -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_lbfgsb PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_bobyqa micro_bobyqa.cpp)
-    target_link_libraries(micro_bobyqa PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_bobyqa PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_bobyqa PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native
@@ -155,13 +155,13 @@ if(NLopt_FOUND)
             -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_bobyqa PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_cmaes micro_cmaes.cpp)
-    target_link_libraries(micro_cmaes PRIVATE nablapp::nablapp)
+    target_link_libraries(micro_cmaes PRIVATE argmin::argmin)
     target_compile_options(micro_cmaes PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native
@@ -169,13 +169,13 @@ if(NLopt_FOUND)
             -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_cmaes PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_kraft_slsqp micro_kraft_slsqp.cpp)
-    target_link_libraries(micro_kraft_slsqp PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_kraft_slsqp PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_kraft_slsqp PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native
@@ -183,149 +183,149 @@ if(NLopt_FOUND)
             -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_kraft_slsqp PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_cobyla micro_cobyla.cpp)
-    target_link_libraries(micro_cobyla PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_cobyla PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_cobyla PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_cobyla PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_mma micro_mma.cpp)
-    target_link_libraries(micro_mma PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_mma PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_mma PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_mma PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_nw_sqp micro_nw_sqp.cpp)
-    target_link_libraries(micro_nw_sqp PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_nw_sqp PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_nw_sqp PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_nw_sqp PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_filter_slsqp micro_filter_slsqp.cpp)
-    target_link_libraries(micro_filter_slsqp PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_filter_slsqp PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_filter_slsqp PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_filter_slsqp PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_filter_nw_sqp micro_filter_nw_sqp.cpp)
-    target_link_libraries(micro_filter_nw_sqp PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_filter_nw_sqp PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_filter_nw_sqp PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_filter_nw_sqp PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
-    target_link_libraries(micro_augmented_lagrangian PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_augmented_lagrangian PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_augmented_lagrangian PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_augmented_lagrangian PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_isres micro_isres.cpp)
-    target_link_libraries(micro_isres PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_isres PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_isres PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_isres PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_projected_gn micro_projected_gn.cpp)
-    target_link_libraries(micro_projected_gn PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_projected_gn PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_projected_gn PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_projected_gn PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_projected_gradient_gn micro_projected_gradient_gn.cpp)
-    target_link_libraries(micro_projected_gradient_gn PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_projected_gradient_gn PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_projected_gradient_gn PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_projected_gradient_gn PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
     add_executable(micro_byrd_lbfgsb micro_byrd_lbfgsb.cpp)
-    target_link_libraries(micro_byrd_lbfgsb PRIVATE nablapp::nablapp NLopt::nlopt)
+    target_link_libraries(micro_byrd_lbfgsb PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_byrd_lbfgsb PRIVATE
         $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
             -march=native -fno-math-errno -fno-trapping-math
         >
     )
-    if(NABLAPP_LTO_SUPPORTED)
+    if(ARGMIN_LTO_SUPPORTED)
         set_target_properties(micro_byrd_lbfgsb PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 endif()
 
-# Levenberg-Marquardt micro-benchmark (nablapp-only: unconstrained
+# Levenberg-Marquardt micro-benchmark (argmin-only: unconstrained
 # least-squares, no direct NLopt equivalent).
 add_executable(micro_lm micro_lm.cpp)
-target_link_libraries(micro_lm PRIVATE nablapp::nablapp)
+target_link_libraries(micro_lm PRIVATE argmin::argmin)
 target_compile_options(micro_lm PRIVATE
     $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
         -march=native -fno-math-errno -fno-trapping-math
     >
 )
-if(NABLAPP_LTO_SUPPORTED)
+if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(micro_lm PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
-# Active-set QP micro-benchmark (nablapp-only, no external dependencies).
+# Active-set QP micro-benchmark (argmin-only, no external dependencies).
 add_executable(micro_active_set_qp micro_active_set_qp.cpp)
-target_link_libraries(micro_active_set_qp PRIVATE nablapp::nablapp)
+target_link_libraries(micro_active_set_qp PRIVATE argmin::argmin)
 target_compile_options(micro_active_set_qp PRIVATE
     $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
         -march=native
@@ -333,7 +333,7 @@ target_compile_options(micro_active_set_qp PRIVATE
         -fno-trapping-math
     >
 )
-if(NABLAPP_LTO_SUPPORTED)
+if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(micro_active_set_qp PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
@@ -346,7 +346,7 @@ endif()
 # diagnostic_kkt_breakdown`.
 add_executable(diagnostic_kkt_breakdown EXCLUDE_FROM_ALL
     diagnostic_kkt_breakdown.cpp)
-target_link_libraries(diagnostic_kkt_breakdown PRIVATE nablapp::nablapp)
+target_link_libraries(diagnostic_kkt_breakdown PRIVATE argmin::argmin)
 target_compile_options(diagnostic_kkt_breakdown PRIVATE
     $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
         -march=native
@@ -354,50 +354,50 @@ target_compile_options(diagnostic_kkt_breakdown PRIVATE
         -fno-trapping-math
     >
 )
-if(NABLAPP_LTO_SUPPORTED)
+if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(diagnostic_kkt_breakdown PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
-option(NABLAPP_BENCH_CERES "Build Ceres comparison benchmarks" ON)
-if(NABLAPP_BENCH_CERES)
+option(ARGMIN_BENCH_CERES "Build Ceres comparison benchmarks" ON)
+if(ARGMIN_BENCH_CERES)
     find_package(Ceres CONFIG QUIET)
     if(Ceres_FOUND)
-        target_sources(nablapp_bench PRIVATE bench_ceres.cpp)
-        target_link_libraries(nablapp_bench PRIVATE Ceres::ceres)
-        target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_CERES)
+        target_sources(argmin_bench PRIVATE bench_ceres.cpp)
+        target_link_libraries(argmin_bench PRIVATE Ceres::ceres)
+        target_compile_definitions(argmin_bench PRIVATE ARGMIN_HAS_CERES)
 
         target_sources(publish_bench PRIVATE bench_ceres.cpp)
         target_link_libraries(publish_bench PRIVATE Ceres::ceres)
-        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_CERES)
+        target_compile_definitions(publish_bench PRIVATE ARGMIN_HAS_CERES)
     else()
         message(STATUS "Ceres not found, skipping Ceres benchmarks")
     endif()
 endif()
 
-option(NABLAPP_BENCH_DLIB "Build dlib comparison benchmarks" ON)
-if(NABLAPP_BENCH_DLIB)
+option(ARGMIN_BENCH_DLIB "Build dlib comparison benchmarks" ON)
+if(ARGMIN_BENCH_DLIB)
     find_package(dlib CONFIG QUIET)
     if(dlib_FOUND)
-        target_sources(nablapp_bench PRIVATE bench_dlib.cpp)
-        target_link_libraries(nablapp_bench PRIVATE dlib::dlib)
-        target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_DLIB)
+        target_sources(argmin_bench PRIVATE bench_dlib.cpp)
+        target_link_libraries(argmin_bench PRIVATE dlib::dlib)
+        target_compile_definitions(argmin_bench PRIVATE ARGMIN_HAS_DLIB)
 
         target_sources(publish_bench PRIVATE bench_dlib.cpp)
         target_link_libraries(publish_bench PRIVATE dlib::dlib)
-        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_DLIB)
+        target_compile_definitions(publish_bench PRIVATE ARGMIN_HAS_DLIB)
     else()
         message(STATUS "dlib not found, skipping dlib benchmarks")
     endif()
 endif()
 
-option(NABLAPP_BENCH_LIBCMAES "Build libcmaes comparison benchmarks" ON)
-if(NABLAPP_BENCH_LIBCMAES)
-    if(NABLAPP_CMAKE_FETCH_DEPS)
+option(ARGMIN_BENCH_LIBCMAES "Build libcmaes comparison benchmarks" ON)
+if(ARGMIN_BENCH_LIBCMAES)
+    if(ARGMIN_CMAKE_FETCH_DEPS)
         include(FetchContent)
         # libcmaes v0.10 ships unconditional install(EXPORT ...) and bare
         # export(TARGETS cmaes ...) commands at top level which fail when
-        # used as a FetchContent subdirectory because nablapp's
+        # used as a FetchContent subdirectory because argmin's
         # eigen_headers (the alias backing Eigen3::Eigen under FETCH_DEPS)
         # is not in any export set. We do not need the export at all --
         # we only consume the cmaes target from a sibling target. Wrap
@@ -444,7 +444,7 @@ if(NABLAPP_BENCH_LIBCMAES)
         endblock()
         unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 
-        # Eigen ABI alignment: nablapp's bench targets compile with
+        # Eigen ABI alignment: argmin's bench targets compile with
         # -march=native, which under AVX gives Eigen 32-byte-aligned
         # fixed-size types. libcmaes built with default flags keeps
         # 16-byte alignment. Mixing Eigen-allocated objects across
@@ -460,39 +460,39 @@ if(NABLAPP_BENCH_LIBCMAES)
             >
         )
 
-        target_sources(nablapp_bench PRIVATE bench_libcmaes.cpp)
-        target_link_libraries(nablapp_bench PRIVATE libcmaes::cmaes)
-        target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_LIBCMAES)
+        target_sources(argmin_bench PRIVATE bench_libcmaes.cpp)
+        target_link_libraries(argmin_bench PRIVATE libcmaes::cmaes)
+        target_compile_definitions(argmin_bench PRIVATE ARGMIN_HAS_LIBCMAES)
 
         target_sources(publish_bench PRIVATE bench_libcmaes.cpp)
         target_link_libraries(publish_bench PRIVATE libcmaes::cmaes)
-        target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_LIBCMAES)
+        target_compile_definitions(publish_bench PRIVATE ARGMIN_HAS_LIBCMAES)
 
         # micro_cmaes uses libcmaes CMAES_DEFAULT as its same-class
         # comparator; keep ABI alignment via the same -march=native
         # already wired on cmaes above.
         if(TARGET micro_cmaes)
             target_link_libraries(micro_cmaes PRIVATE libcmaes::cmaes)
-            target_compile_definitions(micro_cmaes PRIVATE NABLAPP_HAS_LIBCMAES)
+            target_compile_definitions(micro_cmaes PRIVATE ARGMIN_HAS_LIBCMAES)
         endif()
     else()
-        message(STATUS "libcmaes requires NABLAPP_CMAKE_FETCH_DEPS=ON; skipping libcmaes benchmarks")
+        message(STATUS "libcmaes requires ARGMIN_CMAKE_FETCH_DEPS=ON; skipping libcmaes benchmarks")
     endif()
 endif()
 
-option(NABLAPP_BENCH_IPOPT "Build IPOPT comparison benchmarks" ON)
-if(NABLAPP_BENCH_IPOPT)
+option(ARGMIN_BENCH_IPOPT "Build IPOPT comparison benchmarks" ON)
+if(ARGMIN_BENCH_IPOPT)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
         pkg_check_modules(IPOPT IMPORTED_TARGET QUIET ipopt)
         if(IPOPT_FOUND)
-            target_sources(nablapp_bench PRIVATE bench_ipopt.cpp)
-            target_link_libraries(nablapp_bench PRIVATE PkgConfig::IPOPT)
-            target_compile_definitions(nablapp_bench PRIVATE NABLAPP_HAS_IPOPT)
+            target_sources(argmin_bench PRIVATE bench_ipopt.cpp)
+            target_link_libraries(argmin_bench PRIVATE PkgConfig::IPOPT)
+            target_compile_definitions(argmin_bench PRIVATE ARGMIN_HAS_IPOPT)
 
             target_sources(publish_bench PRIVATE bench_ipopt.cpp)
             target_link_libraries(publish_bench PRIVATE PkgConfig::IPOPT)
-            target_compile_definitions(publish_bench PRIVATE NABLAPP_HAS_IPOPT)
+            target_compile_definitions(publish_bench PRIVATE ARGMIN_HAS_IPOPT)
         else()
             message(STATUS "IPOPT not found via pkg-config, skipping IPOPT benchmarks")
         endif()

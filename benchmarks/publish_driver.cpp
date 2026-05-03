@@ -11,33 +11,33 @@
 
 #include "trace_entry.h"
 #include "bench_config.h"
-#include "bench_nablapp.h"
+#include "bench_argmin.h"
 #include "benchmark_result.h"
 #include "problem_registry.h"
 
-#ifdef NABLAPP_HAS_NLOPT
+#ifdef ARGMIN_HAS_NLOPT
 #include "bench_nlopt.h"
 
 #include <nlopt.hpp>
 #endif
 
-#ifdef NABLAPP_HAS_CERES
+#ifdef ARGMIN_HAS_CERES
 #include "bench_ceres.h"
 #endif
 
-#ifdef NABLAPP_HAS_DLIB
+#ifdef ARGMIN_HAS_DLIB
 #include "bench_dlib.h"
 #endif
 
-#ifdef NABLAPP_HAS_IPOPT
+#ifdef ARGMIN_HAS_IPOPT
 #include "bench_ipopt.h"
 #endif
 
-#ifdef NABLAPP_HAS_OPTIM
+#ifdef ARGMIN_HAS_OPTIM
 #include "bench_optim.h"
 #endif
 
-#ifdef NABLAPP_HAS_LIBCMAES
+#ifdef ARGMIN_HAS_LIBCMAES
 #include "bench_libcmaes.h"
 #endif
 
@@ -145,7 +145,7 @@ auto parse_args(int argc, char** argv, cli_args& cli) -> int
 }
 
 void write_trace_file(const std::filesystem::path& path,
-                      const std::vector<nablapp::bench::trace_entry>& trace)
+                      const std::vector<argmin::bench::trace_entry>& trace)
 {
     std::ofstream trace_out(path);
     if(!trace_out)
@@ -184,51 +184,51 @@ int main(int argc, char** argv)
                   << (out_dir / "publish_summary.csv").string() << "'\n";
         return 1;
     }
-    summary_out << nablapp::bench::csv_header() << '\n';
+    summary_out << argmin::bench::csv_header() << '\n';
 
     for(int si = 0; si < cli.seed_count; ++si)
     {
         std::uint64_t seed = static_cast<std::uint64_t>(cli.seed_start + si);
-        auto cfg = nablapp::bench::bench_config::publication(seed);
+        auto cfg = argmin::bench::bench_config::publication(seed);
 
-        std::vector<nablapp::bench::benchmark_result>         results;
-        std::vector<std::vector<nablapp::bench::trace_entry>> traces;
+        std::vector<argmin::bench::benchmark_result>         results;
+        std::vector<std::vector<argmin::bench::trace_entry>> traces;
         // Invariant: results[i] corresponds to traces[i]. Adapters that
         // produce no per-iter trace push an empty vector to keep indexing
         // aligned across libraries.
 
-        // nablapp solvers — iterate every registered problem and dispatch
+        // argmin solvers — iterate every registered problem and dispatch
         // every applicable policy through the existing solver-selection
         // helper. Trace collection is on under publication mode.
-        nablapp::bench::for_each_problem([&](std::string_view name, auto&& prob) {
-            nablapp::bench::run_all_nablapp_solvers(
+        argmin::bench::for_each_problem([&](std::string_view name, auto&& prob) {
+            argmin::bench::run_all_argmin_solvers(
                 name, prob, max_iterations, cfg.trace_enabled, results, traces,
                 cfg, seed);
         });
 
-        #ifdef NABLAPP_HAS_NLOPT
+        #ifdef ARGMIN_HAS_NLOPT
         nlopt::srand(static_cast<unsigned long>(seed));
-        nablapp::bench::run_nlopt_benchmarks(results, traces, cfg);
+        argmin::bench::run_nlopt_benchmarks(results, traces, cfg);
         #endif
-        #ifdef NABLAPP_HAS_IPOPT
-        nablapp::bench::run_ipopt_benchmarks(results, traces, cfg);
+        #ifdef ARGMIN_HAS_IPOPT
+        argmin::bench::run_ipopt_benchmarks(results, traces, cfg);
         #endif
-        #ifdef NABLAPP_HAS_CERES
-        nablapp::bench::run_ceres_benchmarks(results, traces, cfg);
+        #ifdef ARGMIN_HAS_CERES
+        argmin::bench::run_ceres_benchmarks(results, traces, cfg);
         #endif
-        #ifdef NABLAPP_HAS_DLIB
-        nablapp::bench::run_dlib_benchmarks(results, traces, cfg);
+        #ifdef ARGMIN_HAS_DLIB
+        argmin::bench::run_dlib_benchmarks(results, traces, cfg);
         #endif
-        #ifdef NABLAPP_HAS_OPTIM
-        nablapp::bench::run_optim_benchmarks(results, traces, cfg);
+        #ifdef ARGMIN_HAS_OPTIM
+        argmin::bench::run_optim_benchmarks(results, traces, cfg);
         #endif
-        #ifdef NABLAPP_HAS_LIBCMAES
-        nablapp::bench::run_libcmaes_benchmarks(results, traces, cfg);
+        #ifdef ARGMIN_HAS_LIBCMAES
+        argmin::bench::run_libcmaes_benchmarks(results, traces, cfg);
         #endif
 
         for(std::size_t i = 0; i < results.size(); ++i)
         {
-            summary_out << nablapp::bench::csv_row(results[i]) << '\n';
+            summary_out << argmin::bench::csv_row(results[i]) << '\n';
 
             if(i < traces.size() && !traces[i].empty())
             {
