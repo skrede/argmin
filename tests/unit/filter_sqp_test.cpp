@@ -313,3 +313,100 @@ TEST_CASE("filter_slsqp converges on HS028 quadratic with linear equality",
     CHECK(std::abs(result.x[2] - 0.5) < 1e-3);
 }
 
+// BFGS-reset-on-LS-failure cap: filter_slsqp wraps the QP + Armijo /
+// filter region of step() in a bounded retry loop on Armijo / filter
+// rejection. On retry-cap exhaustion the policy returns a null step
+// with diagnostics.bfgs_reset_count populated to the actual reset
+// count (mirroring NLopt slsqp.c:1890-1895 ireset). Three tests
+// pin the contract:
+//   - common success path leaves diagnostics.bfgs_reset_count == 0;
+//   - forced LS failure with bfgs_reset_max == K exhausts at K;
+//   - bfgs_reset_max == 0 disables the retry loop entirely (the
+//     existing restoration fallback handles the rejection path,
+//     mirroring v0.2.1 behaviour).
+//
+// Reference: NLopt slsqp.c:1890-1895 (ireset);
+//            PITFALLS.md Section L (line-search exhaustion);
+//            Hock & Schittkowski 1981, Problem 28.
+TEST_CASE("filter_slsqp diagnostics.bfgs_reset_count is zero on success path",
+          "[filter_slsqp][bfgs_reset]")
+{
+    hs028<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
+                        problem, x0, opts};
+
+    // HS028 is well-conditioned; the BFGS reset retry should never
+    // fire on the success path.
+    for(int i = 0; i < 10; ++i)
+    {
+        auto sr = solver.step();
+        CHECK(sr.diagnostics.bfgs_reset_count == 0u);
+        if(sr.policy_status)
+            break;
+    }
+}
+
+// Cap-exhaust forcing: max_iterations = 0 makes the inner Armijo /
+// filter loop reject every trial direction (the for-loop body never
+// runs, accepted stays false), so every retry fails the inner
+// acceptance test and the loop exhausts at exactly bfgs_reset_max.
+// Reference: NLopt slsqp.c:1890-1895; PITFALLS.md Section L.
+TEST_CASE("filter_slsqp BFGS-reset retry exhausts cap on forced LS failure",
+          "[filter_slsqp][bfgs_reset]")
+{
+    hs028<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    filter_slsqp_policy<hs028<>::problem_dimension>::options_type policy_opts;
+    policy_opts.line_search.max_iterations = 0; // forces accepted == false
+    policy_opts.bfgs_reset_max = 3;
+
+    basic_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
+                        problem, x0, opts, policy_opts};
+
+    auto sr = solver.step();
+    CHECK(sr.is_null_step);
+    CHECK(sr.diagnostics.bfgs_reset_count == 3u);
+}
+
+// Disable path: bfgs_reset_max = 0 makes the retry loop a no-op
+// (reset_count stays 0 and the loop never enters). The existing
+// restoration fallback handles the Armijo rejection (returning the
+// stalled / restoration-success result, both of which carry
+// diagnostics.bfgs_reset_count == 0). This pins back-compat with
+// the v0.2.1 fall-through behaviour.
+TEST_CASE("filter_slsqp bfgs_reset_max = 0 disables the retry loop",
+          "[filter_slsqp][bfgs_reset]")
+{
+    hs028<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    filter_slsqp_policy<hs028<>::problem_dimension>::options_type policy_opts;
+    policy_opts.line_search.max_iterations = 0; // forces accepted == false
+    policy_opts.bfgs_reset_max = 0;
+
+    basic_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
+                        problem, x0, opts, policy_opts};
+
+    auto sr = solver.step();
+    // With retry disabled the cap-exhaust return is bypassed; control
+    // falls into the existing restoration block (which returns
+    // diagnostics.bfgs_reset_count = 0 unconditionally on the disable
+    // path).
+    CHECK(sr.diagnostics.bfgs_reset_count == 0u);
+}
+

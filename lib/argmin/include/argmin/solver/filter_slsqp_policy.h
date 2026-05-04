@@ -66,6 +66,23 @@ struct filter_slsqp_policy
         detail::restoration_strategy restoration{detail::restoration_strategy::hybrid};
         std::uint16_t max_restoration_steps{10};
         double soc_violation_threshold{1e-8};
+
+        // BFGS-reset-on-LS-failure cap. NLopt slsqp.c:1890-1895
+        // ireset parity. Default 5 across all four line-search SQP
+        // policies; per-mode wiring deferred. On Armijo line-search
+        // exhaustion, reset the BFGS Hessian to identity (Shanno-
+        // rescaled on next push) and retry the QP up to
+        // bfgs_reset_max times. After exhaustion, return a null step
+        // with diagnostics.bfgs_reset_count populated. filter_slsqp
+        // previously fell through silently on Armijo exhaustion;
+        // this knob enables principled recovery via the same
+        // ireset pattern shipped on kraft_slsqp.
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
+        //            PITFALLS.md Section L (line-search exhaustion).
+        // Adopted from: NLopt slsqp.c:1890-1895.
+        std::size_t bfgs_reset_max{5};
+
         std::uint16_t stall_window{50};
 
         // Filter envelope parameters. Default kept at 1e-5/1e-5
@@ -307,6 +324,10 @@ struct filter_slsqp_policy
                             .improved = false,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
+                            // Pre-Armijo branch (zero-step + restoration
+                            // success): retry loop has not yet entered
+                            // scope, so bfgs_reset_count is literal 0.
+                            .diagnostics = solver_diagnostics{.bfgs_reset_count = 0},
                         };
                     }
                 }
@@ -368,6 +389,10 @@ struct filter_slsqp_policy
                 .policy_status = h_zero_l1 > 1e-8
                     ? std::optional{solver_status::stalled}
                     : std::nullopt,
+                // Pre-Armijo branch (QP zero-step null return): retry
+                // loop has not yet entered scope, so bfgs_reset_count
+                // is literal 0.
+                .diagnostics = solver_diagnostics{.bfgs_reset_count = 0},
             };
         }
 
@@ -550,6 +575,224 @@ struct filter_slsqp_policy
             }
         }
 
+        // Mirror Armijo / SOC acceptance into ls_success so the
+        // BFGS-reset retry loop below uses the same naming as the
+        // canonical kraft_slsqp pattern (NLopt slsqp.c:1890-1895
+        // ireset). filter_slsqp uses a single `accepted` flag covering
+        // both Armijo (f-type) and filter dominance (h-type) checks;
+        // the alias keeps the retry loop semantically identical to
+        // the kraft version while preserving the existing flag name
+        // for the down-stream restoration / step-acceptance branches.
+        const bool ls_success_initial = accepted;
+        bool ls_success = ls_success_initial;
+
+        // BFGS-reset-on-LS-failure retry (NLopt slsqp.c:1890-1895
+        // ireset pattern). On Armijo / filter exhaustion (after the
+        // SOC retry above), reset the BFGS Hessian to identity
+        // (Shanno-rescaled on next push), re-factor, re-solve the
+        // direct-path QP, and re-run the inner acceptance loop
+        // (Armijo for f-type, filter for h-type) up to
+        // options.bfgs_reset_max times. After exhaustion, return a
+        // null step with diagnostics.bfgs_reset_count populated so
+        // the caller can detect cap exhaustion via:
+        //   is_null_step && diagnostics.bfgs_reset_count >= options.bfgs_reset_max
+        //
+        // filter_slsqp previously fell through silently on Armijo
+        // exhaustion (no K3-style force-continue), forwarding into
+        // the feasibility-restoration block below. The retry loop
+        // adds principled BFGS-curvature recovery before restoration
+        // is invoked: when the Armijo failure is curvature-driven
+        // (BFGS approximation poisoned by recent damped pairs), a
+        // reset to identity cleanly re-bootstraps from the current
+        // gradient. Only when reset cannot find a usable direction
+        // does control fall through to the restoration fallback (or
+        // the cap-exhaust null-step return).
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
+        //            PITFALLS.md Section L (line-search exhaustion).
+        // Adopted from: NLopt slsqp.c:1890-1895.
+        // Adopted from: argmin kraft_slsqp_policy.h retry-loop pattern.
+        std::size_t reset_count = 0;
+        while(!ls_success && reset_count < options.bfgs_reset_max)
+        {
+            s.hessian.reset();
+            ++reset_count;
+
+            // Re-factor the (now identity) BFGS Hessian into (E, f)
+            // and re-solve the direct-path QP. Constraint workspaces
+            // (b_eq_workspace, b_ineq_workspace) and box-bound deltas
+            // (p_lo, p_hi) are unchanged across resets since s.x,
+            // s.c_eq, s.c_ineq, s.lower, s.upper are not mutated
+            // until the iterate update at the bottom of step(). The
+            // factor-reuse path (solve_with_factored_hessian) is
+            // correct because (E, f) is freshly recomputed from the
+            // reset Hessian on every retry.
+            s.hessian.factor_to_E_and_f(s.E_buf, s.g, s.f_buf);
+            qp_res = s.qp_solver.solve_with_factored_hessian(
+                s.E_buf, s.f_buf, Eigen::Vector<double, N>(s.g),
+                s.J_eq, s.b_eq_workspace,
+                s.J_ineq, s.b_ineq_workspace,
+                p_lo, p_hi);
+
+            // Inconsistent-linearisation fall-through after reset:
+            // the kraft_lsq_qp recovery solver promoted the QP into
+            // the augmented (relaxation) path. Another Hessian reset
+            // cannot fix structural infeasibility of the linearised
+            // constraints; exit the loop and fall through to the
+            // cap-exhausted null-step return below. The caller
+            // composes is_null_step && diagnostics.bfgs_reset_count > 0
+            // to recognise the recovery path.
+            if(qp_res.relaxation_factor > 0.0)
+                break;
+
+            p = qp_res.x;
+            p_norm = p.norm();
+            // Post-reset zero direction: the QP at the reset Hessian
+            // returned p = 0. Either a true KKT point (the reset
+            // confirms we were at one) or active-set degeneracy that
+            // no further reset can resolve; exit and fall through to
+            // the cap-exhausted return.
+            if(p_norm < 1e-15)
+                break;
+
+            // Re-evaluate the predicted objective slope along the new
+            // direction; refresh the f-type / h-type classification
+            // since the new p may switch the iteration character at
+            // the same iterate.
+            grad_f_dot_p = s.g.dot(p);
+            f_type = detail::is_f_type_iteration(h_k, grad_f_dot_p,
+                                                 s.filter.h_max());
+
+            // Re-run the inner acceptance loop (Armijo on f for
+            // f-type, filter dominance for h-type). Mirrors the
+            // pre-loop Armijo / filter block; alpha resets to 1.0
+            // for each retry.
+            alpha = 1.0;
+            accepted = false;
+            f_trial = f_k;
+            h_trial = h_k;
+            for(std::uint16_t ls = 0; ls < max_ls; ++ls)
+            {
+                Eigen::Vector<double, N> x_trial = s.x + alpha * p;
+                for(int i = 0; i < n; ++i)
+                {
+                    if(x_trial[i] < s.lower[i]) x_trial[i] = s.lower[i];
+                    if(x_trial[i] > s.upper[i]) x_trial[i] = s.upper[i];
+                }
+
+                f_trial = s.problem->value(x_trial);
+                ++s.line_search_calls;
+
+                if constexpr(constrained<P>)
+                {
+                    if(s.n_eq + s.n_ineq > 0)
+                    {
+                        Eigen::VectorXd c_trial(s.n_eq + s.n_ineq);
+                        s.problem->constraints(x_trial, c_trial);
+                        c_eq_trial = c_trial.head(s.n_eq);
+                        c_ineq_trial = c_trial.tail(s.n_ineq);
+                        h_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
+                    }
+                    else
+                    {
+                        h_trial = 0.0;
+                    }
+                }
+                else
+                {
+                    h_trial = 0.0;
+                }
+
+                if(f_type)
+                {
+                    if(f_trial <= f_k + c1 * alpha * grad_f_dot_p)
+                    {
+                        accepted = true;
+                        break;
+                    }
+                }
+                else
+                {
+                    if(s.filter.is_acceptable(f_trial, h_trial))
+                    {
+                        accepted = true;
+                        break;
+                    }
+                }
+
+                alpha *= rho;
+            }
+
+            ls_success = accepted;
+        }
+
+        // Cap-exhausted null-step return. If the retry loop exited
+        // without accepting a step (cap reached, augmented-path
+        // promotion, or post-reset zero direction), surface a null
+        // step with diagnostics.bfgs_reset_count set to the actual
+        // number of resets performed. Mirrors the kraft_slsqp
+        // cap-exhaust return shape so callers see consistent
+        // telemetry across both line-search SQP variants.
+        //
+        // Restoration (below) is intentionally NOT chained from this
+        // return: the new principled BFGS-reset recovery replaces
+        // the silent Armijo-exhaustion fall-through that previously
+        // forwarded into restoration. Restoration remains reachable
+        // when reset_count == 0, i.e. when the original Armijo / SOC
+        // attempt failed but the retry loop never ran (which is
+        // never the case in the current logic — kept here for the
+        // bfgs_reset_max == 0 disable path).
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset);
+        //            PITFALLS.md Section L (line-search exhaustion).
+        if(!ls_success && reset_count > 0)
+        {
+            // Active-set multiplier re-estimate at x_k for the kkt
+            // residual leg (mirrors the existing zero-step null-step
+            // branch above).
+            Eigen::VectorXd lambda_eq_capped = Eigen::VectorXd::Zero(s.n_eq);
+            Eigen::VectorXd mu_ineq_capped = Eigen::VectorXd::Zero(s.n_ineq);
+            if constexpr(constrained<P>)
+            {
+                if(s.n_eq + s.n_ineq > 0)
+                {
+                    Eigen::Vector<double, N> g_fixed = s.g;
+                    Eigen::VectorXd lambda_reest =
+                        detail::estimate_multipliers_active_set<double,
+                                                                N,
+                                                                Eigen::Dynamic,
+                                                                Eigen::Dynamic>(
+                            g_fixed, s.J_eq, s.J_ineq, s.c_ineq);
+                    if(s.n_eq > 0)
+                        lambda_eq_capped = lambda_reest.head(s.n_eq);
+                    if(s.n_ineq > 0)
+                        mu_ineq_capped = lambda_reest.segment(s.n_eq, s.n_ineq);
+                }
+            }
+            const double kkt_capped = detail::kkt_residual<double,
+                                                           Eigen::Dynamic,
+                                                           Eigen::Dynamic,
+                                                           Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq,
+                lambda_eq_capped, mu_ineq_capped,
+                s.c_eq, s.c_ineq);
+
+            ++s.iteration;
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = lagrangian_gradient_norm(s),
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .x_norm = s.x.norm(),
+                .kkt_residual = kkt_capped,
+                .policy_status = solver_status::stalled,
+                .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
+            };
+        }
+
         // Feasibility restoration: recover from filter-blocked iterates.
         //
         // Reference: Wachter & Biegler 2006 Section 3.
@@ -590,6 +833,11 @@ struct filter_slsqp_policy
                             .improved = s.objective_value < f_k,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
+                            // Restoration-after-rejection success.
+                            // reset_count is 0 on the bfgs_reset_max == 0
+                            // disable path (retry loop never entered) and
+                            // surfaces the actual count otherwise.
+                            .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
                         };
                     }
 
@@ -603,6 +851,10 @@ struct filter_slsqp_policy
                         .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                         .x_norm = s.x.norm(),
                         .policy_status = solver_status::stalled,
+                        // Restoration-failure: surface accumulated reset
+                        // count from the retry loop above (zero when the
+                        // disable path bypassed retries).
+                        .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
                     };
                 }
             }
@@ -775,6 +1027,13 @@ struct filter_slsqp_policy
             .constraint_violation = h_new,
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
+            // Surface BFGS-reset count for telemetry. Zero on the
+            // common success path (no resets fired); non-zero only
+            // when the retry loop above performed at least one
+            // reset before Armijo / filter accepted. Caller telemetry
+            // can distinguish "step accepted on first try" from
+            // "step accepted only after BFGS curvature was discarded".
+            .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
         };
     }
 
