@@ -3,10 +3,32 @@
 
 #include "argmin/result/status.h"
 
+#include <cstddef>
 #include <optional>
 
 namespace argmin
 {
+
+// Per-policy diagnostic counters surfaced on every step_result.
+// Defaulted; policies populate the fields they expose. Designed to
+// absorb new telemetry without breaking aggregate-init callers when
+// new fields are appended at the end of solver_diagnostics.
+//
+// Reference: PITFALLS.md Section L (line-search exhaustion telemetry).
+// argmin variant: fixed-shape struct (not std::variant or templated).
+// Future SEED-002 work may move this to a templated/variant
+// per-policy diagnostics type; the struct here becomes one variant
+// alternative at that point.
+struct solver_diagnostics
+{
+    // BFGS-reset retry count for line-search SQP policies. Set by
+    // kraft_slsqp / nw_sqp / filter_slsqp / filter_nw_sqp on every
+    // step (zero on success, increments per reset-retry on LS
+    // failure); left at 0 by other policies. Caller composes
+    //   is_null_step && bfgs_reset_count >= options.bfgs_reset_max
+    // to detect cap exhaustion.
+    std::size_t bfgs_reset_count{0};
+};
 
 // Metrics from a single solver iteration.
 //
@@ -44,6 +66,12 @@ struct step_result
     // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity).
     std::optional<Scalar> kkt_residual{};
     std::optional<solver_status> policy_status{};
+    // Per-policy diagnostic counters. Defaulted; absorbs future
+    // telemetry without breaking aggregate-init callers when new
+    // fields are appended at the end of solver_diagnostics. New
+    // policies opt-in by setting the fields they expose; others
+    // leave default-zero.
+    solver_diagnostics diagnostics{};
 };
 
 }
