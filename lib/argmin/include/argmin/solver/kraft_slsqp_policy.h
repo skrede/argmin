@@ -386,6 +386,21 @@ struct kraft_slsqp_policy
                         s.kkt_mu_ineq_buf = qp_res.lambda.segment(s.n_eq, s.n_ineq);
                 }
             }
+            // Seed s.lambda from the current QP multipliers so the
+            // Lagrangian-gradient helper reads fresh multipliers
+            // (matches the kkt_residual leg's multiplier source and
+            // nw_sqp's null-step convention at :289-326).
+            if constexpr(constrained<P>)
+            {
+                if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
+                {
+                    if(s.n_eq > 0)
+                        s.lambda.head(s.n_eq) = qp_res.lambda.head(s.n_eq);
+                    if(s.n_ineq > 0)
+                        s.lambda.segment(s.n_eq, s.n_ineq) =
+                            qp_res.lambda.segment(s.n_eq, s.n_ineq);
+                }
+            }
             double kkt_null = detail::kkt_residual<double,
                                                    Eigen::Dynamic,
                                                    Eigen::Dynamic,
@@ -396,7 +411,10 @@ struct kraft_slsqp_policy
 
             return step_result<double>{
                 .objective_value = s.objective_value,
-                .gradient_norm = s.g.norm(),
+                // argmin variant: report ||grad f - A^T lambda|| (Lagrangian
+                // gradient) instead of raw ||grad f||; rationale: KKT
+                // first-order optimality (N&W eq. 12.34).
+                .gradient_norm = lagrangian_gradient_norm(s),
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
@@ -627,6 +645,19 @@ struct kraft_slsqp_policy
                         s.kkt_mu_ineq_buf = qp_res.lambda.segment(s.n_eq, s.n_ineq);
                 }
             }
+            // Seed s.lambda from current QP multipliers (consistency
+            // with the kkt_residual leg; mirrors null-step convention).
+            if constexpr(constrained<P>)
+            {
+                if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
+                {
+                    if(s.n_eq > 0)
+                        s.lambda.head(s.n_eq) = qp_res.lambda.head(s.n_eq);
+                    if(s.n_ineq > 0)
+                        s.lambda.segment(s.n_eq, s.n_ineq) =
+                            qp_res.lambda.segment(s.n_eq, s.n_ineq);
+                }
+            }
             double kkt_reset = detail::kkt_residual<double,
                                                     Eigen::Dynamic,
                                                     Eigen::Dynamic,
@@ -637,7 +668,10 @@ struct kraft_slsqp_policy
 
             return step_result<double>{
                 .objective_value = s.objective_value,
-                .gradient_norm = s.g.norm(),
+                // argmin variant: report ||grad f - A^T lambda|| (Lagrangian
+                // gradient) instead of raw ||grad f||; rationale: KKT
+                // first-order optimality (N&W eq. 12.34).
+                .gradient_norm = lagrangian_gradient_norm(s),
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
@@ -826,7 +860,10 @@ struct kraft_slsqp_policy
         // Reference: N&W 2e Definition 12.1 (KKT primal feasibility).
         return step_result<double>{
             .objective_value = s.objective_value,
-            .gradient_norm = s.g.norm(),
+            // argmin variant: report ||grad f - A^T lambda|| (Lagrangian
+            // gradient) instead of raw ||grad f||; rationale: KKT
+            // first-order optimality (N&W eq. 12.34).
+            .gradient_norm = lagrangian_gradient_norm(s),
             .step_size = sk.norm(),
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
@@ -866,6 +903,30 @@ struct kraft_slsqp_policy
         reset(s, x0);
         s.hessian.reset();
         s.sigma = options.initial_penalty.value_or(1.0);
+    }
+
+private:
+    // Lagrangian gradient norm for step_result.gradient_norm. Replaces
+    // raw ||grad f|| reporting which silently misfires ftol-based
+    // convergence on near-feasible points where lambda is non-trivial.
+    // Mirrors the nw_sqp_policy helper at file-level parity for the
+    // SQP family.
+    //
+    // Reference: N&W 2e Section 12.3 / eq. 12.34 (KKT first-order
+    //            optimality measure).
+    // Adopted from: argmin nw_sqp_policy.h:599-612 (in-tree pattern).
+    template <typename P>
+    static double lagrangian_gradient_norm(const state_type<P>& s)
+    {
+        const int n = static_cast<int>(s.x.size());
+        const int m = s.n_eq + s.n_ineq;
+        if(m == 0)
+            return s.g.norm();
+
+        Eigen::Matrix<double, Eigen::Dynamic, N> A(m, n);
+        if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
+        if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
+        return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
     }
 };
 

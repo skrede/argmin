@@ -1,3 +1,9 @@
+// Convergence regression tests for kraft_slsqp_policy on Hock-Schittkowski problems.
+//
+// Reference: Hock, W. & Schittkowski, K. (1981). Test Examples for
+//            Nonlinear Programming Codes. Lecture Notes in Economics
+//            and Mathematical Systems 187. Springer-Verlag.
+
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/basic_solver.h"
 #include "argmin/formulation/concepts.h"
@@ -315,6 +321,12 @@ TEST_CASE("kraft_slsqp step solve step_n", "[kraft_slsqp]")
     }
 }
 
+// HS007: min ln(1 + x_0^2) - x_1, subject to (1 + x_0^2)^2 + x_1^2 = 4.
+//        n=2, 1 equality. Near-feasible start.
+//
+// Reference: Hock, W. & Schittkowski, K. (1981). Test Examples for
+//            Nonlinear Programming Codes. Lecture Notes in Economics
+//            and Mathematical Systems 187. Springer-Verlag. Problem 7.
 TEST_CASE("kraft_slsqp converges on HS007 equality", "[kraft_slsqp]")
 {
     hs007 problem;
@@ -330,6 +342,41 @@ TEST_CASE("kraft_slsqp converges on HS007 equality", "[kraft_slsqp]")
 
     CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
     CHECK(solver.constraint_violation() < 1e-4);
+    // Lagrangian gradient norm at the optimum: kraft_slsqp reports
+    // ||grad f - A^T lambda||, which is the KKT first-order optimality
+    // measure (N&W eq. 12.34). Raw ||grad f|| is non-zero at
+    // constrained optima.
+    CHECK(result.gradient_norm < 1e-4);
+}
+
+// HS028: min (x_0 + x_1)^2 + (x_1 + x_2)^2, subject to x_0 + 2*x_1 + 3*x_2 = 1.
+//        n=3, 1 equality, well-conditioned.
+//        f* = 0 at x* = (0.5, -0.5, 0.5).
+//
+// Reference: Hock, W. & Schittkowski, K. (1981). Test Examples for
+//            Nonlinear Programming Codes. Lecture Notes in Economics
+//            and Mathematical Systems 187. Springer-Verlag. Problem 28.
+TEST_CASE("kraft_slsqp HS028 quadratic with linear equality",
+          "[kraft_slsqp][regression][hs028]")
+{
+    hs028 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{kraft_slsqp_policy<hs028<>::problem_dimension>{},
+                        problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value < 1e-6);
+    CHECK(solver.constraint_violation() < 1e-6);
+    CHECK(result.gradient_norm < 1e-4);
+    CHECK(std::abs(result.x[0] - 0.5) < 1e-3);
+    CHECK(std::abs(result.x[1] - (-0.5)) < 1e-3);
+    CHECK(std::abs(result.x[2] - 0.5) < 1e-3);
 }
 
 TEST_CASE("kraft_slsqp converges on HS039 equality", "[kraft_slsqp]")
