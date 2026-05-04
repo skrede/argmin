@@ -49,7 +49,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         // Once that plan lands the bar can be tightened.
     }
 
-    // HS043 (Rosen-Suzuki): n=4, 3 inequalities. Loose convergence margin.
+    // HS043 (Rosen-Suzuki): n=4, 3 inequalities.
     //
     // Reference: Hock & Schittkowski 1981, Problem 43.
     SECTION("HS043: inequality constraints")
@@ -64,14 +64,14 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         basic_solver solver{filter_slsqp_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
-        CHECK(result.objective_value == Approx(-44.0).margin(1.0));
-        CHECK(solver.constraint_violation() < 0.1);
-        // Lagrangian gradient norm at converged point (post-COR-01 invariant).
-        // HS043 uses a relaxed bar (< 1e-3) because filter_slsqp's
-        // Wachter-Biegler envelope (gamma_f = gamma_h = 1e-5 hardcoded)
-        // over-rejects strictly-feasible descent on this cell, leaving the
-        // iterate at a loosely converged optimum (SEED-006; gamma sweep is
-        // a separate plan in this phase).
+        // HS043 envelope sweep over {1e-3, 1e-4, 1e-5, 1e-6}^2 found
+        // every (gamma_f, gamma_h) combo converges to the same point on
+        // this policy: filter dominance is not the binding gate on this
+        // cell. Bar tightened from margin(1.0) -> margin(0.001) and
+        // cv < 0.1 -> cv < 1e-6 to lock the post-sweep accuracy in.
+        CHECK(result.objective_value == Approx(-44.0).margin(0.001));
+        CHECK(solver.constraint_violation() < 1e-6);
+        // Lagrangian gradient norm at converged point.
         CHECK(result.gradient_norm < 1e-3);
     }
 
