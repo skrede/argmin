@@ -78,6 +78,25 @@ struct filter_nw_sqp_policy
         // Reference: Wachter & Biegler 2006 Section 2.3, eq. (6).
         double gamma_f{1e-3};
         double gamma_h{1e-3};
+
+        // BFGS-reset-on-LS-failure cap. On Armijo + SOC line-search
+        // exhaustion, reset the BFGS Hessian to identity (Shanno-
+        // rescaled on next push) and retry the QP + Armijo + SOC
+        // sequence up to bfgs_reset_max times. After exhaustion, the
+        // policy falls through to feasibility restoration; if
+        // restoration also fails the returned step_result carries
+        // is_null_step = true with diagnostics.bfgs_reset_count set
+        // to the cumulative reset count. Default 5 = NLopt
+        // slsqp.c:1890-1895 ireset parity.
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
+        //            PITFALLS.md Section L (line-search exhaustion).
+        // argmin variant: filter_nw_sqp's QP solve uses the
+        // detail::solve_qp free function (REF-05 in a later phase
+        // will replace with a stateful active_set_qp_solver member);
+        // the retry loop calls the free function on every iteration.
+        // Adopted from: NLopt slsqp.c:1890-1895.
+        std::size_t bfgs_reset_max{5};
     };
 
     options_type options{};
@@ -224,43 +243,293 @@ struct filter_nw_sqp_policy
         Eigen::MatrixXd A_ineq = s.J_ineq;
         Eigen::VectorXd b_ineq = -s.c_ineq;
 
-        Eigen::VectorXd p0 = Eigen::VectorXd::Zero(n);
-        if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
-        {
-            Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
-            auto qr = AAt.colPivHouseholderQr();
-            Eigen::VectorXd w = qr.solve(b_eq);
-            p0 = A_eq.transpose() * w;
-        }
-
         qp_options qp_opts;
         qp_opts.max_iterations = std::uint16_t{200};
         qp_opts.tolerance = 1e-12;
 
+        const bool has_bounds = has_finite_box(s.lower, s.upper);
+
+        // BFGS-reset-on-LS-failure retry (NLopt slsqp.c:1890-1895
+        // ireset pattern). On Armijo + SOC exhaustion, reset the BFGS
+        // Hessian to identity (Shanno-rescaled on next push) and
+        // retry the QP + Armijo + SOC sequence up to
+        // options.bfgs_reset_max times. The QP solve uses the
+        // detail::solve_qp free function (no factor-reuse
+        // bookkeeping needed across resets). On loop exhaustion the
+        // policy falls through to feasibility restoration; the
+        // diagnostics.bfgs_reset_count surfaces the cumulative reset
+        // count on every step_result return so callers can compose
+        //   is_null_step && diagnostics.bfgs_reset_count > 0
+        // to detect reset-driven nullification.
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
+        //            PITFALLS.md Section L (line-search exhaustion).
+        // Adopted from: NLopt slsqp.c:1890-1895.
+        std::size_t reset_count = 0;
+
+        // Locals that survive the retry loop into the BFGS update / step_result
+        // construction below MUST be hoisted above the loop. Each retry resets
+        // them via re-execution of the QP + sigma-calibration + Armijo + SOC
+        // body; the tail of step() reads only the post-loop values.
         detail::qp_result<double> qp;
-        bool has_bounds = has_finite_box(s.lower, s.upper);
+        Eigen::VectorXd p;
+        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
+        Eigen::Vector<double, N> x_trial(n);
+        Eigen::VectorXd c_eq_trial, c_ineq_trial;
+        Eigen::VectorXd c_trial_all(m);
+        double f_k = s.objective_value;
+        double h_k = detail::constraint_violation(s.c_eq, s.c_ineq);
+        double f_trial = f_k;
+        double h_trial = h_k;
+        double phi0 = 0.0;
+        double dphi0 = 0.0;
+        double alpha = 1.0;
+        bool accepted = false;
+        bool null_qp_step = false;
 
-        if(has_bounds)
+        for(;;)
         {
-            Eigen::VectorXd p_lower = (Eigen::VectorXd(s.lower)
-                - Eigen::VectorXd(s.x)).eval();
-            Eigen::VectorXd p_upper = (Eigen::VectorXd(s.upper)
-                - Eigen::VectorXd(s.x)).eval();
-            p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
-            qp = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
-                                  A_eq, b_eq, A_ineq, b_ineq,
-                                  p_lower, p_upper, p0, qp_opts);
-        }
-        else
-        {
-            qp = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
-                                  A_eq, b_eq, A_ineq, b_ineq,
-                                  p0, qp_opts);
+            Eigen::VectorXd p0 = Eigen::VectorXd::Zero(n);
+            if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
+            {
+                Eigen::MatrixXd AAt = A_eq * A_eq.transpose();
+                auto qr = AAt.colPivHouseholderQr();
+                Eigen::VectorXd w = qr.solve(b_eq);
+                p0 = A_eq.transpose() * w;
+            }
+
+            if(has_bounds)
+            {
+                Eigen::VectorXd p_lower = (Eigen::VectorXd(s.lower)
+                    - Eigen::VectorXd(s.x)).eval();
+                Eigen::VectorXd p_upper = (Eigen::VectorXd(s.upper)
+                    - Eigen::VectorXd(s.x)).eval();
+                p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
+                qp = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
+                                      A_eq, b_eq, A_ineq, b_ineq,
+                                      p_lower, p_upper, p0, qp_opts);
+            }
+            else
+            {
+                qp = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
+                                      A_eq, b_eq, A_ineq, b_ineq,
+                                      p0, qp_opts);
+            }
+
+            p = Eigen::VectorXd(qp.x);
+
+            // Post-reset zero-direction: the QP at the reset Hessian
+            // returned p = 0. This is either a true KKT point (the
+            // reset confirms we were at one) or active-set degeneracy
+            // that no further reset will resolve. Exit the loop and
+            // fall through to the existing null-step return below.
+            if(p.norm() < 1e-15)
+            {
+                null_qp_step = true;
+                break;
+            }
+
+            // --- 2. Extract QP multipliers and update penalty ---
+            lambda_new.setZero(m);
+            if(m > 0 && qp.lambda.size() >= m)
+                lambda_new = qp.lambda.head(m);
+            else if(m > 0 && qp.lambda.size() > 0)
+                lambda_new.head(qp.lambda.size()) = qp.lambda;
+
+            // Auto-derive penalty sigma from QP multipliers (N&W eq. 18.36).
+            // This replaces the user-tunable penalty of nw_sqp_policy.
+            // Additionally increase sigma if the directional derivative of the
+            // L1 merit is non-negative, which indicates the penalty is too low
+            // for the current step to be a descent direction on the merit.
+            s.sigma = detail::update_penalty(s.sigma, lambda_new);
+
+            // Iter-0 cold-start calibration of sigma -- magnitude-aware floor
+            // guarding against under-weighted violation term on objective-
+            // dominated initial points. Companion to the monotone N&W eq. 18.36
+            // update above: that update bumps sigma only when |lambda|_inf
+            // exceeds sigma, which on cold-starts where sigma_0 = 1.0 already
+            // dominates a small lambda leaves the violation term too weak and
+            // admits a near-feasible iter-0 step that strands the iterate
+            // strongly infeasible (canonical case: HS071 from
+            // x_0 = (1, 5, 5, 1)). filter_nw_sqp shares the L1 merit Armijo
+            // path with nw_sqp; the same iter-0 starvation can occur here on
+            // objective-dominated cold-starts.
+            //
+            // The cold-start helper combines a lambda-floor (delta = 1.0
+            // applied unconditionally) with a K-factor magnitude floor
+            // K * max(1, |f_0| / (||c_0||_1 + eps)) that fires precisely on
+            // the objective-dominated regime where ||lambda||_inf is small but
+            // |f_0| / ||c_0||_1 is large.
+            //
+            // Reference: N&W 2e Section 18.3 / eq. 18.36 (lambda-floor for
+            //            descent on the L1 merit);
+            //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.6 (sigma update
+            //            companion).
+            constexpr double cold_start_violation_floor = 1e-6;
+            const double c_0_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
+            if(s.iteration == 0 && lambda_new.size() > 0
+               && c_0_l1 > cold_start_violation_floor)
+            {
+                s.sigma = detail::calibrate_initial_penalty(
+                    s.sigma, lambda_new, s.objective_value, c_0_l1);
+            }
+
+            const double h_cur = detail::constraint_violation(s.c_eq, s.c_ineq);
+            const double dphi_check = Eigen::VectorXd(s.g).dot(p) - s.sigma * h_cur;
+            if(dphi_check >= 0.0 && h_cur > 1e-12)
+                s.sigma = std::max(s.sigma,
+                    std::abs(Eigen::VectorXd(s.g).dot(p)) / h_cur + 1e-4);
+
+            // --- 3. Filter + merit acceptance line search ---
+            //
+            // The filter prevents cycling (Fletcher & Leyffer 2002).
+            // The L1 merit Armijo ensures constraint satisfaction via the
+            // automatically derived penalty sigma.
+            //
+            // Reference: Wachter & Biegler 2006, Section 2.3;
+            //            N&W Section 18.5 (L1 merit Armijo).
+            f_k = s.objective_value;
+            h_k = detail::constraint_violation(s.c_eq, s.c_ineq);
+            const double grad_f_dot_p = Eigen::VectorXd(s.g).dot(p);
+
+            // Check switching condition to determine iteration type.
+            const bool f_type = detail::is_f_type_iteration(
+                h_k, grad_f_dot_p, s.filter.h_max());
+
+            // Add current point to filter for h-type iterations. Re-adding
+            // the same (f_k, h_k) on retries is a no-op (filter dominance
+            // is set-valued; s.x is unchanged across retries).
+            if(!f_type)
+                s.filter.add(f_k, h_k);
+
+            // L1 merit at current point.
+            phi0 = detail::l1_merit(f_k, s.c_eq, s.c_ineq, s.sigma);
+            dphi0 = detail::l1_merit_directional_derivative(
+                grad_f_dot_p, s.c_eq, s.c_ineq, s.sigma);
+
+            alpha = 1.0;
+            const double c1 = options.line_search.c1;
+            const double rho_shrink = options.line_search.rho;
+            const int max_ls = options.line_search.max_iterations;
+
+            f_trial = f_k;
+            h_trial = h_k;
+            accepted = false;
+
+            for(int ls = 0; ls < max_ls; ++ls)
+            {
+                x_trial = s.x + alpha * Eigen::Vector<double, N>(p);
+                if(has_bounds)
+                    x_trial = detail::project(x_trial, s.lower, s.upper);
+
+                f_trial = s.problem->value(x_trial);
+                if(m > 0)
+                {
+                    s.problem->constraints(x_trial, c_trial_all);
+                    c_eq_trial = c_trial_all.head(s.n_eq);
+                    c_ineq_trial = c_trial_all.tail(s.n_ineq);
+                }
+                else
+                {
+                    c_eq_trial = Eigen::VectorXd{};
+                    c_ineq_trial = Eigen::VectorXd{};
+                }
+                h_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
+
+                // Filter acceptance check.
+                const bool filter_ok = s.filter.is_acceptable(f_trial, h_trial);
+
+                // L1 merit Armijo check.
+                const double phi_trial = detail::l1_merit(
+                    f_trial, c_eq_trial, c_ineq_trial, s.sigma);
+                const bool merit_ok = phi_trial <= phi0 + c1 * alpha * dphi0;
+
+                if(f_type)
+                {
+                    // F-type: require both filter acceptance and merit Armijo.
+                    if(filter_ok && merit_ok)
+                    {
+                        accepted = true;
+                        break;
+                    }
+                }
+                else
+                {
+                    // H-type: filter acceptance OR merit Armijo suffices.
+                    if(filter_ok || merit_ok)
+                    {
+                        accepted = true;
+                        break;
+                    }
+                }
+
+                alpha *= rho_shrink;
+            }
+
+            // Second-order correction (SOC) if rejected and infeasible.
+            if(!accepted && h_k > options.soc_violation_threshold
+               && c_eq_trial.size() == s.n_eq && c_ineq_trial.size() == s.n_ineq)
+            {
+                Eigen::VectorXd b_eq_soc = -c_eq_trial;
+                Eigen::VectorXd b_ineq_soc = -c_ineq_trial;
+                Eigen::VectorXd p_soc_0 = Eigen::VectorXd::Zero(n);
+
+                detail::qp_result<double> qp_soc;
+                if(has_bounds)
+                {
+                    Eigen::VectorXd p_lower_soc = (Eigen::VectorXd(s.lower)
+                        - Eigen::VectorXd(x_trial)).eval();
+                    Eigen::VectorXd p_upper_soc = (Eigen::VectorXd(s.upper)
+                        - Eigen::VectorXd(x_trial)).eval();
+                    qp_soc = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
+                                               A_eq, b_eq_soc, A_ineq, b_ineq_soc,
+                                               p_lower_soc, p_upper_soc, p_soc_0,
+                                               qp_opts);
+                }
+                else
+                {
+                    qp_soc = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
+                                               A_eq, b_eq_soc, A_ineq, b_ineq_soc,
+                                               p_soc_0, qp_opts);
+                }
+
+                Eigen::Vector<double, N> x_soc = x_trial
+                    + Eigen::Vector<double, N>(Eigen::VectorXd(qp_soc.x));
+                if(has_bounds)
+                    x_soc = detail::project(x_soc, s.lower, s.upper);
+
+                const double f_soc = s.problem->value(x_soc);
+                Eigen::VectorXd c_soc_all(m);
+                Eigen::VectorXd c_eq_soc, c_ineq_soc;
+                if(m > 0)
+                {
+                    s.problem->constraints(x_soc, c_soc_all);
+                    c_eq_soc = c_soc_all.head(s.n_eq);
+                    c_ineq_soc = c_soc_all.tail(s.n_ineq);
+                }
+                const double h_soc = detail::constraint_violation(c_eq_soc, c_ineq_soc);
+
+                const double phi_soc = detail::l1_merit(
+                    f_soc, c_eq_soc, c_ineq_soc, s.sigma);
+                if(s.filter.is_acceptable(f_soc, h_soc)
+                   && phi_soc <= phi0 + c1 * dphi0)
+                {
+                    x_trial = x_soc;
+                    f_trial = f_soc;
+                    h_trial = h_soc;
+                    c_eq_trial = c_eq_soc;
+                    c_ineq_trial = c_ineq_soc;
+                    accepted = true;
+                }
+            }
+
+            if(accepted) break;
+            if(reset_count >= options.bfgs_reset_max) break;
+            s.hessian.reset();
+            ++reset_count;
         }
 
-        Eigen::VectorXd p = Eigen::VectorXd(qp.x);
-
-        if(p.norm() < 1e-15)
+        if(null_qp_step)
         {
             // Null step: QP returned a zero direction (degeneracy or
             // active-set cycling). N&W 2e S18.4.
@@ -315,202 +584,8 @@ struct filter_nw_sqp_policy
                 .is_null_step = true,
                 .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 .kkt_residual = kkt_null,
+                .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
             };
-        }
-
-        // --- 2. Extract QP multipliers and update penalty ---
-        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
-        if(m > 0 && qp.lambda.size() >= m)
-            lambda_new = qp.lambda.head(m);
-        else if(m > 0 && qp.lambda.size() > 0)
-            lambda_new.head(qp.lambda.size()) = qp.lambda;
-
-        // Auto-derive penalty sigma from QP multipliers (N&W eq. 18.36).
-        // This replaces the user-tunable penalty of nw_sqp_policy.
-        // Additionally increase sigma if the directional derivative of the
-        // L1 merit is non-negative, which indicates the penalty is too low
-        // for the current step to be a descent direction on the merit.
-        s.sigma = detail::update_penalty(s.sigma, lambda_new);
-
-        // Iter-0 cold-start calibration of sigma -- magnitude-aware floor
-        // guarding against under-weighted violation term on objective-
-        // dominated initial points. Companion to the monotone N&W eq. 18.36
-        // update above: that update bumps sigma only when |lambda|_inf
-        // exceeds sigma, which on cold-starts where sigma_0 = 1.0 already
-        // dominates a small lambda leaves the violation term too weak and
-        // admits a near-feasible iter-0 step that strands the iterate
-        // strongly infeasible (canonical case: HS071 from
-        // x_0 = (1, 5, 5, 1)). filter_nw_sqp shares the L1 merit Armijo
-        // path with nw_sqp; the same iter-0 starvation can occur here on
-        // objective-dominated cold-starts.
-        //
-        // The cold-start helper combines a lambda-floor (delta = 1.0
-        // applied unconditionally) with a K-factor magnitude floor
-        // K * max(1, |f_0| / (||c_0||_1 + eps)) that fires precisely on
-        // the objective-dominated regime where ||lambda||_inf is small but
-        // |f_0| / ||c_0||_1 is large.
-        //
-        // Reference: N&W 2e Section 18.3 / eq. 18.36 (lambda-floor for
-        //            descent on the L1 merit);
-        //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.6 (sigma update
-        //            companion).
-        constexpr double cold_start_violation_floor = 1e-6;
-        const double c_0_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
-        if(s.iteration == 0 && lambda_new.size() > 0
-           && c_0_l1 > cold_start_violation_floor)
-        {
-            s.sigma = detail::calibrate_initial_penalty(
-                s.sigma, lambda_new, s.objective_value, c_0_l1);
-        }
-
-        double h_cur = detail::constraint_violation(s.c_eq, s.c_ineq);
-        double dphi_check = Eigen::VectorXd(s.g).dot(p) - s.sigma * h_cur;
-        if(dphi_check >= 0.0 && h_cur > 1e-12)
-            s.sigma = std::max(s.sigma,
-                std::abs(Eigen::VectorXd(s.g).dot(p)) / h_cur + 1e-4);
-
-        // --- 3. Filter + merit acceptance line search ---
-        //
-        // The filter prevents cycling (Fletcher & Leyffer 2002).
-        // The L1 merit Armijo ensures constraint satisfaction via the
-        // automatically derived penalty sigma.
-        //
-        // Reference: Wachter & Biegler 2006, Section 2.3;
-        //            N&W Section 18.5 (L1 merit Armijo).
-        double f_k = s.objective_value;
-        double h_k = detail::constraint_violation(s.c_eq, s.c_ineq);
-        double grad_f_dot_p = Eigen::VectorXd(s.g).dot(p);
-
-        // Check switching condition to determine iteration type.
-        bool f_type = detail::is_f_type_iteration(
-            h_k, grad_f_dot_p, s.filter.h_max());
-
-        // Add current point to filter for h-type iterations.
-        if(!f_type)
-            s.filter.add(f_k, h_k);
-
-        // L1 merit at current point.
-        double phi0 = detail::l1_merit(f_k, s.c_eq, s.c_ineq, s.sigma);
-        double dphi0 = detail::l1_merit_directional_derivative(
-            grad_f_dot_p, s.c_eq, s.c_ineq, s.sigma);
-
-        double alpha = 1.0;
-        const double c1 = options.line_search.c1;
-        const double rho_shrink = options.line_search.rho;
-        const int max_ls = options.line_search.max_iterations;
-
-        Eigen::Vector<double, N> x_trial(n);
-        Eigen::VectorXd c_eq_trial, c_ineq_trial;
-        double f_trial = f_k;
-        double h_trial = h_k;
-        bool accepted = false;
-
-        Eigen::VectorXd c_trial_all(m);
-
-        for(int ls = 0; ls < max_ls; ++ls)
-        {
-            x_trial = s.x + alpha * Eigen::Vector<double, N>(p);
-            if(has_bounds)
-                x_trial = detail::project(x_trial, s.lower, s.upper);
-
-            f_trial = s.problem->value(x_trial);
-            if(m > 0)
-            {
-                s.problem->constraints(x_trial, c_trial_all);
-                c_eq_trial = c_trial_all.head(s.n_eq);
-                c_ineq_trial = c_trial_all.tail(s.n_ineq);
-            }
-            else
-            {
-                c_eq_trial = Eigen::VectorXd{};
-                c_ineq_trial = Eigen::VectorXd{};
-            }
-            h_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
-
-            // Filter acceptance check.
-            bool filter_ok = s.filter.is_acceptable(f_trial, h_trial);
-
-            // L1 merit Armijo check.
-            double phi_trial = detail::l1_merit(
-                f_trial, c_eq_trial, c_ineq_trial, s.sigma);
-            bool merit_ok = phi_trial <= phi0 + c1 * alpha * dphi0;
-
-            if(f_type)
-            {
-                // F-type: require both filter acceptance and merit Armijo.
-                if(filter_ok && merit_ok)
-                {
-                    accepted = true;
-                    break;
-                }
-            }
-            else
-            {
-                // H-type: filter acceptance OR merit Armijo suffices.
-                if(filter_ok || merit_ok)
-                {
-                    accepted = true;
-                    break;
-                }
-            }
-
-            alpha *= rho_shrink;
-        }
-
-        // Second-order correction (SOC) if rejected and infeasible.
-        if(!accepted && h_k > options.soc_violation_threshold)
-        {
-            Eigen::VectorXd b_eq_soc = -c_eq_trial;
-            Eigen::VectorXd b_ineq_soc = -c_ineq_trial;
-            Eigen::VectorXd p_soc_0 = Eigen::VectorXd::Zero(n);
-
-            detail::qp_result<double> qp_soc;
-            if(has_bounds)
-            {
-                Eigen::VectorXd p_lower_soc = (Eigen::VectorXd(s.lower)
-                    - Eigen::VectorXd(x_trial)).eval();
-                Eigen::VectorXd p_upper_soc = (Eigen::VectorXd(s.upper)
-                    - Eigen::VectorXd(x_trial)).eval();
-                qp_soc = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
-                                           A_eq, b_eq_soc, A_ineq, b_ineq_soc,
-                                           p_lower_soc, p_upper_soc, p_soc_0,
-                                           qp_opts);
-            }
-            else
-            {
-                qp_soc = detail::solve_qp(Eigen::MatrixXd(s.hessian.hessian()), Eigen::VectorXd(s.g),
-                                           A_eq, b_eq_soc, A_ineq, b_ineq_soc,
-                                           p_soc_0, qp_opts);
-            }
-
-            Eigen::Vector<double, N> x_soc = x_trial
-                + Eigen::Vector<double, N>(Eigen::VectorXd(qp_soc.x));
-            if(has_bounds)
-                x_soc = detail::project(x_soc, s.lower, s.upper);
-
-            double f_soc = s.problem->value(x_soc);
-            Eigen::VectorXd c_soc_all(m);
-            Eigen::VectorXd c_eq_soc, c_ineq_soc;
-            if(m > 0)
-            {
-                s.problem->constraints(x_soc, c_soc_all);
-                c_eq_soc = c_soc_all.head(s.n_eq);
-                c_ineq_soc = c_soc_all.tail(s.n_ineq);
-            }
-            double h_soc = detail::constraint_violation(c_eq_soc, c_ineq_soc);
-
-            double phi_soc = detail::l1_merit(
-                f_soc, c_eq_soc, c_ineq_soc, s.sigma);
-            if(s.filter.is_acceptable(f_soc, h_soc)
-               && phi_soc <= phi0 + c1 * dphi0)
-            {
-                x_trial = x_soc;
-                f_trial = f_soc;
-                h_trial = h_soc;
-                c_eq_trial = c_eq_soc;
-                c_ineq_trial = c_ineq_soc;
-                accepted = true;
-            }
         }
 
         // If still rejected, attempt feasibility restoration.
@@ -546,6 +621,7 @@ struct filter_nw_sqp_policy
                     .objective_change = s.objective_value - f_k,
                     .improved = h_restored_l1 < h_k,
                     .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                    .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
                 };
             }
 
@@ -571,6 +647,7 @@ struct filter_nw_sqp_policy
                 .improved = false,
                 .is_null_step = true,
                 .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
             };
         }
 
@@ -700,6 +777,7 @@ struct filter_nw_sqp_policy
             .improved = phi_new < phi0,
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .kkt_residual = kkt,
+            .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
         };
     }
 
