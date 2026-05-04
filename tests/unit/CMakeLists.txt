@@ -39,6 +39,7 @@ add_executable(argmin_unit_tests
     finite_difference_test.cpp
     kkt_residual_test.cpp
     dense_ldl_bfgs_test.cpp
+    merit_function_test.cpp
 )
 
 target_link_libraries(argmin_unit_tests

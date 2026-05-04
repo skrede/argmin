@@ -75,6 +75,59 @@ Scalar update_penalty(Scalar sigma,
     return std::max(sigma, required);
 }
 
+// Cold-start calibration of the L1 merit penalty parameter sigma.
+//
+// Combines two iter-0 floors so that the first SQP step lands on a
+// merit function whose violation term genuinely dominates the
+// objective term:
+//
+//   1. lambda-floor: sigma >= max_i |lambda_i| + delta. Same shape as
+//      update_penalty's monotone rule (N&W eq. 18.36) but applied
+//      unconditionally at iter-0 with delta = 1.0 instead of the
+//      monotone-update delta = 1e-4.
+//   2. K-factor magnitude floor:
+//      sigma >= K * max(1, |f_0| / (||c_0||_1 + eps)).
+//      A problem-scale floor that guards against pathologically
+//      small lambda at iter-0 on objective-dominated initial points
+//      (e.g. HS071 from x_0 = (1, 5, 5, 1) where ||lambda||_inf is
+//      O(1) but |f_0| / ||c_0||_1 is O(5)).
+//
+// Returns sigma_calibrated >= sigma_in. Caller is responsible for
+// gating the call to iter-0 only; this function does not check
+// state.iteration.
+//
+// argmin variant: combines the N&W lambda-floor with a magnitude
+// floor; rationale: HS071 cold-start with x_0 = (1, 5, 5, 1) admits
+// a near-feasible iter-0 step under raw N&W eq. 18.36 (lambda is
+// small) and parks the iterate strongly infeasible.
+//
+// Reference: N&W 2e Section 18.3 / eq. 18.36 (lambda-floor for
+//            descent on the L1 merit);
+//            Kraft 1988 DFVLR-FB 88-28 Section 2.2.6 (sigma update
+//            companion); the K-factor problem-scale floor is the
+//            magnitude-aware companion that closes objective-
+//            dominated cold-starts where ||lambda||_inf is small
+//            but |f_0| / ||c_0||_1 is large.
+template <typename Scalar, int M = argmin::dynamic_dimension>
+Scalar calibrate_initial_penalty(Scalar sigma_in,
+                                 const Eigen::Vector<Scalar, M>& lambda_qp,
+                                 Scalar f_0,
+                                 Scalar c_0_l1,
+                                 Scalar K_factor = Scalar(10),
+                                 Scalar delta = Scalar(1))
+{
+    Scalar sigma = sigma_in;
+    if(lambda_qp.size() > 0)
+    {
+        const Scalar lambda_floor = lambda_qp.cwiseAbs().maxCoeff() + delta;
+        sigma = std::max(sigma, lambda_floor);
+    }
+    const Scalar denom = c_0_l1 + Scalar(1e-12);
+    const Scalar magnitude_floor =
+        K_factor * std::max(Scalar(1), std::abs(f_0) / denom);
+    return std::max(sigma, magnitude_floor);
+}
+
 }
 
 #endif
