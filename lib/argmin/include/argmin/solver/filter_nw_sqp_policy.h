@@ -330,9 +330,11 @@ struct filter_nw_sqp_policy
         //            descent on the L1 merit);
         //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.6 (sigma update
         //            companion).
-        if(s.iteration == 0 && lambda_new.size() > 0)
+        constexpr double cold_start_violation_floor = 1e-6;
+        const double c_0_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
+        if(s.iteration == 0 && lambda_new.size() > 0
+           && c_0_l1 > cold_start_violation_floor)
         {
-            const double c_0_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
             s.sigma = detail::calibrate_initial_penalty(
                 s.sigma, lambda_new, s.objective_value, c_0_l1);
         }
