@@ -348,6 +348,44 @@ struct nw_sqp_policy
         // --- 3. Update penalty parameter (N&W eq. 18.36) ---
         s.sigma = detail::update_penalty(s.sigma, lambda_new);
 
+        // Iter-0 cold-start calibration of sigma — magnitude-aware
+        // floor guarding against an under-weighted violation term on
+        // objective-dominated initial points. The default cold-start
+        // sigma_0 = 1.0 admits an iter-0 step that satisfies merit-
+        // decrease against a violation term too weak to dominate the
+        // objective, parking the iterate strongly infeasible (HS071
+        // from x_0 = (1, 5, 5, 1) is the canonical witness: lambda is
+        // O(1) but |f_0| / ||c_0||_1 is O(5)). The K-factor floor
+        // computed here is the magnitude-aware companion to the N&W
+        // eq. 18.36 lambda-floor; both are applied at iter-0 and the
+        // steady-state monotone update_penalty call above retains its
+        // delta = 1e-4 margin for iter > 0.
+        //
+        // The c_0_l1 > feasibility-tolerance gate skips the cold-start
+        // when the initial iterate is already (near-)feasible. The
+        // K-factor floor's denominator collapses to its eps regularizer
+        // in that regime and would push sigma to ~K * |f_0| / eps —
+        // catastrophically large on problems like HS026 from
+        // x_0 = (-2.6, 2, 2) which start exactly feasible (c_0 = 0).
+        // The lambda-floor branch of calibrate_initial_penalty is also
+        // unnecessary at exact feasibility because update_penalty's
+        // monotone rule above has already enforced the lambda-bound.
+        //
+        // Reference: N&W 2e Section 18.3 / eq. 18.36 (lambda-floor for
+        //            descent on the L1 merit);
+        //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.6 (sigma
+        //            update rule companion).
+        if(s.iteration == 0 && lambda_new.size() > 0)
+        {
+            const double c_0_l1 =
+                detail::constraint_violation(s.c_eq, s.c_ineq);
+            if(c_0_l1 > 1e-6)
+            {
+                s.sigma = detail::calibrate_initial_penalty(
+                    s.sigma, lambda_new, s.objective_value, c_0_l1);
+            }
+        }
+
         // --- 4. Line search on L1 merit ---
         double phi0 = detail::l1_merit(s.objective_value,
                                        s.c_eq, s.c_ineq, s.sigma);
