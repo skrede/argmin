@@ -307,6 +307,36 @@ struct filter_nw_sqp_policy
         // L1 merit is non-negative, which indicates the penalty is too low
         // for the current step to be a descent direction on the merit.
         s.sigma = detail::update_penalty(s.sigma, lambda_new);
+
+        // Iter-0 cold-start calibration of sigma -- magnitude-aware floor
+        // guarding against under-weighted violation term on objective-
+        // dominated initial points. Companion to the monotone N&W eq. 18.36
+        // update above: that update bumps sigma only when |lambda|_inf
+        // exceeds sigma, which on cold-starts where sigma_0 = 1.0 already
+        // dominates a small lambda leaves the violation term too weak and
+        // admits a near-feasible iter-0 step that strands the iterate
+        // strongly infeasible (canonical case: HS071 from
+        // x_0 = (1, 5, 5, 1)). filter_nw_sqp shares the L1 merit Armijo
+        // path with nw_sqp; the same iter-0 starvation can occur here on
+        // objective-dominated cold-starts.
+        //
+        // The cold-start helper combines a lambda-floor (delta = 1.0
+        // applied unconditionally) with a K-factor magnitude floor
+        // K * max(1, |f_0| / (||c_0||_1 + eps)) that fires precisely on
+        // the objective-dominated regime where ||lambda||_inf is small but
+        // |f_0| / ||c_0||_1 is large.
+        //
+        // Reference: N&W 2e Section 18.3 / eq. 18.36 (lambda-floor for
+        //            descent on the L1 merit);
+        //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.6 (sigma update
+        //            companion).
+        if(s.iteration == 0 && lambda_new.size() > 0)
+        {
+            const double c_0_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
+            s.sigma = detail::calibrate_initial_penalty(
+                s.sigma, lambda_new, s.objective_value, c_0_l1);
+        }
+
         double h_cur = detail::constraint_violation(s.c_eq, s.c_ineq);
         double dphi_check = Eigen::VectorXd(s.g).dot(p) - s.sigma * h_cur;
         if(dphi_check >= 0.0 && h_cur > 1e-12)

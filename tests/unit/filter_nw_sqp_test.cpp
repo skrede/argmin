@@ -22,6 +22,7 @@ static_assert(nlp_solver<basic_solver<filter_nw_sqp_policy<>>>,
 
 TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
 {
+    // Reference: Hock & Schittkowski 1981, Problem 71.
     SECTION("HS071: mixed equality + inequality constraints")
     {
         // Regression guard: HS071 convergence blocked by filter over-rejection
@@ -43,6 +44,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         CHECK(result.objective_value < 20.0);
     }
 
+    // Reference: Hock & Schittkowski 1981, Problem 43.
     SECTION("HS043: inequality constraints only")
     {
         // step_threshold aligned with the benchmark / NLopt xtol_rel regime
@@ -75,6 +77,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         CHECK(result.constraint_violation <= opts.feasibility_tolerance);
     }
 
+    // Reference: Hock & Schittkowski 1981, Problem 39.
     SECTION("HS039: equality constraints only")
     {
         hs039 problem;
@@ -94,6 +97,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         CHECK(solver.constraint_violation() < 1e-4);
     }
 
+    // Reference: Hock & Schittkowski 1981, Problem 76.
     SECTION("HS076: inequality + equality constraints")
     {
         hs076 problem;
@@ -158,7 +162,8 @@ TEST_CASE("filter_nw_sqp populates kkt_residual and exposes is_null_step",
 // Reference baseline (post-phase30): 13 iters @ f = -1.0. Regression target:
 // iterations within 1 of baseline.
 //
-// Reference: N&W 2e Section 18.3 + Algorithm 18.3 (working-set);
+// Reference: Hock & Schittkowski 1981, Problem 24.
+//            N&W 2e Section 18.3 + Algorithm 18.3 (working-set);
 //            eq. 18.15 (least-squares lambda);
 //            eq. 12.34 (composite first-order optimality).
 TEST_CASE("filter_nw_sqp HS024 regression guard",
