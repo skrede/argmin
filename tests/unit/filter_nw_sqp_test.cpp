@@ -79,10 +79,9 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         //     trajectory while keeping the filter_nw_sqp regression
         //     guard intact. The retry's f trades trajectory quality
         //     on this specific cell for the broader correctness
-        //     gain documented in PITFALLS Section L.
+        //     gain in line-search exhaustion handling.
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset).
         hs043 problem;
         auto x0 = problem.initial_point();
         solver_options opts;

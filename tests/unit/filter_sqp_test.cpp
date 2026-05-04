@@ -43,10 +43,10 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         CHECK(solver.constraint_violation() < 0.01);
         // No strict Lagrangian-gradient bar: filter_slsqp on HS071 reaches
         // the f-ballpark with a modest constraint violation but does NOT
-        // reach a stationary point at HEAD (gradient_norm ~= 0.6). The
-        // gap is the known SEED-015 / iter-0 cold-start residual addressed
-        // by a separate plan in this phase (mu calibration / SOC retry).
-        // Once that plan lands the bar can be tightened.
+        // reach a stationary point (gradient_norm ~= 0.6). The residual
+        // is an iter-0 cold-start artifact addressed elsewhere in the
+        // SQP family (mu calibration / SOC retry); the bar can be
+        // tightened once that lands here.
     }
 
     // HS043 (Rosen-Suzuki): n=4, 3 inequalities.
@@ -92,7 +92,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
 
         CHECK(result.objective_value == Approx(-1.0).margin(0.1));
         CHECK(solver.constraint_violation() < 0.01);
-        // Lagrangian gradient norm at converged point (post-COR-01 invariant).
+        // Lagrangian gradient norm at converged point.
         CHECK(result.gradient_norm < 1e-4);
     }
 
@@ -113,7 +113,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
 
         CHECK(result.objective_value == Approx(0.111).margin(0.01));
         CHECK(solver.constraint_violation() < 0.01);
-        // Lagrangian gradient norm at converged point (post-COR-01 invariant).
+        // Lagrangian gradient norm at converged point.
         CHECK(result.gradient_norm < 1e-4);
     }
 
@@ -134,7 +134,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
 
         CHECK(result.objective_value == Approx(-1.0).margin(0.1));
         CHECK(solver.constraint_violation() < 0.01);
-        // Lagrangian gradient norm at converged point (post-COR-01 invariant).
+        // Lagrangian gradient norm at converged point.
         CHECK(result.gradient_norm < 1e-4);
     }
 
@@ -222,8 +222,8 @@ TEST_CASE("filter_slsqp populates kkt_residual and exposes is_null_step",
 // Reference baseline (post-phase30): 13 iters @ f = -1.0. Regression
 // target: iterations within 1.
 //
-// Note: this test does NOT set a gradient_norm tolerance. After COR-01
-// the policy reports the Lagrangian gradient norm; on HS024 the
+// Note: this test does NOT set a gradient_norm tolerance. The policy
+// reports the Lagrangian gradient norm; on HS024 the
 // least-squares multiplier estimate makes ||grad f - A^T lambda||
 // numerically zero from iter 0 onward (since HS024 is objective-only
 // in the directions the QP currently chases), so a gradient_threshold
@@ -256,7 +256,7 @@ TEST_CASE("filter_slsqp HS024 regression guard",
     CHECK(result.objective_value == Approx(-1.0).margin(1e-6));
     CHECK(result.iterations <= 14);
     CHECK(solver.constraint_violation() < 1e-6);
-    // Lagrangian gradient norm at converged point (post-COR-01 invariant).
+    // Lagrangian gradient norm at converged point.
     CHECK(result.gradient_norm < 1e-4);
 }
 
@@ -281,7 +281,7 @@ TEST_CASE("filter_slsqp converges on HS007 equality",
 
     CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(1e-3));
     CHECK(solver.constraint_violation() < 1e-4);
-    // Lagrangian gradient norm at converged point (post-COR-01 invariant).
+    // Lagrangian gradient norm at converged point.
     CHECK(result.gradient_norm < 1e-4);
 }
 
@@ -306,7 +306,7 @@ TEST_CASE("filter_slsqp converges on HS028 quadratic with linear equality",
 
     CHECK(result.objective_value < 1e-6);
     CHECK(solver.constraint_violation() < 1e-6);
-    // Lagrangian gradient norm at converged point (post-COR-01 invariant).
+    // Lagrangian gradient norm at converged point.
     CHECK(result.gradient_norm < 1e-4);
     CHECK(std::abs(result.x[0] - 0.5) < 1e-3);
     CHECK(std::abs(result.x[1] - (-0.5)) < 1e-3);
@@ -326,7 +326,6 @@ TEST_CASE("filter_slsqp converges on HS028 quadratic with linear equality",
 //     mirroring v0.2.1 behaviour).
 //
 // Reference: NLopt slsqp.c:1890-1895 (ireset);
-//            PITFALLS.md Section L (line-search exhaustion);
 //            Hock & Schittkowski 1981, Problem 28.
 TEST_CASE("filter_slsqp diagnostics.bfgs_reset_count is zero on success path",
           "[filter_slsqp][bfgs_reset]")
@@ -356,7 +355,7 @@ TEST_CASE("filter_slsqp diagnostics.bfgs_reset_count is zero on success path",
 // filter loop reject every trial direction (the for-loop body never
 // runs, accepted stays false), so every retry fails the inner
 // acceptance test and the loop exhausts at exactly bfgs_reset_max.
-// Reference: NLopt slsqp.c:1890-1895; PITFALLS.md Section L.
+// Reference: NLopt slsqp.c:1890-1895.
 TEST_CASE("filter_slsqp BFGS-reset retry exhausts cap on forced LS failure",
           "[filter_slsqp][bfgs_reset]")
 {

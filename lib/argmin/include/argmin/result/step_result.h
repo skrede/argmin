@@ -14,11 +14,9 @@ namespace argmin
 // absorb new telemetry without breaking aggregate-init callers when
 // new fields are appended at the end of solver_diagnostics.
 //
-// Reference: PITFALLS.md Section L (line-search exhaustion telemetry).
 // argmin variant: fixed-shape struct (not std::variant or templated).
-// Future SEED-002 work may move this to a templated/variant
-// per-policy diagnostics type; the struct here becomes one variant
-// alternative at that point.
+// A future templated/variant per-policy diagnostics type would treat
+// this struct as one variant alternative.
 struct solver_diagnostics
 {
     // BFGS-reset retry count for line-search SQP policies. Set by

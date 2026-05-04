@@ -78,8 +78,7 @@ struct filter_slsqp_policy
         // this knob enables principled recovery via the same
         // ireset pattern shipped on kraft_slsqp.
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
         // Adopted from: NLopt slsqp.c:1890-1895.
         std::size_t bfgs_reset_max{5};
 
@@ -608,8 +607,7 @@ struct filter_slsqp_policy
         // does control fall through to the restoration fallback (or
         // the cap-exhaust null-step return).
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
         // Adopted from: NLopt slsqp.c:1890-1895.
         // Adopted from: argmin kraft_slsqp_policy.h retry-loop pattern.
         std::size_t reset_count = 0;
@@ -743,8 +741,7 @@ struct filter_slsqp_policy
         // never the case in the current logic — kept here for the
         // bfgs_reset_max == 0 disable path).
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset).
         if(!ls_success && reset_count > 0)
         {
             // Active-set multiplier re-estimate at x_k for the kkt
@@ -1075,8 +1072,8 @@ struct filter_slsqp_policy
 private:
     // Lagrangian gradient norm for step_result.gradient_norm. Replaces
     // raw ||grad f|| reporting which silently misfires ftol-based
-    // convergence on near-feasible points where lambda is non-trivial
-    // (PITFALLS §F). Mirrors the in-tree pattern across the SQP family.
+    // convergence on near-feasible points where lambda is non-trivial.
+    // Mirrors the in-tree pattern across the SQP family.
     //
     // Reference: N&W 2e Section 12.3 / eq. 12.34 (KKT first-order
     //            optimality measure).

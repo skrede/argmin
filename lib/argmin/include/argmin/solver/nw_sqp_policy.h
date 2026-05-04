@@ -86,8 +86,7 @@ struct nw_sqp_policy
         // populated. Default 5 = NLopt slsqp.c:1890-1895 ireset
         // parity.
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
         // argmin variant: retry covers QP + Armijo + SOC together
         // (per-step recovery); SOC alone is the per-Armijo recovery
         // for Maratos curvature. The two retries compose so that on
@@ -265,9 +264,7 @@ struct nw_sqp_policy
         //
         // Replaces the previous fall-through-on-LS-failure behaviour
         // where nw_sqp would update BFGS curvature from a step that
-        // never satisfied merit decrease. Curvature corruption from
-        // accepting unaccepted directions is the C8 audit gap recorded
-        // in PITFALLS.md Section L.
+        // never satisfied merit decrease.
         //
         // argmin variant: retry covers QP + Armijo + SOC together
         // (per-step recovery); SOC alone is the per-Armijo recovery
@@ -276,8 +273,7 @@ struct nw_sqp_policy
         // produce a different QP direction that itself runs through
         // Armijo + SOC.
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
         // Adopted from: NLopt slsqp.c:1890-1895.
 
         // Hoisted state observed by the BFGS-update block AFTER the

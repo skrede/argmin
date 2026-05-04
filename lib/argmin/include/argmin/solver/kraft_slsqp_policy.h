@@ -96,8 +96,7 @@ struct kraft_slsqp_policy
         // step with diagnostics.bfgs_reset_count populated. Default
         // 5 = NLopt slsqp.c:1890-1895 ireset parity.
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
         // argmin variant: replaces the K3 force-continue
         // (alpha = 1e-4) which corrupted BFGS curvature by
         // stepping along an unaccepted direction.
@@ -757,12 +756,9 @@ struct kraft_slsqp_policy
         //
         // Replaces the K3 force-continue (alpha = 1e-4) at this site
         // which corrupted BFGS curvature by stepping along an
-        // unaccepted direction. Curvature corruption from the K3 hack
-        // was the root cause of the C8 audit gap recorded in
-        // PITFALLS.md Section L.
+        // unaccepted direction.
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
         // Adopted from: NLopt slsqp.c:1890-1895.
         std::size_t reset_count = 0;
         while(!ls_success && reset_count < options.bfgs_reset_max)

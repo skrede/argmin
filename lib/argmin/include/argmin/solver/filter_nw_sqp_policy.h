@@ -89,11 +89,10 @@ struct filter_nw_sqp_policy
         // to the cumulative reset count. Default 5 = NLopt
         // slsqp.c:1890-1895 ireset parity.
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
         // argmin variant: filter_nw_sqp's QP solve uses the
-        // detail::solve_qp free function (REF-05 in a later phase
-        // will replace with a stateful active_set_qp_solver member);
+        // detail::solve_qp free function (a future refactor will
+        // replace with a stateful active_set_qp_solver member);
         // the retry loop calls the free function on every iteration.
         // Adopted from: NLopt slsqp.c:1890-1895.
         std::size_t bfgs_reset_max{5};
@@ -262,8 +261,7 @@ struct filter_nw_sqp_policy
         //   is_null_step && diagnostics.bfgs_reset_count > 0
         // to detect reset-driven nullification.
         //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-        //            PITFALLS.md Section L (line-search exhaustion).
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
         // Adopted from: NLopt slsqp.c:1890-1895.
         std::size_t reset_count = 0;
 
