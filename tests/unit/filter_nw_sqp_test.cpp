@@ -53,14 +53,19 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         // skip-on-nonpositive-curvature per Procedure 18.2 footnote) the
         // iterate reaches f=-44.16 at iter 7 with marginal infeasibility
         // (cv above the best-seen feasibility_tolerance), and a subsequent
-        // filter-acceptance over-rejection (FILTER-05) wanders the iterate
-        // to a non-stationary region.
+        // filter-acceptance over-rejection (Wachter-Biegler envelope) wanders
+        // the iterate to a non-stationary region.
         //
         // Under basic_solver's best-seen termination (NLopt convention),
         // the returned solve_result is the best strictly-feasible iterate
-        // encountered, not the infeasible f=-44 trial. On HS043 the best
-        // feasible iterate is f approximately -40.4, giving the margin
-        // (4.0) guard below.
+        // encountered, not the infeasible f=-44 trial.
+        //
+        // Bar tightened from margin(4.0) -> margin(0.5) per the HS043
+        // envelope sweep (benchmarks/filter_envelope_sweep.cpp): with the
+        // accurate-mode default gamma_f = gamma_h = 1e-3 the policy
+        // converges to f = -43.65 (cv = 0) at this initial point, vs
+        // f = -43.33 under the prior 1e-5/1e-5 default. HS024 + HS076
+        // regression guards remain green across the sweep.
         hs043 problem;
         auto x0 = problem.initial_point();
         solver_options opts;
@@ -73,7 +78,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
-        CHECK(result.objective_value == Approx(-44.0).margin(4.0));
+        CHECK(result.objective_value == Approx(-44.0).margin(0.5));
         CHECK(result.constraint_violation <= opts.feasibility_tolerance);
     }
 

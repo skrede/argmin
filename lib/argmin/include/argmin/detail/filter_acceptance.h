@@ -45,6 +45,28 @@ template <typename Scalar = double>
 class filter_set
 {
 public:
+    // Asymmetric envelope (Wachter-Biegler 2006 Section 2.3, eq. 6).
+    // gamma_f controls objective-margin slack (gamma_f * h);
+    // gamma_h controls violation-margin slack ((1 - gamma_h) * h).
+    // Default-construct preserves the prior baseline (1e-5 each).
+    //
+    // Reference: Wachter & Biegler 2006 Section 2.3, eq. (6);
+    //            Fletcher & Leyffer 2002 Section 3;
+    //            N&W 2e Section 15.5 (filter methods).
+    // argmin variant: parameterised envelope (was hardcoded 1e-5);
+    // rationale: HS043 over-rejection on strictly-feasible descent
+    // motivates per-policy asymmetric tuning.
+    filter_set() = default;
+
+    filter_set(Scalar gamma_f, Scalar gamma_h)
+        : gamma_f_(gamma_f), gamma_h_(gamma_h) {}
+
+    void set_envelope(Scalar gamma_f, Scalar gamma_h)
+    {
+        gamma_f_ = gamma_f;
+        gamma_h_ = gamma_h;
+    }
+
     // Initialize the filter with a maximum constraint violation ceiling.
     //
     // Callers set h_max = 1e4 * max(1, h_0) where h_0 is the initial
