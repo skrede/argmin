@@ -47,6 +47,7 @@
 #include "argmin/detail/kraft_lsq_qp.h"
 #include "argmin/detail/kraft_lsq_qp_recovery.h"
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/merit_function.h"
 #include "argmin/line_search/armijo.h"
 #include "argmin/options/qp_options.h"
 #include "argmin/line_search/options.h"
@@ -442,6 +443,47 @@ struct kraft_slsqp_policy
             const double lambda_max = qp_res.lambda.cwiseAbs().maxCoeff();
             if(lambda_max + 0.5 > s.sigma)
                 s.sigma = lambda_max + 1.0;
+        }
+
+        // Iter-0 cold-start calibration of sigma. The monotone rule
+        // above bumps sigma only when lambda_max + 0.5 > sigma; on
+        // problems where the cold-start sigma_0 = 1.0 already exceeds
+        // lambda_max it leaves sigma at 1.0, which on objective-
+        // dominated initial points (HS071 from x_0 = (1, 5, 5, 1))
+        // produces an iter-0 step that satisfies merit-decrease
+        // against an under-weighted violation term and parks the
+        // iterate strongly infeasible. Force a magnitude-aware floor
+        // at iter-0 only.
+        //
+        // The cold-start is additionally gated on a strict-violation
+        // threshold (||c_0||_1 > 1e-6): when iter-0 is already
+        // (near-)feasible the K-factor problem-scale floor degenerates
+        // (denom -> eps; magnitude_floor explodes) and over-penalises
+        // the linearised constraint perturbation produced by the QP
+        // step. HS026 from x_0 = (-2.6, 2, 2) hits c_0 = 0 exactly and
+        // is the canonical canary; without this gate the cold-start
+        // drives sigma to ~2e14 and the line search rejects every
+        // descent direction. The gate keeps the cold-start active only
+        // on the case it is designed for (objective-dominated AND
+        // strictly infeasible iter-0).
+        //
+        // argmin variant: combines lambda-floor + K-factor floor at
+        // iter-0; preserves the existing monotone rule for iter > 0.
+        // The K-factor problem-scale floor is the magnitude-aware
+        // companion that closes objective-dominated cold-starts where
+        // ||lambda||_inf is small but |f_0| / ||c_0||_1 is large.
+        //
+        // Reference: N&W 2e Section 18.3 / eq. 18.36 (lambda-floor for
+        //            descent on the L1 merit);
+        //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.6 (sigma
+        //            update companion).
+        constexpr double cold_start_violation_floor = 1e-6;
+        if(s.iteration == 0 && qp_res.lambda.size() > 0
+           && constraint_viol_0 > cold_start_violation_floor)
+        {
+            s.sigma = detail::calibrate_initial_penalty(
+                s.sigma, qp_res.lambda, s.objective_value,
+                constraint_viol_0);
         }
 
         // L1 merit function for the line search (Kraft 1988, N&W 18.3).
