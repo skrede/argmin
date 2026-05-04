@@ -485,3 +485,104 @@ TEST_CASE("nw_sqp populates kkt_residual and exposes is_null_step",
     }
     CHECK(populated);
 }
+
+// BFGS-reset-on-LS-failure retry telemetry. The nw_sqp policy
+// surfaces a BFGS-reset count on every step_result via the
+// solver_diagnostics sub-struct. On well-conditioned problems with
+// the default Armijo budget the line search accepts a step (after
+// possible Maratos SOC retry), the BFGS-reset retry loop is a
+// no-op, and bfgs_reset_count must read zero on every step.
+//
+// Reference: NLopt slsqp.c:1890-1895 (ireset loop);
+//            Hock & Schittkowski 1981, Problem 39.
+TEST_CASE("nw_sqp diagnostics.bfgs_reset_count is zero on success path",
+          "[sqp][diagnostics][bfgs_reset]")
+{
+    hs039 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
+
+    // Step several times -- HS039 is well-conditioned with two
+    // equality constraints; every Armijo line search either accepts
+    // the unit step or its SOC-corrected sibling and the BFGS-reset
+    // retry loop never fires.
+    for(int i = 0; i < 10; ++i)
+    {
+        const auto sr = solver.step();
+        CHECK(sr.diagnostics.bfgs_reset_count == 0u);
+        if(sr.policy_status)
+            break;
+    }
+}
+
+// Forced cap-exhaustion of the BFGS-reset retry loop. By zeroing the
+// Armijo evaluation budget (line_search.max_iterations = 0) every
+// line search trivially fails; the SOC retry block (which uses the
+// same budget) also fails for the same reason. The retry loop drives
+// through exactly bfgs_reset_max iterations before falling out into
+// the cap-exhausted null-step return. The returned step_result must
+// expose:
+//   - is_null_step  == true
+//   - diagnostics.bfgs_reset_count == bfgs_reset_max
+//
+// HS039 is chosen because its smooth equality constraints do not
+// produce a zero-direction QP at the initial iterate, so the
+// zero-step branch (which would short-circuit the test with
+// bfgs_reset_count = 0 / loop-not-entered semantics) does not fire.
+//
+// Reference: NLopt slsqp.c:1890-1895 (ireset loop);
+//            Hock & Schittkowski 1981, Problem 39.
+TEST_CASE("nw_sqp BFGS-reset retry exhausts cap on forced LS failure",
+          "[sqp][diagnostics][bfgs_reset]")
+{
+    hs039 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 1;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    constexpr std::size_t cap = 3;
+    nw_sqp_policy<hs039<>::problem_dimension> policy{};
+    policy.options.bfgs_reset_max = cap;
+    policy.options.line_search.max_iterations = 0;
+
+    basic_solver solver{std::move(policy), problem, x0, opts};
+
+    const auto sr = solver.step();
+    CHECK(sr.is_null_step);
+    CHECK(sr.diagnostics.bfgs_reset_count == cap);
+}
+
+// bfgs_reset_max = 0 disables the retry loop entirely. With the
+// Armijo budget zeroed as well, the loop body runs exactly once
+// (Armijo + SOC fail) and the cap-check exits without performing
+// any reset; the cap-exhausted null-step return fires with
+// reset_count = 0. Locks in the loop-disabled path: zero retries
+// means the caller composes is_null_step alone (without relying on
+// the count) to detect failure.
+TEST_CASE("nw_sqp bfgs_reset_max = 0 disables the retry loop",
+          "[sqp][diagnostics][bfgs_reset]")
+{
+    hs039 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 1;
+
+    nw_sqp_policy<hs039<>::problem_dimension> policy{};
+    policy.options.bfgs_reset_max = 0;
+    policy.options.line_search.max_iterations = 0;
+
+    basic_solver solver{std::move(policy), problem, x0, opts};
+
+    const auto sr = solver.step();
+    CHECK(sr.is_null_step);
+    CHECK(sr.diagnostics.bfgs_reset_count == 0u);
+}

@@ -77,6 +77,26 @@ struct nw_sqp_policy
         //            N&W 2e Section 18.3 (Maratos effect).
         std::optional<double> soc_violation_threshold{};
 
+        // BFGS-reset-on-LS-failure cap. On Armijo line-search
+        // exhaustion (with the Maratos SOC retry already attempted
+        // and failed), reset the BFGS Hessian to identity (Shanno-
+        // rescaled on next push) and retry the QP + Armijo + SOC
+        // together up to bfgs_reset_max times. After exhaustion,
+        // return a null step with diagnostics.bfgs_reset_count
+        // populated. Default 5 = NLopt slsqp.c:1890-1895 ireset
+        // parity.
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
+        //            PITFALLS.md Section L (line-search exhaustion).
+        // argmin variant: retry covers QP + Armijo + SOC together
+        // (per-step recovery); SOC alone is the per-Armijo recovery
+        // for Maratos curvature. The two retries compose so that on
+        // Armijo+SOC failure a fresh BFGS Hessian gets a chance to
+        // produce a different QP direction that itself runs through
+        // Armijo + SOC.
+        // Adopted from: NLopt slsqp.c:1890-1895.
+        std::size_t bfgs_reset_max{5};
+
         std::uint16_t stall_window{50};
     };
 
@@ -234,6 +254,51 @@ struct nw_sqp_policy
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
 
+        // BFGS-reset-on-LS-failure retry loop (NLopt slsqp.c:1890-1895
+        // ireset pattern). On Armijo + SOC exhaustion, reset the BFGS
+        // Hessian to identity (Shanno-rescaled on next push) and retry
+        // the QP + Armijo + SOC together up to bfgs_reset_max times.
+        // After exhaustion, return a null step with
+        // diagnostics.bfgs_reset_count populated so the caller can
+        // detect cap exhaustion via:
+        //   is_null_step && diagnostics.bfgs_reset_count >= options.bfgs_reset_max
+        //
+        // Replaces the previous fall-through-on-LS-failure behaviour
+        // where nw_sqp would update BFGS curvature from a step that
+        // never satisfied merit decrease. Curvature corruption from
+        // accepting unaccepted directions is the C8 audit gap recorded
+        // in PITFALLS.md Section L.
+        //
+        // argmin variant: retry covers QP + Armijo + SOC together
+        // (per-step recovery); SOC alone is the per-Armijo recovery
+        // for Maratos curvature. The two retries compose so that on
+        // Armijo+SOC failure a fresh BFGS Hessian gets a chance to
+        // produce a different QP direction that itself runs through
+        // Armijo + SOC.
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop);
+        //            PITFALLS.md Section L (line-search exhaustion).
+        // Adopted from: NLopt slsqp.c:1890-1895.
+
+        // Hoisted state observed by the BFGS-update block AFTER the
+        // retry loop closes. Declaring these at function scope (not
+        // inside the loop body) keeps the post-loop block unchanged
+        // while letting the loop iterate on QP + Armijo + SOC.
+        std::size_t reset_count = 0;
+        bool ls_success = false;
+        bool zero_step_detected = false;
+        detail::qp_result<double, N> qp;
+        Eigen::Vector<double, N> p = Eigen::Vector<double, N>::Zero(n);
+        Eigen::Vector<double, N> x_trial = s.x;
+        double f_trial{s.objective_value};
+        Eigen::VectorXd lambda_null;        // populated only on zero_step_detected path
+        Eigen::VectorXd lambda_eq_null;     // populated only on zero_step_detected path
+        Eigen::VectorXd mu_ineq_null;       // populated only on zero_step_detected path
+        double grad_L_null_norm{0.0};       // populated only on zero_step_detected path
+        double kkt_null{0.0};               // populated only on zero_step_detected path
+
+        for(;;)
+        {
         // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
         // Pass s.J_eq / s.J_ineq directly into the QP solver — the
         // state matrices already match the Matrix<Scalar, Meq, N> shape
@@ -263,7 +328,6 @@ struct nw_sqp_policy
             ? options.qp.tolerance
             : std::optional<double>{1e-12};
 
-        detail::qp_result<double, N> qp;
         bool has_finite_bounds = has_finite_box(s.lower, s.upper);
 
         if(has_finite_bounds)
@@ -284,7 +348,7 @@ struct nw_sqp_policy
                                    p0, qp_opts);
         }
 
-        Eigen::Vector<double, N> p = qp.x;
+        p = qp.x;
 
         // Zero step check.
         //
@@ -307,26 +371,33 @@ struct nw_sqp_policy
         // Null-step branch: x_{k+1} = x_k so QP multipliers are
         // measured at the current iterate; no staleness. Multiplier
         // re-estimation not applied here.
+        //
+        // Inside the BFGS-reset retry loop: a post-reset zero
+        // direction is either a true KKT point (the reset confirms
+        // it) or active-set degeneracy that no further reset can
+        // resolve. Capture the diagnostic state and break out of the
+        // loop; the post-loop block returns the null-step result with
+        // diagnostics.bfgs_reset_count = reset_count populated.
         if(p.norm() < 1e-15)
         {
-            Eigen::VectorXd lambda_null = Eigen::VectorXd::Zero(m);
+            lambda_null = Eigen::VectorXd::Zero(m);
             if(m > 0 && qp.lambda.size() >= m)
                 lambda_null = qp.lambda.head(m);
             else if(m > 0 && qp.lambda.size() > 0)
                 lambda_null.head(qp.lambda.size()) = qp.lambda;
 
-            Eigen::VectorXd lambda_eq_null = s.n_eq > 0
+            lambda_eq_null = s.n_eq > 0
                 ? Eigen::VectorXd(lambda_null.head(s.n_eq))
                 : Eigen::VectorXd::Zero(0);
-            Eigen::VectorXd mu_ineq_null = s.n_ineq > 0
+            mu_ineq_null = s.n_ineq > 0
                 ? Eigen::VectorXd(lambda_null.segment(s.n_eq, s.n_ineq))
                 : Eigen::VectorXd::Zero(0);
             // Reference: N&W 2e Definition 12.1, eq. 12.34 (full KKT
             //            first-order optimality E-measure).
-            double kkt_null = detail::kkt_residual<double,
-                                                   Eigen::Dynamic,
-                                                   Eigen::Dynamic,
-                                                   Eigen::Dynamic>(
+            kkt_null = detail::kkt_residual<double,
+                                            Eigen::Dynamic,
+                                            Eigen::Dynamic,
+                                            Eigen::Dynamic>(
                 s.g, s.J_eq, s.J_ineq,
                 lambda_eq_null, mu_ineq_null,
                 s.c_eq, s.c_ineq);
@@ -337,7 +408,7 @@ struct nw_sqp_policy
             // s.lambda from the prior successful step, which is stale
             // on a zero-step bailout and made gradient_tolerance_criterion
             // fire silently at non-stationary HS071 iterates.
-            double grad_L_null_norm = s.g.norm();
+            grad_L_null_norm = s.g.norm();
             if(m > 0)
             {
                 Eigen::Vector<double, N> grad_L = s.g;
@@ -348,17 +419,8 @@ struct nw_sqp_policy
                 grad_L_null_norm = grad_L.norm();
             }
 
-            return step_result<double>{
-                .objective_value = s.objective_value,
-                .gradient_norm = grad_L_null_norm,
-                .step_size = 0.0,
-                .objective_change = 0.0,
-                .improved = false,
-                .is_null_step = true,
-                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
-                .x_norm = s.x.norm(),
-                .kkt_residual = kkt_null,
-            };
+            zero_step_detected = true;
+            break;
         }
 
         // --- 2. Extract QP multipliers ---
@@ -454,9 +516,13 @@ struct nw_sqp_policy
         // max_ls == 0 configuration. GCC 15 flags an uninitialized SSE
         // packet load through this path if x_trial is left default-
         // constructed after only being assigned inside the loop body.
-        Eigen::Vector<double, N> x_trial = s.x;
-        double f_trial{s.objective_value};
-        bool ls_success = false;
+        // x_trial / f_trial / ls_success are hoisted to function
+        // scope above (BFGS-reset retry loop variables); reset to the
+        // current iterate at every retry so the merit / SOC blocks
+        // see a fresh trial baseline.
+        x_trial = s.x;
+        f_trial = s.objective_value;
+        ls_success = false;
 
         for(std::uint16_t ls = 0; ls < max_ls; ++ls)
         {
@@ -636,6 +702,129 @@ struct nw_sqp_policy
             }
         }
 
+        // BFGS-reset retry loop close. If Armijo + SOC accepted a
+        // descent direction, exit the loop and fall through to the
+        // BFGS-update / step_result return path below. Otherwise,
+        // if the cap is not yet hit, reset the BFGS Hessian to
+        // identity (Shanno-rescaled on next push) and retry the
+        // QP + Armijo + SOC together. After cap exhaustion, exit
+        // and let the post-loop block return the cap-exhausted
+        // null step with diagnostics.bfgs_reset_count = reset_count.
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
+        // Adopted from: NLopt slsqp.c:1890-1895.
+        if(ls_success)
+            break;
+        if(reset_count >= options.bfgs_reset_max)
+            break;
+        s.hessian.reset();
+        ++reset_count;
+        }
+
+        // Post-loop: zero-step path. The QP returned p ~= 0 inside
+        // the loop (degeneracy / true KKT point), the loop captured
+        // the diagnostic state and broke out. Surface
+        // reset_count alongside the existing null-step telemetry so
+        // callers can distinguish a fresh zero-step (reset_count == 0)
+        // from one reached only after the BFGS Hessian was discarded
+        // (reset_count > 0).
+        if(zero_step_detected)
+        {
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = grad_L_null_norm,
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .x_norm = s.x.norm(),
+                .kkt_residual = kkt_null,
+                .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
+            };
+        }
+
+        // Post-loop: cap-exhausted null step. Armijo + SOC failed on
+        // every retry and the BFGS-reset cap is hit. Mirror the kraft
+        // cap-exhausted return shape: refresh KKT-residual buffers
+        // from the most recent qp.lambda multipliers and surface the
+        // cumulative reset count so callers can compose
+        //   is_null_step && diagnostics.bfgs_reset_count >= options.bfgs_reset_max
+        // to detect cap exhaustion deterministically.
+        //
+        // Reference: N&W 2e Definition 12.1, eq. 12.34 (full KKT
+        //            first-order optimality E-measure).
+        if(!ls_success)
+        {
+            Eigen::VectorXd lambda_capped = Eigen::VectorXd::Zero(m);
+            if(m > 0 && qp.lambda.size() >= m)
+                lambda_capped = qp.lambda.head(m);
+            else if(m > 0 && qp.lambda.size() > 0)
+                lambda_capped.head(qp.lambda.size()) = qp.lambda;
+
+            Eigen::VectorXd lambda_eq_capped = s.n_eq > 0
+                ? Eigen::VectorXd(lambda_capped.head(s.n_eq))
+                : Eigen::VectorXd::Zero(0);
+            Eigen::VectorXd mu_ineq_capped = s.n_ineq > 0
+                ? Eigen::VectorXd(lambda_capped.segment(s.n_eq, s.n_ineq))
+                : Eigen::VectorXd::Zero(0);
+
+            const double kkt_capped = detail::kkt_residual<double,
+                                                           Eigen::Dynamic,
+                                                           Eigen::Dynamic,
+                                                           Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq,
+                lambda_eq_capped, mu_ineq_capped,
+                s.c_eq, s.c_ineq);
+
+            // Lagrangian gradient norm at the iter-start point using
+            // the most recent QP multipliers (consistent with the
+            // zero-step branch above).
+            double grad_L_capped_norm = s.g.norm();
+            if(m > 0)
+            {
+                Eigen::Vector<double, N> grad_L = s.g;
+                if(s.n_eq > 0)
+                    grad_L.noalias() -= s.J_eq.transpose() * lambda_eq_capped;
+                if(s.n_ineq > 0)
+                    grad_L.noalias() -= s.J_ineq.transpose() * mu_ineq_capped;
+                grad_L_capped_norm = grad_L.norm();
+            }
+
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = grad_L_capped_norm,
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .x_norm = s.x.norm(),
+                .kkt_residual = kkt_capped,
+                .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
+            };
+        }
+
+        // Recompute lambda_new from the accepted-step qp.lambda for
+        // the BFGS-update block below. The local lambda_new declared
+        // inside the (now-looped) region went out of scope when the
+        // loop closed; the BFGS update needs the multipliers from the
+        // QP solve that produced the accepted direction.
+        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
+        if(m > 0 && qp.lambda.size() >= m)
+            lambda_new = qp.lambda.head(m);
+        else if(m > 0 && qp.lambda.size() > 0)
+            lambda_new.head(qp.lambda.size()) = qp.lambda;
+
+        // L1 merit at iter-start point for the post-step `improved`
+        // flag below. Local phi0 declared inside the (now-looped)
+        // region went out of scope; recompute at s.x using the
+        // current sigma so phi_new vs phi0 comparison stays valid.
+        // sigma is monotone across retries so this is the most
+        // conservative reference value.
+        double phi0 = detail::l1_merit(s.objective_value,
+                                       s.c_eq, s.c_ineq, s.sigma);
+
         // --- 5. Compute BFGS update vectors ---
         // Reuse objective and constraint values from line search (already
         // evaluated at x_trial). Only gradient and Jacobian need fresh eval.
@@ -771,6 +960,15 @@ struct nw_sqp_policy
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
+            // Surface BFGS-reset count for telemetry. Zero on the
+            // common success path (Armijo + SOC accepted on the
+            // first try); non-zero only when the BFGS-reset retry
+            // loop above performed at least one reset before the
+            // QP + Armijo + SOC chain accepted a descent direction.
+            // Caller telemetry can distinguish "step accepted on
+            // first try" from "step accepted only after BFGS
+            // curvature was discarded".
+            .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
         };
     }
 
