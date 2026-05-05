@@ -219,6 +219,30 @@ struct filter_slsqp_policy
     {
         const int n = s.n;
 
+        // Cold-start mu calibration: documented no-op for filter_slsqp.
+        //
+        // The cold-start fix (calibrate_initial_penalty after iter-0 QP solve)
+        // applies to SQP policies whose main acceptance test is L1 merit:
+        // kraft_slsqp, nw_sqp, filter_nw_sqp. filter_slsqp's main loop uses
+        // filter dominance (Wachter & Biegler 2006 Section 2.3) and does
+        // not consume sigma on the accepted path. The only sigma site in
+        // this policy is sigma_restore in the restoration helper, which
+        // already implements the equivalent of the cold-start formula
+        // (sigma_restore = ||lambda||_inf + 1e-4, matching N&W eq. 18.36
+        // up to the choice of safety constant).
+        //
+        // Reference: N&W 2e eq. 18.36 (sigma sufficient for L1-merit descent);
+        //            Wachter & Biegler 2006 Section 2.3 (filter acceptance);
+        //            PITFALLS §B remedy 1 (cold-start applies to merit-based
+        //            policies).
+        //
+        // argmin variant: filter_slsqp main loop is filter-based, so the
+        //                 main-path cold-start is a no-op; sigma calibration
+        //                 lives in the restoration helper. Future helper
+        //                 extraction may unify these into a single shared
+        //                 cold-start site; preserved in current form for
+        //                 bit-identical regression compatibility.
+
         // Factor the BFGS LDL Hessian into (E, f) directly off the
         // packed L, D factors -- skipping the O(n^3 / 3) LLT(B) the QP
         // solver would otherwise run on every solve. See
