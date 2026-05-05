@@ -3,6 +3,7 @@
 
 #include "argmin/result/status.h"
 
+#include <cstddef>
 #include <optional>
 
 namespace argmin
@@ -44,6 +45,25 @@ struct step_result
     // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity).
     std::optional<Scalar> kkt_residual{};
     std::optional<solver_status> policy_status{};
+
+    // Per-step solver diagnostics for telemetry. Defaulted-member
+    // sub-struct so future fields can be added without touching
+    // existing call sites. Caller composition for line-search SQP
+    // policies: is_null_step == true && diagnostics.bfgs_reset_count > 0
+    // signals BFGS-reset cap exhaustion.
+    //
+    // Reference: PITFALLS section L (line-search exhaustion fallback);
+    //            NLopt slsqp.c:1890-1895 (ireset retry parity).
+    //
+    // argmin variant: scalar bfgs_reset_count only;
+    //                 a templated / variant per-policy diagnostics
+    //                 type is the natural pairing with a future
+    //                 step_result type-system redesign.
+    struct solver_diagnostics
+    {
+        std::size_t bfgs_reset_count{0};
+    };
+    solver_diagnostics diagnostics{};
 };
 
 }
