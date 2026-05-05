@@ -69,9 +69,13 @@ struct sqp_state_buffers
     Eigen::VectorXd kkt_lambda_eq_buf;
     Eigen::VectorXd kkt_mu_ineq_buf;
 
-    // Constraint Jacobian (m x n; row-axis dynamic, col-axis matches N).
-    Eigen::Matrix<Scalar, Eigen::Dynamic, N> J_all;
-    Eigen::Matrix<Scalar, Eigen::Dynamic, N> J_all_old;
+    // Constraint Jacobian (m x n). Typed Eigen::MatrixXd (dynamic rows AND
+    // columns) to match the user-facing constraint_jacobian callback API
+    // (which accepts Eigen::MatrixXd& by reference). Adopting Matrix<Scalar,
+    // Dynamic, N> here would break the binding at policies' init() and
+    // post-step Jacobian re-evaluation sites for fixed-N problems.
+    Eigen::MatrixXd J_all;
+    Eigen::MatrixXd J_all_old;
 
     // Pre-factored Hessian for kraft_lsq_qp's solve_with_factored_hessian path
     // (Kraft lineage only; N&W lineage leaves these zero-sized).
@@ -239,8 +243,8 @@ template <typename Scalar, int N>
 inline void compute_bfgs_pair_fused(
     const Eigen::Vector<Scalar, N>& g_old,
     const Eigen::Vector<Scalar, N>& g_new,
-    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& J_all_old,
-    const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& J_all,
+    const Eigen::MatrixXd& J_all_old,
+    const Eigen::MatrixXd& J_all,
     const Eigen::Vector<Scalar, Eigen::Dynamic>& lam_full,
     int m_total,
     Eigen::Ref<Eigen::Vector<Scalar, N>> grad_L_old,

@@ -94,8 +94,8 @@ int main()
 
         Eigen::Matrix<double, Eigen::Dynamic, N> J_eq(n_eq, N);
         Eigen::Matrix<double, Eigen::Dynamic, N> J_ineq(n_ineq, N);
-        Eigen::Matrix<double, Eigen::Dynamic, N> J_all(m_total, N);
-        Eigen::Matrix<double, Eigen::Dynamic, N> J_all_old(m_total, N);
+        Eigen::MatrixXd J_all(m_total, N);
+        Eigen::MatrixXd J_all_old(m_total, N);
         J_eq.setZero();
         J_ineq.setZero();
         J_all.setZero();
@@ -157,8 +157,8 @@ int main()
 
         Eigen::Matrix<double, Eigen::Dynamic, N> J_eq(n_eq, n);
         Eigen::Matrix<double, Eigen::Dynamic, N> J_ineq(n_ineq, n);
-        Eigen::Matrix<double, Eigen::Dynamic, N> J_all(m_total, n);
-        Eigen::Matrix<double, Eigen::Dynamic, N> J_all_old(m_total, n);
+        Eigen::MatrixXd J_all(m_total, n);
+        Eigen::MatrixXd J_all_old(m_total, n);
         J_eq.setZero();
         J_ineq.setZero();
         J_all.setZero();
