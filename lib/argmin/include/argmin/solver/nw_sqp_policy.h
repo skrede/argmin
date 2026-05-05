@@ -18,10 +18,11 @@
 //            globalization per Section 18.5-18.6.
 
 #include "argmin/detail/lagrangian.h"
-#include "argmin/detail/dense_ldl_bfgs.h"
+#include "argmin/detail/sqp_common.h"
 #include "argmin/detail/kkt_residual.h"
-#include "argmin/detail/merit_function.h"
 #include "argmin/detail/active_set_qp.h"
+#include "argmin/detail/dense_ldl_bfgs.h"
+#include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/options/qp_options.h"
 #include "argmin/line_search/options.h"
@@ -108,15 +109,27 @@ struct nw_sqp_policy
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
-        // Pre-allocated constraint workspace (sized in init(), reused in step())
-        // Eliminates per-step heap allocations for constraint evaluation.
-        Eigen::VectorXd c_all;
-        Eigen::MatrixXd J_all;
-        Eigen::VectorXd c_eq_trial;
-        Eigen::VectorXd c_ineq_trial;
-        Eigen::MatrixXd J_all_old;  // Saved Jacobian at x_k for BFGS update (N&W eq. 18.13)
-        Eigen::VectorXd b_eq_workspace;     // QP RHS workspace
-        Eigen::VectorXd b_ineq_workspace;   // QP RHS workspace
+
+        // Cross-policy state-resident buffer struct. Consolidates the
+        // per-step / per-line-search trial buffers, the BFGS curvature-pair
+        // buffers, the constraint-axis workspaces (c_all, c_trial,
+        // b_eq / b_ineq, lam / lam_eq / lam_ineq, kkt_lambda_eq /
+        // kkt_mu_ineq), and the constraint Jacobian pair (J_all and the
+        // J_all_old cached copy that supports the BFGS curvature-pair on
+        // the post-step Jacobian re-evaluation path). nw_sqp does not use
+        // the SOC-retry b_eq_soc_buf / b_ineq_soc_buf or the kraft-only
+        // pre-factored Hessian E_buf / f_buf members; those remain present
+        // (zero-sized after resize on the n_eq / n_ineq dynamic axes) for
+        // cross-policy struct consistency.
+        //
+        // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers
+        //               (in-tree precedent — landed alongside this refactor;
+        //                generalizes the per-policy *_buf state-resident layout).
+        // Reference: N&W 2e Section 18.
+        //
+        // argmin variant: cross-policy state-resident buffer struct.
+        argmin::detail::sqp_state_buffers<double, N> bufs;
+
         Eigen::MatrixXd AAt_workspace;      // Feasibility LDLT workspace
         Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;  // Reusable factorization
         double objective_value{};
@@ -164,15 +177,14 @@ struct nw_sqp_policy
         s.objective_value = problem.value(x0);
         problem.gradient(x0, s.g);
 
-        // Pre-allocate constraint workspace (sized once, reused in step()).
-        // Follows the kraft_slsqp pre-allocation pattern.
-        s.c_all.resize(m);
-        s.J_all.resize(m, n);
-        s.J_all_old.setZero(m, n);
-        s.c_eq_trial.resize(s.n_eq);
-        s.c_ineq_trial.resize(s.n_ineq);
-        s.b_eq_workspace.resize(s.n_eq);
-        s.b_ineq_workspace.resize(s.n_ineq);
+        // Cross-policy state-resident buffer struct: sizes all per-step
+        // workspaces (n-sized iterate / direction / curvature-pair buffers,
+        // m-sized constraint workspaces, and the constraint Jacobian pair)
+        // in one call. nw_sqp does not consume the kraft-only E_buf / f_buf
+        // pre-factored Hessian members; those remain default-resized.
+        s.bufs.resize(n, s.n_eq, s.n_ineq);
+        s.bufs.J_all_old.setZero(m, n);
+
         if(s.n_eq > 0)
         {
             s.AAt_workspace.resize(s.n_eq, s.n_eq);
@@ -181,15 +193,15 @@ struct nw_sqp_policy
 
         // Evaluate constraints: single vector, split into eq/ineq
         if(m > 0)
-            problem.constraints(x0, s.c_all);
-        s.c_eq = s.c_all.head(s.n_eq);
-        s.c_ineq = s.c_all.tail(s.n_ineq);
+            problem.constraints(x0, s.bufs.c_all);
+        s.c_eq = s.bufs.c_all.head(s.n_eq);
+        s.c_ineq = s.bufs.c_all.tail(s.n_ineq);
 
         // Evaluate Jacobian: single matrix, split into eq/ineq
         if(m > 0)
-            problem.constraint_jacobian(x0, s.J_all);
-        s.J_eq = s.J_all.topRows(s.n_eq);
-        s.J_ineq = s.J_all.bottomRows(s.n_ineq);
+            problem.constraint_jacobian(x0, s.bufs.J_all);
+        s.J_eq = s.bufs.J_all.topRows(s.n_eq);
+        s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
 
         // Box bounds
         if constexpr(bound_constrained<Problem>)
@@ -268,12 +280,14 @@ struct nw_sqp_policy
         // re-fires on each retry but is monotone-up (idempotent).
         // detail::update_penalty below is similarly monotone-up.
         detail::qp_result<double, N> qp;
-        Eigen::Vector<double, N> p;
-        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
+        Eigen::Vector<double, N>& p = s.bufs.p_buf;
+        Eigen::VectorXd& lambda_new = s.bufs.lam_buf;
+        lambda_new.setZero(m);
         double phi0 = 0.0;
         double dphi0 = 0.0;
         double alpha = 1.0;
-        Eigen::Vector<double, N> x_trial = s.x;
+        Eigen::Vector<double, N>& x_trial = s.bufs.x_trial_buf;
+        x_trial = s.x;
         double f_trial = s.objective_value;
         bool ls_success = false;
 
@@ -285,19 +299,21 @@ struct nw_sqp_policy
         // state matrices already match the Matrix<Scalar, Meq, N> shape
         // the templated solve() expects, so no local A_eq/A_ineq copy
         // is needed.
-        s.b_eq_workspace = -s.c_eq;
-        s.b_ineq_workspace = -s.c_ineq;
+        s.bufs.b_eq_workspace = -s.c_eq;
+        s.bufs.b_ineq_workspace = -s.c_ineq;
 
         Eigen::Vector<double, N> p0 = Eigen::Vector<double, N>::Zero(n);
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
         {
-            // Solve (J_eq J_eq^T) w = b_eq, then p0 = J_eq^T w
-            // J*J^T is PSD but may be rank-deficient with numerical noise;
-            // LDLT handles indefinite/singular cases that LLT cannot.
-            s.AAt_workspace.noalias() = s.J_eq * s.J_eq.transpose();
-            s.ldlt_feasibility.compute(s.AAt_workspace);
-            auto w = s.ldlt_feasibility.solve(s.b_eq_workspace);
-            p0.noalias() = s.J_eq.transpose() * w;
+            // Adopted from: argmin/detail/sqp_common.h equality_feasibility_warmstart
+            //               (in-tree precedent — helper hoists this very pattern from nw_sqp).
+            // Reference: N&W 2e Section 18.3 (equality-feasibility step).
+            //
+            // argmin variant: caller-owned AAt + LDLT workspaces; nw_sqp is the
+            //                 canonical extraction site for this helper.
+            argmin::detail::equality_feasibility_warmstart<double, N, Eigen::Dynamic>(
+                s.J_eq, s.bufs.b_eq_workspace,
+                s.AAt_workspace, s.ldlt_feasibility, p0);
         }
 
         // Use embedded QP options with defaults
@@ -313,19 +329,17 @@ struct nw_sqp_policy
 
         if(has_finite_bounds)
         {
-            Eigen::Vector<double, N> p_lower = (Eigen::Vector<double, N>(s.lower) -
-                                                  Eigen::Vector<double, N>(s.x)).eval();
-            Eigen::Vector<double, N> p_upper = (Eigen::Vector<double, N>(s.upper) -
-                                                  Eigen::Vector<double, N>(s.x)).eval();
-            p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
+            s.bufs.p_lo_buf.noalias() = s.lower - s.x;
+            s.bufs.p_hi_buf.noalias() = s.upper - s.x;
+            p0 = p0.cwiseMax(s.bufs.p_lo_buf).cwiseMin(s.bufs.p_hi_buf);
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
-                                   s.J_eq, s.b_eq_workspace, s.J_ineq, s.b_ineq_workspace,
-                                   p_lower, p_upper, p0, qp_opts);
+                                   s.J_eq, s.bufs.b_eq_workspace, s.J_ineq, s.bufs.b_ineq_workspace,
+                                   s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0, qp_opts);
         }
         else
         {
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
-                                   s.J_eq, s.b_eq_workspace, s.J_ineq, s.b_ineq_workspace,
+                                   s.J_eq, s.bufs.b_eq_workspace, s.J_ineq, s.bufs.b_ineq_workspace,
                                    p0, qp_opts);
         }
 
@@ -372,57 +386,47 @@ struct nw_sqp_policy
         // re-estimation not applied here.
         if(p.norm() < 1e-15)
         {
-            Eigen::VectorXd lambda_null = Eigen::VectorXd::Zero(m);
-            if(m > 0 && qp.lambda.size() >= m)
-                lambda_null = qp.lambda.head(m);
-            else if(m > 0 && qp.lambda.size() > 0)
-                lambda_null.head(qp.lambda.size()) = qp.lambda;
+            // Adopted from: argmin/detail/sqp_common.h extract_qp_multipliers.
+            s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+            s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
+            if(m > 0 && qp.lambda.size() > 0)
+            {
+                argmin::detail::extract_qp_multipliers<double>(
+                    qp.lambda, s.n_eq, s.n_ineq,
+                    s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+            }
 
-            Eigen::VectorXd lambda_eq_null = s.n_eq > 0
-                ? Eigen::VectorXd(lambda_null.head(s.n_eq))
-                : Eigen::VectorXd::Zero(0);
-            Eigen::VectorXd mu_ineq_null = s.n_ineq > 0
-                ? Eigen::VectorXd(lambda_null.segment(s.n_eq, s.n_ineq))
-                : Eigen::VectorXd::Zero(0);
+            // Adopted from: argmin/detail/sqp_common.h null_step_result.
             // Reference: N&W 2e Definition 12.1, eq. 12.34 (full KKT
             //            first-order optimality E-measure).
-            double kkt_null = detail::kkt_residual<double,
-                                                   Eigen::Dynamic,
-                                                   Eigen::Dynamic,
-                                                   Eigen::Dynamic>(
-                s.g, s.J_eq, s.J_ineq,
-                lambda_eq_null, mu_ineq_null,
-                s.c_eq, s.c_ineq);
-
-            // Use the CURRENT QP multipliers (lambda_eq_null /
-            // mu_ineq_null) to form the Lagrangian-gradient norm.
-            // The previous lagrangian_gradient_norm(s) call read
-            // s.lambda from the prior successful step, which is stale
-            // on a zero-step bailout and made gradient_tolerance_criterion
-            // fire silently at non-stationary HS071 iterates.
+            //
+            // argmin variant: nw_sqp's null-step path overrides the helper's
+            //                 gradient_norm (which uses lpNorm<Infinity>) with
+            //                 the L2 Lagrangian-gradient norm computed against
+            //                 the CURRENT QP multipliers. Pre-refactor in-line
+            //                 code used `grad_L.norm()` (L2); the override
+            //                 preserves bit-identical reporting on the
+            //                 cross-policy step_result consistency suite.
+            auto r = argmin::detail::null_step_result<double, N,
+                                                      Eigen::Dynamic,
+                                                      Eigen::Dynamic>(
+                s.objective_value, s.g, s.J_eq, s.J_ineq,
+                s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
+                s.c_eq, s.c_ineq, s.x.norm(), reset_count);
+            // L2 override: helper reports lpNorm<Infinity>, nw_sqp's prior
+            // in-line code reported L2.
             double grad_L_null_norm = s.g.norm();
             if(m > 0)
             {
                 Eigen::Vector<double, N> grad_L = s.g;
                 if(s.n_eq > 0)
-                    grad_L.noalias() -= s.J_eq.transpose() * lambda_eq_null;
+                    grad_L.noalias() -= s.J_eq.transpose() * s.bufs.kkt_lambda_eq_buf;
                 if(s.n_ineq > 0)
-                    grad_L.noalias() -= s.J_ineq.transpose() * mu_ineq_null;
+                    grad_L.noalias() -= s.J_ineq.transpose() * s.bufs.kkt_mu_ineq_buf;
                 grad_L_null_norm = grad_L.norm();
             }
-
-            return step_result<double>{
-                .objective_value = s.objective_value,
-                .gradient_norm = grad_L_null_norm,
-                .step_size = 0.0,
-                .objective_change = 0.0,
-                .improved = false,
-                .is_null_step = true,
-                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
-                .x_norm = s.x.norm(),
-                .kkt_residual = kkt_null,
-                .diagnostics = { .bfgs_reset_count = reset_count },
-            };
+            r.gradient_norm = grad_L_null_norm;
+            return r;
         }
 
         // --- 2. Extract QP multipliers ---
@@ -438,19 +442,32 @@ struct nw_sqp_policy
         // --- 4. Line search on L1 merit ---
         phi0 = detail::l1_merit(s.objective_value,
                                 s.c_eq, s.c_ineq, s.sigma);
-        dphi0 = detail::l1_merit_directional_derivative(
-            s.g.dot(p), s.c_eq, s.c_ineq, s.sigma);
+        // Adopted from: argmin/detail/merit_function.h l1_merit_dphi_h4.
+        // nw_sqp's lineage uses h4 = 1 (no augmented relaxation), so the
+        // helper is bit-identical to the prior l1_merit_directional_derivative
+        // call.
+        const double grad_f_dot_p = s.g.dot(p);
+        dphi0 = argmin::detail::l1_merit_dphi_h4<double>(
+            grad_f_dot_p, s.c_eq, s.c_ineq, s.sigma, /*h4=*/1.0);
 
         // If dphi0 >= 0, the penalty is insufficient for descent.
         // Increase sigma until the SQP direction is a descent direction
         // for the L1 merit function (N&W eq. 18.36).
         if(dphi0 >= 0.0)
         {
-            double grad_f_dot_p = s.g.dot(p);
             double cv = detail::constraint_violation(s.c_eq, s.c_ineq);
             if(cv > 1e-15)
             {
-                s.sigma = std::max(s.sigma, (grad_f_dot_p / cv) + 1.0);
+                // Adopted from: argmin/detail/merit_function.h bump_sigma_for_descent.
+                //
+                // argmin variant: helper guards on h4 > 0 in addition to violation > 0;
+                //                 nw_sqp's prior in-line bump used grad_f_dot_p / cv + 1
+                //                 directly; helper's `abs(grad_f_dot_p) / (violation * h4) + 1`
+                //                 with h4 = 1 reduces to abs(grad_f_dot_p) / cv + 1 — bit-
+                //                 identical for grad_f_dot_p >= 0 (the only branch reached
+                //                 here, since dphi0 >= 0 implies grad_f_dot_p >= sigma * cv > 0).
+                s.sigma = argmin::detail::bump_sigma_for_descent<double>(
+                    s.sigma, grad_f_dot_p, cv, /*h4=*/1.0, /*sigma_max=*/1e10);
                 phi0 = detail::l1_merit(s.objective_value,
                                         s.c_eq, s.c_ineq, s.sigma);
                 dphi0 = grad_f_dot_p - s.sigma * cv;
@@ -487,14 +504,23 @@ struct nw_sqp_policy
 
             f_trial = s.problem->value(x_trial);
             if(m > 0)
-                s.problem->constraints(x_trial, s.c_all);
-            s.c_eq_trial = s.c_all.head(s.n_eq);
-            s.c_ineq_trial = s.c_all.tail(s.n_ineq);
-            double phi_trial = detail::l1_merit(f_trial, s.c_eq_trial,
-                                                s.c_ineq_trial, s.sigma);
+                s.problem->constraints(x_trial, s.bufs.c_all);
+            // Inline L1 merit via head/tail VectorBlock expressions to avoid
+            // a per-backtrack VectorXd materialization. Equivalent to
+            // detail::l1_merit(f, c_eq, c_ineq, sigma).
+            double viol_trial = 0.0;
+            if(s.n_eq > 0)
+                viol_trial += s.bufs.c_all.head(s.n_eq).cwiseAbs().sum();
+            if(s.n_ineq > 0)
+                viol_trial += (-s.bufs.c_all.tail(s.n_ineq)).cwiseMax(0.0).sum();
+            double phi_trial = f_trial + s.sigma * viol_trial;
 
             if(phi_trial <= phi0 + ls_c1 * alpha * dphi0)
             {
+                // Persist the accepted trial constraints for the post-loop
+                // accept block (replaces the prior eager s.c_eq_trial /
+                // s.c_ineq_trial assignment that ran on every backtrack).
+                s.bufs.c_trial_buf = s.bufs.c_all;
                 ls_success = true;
                 break;
             }
@@ -536,38 +562,32 @@ struct nw_sqp_policy
             if(has_finite_bounds)
                 x_full = detail::project(x_full, s.lower, s.upper);
 
-            s.problem->constraints(x_full, s.c_all);
-            auto c_eq_full = s.c_all.head(s.n_eq);
-            auto c_ineq_full = s.c_all.tail(s.n_ineq);
+            s.problem->constraints(x_full, s.bufs.c_all);
+            auto c_eq_full = s.bufs.c_all.head(s.n_eq);
+            auto c_ineq_full = s.bufs.c_all.tail(s.n_ineq);
 
-            Eigen::VectorXd b_eq_soc = s.n_eq > 0
-                ? Eigen::VectorXd((-c_eq_full + s.J_eq * p).eval())
-                : Eigen::VectorXd();
-            Eigen::VectorXd b_ineq_soc = s.n_ineq > 0
-                ? Eigen::VectorXd((-c_ineq_full + s.J_ineq * p).eval())
-                : Eigen::VectorXd();
+            if(s.n_eq > 0)
+                s.bufs.b_eq_soc_buf.noalias() = -c_eq_full + s.J_eq * p;
+            if(s.n_ineq > 0)
+                s.bufs.b_ineq_soc_buf.noalias() = -c_ineq_full + s.J_ineq * p;
 
             detail::qp_result<double, N> qp_soc;
             if(has_finite_bounds)
             {
-                Eigen::Vector<double, N> p_lower =
-                    (Eigen::Vector<double, N>(s.lower) -
-                     Eigen::Vector<double, N>(s.x)).eval();
-                Eigen::Vector<double, N> p_upper =
-                    (Eigen::Vector<double, N>(s.upper) -
-                     Eigen::Vector<double, N>(s.x)).eval();
+                // p_lo_buf / p_hi_buf already populated from the main QP
+                // build above; reuse without re-computing s.lower - s.x.
                 Eigen::Vector<double, N> p0_soc = p;
-                p0_soc = p0_soc.cwiseMax(p_lower).cwiseMin(p_upper);
+                p0_soc = p0_soc.cwiseMax(s.bufs.p_lo_buf).cwiseMin(s.bufs.p_hi_buf);
                 qp_soc = s.qp_solver.solve(
                     s.hessian.hessian(), s.g,
-                    s.J_eq, b_eq_soc, s.J_ineq, b_ineq_soc,
-                    p_lower, p_upper, p0_soc, qp_opts);
+                    s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
+                    s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0_soc, qp_opts);
             }
             else
             {
                 qp_soc = s.qp_solver.solve(
                     s.hessian.hessian(), s.g,
-                    s.J_eq, b_eq_soc, s.J_ineq, b_ineq_soc,
+                    s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
                     p, qp_opts);
             }
 
@@ -588,11 +608,15 @@ struct nw_sqp_policy
 
                     f_trial_soc = s.problem->value(x_trial_soc);
                     if(m > 0)
-                        s.problem->constraints(x_trial_soc, s.c_all);
-                    s.c_eq_trial = s.c_all.head(s.n_eq);
-                    s.c_ineq_trial = s.c_all.tail(s.n_ineq);
-                    double phi_trial_soc = detail::l1_merit(
-                        f_trial_soc, s.c_eq_trial, s.c_ineq_trial, s.sigma);
+                        s.problem->constraints(x_trial_soc, s.bufs.c_all);
+                    // Inline L1 merit via head/tail VectorBlock expressions to
+                    // avoid per-backtrack VectorXd materialization (see main LS).
+                    double viol_soc = 0.0;
+                    if(s.n_eq > 0)
+                        viol_soc += s.bufs.c_all.head(s.n_eq).cwiseAbs().sum();
+                    if(s.n_ineq > 0)
+                        viol_soc += (-s.bufs.c_all.tail(s.n_ineq)).cwiseMax(0.0).sum();
+                    double phi_trial_soc = f_trial_soc + s.sigma * viol_soc;
 
                     if(phi_trial_soc <= phi0 + ls_c1 * alpha_soc * dphi0)
                     {
@@ -600,6 +624,9 @@ struct nw_sqp_policy
                         alpha = alpha_soc;
                         x_trial = x_trial_soc;
                         f_trial = f_trial_soc;
+                        // Persist accepted trial constraints (parallel to the
+                        // main line-search acceptance branch).
+                        s.bufs.c_trial_buf = s.bufs.c_all;
                         ls_success = true;
                         break;
                     }
@@ -623,46 +650,40 @@ struct nw_sqp_policy
         //            dense_ldl_bfgs.h:86-105 (reset semantics).
         if(reset_count >= reset_max)
         {
-            Eigen::VectorXd lambda_eq_cap = Eigen::VectorXd::Zero(s.n_eq);
-            Eigen::VectorXd mu_ineq_cap = Eigen::VectorXd::Zero(s.n_ineq);
+            // Adopted from: argmin/detail/sqp_common.h extract_qp_multipliers.
+            s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+            s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
             if(m > 0 && qp.lambda.size() >= m)
             {
-                if(s.n_eq > 0)
-                    lambda_eq_cap = qp.lambda.head(s.n_eq);
-                if(s.n_ineq > 0)
-                    mu_ineq_cap = qp.lambda.segment(s.n_eq, s.n_ineq);
+                argmin::detail::extract_qp_multipliers<double>(
+                    qp.lambda, s.n_eq, s.n_ineq,
+                    s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
             }
-            double kkt_cap = detail::kkt_residual<double,
-                                                  Eigen::Dynamic,
-                                                  Eigen::Dynamic,
-                                                  Eigen::Dynamic>(
-                s.g, s.J_eq, s.J_ineq,
-                lambda_eq_cap, mu_ineq_cap,
-                s.c_eq, s.c_ineq);
 
+            // Adopted from: argmin/detail/sqp_common.h null_step_result.
+            //
+            // argmin variant: nw_sqp overrides the helper's gradient_norm
+            //                 (lpNorm<Infinity>) with the L2 Lagrangian-
+            //                 gradient norm to preserve cross-policy
+            //                 step_result consistency.
+            auto r = argmin::detail::null_step_result<double, N,
+                                                      Eigen::Dynamic,
+                                                      Eigen::Dynamic>(
+                s.objective_value, s.g, s.J_eq, s.J_ineq,
+                s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
+                s.c_eq, s.c_ineq, s.x.norm(), reset_count);
             double grad_L_cap_norm = s.g.norm();
             if(m > 0)
             {
                 Eigen::Vector<double, N> grad_L = s.g;
                 if(s.n_eq > 0)
-                    grad_L.noalias() -= s.J_eq.transpose() * lambda_eq_cap;
+                    grad_L.noalias() -= s.J_eq.transpose() * s.bufs.kkt_lambda_eq_buf;
                 if(s.n_ineq > 0)
-                    grad_L.noalias() -= s.J_ineq.transpose() * mu_ineq_cap;
+                    grad_L.noalias() -= s.J_ineq.transpose() * s.bufs.kkt_mu_ineq_buf;
                 grad_L_cap_norm = grad_L.norm();
             }
-
-            return step_result<double>{
-                .objective_value = s.objective_value,
-                .gradient_norm = grad_L_cap_norm,
-                .step_size = 0.0,
-                .objective_change = 0.0,
-                .improved = false,
-                .is_null_step = true,
-                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
-                .x_norm = s.x.norm(),
-                .kkt_residual = kkt_cap,
-                .diagnostics = { .bfgs_reset_count = reset_count },
-            };
+            r.gradient_norm = grad_L_cap_norm;
+            return r;
         }
 
         s.hessian.reset();
@@ -672,50 +693,59 @@ struct nw_sqp_policy
         // --- 5. Compute BFGS update vectors ---
         // Reuse objective and constraint values from line search (already
         // evaluated at x_trial). Only gradient and Jacobian need fresh eval.
-        Eigen::Vector<double, N> x_old = s.x;
-        Eigen::Vector<double, N> g_old = s.g;
+        s.bufs.x_old_buf = s.x;
+        s.bufs.g_old_buf = s.g;
+        Eigen::Vector<double, N>& x_old = s.bufs.x_old_buf;
+        Eigen::Vector<double, N>& g_old = s.bufs.g_old_buf;
         double f_old = s.objective_value;
 
         s.x = x_trial;
         s.objective_value = f_trial;
         s.problem->gradient(s.x, s.g);
-        s.c_eq = s.c_eq_trial;
-        s.c_ineq = s.c_ineq_trial;
+        s.c_eq = s.bufs.c_trial_buf.head(s.n_eq);
+        s.c_ineq = s.bufs.c_trial_buf.tail(s.n_ineq);
 
         // Save old Jacobian before re-evaluation for BFGS update (N&W eq. 18.13)
         if(m > 0)
-            s.J_all_old.noalias() = s.J_all;
+            s.bufs.J_all_old.noalias() = s.bufs.J_all;
 
         if(m > 0)
-            s.problem->constraint_jacobian(s.x, s.J_all);
-        s.J_eq = s.J_all.topRows(s.n_eq);
-        s.J_ineq = s.J_all.bottomRows(s.n_ineq);
+            s.problem->constraint_jacobian(s.x, s.bufs.J_all);
+        s.J_eq = s.bufs.J_all.topRows(s.n_eq);
+        s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
 
-        Eigen::Vector<double, N> sk = s.x - x_old;
+        Eigen::Vector<double, N>& grad_L_new = s.bufs.grad_L_new_buf;
+        Eigen::Vector<double, N>& grad_L_old = s.bufs.grad_L_old_buf;
+        Eigen::Vector<double, N>& sk = s.bufs.sk_buf;
+        Eigen::Vector<double, N>& yk = s.bufs.yk_buf;
 
         // Lagrangian gradient at new and old points using new multipliers.
         // grad_L_old must use the Jacobian at x_old (not x_new) so that
         // y_k = grad_L_new - grad_L_old captures constraint curvature.
         // Reference: N&W eq. 18.13.
-        Eigen::Vector<double, N> grad_L_new, grad_L_old;
         if(m > 0)
         {
-            // grad_L = grad_f - J^T * lambda (N&W eq. 18.2-18.3)
-            // Use J_all directly for new point (already updated above)
-            grad_L_new = s.g;
-            grad_L_new.noalias() -= s.J_all.transpose() * lambda_new;
-
-            // Use J_all_old for old point (saved before Jacobian re-evaluation)
-            grad_L_old = g_old;
-            grad_L_old.noalias() -= s.J_all_old.transpose() * lambda_new;
+            // Adopted from: argmin/detail/sqp_common.h compute_bfgs_pair_fused
+            //               (in-tree precedent — landed alongside this refactor).
+            //
+            // argmin variant: nw_sqp's lambda_new is the full m-sized QP-multiplier
+            //                 vector (lam_buf alias); the helper's m_total branch
+            //                 runs a single fused J_all^T * lam GEMV per gradient
+            //                 against topRows(m) of J_all_old / J_all.
+            argmin::detail::compute_bfgs_pair_fused<double, N>(
+                g_old, s.g, s.bufs.J_all_old, s.bufs.J_all,
+                lambda_new.head(m), m,
+                grad_L_old, grad_L_new,
+                sk, yk,
+                s.x, x_old);
         }
         else
         {
             grad_L_new = s.g;
             grad_L_old = g_old;
+            sk.noalias() = s.x - x_old;
+            yk.noalias() = grad_L_new - grad_L_old;
         }
-
-        Eigen::Vector<double, N> yk = grad_L_new - grad_L_old;
 
         // --- 6. BFGS curvature push (dense_ldl_bfgs, Powell-damped) ---
         // Skip BFGS updates on near-zero or non-positive curvature
@@ -765,28 +795,23 @@ struct nw_sqp_policy
         //            Definition 12.1 (KKT conditions: stationarity +
         //            dual feasibility + complementarity);
         //            eq. 12.34 (Lagrangian stationarity leg).
-        Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
-        Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
+        s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+        s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
         if(m > 0)
         {
-            Eigen::Vector<double, N> g_fixed = s.g;
-            Eigen::VectorXd lambda_reest =
-                detail::estimate_multipliers_active_set<double,
-                                                        N,
-                                                        Eigen::Dynamic,
-                                                        Eigen::Dynamic>(
-                    g_fixed, s.J_eq, s.J_ineq, s.c_ineq);
-            if(s.n_eq > 0)
-                lambda_eq_kkt = lambda_reest.head(s.n_eq);
-            if(s.n_ineq > 0)
-                mu_ineq_kkt = lambda_reest.segment(s.n_eq, s.n_ineq);
+            // Adopted from: argmin/detail/lagrangian.h compute_kkt_multipliers_active_set.
+            argmin::detail::compute_kkt_multipliers_active_set<double, N,
+                                                              Eigen::Dynamic,
+                                                              Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq, s.c_ineq,
+                s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
         }
         double kkt = detail::kkt_residual<double,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic>(
             s.g, s.J_eq, s.J_ineq,
-            lambda_eq_kkt, mu_ineq_kkt,
+            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
             s.c_eq, s.c_ineq);
 
         // Primal feasibility (L-infinity) reported into
@@ -820,13 +845,13 @@ struct nw_sqp_policy
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
         if(m > 0)
-            s.problem->constraints(x0, s.c_all);
-        s.c_eq = s.c_all.head(s.n_eq);
-        s.c_ineq = s.c_all.tail(s.n_ineq);
+            s.problem->constraints(x0, s.bufs.c_all);
+        s.c_eq = s.bufs.c_all.head(s.n_eq);
+        s.c_ineq = s.bufs.c_all.tail(s.n_ineq);
         if(m > 0)
-            s.problem->constraint_jacobian(x0, s.J_all);
-        s.J_eq = s.J_all.topRows(s.n_eq);
-        s.J_ineq = s.J_all.bottomRows(s.n_ineq);
+            s.problem->constraint_jacobian(x0, s.bufs.J_all);
+        s.J_eq = s.bufs.J_all.topRows(s.n_eq);
+        s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
         s.iteration = 0;
     }
 
