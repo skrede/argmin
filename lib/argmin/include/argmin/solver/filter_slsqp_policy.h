@@ -78,6 +78,22 @@ struct filter_slsqp_policy
         //            Fletcher & Leyffer 2002 Section 5.
         std::optional<double> gamma_f{};
         std::optional<double> gamma_h{};
+
+        // BFGS-reset retry cap on line-search/filter exhaustion. After
+        // restoration fails to recover an acceptable trial point, the policy
+        // resets the BFGS Hessian to identity and re-solves the QP, repeating
+        // up to bfgs_reset_max times before returning a null-step. Default 5
+        // matches NLopt slsqp.c:1890-1895 ireset semantics.
+        //
+        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
+        //            N&W 2e Section 3.3 (recovery from non-descent).
+        //
+        // argmin variant: filter policies layer this AFTER the existing
+        //                 restoration path (restoration first then BFGS
+        //                 reset then null-step). Cascade-free: no new
+        //                 solver_status enum entry.
+        std::size_t bfgs_reset_max{5};
     };
 
     options_type options{};
@@ -260,6 +276,39 @@ struct filter_slsqp_policy
         //                 cold-start site; preserved in current form for
         //                 bit-identical regression compatibility.
 
+        // BFGS-reset retry layered after the restoration path.
+        //
+        // Filter policies prefer feasibility restoration (which explicitly
+        // minimises ||c||) over a BFGS reset on rejection, because the
+        // restoration step is conceptually cheaper than discarding curvature.
+        // The retry ordering is therefore: restoration first then BFGS-reset
+        // retry then null-step. This preserves v0.2.1 restoration semantics
+        // while adding the BFGS-reset escape hatch for the case where the
+        // restoration helper also fails to recover an acceptable trial point.
+        //
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h retry-loop pattern
+        //               (in-tree precedent landed alongside this fix).
+        //               NLopt slsqp.c:1890-1895 (ireset retry pattern, max=5).
+        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        //            N&W 2e Section 3.3 (recovery from non-descent).
+        //
+        // argmin variant: cap is options.bfgs_reset_max (default 5);
+        //                 status on exhaustion is is_null_step + the
+        //                 diagnostics.bfgs_reset_count counter; rationale
+        //                 is cascade-free (no new solver_status enum entry).
+        std::size_t reset_count = 0;
+        const std::size_t reset_max = options.bfgs_reset_max;
+
+        // Loop-carried variables that survive the retry block into the
+        // post-loop accept-step block. Restoration-success returns inline
+        // from inside the loop; the only path that exits via `break` is
+        // the LS/filter accept path (accepted = true).
+        detail::qp_result<double, N> qp_res;
+        Eigen::Vector<double, N> p;
+        double alpha = 1.0;
+
+        for(;;)
+        {
         // Factor the BFGS LDL Hessian into (E, f) directly off the
         // packed L, D factors -- skipping the O(n^3 / 3) LLT(B) the QP
         // solver would otherwise run on every solve. See
@@ -275,14 +324,17 @@ struct filter_slsqp_policy
         Eigen::Vector<double, N> p_hi = (Eigen::Vector<double, N>(s.upper) -
                                           Eigen::Vector<double, N>(s.x)).eval();
 
-        auto qp_res = s.qp_solver.solve_with_factored_hessian(
+        qp_res = s.qp_solver.solve_with_factored_hessian(
             s.E_buf, s.f_buf, Eigen::Vector<double, N>(s.g),
             s.J_eq, s.b_eq_workspace,
             s.J_ineq, s.b_ineq_workspace,
             p_lo, p_hi);
 
-        Eigen::Vector<double, N> p = qp_res.x;
+        p = qp_res.x;
         double p_norm = p.norm();
+        bool zero_step_restoration_failed = false;
+        bool accepted = false;
+        bool main_path_restoration_failed = false;
         if(p_norm < 1e-15)
         {
             // Zero step with high constraint violation: attempt restoration
@@ -295,10 +347,12 @@ struct filter_slsqp_policy
             // ordering. The `h_zero > 1e-8` restoration trigger keeps the
             // L1 form for consistency with filter semantics at that gate.
             double h_zero_l1 = detail::constraint_violation(s.c_eq, s.c_ineq);
+            bool zero_step_restoration_attempted = false;
             if constexpr(constrained<P>)
             {
                 if(h_zero_l1 > 1e-8 && s.n_eq + s.n_ineq > 0)
                 {
+                    zero_step_restoration_attempted = true;
                     auto rest = run_restoration_(s);
                     if(rest.success)
                     {
@@ -330,10 +384,26 @@ struct filter_slsqp_policy
                             .improved = false,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
+                            .diagnostics = { .bfgs_reset_count = reset_count },
                         };
                     }
                 }
             }
+
+            // Restoration was attempted (zero-step + high constraint
+            // violation) and failed: per the restoration-first ordering,
+            // fall through to the BFGS-reset retry block at the bottom of
+            // the loop. The genuine-feasibility null-step path below
+            // (when restoration was NOT attempted, e.g., h_zero_l1 <= 1e-8
+            // or unconstrained) does not benefit from a curvature reset:
+            // a true zero direction at a feasible iterate is the QP's
+            // correct answer at the optimum.
+            if(zero_step_restoration_attempted)
+            {
+                zero_step_restoration_failed = true;
+            }
+            else
+            {
 
             // Null step: QP zero direction with high constraint
             // violation; filter blocks all trial steps. Kraft 1988
@@ -391,8 +461,18 @@ struct filter_slsqp_policy
                 .policy_status = h_zero_l1 > 1e-8
                     ? std::optional{solver_status::stalled}
                     : std::nullopt,
+                .diagnostics = { .bfgs_reset_count = reset_count },
             };
+            }  // end !zero_step_restoration_attempted else-branch
         }
+
+        // Skip the LS / SOC / restoration block when the zero-step branch
+        // already attempted restoration and failed: that path falls
+        // straight through to the BFGS-reset retry at the bottom of this
+        // loop. The non-zero-step path (regular QP direction) runs the
+        // LS / SOC / restoration sequence here.
+        if(!zero_step_restoration_failed)
+        {
 
         // Current constraint violation and objective.
         double h_k = detail::constraint_violation(s.c_eq, s.c_ineq);
@@ -410,8 +490,7 @@ struct filter_slsqp_policy
             s.filter.add(f_k, h_k);
 
         // Backtracking with filter acceptance or Armijo f-descent.
-        double alpha = 1.0;
-        bool accepted = false;
+        alpha = 1.0;
         double f_trial = f_k;
         double h_trial = h_k;
         Eigen::VectorXd c_eq_trial, c_ineq_trial;
@@ -574,6 +653,12 @@ struct filter_slsqp_policy
         }
 
         // Feasibility restoration: recover from filter-blocked iterates.
+        // Restoration runs FIRST (before any BFGS-reset retry) per the
+        // restoration-first ordering documented at the top of this loop:
+        // restoration explicitly minimises ||c|| and is conceptually
+        // cheaper than discarding curvature. The BFGS-reset retry layered
+        // at the bottom of the loop fires only if restoration also fails
+        // to recover an acceptable trial point.
         //
         // Reference: Wachter & Biegler 2006 Section 3.
         if(!accepted)
@@ -613,23 +698,55 @@ struct filter_slsqp_policy
                             .improved = s.objective_value < f_k,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
+                            .diagnostics = { .bfgs_reset_count = reset_count },
                         };
                     }
 
-                    ++s.iteration;
-                    return step_result<double>{
-                        .objective_value = s.objective_value,
-                        .gradient_norm = lagrangian_gradient_norm(s),
-                        .step_size = 0.0,
-                        .objective_change = 0.0,
-                        .improved = false,
-                        .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
-                        .x_norm = s.x.norm(),
-                        .policy_status = solver_status::stalled,
-                    };
+                    // Restoration also failed: fall through to the
+                    // BFGS-reset retry block at the bottom of the loop.
+                    main_path_restoration_failed = true;
                 }
             }
         }
+
+        }  // end if(!zero_step_restoration_failed) wrapper
+
+        if(accepted)
+            break;
+
+        // Line search / filter / SOC / restoration all failed to find an
+        // acceptable trial point. Reset BFGS to identity (Shanno-rescale
+        // on next push; dense_ldl_bfgs.h:86-105 zeroes
+        // updates_since_reset_) and retry the QP with B = I. On
+        // exhaustion of the cap, return a null-step with
+        // diagnostics.bfgs_reset_count populated. Reaches this block on
+        // either zero_step_restoration_failed or main_path_restoration_failed
+        // (or unconstrained / m == 0 fall-through where no restoration was
+        // applicable).
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset retry parity);
+        //            N&W 2e Section 3.3 (recovery from non-descent);
+        //            dense_ldl_bfgs.h:86-105 (reset semantics).
+        (void)main_path_restoration_failed;  // documents reset trigger
+        if(reset_count >= reset_max)
+        {
+            ++s.iteration;
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = lagrangian_gradient_norm(s),
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .x_norm = s.x.norm(),
+                .policy_status = solver_status::stalled,
+                .diagnostics = { .bfgs_reset_count = reset_count },
+            };
+        }
+        s.hessian.reset();
+        ++reset_count;
+        }  // end BFGS-reset retry loop
 
         // Accept step.
         Eigen::Vector<double, N> x_old = s.x;
@@ -795,6 +912,7 @@ struct filter_slsqp_policy
             .constraint_violation = h_new,
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
+            .diagnostics = { .bfgs_reset_count = reset_count },
         };
     }
 
