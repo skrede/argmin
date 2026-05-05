@@ -520,3 +520,52 @@ TEST_CASE("kraft_slsqp HS006 accuracy guard",
     CHECK(result.iterations >= 6);
     CHECK(result.iterations <= 12);
 }
+
+// Lagrangian gradient norm vanishes at constrained optima; raw ||grad f||
+// does not. The reported gradient_norm must therefore drop below 1e-4 at
+// the HS007 optimum once kraft_slsqp reports grad_L instead of grad_f.
+//
+// Reference: Hock & Schittkowski (1981), Test Examples for Nonlinear
+// Programming Codes, Lecture Notes in Economics and Mathematical
+// Systems vol. 187, Springer, Problem 7.
+//            N&W 2e Section 12.3 / eq. 12.34 (KKT stationarity).
+TEST_CASE("kraft_slsqp HS007 Lagrangian gradient < 1e-4 at optimum",
+          "[kraft_slsqp][regression]")
+{
+    hs007 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{kraft_slsqp_policy<hs007<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
+}
+
+// Reference: Hock & Schittkowski (1981), Problem 28. Equality-only
+// problem: min (x0+x1)^2 + (x1+x2)^2 s.t. x0+2*x1+3*x2-1=0;
+// f* = 0 at (0.5, -0.5, 0.5).
+TEST_CASE("kraft_slsqp HS028 Lagrangian gradient < 1e-4 at optimum",
+          "[kraft_slsqp][regression]")
+{
+    hs028<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{kraft_slsqp_policy<hs028<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
+}

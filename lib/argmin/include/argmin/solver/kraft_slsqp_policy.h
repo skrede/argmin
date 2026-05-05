@@ -396,7 +396,7 @@ struct kraft_slsqp_policy
 
             return step_result<double>{
                 .objective_value = s.objective_value,
-                .gradient_norm = s.g.norm(),
+                .gradient_norm = lagrangian_gradient_norm(s),
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
@@ -637,7 +637,7 @@ struct kraft_slsqp_policy
 
             return step_result<double>{
                 .objective_value = s.objective_value,
-                .gradient_norm = s.g.norm(),
+                .gradient_norm = lagrangian_gradient_norm(s),
                 .step_size = 0.0,
                 .objective_change = 0.0,
                 .improved = false,
@@ -826,7 +826,7 @@ struct kraft_slsqp_policy
         // Reference: N&W 2e Definition 12.1 (KKT primal feasibility).
         return step_result<double>{
             .objective_value = s.objective_value,
-            .gradient_norm = s.g.norm(),
+            .gradient_norm = lagrangian_gradient_norm(s),
             .step_size = sk.norm(),
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
@@ -866,6 +866,36 @@ struct kraft_slsqp_policy
         reset(s, x0);
         s.hessian.reset();
         s.sigma = options.initial_penalty.value_or(1.0);
+    }
+
+private:
+    // Lagrangian gradient norm for KKT-consistent stationarity reporting.
+    //
+    // grad_L = grad_f - [J_eq; J_ineq]^T * lambda. At a constrained optimum
+    // grad_L vanishes (N&W eq. 12.34) while raw ||grad_f|| in general does
+    // not. Convergence criteria gate on Lagrangian-gradient norm.
+    //
+    // Adopted from: argmin/solver/nw_sqp_policy.h:599-612 (in-tree precedent).
+    // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity);
+    //            eq. 18.2-18.3 (Lagrangian gradient definition).
+    //
+    // argmin variant: per-policy static helper parameterised on state_type<P>;
+    //                 a shared free-function variant is deferred to a later
+    //                 helper-extraction pass. Rationale: state_type members
+    //                 differ across SQP policies; a shared helper would need
+    //                 a concept-or-trait abstraction not yet in place.
+    template <typename P>
+    static double lagrangian_gradient_norm(const state_type<P>& s)
+    {
+        const int n = static_cast<int>(s.x.size());
+        const int m = s.n_eq + s.n_ineq;
+        if(m == 0)
+            return s.g.norm();
+
+        Eigen::Matrix<double, Eigen::Dynamic, N> A(m, n);
+        if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
+        if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
+        return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
     }
 };
 

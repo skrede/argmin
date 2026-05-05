@@ -8,6 +8,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
+
 using Catch::Approx;
 using namespace argmin;
 
@@ -189,7 +191,6 @@ TEST_CASE("filter_slsqp HS024 regression guard",
     auto x0 = problem.initial_point();
     solver_options opts;
     opts.max_iterations = 50;
-    opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
@@ -203,3 +204,51 @@ TEST_CASE("filter_slsqp HS024 regression guard",
     CHECK(solver.constraint_violation() < 1e-6);
 }
 
+// Lagrangian gradient norm vanishes at constrained optima; raw ||grad f||
+// does not. The reported gradient_norm must therefore drop below 1e-4 at
+// the HS007 optimum once filter_slsqp reports grad_L instead of grad_f.
+//
+// Reference: Hock & Schittkowski (1981), Test Examples for Nonlinear
+// Programming Codes, Lecture Notes in Economics and Mathematical
+// Systems vol. 187, Springer, Problem 7.
+//            N&W 2e Section 12.3 / eq. 12.34 (KKT stationarity).
+TEST_CASE("filter_slsqp HS007 Lagrangian gradient < 1e-4 at optimum",
+          "[filter_slsqp][regression]")
+{
+    hs007 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{filter_slsqp_policy<hs007<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
+}
+
+// Reference: Hock & Schittkowski (1981), Problem 28. Equality-only
+// problem: min (x0+x1)^2 + (x1+x2)^2 s.t. x0+2*x1+3*x2-1=0;
+// f* = 0 at (0.5, -0.5, 0.5).
+TEST_CASE("filter_slsqp HS028 Lagrangian gradient < 1e-4 at optimum",
+          "[filter_slsqp][regression]")
+{
+    hs028<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
+}
