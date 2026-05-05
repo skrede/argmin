@@ -248,6 +248,55 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
+    # Allocation-tracing variants of the four micro_*_sqp benches. Each
+    # variant compiles the same source under ARGMIN_BENCH_TRACE_ALLOC=1
+    # (which switches main() into a 2-step-warmup + 10-step hot-loop
+    # probe asserting zero hot-loop allocations) and EIGEN_RUNTIME_NO_MALLOC=1
+    # (which makes Eigen::internal::set_is_malloc_allowed take effect).
+    # CTest entries fail the build if any policy allocates on the hot path.
+    foreach(_alloc_target IN ITEMS
+        micro_kraft_slsqp_alloc_trace
+        micro_nw_sqp_alloc_trace
+        micro_filter_slsqp_alloc_trace
+        micro_filter_nw_sqp_alloc_trace)
+        if(_alloc_target STREQUAL "micro_kraft_slsqp_alloc_trace")
+            set(_alloc_source micro_kraft_slsqp.cpp)
+            set(_alloc_test_name sqp_alloc_free_kraft)
+        elseif(_alloc_target STREQUAL "micro_nw_sqp_alloc_trace")
+            set(_alloc_source micro_nw_sqp.cpp)
+            set(_alloc_test_name sqp_alloc_free_nw)
+        elseif(_alloc_target STREQUAL "micro_filter_slsqp_alloc_trace")
+            set(_alloc_source micro_filter_slsqp.cpp)
+            set(_alloc_test_name sqp_alloc_free_filter_slsqp)
+        else()
+            set(_alloc_source micro_filter_nw_sqp.cpp)
+            set(_alloc_test_name sqp_alloc_free_filter_nw)
+        endif()
+
+        add_executable(${_alloc_target} ${_alloc_source})
+        target_link_libraries(${_alloc_target} PRIVATE argmin::argmin NLopt::nlopt)
+        # ARGMIN_BENCH_TRACE_ALLOC=1 enables the bench-side ::operator new
+        # override + counter; the per-policy probe asserts the counter
+        # remains zero across the hot loop. EIGEN_RUNTIME_NO_MALLOC is
+        # intentionally NOT defined here: the Eigen runtime gate aborts
+        # via assert() on the first allocation, which is too aggressive
+        # for the report-and-continue posture; the bench-level counter
+        # detects the same condition without aborting and lets the probe
+        # fail gracefully with a clear stderr message.
+        target_compile_definitions(${_alloc_target} PRIVATE
+            ARGMIN_BENCH_TRACE_ALLOC=1)
+        target_compile_options(${_alloc_target} PRIVATE
+            $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+                -march=native -fno-math-errno -fno-trapping-math
+            >
+        )
+        if(ARGMIN_LTO_SUPPORTED)
+            set_target_properties(${_alloc_target} PROPERTIES
+                INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        endif()
+        add_test(NAME ${_alloc_test_name} COMMAND ${_alloc_target})
+    endforeach()
+
     add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
     target_link_libraries(micro_augmented_lagrangian PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_augmented_lagrangian PRIVATE
@@ -429,15 +478,31 @@ if(ARGMIN_BENCH_LIBCMAES)
             # and is not on cmaes's include path. Patch the upstream
             # call to use PROJECT_BINARY_DIR so the header lands where
             # the include path expects it.
+            # Portable in-place text substitution. The previous form used
+            # `sed -i` which differs between GNU sed (Linux: `sed -i ...`)
+            # and BSD sed (macOS / Apple toolchain: `sed -i '' ...` requires
+            # an explicit backup-suffix arg). Driving the patch through a
+            # cmake -P script sidesteps the platform split entirely; the
+            # script reads, regex-replaces, and writes back atomically.
+            set(_libcmaes_patch_script
+                "${CMAKE_CURRENT_BINARY_DIR}/libcmaes_patch.cmake")
+            file(WRITE "${_libcmaes_patch_script}" [=[
+file(READ "${TARGET}" _content)
+string(REPLACE
+    "\${CMAKE_BINARY_DIR}/include/libcmaes/cmaes_export.h"
+    "\${PROJECT_BINARY_DIR}/include/libcmaes/cmaes_export.h"
+    _content "${_content}")
+file(WRITE "${TARGET}" "${_content}")
+]=])
             FetchContent_Declare(
                 libcmaes
                 GIT_REPOSITORY https://github.com/CMA-ES/libcmaes.git
                 GIT_TAG        v0.10
                 GIT_SHALLOW    TRUE
                 EXCLUDE_FROM_ALL
-                PATCH_COMMAND  sed -i
-                    "s|\\\${CMAKE_BINARY_DIR}/include/libcmaes/cmaes_export.h|\\\${PROJECT_BINARY_DIR}/include/libcmaes/cmaes_export.h|g"
-                    "<SOURCE_DIR>/src/CMakeLists.txt"
+                PATCH_COMMAND  ${CMAKE_COMMAND}
+                    -DTARGET=<SOURCE_DIR>/src/CMakeLists.txt
+                    -P ${_libcmaes_patch_script}
                 UPDATE_DISCONNECTED TRUE
             )
             FetchContent_MakeAvailable(libcmaes)
