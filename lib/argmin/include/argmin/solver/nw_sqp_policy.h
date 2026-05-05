@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 namespace argmin
 {
@@ -54,6 +55,16 @@ struct nw_sqp_policy
     {
         line_search_options line_search{};  // Replaces hardcoded c1=1e-4, rho=0.5, max_iter=30
         qp_options qp{};                   // QP subproblem params
+        // Maratos second-order correction retry threshold. SOC fires when
+        // Armijo rejects the trial step AND the constraint violation at x_k
+        // exceeds this threshold. Below the threshold the linearization is
+        // consistent enough that the SOC step adds work without materially
+        // changing the search direction. Default 1e-3 applied at the call
+        // site (mirrors kraft_slsqp_policy::options_type::soc_min_violation).
+        //
+        // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (SOC threshold);
+        //            N&W 2e §18.3 (Maratos effect).
+        std::optional<double> soc_violation_threshold{};
         std::uint16_t stall_window{50};
     };
 
@@ -407,6 +418,7 @@ struct nw_sqp_policy
         // constructed after only being assigned inside the loop body.
         Eigen::Vector<double, N> x_trial = s.x;
         double f_trial{s.objective_value};
+        bool ls_success = false;
 
         for(std::uint16_t ls = 0; ls < max_ls; ++ls)
         {
@@ -424,9 +436,119 @@ struct nw_sqp_policy
                                                 s.c_ineq_trial, s.sigma);
 
             if(phi_trial <= phi0 + ls_c1 * alpha * dphi0)
+            {
+                ls_success = true;
                 break;
+            }
 
             alpha *= ls_rho;
+        }
+
+        // Maratos second-order correction retry on Armijo failure.
+        //
+        // On rejection of the trial step the L1 merit can be lifted by the
+        // nonlinear constraint residual at x + p even when p is a valid
+        // first-order descent direction (the Maratos effect: linearised
+        // constraints understate quadratic curvature near a tight active
+        // set). Re-solve the QP with the constraint RHS re-anchored at the
+        // trial point:
+        //   b_eq_soc  = -c_eq(x + p)  + J_eq(x)  * p
+        //   b_ineq_soc = -c_ineq(x + p) + J_ineq(x) * p
+        // and accept the combined direction p + p_soc if the Armijo test
+        // passes on the L1 merit.
+        //
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h:541-617
+        // (in-tree precedent).
+        //
+        // argmin variant: nw_sqp uses active_set_qp_solver with the dense
+        //                 Hessian B = s.hessian.hessian(); kraft_slsqp uses
+        //                 kraft_lsq_qp_recovery_solver with a factored
+        //                 (E, f) form. The SOC math is identical; the QP
+        //                 API differs.
+        //
+        // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (Maratos SOC);
+        //            N&W 2e §18.3 (Maratos effect, second-order correction).
+        const double soc_min_violation =
+            options.soc_violation_threshold.value_or(1e-3);
+        const double cv_now = detail::constraint_violation(s.c_eq, s.c_ineq);
+
+        if(!ls_success && cv_now > soc_min_violation && m > 0)
+        {
+            Eigen::Vector<double, N> x_full = s.x + p;
+            if(has_finite_bounds)
+                x_full = detail::project(x_full, s.lower, s.upper);
+
+            s.problem->constraints(x_full, s.c_all);
+            auto c_eq_full = s.c_all.head(s.n_eq);
+            auto c_ineq_full = s.c_all.tail(s.n_ineq);
+
+            Eigen::VectorXd b_eq_soc = s.n_eq > 0
+                ? Eigen::VectorXd((-c_eq_full + s.J_eq * p).eval())
+                : Eigen::VectorXd();
+            Eigen::VectorXd b_ineq_soc = s.n_ineq > 0
+                ? Eigen::VectorXd((-c_ineq_full + s.J_ineq * p).eval())
+                : Eigen::VectorXd();
+
+            detail::qp_result<double, N> qp_soc;
+            if(has_finite_bounds)
+            {
+                Eigen::Vector<double, N> p_lower =
+                    (Eigen::Vector<double, N>(s.lower) -
+                     Eigen::Vector<double, N>(s.x)).eval();
+                Eigen::Vector<double, N> p_upper =
+                    (Eigen::Vector<double, N>(s.upper) -
+                     Eigen::Vector<double, N>(s.x)).eval();
+                Eigen::Vector<double, N> p0_soc = p;
+                p0_soc = p0_soc.cwiseMax(p_lower).cwiseMin(p_upper);
+                qp_soc = s.qp_solver.solve(
+                    s.hessian.hessian(), s.g,
+                    s.J_eq, b_eq_soc, s.J_ineq, b_ineq_soc,
+                    p_lower, p_upper, p0_soc, qp_opts);
+            }
+            else
+            {
+                qp_soc = s.qp_solver.solve(
+                    s.hessian.hessian(), s.g,
+                    s.J_eq, b_eq_soc, s.J_ineq, b_ineq_soc,
+                    p, qp_opts);
+            }
+
+            if(qp_soc.status == detail::qp_status::optimal)
+            {
+                Eigen::Vector<double, N> p_combined = p + qp_soc.x;
+                double alpha_soc = 1.0;
+                Eigen::Vector<double, N> x_trial_soc = s.x;
+                double f_trial_soc{s.objective_value};
+
+                for(std::uint16_t ls = 0; ls < max_ls; ++ls)
+                {
+                    x_trial_soc = s.x + alpha_soc * p_combined;
+
+                    if(has_finite_bounds)
+                        x_trial_soc = detail::project(x_trial_soc,
+                                                      s.lower, s.upper);
+
+                    f_trial_soc = s.problem->value(x_trial_soc);
+                    if(m > 0)
+                        s.problem->constraints(x_trial_soc, s.c_all);
+                    s.c_eq_trial = s.c_all.head(s.n_eq);
+                    s.c_ineq_trial = s.c_all.tail(s.n_ineq);
+                    double phi_trial_soc = detail::l1_merit(
+                        f_trial_soc, s.c_eq_trial, s.c_ineq_trial, s.sigma);
+
+                    if(phi_trial_soc <= phi0 + ls_c1 * alpha_soc * dphi0)
+                    {
+                        p = p_combined;
+                        alpha = alpha_soc;
+                        x_trial = x_trial_soc;
+                        f_trial = f_trial_soc;
+                        ls_success = true;
+                        break;
+                    }
+
+                    alpha_soc *= ls_rho;
+                }
+            }
         }
 
         // --- 5. Compute BFGS update vectors ---
