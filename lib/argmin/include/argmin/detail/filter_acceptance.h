@@ -45,6 +45,25 @@ template <typename Scalar = double>
 class filter_set
 {
 public:
+    // Construct a filter_set with explicit envelope parameters.
+    //
+    // gamma_f and gamma_h are the asymmetric envelope margins for
+    // filter dominance (Wachter & Biegler 2006 Section 2.3, eq. 6).
+    // Defaults 1e-5 / 1e-5 preserve the v0.2.1 behaviour; per-policy
+    // tuning is exposed via filter_*_policy::options_type.
+    //
+    // argmin variant: independent gamma_f and gamma_h (Wachter &
+    //                 Biegler 2006 Section 2.3); Fletcher-Leyffer 2002
+    //                 Section 5 originally presents a single shared
+    //                 margin; rationale: HS043 geometry suggests
+    //                 asymmetric defaults.
+    //
+    // Reference: Wachter & Biegler 2006 Section 2.3, eq. (6);
+    //            Fletcher & Leyffer 2002 Section 5.
+    explicit filter_set(Scalar gamma_f = Scalar(1e-5),
+                        Scalar gamma_h = Scalar(1e-5))
+        : gamma_f_(gamma_f), gamma_h_(gamma_h) {}
+
     // Initialize the filter with a maximum constraint violation ceiling.
     //
     // Callers set h_max = 1e4 * max(1, h_0) where h_0 is the initial
@@ -55,6 +74,17 @@ public:
     {
         entries_.clear();
         h_max_ = h_max;
+    }
+
+    // Re-set the envelope on an existing filter_set without
+    // re-construction. Use case: a policy holds filter_set as a state
+    // member and threads options into it during init().
+    //
+    // Reference: Wachter & Biegler 2006 Section 2.3, eq. (6).
+    void set_envelope(Scalar gamma_f, Scalar gamma_h)
+    {
+        gamma_f_ = gamma_f;
+        gamma_h_ = gamma_h;
     }
 
     // Test whether a trial point (f_trial, h_trial) is acceptable to

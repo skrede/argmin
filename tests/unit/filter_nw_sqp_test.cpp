@@ -51,14 +51,32 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         // skip-on-nonpositive-curvature per Procedure 18.2 footnote) the
         // iterate reaches f=-44.16 at iter 7 with marginal infeasibility
         // (cv above the best-seen feasibility_tolerance), and a subsequent
-        // filter-acceptance over-rejection (FILTER-05) wanders the iterate
-        // to a non-stationary region.
+        // filter-acceptance over-rejection wanders the iterate to a
+        // non-stationary region.
         //
         // Under basic_solver's best-seen termination (NLopt convention),
         // the returned solve_result is the best strictly-feasible iterate
         // encountered, not the infeasible f=-44 trial. On HS043 the best
         // feasible iterate is f approximately -40.4, giving the margin
         // (4.0) guard below.
+        //
+        // Asymmetric envelope sweep (gamma_f, gamma_h in
+        // {1e-3, 1e-4, 1e-5, 1e-6} squared) produced no combo that
+        // dominates the v0.2.1 default 1e-5 / 1e-5 while preserving
+        // HS024 outer-iter and HS076 best-feasible-f baselines: every
+        // (gamma_f <= 1e-4, *) cell either matches the baseline f
+        // exactly (-40.375) or, at gamma_f = 1e-3, marginally improves
+        // the f (-43.65 to -43.91) at a 33x to 280x outer-iter blowup
+        // on HS043 itself (500+ to 4200+ iters vs the 15-iter
+        // baseline). Bar held at v0.2.1; gap between best-feasible
+        // -40.4 and the canonical optimum -44 deferred to a future
+        // milestone pending BFGS tail-drift / restoration tightening.
+        //
+        // Reference: Hock & Schittkowski 1981 Problem 43 (Test Examples
+        //            for Nonlinear Programming Codes, Lecture Notes in
+        //            Economics and Mathematical Systems vol. 187, Springer);
+        //            Wachter & Biegler 2006 Section 2.3 (envelope);
+        //            Fletcher & Leyffer 2002 Section 5.
         hs043 problem;
         auto x0 = problem.initial_point();
         solver_options opts;

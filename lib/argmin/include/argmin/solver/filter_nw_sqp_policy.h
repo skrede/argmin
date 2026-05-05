@@ -46,6 +46,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 namespace argmin
 {
@@ -65,6 +66,16 @@ struct filter_nw_sqp_policy
         std::uint16_t max_restoration_steps{10};
         double soc_violation_threshold{1e-8};
         std::uint16_t stall_window{50};
+
+        // Filter envelope margins (Wachter & Biegler 2006 Section 2.3,
+        // eq. 6). Default 1e-5 / 1e-5 preserve v0.2.1 behaviour; tuning
+        // is per-policy and selected empirically by the v0.3.0 envelope
+        // sweep.
+        //
+        // Reference: Wachter & Biegler 2006 Section 2.3;
+        //            Fletcher & Leyffer 2002 Section 5.
+        std::optional<double> gamma_f{};
+        std::optional<double> gamma_h{};
     };
 
     options_type options{};
@@ -105,6 +116,16 @@ struct filter_nw_sqp_policy
         int n_ineq{0};
         int n{0};
     };
+
+    template <typename Problem, typename Convergence>
+    state_type<Problem> init(const Problem& problem,
+                             const Eigen::Vector<double, N>& x0,
+                             const solver_options<Convergence>& opts,
+                             const options_type& policy_opts)
+    {
+        options = policy_opts;
+        return init(problem, x0, opts);
+    }
 
     template <typename Problem, typename Convergence = default_convergence>
     state_type<Problem> init(const Problem& problem,
@@ -157,10 +178,16 @@ struct filter_nw_sqp_policy
         s.sigma = 1.0;
         s.iteration = 0;
 
-        // Initialize filter with h_max based on initial constraint violation.
+        // Initialize filter with h_max based on initial constraint
+        // violation, then thread the configured envelope margins onto
+        // the filter (Wachter & Biegler 2006 Section 2.3, eq. 6).
+        // Defaults 1e-5 / 1e-5 preserve v0.2.1 behaviour when the
+        // options are unset.
         // Reference: Wachter & Biegler 2006, eq. (8).
         double h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.filter.initialize(1e4 * std::max(1.0, h_0));
+        s.filter.set_envelope(options.gamma_f.value_or(1e-5),
+                              options.gamma_h.value_or(1e-5));
 
         // Initial multiplier estimate via least-squares (N&W eq. 18.15).
         if(m > 0)
@@ -712,6 +739,8 @@ struct filter_nw_sqp_policy
         s.hessian.reset();
         const double h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.filter.initialize(1e4 * std::max(1.0, h_0));
+        s.filter.set_envelope(options.gamma_f.value_or(1e-5),
+                              options.gamma_h.value_or(1e-5));
         s.sigma = 1.0;
         s.lambda.setZero();
     }

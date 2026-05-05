@@ -35,6 +35,19 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
 
     SECTION("HS043: inequality constraints")
     {
+        // Asymmetric envelope sweep on filter_slsqp
+        // (gamma_f, gamma_h in {1e-3, 1e-4, 1e-5, 1e-6} squared) produced
+        // bit-identical (f, cv, outer_iters) across all 16 cells: HS043
+        // f = -44.0000 at 13 outer iters, HS024 f = -1.0 at 13, HS076
+        // f = -4.6818 at 8. The filter envelope is structurally inert on
+        // this policy at the test problems' geometries; bar held at the
+        // v0.2.1 default of 1e-5 / 1e-5 with the canonical -44 margin.
+        //
+        // Reference: Hock & Schittkowski 1981 Problem 43 (Test Examples
+        //            for Nonlinear Programming Codes, Lecture Notes in
+        //            Economics and Mathematical Systems vol. 187, Springer);
+        //            Wachter & Biegler 2006 Section 2.3 (envelope);
+        //            Fletcher & Leyffer 2002 Section 5.
         hs043<> problem;
         auto x0 = problem.initial_point();
         solver_options opts;
