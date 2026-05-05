@@ -76,6 +76,22 @@ struct filter_nw_sqp_policy
         //            Fletcher & Leyffer 2002 Section 5.
         std::optional<double> gamma_f{};
         std::optional<double> gamma_h{};
+
+        // BFGS-reset retry cap on line-search/filter exhaustion. After
+        // restoration fails to recover an acceptable trial point, the policy
+        // resets the BFGS Hessian to identity and re-solves the QP, repeating
+        // up to bfgs_reset_max times before returning a null-step. Default 5
+        // matches NLopt slsqp.c:1890-1895 ireset semantics.
+        //
+        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
+        //            N&W 2e Section 3.3 (recovery from non-descent).
+        //
+        // argmin variant: filter policies layer this AFTER the existing
+        //                 restoration path (restoration first then BFGS
+        //                 reset then null-step). Cascade-free: no new
+        //                 solver_status enum entry.
+        std::size_t bfgs_reset_max{5};
     };
 
     options_type options{};
@@ -221,11 +237,65 @@ struct filter_nw_sqp_policy
         // pure overhead (one wasted gradient + Jacobian + constraints
         // call per outer iter from iter 1 onward).
 
-        // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
+        // BFGS-reset retry layered after the restoration path.
+        //
+        // Same restoration-first ordering as filter_slsqp: feasibility
+        // restoration runs first on rejection (it explicitly minimises
+        // ||c|| and is conceptually cheaper than discarding curvature).
+        // The BFGS-reset retry fires only when restoration also fails to
+        // recover an acceptable trial point. Ordering: line search /
+        // SOC / restoration first then BFGS-reset retry then null-step.
+        // Preserves v0.2.1 restoration semantics while adding the
+        // BFGS-reset escape hatch.
+        //
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h retry-loop pattern;
+        //               argmin/solver/filter_slsqp_policy.h restoration-first
+        //               ordering (in-tree precedents landed alongside this fix).
+        //               NLopt slsqp.c:1890-1895 (ireset retry pattern, max=5).
+        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        //            N&W 2e Section 3.3 (recovery from non-descent).
+        //
+        // argmin variant: cap is options.bfgs_reset_max (default 5);
+        //                 status on exhaustion is is_null_step + the
+        //                 diagnostics.bfgs_reset_count counter; rationale
+        //                 is cascade-free (no new solver_status enum entry).
+        std::size_t reset_count = 0;
+        const std::size_t reset_max = options.bfgs_reset_max;
+
+        // Loop-carried variables that survive the retry block into the
+        // post-loop accept-step block. The only path that exits the loop
+        // via `break` is the LS / SOC accept path (accepted = true).
+        // Restoration-success and restoration-exhaustion (after reset cap)
+        // return inline from inside the loop.
+        const bool has_bounds = has_finite_box(s.lower, s.upper);
         Eigen::MatrixXd A_eq = s.J_eq;
-        Eigen::VectorXd b_eq = -s.c_eq;
         Eigen::MatrixXd A_ineq = s.J_ineq;
+        Eigen::VectorXd b_eq = -s.c_eq;
         Eigen::VectorXd b_ineq = -s.c_ineq;
+        qp_options qp_opts;
+        qp_opts.max_iterations = std::uint16_t{200};
+        qp_opts.tolerance = 1e-12;
+
+        detail::qp_result<double> qp;
+        Eigen::VectorXd p;
+        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
+        Eigen::Vector<double, N> x_trial(n);
+        Eigen::VectorXd c_eq_trial, c_ineq_trial;
+        double f_trial = s.objective_value;
+        double f_k = s.objective_value;
+        double h_k = 0.0;
+        double phi0 = 0.0;
+        double alpha = 1.0;
+
+        for(;;)
+        {
+        // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
+        // Re-bind QP RHS each retry: s.c_eq / s.c_ineq are unchanged
+        // (s.x has not moved) but the Hessian has been reset on retry,
+        // so the QP direction differs. Linearisation matrices A_eq /
+        // A_ineq are likewise unchanged across retries.
+        b_eq = -s.c_eq;
+        b_ineq = -s.c_ineq;
 
         Eigen::VectorXd p0 = Eigen::VectorXd::Zero(n);
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
@@ -235,13 +305,6 @@ struct filter_nw_sqp_policy
             Eigen::VectorXd w = qr.solve(b_eq);
             p0 = A_eq.transpose() * w;
         }
-
-        qp_options qp_opts;
-        qp_opts.max_iterations = std::uint16_t{200};
-        qp_opts.tolerance = 1e-12;
-
-        detail::qp_result<double> qp;
-        bool has_bounds = has_finite_box(s.lower, s.upper);
 
         if(has_bounds)
         {
@@ -261,7 +324,7 @@ struct filter_nw_sqp_policy
                                   p0, qp_opts);
         }
 
-        Eigen::VectorXd p = Eigen::VectorXd(qp.x);
+        p = Eigen::VectorXd(qp.x);
 
         // Cold-start mu calibration. After the first QP solve, sigma must
         // dominate the multiplier scale to make the SQP direction a descent
@@ -275,7 +338,10 @@ struct filter_nw_sqp_policy
         //
         // argmin variant: gated on s.iteration == 0; the existing
         //                 detail::update_penalty call below is monotone-up
-        //                 and idempotent against this cold-start.
+        //                 and idempotent against this cold-start. Re-running
+        //                 on retry (s.iteration is unchanged across retries)
+        //                 is harmless: update_penalty is monotone-up and
+        //                 idempotent.
         if(s.iteration == 0 && qp.lambda.size() > 0)
         {
             s.sigma = detail::calibrate_initial_penalty(s.sigma, qp.lambda);
@@ -336,11 +402,12 @@ struct filter_nw_sqp_policy
                 .is_null_step = true,
                 .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 .kkt_residual = kkt_null,
+                .diagnostics = { .bfgs_reset_count = reset_count },
             };
         }
 
         // --- 2. Extract QP multipliers and update penalty ---
-        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
+        lambda_new.setZero(m);
         if(m > 0 && qp.lambda.size() >= m)
             lambda_new = qp.lambda.head(m);
         else if(m > 0 && qp.lambda.size() > 0)
@@ -366,12 +433,12 @@ struct filter_nw_sqp_policy
         //
         // Reference: Wachter & Biegler 2006, Section 2.3;
         //            N&W Section 18.5 (L1 merit Armijo).
-        double f_k = s.objective_value;
-        double h_k = detail::constraint_violation(s.c_eq, s.c_ineq);
-        double grad_f_dot_p = Eigen::VectorXd(s.g).dot(p);
+        f_k = s.objective_value;
+        h_k = detail::constraint_violation(s.c_eq, s.c_ineq);
+        const double grad_f_dot_p = Eigen::VectorXd(s.g).dot(p);
 
         // Check switching condition to determine iteration type.
-        bool f_type = detail::is_f_type_iteration(
+        const bool f_type = detail::is_f_type_iteration(
             h_k, grad_f_dot_p, s.filter.h_max());
 
         // Add current point to filter for h-type iterations.
@@ -379,18 +446,16 @@ struct filter_nw_sqp_policy
             s.filter.add(f_k, h_k);
 
         // L1 merit at current point.
-        double phi0 = detail::l1_merit(f_k, s.c_eq, s.c_ineq, s.sigma);
-        double dphi0 = detail::l1_merit_directional_derivative(
+        phi0 = detail::l1_merit(f_k, s.c_eq, s.c_ineq, s.sigma);
+        const double dphi0 = detail::l1_merit_directional_derivative(
             grad_f_dot_p, s.c_eq, s.c_ineq, s.sigma);
 
-        double alpha = 1.0;
+        alpha = 1.0;
         const double c1 = options.line_search.c1;
         const double rho_shrink = options.line_search.rho;
         const int max_ls = options.line_search.max_iterations;
 
-        Eigen::Vector<double, N> x_trial(n);
-        Eigen::VectorXd c_eq_trial, c_ineq_trial;
-        double f_trial = f_k;
+        f_trial = f_k;
         double h_trial = h_k;
         bool accepted = false;
 
@@ -503,6 +568,13 @@ struct filter_nw_sqp_policy
         }
 
         // If still rejected, attempt feasibility restoration.
+        // Restoration runs FIRST (before any BFGS-reset retry) per the
+        // restoration-first ordering documented at the top of this
+        // step(): restoration explicitly minimises ||c|| and is
+        // conceptually cheaper than discarding curvature. The
+        // BFGS-reset retry layered after this block fires only when
+        // restoration also fails to recover an acceptable trial point.
+        //
         // Reference: Wachter & Biegler 2006, Section 3.
         if(!accepted)
         {
@@ -535,22 +607,39 @@ struct filter_nw_sqp_policy
                     .objective_change = s.objective_value - f_k,
                     .improved = h_restored_l1 < h_k,
                     .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                    .diagnostics = { .bfgs_reset_count = reset_count },
                 };
             }
 
-            // Null step: feasibility restoration exhausted without
-            // reducing constraint violation.
-            //
-            // is_null_step=true prevents step_tolerance_criterion
-            // from labelling the zero step as a stall; the iterate
-            // is carried forward without movement while the outer
-            // loop retains flexibility (restoration may succeed on
-            // a future iteration once the filter envelope relaxes).
-            //
-            // step_result.constraint_violation reports L-infinity primal
-            // feasibility (kkt_residual-consistent). The local h_k (L1)
-            // is consumed by filter dominance checks per Fletcher-Leyffer
-            // 2002 Section 2.
+            // Restoration also failed: fall through to the BFGS-reset
+            // retry block at the bottom of this loop.
+        }
+
+        if(accepted)
+            break;
+
+        // Line search / SOC / restoration all failed to find an
+        // acceptable trial point. Reset BFGS to identity (Shanno-rescale
+        // on next push; dense_ldl_bfgs.h zeroes updates_since_reset_)
+        // and retry the QP with B = I. On exhaustion of the cap, return
+        // a null-step with diagnostics.bfgs_reset_count populated.
+        //
+        // is_null_step=true prevents step_tolerance_criterion from
+        // labelling the zero step as a stall; the iterate is carried
+        // forward without movement while the outer loop retains
+        // flexibility (restoration may succeed on a future iteration
+        // once the filter envelope relaxes).
+        //
+        // step_result.constraint_violation reports L-infinity primal
+        // feasibility (kkt_residual-consistent). The local h_k (L1)
+        // is consumed by filter dominance checks per Fletcher-Leyffer
+        // 2002 Section 2.
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset retry parity);
+        //            N&W 2e Section 3.3 (recovery from non-descent);
+        //            dense_ldl_bfgs.h reset() semantics.
+        if(reset_count >= reset_max)
+        {
             ++s.iteration;
             return step_result<double>{
                 .objective_value = s.objective_value,
@@ -560,8 +649,12 @@ struct filter_nw_sqp_policy
                 .improved = false,
                 .is_null_step = true,
                 .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .diagnostics = { .bfgs_reset_count = reset_count },
             };
         }
+        s.hessian.reset();
+        ++reset_count;
+        }  // end BFGS-reset retry loop
 
         // --- 4. Accept step and compute BFGS update ---
         Eigen::Vector<double, N> x_old = s.x;
@@ -689,6 +782,7 @@ struct filter_nw_sqp_policy
             .improved = phi_new < phi0,
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .kkt_residual = kkt,
+            .diagnostics = { .bfgs_reset_count = reset_count },
         };
     }
 
