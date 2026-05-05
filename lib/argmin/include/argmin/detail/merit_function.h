@@ -118,6 +118,61 @@ Scalar calibrate_initial_penalty(Scalar sigma_in,
     return std::max(sigma_in, required);
 }
 
+// h4-weighted directional derivative of the L1 merit.
+//
+// Adopted from: argmin/solver/kraft_slsqp_policy.h:541-542 (in-tree
+//               precedent — h4-weighted directional derivative).
+// Reference: Kraft 1988 DFVLR-FB 88-28 §3.4 (h4 = 1 - relaxation_factor);
+//            N&W 2e Section 18.3 (L1 merit directional derivative).
+//
+// argmin variant: extends l1_merit_directional_derivative with a
+//                 multiplicative h4 factor on the violation term.
+//                 nw_sqp / filter_slsqp / filter_nw_sqp lineages call
+//                 with h4 = 1 (bit-identical to the existing helper).
+template <typename Scalar,
+          int Meq = argmin::dynamic_dimension,
+          int Mineq = argmin::dynamic_dimension>
+inline Scalar l1_merit_dphi_h4(
+    Scalar grad_f_dot_p,
+    const Eigen::Vector<Scalar, Meq>& c_eq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq,
+    Scalar sigma,
+    Scalar h4 = Scalar(1))
+{
+    const Scalar viol = constraint_violation(c_eq, c_ineq);
+    return grad_f_dot_p - sigma * h4 * viol;
+}
+
+// Cold-bump sigma so that the L1-merit slope becomes strictly negative.
+//
+// Adopted from: argmin/solver/kraft_slsqp_policy.h:544-555 (in-tree
+//               precedent — sigma cold-bump for descent guarantee);
+//               argmin/solver/nw_sqp_policy.h:447-463 (parallel pattern).
+// Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.6;
+//            N&W 2e Section 18.3 (penalty parameter cold-bump).
+//
+// argmin variant: scalar form with sigma_max cap. Idempotent;
+//                 monotone-up: sigma never decreases.
+template <typename Scalar>
+inline Scalar bump_sigma_for_descent(
+    Scalar sigma_in,
+    Scalar grad_f_dot_p,
+    Scalar violation,
+    Scalar h4 = Scalar(1),
+    Scalar sigma_max = Scalar(1e10))
+{
+    const Scalar dphi = grad_f_dot_p - sigma_in * h4 * violation;
+    if(dphi >= Scalar(0) && violation > Scalar(0) && h4 > Scalar(0))
+    {
+        using std::abs;
+        const Scalar bumped = std::max(
+            sigma_in,
+            abs(grad_f_dot_p) / (violation * h4) + Scalar(1));
+        return std::min(bumped, sigma_max);
+    }
+    return sigma_in;
+}
+
 }
 
 #endif
