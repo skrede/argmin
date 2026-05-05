@@ -7,3 +7,8 @@ add_executable(include_test include_test.cpp)
 target_link_libraries(include_test PRIVATE argmin::argmin)
 target_compile_options(include_test PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
 add_test(NAME include_test COMMAND include_test)
+
+add_executable(sqp_common_compile_test sqp_common_compile_test.cpp)
+target_link_libraries(sqp_common_compile_test PRIVATE argmin::argmin)
+target_compile_options(sqp_common_compile_test PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
+add_test(NAME sqp_common_compile_test COMMAND sqp_common_compile_test)
