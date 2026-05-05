@@ -66,6 +66,20 @@ struct nw_sqp_policy
         //            N&W 2e §18.3 (Maratos effect).
         std::optional<double> soc_violation_threshold{};
         std::uint16_t stall_window{50};
+
+        // BFGS-reset retry cap on line-search exhaustion. On Armijo
+        // failure (after SOC retry), the policy resets the BFGS Hessian
+        // to identity and re-solves the QP, repeating up to
+        // bfgs_reset_max times before returning a null-step. Default 5
+        // matches NLopt slsqp.c:1890-1895 ireset semantics.
+        //
+        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
+        //            N&W 2e Section 3.3 (recovery from non-descent).
+        //
+        // argmin variant: per-policy options field; cascade-free
+        //                 (no new solver_status enum entry).
+        std::size_t bfgs_reset_max{5};
     };
 
     options_type options{};
@@ -222,6 +236,50 @@ struct nw_sqp_policy
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
 
+        // BFGS-reset retry loop on line-search exhaustion (D-05; NLopt
+        // slsqp.c:1890-1895 ireset parity). Wraps QP solve -> cold-start
+        // sigma -> zero-step null-step -> sigma update -> Armijo line
+        // search -> Maratos SOC retry. On line-search exhaustion (Armijo
+        // and SOC both fail to find a decreasing step), reset the BFGS
+        // Hessian to identity and re-solve the QP, bounded by
+        // options.bfgs_reset_max. On cap exhaustion, return a null-step
+        // with diagnostics.bfgs_reset_count populated.
+        //
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h retry-loop
+        //               pattern (in-tree precedent landed alongside
+        //               this fix).
+        //               NLopt slsqp.c:1890-1895 (ireset retry pattern,
+        //               max=5).
+        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        //            N&W 2e Section 3.3 (recovery from non-descent).
+        //
+        // argmin variant: cap is options.bfgs_reset_max (default 5);
+        //                 status on exhaustion is is_null_step + the
+        //                 diagnostics.bfgs_reset_count counter; rationale
+        //                 is D-05 cascade-free (no new solver_status
+        //                 enum entry).
+        std::size_t reset_count = 0;
+        const std::size_t reset_max = options.bfgs_reset_max;
+
+        // Loop-carried variables that survive the retry block into the
+        // post-loop accept-step block. The cold-start sigma calibration
+        // is gated on s.iteration == 0; subsequent retries within the
+        // same step() call do NOT advance s.iteration, so the cold-start
+        // re-fires on each retry but is monotone-up (idempotent).
+        // detail::update_penalty below is similarly monotone-up.
+        detail::qp_result<double, N> qp;
+        Eigen::Vector<double, N> p;
+        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
+        double phi0 = 0.0;
+        double dphi0 = 0.0;
+        double alpha = 1.0;
+        Eigen::Vector<double, N> x_trial = s.x;
+        double f_trial = s.objective_value;
+        bool ls_success = false;
+
+        for(;;)
+        {
+
         // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
         // Pass s.J_eq / s.J_ineq directly into the QP solver — the
         // state matrices already match the Matrix<Scalar, Meq, N> shape
@@ -251,7 +309,6 @@ struct nw_sqp_policy
             ? options.qp.tolerance
             : std::optional<double>{1e-12};
 
-        detail::qp_result<double, N> qp;
         bool has_finite_bounds = has_finite_box(s.lower, s.upper);
 
         if(has_finite_bounds)
@@ -272,7 +329,7 @@ struct nw_sqp_policy
                                    p0, qp_opts);
         }
 
-        Eigen::Vector<double, N> p = qp.x;
+        p = qp.x;
 
         // Cold-start mu calibration. After the first QP solve, sigma must
         // dominate the multiplier scale to make the SQP direction a descent
@@ -364,11 +421,12 @@ struct nw_sqp_policy
                 .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 .x_norm = s.x.norm(),
                 .kkt_residual = kkt_null,
+                .diagnostics = { .bfgs_reset_count = reset_count },
             };
         }
 
         // --- 2. Extract QP multipliers ---
-        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
+        lambda_new.setZero(m);
         if(m > 0 && qp.lambda.size() >= m)
             lambda_new = qp.lambda.head(m);
         else if(m > 0 && qp.lambda.size() > 0)
@@ -378,9 +436,9 @@ struct nw_sqp_policy
         s.sigma = detail::update_penalty(s.sigma, lambda_new);
 
         // --- 4. Line search on L1 merit ---
-        double phi0 = detail::l1_merit(s.objective_value,
-                                       s.c_eq, s.c_ineq, s.sigma);
-        double dphi0 = detail::l1_merit_directional_derivative(
+        phi0 = detail::l1_merit(s.objective_value,
+                                s.c_eq, s.c_ineq, s.sigma);
+        dphi0 = detail::l1_merit_directional_derivative(
             s.g.dot(p), s.c_eq, s.c_ineq, s.sigma);
 
         // If dphi0 >= 0, the penalty is insufficient for descent.
@@ -406,7 +464,7 @@ struct nw_sqp_policy
         }
 
         // Backtracking Armijo on L1 merit using embedded line search options
-        double alpha = 1.0;
+        alpha = 1.0;
         const double ls_c1 = options.line_search.c1;
         const double ls_rho = options.line_search.rho;
         const std::uint16_t max_ls = options.line_search.max_iterations;
@@ -416,9 +474,9 @@ struct nw_sqp_policy
         // max_ls == 0 configuration. GCC 15 flags an uninitialized SSE
         // packet load through this path if x_trial is left default-
         // constructed after only being assigned inside the loop body.
-        Eigen::Vector<double, N> x_trial = s.x;
-        double f_trial{s.objective_value};
-        bool ls_success = false;
+        x_trial = s.x;
+        f_trial = s.objective_value;
+        ls_success = false;
 
         for(std::uint16_t ls = 0; ls < max_ls; ++ls)
         {
@@ -550,6 +608,66 @@ struct nw_sqp_policy
                 }
             }
         }
+
+        if(ls_success)
+            break;
+
+        // Line search and SOC retry both failed to find a decreasing
+        // step. Reset BFGS to identity (Shanno-rescale on next push;
+        // dense_ldl_bfgs.h:86-105 zeroes updates_since_reset_) and
+        // retry the QP with B = I. On exhaustion of the cap, return a
+        // null-step with diagnostics.bfgs_reset_count populated.
+        //
+        // Reference: NLopt slsqp.c:1890-1895 (ireset retry parity);
+        //            N&W 2e Section 3.3 (recovery from non-descent);
+        //            dense_ldl_bfgs.h:86-105 (reset semantics).
+        if(reset_count >= reset_max)
+        {
+            Eigen::VectorXd lambda_eq_cap = Eigen::VectorXd::Zero(s.n_eq);
+            Eigen::VectorXd mu_ineq_cap = Eigen::VectorXd::Zero(s.n_ineq);
+            if(m > 0 && qp.lambda.size() >= m)
+            {
+                if(s.n_eq > 0)
+                    lambda_eq_cap = qp.lambda.head(s.n_eq);
+                if(s.n_ineq > 0)
+                    mu_ineq_cap = qp.lambda.segment(s.n_eq, s.n_ineq);
+            }
+            double kkt_cap = detail::kkt_residual<double,
+                                                  Eigen::Dynamic,
+                                                  Eigen::Dynamic,
+                                                  Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq,
+                lambda_eq_cap, mu_ineq_cap,
+                s.c_eq, s.c_ineq);
+
+            double grad_L_cap_norm = s.g.norm();
+            if(m > 0)
+            {
+                Eigen::Vector<double, N> grad_L = s.g;
+                if(s.n_eq > 0)
+                    grad_L.noalias() -= s.J_eq.transpose() * lambda_eq_cap;
+                if(s.n_ineq > 0)
+                    grad_L.noalias() -= s.J_ineq.transpose() * mu_ineq_cap;
+                grad_L_cap_norm = grad_L.norm();
+            }
+
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = grad_L_cap_norm,
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .x_norm = s.x.norm(),
+                .kkt_residual = kkt_cap,
+                .diagnostics = { .bfgs_reset_count = reset_count },
+            };
+        }
+
+        s.hessian.reset();
+        ++reset_count;
+        }  // end BFGS-reset retry loop
 
         // --- 5. Compute BFGS update vectors ---
         // Reuse objective and constraint values from line search (already
@@ -686,6 +804,7 @@ struct nw_sqp_policy
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
+            .diagnostics = { .bfgs_reset_count = reset_count },
         };
     }
 
