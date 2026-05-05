@@ -204,6 +204,7 @@ TEST_CASE("filter_slsqp HS024 regression guard",
     auto x0 = problem.initial_point();
     solver_options opts;
     opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
