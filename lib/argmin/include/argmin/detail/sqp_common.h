@@ -5,16 +5,21 @@
 //
 // Provides the shared pre-allocated workspace struct sqp_state_buffers
 // adopted by the line-search SQP family (kraft_slsqp, nw_sqp,
-// filter_slsqp, filter_nw_sqp), plus forward declarations for the
-// shared helper functions whose bodies live in this header's
-// implementation companion.
+// filter_slsqp, filter_nw_sqp), plus the shared helper functions
+// (null_step_result, extract_qp_multipliers, compute_bfgs_pair_fused,
+// equality_feasibility_warmstart, step_with_projection) that
+// consolidate the duplicated patterns at the four SQP policy hot
+// paths.
 //
 // Reference: Nocedal and Wright, "Numerical Optimization" 2e, Section 18
 //            (sequential quadratic programming);
 //            Kraft 1988 DFVLR-FB 88-28 (line-search SLSQP).
 
 #include "argmin/types.h"
+#include "argmin/detail/lagrangian.h"
 #include "argmin/result/step_result.h"
+#include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/bound_projection.h"
 
 #include <Eigen/QR>
 #include <Eigen/Core>
@@ -22,6 +27,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <algorithm>
 
 namespace argmin::detail
 {
@@ -122,7 +128,7 @@ inline void sqp_state_buffers<Scalar, N>::resize(int n, int n_eq, int n_ineq)
 //                 across the four line-search SQP policies.
 template <typename Scalar, int N, int Meq = argmin::dynamic_dimension,
           int Mineq = argmin::dynamic_dimension>
-step_result<Scalar> null_step_result(
+inline step_result<Scalar> null_step_result(
     Scalar f,
     const Eigen::Vector<Scalar, N>& g,
     const Eigen::Matrix<Scalar, Meq, N>& J_eq,
@@ -133,7 +139,48 @@ step_result<Scalar> null_step_result(
     const Eigen::Vector<Scalar, Mineq>& c_ineq,
     Scalar x_norm,
     std::size_t bfgs_reset_count = 0,
-    std::optional<solver_status> policy_status = std::nullopt);
+    std::optional<solver_status> policy_status = std::nullopt)
+{
+    step_result<Scalar> r{};
+    r.objective_value = f;
+    r.step_size = Scalar(0);
+    r.objective_change = Scalar(0);
+    r.improved = false;
+    r.is_null_step = true;
+    r.x_norm = x_norm;
+    r.constraint_violation = primal_feasibility_inf(c_eq, c_ineq);
+
+    // Lagrangian gradient norm via two GEMVs (no allocation of stacked A).
+    // grad_L = g - J_eq^T * lam_eq - J_ineq^T * mu_ineq.
+    Eigen::Vector<Scalar, N> grad_L = g;
+    if(J_eq.rows() > 0 && lam_eq.size() > 0)
+        grad_L.noalias() -= J_eq.transpose() * lam_eq;
+    if(J_ineq.rows() > 0 && mu_ineq.size() > 0)
+        grad_L.noalias() -= J_ineq.transpose() * mu_ineq;
+    r.gradient_norm = grad_L.size() > 0
+        ? grad_L.template lpNorm<Eigen::Infinity>()
+        : Scalar(0);
+
+    // Composite KKT residual at the current iterate. Caller may overwrite
+    // with a freshly recomputed value when a reset path needs the post-reset
+    // residual instead.
+    if(lam_eq.size() == J_eq.rows() && mu_ineq.size() == J_ineq.rows())
+    {
+        const Eigen::Vector<Scalar, Meq> lam_eq_typed = lam_eq;
+        const Eigen::Vector<Scalar, Mineq> mu_ineq_typed = mu_ineq;
+        r.kkt_residual = kkt_residual<Scalar, N, Meq, Mineq>(
+            g, J_eq, J_ineq, lam_eq_typed, mu_ineq_typed, c_eq, c_ineq);
+    }
+    else
+    {
+        r.kkt_residual = std::nullopt;
+    }
+
+    r.diagnostics.bfgs_reset_count = bfgs_reset_count;
+    r.policy_status = policy_status;
+
+    return r;
+}
 
 // Adopted from: argmin/result/step_result.h schema (in-tree precedent
 //               for partial-multiplier QP returns); argmin/detail/active_set_qp.h
@@ -146,12 +193,37 @@ step_result<Scalar> null_step_result(
 //                 rationale: removes the duplicated scatter pattern at
 //                 four call sites across the SQP family.
 template <typename Scalar>
-void extract_qp_multipliers(
+inline void extract_qp_multipliers(
     const Eigen::Vector<Scalar, Eigen::Dynamic>& qp_lambda,
     int n_eq,
     int n_ineq,
     Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> lam_eq_out,
-    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> mu_ineq_out);
+    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> mu_ineq_out)
+{
+    const int m_total = n_eq + n_ineq;
+    const int lam_size = static_cast<int>(qp_lambda.size());
+
+    lam_eq_out.setZero();
+    mu_ineq_out.setZero();
+
+    if(lam_size == m_total)
+    {
+        if(n_eq > 0) lam_eq_out = qp_lambda.head(n_eq);
+        if(n_ineq > 0) mu_ineq_out = qp_lambda.tail(n_ineq);
+        return;
+    }
+
+    // Partial-multiplier path: copy what is available head-first into the
+    // equality leg, then the remainder into the inequality leg.
+    const int eq_take = std::min(lam_size, n_eq);
+    if(eq_take > 0) lam_eq_out.head(eq_take) = qp_lambda.head(eq_take);
+    const int rem = lam_size - eq_take;
+    if(rem > 0 && n_ineq > 0)
+    {
+        const int ineq_take = std::min(rem, n_ineq);
+        mu_ineq_out.head(ineq_take) = qp_lambda.segment(eq_take, ineq_take);
+    }
+}
 
 // Adopted from: argmin/solver/kraft_slsqp_policy.h:776-820 (in-tree
 //               precedent — fused J^T*lambda subtraction over both legs);
@@ -164,7 +236,7 @@ void extract_qp_multipliers(
 //                 GEMVs); rationale: halves the gradient-walk cost
 //                 on the curvature-pair construction hot path.
 template <typename Scalar, int N>
-void compute_bfgs_pair_fused(
+inline void compute_bfgs_pair_fused(
     const Eigen::Vector<Scalar, N>& g_old,
     const Eigen::Vector<Scalar, N>& g_new,
     const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& J_all_old,
@@ -176,7 +248,34 @@ void compute_bfgs_pair_fused(
     Eigen::Ref<Eigen::Vector<Scalar, N>> sk_out,
     Eigen::Ref<Eigen::Vector<Scalar, N>> yk_out,
     const Eigen::Vector<Scalar, N>& x_new,
-    const Eigen::Vector<Scalar, N>& x_old);
+    const Eigen::Vector<Scalar, N>& x_old)
+{
+    // Operation order is bit-for-bit identical to kraft_slsqp_policy.h:776-820:
+    //   1. seed grad_L_old / grad_L_new with the bare objective gradients;
+    //   2. if the QP returned a full multiplier vector (lam_take == m_total),
+    //      run a single fused J_all^T * lam_full GEMV per gradient against
+    //      topRows(m_total) of the eq-then-ineq concatenated Jacobian;
+    //   3. otherwise keep the bare gradients (kraft's eq-only fallback at
+    //      :811-818 is structurally a no-op for the helper signature because
+    //      the fallback used s.J_eq directly rather than J_all_old.topRows
+    //      and is policy-internal; the helper exposes the m_total-only
+    //      branch here and lets adopters keep the eq-only fallback inline
+    //      where it touches policy-private state).
+    grad_L_old = g_old;
+    grad_L_new = g_new;
+
+    const int lam_take = static_cast<int>(lam_full.size());
+    if(lam_take == m_total && m_total > 0)
+    {
+        grad_L_old.noalias() -= J_all_old.topRows(m_total).transpose()
+                               * lam_full.head(m_total);
+        grad_L_new.noalias() -= J_all.topRows(m_total).transpose()
+                               * lam_full.head(m_total);
+    }
+
+    sk_out.noalias() = x_new - x_old;
+    yk_out.noalias() = grad_L_new - grad_L_old;
+}
 
 // Adopted from: argmin/solver/nw_sqp_policy.h:222-232, :297-300 (in-tree
 //               precedent — LDLT-based equality-feasibility warm-start).
@@ -188,12 +287,22 @@ void compute_bfgs_pair_fused(
 //                 enables filter_nw_sqp adoption without a per-step
 //                 ColPivHouseholderQR (REF-05 close).
 template <typename Scalar, int N, int Meq = argmin::dynamic_dimension>
-void equality_feasibility_warmstart(
+inline void equality_feasibility_warmstart(
     const Eigen::Matrix<Scalar, Meq, N>& J_eq,
     const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
     Eigen::MatrixXd& AAt_workspace,
     Eigen::LDLT<Eigen::MatrixXd>& ldlt_workspace,
-    Eigen::Ref<Eigen::Vector<Scalar, N>> p0_out);
+    Eigen::Ref<Eigen::Vector<Scalar, N>> p0_out)
+{
+    // Verbatim port of nw_sqp_policy.h:297-300:
+    //   AAt = J_eq * J_eq^T, ldlt.compute(AAt), w = ldlt.solve(b_eq),
+    //   p0 = J_eq^T * w. LDLT (not LLT) handles indefinite/singular
+    //   J*J^T cases that LLT cannot.
+    AAt_workspace.noalias() = J_eq * J_eq.transpose();
+    ldlt_workspace.compute(AAt_workspace);
+    const Eigen::VectorXd w = ldlt_workspace.solve(b_eq);
+    p0_out.noalias() = J_eq.transpose() * w;
+}
 
 // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent
 //               — detail::project clip-to-box utility).
@@ -203,13 +312,18 @@ void equality_feasibility_warmstart(
 //                 against a box; rationale: replaces four hand-rolled
 //                 inline clip sites in kraft / filter_slsqp.
 template <typename Scalar, int N>
-void step_with_projection(
+inline void step_with_projection(
     const Eigen::Vector<Scalar, N>& x,
     Scalar alpha,
     const Eigen::Vector<Scalar, N>& p,
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper,
-    Eigen::Ref<Eigen::Vector<Scalar, N>> x_trial_out);
+    Eigen::Ref<Eigen::Vector<Scalar, N>> x_trial_out)
+{
+    x_trial_out.noalias() = x + alpha * p;
+    const Eigen::Vector<Scalar, N> tmp = x_trial_out;
+    x_trial_out = detail::project(tmp, lower, upper);
+}
 
 }
 
