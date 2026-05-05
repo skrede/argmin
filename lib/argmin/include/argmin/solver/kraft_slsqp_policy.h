@@ -47,6 +47,7 @@
 #include "argmin/detail/kraft_lsq_qp.h"
 #include "argmin/detail/kraft_lsq_qp_recovery.h"
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/merit_function.h"
 #include "argmin/line_search/armijo.h"
 #include "argmin/options/qp_options.h"
 #include "argmin/line_search/options.h"
@@ -353,6 +354,25 @@ struct kraft_slsqp_policy
             s.p_lo_buf, s.p_hi_buf);
 
         s.p_buf = qp_res.x;
+
+        // Cold-start mu calibration. After the first QP solve, sigma must
+        // dominate the multiplier scale to make the SQP direction a descent
+        // direction for the L1 merit (N&W eq. 18.36). Default sigma = 1.0
+        // underestimates the required penalty on HS071-class problems with
+        // large multipliers, causing iter-0 line-search rejection.
+        //
+        // Adopted from: NLopt slsqp.c iter-0 implicit cold-start from QP lambda.
+        // Reference: N&W 2e eq. 18.36; Kraft 1988 §2.2.6;
+        //            PITFALLS §B remedy 1.
+        //
+        // argmin variant: gated on s.iteration == 0; the existing post-QP
+        //                 sigma update at lines below is max-monotone and
+        //                 therefore idempotent against this cold-start.
+        if(s.iteration == 0 && qp_res.lambda.size() > 0)
+        {
+            s.sigma = detail::calibrate_initial_penalty(s.sigma, qp_res.lambda);
+        }
+
         Eigen::Vector<double, N>& p = s.p_buf;
 
         double p_norm = p.norm();
