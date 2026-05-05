@@ -75,6 +75,49 @@ Scalar update_penalty(Scalar sigma,
     return std::max(sigma, required);
 }
 
+// Cold-start initial penalty calibration.
+//
+// After the first QP solve at iter 0, sigma must be at least as large
+// as the multiplier scale to ensure the SQP direction is a descent
+// direction for the L1 merit (N&W eq. 18.36). The default cold-start
+// value (1.0) underestimates the required penalty on problems with
+// large multipliers (e.g. HS071), causing the line search to reject
+// the iter-0 step and the policy to park infeasible.
+//
+// calibrate_initial_penalty(sigma_in, lambda_qp, safety) returns
+//   max(sigma_in, ||lambda_qp||_inf + safety),
+// mirroring update_penalty's monotone-up form but as a one-shot
+// initialisation rather than a per-step update.
+//
+// Adopted from: NLopt slsqp.c implicit cold-start from QP lambda
+//               (slsqp.c on the iter-0 path uses lambda from the
+//                first QP solve to set the penalty scale before
+//                any merit evaluation).
+// Reference: N&W 2e eq. 18.36 (sigma sufficient for L1-merit descent);
+//            Powell 1978 ("A fast algorithm for nonlinearly
+//            constrained optimization calculations") Section 6
+//            (cold-start safety_factor = 1 recommendation);
+//            Kraft 1988 DFVLR-FB 88-28 §2.2.6 (sigma update rule);
+//            PITFALLS §B remedy 1 (single-line scalar cold-start).
+//
+// argmin variant: scalar sigma calibration without per-constraint
+//                 mu_j smoothing; NLopt slsqp.c:1988-1994 maintains
+//                 a per-constraint mu_j vector; rationale: scalar
+//                 fix delivers HS071 closure without the regression
+//                 risk of per-constraint smoothing on already-stable
+//                 hs026 / hs039 trajectories. Per-constraint mu_j
+//                 is an empirically-gated future extension.
+template <typename Scalar, int M = argmin::dynamic_dimension>
+Scalar calibrate_initial_penalty(Scalar sigma_in,
+                                 const Eigen::Vector<Scalar, M>& lambda_qp,
+                                 Scalar safety = Scalar(1.0))
+{
+    if(lambda_qp.size() == 0)
+        return sigma_in;
+    Scalar required = lambda_qp.cwiseAbs().maxCoeff() + safety;
+    return std::max(sigma_in, required);
+}
+
 }
 
 #endif
