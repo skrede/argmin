@@ -241,18 +241,18 @@ inline void extract_qp_multipliers(
 //                 on the curvature-pair construction hot path.
 template <typename Scalar, int N>
 inline void compute_bfgs_pair_fused(
-    const Eigen::Vector<Scalar, N>& g_old,
-    const Eigen::Vector<Scalar, N>& g_new,
-    const Eigen::MatrixXd& J_all_old,
-    const Eigen::MatrixXd& J_all,
-    const Eigen::Vector<Scalar, Eigen::Dynamic>& lam_full,
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g_old,
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g_new,
+    const Eigen::Ref<const Eigen::MatrixXd>& J_all_old,
+    const Eigen::Ref<const Eigen::MatrixXd>& J_all,
+    const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>& lam_full,
     int m_total,
     Eigen::Ref<Eigen::Vector<Scalar, N>> grad_L_old,
     Eigen::Ref<Eigen::Vector<Scalar, N>> grad_L_new,
     Eigen::Ref<Eigen::Vector<Scalar, N>> sk_out,
     Eigen::Ref<Eigen::Vector<Scalar, N>> yk_out,
-    const Eigen::Vector<Scalar, N>& x_new,
-    const Eigen::Vector<Scalar, N>& x_old)
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>& x_new,
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>& x_old)
 {
     // Operation order is bit-for-bit identical to kraft_slsqp_policy.h:776-820:
     //   1. seed grad_L_old / grad_L_new with the bare objective gradients;

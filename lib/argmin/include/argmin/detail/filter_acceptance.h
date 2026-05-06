@@ -69,10 +69,16 @@ public:
     // Callers set h_max = 1e4 * max(1, h_0) where h_0 is the initial
     // constraint violation.
     //
-    // Reference: Wachter & Biegler 2006, eq. (8).
+    // Pre-reserves the underlying entry vector to a typical SQP iteration
+    // budget so that hot-path add() calls do not trigger geometric vector
+    // growth (which would allocate). 256 entries cover well past any
+    // realistic SQP iteration count for the line-search filter family;
+    // the extra capacity is small (16 B/entry on x86_64 with double).
     void initialize(Scalar h_max)
     {
         entries_.clear();
+        if(entries_.capacity() < 256)
+            entries_.reserve(256);
         h_max_ = h_max;
     }
 

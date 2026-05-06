@@ -762,19 +762,29 @@ struct filter_slsqp_policy
             }
         }
 
-        // Multiplier estimation.
-        // Reference: N&W eq. 18.15.
+        // Multiplier update. Use the QP subproblem multipliers when the
+        // solver returned a full lambda vector; the QP solver returns the
+        // KKT multipliers of the SQP subproblem in the canonical
+        // [lambda_eq; mu_ineq] layout, which agree with the LS estimate
+        // (N&W eq. 18.15) at the optimum. Fall back to the LS estimate
+        // only when the QP multipliers are unavailable (rare failure
+        // path; allocation there is acceptable and out of the hot path).
         if constexpr(constrained<P>)
         {
-            if(s.n_eq + s.n_ineq > 0)
+            const int m_lambda = s.n_eq + s.n_ineq;
+            if(m_lambda > 0)
             {
-                Eigen::MatrixXd A_full(s.n_eq + s.n_ineq, n);
-                if(s.n_eq > 0)
-                    A_full.topRows(s.n_eq) = s.J_eq;
-                if(s.n_ineq > 0)
-                    A_full.bottomRows(s.n_ineq) = s.J_ineq;
-                Eigen::VectorXd g_dyn = s.g;
-                s.lambda = detail::estimate_multipliers(g_dyn, A_full);
+                if(qp_res.lambda.size() >= m_lambda)
+                {
+                    s.lambda.head(m_lambda) = qp_res.lambda.head(m_lambda);
+                }
+                else if(qp_res.lambda.size() == 0)
+                {
+                    Eigen::Matrix<double, Eigen::Dynamic, N> A_all(m_lambda, n);
+                    if(s.n_eq > 0)   A_all.topRows(s.n_eq)    = s.J_eq;
+                    if(s.n_ineq > 0) A_all.bottomRows(s.n_ineq) = s.J_ineq;
+                    s.lambda = detail::estimate_multipliers(s.g, A_all);
+                }
             }
         }
 
