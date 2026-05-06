@@ -426,6 +426,38 @@ public:
             constraint_vector(b_view), m_eq, tol, W_);
 
         Eigen::Vector<Scalar, N> x = x0;
+
+        // Phase-1 feasibility projection. The active-set machinery in
+        // solve_equality_subproblem assumes x is feasible w.r.t. the
+        // working-set equalities (m>=n branch returns p=0 unconditionally).
+        // Restore that invariant at entry by projecting any infeasible x0
+        // onto the equality manifold via the minimum-norm correction
+        //   dx = A_eq^T (A_eq A_eq^T)^{-1} (b_eq - A_eq x).
+        // With a thin QR factorization A_eq^T = Q * R (Q is n x m_eq,
+        // R is m_eq x m_eq upper triangular when A_eq has full row rank),
+        // the closed-form min-norm solution is dx = Q * R^{-T} * residual.
+        // Reference: N&W 2e Section 16.1, Algorithm 16.1, pp. 460-463
+        //            (feasibility invariant); N&W 2e Section 10.3 / Lemma 16.5
+        //            (minimum-norm under-determined solution).
+        // No direct production-library precedent: active-set QP literature
+        // assumes feasible x0; this fix internalizes the precondition.
+        if(m_eq > 0)
+        {
+            const auto residual = (b_eq - A_eq * x).eval();
+            if(residual.cwiseAbs().maxCoeff() > tol)
+            {
+                qr_lambda_.compute(A_eq.transpose());
+                rhs_.head(n).setZero();
+                rhs_.head(m_eq) = qr_lambda_.matrixQR()
+                    .topLeftCorner(m_eq, m_eq)
+                    .template triangularView<Eigen::Upper>()
+                    .transpose()
+                    .solve(residual);
+                rhs_.head(n).applyOnTheLeft(qr_lambda_.householderQ());
+                x += rhs_.head(n);
+            }
+        }
+
         qr_valid_ = false;
         givens_update_count_ = 0;
 
