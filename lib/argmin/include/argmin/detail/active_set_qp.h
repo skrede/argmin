@@ -7,10 +7,12 @@
 //         s.t. A_eq x = b_eq           (equality)
 //              A_ineq x >= b_ineq      (inequality)
 //
-// Reference: N&W Algorithm 16.1, pp. 460-463 (active-set method for convex QP)
+// Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463 (active-set method
+//            for convex QP; phase-1 feasibility invariant on x0)
 //            N&W Section 16.2, eq. 16.16-16.19 (null-space method)
 //            N&W eq. 16.29 (blocking step length)
-//            N&W Section 16.5 (indefinite QP extensions)
+//            N&W Section 16.5, Lemma 16.5 (indefinite QP extensions; minimum-
+//            norm under-determined solution via thin QR)
 
 #include "argmin/detail/givens_qr_update.h"
 #include "argmin/types.h"
@@ -388,7 +390,15 @@ public:
 
     // Solve QP subproblem using pre-allocated workspace.
     //
-    // Reference: N&W Algorithm 16.1, pp. 460-463.
+    // Accepts any x0; if x0 violates A_eq * x0 = b_eq within `tol`, a
+    // minimum-norm phase-1 correction projects x onto the equality
+    // manifold per N&W Section 16.1's feasibility invariant before the
+    // active-set loop begins. The active-set algorithm itself assumes
+    // the iterate is feasible w.r.t. the working-set equalities (the
+    // m >= n branch in solve_equality_subproblem returns p = 0 only
+    // under that precondition).
+    //
+    // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
     template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
     qp_result<Scalar, N, M> solve(
         const Eigen::Matrix<Scalar, N, N>& G,
@@ -538,7 +548,11 @@ public:
         return res;
     }
 
-    // Box-constraint overload.
+    // Box-constraint overload. Folds box bounds into the augmented
+    // inequality block and forwards to the general overload, so it
+    // inherits the phase-1 feasibility projection automatically.
+    //
+    // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
     template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
     qp_result<Scalar, N, M> solve(
         const Eigen::Matrix<Scalar, N, N>& G,
