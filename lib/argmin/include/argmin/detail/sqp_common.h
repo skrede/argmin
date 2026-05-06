@@ -296,16 +296,23 @@ inline void equality_feasibility_warmstart(
     const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
     Eigen::MatrixXd& AAt_workspace,
     Eigen::LDLT<Eigen::MatrixXd>& ldlt_workspace,
+    Eigen::Vector<Scalar, Eigen::Dynamic>& w_workspace,
     Eigen::Ref<Eigen::Vector<Scalar, N>> p0_out)
 {
     // Verbatim port of nw_sqp_policy.h:297-300:
     //   AAt = J_eq * J_eq^T, ldlt.compute(AAt), w = ldlt.solve(b_eq),
     //   p0 = J_eq^T * w. LDLT (not LLT) handles indefinite/singular
     //   J*J^T cases that LLT cannot.
+    //
+    // w_workspace is a caller-owned VectorXd pre-sized to b_eq.size()
+    // (see init() in nw_sqp_policy / filter_nw_sqp_policy); writing into
+    // it via the no-allocation Eigen::LDLT::solveInPlace path keeps the
+    // hot-loop allocation count at zero.
     AAt_workspace.noalias() = J_eq * J_eq.transpose();
     ldlt_workspace.compute(AAt_workspace);
-    const Eigen::VectorXd w = ldlt_workspace.solve(b_eq);
-    p0_out.noalias() = J_eq.transpose() * w;
+    w_workspace = b_eq;
+    ldlt_workspace.solveInPlace(w_workspace);
+    p0_out.noalias() = J_eq.transpose() * w_workspace;
 }
 
 // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent

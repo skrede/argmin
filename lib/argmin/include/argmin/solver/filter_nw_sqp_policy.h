@@ -150,6 +150,7 @@ struct filter_nw_sqp_policy
         detail::active_set_qp_solver<double, N> qp_solver;
         Eigen::MatrixXd AAt_workspace;
         Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;
+        Eigen::VectorXd w_workspace;
 
         double objective_value{};
         // Shanno-rescaled compact L-BFGS operator (N&W eq. 6.20 /
@@ -211,6 +212,7 @@ struct filter_nw_sqp_policy
         {
             s.AAt_workspace.resize(s.n_eq, s.n_eq);
             s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(s.n_eq);
+            s.w_workspace.resize(s.n_eq);
         }
 
         if(m > 0)
@@ -325,7 +327,14 @@ struct filter_nw_sqp_policy
         lambda_new.setZero(m);
         Eigen::Vector<double, N>& x_trial = s.bufs.x_trial_buf;
         x_trial = s.x;
-        Eigen::VectorXd c_eq_trial, c_ineq_trial;
+        // c_eq_trial / c_ineq_trial views into s.bufs.c_trial_buf; no
+        // per-step VectorXd materialization. The same inline-VectorBlock
+        // pattern landed in filter_slsqp_policy on the prior plan to
+        // avoid the heap-alloc the helper signature would otherwise force.
+        // Reference: detail::constraint_violation / detail::l1_merit signatures
+        //            require Eigen::Vector<Scalar, M> and do not deduce from
+        //            VectorBlock head()/tail() expressions; inlining the
+        //            scalar reductions sidesteps the materialization.
         double f_trial = s.objective_value;
         double f_k = s.objective_value;
         double h_k = 0.0;
@@ -355,7 +364,7 @@ struct filter_nw_sqp_policy
             //                 per-step ColPivHouseholderQR allocation.
             argmin::detail::equality_feasibility_warmstart<double, N, Eigen::Dynamic>(
                 s.J_eq, s.bufs.b_eq_workspace,
-                s.AAt_workspace, s.ldlt_feasibility, p0);
+                s.AAt_workspace, s.ldlt_feasibility, s.w_workspace, p0);
         }
 
         if(has_bounds)
@@ -534,24 +543,29 @@ struct filter_nw_sqp_policy
 
             f_trial = s.problem->value(x_trial);
             if(m > 0)
-            {
                 s.problem->constraints(x_trial, s.bufs.c_trial_buf);
-                c_eq_trial = s.bufs.c_trial_buf.head(s.n_eq);
-                c_ineq_trial = s.bufs.c_trial_buf.tail(s.n_ineq);
-            }
-            else
-            {
-                c_eq_trial = Eigen::VectorXd{};
-                c_ineq_trial = Eigen::VectorXd{};
-            }
-            h_trial = detail::constraint_violation(c_eq_trial, c_ineq_trial);
+            // Inline L1 constraint violation and L1 merit on VectorBlock
+            // head()/tail() expressions to avoid the per-backtrack VectorXd
+            // materialization the helper signatures would force. Identity:
+            //   constraint_violation(c_eq, c_ineq)
+            //     = ||c_eq||_1 + ||(-c_ineq)_+||_1
+            //   l1_merit(f, c_eq, c_ineq, sigma)
+            //     = f + sigma * constraint_violation(c_eq, c_ineq).
+            // Mirrors the inline-VectorBlock pattern adopted in
+            // filter_slsqp_policy on the prior plan.
+            double viol_trial = 0.0;
+            if(s.n_eq > 0)
+                viol_trial += s.bufs.c_trial_buf.head(s.n_eq).cwiseAbs().sum();
+            if(s.n_ineq > 0)
+                viol_trial += (-s.bufs.c_trial_buf.tail(s.n_ineq))
+                                  .cwiseMax(0.0).sum();
+            h_trial = viol_trial;
 
             // Filter acceptance check.
             bool filter_ok = s.filter.is_acceptable(f_trial, h_trial);
 
-            // L1 merit Armijo check.
-            double phi_trial = detail::l1_merit(
-                f_trial, c_eq_trial, c_ineq_trial, s.sigma);
+            // L1 merit Armijo check (inline form per identity above).
+            double phi_trial = f_trial + s.sigma * viol_trial;
             bool merit_ok = phi_trial <= phi0 + c1 * alpha * dphi0;
 
             if(f_type)
@@ -581,11 +595,14 @@ struct filter_nw_sqp_policy
         {
             // SOC RHS lives in state-resident b_eq_soc_buf / b_ineq_soc_buf
             // (sqp_state_buffers fields) — replaces the prior per-step
-            // b_eq_soc / b_ineq_soc local materializations.
+            // b_eq_soc / b_ineq_soc local materializations. Drives the SOC
+            // RHS from c_trial_buf head()/tail() expressions directly to
+            // avoid c_eq_trial / c_ineq_trial VectorXd materialization.
             if(s.n_eq > 0)
-                s.bufs.b_eq_soc_buf.noalias() = -c_eq_trial;
+                s.bufs.b_eq_soc_buf.noalias() = -s.bufs.c_trial_buf.head(s.n_eq);
             if(s.n_ineq > 0)
-                s.bufs.b_ineq_soc_buf.noalias() = -c_ineq_trial;
+                s.bufs.b_ineq_soc_buf.noalias()
+                    = -s.bufs.c_trial_buf.tail(s.n_ineq);
 
             detail::qp_result<double, N> qp_soc;
             if(has_bounds)
@@ -619,25 +636,28 @@ struct filter_nw_sqp_policy
                 x_soc = detail::project(x_soc, s.lower, s.upper);
 
             double f_soc = s.problem->value(x_soc);
-            Eigen::VectorXd c_eq_soc, c_ineq_soc;
+            // SOC re-evaluates c at x_soc directly into c_trial_buf, then
+            // computes constraint_violation / l1_merit inline on the
+            // VectorBlock head()/tail() expressions to avoid the
+            // c_eq_soc / c_ineq_soc VectorXd materialization. If the SOC
+            // trial is accepted, c_trial_buf already holds c(x_soc) and
+            // becomes the s.c_eq / s.c_ineq source after the LS block.
             if(m > 0)
-            {
                 s.problem->constraints(x_soc, s.bufs.c_trial_buf);
-                c_eq_soc = s.bufs.c_trial_buf.head(s.n_eq);
-                c_ineq_soc = s.bufs.c_trial_buf.tail(s.n_ineq);
-            }
-            double h_soc = detail::constraint_violation(c_eq_soc, c_ineq_soc);
-
-            double phi_soc = detail::l1_merit(
-                f_soc, c_eq_soc, c_ineq_soc, s.sigma);
+            double viol_soc = 0.0;
+            if(s.n_eq > 0)
+                viol_soc += s.bufs.c_trial_buf.head(s.n_eq).cwiseAbs().sum();
+            if(s.n_ineq > 0)
+                viol_soc += (-s.bufs.c_trial_buf.tail(s.n_ineq))
+                                .cwiseMax(0.0).sum();
+            double h_soc = viol_soc;
+            double phi_soc = f_soc + s.sigma * viol_soc;
             if(s.filter.is_acceptable(f_soc, h_soc)
                && phi_soc <= phi0 + c1 * dphi0)
             {
                 x_trial = x_soc;
                 f_trial = f_soc;
                 h_trial = h_soc;
-                c_eq_trial = c_eq_soc;
-                c_ineq_trial = c_ineq_soc;
                 accepted = true;
             }
         }
@@ -798,8 +818,14 @@ struct filter_nw_sqp_policy
 
         s.x = x_trial;
         s.objective_value = f_trial;
-        s.c_eq = c_eq_trial;
-        s.c_ineq = c_ineq_trial;
+        // c_trial_buf holds c(x_accepted) from the last-accepted line search
+        // or SOC iteration; copy into the policy-state s.c_eq / s.c_ineq
+        // (pre-sized in init() to s.n_eq / s.n_ineq, so the assignment
+        // does not allocate).
+        if(s.n_eq > 0)
+            s.c_eq = s.bufs.c_trial_buf.head(s.n_eq);
+        if(s.n_ineq > 0)
+            s.c_ineq = s.bufs.c_trial_buf.tail(s.n_ineq);
         s.problem->gradient(s.x, s.g);
         if(m > 0)
         {

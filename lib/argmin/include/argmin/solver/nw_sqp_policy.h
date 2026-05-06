@@ -132,6 +132,7 @@ struct nw_sqp_policy
 
         Eigen::MatrixXd AAt_workspace;      // Feasibility LDLT workspace
         Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;  // Reusable factorization
+        Eigen::VectorXd w_workspace;        // LDLT solve in-place buffer
         double objective_value{};
         double sigma{1.0};
         // Canonical BFGS operator per D-01. References: Shanno 1978 (N&W eq. 6.20); N&W Section 7.2 (L-BFGS); Kraft 1988 DFVLR-FB 88-28 Section 2.2.3.
@@ -189,6 +190,7 @@ struct nw_sqp_policy
         {
             s.AAt_workspace.resize(s.n_eq, s.n_eq);
             s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(s.n_eq);
+            s.w_workspace.resize(s.n_eq);
         }
 
         // Evaluate constraints: single vector, split into eq/ineq
@@ -313,7 +315,7 @@ struct nw_sqp_policy
             //                 canonical extraction site for this helper.
             argmin::detail::equality_feasibility_warmstart<double, N, Eigen::Dynamic>(
                 s.J_eq, s.bufs.b_eq_workspace,
-                s.AAt_workspace, s.ldlt_feasibility, p0);
+                s.AAt_workspace, s.ldlt_feasibility, s.w_workspace, p0);
         }
 
         // Use embedded QP options with defaults

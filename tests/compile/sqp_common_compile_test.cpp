@@ -119,8 +119,9 @@ int main()
 
         Eigen::MatrixXd AAt = Eigen::MatrixXd::Zero(n_eq, n_eq);
         Eigen::LDLT<Eigen::MatrixXd> ldlt(n_eq);
+        Eigen::VectorXd w_ws(n_eq);
         argmin::detail::equality_feasibility_warmstart<double, N>(
-            J_eq, b_eq_v, AAt, ldlt, p0);
+            J_eq, b_eq_v, AAt, ldlt, w_ws, p0);
 
         argmin::detail::compute_bfgs_pair_fused<double, N>(
             g, g, J_all_old, J_all, lam_full, m_total,
@@ -182,8 +183,9 @@ int main()
 
         Eigen::MatrixXd AAt = Eigen::MatrixXd::Zero(n_eq, n_eq);
         Eigen::LDLT<Eigen::MatrixXd> ldlt(n_eq);
+        Eigen::VectorXd w_ws(n_eq);
         argmin::detail::equality_feasibility_warmstart<double, N>(
-            J_eq, b_eq_v, AAt, ldlt, p0);
+            J_eq, b_eq_v, AAt, ldlt, w_ws, p0);
 
         argmin::detail::compute_bfgs_pair_fused<double, N>(
             g, g, J_all_old, J_all, lam_full, m_total,
