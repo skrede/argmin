@@ -785,25 +785,39 @@ struct kraft_slsqp_policy
         // KKT residual: full first-order optimality error E(x, lambda,
         // mu) as the L-infinity maximum over five legs (stationarity,
         // primal equality feasibility, primal inequality feasibility,
-        // dual feasibility, complementarity). Multipliers come from an
-        // active-set least-squares estimate at the post-step iterate
-        // (working set identified by |c_ineq[i]| < active_tol); inactive
-        // mu_ineq entries are projected to zero, active mu_ineq entries
-        // are clipped to the dual-feasible non-negative cone. When m == 0
-        // the kkt_residual helper collapses to ||grad_f||_inf.
+        // dual feasibility, complementarity). Multipliers come from the
+        // QP solution; equality multipliers occupy the first n_eq
+        // entries of qp_res.lambda and inequality multipliers follow.
+        // When m == 0 the helper collapses to ||grad_f||_inf.
+        //
+        // Kraft's policy uses the QP-native multipliers here rather
+        // than an active-set least-squares estimate at the post-step
+        // iterate. The QP returns dual-feasible multipliers for its
+        // own KKT conditions (Goldfarb-Idnani), and at convergence
+        // qp_res.lambda agrees with any post-step LS estimate; off
+        // convergence the QP-native source is what kraft has shipped
+        // since v0.2.1 and avoids a per-iter ColPivQR on the active-
+        // set Jacobian. Sibling SQP policies (nw_sqp, filter_slsqp,
+        // filter_nw_sqp) keep the active-set LS path via
+        // detail::compute_kkt_multipliers_active_set in lagrangian.h.
         //
         // Reference: N&W 2e Definition 12.1 (KKT conditions:
         //            stationarity, primal feasibility, dual feasibility,
         //            complementarity); eq. 12.34 (Lagrangian
-        //            stationarity leg); Algorithm 18.3 (active-set
-        //            multiplier estimate).
-        //
-        // Adopted from: argmin/detail/lagrangian.h compute_kkt_multipliers_active_set.
-        argmin::detail::compute_kkt_multipliers_active_set<double, N,
-                                                          Eigen::Dynamic,
-                                                          Eigen::Dynamic>(
-            s.g, s.J_eq, s.J_ineq, s.c_ineq,
-            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+        //            stationarity leg); Goldfarb-Idnani 1983
+        //            (active-set QP duality, kraft_lsq_qp lineage).
+        s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+        s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
+        if constexpr(constrained<P>)
+        {
+            if(qp_res.lambda.size() >= s.n_eq + s.n_ineq)
+            {
+                if(s.n_eq > 0)
+                    s.bufs.kkt_lambda_eq_buf = qp_res.lambda.head(s.n_eq);
+                if(s.n_ineq > 0)
+                    s.bufs.kkt_mu_ineq_buf = qp_res.lambda.segment(s.n_eq, s.n_ineq);
+            }
+        }
         double kkt = detail::kkt_residual<double,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic,
