@@ -14,6 +14,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
+#include <limits>
+
 using Catch::Approx;
 using namespace argmin;
 
@@ -242,4 +245,227 @@ TEST_CASE("filter_nw_sqp reset() clears filter for warm-start convergence",
     // first; BFGS is preserved so the second can be slightly faster (a
     // few iters), but it should not regress significantly.
     CHECK(second.iterations <= first.iterations + 5);
+}
+
+// Dynamic-dimension wrappers for the convergence guard below. The
+// compile-time-N variants of hs024 / hs071 / hs076 above (problem_dimension
+// fixed to 2 / 4 / 4) leave the dynamic-N (problem_dimension =
+// argmin::dynamic_dimension) instantiation of filter_nw_sqp_policy<>
+// uncovered. The micro_filter_nw_sqp bench harness exercises this path,
+// but bench main() has no assertion bar; convergence regressions on the
+// dynamic-N path therefore show up only as a hung allocation-trace
+// probe (sqp_alloc_free_filter_nw stuck in restoration) rather than a
+// clean test-suite failure. These tests close that gap.
+namespace
+{
+
+struct hs024_dynamic
+{
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+
+    [[nodiscard]] int dimension() const { return 2; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 3; }
+
+    [[nodiscard]] double value(const Eigen::VectorXd& x) const
+    {
+        const double t = (x[0] - 3.0) * (x[0] - 3.0) - 9.0;
+        return t * x[1] * x[1] * x[1] / (27.0 * std::sqrt(3.0));
+    }
+
+    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    {
+        const double t = (x[0] - 3.0) * (x[0] - 3.0) - 9.0;
+        g[0] = 2.0 * (x[0] - 3.0) * x[1] * x[1] * x[1] / (27.0 * std::sqrt(3.0));
+        g[1] = t * 3.0 * x[1] * x[1] / (27.0 * std::sqrt(3.0));
+    }
+
+    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    {
+        c.resize(3);
+        c[0] = x[0] / std::sqrt(3.0) - x[1];
+        c[1] = x[0] + std::sqrt(3.0) * x[1];
+        c[2] = 6.0 - x[0] - std::sqrt(3.0) * x[1];
+    }
+
+    void constraint_jacobian(const Eigen::VectorXd&, Eigen::MatrixXd& J) const
+    {
+        J.resize(3, 2);
+        J(0, 0) = 1.0 / std::sqrt(3.0); J(0, 1) = -1.0;
+        J(1, 0) = 1.0;                  J(1, 1) = std::sqrt(3.0);
+        J(2, 0) = -1.0;                 J(2, 1) = -std::sqrt(3.0);
+    }
+
+    [[nodiscard]] Eigen::VectorXd lower_bounds() const
+    {
+        return Eigen::VectorXd::Zero(2);
+    }
+
+    [[nodiscard]] Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd::Constant(2, std::numeric_limits<double>::infinity());
+    }
+};
+
+struct hs071_dynamic
+{
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+
+    [[nodiscard]] int dimension() const { return 4; }
+    [[nodiscard]] int num_equality() const { return 1; }
+    [[nodiscard]] int num_inequality() const { return 1; }
+
+    [[nodiscard]] double value(const Eigen::VectorXd& x) const
+    {
+        return x[0] * x[3] * (x[0] + x[1] + x[2]) + x[2];
+    }
+
+    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    {
+        g[0] = x[3] * (2.0 * x[0] + x[1] + x[2]);
+        g[1] = x[0] * x[3];
+        g[2] = x[0] * x[3] + 1.0;
+        g[3] = x[0] * (x[0] + x[1] + x[2]);
+    }
+
+    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    {
+        c.resize(2);
+        c[0] = x[0]*x[0] + x[1]*x[1] + x[2]*x[2] + x[3]*x[3] - 40.0;
+        c[1] = x[0] * x[1] * x[2] * x[3] - 25.0;
+    }
+
+    void constraint_jacobian(const Eigen::VectorXd& x, Eigen::MatrixXd& J) const
+    {
+        J.resize(2, 4);
+        J(0, 0) = 2.0 * x[0]; J(0, 1) = 2.0 * x[1];
+        J(0, 2) = 2.0 * x[2]; J(0, 3) = 2.0 * x[3];
+        J(1, 0) = x[1] * x[2] * x[3]; J(1, 1) = x[0] * x[2] * x[3];
+        J(1, 2) = x[0] * x[1] * x[3]; J(1, 3) = x[0] * x[1] * x[2];
+    }
+
+    [[nodiscard]] Eigen::VectorXd lower_bounds() const
+    {
+        return Eigen::VectorXd::Constant(4, 1.0);
+    }
+
+    [[nodiscard]] Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd::Constant(4, 5.0);
+    }
+};
+
+struct hs076_dynamic
+{
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+
+    [[nodiscard]] int dimension() const { return 4; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 3; }
+
+    [[nodiscard]] double value(const Eigen::VectorXd& x) const
+    {
+        return x[0]*x[0] + 0.5*x[1]*x[1] + x[2]*x[2] + 0.5*x[3]*x[3]
+               - x[0]*x[2] + x[2]*x[3]
+               - x[0] - 3.0*x[1] + x[2] - x[3];
+    }
+
+    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    {
+        g[0] = 2.0*x[0] - x[2] - 1.0;
+        g[1] = x[1] - 3.0;
+        g[2] = 2.0*x[2] - x[0] + x[3] + 1.0;
+        g[3] = x[3] + x[2] - 1.0;
+    }
+
+    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    {
+        c.resize(3);
+        c[0] = 5.0 - (x[0] + 2.0*x[1] + x[2] + x[3]);
+        c[1] = 4.0 - (3.0*x[0] + x[1] + 2.0*x[2] - x[3]);
+        c[2] = x[1] + 4.0*x[2] - 1.5;
+    }
+
+    void constraint_jacobian(const Eigen::VectorXd&, Eigen::MatrixXd& J) const
+    {
+        J.resize(3, 4);
+        J <<
+            -1.0, -2.0, -1.0, -1.0,
+            -3.0, -1.0, -2.0,  1.0,
+             0.0,  1.0,  4.0,  0.0;
+    }
+
+    [[nodiscard]] Eigen::VectorXd lower_bounds() const
+    {
+        return Eigen::VectorXd::Zero(4);
+    }
+
+    [[nodiscard]] Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd::Constant(4, std::numeric_limits<double>::infinity());
+    }
+};
+
+}  // anonymous namespace
+
+// Convergence guard for the dynamic-N (problem_dimension =
+// argmin::dynamic_dimension) instantiation of filter_nw_sqp_policy.
+// Asserts the textbook optima with a margin and feasibility within
+// 1e-6. Iter / eval counts are intentionally NOT asserted: they are
+// regression metrics and belong to a separate suite, not the
+// correctness-invariant unit tests. A generous max_iterations cap is
+// used only to bound the test wall time (not as a correctness bar).
+TEST_CASE("filter_nw_sqp converges on dynamic-dimension HS problems",
+          "[filter_nw_sqp][regression][dynamic_n]")
+{
+    SECTION("HS024 dynamic-N")
+    {
+        hs024_dynamic problem;
+        Eigen::VectorXd x0{{1.0, 0.5}};
+        solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_objective_threshold(1e-10);
+        opts.set_step_threshold(1e-10);
+
+        basic_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
+        auto result = solver.solve(opts);
+
+        CHECK(result.objective_value == Approx(-1.0).margin(1e-3));
+        CHECK(solver.constraint_violation() < 1e-6);
+    }
+
+    SECTION("HS071 dynamic-N")
+    {
+        hs071_dynamic problem;
+        Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
+        solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_objective_threshold(1e-10);
+        opts.set_step_threshold(1e-10);
+
+        basic_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
+        auto result = solver.solve(opts);
+
+        CHECK(result.objective_value == Approx(17.0140173).margin(1e-2));
+        CHECK(solver.constraint_violation() < 1e-6);
+    }
+
+    SECTION("HS076 dynamic-N")
+    {
+        hs076_dynamic problem;
+        Eigen::VectorXd x0{{0.5, 0.5, 0.5, 0.5}};
+        solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_gradient_threshold(1e-6);
+        opts.set_objective_threshold(1e-10);
+        opts.set_step_threshold(1e-10);
+
+        basic_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
+        auto result = solver.solve(opts);
+
+        CHECK(result.objective_value == Approx(-4.6818181818).margin(1e-3));
+        CHECK(solver.constraint_violation() < 1e-6);
+    }
 }
