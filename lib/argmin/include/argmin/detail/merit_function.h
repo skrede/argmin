@@ -132,7 +132,7 @@ Scalar calibrate_initial_penalty(Scalar sigma_in,
 template <typename Scalar,
           int Meq = argmin::dynamic_dimension,
           int Mineq = argmin::dynamic_dimension>
-inline Scalar l1_merit_dphi_h4(
+ARGMIN_FORCE_INLINE Scalar l1_merit_dphi_h4(
     Scalar grad_f_dot_p,
     const Eigen::Vector<Scalar, Meq>& c_eq,
     const Eigen::Vector<Scalar, Mineq>& c_ineq,
@@ -154,7 +154,7 @@ inline Scalar l1_merit_dphi_h4(
 // argmin variant: scalar form with sigma_max cap. Idempotent;
 //                 monotone-up: sigma never decreases.
 template <typename Scalar>
-inline Scalar bump_sigma_for_descent(
+ARGMIN_FORCE_INLINE Scalar bump_sigma_for_descent(
     Scalar sigma_in,
     Scalar grad_f_dot_p,
     Scalar violation,

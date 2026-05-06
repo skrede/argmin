@@ -132,7 +132,7 @@ inline void sqp_state_buffers<Scalar, N>::resize(int n, int n_eq, int n_ineq)
 //                 across the four line-search SQP policies.
 template <typename Scalar, int N, int Meq = argmin::dynamic_dimension,
           int Mineq = argmin::dynamic_dimension>
-inline step_result<Scalar> null_step_result(
+ARGMIN_FORCE_INLINE step_result<Scalar> null_step_result(
     Scalar f,
     const Eigen::Vector<Scalar, N>& g,
     const Eigen::Matrix<Scalar, Meq, N>& J_eq,
@@ -197,7 +197,7 @@ inline step_result<Scalar> null_step_result(
 //                 rationale: removes the duplicated scatter pattern at
 //                 four call sites across the SQP family.
 template <typename Scalar>
-inline void extract_qp_multipliers(
+ARGMIN_FORCE_INLINE void extract_qp_multipliers(
     const Eigen::Vector<Scalar, Eigen::Dynamic>& qp_lambda,
     int n_eq,
     int n_ineq,
@@ -207,9 +207,10 @@ inline void extract_qp_multipliers(
     const int m_total = n_eq + n_ineq;
     const int lam_size = static_cast<int>(qp_lambda.size());
 
-    lam_eq_out.setZero();
-    mu_ineq_out.setZero();
-
+    // Fast path: full-multiplier QP return. Skip the setZero pre-clear on
+    // both legs (the assignments below cover every output element). This
+    // is the dominant path on healthy SQP iterations; the partial-multiplier
+    // fallback below explicitly setZero-s the legs it does not write.
     if(lam_size == m_total)
     {
         if(n_eq > 0) lam_eq_out = qp_lambda.head(n_eq);
@@ -218,7 +219,11 @@ inline void extract_qp_multipliers(
     }
 
     // Partial-multiplier path: copy what is available head-first into the
-    // equality leg, then the remainder into the inequality leg.
+    // equality leg, then the remainder into the inequality leg. Pre-clear
+    // both legs so the un-written tail elements are zero.
+    lam_eq_out.setZero();
+    mu_ineq_out.setZero();
+
     const int eq_take = std::min(lam_size, n_eq);
     if(eq_take > 0) lam_eq_out.head(eq_take) = qp_lambda.head(eq_take);
     const int rem = lam_size - eq_take;
@@ -240,7 +245,7 @@ inline void extract_qp_multipliers(
 //                 GEMVs); rationale: halves the gradient-walk cost
 //                 on the curvature-pair construction hot path.
 template <typename Scalar, int N>
-inline void compute_bfgs_pair_fused(
+ARGMIN_FORCE_INLINE void compute_bfgs_pair_fused(
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g_old,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g_new,
     const Eigen::Ref<const Eigen::MatrixXd>& J_all_old,
@@ -291,7 +296,7 @@ inline void compute_bfgs_pair_fused(
 //                 enables filter_nw_sqp adoption without a per-step
 //                 ColPivHouseholderQR (REF-05 close).
 template <typename Scalar, int N, int Meq = argmin::dynamic_dimension>
-inline void equality_feasibility_warmstart(
+ARGMIN_FORCE_INLINE void equality_feasibility_warmstart(
     const Eigen::Matrix<Scalar, Meq, N>& J_eq,
     const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
     Eigen::MatrixXd& AAt_workspace,
@@ -323,7 +328,7 @@ inline void equality_feasibility_warmstart(
 //                 against a box; rationale: replaces four hand-rolled
 //                 inline clip sites in kraft / filter_slsqp.
 template <typename Scalar, int N>
-inline void step_with_projection(
+ARGMIN_FORCE_INLINE void step_with_projection(
     const Eigen::Vector<Scalar, N>& x,
     Scalar alpha,
     const Eigen::Vector<Scalar, N>& p,
@@ -331,9 +336,13 @@ inline void step_with_projection(
     const Eigen::Vector<Scalar, N>& upper,
     Eigen::Ref<Eigen::Vector<Scalar, N>> x_trial_out)
 {
+    // Compose x_trial = clamp(x + alpha*p, lower, upper) without an
+    // intermediate copy. The previous pattern materialized tmp = x_trial_out
+    // before forwarding to detail::project; using cwiseMax / cwiseMin keeps
+    // the entire expression in expression-template space and lets Eigen
+    // fuse the three vector ops into a single packet loop.
     x_trial_out.noalias() = x + alpha * p;
-    const Eigen::Vector<Scalar, N> tmp = x_trial_out;
-    x_trial_out = detail::project(tmp, lower, upper);
+    x_trial_out = x_trial_out.cwiseMax(lower).cwiseMin(upper);
 }
 
 }

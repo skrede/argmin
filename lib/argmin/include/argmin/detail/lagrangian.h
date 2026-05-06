@@ -206,7 +206,7 @@ template <typename Scalar,
           int N = argmin::dynamic_dimension,
           int Meq = argmin::dynamic_dimension,
           int Mineq = argmin::dynamic_dimension>
-inline void compute_kkt_multipliers_active_set(
+ARGMIN_FORCE_INLINE void compute_kkt_multipliers_active_set(
     const Eigen::Vector<Scalar, N>& g,
     const Eigen::Matrix<Scalar, Meq, N>& J_eq,
     const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
