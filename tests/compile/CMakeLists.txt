@@ -12,3 +12,8 @@ add_executable(sqp_common_compile_test sqp_common_compile_test.cpp)
 target_link_libraries(sqp_common_compile_test PRIVATE argmin::argmin)
 target_compile_options(sqp_common_compile_test PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
 add_test(NAME sqp_common_compile_test COMMAND sqp_common_compile_test)
+
+add_executable(sqp_mode_racing_test sqp_mode_racing_test.cpp)
+target_link_libraries(sqp_mode_racing_test PRIVATE argmin::argmin)
+target_compile_options(sqp_mode_racing_test PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
+add_test(NAME sqp_mode_racing_test COMMAND sqp_mode_racing_test)
