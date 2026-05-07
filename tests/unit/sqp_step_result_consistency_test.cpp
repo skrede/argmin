@@ -25,6 +25,7 @@
 #include "argmin/solver/filter_slsqp_policy.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/basic_solver.h"
+#include "argmin/solver/sqp_mode.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <catch2/catch_template_test_macros.hpp>
@@ -35,13 +36,17 @@
 using namespace argmin;
 
 TEMPLATE_TEST_CASE_SIG(
-    "SQP step_result consistency across line-search SQP family",
-    "[sqp][consistency]",
+    "SQP step_result consistency across line-search SQP family x mode",
+    "[sqp][consistency][mode]",
     ((typename Policy), Policy),
-    kraft_slsqp_policy<>,
-    nw_sqp_policy<>,
-    filter_slsqp_policy<>,
-    filter_nw_sqp_policy<>)
+    kraft_slsqp_policy_accurate<dynamic_dimension>,
+    kraft_slsqp_policy_fast<dynamic_dimension>,
+    nw_sqp_policy_accurate<dynamic_dimension>,
+    nw_sqp_policy_fast<dynamic_dimension>,
+    filter_slsqp_policy_accurate<dynamic_dimension>,
+    filter_slsqp_policy_fast<dynamic_dimension>,
+    filter_nw_sqp_policy_accurate<dynamic_dimension>,
+    filter_nw_sqp_policy_fast<dynamic_dimension>)
 {
     SECTION("HS007 Lagrangian gradient vanishes at constrained optimum")
     {
@@ -163,8 +168,10 @@ TEMPLATE_TEST_CASE_SIG(
                 break;
         }
 
-        if constexpr (std::is_same_v<Policy, nw_sqp_policy<>>
-                      || std::is_same_v<Policy, filter_nw_sqp_policy<>>)
+        if constexpr (std::is_same_v<Policy, nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                      || std::is_same_v<Policy, nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>
+                      || std::is_same_v<Policy, filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                      || std::is_same_v<Policy, filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>)
         {
             CHECK(solver.constraint_violation() < NW_SQP_HS071_CV_BAR);
         }
