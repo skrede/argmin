@@ -55,6 +55,7 @@
 #include "argmin/line_search/options.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
+#include "argmin/solver/sqp_mode.h"
 #include "argmin/types.h"
 
 #include "argmin/formulation/concepts.h"
@@ -70,13 +71,34 @@
 namespace argmin
 {
 
-template <int N = dynamic_dimension>
+// argmin variant: closed-set Mode NTTP threaded through the kraft_slsqp
+//                 policy class template. `rebind<M>` preserves Mode on
+//                 N rebind. Per-mode tolerance + SOC threshold defaults
+//                 are exposed as static-constexpr members; the SOC-gate
+//                 site uses the per-mode default at the threshold check
+//                 (constexpr-folded). `accurate` is the default to preserve
+//                 baseline behavior for any consumer that has not opted in.
+//
+// Reference: KNITRO mode-system precedent (commercial NLP fast/accurate
+//            modes); Kraft 1988 §2.2.4 (SOC threshold semantics);
+//            N&W 2e Definition 12.1 (Lagrangian-gradient KKT).
+template <int N = dynamic_dimension, sqp_mode Mode = sqp_mode::accurate>
 struct kraft_slsqp_policy
 {
     using scalar_type = double;
+    static constexpr sqp_mode mode_ = Mode;
 
     template <int M>
-    using rebind = kraft_slsqp_policy<M>;
+    using rebind = kraft_slsqp_policy<M, Mode>;
+
+    static constexpr double default_soc_violation_threshold =
+        (Mode == sqp_mode::fast) ? 1e-2 : 1e-3;
+    static constexpr double default_gradient_tolerance =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-8;
+    static constexpr double default_step_tolerance_rel =
+        (Mode == sqp_mode::fast) ? 1e-6 : 1e-12;
+    static constexpr double default_feasibility_tolerance =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
 
     struct options_type
     {
@@ -535,7 +557,8 @@ struct kraft_slsqp_policy
             //
             // The correction step dp is added to p and the line search
             // is retried with the combined direction.
-            const double soc_violation_threshold = options.soc_violation_threshold.value_or(1e-3);
+            const double soc_violation_threshold =
+                options.soc_violation_threshold.value_or(default_soc_violation_threshold);
             if(!ls.success && constraint_viol_0 > soc_violation_threshold)
             {
                 if constexpr(constrained<P>)
@@ -907,6 +930,12 @@ private:
         return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
     }
 };
+
+template <int N = dynamic_dimension>
+using kraft_slsqp_policy_fast = kraft_slsqp_policy<N, sqp_mode::fast>;
+
+template <int N = dynamic_dimension>
+using kraft_slsqp_policy_accurate = kraft_slsqp_policy<N, sqp_mode::accurate>;
 
 }
 
