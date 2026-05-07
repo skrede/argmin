@@ -88,7 +88,7 @@ struct kraft_slsqp_policy
         // adds work without materially changing the search direction.
         // Default 1e-3 (Kraft 1988 §2.2.4 / N&W §18.3 conventional choice);
         // the prior 1e-8 effectively always fired the retry.
-        std::optional<double> soc_min_violation{};
+        std::optional<double> soc_violation_threshold{};
         line_search_options line_search{};             // Embedded line search params
         qp_options qp{};                               // QP subproblem params
         std::uint16_t stall_window{50};
@@ -535,8 +535,8 @@ struct kraft_slsqp_policy
             //
             // The correction step dp is added to p and the line search
             // is retried with the combined direction.
-            const double soc_min_violation = options.soc_min_violation.value_or(1e-3);
-            if(!ls.success && constraint_viol_0 > soc_min_violation)
+            const double soc_violation_threshold = options.soc_violation_threshold.value_or(1e-3);
+            if(!ls.success && constraint_viol_0 > soc_violation_threshold)
             {
                 if constexpr(constrained<P>)
                 {
