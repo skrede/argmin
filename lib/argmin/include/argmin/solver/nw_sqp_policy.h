@@ -61,7 +61,7 @@ struct nw_sqp_policy
         // exceeds this threshold. Below the threshold the linearization is
         // consistent enough that the SOC step adds work without materially
         // changing the search direction. Default 1e-3 applied at the call
-        // site (mirrors kraft_slsqp_policy::options_type::soc_min_violation).
+        // site (mirrors kraft_slsqp_policy::options_type::soc_violation_threshold).
         //
         // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (SOC threshold);
         //            N&W 2e §18.3 (Maratos effect).
@@ -554,11 +554,11 @@ struct nw_sqp_policy
         //
         // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (Maratos SOC);
         //            N&W 2e §18.3 (Maratos effect, second-order correction).
-        const double soc_min_violation =
+        const double soc_violation_threshold =
             options.soc_violation_threshold.value_or(1e-3);
         const double cv_now = detail::constraint_violation(s.c_eq, s.c_ineq);
 
-        if(!ls_success && cv_now > soc_min_violation && m > 0)
+        if(!ls_success && cv_now > soc_violation_threshold && m > 0)
         {
             Eigen::Vector<double, N> x_full = s.x + p;
             if(has_finite_bounds)
