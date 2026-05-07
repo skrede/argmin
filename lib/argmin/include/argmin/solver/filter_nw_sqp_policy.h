@@ -36,6 +36,7 @@
 #include "argmin/line_search/options.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
+#include "argmin/solver/sqp_mode.h"
 #include "argmin/types.h"
 
 #include "argmin/formulation/concepts.h"
@@ -52,13 +53,38 @@
 namespace argmin
 {
 
-template <int N = dynamic_dimension>
+// argmin variant: closed-set Mode NTTP threaded through the filter_nw_sqp
+//                 policy class template. `rebind<M>` preserves Mode on
+//                 N rebind. Per-mode tolerance + filter envelope defaults
+//                 are exposed as static-constexpr members; the filter
+//                 envelope sites read the per-mode default via
+//                 value_or(default_filter_gamma_*) (constexpr-folded).
+//                 `accurate` is the default to preserve baseline behavior
+//                 for any consumer that has not opted in.
+//
+// Reference: KNITRO mode-system precedent (commercial NLP fast/accurate
+//            modes); Wachter & Biegler 2006 Section 2.3 (filter envelope
+//            semantics, eq. 6); Fletcher & Leyffer 2002 Section 2.2
+//            (filter dominance ordering).
+template <int N = dynamic_dimension, sqp_mode Mode = sqp_mode::accurate>
 struct filter_nw_sqp_policy
 {
     using scalar_type = double;
+    static constexpr sqp_mode mode_ = Mode;
 
     template <int M>
-    using rebind = filter_nw_sqp_policy<M>;
+    using rebind = filter_nw_sqp_policy<M, Mode>;
+
+    static constexpr double default_filter_gamma_f =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-5;
+    static constexpr double default_filter_gamma_h =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-5;
+    static constexpr double default_gradient_tolerance =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-8;
+    static constexpr double default_step_tolerance_rel =
+        (Mode == sqp_mode::fast) ? 1e-6 : 1e-12;
+    static constexpr double default_feasibility_tolerance =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
 
     struct options_type
     {
@@ -252,8 +278,8 @@ struct filter_nw_sqp_policy
         // Reference: Wachter & Biegler 2006, eq. (8).
         double h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.filter.initialize(1e4 * std::max(1.0, h_0));
-        s.filter.set_envelope(options.gamma_f.value_or(1e-5),
-                              options.gamma_h.value_or(1e-5));
+        s.filter.set_envelope(options.gamma_f.value_or(default_filter_gamma_f),
+                              options.gamma_h.value_or(default_filter_gamma_h));
 
         // Initial multiplier estimate via least-squares (N&W eq. 18.15).
         if(m > 0)
@@ -993,8 +1019,8 @@ struct filter_nw_sqp_policy
         s.hessian.reset();
         const double h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.filter.initialize(1e4 * std::max(1.0, h_0));
-        s.filter.set_envelope(options.gamma_f.value_or(1e-5),
-                              options.gamma_h.value_or(1e-5));
+        s.filter.set_envelope(options.gamma_f.value_or(default_filter_gamma_f),
+                              options.gamma_h.value_or(default_filter_gamma_h));
         s.sigma = 1.0;
         s.lambda.setZero();
     }
@@ -1132,6 +1158,12 @@ private:
         return {s.x, detail::constraint_violation(s.c_eq, s.c_ineq), false, 0};
     }
 };
+
+template <int N = dynamic_dimension>
+using filter_nw_sqp_policy_fast = filter_nw_sqp_policy<N, sqp_mode::fast>;
+
+template <int N = dynamic_dimension>
+using filter_nw_sqp_policy_accurate = filter_nw_sqp_policy<N, sqp_mode::accurate>;
 
 }
 
