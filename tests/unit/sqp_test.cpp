@@ -1,5 +1,6 @@
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/basic_solver.h"
+#include "argmin/solver/sqp_mode.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/test_functions/rosenbrock.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -7,9 +8,12 @@
 #include <Eigen/Core>
 
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 
 using Catch::Approx;
@@ -723,4 +727,258 @@ TEST_CASE("nw_sqp converges on dynamic-dimension HS problems",
         CHECK(result.objective_value == Approx(-4.6818181818).margin(1e-3));
         CHECK(solver.constraint_violation() < 1e-6);
     }
+}
+
+// Parametric mode-dispatch coverage: HS071 / HS026 / HS007 / HS028 across
+// the nw_sqp_policy_accurate and nw_sqp_policy_fast aliases. Each row
+// applies per-mode tolerance defaults via the policy's static-constexpr
+// members at fixture construction. The accurate branch reproduces the
+// existing TEST_CASE bar bit-identically (where one exists for the
+// problem); the fast branch enforces a per-mode looser bar sized to the
+// fast tolerance budget. Per-problem wall-time TEST_CASE rows below assert
+// fast-mode wall time does not exceed accurate-mode wall time (with a
+// 10% headroom for single-shot timing noise).
+//
+// HS028 has no existing TEST_CASE in this file; the parametric row's
+// accurate bars mirror the kraft_slsqp HS028 acceptance margins
+// (tests/unit/kraft_slsqp_test.cpp) so the cross-policy bar shape is
+// uniform.
+//
+// HS071 carries SEED-015 (L1 merit infeasibility on nw_sqp): the existing
+// "nw_sqp HS071 mixed constraints" TEST_CASE intentionally locks a weak
+// `objective_value < 30.0` bar because the iterate parks at f approximately
+// 13.77 with cv approximately 6.5 -- below f* = 17.014 and unreachable
+// from the feasible region. Per-mode dispatch is not the fix mechanism
+// for SEED-015; both parametric branches mirror the existing weak bar
+// (accurate bit-identical; fast at least as loose by D-12).
+//
+// Reference: KNITRO commercial fast/accurate-mode precedent;
+//            N&W 2e Algorithm 18.3 (line-search SQP);
+//            N&W 2e Definition 12.1 (KKT primal feasibility).
+
+TEMPLATE_TEST_CASE_SIG(
+    "nw_sqp HS071 mixed constraints (parametric on mode)",
+    "[sqp][regression][mode]",
+    ((typename Policy), Policy),
+    nw_sqp_policy_accurate<hs071<>::problem_dimension>,
+    nw_sqp_policy_fast<hs071<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs071<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // SEED-015 weak bar (see TEST_CASE "nw_sqp HS071 mixed constraints"
+    // at sqp_test.cpp:319). nw_sqp's L1 merit admits an iter-0 step that
+    // satisfies the linearized inequality but nonlinearly violates the
+    // x1*x2*x3*x4 >= 25 constraint, parking the iterate at f approximately
+    // 13.77 with cv approximately 6.5. Both modes inherit this -- per-mode
+    // dispatch is not the SEED-015 fix mechanism. The if constexpr branches
+    // are intentionally content-identical here (both `< 30.0`) so the fast
+    // bar is at least as loose as the accurate bar (D-12 fast >= accurate
+    // slack); the dispatch is preserved for shape consistency with the
+    // other parametric rows.
+    CHECK(std::isfinite(result.objective_value));
+    if constexpr(policy_t::mode_ == sqp_mode::fast)
+    {
+        CHECK(result.objective_value < 30.0);
+    }
+    else
+    {
+        // Bit-identical to existing nw_sqp HS071 TEST_CASE bar.
+        CHECK(result.objective_value < 30.0);
+    }
+}
+
+TEMPLATE_TEST_CASE_SIG(
+    "nw_sqp HS026 (parametric on mode)",
+    "[sqp][regression][mode]",
+    ((typename Policy), Policy),
+    nw_sqp_policy_accurate<hs026<>::problem_dimension>,
+    nw_sqp_policy_fast<hs026<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs026 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS026 optimum: f* = 0 at (1, 1, 1).
+    if constexpr(policy_t::mode_ == sqp_mode::fast)
+    {
+        CHECK(result.objective_value < 1e-3);
+    }
+    else
+    {
+        // Bit-identical to existing nw_sqp HS026 TEST_CASE bar.
+        CHECK(result.objective_value < 1e-6);
+    }
+    CHECK(result.iterations <= 50);
+}
+
+TEMPLATE_TEST_CASE_SIG(
+    "nw_sqp HS007 (parametric on mode)",
+    "[sqp][regression][mode]",
+    ((typename Policy), Policy),
+    nw_sqp_policy_accurate<hs007<>::problem_dimension>,
+    nw_sqp_policy_fast<hs007<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs007 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS007 optimum: f* = -sqrt(3) approx -1.7320508.
+    if constexpr(policy_t::mode_ == sqp_mode::fast)
+    {
+        // Loosened margin sized to the fast tolerance budget; iter-count
+        // bounds are dropped on the fast row (per-mode iter trajectories
+        // diverge from the accurate baseline).
+        CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.05));
+    }
+    else
+    {
+        // Bit-identical to existing nw_sqp HS007 TEST_CASE bars.
+        CHECK(result.objective_value < -1.7320);
+        CHECK(result.iterations >= 6);
+        CHECK(result.iterations <= 12);
+    }
+}
+
+TEMPLATE_TEST_CASE_SIG(
+    "nw_sqp HS028 (parametric on mode)",
+    "[sqp][regression][mode]",
+    ((typename Policy), Policy),
+    nw_sqp_policy_accurate<hs028<>::problem_dimension>,
+    nw_sqp_policy_fast<hs028<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs028<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS028 optimum: f* = 0 at (0.5, -0.5, 0.5). Mirrors the kraft_slsqp
+    // HS028 parametric acceptance margins (kraft_slsqp_test.cpp).
+    if constexpr(policy_t::mode_ == sqp_mode::fast)
+    {
+        CHECK(result.objective_value == Approx(0.0).margin(1e-3));
+        CHECK(solver.constraint_violation() < 1e-2);
+    }
+    else
+    {
+        CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+        CHECK(solver.constraint_violation() < 1e-4);
+        CHECK(result.gradient_norm < 1e-4);
+    }
+}
+
+namespace
+{
+
+// Per-problem wall-time helper. Solves once with the supplied policy at
+// its per-mode constexpr tolerances and returns the wall delta in
+// seconds. Mirrors the kraft_slsqp_test.cpp solve_wall_seconds shape.
+template <typename Policy, typename Problem>
+double solve_wall_seconds(const Problem& problem, const Eigen::VectorXd& x0,
+                          std::uint32_t max_iters)
+{
+    solver_options opts;
+    opts.max_iterations = max_iters;
+    opts.set_gradient_threshold(Policy::default_gradient_tolerance);
+    opts.set_step_threshold(Policy::default_step_tolerance_rel);
+    opts.constraint_tolerance = Policy::default_feasibility_tolerance;
+    basic_solver solver{Policy{}, problem, x0, opts};
+    const auto t0 = std::chrono::steady_clock::now();
+    [[maybe_unused]] auto result = solver.solve(opts);
+    const auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration<double>(t1 - t0).count();
+}
+
+}
+
+// Per D-12: fast-mode wall <= accurate-mode wall on every parametric
+// problem. Single-shot timing carries jitter; a 10% headroom guards
+// against quiet-machine noise without relaxing the structural bound.
+
+TEST_CASE("nw_sqp _fast wall <= _accurate wall (HS071)",
+          "[sqp][mode][wall]")
+{
+    hs071<> problem;
+    const Eigen::VectorXd x0 = problem.initial_point();
+    using accurate_t = nw_sqp_policy_accurate<hs071<>::problem_dimension>;
+    using fast_t = nw_sqp_policy_fast<hs071<>::problem_dimension>;
+    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 200);
+    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 200);
+    INFO("HS071: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
+    CHECK(t_fast <= t_acc * 1.10);
+}
+
+TEST_CASE("nw_sqp _fast wall <= _accurate wall (HS026)",
+          "[sqp][mode][wall]")
+{
+    hs026 problem;
+    const Eigen::VectorXd x0 = problem.initial_point();
+    using accurate_t = nw_sqp_policy_accurate<hs026<>::problem_dimension>;
+    using fast_t = nw_sqp_policy_fast<hs026<>::problem_dimension>;
+    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 50);
+    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 50);
+    INFO("HS026: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
+    CHECK(t_fast <= t_acc * 1.10);
+}
+
+TEST_CASE("nw_sqp _fast wall <= _accurate wall (HS007)",
+          "[sqp][mode][wall]")
+{
+    hs007 problem;
+    const Eigen::VectorXd x0 = problem.initial_point();
+    using accurate_t = nw_sqp_policy_accurate<hs007<>::problem_dimension>;
+    using fast_t = nw_sqp_policy_fast<hs007<>::problem_dimension>;
+    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 50);
+    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 50);
+    INFO("HS007: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
+    CHECK(t_fast <= t_acc * 1.10);
+}
+
+TEST_CASE("nw_sqp _fast wall <= _accurate wall (HS028)",
+          "[sqp][mode][wall]")
+{
+    hs028<> problem;
+    const Eigen::VectorXd x0 = problem.initial_point();
+    using accurate_t = nw_sqp_policy_accurate<hs028<>::problem_dimension>;
+    using fast_t = nw_sqp_policy_fast<hs028<>::problem_dimension>;
+    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 200);
+    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 200);
+    INFO("HS028: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
+    CHECK(t_fast <= t_acc * 1.10);
 }

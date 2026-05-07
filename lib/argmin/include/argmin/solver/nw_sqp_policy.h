@@ -28,6 +28,7 @@
 #include "argmin/line_search/options.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
+#include "argmin/solver/sqp_mode.h"
 #include "argmin/types.h"
 
 #include "argmin/formulation/concepts.h"
@@ -44,13 +45,33 @@
 namespace argmin
 {
 
-template <int N = dynamic_dimension>
+// argmin variant: closed-set Mode NTTP threaded through nw_sqp_policy.
+//                 `rebind<M>` preserves Mode on N rebind. Per-mode
+//                 tolerance + SOC threshold defaults exposed as static-
+//                 constexpr members; the SOC-gate site uses the per-mode
+//                 default at the threshold check (constexpr-folded).
+//                 `accurate` is the default to preserve baseline behavior
+//                 for any consumer that has not opted in.
+//
+// Reference: KNITRO mode-system precedent (commercial NLP fast/accurate
+//            modes); N&W 2e Algorithm 18.3 (line-search SQP framework).
+template <int N = dynamic_dimension, sqp_mode Mode = sqp_mode::accurate>
 struct nw_sqp_policy
 {
     using scalar_type = double;
+    static constexpr sqp_mode mode_ = Mode;
 
     template <int M>
-    using rebind = nw_sqp_policy<M>;
+    using rebind = nw_sqp_policy<M, Mode>;
+
+    static constexpr double default_soc_violation_threshold =
+        (Mode == sqp_mode::fast) ? 1e-2 : 1e-3;
+    static constexpr double default_gradient_tolerance =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-8;
+    static constexpr double default_step_tolerance_rel =
+        (Mode == sqp_mode::fast) ? 1e-6 : 1e-12;
+    static constexpr double default_feasibility_tolerance =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
 
     struct options_type
     {
@@ -555,7 +576,7 @@ struct nw_sqp_policy
         // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (Maratos SOC);
         //            N&W 2e §18.3 (Maratos effect, second-order correction).
         const double soc_violation_threshold =
-            options.soc_violation_threshold.value_or(1e-3);
+            options.soc_violation_threshold.value_or(default_soc_violation_threshold);
         const double cv_now = detail::constraint_violation(s.c_eq, s.c_ineq);
 
         if(!ls_success && cv_now > soc_violation_threshold && m > 0)
@@ -897,6 +918,12 @@ private:
         return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
     }
 };
+
+template <int N = dynamic_dimension>
+using nw_sqp_policy_fast = nw_sqp_policy<N, sqp_mode::fast>;
+
+template <int N = dynamic_dimension>
+using nw_sqp_policy_accurate = nw_sqp_policy<N, sqp_mode::accurate>;
 
 }
 
