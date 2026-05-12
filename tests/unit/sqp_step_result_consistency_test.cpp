@@ -280,4 +280,84 @@ TEMPLATE_TEST_CASE_SIG(
                 REQUIRE(options.qp.tolerance == Catch::Approx(1e-12));
         }
     }
+
+    SECTION("Per-mode default_sigma_max constexpr published on N&W lineage")
+    {
+        // L1-merit penalty ceiling. 1e6 fast (tighter wall-time-budgeted
+        // cap), 1e10 accurate (NLopt-parity headroom). Published only on
+        // N&W lineage (nw_sqp + filter_nw_sqp); requires-expression gates
+        // the assertion off on Kraft lineage rows that do not publish it.
+        if constexpr(requires { Policy::default_sigma_max; })
+        {
+            if constexpr(Policy::mode_ == sqp_mode::fast)
+                REQUIRE(Policy::default_sigma_max == Catch::Approx(1e6));
+            else
+                REQUIRE(Policy::default_sigma_max == Catch::Approx(1e10));
+        }
+    }
+
+    SECTION("bfgs_skip_count observable on step_result.diagnostics")
+    {
+        // Drive the solver step-by-step on HS026 and aggregate the
+        // diagnostics.bfgs_skip_count counter across every step.
+        //
+        // Invariants asserted:
+        //   - Accurate mode (every policy) and Kraft lineage (every mode):
+        //     bfgs_skip_count == 0 across every step (the fast-mode skip
+        //     gate lives on N&W lineage only; accurate-mode preserves the
+        //     existing Powell-damped push semantics).
+        //   - Fast-mode N&W lineage (nw_sqp + filter_nw_sqp): the field is
+        //     observable as a std::size_t on every step; the cumulative
+        //     count is a non-negative number representable in std::size_t.
+        //     No positive lower bound is asserted because HS026 has a
+        //     trajectory where the curvature pair s^T y stays positive on
+        //     every accepted step at the converged optimum.
+        hs026<> problem;
+        auto x0 = problem.initial_point();
+        solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_step_threshold(1e-12);
+        opts.set_objective_threshold(1e-12);
+
+        basic_solver solver{Policy{}, problem, x0, opts};
+
+        std::size_t skip_total = 0;
+        for(int i = 0; i < 200; ++i)
+        {
+            auto sr = solver.step();
+            // Type-observability: the field must be an unsigned count.
+            static_assert(std::is_same_v<
+                decltype(sr.diagnostics.bfgs_skip_count), std::size_t>);
+            skip_total += sr.diagnostics.bfgs_skip_count;
+            if(sr.policy_status)
+                break;
+        }
+
+        // Kraft lineage and accurate mode never increment the counter.
+        if constexpr(std::is_same_v<Policy,
+                         kraft_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
+                  || std::is_same_v<Policy,
+                         kraft_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                  || std::is_same_v<Policy,
+                         filter_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
+                  || std::is_same_v<Policy,
+                         filter_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+        {
+            CHECK(skip_total == std::size_t{0});
+        }
+        else if constexpr(Policy::mode_ == sqp_mode::accurate)
+        {
+            // N&W lineage accurate mode: gate dispatches to the unchanged
+            // Powell-damped path; the skip branch is never taken.
+            CHECK(skip_total == std::size_t{0});
+        }
+        else
+        {
+            // Fast-mode N&W lineage: gate may or may not fire on the
+            // HS026 trajectory; only assert that the field is observable
+            // and non-negative (vacuous for std::size_t but documents the
+            // invariant).
+            CHECK(skip_total >= std::size_t{0});
+        }
+    }
 }

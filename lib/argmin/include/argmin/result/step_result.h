@@ -62,6 +62,15 @@ struct step_result
     struct solver_diagnostics
     {
         std::size_t bfgs_reset_count{0};
+        // Fast-mode BFGS-update skip counter. Increments at the policy-level
+        // hessian.push() guard whenever the curvature pair has s^T y <= 0
+        // and the policy mode dispatches to the skip branch (N&W Procedure
+        // 18.2 Powell damping is bypassed in fast mode in favor of leaving
+        // the prior B unchanged for wall-time-budgeted contexts).
+        //
+        // Reference: N&W 2e eq. 18.22-18.24 (Powell damping; accurate-mode
+        //            path is preserved unchanged in dense_ldl_bfgs::push).
+        std::size_t bfgs_skip_count{0};
     };
     solver_diagnostics diagnostics{};
 };

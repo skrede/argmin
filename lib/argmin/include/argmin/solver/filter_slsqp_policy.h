@@ -490,7 +490,10 @@ struct filter_slsqp_policy
                             .improved = false,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
-                            .diagnostics = { .bfgs_reset_count = reset_count },
+                            .diagnostics = {
+                                .bfgs_reset_count = reset_count,
+                                .bfgs_skip_count = 0,
+                            },
                         };
                     }
                 }
@@ -779,7 +782,10 @@ struct filter_slsqp_policy
                             .improved = s.objective_value < f_k,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
-                            .diagnostics = { .bfgs_reset_count = reset_count },
+                            .diagnostics = {
+                                .bfgs_reset_count = reset_count,
+                                .bfgs_skip_count = 0,
+                            },
                         };
                     }
 
@@ -822,7 +828,10 @@ struct filter_slsqp_policy
                 .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 .x_norm = s.x.norm(),
                 .policy_status = solver_status::stalled,
-                .diagnostics = { .bfgs_reset_count = reset_count },
+                .diagnostics = {
+                    .bfgs_reset_count = reset_count,
+                    .bfgs_skip_count = 0,
+                },
             };
         }
         s.hessian.reset();
@@ -1019,7 +1028,10 @@ struct filter_slsqp_policy
             .constraint_violation = h_new,
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
-            .diagnostics = { .bfgs_reset_count = reset_count },
+            .diagnostics = {
+                .bfgs_reset_count = reset_count,
+                .bfgs_skip_count = 0,
+            },
         };
     }
 

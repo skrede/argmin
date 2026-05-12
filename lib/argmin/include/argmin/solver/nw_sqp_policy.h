@@ -72,10 +72,86 @@ struct nw_sqp_policy
     static constexpr double default_feasibility_tolerance =
         (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
 
+    // Per-mode Armijo backtracking budget. The standalone Armijo budget is
+    // 10 for fast (wall-time minimization with early null-step fallback) and
+    // 40 for accurate (NLopt-parity sustained backtracking before declaring
+    // exhaustion). Mirrors kraft lineage per-mode budget.
+    //
+    // Reference: NLopt slsqp.c:1803-2189 (slsqpb_ outer line-search budget).
+    static constexpr std::uint16_t default_line_search_max_iterations =
+        (Mode == sqp_mode::fast) ? std::uint16_t{10} : std::uint16_t{40};
+
+    // Armijo sufficient-decrease parameter (Wolfe-condition convention).
+    // Held constant across both modes (no literature precedent for a
+    // per-mode value of c1).
+    //
+    // Reference: N&W 2e §3.1 (Wolfe-condition convention);
+    //            NLopt slsqp.c default c1 = 1e-4.
+    static constexpr double default_armijo_c1 = 1e-4;
+
+    // Armijo backtracking shrink factor. Fast mode uses 0.3 (faster
+    // geometric back-off so each Armijo iteration probes a more
+    // aggressively shorter step inside the smaller fast-mode budget);
+    // accurate mode keeps NLopt's 0.5.
+    //
+    // Reference: NLopt slsqp.c default rho = 0.5;
+    //            N&W 2e §3.5 (backtracking shrink factor range 0.1..0.9).
+    static constexpr double default_armijo_rho =
+        (Mode == sqp_mode::fast) ? 0.3 : 0.5;
+
+    // BFGS Hessian-reset retry cap on line-search exhaustion. Fast mode
+    // disables the retry (0 — fall straight through to null-step,
+    // prioritizing wall-time); accurate mode matches NLopt slsqp.c's
+    // ireset semantics with up to 5 retries.
+    //
+    // Reference: NLopt slsqp.c:1890-1895 (ireset retry pattern).
+    static constexpr std::size_t default_bfgs_reset_max =
+        (Mode == sqp_mode::fast) ? std::size_t{0} : std::size_t{5};
+
+    // QP inner solver iteration cap. Fast mode caps at 50 for a quicker
+    // bail-out on degenerate / cycling working sets; accurate mode matches
+    // NLopt slsqp.c's LSI/LSEI cascade convention of 200.
+    //
+    // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
+    static constexpr std::uint16_t default_qp_max_iterations =
+        (Mode == sqp_mode::fast) ? std::uint16_t{50} : std::uint16_t{200};
+
+    // QP convergence tolerance. Fast mode relaxes to 1e-8 (sub-iter
+    // savings on a problem whose outer-loop KKT residual will dominate);
+    // accurate mode matches NLopt's double-precision baseline at 1e-12.
+    //
+    // Reference: Kraft 1988 §3.5 (QP convergence acc^2 threshold).
+    static constexpr double default_qp_tolerance =
+        (Mode == sqp_mode::fast) ? 1e-8 : 1e-12;
+
+    // L1-merit penalty parameter ceiling. The bump_sigma_for_descent helper
+    // caps sigma at this value to prevent unbounded penalty growth on
+    // problems with degenerate constraint Jacobians. Fast mode clamps at
+    // 1e6 (tighter ceiling matching wall-time-budgeted contexts); accurate
+    // mode retains the 1e10 NLopt-parity headroom.
+    //
+    // Reference: N&W 2e §18.3 + Procedure 18.2 (L1-merit penalty cap).
+    static constexpr double default_sigma_max =
+        (Mode == sqp_mode::fast) ? 1e6 : 1e10;
+
     struct options_type
     {
-        line_search_options line_search{};  // Replaces hardcoded c1=1e-4, rho=0.5, max_iter=30
-        qp_options qp{};                   // QP subproblem params
+        // Embedded line-search params. Designated-initializer order follows
+        // line_search_options field-declaration order (c1, c2, rho,
+        // max_alpha, max_iterations); skipped designators (c2, max_alpha)
+        // keep their line_search_options-side defaults (0.9 and 1.0).
+        line_search_options line_search{
+            .c1 = default_armijo_c1,
+            .rho = default_armijo_rho,
+            .max_iterations = default_line_search_max_iterations,
+        };
+
+        // QP subproblem params. Brace-initialized from per-mode defaults so
+        // options.qp.{max_iterations, tolerance} reflect the current Mode.
+        qp_options qp{
+            .max_iterations = default_qp_max_iterations,
+            .tolerance = default_qp_tolerance,
+        };
         // Maratos second-order correction retry threshold. SOC fires when
         // Armijo rejects the trial step AND the constraint violation at x_k
         // exceeds this threshold. Below the threshold the linearization is
@@ -91,8 +167,8 @@ struct nw_sqp_policy
         // BFGS-reset retry cap on line-search exhaustion. On Armijo
         // failure (after SOC retry), the policy resets the BFGS Hessian
         // to identity and re-solves the QP, repeating up to
-        // bfgs_reset_max times before returning a null-step. Default 5
-        // matches NLopt slsqp.c:1890-1895 ireset semantics.
+        // bfgs_reset_max times before returning a null-step. Per-mode
+        // brace-init from default_bfgs_reset_max (0 fast / 5 accurate).
         //
         // Reference: PITFALLS section L (line-search exhaustion fallback);
         //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
@@ -100,7 +176,7 @@ struct nw_sqp_policy
         //
         // argmin variant: per-policy options field; cascade-free
         //                 (no new solver_status enum entry).
-        std::size_t bfgs_reset_max{5};
+        std::size_t bfgs_reset_max{default_bfgs_reset_max};
     };
 
     options_type options{};
@@ -294,6 +370,11 @@ struct nw_sqp_policy
         //                 enum entry).
         std::size_t reset_count = 0;
         const std::size_t reset_max = options.bfgs_reset_max;
+        // Fast-mode BFGS-update skip counter. Increments on the policy-level
+        // hessian.push() guard whenever the curvature pair has s^T y <= 0
+        // and the policy mode dispatches to the skip branch (the Powell-
+        // damped helper path is bypassed). Always zero in accurate mode.
+        std::size_t bfgs_skip_count = 0;
 
         // Loop-carried variables that survive the retry block into the
         // post-loop accept-step block. The cold-start sigma calibration
@@ -486,7 +567,8 @@ struct nw_sqp_policy
                 //                 identical for grad_f_dot_p >= 0 (the only branch reached
                 //                 here, since dphi0 >= 0 implies grad_f_dot_p >= sigma * cv > 0).
                 s.sigma = argmin::detail::bump_sigma_for_descent<double>(
-                    s.sigma, grad_f_dot_p, cv, /*h4=*/1.0, /*sigma_max=*/1e10);
+                    s.sigma, grad_f_dot_p, cv, /*h4=*/1.0,
+                    /*sigma_max=*/default_sigma_max);
                 phi0 = detail::l1_merit(s.objective_value,
                                         s.c_eq, s.c_ineq, s.sigma);
                 dphi0 = grad_f_dot_p - s.sigma * cv;
@@ -773,12 +855,30 @@ struct nw_sqp_policy
         // N&W eq. 18.22-18.24 internally, but the explicit guard here
         // keeps the policy-step semantics legible.
         //
+        // Fast-mode dispatch: on non-positive curvature the push() is
+        // skipped (Powell damping bypassed) and bfgs_skip_count is
+        // incremented for surfacing on step_result.diagnostics. Accurate
+        // mode retains the existing semantics (Powell damping inside
+        // dense_ldl_bfgs::push when s^T y > 0 and sk.norm() > 1e-15).
+        //
         // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
-        //            N&W Procedure 18.2 damping guard.
+        //            N&W Procedure 18.2 damping guard;
+        //            N&W eq. 18.22-18.24 (Powell damping, accurate path).
         const double sTy = sk.dot(yk);
-        if(sk.norm() > 1e-15 && sTy > 0.0)
+        if(sk.norm() > 1e-15)
         {
-            s.hessian.push(sk, yk);
+            if constexpr (Mode == sqp_mode::fast)
+            {
+                if(sTy > 0.0)
+                    s.hessian.push(sk, yk);
+                else
+                    ++bfgs_skip_count;
+            }
+            else
+            {
+                if(sTy > 0.0)
+                    s.hessian.push(sk, yk);
+            }
         }
 
         // --- 7. Update multipliers and iteration ---
@@ -846,7 +946,10 @@ struct nw_sqp_policy
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
-            .diagnostics = { .bfgs_reset_count = reset_count },
+            .diagnostics = {
+                .bfgs_reset_count = reset_count,
+                .bfgs_skip_count = bfgs_skip_count,
+            },
         };
     }
 

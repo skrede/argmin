@@ -952,7 +952,10 @@ struct kraft_slsqp_policy
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
-            .diagnostics = { .bfgs_reset_count = reset_count },
+            .diagnostics = {
+                .bfgs_reset_count = reset_count,
+                .bfgs_skip_count = 0,
+            },
         };
     }
 
