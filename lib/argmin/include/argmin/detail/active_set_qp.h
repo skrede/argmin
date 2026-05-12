@@ -23,6 +23,7 @@
 #include <Eigen/Cholesky>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <utility>
@@ -398,6 +399,13 @@ public:
     // m >= n branch in solve_equality_subproblem returns p = 0 only
     // under that precondition).
     //
+    // Preconditions:
+    //   - A_eq is of shape m_eq x n with m_eq <= n; over-determined
+    //     equality systems are unsupported and will assert in debug
+    //     builds (the phase-1 thin-QR projection writes into a buffer
+    //     of size n and uses a topLeftCorner(m_eq, m_eq) triangular
+    //     view, both of which require m_eq <= n).
+    //
     // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
     template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
     qp_result<Scalar, N, M> solve(
@@ -453,6 +461,14 @@ public:
         // assumes feasible x0; this fix internalizes the precondition.
         if(m_eq > 0)
         {
+            // Precondition: A_eq must be of shape m_eq x n with m_eq <= n.
+            // The thin QR factorization of A_eq.transpose() packs R into an
+            // (n x m_eq) matrix; topLeftCorner(m_eq, m_eq) is well-defined
+            // only when m_eq <= n. Callers that construct over-determined
+            // problems (m_eq > n) hit UB without this guard.
+            assert(m_eq <= n
+                   && "active_set_qp_solver: m_eq must be <= n for phase-1 feasibility projection");
+
             const auto residual = (b_eq - A_eq * x).eval();
             if(residual.cwiseAbs().maxCoeff() > tol)
             {
