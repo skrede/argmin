@@ -27,14 +27,109 @@
 #include "argmin/solver/basic_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/test_functions/hock_schittkowski.h"
+#include "argmin/test_functions/problem_class.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <type_traits>
+#include <limits>
+#include <cmath>
 
 using namespace argmin;
+
+namespace
+{
+
+// NaN-emitting fixture for the Armijo-NaN-recovery gate.
+//
+// Objective: f(x) = 1000 * sqrt(x[0] - 1).
+// Equality:  c(x) = x[1] = 0.
+// Domain:    x[0] >= 1 (objective natural domain).
+// Start at x0 = (1.001, 0) so the initial f is finite (sqrt(0.001) * 1000
+// ~ 31.6) but the gradient is huge (~1.58e4): the first QP step on
+// B = I is a massive overshoot p[0] ~ -1.58e4 that drives the trial
+// iterate x[0] = 1.001 - alpha * 1.58e4 deep into the negative-arg-of-
+// sqrt region for any alpha >= 1e-4. The Armijo backtracker
+// (line_search/armijo.h) and the four policies' inline-merit /
+// inline-filter backtracking loops MUST observe f_trial = NaN, increment
+// nan_eval_count, and continue shrinking alpha rather than letting the
+// NaN propagate into the merit / filter comparison. The gate makes the
+// NaN recoverable: alpha shrinks until the trial point lies in the
+// natural domain.
+//
+// Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+//            (NaN detection model; argmin variant is Armijo-only).
+template <typename Scalar = double>
+struct sqrt_nan_emitter
+{
+    static constexpr int problem_dimension = 2;
+    static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 1;
+
+    [[nodiscard]] int dimension() const { return 2; }
+    [[nodiscard]] int num_equality() const { return 1; }
+    [[nodiscard]] int num_inequality() const { return 0; }
+
+    [[nodiscard]] Scalar value(
+        const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        using std::sqrt;
+        return Scalar(1000) * sqrt(x[0] - Scalar(1));
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        using std::sqrt;
+        const Scalar arg = x[0] - Scalar(1);
+        if(arg > Scalar(0))
+            g[0] = Scalar(500) / sqrt(arg);
+        else
+            g[0] = std::numeric_limits<Scalar>::quiet_NaN();
+        g[1] = Scalar(0);
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x,
+                     auto& c) const
+    {
+        c[0] = x[1];
+    }
+
+    void constraint_jacobian(
+        const Eigen::Vector<Scalar, problem_dimension>& /*x*/,
+        auto& J) const
+    {
+        J(0, 0) = Scalar(0);
+        J(0, 1) = Scalar(1);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension>
+    lower_bounds() const
+    {
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, -inf);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension>
+    upper_bounds() const
+    {
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, inf);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension>
+    initial_point() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> x;
+        x[0] = Scalar(1.001);
+        x[1] = Scalar(0);
+        return x;
+    }
+};
+
+}
 
 TEMPLATE_TEST_CASE_SIG(
     "SQP step_result consistency across line-search SQP family x mode",
@@ -359,5 +454,65 @@ TEMPLATE_TEST_CASE_SIG(
             // invariant).
             CHECK(skip_total >= std::size_t{0});
         }
+    }
+
+    SECTION("nan_eval_count fires and Armijo recovers from NaN trial-iterates")
+    {
+        // Drive the solver step-by-step on the sqrt-nan-emitter fixture.
+        // The initial QP step is a massive overshoot (gradient ~1.58e4
+        // at x[0] = 1.001) that pulls trial iterates into x[0] < 1, the
+        // negative-arg-of-sqrt region where the objective returns NaN.
+        // The Armijo backtracker (line_search/armijo.h for kraft; inline
+        // hand-rolled loops for nw_sqp / filter_slsqp / filter_nw_sqp)
+        // MUST treat the non-finite evaluation as a backtrack trigger,
+        // increment diagnostics.nan_eval_count, shrink alpha, and continue.
+        //
+        // Invariants asserted on every policy x mode row:
+        //   - At least one step's diagnostics.nan_eval_count is > 0
+        //     (the recovery gate fires on the first probe into the bad
+        //     domain).
+        //   - The step that observes nan_eval_count > 0 does NOT return
+        //     a non-finite objective_value: the gate prevents the NaN
+        //     from propagating to the accepted iterate.
+        //   - No step's objective_value is non-finite (the BFGS
+        //     curvature pair s.bufs.sk / yk is constructed from finite
+        //     gradients at finite iterates only).
+        sqrt_nan_emitter<> problem;
+        auto x0 = problem.initial_point();
+        solver_options opts;
+        opts.max_iterations = 50;
+        opts.set_step_threshold(1e-12);
+        opts.set_objective_threshold(1e-12);
+
+        basic_solver solver{Policy{}, problem, x0, opts};
+
+        std::size_t nan_total = 0;
+        bool any_finite_step = false;
+        bool any_nonfinite_step = false;
+        for(int i = 0; i < 50; ++i)
+        {
+            auto sr = solver.step();
+            // Type-observability.
+            static_assert(std::is_same_v<
+                decltype(sr.diagnostics.nan_eval_count), std::size_t>);
+            nan_total += sr.diagnostics.nan_eval_count;
+            if(std::isfinite(sr.objective_value))
+                any_finite_step = true;
+            else
+                any_nonfinite_step = true;
+            if(sr.policy_status)
+                break;
+        }
+
+        // The gate fires across all 8 cells: kraft via the armijo()
+        // free function NaN check; nw_sqp / filter_slsqp / filter_nw_sqp
+        // via the inline hand-rolled-LS gates. Both modes enable the
+        // gate per the policy decision to never silently consume NaN.
+        CHECK(nan_total > std::size_t{0});
+        // Recovery: no accepted step propagates a NaN into the
+        // reported objective_value (gate shrinks alpha and retries
+        // rather than letting NaN cross the Armijo / filter comparison).
+        CHECK(any_finite_step);
+        CHECK(!any_nonfinite_step);
     }
 }

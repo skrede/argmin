@@ -71,6 +71,19 @@ struct step_result
         // Reference: N&W 2e eq. 18.22-18.24 (Powell damping; accurate-mode
         //            path is preserved unchanged in dense_ldl_bfgs::push).
         std::size_t bfgs_skip_count{0};
+        // Armijo NaN/Inf recovery counter. Increments whenever the
+        // Armijo backtracker — or any policy's hand-rolled inline
+        // backtracking loop — observes a non-finite trial-iterate
+        // evaluation and responds by shrinking alpha and continuing
+        // rather than propagating the tainted value through the merit
+        // comparison. Aggregated across the main line search and any
+        // second-order-correction retry. Both modes enable the gate —
+        // non-finite trial-point evaluations should never be silently
+        // consumed.
+        //
+        // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+        //            (NaN detection model; argmin variant is Armijo-only).
+        std::size_t nan_eval_count{0};
     };
     solver_diagnostics diagnostics{};
 };

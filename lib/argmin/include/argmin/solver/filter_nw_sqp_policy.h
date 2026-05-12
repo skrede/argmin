@@ -416,6 +416,17 @@ struct filter_nw_sqp_policy
         // and the policy mode dispatches to the skip branch (the Powell-
         // damped helper path is bypassed). Always zero in accurate mode.
         std::size_t bfgs_skip_count = 0;
+        // Armijo NaN/Inf recovery counter for the hand-rolled main line
+        // search. filter_nw_sqp's SOC retry is a single-shot acceptance
+        // (no backtracking loop), so only the main LS contributes here.
+        // Incremented inline when a trial-iterate evaluation returns
+        // non-finite f_trial or constraint values; the backtracker shrinks
+        // alpha and continues rather than passing NaN through the filter
+        // dominance / L1 merit comparisons. Both modes enable the gate.
+        //
+        // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+        //            (NaN detection model; argmin variant is Armijo-only).
+        std::size_t nan_eval_count = 0;
 
         // Loop-carried variables that survive the retry block into the
         // post-loop accept-step block. The only path that exits the loop
@@ -651,6 +662,26 @@ struct filter_nw_sqp_policy
             f_trial = s.problem->value(x_trial);
             if(m > 0)
                 s.problem->constraints(x_trial, s.bufs.c_trial_buf);
+
+            // NaN/Inf recovery: parallel to line_search/armijo.h's gate
+            // for the hand-rolled inline filter + merit path. If the
+            // objective or any constraint returns non-finite on this
+            // trial iterate, shrink alpha and continue rather than
+            // passing NaN through the filter dominance / Armijo
+            // comparisons below (where IEEE-754 ordered comparisons
+            // yield false regardless of descent). Both modes enable the
+            // gate.
+            //
+            // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+            //            (NaN detection model; argmin variant is Armijo-only).
+            if(!std::isfinite(f_trial)
+               || (m > 0 && !s.bufs.c_trial_buf.allFinite()))
+            {
+                ++nan_eval_count;
+                alpha *= rho_shrink;
+                continue;
+            }
+
             // Inline L1 constraint violation and L1 merit on VectorBlock
             // head()/tail() expressions to avoid the per-backtrack VectorXd
             // materialization the helper signatures would force. Identity:
@@ -840,6 +871,7 @@ struct filter_nw_sqp_policy
                     .diagnostics = {
                         .bfgs_reset_count = reset_count,
                         .bfgs_skip_count = bfgs_skip_count,
+                        .nan_eval_count = nan_eval_count,
                     },
                 };
             }
@@ -911,6 +943,7 @@ struct filter_nw_sqp_policy
                 .diagnostics = {
                     .bfgs_reset_count = reset_count,
                     .bfgs_skip_count = bfgs_skip_count,
+                    .nan_eval_count = nan_eval_count,
                 },
             };
         }
@@ -1075,6 +1108,7 @@ struct filter_nw_sqp_policy
             .diagnostics = {
                 .bfgs_reset_count = reset_count,
                 .bfgs_skip_count = bfgs_skip_count,
+                .nan_eval_count = nan_eval_count,
             },
         };
     }

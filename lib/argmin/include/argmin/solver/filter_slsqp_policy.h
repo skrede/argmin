@@ -406,6 +406,19 @@ struct filter_slsqp_policy
         //                 is cascade-free (no new solver_status enum entry).
         std::size_t reset_count = 0;
         const std::size_t reset_max = options.bfgs_reset_max;
+        // Armijo NaN/Inf recovery counter aggregated across the main inline
+        // filter line search and the SOC retry inline loop. filter_slsqp
+        // hand-rolls the backtracking loops (does not call
+        // line_search/armijo.h) because the inline filter-acceptance + Armijo
+        // f-descent pattern avoids per-backtrack VectorXd materialisation;
+        // this counter mirrors armijo()'s diagnostic on the hand-rolled
+        // paths. Incremented inline when a trial-iterate evaluation returns
+        // non-finite f_trial or constraint values; the backtracker shrinks
+        // alpha and continues. Both modes enable the gate.
+        //
+        // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+        //            (NaN detection model; argmin variant is Armijo-only).
+        std::size_t nan_eval_count = 0;
 
         // Loop-carried variables that survive the retry block into the
         // post-loop accept-step block. Restoration-success returns inline
@@ -493,6 +506,7 @@ struct filter_slsqp_policy
                             .diagnostics = {
                                 .bfgs_reset_count = reset_count,
                                 .bfgs_skip_count = 0,
+                                .nan_eval_count = nan_eval_count,
                             },
                         };
                     }
@@ -599,11 +613,13 @@ struct filter_slsqp_policy
             f_trial = s.problem->value(s.bufs.x_trial_buf);
             ++s.line_search_calls;
 
+            bool c_finite = true;
             if constexpr(constrained<P>)
             {
                 if(s.n_eq + s.n_ineq > 0)
                 {
                     s.problem->constraints(s.bufs.x_trial_buf, s.bufs.c_trial_buf);
+                    c_finite = s.bufs.c_trial_buf.allFinite();
                     // Inline L1 constraint violation via head/tail VectorBlock
                     // expressions to avoid a per-backtrack VectorXd
                     // materialization. Equivalent to
@@ -622,6 +638,23 @@ struct filter_slsqp_policy
             else
             {
                 h_trial = 0.0;
+            }
+
+            // NaN/Inf recovery: parallel to line_search/armijo.h's gate
+            // for the hand-rolled inline-filter / inline-merit path. If the
+            // objective or any constraint returns non-finite on this trial
+            // iterate, shrink alpha and continue rather than passing
+            // NaN/Inf into the filter dominance / Armijo comparison below
+            // (where the IEEE-754 ordered comparisons would yield false
+            // regardless of descent). Both modes enable the gate.
+            //
+            // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+            //            (NaN detection model; argmin variant is Armijo-only).
+            if(!std::isfinite(f_trial) || !c_finite)
+            {
+                ++nan_eval_count;
+                alpha *= rho;
+                continue;
             }
 
             if(f_type)
@@ -695,9 +728,11 @@ struct filter_slsqp_policy
                             ++s.line_search_calls;
 
                             double h_soc = 0.0;
+                            bool c_soc_finite = true;
                             if(s.n_eq + s.n_ineq > 0)
                             {
                                 s.problem->constraints(s.bufs.x_trial_buf, s.bufs.c_trial_buf);
+                                c_soc_finite = s.bufs.c_trial_buf.allFinite();
                                 // Inline L1 constraint violation via head/tail
                                 // VectorBlock expressions to avoid a per-backtrack
                                 // VectorXd materialization (see main LS).
@@ -705,6 +740,17 @@ struct filter_slsqp_policy
                                     h_soc += s.bufs.c_trial_buf.head(s.n_eq).cwiseAbs().sum();
                                 if(s.n_ineq > 0)
                                     h_soc += (-s.bufs.c_trial_buf.tail(s.n_ineq)).cwiseMax(0.0).sum();
+                            }
+
+                            // NaN/Inf recovery on the SOC retry path
+                            // (parallel to the main-LS inline gate above).
+                            // Shrink alpha_soc and continue on non-finite
+                            // trial-iterate evaluation.
+                            if(!std::isfinite(f_soc) || !c_soc_finite)
+                            {
+                                ++nan_eval_count;
+                                alpha_soc *= rho;
+                                continue;
                             }
 
                             bool soc_accepted = false;
@@ -785,6 +831,7 @@ struct filter_slsqp_policy
                             .diagnostics = {
                                 .bfgs_reset_count = reset_count,
                                 .bfgs_skip_count = 0,
+                                .nan_eval_count = nan_eval_count,
                             },
                         };
                     }
@@ -831,6 +878,7 @@ struct filter_slsqp_policy
                 .diagnostics = {
                     .bfgs_reset_count = reset_count,
                     .bfgs_skip_count = 0,
+                    .nan_eval_count = nan_eval_count,
                 },
             };
         }
@@ -1031,6 +1079,7 @@ struct filter_slsqp_policy
             .diagnostics = {
                 .bfgs_reset_count = reset_count,
                 .bfgs_skip_count = 0,
+                .nan_eval_count = nan_eval_count,
             },
         };
     }
