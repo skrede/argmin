@@ -585,3 +585,24 @@ if(ARGMIN_BENCH_IPOPT)
         message(STATUS "PkgConfig not available, skipping IPOPT benchmarks")
     endif()
 endif()
+
+# Fast-vs-accurate wall-budget empirical sweep driver. Iterates the
+# 15 (policy x problem) wall-comparison cells covered by the SQP unit
+# tests, measures per-rep (t_fast, t_acc, ratio) across 10 repetitions
+# per cell, and emits a JSON document on stdout with top-level
+# git_sha / timestamp_utc / host_info metadata. Standalone main()
+# (no Google Benchmark dependency).
+add_executable(wall_budget_sweep wall_budget_sweep.cpp)
+target_link_libraries(wall_budget_sweep PRIVATE argmin::argmin)
+
+target_compile_options(wall_budget_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(wall_budget_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()

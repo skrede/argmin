@@ -748,6 +748,7 @@ TEST_CASE("kraft_slsqp _fast wall <= _accurate wall (HS071)",
     const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 200);
     const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 200);
     INFO("HS071: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
+    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
     CHECK(t_fast <= t_acc * 1.60);
 }
 
@@ -761,6 +762,7 @@ TEST_CASE("kraft_slsqp _fast wall <= _accurate wall (HS026)",
     const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 50);
     const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 50);
     INFO("HS026: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
+    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
     CHECK(t_fast <= t_acc * 1.60);
 }
 
@@ -774,5 +776,6 @@ TEST_CASE("kraft_slsqp _fast wall <= _accurate wall (HS028)",
     const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 200);
     const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 200);
     INFO("HS028: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
+    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
     CHECK(t_fast <= t_acc * 1.60);
 }
