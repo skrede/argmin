@@ -250,6 +250,7 @@ struct kraft_slsqp_policy
         // default_multiplier_reest_every_k constexpr above). Wired for
         // API uniformity with the N&W lineage; behavioral no-op on
         // Kraft's QP-native KKT-leg.
+        // A value of 0 is treated as 1 (re-estimate every step) by the read-site clamp.
         std::size_t multiplier_reest_every_k{default_multiplier_reest_every_k};
     };
 

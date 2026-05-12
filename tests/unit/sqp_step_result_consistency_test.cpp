@@ -547,6 +547,56 @@ TEMPLATE_TEST_CASE_SIG(
         }
     }
 
+    SECTION("multiplier_reest_every_k = 0 clamps to 1 (no SIGFPE)")
+    {
+        // The read-site clamp on the three N&W-lineage policies that
+        // consume options.multiplier_reest_every_k as a modulo divisor
+        // (nw_sqp, filter_slsqp, filter_nw_sqp) maps a user-supplied
+        // value of 0 to 1 ("re-estimate every step"). Without the
+        // clamp the modulo would be integer-divide-by-zero (SIGFPE on
+        // x86-64). Setting k=0 must produce iter count, final objective,
+        // and gradient_norm equivalent to a k=1 reference run on the
+        // same problem.
+        //
+        // Kraft rows do not consume the field (documented no-op), so
+        // k=0 and k=1 both leave the QP-native KKT-leg unchanged and
+        // the equivalence holds trivially.
+        if constexpr(requires { typename Policy::options_type{}.multiplier_reest_every_k; })
+        {
+            using Problem = hs028<>;
+            using PolicyN = typename Policy::template rebind<
+                Problem::problem_dimension>;
+            Problem problem;
+            auto x0 = problem.initial_point();
+            solver_options opts;
+            opts.max_iterations = 200;
+            opts.set_step_threshold(1e-12);
+            opts.set_objective_threshold(1e-12);
+
+            // Reference k=1 run.
+            typename PolicyN::options_type policy_opts_k1{};
+            policy_opts_k1.multiplier_reest_every_k = std::size_t{1};
+            basic_solver solver_k1{
+                PolicyN{}, problem, x0, opts, policy_opts_k1};
+            auto result_k1 = solver_k1.solve(opts);
+
+            // k=0 must clamp to 1 at the read site (no SIGFPE; equivalent
+            // step_result to the k=1 reference).
+            typename PolicyN::options_type policy_opts_k0{};
+            policy_opts_k0.multiplier_reest_every_k = std::size_t{0};
+            basic_solver solver_k0{
+                PolicyN{}, problem, x0, opts, policy_opts_k0};
+            auto result_k0 = solver_k0.solve(opts);
+
+            REQUIRE(result_k0.iterations == result_k1.iterations);
+            REQUIRE(result_k0.objective_value
+                    == result_k1.objective_value);
+            CHECK(result_k0.gradient_norm
+                  == Catch::Approx(result_k1.gradient_norm));
+            CHECK(result_k0.status == result_k1.status);
+        }
+    }
+
     SECTION("nan_eval_count fires and Armijo recovers from NaN trial-iterates")
     {
         // Drive the solver step-by-step on the sqrt-nan-emitter fixture.

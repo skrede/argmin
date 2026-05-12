@@ -206,6 +206,7 @@ struct nw_sqp_policy
         // (s.iteration % k == 0) the post-step KKT-leg invokes the
         // active-set LS helper; otherwise the prior step's
         // s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf are reused.
+        // A value of 0 is treated as 1 (re-estimate every step) by the read-site clamp.
         std::size_t multiplier_reest_every_k{default_multiplier_reest_every_k};
     };
 
@@ -1001,7 +1002,14 @@ struct nw_sqp_policy
         // unconditional re-estimation.
         if(m > 0)
         {
-            if(s.iteration % options.multiplier_reest_every_k == 0)
+            // Clamp the user-supplied stride to >= 1 at the read site.
+            // A value of 0 maps to 1 (re-estimate every step) rather than
+            // triggering integer-divide-by-zero (SIGFPE on x86-64). The
+            // default-constructed value is non-zero (1 accurate / 5 fast),
+            // so this clamp only engages when a caller explicitly assigns 0.
+            const std::size_t reest_stride = std::max<std::size_t>(
+                options.multiplier_reest_every_k, std::size_t{1});
+            if(s.iteration % reest_stride == 0)
             {
                 s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
                 s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
