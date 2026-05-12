@@ -24,11 +24,16 @@
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
+
 #include "argmin/options/qp_options.h"
+
 #include "argmin/line_search/options.h"
+
 #include "argmin/result/step_result.h"
+
 #include "argmin/solver/options.h"
 #include "argmin/solver/sqp_mode.h"
+
 #include "argmin/types.h"
 
 #include "argmin/formulation/concepts.h"
@@ -290,8 +295,6 @@ struct nw_sqp_policy
         static_assert(constrained<Problem>,
                       "nw_sqp_policy requires constrained<Problem>");
 
-        constexpr int M = state_type<Problem>::M;
-
         const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
@@ -372,8 +375,6 @@ struct nw_sqp_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        constexpr int M = state_type<P>::M;
-
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
 
@@ -1085,8 +1086,6 @@ struct nw_sqp_policy
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
-        constexpr int M = state_type<P>::M;
-
         const int n = static_cast<int>(x0.size());
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
@@ -1125,22 +1124,6 @@ private:
                 return true;
         }
         return false;
-    }
-
-    template <typename P>
-    static double lagrangian_gradient_norm(const state_type<P>& s)
-    {
-        constexpr int M = state_type<P>::M;
-
-        const int n = static_cast<int>(s.x.size());
-        const int m = s.n_eq + s.n_ineq;
-        if(m == 0)
-            return s.g.norm();
-
-        Eigen::Matrix<double, Eigen::Dynamic, N> A(m, n);
-        if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
-        if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
-        return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
     }
 };
 

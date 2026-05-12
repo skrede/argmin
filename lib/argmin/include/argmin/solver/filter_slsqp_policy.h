@@ -35,11 +35,16 @@
 #include "argmin/detail/sqp_common.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
+
 #include "argmin/options/qp_options.h"
+
 #include "argmin/line_search/options.h"
+
 #include "argmin/result/step_result.h"
+
 #include "argmin/solver/options.h"
 #include "argmin/solver/sqp_mode.h"
+
 #include "argmin/types.h"
 
 #include "argmin/formulation/concepts.h"
@@ -490,7 +495,6 @@ struct filter_slsqp_policy
         double p_norm = p.norm();
         bool zero_step_restoration_failed = false;
         bool accepted = false;
-        bool main_path_restoration_failed = false;
         if(p_norm < 1e-15)
         {
             // Zero step with high constraint violation: attempt restoration
@@ -880,7 +884,6 @@ struct filter_slsqp_policy
 
                     // Restoration also failed: fall through to the
                     // BFGS-reset retry block at the bottom of the loop.
-                    main_path_restoration_failed = true;
                 }
             }
         }
@@ -896,14 +899,13 @@ struct filter_slsqp_policy
         // updates_since_reset_) and retry the QP with B = I. On
         // exhaustion of the cap, return a null-step with
         // diagnostics.bfgs_reset_count populated. Reaches this block on
-        // either zero_step_restoration_failed or main_path_restoration_failed
-        // (or unconstrained / m == 0 fall-through where no restoration was
-        // applicable).
+        // zero-step restoration failure, main-path restoration failure,
+        // or unconstrained / m == 0 fall-through where no restoration
+        // was applicable.
         //
         // Reference: NLopt slsqp.c:1890-1895 (ireset retry parity);
         //            N&W 2e Section 3.3 (recovery from non-descent);
         //            dense_ldl_bfgs.h:86-105 (reset semantics).
-        (void)main_path_restoration_failed;  // documents reset trigger
         if(reset_count >= reset_max)
         {
             ++s.iteration;

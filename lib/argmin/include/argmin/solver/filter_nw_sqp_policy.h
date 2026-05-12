@@ -32,11 +32,16 @@
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/filter_acceptance.h"
 #include "argmin/detail/filter_restoration.h"
+
 #include "argmin/options/qp_options.h"
+
 #include "argmin/line_search/options.h"
+
 #include "argmin/result/step_result.h"
+
 #include "argmin/solver/options.h"
 #include "argmin/solver/sqp_mode.h"
+
 #include "argmin/types.h"
 
 #include "argmin/formulation/concepts.h"

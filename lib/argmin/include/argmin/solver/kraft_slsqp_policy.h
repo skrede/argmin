@@ -50,12 +50,17 @@
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/sqp_common.h"
 #include "argmin/detail/bound_projection.h"
-#include "argmin/line_search/armijo.h"
+
 #include "argmin/options/qp_options.h"
+
+#include "argmin/line_search/armijo.h"
 #include "argmin/line_search/options.h"
+
 #include "argmin/result/step_result.h"
+
 #include "argmin/solver/options.h"
 #include "argmin/solver/sqp_mode.h"
+
 #include "argmin/types.h"
 
 #include "argmin/formulation/concepts.h"
