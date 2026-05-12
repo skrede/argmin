@@ -95,10 +95,86 @@ struct filter_slsqp_policy
     static constexpr double default_soc_violation_threshold =
         (Mode == sqp_mode::fast) ? 1e-2 : 1e-3;
 
+    // Per-mode Armijo backtracking budget. NLopt slsqp.c's slsqpb_ outer
+    // loop (slsqp.c:1803-2189) interleaves an inner line search whose
+    // budget tracks the outer iter limit by convention; the standalone
+    // Armijo budget here is 10 for fast (wall-time minimization with
+    // early null-step / restoration fallback) and 40 for accurate
+    // (NLopt-parity sustained backtracking before declaring exhaustion).
+    //
+    // Reference: NLopt slsqp.c:1803-2189 (slsqpb_ outer line-search budget).
+    static constexpr std::uint16_t default_line_search_max_iterations =
+        (Mode == sqp_mode::fast) ? std::uint16_t{10} : std::uint16_t{40};
+
+    // Armijo sufficient-decrease parameter. The 1e-4 default is the
+    // Wolfe-condition convention used by NLopt slsqp.c and is held
+    // constant across both modes.
+    //
+    // Reference: N&W 2e §3.1 (Wolfe-condition convention);
+    //            NLopt slsqp.c default c1 = 1e-4.
+    static constexpr double default_armijo_c1 = 1e-4;
+
+    // Armijo backtracking shrink factor. NLopt slsqp.c uses 0.5 as the
+    // default; fast mode uses 0.3 (faster geometric back-off inside the
+    // smaller fast-mode line-search budget), accurate mode keeps 0.5.
+    //
+    // Reference: NLopt slsqp.c default rho = 0.5;
+    //            N&W 2e §3.5 (backtracking shrink factor range 0.1..0.9).
+    static constexpr double default_armijo_rho =
+        (Mode == sqp_mode::fast) ? 0.3 : 0.5;
+
+    // BFGS Hessian-reset retry cap on filter / line-search exhaustion.
+    // Fast mode disables the retry (0); accurate mode matches NLopt
+    // slsqp.c's ireset semantics with up to 5 retries.
+    //
+    // Reference: NLopt slsqp.c:1890-1895 (ireset retry pattern).
+    static constexpr std::size_t default_bfgs_reset_max =
+        (Mode == sqp_mode::fast) ? std::size_t{0} : std::size_t{5};
+
+    // QP inner solver iteration cap. Fast mode caps at 50 for a quicker
+    // bail-out on degenerate / cycling working sets; accurate mode matches
+    // NLopt slsqp.c's LSI/LSEI cascade convention of 200.
+    //
+    // NOTE: filter_slsqp shares kraft_lsq_qp_recovery_solver with
+    // kraft_slsqp. The recovery solver does not currently thread
+    // options.qp values into its solve API; brace initialization lives
+    // for API uniformity with the N&W lineage and to make per-mode
+    // propagation observable on options.qp.
+    //
+    // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
+    static constexpr std::uint16_t default_qp_max_iterations =
+        (Mode == sqp_mode::fast) ? std::uint16_t{50} : std::uint16_t{200};
+
+    // QP convergence tolerance (acc^2 in Kraft's QP cast). Fast mode
+    // relaxes to 1e-8; accurate mode matches NLopt's double-precision
+    // baseline at 1e-12.
+    //
+    // NOTE: Same dead-wire as default_qp_max_iterations above.
+    //
+    // Reference: Kraft 1988 §3.5 (QP convergence acc^2 threshold).
+    static constexpr double default_qp_tolerance =
+        (Mode == sqp_mode::fast) ? 1e-8 : 1e-12;
+
     struct options_type
     {
-        line_search_options line_search{};
-        qp_options qp{};
+        // Embedded line-search params. Designated-initializer order follows
+        // line_search_options field-declaration order (c1, c2, rho,
+        // max_alpha, max_iterations); skipped designators (c2, max_alpha)
+        // keep their line_search_options-side defaults (0.9 and 1.0).
+        line_search_options line_search{
+            .c1 = default_armijo_c1,
+            .rho = default_armijo_rho,
+            .max_iterations = default_line_search_max_iterations,
+        };
+
+        // QP subproblem params. Dead-wired on filter_slsqp at present
+        // (kraft_lsq_qp_recovery_solver does not consume options.qp);
+        // brace-initialized here for API uniformity with the N&W lineage
+        // and to make per-mode propagation visible to callers.
+        qp_options qp{
+            .max_iterations = default_qp_max_iterations,
+            .tolerance = default_qp_tolerance,
+        };
         detail::restoration_strategy restoration{detail::restoration_strategy::hybrid};
         std::uint16_t max_restoration_steps{10};
         double soc_violation_threshold{default_soc_violation_threshold};
@@ -117,8 +193,8 @@ struct filter_slsqp_policy
         // BFGS-reset retry cap on line-search/filter exhaustion. After
         // restoration fails to recover an acceptable trial point, the policy
         // resets the BFGS Hessian to identity and re-solves the QP, repeating
-        // up to bfgs_reset_max times before returning a null-step. Default 5
-        // matches NLopt slsqp.c:1890-1895 ireset semantics.
+        // up to bfgs_reset_max times before returning a null-step. Per-mode
+        // brace-init from default_bfgs_reset_max (0 fast / 5 accurate).
         //
         // Reference: PITFALLS section L (line-search exhaustion fallback);
         //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
@@ -128,7 +204,7 @@ struct filter_slsqp_policy
         //                 restoration path (restoration first then BFGS
         //                 reset then null-step). Cascade-free: no new
         //                 solver_status enum entry.
-        std::size_t bfgs_reset_max{5};
+        std::size_t bfgs_reset_max{default_bfgs_reset_max};
     };
 
     options_type options{};
