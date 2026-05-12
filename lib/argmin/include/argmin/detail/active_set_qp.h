@@ -414,8 +414,8 @@ public:
         const int m_eq = A_eq.rows();
         const int m_ineq = A_ineq.rows();
         const int m_total = m_eq + m_ineq;
-        const int max_iter = static_cast<int>(opts.max_iterations.value_or(200));
-        const auto tol = static_cast<Scalar>(opts.tolerance.value_or(1e-12));
+        const int max_iter = static_cast<int>(opts.max_iterations);
+        const auto tol = static_cast<Scalar>(opts.tolerance);
 
         if(m_eq > 0)
         {
@@ -722,8 +722,8 @@ qp_result<Scalar, N> solve_qp(
     const int m_eq = A_eq.rows();
     const int m_ineq = A_ineq.rows();
     const int m_total = m_eq + m_ineq;
-    const int max_iter = static_cast<int>(opts.max_iterations.value_or(200));
-    const auto tol = static_cast<Scalar>(opts.tolerance.value_or(1e-12));
+    const int max_iter = static_cast<int>(opts.max_iterations);
+    const auto tol = static_cast<Scalar>(opts.tolerance);
 
     // Assemble full constraint matrix: [A_eq; A_ineq] x >= [b_eq; b_ineq]
     // (Equality constraints treated as a_i^T x = b_i, always active.)

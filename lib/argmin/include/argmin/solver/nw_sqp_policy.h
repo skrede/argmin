@@ -40,7 +40,6 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <optional>
 
 namespace argmin
 {
@@ -81,12 +80,12 @@ struct nw_sqp_policy
         // Armijo rejects the trial step AND the constraint violation at x_k
         // exceeds this threshold. Below the threshold the linearization is
         // consistent enough that the SOC step adds work without materially
-        // changing the search direction. Default 1e-3 applied at the call
-        // site (mirrors kraft_slsqp_policy::options_type::soc_violation_threshold).
+        // changing the search direction. Direct-field-default form
+        // (mirrors kraft_slsqp_policy::options_type::soc_violation_threshold).
         //
         // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (SOC threshold);
         //            N&W 2e §18.3 (Maratos effect).
-        std::optional<double> soc_violation_threshold{};
+        double soc_violation_threshold{default_soc_violation_threshold};
         std::uint16_t stall_window{50};
 
         // BFGS-reset retry cap on line-search exhaustion. On Armijo
@@ -339,14 +338,11 @@ struct nw_sqp_policy
                 s.AAt_workspace, s.ldlt_feasibility, s.w_workspace, p0);
         }
 
-        // Use embedded QP options with defaults
-        argmin::qp_options qp_opts;
-        qp_opts.max_iterations = options.qp.max_iterations.has_value()
-            ? options.qp.max_iterations
-            : std::optional<std::uint16_t>{200};
-        qp_opts.tolerance = options.qp.tolerance.has_value()
-            ? options.qp.tolerance
-            : std::optional<double>{1e-12};
+        // Embedded QP options pass through directly: qp_options is plain-type
+        // and brace-initialized with the accurate-mode fallback literals at
+        // the struct level (200, 1e-12). Per-policy per-mode wiring happens
+        // at options_type instantiation time, no read-site indirection.
+        const argmin::qp_options& qp_opts = options.qp;
 
         bool has_finite_bounds = has_finite_box(s.lower, s.upper);
 
@@ -575,11 +571,9 @@ struct nw_sqp_policy
         //
         // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (Maratos SOC);
         //            N&W 2e §18.3 (Maratos effect, second-order correction).
-        const double soc_violation_threshold =
-            options.soc_violation_threshold.value_or(default_soc_violation_threshold);
         const double cv_now = detail::constraint_violation(s.c_eq, s.c_ineq);
 
-        if(!ls_success && cv_now > soc_violation_threshold && m > 0)
+        if(!ls_success && cv_now > options.soc_violation_threshold && m > 0)
         {
             Eigen::Vector<double, N> x_full = s.x + p;
             if(has_finite_bounds)
