@@ -57,8 +57,9 @@ namespace argmin
 //                 policy class template. `rebind<M>` preserves Mode on
 //                 N rebind. Per-mode tolerance + filter envelope defaults
 //                 are exposed as static-constexpr members; the filter
-//                 envelope sites read the per-mode default via
-//                 value_or(default_filter_gamma_*) (constexpr-folded).
+//                 envelope fields brace-initialize from the per-mode
+//                 default_filter_gamma_* constexpr (direct-field-default
+//                 form, no value_or indirection at the read site).
 //                 `accurate` is the default to preserve baseline behavior
 //                 for any consumer that has not opted in.
 //
@@ -85,24 +86,30 @@ struct filter_nw_sqp_policy
         (Mode == sqp_mode::fast) ? 1e-6 : 1e-12;
     static constexpr double default_feasibility_tolerance =
         (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
+    // Kraft 1988 §2.2.4 + N&W §18.3 (SOC violation threshold; per-mode
+    // fast/accurate). Converges with the kraft_slsqp / nw_sqp lineage values
+    // (prior plain-double 1e-8 on the filter policies was out-of-line with
+    // the sibling SQP policies' per-mode 1e-2 / 1e-3).
+    static constexpr double default_soc_violation_threshold =
+        (Mode == sqp_mode::fast) ? 1e-2 : 1e-3;
 
     struct options_type
     {
         line_search_options line_search{};
         detail::restoration_strategy restoration{detail::restoration_strategy::hybrid};
         std::uint16_t max_restoration_steps{10};
-        double soc_violation_threshold{1e-8};
+        double soc_violation_threshold{default_soc_violation_threshold};
         std::uint16_t stall_window{50};
 
         // Filter envelope margins (Wachter & Biegler 2006 Section 2.3,
-        // eq. 6). Default 1e-5 / 1e-5 preserve v0.2.1 behaviour; tuning
-        // is per-policy and selected empirically by the v0.3.0 envelope
-        // sweep.
+        // eq. 6). Direct-field-default form: per-mode default_filter_gamma_*
+        // static-constexpr above brace-initializes the field. Callers who
+        // want a non-default value assign the field directly.
         //
         // Reference: Wachter & Biegler 2006 Section 2.3;
         //            Fletcher & Leyffer 2002 Section 5.
-        std::optional<double> gamma_f{};
-        std::optional<double> gamma_h{};
+        double gamma_f{default_filter_gamma_f};
+        double gamma_h{default_filter_gamma_h};
 
         // BFGS-reset retry cap on line-search/filter exhaustion. After
         // restoration fails to recover an acceptable trial point, the policy
@@ -278,8 +285,7 @@ struct filter_nw_sqp_policy
         // Reference: Wachter & Biegler 2006, eq. (8).
         double h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.filter.initialize(1e4 * std::max(1.0, h_0));
-        s.filter.set_envelope(options.gamma_f.value_or(default_filter_gamma_f),
-                              options.gamma_h.value_or(default_filter_gamma_h));
+        s.filter.set_envelope(options.gamma_f, options.gamma_h);
 
         // Initial multiplier estimate via least-squares (N&W eq. 18.15).
         if(m > 0)
@@ -1019,8 +1025,7 @@ struct filter_nw_sqp_policy
         s.hessian.reset();
         const double h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.filter.initialize(1e4 * std::max(1.0, h_0));
-        s.filter.set_envelope(options.gamma_f.value_or(default_filter_gamma_f),
-                              options.gamma_h.value_or(default_filter_gamma_h));
+        s.filter.set_envelope(options.gamma_f, options.gamma_h);
         s.sigma = 1.0;
         s.lambda.setZero();
     }

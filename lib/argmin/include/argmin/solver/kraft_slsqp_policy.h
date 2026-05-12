@@ -65,7 +65,6 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <optional>
 #include <algorithm>
 
 namespace argmin
@@ -99,18 +98,26 @@ struct kraft_slsqp_policy
         (Mode == sqp_mode::fast) ? 1e-6 : 1e-12;
     static constexpr double default_feasibility_tolerance =
         (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
+    // Kraft 1988 §2.2.6 (initial penalty default; mode-invariant 1.0).
+    static constexpr double default_initial_penalty = 1.0;
 
     struct options_type
     {
-        std::optional<double> initial_penalty{};       // penalty weight (default: 1.0, Kraft 1988)
-        std::optional<double> penalty_growth{};        // penalty multiplier (default: 10.0, Kraft 1988)
+        // Direct-field-default form: the per-mode default_* static-constexpr
+        // members above brace-initialize each field. Solver code reads the
+        // field directly at every use site (no value_or / has_value
+        // indirection). Callers who want a non-default value assign the field
+        // directly.
+        //
+        // Reference: Kraft 1988 §2.2.6 (initial penalty default 1.0);
+        //            Kraft 1988 §2.2.4 / N&W §18.3 (SOC threshold; per-mode
+        //            1e-2 fast / 1e-3 accurate).
+        double initial_penalty{default_initial_penalty};
         // Minimum constraint violation at x_k below which the second-order
         // correction (Maratos retry) is skipped on Armijo failure. Below this
         // threshold the linearization is consistent enough that the SoC step
         // adds work without materially changing the search direction.
-        // Default 1e-3 (Kraft 1988 §2.2.4 / N&W §18.3 conventional choice);
-        // the prior 1e-8 effectively always fired the retry.
-        std::optional<double> soc_violation_threshold{};
+        double soc_violation_threshold{default_soc_violation_threshold};
         line_search_options line_search{};             // Embedded line search params
         qp_options qp{};                               // QP subproblem params
         std::uint16_t stall_window{50};
@@ -289,7 +296,7 @@ struct kraft_slsqp_policy
         // adaptive-theta compact L-BFGS path that rebuilt B from scratch
         // every push at O(M * n^2) cost.
         s.hessian = detail::dense_ldl_bfgs<double, N>(n);
-        s.sigma = options.initial_penalty.value_or(1.0);
+        s.sigma = options.initial_penalty;
         s.iteration = 0;
 
         // Pre-allocate kraft_lsq_qp_solver workspace. Size finite-bound
@@ -557,9 +564,7 @@ struct kraft_slsqp_policy
             //
             // The correction step dp is added to p and the line search
             // is retried with the combined direction.
-            const double soc_violation_threshold =
-                options.soc_violation_threshold.value_or(default_soc_violation_threshold);
-            if(!ls.success && constraint_viol_0 > soc_violation_threshold)
+            if(!ls.success && constraint_viol_0 > options.soc_violation_threshold)
             {
                 if constexpr(constrained<P>)
                 {
@@ -897,7 +902,7 @@ struct kraft_slsqp_policy
     {
         reset(s, x0);
         s.hessian.reset();
-        s.sigma = options.initial_penalty.value_or(1.0);
+        s.sigma = options.initial_penalty;
     }
 
 private:
