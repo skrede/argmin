@@ -487,6 +487,15 @@ struct filter_nw_sqp_policy
         double h_k = 0.0;
         double phi0 = 0.0;
         double alpha = 1.0;
+        // f_k and h_k are computed from s.objective_value / s.c_eq / s.c_ineq
+        // which do not change between BFGS-reset retries (s.x is fixed
+        // during the retry); fire the h-type filter add at most once per
+        // outer step() invocation.
+        bool filter_added = false;
+        // iter-0 cold start: fires at most once per outer step()
+        // invocation; the calibration is max-monotone (idempotent) but
+        // the per-retry firing is wasteful and obscures the intent.
+        bool cold_start_done = false;
 
         for(;;)
         {
@@ -551,15 +560,18 @@ struct filter_nw_sqp_policy
         //            dominates the multiplier scale at the start of the
         //            run.
         //
-        // argmin variant: gated on s.iteration == 0; the existing
-        //                 detail::update_penalty call below is monotone-up
-        //                 and idempotent against this cold-start. Re-running
-        //                 on retry (s.iteration is unchanged across retries)
-        //                 is harmless: update_penalty is monotone-up and
-        //                 idempotent.
-        if(s.iteration == 0 && qp.lambda.size() > 0)
+        // argmin variant: gated on s.iteration == 0 AND the per-step
+        //                 cold_start_done flag declared above the retry
+        //                 loop. iter-0 cold start fires at most once per
+        //                 outer step() invocation (the existing
+        //                 detail::update_penalty call below is
+        //                 max-monotone and therefore idempotent, but the
+        //                 per-retry firing is wasteful and obscures the
+        //                 intent).
+        if(!cold_start_done && s.iteration == 0 && qp.lambda.size() > 0)
         {
             s.sigma = detail::calibrate_initial_penalty(s.sigma, qp.lambda);
+            cold_start_done = true;
         }
 
         if(p.norm() < 1e-15)
@@ -617,6 +629,12 @@ struct filter_nw_sqp_policy
                 s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
                 s.c_eq, s.c_ineq, s.x.norm(), reset_count);
             r.gradient_norm = lagrangian_gradient_norm(s);
+            // Mirror the cap-exhausted exit below: surface the
+            // accumulated NaN-recovery and BFGS-skip counts so the
+            // in-loop null-step return is symmetric with the post-loop
+            // null-step return.
+            r.diagnostics.nan_eval_count = nan_eval_count;
+            r.diagnostics.bfgs_skip_count = bfgs_skip_count;
             return r;
         }
 
@@ -668,8 +686,11 @@ struct filter_nw_sqp_policy
             h_k, grad_f_dot_p, s.filter.h_max());
 
         // Add current point to filter for h-type iterations.
-        if(!f_type)
+        if(!f_type && !filter_added)
+        {
             s.filter.add(f_k, h_k);
+            filter_added = true;
+        }
 
         // L1 merit at current point.
         // Adopted from: argmin/detail/merit_function.h l1_merit_dphi_h4.

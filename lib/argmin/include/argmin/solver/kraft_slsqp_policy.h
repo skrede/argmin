@@ -474,6 +474,10 @@ struct kraft_slsqp_policy
         detail::qp_result<double, N> qp_res;
         double alpha = 0.0;
         Eigen::Vector<double, N>& p = s.bufs.p_buf;
+        // iter-0 cold start: fires at most once per outer step()
+        // invocation; gates the calibrate_initial_penalty call against
+        // re-firing on every BFGS-reset retry within the same step().
+        bool cold_start_done = false;
 
         for(;;)
         {
@@ -519,12 +523,17 @@ struct kraft_slsqp_policy
             //            sigma dominates the multiplier scale at the
             //            start of the run.
             //
-            // argmin variant: gated on s.iteration == 0; the existing post-QP
-            //                 sigma update at lines below is max-monotone and
-            //                 therefore idempotent against this cold-start.
-            if(s.iteration == 0 && qp_res.lambda.size() > 0)
+            // argmin variant: gated on s.iteration == 0 AND the per-step
+            //                 cold_start_done flag declared above the
+            //                 retry loop. iter-0 cold start fires at most
+            //                 once per outer step() invocation; the
+            //                 existing post-QP sigma update at lines
+            //                 below is max-monotone and therefore
+            //                 idempotent.
+            if(!cold_start_done && s.iteration == 0 && qp_res.lambda.size() > 0)
             {
                 s.sigma = detail::calibrate_initial_penalty(s.sigma, qp_res.lambda);
+                cold_start_done = true;
             }
 
             double p_norm = p.norm();

@@ -656,4 +656,119 @@ TEMPLATE_TEST_CASE_SIG(
         CHECK(any_finite_step);
         CHECK(!any_nonfinite_step);
     }
+
+    SECTION("nan_eval_count strictly > 0 on N&W-lineage in-loop null-step returns")
+    {
+        // Verifies that the in-loop null-step early-return paths in the
+        // three N&W-lineage policies (nw_sqp, filter_slsqp,
+        // filter_nw_sqp) propagate the locally-accumulated
+        // nan_eval_count into r.diagnostics before returning, mirroring
+        // the cap-exhausted exit paths. Without the propagation, any
+        // NaN events observed during the line-search backtracking that
+        // preceded the null-step return would be silently dropped
+        // (null_step_result defaults the diagnostics counter to zero).
+        //
+        // The sqrt_nan_emitter fixture forces the Armijo NaN gate to
+        // fire on the first probe into the negative-arg-of-sqrt region.
+        // The accumulated count across the whole step() trail (including
+        // any in-loop null-step returns) MUST be strictly positive on
+        // every N&W-lineage row. Kraft rows use a different control
+        // flow (single-pass step() with no in-loop null-step branch on
+        // the same code path) and are excluded.
+        if constexpr(std::is_same_v<Policy,
+                         nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>
+                  || std::is_same_v<Policy,
+                         nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                  || std::is_same_v<Policy,
+                         filter_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
+                  || std::is_same_v<Policy,
+                         filter_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                  || std::is_same_v<Policy,
+                         filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>
+                  || std::is_same_v<Policy,
+                         filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+        {
+            sqrt_nan_emitter<> problem;
+            auto x0 = problem.initial_point();
+            solver_options opts;
+            opts.max_iterations = 50;
+            opts.set_step_threshold(1e-12);
+            opts.set_objective_threshold(1e-12);
+
+            basic_solver solver{Policy{}, problem, x0, opts};
+
+            std::size_t nan_total = 0;
+            for(int i = 0; i < 50; ++i)
+            {
+                auto sr = solver.step();
+                nan_total += sr.diagnostics.nan_eval_count;
+                if(sr.policy_status)
+                    break;
+            }
+
+            CHECK(nan_total > std::size_t{0});
+        }
+    }
+
+    SECTION("filter set bounded growth on filter-lineage h-type iterations")
+    {
+        // Verifies that the filter.add on h-type iterations fires at
+        // most once per outer step() invocation, even when the
+        // BFGS-reset retry loop iterates multiple times. Under the
+        // pre-gate behavior, a single outer step with bfgs_reset_max=5
+        // retries on an h-type iteration could add up to 6 duplicate
+        // entries to the filter; with the per-step filter_added flag
+        // the bound is 1 per outer step.
+        //
+        // Directly observable invariant: solver.state().filter.size()
+        // after N outer steps is bounded by N + 1 (the +1 accounts for
+        // the iter-0 initial filter entry that the policy seeds at
+        // construction via state_type::init). The bound holds across
+        // arbitrary bfgs_reset_max values.
+        if constexpr(std::is_same_v<Policy,
+                         filter_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
+                  || std::is_same_v<Policy,
+                         filter_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                  || std::is_same_v<Policy,
+                         filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>
+                  || std::is_same_v<Policy,
+                         filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+        {
+            using Problem = hs026<>;
+            using PolicyN = typename Policy::template rebind<
+                Problem::problem_dimension>;
+            Problem problem;
+            auto x0 = problem.initial_point();
+            solver_options opts;
+            opts.max_iterations = 200;
+            opts.set_step_threshold(1e-12);
+            opts.set_objective_threshold(1e-12);
+
+            // Configure bfgs_reset_max > 1 so the retry loop has
+            // headroom to potentially re-add to the filter under the
+            // pre-gate behavior. With the per-step filter_added flag
+            // the bound below still holds.
+            typename PolicyN::options_type policy_opts{};
+            policy_opts.bfgs_reset_max = std::size_t{5};
+
+            basic_solver solver{
+                PolicyN{}, problem, x0, opts, policy_opts};
+
+            std::size_t outer_steps = 0;
+            for(int i = 0; i < 200; ++i)
+            {
+                auto sr = solver.step();
+                ++outer_steps;
+                if(sr.policy_status)
+                    break;
+            }
+
+            // Filter size is bounded by N outer steps + 1 initial
+            // entry. The accessor returns std::uint16_t; widen for
+            // a non-narrowing comparison against std::size_t.
+            const auto filter_size = static_cast<std::size_t>(
+                solver.state().filter.size());
+            CHECK(filter_size <= outer_steps + std::size_t{1});
+        }
+    }
 }

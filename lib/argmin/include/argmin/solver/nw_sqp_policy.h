@@ -421,10 +421,12 @@ struct nw_sqp_policy
 
         // Loop-carried variables that survive the retry block into the
         // post-loop accept-step block. The cold-start sigma calibration
-        // is gated on s.iteration == 0; subsequent retries within the
-        // same step() call do NOT advance s.iteration, so the cold-start
-        // re-fires on each retry but is monotone-up (idempotent).
-        // detail::update_penalty below is similarly monotone-up.
+        // is gated on s.iteration == 0 AND the per-step cold_start_done
+        // flag; subsequent retries within the same step() call do NOT
+        // advance s.iteration, so without the flag the cold-start would
+        // re-fire on each retry (max-monotone and therefore idempotent
+        // but wasteful and obscures intent). detail::update_penalty
+        // below is similarly monotone-up.
         detail::qp_result<double, N> qp;
         Eigen::Vector<double, N>& p = s.bufs.p_buf;
         Eigen::VectorXd& lambda_new = s.bufs.lam_buf;
@@ -436,6 +438,10 @@ struct nw_sqp_policy
         x_trial = s.x;
         double f_trial = s.objective_value;
         bool ls_success = false;
+        // iter-0 cold start: fires at most once per outer step()
+        // invocation; gates the calibrate_initial_penalty call against
+        // re-firing on every BFGS-reset retry within the same step().
+        bool cold_start_done = false;
 
         for(;;)
         {
@@ -501,12 +507,16 @@ struct nw_sqp_policy
         //            dominates the multiplier scale at the start of the
         //            run.
         //
-        // argmin variant: gated on s.iteration == 0; the existing
-        //                 detail::update_penalty call below is monotone-up
-        //                 and idempotent against this cold-start.
-        if(s.iteration == 0 && qp.lambda.size() > 0)
+        // argmin variant: gated on s.iteration == 0 AND the per-step
+        //                 cold_start_done flag declared above the retry
+        //                 loop. iter-0 cold start fires at most once per
+        //                 outer step() invocation; the existing
+        //                 detail::update_penalty call below is
+        //                 max-monotone and therefore idempotent.
+        if(!cold_start_done && s.iteration == 0 && qp.lambda.size() > 0)
         {
             s.sigma = detail::calibrate_initial_penalty(s.sigma, qp.lambda);
+            cold_start_done = true;
         }
 
         // Zero step check.
@@ -572,6 +582,13 @@ struct nw_sqp_policy
                 grad_L_null_norm = grad_L.norm();
             }
             r.gradient_norm = grad_L_null_norm;
+            // Mirror the cap-exhausted exit below: surface the
+            // accumulated NaN-recovery and BFGS-skip counts so the
+            // in-loop null-step return is symmetric with the post-loop
+            // null-step return (the field is a contracted public
+            // diagnostic and the consistency suite asserts on it).
+            r.diagnostics.nan_eval_count = nan_eval_count;
+            r.diagnostics.bfgs_skip_count = bfgs_skip_count;
             return r;
         }
 

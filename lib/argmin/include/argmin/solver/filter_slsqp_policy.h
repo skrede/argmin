@@ -459,6 +459,11 @@ struct filter_slsqp_policy
         detail::qp_result<double, N> qp_res;
         Eigen::Vector<double, N>& p = s.bufs.p_buf;
         double alpha = 1.0;
+        // f_k and h_k are computed from s.objective_value / s.c_eq / s.c_ineq
+        // which do not change between BFGS-reset retries (s.x is fixed
+        // during the retry); fire the h-type filter add at most once per
+        // outer step() invocation.
+        bool filter_added = false;
 
         for(;;)
         {
@@ -599,6 +604,12 @@ struct filter_slsqp_policy
             // accepted-step path; override the helper's internal
             // computation from the per-leg buffers.
             r.gradient_norm = lagrangian_gradient_norm(s);
+            // Mirror the cap-exhausted exit below: surface the
+            // accumulated NaN-recovery count so the in-loop null-step
+            // return is symmetric (filter_slsqp does not maintain a
+            // bfgs_skip_count local — the Powell-damped path is
+            // unconditional on the Kraft lineage).
+            r.diagnostics.nan_eval_count = nan_eval_count;
             ++s.iteration;
             return r;
             }  // end !zero_step_restoration_attempted else-branch
@@ -624,8 +635,11 @@ struct filter_slsqp_policy
 
         // Add current point to filter on h-type iterations.
         // Reference: Wachter & Biegler 2006 Algorithm A.
-        if(!f_type)
+        if(!f_type && !filter_added)
+        {
             s.filter.add(f_k, h_k);
+            filter_added = true;
+        }
 
         // Backtracking with filter acceptance or Armijo f-descent.
         alpha = 1.0;
