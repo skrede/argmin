@@ -456,6 +456,98 @@ TEMPLATE_TEST_CASE_SIG(
         }
     }
 
+    SECTION("multiplier_reest_every_k preserves accurate-mode k=1 bit identity")
+    {
+        // At k=1 the active-set multiplier re-estimation gate
+        // (s.iteration % k == 0) fires on every step, so behavior is
+        // bit-identical to the pre-stride implementation. Compare two
+        // solves on HS028 (equality-only, deterministic trajectory):
+        // one with default options, one with
+        // multiplier_reest_every_k = 1 explicitly. The iter count and
+        // objective must agree exactly.
+        //
+        // Accurate-mode rows only — fast-mode default picks k_fast=5
+        // (sweep-derived), so default-options ≠ k=1 on the fast rows.
+        // The k=1 bit-identity claim is specifically about the
+        // gate-on-every-step path being equivalent to the pre-stride
+        // implementation.
+        if constexpr(Policy::mode_ == sqp_mode::accurate)
+        {
+            using Problem = hs028<>;
+            using PolicyN = typename Policy::template rebind<
+                Problem::problem_dimension>;
+            Problem problem;
+            auto x0 = problem.initial_point();
+            solver_options opts;
+            opts.max_iterations = 200;
+            opts.set_step_threshold(1e-12);
+            opts.set_objective_threshold(1e-12);
+
+            // Default-options run (k=1 by per-mode default in accurate).
+            basic_solver solver_default{Policy{}, problem, x0, opts};
+            auto result_default = solver_default.solve(opts);
+
+            // Explicit k=1 run via the (Policy, problem, x0, opts,
+            // policy_opts) 5-arg CTAD overload so the policy_opts
+            // reach the rebound policy's options after CTAD rebind.
+            typename PolicyN::options_type policy_opts{};
+            policy_opts.multiplier_reest_every_k = std::size_t{1};
+            basic_solver solver_explicit{
+                PolicyN{}, problem, x0, opts, policy_opts};
+            auto result_explicit = solver_explicit.solve(opts);
+
+            REQUIRE(result_default.iterations == result_explicit.iterations);
+            REQUIRE(result_default.objective_value
+                    == result_explicit.objective_value);
+            CHECK(result_default.gradient_norm
+                  == Catch::Approx(result_explicit.gradient_norm));
+        }
+    }
+
+    SECTION("multiplier_reest_every_k is a no-op on kraft (k=1 vs k=10 invariant)")
+    {
+        // Kraft uses QP-native multipliers (qp_res.lambda copied
+        // directly into the kkt-leg buffers on every step) and does
+        // NOT consume options.multiplier_reest_every_k at any KKT
+        // call site. Setting k=1 vs k=10 must produce bit-identical
+        // iter counts and final objectives on every kraft row;
+        // sibling line-search SQP policies that DO consume the
+        // stride may differ.
+        if constexpr(std::is_same_v<Policy,
+                         kraft_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
+                  || std::is_same_v<Policy,
+                         kraft_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+        {
+            using Problem = hs071<>;
+            using PolicyN = typename Policy::template rebind<
+                Problem::problem_dimension>;
+            Problem problem;
+            auto x0 = problem.initial_point();
+            solver_options opts;
+            opts.max_iterations = 200;
+            opts.set_step_threshold(1e-12);
+            opts.set_objective_threshold(1e-10);
+
+            typename PolicyN::options_type policy_opts_k1{};
+            policy_opts_k1.multiplier_reest_every_k = std::size_t{1};
+            basic_solver solver_k1{
+                PolicyN{}, problem, x0, opts, policy_opts_k1};
+            auto result_k1 = solver_k1.solve(opts);
+
+            typename PolicyN::options_type policy_opts_k10{};
+            policy_opts_k10.multiplier_reest_every_k = std::size_t{10};
+            basic_solver solver_k10{
+                PolicyN{}, problem, x0, opts, policy_opts_k10};
+            auto result_k10 = solver_k10.solve(opts);
+
+            REQUIRE(result_k1.iterations == result_k10.iterations);
+            REQUIRE(result_k1.objective_value
+                    == result_k10.objective_value);
+            CHECK(result_k1.gradient_norm
+                  == Catch::Approx(result_k10.gradient_norm));
+        }
+    }
+
     SECTION("nan_eval_count fires and Armijo recovers from NaN trial-iterates")
     {
         // Drive the solver step-by-step on the sqrt-nan-emitter fixture.
