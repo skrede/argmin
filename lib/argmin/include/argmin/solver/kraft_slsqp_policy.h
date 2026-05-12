@@ -237,7 +237,8 @@ struct kraft_slsqp_policy
         // bfgs_reset_max times before returning a null-step. Per-mode
         // brace-init from default_bfgs_reset_max (0 fast / 5 accurate).
         //
-        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
         //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
         //            N&W 2e Section 3.3 (recovery from non-descent).
         //
@@ -288,8 +289,8 @@ struct kraft_slsqp_policy
         // consumed by kraft_lsq_qp_recovery_solver::solve_with_factored_hessian.
         //
         // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers
-        //               (in-tree precedent — landed alongside this refactor;
-        //                generalizes the kraft *_buf state-resident layout).
+        //               (in-tree precedent: generalizes the kraft *_buf
+        //                state-resident layout).
         // Reference: N&W 2e Section 18.
         //
         // argmin variant: cross-policy state-resident buffer struct.
@@ -434,8 +435,9 @@ struct kraft_slsqp_policy
         // needed.
         const int n = s.n;
 
-        // BFGS-reset retry loop (D-05; NLopt slsqp.c:1890-1895 ireset
-        // parity). Wraps factor -> QP solve -> cold-start sigma -> merit
+        // BFGS-reset retry loop on line-search exhaustion (NLopt
+        // slsqp.c:1890-1895 ireset parity). Wraps factor -> QP solve ->
+        // cold-start sigma -> merit
         // -> Armijo -> SOC -> augmented-path null-step. On line-search
         // exhaustion (Armijo + SOC fail on either direct or augmented
         // path), reset the BFGS Hessian to identity and re-solve the QP,
@@ -447,14 +449,15 @@ struct kraft_slsqp_policy
         //
         // Adopted from: NLopt slsqp.c:1890-1895 (ireset retry pattern,
         //               max=5).
-        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
         //            N&W 2e Section 3.3 (recovery from non-descent).
         //
         // argmin variant: cap is options.bfgs_reset_max (default 5);
         //                 status on exhaustion is is_null_step + the
-        //                 diagnostics.bfgs_reset_count counter; rationale
-        //                 is D-05 cascade-free (no new solver_status
-        //                 enum entry).
+        //                 diagnostics.bfgs_reset_count counter; rationale:
+        //                 cascade-free design (no new solver_status
+        //                 enumerant required).
         std::size_t reset_count = 0;
         const std::size_t reset_max = options.bfgs_reset_max;
         // Armijo NaN/Inf recovery counter aggregated across the main line
@@ -509,8 +512,11 @@ struct kraft_slsqp_policy
             // large multipliers, causing iter-0 line-search rejection.
             //
             // Adopted from: NLopt slsqp.c iter-0 implicit cold-start from QP lambda.
-            // Reference: N&W 2e eq. 18.36; Kraft 1988 §2.2.6;
-            //            PITFALLS §B remedy 1.
+            // Reference: N&W 2e eq. 18.36; Kraft 1988 §2.2.6.
+            //            iter-0 cold-start: qp-lambda-driven sigma seed
+            //            bounds the first-step rejection rate by ensuring
+            //            sigma dominates the multiplier scale at the
+            //            start of the run.
             //
             // argmin variant: gated on s.iteration == 0; the existing post-QP
             //                 sigma update at lines below is max-monotone and
@@ -661,7 +667,7 @@ struct kraft_slsqp_policy
             // Backtracking Armijo line search on the L1 merit.
             auto phi_ls = [&](double alpha_) {
                 ++s.line_search_calls;
-                // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent).
+                // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
                 s.bufs.x_trial_buf.noalias() = s.x + alpha_ * p;
                 s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
                 return merit(s.bufs.x_trial_buf);
@@ -694,7 +700,7 @@ struct kraft_slsqp_policy
                 {
                     if(s.n_eq + s.n_ineq > 0)
                     {
-                        // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent).
+                        // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
                         s.bufs.x_trial_buf.noalias() = s.x + p;
                         s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
 
@@ -721,7 +727,7 @@ struct kraft_slsqp_policy
                             s.p_combined_buf.noalias() = p + soc_res.x;
                             auto phi_soc = [&](double a) {
                                 ++s.line_search_calls;
-                                // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent).
+                                // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
                                 s.bufs.x_trial_buf.noalias() = s.x + a * s.p_combined_buf;
                                 s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
                                 return merit(s.bufs.x_trial_buf);
@@ -798,7 +804,7 @@ struct kraft_slsqp_policy
         double old_f = s.objective_value;
         s.x = s.x + alpha * p;
 
-        // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent).
+        // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
         s.x = detail::project(s.x, s.lower, s.upper);
 
         s.objective_value = s.problem->value(s.x);
@@ -864,7 +870,7 @@ struct kraft_slsqp_policy
                 if(lam_take == m_total)
                 {
                     // Adopted from: argmin/detail/sqp_common.h compute_bfgs_pair_fused
-                    //               (in-tree precedent — landed alongside this refactor).
+                    //               (in-tree precedent).
                     argmin::detail::compute_bfgs_pair_fused<double, N>(
                         g_old, s.g, s.bufs.J_all_old, s.bufs.J_all,
                         s.bufs.lam_buf.head(m_total), m_total,
@@ -874,7 +880,8 @@ struct kraft_slsqp_policy
                 }
                 else
                 {
-                    // Eq-only fallback (kraft :811-818): the helper's m_total
+                    // Eq-only fallback (kraft_slsqp_policy::compute_bfgs_pair_fused
+                    // m_total branch above): the helper's m_total
                     // branch only handles the full-multiplier case; the
                     // partial-multiplier path stays inline because it touches
                     // s.J_eq (policy-private state) rather than J_all_old.topRows.
@@ -951,9 +958,8 @@ struct kraft_slsqp_policy
         // iterate. The QP returns dual-feasible multipliers for its
         // own KKT conditions (Goldfarb-Idnani), and at convergence
         // qp_res.lambda agrees with any post-step LS estimate; off
-        // convergence the QP-native source is what kraft has shipped
-        // since v0.2.1 and avoids a per-iter ColPivQR on the active-
-        // set Jacobian. Sibling SQP policies (nw_sqp, filter_slsqp,
+        // convergence the QP-native source avoids a per-iter ColPivQR on the
+        // active-set Jacobian. Sibling SQP policies (nw_sqp, filter_slsqp,
         // filter_nw_sqp) keep the active-set LS path via
         // detail::compute_kkt_multipliers_active_set in lagrangian.h.
         //
@@ -1051,7 +1057,7 @@ private:
     // grad_L vanishes (N&W eq. 12.34) while raw ||grad_f|| in general does
     // not. Convergence criteria gate on Lagrangian-gradient norm.
     //
-    // Adopted from: argmin/solver/nw_sqp_policy.h:599-612 (in-tree precedent).
+    // Adopted from: argmin/solver/nw_sqp_policy.h::step null-step branch (in-tree precedent).
     // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity);
     //            eq. 18.2-18.3 (Lagrangian gradient definition).
     //

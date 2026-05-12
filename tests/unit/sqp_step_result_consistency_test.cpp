@@ -18,7 +18,7 @@
 //
 // argmin variant: parameterized over the four-policy type list via
 //                 Catch2 TEMPLATE_TEST_CASE_SIG; trust-region SQP joins
-//                 as a fifth row when it lands in a future milestone.
+//                 as a fifth row when the trust-region SQP policy lands.
 
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
@@ -242,8 +242,7 @@ TEMPLATE_TEST_CASE_SIG(
         // an iter-0 L1-merit infeasible point with cv approximately 6.5
         // and do not move under the current implementation. Per-policy
         // bars below capture that empirical state. The nw-variant gap
-        // is a known gap; see project planning docs for the v0.3.1
-        // follow-up tracking the L1-merit infeasibility closure.
+        // is a known coverage gap pending the trust-region SQP policy.
         constexpr double SLSQP_HS071_CV_BAR  = 0.05;
         constexpr double NW_SQP_HS071_CV_BAR = 6.6;
 

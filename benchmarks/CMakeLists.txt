@@ -4,7 +4,7 @@ project(argmin_benchmarks LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Google Benchmark via FetchContent (per D-03/BNCH-01).
+# Google Benchmark via FetchContent (for parametric sweep harness on (policy, mode, k)).
 include(FetchContent)
 if(ARGMIN_CMAKE_FETCH_DEPS)
     FetchContent_Declare(
@@ -79,7 +79,7 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
-# Optional comparison library hooks (per D-03).
+# Optional comparison library hooks (NLopt LD_SLSQP and similar).
 
 option(ARGMIN_BENCH_NLOPT "Build NLopt comparison benchmarks" ON)
 if(ARGMIN_BENCH_NLOPT)

@@ -149,7 +149,8 @@ struct filter_nw_sqp_policy
     // (s.iteration % multiplier_reest_every_k == 0); on the skip path
     // the prior step's s.bufs.kkt_lambda_eq_buf / s.bufs.kkt_mu_ineq_buf
     // are reused (state-resident, zero-alloc). k=1 recomputes every
-    // step (pre-Phase-41 behavior); k>1 trades a stationarity-leg lag
+    // step (the previous unconditional re-estimation behavior); k>1
+    // trades a stationarity-leg lag
     // of ~k steps for k-1x savings on the per-step ColPivHouseholderQR.
     //
     // Reference: Bertsekas 1996 §4.2 (stale-multiplier reuse rationale);
@@ -206,7 +207,8 @@ struct filter_nw_sqp_policy
         // up to bfgs_reset_max times before returning a null-step. Per-mode
         // brace-init from default_bfgs_reset_max (0 fast / 5 accurate).
         //
-        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
         //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
         //            N&W 2e Section 3.3 (recovery from non-descent).
         //
@@ -240,9 +242,9 @@ struct filter_nw_sqp_policy
         // copy. Compile-time-N column count restores parity with
         // nw_sqp_policy.
         //
-        // Adopted from: argmin/solver/nw_sqp_policy.h:107-108 (in-tree
-        //               precedent — typed J_eq / J_ineq for templated
-        //               qp_solver.solve dispatch).
+        // Adopted from: argmin/solver/nw_sqp_policy.h::policy class-template
+        //               Mode threading (in-tree precedent — typed J_eq /
+        //               J_ineq for templated qp_solver.solve dispatch).
         // Reference: N&W 2e Section 18.3.
         Eigen::Matrix<double, Eigen::Dynamic, N> J_eq;
         Eigen::Matrix<double, Eigen::Dynamic, N> J_ineq;
@@ -266,9 +268,10 @@ struct filter_nw_sqp_policy
         // argmin variant: cross-policy state-resident buffer struct.
         argmin::detail::sqp_state_buffers<double, N> bufs;
 
-        // Adopted from: argmin/solver/nw_sqp_policy.h:88-96, :222-232
-        //               (in-tree precedent — stateful active_set_qp_solver
-        //                with reusable LDLT warm-start workspace).
+        // Adopted from: argmin/solver/nw_sqp_policy.h::default_* constexpr
+        //               block and state_type init (in-tree precedent —
+        //               stateful active_set_qp_solver with reusable LDLT
+        //               warm-start workspace).
         // Reference: N&W 2e Section 16.5 (active-set QP).
         //
         // argmin variant: pre-allocated QP solver + LDLT factorization
@@ -376,8 +379,8 @@ struct filter_nw_sqp_policy
         // Initialize filter with h_max based on initial constraint
         // violation, then thread the configured envelope margins onto
         // the filter (Wachter & Biegler 2006 Section 2.3, eq. 6).
-        // Defaults 1e-5 / 1e-5 preserve v0.2.1 behaviour when the
-        // options are unset.
+        // Defaults 1e-5 / 1e-5 preserve the previously-shipped behavior
+        // when the options are unset.
         // Reference: Wachter & Biegler 2006, eq. (8).
         double h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.filter.initialize(1e4 * std::max(1.0, h_0));
@@ -422,14 +425,16 @@ struct filter_nw_sqp_policy
         // The BFGS-reset retry fires only when restoration also fails to
         // recover an acceptable trial point. Ordering: line search /
         // SOC / restoration first then BFGS-reset retry then null-step.
-        // Preserves v0.2.1 restoration semantics while adding the
+        // Preserves the existing restoration semantics while adding the
         // BFGS-reset escape hatch.
         //
-        // Adopted from: argmin/solver/kraft_slsqp_policy.h retry-loop pattern;
-        //               argmin/solver/filter_slsqp_policy.h restoration-first
-        //               ordering (in-tree precedents landed alongside this fix).
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h::step retry-loop
+        //               pattern;
+        //               argmin/solver/filter_slsqp_policy.h::step restoration-
+        //               first ordering (in-tree precedents).
         //               NLopt slsqp.c:1890-1895 (ireset retry pattern, max=5).
-        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
         //            N&W 2e Section 3.3 (recovery from non-descent).
         //
         // argmin variant: cap is options.bfgs_reset_max (default 5);
@@ -451,8 +456,7 @@ struct filter_nw_sqp_policy
         // alpha and continues rather than passing NaN through the filter
         // dominance / L1 merit comparisons. Both modes enable the gate.
         //
-        // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
-        //            (NaN detection model; argmin variant is Armijo-only).
+        // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
         std::size_t nan_eval_count = 0;
 
         // Loop-carried variables that survive the retry block into the
@@ -471,8 +475,8 @@ struct filter_nw_sqp_policy
         x_trial = s.x;
         // c_eq_trial / c_ineq_trial views into s.bufs.c_trial_buf; no
         // per-step VectorXd materialization. The same inline-VectorBlock
-        // pattern landed in filter_slsqp_policy on the prior plan to
-        // avoid the heap-alloc the helper signature would otherwise force.
+        // pattern is used in filter_slsqp_policy to avoid the heap-alloc
+        // the helper signature would otherwise force.
         // Reference: detail::constraint_violation / detail::l1_merit signatures
         //            require Eigen::Vector<Scalar, M> and do not deduce from
         //            VectorBlock head()/tail() expressions; inlining the
@@ -490,7 +494,7 @@ struct filter_nw_sqp_policy
         // (s.x has not moved) but the Hessian has been reset on retry,
         // so the QP direction differs. Linearisation matrices s.J_eq /
         // s.J_ineq are likewise unchanged across retries; pass them
-        // directly into qp_solver.solve (REF-06 typing change drops
+        // directly into qp_solver.solve (typing change drops
         // the prior local A_eq / A_ineq copies).
         s.bufs.b_eq_workspace = -s.c_eq;
         s.bufs.b_ineq_workspace = -s.c_ineq;
@@ -514,7 +518,7 @@ struct filter_nw_sqp_policy
             s.bufs.p_lo_buf.noalias() = s.lower - s.x;
             s.bufs.p_hi_buf.noalias() = s.upper - s.x;
             p0 = p0.cwiseMax(s.bufs.p_lo_buf).cwiseMin(s.bufs.p_hi_buf);
-            // Adopted from: argmin/solver/nw_sqp_policy.h:335-337
+            // Adopted from: argmin/solver/nw_sqp_policy.h::step QP-solve site
             //               (in-tree precedent — stateful active_set_qp_solver::solve).
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                    s.J_eq, s.bufs.b_eq_workspace,
@@ -523,8 +527,8 @@ struct filter_nw_sqp_policy
         }
         else
         {
-            // Adopted from: argmin/solver/nw_sqp_policy.h:341-343
-            //               (in-tree precedent — stateful active_set_qp_solver::solve, no-bounds overload).
+            // Adopted from: argmin/solver/nw_sqp_policy.h::step QP-multiplier-extract
+            //               site (in-tree precedent — stateful active_set_qp_solver::solve, no-bounds overload).
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                    s.J_eq, s.bufs.b_eq_workspace,
                                    s.J_ineq, s.bufs.b_ineq_workspace,
@@ -540,8 +544,11 @@ struct filter_nw_sqp_policy
         // large multipliers, causing iter-0 line-search rejection.
         //
         // Adopted from: NLopt slsqp.c iter-0 implicit cold-start from QP lambda.
-        // Reference: N&W 2e eq. 18.36; Kraft 1988 §2.2.6;
-        //            PITFALLS §B remedy 1.
+        // Reference: N&W 2e eq. 18.36; Kraft 1988 §2.2.6.
+        //            iter-0 cold-start: qp-lambda-driven sigma seed bounds
+        //            the first-step rejection rate by ensuring sigma
+        //            dominates the multiplier scale at the start of the
+        //            run.
         //
         // argmin variant: gated on s.iteration == 0; the existing
         //                 detail::update_penalty call below is monotone-up
@@ -634,7 +641,7 @@ struct filter_nw_sqp_policy
         // helper here would shift HS043 cv beyond the marker; left inline.
         // The std::min(..., default_sigma_max) cap mirrors the helper's
         // sigma_max ceiling (1e6 fast / 1e10 accurate, N&W §18.3).
-        // Reference: N&W 2e eq. 18.36; PITFALLS §B.
+        // Reference: N&W 2e eq. 18.36 (sigma sufficient for L1-merit descent).
         s.sigma = detail::update_penalty(s.sigma, lambda_new);
         double h_cur = detail::constraint_violation(s.c_eq, s.c_ineq);
         double dphi_check = s.g.dot(p) - s.sigma * h_cur;
@@ -690,17 +697,12 @@ struct filter_nw_sqp_policy
             if(m > 0)
                 s.problem->constraints(x_trial, s.bufs.c_trial_buf);
 
-            // NaN/Inf recovery: parallel to line_search/armijo.h's gate
-            // for the hand-rolled inline filter + merit path. If the
-            // objective or any constraint returns non-finite on this
-            // trial iterate, shrink alpha and continue rather than
-            // passing NaN through the filter dominance / Armijo
-            // comparisons below (where IEEE-754 ordered comparisons
-            // yield false regardless of descent). Both modes enable the
-            // gate.
-            //
-            // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
-            //            (NaN detection model; argmin variant is Armijo-only).
+            // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
+            //               Hand-rolled inline-filter + merit path mirrors
+            //               that semantics — non-finite f_trial or
+            //               constraints trigger backtrack rather than
+            //               crossing the filter dominance / Armijo
+            //               comparisons. Both modes enable the gate.
             if(!std::isfinite(f_trial)
                || (m > 0 && !s.bufs.c_trial_buf.allFinite()))
             {
@@ -717,7 +719,7 @@ struct filter_nw_sqp_policy
             //   l1_merit(f, c_eq, c_ineq, sigma)
             //     = f + sigma * constraint_violation(c_eq, c_ineq).
             // Mirrors the inline-VectorBlock pattern adopted in
-            // filter_slsqp_policy on the prior plan.
+            // filter_slsqp_policy.
             double viol_trial = 0.0;
             if(s.n_eq > 0)
                 viol_trial += s.bufs.c_trial_buf.head(s.n_eq).cwiseAbs().sum();
@@ -775,9 +777,9 @@ struct filter_nw_sqp_policy
                 Eigen::Vector<double, N> p_lower_soc = s.lower - x_trial;
                 Eigen::Vector<double, N> p_upper_soc = s.upper - x_trial;
                 Eigen::Vector<double, N> p_soc_0 = Eigen::Vector<double, N>::Zero(n);
-                // Adopted from: argmin/solver/nw_sqp_policy.h:581-584
-                //               (in-tree precedent — stateful active_set_qp_solver
-                //                SOC-retry path).
+                // Adopted from: argmin/solver/nw_sqp_policy.h::step main-LS
+                //               Armijo backtrack site (in-tree precedent —
+                //               stateful active_set_qp_solver SOC-retry path).
                 qp_soc = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                            s.J_eq, s.bufs.b_eq_soc_buf,
                                            s.J_ineq, s.bufs.b_ineq_soc_buf,
@@ -787,9 +789,9 @@ struct filter_nw_sqp_policy
             else
             {
                 Eigen::Vector<double, N> p_soc_0 = Eigen::Vector<double, N>::Zero(n);
-                // Adopted from: argmin/solver/nw_sqp_policy.h:588-591
-                //               (in-tree precedent — stateful active_set_qp_solver,
-                //                no-bounds overload).
+                // Adopted from: argmin/solver/nw_sqp_policy.h::step main-LS
+                //               NaN-gate site (in-tree precedent — stateful
+                //               active_set_qp_solver, no-bounds overload).
                 qp_soc = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                            s.J_eq, s.bufs.b_eq_soc_buf,
                                            s.J_ineq, s.bufs.b_ineq_soc_buf,

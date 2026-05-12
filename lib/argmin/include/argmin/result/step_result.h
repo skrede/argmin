@@ -52,7 +52,8 @@ struct step_result
     // policies: is_null_step == true && diagnostics.bfgs_reset_count > 0
     // signals BFGS-reset cap exhaustion.
     //
-    // Reference: PITFALLS section L (line-search exhaustion fallback);
+    // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+    //            fallback);
     //            NLopt slsqp.c:1890-1895 (ireset retry parity).
     //
     // argmin variant: scalar bfgs_reset_count only;
@@ -81,8 +82,7 @@ struct step_result
         // non-finite trial-point evaluations should never be silently
         // consumed.
         //
-        // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
-        //            (NaN detection model; argmin variant is Armijo-only).
+        // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
         std::size_t nan_eval_count{0};
     };
     solver_diagnostics diagnostics{};

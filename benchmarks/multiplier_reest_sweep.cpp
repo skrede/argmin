@@ -14,7 +14,8 @@
 // stride k is read from state.range(0); the policy's options_type
 // .multiplier_reest_every_k is assigned before each solve. Counters
 // surface iter_count and the policy-status code for SR analysis; the
-// median wall is used for the D-03 default-selection rule.
+// median wall is used for the default-selection rule (largest k satisfying
+// zero status regression + iter inflation <= 10% in fast mode).
 //
 // The harness is read-only on the argmin library and is bench-only —
 // it is not linked into argmin::argmin and consumers do not pick it

@@ -9,7 +9,7 @@
 //   3. Backtracking line search on L1 merit function (Section 18.5)
 //   4. Damped BFGS update of Hessian of Lagrangian (Procedure 18.2)
 //
-// The policy satisfies the basic_solver contract via deducing this (D-14).
+// The policy satisfies the basic_solver contract via deducing this.
 // Requires: differentiable<Problem> && constrained<Problem>.
 // Box bounds: detected via if constexpr(bound_constrained<Problem>).
 //
@@ -139,7 +139,8 @@ struct nw_sqp_policy
     // (s.iteration % multiplier_reest_every_k == 0); on the skip path
     // the prior step's s.bufs.kkt_lambda_eq_buf / s.bufs.kkt_mu_ineq_buf
     // are reused (state-resident, zero-alloc). k=1 recomputes every
-    // step (pre-Phase-41 behavior); k>1 trades a stationarity-leg lag
+    // step (the previous unconditional re-estimation behavior); k>1
+    // trades a stationarity-leg lag
     // of ~k steps for k-1x savings on the per-step ColPivHouseholderQR
     // run by the helper.
     //
@@ -191,7 +192,8 @@ struct nw_sqp_policy
         // bfgs_reset_max times before returning a null-step. Per-mode
         // brace-init from default_bfgs_reset_max (0 fast / 5 accurate).
         //
-        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
         //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
         //            N&W 2e Section 3.3 (recovery from non-descent).
         //
@@ -247,8 +249,8 @@ struct nw_sqp_policy
         // cross-policy struct consistency.
         //
         // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers
-        //               (in-tree precedent — landed alongside this refactor;
-        //                generalizes the per-policy *_buf state-resident layout).
+        //               (in-tree precedent: generalizes the per-policy
+        //                *_buf state-resident layout).
         // Reference: N&W 2e Section 18.
         //
         // argmin variant: cross-policy state-resident buffer struct.
@@ -259,7 +261,7 @@ struct nw_sqp_policy
         Eigen::VectorXd w_workspace;        // LDLT solve in-place buffer
         double objective_value{};
         double sigma{1.0};
-        // Canonical BFGS operator per D-01. References: Shanno 1978 (N&W eq. 6.20); N&W Section 7.2 (L-BFGS); Kraft 1988 DFVLR-FB 88-28 Section 2.2.3.
+        // Canonical BFGS operator. References: Shanno 1978 (N&W eq. 6.20); N&W Section 7.2 (L-BFGS); Kraft 1988 DFVLR-FB 88-28 Section 2.2.3.
         detail::dense_ldl_bfgs<double, N> hessian;
         detail::active_set_qp_solver<double, N> qp_solver;
         std::uint32_t iteration{0};
@@ -374,7 +376,7 @@ struct nw_sqp_policy
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
 
-        // BFGS-reset retry loop on line-search exhaustion (D-05; NLopt
+        // BFGS-reset retry loop on line-search exhaustion (NLopt
         // slsqp.c:1890-1895 ireset parity). Wraps QP solve -> cold-start
         // sigma -> zero-step null-step -> sigma update -> Armijo line
         // search -> Maratos SOC retry. On line-search exhaustion (Armijo
@@ -383,19 +385,19 @@ struct nw_sqp_policy
         // options.bfgs_reset_max. On cap exhaustion, return a null-step
         // with diagnostics.bfgs_reset_count populated.
         //
-        // Adopted from: argmin/solver/kraft_slsqp_policy.h retry-loop
-        //               pattern (in-tree precedent landed alongside
-        //               this fix).
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h::step retry-loop
+        //               pattern (in-tree precedent).
         //               NLopt slsqp.c:1890-1895 (ireset retry pattern,
         //               max=5).
-        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
         //            N&W 2e Section 3.3 (recovery from non-descent).
         //
         // argmin variant: cap is options.bfgs_reset_max (default 5);
         //                 status on exhaustion is is_null_step + the
-        //                 diagnostics.bfgs_reset_count counter; rationale
-        //                 is D-05 cascade-free (no new solver_status
-        //                 enum entry).
+        //                 diagnostics.bfgs_reset_count counter; rationale:
+        //                 cascade-free design (no new solver_status
+        //                 enumerant required).
         std::size_t reset_count = 0;
         const std::size_t reset_max = options.bfgs_reset_max;
         // Fast-mode BFGS-update skip counter. Increments on the policy-level
@@ -413,8 +415,7 @@ struct nw_sqp_policy
         // backtracker shrinks alpha and continues. Both modes enable the
         // gate.
         //
-        // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
-        //            (NaN detection model; argmin variant is Armijo-only).
+        // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
         std::size_t nan_eval_count = 0;
 
         // Loop-carried variables that survive the retry block into the
@@ -493,8 +494,11 @@ struct nw_sqp_policy
         // large multipliers, causing iter-0 line-search rejection.
         //
         // Adopted from: NLopt slsqp.c iter-0 implicit cold-start from QP lambda.
-        // Reference: N&W 2e eq. 18.36; Kraft 1988 §2.2.6;
-        //            PITFALLS §B remedy 1.
+        // Reference: N&W 2e eq. 18.36; Kraft 1988 §2.2.6.
+        //            iter-0 cold-start: qp-lambda-driven sigma seed bounds
+        //            the first-step rejection rate by ensuring sigma
+        //            dominates the multiplier scale at the start of the
+        //            run.
         //
         // argmin variant: gated on s.iteration == 0; the existing
         //                 detail::update_penalty call below is monotone-up
@@ -648,16 +652,11 @@ struct nw_sqp_policy
             if(m > 0)
                 s.problem->constraints(x_trial, s.bufs.c_all);
 
-            // NaN/Inf recovery: parallel to line_search/armijo.h's gate
-            // for the hand-rolled inline-merit path. If the objective or
-            // any constraint returns non-finite on this trial iterate,
-            // shrink alpha and continue rather than letting NaN propagate
-            // through the L1 merit comparison below (where the IEEE-754
-            // ordered comparison would yield false regardless of descent).
-            // Both modes enable the gate.
-            //
-            // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
-            //            (NaN detection model; argmin variant is Armijo-only).
+            // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
+            //               Hand-rolled inline-merit path mirrors that
+            //               semantics — non-finite f_trial or constraints
+            //               trigger backtrack rather than crossing the L1
+            //               merit comparison. Both modes enable the gate.
             if(!std::isfinite(f_trial)
                || (m > 0 && !s.bufs.c_all.allFinite()))
             {
@@ -702,8 +701,8 @@ struct nw_sqp_policy
         // and accept the combined direction p + p_soc if the Armijo test
         // passes on the L1 merit.
         //
-        // Adopted from: argmin/solver/kraft_slsqp_policy.h:541-617
-        // (in-tree precedent).
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h::step SOC retry
+        //               block (in-tree precedent).
         //
         // argmin variant: nw_sqp uses active_set_qp_solver with the dense
         //                 Hessian B = s.hessian.hessian(); kraft_slsqp uses
@@ -903,7 +902,7 @@ struct nw_sqp_policy
         if(m > 0)
         {
             // Adopted from: argmin/detail/sqp_common.h compute_bfgs_pair_fused
-            //               (in-tree precedent — landed alongside this refactor).
+            //               (in-tree precedent).
             //
             // argmin variant: nw_sqp's lambda_new is the full m-sized QP-multiplier
             //                 vector (lam_buf alias); the helper's m_total branch

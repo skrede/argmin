@@ -160,7 +160,8 @@ struct filter_slsqp_policy
     // (s.iteration % multiplier_reest_every_k == 0); on the skip path
     // the prior step's s.bufs.kkt_lambda_eq_buf / s.bufs.kkt_mu_ineq_buf
     // are reused (state-resident, zero-alloc). k=1 recomputes every
-    // step (pre-Phase-41 behavior); k>1 trades a stationarity-leg lag
+    // step (the previous unconditional re-estimation behavior); k>1
+    // trades a stationarity-leg lag
     // of ~k steps for k-1x savings on the per-step ColPivHouseholderQR.
     //
     // Reference: Bertsekas 1996 §4.2 (stale-multiplier reuse rationale);
@@ -216,7 +217,8 @@ struct filter_slsqp_policy
         // up to bfgs_reset_max times before returning a null-step. Per-mode
         // brace-init from default_bfgs_reset_max (0 fast / 5 accurate).
         //
-        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
         //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
         //            N&W 2e Section 3.3 (recovery from non-descent).
         //
@@ -266,13 +268,13 @@ struct filter_slsqp_policy
         // kkt_lambda_eq / kkt_mu_ineq), the constraint Jacobian pair
         // (J_all and the J_all_old cached copy that eliminates the
         // second constraint_jacobian(x_old, ...) call on the BFGS
-        // curvature-pair path -- closes REF-04 here), and the
+        // curvature-pair path), and the
         // pre-factored Hessian buffers (E_buf / f_buf) consumed by
         // kraft_lsq_qp_recovery_solver::solve_with_factored_hessian.
         //
         // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers
-        //               (in-tree precedent -- landed alongside this refactor;
-        //                generalizes the kraft *_buf state-resident layout).
+        //               (in-tree precedent: generalizes the kraft *_buf
+        //                state-resident layout).
         // Reference: N&W 2e Section 18.
         //
         // argmin variant: cross-policy state-resident buffer struct.
@@ -372,8 +374,8 @@ struct filter_slsqp_policy
         // Initialize filter with h_max per Wachter-Biegler 2006 eq. (8)
         // and thread the configured envelope margins onto the filter
         // (Wachter & Biegler 2006 Section 2.3, eq. 6). Defaults
-        // 1e-5 / 1e-5 preserve v0.2.1 behaviour when the options are
-        // unset.
+        // 1e-5 / 1e-5 preserve the previously-shipped behavior when the
+        // options are unset.
         s.filter.initialize(1e4 * std::max(1.0, h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
 
@@ -401,8 +403,9 @@ struct filter_slsqp_policy
         //
         // Reference: N&W 2e eq. 18.36 (sigma sufficient for L1-merit descent);
         //            Wachter & Biegler 2006 Section 2.3 (filter acceptance);
-        //            PITFALLS B remedy 1 (cold-start applies to merit-based
-        //            policies).
+        //            cold-start applies only to merit-based policies (the
+        //            qp-lambda-driven sigma seed bounds first-step rejection
+        //            on L1-merit acceptance).
         //
         // argmin variant: filter_slsqp main loop is filter-based, so the
         //                 main-path cold-start is a no-op; sigma calibration
@@ -417,14 +420,16 @@ struct filter_slsqp_policy
         // minimises ||c||) over a BFGS reset on rejection, because the
         // restoration step is conceptually cheaper than discarding curvature.
         // The retry ordering is therefore: restoration first then BFGS-reset
-        // retry then null-step. This preserves v0.2.1 restoration semantics
-        // while adding the BFGS-reset escape hatch for the case where the
-        // restoration helper also fails to recover an acceptable trial point.
+        // retry then null-step. This preserves the existing restoration
+        // semantics while adding the BFGS-reset escape hatch for the case
+        // where the restoration helper also fails to recover an acceptable
+        // trial point.
         //
-        // Adopted from: argmin/solver/kraft_slsqp_policy.h retry-loop pattern
-        //               (in-tree precedent landed alongside this fix).
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h::step retry-loop
+        //               pattern (in-tree precedent).
         //               NLopt slsqp.c:1890-1895 (ireset retry pattern, max=5).
-        // Reference: PITFALLS section L (line-search exhaustion fallback);
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
         //            N&W 2e Section 3.3 (recovery from non-descent).
         //
         // argmin variant: cap is options.bfgs_reset_max (default 5);
@@ -443,8 +448,7 @@ struct filter_slsqp_policy
         // non-finite f_trial or constraint values; the backtracker shrinks
         // alpha and continues. Both modes enable the gate.
         //
-        // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
-        //            (NaN detection model; argmin variant is Armijo-only).
+        // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
         std::size_t nan_eval_count = 0;
 
         // Loop-carried variables that survive the retry block into the
@@ -633,7 +637,7 @@ struct filter_slsqp_policy
 
         for(std::uint16_t ls = 0; ls < max_ls; ++ls)
         {
-            // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent).
+            // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
             s.bufs.x_trial_buf.noalias() = s.x + alpha * p;
             s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
 
@@ -667,16 +671,12 @@ struct filter_slsqp_policy
                 h_trial = 0.0;
             }
 
-            // NaN/Inf recovery: parallel to line_search/armijo.h's gate
-            // for the hand-rolled inline-filter / inline-merit path. If the
-            // objective or any constraint returns non-finite on this trial
-            // iterate, shrink alpha and continue rather than passing
-            // NaN/Inf into the filter dominance / Armijo comparison below
-            // (where the IEEE-754 ordered comparisons would yield false
-            // regardless of descent). Both modes enable the gate.
-            //
-            // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
-            //            (NaN detection model; argmin variant is Armijo-only).
+            // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
+            //               Hand-rolled inline-filter / inline-merit path
+            //               mirrors that semantics — non-finite f_trial or
+            //               constraints trigger a backtrack rather than
+            //               crossing the filter dominance / Armijo
+            //               comparison. Both modes enable the gate.
             if(!std::isfinite(f_trial) || !c_finite)
             {
                 ++nan_eval_count;
@@ -719,7 +719,7 @@ struct filter_slsqp_policy
             {
                 if(s.n_eq + s.n_ineq > 0)
                 {
-                    // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent).
+                    // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
                     Eigen::Vector<double, N> x_full = s.x + p;
                     x_full = detail::project(x_full, s.lower, s.upper);
 
@@ -747,7 +747,7 @@ struct filter_slsqp_policy
 
                         for(std::uint16_t ls = 0; ls < max_ls; ++ls)
                         {
-                            // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent).
+                            // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
                             s.bufs.x_trial_buf.noalias() = s.x + alpha_soc * p_soc;
                             s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
 
@@ -919,7 +919,7 @@ struct filter_slsqp_policy
         double old_f = s.objective_value;
         s.x = s.x + alpha * p;
 
-        // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent).
+        // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
         s.x = detail::project(s.x, s.lower, s.upper);
 
         s.objective_value = s.problem->value(s.x);
@@ -931,7 +931,7 @@ struct filter_slsqp_policy
         {
             if(s.n_eq + s.n_ineq > 0)
             {
-                // REF-04: cache J(x_k) into J_all_old before the next-iter
+                // Cache J(x_k) into J_all_old before the next-iter
                 // Jacobian overwrites s.bufs.J_all. The BFGS curvature-pair
                 // update below needs J(x_old) = J(x_k) to compute
                 // grad_L_old = g_k - J(x_k)^T lambda; with this cache
@@ -998,7 +998,7 @@ struct filter_slsqp_policy
                 if(lam_take == m_total)
                 {
                     // Adopted from: argmin/detail/sqp_common.h compute_bfgs_pair_fused
-                    //               (in-tree precedent -- landed alongside this refactor).
+                    //               (in-tree precedent).
                     argmin::detail::compute_bfgs_pair_fused<double, N>(
                         g_old, s.g, s.bufs.J_all_old, s.bufs.J_all,
                         s.bufs.lam_buf.head(m_total), m_total,
@@ -1171,7 +1171,7 @@ private:
     // grad_L vanishes (N&W eq. 12.34) while raw ||grad_f|| in general does
     // not. Convergence criteria gate on Lagrangian-gradient norm.
     //
-    // Adopted from: argmin/solver/nw_sqp_policy.h:599-612 (in-tree precedent).
+    // Adopted from: argmin/solver/nw_sqp_policy.h::step null-step branch (in-tree precedent).
     // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity);
     //            eq. 18.2-18.3 (Lagrangian gradient definition).
     //
