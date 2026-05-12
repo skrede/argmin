@@ -28,6 +28,7 @@
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -184,5 +185,99 @@ TEMPLATE_TEST_CASE_SIG(
         // result/step_result.h). The conceptual primal-feasibility
         // L-inf quantity is reported under that name.
         CHECK(last.constraint_violation >= 0.0);
+    }
+
+    SECTION("Per-mode default_armijo_c1 propagates to options.line_search.c1")
+    {
+        // Mode-invariant 1e-4 (Wolfe-condition convention). Gate the
+        // assertion on the requires-expression so rows whose policy
+        // has not yet published default_armijo_c1 skip cleanly.
+        if constexpr(requires { Policy::default_armijo_c1; })
+        {
+            typename Policy::options_type options{};
+            REQUIRE(options.line_search.c1
+                    == Catch::Approx(Policy::default_armijo_c1));
+            REQUIRE(options.line_search.c1 == Catch::Approx(1e-4));
+        }
+    }
+
+    SECTION("Per-mode default_armijo_rho propagates to options.line_search.rho")
+    {
+        // 0.3 in fast mode (faster Armijo back-off), 0.5 in accurate
+        // mode (NLopt slsqp.c default).
+        if constexpr(requires { Policy::default_armijo_rho; })
+        {
+            typename Policy::options_type options{};
+            REQUIRE(options.line_search.rho
+                    == Catch::Approx(Policy::default_armijo_rho));
+            if constexpr(Policy::mode_ == sqp_mode::fast)
+                REQUIRE(options.line_search.rho == Catch::Approx(0.3));
+            else
+                REQUIRE(options.line_search.rho == Catch::Approx(0.5));
+        }
+    }
+
+    SECTION("Per-mode default_line_search_max_iterations propagates")
+    {
+        // 10 fast, 40 accurate.
+        if constexpr(requires { Policy::default_line_search_max_iterations; })
+        {
+            typename Policy::options_type options{};
+            REQUIRE(options.line_search.max_iterations
+                    == Policy::default_line_search_max_iterations);
+            if constexpr(Policy::mode_ == sqp_mode::fast)
+                REQUIRE(options.line_search.max_iterations == 10);
+            else
+                REQUIRE(options.line_search.max_iterations == 40);
+        }
+    }
+
+    SECTION("Per-mode default_bfgs_reset_max propagates")
+    {
+        // 0 fast (no retry; null-step or QP recovery instead),
+        // 5 accurate (NLopt slsqp.c ireset semantics).
+        if constexpr(requires { Policy::default_bfgs_reset_max; })
+        {
+            typename Policy::options_type options{};
+            REQUIRE(options.bfgs_reset_max == Policy::default_bfgs_reset_max);
+            if constexpr(Policy::mode_ == sqp_mode::fast)
+                REQUIRE(options.bfgs_reset_max == std::size_t{0});
+            else
+                REQUIRE(options.bfgs_reset_max == std::size_t{5});
+        }
+    }
+
+    SECTION("Per-mode default_qp_max_iterations propagates to options.qp")
+    {
+        // 50 fast, 200 accurate. Observable on options.qp.max_iterations;
+        // currently dead-wired on the kraft and filter_slsqp recovery
+        // solver paths (no behavioral effect on the QP solve), but the
+        // value is observable here.
+        if constexpr(requires { Policy::default_qp_max_iterations; })
+        {
+            typename Policy::options_type options{};
+            REQUIRE(options.qp.max_iterations
+                    == Policy::default_qp_max_iterations);
+            if constexpr(Policy::mode_ == sqp_mode::fast)
+                REQUIRE(options.qp.max_iterations == 50);
+            else
+                REQUIRE(options.qp.max_iterations == 200);
+        }
+    }
+
+    SECTION("Per-mode default_qp_tolerance propagates to options.qp")
+    {
+        // 1e-8 fast, 1e-12 accurate. Same dead-wire caveat as
+        // default_qp_max_iterations on kraft / filter_slsqp.
+        if constexpr(requires { Policy::default_qp_tolerance; })
+        {
+            typename Policy::options_type options{};
+            REQUIRE(options.qp.tolerance
+                    == Catch::Approx(Policy::default_qp_tolerance));
+            if constexpr(Policy::mode_ == sqp_mode::fast)
+                REQUIRE(options.qp.tolerance == Catch::Approx(1e-8));
+            else
+                REQUIRE(options.qp.tolerance == Catch::Approx(1e-12));
+        }
     }
 }
