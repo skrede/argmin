@@ -4,6 +4,8 @@
 #include "argmin/line_search/result.h"
 #include "argmin/line_search/options.h"
 
+#include <cmath>
+
 namespace argmin
 {
 
@@ -37,6 +39,23 @@ template <typename Phi, typename Scalar = double>
     {
         Scalar phi_alpha = phi(alpha);
         ++result.evaluations;
+
+        // NaN/Inf recovery: treat non-finite phi as a backtrack trigger so
+        // the Armijo comparison below stays defined. A non-finite return
+        // value indicates either the objective or a constraint propagated
+        // NaN/Inf on this trial iterate, or the iterate fell outside the
+        // function's natural domain. Both fast and accurate modes enable
+        // this gate — non-finite trial-point evaluations should never be
+        // silently consumed.
+        //
+        // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+        //            (NaN detection model; argmin variant is Armijo-only).
+        if(!std::isfinite(phi_alpha))
+        {
+            ++result.diagnostics.nan_eval_count;
+            alpha *= opts.rho;
+            continue;
+        }
 
         result.alpha = alpha;
         result.value = phi_alpha;

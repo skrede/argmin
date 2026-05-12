@@ -425,6 +425,14 @@ struct kraft_slsqp_policy
         //                 enum entry).
         std::size_t reset_count = 0;
         const std::size_t reset_max = options.bfgs_reset_max;
+        // Armijo NaN/Inf recovery counter aggregated across the main line
+        // search and any second-order-correction retry within this step()
+        // call. Kraft calls armijo() directly (line_search/armijo.h) so the
+        // gate lives in the helper; this local mirrors the diagnostic into
+        // the step_result return without exposing the helper's scope at
+        // the return site (ls_soc is declared inside the SOC if-block and
+        // is not visible at the bottom of step()).
+        std::size_t nan_eval_count = 0;
 
         // Survives the retry loop into the post-loop accept-step block.
         detail::qp_result<double, N> qp_res;
@@ -630,6 +638,7 @@ struct kraft_slsqp_policy
             auto ls = armijo(phi_ls, merit_0, dphi_merit, options.line_search);
             alpha = ls.alpha;
             bool ls_success = ls.success;
+            nan_eval_count += ls.diagnostics.nan_eval_count;
 
             // Second-order correction (Kraft 1988 Section 2.2.4,
             // N&W Section 18.3 "Maratos effect").
@@ -687,6 +696,7 @@ struct kraft_slsqp_policy
                             };
                             auto ls_soc = armijo(phi_soc, merit_0, dphi_merit,
                                                  options.line_search);
+                            nan_eval_count += ls_soc.diagnostics.nan_eval_count;
                             if(ls_soc.success && ls_soc.alpha > alpha)
                             {
                                 p = s.p_combined_buf;
@@ -740,6 +750,9 @@ struct kraft_slsqp_policy
                 // s.lambda for cross-policy consistency with the accepted-
                 // step path; override the helper's internal computation.
                 r.gradient_norm = lagrangian_gradient_norm(s);
+                // Surface the Armijo NaN-recovery count accumulated across
+                // the main LS and any SOC retry within this step() call.
+                r.diagnostics.nan_eval_count = nan_eval_count;
                 return r;
             }
 
@@ -955,6 +968,7 @@ struct kraft_slsqp_policy
             .diagnostics = {
                 .bfgs_reset_count = reset_count,
                 .bfgs_skip_count = 0,
+                .nan_eval_count = nan_eval_count,
             },
         };
     }

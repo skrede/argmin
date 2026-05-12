@@ -375,6 +375,19 @@ struct nw_sqp_policy
         // and the policy mode dispatches to the skip branch (the Powell-
         // damped helper path is bypassed). Always zero in accurate mode.
         std::size_t bfgs_skip_count = 0;
+        // Armijo NaN/Inf recovery counter aggregated across the main inline
+        // line search and the SOC retry inline loop. nw_sqp hand-rolls the
+        // Armijo backtracking loop (does not call line_search/armijo.h)
+        // because the inline-merit pattern avoids a per-backtrack VectorXd
+        // materialisation; this counter mirrors armijo()'s diagnostic on
+        // the hand-rolled paths. Incremented inline when a trial-iterate
+        // evaluation returns non-finite f_trial or constraint values; the
+        // backtracker shrinks alpha and continues. Both modes enable the
+        // gate.
+        //
+        // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+        //            (NaN detection model; argmin variant is Armijo-only).
+        std::size_t nan_eval_count = 0;
 
         // Loop-carried variables that survive the retry block into the
         // post-loop accept-step block. The cold-start sigma calibration
@@ -606,6 +619,25 @@ struct nw_sqp_policy
             f_trial = s.problem->value(x_trial);
             if(m > 0)
                 s.problem->constraints(x_trial, s.bufs.c_all);
+
+            // NaN/Inf recovery: parallel to line_search/armijo.h's gate
+            // for the hand-rolled inline-merit path. If the objective or
+            // any constraint returns non-finite on this trial iterate,
+            // shrink alpha and continue rather than letting NaN propagate
+            // through the L1 merit comparison below (where the IEEE-754
+            // ordered comparison would yield false regardless of descent).
+            // Both modes enable the gate.
+            //
+            // Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+            //            (NaN detection model; argmin variant is Armijo-only).
+            if(!std::isfinite(f_trial)
+               || (m > 0 && !s.bufs.c_all.allFinite()))
+            {
+                ++nan_eval_count;
+                alpha *= ls_rho;
+                continue;
+            }
+
             // Inline L1 merit via head/tail VectorBlock expressions to avoid
             // a per-backtrack VectorXd materialization. Equivalent to
             // detail::l1_merit(f, c_eq, c_ineq, sigma).
@@ -708,6 +740,18 @@ struct nw_sqp_policy
                     f_trial_soc = s.problem->value(x_trial_soc);
                     if(m > 0)
                         s.problem->constraints(x_trial_soc, s.bufs.c_all);
+
+                    // NaN/Inf recovery on the SOC retry path (parallel to
+                    // the main-LS inline gate above). Shrink alpha_soc and
+                    // continue on non-finite trial-iterate evaluation.
+                    if(!std::isfinite(f_trial_soc)
+                       || (m > 0 && !s.bufs.c_all.allFinite()))
+                    {
+                        ++nan_eval_count;
+                        alpha_soc *= ls_rho;
+                        continue;
+                    }
+
                     // Inline L1 merit via head/tail VectorBlock expressions to
                     // avoid per-backtrack VectorXd materialization (see main LS).
                     double viol_soc = 0.0;
@@ -782,6 +826,12 @@ struct nw_sqp_policy
                 grad_L_cap_norm = grad_L.norm();
             }
             r.gradient_norm = grad_L_cap_norm;
+            // Surface the Armijo NaN-recovery count accumulated across
+            // the main hand-rolled LS and the SOC retry within this
+            // step() call (null_step_result leaves nan_eval_count at
+            // its in-class default 0).
+            r.diagnostics.bfgs_skip_count = bfgs_skip_count;
+            r.diagnostics.nan_eval_count = nan_eval_count;
             return r;
         }
 
@@ -949,6 +999,7 @@ struct nw_sqp_policy
             .diagnostics = {
                 .bfgs_reset_count = reset_count,
                 .bfgs_skip_count = bfgs_skip_count,
+                .nan_eval_count = nan_eval_count,
             },
         };
     }
