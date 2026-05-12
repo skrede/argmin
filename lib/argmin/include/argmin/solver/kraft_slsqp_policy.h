@@ -166,6 +166,32 @@ struct kraft_slsqp_policy
     static constexpr double default_qp_tolerance =
         (Mode == sqp_mode::fast) ? 1e-8 : 1e-12;
 
+    // Active-set Lagrange-multiplier re-estimation stride. Sibling
+    // line-search SQP policies (nw_sqp, filter_slsqp, filter_nw_sqp)
+    // recompute multipliers via compute_kkt_multipliers_active_set on
+    // every step k for which (s.iteration % k == 0); on the skip path
+    // the prior step's s.bufs.kkt_lambda_eq_buf / s.bufs.kkt_mu_ineq_buf
+    // are reused (state-resident, zero-alloc).
+    //
+    // NOTE: Kraft lineage uses QP-native multipliers (qp_res.lambda
+    // copied directly into s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf
+    // on every step) rather than active-set least-squares, so this
+    // field is wired for API uniformity across the four line-search
+    // SQP policies but has no behavioral effect on Kraft's hot path.
+    //
+    // Reference: Bertsekas 1996 §4.2 (stale-multiplier reuse rationale);
+    //            N&W 2e §18.3 + Algorithm 18.3 (working-set
+    //            identification, eq. 18.15).
+    //
+    // Defaults picked empirically from an internal sweep on
+    // HS026 / HS028 / HS043 / HS071 across k ∈ {1, 2, 3, 5, 8, 10}.
+    // Accurate-mode locked at 1 (KKT-leg precision); fast-mode picked
+    // as the largest k that satisfies a zero-status-regression + iter
+    // inflation ≤ 10% gate on the three N&W-lineage sibling policies
+    // (kraft is excluded from the gate — see no-op note above).
+    static constexpr std::size_t default_multiplier_reest_every_k =
+        (Mode == sqp_mode::fast) ? std::size_t{5} : std::size_t{1};
+
     struct options_type
     {
         // Direct-field-default form: the per-mode default_* static-constexpr
@@ -218,6 +244,12 @@ struct kraft_slsqp_policy
         // argmin variant: per-policy options field; cascade-free
         //                 (no new solver_status enum entry).
         std::size_t bfgs_reset_max{default_bfgs_reset_max};
+
+        // Active-set multiplier re-estimation stride (cf. the per-policy
+        // default_multiplier_reest_every_k constexpr above). Wired for
+        // API uniformity with the N&W lineage; behavioral no-op on
+        // Kraft's QP-native KKT-leg.
+        std::size_t multiplier_reest_every_k{default_multiplier_reest_every_k};
     };
 
     options_type options{};
@@ -930,6 +962,13 @@ struct kraft_slsqp_policy
         //            complementarity); eq. 12.34 (Lagrangian
         //            stationarity leg); Goldfarb-Idnani 1983
         //            (active-set QP duality, kraft_lsq_qp lineage).
+        //
+        // NOTE: options.multiplier_reest_every_k is intentionally NOT
+        // consulted here. The QP-native copy below is the multiplier
+        // source for kraft on every step and runs unconditionally; the
+        // field exists on options_type for API uniformity across the
+        // four line-search SQP policies but is a documented no-op on
+        // the Kraft hot path.
         s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
         s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
         if constexpr(constrained<P>)

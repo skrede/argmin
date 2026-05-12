@@ -59,6 +59,26 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Strided active-set multiplier-reest sweep harness. Parametric on
+# (policy x mode x problem x k); emits Google Benchmark native JSON
+# via --benchmark_out for the per-mode default selection of
+# default_multiplier_reest_every_k across the four line-search SQP
+# policies on HS026 / HS028 / HS043 / HS071.
+add_executable(multiplier_reest_sweep multiplier_reest_sweep.cpp)
+target_link_libraries(multiplier_reest_sweep PRIVATE argmin::argmin benchmark::benchmark)
+
+target_compile_options(multiplier_reest_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(multiplier_reest_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Optional comparison library hooks (per D-03).
 
 option(ARGMIN_BENCH_NLOPT "Build NLopt comparison benchmarks" ON)

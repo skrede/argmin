@@ -155,6 +155,26 @@ struct filter_slsqp_policy
     static constexpr double default_qp_tolerance =
         (Mode == sqp_mode::fast) ? 1e-8 : 1e-12;
 
+    // Active-set Lagrange-multiplier re-estimation stride. The post-step
+    // KKT-leg invokes compute_kkt_multipliers_active_set only when
+    // (s.iteration % multiplier_reest_every_k == 0); on the skip path
+    // the prior step's s.bufs.kkt_lambda_eq_buf / s.bufs.kkt_mu_ineq_buf
+    // are reused (state-resident, zero-alloc). k=1 recomputes every
+    // step (pre-Phase-41 behavior); k>1 trades a stationarity-leg lag
+    // of ~k steps for k-1x savings on the per-step ColPivHouseholderQR.
+    //
+    // Reference: Bertsekas 1996 §4.2 (stale-multiplier reuse rationale);
+    //            N&W 2e §18.3 + Algorithm 18.3 (working-set
+    //            identification, eq. 18.15).
+    //
+    // Defaults picked empirically from an internal sweep on
+    // HS026 / HS028 / HS043 / HS071 across k ∈ {1, 2, 3, 5, 8, 10}.
+    // Accurate-mode locked at 1 (KKT-leg precision); fast-mode picked
+    // as the largest k that satisfies a zero-status-regression + iter
+    // inflation ≤ 10% gate on the N&W-lineage policies.
+    static constexpr std::size_t default_multiplier_reest_every_k =
+        (Mode == sqp_mode::fast) ? std::size_t{5} : std::size_t{1};
+
     struct options_type
     {
         // Embedded line-search params. Designated-initializer order follows
@@ -205,6 +225,13 @@ struct filter_slsqp_policy
         //                 reset then null-step). Cascade-free: no new
         //                 solver_status enum entry.
         std::size_t bfgs_reset_max{default_bfgs_reset_max};
+
+        // Active-set multiplier re-estimation stride (cf. the per-policy
+        // default_multiplier_reest_every_k constexpr above). At
+        // (s.iteration % k == 0) the post-step KKT-leg invokes the
+        // active-set LS helper; otherwise the prior step's
+        // s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf are reused.
+        std::size_t multiplier_reest_every_k{default_multiplier_reest_every_k};
     };
 
     options_type options{};
@@ -1053,12 +1080,30 @@ struct filter_slsqp_policy
         //            Section 18.3 + Algorithm 18.3 (working-set
         //            identification).
         //
-        // Adopted from: argmin/detail/lagrangian.h compute_kkt_multipliers_active_set.
-        argmin::detail::compute_kkt_multipliers_active_set<double, N,
-                                                          Eigen::Dynamic,
-                                                          Eigen::Dynamic>(
-            s.g, s.J_eq, s.J_ineq, s.c_ineq,
-            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+        // Strided re-estimation: when options.multiplier_reest_every_k
+        // > 1 the helper is invoked only on steps where
+        // (s.iteration % k == 0); on the skip path the prior step's
+        // s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf are reused
+        // (state-resident, zero-alloc; Bertsekas 1996 §4.2). The
+        // helper only writes binding entries, so the buffers are
+        // explicitly zeroed inside the gate-fire branch to clear any
+        // previously-binding multipliers whose row may have left the
+        // active set since the prior fire. At k=1 the gate always
+        // fires; behavior is bit-identical to unconditional
+        // re-estimation.
+        if(s.iteration % options.multiplier_reest_every_k == 0)
+        {
+            s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+            s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
+            // Adopted from: argmin/detail/lagrangian.h compute_kkt_multipliers_active_set.
+            argmin::detail::compute_kkt_multipliers_active_set<double, N,
+                                                              Eigen::Dynamic,
+                                                              Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq, s.c_ineq,
+                s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+        }
+        // else: reuse s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf from
+        //       the prior step's gate-fire path.
         double kkt = detail::kkt_residual<double,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic,
