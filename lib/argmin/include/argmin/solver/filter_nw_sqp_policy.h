@@ -93,9 +93,78 @@ struct filter_nw_sqp_policy
     static constexpr double default_soc_violation_threshold =
         (Mode == sqp_mode::fast) ? 1e-2 : 1e-3;
 
+    // Per-mode Armijo backtracking budget. 10 fast / 40 accurate, mirroring
+    // the kraft + nw_sqp lineages.
+    //
+    // Reference: NLopt slsqp.c:1803-2189 (slsqpb_ outer line-search budget).
+    static constexpr std::uint16_t default_line_search_max_iterations =
+        (Mode == sqp_mode::fast) ? std::uint16_t{10} : std::uint16_t{40};
+
+    // Armijo sufficient-decrease parameter (Wolfe-condition convention).
+    // Mode-invariant 1e-4.
+    //
+    // Reference: N&W 2e §3.1 (Wolfe-condition convention);
+    //            NLopt slsqp.c default c1 = 1e-4.
+    static constexpr double default_armijo_c1 = 1e-4;
+
+    // Armijo backtracking shrink factor. 0.3 fast / 0.5 accurate.
+    //
+    // Reference: NLopt slsqp.c default rho = 0.5;
+    //            N&W 2e §3.5 (backtracking shrink factor range 0.1..0.9).
+    static constexpr double default_armijo_rho =
+        (Mode == sqp_mode::fast) ? 0.3 : 0.5;
+
+    // BFGS Hessian-reset retry cap on line-search exhaustion. 0 fast
+    // (immediate fallthrough to restoration / null-step) / 5 accurate
+    // (NLopt-parity ireset semantics).
+    //
+    // Reference: NLopt slsqp.c:1890-1895 (ireset retry pattern).
+    static constexpr std::size_t default_bfgs_reset_max =
+        (Mode == sqp_mode::fast) ? std::size_t{0} : std::size_t{5};
+
+    // QP inner solver iteration cap. 50 fast / 200 accurate.
+    //
+    // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
+    static constexpr std::uint16_t default_qp_max_iterations =
+        (Mode == sqp_mode::fast) ? std::uint16_t{50} : std::uint16_t{200};
+
+    // QP convergence tolerance. 1e-8 fast / 1e-12 accurate.
+    //
+    // Reference: Kraft 1988 §3.5 (QP convergence acc^2 threshold).
+    static constexpr double default_qp_tolerance =
+        (Mode == sqp_mode::fast) ? 1e-8 : 1e-12;
+
+    // L1-merit penalty parameter ceiling. The inline penalty bump below
+    // caps sigma at this value to prevent unbounded penalty growth on
+    // problems with degenerate constraint Jacobians. 1e6 fast (tighter
+    // ceiling matching wall-time-budgeted contexts); 1e10 accurate
+    // (NLopt-parity headroom).
+    //
+    // Reference: N&W 2e §18.3 + Procedure 18.2 (L1-merit penalty cap).
+    static constexpr double default_sigma_max =
+        (Mode == sqp_mode::fast) ? 1e6 : 1e10;
+
     struct options_type
     {
-        line_search_options line_search{};
+        // Embedded line-search params. Designated-initializer order follows
+        // line_search_options field-declaration order (c1, c2, rho,
+        // max_alpha, max_iterations); skipped designators (c2, max_alpha)
+        // keep their line_search_options-side defaults (0.9 and 1.0).
+        line_search_options line_search{
+            .c1 = default_armijo_c1,
+            .rho = default_armijo_rho,
+            .max_iterations = default_line_search_max_iterations,
+        };
+
+        // QP subproblem params. Brace-initialized from per-mode defaults so
+        // options.qp.{max_iterations, tolerance} reflect the current Mode.
+        // Prior to this addition the policy constructed a local qp_options
+        // with hardcoded literals; the new member exposes per-mode
+        // propagation to callers.
+        qp_options qp{
+            .max_iterations = default_qp_max_iterations,
+            .tolerance = default_qp_tolerance,
+        };
         detail::restoration_strategy restoration{detail::restoration_strategy::hybrid};
         std::uint16_t max_restoration_steps{10};
         double soc_violation_threshold{default_soc_violation_threshold};
@@ -114,8 +183,8 @@ struct filter_nw_sqp_policy
         // BFGS-reset retry cap on line-search/filter exhaustion. After
         // restoration fails to recover an acceptable trial point, the policy
         // resets the BFGS Hessian to identity and re-solves the QP, repeating
-        // up to bfgs_reset_max times before returning a null-step. Default 5
-        // matches NLopt slsqp.c:1890-1895 ireset semantics.
+        // up to bfgs_reset_max times before returning a null-step. Per-mode
+        // brace-init from default_bfgs_reset_max (0 fast / 5 accurate).
         //
         // Reference: PITFALLS section L (line-search exhaustion fallback);
         //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
@@ -125,7 +194,7 @@ struct filter_nw_sqp_policy
         //                 restoration path (restoration first then BFGS
         //                 reset then null-step). Cascade-free: no new
         //                 solver_status enum entry.
-        std::size_t bfgs_reset_max{5};
+        std::size_t bfgs_reset_max{default_bfgs_reset_max};
     };
 
     options_type options{};
@@ -342,6 +411,11 @@ struct filter_nw_sqp_policy
         //                 is cascade-free (no new solver_status enum entry).
         std::size_t reset_count = 0;
         const std::size_t reset_max = options.bfgs_reset_max;
+        // Fast-mode BFGS-update skip counter. Increments on the policy-level
+        // hessian.push() guard whenever the curvature pair has s^T y <= 0
+        // and the policy mode dispatches to the skip branch (the Powell-
+        // damped helper path is bypassed). Always zero in accurate mode.
+        std::size_t bfgs_skip_count = 0;
 
         // Loop-carried variables that survive the retry block into the
         // post-loop accept-step block. The only path that exits the loop
@@ -349,9 +423,7 @@ struct filter_nw_sqp_policy
         // Restoration-success and restoration-exhaustion (after reset cap)
         // return inline from inside the loop.
         const bool has_bounds = has_finite_box(s.lower, s.upper);
-        qp_options qp_opts;
-        qp_opts.max_iterations = std::uint16_t{200};
-        qp_opts.tolerance = 1e-12;
+        const qp_options& qp_opts = options.qp;
 
         detail::qp_result<double, N> qp;
         Eigen::Vector<double, N>& p = s.bufs.p_buf;
@@ -519,16 +591,19 @@ struct filter_nw_sqp_policy
         // detail::bump_sigma_for_descent helper's `+ 1` constant). The
         // helper's signature is sized for nw_sqp / kraft cold-bump
         // semantics where the additive ceiling is `+ 1`; filter_nw_sqp's
-        // smaller `+ 1e-4` constant is load-bearing for the HS043 SEED-006
+        // smaller `+ 1e-4` constant is load-bearing for the HS043
         // over-rejection marker (Catch2 Approx margin 4.0). Adopting the
         // helper here would shift HS043 cv beyond the marker; left inline.
+        // The std::min(..., default_sigma_max) cap mirrors the helper's
+        // sigma_max ceiling (1e6 fast / 1e10 accurate, N&W §18.3).
         // Reference: N&W 2e eq. 18.36; PITFALLS §B.
         s.sigma = detail::update_penalty(s.sigma, lambda_new);
         double h_cur = detail::constraint_violation(s.c_eq, s.c_ineq);
         double dphi_check = s.g.dot(p) - s.sigma * h_cur;
         if(dphi_check >= 0.0 && h_cur > 1e-12)
-            s.sigma = std::max(s.sigma,
-                std::abs(s.g.dot(p)) / h_cur + 1e-4);
+            s.sigma = std::min(default_sigma_max,
+                std::max(s.sigma,
+                    std::abs(s.g.dot(p)) / h_cur + 1e-4));
 
         // --- 3. Filter + merit acceptance line search ---
         //
@@ -762,7 +837,10 @@ struct filter_nw_sqp_policy
                     .improved = h_restored_l1 < h_k,
                     .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                     .kkt_residual = kkt_rest,
-                    .diagnostics = { .bfgs_reset_count = reset_count },
+                    .diagnostics = {
+                        .bfgs_reset_count = reset_count,
+                        .bfgs_skip_count = bfgs_skip_count,
+                    },
                 };
             }
 
@@ -830,7 +908,10 @@ struct filter_nw_sqp_policy
                 .is_null_step = true,
                 .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                 .kkt_residual = kkt_cap,
-                .diagnostics = { .bfgs_reset_count = reset_count },
+                .diagnostics = {
+                    .bfgs_reset_count = reset_count,
+                    .bfgs_skip_count = bfgs_skip_count,
+                },
             };
         }
         s.hessian.reset();
@@ -906,12 +987,29 @@ struct filter_nw_sqp_policy
         // Powell damping per N&W eq. 18.22-18.24 internally, but the
         // explicit guard here keeps the policy-step semantics legible.
         //
+        // Fast-mode dispatch: on non-positive curvature the push() is
+        // skipped (Powell damping bypassed) and bfgs_skip_count is
+        // incremented for surfacing on step_result.diagnostics. Accurate
+        // mode retains the existing semantics.
+        //
         // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
-        //            N&W Procedure 18.2 damping guard.
+        //            N&W Procedure 18.2 damping guard;
+        //            N&W eq. 18.22-18.24 (Powell damping, accurate path).
         const double sTy = sk.dot(yk);
-        if(sk.norm() > 1e-15 && sTy > 0.0)
+        if(sk.norm() > 1e-15)
         {
-            s.hessian.push(sk, yk);
+            if constexpr (Mode == sqp_mode::fast)
+            {
+                if(sTy > 0.0)
+                    s.hessian.push(sk, yk);
+                else
+                    ++bfgs_skip_count;
+            }
+            else
+            {
+                if(sTy > 0.0)
+                    s.hessian.push(sk, yk);
+            }
         }
 
         // --- 6. Update multipliers and iteration ---
@@ -974,7 +1072,10 @@ struct filter_nw_sqp_policy
             .improved = phi_new < phi0,
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .kkt_residual = kkt,
-            .diagnostics = { .bfgs_reset_count = reset_count },
+            .diagnostics = {
+                .bfgs_reset_count = reset_count,
+                .bfgs_skip_count = bfgs_skip_count,
+            },
         };
     }
 
