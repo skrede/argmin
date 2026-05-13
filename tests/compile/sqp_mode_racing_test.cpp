@@ -16,9 +16,11 @@
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/basic_solver.h"
 #include "argmin/solver/sqp_mode.h"
+#include "argmin/formulation/concepts.h"
 #include "argmin/types.h"
 
 #include <type_traits>
@@ -70,6 +72,9 @@ static_assert(!std::is_same_v<
 static_assert(!std::is_same_v<
     filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>,
     filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
+static_assert(!std::is_same_v<
+    tr_sqp_policy<dynamic_dimension, sqp_mode::fast>,
+    tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
 
 // -----------------------------------------------------------------------
 // Gate 3 -- _fast / _accurate alias resolution across all four policies.
@@ -98,6 +103,12 @@ static_assert(std::is_same_v<
 static_assert(std::is_same_v<
     filter_nw_sqp_policy_accurate<dynamic_dimension>,
     filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
+static_assert(std::is_same_v<
+    tr_sqp_policy_fast<dynamic_dimension>,
+    tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>);
+static_assert(std::is_same_v<
+    tr_sqp_policy_accurate<dynamic_dimension>,
+    tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
 
 // -----------------------------------------------------------------------
 // Gate 4 -- rebind<M> propagates Mode through the dimension axis.
@@ -136,6 +147,42 @@ using racing_kraft = basic_solver_group<
 // referencing the alias the compiler may skip alias-expansion-time
 // SFINAE.
 static_assert(std::is_same_v<racing_kraft, racing_kraft>);
+
+}
+
+// -----------------------------------------------------------------------
+// nlp_solver concept satisfaction gate for tr_sqp_policy.
+// -----------------------------------------------------------------------
+// The trust-region SQP policy must satisfy the same nlp_solver concept
+// the line-search SQP policies do, so basic_solver_group can race them
+// against each other and downstream consumers (ctrlpp / cartan) can
+// inject either family through the same concept-templated entry point.
+static_assert(nlp_solver<basic_solver<tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
+static_assert(nlp_solver<basic_solver<tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>>);
+
+// -----------------------------------------------------------------------
+// Gate 5b -- cross-family racing-tuple instantiation.
+// -----------------------------------------------------------------------
+// basic_solver_group instantiation across a line-search SQP policy
+// (kraft_slsqp_accurate) and a trust-region SQP policy
+// (tr_sqp_accurate). The compile-time form of the cross-family racing
+// requirement: if the per-policy options_type forwarding inside the
+// std::tuple<policy_options_t<...>...> backing distinguishes the two
+// policy types (which have entirely different options_type layouts),
+// the using-alias is well-formed and the static_assert holds; a
+// regression in policy_options_t<> or in the racing-tuple machinery
+// surfaces as a SFINAE failure on the alias.
+namespace
+{
+
+using racing_cross_family = basic_solver_group<
+    round_robin_schedule,
+    dynamic_dimension,
+    void,
+    kraft_slsqp_policy<dynamic_dimension, sqp_mode::accurate>,
+    tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>;
+
+static_assert(std::is_same_v<racing_cross_family, racing_cross_family>);
 
 }
 
