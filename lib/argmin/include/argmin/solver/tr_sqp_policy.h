@@ -198,13 +198,24 @@ struct tr_sqp_policy
         Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
 
-        // Cross-policy state-resident buffer struct. TRSQP resizes this
-        // with the JOINT dimension n + n_ineq so the per-step iterate /
-        // direction / curvature-pair buffers all carry the slack-
-        // augmented primal width.
+        // Cross-policy state-resident buffer struct. TRSQP uses the
+        // x-only-typed bufs for the constraint-axis buffers (c_all, J_all,
+        // kkt_lambda_eq_buf, kkt_mu_ineq_buf) sized at the x-only dimension
+        // n; the joint-space (x, s) buffers are dynamic-dimension fields
+        // below (joint_*) because the joint primal width n + n_ineq is a
+        // runtime quantity even when the policy's N template parameter is
+        // a fixed compile-time constant for the x-only dimension.
         //
         // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers.
         argmin::detail::sqp_state_buffers<double, N> bufs;
+
+        // Joint-space (x, s) dynamic buffers. Sized at n + n_ineq on init;
+        // the joint primal dimension is runtime even when N is fixed.
+        Eigen::VectorXd joint_x_old_buf;
+        Eigen::VectorXd joint_grad_L_old_buf;
+        Eigen::VectorXd joint_grad_L_new_buf;
+        Eigen::VectorXd joint_sk_buf;
+        Eigen::VectorXd joint_yk_buf;
 
         // TRSQP-specific slack vector for the inequality reformulation
         // c_ineq(x) + s = 0, s >= 0. The full step() integration in a
@@ -224,7 +235,9 @@ struct tr_sqp_policy
 
         double objective_value{};
         // Lagrangian-Hessian approximation on the JOINT (x, s) space;
-        // sized n + n_ineq.
+        // sized n + n_ineq. The compile-time dimension is Eigen::Dynamic
+        // because the joint primal width is a runtime quantity even when
+        // the policy's N template parameter pins the x-only dimension.
         //
         // Reference: Fletcher and Powell 1974 Math. Computation 28:1067-
         //            1078 (LDL^T rank-1 update);
@@ -232,7 +245,7 @@ struct tr_sqp_policy
         //            BFGS);
         //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.3 (BFGS in
         //            the SQP outer loop).
-        detail::dense_ldl_bfgs<double, N> hessian;
+        detail::dense_ldl_bfgs<double, Eigen::Dynamic> hessian;
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
@@ -271,13 +284,21 @@ struct tr_sqp_policy
         s.objective_value = problem.value(x0);
         problem.gradient(x0, s.g);
 
-        // Cross-policy state-resident buffer struct sized on the JOINT
-        // (x, s) dimension. The slack reformulation widens the primal to
-        // n + n_ineq; all per-step iterate / direction / curvature-pair
-        // buffers carry that width. The constraint-axis buffers are
-        // sized on n_eq + n_ineq (the joint constraint count: original
-        // equalities plus the new slack equalities c_ineq + s = 0).
-        s.bufs.resize(n + s.n_ineq, s.n_eq + s.n_ineq, 0);
+        // Cross-policy state-resident buffer struct sized on the x-only
+        // dimension n; the constraint-axis buffers (c_all, J_all,
+        // kkt_lambda_eq_buf, kkt_mu_ineq_buf) hold un-reformulated
+        // x-only quantities cross-family consistent with the line-search
+        // SQP family. The slack-augmented joint-space buffers are
+        // separate dynamic-dimension fields sized below.
+        s.bufs.resize(n, s.n_eq, s.n_ineq);
+
+        // Joint (x, s) dynamic buffers sized on n + n_ineq.
+        const int n_joint = n + s.n_ineq;
+        s.joint_x_old_buf.setZero(n_joint);
+        s.joint_grad_L_old_buf.setZero(n_joint);
+        s.joint_grad_L_new_buf.setZero(n_joint);
+        s.joint_sk_buf.setZero(n_joint);
+        s.joint_yk_buf.setZero(n_joint);
 
         // LDLT workspace for the normal-step LSQ leg. Sized on the joint
         // constraint count m_joint = n_eq + n_ineq (the normal step
@@ -322,18 +343,26 @@ struct tr_sqp_policy
             s.upper = Eigen::Vector<double, N>::Constant(n, inf);
         }
 
-        // Slack initialization: s_0 = max(-c_ineq(x_0), 0) enforces
-        // s_0 >= 0 and minimizes the initial equality residual
-        // ||c_ineq(x_0) + s_0||.
+        // Slack initialization: s_0 = max(c_ineq(x_0), 0) enforces
+        // s_0 >= 0 and zeroes the joint residual c_ineq - s at every
+        // feasible initial iterate. argmin's external sign convention
+        // is `c_ineq(x) >= 0 feasible`; the slack-equality `c_ineq - s = 0`
+        // with `s >= 0` is satisfied by `s_0 = c_ineq(x_0)` whenever
+        // c_ineq(x_0) >= 0, and by `s_0 = 0` with residual `c_ineq(x_0)`
+        // when c_ineq(x_0) < 0 (the magnitude of infeasibility).
         //
-        // Reference: scipy/optimize/_trustregion_constr (public-API
-        //            reference shape for slack-reformulated inequalities).
-        s.s_slack = (-s.c_ineq).cwiseMax(0.0).eval();
+        // Reference: scipy/optimize/_trustregion_constr/canonical_constraint.py
+        //            (slack init matched to the inequality sign
+        //             convention).
+        s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
 
         // Lagrangian-Hessian on the joint (x, s) space. dense_ldl_bfgs
         // initializes to identity; the slack block picks up curvature
         // through (s_k, y_k) pairs naturally on subsequent push() calls.
-        s.hessian = detail::dense_ldl_bfgs<double, N>(n + s.n_ineq);
+        // The compile-time dimension is Eigen::Dynamic so the joint
+        // primal width is a runtime quantity.
+        s.hessian = detail::dense_ldl_bfgs<double, Eigen::Dynamic>(
+            n + s.n_ineq);
 
         // Multiplier vector sized on the un-reformulated constraint
         // count (cross-policy consistency with the line-search SQP
@@ -396,9 +425,9 @@ struct tr_sqp_policy
             if(n_ineq > 0)
                 grad_L_x.noalias() -= s.J_ineq.transpose()
                                     * s.bufs.kkt_mu_ineq_buf;
-            s.bufs.grad_L_new_buf.head(n) = grad_L_x;
+            s.joint_grad_L_new_buf.head(n) = grad_L_x;
             if(n_ineq > 0)
-                s.bufs.grad_L_new_buf.tail(n_ineq) = -s.bufs.kkt_mu_ineq_buf;
+                s.joint_grad_L_new_buf.tail(n_ineq) = -s.bufs.kkt_mu_ineq_buf;
         }
 
         // Section C -- Joint Jacobian A and joint residual c.
@@ -439,7 +468,7 @@ struct tr_sqp_policy
         // the bare objective-gradient norm) so the inexact-Newton tail
         // tightens with stationarity, not with raw f-progress.
         const double grad_L_norm =
-            s.bufs.grad_L_new_buf.template lpNorm<Eigen::Infinity>();
+            s.joint_grad_L_new_buf.template lpNorm<Eigen::Infinity>();
         double eps_k;
         if constexpr (Mode == sqp_mode::fast)
             eps_k = std::min(0.1, grad_L_norm);
@@ -539,7 +568,7 @@ struct tr_sqp_policy
         // compile-time constant for the x-only dim.
         const auto bo = argmin::detail::byrd_omojokun_composite_step<
             double, Eigen::Dynamic>(
-            z_k, s.bufs.grad_L_new_buf,
+            z_k, s.joint_grad_L_new_buf,
             hessian_op,
             A_joint, c_joint,
             s.trust_radius, eps_k, max_cg_iter,
@@ -605,10 +634,10 @@ struct tr_sqp_policy
         // The joint old iterate is (x_old; s_slack_old); the joint
         // gradient old is the snapshot in grad_L_new_buf BEFORE the
         // re-evaluation overwrites the head/tail blocks below.
-        s.bufs.x_old_buf.head(n) = s.x;
+        s.joint_x_old_buf.head(n) = s.x;
         if(n_ineq > 0)
-            s.bufs.x_old_buf.tail(n_ineq) = s.s_slack;
-        s.bufs.grad_L_old_buf = s.bufs.grad_L_new_buf;
+            s.joint_x_old_buf.tail(n_ineq) = s.s_slack;
+        s.joint_grad_L_old_buf = s.joint_grad_L_new_buf;
 
         s.x.noalias() += p_out.head(n);
         if(n_ineq > 0)
@@ -670,16 +699,16 @@ struct tr_sqp_policy
             if(n_ineq > 0)
                 grad_L_x_new.noalias() -= s.J_ineq.transpose()
                                         * s.bufs.kkt_mu_ineq_buf;
-            s.bufs.grad_L_new_buf.head(n) = grad_L_x_new;
+            s.joint_grad_L_new_buf.head(n) = grad_L_x_new;
             if(n_ineq > 0)
-                s.bufs.grad_L_new_buf.tail(n_ineq) = -s.bufs.kkt_mu_ineq_buf;
+                s.joint_grad_L_new_buf.tail(n_ineq) = -s.bufs.kkt_mu_ineq_buf;
         }
 
-        s.bufs.sk_buf.head(n) = s.x;
+        s.joint_sk_buf.head(n) = s.x;
         if(n_ineq > 0)
-            s.bufs.sk_buf.tail(n_ineq) = s.s_slack;
-        s.bufs.sk_buf.noalias() -= s.bufs.x_old_buf;
-        s.bufs.yk_buf = s.bufs.grad_L_new_buf - s.bufs.grad_L_old_buf;
+            s.joint_sk_buf.tail(n_ineq) = s.s_slack;
+        s.joint_sk_buf.noalias() -= s.joint_x_old_buf;
+        s.joint_yk_buf = s.joint_grad_L_new_buf - s.joint_grad_L_old_buf;
 
         // Section R -- BFGS curvature-pair push under the per-mode
         // skip-on-non-positive-curvature gate.
@@ -696,20 +725,20 @@ struct tr_sqp_policy
         // Only fast mode increments bfgs_skip_count -- the diagnostic
         // surface is fast-mode-only by convention, matching the in-tree
         // analog at nw_sqp_policy::step().
-        const double sTy = s.bufs.sk_buf.dot(s.bufs.yk_buf);
-        if(s.bufs.sk_buf.norm() > 1e-15)
+        const double sTy = s.joint_sk_buf.dot(s.joint_yk_buf);
+        if(s.joint_sk_buf.norm() > 1e-15)
         {
             if constexpr (Mode == sqp_mode::fast)
             {
                 if(sTy > 0.0)
-                    s.hessian.push(s.bufs.sk_buf, s.bufs.yk_buf);
+                    s.hessian.push(s.joint_sk_buf, s.joint_yk_buf);
                 else
                     ++bfgs_skip_count;
             }
             else
             {
                 if(sTy > 0.0)
-                    s.hessian.push(s.bufs.sk_buf, s.bufs.yk_buf);
+                    s.hessian.push(s.joint_sk_buf, s.joint_yk_buf);
             }
         }
 
@@ -783,7 +812,7 @@ struct tr_sqp_policy
         s.J_eq = J_eval.topRows(s.n_eq);
         s.J_ineq = J_eval.bottomRows(s.n_ineq);
 
-        s.s_slack = (-s.c_ineq).cwiseMax(0.0).eval();
+        s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
         s.trust_radius = options.initial_trust_radius;
         s.iteration = 0;
     }

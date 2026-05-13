@@ -42,6 +42,7 @@ add_executable(argmin_unit_tests
     sqp_step_result_consistency_test.cpp
     steihaug_cg_test.cpp
     byrd_omojokun_test.cpp
+    tr_sqp_test.cpp
 )
 
 target_link_libraries(argmin_unit_tests
