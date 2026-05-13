@@ -721,10 +721,12 @@ TEMPLATE_TEST_CASE_SIG(
         // the bound is 1 per outer step.
         //
         // Directly observable invariant: solver.state().filter.size()
-        // after N outer steps is bounded by N + 1 (the +1 accounts for
-        // the iter-0 initial filter entry that the policy seeds at
-        // construction via state_type::init). The bound holds across
-        // arbitrary bfgs_reset_max values.
+        // after N outer steps is bounded by N + 1. Filter size is bounded
+        // by N outer steps: each outer step() invocation adds at most one
+        // entry (the filter_added guard prevents re-adds on BFGS-reset
+        // retries; restoration paths add one entry then return immediately).
+        // The +1 provides conservative slack for restoration steps that
+        // return before incrementing outer_steps.
         if constexpr(std::is_same_v<Policy,
                          filter_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
                   || std::is_same_v<Policy,
@@ -763,9 +765,9 @@ TEMPLATE_TEST_CASE_SIG(
                     break;
             }
 
-            // Filter size is bounded by N outer steps + 1 initial
-            // entry. The accessor returns std::uint16_t; widen for
-            // a non-narrowing comparison against std::size_t.
+            // Filter grows at most once per outer step; +1 is conservative
+            // slack. The accessor returns std::uint16_t; widen for a
+            // non-narrowing comparison against std::size_t.
             const auto filter_size = static_cast<std::size_t>(
                 solver.state().filter.size());
             CHECK(filter_size <= outer_steps + std::size_t{1});
