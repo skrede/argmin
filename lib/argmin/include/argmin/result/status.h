@@ -23,6 +23,7 @@ enum class solver_status : std::uint8_t
     ftol_reached,
     maxeval_reached,
     roundoff_limited,
+    trust_region_step_rejected,
     objective_stalled,
     time_limit_reached,
     aborted
