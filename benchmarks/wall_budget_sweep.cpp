@@ -21,12 +21,13 @@
 //            Nonlinear Programming Codes", Lecture Notes in Economics
 //            and Mathematical Systems vol. 187, Springer.
 
-#include "argmin/solver/basic_solver.h"
 #include "argmin/solver/sqp_mode.h"
+#include "argmin/solver/basic_solver.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
+
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
