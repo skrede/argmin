@@ -18,7 +18,8 @@ enum class problem_class : unsigned
     inequality        = 1u << 2,
     equality          = 1u << 3,
     mixed             = 1u << 4,
-    global            = 1u << 5
+    global            = 1u << 5,
+    application       = 1u << 6
 };
 
 [[nodiscard]] constexpr problem_class operator|(problem_class a,

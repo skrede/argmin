@@ -43,6 +43,8 @@ add_executable(argmin_unit_tests
     steihaug_cg_test.cpp
     byrd_omojokun_test.cpp
     tr_sqp_test.cpp
+    nmpc_lqr_test.cpp
+    ik_pose_batch_test.cpp
 )
 
 target_link_libraries(argmin_unit_tests
