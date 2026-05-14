@@ -137,13 +137,18 @@ PROFILE_SOLVERS = frozenset({
 
 
 def _assert_no_prohibited_solvers(summary: pd.DataFrame) -> None:
-    """Refuse to build a per-step Dolan-More profile from a CSV that mixes
-    CUTEst-aggregate solvers into the per-step cohort.
+    """Refuse to build a per-step Dolan-More profile when the plot cohort
+    contains a CUTEst-aggregate-only solver.
 
     See ``.planning/research/FEATURES.md`` section 6 (Per-Step Performance
-    Comparison Table) for the full honest-position statement. This guard is
-    unconditional -- the ``--no-cohort-filter`` flag bypasses the named-subset
-    filter but does NOT bypass this assertion.
+    Comparison Table) for the full honest-position statement. The guard runs
+    against the post-cohort-filter dataframe -- i.e., whatever rows are about
+    to be plotted. In default mode the named-subset cohort excludes every
+    prohibited solver by construction and the guard is a no-op. In
+    ``--no-cohort-filter`` diagnostic mode the cohort widens to every solver
+    present in the HS-suite-filtered input; if a prohibited solver is in that
+    widened cohort the guard exits 2 so a stray ipopt / knitro / snopt /
+    scipy_slsqp row cannot reach a published profile.
     """
 
     if "solver" not in summary.columns:
@@ -346,13 +351,11 @@ def _collect_t_tau_rows(run_dir: Path,
 
         pair = _disambiguate_solver_problem(stem_no_seed, known_pairs)
         if pair is None:
-            # Last-resort: split on the rightmost underscore.
-            sp = stem_no_seed.rsplit("_", 1)
-            if len(sp) != 2:
-                print(f"dm_profile: cannot disambiguate {trace_path.name}",
-                      file=sys.stderr)
-                continue
-            pair = (sp[0], sp[1])
+            # Trace file's (solver, problem) is not in the cohort-filtered
+            # summary. Skip silently -- this is the expected path for traces
+            # whose solver was excluded by the named-cohort filter (e.g.,
+            # ipopt traces when the default PROFILE_SOLVERS cohort is active).
+            continue
 
         solver, problem = pair
         if problem not in f_star_by_problem:
@@ -484,15 +487,18 @@ def main() -> int:
 
     summary = _load_summary(run_dir)
 
-    # Honest-position guard: prohibited per-step solvers terminate the run
-    # before any filtering, plotting, or report writing.
-    _assert_no_prohibited_solvers(summary)
-
     # HS-suite filter (excluding application-shaped cells) + named profile
     # cohort filter. The HS-suite filter applies unconditionally; the
     # named-subset filter respects --no-cohort-filter.
     summary = _apply_cohort_filters(
         summary, apply_solver_subset=not args.no_cohort_filter)
+
+    # Honest-position guard: prohibited per-step solvers in the post-filter
+    # cohort terminate the run before any plotting or report writing. Default
+    # mode's named cohort excludes them by construction, so this is a no-op
+    # there; --no-cohort-filter mode triggers the guard if a prohibited
+    # solver survives into the plot cohort.
+    _assert_no_prohibited_solvers(summary)
 
     if args.solvers:
         summary = summary[summary["solver"].isin(args.solvers)].copy()
