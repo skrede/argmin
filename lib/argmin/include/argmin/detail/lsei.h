@@ -35,6 +35,7 @@ struct lsei_workspace
     using matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
     using vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
 
+    matrix_t Qc;
     matrix_t R_c_upper;
     vector_t y1;
     matrix_t E_tilde;
@@ -64,6 +65,7 @@ struct lsei_workspace
     void resize(int n, int m_eq, int m_ineq)
     {
         const int n2 = n - m_eq;
+        Qc.resize(n, n);
         R_c_upper.resize(m_eq, m_eq);
         y1.resize(m_eq);
         E_tilde.resize(n, n);
@@ -164,13 +166,9 @@ int lsei(
     // which is a lower-triangular system for y1 = y(0..m_eq-1).
     // ------------------------------------------------------------------
     ws.qr_c.compute(C.transpose());
-
-    // Q_c is left implicit; subsequent operations apply the Householder
-    // sequence directly via Eigen::HouseholderSequence overloads (matrix
-    // applyOnTheRight, vector multiplication, transpose-vector
-    // multiplication). The explicit Q_c = householderQ() * Identity(n, n)
-    // materialization is avoided.
-    // Reference: Eigen::HouseholderSequence (Eigen/QR).
+    if(ws.Qc.rows() != n || ws.Qc.cols() != n) ws.Qc.resize(n, n);
+    ws.Qc = ws.qr_c.householderQ()
+            * decltype(ws.Qc)::Identity(n, n);
 
     // R_c is m_eq x m_eq upper triangular, extracted from qr_c.matrixQR().
     if(ws.R_c_upper.rows() != m_eq || ws.R_c_upper.cols() != m_eq)
@@ -198,11 +196,7 @@ int lsei(
     // separate E1 / E2 allocation.
     // ------------------------------------------------------------------
     if(ws.E_tilde.rows() != n || ws.E_tilde.cols() != n) ws.E_tilde.resize(n, n);
-    // Implicit Householder sequence application; Eigen handles the
-    // accumulation without materializing an n x n Q matrix.
-    // Reference: Eigen::HouseholderSequence::applyOnTheRight.
-    ws.E_tilde = E;
-    ws.E_tilde.applyOnTheRight(ws.qr_c.householderQ());
+    ws.E_tilde.noalias() = E * ws.Qc;
 
     if(ws.f_red.size() != n) ws.f_red.resize(n);
     ws.f_red.noalias() = f - ws.E_tilde.leftCols(m_eq) * ws.y1;
@@ -221,9 +215,7 @@ int lsei(
     {
         if(ws.G_tilde.rows() != m_ineq || ws.G_tilde.cols() != n)
             ws.G_tilde.resize(m_ineq, n);
-        // Implicit Householder sequence application (see E_tilde site above).
-        ws.G_tilde = G;
-        ws.G_tilde.applyOnTheRight(ws.qr_c.householderQ());
+        ws.G_tilde.noalias() = G * ws.Qc;
         if(ws.h_red.size() != m_ineq) ws.h_red.resize(m_ineq);
         ws.h_red.noalias() = h - ws.G_tilde.leftCols(m_eq) * ws.y1;
     }
@@ -287,9 +279,7 @@ int lsei(
     if(n2 > 0)
         ws.y.tail(n2) = ws.y2_dyn;
 
-    // Implicit Householder sequence applied to the assembled y vector;
-    // Eigen evaluates the product without materializing Q_c.
-    x = ws.qr_c.householderQ() * ws.y;
+    x.noalias() = ws.Qc * ws.y;
 
     // ------------------------------------------------------------------
     // Recover equality multipliers from the gradient projection on y_1.
@@ -318,9 +308,7 @@ int lsei(
         ws.lambda_eq_qgrad.noalias() -= G.transpose() * lambda_ineq;
 
     // Re-use lambda_eq_resid as Q_c^T * qgrad scratch.
-    // Implicit Householder-sequence transpose application; Q_c is never
-    // materialized.
-    ws.lambda_eq_resid = ws.qr_c.householderQ().transpose() * ws.lambda_eq_qgrad;
+    ws.lambda_eq_resid.noalias() = ws.Qc.transpose() * ws.lambda_eq_qgrad;
 
     lambda_eq = ws.R_c_upper.template triangularView<Eigen::Upper>()
                             .solve(ws.lambda_eq_resid.head(m_eq).eval());
