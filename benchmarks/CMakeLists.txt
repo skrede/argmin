@@ -606,3 +606,48 @@ if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(wall_budget_sweep PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
+
+# Standalone regression gate. Consumes publish_summary.csv and a checked-in
+# per-cell baseline (benchmarks/baselines/v0.3.0-regression.csv); exits
+# non-zero on any expected:pass cell breaching a numeric bound or any
+# expected:shouldfail cell unexpectedly converging. C++23 std-only --
+# no Eigen, no argmin, no Catch2, no NLopt; pure CSV bound comparison.
+# Invoked post-bench from run_publish_bench.sh.
+add_executable(regression_check regression_check.cpp)
+target_compile_options(regression_check PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+
+# Fast-CI regression gate. Drives run_publish_bench.sh at SEED_COUNT=3
+# under the build's binary paths and a temporary output root inside the
+# build tree; the script propagates regression_check's exit code so any
+# bound breach fails the test cell. Registered only when testing is
+# enabled in the active build configuration (i.e., the build dir was
+# configured with both ARGMIN_BUILD_TESTS=ON and ARGMIN_BUILD_BENCHMARKS=ON).
+if(CMAKE_TESTING_ENABLED)
+    add_test(
+        NAME publish_bench_regression_gate
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+                "SEED_START=42"
+                "SEED_COUNT=3"
+                "OUT_ROOT=${CMAKE_BINARY_DIR}/regression_gate_runs"
+                "BENCH_BINARY=$<TARGET_FILE:publish_bench>"
+                "REGRESSION_CHECK_BINARY=$<TARGET_FILE:regression_check>"
+                "REGRESSION_BASELINE=${CMAKE_SOURCE_DIR}/benchmarks/baselines/v0.3.0-regression.csv"
+                # Per-step wall variance dominates at SEED_COUNT=3; the
+                # outer-iter, accuracy, status, and cv gates stay active.
+                # Full 11-seed sweep via run_publish_bench.sh enforces the
+                # wall gate.
+                "REGRESSION_CHECK_DISABLE_WALL_GATE=1"
+                bash "${CMAKE_SOURCE_DIR}/benchmarks/scripts/run_publish_bench.sh"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
+    set_tests_properties(publish_bench_regression_gate PROPERTIES
+        TIMEOUT 600
+        LABELS "regression;bench"
+    )
+endif()
