@@ -33,6 +33,7 @@
 #include "argmin/solver/projected_gn_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/byrd_lbfgsb_policy.h"
+#include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
 #include "argmin/solver/projected_gradient_gn_policy.h"
@@ -407,9 +408,13 @@ void run_all_argmin_solvers(
         run("projected_gradient_gn", projected_gradient_gn_policy{});
     }
 
-    // SLSQP: any constrained problem.
+    // SLSQP: any constrained problem. Two dispatches per SQP family for
+    // fast and accurate mode coverage on every constrained cell.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
-        run_constrained("kraft_slsqp", kraft_slsqp_policy<>{});
+    {
+        run_constrained("kraft_slsqp_fast",     kraft_slsqp_policy_fast<>{});
+        run_constrained("kraft_slsqp_accurate", kraft_slsqp_policy_accurate<>{});
+    }
 
     // MMA family: inequality-constrained (no equality).
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
@@ -471,30 +476,44 @@ void run_all_argmin_solvers(
         }
     }
 
-    // N&W SQP: equality or mixed constrained.
+    // N&W SQP: equality or mixed constrained. Two dispatches per SQP family
+    // for fast and accurate mode coverage; both modes share the runtime
+    // equality-presence guard.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
     {
         if constexpr(requires { prob.num_equality(); })
         {
             if(prob.num_equality() > 0)
             {
-                std::vector<trace_entry> trace;
-                auto r = run_argmin_solver<nw_sqp_policy<>, default_convergence>(
-                    "nw_sqp", problem_name, prob, max_iterations, collect_trace, trace,
-                    config);
-                results.push_back(r);
-                traces.push_back(std::move(trace));
+                run_constrained("nw_sqp_fast",     nw_sqp_policy_fast<>{});
+                run_constrained("nw_sqp_accurate", nw_sqp_policy_accurate<>{});
             }
         }
     }
 
     // Filter SLSQP: any constrained problem (filter-based L-BFGS SQP).
+    // Two dispatches per SQP family for fast and accurate mode coverage.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
-        run_constrained("filter_slsqp", filter_slsqp_policy<>{});
+    {
+        run_constrained("filter_slsqp_fast",     filter_slsqp_policy_fast<>{});
+        run_constrained("filter_slsqp_accurate", filter_slsqp_policy_accurate<>{});
+    }
 
     // Filter NW SQP: any constrained problem (filter-based dense BFGS SQP).
+    // Two dispatches per SQP family for fast and accurate mode coverage.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
-        run_constrained("filter_nw_sqp", filter_nw_sqp_policy<>{});
+    {
+        run_constrained("filter_nw_sqp_fast",     filter_nw_sqp_policy_fast<>{});
+        run_constrained("filter_nw_sqp_accurate", filter_nw_sqp_policy_accurate<>{});
+    }
+
+    // TR-SQP (Byrd-Omojokun composite step): tr_sqp at parity with the
+    // line-search SQP families on every applicable constrained cell.
+    if constexpr(is_constrained && differentiable<Problem> && is_bound)
+    {
+        run_constrained("tr_sqp_fast",     tr_sqp_policy_fast<>{});
+        run_constrained("tr_sqp_accurate", tr_sqp_policy_accurate<>{});
+    }
 
     // Augmented Lagrangian (with L-BFGS-B inner): any constrained problem.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
