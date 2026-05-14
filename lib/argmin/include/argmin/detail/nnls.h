@@ -169,12 +169,6 @@ nnls_result<Scalar> nnls(
         // Householder reflector H = I - tau v v^T that zeros rows
         // [nsetp+1, m) of A_factored.col(t) (acting on the segment
         // [nsetp, m)). Apply H to all Z-set columns and to b_factored.
-        //
-        // A relative-pivot stability check (column tail must contribute
-        // a non-negligible fraction of the column's full norm) catches
-        // the case where t is numerically dependent on the existing P
-        // columns; in that rare case we zero w[t] and re-loop the
-        // outer iteration to find a different argmax.
         int t_pos = -1;
         for(int k = nsetp; k < n; ++k)
         {
@@ -186,27 +180,6 @@ nnls_result<Scalar> nnls(
         }
 
         const int tail_len = m - nsetp;
-        const Scalar full_col_norm =
-            A_factored.col(t).head(m).norm();
-        const Scalar tail_col_norm =
-            A_factored.col(t).segment(nsetp, tail_len).norm();
-
-        // If the tail is dominated by the head (column dependent on P),
-        // skip it: zero w[t], swap it temporarily out of contention by
-        // restarting the outer loop. The eps factor matches NLopt's
-        // h12_ skip threshold (slsqp.c h12_ "alpha=0.01*pivot" style).
-        if(tail_col_norm <= eps * full_col_norm)
-        {
-            // Mark this column un-pickable for the rest of the run by
-            // setting in_P[t] = 1 (it can't actually be added since it's
-            // dependent, but the dual check uses in_P to skip Z scans).
-            // This matches NLopt's behavior on degenerate columns.
-            in_P[t] = 1;
-            // Don't increment nsetp; this column never enters P
-            // numerically. We still need to remove it from the live
-            // search, which the in_P guard does on the next outer iter.
-            continue;
-        }
 
         // Compute Householder for the tail segment of column t.
         // Eigen API: makeHouseholderInPlace produces (essential, tau,
