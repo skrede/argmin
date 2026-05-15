@@ -292,6 +292,17 @@ struct tr_sqp_policy
         // separate dynamic-dimension fields sized below.
         s.bufs.resize(n, s.n_eq, s.n_ineq);
 
+        // Section B of step() reads kkt_lambda_eq_buf / kkt_mu_ineq_buf
+        // on the first call to assemble the joint Lagrangian gradient
+        // before the post-step active-set re-estimation has run; without
+        // an explicit zero-init the read is on uninitialized Eigen-managed
+        // memory (resize() does not clear). Zero is the correct
+        // information-free default at iter 0 — the joint Lagrangian
+        // gradient collapses to the bare objective gradient, matching
+        // the line-search SQP family's first-step KKT-leg semantics.
+        s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+        s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
+
         // Joint (x, s) dynamic buffers sized on n + n_ineq.
         const int n_joint = n + s.n_ineq;
         s.joint_x_old_buf.setZero(n_joint);
@@ -763,7 +774,7 @@ struct tr_sqp_policy
             s.c_eq, s.c_ineq);
 
         const double grad_L_norm_new =
-            s.bufs.grad_L_new_buf.template lpNorm<Eigen::Infinity>();
+            s.joint_grad_L_new_buf.template lpNorm<Eigen::Infinity>();
 
         // BFGS reset / Armijo-NaN counters stay at zero: TRSQP has no
         // BFGS-reset retry and no Armijo NaN gate (the ratio test does
