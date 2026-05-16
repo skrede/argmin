@@ -313,6 +313,211 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
+// HS035 / HS039 / HS040 / HS050 are documented as known-failure cells
+// for the current trust-region SQP implementation, with the failure
+// mechanism shared across HS035 / HS039 / HS040 / HS043 (merit
+// overshoot on the slack-augmented L2 merit) and a distinct mechanism
+// for HS050 (composite-step divergence).
+//
+// HS035 / HS039 / HS040 share the equality-and-inequality merit
+// overshoot mechanism with the existing HS043 known-failure cell:
+//   - The Byrd-Omojokun composite step accepts trial steps that drive
+//     the L2-merit weighted sum (objective + penalty * (||c|| - ||A p +
+//     c||)) downward by overshooting the objective at the expense of
+//     the feasibility leg. On the equality-constraint cells (HS039 /
+//     HS040 / HS028-like family) the helper computes a tangential step
+//     whose linearization satisfies the equality constraint, but the
+//     accepted iterate ends up off the constraint manifold; subsequent
+//     iters oscillate between feasibility recovery and objective
+//     descent, with neither leg making bounded progress to f*.
+//   - The widened (penalty_factor, soc_max_iterations) sweep on the
+//     full HS024 / HS026 / HS028 / HS035 / HS039 / HS040 / HS043 /
+//     HS050 / HS071 / HS076 cell axis shows that HS039 accurate and
+//     HS040 fast and HS050 (both modes) can be brought inside the
+//     per-mode strict bar at non-default (penalty_factor,
+//     soc_max_iterations) configurations, but every such configuration
+//     regresses at least one of the reference cells (HS026 fast / HS028
+//     fast / HS071 accurate / HS076 both modes). The sweep selects the
+//     opt-in-zero default (penalty_factor = 0, soc_max_iterations = 0);
+//     non-passing closure-target cells stay tagged known-failure.
+//   - HS035 fast is borderline-passing under the publish_bench's 699-
+//     iter fast-mode budget (f_err = 1.78e-3 inside the 5% bar at
+//     iter 699) and known-failure under the 200-iter cap used by the
+//     other unit cells (f_err = 0.138 outside the 5% bar at iter 200);
+//     the cell here uses the 200-iter cap for parity with the rest of
+//     the test suite.
+//
+// HS050 is the composite-step-divergence cell: monotone objective
+// descent and monotone cv reduction, but the KKT residual GROWS over
+// the trajectory. The iterate drifts away from the first-order
+// optimality conditions even as the policy makes progress on
+// individual merit-function components. The (penalty_factor,
+// soc_max_iterations) knobs cannot address this — the cell terminates
+// far from f* under every swept configuration that preserves the
+// reference set.
+//
+// Closure of the merit-overshoot family requires a filter-based ratio
+// test layered on top of the Byrd-Omojokun composite step (objective-
+// OR-feasibility descent, not strict L2-merit descent), or a slack-
+// barrier reformulation of the inequality leg; closure of HS050
+// requires a composite-step variant that does not allow the KKT
+// residual to grow on monotone-descent trajectories. Both are out of
+// scope for the current (penalty_factor, soc_max_iterations) knob
+// surface.
+//
+// Reference: Hock & Schittkowski (1981), Problems 35, 39, 40, 50;
+//            Nocedal and Wright 2e Section 18.5 Algorithm 18.4
+//            (Byrd-Omojokun composite step); Lalee, Nocedal,
+//            Plantenga 1998 SIAM J. Optim. 8(3):682-706 Section 3.1
+//            (v-optimal restoration) and Section 3.3 (augmented merit
+//            penalty update); Fletcher and Leyffer 2002 Math. Program.
+//            91:239-269 (filter-trust-region pairing).
+
+TEMPLATE_TEST_CASE_SIG(
+    "tr_sqp HS035 (parametric on mode) [known failure]",
+    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    ((typename Policy), Policy),
+    tr_sqp_policy_accurate<hs035<>::problem_dimension>,
+    tr_sqp_policy_fast<hs035<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs035<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS035 optimum: f* = 1/9 ~ 0.11111 at (4/3, 7/9, 4/9).
+    const double f_star = problem.optimal_value();
+    const double f_err  = std::abs(result.objective_value - f_star)
+                          / std::abs(f_star);
+
+    if constexpr(policy_t::mode_ == sqp_mode::fast)
+    {
+        CHECK(f_err < 0.05);
+        CHECK(solver.constraint_violation() < 1e-2);
+    }
+    else
+    {
+        CHECK(f_err < 0.01);
+        CHECK(solver.constraint_violation() < 1e-4);
+    }
+}
+
+TEMPLATE_TEST_CASE_SIG(
+    "tr_sqp HS039 (parametric on mode) [known failure]",
+    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    ((typename Policy), Policy),
+    tr_sqp_policy_accurate<hs039<>::problem_dimension>,
+    tr_sqp_policy_fast<hs039<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs039<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS039 optimum: f* = -1 at (1, 1, 0, 0).
+    const double f_star = problem.optimal_value();
+    const double f_err  = std::abs(result.objective_value - f_star)
+                          / std::abs(f_star);
+
+    if constexpr(policy_t::mode_ == sqp_mode::fast)
+    {
+        CHECK(f_err < 0.05);
+        CHECK(solver.constraint_violation() < 1e-2);
+    }
+    else
+    {
+        CHECK(f_err < 0.01);
+        CHECK(solver.constraint_violation() < 1e-4);
+    }
+}
+
+TEMPLATE_TEST_CASE_SIG(
+    "tr_sqp HS040 (parametric on mode) [known failure]",
+    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    ((typename Policy), Policy),
+    tr_sqp_policy_accurate<hs040<>::problem_dimension>,
+    tr_sqp_policy_fast<hs040<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs040<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS040 optimum: f* = -0.25 at (1, 2^(1/3), 2^(1/2), -2^(-3/4)).
+    const double f_star = problem.optimal_value();
+    const double f_err  = std::abs(result.objective_value - f_star)
+                          / std::abs(f_star);
+
+    if constexpr(policy_t::mode_ == sqp_mode::fast)
+    {
+        CHECK(f_err < 0.05);
+        CHECK(solver.constraint_violation() < 1e-2);
+    }
+    else
+    {
+        CHECK(f_err < 0.01);
+        CHECK(solver.constraint_violation() < 1e-4);
+    }
+}
+
+TEMPLATE_TEST_CASE_SIG(
+    "tr_sqp HS050 (parametric on mode) [known failure]",
+    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    ((typename Policy), Policy),
+    tr_sqp_policy_accurate<hs050<>::problem_dimension>,
+    tr_sqp_policy_fast<hs050<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs050<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS050 optimum: f* = 0 at (1, 1, 1, 1, 1). Absolute bar because
+    // f* = 0 makes the |f - f*| / |f*| ratio ill-posed.
+    if constexpr(policy_t::mode_ == sqp_mode::fast)
+    {
+        CHECK(result.objective_value == Approx(0.0).margin(1e-2));
+        CHECK(solver.constraint_violation() < 1e-2);
+    }
+    else
+    {
+        CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+        CHECK(solver.constraint_violation() < 1e-4);
+    }
+}
+
 TEMPLATE_TEST_CASE_SIG(
     "tr_sqp HS028 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
