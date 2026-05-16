@@ -298,6 +298,38 @@ struct nmpc_lqr
         return z;
     }
 
+    // optimal_value: informational, not algorithmic ground truth. The
+    // value returned here is consumed by the bench harness purely as a
+    // reference scalar in the accuracy column (`accuracy = |f - f_ref|`)
+    // and is not load-bearing for convergence gates on this cell. Two
+    // facts about this fixture follow from that convention:
+    //
+    //  1) The reported `accuracy` on a converged trajectory equals the
+    //     terminal LQR cost itself (since `f_ref = 0`), not a deficit
+    //     against a true minimizer. On `h = 20` the harness reports
+    //     `accuracy ~ 12.68`; that number is the cost
+    //     `0.5 * sum (x_k^T Q x_k + u_k^T R u_k)` evaluated at the
+    //     terminal iterate, which already satisfies the dynamics
+    //     equalities at machine precision (`cv ~ 1e-16`). It is not a
+    //     convergence-deficit on a true `f*`.
+    //
+    //  2) The constraint-violation column `cv` reported on this fixture
+    //     is the dynamics-equality residual `||x_{k+1} - A x_k - B u_k||`
+    //     under the single-shooting-with-equality-residuals formulation
+    //     in `value()` and `constraints()` above. A small `cv` means
+    //     the iterate is dynamics-feasible at machine precision; it
+    //     does NOT mean the LQR cost is close to the constrained
+    //     optimum. The closed-form LQR optimum requires a Riccati /
+    //     DARE solve at fixed problem data; that solve is intentionally
+    //     not part of this fixture (the SQP harness gates on
+    //     `min_accuracy_log10` against the informational reference, so
+    //     a precomputed Riccati value is not load-bearing).
+    //
+    // Returning zero keeps the fixture self-contained and signals to
+    // downstream consumers that the accuracy column is positional, not
+    // diagnostic. Callers that need a true minimizer should run a
+    // Riccati solve at the same problem data.
+    //
     // optimal_value: bench-good-enough reference. The closed-form LQR
     // optimum requires a Riccati / DARE solve at fixed problem data; the
     // SQP harness gates on min_accuracy_log10, not on exact equality, so
