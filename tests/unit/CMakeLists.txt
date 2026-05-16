@@ -43,6 +43,7 @@ add_executable(argmin_unit_tests
     steihaug_cg_test.cpp
     byrd_omojokun_test.cpp
     tr_sqp_test.cpp
+    filter_trsqp_test.cpp
     nmpc_lqr_test.cpp
     ik_pose_batch_test.cpp
 )
