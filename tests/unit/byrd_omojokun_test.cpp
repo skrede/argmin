@@ -12,7 +12,7 @@
 
 using Catch::Approx;
 using argmin::detail::byrd_omojokun_composite_step;
-using argmin::detail::byrd_omojokun_result;
+using argmin::detail::byrd_omojokun_step_result;
 using argmin::detail::cg_exit_status;
 using argmin::detail::zeta;
 using argmin::detail::tr_eta_1;
@@ -20,6 +20,7 @@ using argmin::detail::tr_eta_2;
 using argmin::detail::tr_shrink_factor;
 using argmin::detail::tr_expand_factor;
 using argmin::detail::tr_delta_max;
+using argmin::detail::tr_boundary_guard;
 
 namespace
 {
@@ -84,6 +85,57 @@ struct trial_eval_maratos
     }
 };
 
+// Caller-side ratio test + radius update mirroring the L2-merit
+// augmented-reduction gate that tr_sqp_policy applies at its composite-
+// step call site. The helper itself no longer performs this branch;
+// the unit-test cells below verify the same observable shape by
+// re-running the migrated logic locally against the helper's raw
+// outputs.
+struct merit_acceptance
+{
+    double rho;
+    double actual_reduction;
+    double predicted_reduction;
+    double new_delta;
+    bool accepted;
+};
+
+merit_acceptance evaluate_acceptance(const byrd_omojokun_step_result& r,
+                                     double f_old, double c_norm_old,
+                                     double penalty,
+                                     double delta_in,
+                                     double step_norm)
+{
+    const double actual =
+        (f_old + penalty * c_norm_old)
+        - (r.f_new + penalty * r.c_norm_new);
+    const double predicted = r.predicted + penalty * r.vpred;
+    const double pred_guarded =
+        std::max(predicted, std::numeric_limits<double>::epsilon());
+    const double rho = actual / pred_guarded;
+
+    merit_acceptance out;
+    out.rho = rho;
+    out.actual_reduction = actual;
+    out.predicted_reduction = predicted;
+    if(rho < tr_eta_1)
+    {
+        out.accepted = false;
+        out.new_delta = tr_shrink_factor * delta_in;
+    }
+    else
+    {
+        out.accepted = true;
+        if(rho > tr_eta_2
+           && step_norm >= tr_boundary_guard * delta_in)
+            out.new_delta =
+                std::min(tr_expand_factor * delta_in, tr_delta_max);
+        else
+            out.new_delta = delta_in;
+    }
+    return out;
+}
+
 }
 
 TEST_CASE("byrd_omojokun pure equality quadratic accepts and progresses",
@@ -140,7 +192,7 @@ TEST_CASE("byrd_omojokun pure equality quadratic accepts and progresses",
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
-        f_old, c_norm_old, teval,
+        teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
         penalty, penalty_factor);
@@ -154,12 +206,16 @@ TEST_CASE("byrd_omojokun pure equality quadratic accepts and progresses",
     CHECK(lin_resid_new < lin_resid_old);
 
     CHECK_FALSE(r.normal_step_lsq_fallback);
-    CHECK(r.accepted);
-    CHECK(r.rho >= tr_eta_1);
+
+    const auto acc = evaluate_acceptance(r, f_old, c_norm_old,
+                                         penalty, delta_in,
+                                         p_out.norm());
+    CHECK(acc.accepted);
+    CHECK(acc.rho >= tr_eta_1);
     // Radius does not shrink: should be either delta_in (held) or
     // expanded to min(2*delta_in, delta_max) if rho > 0.75 AND step
     // hit the boundary. Either way, new_delta >= delta_in.
-    CHECK(r.new_delta >= delta_in);
+    CHECK(acc.new_delta >= delta_in);
 }
 
 TEST_CASE("byrd_omojokun rank-deficient A triggers Cauchy fallback",
@@ -215,11 +271,11 @@ TEST_CASE("byrd_omojokun rank-deficient A triggers Cauchy fallback",
 
     double penalty = 1.0;
     const double penalty_factor = 0.0;
-    auto r = byrd_omojokun_composite_step<double, 2>(
+    [[maybe_unused]] auto r = byrd_omojokun_composite_step<double, 2>(
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
-        f_old, c_norm_old, teval,
+        teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
         penalty, penalty_factor);
@@ -282,18 +338,21 @@ TEST_CASE("byrd_omojokun Maratos-shape problem rejects unsafe step",
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
-        f_old, c_norm_old, teval,
+        teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
         penalty, penalty_factor);
 
-    INFO("rho=" << r.rho
-         << "  actual=" << r.actual_reduction
-         << "  predicted=" << r.predicted_reduction
+    const auto acc = evaluate_acceptance(r, f_old, c_norm_old,
+                                         penalty, delta_in,
+                                         p_out.norm());
+    INFO("rho=" << acc.rho
+         << "  actual=" << acc.actual_reduction
+         << "  predicted=" << acc.predicted_reduction
          << "  ||p||=" << p_out.norm());
-    CHECK_FALSE(r.accepted);
-    CHECK(r.rho < tr_eta_1);
-    CHECK(r.new_delta == Approx(tr_shrink_factor * delta_in).margin(1e-12));
+    CHECK_FALSE(acc.accepted);
+    CHECK(acc.rho < tr_eta_1);
+    CHECK(acc.new_delta == Approx(tr_shrink_factor * delta_in).margin(1e-12));
 }
 
 TEST_CASE("byrd_omojokun ratio > 0.75 at TR boundary expands radius",
@@ -341,18 +400,21 @@ TEST_CASE("byrd_omojokun ratio > 0.75 at TR boundary expands radius",
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
-        f_old, c_norm_old, teval,
+        teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
         penalty, penalty_factor);
 
-    INFO("rho=" << r.rho
+    const auto acc = evaluate_acceptance(r, f_old, c_norm_old,
+                                         penalty, delta_in,
+                                         p_out.norm());
+    INFO("rho=" << acc.rho
          << "  ||p||=" << p_out.norm()
-         << "  new_delta=" << r.new_delta);
-    CHECK(r.accepted);
-    CHECK(r.rho > tr_eta_2);
+         << "  new_delta=" << acc.new_delta);
+    CHECK(acc.accepted);
+    CHECK(acc.rho > tr_eta_2);
     CHECK(p_out.norm() >= 0.9 * delta_in);
-    CHECK(r.new_delta == Approx(
+    CHECK(acc.new_delta == Approx(
         std::min(tr_expand_factor * delta_in, tr_delta_max)).margin(1e-12));
 }
 
@@ -396,19 +458,22 @@ TEST_CASE("byrd_omojokun interior step holds radius",
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
-        f_old, c_norm_old, teval,
+        teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
         penalty, penalty_factor);
 
-    INFO("rho=" << r.rho
+    const auto acc = evaluate_acceptance(r, f_old, c_norm_old,
+                                         penalty, delta_in,
+                                         p_out.norm());
+    INFO("rho=" << acc.rho
          << "  ||p||=" << p_out.norm()
-         << "  new_delta=" << r.new_delta);
-    CHECK(r.accepted);
+         << "  new_delta=" << acc.new_delta);
+    CHECK(acc.accepted);
     // Step is interior (||p|| < 0.9 * delta) so the expand branch
     // is gated off; radius held at delta_in.
     CHECK(p_out.norm() < 0.9 * delta_in);
-    CHECK(r.new_delta == Approx(delta_in).margin(1e-12));
+    CHECK(acc.new_delta == Approx(delta_in).margin(1e-12));
 }
 
 // ─── Penalty-update side-effect cells ──────────────────────────────
@@ -456,7 +521,6 @@ TEST_CASE("byrd_omojokun_composite_step penalty grows when "
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
-    const double c_norm_old = c.norm();
     trial_eval_quadratic teval{g, B, A, c, f_old};
 
     double penalty = 1.0;
@@ -467,7 +531,7 @@ TEST_CASE("byrd_omojokun_composite_step penalty grows when "
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
-        f_old, c_norm_old, teval,
+        teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
         penalty, penalty_factor);
@@ -507,7 +571,6 @@ TEST_CASE("byrd_omojokun_composite_step penalty stays at initial "
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
-    const double c_norm_old = 0.0;
     trial_eval_quadratic teval{g, B, A, c, f_old};
 
     double penalty = 1.0;
@@ -516,7 +579,7 @@ TEST_CASE("byrd_omojokun_composite_step penalty stays at initial "
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
-        f_old, c_norm_old, teval,
+        teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
         penalty, penalty_factor);

@@ -11,19 +11,32 @@
 //                     via the Steihaug-Toint truncated CG helper (see
 //                     steihaug_cg.h).
 //   3. Composite:     p = v + u.
-//   4. Ratio test:    rho = actual_reduction / max(predicted_reduction, eps)
-//                     with the augmented reduction (objective decrease
-//                     plus linearized-feasibility decrease) per scipy
-//                     convention.
-//   5. Radius update: eta_1 = 0.1, eta_2 = 0.75, shrink x0.25,
-//                     expand x2.0 (Nocedal-Wright 2e Section 4.1
-//                     Algorithm 4.1 universal defaults).
+//   4. Penalty:       update the in/out adaptive penalty parameter per
+//                     the Lalee-Nocedal-Plantenga heuristic so the value
+//                     reflects the curvature at the proposed composite
+//                     step. The penalty itself is internal to the helper
+//                     (per-step quadratic-model state, not an acceptance
+//                     verdict).
+//
+// The helper returns raw decision inputs (predicted objective-leg
+// reduction, feasibility-leg predicted reduction vpred, trial-point
+// f_new + c_norm_new) and lets the caller decide acceptance and the
+// radius update. Caller-side merit gates that consume these inputs:
+//   * tr_sqp_policy applies the augmented L2-merit ratio test
+//     rho = (f_old + penalty * c_norm_old
+//            - f_new - penalty * c_norm_new)
+//           / max(predicted + penalty * vpred, eps)
+//     plus the eta_1/eta_2 radius update at its single call site.
+//   * filter_trsqp_policy applies a Fletcher-Leyffer dominance check
+//     on (f_new, h_new) against its filter set; the radius update
+//     follows the same eta_1/eta_2 thresholds re-implemented at the
+//     call site.
 //
 // Adopted from: scipy/optimize/_trustregion_constr/qp_subproblem.py
 //               (modified_dogleg + projected_cg);
 //               scipy/optimize/_trustregion_constr/equality_constrained_sqp.py
 //               (TR_FACTOR = 0.8 normal-step damping; ratio test and
-//                radius update).
+//                radius update -- the latter migrated out of this helper).
 //
 // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
 //            Section 18.5 Algorithm 18.4 (Byrd-Omojokun composite step);
@@ -32,7 +45,7 @@
 //            Lalee, Nocedal, Plantenga 1998, SIAM J. Optim. 8(3):682-706
 //              (concrete dogleg pseudocode for the normal step;
 //               augmented-reduction ratio-test formula in Section 3.3
-//               equations 3.4-3.5).
+//               equations 3.4-3.5 -- consumed at the caller).
 //
 // argmin variant: callers assemble the joint residual with the
 //                 inequality sign flipped to match the slack
@@ -43,9 +56,9 @@
 //                 slack bounds uniformly via the displaced-box
 //                 detail::project invocation. Caller is responsible
 //                 for trial_eval finiteness; an unrecovered NaN from
-//                 trial_eval propagates to a NaN ratio and the
-//                 (NaN < eta_1) IEEE-754 branch accepts the step --
-//                 caller-side clamping or validation is required.
+//                 trial_eval propagates into f_new / c_norm_new and the
+//                 caller's ratio-test branch is responsible for the
+//                 IEEE-754 NaN semantics.
 
 #include "argmin/types.h"
 #include "argmin/detail/steihaug_cg.h"
@@ -73,7 +86,10 @@ namespace argmin::detail
 //            universal value).
 inline constexpr double zeta = 0.8;
 
-// TR ratio thresholds and radius-update factors.
+// TR ratio thresholds and radius-update factors. Consumed by callers
+// (tr_sqp_policy, filter_trsqp_policy) to perform the eta_1 / eta_2
+// rho-branch and the boundary-guarded expand step at the composite-
+// step call site.
 //
 // Reference: Nocedal and Wright 2e Section 4.1 Algorithm 4.1
 //            universal defaults (consistent with scipy trust-constr,
@@ -87,17 +103,40 @@ inline constexpr double tr_boundary_guard = 0.9;   // expand only when ||p|| >= 
 
 // Composite-step result POD returned by byrd_omojokun_composite_step.
 //
-// The caller decides whether to apply p_out to z_k based on `accepted`.
-// `normal_step_lsq_fallback` is set when the LDLT factorization of
-// AA^T failed (rank-deficient joint Jacobian) and the helper fell
-// back to a pure-Cauchy step truncated to the zeta*delta boundary.
-struct byrd_omojokun_result
+// The helper places the composite step into the caller's p_out buffer
+// and reports raw decision inputs. The caller decides whether to apply
+// p_out to z_k based on its own acceptance gate built from these
+// fields:
+//   predicted  -- the unweighted-objective predicted reduction
+//                 -g^T p - 0.5 p^T B p (the quadratic-model decrease in
+//                 the objective leg). Callers form the augmented
+//                 predicted reduction as predicted + penalty * vpred
+//                 if they use an L2-merit ratio test; filter-style
+//                 callers consume the unweighted predicted directly.
+//   vpred      -- the feasibility-leg predicted reduction
+//                 ||c||_2 - ||A p + c||_2 evaluated AT the
+//                 linearization point (both terms at z_k; this is NOT
+//                 the cross-iterate feasibility decrease).
+//   f_new      -- objective at z_k + p, from trial_eval's first return.
+//   c_norm_new -- L2 norm of the joint constraint residual at z_k + p,
+//                 from trial_eval's second return.
+//   p_out_filled                -- true on every non-degenerate path
+//                                  (false reserved for explicit early
+//                                  exits that leave p_out untouched).
+//   normal_step_lsq_fallback    -- set when the LDLT factorization of
+//                                  AA^T failed (rank-deficient joint
+//                                  Jacobian) and the helper fell back
+//                                  to a pure-Cauchy step truncated to
+//                                  the zeta * delta boundary.
+//   tangential_cg_status        -- exit status of the inner Steihaug-CG
+//                                  call on the tangential leg.
+struct byrd_omojokun_step_result
 {
-    double rho;
-    double new_delta;
-    double actual_reduction;
-    double predicted_reduction;
-    bool accepted;
+    double predicted;
+    double vpred;
+    double f_new;
+    double c_norm_new;
+    bool p_out_filled;
     bool normal_step_lsq_fallback;
     cg_exit_status tangential_cg_status;
 };
@@ -118,13 +157,11 @@ struct byrd_omojokun_result
 //                       Steihaug-CG leg.
 //   lower_displaced  -- (lower - z_k) for the joint box.
 //   upper_displaced  -- (upper - z_k) for the joint box.
-//   f_old            -- objective value at z_k.
-//   c_norm_old       -- ||c(z_k)||_2 (L2 merit feasibility term at z_k).
 //   trial_eval       -- callable invoked as trial_eval(p_out) returning
 //                       std::pair<Scalar, Scalar>{f_new, c_norm_new} at
 //                       z_k + p_out. The caller owns evaluation; the
-//                       helper just consumes the (f, c_norm) pair to
-//                       form the augmented L2 merit difference.
+//                       helper just forwards the (f, c_norm) pair to
+//                       its caller through the result POD.
 //   AAt_workspace    -- caller-owned MatrixXd, m_total x m_total.
 //   ldlt_workspace   -- caller-owned LDLT factorization object.
 //   w_workspace      -- caller-owned VectorXd, m_total.
@@ -140,9 +177,9 @@ struct byrd_omojokun_result
 //                       Owned by the caller's policy state so it persists
 //                       across composite-step calls; updated per the
 //                       LNP / scipy update_penalty heuristic before
-//                       return. The augmented predicted/actual reductions
-//                       weight the feasibility leg by `penalty` on both
-//                       sides.
+//                       return. Callers that do not consume the
+//                       penalty (filter-style acceptance) may pass a
+//                       dummy field; the helper does not gate on it.
 //   penalty_factor   -- in: heuristic growth factor controlling how
 //                       aggressively the penalty grows. The post-step
 //                       update sets
@@ -165,7 +202,7 @@ struct byrd_omojokun_result
 //            absorb the freeze-on-feasibility regression that larger
 //            growth factors produce in isolation).
 template <typename Scalar, int N, typename HessianOp, typename TrialEval>
-byrd_omojokun_result byrd_omojokun_composite_step(
+byrd_omojokun_step_result byrd_omojokun_composite_step(
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& z_k,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g,
     HessianOp&& hessian_op,
@@ -176,8 +213,6 @@ byrd_omojokun_result byrd_omojokun_composite_step(
     std::size_t max_cg_iter,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& lower_displaced,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& upper_displaced,
-    Scalar f_old,
-    Scalar c_norm_old,
     TrialEval&& trial_eval,
     Eigen::MatrixXd& AAt_workspace,
     Eigen::LDLT<Eigen::MatrixXd>& ldlt_workspace,
@@ -197,7 +232,8 @@ byrd_omojokun_result byrd_omojokun_composite_step(
                 // caller). Retained in the signature for clarity at
                 // call sites and for future use by diagnostics.
 
-    byrd_omojokun_result result{};
+    byrd_omojokun_step_result result{};
+    result.p_out_filled = false;
     result.normal_step_lsq_fallback = false;
     result.tangential_cg_status = cg_exit_status::forcing;
 
@@ -344,22 +380,22 @@ byrd_omojokun_result byrd_omojokun_composite_step(
     // ── Composite step ─────────────────────────────────────────────
     p_out = v_buf + u_buf;
 
-    // ── Predicted reduction (augmented, with LNP penalty) ──────────
+    // ── Predicted reductions (objective leg + feasibility leg) ─────
     //
     // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3 eq. 3.4-3.5;
     //            scipy equality_constrained_sqp.py predicted-reduction
     //            formula.
     //
-    //   pred = -g^T p - 0.5 * p^T B p
-    //        + penalty * (||c||_2 - ||A p + c||_2)
+    //   predicted (objective leg)   = -g^T p - 0.5 * p^T B p
+    //   vpred     (feasibility leg) = ||c||_2 - ||A p + c||_2
     //
-    // The penalty (passed in by the caller as an adaptive in/out
-    // parameter) weights the feasibility leg against the objective leg.
-    // vpred = ||c||_2 - ||A p + c||_2 is the linearized-feasibility
-    // predicted reduction AT the current x: both norms are computed at
-    // the linearization point, NOT across iterates. This is the load-
-    // bearing correctness point — the previous-iterate end residual
-    // (c_norm_old) belongs in the actual-reduction leg, not in vpred.
+    // Both norms in vpred are at the linearization point, NOT across
+    // iterates. The previous-iterate end residual (||c(z_k)||_2 at the
+    // caller's f_old / c_norm_old shape) belongs in the caller's
+    // actual-reduction leg, not in vpred. Callers form the augmented
+    // L2-merit predicted reduction as `predicted + penalty * vpred`
+    // when needed; filter-style callers consume the unweighted
+    // `predicted` and a separately-computed `h` aggregate.
     Eigen::Vector<Scalar, N> Bp = hessian_op(p_out);
     const Scalar Bp_dot_p = p_out.dot(Bp);
     Eigen::VectorXd Ap_plus_c = A * p_out + c;
@@ -367,24 +403,17 @@ byrd_omojokun_result byrd_omojokun_composite_step(
     const Scalar Ap_plus_c_norm = Ap_plus_c.norm();
     const Scalar vpred = c_norm_lin - Ap_plus_c_norm;
     const Scalar predicted =
-        -g.dot(p_out) - Scalar{0.5} * Bp_dot_p
-        + penalty * vpred;
+        -g.dot(p_out) - Scalar{0.5} * Bp_dot_p;
 
-    // ── Actual reduction (augmented, with LNP penalty) ─────────────
+    // ── Trial evaluation at z_k + p ─────────────────────────────────
     //
-    // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3;
-    //            scipy equality_constrained_sqp.py ratio test.
-    //
-    //   actual = (f_old + penalty * ||c(z_k)||_2)
-    //          - (f_new + penalty * ||c(z_k + p)||_2)
-    //
-    // The penalty weight matches the predicted-reduction shape so the
-    // ratio is well-posed under non-unit penalty.
+    // Caller-supplied closure returns (f_new, c_norm_new). The helper
+    // does not consume these for an internal ratio test; the values
+    // are forwarded through the result POD so the caller's acceptance
+    // gate can read them.
     std::pair<Scalar, Scalar> trial = trial_eval(p_out);
     const Scalar f_new = trial.first;
     const Scalar c_norm_new = trial.second;
-    const Scalar actual =
-        (f_old + penalty * c_norm_old) - (f_new + penalty * c_norm_new);
 
     // ── Penalty update (LNP / scipy update_penalty heuristic) ──────
     //
@@ -433,38 +462,11 @@ byrd_omojokun_result byrd_omojokun_composite_step(
         }
     }
 
-    // ── Ratio and radius update ────────────────────────────────────
-    //
-    // Reference: Nocedal and Wright 2e Section 4.1 Algorithm 4.1
-    //            (universal defaults). max(pred, eps) guards 0/0 on
-    //            degenerate steps; rho -> +/-inf is handled correctly
-    //            by the standard threshold branches.
-    const Scalar pred_guarded =
-        std::max(predicted, std::numeric_limits<Scalar>::epsilon());
-    const Scalar rho = actual / pred_guarded;
-    const Scalar step_norm = p_out.norm();
-
-    Scalar new_delta;
-    bool accepted;
-    if(rho < tr_eta_1)
-    {
-        accepted = false;
-        new_delta = tr_shrink_factor * delta;
-    }
-    else
-    {
-        accepted = true;
-        if(rho > tr_eta_2 && step_norm >= tr_boundary_guard * delta)
-            new_delta = std::min(tr_expand_factor * delta, tr_delta_max);
-        else
-            new_delta = delta;
-    }
-
-    result.rho = rho;
-    result.new_delta = new_delta;
-    result.actual_reduction = actual;
-    result.predicted_reduction = predicted;
-    result.accepted = accepted;
+    result.predicted = predicted;
+    result.vpred = vpred;
+    result.f_new = f_new;
+    result.c_norm_new = c_norm_new;
+    result.p_out_filled = true;
     return result;
 }
 

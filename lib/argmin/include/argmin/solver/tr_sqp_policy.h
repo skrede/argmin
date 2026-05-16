@@ -682,11 +682,16 @@ struct tr_sqp_policy
         // m_joint = n_eq + n_ineq; the byrd_omojokun helper reuses them
         // directly with no resize on the hot path.
 
-        // Section K -- Byrd-Omojokun composite step + ratio test +
-        // radius update via the helper. The helper is templated on
-        // Eigen::Dynamic because the joint primal dimension is a
-        // runtime quantity even when the policy template N is a fixed
-        // compile-time constant for the x-only dim.
+        // Section K -- Byrd-Omojokun composite step. The helper
+        // returns raw decision inputs (predicted objective-leg
+        // reduction, vpred feasibility-leg predicted reduction,
+        // f_new and c_norm_new at the trial point); the augmented
+        // L2-merit ratio test and the eta_1 / eta_2 radius update
+        // are computed locally below against these inputs. The
+        // helper is templated on Eigen::Dynamic because the joint
+        // primal dimension is a runtime quantity even when the policy
+        // template N is a fixed compile-time constant for the x-only
+        // dim.
         //
         // Snapshot the pre-step trust radius and penalty so the SOC
         // retry (Section K') can re-invoke the helper without
@@ -696,20 +701,72 @@ struct tr_sqp_policy
         // residual, not radius expansion) and without inheriting any
         // penalty inflation the LNP heuristic applied on the rejected
         // primary step.
+        //
+        // Reference: Nocedal and Wright 2e Section 4.1 Algorithm 4.1
+        //            (rho branches on eta_1 / eta_2; boundary-guarded
+        //             expansion). max(pred_aug, eps) guards 0/0 on
+        //             degenerate steps; rho -> +/-inf is handled
+        //             correctly by the standard threshold branches.
         const double delta_pre_step   = s.trust_radius;
         const double penalty_pre_step = s.penalty;
-        auto bo = argmin::detail::byrd_omojokun_composite_step<
+        auto bo_step = argmin::detail::byrd_omojokun_composite_step<
             double, Eigen::Dynamic>(
             z_k, s.joint_grad_L_new_buf,
             hessian_op,
             A_joint, c_joint,
             s.trust_radius, eps_k, max_cg_iter,
             lower_joint, upper_joint,
-            f_old, c_norm_old,
             trial_eval,
             s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
             v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
             s.penalty, options.penalty_factor);
+
+        // Caller-side augmented-merit ratio test + radius update.
+        // The helper updates s.penalty in place per the LNP heuristic
+        // BEFORE returning, so the post-call s.penalty value is the
+        // one that must weight both legs of the augmented merit on
+        // the primary step (matches the pre-refactor BO behavior).
+        // The radius input below is `s.trust_radius` -- the pre-step
+        // radius snapshot lives in `delta_pre_step` and is consumed
+        // by the SOC retry, not by the primary branch.
+        auto compute_acceptance = [](const argmin::detail::
+                                         byrd_omojokun_step_result& bo,
+                                     double f_old_,
+                                     double c_norm_old_,
+                                     double penalty_,
+                                     double delta_in,
+                                     double step_norm)
+            -> std::pair<bool, double>
+        {
+            const double actual =
+                (f_old_ + penalty_ * c_norm_old_)
+                - (bo.f_new + penalty_ * bo.c_norm_new);
+            const double pred_aug =
+                bo.predicted + penalty_ * bo.vpred;
+            const double pred_guarded =
+                std::max(pred_aug,
+                         std::numeric_limits<double>::epsilon());
+            const double rho = actual / pred_guarded;
+            if(rho < argmin::detail::tr_eta_1)
+                return {false,
+                        argmin::detail::tr_shrink_factor * delta_in};
+            if(rho > argmin::detail::tr_eta_2
+               && step_norm
+                  >= argmin::detail::tr_boundary_guard * delta_in)
+                return {true,
+                        std::min(
+                            argmin::detail::tr_expand_factor * delta_in,
+                            argmin::detail::tr_delta_max)};
+            return {true, delta_in};
+        };
+
+        auto [accepted, new_delta] = compute_acceptance(
+            bo_step,
+            f_old,
+            c_norm_old,
+            s.penalty,
+            s.trust_radius,
+            p_out.norm());
 
         // Section K' -- Second-order correction retry on the inequality
         // leg. On a rejected primary composite step, recompute the
@@ -741,7 +798,7 @@ struct tr_sqp_policy
         //            Nocedal and Wright 2e Section 18.3 (Maratos
         //            effect and SOC pairing).
         std::size_t soc_retry_count = 0;
-        if(!bo.accepted && options.soc_max_iterations > 0)
+        if(!accepted && options.soc_max_iterations > 0)
         {
             Eigen::Vector<double, N> x_trial(n);
             Eigen::VectorXd s_trial(n_ineq);
@@ -779,30 +836,40 @@ struct tr_sqp_policy
                 // starting conditions as the primary step, but with a
                 // corrected residual.
                 s.penalty = penalty_pre_step;
-                bo = argmin::detail::byrd_omojokun_composite_step<
+                bo_step = argmin::detail::byrd_omojokun_composite_step<
                     double, Eigen::Dynamic>(
                     z_k, s.joint_grad_L_new_buf,
                     hessian_op,
                     A_joint, c_joint_soc,
                     delta_pre_step, eps_k, max_cg_iter,
                     lower_joint, upper_joint,
-                    f_old, c_norm_old,
                     trial_eval,
                     s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
                     v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
                     s.penalty, options.penalty_factor);
 
-                if(bo.accepted)
+                // Re-run the caller-side acceptance gate against this
+                // retry's raw outputs. The radius input is held at
+                // delta_pre_step (no chained shrinks across retries).
+                std::tie(accepted, new_delta) = compute_acceptance(
+                    bo_step,
+                    f_old,
+                    c_norm_old,
+                    s.penalty,
+                    delta_pre_step,
+                    p_out.norm());
+
+                if(accepted)
                     break;
             }
         }
 
-        // Section L -- Radius update consumes the helper's verdict.
-        // After the SOC retry path, `bo` is either the accepted retry
-        // (radius = delta_pre_step or expanded) or the last rejected
-        // retry (radius shrunk from delta_pre_step). Either way,
-        // bo.new_delta is the authoritative post-step radius.
-        s.trust_radius = bo.new_delta;
+        // Section L -- Radius update consumes the caller-side verdict.
+        // After the SOC retry path, `new_delta` is either the accepted
+        // retry's radius (delta_pre_step or expanded) or the last
+        // rejected retry's radius (shrunk from delta_pre_step). Either
+        // way, new_delta is the authoritative post-step radius.
+        s.trust_radius = new_delta;
 
         // Section M -- Trust-radius collapse path. Below the policy-
         // level floor the policy emits a null-step carrying the new
@@ -836,7 +903,7 @@ struct tr_sqp_policy
         // Reference: Nocedal and Wright 2e Section 4.1 Algorithm 4.1
         //            (rejection contracts the radius, leaves the
         //             iterate unchanged).
-        if(!bo.accepted)
+        if(!accepted)
         {
             auto r = argmin::detail::null_step_result<double, N,
                                                       Eigen::Dynamic,
