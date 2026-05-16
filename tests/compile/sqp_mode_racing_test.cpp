@@ -1,15 +1,17 @@
 // argmin variant: compile-time-only racing-tuple verification for
-//                 basic_solver_group across <N, fast> + <N, accurate>
-//                 mode variants of every line-search SQP policy. The
+//                 basic_solver_group across SQP-family policies. The
 //                 racing tuple's per-policy options_type forwarding
-//                 must distinguish between mode variants because
-//                 kraft_slsqp_policy<N, fast>::options_type and
-//                 kraft_slsqp_policy<N, accurate>::options_type are
-//                 two distinct types in the std::tuple<...> backing
-//                 of basic_solver_group.
+//                 inside the std::tuple<...> backing of
+//                 basic_solver_group must distinguish between policy
+//                 types with different options_type layouts.
 //
-// Reference: ARCHITECTURE.md OQ6 (basic_solver_group racing compile
-//            test); KNITRO commercial-mode-system precedent.
+//                 After the empirical collapse of the line-search SQP
+//                 _fast mode, the four line-search policies
+//                 (kraft_slsqp, nw_sqp, filter_slsqp, filter_nw_sqp) are
+//                 single-mode and have no Mode NTTP. tr_sqp_policy
+//                 retains its dual-mode dispatch and exercises the
+//                 <N, fast> != <N, accurate> distinct-type contract on
+//                 the surviving Mode-axis policy.
 
 #include "argmin/schedule/basic_solver_group.h"
 #include "argmin/schedule/round_robin_schedule.h"
@@ -28,81 +30,65 @@
 using namespace argmin;
 
 // -----------------------------------------------------------------------
-// Gate 1 -- policy_options_t<> NTTP-forwarding alias resolution.
+// Gate 1 -- policy_options_t<> alias resolution.
 // -----------------------------------------------------------------------
 // The two operands of the static_assert below are spelled DIFFERENTLY:
 // the LHS goes through detail::policy_options_impl via the public alias
 // in argmin/solver/basic_solver.h, and the RHS names the nested
-// options_type directly off the mode-bearing kraft policy. They must
-// resolve to the same concrete type. A regression in the alias's
-// resolution path (e.g. accidentally always picking the
-// solver_options<> fallback when has_options_type<Policy> is satisfied)
-// would fail this check.
+// options_type directly off the policy. They must resolve to the same
+// concrete type. A regression in the alias's resolution path (e.g.
+// accidentally always picking the solver_options<> fallback when
+// has_options_type<Policy> is satisfied) would fail this check.
 //
-// kraft_slsqp_policy::options_type is a plain nested struct (not itself
-// a template on Mode), so the LHS resolves to the
-// kraft_slsqp_policy<N, fast>-nested options_type and the RHS names
-// that same nested type. The check is non-trivial because it exercises
-// the alias's specialization-selection logic, which `is_same_v<T, T>`
-// would not.
+// kraft_slsqp_policy::options_type is a plain nested struct; the LHS
+// resolves to the kraft_slsqp_policy<N>-nested options_type and the RHS
+// names that same nested type. The check is non-trivial because it
+// exercises the alias's specialization-selection logic, which
+// `is_same_v<T, T>` would not.
 static_assert(std::is_same_v<
     argmin::policy_options_t<
-        argmin::kraft_slsqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::fast>,
+        argmin::kraft_slsqp_policy<argmin::dynamic_dimension>,
         double>,
-    typename argmin::kraft_slsqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::fast>::options_type>);
+    typename argmin::kraft_slsqp_policy<argmin::dynamic_dimension>::options_type>);
+
+// tr_sqp retains its Mode NTTP; the per-mode options_type forwarding
+// must continue to distinguish the two variants in the std::tuple<...>
+// backing of basic_solver_group.
 static_assert(std::is_same_v<
     argmin::policy_options_t<
-        argmin::kraft_slsqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::accurate>,
+        argmin::tr_sqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::fast>,
         double>,
-    typename argmin::kraft_slsqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::accurate>::options_type>);
+    typename argmin::tr_sqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::fast>::options_type>);
+static_assert(std::is_same_v<
+    argmin::policy_options_t<
+        argmin::tr_sqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::accurate>,
+        double>,
+    typename argmin::tr_sqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::accurate>::options_type>);
 
 // -----------------------------------------------------------------------
-// Gate 2 -- <N, fast> != <N, accurate> distinct types across all four
-// line-search SQP policies.
+// Gate 2 -- <N, fast> != <N, accurate> distinct types on the surviving
+// dual-mode policy (tr_sqp).
 // -----------------------------------------------------------------------
-static_assert(!std::is_same_v<
-    kraft_slsqp_policy<dynamic_dimension, sqp_mode::fast>,
-    kraft_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>);
-static_assert(!std::is_same_v<
-    nw_sqp_policy<dynamic_dimension, sqp_mode::fast>,
-    nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
-static_assert(!std::is_same_v<
-    filter_slsqp_policy<dynamic_dimension, sqp_mode::fast>,
-    filter_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>);
-static_assert(!std::is_same_v<
-    filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>,
-    filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
 static_assert(!std::is_same_v<
     tr_sqp_policy<dynamic_dimension, sqp_mode::fast>,
     tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
 
 // -----------------------------------------------------------------------
-// Gate 3 -- _fast / _accurate alias resolution across all four policies.
+// Gate 3 -- _accurate alias resolution across the four single-mode
+// line-search policies + tr_sqp's dual-mode aliases.
 // -----------------------------------------------------------------------
 static_assert(std::is_same_v<
-    kraft_slsqp_policy_fast<dynamic_dimension>,
-    kraft_slsqp_policy<dynamic_dimension, sqp_mode::fast>>);
-static_assert(std::is_same_v<
     kraft_slsqp_policy_accurate<dynamic_dimension>,
-    kraft_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>);
-static_assert(std::is_same_v<
-    nw_sqp_policy_fast<dynamic_dimension>,
-    nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>);
+    kraft_slsqp_policy<dynamic_dimension>>);
 static_assert(std::is_same_v<
     nw_sqp_policy_accurate<dynamic_dimension>,
-    nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
-static_assert(std::is_same_v<
-    filter_slsqp_policy_fast<dynamic_dimension>,
-    filter_slsqp_policy<dynamic_dimension, sqp_mode::fast>>);
+    nw_sqp_policy<dynamic_dimension>>);
 static_assert(std::is_same_v<
     filter_slsqp_policy_accurate<dynamic_dimension>,
-    filter_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>);
-static_assert(std::is_same_v<
-    filter_nw_sqp_policy_fast<dynamic_dimension>,
-    filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>);
+    filter_slsqp_policy<dynamic_dimension>>);
 static_assert(std::is_same_v<
     filter_nw_sqp_policy_accurate<dynamic_dimension>,
-    filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
+    filter_nw_sqp_policy<dynamic_dimension>>);
 static_assert(std::is_same_v<
     tr_sqp_policy_fast<dynamic_dimension>,
     tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>);
@@ -111,21 +97,24 @@ static_assert(std::is_same_v<
     tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
 
 // -----------------------------------------------------------------------
-// Gate 4 -- rebind<M> propagates Mode through the dimension axis.
+// Gate 4 -- rebind<M> preserves the policy contract through the
+// dimension axis. For dual-mode tr_sqp, Mode is preserved verbatim; a
+// regression that dropped Mode and silently defaulted to accurate would
+// fail this check.
 // -----------------------------------------------------------------------
-// Mode is a separate axis from N; rebind<M> must preserve Mode verbatim.
-// A regression in the rebind alias (e.g. dropping Mode and silently
-// defaulting to accurate) would fail this check.
 static_assert(std::is_same_v<
-    typename kraft_slsqp_policy<dynamic_dimension, sqp_mode::fast>::template rebind<4>,
-    kraft_slsqp_policy<4, sqp_mode::fast>>);
+    typename kraft_slsqp_policy<dynamic_dimension>::template rebind<4>,
+    kraft_slsqp_policy<4>>);
 static_assert(std::is_same_v<
-    typename filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>::template rebind<4>,
-    filter_nw_sqp_policy<4, sqp_mode::fast>>);
+    typename filter_nw_sqp_policy<dynamic_dimension>::template rebind<4>,
+    filter_nw_sqp_policy<4>>);
+static_assert(std::is_same_v<
+    typename tr_sqp_policy<dynamic_dimension, sqp_mode::fast>::template rebind<4>,
+    tr_sqp_policy<4, sqp_mode::fast>>);
 
 // -----------------------------------------------------------------------
 // Gate 5 -- basic_solver_group instantiation across <N, fast> + <N,
-// accurate> variants of kraft_slsqp_policy.
+// accurate> variants of tr_sqp_policy (the surviving dual-mode policy).
 // -----------------------------------------------------------------------
 // The using-alias is the load-bearing test; its SFINAE-failure surfaces
 // as a compile error if policy_options_t<> does not survive NTTP
@@ -135,18 +124,18 @@ static_assert(std::is_same_v<
 namespace
 {
 
-using racing_kraft = basic_solver_group<
+using racing_tr_sqp = basic_solver_group<
     round_robin_schedule,
     dynamic_dimension,
     void,
-    kraft_slsqp_policy<dynamic_dimension, sqp_mode::fast>,
-    kraft_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>;
+    tr_sqp_policy<dynamic_dimension, sqp_mode::fast>,
+    tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>;
 
-// The is_same_v<T, T> here only forces racing_kraft to be a complete
+// The is_same_v<T, T> here only forces racing_tr_sqp to be a complete
 // type (the alias instantiation is the load-bearing check); without
 // referencing the alias the compiler may skip alias-expansion-time
 // SFINAE.
-static_assert(std::is_same_v<racing_kraft, racing_kraft>);
+static_assert(std::is_same_v<racing_tr_sqp, racing_tr_sqp>);
 
 }
 
@@ -163,10 +152,10 @@ static_assert(nlp_solver<basic_solver<tr_sqp_policy<dynamic_dimension, sqp_mode:
 // -----------------------------------------------------------------------
 // Gate 5b -- cross-family racing-tuple instantiation.
 // -----------------------------------------------------------------------
-// basic_solver_group instantiation across a line-search SQP policy
-// (kraft_slsqp_accurate) and a trust-region SQP policy
-// (tr_sqp_accurate). The compile-time form of the cross-family racing
-// requirement: if the per-policy options_type forwarding inside the
+// basic_solver_group instantiation across a single-mode line-search SQP
+// policy (kraft_slsqp) and a trust-region SQP policy (tr_sqp_accurate).
+// The compile-time form of the cross-family racing requirement: if the
+// per-policy options_type forwarding inside the
 // std::tuple<policy_options_t<...>...> backing distinguishes the two
 // policy types (which have entirely different options_type layouts),
 // the using-alias is well-formed and the static_assert holds; a
@@ -179,7 +168,7 @@ using racing_cross_family = basic_solver_group<
     round_robin_schedule,
     dynamic_dimension,
     void,
-    kraft_slsqp_policy<dynamic_dimension, sqp_mode::accurate>,
+    kraft_slsqp_policy<dynamic_dimension>,
     tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>;
 
 static_assert(std::is_same_v<racing_cross_family, racing_cross_family>);

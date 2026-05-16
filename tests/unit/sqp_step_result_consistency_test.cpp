@@ -133,17 +133,13 @@ struct sqrt_nan_emitter
 }
 
 TEMPLATE_TEST_CASE_SIG(
-    "SQP step_result consistency across SQP family (line-search + trust-region) x mode",
+    "SQP step_result consistency across SQP family (line-search + trust-region)",
     "[sqp][consistency][mode]",
     ((typename Policy), Policy),
     kraft_slsqp_policy_accurate<dynamic_dimension>,
-    kraft_slsqp_policy_fast<dynamic_dimension>,
     nw_sqp_policy_accurate<dynamic_dimension>,
-    nw_sqp_policy_fast<dynamic_dimension>,
     filter_slsqp_policy_accurate<dynamic_dimension>,
-    filter_slsqp_policy_fast<dynamic_dimension>,
     filter_nw_sqp_policy_accurate<dynamic_dimension>,
-    filter_nw_sqp_policy_fast<dynamic_dimension>,
     tr_sqp_policy_accurate<dynamic_dimension>,
     tr_sqp_policy_fast<dynamic_dimension>)
 {
@@ -315,10 +311,8 @@ TEMPLATE_TEST_CASE_SIG(
                 break;
         }
 
-        if constexpr (std::is_same_v<Policy, nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>
-                      || std::is_same_v<Policy, nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>
-                      || std::is_same_v<Policy, filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>
-                      || std::is_same_v<Policy, filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>)
+        if constexpr (std::is_same_v<Policy, nw_sqp_policy<dynamic_dimension>>
+                      || std::is_same_v<Policy, filter_nw_sqp_policy<dynamic_dimension>>)
         {
             CHECK(solver.constraint_violation() < NW_SQP_HS071_CV_BAR);
         }
@@ -347,98 +341,145 @@ TEMPLATE_TEST_CASE_SIG(
         }
     }
 
-    SECTION("Per-mode default_armijo_rho propagates to options.line_search.rho")
+    SECTION("default_armijo_rho propagates to options.line_search.rho")
     {
-        // 0.3 in fast mode (faster Armijo back-off), 0.5 in accurate
-        // mode (NLopt slsqp.c default).
+        // Single-mode line-search policies + tr_sqp accurate ship 0.5
+        // (NLopt slsqp.c default); tr_sqp fast ships its own value.
         if constexpr(requires { Policy::default_armijo_rho; })
         {
             typename Policy::options_type options{};
             REQUIRE(options.line_search.rho
                     == Catch::Approx(Policy::default_armijo_rho));
-            if constexpr(Policy::mode_ == sqp_mode::fast)
-                REQUIRE(options.line_search.rho == Catch::Approx(0.3));
+            if constexpr(requires { Policy::mode_; })
+            {
+                if constexpr(Policy::mode_ == sqp_mode::fast)
+                    REQUIRE(options.line_search.rho == Catch::Approx(0.3));
+                else
+                    REQUIRE(options.line_search.rho == Catch::Approx(0.5));
+            }
             else
+            {
+                // Collapsed line-search policies ship the former accurate
+                // value (0.5).
                 REQUIRE(options.line_search.rho == Catch::Approx(0.5));
+            }
         }
     }
 
-    SECTION("Per-mode default_line_search_max_iterations propagates")
+    SECTION("default_line_search_max_iterations propagates")
     {
-        // 10 fast, 40 accurate.
+        // Single-mode line-search policies + tr_sqp accurate ship 40;
+        // tr_sqp fast ships 10.
         if constexpr(requires { Policy::default_line_search_max_iterations; })
         {
             typename Policy::options_type options{};
             REQUIRE(options.line_search.max_iterations
                     == Policy::default_line_search_max_iterations);
-            if constexpr(Policy::mode_ == sqp_mode::fast)
-                REQUIRE(options.line_search.max_iterations == 10);
+            if constexpr(requires { Policy::mode_; })
+            {
+                if constexpr(Policy::mode_ == sqp_mode::fast)
+                    REQUIRE(options.line_search.max_iterations == 10);
+                else
+                    REQUIRE(options.line_search.max_iterations == 40);
+            }
             else
+            {
                 REQUIRE(options.line_search.max_iterations == 40);
+            }
         }
     }
 
-    SECTION("Per-mode default_bfgs_reset_max propagates")
+    SECTION("default_bfgs_reset_max propagates")
     {
-        // 0 fast (no retry; null-step or QP recovery instead),
-        // 5 accurate (NLopt slsqp.c ireset semantics).
+        // Single-mode line-search policies ship 5 (NLopt slsqp.c ireset
+        // semantics). tr_sqp publishes its own per-mode values when
+        // applicable.
         if constexpr(requires { Policy::default_bfgs_reset_max; })
         {
             typename Policy::options_type options{};
             REQUIRE(options.bfgs_reset_max == Policy::default_bfgs_reset_max);
-            if constexpr(Policy::mode_ == sqp_mode::fast)
-                REQUIRE(options.bfgs_reset_max == std::size_t{0});
+            if constexpr(requires { Policy::mode_; })
+            {
+                if constexpr(Policy::mode_ == sqp_mode::fast)
+                    REQUIRE(options.bfgs_reset_max == std::size_t{0});
+                else
+                    REQUIRE(options.bfgs_reset_max == std::size_t{5});
+            }
             else
+            {
                 REQUIRE(options.bfgs_reset_max == std::size_t{5});
+            }
         }
     }
 
-    SECTION("Per-mode default_qp_max_iterations propagates to options.qp")
+    SECTION("default_qp_max_iterations propagates to options.qp")
     {
-        // 50 fast, 200 accurate. Observable on options.qp.max_iterations;
-        // currently dead-wired on the kraft and filter_slsqp recovery
-        // solver paths (no behavioral effect on the QP solve), but the
-        // value is observable here.
+        // Single-mode line-search policies ship 200. Observable on
+        // options.qp.max_iterations; currently dead-wired on the kraft
+        // and filter_slsqp recovery solver paths but the value is
+        // observable here.
         if constexpr(requires { Policy::default_qp_max_iterations; })
         {
             typename Policy::options_type options{};
             REQUIRE(options.qp.max_iterations
                     == Policy::default_qp_max_iterations);
-            if constexpr(Policy::mode_ == sqp_mode::fast)
-                REQUIRE(options.qp.max_iterations == 50);
+            if constexpr(requires { Policy::mode_; })
+            {
+                if constexpr(Policy::mode_ == sqp_mode::fast)
+                    REQUIRE(options.qp.max_iterations == 50);
+                else
+                    REQUIRE(options.qp.max_iterations == 200);
+            }
             else
+            {
                 REQUIRE(options.qp.max_iterations == 200);
+            }
         }
     }
 
-    SECTION("Per-mode default_qp_tolerance propagates to options.qp")
+    SECTION("default_qp_tolerance propagates to options.qp")
     {
-        // 1e-8 fast, 1e-12 accurate. Same dead-wire caveat as
-        // default_qp_max_iterations on kraft / filter_slsqp.
+        // Single-mode line-search policies ship 1e-12; tr_sqp publishes
+        // per-mode values where applicable.
         if constexpr(requires { Policy::default_qp_tolerance; })
         {
             typename Policy::options_type options{};
             REQUIRE(options.qp.tolerance
                     == Catch::Approx(Policy::default_qp_tolerance));
-            if constexpr(Policy::mode_ == sqp_mode::fast)
-                REQUIRE(options.qp.tolerance == Catch::Approx(1e-8));
+            if constexpr(requires { Policy::mode_; })
+            {
+                if constexpr(Policy::mode_ == sqp_mode::fast)
+                    REQUIRE(options.qp.tolerance == Catch::Approx(1e-8));
+                else
+                    REQUIRE(options.qp.tolerance == Catch::Approx(1e-12));
+            }
             else
+            {
                 REQUIRE(options.qp.tolerance == Catch::Approx(1e-12));
+            }
         }
     }
 
-    SECTION("Per-mode default_sigma_max constexpr published on N&W lineage")
+    SECTION("default_sigma_max constexpr published on N&W lineage")
     {
-        // L1-merit penalty ceiling. 1e6 fast (tighter wall-time-budgeted
-        // cap), 1e10 accurate (NLopt-parity headroom). Published only on
-        // N&W lineage (nw_sqp + filter_nw_sqp); requires-expression gates
-        // the assertion off on Kraft lineage rows that do not publish it.
+        // L1-merit penalty ceiling. Single-mode N&W lineage line-search
+        // policies ship 1e10 (NLopt-parity headroom). Published only on
+        // N&W lineage (nw_sqp + filter_nw_sqp) for the line-search
+        // family; requires-expression gates the assertion off on Kraft
+        // lineage rows that do not publish it.
         if constexpr(requires { Policy::default_sigma_max; })
         {
-            if constexpr(Policy::mode_ == sqp_mode::fast)
-                REQUIRE(Policy::default_sigma_max == Catch::Approx(1e6));
+            if constexpr(requires { Policy::mode_; })
+            {
+                if constexpr(Policy::mode_ == sqp_mode::fast)
+                    REQUIRE(Policy::default_sigma_max == Catch::Approx(1e6));
+                else
+                    REQUIRE(Policy::default_sigma_max == Catch::Approx(1e10));
+            }
             else
+            {
                 REQUIRE(Policy::default_sigma_max == Catch::Approx(1e10));
+            }
         }
     }
 
@@ -447,17 +488,12 @@ TEMPLATE_TEST_CASE_SIG(
         // Drive the solver step-by-step on HS026 and aggregate the
         // diagnostics.bfgs_skip_count counter across every step.
         //
-        // Invariants asserted:
-        //   - Accurate mode (every policy) and Kraft lineage (every mode):
-        //     bfgs_skip_count == 0 across every step (the fast-mode skip
-        //     gate lives on N&W lineage only; accurate-mode preserves the
-        //     existing Powell-damped push semantics).
-        //   - Fast-mode N&W lineage (nw_sqp + filter_nw_sqp): the field is
-        //     observable as a std::size_t on every step; the cumulative
-        //     count is a non-negative number representable in std::size_t.
-        //     No positive lower bound is asserted because HS026 has a
-        //     trajectory where the curvature pair s^T y stays positive on
-        //     every accepted step at the converged optimum.
+        // After the line-search SQP family collapsed to single-mode, the
+        // BFGS-skip path on the N&W lineage is gone; the field stays
+        // observable for cross-policy schema parity but is never
+        // incremented on the four line-search policies. tr_sqp_fast still
+        // increments the counter when curvature is non-positive (its
+        // dual-mode dispatch survives); tr_sqp_accurate leaves it at zero.
         hs026<> problem;
         auto x0 = problem.initial_point();
         solver_options opts;
@@ -479,35 +515,29 @@ TEMPLATE_TEST_CASE_SIG(
                 break;
         }
 
-        // Kraft lineage and accurate mode never increment the counter.
-        if constexpr(std::is_same_v<Policy,
-                         kraft_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
-                  || std::is_same_v<Policy,
-                         kraft_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>
-                  || std::is_same_v<Policy,
-                         filter_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
-                  || std::is_same_v<Policy,
-                         filter_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+        if constexpr(requires { Policy::mode_; })
         {
-            CHECK(skip_total == std::size_t{0});
-        }
-        else if constexpr(Policy::mode_ == sqp_mode::accurate)
-        {
-            // N&W lineage accurate mode: gate dispatches to the unchanged
-            // Powell-damped path; the skip branch is never taken.
-            CHECK(skip_total == std::size_t{0});
+            if constexpr(Policy::mode_ == sqp_mode::fast)
+            {
+                // tr_sqp_fast: counter may or may not fire on the HS026
+                // trajectory; only assert observability.
+                CHECK(skip_total >= std::size_t{0});
+            }
+            else
+            {
+                // tr_sqp_accurate: skip branch never taken.
+                CHECK(skip_total == std::size_t{0});
+            }
         }
         else
         {
-            // Fast-mode N&W lineage: gate may or may not fire on the
-            // HS026 trajectory; only assert that the field is observable
-            // and non-negative (vacuous for std::size_t but documents the
-            // invariant).
-            CHECK(skip_total >= std::size_t{0});
+            // Single-mode line-search family: the BFGS-skip path was
+            // removed; the field is observable but never incremented.
+            CHECK(skip_total == std::size_t{0});
         }
     }
 
-    SECTION("multiplier_reest_every_k preserves accurate-mode k=1 bit identity")
+    SECTION("multiplier_reest_every_k preserves k=1 bit identity")
     {
         // At k=1 the active-set multiplier re-estimation gate
         // (s.iteration % k == 0) fires on every step, so behavior is
@@ -517,12 +547,16 @@ TEMPLATE_TEST_CASE_SIG(
         // multiplier_reest_every_k = 1 explicitly. The iter count and
         // objective must agree exactly.
         //
-        // Accurate-mode rows only — fast-mode default picks k_fast=5
-        // (sweep-derived), so default-options ≠ k=1 on the fast rows.
-        // The k=1 bit-identity claim is specifically about the
-        // gate-on-every-step path being equivalent to the pre-stride
-        // implementation.
-        if constexpr(Policy::mode_ == sqp_mode::accurate)
+        // Applies to every row whose default_multiplier_reest_every_k is
+        // 1 — the four single-mode line-search policies and the tr_sqp
+        // accurate row. tr_sqp_fast (where the default is 5) is excluded.
+        constexpr bool k1_by_default = []{
+            if constexpr(requires { Policy::mode_; })
+                return Policy::mode_ == sqp_mode::accurate;
+            else
+                return true;  // single-mode line-search: k=1 by default.
+        }();
+        if constexpr(k1_by_default)
         {
             using Problem = hs028<>;
             using PolicyN = typename Policy::template rebind<
@@ -565,9 +599,7 @@ TEMPLATE_TEST_CASE_SIG(
         // sibling line-search SQP policies that DO consume the
         // stride may differ.
         if constexpr(std::is_same_v<Policy,
-                         kraft_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
-                  || std::is_same_v<Policy,
-                         kraft_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+                         kraft_slsqp_policy<dynamic_dimension>>)
         {
             using Problem = hs071<>;
             using PolicyN = typename Policy::template rebind<
@@ -743,17 +775,11 @@ TEMPLATE_TEST_CASE_SIG(
         // flow (single-pass step() with no in-loop null-step branch on
         // the same code path) and are excluded.
         if constexpr(std::is_same_v<Policy,
-                         nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>
+                         nw_sqp_policy<dynamic_dimension>>
                   || std::is_same_v<Policy,
-                         nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                         filter_slsqp_policy<dynamic_dimension>>
                   || std::is_same_v<Policy,
-                         filter_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
-                  || std::is_same_v<Policy,
-                         filter_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>
-                  || std::is_same_v<Policy,
-                         filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>
-                  || std::is_same_v<Policy,
-                         filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+                         filter_nw_sqp_policy<dynamic_dimension>>)
         {
             sqrt_nan_emitter<> problem;
             auto x0 = problem.initial_point();
@@ -795,13 +821,9 @@ TEMPLATE_TEST_CASE_SIG(
         // The +1 provides conservative slack for restoration steps that
         // return before incrementing outer_steps.
         if constexpr(std::is_same_v<Policy,
-                         filter_slsqp_policy<dynamic_dimension, sqp_mode::fast>>
+                         filter_slsqp_policy<dynamic_dimension>>
                   || std::is_same_v<Policy,
-                         filter_slsqp_policy<dynamic_dimension, sqp_mode::accurate>>
-                  || std::is_same_v<Policy,
-                         filter_nw_sqp_policy<dynamic_dimension, sqp_mode::fast>>
-                  || std::is_same_v<Policy,
-                         filter_nw_sqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+                         filter_nw_sqp_policy<dynamic_dimension>>)
         {
             using Problem = hs026<>;
             using PolicyN = typename Policy::template rebind<

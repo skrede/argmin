@@ -75,101 +75,82 @@
 namespace argmin
 {
 
-// argmin variant: closed-set Mode NTTP threaded through the kraft_slsqp
-//                 policy class template. `rebind<M>` preserves Mode on
-//                 N rebind. Per-mode tolerance + SOC threshold defaults
-//                 are exposed as static-constexpr members; the SOC-gate
-//                 site uses the per-mode default at the threshold check
-//                 (constexpr-folded). `accurate` is the default to preserve
-//                 baseline behavior for any consumer that has not opted in.
+// argmin variant: single-mode line-search SLSQP policy. The earlier per-mode
+//                 dispatch (fast / accurate as a closed-set NTTP) is removed
+//                 here: the publish_bench HS suite at small constrained
+//                 problem sizes (n=2..4) showed `fast` lost wall-time AND
+//                 iteration count against `accurate` on every measured
+//                 cell across the entire line-search SQP family, with the
+//                 inversion holding within bench noise even on n=120 NMPC
+//                 cells. The strictly-worse mode has been removed; the
+//                 surviving defaults below are the former `accurate`
+//                 values.
 //
-// Reference: KNITRO mode-system precedent (commercial NLP fast/accurate
-//            modes); Kraft 1988 §2.2.4 (SOC threshold semantics);
+// Reference: Kraft 1988 §2.2.4 (SOC threshold semantics);
 //            N&W 2e Definition 12.1 (Lagrangian-gradient KKT).
-template <int N = dynamic_dimension, sqp_mode Mode = sqp_mode::accurate>
+template <int N = dynamic_dimension>
 struct kraft_slsqp_policy
 {
     using scalar_type = double;
-    static constexpr sqp_mode mode_ = Mode;
 
     template <int M>
-    using rebind = kraft_slsqp_policy<M, Mode>;
+    using rebind = kraft_slsqp_policy<M>;
 
-    static constexpr double default_soc_violation_threshold =
-        (Mode == sqp_mode::fast) ? 1e-2 : 1e-3;
-    static constexpr double default_gradient_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-8;
-    static constexpr double default_step_tolerance_rel =
-        (Mode == sqp_mode::fast) ? 1e-6 : 1e-12;
-    static constexpr double default_feasibility_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
-    // Kraft 1988 §2.2.6 (initial penalty default; mode-invariant 1.0).
+    static constexpr double default_soc_violation_threshold = 1e-3;
+    static constexpr double default_gradient_tolerance = 1e-8;
+    static constexpr double default_step_tolerance_rel = 1e-12;
+    static constexpr double default_feasibility_tolerance = 1e-6;
+    // Kraft 1988 §2.2.6 (initial penalty default).
     static constexpr double default_initial_penalty = 1.0;
 
-    // Per-mode Armijo backtracking budget. NLopt slsqp.c's slsqpb_ outer
-    // loop (slsqp.c:1803-2189) interleaves an inner line search whose
-    // budget tracks the outer iter limit by convention; the standalone
-    // Armijo budget here is 10 for fast (wall-time minimization with
-    // early null-step fallback) and 40 for accurate (NLopt-parity
-    // sustained backtracking before declaring exhaustion).
+    // Armijo backtracking budget. NLopt slsqp.c's slsqpb_ outer loop
+    // (slsqp.c:1803-2189) interleaves an inner line search whose budget
+    // tracks the outer iter limit by convention; the standalone Armijo
+    // budget here is 40 (NLopt-parity sustained backtracking before
+    // declaring exhaustion).
     //
     // Reference: NLopt slsqp.c:1803-2189 (slsqpb_ outer line-search budget).
-    static constexpr std::uint16_t default_line_search_max_iterations =
-        (Mode == sqp_mode::fast) ? std::uint16_t{10} : std::uint16_t{40};
+    static constexpr std::uint16_t default_line_search_max_iterations = 40;
 
     // Armijo sufficient-decrease parameter. The 1e-4 default is the
-    // Wolfe-condition convention used by NLopt slsqp.c and is held
-    // constant across both modes (no literature precedent for a
-    // per-mode value of c1).
+    // Wolfe-condition convention used by NLopt slsqp.c.
     //
     // Reference: N&W 2e §3.1 (Wolfe-condition convention);
     //            NLopt slsqp.c default c1 = 1e-4.
     static constexpr double default_armijo_c1 = 1e-4;
 
-    // Armijo backtracking shrink factor. NLopt slsqp.c uses 0.5 as the
-    // default. Fast mode uses 0.3 (faster geometric back-off so each
-    // Armijo iteration probes a more aggressively shorter step inside
-    // the smaller fast-mode budget); accurate mode keeps NLopt's 0.5.
+    // Armijo backtracking shrink factor (NLopt slsqp.c default).
     //
     // Reference: NLopt slsqp.c default rho = 0.5;
     //            N&W 2e §3.5 (backtracking shrink factor range 0.1..0.9).
-    static constexpr double default_armijo_rho =
-        (Mode == sqp_mode::fast) ? 0.3 : 0.5;
+    static constexpr double default_armijo_rho = 0.5;
 
-    // BFGS Hessian-reset retry cap on line-search exhaustion. Fast mode
-    // disables the retry (0 — fall straight through to null-step or
-    // QP recovery, prioritizing wall-time); accurate mode matches NLopt
-    // slsqp.c's ireset semantics with up to 5 retries.
+    // BFGS Hessian-reset retry cap on line-search exhaustion. Matches
+    // NLopt slsqp.c's ireset semantics with up to 5 retries.
     //
     // Reference: NLopt slsqp.c:1890-1895 (ireset retry pattern).
-    static constexpr std::size_t default_bfgs_reset_max =
-        (Mode == sqp_mode::fast) ? std::size_t{0} : std::size_t{5};
+    static constexpr std::size_t default_bfgs_reset_max = 5;
 
-    // QP inner solver iteration cap. Fast mode caps at 50 for a quicker
-    // bail-out on degenerate / cycling working sets; accurate mode matches
-    // NLopt slsqp.c's LSI/LSEI cascade convention of 200.
+    // QP inner solver iteration cap (NLopt slsqp.c LSI/LSEI cascade
+    // convention).
     //
     // NOTE: Kraft lineage uses kraft_lsq_qp_recovery_solver which
     // currently does not thread these values into its solve API; brace
     // initialization lives for API uniformity with N&W lineage and to
-    // make per-mode propagation observable to callers.
+    // make the value observable to callers.
     //
     // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
-    static constexpr std::uint16_t default_qp_max_iterations =
-        (Mode == sqp_mode::fast) ? std::uint16_t{50} : std::uint16_t{200};
+    static constexpr std::uint16_t default_qp_max_iterations = 200;
 
-    // QP convergence tolerance (acc^2 in Kraft's QP cast). Fast mode
-    // relaxes to 1e-8 (sub-iter savings on a problem whose outer-loop
-    // KKT residual will dominate); accurate mode matches NLopt's
-    // double-precision baseline at 1e-12.
+    // QP convergence tolerance (acc^2 in Kraft's QP cast); matches
+    // NLopt's double-precision baseline.
     //
     // NOTE: Same dead-wire as default_qp_max_iterations above; field
     // is observable but currently has no behavioral effect on the kraft
     // QP solve path.
     //
     // Reference: Kraft 1988 §3.5 (QP convergence acc^2 threshold).
-    static constexpr double default_qp_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-8 : 1e-12;
+    static constexpr double default_qp_tolerance = 1e-12;
 
     // Active-set Lagrange-multiplier re-estimation stride. Sibling
     // line-search SQP policies (nw_sqp, filter_slsqp, filter_nw_sqp)
@@ -187,15 +168,7 @@ struct kraft_slsqp_policy
     // Reference: Bertsekas 1996 §4.2 (stale-multiplier reuse rationale);
     //            N&W 2e §18.3 + Algorithm 18.3 (working-set
     //            identification, eq. 18.15).
-    //
-    // Defaults picked empirically from an internal sweep on
-    // HS026 / HS028 / HS043 / HS071 across k ∈ {1, 2, 3, 5, 8, 10}.
-    // Accurate-mode locked at 1 (KKT-leg precision); fast-mode picked
-    // as the largest k that satisfies a zero-status-regression + iter
-    // inflation ≤ 10% gate on the three N&W-lineage sibling policies
-    // (kraft is excluded from the gate — see no-op note above).
-    static constexpr std::size_t default_multiplier_reest_every_k =
-        (Mode == sqp_mode::fast) ? std::size_t{5} : std::size_t{1};
+    static constexpr std::size_t default_multiplier_reest_every_k = 1;
 
     struct options_type
     {
@@ -1096,11 +1069,11 @@ private:
     }
 };
 
+// Single-mode shape: kraft_slsqp_policy_accurate is retained as a
+// source-call-site readable alias for the bare template, matching
+// tr_sqp_policy_accurate on the surviving dual-mode trust-region policy.
 template <int N = dynamic_dimension>
-using kraft_slsqp_policy_fast = kraft_slsqp_policy<N, sqp_mode::fast>;
-
-template <int N = dynamic_dimension>
-using kraft_slsqp_policy_accurate = kraft_slsqp_policy<N, sqp_mode::accurate>;
+using kraft_slsqp_policy_accurate = kraft_slsqp_policy<N>;
 
 }
 

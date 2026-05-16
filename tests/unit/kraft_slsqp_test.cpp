@@ -8,10 +8,8 @@
 #include <Eigen/Core>
 
 #include <catch2/catch_approx.hpp>
-#include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -573,38 +571,26 @@ TEST_CASE("kraft_slsqp HS028 Lagrangian gradient < 1e-4 at optimum",
     CHECK(result.gradient_norm < 1e-4);
 }
 
-// Parametric mode-dispatch coverage: HS071 / HS026 / HS028 across the
-// kraft_slsqp_policy_accurate and kraft_slsqp_policy_fast aliases. Each
-// row applies per-mode tolerance defaults via the policy's
-// static-constexpr members at fixture construction. The accurate branch
-// reproduces the existing TEST_CASE bar bit-identically; the fast
-// branch enforces a per-mode looser bar sized to the fast tolerance
-// budget. A separate per-problem wall-time TEST_CASE asserts
-// fast-mode wall time does not exceed accurate-mode wall time by more
-// than 25 % (headroom for single-shot timing jitter and the BFGS-skip
-// per-iter savings being reabsorbed by extra line-search effort on
-// low-dimensional problems).
+// Per-problem regression-guard coverage: HS071 / HS026 / HS028 on the
+// single-mode kraft_slsqp_policy (the per-mode dispatch was removed
+// after empirical evidence showed the former _fast mode lost wall-time
+// and iteration count against the _accurate mode on every measured
+// cell). Each TEST_CASE applies the policy's static-constexpr tolerance
+// defaults at fixture construction and reproduces the bit-identical
+// regression bars that the prior _accurate parametric row carried.
 //
-// Reference: KNITRO commercial fast/accurate-mode precedent;
-//            Kraft 1988 §2.2.4 (SOC threshold semantics);
+// Reference: Kraft 1988 §2.2.4 (SOC threshold semantics);
 //            N&W 2e Definition 12.1 (KKT primal feasibility).
 
-TEMPLATE_TEST_CASE_SIG(
-    "kraft_slsqp HS071 mixed constraints (regression guard, parametric on mode)",
-    "[kraft_slsqp][regression][mode]",
-    ((typename Policy), Policy),
-    kraft_slsqp_policy_accurate<hs071<>::problem_dimension>,
-    kraft_slsqp_policy_fast<hs071<>::problem_dimension>)
+TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
+          "[kraft_slsqp][regression][mode]")
 {
-    using policy_t = Policy;
+    using policy_t = kraft_slsqp_policy_accurate<hs071<>::problem_dimension>;
 
     hs071<> problem;
     auto x0 = problem.initial_point();
     solver_options opts;
     opts.max_iterations = 200;
-    // Per-mode tolerance defaults via static-constexpr members on the
-    // policy. accurate values match the existing TEST_CASE acceptance
-    // margins for HS071.
     opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
@@ -612,32 +598,19 @@ TEMPLATE_TEST_CASE_SIG(
     basic_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    if constexpr(policy_t::mode_ == sqp_mode::fast)
-    {
-        CHECK(result.objective_value == Approx(17.0140173).margin(0.5));
-        CHECK(solver.constraint_violation() < 0.1);
-    }
-    else
-    {
-        // Bit-identical to existing kraft_slsqp HS071 TEST_CASE bar.
-        CHECK(result.objective_value == Approx(17.0140173).margin(0.1));
-        CHECK(solver.constraint_violation() < 0.05);
-    }
-    // Box bounds 1 <= xi <= 5 are problem-defined; both modes must respect.
+    CHECK(result.objective_value == Approx(17.0140173).margin(0.1));
+    CHECK(solver.constraint_violation() < 0.05);
+    // Box bounds 1 <= xi <= 5 are problem-defined.
     CHECK(result.x[0] >= 1.0 - 1e-6);
     CHECK(result.x[0] <= 5.0 + 1e-6);
     CHECK(result.x[1] >= 1.0 - 1e-6);
     CHECK(result.x[1] <= 5.0 + 1e-6);
 }
 
-TEMPLATE_TEST_CASE_SIG(
-    "kraft_slsqp HS026 (regression guard, parametric on mode)",
-    "[kraft_slsqp][regression][mode]",
-    ((typename Policy), Policy),
-    kraft_slsqp_policy_accurate<hs026<>::problem_dimension>,
-    kraft_slsqp_policy_fast<hs026<>::problem_dimension>)
+TEST_CASE("kraft_slsqp HS026 (regression guard)",
+          "[kraft_slsqp][regression][mode]")
 {
-    using policy_t = Policy;
+    using policy_t = kraft_slsqp_policy_accurate<hs026<>::problem_dimension>;
 
     hs026 problem;
     auto x0 = problem.initial_point();
@@ -652,27 +625,15 @@ TEMPLATE_TEST_CASE_SIG(
 
     // HS026 optimum: f* = 0 at (1, 1, 1). The kraft_slsqp tail descends
     // slowly toward the optimum; iter cap is the load-bearing guard.
-    if constexpr(policy_t::mode_ == sqp_mode::fast)
-    {
-        CHECK(result.objective_value < 1e-3);
-        CHECK(solver.constraint_violation() < 1e-2);
-    }
-    else
-    {
-        CHECK(result.objective_value < 1e-6);
-        CHECK(solver.constraint_violation() < 1e-3);
-    }
+    CHECK(result.objective_value < 1e-6);
+    CHECK(solver.constraint_violation() < 1e-3);
     CHECK(result.iterations <= 50);
 }
 
-TEMPLATE_TEST_CASE_SIG(
-    "kraft_slsqp HS028 (regression guard, parametric on mode)",
-    "[kraft_slsqp][regression][mode]",
-    ((typename Policy), Policy),
-    kraft_slsqp_policy_accurate<hs028<>::problem_dimension>,
-    kraft_slsqp_policy_fast<hs028<>::problem_dimension>)
+TEST_CASE("kraft_slsqp HS028 (regression guard)",
+          "[kraft_slsqp][regression][mode]")
 {
-    using policy_t = Policy;
+    using policy_t = kraft_slsqp_policy_accurate<hs028<>::problem_dimension>;
 
     hs028<> problem;
     auto x0 = problem.initial_point();
@@ -686,96 +647,7 @@ TEMPLATE_TEST_CASE_SIG(
     auto result = solver.solve(opts);
 
     // HS028 optimum: f* = 0 at (0.5, -0.5, 0.5).
-    if constexpr(policy_t::mode_ == sqp_mode::fast)
-    {
-        CHECK(result.objective_value == Approx(0.0).margin(1e-3));
-        CHECK(solver.constraint_violation() < 1e-2);
-    }
-    else
-    {
-        CHECK(result.objective_value == Approx(0.0).margin(1e-6));
-        CHECK(solver.constraint_violation() < 1e-4);
-        CHECK(result.gradient_norm < 1e-4);
-    }
-}
-
-namespace
-{
-
-// Per-problem wall-time helper. Solves once with the supplied policy at
-// its per-mode constexpr tolerances and returns the wall delta in
-// seconds.
-template <typename Policy, typename Problem>
-double solve_wall_seconds(const Problem& problem, const Eigen::VectorXd& x0,
-                          std::uint32_t max_iters)
-{
-    solver_options opts;
-    opts.max_iterations = max_iters;
-    opts.set_gradient_threshold(Policy::default_gradient_tolerance);
-    opts.set_step_threshold(Policy::default_step_tolerance_rel);
-    opts.constraint_tolerance = Policy::default_feasibility_tolerance;
-    basic_solver solver{Policy{}, problem, x0, opts};
-    const auto t0 = std::chrono::steady_clock::now();
-    [[maybe_unused]] auto result = solver.solve(opts);
-    const auto t1 = std::chrono::steady_clock::now();
-    return std::chrono::duration<double>(t1 - t0).count();
-}
-
-}
-
-// Fast-mode wall must not be pathologically slower than accurate-mode
-// wall on any parametric problem. Single-shot timing on sub-100 ms solves
-// carries appreciable jitter, and on small (low-dimensional) problems
-// fast-mode's looser direction quality can drive extra line-search work
-// that occasionally erases the per-iter savings. A 25 % headroom over
-// the accurate-mode wall absorbs both sources without permitting an
-// unbounded fast-mode slowdown.
-//
-// Empirical: on a 2-dim problem (HS026) the observed ratio runs
-// ~1.40-1.45 under ctest -j4 load — the BFGS-skip per-iter saving is
-// reabsorbed by extra line-search effort because skipping the Hessian
-// update keeps the QP direction quality flat. A 60 % budget reflects
-// that real design cost; the net win shifts to larger problems where
-// the per-iter savings outpace the direction-quality penalty.
-
-TEST_CASE("kraft_slsqp _fast wall <= _accurate wall (HS071)",
-          "[kraft_slsqp][mode][wall]")
-{
-    hs071<> problem;
-    const Eigen::VectorXd x0 = problem.initial_point();
-    using accurate_t = kraft_slsqp_policy_accurate<hs071<>::problem_dimension>;
-    using fast_t = kraft_slsqp_policy_fast<hs071<>::problem_dimension>;
-    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 200);
-    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 200);
-    INFO("HS071: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
-    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
-    CHECK(t_fast <= t_acc * 1.60);
-}
-
-TEST_CASE("kraft_slsqp _fast wall <= _accurate wall (HS026)",
-          "[kraft_slsqp][mode][wall]")
-{
-    hs026<> problem;
-    const Eigen::VectorXd x0 = problem.initial_point();
-    using accurate_t = kraft_slsqp_policy_accurate<hs026<>::problem_dimension>;
-    using fast_t = kraft_slsqp_policy_fast<hs026<>::problem_dimension>;
-    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 50);
-    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 50);
-    INFO("HS026: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
-    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
-    CHECK(t_fast <= t_acc * 1.60);
-}
-
-TEST_CASE("kraft_slsqp _fast wall <= _accurate wall (HS028)",
-          "[kraft_slsqp][mode][wall]")
-{
-    hs028<> problem;
-    const Eigen::VectorXd x0 = problem.initial_point();
-    using accurate_t = kraft_slsqp_policy_accurate<hs028<>::problem_dimension>;
-    using fast_t = kraft_slsqp_policy_fast<hs028<>::problem_dimension>;
-    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 200);
-    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 200);
-    INFO("HS028: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
-    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
-    CHECK(t_fast <= t_acc * 1.60);
+    CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
 }

@@ -13,10 +13,8 @@
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <catch2/catch_approx.hpp>
-#include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -491,33 +489,27 @@ TEST_CASE("filter_nw_sqp converges on dynamic-dimension HS problems",
     }
 }
 
-// Parametric mode-dispatch coverage: HS043 / HS071 / HS026 / HS028 across
-// the filter_nw_sqp_policy_accurate and filter_nw_sqp_policy_fast aliases.
-// Each row applies per-mode tolerance defaults via the policy's
-// static-constexpr members at fixture construction. The accurate branch
-// reproduces the existing TEST_CASE bar bit-identically (where one
-// exists); the fast branch enforces a per-mode looser bar sized to the
-// fast tolerance budget. A separate per-problem wall-time TEST_CASE
-// asserts fast-mode wall does not exceed accurate-mode wall (with a 10%
-// headroom for single-shot timing noise).
+// Per-problem regression-guard coverage: HS071 / HS043 / HS026 / HS028
+// on the single-mode filter_nw_sqp_policy (the per-mode dispatch was
+// removed after empirical evidence showed the former _fast mode lost
+// wall-time and iteration count against the _accurate mode on every
+// measured cell). Each TEST_CASE applies the policy's static-constexpr
+// tolerance defaults at fixture construction.
 //
 // HS043 is the filter-lineage regression for over-rejection on
 // strictly-feasible descent (covered in the v0.3.0 SQP correctness
-// sweep) and is mandatory in this parametric set.
+// sweep) and is mandatory in this set. HS071 carries a weak `< 20.0`
+// bar mirroring the L1 merit's iter-0 infeasibility on the
+// x1*x2*x3*x4 >= 25 inequality (the iterate parks below f* = 17.014).
 //
-// Reference: KNITRO commercial fast/accurate-mode precedent;
-//            Wachter & Biegler 2006 Section 2.3 (filter envelope);
+// Reference: Wachter & Biegler 2006 Section 2.3 (filter envelope);
 //            Fletcher & Leyffer 2002 Section 5;
 //            Hock & Schittkowski 1981 Problems 26 / 28 / 43 / 71.
 
-TEMPLATE_TEST_CASE_SIG(
-    "filter_nw_sqp HS071 mixed constraints (parametric on mode)",
-    "[filter_nw_sqp][regression][mode]",
-    ((typename Policy), Policy),
-    filter_nw_sqp_policy_accurate<hs071<>::problem_dimension>,
-    filter_nw_sqp_policy_fast<hs071<>::problem_dimension>)
+TEST_CASE("filter_nw_sqp HS071 mixed constraints (regression guard)",
+          "[filter_nw_sqp][regression][mode]")
 {
-    using policy_t = Policy;
+    using policy_t = filter_nw_sqp_policy_accurate<hs071<>::problem_dimension>;
 
     hs071<> problem;
     auto x0 = problem.initial_point();
@@ -530,45 +522,23 @@ TEMPLATE_TEST_CASE_SIG(
     basic_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    // Bit-identical to the existing filter_nw_sqp HS071 weak bar (`< 20.0`
-    // at SECTION above): the L1 merit's iter-0 infeasibility on the
-    // x1*x2*x3*x4 >= 25 inequality parks the iterate below f* = 17.014;
-    // both modes inherit this. Per-mode dispatch is not the fix
-    // mechanism here. The if constexpr branches are intentionally
-    // identical so the fast bar is at least as loose as the accurate
-    // bar (D-12 fast >= accurate slack); the dispatch is preserved for
-    // shape consistency with the other parametric rows.
     CHECK(std::isfinite(result.objective_value));
-    if constexpr(policy_t::mode_ == sqp_mode::fast)
-    {
-        CHECK(result.objective_value < 20.0);
-    }
-    else
-    {
-        // Bit-identical to existing filter_nw_sqp HS071 TEST_CASE bar.
-        CHECK(result.objective_value < 20.0);
-    }
+    CHECK(result.objective_value < 20.0);
 }
 
-TEMPLATE_TEST_CASE_SIG(
-    "filter_nw_sqp HS043 inequality constraints (parametric on mode)",
-    "[filter_nw_sqp][regression][mode]",
-    ((typename Policy), Policy),
-    filter_nw_sqp_policy_accurate<hs043<>::problem_dimension>,
-    filter_nw_sqp_policy_fast<hs043<>::problem_dimension>)
+TEST_CASE("filter_nw_sqp HS043 inequality constraints (regression guard)",
+          "[filter_nw_sqp][regression][mode]")
 {
-    using policy_t = Policy;
+    using policy_t = filter_nw_sqp_policy_accurate<hs043<>::problem_dimension>;
 
     // HS043 is the filter-lineage regression for over-rejection on
     // strictly-feasible descent. The asymmetric envelope sweep
     // (gamma_f, gamma_h in {1e-3, 1e-4, 1e-5, 1e-6} squared) on
     // filter_nw_sqp produced no combo that dominates the v0.2.1 default
-    // 1e-5 / 1e-5 while preserving the HS024 / HS076 baselines on this
-    // policy; the accurate parametric row reproduces the canonical
-    // -44 / margin(4.0) bar from the existing filter_nw_sqp HS043
-    // SECTION verbatim (best-feasible iterate is f approximately -40.4
-    // under best-seen termination -- see the doc comment at the
-    // existing HS043 SECTION above).
+    // 1e-5 / 1e-5 while preserving the HS024 / HS076 baselines; this
+    // TEST_CASE reproduces the canonical -44 / margin(4.0) bar
+    // (best-feasible iterate is f approximately -40.4 under best-seen
+    // termination).
     hs043<> problem;
     auto x0 = problem.initial_point();
     solver_options opts;
@@ -580,28 +550,14 @@ TEMPLATE_TEST_CASE_SIG(
     basic_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    if constexpr(policy_t::mode_ == sqp_mode::fast)
-    {
-        // Loosened to absorb fast-tolerance iterate drift on this
-        // best-seen-termination geometry.
-        CHECK(result.objective_value == Approx(-44.0).margin(8.0));
-    }
-    else
-    {
-        // Bit-identical to existing filter_nw_sqp HS043 SECTION bar.
-        CHECK(result.objective_value == Approx(-44.0).margin(4.0));
-        CHECK(result.constraint_violation <= opts.feasibility_tolerance);
-    }
+    CHECK(result.objective_value == Approx(-44.0).margin(4.0));
+    CHECK(result.constraint_violation <= opts.feasibility_tolerance);
 }
 
-TEMPLATE_TEST_CASE_SIG(
-    "filter_nw_sqp HS026 (parametric on mode)",
-    "[filter_nw_sqp][regression][mode]",
-    ((typename Policy), Policy),
-    filter_nw_sqp_policy_accurate<hs026<>::problem_dimension>,
-    filter_nw_sqp_policy_fast<hs026<>::problem_dimension>)
+TEST_CASE("filter_nw_sqp HS026 (regression guard)",
+          "[filter_nw_sqp][regression][mode]")
 {
-    using policy_t = Policy;
+    using policy_t = filter_nw_sqp_policy_accurate<hs026<>::problem_dimension>;
 
     hs026 problem;
     auto x0 = problem.initial_point();
@@ -614,27 +570,15 @@ TEMPLATE_TEST_CASE_SIG(
     basic_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    // HS026 optimum: f* = 0 at (1, 1, 1). Bars sized to per-mode
-    // tolerance budget; iter cap is the load-bearing guard.
-    if constexpr(policy_t::mode_ == sqp_mode::fast)
-    {
-        CHECK(result.objective_value < 1e-2);
-    }
-    else
-    {
-        CHECK(result.objective_value < 1e-4);
-    }
+    // HS026 optimum: f* = 0 at (1, 1, 1).
+    CHECK(result.objective_value < 1e-4);
     CHECK(result.iterations <= 200);
 }
 
-TEMPLATE_TEST_CASE_SIG(
-    "filter_nw_sqp HS028 (parametric on mode)",
-    "[filter_nw_sqp][regression][mode]",
-    ((typename Policy), Policy),
-    filter_nw_sqp_policy_accurate<hs028<>::problem_dimension>,
-    filter_nw_sqp_policy_fast<hs028<>::problem_dimension>)
+TEST_CASE("filter_nw_sqp HS028 (regression guard)",
+          "[filter_nw_sqp][regression][mode]")
 {
-    using policy_t = Policy;
+    using policy_t = filter_nw_sqp_policy_accurate<hs028<>::problem_dimension>;
 
     hs028<> problem;
     auto x0 = problem.initial_point();
@@ -647,103 +591,8 @@ TEMPLATE_TEST_CASE_SIG(
     basic_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    // HS028 optimum: f* = 0 at (0.5, -0.5, 0.5). Mirrors the
-    // filter_slsqp HS028 parametric acceptance margins.
-    if constexpr(policy_t::mode_ == sqp_mode::fast)
-    {
-        CHECK(result.objective_value == Approx(0.0).margin(1e-3));
-        CHECK(solver.constraint_violation() < 1e-2);
-    }
-    else
-    {
-        CHECK(result.objective_value == Approx(0.0).margin(1e-6));
-        CHECK(solver.constraint_violation() < 1e-4);
-        CHECK(result.gradient_norm < 1e-4);
-    }
-}
-
-namespace
-{
-
-// Per-problem wall-time helper. Solves once with the supplied policy at
-// its per-mode constexpr tolerances and returns the wall delta in
-// seconds. Mirrors the filter_slsqp / nw_sqp / kraft_slsqp solve_wall_seconds
-// shape.
-template <typename Policy, typename Problem>
-double solve_wall_seconds(const Problem& problem, const Eigen::VectorXd& x0,
-                          std::uint32_t max_iters)
-{
-    solver_options opts;
-    opts.max_iterations = max_iters;
-    opts.set_gradient_threshold(Policy::default_gradient_tolerance);
-    opts.set_step_threshold(Policy::default_step_tolerance_rel);
-    opts.constraint_tolerance = Policy::default_feasibility_tolerance;
-    basic_solver solver{Policy{}, problem, x0, opts};
-    const auto t0 = std::chrono::steady_clock::now();
-    [[maybe_unused]] auto result = solver.solve(opts);
-    const auto t1 = std::chrono::steady_clock::now();
-    return std::chrono::duration<double>(t1 - t0).count();
-}
-
-}  // anonymous namespace
-
-// Per-problem fast-vs-accurate wall consistency: fast-mode wall must not
-// exceed accurate-mode wall by more than 25 % (headroom for single-shot
-// timing jitter and the BFGS-skip per-iter savings being reabsorbed by
-// extra line-search effort on low-dimensional problems).
-
-TEST_CASE("filter_nw_sqp _fast wall <= _accurate wall (HS071)",
-          "[filter_nw_sqp][mode][wall]")
-{
-    hs071<> problem;
-    const Eigen::VectorXd x0 = problem.initial_point();
-    using accurate_t = filter_nw_sqp_policy_accurate<hs071<>::problem_dimension>;
-    using fast_t = filter_nw_sqp_policy_fast<hs071<>::problem_dimension>;
-    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 500);
-    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 500);
-    INFO("HS071: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
-    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
-    CHECK(t_fast <= t_acc * 1.60);
-}
-
-TEST_CASE("filter_nw_sqp _fast wall <= _accurate wall (HS043)",
-          "[filter_nw_sqp][mode][wall]")
-{
-    hs043<> problem;
-    const Eigen::VectorXd x0 = problem.initial_point();
-    using accurate_t = filter_nw_sqp_policy_accurate<hs043<>::problem_dimension>;
-    using fast_t = filter_nw_sqp_policy_fast<hs043<>::problem_dimension>;
-    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 500);
-    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 500);
-    INFO("HS043: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
-    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
-    CHECK(t_fast <= t_acc * 1.60);
-}
-
-TEST_CASE("filter_nw_sqp _fast wall <= _accurate wall (HS026)",
-          "[filter_nw_sqp][mode][wall]")
-{
-    hs026<> problem;
-    const Eigen::VectorXd x0 = problem.initial_point();
-    using accurate_t = filter_nw_sqp_policy_accurate<hs026<>::problem_dimension>;
-    using fast_t = filter_nw_sqp_policy_fast<hs026<>::problem_dimension>;
-    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 200);
-    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 200);
-    INFO("HS026: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
-    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
-    CHECK(t_fast <= t_acc * 1.60);
-}
-
-TEST_CASE("filter_nw_sqp _fast wall <= _accurate wall (HS028)",
-          "[filter_nw_sqp][mode][wall]")
-{
-    hs028<> problem;
-    const Eigen::VectorXd x0 = problem.initial_point();
-    using accurate_t = filter_nw_sqp_policy_accurate<hs028<>::problem_dimension>;
-    using fast_t = filter_nw_sqp_policy_fast<hs028<>::problem_dimension>;
-    const double t_acc = solve_wall_seconds<accurate_t>(problem, x0, 200);
-    const double t_fast = solve_wall_seconds<fast_t>(problem, x0, 200);
-    INFO("HS028: t_acc=" << t_acc << "s t_fast=" << t_fast << "s");
-    // Fast-vs-accurate wall budget 1.60x: absorbs the line-search-iteration overhead on small problems where the fast-mode BFGS-skip path evaluates a slightly different Armijo trajectory than the accurate-mode reference.
-    CHECK(t_fast <= t_acc * 1.60);
+    // HS028 optimum: f* = 0 at (0.5, -0.5, 0.5).
+    CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
 }

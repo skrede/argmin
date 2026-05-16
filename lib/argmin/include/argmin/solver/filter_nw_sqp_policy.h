@@ -58,117 +58,90 @@
 namespace argmin
 {
 
-// argmin variant: closed-set Mode NTTP threaded through the filter_nw_sqp
-//                 policy class template. `rebind<M>` preserves Mode on
-//                 N rebind. Per-mode tolerance + filter envelope defaults
-//                 are exposed as static-constexpr members; the filter
-//                 envelope fields brace-initialize from the per-mode
-//                 default_filter_gamma_* constexpr (direct-field-default
-//                 form, no value_or indirection at the read site).
-//                 `accurate` is the default to preserve baseline behavior
-//                 for any consumer that has not opted in.
+// argmin variant: single-mode filter-acceptance SQP policy (N&W lineage).
+//                 The earlier per-mode dispatch (fast / accurate as a
+//                 closed-set NTTP) is removed here: empirical bench
+//                 measurements showed `fast` lost wall-time AND iteration
+//                 count against `accurate` on every measured cell across
+//                 the entire line-search SQP family. The strictly-worse
+//                 mode has been removed; the surviving defaults below are
+//                 the former `accurate` values.
 //
-// Reference: KNITRO mode-system precedent (commercial NLP fast/accurate
-//            modes); Wachter & Biegler 2006 Section 2.3 (filter envelope
+// Reference: Wachter & Biegler 2006 Section 2.3 (filter envelope
 //            semantics, eq. 6); Fletcher & Leyffer 2002 Section 2.2
 //            (filter dominance ordering).
-template <int N = dynamic_dimension, sqp_mode Mode = sqp_mode::accurate>
+template <int N = dynamic_dimension>
 struct filter_nw_sqp_policy
 {
     using scalar_type = double;
-    static constexpr sqp_mode mode_ = Mode;
 
     template <int M>
-    using rebind = filter_nw_sqp_policy<M, Mode>;
+    using rebind = filter_nw_sqp_policy<M>;
 
-    static constexpr double default_filter_gamma_f =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-5;
-    static constexpr double default_filter_gamma_h =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-5;
-    static constexpr double default_gradient_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-8;
-    static constexpr double default_step_tolerance_rel =
-        (Mode == sqp_mode::fast) ? 1e-6 : 1e-12;
-    static constexpr double default_feasibility_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
-    // Kraft 1988 §2.2.4 + N&W §18.3 (SOC violation threshold; per-mode
-    // fast/accurate). Converges with the kraft_slsqp / nw_sqp lineage values
-    // (prior plain-double 1e-8 on the filter policies was out-of-line with
-    // the sibling SQP policies' per-mode 1e-2 / 1e-3).
-    static constexpr double default_soc_violation_threshold =
-        (Mode == sqp_mode::fast) ? 1e-2 : 1e-3;
+    static constexpr double default_filter_gamma_f = 1e-5;
+    static constexpr double default_filter_gamma_h = 1e-5;
+    static constexpr double default_gradient_tolerance = 1e-8;
+    static constexpr double default_step_tolerance_rel = 1e-12;
+    static constexpr double default_feasibility_tolerance = 1e-6;
+    // Kraft 1988 §2.2.4 + N&W §18.3 (SOC violation threshold). Converges
+    // with the kraft_slsqp / nw_sqp lineage values.
+    static constexpr double default_soc_violation_threshold = 1e-3;
 
-    // Per-mode Armijo backtracking budget. 10 fast / 40 accurate, mirroring
-    // the kraft + nw_sqp lineages.
+    // Armijo backtracking budget (NLopt-parity sustained backtracking
+    // before declaring exhaustion); mirrors the kraft + nw_sqp lineages.
     //
     // Reference: NLopt slsqp.c:1803-2189 (slsqpb_ outer line-search budget).
-    static constexpr std::uint16_t default_line_search_max_iterations =
-        (Mode == sqp_mode::fast) ? std::uint16_t{10} : std::uint16_t{40};
+    static constexpr std::uint16_t default_line_search_max_iterations = 40;
 
     // Armijo sufficient-decrease parameter (Wolfe-condition convention).
-    // Mode-invariant 1e-4.
     //
     // Reference: N&W 2e §3.1 (Wolfe-condition convention);
     //            NLopt slsqp.c default c1 = 1e-4.
     static constexpr double default_armijo_c1 = 1e-4;
 
-    // Armijo backtracking shrink factor. 0.3 fast / 0.5 accurate.
+    // Armijo backtracking shrink factor (NLopt slsqp.c default).
     //
     // Reference: NLopt slsqp.c default rho = 0.5;
     //            N&W 2e §3.5 (backtracking shrink factor range 0.1..0.9).
-    static constexpr double default_armijo_rho =
-        (Mode == sqp_mode::fast) ? 0.3 : 0.5;
+    static constexpr double default_armijo_rho = 0.5;
 
-    // BFGS Hessian-reset retry cap on line-search exhaustion. 0 fast
-    // (immediate fallthrough to restoration / null-step) / 5 accurate
-    // (NLopt-parity ireset semantics).
+    // BFGS Hessian-reset retry cap on line-search exhaustion (NLopt-parity
+    // ireset semantics).
     //
     // Reference: NLopt slsqp.c:1890-1895 (ireset retry pattern).
-    static constexpr std::size_t default_bfgs_reset_max =
-        (Mode == sqp_mode::fast) ? std::size_t{0} : std::size_t{5};
+    static constexpr std::size_t default_bfgs_reset_max = 5;
 
-    // QP inner solver iteration cap. 50 fast / 200 accurate.
+    // QP inner solver iteration cap (NLopt slsqp.c LSI/LSEI cascade
+    // convention).
     //
     // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
-    static constexpr std::uint16_t default_qp_max_iterations =
-        (Mode == sqp_mode::fast) ? std::uint16_t{50} : std::uint16_t{200};
+    static constexpr std::uint16_t default_qp_max_iterations = 200;
 
-    // QP convergence tolerance. 1e-8 fast / 1e-12 accurate.
+    // QP convergence tolerance (NLopt's double-precision baseline).
     //
     // Reference: Kraft 1988 §3.5 (QP convergence acc^2 threshold).
-    static constexpr double default_qp_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-8 : 1e-12;
+    static constexpr double default_qp_tolerance = 1e-12;
 
     // L1-merit penalty parameter ceiling. The inline penalty bump below
     // caps sigma at this value to prevent unbounded penalty growth on
-    // problems with degenerate constraint Jacobians. 1e6 fast (tighter
-    // ceiling matching wall-time-budgeted contexts); 1e10 accurate
-    // (NLopt-parity headroom).
+    // problems with degenerate constraint Jacobians (NLopt-parity
+    // headroom).
     //
     // Reference: N&W 2e §18.3 + Procedure 18.2 (L1-merit penalty cap).
-    static constexpr double default_sigma_max =
-        (Mode == sqp_mode::fast) ? 1e6 : 1e10;
+    static constexpr double default_sigma_max = 1e10;
 
     // Active-set Lagrange-multiplier re-estimation stride. The post-step
     // KKT-leg invokes compute_kkt_multipliers_active_set only when
     // (s.iteration % multiplier_reest_every_k == 0); on the skip path
     // the prior step's s.bufs.kkt_lambda_eq_buf / s.bufs.kkt_mu_ineq_buf
     // are reused (state-resident, zero-alloc). k=1 recomputes every
-    // step (the previous unconditional re-estimation behavior); k>1
-    // trades a stationarity-leg lag
-    // of ~k steps for k-1x savings on the per-step ColPivHouseholderQR.
+    // step; k>1 trades a stationarity-leg lag of ~k steps for k-1x
+    // savings on the per-step ColPivHouseholderQR.
     //
     // Reference: Bertsekas 1996 §4.2 (stale-multiplier reuse rationale);
     //            N&W 2e §18.3 + Algorithm 18.3 (working-set
     //            identification, eq. 18.15).
-    //
-    // Defaults picked empirically from an internal sweep on
-    // HS026 / HS028 / HS043 / HS071 across k ∈ {1, 2, 3, 5, 8, 10}.
-    // Accurate-mode locked at 1 (KKT-leg precision); fast-mode picked
-    // as the largest k that satisfies a zero-status-regression + iter
-    // inflation ≤ 10% gate on the N&W-lineage policies.
-    static constexpr std::size_t default_multiplier_reest_every_k =
-        (Mode == sqp_mode::fast) ? std::size_t{5} : std::size_t{1};
+    static constexpr std::size_t default_multiplier_reest_every_k = 1;
 
     struct options_type
     {
@@ -182,11 +155,9 @@ struct filter_nw_sqp_policy
             .max_iterations = default_line_search_max_iterations,
         };
 
-        // QP subproblem params. Brace-initialized from per-mode defaults so
-        // options.qp.{max_iterations, tolerance} reflect the current Mode.
-        // Prior to this addition the policy constructed a local qp_options
-        // with hardcoded literals; the new member exposes per-mode
-        // propagation to callers.
+        // QP subproblem params. Brace-initialized from the policy's
+        // static-constexpr defaults so options.qp.{max_iterations,
+        // tolerance} reflect the shipped policy contract.
         qp_options qp{
             .max_iterations = default_qp_max_iterations,
             .tolerance = default_qp_tolerance,
@@ -209,8 +180,7 @@ struct filter_nw_sqp_policy
         // BFGS-reset retry cap on line-search/filter exhaustion. After
         // restoration fails to recover an acceptable trial point, the policy
         // resets the BFGS Hessian to identity and re-solves the QP, repeating
-        // up to bfgs_reset_max times before returning a null-step. Per-mode
-        // brace-init from default_bfgs_reset_max (0 fast / 5 accurate).
+        // up to bfgs_reset_max times before returning a null-step.
         //
         // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
         //            fallback);
@@ -1076,29 +1046,26 @@ struct filter_nw_sqp_policy
         // Powell damping per N&W eq. 18.22-18.24 internally, but the
         // explicit guard here keeps the policy-step semantics legible.
         //
-        // Fast-mode dispatch: on non-positive curvature the push() is
-        // skipped (Powell damping bypassed) and bfgs_skip_count is
-        // incremented for surfacing on step_result.diagnostics. Accurate
-        // mode retains the existing semantics.
+        // On strictly-positive curvature push the BFGS curvature pair
+        // (Powell damping applied inside dense_ldl_bfgs::push per N&W eq.
+        // 18.22-18.24); on non-positive curvature drop the pair (the
+        // earlier fast-mode skip-and-count path was removed after
+        // empirical evidence showed it lost wall-time and iteration count
+        // against the Powell-damped path on every measured cell).
+        //
+        // The bfgs_skip_count diagnostic field on step_result is retained
+        // for cross-policy schema parity but is now never incremented
+        // here; the local counter feeds the existing post-step
+        // diagnostics propagation untouched.
         //
         // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
         //            N&W Procedure 18.2 damping guard;
-        //            N&W eq. 18.22-18.24 (Powell damping, accurate path).
+        //            N&W eq. 18.22-18.24 (Powell damping).
         const double sTy = sk.dot(yk);
         if(sk.norm() > 1e-15)
         {
-            if constexpr (Mode == sqp_mode::fast)
-            {
-                if(sTy > 0.0)
-                    s.hessian.push(sk, yk);
-                else
-                    ++bfgs_skip_count;
-            }
-            else
-            {
-                if(sTy > 0.0)
-                    s.hessian.push(sk, yk);
-            }
+            if(sTy > 0.0)
+                s.hessian.push(sk, yk);
         }
 
         // --- 6. Update multipliers and iteration ---
@@ -1385,11 +1352,11 @@ private:
     }
 };
 
+// Single-mode shape: filter_nw_sqp_policy_accurate is retained as a
+// source-call-site readable alias for the bare template, matching
+// tr_sqp_policy_accurate on the surviving dual-mode trust-region policy.
 template <int N = dynamic_dimension>
-using filter_nw_sqp_policy_fast = filter_nw_sqp_policy<N, sqp_mode::fast>;
-
-template <int N = dynamic_dimension>
-using filter_nw_sqp_policy_accurate = filter_nw_sqp_policy<N, sqp_mode::accurate>;
+using filter_nw_sqp_policy_accurate = filter_nw_sqp_policy<N>;
 
 }
 

@@ -408,11 +408,11 @@ void run_all_argmin_solvers(
         run("projected_gradient_gn", projected_gradient_gn_policy{});
     }
 
-    // SLSQP: any constrained problem. Two dispatches per SQP family for
-    // fast and accurate mode coverage on every constrained cell.
+    // SLSQP: any constrained problem. The line-search SQP family is
+    // single-mode after the empirical _fast collapse; one dispatch per
+    // policy.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
     {
-        run_constrained("kraft_slsqp_fast",     kraft_slsqp_policy_fast<>{});
         run_constrained("kraft_slsqp_accurate", kraft_slsqp_policy_accurate<>{});
     }
 
@@ -476,34 +476,31 @@ void run_all_argmin_solvers(
         }
     }
 
-    // N&W SQP: equality or mixed constrained. Two dispatches per SQP family
-    // for fast and accurate mode coverage; both modes share the runtime
-    // equality-presence guard.
+    // N&W SQP: equality or mixed constrained. Single-mode after the
+    // _fast collapse on the line-search SQP family; the runtime
+    // equality-presence guard remains.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
     {
         if constexpr(requires { prob.num_equality(); })
         {
             if(prob.num_equality() > 0)
             {
-                run_constrained("nw_sqp_fast",     nw_sqp_policy_fast<>{});
                 run_constrained("nw_sqp_accurate", nw_sqp_policy_accurate<>{});
             }
         }
     }
 
     // Filter SLSQP: any constrained problem (filter-based L-BFGS SQP).
-    // Two dispatches per SQP family for fast and accurate mode coverage.
+    // Single-mode after the _fast collapse on the line-search SQP family.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
     {
-        run_constrained("filter_slsqp_fast",     filter_slsqp_policy_fast<>{});
         run_constrained("filter_slsqp_accurate", filter_slsqp_policy_accurate<>{});
     }
 
     // Filter NW SQP: any constrained problem (filter-based dense BFGS SQP).
-    // Two dispatches per SQP family for fast and accurate mode coverage.
+    // Single-mode after the _fast collapse on the line-search SQP family.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
     {
-        run_constrained("filter_nw_sqp_fast",     filter_nw_sqp_policy_fast<>{});
         run_constrained("filter_nw_sqp_accurate", filter_nw_sqp_policy_accurate<>{});
     }
 

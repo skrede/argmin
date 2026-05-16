@@ -55,7 +55,9 @@ a static class tuple would silently drop combined-class profiles.
 For the published per-step Dolan-More profile the cohort is filtered to
 the HS suite (the ``application``-flagged shapes -- n in [30, 120] -- are
 dropped) and to the named per-step solver subset
-``{kraft_slsqp_fast, kraft_slsqp_accurate, tr_sqp_accurate, nlopt_slsqp}``;
+``{kraft_slsqp_accurate, tr_sqp_accurate, tr_sqp_fast, nlopt_slsqp}``
+(reduced from five entries after the line-search SQP family was
+empirically collapsed to single-mode; tr_sqp retains both modes);
 see ``.planning/research/FEATURES.md`` section 6 for the honest-position
 statement on per-step performance comparisons.
 
@@ -109,12 +111,13 @@ HS_SUITE_EXCLUDE_TOKEN = "application"
 # inflates the comparison. The PROHIBITED_IN_PER_STEP set is enforced as a
 # hard assertion at script entry; the assertion is non-bypassable.
 PER_STEP_VALID_SOLVERS = frozenset({
-    # argmin internal solvers (paired publish_bench measurements; the
-    # `_fast` / `_accurate` aliases come from the per-policy mode axis).
-    "kraft_slsqp_fast", "kraft_slsqp_accurate",
-    "nw_sqp_fast", "nw_sqp_accurate",
-    "filter_slsqp_fast", "filter_slsqp_accurate",
-    "filter_nw_sqp_fast", "filter_nw_sqp_accurate",
+    # argmin internal solvers (paired publish_bench measurements). The
+    # line-search SQP family is single-mode after the empirical _fast
+    # collapse; tr_sqp retains both modes.
+    "kraft_slsqp_accurate",
+    "nw_sqp_accurate",
+    "filter_slsqp_accurate",
+    "filter_nw_sqp_accurate",
     "tr_sqp_fast", "tr_sqp_accurate",
     # NLopt (the only external library with paired per-step
     # per-HS-problem numbers at argmin's problem sizes).
@@ -127,11 +130,13 @@ PROHIBITED_IN_PER_STEP = frozenset({
 })
 
 # The named profile cohort for the argmin per-step Dolan-More figures
-# (kraft fast/accurate, trust-region SQP accurate, NLopt SLSQP).
+# (kraft_slsqp as the sole line-search representative after the _fast
+# collapse, tr_sqp accurate + fast at parity, NLopt SLSQP as the
+# external reference).
 PROFILE_SOLVERS = frozenset({
-    "kraft_slsqp_fast",
     "kraft_slsqp_accurate",
     "tr_sqp_accurate",
+    "tr_sqp_fast",
     "nlopt_slsqp",
 })
 
