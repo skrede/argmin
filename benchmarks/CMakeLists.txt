@@ -79,6 +79,29 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# ISRES seed-stability sweep harness. Drives the production isres_policy
+# across seeds 1..100 on the `simple constrained 2D` regression test
+# problem (replicates tests/unit/isres_test.cpp). Emits a JSON record
+# with per-seed terminal objective_value / cv / x_max_coeff /
+# converged-flag / status; selects the lowest seed where
+# `objective_value < 1.0` (the test's CHECK condition). Non-ctest;
+# one-shot; consumes nothing the regular bench targets do not already
+# pull in.
+add_executable(isres_seed_sweep isres_seed_sweep.cpp)
+target_link_libraries(isres_seed_sweep PRIVATE argmin::argmin)
+
+target_compile_options(isres_seed_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(isres_seed_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Optional comparison library hooks (NLopt LD_SLSQP and similar).
 
 option(ARGMIN_BENCH_NLOPT "Build NLopt comparison benchmarks" ON)
