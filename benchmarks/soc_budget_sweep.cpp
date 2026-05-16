@@ -38,9 +38,8 @@
 //
 // Output: a single JSON document with a per-cell `by_config` block plus
 // a `selection` block recording the joint disposition (a / b / c).
-// Default output path is
-// .planning/phases/44-sqp-family-polish-test-stabilization/
-// 44-03-soc-budget-sweep.json; override with `--output PATH`.
+// Default output path is `soc_budget_sweep.json` in the current
+// working directory; override with `--output PATH`.
 // Stdout prints a per-row table and the joint disposition.
 //
 // Non-ctest, one-shot. The harness is read-only on argmin; consumers
@@ -377,9 +376,7 @@ const cell_block* find_block(const std::vector<cell_block>& blocks,
 
 int main(int argc, char** argv)
 {
-    std::string output_path =
-        ".planning/phases/44-sqp-family-polish-test-stabilization/"
-        "44-03-soc-budget-sweep.json";
+    std::string output_path = "soc_budget_sweep.json";
     std::string build_type = "Release";
     std::string head_sha   = "unknown";
 

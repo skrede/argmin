@@ -13,9 +13,9 @@
 //
 // Output: a single JSON document with per-seed rows and a summary
 // block including `lowest_converging_seed`. Default output path is
-// .planning/phases/44-sqp-family-polish-test-stabilization/44-04-isres-seed-sweep.json;
-// override with `--output PATH`. Stdout prints a one-line-per-seed
-// table plus a top-5 lowest-converging-seeds summary.
+// `isres_seed_sweep.json` in the current working directory; override
+// with `--output PATH`. Stdout prints a one-line-per-seed table plus a
+// top-5 lowest-converging-seeds summary.
 //
 // Non-ctest, one-shot. The harness is read-only on argmin; consumers
 // do not pick it up via FetchContent.
@@ -243,9 +243,7 @@ void write_json(const std::vector<seed_record>& rows,
 
 int main(int argc, char** argv)
 {
-    std::string output_path =
-        ".planning/phases/44-sqp-family-polish-test-stabilization/"
-        "44-04-isres-seed-sweep.json";
+    std::string output_path = "isres_seed_sweep.json";
     std::string build_type = "Release";
     std::string head_sha   = "unknown";
 
@@ -269,7 +267,7 @@ int main(int argc, char** argv)
             std::cout << "isres_seed_sweep: drive ISRES across seeds 1..100 "
                          "on the simple_constrained 2D test problem.\n"
                          "  --output PATH       JSON output path "
-                         "(default: .planning/phases/.../44-04-isres-seed-sweep.json)\n"
+                         "(default: isres_seed_sweep.json)\n"
                          "  --build-type S      label only (default Release)\n"
                          "  --head-sha S        label only (default unknown)\n";
             return 0;

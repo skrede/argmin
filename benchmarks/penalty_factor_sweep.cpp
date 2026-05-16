@@ -20,9 +20,8 @@
 //
 // Output: a single JSON document with a per-cell `by_penalty_factor`
 // block plus a summary. Default output path is
-// .planning/phases/44-sqp-family-polish-test-stabilization/
-// 44-02-penalty-factor-sweep.json; override with `--output PATH`.
-// Stdout prints a per-row table.
+// `penalty_factor_sweep.json` in the current working directory;
+// override with `--output PATH`. Stdout prints a per-row table.
 //
 // Non-ctest, one-shot. The harness is read-only on argmin; consumers
 // do not pick it up via FetchContent.
@@ -321,9 +320,7 @@ void write_json(const std::vector<cell_block>& blocks,
 
 int main(int argc, char** argv)
 {
-    std::string output_path =
-        ".planning/phases/44-sqp-family-polish-test-stabilization/"
-        "44-02-penalty-factor-sweep.json";
+    std::string output_path = "penalty_factor_sweep.json";
     std::string build_type = "Release";
     std::string head_sha   = "unknown";
 

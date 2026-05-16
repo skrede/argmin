@@ -192,9 +192,11 @@ struct tr_sqp_policy
     // Empirical evidence: at (penalty_factor, soc_max_iterations) in
     // {(0.01, 2), (0.01, 3), ...,(0.30, 3)} the SOC retry closes HS043
     // from f_err = 51% / cv = 4.49 (pre-SOC baseline) to f_err = 8% /
-    // cv = 0; the residual 8% gap is the slack-mediated motion freeze
-    // documented in SEED-028. The structural closure (filter_trsqp_policy
-    // per SEED-028 Option C) is deferred.
+    // cv = 0; the residual 8% gap is a slack-mediated motion freeze
+    // arising from the L1-merit treatment of the inequality slack on
+    // this problem class. Strict closure requires a filter-based ratio
+    // test layered on top of the trust-region composite step, which is
+    // out of scope here.
     //
     // Reference: Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
     //            8(3):682-706 Section 3.1 (v-optimal restoration shape);
