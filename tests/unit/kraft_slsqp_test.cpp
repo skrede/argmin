@@ -1,5 +1,6 @@
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/basic_solver.h"
+#include "argmin/solver/sqp_mode.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 #include "argmin/test_functions/rosenbrock.h"
@@ -519,4 +520,134 @@ TEST_CASE("kraft_slsqp HS006 accuracy guard",
     CHECK(result.objective_value < 1e-6);
     CHECK(result.iterations >= 6);
     CHECK(result.iterations <= 12);
+}
+
+// Lagrangian gradient norm vanishes at constrained optima; raw ||grad f||
+// does not. The reported gradient_norm must therefore drop below 1e-4 at
+// the HS007 optimum once kraft_slsqp reports grad_L instead of grad_f.
+//
+// Reference: Hock & Schittkowski (1981), Test Examples for Nonlinear
+// Programming Codes, Lecture Notes in Economics and Mathematical
+// Systems vol. 187, Springer, Problem 7.
+//            N&W 2e Section 12.3 / eq. 12.34 (KKT stationarity).
+TEST_CASE("kraft_slsqp HS007 Lagrangian gradient < 1e-4 at optimum",
+          "[kraft_slsqp][regression]")
+{
+    hs007 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{kraft_slsqp_policy<hs007<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
+}
+
+// Reference: Hock & Schittkowski (1981), Problem 28. Equality-only
+// problem: min (x0+x1)^2 + (x1+x2)^2 s.t. x0+2*x1+3*x2-1=0;
+// f* = 0 at (0.5, -0.5, 0.5).
+TEST_CASE("kraft_slsqp HS028 Lagrangian gradient < 1e-4 at optimum",
+          "[kraft_slsqp][regression]")
+{
+    hs028<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{kraft_slsqp_policy<hs028<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
+}
+
+// Per-problem regression-guard coverage: HS071 / HS026 / HS028 on the
+// single-mode kraft_slsqp_policy (the per-mode dispatch was removed
+// after empirical evidence showed the former _fast mode lost wall-time
+// and iteration count against the _accurate mode on every measured
+// cell). Each TEST_CASE applies the policy's static-constexpr tolerance
+// defaults at fixture construction and reproduces the bit-identical
+// regression bars that the prior _accurate parametric row carried.
+//
+// Reference: Kraft 1988 §2.2.4 (SOC threshold semantics);
+//            N&W 2e Definition 12.1 (KKT primal feasibility).
+
+TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
+          "[kraft_slsqp][regression][mode]")
+{
+    using policy_t = kraft_slsqp_policy_accurate<hs071<>::problem_dimension>;
+
+    hs071<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(17.0140173).margin(0.1));
+    CHECK(solver.constraint_violation() < 0.05);
+    // Box bounds 1 <= xi <= 5 are problem-defined.
+    CHECK(result.x[0] >= 1.0 - 1e-6);
+    CHECK(result.x[0] <= 5.0 + 1e-6);
+    CHECK(result.x[1] >= 1.0 - 1e-6);
+    CHECK(result.x[1] <= 5.0 + 1e-6);
+}
+
+TEST_CASE("kraft_slsqp HS026 (regression guard)",
+          "[kraft_slsqp][regression][mode]")
+{
+    using policy_t = kraft_slsqp_policy_accurate<hs026<>::problem_dimension>;
+
+    hs026 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS026 optimum: f* = 0 at (1, 1, 1). The kraft_slsqp tail descends
+    // slowly toward the optimum; iter cap is the load-bearing guard.
+    CHECK(result.objective_value < 1e-6);
+    CHECK(solver.constraint_violation() < 1e-3);
+    CHECK(result.iterations <= 50);
+}
+
+TEST_CASE("kraft_slsqp HS028 (regression guard)",
+          "[kraft_slsqp][regression][mode]")
+{
+    using policy_t = kraft_slsqp_policy_accurate<hs028<>::problem_dimension>;
+
+    hs028<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS028 optimum: f* = 0 at (0.5, -0.5, 0.5).
+    CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
 }

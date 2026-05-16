@@ -3,6 +3,7 @@
 
 #include "argmin/result/status.h"
 
+#include <cstddef>
 #include <optional>
 
 namespace argmin
@@ -44,6 +45,63 @@ struct step_result
     // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity).
     std::optional<Scalar> kkt_residual{};
     std::optional<solver_status> policy_status{};
+
+    // Per-step solver diagnostics for telemetry. Defaulted-member
+    // sub-struct so future fields can be added without touching
+    // existing call sites. Caller composition for line-search SQP
+    // policies: is_null_step == true && diagnostics.bfgs_reset_count > 0
+    // signals BFGS-reset cap exhaustion.
+    //
+    // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+    //            fallback);
+    //            NLopt slsqp.c:1890-1895 (ireset retry parity).
+    //
+    // argmin variant: scalar bfgs_reset_count only;
+    //                 a templated / variant per-policy diagnostics
+    //                 type is the natural pairing with a future
+    //                 step_result type-system redesign.
+    struct solver_diagnostics
+    {
+        std::size_t bfgs_reset_count{0};
+        // Fast-mode BFGS-update skip counter. Increments at the policy-level
+        // hessian.push() guard whenever the curvature pair has s^T y <= 0
+        // and the policy mode dispatches to the skip branch (N&W Procedure
+        // 18.2 Powell damping is bypassed in fast mode in favor of leaving
+        // the prior B unchanged for wall-time-budgeted contexts).
+        //
+        // Reference: N&W 2e eq. 18.22-18.24 (Powell damping; accurate-mode
+        //            path is preserved unchanged in dense_ldl_bfgs::push).
+        std::size_t bfgs_skip_count{0};
+        // Armijo NaN/Inf recovery counter. Increments whenever the
+        // Armijo backtracker — or any policy's hand-rolled inline
+        // backtracking loop — observes a non-finite trial-iterate
+        // evaluation and responds by shrinking alpha and continuing
+        // rather than propagating the tainted value through the merit
+        // comparison. Aggregated across the main line search and any
+        // second-order-correction retry. Both modes enable the gate —
+        // non-finite trial-point evaluations should never be silently
+        // consumed.
+        //
+        // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
+        std::size_t nan_eval_count{0};
+        // Second-order correction retry counter for trust-region SQP.
+        // Increments once per SOC retry attempt at the composite-step
+        // rejection site (regardless of whether the retry succeeds). Zero
+        // for any policy that does not invoke a SOC retry. The retry
+        // shape is the trust-region analog of the kraft_slsqp_policy
+        // Maratos correction: on a rejected primary step, recompute the
+        // linearized constraint residual at the trial point with the
+        // original Jacobian and re-call the composite-step helper with
+        // the corrected RHS.
+        //
+        // Reference: Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
+        //            8(3):682-706 Section 3.1 (v-optimal restoration);
+        //            Nocedal and Wright 2e Section 18.3 (Maratos effect
+        //            and second-order correction; line-search analog at
+        //            kraft_slsqp_policy.h Section 2.2.4).
+        std::size_t soc_retry_count{0};
+    };
+    solver_diagnostics diagnostics{};
 };
 
 }

@@ -385,3 +385,47 @@ TEST_CASE("stateful solver with Givens matches free-function baseline", "[qp][gi
     CHECK(result_stateful.x[0] == Approx(result_free.x[0]).margin(1e-10));
     CHECK(result_stateful.x[1] == Approx(result_free.x[1]).margin(1e-10));
 }
+
+TEST_CASE("active_set_qp_solver projects infeasible iter-0 onto equality manifold",
+          "[qp][regression]")
+{
+    // Synthetic minimal reproducer: n=2, n_eq=2 forces the m>=n branch on
+    // entry; x0=(0,0) violates b_eq=(1,1) so the iterate is infeasible
+    // w.r.t. the working set. Pre-fix: solve_equality_subproblem returns
+    // p=0 unconditionally on the m>=n branch, the active-set loop
+    // terminates with x still at x0, and the post-condition
+    // (A_eq * x == b_eq) fails. Post-fix: the solver projects x onto
+    // the equality manifold before entering the active-set loop,
+    // satisfying the feasibility invariant of N&W Algorithm 16.1
+    // (N&W 2e Section 16.1, pp. 460-463).
+    //
+    // This fixture instantiates the stateful active_set_qp_solver
+    // class directly and calls its public solve() member -- the same
+    // code path consumed by the line-search SQP policies. The free
+    // function solve_qp(...) is a separate, independent code path and
+    // is not exercised here.
+    //
+    // Closed form: A_eq = I_2, b_eq = (1,1), G = I_2, d = 0, n_eq = n = 2.
+    // The equality system fully determines x:
+    //   x = x0 + A_eq^T (A_eq A_eq^T)^{-1} (b_eq - A_eq x0)
+    //     = (0,0) + I (I)^{-1} ((1,1) - (0,0))
+    //     = (1, 1).
+    // With G = I_2, d = 0, the unconstrained QP minimum is at 0, but
+    // the equality pins x to (1, 1) -- no remaining degree of freedom.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd d = Eigen::VectorXd::Zero(2);
+    Eigen::MatrixXd A_eq = Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd b_eq{{1.0, 1.0}};
+    Eigen::MatrixXd A_ineq(0, 2);
+    Eigen::VectorXd b_ineq(0);
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(2);
+
+    // n=2 unknowns, max_constraints=2 (room for the two equalities; no inequalities).
+    active_set_qp_solver<double> solver(2, 2);
+    auto result = solver.solve(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    CHECK(result.status == qp_status::optimal);
+    CHECK((A_eq * result.x - b_eq).cwiseAbs().maxCoeff() < 1e-8);
+    CHECK(result.x[0] == Approx(1.0).margin(1e-10));
+    CHECK(result.x[1] == Approx(1.0).margin(1e-10));
+}

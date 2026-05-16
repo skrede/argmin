@@ -19,12 +19,29 @@ struct gradient_tolerance_criterion
 {
     std::optional<double> threshold{};
 
+    // Stationarity is gated on the composite KKT residual (Lagrangian
+    // stationarity + primal feasibility + dual feasibility +
+    // complementarity) when populated by the policy, with a fallback to
+    // gradient_norm for unconstrained / derivative-free policies that
+    // leave kkt_residual nullopt. Under correct Lagrangian-gradient
+    // reporting on constrained SQP policies, ||grad L|| can vanish at
+    // intermediate iterates that are not yet KKT points (the multiplier
+    // closure can drive the stationarity leg to zero while primal or
+    // dual feasibility legs are still large). Gating on raw gradient_norm
+    // there fires premature converged at non-KKT iterates; the composite
+    // residual is the correct convergence quantity.
+    //
+    // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
+    //            Definition 12.1 (KKT first-order optimality conditions);
+    //            eq. 12.34 (Lagrangian stationarity leg of the
+    //            composite measure).
     std::optional<solver_status> check(const step_result<double>& r,
                                        std::uint32_t /*iteration*/) const
     {
         if(!threshold)
             return std::nullopt;
-        if(r.gradient_norm < *threshold)
+        const double kkt = r.kkt_residual.value_or(r.gradient_norm);
+        if(kkt < *threshold)
             return solver_status::converged;
         return std::nullopt;
     }

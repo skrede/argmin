@@ -192,6 +192,43 @@ Eigen::Vector<Scalar, Eigen::Dynamic> estimate_multipliers_active_set(
     return lambda_full;
 }
 
+// Active-set multiplier estimate with scatter into caller-owned outputs.
+//
+// Adopted from: argmin/detail/lagrangian.h:137 estimate_multipliers_active_set
+//               (in-tree precedent — wrapper-with-scatter sibling).
+// Reference: N&W 2e Section 16.5 (least-squares multiplier estimate);
+//            Kraft 1988 DFVLR-FB 88-28 §2.2.4.
+//
+// argmin variant: scatter form that writes into caller-owned Ref<VectorXd>
+//                 outputs; eliminates the head/segment scatter pattern
+//                 currently inlined at the four SQP policy KKT-leg sites.
+template <typename Scalar,
+          int N = argmin::dynamic_dimension,
+          int Meq = argmin::dynamic_dimension,
+          int Mineq = argmin::dynamic_dimension>
+ARGMIN_FORCE_INLINE void compute_kkt_multipliers_active_set(
+    const Eigen::Vector<Scalar, N>& g,
+    const Eigen::Matrix<Scalar, Meq, N>& J_eq,
+    const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq,
+    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> lam_eq_out,
+    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> mu_ineq_out,
+    Scalar active_tol = Scalar(1e-8))
+{
+    const Eigen::Vector<Scalar, Eigen::Dynamic> lambda_full =
+        estimate_multipliers_active_set(g, J_eq, J_ineq, c_ineq, active_tol);
+
+    const Eigen::Index n_eq = J_eq.rows();
+    const Eigen::Index n_ineq = J_ineq.rows();
+
+    lam_eq_out.setZero();
+    mu_ineq_out.setZero();
+    if(n_eq > 0)
+        lam_eq_out = lambda_full.head(n_eq);
+    if(n_ineq > 0)
+        mu_ineq_out = lambda_full.segment(n_eq, n_ineq);
+}
+
 }
 
 #endif

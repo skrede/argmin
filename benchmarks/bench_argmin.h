@@ -33,6 +33,7 @@
 #include "argmin/solver/projected_gn_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/byrd_lbfgsb_policy.h"
+#include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
 #include "argmin/solver/projected_gradient_gn_policy.h"
@@ -84,6 +85,7 @@ using rebind_policy_t = typename rebind_policy<Policy, N>::type;
     case solver_status::xtol_reached:     return "xtol_reached";
     case solver_status::maxeval_reached:  return "maxeval_reached";
     case solver_status::roundoff_limited:   return "roundoff_limited";
+    case solver_status::trust_region_step_rejected: return "trust_region_step_rejected";
     case solver_status::objective_stalled: return "objective_stalled";
     case solver_status::time_limit_reached: return "time_limit_reached";
     case solver_status::aborted:           return "aborted";
@@ -270,6 +272,14 @@ auto run_argmin_solver(std::string_view solver_name,
             : static_cast<double>(trace.back().f_current);
         benchmark::DoNotOptimize(final_obj_safe);
 
+        // Final-iter cv pulled from the trace tail (the per-iter trace is
+        // the in-process record of what the policy reported on each step);
+        // the trace is empty only on degenerate problems that never enter
+        // the step loop, in which case 0.0 stands in.
+        const double final_cv = trace.empty()
+            ? 0.0
+            : trace.back().cv;
+
         return benchmark_result{
             .solver = solver_name,
             .library = "argmin",
@@ -289,6 +299,7 @@ auto run_argmin_solver(std::string_view solver_name,
             .final_objective = final_obj_safe,
             .known_optimum = prob.optimal_value(),
             .accuracy = std::abs(final_obj_safe - prob.optimal_value()),
+            .constraint_violation = final_cv,
             .status = detail::status_string(final_status),
         };
     }
@@ -329,6 +340,7 @@ auto run_argmin_solver(std::string_view solver_name,
             .final_objective = result.objective_value,
             .known_optimum = prob.optimal_value(),
             .accuracy = std::abs(result.objective_value - prob.optimal_value()),
+            .constraint_violation = static_cast<double>(result.constraint_violation),
             .status = detail::status_string(result.status),
         };
     }
@@ -407,9 +419,13 @@ void run_all_argmin_solvers(
         run("projected_gradient_gn", projected_gradient_gn_policy{});
     }
 
-    // SLSQP: any constrained problem.
+    // SLSQP: any constrained problem. The line-search SQP family is
+    // single-mode after the empirical _fast collapse; one dispatch per
+    // policy.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
-        run_constrained("kraft_slsqp", kraft_slsqp_policy<>{});
+    {
+        run_constrained("kraft_slsqp_accurate", kraft_slsqp_policy_accurate<>{});
+    }
 
     // MMA family: inequality-constrained (no equality).
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
@@ -471,30 +487,41 @@ void run_all_argmin_solvers(
         }
     }
 
-    // N&W SQP: equality or mixed constrained.
+    // N&W SQP: equality or mixed constrained. Single-mode after the
+    // _fast collapse on the line-search SQP family; the runtime
+    // equality-presence guard remains.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
     {
         if constexpr(requires { prob.num_equality(); })
         {
             if(prob.num_equality() > 0)
             {
-                std::vector<trace_entry> trace;
-                auto r = run_argmin_solver<nw_sqp_policy<>, default_convergence>(
-                    "nw_sqp", problem_name, prob, max_iterations, collect_trace, trace,
-                    config);
-                results.push_back(r);
-                traces.push_back(std::move(trace));
+                run_constrained("nw_sqp_accurate", nw_sqp_policy_accurate<>{});
             }
         }
     }
 
     // Filter SLSQP: any constrained problem (filter-based L-BFGS SQP).
+    // Single-mode after the _fast collapse on the line-search SQP family.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
-        run_constrained("filter_slsqp", filter_slsqp_policy<>{});
+    {
+        run_constrained("filter_slsqp_accurate", filter_slsqp_policy_accurate<>{});
+    }
 
     // Filter NW SQP: any constrained problem (filter-based dense BFGS SQP).
+    // Single-mode after the _fast collapse on the line-search SQP family.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)
-        run_constrained("filter_nw_sqp", filter_nw_sqp_policy<>{});
+    {
+        run_constrained("filter_nw_sqp_accurate", filter_nw_sqp_policy_accurate<>{});
+    }
+
+    // TR-SQP (Byrd-Omojokun composite step): tr_sqp at parity with the
+    // line-search SQP families on every applicable constrained cell.
+    if constexpr(is_constrained && differentiable<Problem> && is_bound)
+    {
+        run_constrained("tr_sqp_fast",     tr_sqp_policy_fast<>{});
+        run_constrained("tr_sqp_accurate", tr_sqp_policy_accurate<>{});
+    }
 
     // Augmented Lagrangian (with L-BFGS-B inner): any constrained problem.
     if constexpr(is_constrained && differentiable<Problem> && is_bound)

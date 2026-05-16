@@ -74,7 +74,10 @@ constexpr double v = 0.00492867323399;
 // Convergence: the published v = 0.00492867323399 ensures
 // f(x[i+1]) + v/x[i+1] < 1 throughout, so sqrt of a positive
 // argument is real. A defensive guard is included for the edge case.
-consteval auto compute_x_table() -> std::array<double, N_REGIONS>
+// std::exp / std::log are not portably constexpr (libc++ on Apple Clang
+// rejects them in constant expressions); the tables are populated at
+// static-init time before any sampler runs.
+inline auto compute_x_table() -> std::array<double, N_REGIONS>
 {
     std::array<double, N_REGIONS> x{};
     x[N_REGIONS - 1] = R;
@@ -93,7 +96,7 @@ consteval auto compute_x_table() -> std::array<double, N_REGIONS>
     return x;
 }
 
-consteval auto compute_y_table() -> std::array<double, N_REGIONS>
+inline auto compute_y_table() -> std::array<double, N_REGIONS>
 {
     auto x = compute_x_table();
     std::array<double, N_REGIONS> y{};
@@ -105,8 +108,8 @@ consteval auto compute_y_table() -> std::array<double, N_REGIONS>
     return y;
 }
 
-inline constexpr auto x_table = compute_x_table();
-inline constexpr auto y_table = compute_y_table();
+inline const auto x_table = compute_x_table();
+inline const auto y_table = compute_y_table();
 
 }
 

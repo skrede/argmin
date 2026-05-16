@@ -162,7 +162,9 @@ struct lbfgsb_policy
                 .kkt_residual = kkt,
             };
         }
-        auto& [d, alpha_max] = *dir;
+        auto& result = *dir;
+        auto& d = result.d;
+        auto& alpha_max = result.alpha_max;
 
         // Line search functors with gradient caching.
         // The dphi callback computes the gradient at the trial point, which

@@ -235,6 +235,16 @@ TEST_CASE("augmented lagrangian warm-start converges on HS071",
     policy_type::options_type policy_opts;
     policy_opts.warm_start_inner = true;
     policy_opts.max_outer_iterations = 100;
+    // Flat inner tolerance schedule (alpha = 0.1) keeps the inner
+    // subproblem solved to a tight tolerance from iter-0 onward.
+    // Under composite-KKT gating in gradient_tolerance_criterion
+    // the inner L-BFGS-B terminates on the projected-gradient
+    // inf-norm (smaller than the full L2 gradient on bound-active
+    // points), so the alpha = 0.9 schedule under-converges the
+    // inner subproblems on HS071's mixed bound-active geometry.
+    // Reference: Conn, Gould & Toint 1991 § 3 (adaptive tolerance);
+    //            N&W 2e Section 16.7 (projected-gradient KKT).
+    policy_opts.inner_tolerance_alpha = 0.1;
 
     solver_options opts;
     opts.max_iterations = 100;
@@ -262,6 +272,9 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
     policy_type::options_type warm_opts;
     warm_opts.warm_start_inner = true;
     warm_opts.max_outer_iterations = 100;
+    // Flat inner tolerance schedule: see "augmented lagrangian
+    // warm-start converges on HS071" for rationale.
+    warm_opts.inner_tolerance_alpha = 0.1;
 
     solver_options sopts;
     sopts.max_iterations = 100;
@@ -277,6 +290,7 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
     policy_type::options_type cold_opts;
     cold_opts.warm_start_inner = false;
     cold_opts.max_outer_iterations = 100;
+    cold_opts.inner_tolerance_alpha = 0.1;
 
     basic_solver<policy_type, D, hs071<>> cold_solver{problem, x0, sopts, cold_opts};
     auto cold_result = cold_solver.solve();
@@ -339,6 +353,9 @@ TEST_CASE("augmented lagrangian cold-start still works on HS071",
     policy_type::options_type policy_opts;
     policy_opts.warm_start_inner = false;
     policy_opts.max_outer_iterations = 100;
+    // Flat inner tolerance schedule: see "augmented lagrangian
+    // warm-start converges on HS071" for rationale.
+    policy_opts.inner_tolerance_alpha = 0.1;
 
     solver_options opts;
     opts.max_iterations = 100;

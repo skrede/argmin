@@ -4,7 +4,7 @@ project(argmin_benchmarks LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Google Benchmark via FetchContent (per D-03/BNCH-01).
+# Google Benchmark via FetchContent (for parametric sweep harness on (policy, mode, k)).
 include(FetchContent)
 if(ARGMIN_CMAKE_FETCH_DEPS)
     FetchContent_Declare(
@@ -59,7 +59,95 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
-# Optional comparison library hooks (per D-03).
+# Strided active-set multiplier-reest sweep harness. Parametric on
+# (policy x mode x problem x k); emits Google Benchmark native JSON
+# via --benchmark_out for the per-mode default selection of
+# default_multiplier_reest_every_k across the four line-search SQP
+# policies on HS026 / HS028 / HS043 / HS071.
+add_executable(multiplier_reest_sweep multiplier_reest_sweep.cpp)
+target_link_libraries(multiplier_reest_sweep PRIVATE argmin::argmin benchmark::benchmark)
+
+target_compile_options(multiplier_reest_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(multiplier_reest_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
+# ISRES seed-stability sweep harness. Drives the production isres_policy
+# across seeds 1..100 on the `simple constrained 2D` regression test
+# problem (replicates tests/unit/isres_test.cpp). Emits a JSON record
+# with per-seed terminal objective_value / cv / x_max_coeff /
+# converged-flag / status; selects the lowest seed where
+# `objective_value < 1.0` (the test's CHECK condition). Non-ctest;
+# one-shot; consumes nothing the regular bench targets do not already
+# pull in.
+add_executable(isres_seed_sweep isres_seed_sweep.cpp)
+target_link_libraries(isres_seed_sweep PRIVATE argmin::argmin)
+
+target_compile_options(isres_seed_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(isres_seed_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
+# Adaptive-penalty growth-factor sweep harness for tr_sqp_policy. Drives
+# the policy across penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} on the
+# existing HS-suite cells (HS026/HS028/HS043/HS071/HS076) under both
+# accurate and fast modes; emits a JSON record per (penalty_factor,
+# cell, mode) plus a selection block identifying the largest non-
+# regressing default per the existing tr_sqp_test.cpp acceptance bars.
+# Non-ctest, one-shot.
+add_executable(penalty_factor_sweep penalty_factor_sweep.cpp)
+target_link_libraries(penalty_factor_sweep PRIVATE argmin::argmin)
+
+target_compile_options(penalty_factor_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(penalty_factor_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
+# Joint (penalty_factor, soc_max_iterations) sweep harness for
+# tr_sqp_policy. Drives the policy across the cross product of
+# penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} and soc_max_iterations
+# in {0, 1, 2, 3} on the HS-suite cells (reference and closure-target
+# subsets, both sqp_mode variants); emits a JSON record per
+# (pf, soc_iter, cell, mode) plus a selection block recording the joint
+# disposition (closure-count improvement vs the no-op baseline).
+# Non-ctest, one-shot.
+add_executable(soc_budget_sweep soc_budget_sweep.cpp)
+target_link_libraries(soc_budget_sweep PRIVATE argmin::argmin)
+
+target_compile_options(soc_budget_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(soc_budget_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
+# Optional comparison library hooks (NLopt LD_SLSQP and similar).
 
 option(ARGMIN_BENCH_NLOPT "Build NLopt comparison benchmarks" ON)
 if(ARGMIN_BENCH_NLOPT)
@@ -248,6 +336,55 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
+    # Allocation-tracing variants of the four micro_*_sqp benches. Each
+    # variant compiles the same source under ARGMIN_BENCH_TRACE_ALLOC=1
+    # (which switches main() into a 2-step-warmup + 10-step hot-loop
+    # probe asserting zero hot-loop allocations) and EIGEN_RUNTIME_NO_MALLOC=1
+    # (which makes Eigen::internal::set_is_malloc_allowed take effect).
+    # CTest entries fail the build if any policy allocates on the hot path.
+    foreach(_alloc_target IN ITEMS
+        micro_kraft_slsqp_alloc_trace
+        micro_nw_sqp_alloc_trace
+        micro_filter_slsqp_alloc_trace
+        micro_filter_nw_sqp_alloc_trace)
+        if(_alloc_target STREQUAL "micro_kraft_slsqp_alloc_trace")
+            set(_alloc_source micro_kraft_slsqp.cpp)
+            set(_alloc_test_name sqp_alloc_free_kraft)
+        elseif(_alloc_target STREQUAL "micro_nw_sqp_alloc_trace")
+            set(_alloc_source micro_nw_sqp.cpp)
+            set(_alloc_test_name sqp_alloc_free_nw)
+        elseif(_alloc_target STREQUAL "micro_filter_slsqp_alloc_trace")
+            set(_alloc_source micro_filter_slsqp.cpp)
+            set(_alloc_test_name sqp_alloc_free_filter_slsqp)
+        else()
+            set(_alloc_source micro_filter_nw_sqp.cpp)
+            set(_alloc_test_name sqp_alloc_free_filter_nw)
+        endif()
+
+        add_executable(${_alloc_target} ${_alloc_source})
+        target_link_libraries(${_alloc_target} PRIVATE argmin::argmin NLopt::nlopt)
+        # ARGMIN_BENCH_TRACE_ALLOC=1 enables the bench-side ::operator new
+        # override + counter; the per-policy probe asserts the counter
+        # remains zero across the hot loop. EIGEN_RUNTIME_NO_MALLOC is
+        # intentionally NOT defined here: the Eigen runtime gate aborts
+        # via assert() on the first allocation, which is too aggressive
+        # for the report-and-continue posture; the bench-level counter
+        # detects the same condition without aborting and lets the probe
+        # fail gracefully with a clear stderr message.
+        target_compile_definitions(${_alloc_target} PRIVATE
+            ARGMIN_BENCH_TRACE_ALLOC=1)
+        target_compile_options(${_alloc_target} PRIVATE
+            $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+                -march=native -fno-math-errno -fno-trapping-math
+            >
+        )
+        if(ARGMIN_LTO_SUPPORTED)
+            set_target_properties(${_alloc_target} PROPERTIES
+                INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        endif()
+        add_test(NAME ${_alloc_test_name} COMMAND ${_alloc_target})
+    endforeach()
+
     add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
     target_link_libraries(micro_augmented_lagrangian PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_augmented_lagrangian PRIVATE
@@ -429,15 +566,31 @@ if(ARGMIN_BENCH_LIBCMAES)
             # and is not on cmaes's include path. Patch the upstream
             # call to use PROJECT_BINARY_DIR so the header lands where
             # the include path expects it.
+            # Portable in-place text substitution. The previous form used
+            # `sed -i` which differs between GNU sed (Linux: `sed -i ...`)
+            # and BSD sed (macOS / Apple toolchain: `sed -i '' ...` requires
+            # an explicit backup-suffix arg). Driving the patch through a
+            # cmake -P script sidesteps the platform split entirely; the
+            # script reads, regex-replaces, and writes back atomically.
+            set(_libcmaes_patch_script
+                "${CMAKE_CURRENT_BINARY_DIR}/libcmaes_patch.cmake")
+            file(WRITE "${_libcmaes_patch_script}" [=[
+file(READ "${TARGET}" _content)
+string(REPLACE
+    "\${CMAKE_BINARY_DIR}/include/libcmaes/cmaes_export.h"
+    "\${PROJECT_BINARY_DIR}/include/libcmaes/cmaes_export.h"
+    _content "${_content}")
+file(WRITE "${TARGET}" "${_content}")
+]=])
             FetchContent_Declare(
                 libcmaes
                 GIT_REPOSITORY https://github.com/CMA-ES/libcmaes.git
                 GIT_TAG        v0.10
                 GIT_SHALLOW    TRUE
                 EXCLUDE_FROM_ALL
-                PATCH_COMMAND  sed -i
-                    "s|\\\${CMAKE_BINARY_DIR}/include/libcmaes/cmaes_export.h|\\\${PROJECT_BINARY_DIR}/include/libcmaes/cmaes_export.h|g"
-                    "<SOURCE_DIR>/src/CMakeLists.txt"
+                PATCH_COMMAND  ${CMAKE_COMMAND}
+                    -DTARGET=<SOURCE_DIR>/src/CMakeLists.txt
+                    -P ${_libcmaes_patch_script}
                 UPDATE_DISCONNECTED TRUE
             )
             FetchContent_MakeAvailable(libcmaes)
@@ -499,4 +652,49 @@ if(ARGMIN_BENCH_IPOPT)
     else()
         message(STATUS "PkgConfig not available, skipping IPOPT benchmarks")
     endif()
+endif()
+
+# Standalone regression gate. Consumes publish_summary.csv and a checked-in
+# per-cell baseline (benchmarks/baselines/v0.3.0-regression.csv); exits
+# non-zero on any expected:pass cell breaching a numeric bound or any
+# expected:shouldfail cell unexpectedly converging. C++23 std-only --
+# no Eigen, no argmin, no Catch2, no NLopt; pure CSV bound comparison.
+# Invoked post-bench from run_publish_bench.sh.
+add_executable(regression_check regression_check.cpp)
+target_compile_options(regression_check PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+
+# Fast-CI regression gate. Drives run_publish_bench.sh at SEED_COUNT=3
+# under the build's binary paths and a temporary output root inside the
+# build tree; the script propagates regression_check's exit code so any
+# bound breach fails the test cell. Registered only when testing is
+# enabled in the active build configuration (i.e., the build dir was
+# configured with both ARGMIN_BUILD_TESTS=ON and ARGMIN_BUILD_BENCHMARKS=ON).
+if(CMAKE_TESTING_ENABLED)
+    add_test(
+        NAME publish_bench_regression_gate
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+                "SEED_START=42"
+                "SEED_COUNT=3"
+                "OUT_ROOT=${CMAKE_BINARY_DIR}/regression_gate_runs"
+                "BENCH_BINARY=$<TARGET_FILE:publish_bench>"
+                "REGRESSION_CHECK_BINARY=$<TARGET_FILE:regression_check>"
+                "REGRESSION_BASELINE=${CMAKE_SOURCE_DIR}/benchmarks/baselines/v0.3.0-regression.csv"
+                # Per-step wall variance dominates at SEED_COUNT=3; the
+                # outer-iter, accuracy, status, and cv gates stay active.
+                # Full 11-seed sweep via run_publish_bench.sh enforces the
+                # wall gate.
+                "REGRESSION_CHECK_DISABLE_WALL_GATE=1"
+                bash "${CMAKE_SOURCE_DIR}/benchmarks/scripts/run_publish_bench.sh"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
+    set_tests_properties(publish_bench_regression_gate PROPERTIES
+        TIMEOUT 600
+        LABELS "regression;bench"
+    )
 endif()

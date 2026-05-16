@@ -13,10 +13,12 @@
 #include "argmin/test_functions/ackley.h"
 #include "argmin/test_functions/schwefel.h"
 #include "argmin/test_functions/griewank.h"
+#include "argmin/test_functions/nmpc_lqr.h"
 #include "argmin/test_functions/rosenbrock.h"
 #include "argmin/test_functions/rastrigin.h"
 #include "argmin/test_functions/himmelblau.h"
 #include "argmin/test_functions/problem_class.h"
+#include "argmin/test_functions/ik_pose_batch.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 #include "argmin/test_functions/more_garbow_hillstrom.h"
 
@@ -82,6 +84,11 @@ void for_each_problem(Fn&& fn)
     fn("rastrigin_10", argmin::rastrigin<>{.n = 10});
     fn("schwefel_2", argmin::schwefel<>{.n = 2});
     fn("griewank_2", argmin::griewank<>{.n = 2});
+
+    // Application-shaped (NMPC, IK pose-batch)
+    fn("nmpc_lqr_h10",    argmin::nmpc_lqr<10>{});
+    fn("nmpc_lqr_h20",    argmin::nmpc_lqr<20>{});
+    fn("ik_pose_batch_6", argmin::ik_pose_batch<6, 5>{});
 }
 
 // Filter variant: invokes fn only for problems matching the given class.

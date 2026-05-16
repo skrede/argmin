@@ -3,6 +3,25 @@
 
 #include <Eigen/Core>
 
+// Force-inline attribute portable across GCC, Clang, and MSVC.
+//
+// Used on per-iteration helper functions where the function-call boundary
+// would otherwise prevent the compiler from optimizing through the
+// Eigen::Ref<> conversion at the helper signature. Even at -O3 the call
+// boundary stops the optimizer from collapsing the Ref<> wrapper on
+// otherwise-trivial scatter / accumulate hot paths; an explicit always-
+// inline hint recovers the pre-extraction inline-arithmetic codegen.
+//
+// Reference: GCC manual "Function Attributes" / always_inline; Clang
+//            extends the GNU attribute set; Microsoft __forceinline.
+#if defined(__GNUC__) || defined(__clang__)
+    #define ARGMIN_FORCE_INLINE [[gnu::always_inline]] inline
+#elif defined(_MSC_VER)
+    #define ARGMIN_FORCE_INLINE __forceinline
+#else
+    #define ARGMIN_FORCE_INLINE inline
+#endif
+
 namespace argmin
 {
 
