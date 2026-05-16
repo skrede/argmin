@@ -11,12 +11,19 @@
 //                 single-mode and have no Mode NTTP. tr_sqp_policy
 //                 retains its dual-mode dispatch and exercises the
 //                 <N, fast> != <N, accurate> distinct-type contract on
-//                 the surviving Mode-axis policy.
+//                 one of the two surviving Mode-axis policies.
+//
+//                 filter_trsqp_policy joins tr_sqp_policy as a dual-mode
+//                 SQP policy; this test gates both type-system contracts
+//                 (options_type forwarding, alias resolution, rebind
+//                 Mode preservation) and concept satisfaction under both
+//                 sqp_mode::accurate and sqp_mode::fast.
 
 #include "argmin/schedule/basic_solver_group.h"
 #include "argmin/schedule/round_robin_schedule.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
+#include "argmin/solver/filter_trsqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
@@ -65,17 +72,36 @@ static_assert(std::is_same_v<
         double>,
     typename argmin::tr_sqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::accurate>::options_type>);
 
+// filter_trsqp_policy is the second dual-mode SQP policy; its
+// options_type forwarding through policy_options_t<> must distinguish
+// the per-mode variants inside the std::tuple<...> backing of
+// basic_solver_group identically to tr_sqp.
+static_assert(std::is_same_v<
+    argmin::policy_options_t<
+        argmin::filter_trsqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::fast>,
+        double>,
+    typename argmin::filter_trsqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::fast>::options_type>);
+static_assert(std::is_same_v<
+    argmin::policy_options_t<
+        argmin::filter_trsqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::accurate>,
+        double>,
+    typename argmin::filter_trsqp_policy<argmin::dynamic_dimension, argmin::sqp_mode::accurate>::options_type>);
+
 // -----------------------------------------------------------------------
 // Gate 2 -- <N, fast> != <N, accurate> distinct types on the surviving
-// dual-mode policy (tr_sqp).
+// dual-mode policies (tr_sqp and filter_trsqp).
 // -----------------------------------------------------------------------
 static_assert(!std::is_same_v<
     tr_sqp_policy<dynamic_dimension, sqp_mode::fast>,
     tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
+static_assert(!std::is_same_v<
+    filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>,
+    filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>);
 
 // -----------------------------------------------------------------------
 // Gate 3 -- _accurate alias resolution across the four single-mode
-// line-search policies + tr_sqp's dual-mode aliases.
+// line-search policies + the two dual-mode trust-region policies
+// (tr_sqp, filter_trsqp).
 // -----------------------------------------------------------------------
 static_assert(std::is_same_v<
     kraft_slsqp_policy_accurate<dynamic_dimension>,
@@ -95,12 +121,18 @@ static_assert(std::is_same_v<
 static_assert(std::is_same_v<
     tr_sqp_policy_accurate<dynamic_dimension>,
     tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>);
+static_assert(std::is_same_v<
+    filter_trsqp_policy_fast<dynamic_dimension>,
+    filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>);
+static_assert(std::is_same_v<
+    filter_trsqp_policy_accurate<dynamic_dimension>,
+    filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>);
 
 // -----------------------------------------------------------------------
 // Gate 4 -- rebind<M> preserves the policy contract through the
-// dimension axis. For dual-mode tr_sqp, Mode is preserved verbatim; a
-// regression that dropped Mode and silently defaulted to accurate would
-// fail this check.
+// dimension axis. For the dual-mode policies (tr_sqp, filter_trsqp),
+// Mode is preserved verbatim; a regression that dropped Mode and
+// silently defaulted to accurate would fail this check.
 // -----------------------------------------------------------------------
 static_assert(std::is_same_v<
     typename kraft_slsqp_policy<dynamic_dimension>::template rebind<4>,
@@ -111,10 +143,13 @@ static_assert(std::is_same_v<
 static_assert(std::is_same_v<
     typename tr_sqp_policy<dynamic_dimension, sqp_mode::fast>::template rebind<4>,
     tr_sqp_policy<4, sqp_mode::fast>>);
+static_assert(std::is_same_v<
+    typename filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>::template rebind<4>,
+    filter_trsqp_policy<4, sqp_mode::fast>>);
 
 // -----------------------------------------------------------------------
 // Gate 5 -- basic_solver_group instantiation across <N, fast> + <N,
-// accurate> variants of tr_sqp_policy (the surviving dual-mode policy).
+// accurate> variants of each dual-mode policy (tr_sqp, filter_trsqp).
 // -----------------------------------------------------------------------
 // The using-alias is the load-bearing test; its SFINAE-failure surfaces
 // as a compile error if policy_options_t<> does not survive NTTP
@@ -139,15 +174,32 @@ static_assert(std::is_same_v<racing_tr_sqp, racing_tr_sqp>);
 
 }
 
+namespace
+{
+
+using racing_filter_trsqp = basic_solver_group<
+    round_robin_schedule,
+    dynamic_dimension,
+    void,
+    filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>,
+    filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>;
+
+static_assert(std::is_same_v<racing_filter_trsqp, racing_filter_trsqp>);
+
+}
+
 // -----------------------------------------------------------------------
-// nlp_solver concept satisfaction gate for tr_sqp_policy.
+// nlp_solver concept satisfaction gate for the trust-region SQP
+// policies (tr_sqp, filter_trsqp).
 // -----------------------------------------------------------------------
-// The trust-region SQP policy must satisfy the same nlp_solver concept
+// The trust-region SQP policies must satisfy the same nlp_solver concept
 // the line-search SQP policies do, so basic_solver_group can race them
 // against each other and downstream consumers (ctrlpp / cartan) can
 // inject either family through the same concept-templated entry point.
 static_assert(nlp_solver<basic_solver<tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
 static_assert(nlp_solver<basic_solver<tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>>);
+static_assert(nlp_solver<basic_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
+static_assert(nlp_solver<basic_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>>);
 
 // -----------------------------------------------------------------------
 // Gate 5b -- cross-family racing-tuple instantiation.
@@ -172,6 +224,33 @@ using racing_cross_family = basic_solver_group<
     tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>;
 
 static_assert(std::is_same_v<racing_cross_family, racing_cross_family>);
+
+}
+
+// -----------------------------------------------------------------------
+// Gate 5c -- cross-policy racing-tuple instantiation across two
+// trust-region SQP policies that share the composite-step backend but
+// differ at the acceptance gate. The L2-merit augmented ratio test
+// (tr_sqp_policy) and the Fletcher-Leyffer filter dominance check
+// (filter_trsqp_policy) sit at the same call site against the same
+// Byrd-Omojokun composite step; basic_solver_group must distinguish
+// the two options_type layouts in its std::tuple<...> backing.
+// -----------------------------------------------------------------------
+// Reference: Fletcher and Leyffer 2002 Math. Programming 91:239-269;
+//            Nocedal and Wright 2e Section 18.5 Algorithm 18.4
+//            (Byrd-Omojokun composite step).
+namespace
+{
+
+using racing_filter_trsqp_vs_tr_sqp = basic_solver_group<
+    round_robin_schedule,
+    dynamic_dimension,
+    void,
+    filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>,
+    tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>;
+
+static_assert(std::is_same_v<racing_filter_trsqp_vs_tr_sqp,
+                             racing_filter_trsqp_vs_tr_sqp>);
 
 }
 
