@@ -491,12 +491,17 @@ int main(int argc, char** argv)
         // Status-aware accept-as-pass: a skip row whose every seed
         // reports status=stalled AND accuracy<cutoff AND cv<cutoff is
         // promoted in-memory to a pass cell so the gate enforces
-        // convergence on machine-precision stalls. See the file
-        // preamble for the rule rationale.
+        // convergence on machine-precision stalls. The same predicate
+        // also marks an originally-pass row as "passes by status-aware
+        // promotion" so the converged-all-seeds gate is relaxed (the
+        // promoted cohort is by construction every-seed-stalled). See
+        // the file preamble for the rule rationale.
         std::string effective_expect{expect};
+        const bool status_aware_match =
+            status_aware_promotes_to_pass(agg, accuracy_cutoff, cv_cutoff);
         if(expect == "skip")
         {
-            if(status_aware_promotes_to_pass(agg, accuracy_cutoff, cv_cutoff))
+            if(status_aware_match)
             {
                 effective_expect = "pass";
                 if(promote_log_enabled)
@@ -560,12 +565,16 @@ int main(int argc, char** argv)
             if(agg.cv_available && !pass_cv)
                 emit_breach(solver, problem, mode, "max_cv_log10",
                             measured_cv_log10, max_cv_log10);
-            // status-gate: original-pass rows require every seed
-            // converged; promoted rows (effective_expect=pass, expect=skip)
-            // accept the every-seed-stalled disposition by construction of
-            // the promotion predicate, so the converged-all-seeds gate is
-            // only applied to the original-pass cohort.
-            if(any_nonconverged && expect != "skip")
+            // status-gate: pass rows require every seed converged unless
+            // the cell qualifies for status-aware promotion (every seed
+            // stalled at machine precision on the feasible manifold), in
+            // which case the every-seed-stalled disposition is the
+            // expected one and the converged-all-seeds gate is relaxed.
+            // This single guard covers both "promoted from skip" (where
+            // status_aware_match drives effective_expect=pass) and
+            // "baked-in promote-to-pass in baseline" (where
+            // status_aware_match independently confirms the rule applies).
+            if(any_nonconverged && !status_aware_match)
             {
                 std::cerr << "BREACH: solver=" << solver
                           << " problem=" << problem
