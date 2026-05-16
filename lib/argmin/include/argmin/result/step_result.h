@@ -84,6 +84,22 @@ struct step_result
         //
         // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
         std::size_t nan_eval_count{0};
+        // Second-order correction retry counter for trust-region SQP.
+        // Increments once per SOC retry attempt at the composite-step
+        // rejection site (regardless of whether the retry succeeds). Zero
+        // for any policy that does not invoke a SOC retry. The retry
+        // shape is the trust-region analog of the kraft_slsqp_policy
+        // Maratos correction: on a rejected primary step, recompute the
+        // linearized constraint residual at the trial point with the
+        // original Jacobian and re-call the composite-step helper with
+        // the corrected RHS.
+        //
+        // Reference: Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
+        //            8(3):682-706 Section 3.1 (v-optimal restoration);
+        //            Nocedal and Wright 2e Section 18.3 (Maratos effect
+        //            and second-order correction; line-search analog at
+        //            kraft_slsqp_policy.h Section 2.2.4).
+        std::size_t soc_retry_count{0};
     };
     solver_diagnostics diagnostics{};
 };

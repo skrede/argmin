@@ -163,6 +163,47 @@ struct tr_sqp_policy
     static constexpr double default_initial_penalty = 1.0;
     static constexpr double default_penalty_factor  = 0.0;
 
+    // Second-order correction retry budget on the inequality leg. On a
+    // rejected primary composite step (helper.accepted == false), the
+    // policy iterates the SOC retry up to this many times: each retry
+    // recomputes the linearized inequality residual at the trial point
+    // x_trial = x + p with the original Jacobian J(x), then re-calls
+    // the composite-step helper with the corrected residual. The
+    // trust-region radius is held fixed across retries (the retry
+    // exploits curvature information from the trial-point residual, not
+    // radius expansion).
+    //
+    // Default selected empirically by a joint sweep across
+    // (penalty_factor, soc_max_iterations) on the existing HS-suite
+    // acceptance cells (HS026 / HS028 / HS071 / HS076 non-regression +
+    // HS043 closure). The default is 0 (opt-in): every non-trivial
+    // value in the swept {1, 2, 3} grid regressed at least one of the
+    // four pre-existing D-04 cells (HS076 accurate stalls with cv
+    // around 0.1 at soc >= 1; HS071 accurate regresses past the 1%
+    // f_err bar with any pf >= 0.01). soc_max_iterations = 0 disables
+    // the retry entirely; the helper's existing single-step rejection
+    // branch returns a null-step result on the first rejection (pre-SOC
+    // behavior). Consumers studying the SOC retry in isolation, or
+    // tuning the joint (penalty_factor, soc_max_iterations) pair on a
+    // workload class where the existing cells' default acceptance bars
+    // are not load-bearing, opt in via
+    // `policy.options.soc_max_iterations = K`.
+    //
+    // Empirical evidence: at (penalty_factor, soc_max_iterations) in
+    // {(0.01, 2), (0.01, 3), ...,(0.30, 3)} the SOC retry closes HS043
+    // from f_err = 51% / cv = 4.49 (pre-SOC baseline) to f_err = 8% /
+    // cv = 0; the residual 8% gap is the slack-mediated motion freeze
+    // documented in SEED-028. The structural closure (filter_trsqp_policy
+    // per SEED-028 Option C) is deferred.
+    //
+    // Reference: Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
+    //            8(3):682-706 Section 3.1 (v-optimal restoration shape);
+    //            Nocedal and Wright 2e Section 18.3 (Maratos effect and
+    //            the line-search second-order correction analog at
+    //            kraft_slsqp_policy.h Section 2.2.4).
+    static constexpr std::size_t default_soc_max_iterations =
+        std::size_t{0};
+
     struct options_type
     {
         // Direct-field-default form: literature-defaulted scalars are
@@ -209,6 +250,16 @@ struct tr_sqp_policy
         // Reference: Lalee, Nocedal, Plantenga 1998 equation 1.13;
         //            scipy update_penalty.
         double penalty_factor{default_penalty_factor};
+
+        // Maximum number of second-order correction retries on the
+        // inequality leg of the composite step. Zero disables SOC retry
+        // (matches the pre-SOC single-step rejection shape). Direct-
+        // value form per the project memory rule on options-struct
+        // fields with literature defaults.
+        //
+        // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.1;
+        //            kraft_slsqp_policy line-search SOC analog.
+        std::size_t soc_max_iterations{default_soc_max_iterations};
     };
 
     options_type options{};
@@ -620,7 +671,18 @@ struct tr_sqp_policy
         // Eigen::Dynamic because the joint primal dimension is a
         // runtime quantity even when the policy template N is a fixed
         // compile-time constant for the x-only dim.
-        const auto bo = argmin::detail::byrd_omojokun_composite_step<
+        //
+        // Snapshot the pre-step trust radius and penalty so the SOC
+        // retry (Section K') can re-invoke the helper without
+        // compounding the radius shrink the primary call's rejection
+        // performs (Lalee, Nocedal, Plantenga 1998 Section 3.1: the SOC
+        // retry exploits curvature information from the trial-point
+        // residual, not radius expansion) and without inheriting any
+        // penalty inflation the LNP heuristic applied on the rejected
+        // primary step.
+        const double delta_pre_step   = s.trust_radius;
+        const double penalty_pre_step = s.penalty;
+        auto bo = argmin::detail::byrd_omojokun_composite_step<
             double, Eigen::Dynamic>(
             z_k, s.joint_grad_L_new_buf,
             hessian_op,
@@ -633,7 +695,96 @@ struct tr_sqp_policy
             v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
             s.penalty, options.penalty_factor);
 
+        // Section K' -- Second-order correction retry on the inequality
+        // leg. On a rejected primary composite step, recompute the
+        // linearized constraint residual at the trial point z_k + p
+        // with the ORIGINAL Jacobian A_joint (Lalee, Nocedal, Plantenga
+        // 1998 Section 3.1 v-optimal restoration shape; the analog
+        // line-search SOC retry at kraft_slsqp_policy.h Section 2.2.4
+        // uses the same "replace RHS with c(x+p), keep J(x)" pattern).
+        // The helper is re-called with the corrected c_joint_soc; the
+        // trust radius is held fixed at delta_pre_step (no further
+        // shrink) and the penalty is reset to its pre-step value so a
+        // single failed primary step does not inflate the penalty
+        // input to the retry.
+        //
+        // Acceptance: if any retry produces an accepted step, p_out is
+        // overwritten with the retry's step and the policy falls
+        // through to Section O (step acceptance). The helper's
+        // new_delta from the accepted retry governs the post-step
+        // radius update.
+        //
+        // Rejection: if all options.soc_max_iterations retries are
+        // rejected, the policy falls through to Sections L/M/N with
+        // the LAST retry's verdict (the radius has shrunk by
+        // tr_shrink_factor on each retry, mirroring the primary
+        // rejection path's radius shrink across retries).
+        //
+        // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.1;
+        //            Nocedal and Wright 2e Section 18.3 (Maratos
+        //            effect and SOC pairing).
+        std::size_t soc_retry_count = 0;
+        if(!bo.accepted && options.soc_max_iterations > 0)
+        {
+            Eigen::Vector<double, N> x_trial(n);
+            Eigen::VectorXd s_trial(n_ineq);
+            Eigen::VectorXd c_all_trial(m_total);
+            Eigen::VectorXd c_joint_soc(m_total);
+
+            for(std::size_t soc_iter = 0;
+                soc_iter < options.soc_max_iterations;
+                ++soc_iter)
+            {
+                ++soc_retry_count;
+
+                // Trial point at the rejected step (state x and s_slack
+                // are still the pre-step values; only p_out has been
+                // populated by the helper).
+                x_trial.noalias() = s.x + p_out.head(n);
+                if(n_ineq > 0)
+                    s_trial.noalias() = s.s_slack + p_out.tail(n_ineq);
+
+                // Re-evaluate constraints at the trial point. The
+                // equality block uses c_eq(x_trial); the inequality
+                // block uses the slack-reformulated joint residual
+                // -c_ineq(x_trial) + s_trial under argmin's sign
+                // convention (c_ineq >= 0 feasible).
+                if(m_total > 0)
+                    s.problem->constraints(x_trial, c_all_trial);
+                if(s.n_eq > 0)
+                    c_joint_soc.head(s.n_eq) = c_all_trial.head(s.n_eq);
+                if(n_ineq > 0)
+                    c_joint_soc.tail(n_ineq) =
+                        -c_all_trial.tail(n_ineq) + s_trial;
+
+                // Reset penalty + trust-radius inputs to pre-step
+                // values: the retry re-enters the helper with the same
+                // starting conditions as the primary step, but with a
+                // corrected residual.
+                s.penalty = penalty_pre_step;
+                bo = argmin::detail::byrd_omojokun_composite_step<
+                    double, Eigen::Dynamic>(
+                    z_k, s.joint_grad_L_new_buf,
+                    hessian_op,
+                    A_joint, c_joint_soc,
+                    delta_pre_step, eps_k, max_cg_iter,
+                    lower_joint, upper_joint,
+                    f_old, c_norm_old,
+                    trial_eval,
+                    s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
+                    v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+                    s.penalty, options.penalty_factor);
+
+                if(bo.accepted)
+                    break;
+            }
+        }
+
         // Section L -- Radius update consumes the helper's verdict.
+        // After the SOC retry path, `bo` is either the accepted retry
+        // (radius = delta_pre_step or expanded) or the last rejected
+        // retry (radius shrunk from delta_pre_step). Either way,
+        // bo.new_delta is the authoritative post-step radius.
         s.trust_radius = bo.new_delta;
 
         // Section M -- Trust-radius collapse path. Below the policy-
@@ -654,6 +805,7 @@ struct tr_sqp_policy
                 s.c_eq, s.c_ineq, s.x.norm(), /*bfgs_reset_count=*/0,
                 solver_status::trust_region_step_rejected);
             r.diagnostics.bfgs_skip_count = bfgs_skip_count;
+            r.diagnostics.soc_retry_count = soc_retry_count;
             ++s.iteration;
             return r;
         }
@@ -676,6 +828,7 @@ struct tr_sqp_policy
                 s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
                 s.c_eq, s.c_ineq, s.x.norm(), /*bfgs_reset_count=*/0);
             r.diagnostics.bfgs_skip_count = bfgs_skip_count;
+            r.diagnostics.soc_retry_count = soc_retry_count;
             ++s.iteration;
             return r;
         }
@@ -841,6 +994,7 @@ struct tr_sqp_policy
                 .bfgs_reset_count = 0,
                 .bfgs_skip_count  = bfgs_skip_count,
                 .nan_eval_count   = 0,
+                .soc_retry_count  = soc_retry_count,
             },
         };
     }
