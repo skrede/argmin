@@ -173,30 +173,44 @@ struct tr_sqp_policy
     // exploits curvature information from the trial-point residual, not
     // radius expansion).
     //
-    // Default selected empirically by a joint sweep across
-    // (penalty_factor, soc_max_iterations) on the existing HS-suite
-    // acceptance cells (HS026 / HS028 / HS071 / HS076 non-regression +
-    // HS043 closure). The default is 0 (opt-in): every non-trivial
-    // value in the swept {1, 2, 3} grid regressed at least one of the
-    // four pre-existing D-04 cells (HS076 accurate stalls with cv
-    // around 0.1 at soc >= 1; HS071 accurate regresses past the 1%
-    // f_err bar with any pf >= 0.01). soc_max_iterations = 0 disables
-    // the retry entirely; the helper's existing single-step rejection
-    // branch returns a null-step result on the first rejection (pre-SOC
-    // behavior). Consumers studying the SOC retry in isolation, or
-    // tuning the joint (penalty_factor, soc_max_iterations) pair on a
-    // workload class where the existing cells' default acceptance bars
-    // are not load-bearing, opt in via
-    // `policy.options.soc_max_iterations = K`.
+    // Default selected empirically by a widened joint sweep across
+    // (penalty_factor, soc_max_iterations) on:
+    //   - reference cells (non-regression gate): HS026, HS028, HS071,
+    //     HS076 in both sqp_mode variants;
+    //   - closure-target cells: HS024, HS035, HS039, HS040, HS043,
+    //     HS050 in both sqp_mode variants.
     //
-    // Empirical evidence: at (penalty_factor, soc_max_iterations) in
-    // {(0.01, 2), (0.01, 3), ...,(0.30, 3)} the SOC retry closes HS043
-    // from f_err = 51% / cv = 4.49 (pre-SOC baseline) to f_err = 8% /
-    // cv = 0; the residual 8% gap is a slack-mediated motion freeze
-    // arising from the L1-merit treatment of the inequality slack on
-    // this problem class. Strict closure requires a filter-based ratio
-    // test layered on top of the trust-region composite step, which is
-    // out of scope here.
+    // The (penalty_factor=0, soc_max_iterations=0) pair is the unique
+    // configuration in the 20-point grid that preserves every
+    // reference-cell tuple within the per-mode strict bar (1% f_err
+    // and 1e-4 cv for accurate; 5% f_err and 1e-2 cv for fast). Every
+    // non-zero soc_max_iterations regresses HS076 (the SOC retry
+    // perturbs the iterate off the inequality-active manifold); every
+    // non-zero penalty_factor regresses HS026 fast / HS028 fast /
+    // HS071 accurate (the LNP penalty growth drives the augmented
+    // merit weight too high for the line-search bracket on those
+    // cells).
+    //
+    // Individual closure-target cells DO close at non-default
+    // configurations under the same sweep: HS039 accurate at any
+    // pf >= 0.01 paired with soc >= 2; HS040 fast at any pf paired
+    // with soc >= 2; HS050 both modes at (pf=0, soc >= 1). All such
+    // closures cost at least one reference-cell regression, so they
+    // are not eligible to become the default. The cookbook setting
+    // for an HS039-like equality-constraint workload that the
+    // reference cells do not gate is `policy.options.penalty_factor
+    // = 0.01` and `policy.options.soc_max_iterations = 2`; the user
+    // assigns the fields directly if the workload class is suitable.
+    //
+    // soc_max_iterations = 0 disables the retry entirely; the
+    // helper's existing single-step rejection branch returns a
+    // null-step result on the first rejection (pre-SOC behavior).
+    //
+    // Strict closure of the merit-overshoot cell family (HS035 /
+    // HS039 / HS040 / HS043) requires a different fix surface —
+    // filter-based ratio test, interior-point slack barrier, or
+    // v-optimal restoration leg — none of which are in scope of this
+    // knob surface.
     //
     // Reference: Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
     //            8(3):682-706 Section 3.1 (v-optimal restoration shape);
