@@ -4,7 +4,8 @@
 // Drives the trust-region SQP policy across the cross product of:
 //   - penalty_factor:        {0.0, 0.01, 0.05, 0.1, 0.3}
 //   - soc_max_iterations:    {0, 1, 2, 3}
-//   - HS-suite cell:         HS026, HS028, HS043, HS071, HS076
+//   - HS-suite cell:         HS024, HS026, HS028, HS035, HS039, HS040,
+//                            HS043, HS050, HS071, HS076
 //   - mode:                  sqp_mode::accurate, sqp_mode::fast
 //
 // Both knobs are runtime — the harness reuses one Release build of the
@@ -12,35 +13,51 @@
 // `policy.options.soc_max_iterations` per cell. For every
 // (pf, soc_iter, cell, mode) tuple the harness records iterations, final
 // objective, final constraint violation (inf-norm), terminal solver
-// status, wall microseconds, `f_err = |f - f*| / max(|f*|, 1.0)`, the
-// summed SOC retry count across the trajectory, and a
+// status, wall microseconds, `f_err = |f - f*| / max(|f*|, 1.0)`, and a
 // `within_strict_bar` flag derived from the tr_sqp_test.cpp acceptance
 // shapes.
 //
+// The cell axis partitions into two roles:
+//
+//   - Reference cells (non-regression gate): HS026, HS028, HS071, HS076.
+//     These pass under (penalty_factor = 0, soc_max_iterations = 0) at
+//     the current HEAD and must continue to pass under any swept
+//     configuration for that configuration to remain a default
+//     candidate.
+//   - Closure-target cells (improvement axis): HS024, HS035, HS039,
+//     HS040, HS043, HS050. These fail at the per-mode strict bar under
+//     the (0, 0) baseline. The sweep asks whether any swept
+//     configuration closes at least one of them strictly without
+//     regressing the reference set.
+//
 // Joint selection rule (applied in main()):
 //
-//   Step 1 — D-04 hard gate: a (pf, soc_iter) configuration is a Step-1
-//            survivor iff every HS026 / HS028 / HS071 / HS076 cell (both
-//            modes) reports `within_strict_bar = true`.
-//   Step 2 — D-02 strict-pass on HS043: among Step-1 survivors, identify
-//            configurations where HS043 (both modes) also reports
-//            `within_strict_bar = true`. If non-empty, pick the
-//            configuration with the LARGEST penalty_factor (more
-//            aggressive penalty growth) AND the SMALLEST soc_max_iter
-//            (cheapest retry budget); tie-break on the lowest summed
-//            wall on HS043 across modes.
-//   Step 3 — D-03 partial branch: if Step 2 is empty, pick the Step-1
-//            survivor with the lowest HS043 f_err (summed across modes).
-//   Step 4 — Land+revert fallback: if Step 1 is empty (every joint
-//            regresses at least one D-04 cell), report null selection
-//            with the rationale that the SOC retry surgery is
-//            net-negative.
+//   Step 1 — Reference-set gate: a (pf, soc_iter) configuration is a
+//            Step-1 survivor iff every HS026 / HS028 / HS071 / HS076
+//            cell (both modes) reports `within_strict_bar = true`.
+//   Step 2 — Closure-count metric: among Step-1 survivors, count how
+//            many closure-target cells × both modes report
+//            `within_strict_bar = true` at that configuration. Returns
+//            a value in [0, 12].
+//   Step 3 — Improvement-or-hold:
+//             (a) If the configuration with the highest closure_count
+//                 has strictly greater closure_count than (0, 0), select
+//                 that configuration as the new default. Branch label
+//                 "close_>=1_cell". Tie-break on largest penalty_factor,
+//                 then smallest soc_max_iter, then lowest summed wall
+//                 across closure-target cells.
+//             (b) Else if Step-1 has survivors but no closure-count
+//                 improvement over (0, 0), keep (0, 0) as the default
+//                 and tag every non-passing closure-target cell as
+//                 known-failure. Branch label "no_improvement_over_default".
+//             (c) Else if Step-1 is empty (every joint regresses at
+//                 least one reference cell), keep (0, 0). Branch label
+//                 "reference_regression_unavoidable".
 //
 // Output: a single JSON document with a per-cell `by_config` block plus
-// a `selection` block recording the joint disposition (a / b / c).
-// Default output path is `soc_budget_sweep.json` in the current
-// working directory; override with `--output PATH`.
-// Stdout prints a per-row table and the joint disposition.
+// a `selection` block. Default output path is `soc_budget_sweep.json`
+// in the current working directory; override with `--output PATH`.
+// Stdout prints a per-row table and the selection trace.
 //
 // Non-ctest, one-shot. The harness is read-only on argmin; consumers
 // do not pick it up via FetchContent.
@@ -50,7 +67,8 @@
 //            and Mathematical Systems vol. 187, Springer.
 //            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
 //            8(3):682-706 Section 3.3 (adaptive penalty heuristic) +
-//            Section 3.1 (SOC retry shape).
+//            Section 3.1 (SOC retry shape). Nocedal and Wright 2e
+//            Section 18.5 Algorithm 18.4 (Byrd-Omojokun composite step).
 
 #include "argmin/solver/basic_solver.h"
 #include "argmin/solver/sqp_mode.h"
@@ -60,6 +78,7 @@
 #include <Eigen/Core>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -68,6 +87,7 @@
 #include <iomanip>
 #include <ios>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -132,8 +152,25 @@ struct cell_record
 };
 
 // Strict-bar predicate matching the tr_sqp_test.cpp acceptance shapes.
-// HS026 / HS028 use absolute objective bars (f* = 0 for both); HS043 /
-// HS071 / HS076 use relative f_err bars.
+// Per-mode bars are 1% f_err / 1e-4 cv for accurate mode and 5% f_err /
+// 1e-2 cv for fast mode. Cells with f* = 0 use absolute-objective bars
+// because the relative f_err formula is ill-posed at zero.
+//
+// Per-cell bar shapes (matching tr_sqp_test.cpp where the cell exists
+// and the Plan-45 trace-classification table for the new closure-target
+// cells):
+//   - HS024 (f* = -1):       relative-against-1, both modes.
+//   - HS026 (f* = 0):        absolute, both modes.
+//   - HS028 (f* = 0):        absolute (1e-6 accurate, 1e-2 fast) — long
+//                            shallow ridge with relaxed fast-mode bar.
+//   - HS035 (f* = 1/9):      relative-against-|1/9|, both modes.
+//   - HS039 (f* = -1):       relative-against-1, both modes.
+//   - HS040 (f* = -0.25):    relative-against-0.25, both modes.
+//   - HS043 (f* = -44):      relative, both modes.
+//   - HS050 (f* = 0):        absolute (1e-6 accurate, 1e-2 fast),
+//                            mirroring HS028's f* = 0 convention.
+//   - HS071 (f* ~ 17.01):    relative, both modes.
+//   - HS076 (f* ~ -4.68):    relative, both modes.
 bool within_strict_bar(std::string_view problem_name,
                        sqp_mode          mode,
                        double            f,
@@ -142,8 +179,8 @@ bool within_strict_bar(std::string_view problem_name,
 {
     if(problem_name == "hs026")
     {
-        const double bar = (mode == sqp_mode::fast) ? 0.05 : 0.01;
-        const double cv_bar = (mode == sqp_mode::fast) ? 1e-2 : 1e-4;
+        const double bar    = (mode == sqp_mode::fast) ? 0.05  : 0.01;
+        const double cv_bar = (mode == sqp_mode::fast) ? 1e-2  : 1e-4;
         return std::abs(f - 0.0) <= bar && cv < cv_bar;
     }
     if(problem_name == "hs028")
@@ -152,9 +189,21 @@ bool within_strict_bar(std::string_view problem_name,
             return std::abs(f - 0.0) <= 1e-2 && cv < 1e-2;
         return std::abs(f - 0.0) <= 1e-6 && cv < 1e-4;
     }
-    if(problem_name == "hs071" || problem_name == "hs076"
-       || problem_name == "hs043")
+    if(problem_name == "hs050")
     {
+        // HS050 f* = 0; reuse the HS028 absolute-bar convention because
+        // the relative f_err is ill-posed at zero.
+        if(mode == sqp_mode::fast)
+            return std::abs(f - 0.0) <= 1e-2 && cv < 1e-2;
+        return std::abs(f - 0.0) <= 1e-6 && cv < 1e-4;
+    }
+    if(problem_name == "hs024" || problem_name == "hs035"
+       || problem_name == "hs039" || problem_name == "hs040"
+       || problem_name == "hs043" || problem_name == "hs071"
+       || problem_name == "hs076")
+    {
+        // Relative-against-|f*| bar. HS035 uses |f* = 1/9|, HS040 uses
+        // |f* = 0.25|, and the rest use |f*| at its native magnitude.
         const double f_err = std::abs(f - f_star) / std::abs(f_star);
         if(mode == sqp_mode::fast)
             return f_err < 0.05 && cv < 1e-2;
@@ -255,16 +304,27 @@ void run_cell_block(const std::string& problem_name,
     out_blocks.push_back(std::move(fst_block));
 }
 
+// Cell-name partitioning for the selection rule. The reference set is
+// the existing-passing cells under (pf=0, soc=0); the closure-target
+// set is the failing cells routed to this sweep.
+constexpr std::string_view kReferenceCells[] = {
+    "hs026", "hs028", "hs071", "hs076"};
+constexpr std::string_view kClosureTargets[] = {
+    "hs024", "hs035", "hs039", "hs040", "hs043", "hs050"};
+constexpr std::string_view kModes[] = {"accurate", "fast"};
+
 struct selection
 {
     std::optional<double>      penalty_factor;
     std::optional<std::size_t> soc_max_iter;
-    std::string                branch;        // "a", "b", or "c"
+    std::string                branch;        // see selection rule
+    std::size_t                closure_count{0};
     std::string                rationale;
 };
 
 void write_json(const std::vector<cell_block>& blocks,
                 const selection&               sel,
+                const std::vector<std::tuple<double, std::size_t, std::size_t, bool>>& closure_count_grid,
                 std::string_view               output_path,
                 std::string_view               build_type,
                 std::string_view               head_sha)
@@ -296,6 +356,22 @@ void write_json(const std::vector<cell_block>& blocks,
     }
     out << "]\n";
     out << "  },\n";
+
+    // Cell-role partitioning for downstream consumers.
+    out << "  \"reference_cells\": [";
+    for(std::size_t i = 0; i < std::size(kReferenceCells); ++i)
+    {
+        if(i) out << ", ";
+        out << "\"" << kReferenceCells[i] << "\"";
+    }
+    out << "],\n";
+    out << "  \"closure_targets\": [";
+    for(std::size_t i = 0; i < std::size(kClosureTargets); ++i)
+    {
+        if(i) out << ", ";
+        out << "\"" << kClosureTargets[i] << "\"";
+    }
+    out << "],\n";
 
     out << "  \"cells\": [\n";
     for(std::size_t b = 0; b < blocks.size(); ++b)
@@ -332,14 +408,43 @@ void write_json(const std::vector<cell_block>& blocks,
     }
     out << "  ],\n";
 
+    // Per-(pf, soc) closure-count summary; downstream MD consumes this.
+    out << "  \"closure_count_by_config\": [\n";
+    for(std::size_t i = 0; i < closure_count_grid.size(); ++i)
+    {
+        const auto& [pf, soc, cnt, passes_ref] = closure_count_grid[i];
+        out << "    {\"pf\": " << fmt_num(pf)
+            << ", \"soc\": " << soc
+            << ", \"closure_count\": " << cnt
+            << ", \"passes_reference_gate\": " << (passes_ref ? "true" : "false")
+            << "}";
+        if(i + 1 < closure_count_grid.size()) out << ",";
+        out << "\n";
+    }
+    out << "  ],\n";
+
     out << "  \"selection\": {\n";
-    out << "    \"d04_gate_cells\": [\"hs026\", \"hs028\", \"hs071\", \"hs076\"],\n";
+    out << "    \"reference_cells\": [";
+    for(std::size_t i = 0; i < std::size(kReferenceCells); ++i)
+    {
+        if(i) out << ", ";
+        out << "\"" << kReferenceCells[i] << "\"";
+    }
+    out << "],\n";
+    out << "    \"closure_targets\": [";
+    for(std::size_t i = 0; i < std::size(kClosureTargets); ++i)
+    {
+        if(i) out << ", ";
+        out << "\"" << kClosureTargets[i] << "\"";
+    }
+    out << "],\n";
     out << "    \"branch\": \"" << sel.branch << "\",\n";
-    out << "    \"selected_penalty_factor\": ";
+    out << "    \"closure_count\": " << sel.closure_count << ",\n";
+    out << "    \"penalty_factor\": ";
     if(sel.penalty_factor) out << fmt_num(*sel.penalty_factor);
     else                   out << "null";
     out << ",\n";
-    out << "    \"selected_soc_max_iter\": ";
+    out << "    \"soc_max_iter\": ";
     if(sel.soc_max_iter) out << *sel.soc_max_iter;
     else                 out << "null";
     out << ",\n";
@@ -397,12 +502,25 @@ int main(int argc, char** argv)
         }
         else if(a == "--help" || a == "-h")
         {
-            std::cout << "soc_budget_sweep: drive tr_sqp_policy across "
-                         "the joint (penalty_factor, soc_max_iter) grid on "
-                         "HS026/HS028/HS043/HS071/HS076 (accurate + fast).\n"
-                         "  --output PATH       JSON output path\n"
-                         "  --build-type S      label only\n"
-                         "  --head-sha S        label only\n";
+            std::cout <<
+                "soc_budget_sweep: drive tr_sqp_policy across the joint\n"
+                "  (penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3},\n"
+                "   soc_max_iterations in {0, 1, 2, 3}) grid on the\n"
+                "  HS-suite cells:\n"
+                "    - reference (non-regression gate): HS026, HS028, HS071, HS076\n"
+                "    - closure targets (improvement axis): HS024, HS035, HS039,\n"
+                "      HS040, HS043, HS050\n"
+                "  in both accurate and fast sqp_mode.\n"
+                "\n"
+                "Selection rule: a configuration that strictly improves the\n"
+                "closure-count over (pf=0, soc=0) while preserving the\n"
+                "reference set becomes the new default. Otherwise (0, 0)\n"
+                "stays as the opt-in-zero default and non-passing closure\n"
+                "targets are tagged known-failure.\n"
+                "\n"
+                "  --output PATH       JSON output path\n"
+                "  --build-type S      label only\n"
+                "  --head-sha S        label only\n";
             return 0;
         }
         else
@@ -414,17 +532,28 @@ int main(int argc, char** argv)
 
     std::vector<cell_block> blocks;
 
+    using hs024_t = argmin::hs024<>;
     using hs026_t = argmin::hs026<>;
     using hs028_t = argmin::hs028<>;
+    using hs035_t = argmin::hs035<>;
+    using hs039_t = argmin::hs039<>;
+    using hs040_t = argmin::hs040<>;
     using hs043_t = argmin::hs043<>;
+    using hs050_t = argmin::hs050<>;
     using hs071_t = argmin::hs071<>;
     using hs076_t = argmin::hs076<>;
 
-    hs026_t p026; hs028_t p028; hs043_t p043; hs071_t p071; hs076_t p076;
+    hs024_t p024; hs026_t p026; hs028_t p028; hs035_t p035; hs039_t p039;
+    hs040_t p040; hs043_t p043; hs050_t p050; hs071_t p071; hs076_t p076;
 
-    // Per-problem max_iterations matches tr_sqp_test.cpp setup. HS028
-    // gets 500 (long shallow ridge on the joint slack-augmented primal);
-    // the rest get 200.
+    // Per-problem max_iterations matches the existing tr_sqp_test.cpp
+    // convention. HS028 gets 500 (long shallow ridge on the joint
+    // slack-augmented primal); the rest get 200.
+    run_cell_block<
+        tr_sqp_policy<hs024_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<hs024_t::problem_dimension, sqp_mode::fast>>(
+        "hs024", static_cast<double>(p024.optimal_value()), 200, p024, blocks);
+
     run_cell_block<
         tr_sqp_policy<hs026_t::problem_dimension, sqp_mode::accurate>,
         tr_sqp_policy<hs026_t::problem_dimension, sqp_mode::fast>>(
@@ -436,9 +565,29 @@ int main(int argc, char** argv)
         "hs028", static_cast<double>(p028.optimal_value()), 500, p028, blocks);
 
     run_cell_block<
+        tr_sqp_policy<hs035_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<hs035_t::problem_dimension, sqp_mode::fast>>(
+        "hs035", static_cast<double>(p035.optimal_value()), 200, p035, blocks);
+
+    run_cell_block<
+        tr_sqp_policy<hs039_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<hs039_t::problem_dimension, sqp_mode::fast>>(
+        "hs039", static_cast<double>(p039.optimal_value()), 200, p039, blocks);
+
+    run_cell_block<
+        tr_sqp_policy<hs040_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<hs040_t::problem_dimension, sqp_mode::fast>>(
+        "hs040", static_cast<double>(p040.optimal_value()), 200, p040, blocks);
+
+    run_cell_block<
         tr_sqp_policy<hs043_t::problem_dimension, sqp_mode::accurate>,
         tr_sqp_policy<hs043_t::problem_dimension, sqp_mode::fast>>(
         "hs043", static_cast<double>(p043.optimal_value()), 200, p043, blocks);
+
+    run_cell_block<
+        tr_sqp_policy<hs050_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<hs050_t::problem_dimension, sqp_mode::fast>>(
+        "hs050", static_cast<double>(p050.optimal_value()), 200, p050, blocks);
 
     run_cell_block<
         tr_sqp_policy<hs071_t::problem_dimension, sqp_mode::accurate>,
@@ -472,13 +621,9 @@ int main(int argc, char** argv)
         }
     }
 
-    // Joint selection rule. See header comment.
-    static constexpr std::string_view kD04Cells[] = {
-        "hs026", "hs028", "hs071", "hs076"};
-    static constexpr std::string_view kModes[] = {"accurate", "fast"};
-
-    auto passes_d04 = [&](double pf, std::size_t soc) -> bool {
-        for(auto cell : kD04Cells)
+    // Selection rule predicates and metric.
+    auto passes_reference_gate = [&](double pf, std::size_t soc) -> bool {
+        for(auto cell : kReferenceCells)
         {
             for(auto mode : kModes)
             {
@@ -492,173 +637,163 @@ int main(int argc, char** argv)
         return true;
     };
 
-    auto passes_hs043 = [&](double pf, std::size_t soc) -> bool {
-        for(auto mode : kModes)
+    auto closure_count = [&](double pf, std::size_t soc) -> std::size_t {
+        std::size_t cnt = 0;
+        for(auto cell : kClosureTargets)
         {
-            const cell_block* blk = find_block(blocks, "hs043", mode);
-            if(!blk) return false;
-            const cell_record* rec = find_record(*blk, pf, soc);
-            if(!rec) return false;
-            if(!rec->within_strict_bar) return false;
+            for(auto mode : kModes)
+            {
+                const cell_block* blk = find_block(blocks, cell, mode);
+                if(!blk) continue;
+                const cell_record* rec = find_record(*blk, pf, soc);
+                if(!rec) continue;
+                if(rec->within_strict_bar) ++cnt;
+            }
         }
-        return true;
+        return cnt;
     };
 
-    auto hs043_f_err_sum = [&](double pf, std::size_t soc) -> double {
+    auto closure_target_wall_sum = [&](double pf, std::size_t soc) -> double {
         double sum = 0.0;
-        for(auto mode : kModes)
+        for(auto cell : kClosureTargets)
         {
-            const cell_block* blk = find_block(blocks, "hs043", mode);
-            if(!blk) return std::numeric_limits<double>::infinity();
-            const cell_record* rec = find_record(*blk, pf, soc);
-            if(!rec) return std::numeric_limits<double>::infinity();
-            sum += rec->f_err;
+            for(auto mode : kModes)
+            {
+                const cell_block* blk = find_block(blocks, cell, mode);
+                if(!blk) continue;
+                const cell_record* rec = find_record(*blk, pf, soc);
+                if(!rec) continue;
+                sum += rec->wall_us;
+            }
         }
         return sum;
     };
 
-    auto hs043_wall_sum = [&](double pf, std::size_t soc) -> double {
-        double sum = 0.0;
-        for(auto mode : kModes)
-        {
-            const cell_block* blk = find_block(blocks, "hs043", mode);
-            if(!blk) return std::numeric_limits<double>::infinity();
-            const cell_record* rec = find_record(*blk, pf, soc);
-            if(!rec) return std::numeric_limits<double>::infinity();
-            sum += rec->wall_us;
-        }
-        return sum;
-    };
-
-    // Print the D-04 gate table.
-    std::cout << "\nD-04 gate (hs026/hs028/hs071/hs076, both modes):\n";
+    // Print the reference gate + closure-count table.
+    std::cout << "\nReference gate (hs026/hs028/hs071/hs076 both modes within strict bar)\n";
+    std::cout << "    + closure_count over hs024/hs035/hs039/hs040/hs043/hs050 both modes:\n";
+    std::vector<std::tuple<double, std::size_t, std::size_t, bool>> closure_count_grid;
     for(double pf : kPenaltyFactors)
     {
         for(std::size_t soc : kSocMaxIters)
         {
+            const bool        ref_ok = passes_reference_gate(pf, soc);
+            const std::size_t cnt    = closure_count(pf, soc);
+            closure_count_grid.emplace_back(pf, soc, cnt, ref_ok);
             std::cout << "  pf=" << std::fixed << std::setprecision(2) << pf
-                      << " soc=" << soc << " : "
-                      << (passes_d04(pf, soc) ? "PASS" : "REGRESS")
-                      << " ; hs043 D-02="
-                      << (passes_hs043(pf, soc) ? "PASS" : "FAIL")
-                      << " ; hs043 f_err_sum="
-                      << std::scientific << std::setprecision(3)
-                      << hs043_f_err_sum(pf, soc) << "\n";
+                      << " soc=" << soc << " : reference="
+                      << (ref_ok ? "PASS   " : "REGRESS")
+                      << " ; closure_count=" << cnt << " / 12\n";
         }
     }
 
-    // Step 2: D-02 strict-pass winners.
+    // Step-1 survivors of the reference gate.
     struct candidate
     {
         double      pf;
         std::size_t soc;
+        std::size_t closure_count;
     };
-    std::vector<candidate> d02_winners;
+    std::vector<candidate> survivors;
     for(double pf : kPenaltyFactors)
     {
         for(std::size_t soc : kSocMaxIters)
         {
-            if(passes_d04(pf, soc) && passes_hs043(pf, soc))
-                d02_winners.push_back({pf, soc});
+            if(passes_reference_gate(pf, soc))
+            {
+                survivors.push_back({pf, soc, closure_count(pf, soc)});
+            }
         }
     }
 
+    const std::size_t baseline_closure = closure_count(0.0, 0);
+    const bool baseline_passes_reference = passes_reference_gate(0.0, 0);
+
     selection sel;
-    if(!d02_winners.empty())
+    if(survivors.empty())
     {
-        // Largest pf, smallest soc; tie-break on lowest hs043 wall sum.
-        auto best = d02_winners[0];
-        for(const auto& c : d02_winners)
+        // Step-1 empty: every joint regresses at least one reference
+        // cell. Hold (0, 0) and tag every non-passing closure target.
+        sel.branch         = "reference_regression_unavoidable";
+        sel.closure_count  = baseline_passes_reference ? baseline_closure : 0;
+        sel.rationale =
+            "Every swept configuration regresses at least one reference "
+            "cell in {hs026, hs028, hs071, hs076} on at least one mode. "
+            "The opt-in-zero default (penalty_factor=0, soc_max_iterations=0) "
+            "stays; non-passing closure-target cells are tagged "
+            "known-failure with their trace-derived mechanism family.";
+        std::cout << "\nBranch (reference_regression_unavoidable): no configuration "
+                     "holds the reference gate. Keep (0, 0).\n";
+    }
+    else
+    {
+        // Step 2: find the survivor with the highest closure_count.
+        candidate best = survivors[0];
+        for(const auto& c : survivors)
         {
-            const bool better_pf  = c.pf  >  best.pf;
-            const bool same_pf    = c.pf  == best.pf;
-            const bool better_soc = c.soc <  best.soc;
-            const bool same_soc   = c.soc == best.soc;
-            if(better_pf
-               || (same_pf && better_soc)
-               || (same_pf && same_soc
-                   && hs043_wall_sum(c.pf, c.soc)
-                      < hs043_wall_sum(best.pf, best.soc)))
+            const bool better_count = c.closure_count > best.closure_count;
+            const bool same_count   = c.closure_count == best.closure_count;
+            const bool better_pf    = c.pf > best.pf;
+            const bool same_pf      = c.pf == best.pf;
+            const bool better_soc   = c.soc < best.soc;
+            const bool same_soc     = c.soc == best.soc;
+            if(better_count
+               || (same_count && better_pf)
+               || (same_count && same_pf && better_soc)
+               || (same_count && same_pf && same_soc
+                   && closure_target_wall_sum(c.pf, c.soc)
+                      < closure_target_wall_sum(best.pf, best.soc)))
             {
                 best = c;
             }
         }
-        sel.penalty_factor = best.pf;
-        sel.soc_max_iter   = best.soc;
-        sel.branch         = "a";
-        std::ostringstream os;
-        os << "Joint (penalty_factor, soc_max_iter) = (" << std::fixed
-           << std::setprecision(2) << best.pf << ", " << best.soc
-           << ") closes HS043 under D-02 strict bars across modes and "
-              "preserves D-04 on {hs026, hs028, hs071, hs076}. Selected "
-              "as the largest non-regressing penalty_factor paired with "
-              "the smallest non-regressing soc_max_iter.";
-        sel.rationale = os.str();
-        std::cout << "\nBranch (a) D-02 strict-pass: pf=" << std::fixed
-                  << std::setprecision(2) << best.pf
-                  << "  soc=" << best.soc << "\n";
-    }
-    else
-    {
-        // Step 3: D-03 partial branch. Among Step-1 survivors (D-04 only),
-        // pick the one with the lowest HS043 f_err sum.
-        std::vector<candidate> d04_survivors;
-        for(double pf : kPenaltyFactors)
+
+        if(best.closure_count > baseline_closure)
         {
-            for(std::size_t soc : kSocMaxIters)
-            {
-                if(passes_d04(pf, soc))
-                    d04_survivors.push_back({pf, soc});
-            }
-        }
-        if(!d04_survivors.empty())
-        {
-            auto best = d04_survivors[0];
-            double best_f_err = hs043_f_err_sum(best.pf, best.soc);
-            for(const auto& c : d04_survivors)
-            {
-                const double fe = hs043_f_err_sum(c.pf, c.soc);
-                if(fe < best_f_err)
-                {
-                    best = c;
-                    best_f_err = fe;
-                }
-            }
             sel.penalty_factor = best.pf;
             sel.soc_max_iter   = best.soc;
-            sel.branch         = "b";
+            sel.branch         = "close_>=1_cell";
+            sel.closure_count  = best.closure_count;
             std::ostringstream os;
-            os << "Joint (penalty_factor, soc_max_iter) = (" << std::fixed
-               << std::setprecision(2) << best.pf << ", " << best.soc
-               << ") preserves D-04 on {hs026, hs028, hs071, hs076} and "
-                  "minimizes HS043 f_err (residual " << std::scientific
-               << std::setprecision(3) << best_f_err << " summed across "
-                  "modes); strict D-02 bars on HS043 are not met. The "
-                  "HS043 [!shouldfail] tag stays in place pending the "
-                  "filter_trsqp_policy structural closure.";
+            os << "Joint (penalty_factor, soc_max_iterations) = ("
+               << std::fixed << std::setprecision(2) << best.pf << ", "
+               << best.soc << ") closes " << best.closure_count
+               << " closure-target cell-mode tuples (vs " << baseline_closure
+               << " at the (0, 0) baseline) while preserving the reference "
+                  "set on hs026/hs028/hs071/hs076 across modes. Selected "
+                  "as the highest-closure-count survivor, tie-broken by "
+                  "largest penalty_factor then smallest soc_max_iterations.";
             sel.rationale = os.str();
-            std::cout << "\nBranch (b) D-03 partial-closure: pf=" << std::fixed
+            std::cout << "\nBranch (close_>=1_cell): pf=" << std::fixed
                       << std::setprecision(2) << best.pf
                       << "  soc=" << best.soc
-                      << "  hs043_f_err_sum=" << std::scientific
-                      << std::setprecision(3) << best_f_err << "\n";
+                      << "  closure_count=" << best.closure_count
+                      << "  baseline_closure=" << baseline_closure << "\n";
         }
         else
         {
-            // Step 4: land+revert fallback. Every joint regresses at
-            // least one D-04 cell.
-            sel.branch = "c";
-            sel.rationale =
-                "NO (penalty_factor, soc_max_iter) configuration in the "
-                "swept grid holds D-04 on {hs026, hs028, hs071, hs076} "
-                "across modes. The SOC retry surgery is net-negative as "
-                "a standalone landing; the two-commit land+revert "
-                "protocol applies. The plan-2 LNP plumbing stays in tree.";
-            std::cout << "\nBranch (c) land+revert: every joint regresses D-04.\n";
+            sel.branch        = "no_improvement_over_default";
+            sel.closure_count = baseline_closure;
+            std::ostringstream os;
+            os << "No configuration in the swept grid strictly improves "
+                  "the closure_count over the (0, 0) baseline (best survivor "
+                  "closure_count = " << best.closure_count
+               << ", baseline closure_count = " << baseline_closure
+               << "). The opt-in-zero default (penalty_factor=0, "
+                  "soc_max_iterations=0) stays; non-passing closure-target "
+                  "cells are tagged known-failure with their trace-derived "
+                  "mechanism family.";
+            sel.rationale = os.str();
+            std::cout << "\nBranch (no_improvement_over_default): best survivor "
+                         "pf=" << std::fixed << std::setprecision(2) << best.pf
+                      << " soc=" << best.soc
+                      << " closure_count=" << best.closure_count
+                      << " <= baseline " << baseline_closure
+                      << ". Keep (0, 0).\n";
         }
     }
 
-    write_json(blocks, sel, output_path, build_type, head_sha);
+    write_json(blocks, sel, closure_count_grid, output_path, build_type, head_sha);
     std::cout << "\nJSON written to: " << output_path << "\n";
     return 0;
 }
