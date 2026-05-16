@@ -217,6 +217,102 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
+// HS024 is documented as a known-failure cell for the current
+// trust-region SQP implementation. Empirical behavior at the
+// current HEAD:
+//   - x0 = (1, 0.5) is strictly feasible: c_ineq = (0.0774, 1.866,
+//     4.134), all box-bounds x >= 0 are strictly satisfied
+//     (1 > 0, 0.5 > 0), the slack lower bound s >= 0 is strictly
+//     satisfied (s_slack = c_ineq, all positive).
+//   - Objective gradient at x0 is g = (-0.01069, -0.0802) (in the
+//     1 / (27 sqrt 3) scaling); ||g||_inf = 0.0802 is the iter-0
+//     KKT residual.
+//   - The composite-step helper hits the c.norm() == 0 short-circuit
+//     in the normal-step leg (byrd_omojokun.h:215) and zeroes v_buf;
+//     Steihaug-CG then computes a non-trivial tangential candidate
+//     u_buf of norm ||g|| ~ 0.081 (no bound activation truncates
+//     the projection at byrd_omojokun.h:317-342).
+//   - The L2-merit augmented predicted-reduction at
+//     byrd_omojokun.h:369-371 evaluates to
+//       predicted = +0.5 ||g||^2  +  penalty * (||c|| - ||A p + c||)
+//                 = +0.00322      +  1.0 * (0 - 0.224)
+//                 ~= -0.221  (strictly NEGATIVE)
+//     because the linearized inequality residual A p + c is non-zero
+//     even though the actual cv stays at zero (the unconstrained
+//     Newton direction perturbs the linearization off the feasibility
+//     manifold). Per Nocedal and Wright 2e eq. 18.43-18.50 the L2
+//     merit is monotone non-decreasing in ||A p + c|| / ||c|| at a
+//     strictly-feasible iterate, so any non-zero step is rejected by
+//     the ratio test (rho = actual / pred_guarded < tr_eta_1).
+//   - The radius shrinks by tr_shrink_factor = 0.25 per rejected iter
+//     for 20 iterations, after which the iter cap fires; if the iter
+//     budget were larger, Section M of the policy would emit
+//     solver_status::trust_region_step_rejected once the radius
+//     dropped below min_trust_radius = 1e-12.
+//
+// The underlying weakness is the L2-merit ratio test on strictly-
+// feasible iterates with non-trivial unconstrained Newton direction:
+// the predicted reduction's feasibility leg (penalty * (||c|| -
+// ||A p + c||)) is structurally negative for any step that perturbs
+// the linearization, regardless of objective descent. The bounded
+// (initial_penalty, penalty_factor) knob surface cannot fix this --
+// a penalty sweep down to 1e-8 either preserves the strictly-feasible
+// stall (penalty >= ~0.05) or flips the cell into an infeasible stall
+// at cv ~ 0.7 (penalty <= ~0.01), neither of which closes to f*.
+// Closure requires either a filter-based ratio test (accept on
+// objective-OR-feasibility improvement, layered on top of the
+// composite step) or an interior-point-style log-barrier on the
+// slack leg; both restructure the helper around a new acceptance
+// criterion and are out of scope for an in-policy fix.
+//
+// The [!shouldfail] tag captures the current state without removing
+// the cell: a future fix that makes HS024 converge will register as
+// "should-have-failed-but-passed" and surface the regression signal
+// for the closure milestone.
+//
+// Reference: Hock & Schittkowski (1981), Problem 24; Nocedal and
+//            Wright 2e Section 18.5 Algorithm 18.4 (Byrd-Omojokun
+//            composite step) and eq. 18.43-18.50 (L2-merit
+//            predicted-reduction shape); Lalee, Nocedal, Plantenga
+//            1998 SIAM J. Optim. 8(3):682-706 Section 3.3 (augmented
+//            merit + penalty update).
+TEMPLATE_TEST_CASE_SIG(
+    "tr_sqp HS024 (parametric on mode) [known failure]",
+    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    ((typename Policy), Policy),
+    tr_sqp_policy_accurate<hs024<>::problem_dimension>,
+    tr_sqp_policy_fast<hs024<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs024<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS024 optimum: f* = -1 at (3, sqrt(3)).
+    const double f_star = problem.optimal_value();
+    const double f_err  = std::abs(result.objective_value - f_star)
+                          / std::abs(f_star);
+
+    if constexpr(policy_t::mode_ == sqp_mode::fast)
+    {
+        CHECK(f_err < 0.05);
+        CHECK(solver.constraint_violation() < 1e-2);
+    }
+    else
+    {
+        CHECK(f_err < 0.01);
+        CHECK(solver.constraint_violation() < 1e-4);
+    }
+}
+
 TEMPLATE_TEST_CASE_SIG(
     "tr_sqp HS028 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
