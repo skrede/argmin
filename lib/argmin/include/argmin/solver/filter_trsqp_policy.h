@@ -738,12 +738,17 @@ struct filter_trsqp_policy
                         argmin::detail::tr_shrink_factor * delta_input};
             }
 
-            // Standard rho-rule radius update against the OBJECTIVE-leg
-            // predicted reduction.
+            // Filter-accepted step: radius rule is decoupled from
+            // acceptance. Expand on a very-successful objective-leg
+            // prediction (rho > tr_eta_2 with the step at the trust
+            // boundary); otherwise hold the radius. The shrink path
+            // belongs only on filter rejection (handled above at the
+            // !acceptable branch), not on h-type feasibility-progress
+            // accepts where the objective worsens.
             //
             // Reference: Fletcher, Leyffer, Toint 2002 Section 3 --
-            //            filter-TR uses unweighted f-predicted in the
-            //            radius rule.
+            //            filter-TR decouples acceptance from radius
+            //            update.
             const double actual_obj = f_old - bo.f_new;
             const double pred_guarded = std::max(
                 bo.predicted, std::numeric_limits<double>::epsilon());
@@ -757,9 +762,6 @@ struct filter_trsqp_policy
                 new_delta = std::min(
                     argmin::detail::tr_expand_factor * delta_input,
                     argmin::detail::tr_delta_max);
-            else if(rho < argmin::detail::tr_eta_1)
-                new_delta =
-                    argmin::detail::tr_shrink_factor * delta_input;
             else
                 new_delta = delta_input;
 
