@@ -35,6 +35,7 @@
             "binaryDir": "${sourceDir}/build/release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
+                "ARGMIN_BUILD_TESTS": "ON",
                 "ARGMIN_CMAKE_FETCH_DEPS": "ON"
             }
         },
@@ -131,6 +132,13 @@
         {
             "name": "dev-full",
             "configurePreset": "dev-full",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "release",
+            "configurePreset": "release",
             "output": {
                 "outputOnFailure": true
             }

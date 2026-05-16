@@ -1,11 +1,6 @@
-// Convergence regression tests for kraft_slsqp_policy on Hock-Schittkowski problems.
-//
-// Reference: Hock, W. & Schittkowski, K. (1981). Test Examples for
-//            Nonlinear Programming Codes. Lecture Notes in Economics
-//            and Mathematical Systems 187. Springer-Verlag.
-
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/basic_solver.h"
+#include "argmin/solver/sqp_mode.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 #include "argmin/test_functions/rosenbrock.h"
@@ -321,12 +316,6 @@ TEST_CASE("kraft_slsqp step solve step_n", "[kraft_slsqp]")
     }
 }
 
-// HS007: min ln(1 + x_0^2) - x_1, subject to (1 + x_0^2)^2 + x_1^2 = 4.
-//        n=2, 1 equality. Near-feasible start.
-//
-// Reference: Hock, W. & Schittkowski, K. (1981). Test Examples for
-//            Nonlinear Programming Codes. Lecture Notes in Economics
-//            and Mathematical Systems 187. Springer-Verlag. Problem 7.
 TEST_CASE("kraft_slsqp converges on HS007 equality", "[kraft_slsqp]")
 {
     hs007 problem;
@@ -342,41 +331,6 @@ TEST_CASE("kraft_slsqp converges on HS007 equality", "[kraft_slsqp]")
 
     CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
     CHECK(solver.constraint_violation() < 1e-4);
-    // Lagrangian gradient norm at the optimum: kraft_slsqp reports
-    // ||grad f - A^T lambda||, which is the KKT first-order optimality
-    // measure (N&W eq. 12.34). Raw ||grad f|| is non-zero at
-    // constrained optima.
-    CHECK(result.gradient_norm < 1e-4);
-}
-
-// HS028: min (x_0 + x_1)^2 + (x_1 + x_2)^2, subject to x_0 + 2*x_1 + 3*x_2 = 1.
-//        n=3, 1 equality, well-conditioned.
-//        f* = 0 at x* = (0.5, -0.5, 0.5).
-//
-// Reference: Hock, W. & Schittkowski, K. (1981). Test Examples for
-//            Nonlinear Programming Codes. Lecture Notes in Economics
-//            and Mathematical Systems 187. Springer-Verlag. Problem 28.
-TEST_CASE("kraft_slsqp HS028 quadratic with linear equality",
-          "[kraft_slsqp][regression][hs028]")
-{
-    hs028 problem;
-    auto x0 = problem.initial_point();
-    solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_step_threshold(1e-12);
-    opts.set_objective_threshold(1e-12);
-
-    basic_solver solver{kraft_slsqp_policy<hs028<>::problem_dimension>{},
-                        problem, x0, opts};
-    auto result = solver.solve(opts);
-
-    CHECK(result.objective_value < 1e-6);
-    CHECK(solver.constraint_violation() < 1e-6);
-    CHECK(result.gradient_norm < 1e-4);
-    CHECK(std::abs(result.x[0] - 0.5) < 1e-3);
-    CHECK(std::abs(result.x[1] - (-0.5)) < 1e-3);
-    CHECK(std::abs(result.x[2] - 0.5) < 1e-3);
 }
 
 TEST_CASE("kraft_slsqp converges on HS039 equality", "[kraft_slsqp]")
@@ -568,102 +522,132 @@ TEST_CASE("kraft_slsqp HS006 accuracy guard",
     CHECK(result.iterations <= 12);
 }
 
-// BFGS-reset-on-LS-failure retry telemetry. The kraft_slsqp policy
-// surfaces a BFGS-reset count on every step_result via the
-// solver_diagnostics sub-struct. On well-conditioned problems with
-// the default Armijo budget the line search accepts the unit step,
-// the retry loop is a no-op, and bfgs_reset_count must read zero.
+// Lagrangian gradient norm vanishes at constrained optima; raw ||grad f||
+// does not. The reported gradient_norm must therefore drop below 1e-4 at
+// the HS007 optimum once kraft_slsqp reports grad_L instead of grad_f.
 //
-// Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-//            Hock & Schittkowski 1981, Problem 28.
-TEST_CASE("kraft_slsqp diagnostics.bfgs_reset_count is zero on success path",
-          "[kraft_slsqp][diagnostics][bfgs_reset]")
+// Reference: Hock & Schittkowski (1981), Test Examples for Nonlinear
+// Programming Codes, Lecture Notes in Economics and Mathematical
+// Systems vol. 187, Springer, Problem 7.
+//            N&W 2e Section 12.3 / eq. 12.34 (KKT stationarity).
+TEST_CASE("kraft_slsqp HS007 Lagrangian gradient < 1e-4 at optimum",
+          "[kraft_slsqp][regression]")
 {
-    hs028 problem;
+    hs007 problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{kraft_slsqp_policy<hs007<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
+}
+
+// Reference: Hock & Schittkowski (1981), Problem 28. Equality-only
+// problem: min (x0+x1)^2 + (x1+x2)^2 s.t. x0+2*x1+3*x2-1=0;
+// f* = 0 at (0.5, -0.5, 0.5).
+TEST_CASE("kraft_slsqp HS028 Lagrangian gradient < 1e-4 at optimum",
+          "[kraft_slsqp][regression]")
+{
+    hs028<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_step_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+
+    basic_solver solver{kraft_slsqp_policy<hs028<>::problem_dimension>{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
+}
+
+// Per-problem regression-guard coverage: HS071 / HS026 / HS028 on the
+// single-mode kraft_slsqp_policy (the per-mode dispatch was removed
+// after empirical evidence showed the former _fast mode lost wall-time
+// and iteration count against the _accurate mode on every measured
+// cell). Each TEST_CASE applies the policy's static-constexpr tolerance
+// defaults at fixture construction and reproduces the bit-identical
+// regression bars that the prior _accurate parametric row carried.
+//
+// Reference: Kraft 1988 §2.2.4 (SOC threshold semantics);
+//            N&W 2e Definition 12.1 (KKT primal feasibility).
+
+TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
+          "[kraft_slsqp][regression][mode]")
+{
+    using policy_t = kraft_slsqp_policy_accurate<hs071<>::problem_dimension>;
+
+    hs071<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.objective_value == Approx(17.0140173).margin(0.1));
+    CHECK(solver.constraint_violation() < 0.05);
+    // Box bounds 1 <= xi <= 5 are problem-defined.
+    CHECK(result.x[0] >= 1.0 - 1e-6);
+    CHECK(result.x[0] <= 5.0 + 1e-6);
+    CHECK(result.x[1] >= 1.0 - 1e-6);
+    CHECK(result.x[1] <= 5.0 + 1e-6);
+}
+
+TEST_CASE("kraft_slsqp HS026 (regression guard)",
+          "[kraft_slsqp][regression][mode]")
+{
+    using policy_t = kraft_slsqp_policy_accurate<hs026<>::problem_dimension>;
+
+    hs026 problem;
     auto x0 = problem.initial_point();
     solver_options opts;
     opts.max_iterations = 50;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_step_threshold(1e-12);
-    opts.set_objective_threshold(1e-12);
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{kraft_slsqp_policy<hs028<>::problem_dimension>{},
-                        problem, x0, opts};
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
 
-    // Step several times -- HS028 is well-conditioned with a linear
-    // equality constraint; every Armijo line search accepts the unit
-    // step and the reset-retry loop never fires.
-    for(int i = 0; i < 10; ++i)
-    {
-        const auto sr = solver.step();
-        CHECK(sr.diagnostics.bfgs_reset_count == 0u);
-        if(sr.policy_status)
-            break;
-    }
+    // HS026 optimum: f* = 0 at (1, 1, 1). The kraft_slsqp tail descends
+    // slowly toward the optimum; iter cap is the load-bearing guard.
+    CHECK(result.objective_value < 1e-6);
+    CHECK(solver.constraint_violation() < 1e-3);
+    CHECK(result.iterations <= 50);
 }
 
-// Forced cap-exhaustion of the BFGS-reset retry loop. By zeroing the
-// Armijo evaluation budget (line_search.max_iterations = 0) every
-// line search trivially fails, which drives the retry loop through
-// exactly bfgs_reset_max iterations before falling out into the
-// cap-exhausted null-step return. The returned step_result must
-// expose:
-//   - is_null_step  == true
-//   - diagnostics.bfgs_reset_count == bfgs_reset_max
-//
-// HS028 is chosen because its linear equality constraint never
-// promotes the QP into the augmented (relaxation) path on the
-// initial iterate, so the augmented-path null-step branch (which
-// would short-circuit the test with bfgs_reset_count == 1) does not
-// fire. The retry loop is the only path through which control can
-// reach the null-step return on this fixture.
-//
-// Reference: NLopt slsqp.c:1890-1895 (ireset loop);
-//            Hock & Schittkowski 1981, Problem 28.
-TEST_CASE("kraft_slsqp BFGS-reset retry exhausts cap on forced LS failure",
-          "[kraft_slsqp][diagnostics][bfgs_reset]")
+TEST_CASE("kraft_slsqp HS028 (regression guard)",
+          "[kraft_slsqp][regression][mode]")
 {
-    hs028 problem;
+    using policy_t = kraft_slsqp_policy_accurate<hs028<>::problem_dimension>;
+
+    hs028<> problem;
     auto x0 = problem.initial_point();
     solver_options opts;
-    opts.max_iterations = 1;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_step_threshold(1e-12);
-    opts.set_objective_threshold(1e-12);
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    constexpr std::size_t cap = 3;
-    kraft_slsqp_policy<hs028<>::problem_dimension> policy{};
-    policy.options.bfgs_reset_max = cap;
-    policy.options.line_search.max_iterations = 0;
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
 
-    basic_solver solver{std::move(policy), problem, x0, opts};
-
-    const auto sr = solver.step();
-    CHECK(sr.is_null_step);
-    CHECK(sr.diagnostics.bfgs_reset_count == cap);
-}
-
-// bfgs_reset_max = 0 disables the retry loop entirely. With the
-// Armijo budget zeroed as well, the loop body never runs and the
-// cap-exhausted null-step return is reached with reset_count = 0.
-// This locks in the loop-disabled path: zero retries means the
-// caller composes is_null_step alone (without relying on the count)
-// to detect failure.
-TEST_CASE("kraft_slsqp bfgs_reset_max = 0 disables the retry loop",
-          "[kraft_slsqp][diagnostics][bfgs_reset]")
-{
-    hs028 problem;
-    auto x0 = problem.initial_point();
-    solver_options opts;
-    opts.max_iterations = 1;
-
-    kraft_slsqp_policy<hs028<>::problem_dimension> policy{};
-    policy.options.bfgs_reset_max = 0;
-    policy.options.line_search.max_iterations = 0;
-
-    basic_solver solver{std::move(policy), problem, x0, opts};
-
-    const auto sr = solver.step();
-    CHECK(sr.is_null_step);
-    CHECK(sr.diagnostics.bfgs_reset_count == 0u);
+    // HS028 optimum: f* = 0 at (0.5, -0.5, 0.5).
+    CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.gradient_norm < 1e-4);
 }

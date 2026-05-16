@@ -168,7 +168,7 @@ TEST_CASE("cmaes_policy: sigma scales from bounds", "[cmaes]")
     opts.set_step_threshold(1e-15);
 
     // No explicit sigma -- should scale from bound range (10.0 / 3.0).
-    cmaes_policy policy;
+    cmaes_policy<> policy;
     policy.options.seed = 42u;
 
     basic_solver solver{policy, problem, x0, opts};
@@ -191,7 +191,7 @@ TEST_CASE("cmaes_policy: lambda minimum for bounded problems", "[cmaes]")
     opts.set_step_threshold(1e-15);
 
     // No explicit lambda -- should enforce 4*N = 8 minimum for bounded N=2.
-    cmaes_policy policy;
+    cmaes_policy<> policy;
     policy.options.seed = 42u;
 
     basic_solver solver{policy, problem, x0, opts};
@@ -210,7 +210,7 @@ TEST_CASE("cmaes_policy: solves bounded Rastrigin", "[cmaes]")
     opts.set_step_threshold(1e-15);
 
     // Default options -- sigma and lambda should auto-scale from bounds.
-    cmaes_policy policy;
+    cmaes_policy<> policy;
     policy.options.seed = 42u;
 
     basic_solver solver{policy, problem, x0, opts};

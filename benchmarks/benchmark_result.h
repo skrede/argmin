@@ -29,6 +29,7 @@ struct benchmark_result
     double final_objective{};
     double known_optimum{};
     double accuracy{};
+    double constraint_violation{};
     std::string_view status;
 };
 
@@ -36,19 +37,19 @@ struct benchmark_result
 {
     return "solver,library,problem,class,dimension,seed,mode,solver_iters,"
            "f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,"
-           "known_optimum,accuracy,status";
+           "known_optimum,accuracy,constraint_violation,status";
 }
 
 [[nodiscard]] inline auto csv_row(const benchmark_result& r) -> std::string
 {
-    return std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{:.15e},{:.15e},{:.15e},{}",
+    return std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{:.15e},{:.15e},{:.15e},{:.15e},{}",
                        r.solver, r.library, r.problem,
                        to_string(r.pclass), r.dimension,
                        r.seed, r.mode, r.solver_iters,
                        r.f_evals, r.g_evals, r.c_evals, r.J_evals,
                        r.wall_time_us,
                        r.final_objective, r.known_optimum,
-                       r.accuracy, r.status);
+                       r.accuracy, r.constraint_violation, r.status);
 }
 
 }

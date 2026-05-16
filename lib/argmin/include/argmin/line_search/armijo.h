@@ -4,6 +4,23 @@
 #include "argmin/line_search/result.h"
 #include "argmin/line_search/options.h"
 
+#include <cmath>
+
+// NaN/Inf gate semantics for the Armijo backtracker
+//
+// The backtracker tests `std::isfinite(phi_alpha)` before the Armijo
+// sufficient-decrease comparison so a non-finite trial-iterate
+// triggers a backtrack (alpha *= rho; continue) rather than crossing
+// an IEEE-754 ordered comparison. The hand-rolled inline LS loops in
+// the four line-search SQP policies mirror this pattern at their
+// respective trial-iterate evaluation sites. The gate is enabled in
+// both fast and accurate modes; NaN should never be silently
+// consumed.
+//
+// Reference: Ipopt IpIpoptCalculatedQuantities::f_or_grad_returned_nan
+//            (NaN detection model; argmin variant is Armijo-only —
+//             QP and SOC sanitize layers are out of scope).
+
 namespace argmin
 {
 
@@ -37,6 +54,14 @@ template <typename Phi, typename Scalar = double>
     {
         Scalar phi_alpha = phi(alpha);
         ++result.evaluations;
+
+        // NaN/Inf gate: see header comment above for semantics and reference.
+        if(!std::isfinite(phi_alpha))
+        {
+            ++result.diagnostics.nan_eval_count;
+            alpha *= opts.rho;
+            continue;
+        }
 
         result.alpha = alpha;
         result.value = phi_alpha;

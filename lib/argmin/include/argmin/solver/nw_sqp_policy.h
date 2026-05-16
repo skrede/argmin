@@ -9,7 +9,7 @@
 //   3. Backtracking line search on L1 merit function (Section 18.5)
 //   4. Damped BFGS update of Hessian of Lagrangian (Procedure 18.2)
 //
-// The policy satisfies the basic_solver contract via deducing this (D-14).
+// The policy satisfies the basic_solver contract via deducing this.
 // Requires: differentiable<Problem> && constrained<Problem>.
 // Box bounds: detected via if constexpr(bound_constrained<Problem>).
 //
@@ -18,15 +18,22 @@
 //            globalization per Section 18.5-18.6.
 
 #include "argmin/detail/lagrangian.h"
-#include "argmin/detail/dense_ldl_bfgs.h"
+#include "argmin/detail/sqp_common.h"
 #include "argmin/detail/kkt_residual.h"
-#include "argmin/detail/merit_function.h"
 #include "argmin/detail/active_set_qp.h"
+#include "argmin/detail/dense_ldl_bfgs.h"
+#include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
+
 #include "argmin/options/qp_options.h"
+
 #include "argmin/line_search/options.h"
+
 #include "argmin/result/step_result.h"
+
 #include "argmin/solver/options.h"
+#include "argmin/solver/sqp_mode.h"
+
 #include "argmin/types.h"
 
 #include "argmin/formulation/concepts.h"
@@ -38,11 +45,20 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <optional>
 
 namespace argmin
 {
 
+// argmin variant: single-mode line-search SQP policy (N&W lineage). The
+//                 earlier per-mode dispatch (fast / accurate as a closed-set
+//                 NTTP) is removed here: empirical bench measurements showed
+//                 `fast` lost wall-time AND iteration count against
+//                 `accurate` on every measured cell across the entire
+//                 line-search SQP family. The strictly-worse mode has been
+//                 removed; the defaults below are the former `accurate`
+//                 values.
+//
+// Reference: N&W 2e Algorithm 18.3 (line-search SQP framework).
 template <int N = dynamic_dimension>
 struct nw_sqp_policy
 {
@@ -51,52 +67,120 @@ struct nw_sqp_policy
     template <int M>
     using rebind = nw_sqp_policy<M>;
 
+    static constexpr double default_soc_violation_threshold = 1e-3;
+    static constexpr double default_gradient_tolerance = 1e-8;
+    static constexpr double default_step_tolerance_rel = 1e-12;
+    static constexpr double default_feasibility_tolerance = 1e-6;
+
+    // Armijo backtracking budget (NLopt-parity sustained backtracking
+    // before declaring exhaustion).
+    //
+    // Reference: NLopt slsqp.c:1803-2189 (slsqpb_ outer line-search budget).
+    static constexpr std::uint16_t default_line_search_max_iterations = 40;
+
+    // Armijo sufficient-decrease parameter (Wolfe-condition convention).
+    //
+    // Reference: N&W 2e §3.1 (Wolfe-condition convention);
+    //            NLopt slsqp.c default c1 = 1e-4.
+    static constexpr double default_armijo_c1 = 1e-4;
+
+    // Armijo backtracking shrink factor (NLopt slsqp.c default).
+    //
+    // Reference: NLopt slsqp.c default rho = 0.5;
+    //            N&W 2e §3.5 (backtracking shrink factor range 0.1..0.9).
+    static constexpr double default_armijo_rho = 0.5;
+
+    // BFGS Hessian-reset retry cap on line-search exhaustion. Matches
+    // NLopt slsqp.c's ireset semantics with up to 5 retries.
+    //
+    // Reference: NLopt slsqp.c:1890-1895 (ireset retry pattern).
+    static constexpr std::size_t default_bfgs_reset_max = 5;
+
+    // QP inner solver iteration cap (NLopt slsqp.c LSI/LSEI cascade
+    // convention).
+    //
+    // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
+    static constexpr std::uint16_t default_qp_max_iterations = 200;
+
+    // QP convergence tolerance (NLopt's double-precision baseline).
+    //
+    // Reference: Kraft 1988 §3.5 (QP convergence acc^2 threshold).
+    static constexpr double default_qp_tolerance = 1e-12;
+
+    // L1-merit penalty parameter ceiling. The bump_sigma_for_descent
+    // helper caps sigma at this value to prevent unbounded penalty growth
+    // on problems with degenerate constraint Jacobians (NLopt-parity
+    // headroom).
+    //
+    // Reference: N&W 2e §18.3 + Procedure 18.2 (L1-merit penalty cap).
+    static constexpr double default_sigma_max = 1e10;
+
+    // Active-set Lagrange-multiplier re-estimation stride. The post-step
+    // KKT-leg invokes compute_kkt_multipliers_active_set only when
+    // (s.iteration % multiplier_reest_every_k == 0); on the skip path
+    // the prior step's s.bufs.kkt_lambda_eq_buf / s.bufs.kkt_mu_ineq_buf
+    // are reused (state-resident, zero-alloc). k=1 recomputes every
+    // step (the previous unconditional re-estimation behavior); k>1
+    // trades a stationarity-leg lag of ~k steps for k-1x savings on the
+    // per-step ColPivHouseholderQR run by the helper.
+    //
+    // Reference: Bertsekas 1996 §4.2 (stale-multiplier reuse rationale);
+    //            N&W 2e §18.3 + Algorithm 18.3 (working-set
+    //            identification, eq. 18.15).
+    static constexpr std::size_t default_multiplier_reest_every_k = 1;
+
     struct options_type
     {
-        line_search_options line_search{};  // Replaces hardcoded c1=1e-4, rho=0.5, max_iter=30
-        qp_options qp{};                   // QP subproblem params
+        // Embedded line-search params. Designated-initializer order follows
+        // line_search_options field-declaration order (c1, c2, rho,
+        // max_alpha, max_iterations); skipped designators (c2, max_alpha)
+        // keep their line_search_options-side defaults (0.9 and 1.0).
+        line_search_options line_search{
+            .c1 = default_armijo_c1,
+            .rho = default_armijo_rho,
+            .max_iterations = default_line_search_max_iterations,
+        };
 
-        // Trigger threshold for the Maratos second-order correction
-        // (SOC) retry. The SOC fires only when the Armijo line search
-        // rejects the unit step AND the iter-0 (L1) constraint
-        // violation exceeds this threshold; a small violation does not
-        // produce enough Maratos curvature to justify the extra QP
-        // re-solve. Default 1e-3 matches kraft_slsqp's SOC trigger
-        // baseline. The optional shape lets callers express
-        // "default" (empty) distinctly from "disabled by zero" (set
-        // to 0.0 -> SOC always fires when ls fails).
+        // QP subproblem params. Brace-initialized from the policy's
+        // static-constexpr defaults so options.qp.{max_iterations,
+        // tolerance} reflect the shipped policy contract.
+        qp_options qp{
+            .max_iterations = default_qp_max_iterations,
+            .tolerance = default_qp_tolerance,
+        };
+        // Maratos second-order correction retry threshold. SOC fires when
+        // Armijo rejects the trial step AND the constraint violation at x_k
+        // exceeds this threshold. Below the threshold the linearization is
+        // consistent enough that the SOC step adds work without materially
+        // changing the search direction. Direct-field-default form
+        // (mirrors kraft_slsqp_policy::options_type::soc_violation_threshold).
         //
-        // Field name aligns with the filter-family policies
-        // (filter_slsqp_policy, filter_nw_sqp_policy) which already
-        // expose soc_violation_threshold; nw_sqp follows the filter
-        // family naming because it is architecturally closer to
-        // filter_nw_sqp than to kraft_slsqp.
-        //
-        // Reference: Kraft, D. (1988). DFVLR-FB 88-28, §2.2.4
-        //            (second-order correction).
-        //            N&W 2e Section 18.3 (Maratos effect).
-        std::optional<double> soc_violation_threshold{};
-
-        // BFGS-reset-on-LS-failure cap. On Armijo line-search
-        // exhaustion (with the Maratos SOC retry already attempted
-        // and failed), reset the BFGS Hessian to identity (Shanno-
-        // rescaled on next push) and retry the QP + Armijo + SOC
-        // together up to bfgs_reset_max times. After exhaustion,
-        // return a null step with diagnostics.bfgs_reset_count
-        // populated. Default 5 = NLopt slsqp.c:1890-1895 ireset
-        // parity.
-        //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
-        // argmin variant: retry covers QP + Armijo + SOC together
-        // (per-step recovery); SOC alone is the per-Armijo recovery
-        // for Maratos curvature. The two retries compose so that on
-        // Armijo+SOC failure a fresh BFGS Hessian gets a chance to
-        // produce a different QP direction that itself runs through
-        // Armijo + SOC.
-        // Adopted from: NLopt slsqp.c:1890-1895.
-        std::size_t bfgs_reset_max{5};
-
+        // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (SOC threshold);
+        //            N&W 2e §18.3 (Maratos effect).
+        double soc_violation_threshold{default_soc_violation_threshold};
         std::uint16_t stall_window{50};
+
+        // BFGS-reset retry cap on line-search exhaustion. On Armijo
+        // failure (after SOC retry), the policy resets the BFGS Hessian
+        // to identity and re-solves the QP, repeating up to
+        // bfgs_reset_max times before returning a null-step.
+        //
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
+        //            NLopt slsqp.c:1890-1895 (ireset retry pattern);
+        //            N&W 2e Section 3.3 (recovery from non-descent).
+        //
+        // argmin variant: per-policy options field; cascade-free
+        //                 (no new solver_status enum entry).
+        std::size_t bfgs_reset_max{default_bfgs_reset_max};
+
+        // Active-set multiplier re-estimation stride (cf. the per-policy
+        // default_multiplier_reest_every_k constexpr above). At
+        // (s.iteration % k == 0) the post-step KKT-leg invokes the
+        // active-set LS helper; otherwise the prior step's
+        // s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf are reused.
+        // A value of 0 is treated as 1 (re-estimate every step) by the read-site clamp.
+        std::size_t multiplier_reest_every_k{default_multiplier_reest_every_k};
     };
 
     options_type options{};
@@ -125,20 +209,33 @@ struct nw_sqp_policy
         Eigen::Vector<double, N> lower;
         Eigen::Vector<double, N> upper;
         Eigen::VectorXd lambda;
-        // Pre-allocated constraint workspace (sized in init(), reused in step())
-        // Eliminates per-step heap allocations for constraint evaluation.
-        Eigen::VectorXd c_all;
-        Eigen::MatrixXd J_all;
-        Eigen::VectorXd c_eq_trial;
-        Eigen::VectorXd c_ineq_trial;
-        Eigen::MatrixXd J_all_old;  // Saved Jacobian at x_k for BFGS update (N&W eq. 18.13)
-        Eigen::VectorXd b_eq_workspace;     // QP RHS workspace
-        Eigen::VectorXd b_ineq_workspace;   // QP RHS workspace
+
+        // Cross-policy state-resident buffer struct. Consolidates the
+        // per-step / per-line-search trial buffers, the BFGS curvature-pair
+        // buffers, the constraint-axis workspaces (c_all, c_trial,
+        // b_eq / b_ineq, lam / lam_eq / lam_ineq, kkt_lambda_eq /
+        // kkt_mu_ineq), and the constraint Jacobian pair (J_all and the
+        // J_all_old cached copy that supports the BFGS curvature-pair on
+        // the post-step Jacobian re-evaluation path). nw_sqp does not use
+        // the SOC-retry b_eq_soc_buf / b_ineq_soc_buf or the kraft-only
+        // pre-factored Hessian E_buf / f_buf members; those remain present
+        // (zero-sized after resize on the n_eq / n_ineq dynamic axes) for
+        // cross-policy struct consistency.
+        //
+        // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers
+        //               (in-tree precedent: generalizes the per-policy
+        //                *_buf state-resident layout).
+        // Reference: N&W 2e Section 18.
+        //
+        // argmin variant: cross-policy state-resident buffer struct.
+        argmin::detail::sqp_state_buffers<double, N> bufs;
+
         Eigen::MatrixXd AAt_workspace;      // Feasibility LDLT workspace
         Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;  // Reusable factorization
+        Eigen::VectorXd w_workspace;        // LDLT solve in-place buffer
         double objective_value{};
         double sigma{1.0};
-        // Canonical BFGS operator per D-01. References: Shanno 1978 (N&W eq. 6.20); N&W Section 7.2 (L-BFGS); Kraft 1988 DFVLR-FB 88-28 Section 2.2.3.
+        // Canonical BFGS operator. References: Shanno 1978 (N&W eq. 6.20); N&W Section 7.2 (L-BFGS); Kraft 1988 DFVLR-FB 88-28 Section 2.2.3.
         detail::dense_ldl_bfgs<double, N> hessian;
         detail::active_set_qp_solver<double, N> qp_solver;
         std::uint32_t iteration{0};
@@ -166,8 +263,6 @@ struct nw_sqp_policy
         static_assert(constrained<Problem>,
                       "nw_sqp_policy requires constrained<Problem>");
 
-        constexpr int M = state_type<Problem>::M;
-
         const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
@@ -181,32 +276,32 @@ struct nw_sqp_policy
         s.objective_value = problem.value(x0);
         problem.gradient(x0, s.g);
 
-        // Pre-allocate constraint workspace (sized once, reused in step()).
-        // Follows the kraft_slsqp pre-allocation pattern.
-        s.c_all.resize(m);
-        s.J_all.resize(m, n);
-        s.J_all_old.setZero(m, n);
-        s.c_eq_trial.resize(s.n_eq);
-        s.c_ineq_trial.resize(s.n_ineq);
-        s.b_eq_workspace.resize(s.n_eq);
-        s.b_ineq_workspace.resize(s.n_ineq);
+        // Cross-policy state-resident buffer struct: sizes all per-step
+        // workspaces (n-sized iterate / direction / curvature-pair buffers,
+        // m-sized constraint workspaces, and the constraint Jacobian pair)
+        // in one call. nw_sqp does not consume the kraft-only E_buf / f_buf
+        // pre-factored Hessian members; those remain default-resized.
+        s.bufs.resize(n, s.n_eq, s.n_ineq);
+        s.bufs.J_all_old.setZero(m, n);
+
         if(s.n_eq > 0)
         {
             s.AAt_workspace.resize(s.n_eq, s.n_eq);
             s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(s.n_eq);
+            s.w_workspace.resize(s.n_eq);
         }
 
         // Evaluate constraints: single vector, split into eq/ineq
         if(m > 0)
-            problem.constraints(x0, s.c_all);
-        s.c_eq = s.c_all.head(s.n_eq);
-        s.c_ineq = s.c_all.tail(s.n_ineq);
+            problem.constraints(x0, s.bufs.c_all);
+        s.c_eq = s.bufs.c_all.head(s.n_eq);
+        s.c_ineq = s.bufs.c_all.tail(s.n_ineq);
 
         // Evaluate Jacobian: single matrix, split into eq/ineq
         if(m > 0)
-            problem.constraint_jacobian(x0, s.J_all);
-        s.J_eq = s.J_all.topRows(s.n_eq);
-        s.J_ineq = s.J_all.bottomRows(s.n_ineq);
+            problem.constraint_jacobian(x0, s.bufs.J_all);
+        s.J_eq = s.bufs.J_all.topRows(s.n_eq);
+        s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
 
         // Box bounds
         if constexpr(bound_constrained<Problem>)
@@ -248,103 +343,150 @@ struct nw_sqp_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        constexpr int M = state_type<P>::M;
-
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
 
-        // BFGS-reset-on-LS-failure retry loop (NLopt slsqp.c:1890-1895
-        // ireset pattern). On Armijo + SOC exhaustion, reset the BFGS
-        // Hessian to identity (Shanno-rescaled on next push) and retry
-        // the QP + Armijo + SOC together up to bfgs_reset_max times.
-        // After exhaustion, return a null step with
-        // diagnostics.bfgs_reset_count populated so the caller can
-        // detect cap exhaustion via:
-        //   is_null_step && diagnostics.bfgs_reset_count >= options.bfgs_reset_max
+        // BFGS-reset retry loop on line-search exhaustion (NLopt
+        // slsqp.c:1890-1895 ireset parity). Wraps QP solve -> cold-start
+        // sigma -> zero-step null-step -> sigma update -> Armijo line
+        // search -> Maratos SOC retry. On line-search exhaustion (Armijo
+        // and SOC both fail to find a decreasing step), reset the BFGS
+        // Hessian to identity and re-solve the QP, bounded by
+        // options.bfgs_reset_max. On cap exhaustion, return a null-step
+        // with diagnostics.bfgs_reset_count populated.
         //
-        // Replaces the previous fall-through-on-LS-failure behaviour
-        // where nw_sqp would update BFGS curvature from a step that
-        // never satisfied merit decrease.
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h::step retry-loop
+        //               pattern (in-tree precedent).
+        //               NLopt slsqp.c:1890-1895 (ireset retry pattern,
+        //               max=5).
+        // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
+        //            fallback);
+        //            N&W 2e Section 3.3 (recovery from non-descent).
         //
-        // argmin variant: retry covers QP + Armijo + SOC together
-        // (per-step recovery); SOC alone is the per-Armijo recovery
-        // for Maratos curvature. The two retries compose so that on
-        // Armijo+SOC failure a fresh BFGS Hessian gets a chance to
-        // produce a different QP direction that itself runs through
-        // Armijo + SOC.
-        //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
-        // Adopted from: NLopt slsqp.c:1890-1895.
-
-        // Hoisted state observed by the BFGS-update block AFTER the
-        // retry loop closes. Declaring these at function scope (not
-        // inside the loop body) keeps the post-loop block unchanged
-        // while letting the loop iterate on QP + Armijo + SOC.
+        // argmin variant: cap is options.bfgs_reset_max (default 5);
+        //                 status on exhaustion is is_null_step + the
+        //                 diagnostics.bfgs_reset_count counter; rationale:
+        //                 cascade-free design (no new solver_status
+        //                 enumerant required).
         std::size_t reset_count = 0;
-        bool ls_success = false;
-        bool zero_step_detected = false;
+        const std::size_t reset_max = options.bfgs_reset_max;
+        // Fast-mode BFGS-update skip counter. Increments on the policy-level
+        // hessian.push() guard whenever the curvature pair has s^T y <= 0
+        // and the policy mode dispatches to the skip branch (the Powell-
+        // damped helper path is bypassed). Always zero in accurate mode.
+        std::size_t bfgs_skip_count = 0;
+        // Armijo NaN/Inf recovery counter aggregated across the main inline
+        // line search and the SOC retry inline loop. nw_sqp hand-rolls the
+        // Armijo backtracking loop (does not call line_search/armijo.h)
+        // because the inline-merit pattern avoids a per-backtrack VectorXd
+        // materialisation; this counter mirrors armijo()'s diagnostic on
+        // the hand-rolled paths. Incremented inline when a trial-iterate
+        // evaluation returns non-finite f_trial or constraint values; the
+        // backtracker shrinks alpha and continues. Both modes enable the
+        // gate.
+        //
+        // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
+        std::size_t nan_eval_count = 0;
+
+        // Loop-carried variables that survive the retry block into the
+        // post-loop accept-step block. The cold-start sigma calibration
+        // is gated on s.iteration == 0 AND the per-step cold_start_done
+        // flag; subsequent retries within the same step() call do NOT
+        // advance s.iteration, so without the flag the cold-start would
+        // re-fire on each retry (max-monotone and therefore idempotent
+        // but wasteful and obscures intent). detail::update_penalty
+        // below is similarly monotone-up.
         detail::qp_result<double, N> qp;
-        Eigen::Vector<double, N> p = Eigen::Vector<double, N>::Zero(n);
-        Eigen::Vector<double, N> x_trial = s.x;
-        double f_trial{s.objective_value};
-        Eigen::VectorXd lambda_null;        // populated only on zero_step_detected path
-        Eigen::VectorXd lambda_eq_null;     // populated only on zero_step_detected path
-        Eigen::VectorXd mu_ineq_null;       // populated only on zero_step_detected path
-        double grad_L_null_norm{0.0};       // populated only on zero_step_detected path
-        double kkt_null{0.0};               // populated only on zero_step_detected path
+        Eigen::Vector<double, N>& p = s.bufs.p_buf;
+        Eigen::VectorXd& lambda_new = s.bufs.lam_buf;
+        lambda_new.setZero(m);
+        double phi0 = 0.0;
+        double dphi0 = 0.0;
+        double alpha = 1.0;
+        Eigen::Vector<double, N>& x_trial = s.bufs.x_trial_buf;
+        x_trial = s.x;
+        double f_trial = s.objective_value;
+        bool ls_success = false;
+        // iter-0 cold start: fires at most once per outer step()
+        // invocation; gates the calibrate_initial_penalty call against
+        // re-firing on every BFGS-reset retry within the same step().
+        bool cold_start_done = false;
 
         for(;;)
         {
+
         // --- 1. Build and solve QP subproblem (N&W eq. 18.12) ---
         // Pass s.J_eq / s.J_ineq directly into the QP solver — the
         // state matrices already match the Matrix<Scalar, Meq, N> shape
         // the templated solve() expects, so no local A_eq/A_ineq copy
         // is needed.
-        s.b_eq_workspace = -s.c_eq;
-        s.b_ineq_workspace = -s.c_ineq;
+        s.bufs.b_eq_workspace = -s.c_eq;
+        s.bufs.b_ineq_workspace = -s.c_ineq;
 
         Eigen::Vector<double, N> p0 = Eigen::Vector<double, N>::Zero(n);
         if(s.n_eq > 0 && s.c_eq.norm() > 1e-15)
         {
-            // Solve (J_eq J_eq^T) w = b_eq, then p0 = J_eq^T w
-            // J*J^T is PSD but may be rank-deficient with numerical noise;
-            // LDLT handles indefinite/singular cases that LLT cannot.
-            s.AAt_workspace.noalias() = s.J_eq * s.J_eq.transpose();
-            s.ldlt_feasibility.compute(s.AAt_workspace);
-            auto w = s.ldlt_feasibility.solve(s.b_eq_workspace);
-            p0.noalias() = s.J_eq.transpose() * w;
+            // Adopted from: argmin/detail/sqp_common.h equality_feasibility_warmstart
+            //               (in-tree precedent — helper hoists this very pattern from nw_sqp).
+            // Reference: N&W 2e Section 18.3 (equality-feasibility step).
+            //
+            // argmin variant: caller-owned AAt + LDLT workspaces; nw_sqp is the
+            //                 canonical extraction site for this helper.
+            argmin::detail::equality_feasibility_warmstart<double, N, Eigen::Dynamic>(
+                s.J_eq, s.bufs.b_eq_workspace,
+                s.AAt_workspace, s.ldlt_feasibility, s.w_workspace, p0);
         }
 
-        // Use embedded QP options with defaults
-        argmin::qp_options qp_opts;
-        qp_opts.max_iterations = options.qp.max_iterations.has_value()
-            ? options.qp.max_iterations
-            : std::optional<std::uint16_t>{200};
-        qp_opts.tolerance = options.qp.tolerance.has_value()
-            ? options.qp.tolerance
-            : std::optional<double>{1e-12};
+        // Embedded QP options pass through directly: qp_options is plain-type
+        // and brace-initialized with the accurate-mode fallback literals at
+        // the struct level (200, 1e-12). Per-policy per-mode wiring happens
+        // at options_type instantiation time, no read-site indirection.
+        const argmin::qp_options& qp_opts = options.qp;
 
         bool has_finite_bounds = has_finite_box(s.lower, s.upper);
 
         if(has_finite_bounds)
         {
-            Eigen::Vector<double, N> p_lower = (Eigen::Vector<double, N>(s.lower) -
-                                                  Eigen::Vector<double, N>(s.x)).eval();
-            Eigen::Vector<double, N> p_upper = (Eigen::Vector<double, N>(s.upper) -
-                                                  Eigen::Vector<double, N>(s.x)).eval();
-            p0 = p0.cwiseMax(p_lower).cwiseMin(p_upper);
+            s.bufs.p_lo_buf.noalias() = s.lower - s.x;
+            s.bufs.p_hi_buf.noalias() = s.upper - s.x;
+            p0 = p0.cwiseMax(s.bufs.p_lo_buf).cwiseMin(s.bufs.p_hi_buf);
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
-                                   s.J_eq, s.b_eq_workspace, s.J_ineq, s.b_ineq_workspace,
-                                   p_lower, p_upper, p0, qp_opts);
+                                   s.J_eq, s.bufs.b_eq_workspace, s.J_ineq, s.bufs.b_ineq_workspace,
+                                   s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0, qp_opts);
         }
         else
         {
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
-                                   s.J_eq, s.b_eq_workspace, s.J_ineq, s.b_ineq_workspace,
+                                   s.J_eq, s.bufs.b_eq_workspace, s.J_ineq, s.bufs.b_ineq_workspace,
                                    p0, qp_opts);
         }
 
         p = qp.x;
+
+        // Cold-start mu calibration. After the first QP solve, sigma must
+        // dominate the multiplier scale to make the SQP direction a descent
+        // direction for the L1 merit (N&W eq. 18.36). Default sigma = 1.0
+        // underestimates the required penalty on HS071-class problems with
+        // large multipliers, causing iter-0 line-search rejection.
+        //
+        // Adopted from: NLopt slsqp.c iter-0 implicit cold-start from QP lambda.
+        // Reference: N&W 2e eq. 18.36; Kraft 1988 §2.2.6.
+        //            iter-0 cold-start: qp-lambda-driven sigma seed bounds
+        //            the first-step rejection rate by ensuring sigma
+        //            dominates the multiplier scale at the start of the
+        //            run.
+        //
+        // argmin variant: gated on s.iteration == 0 AND the per-step
+        //                 cold_start_done flag declared above the retry
+        //                 loop. iter-0 cold start fires at most once per
+        //                 outer step() invocation; the existing
+        //                 detail::update_penalty call below is
+        //                 max-monotone and therefore idempotent.
+        if(!cold_start_done && s.iteration == 0 && qp.lambda.size() > 0)
+        {
+            s.sigma = detail::calibrate_initial_penalty(s.sigma, qp.lambda);
+            cold_start_done = true;
+        }
 
         // Zero step check.
         //
@@ -367,60 +509,60 @@ struct nw_sqp_policy
         // Null-step branch: x_{k+1} = x_k so QP multipliers are
         // measured at the current iterate; no staleness. Multiplier
         // re-estimation not applied here.
-        //
-        // Inside the BFGS-reset retry loop: a post-reset zero
-        // direction is either a true KKT point (the reset confirms
-        // it) or active-set degeneracy that no further reset can
-        // resolve. Capture the diagnostic state and break out of the
-        // loop; the post-loop block returns the null-step result with
-        // diagnostics.bfgs_reset_count = reset_count populated.
         if(p.norm() < 1e-15)
         {
-            lambda_null = Eigen::VectorXd::Zero(m);
-            if(m > 0 && qp.lambda.size() >= m)
-                lambda_null = qp.lambda.head(m);
-            else if(m > 0 && qp.lambda.size() > 0)
-                lambda_null.head(qp.lambda.size()) = qp.lambda;
+            // Adopted from: argmin/detail/sqp_common.h extract_qp_multipliers.
+            s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+            s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
+            if(m > 0 && qp.lambda.size() > 0)
+            {
+                argmin::detail::extract_qp_multipliers<double>(
+                    qp.lambda, s.n_eq, s.n_ineq,
+                    s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+            }
 
-            lambda_eq_null = s.n_eq > 0
-                ? Eigen::VectorXd(lambda_null.head(s.n_eq))
-                : Eigen::VectorXd::Zero(0);
-            mu_ineq_null = s.n_ineq > 0
-                ? Eigen::VectorXd(lambda_null.segment(s.n_eq, s.n_ineq))
-                : Eigen::VectorXd::Zero(0);
+            // Adopted from: argmin/detail/sqp_common.h null_step_result.
             // Reference: N&W 2e Definition 12.1, eq. 12.34 (full KKT
             //            first-order optimality E-measure).
-            kkt_null = detail::kkt_residual<double,
-                                            Eigen::Dynamic,
-                                            Eigen::Dynamic,
-                                            Eigen::Dynamic>(
-                s.g, s.J_eq, s.J_ineq,
-                lambda_eq_null, mu_ineq_null,
-                s.c_eq, s.c_ineq);
-
-            // Use the CURRENT QP multipliers (lambda_eq_null /
-            // mu_ineq_null) to form the Lagrangian-gradient norm.
-            // The previous lagrangian_gradient_norm(s) call read
-            // s.lambda from the prior successful step, which is stale
-            // on a zero-step bailout and made gradient_tolerance_criterion
-            // fire silently at non-stationary HS071 iterates.
-            grad_L_null_norm = s.g.norm();
+            //
+            // argmin variant: nw_sqp's null-step path overrides the helper's
+            //                 gradient_norm (which uses lpNorm<Infinity>) with
+            //                 the L2 Lagrangian-gradient norm computed against
+            //                 the CURRENT QP multipliers. Pre-refactor in-line
+            //                 code used `grad_L.norm()` (L2); the override
+            //                 preserves bit-identical reporting on the
+            //                 cross-policy step_result consistency suite.
+            auto r = argmin::detail::null_step_result<double, N,
+                                                      Eigen::Dynamic,
+                                                      Eigen::Dynamic>(
+                s.objective_value, s.g, s.J_eq, s.J_ineq,
+                s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
+                s.c_eq, s.c_ineq, s.x.norm(), reset_count);
+            // L2 override: helper reports lpNorm<Infinity>, nw_sqp's prior
+            // in-line code reported L2.
+            double grad_L_null_norm = s.g.norm();
             if(m > 0)
             {
                 Eigen::Vector<double, N> grad_L = s.g;
                 if(s.n_eq > 0)
-                    grad_L.noalias() -= s.J_eq.transpose() * lambda_eq_null;
+                    grad_L.noalias() -= s.J_eq.transpose() * s.bufs.kkt_lambda_eq_buf;
                 if(s.n_ineq > 0)
-                    grad_L.noalias() -= s.J_ineq.transpose() * mu_ineq_null;
+                    grad_L.noalias() -= s.J_ineq.transpose() * s.bufs.kkt_mu_ineq_buf;
                 grad_L_null_norm = grad_L.norm();
             }
-
-            zero_step_detected = true;
-            break;
+            r.gradient_norm = grad_L_null_norm;
+            // Mirror the cap-exhausted exit below: surface the
+            // accumulated NaN-recovery and BFGS-skip counts so the
+            // in-loop null-step return is symmetric with the post-loop
+            // null-step return (the field is a contracted public
+            // diagnostic and the consistency suite asserts on it).
+            r.diagnostics.nan_eval_count = nan_eval_count;
+            r.diagnostics.bfgs_skip_count = bfgs_skip_count;
+            return r;
         }
 
         // --- 2. Extract QP multipliers ---
-        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
+        lambda_new.setZero(m);
         if(m > 0 && qp.lambda.size() >= m)
             lambda_new = qp.lambda.head(m);
         else if(m > 0 && qp.lambda.size() > 0)
@@ -429,60 +571,36 @@ struct nw_sqp_policy
         // --- 3. Update penalty parameter (N&W eq. 18.36) ---
         s.sigma = detail::update_penalty(s.sigma, lambda_new);
 
-        // Iter-0 cold-start calibration of sigma — magnitude-aware
-        // floor guarding against an under-weighted violation term on
-        // objective-dominated initial points. The default cold-start
-        // sigma_0 = 1.0 admits an iter-0 step that satisfies merit-
-        // decrease against a violation term too weak to dominate the
-        // objective, parking the iterate strongly infeasible (HS071
-        // from x_0 = (1, 5, 5, 1) is the canonical witness: lambda is
-        // O(1) but |f_0| / ||c_0||_1 is O(5)). The K-factor floor
-        // computed here is the magnitude-aware companion to the N&W
-        // eq. 18.36 lambda-floor; both are applied at iter-0 and the
-        // steady-state monotone update_penalty call above retains its
-        // delta = 1e-4 margin for iter > 0.
-        //
-        // The c_0_l1 > feasibility-tolerance gate skips the cold-start
-        // when the initial iterate is already (near-)feasible. The
-        // K-factor floor's denominator collapses to its eps regularizer
-        // in that regime and would push sigma to ~K * |f_0| / eps —
-        // catastrophically large on problems like HS026 from
-        // x_0 = (-2.6, 2, 2) which start exactly feasible (c_0 = 0).
-        // The lambda-floor branch of calibrate_initial_penalty is also
-        // unnecessary at exact feasibility because update_penalty's
-        // monotone rule above has already enforced the lambda-bound.
-        //
-        // Reference: N&W 2e Section 18.3 / eq. 18.36 (lambda-floor for
-        //            descent on the L1 merit);
-        //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.6 (sigma
-        //            update rule companion).
-        if(s.iteration == 0 && lambda_new.size() > 0)
-        {
-            const double c_0_l1 =
-                detail::constraint_violation(s.c_eq, s.c_ineq);
-            if(c_0_l1 > 1e-6)
-            {
-                s.sigma = detail::calibrate_initial_penalty(
-                    s.sigma, lambda_new, s.objective_value, c_0_l1);
-            }
-        }
-
         // --- 4. Line search on L1 merit ---
-        double phi0 = detail::l1_merit(s.objective_value,
-                                       s.c_eq, s.c_ineq, s.sigma);
-        double dphi0 = detail::l1_merit_directional_derivative(
-            s.g.dot(p), s.c_eq, s.c_ineq, s.sigma);
+        phi0 = detail::l1_merit(s.objective_value,
+                                s.c_eq, s.c_ineq, s.sigma);
+        // Adopted from: argmin/detail/merit_function.h l1_merit_dphi_h4.
+        // nw_sqp's lineage uses h4 = 1 (no augmented relaxation), so the
+        // helper is bit-identical to the prior l1_merit_directional_derivative
+        // call.
+        const double grad_f_dot_p = s.g.dot(p);
+        dphi0 = argmin::detail::l1_merit_dphi_h4<double>(
+            grad_f_dot_p, s.c_eq, s.c_ineq, s.sigma, /*h4=*/1.0);
 
         // If dphi0 >= 0, the penalty is insufficient for descent.
         // Increase sigma until the SQP direction is a descent direction
         // for the L1 merit function (N&W eq. 18.36).
         if(dphi0 >= 0.0)
         {
-            double grad_f_dot_p = s.g.dot(p);
             double cv = detail::constraint_violation(s.c_eq, s.c_ineq);
             if(cv > 1e-15)
             {
-                s.sigma = std::max(s.sigma, (grad_f_dot_p / cv) + 1.0);
+                // Adopted from: argmin/detail/merit_function.h bump_sigma_for_descent.
+                //
+                // argmin variant: helper guards on h4 > 0 in addition to violation > 0;
+                //                 nw_sqp's prior in-line bump used grad_f_dot_p / cv + 1
+                //                 directly; helper's `abs(grad_f_dot_p) / (violation * h4) + 1`
+                //                 with h4 = 1 reduces to abs(grad_f_dot_p) / cv + 1 — bit-
+                //                 identical for grad_f_dot_p >= 0 (the only branch reached
+                //                 here, since dphi0 >= 0 implies grad_f_dot_p >= sigma * cv > 0).
+                s.sigma = argmin::detail::bump_sigma_for_descent<double>(
+                    s.sigma, grad_f_dot_p, cv, /*h4=*/1.0,
+                    /*sigma_max=*/default_sigma_max);
                 phi0 = detail::l1_merit(s.objective_value,
                                         s.c_eq, s.c_ineq, s.sigma);
                 dphi0 = grad_f_dot_p - s.sigma * cv;
@@ -496,26 +614,16 @@ struct nw_sqp_policy
         }
 
         // Backtracking Armijo on L1 merit using embedded line search options
-        double alpha = 1.0;
+        alpha = 1.0;
         const double ls_c1 = options.line_search.c1;
         const double ls_rho = options.line_search.rho;
         const std::uint16_t max_ls = options.line_search.max_iterations;
-
-        // L1 constraint violation at the iter-start point. Snapshot
-        // here (before x_trial moves) so the SOC trigger gate below
-        // and the Maratos block can both reuse it.
-        const double constraint_viol_0 =
-            detail::constraint_violation(s.c_eq, s.c_ineq);
 
         // Initialize x_trial from s.x so that the post-loop read at
         // s.x = x_trial; is well-defined even in the pathological
         // max_ls == 0 configuration. GCC 15 flags an uninitialized SSE
         // packet load through this path if x_trial is left default-
         // constructed after only being assigned inside the loop body.
-        // x_trial / f_trial / ls_success are hoisted to function
-        // scope above (BFGS-reset retry loop variables); reset to the
-        // current iterate at every retry so the merit / SOC blocks
-        // see a fresh trial baseline.
         x_trial = s.x;
         f_trial = s.objective_value;
         ls_success = false;
@@ -529,14 +637,37 @@ struct nw_sqp_policy
 
             f_trial = s.problem->value(x_trial);
             if(m > 0)
-                s.problem->constraints(x_trial, s.c_all);
-            s.c_eq_trial = s.c_all.head(s.n_eq);
-            s.c_ineq_trial = s.c_all.tail(s.n_ineq);
-            double phi_trial = detail::l1_merit(f_trial, s.c_eq_trial,
-                                                s.c_ineq_trial, s.sigma);
+                s.problem->constraints(x_trial, s.bufs.c_all);
+
+            // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
+            //               Hand-rolled inline-merit path mirrors that
+            //               semantics — non-finite f_trial or constraints
+            //               trigger backtrack rather than crossing the L1
+            //               merit comparison. Both modes enable the gate.
+            if(!std::isfinite(f_trial)
+               || (m > 0 && !s.bufs.c_all.allFinite()))
+            {
+                ++nan_eval_count;
+                alpha *= ls_rho;
+                continue;
+            }
+
+            // Inline L1 merit via head/tail VectorBlock expressions to avoid
+            // a per-backtrack VectorXd materialization. Equivalent to
+            // detail::l1_merit(f, c_eq, c_ineq, sigma).
+            double viol_trial = 0.0;
+            if(s.n_eq > 0)
+                viol_trial += s.bufs.c_all.head(s.n_eq).cwiseAbs().sum();
+            if(s.n_ineq > 0)
+                viol_trial += (-s.bufs.c_all.tail(s.n_ineq)).cwiseMax(0.0).sum();
+            double phi_trial = f_trial + s.sigma * viol_trial;
 
             if(phi_trial <= phi0 + ls_c1 * alpha * dphi0)
             {
+                // Persist the accepted trial constraints for the post-loop
+                // accept block (replaces the prior eager s.c_eq_trial /
+                // s.c_ineq_trial assignment that ran on every backtrack).
+                s.bufs.c_trial_buf = s.bufs.c_all;
                 ls_success = true;
                 break;
             }
@@ -544,330 +675,240 @@ struct nw_sqp_policy
             alpha *= ls_rho;
         }
 
-        // Second-order correction (Maratos retry).
+        // Maratos second-order correction retry on Armijo failure.
         //
-        // If the Armijo line search rejected the unit step because
-        // the linearization underestimates the constraint curvature
-        // (the canonical Maratos failure mode on HS071-class problems
-        // with a tight nonlinear inequality), re-solve the QP with an
-        // updated RHS that subtracts the nonlinear constraint residual
-        // at the trial point x + p. Using the ORIGINAL Jacobian J_k
-        // (not J_{k+1}) preserves the QP structure so the retry only
-        // touches the constraint RHS.
-        //
-        // RHS update:
-        //   b_eq_soc   = -c_eq(x + p)   + J_eq(x)   * p
+        // On rejection of the trial step the L1 merit can be lifted by the
+        // nonlinear constraint residual at x + p even when p is a valid
+        // first-order descent direction (the Maratos effect: linearised
+        // constraints understate quadratic curvature near a tight active
+        // set). Re-solve the QP with the constraint RHS re-anchored at the
+        // trial point:
+        //   b_eq_soc  = -c_eq(x + p)  + J_eq(x)  * p
         //   b_ineq_soc = -c_ineq(x + p) + J_ineq(x) * p
+        // and accept the combined direction p + p_soc if the Armijo test
+        // passes on the L1 merit.
         //
-        // The correction step dp is added to p to form a combined
-        // direction p + dp; the line search is retried on that
-        // direction with the same merit function and slope.
+        // Adopted from: argmin/solver/kraft_slsqp_policy.h::step SOC retry
+        //               block (in-tree precedent).
         //
-        // The trigger is gated on a minimum L1 violation: SOC is only
-        // worthwhile when there is enough constraint curvature to
-        // justify the QP re-solve. Default 1e-3 matches the kraft
-        // family default. nw_sqp uses stack-local SOC vectors here
-        // (kraft uses state-resident buffers, filter family uses a
-        // mix); a future refactor to a shared sqp_state_buffers will
-        // absorb these into reused storage. nw_sqp's
-        // active_set_qp_solver does not expose factor-reuse, so the
-        // SOC retry calls solve() with the original Hessian.
+        // argmin variant: nw_sqp uses active_set_qp_solver with the dense
+        //                 Hessian B = s.hessian.hessian(); kraft_slsqp uses
+        //                 kraft_lsq_qp_recovery_solver with a factored
+        //                 (E, f) form. The SOC math is identical; the QP
+        //                 API differs.
         //
-        // Reference: Kraft, D. (1988). DFVLR-FB 88-28, §2.2.4
-        //            (second-order correction).
-        //            N&W 2e Section 18.3 ("Maratos effect" and
-        //            second-order corrections in line-search SQP).
-        //            Adopted from in-tree kraft_slsqp_policy.h SOC
-        //            block; the in-tree mirror keeps the algorithmic
-        //            shape and adapts buffer/solver shapes to nw_sqp.
-        const double soc_threshold =
-            options.soc_violation_threshold.value_or(1e-3);
-        if(!ls_success && constraint_viol_0 > soc_threshold)
+        // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (Maratos SOC);
+        //            N&W 2e §18.3 (Maratos effect, second-order correction).
+        const double cv_now = detail::constraint_violation(s.c_eq, s.c_ineq);
+
+        if(!ls_success && cv_now > options.soc_violation_threshold && m > 0)
         {
-            if constexpr(constrained<P>)
+            Eigen::Vector<double, N> x_full = s.x + p;
+            if(has_finite_bounds)
+                x_full = detail::project(x_full, s.lower, s.upper);
+
+            s.problem->constraints(x_full, s.bufs.c_all);
+            auto c_eq_full = s.bufs.c_all.head(s.n_eq);
+            auto c_ineq_full = s.bufs.c_all.tail(s.n_ineq);
+
+            if(s.n_eq > 0)
+                s.bufs.b_eq_soc_buf.noalias() = -c_eq_full + s.J_eq * p;
+            if(s.n_ineq > 0)
+                s.bufs.b_ineq_soc_buf.noalias() = -c_ineq_full + s.J_ineq * p;
+
+            detail::qp_result<double, N> qp_soc;
+            if(has_finite_bounds)
             {
-                if(m > 0)
+                // p_lo_buf / p_hi_buf already populated from the main QP
+                // build above; reuse without re-computing s.lower - s.x.
+                Eigen::Vector<double, N> p0_soc = p;
+                p0_soc = p0_soc.cwiseMax(s.bufs.p_lo_buf).cwiseMin(s.bufs.p_hi_buf);
+                qp_soc = s.qp_solver.solve(
+                    s.hessian.hessian(), s.g,
+                    s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
+                    s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0_soc, qp_opts);
+            }
+            else
+            {
+                qp_soc = s.qp_solver.solve(
+                    s.hessian.hessian(), s.g,
+                    s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
+                    p, qp_opts);
+            }
+
+            if(qp_soc.status == detail::qp_status::optimal)
+            {
+                Eigen::Vector<double, N> p_combined = p + qp_soc.x;
+                double alpha_soc = 1.0;
+                Eigen::Vector<double, N> x_trial_soc = s.x;
+                double f_trial_soc{s.objective_value};
+
+                for(std::uint16_t ls = 0; ls < max_ls; ++ls)
                 {
-                    Eigen::Vector<double, N> x_soc_full = s.x + p;
+                    x_trial_soc = s.x + alpha_soc * p_combined;
+
                     if(has_finite_bounds)
-                        x_soc_full = detail::project(x_soc_full,
-                                                     s.lower, s.upper);
+                        x_trial_soc = detail::project(x_trial_soc,
+                                                      s.lower, s.upper);
 
-                    Eigen::VectorXd c_soc_full(m);
-                    s.problem->constraints(x_soc_full, c_soc_full);
-                    auto c_eq_soc = c_soc_full.head(s.n_eq);
-                    auto c_ineq_soc = c_soc_full.tail(s.n_ineq);
+                    f_trial_soc = s.problem->value(x_trial_soc);
+                    if(m > 0)
+                        s.problem->constraints(x_trial_soc, s.bufs.c_all);
 
-                    Eigen::VectorXd b_eq_soc;
-                    Eigen::VectorXd b_ineq_soc;
+                    // NaN/Inf recovery on the SOC retry path (parallel to
+                    // the main-LS inline gate above). Shrink alpha_soc and
+                    // continue on non-finite trial-iterate evaluation.
+                    if(!std::isfinite(f_trial_soc)
+                       || (m > 0 && !s.bufs.c_all.allFinite()))
+                    {
+                        ++nan_eval_count;
+                        alpha_soc *= ls_rho;
+                        continue;
+                    }
+
+                    // Inline L1 merit via head/tail VectorBlock expressions to
+                    // avoid per-backtrack VectorXd materialization (see main LS).
+                    double viol_soc = 0.0;
                     if(s.n_eq > 0)
-                    {
-                        b_eq_soc.resize(s.n_eq);
-                        b_eq_soc.noalias() = -c_eq_soc + s.J_eq * p;
-                    }
+                        viol_soc += s.bufs.c_all.head(s.n_eq).cwiseAbs().sum();
                     if(s.n_ineq > 0)
+                        viol_soc += (-s.bufs.c_all.tail(s.n_ineq)).cwiseMax(0.0).sum();
+                    double phi_trial_soc = f_trial_soc + s.sigma * viol_soc;
+
+                    if(phi_trial_soc <= phi0 + ls_c1 * alpha_soc * dphi0)
                     {
-                        b_ineq_soc.resize(s.n_ineq);
-                        b_ineq_soc.noalias() = -c_ineq_soc + s.J_ineq * p;
+                        p = p_combined;
+                        alpha = alpha_soc;
+                        x_trial = x_trial_soc;
+                        f_trial = f_trial_soc;
+                        // Persist accepted trial constraints (parallel to the
+                        // main line-search acceptance branch).
+                        s.bufs.c_trial_buf = s.bufs.c_all;
+                        ls_success = true;
+                        break;
                     }
 
-                    // Re-solve the QP with the SOC RHS. Hessian,
-                    // gradient, and Jacobians are unchanged; only the
-                    // constraint RHS shifts.
-                    detail::qp_result<double, N> soc_qp;
-                    if(has_finite_bounds)
-                    {
-                        Eigen::Vector<double, N> p_lower =
-                            (Eigen::Vector<double, N>(s.lower) -
-                             Eigen::Vector<double, N>(s.x)).eval();
-                        Eigen::Vector<double, N> p_upper =
-                            (Eigen::Vector<double, N>(s.upper) -
-                             Eigen::Vector<double, N>(s.x)).eval();
-                        Eigen::Vector<double, N> p_soc0 =
-                            Eigen::Vector<double, N>::Zero(n);
-                        soc_qp = s.qp_solver.solve(
-                            s.hessian.hessian(), s.g,
-                            s.J_eq, b_eq_soc, s.J_ineq, b_ineq_soc,
-                            p_lower, p_upper, p_soc0, qp_opts);
-                    }
-                    else
-                    {
-                        Eigen::Vector<double, N> p_soc0 =
-                            Eigen::Vector<double, N>::Zero(n);
-                        soc_qp = s.qp_solver.solve(
-                            s.hessian.hessian(), s.g,
-                            s.J_eq, b_eq_soc, s.J_ineq, b_ineq_soc,
-                            p_soc0, qp_opts);
-                    }
-
-                    if(soc_qp.status == detail::qp_status::optimal)
-                    {
-                        Eigen::Vector<double, N> p_combined = p + soc_qp.x;
-
-                        // Backtracking Armijo on the combined direction
-                        // using the same phi0/dphi0 reference slope.
-                        double alpha_soc = 1.0;
-                        bool soc_accepted = false;
-                        Eigen::Vector<double, N> x_soc_trial = s.x;
-                        double f_soc_trial{s.objective_value};
-                        Eigen::VectorXd c_eq_soc_trial = s.c_eq_trial;
-                        Eigen::VectorXd c_ineq_soc_trial = s.c_ineq_trial;
-
-                        for(std::uint16_t ls = 0; ls < max_ls; ++ls)
-                        {
-                            x_soc_trial = s.x + alpha_soc * p_combined;
-                            if(has_finite_bounds)
-                                x_soc_trial = detail::project(
-                                    x_soc_trial, s.lower, s.upper);
-
-                            f_soc_trial = s.problem->value(x_soc_trial);
-                            if(m > 0)
-                                s.problem->constraints(x_soc_trial,
-                                                       s.c_all);
-                            c_eq_soc_trial = s.c_all.head(s.n_eq);
-                            c_ineq_soc_trial = s.c_all.tail(s.n_ineq);
-                            double phi_soc = detail::l1_merit(
-                                f_soc_trial, c_eq_soc_trial,
-                                c_ineq_soc_trial, s.sigma);
-
-                            if(phi_soc <= phi0 + ls_c1 * alpha_soc * dphi0)
-                            {
-                                soc_accepted = true;
-                                break;
-                            }
-                            alpha_soc *= ls_rho;
-                        }
-
-                        // Accept the corrected step only if it took a
-                        // longer step than the original Armijo (which
-                        // shrunk to alpha = max_ls's last value without
-                        // accepting). Promotes the SOC outcome into the
-                        // BFGS-update path below.
-                        if(soc_accepted && alpha_soc > alpha)
-                        {
-                            p = p_combined;
-                            alpha = alpha_soc;
-                            x_trial = x_soc_trial;
-                            f_trial = f_soc_trial;
-                            s.c_eq_trial = c_eq_soc_trial;
-                            s.c_ineq_trial = c_ineq_soc_trial;
-                            ls_success = true;
-                        }
-                    }
+                    alpha_soc *= ls_rho;
                 }
             }
         }
 
-        // BFGS-reset retry loop close. If Armijo + SOC accepted a
-        // descent direction, exit the loop and fall through to the
-        // BFGS-update / step_result return path below. Otherwise,
-        // if the cap is not yet hit, reset the BFGS Hessian to
-        // identity (Shanno-rescaled on next push) and retry the
-        // QP + Armijo + SOC together. After cap exhaustion, exit
-        // and let the post-loop block return the cap-exhausted
-        // null step with diagnostics.bfgs_reset_count = reset_count.
-        //
-        // Reference: NLopt slsqp.c:1890-1895 (ireset loop).
-        // Adopted from: NLopt slsqp.c:1890-1895.
         if(ls_success)
             break;
-        if(reset_count >= options.bfgs_reset_max)
-            break;
-        s.hessian.reset();
-        ++reset_count;
-        }
 
-        // Post-loop: zero-step path. The QP returned p ~= 0 inside
-        // the loop (degeneracy / true KKT point), the loop captured
-        // the diagnostic state and broke out. Surface
-        // reset_count alongside the existing null-step telemetry so
-        // callers can distinguish a fresh zero-step (reset_count == 0)
-        // from one reached only after the BFGS Hessian was discarded
-        // (reset_count > 0).
-        if(zero_step_detected)
-        {
-            return step_result<double>{
-                .objective_value = s.objective_value,
-                .gradient_norm = grad_L_null_norm,
-                .step_size = 0.0,
-                .objective_change = 0.0,
-                .improved = false,
-                .is_null_step = true,
-                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
-                .x_norm = s.x.norm(),
-                .kkt_residual = kkt_null,
-                .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
-            };
-        }
-
-        // Post-loop: cap-exhausted null step. Armijo + SOC failed on
-        // every retry and the BFGS-reset cap is hit. Mirror the kraft
-        // cap-exhausted return shape: refresh KKT-residual buffers
-        // from the most recent qp.lambda multipliers and surface the
-        // cumulative reset count so callers can compose
-        //   is_null_step && diagnostics.bfgs_reset_count >= options.bfgs_reset_max
-        // to detect cap exhaustion deterministically.
+        // Line search and SOC retry both failed to find a decreasing
+        // step. Reset BFGS to identity (Shanno-rescale on next push;
+        // dense_ldl_bfgs.h:86-105 zeroes updates_since_reset_) and
+        // retry the QP with B = I. On exhaustion of the cap, return a
+        // null-step with diagnostics.bfgs_reset_count populated.
         //
-        // Reference: N&W 2e Definition 12.1, eq. 12.34 (full KKT
-        //            first-order optimality E-measure).
-        if(!ls_success)
+        // Reference: NLopt slsqp.c:1890-1895 (ireset retry parity);
+        //            N&W 2e Section 3.3 (recovery from non-descent);
+        //            dense_ldl_bfgs.h:86-105 (reset semantics).
+        if(reset_count >= reset_max)
         {
-            Eigen::VectorXd lambda_capped = Eigen::VectorXd::Zero(m);
+            // Adopted from: argmin/detail/sqp_common.h extract_qp_multipliers.
+            s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+            s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
             if(m > 0 && qp.lambda.size() >= m)
-                lambda_capped = qp.lambda.head(m);
-            else if(m > 0 && qp.lambda.size() > 0)
-                lambda_capped.head(qp.lambda.size()) = qp.lambda;
+            {
+                argmin::detail::extract_qp_multipliers<double>(
+                    qp.lambda, s.n_eq, s.n_ineq,
+                    s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+            }
 
-            Eigen::VectorXd lambda_eq_capped = s.n_eq > 0
-                ? Eigen::VectorXd(lambda_capped.head(s.n_eq))
-                : Eigen::VectorXd::Zero(0);
-            Eigen::VectorXd mu_ineq_capped = s.n_ineq > 0
-                ? Eigen::VectorXd(lambda_capped.segment(s.n_eq, s.n_ineq))
-                : Eigen::VectorXd::Zero(0);
-
-            const double kkt_capped = detail::kkt_residual<double,
-                                                           Eigen::Dynamic,
-                                                           Eigen::Dynamic,
-                                                           Eigen::Dynamic>(
-                s.g, s.J_eq, s.J_ineq,
-                lambda_eq_capped, mu_ineq_capped,
-                s.c_eq, s.c_ineq);
-
-            // Lagrangian gradient norm at the iter-start point using
-            // the most recent QP multipliers (consistent with the
-            // zero-step branch above).
-            double grad_L_capped_norm = s.g.norm();
+            // Adopted from: argmin/detail/sqp_common.h null_step_result.
+            //
+            // argmin variant: nw_sqp overrides the helper's gradient_norm
+            //                 (lpNorm<Infinity>) with the L2 Lagrangian-
+            //                 gradient norm to preserve cross-policy
+            //                 step_result consistency.
+            auto r = argmin::detail::null_step_result<double, N,
+                                                      Eigen::Dynamic,
+                                                      Eigen::Dynamic>(
+                s.objective_value, s.g, s.J_eq, s.J_ineq,
+                s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
+                s.c_eq, s.c_ineq, s.x.norm(), reset_count);
+            double grad_L_cap_norm = s.g.norm();
             if(m > 0)
             {
                 Eigen::Vector<double, N> grad_L = s.g;
                 if(s.n_eq > 0)
-                    grad_L.noalias() -= s.J_eq.transpose() * lambda_eq_capped;
+                    grad_L.noalias() -= s.J_eq.transpose() * s.bufs.kkt_lambda_eq_buf;
                 if(s.n_ineq > 0)
-                    grad_L.noalias() -= s.J_ineq.transpose() * mu_ineq_capped;
-                grad_L_capped_norm = grad_L.norm();
+                    grad_L.noalias() -= s.J_ineq.transpose() * s.bufs.kkt_mu_ineq_buf;
+                grad_L_cap_norm = grad_L.norm();
             }
-
-            return step_result<double>{
-                .objective_value = s.objective_value,
-                .gradient_norm = grad_L_capped_norm,
-                .step_size = 0.0,
-                .objective_change = 0.0,
-                .improved = false,
-                .is_null_step = true,
-                .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
-                .x_norm = s.x.norm(),
-                .kkt_residual = kkt_capped,
-                .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
-            };
+            r.gradient_norm = grad_L_cap_norm;
+            // Surface the Armijo NaN-recovery count accumulated across
+            // the main hand-rolled LS and the SOC retry within this
+            // step() call (null_step_result leaves nan_eval_count at
+            // its in-class default 0).
+            r.diagnostics.bfgs_skip_count = bfgs_skip_count;
+            r.diagnostics.nan_eval_count = nan_eval_count;
+            return r;
         }
 
-        // Recompute lambda_new from the accepted-step qp.lambda for
-        // the BFGS-update block below. The local lambda_new declared
-        // inside the (now-looped) region went out of scope when the
-        // loop closed; the BFGS update needs the multipliers from the
-        // QP solve that produced the accepted direction.
-        Eigen::VectorXd lambda_new = Eigen::VectorXd::Zero(m);
-        if(m > 0 && qp.lambda.size() >= m)
-            lambda_new = qp.lambda.head(m);
-        else if(m > 0 && qp.lambda.size() > 0)
-            lambda_new.head(qp.lambda.size()) = qp.lambda;
-
-        // L1 merit at iter-start point for the post-step `improved`
-        // flag below. Local phi0 declared inside the (now-looped)
-        // region went out of scope; recompute at s.x using the
-        // current sigma so phi_new vs phi0 comparison stays valid.
-        // sigma is monotone across retries so this is the most
-        // conservative reference value.
-        double phi0 = detail::l1_merit(s.objective_value,
-                                       s.c_eq, s.c_ineq, s.sigma);
+        s.hessian.reset();
+        ++reset_count;
+        }  // end BFGS-reset retry loop
 
         // --- 5. Compute BFGS update vectors ---
         // Reuse objective and constraint values from line search (already
         // evaluated at x_trial). Only gradient and Jacobian need fresh eval.
-        Eigen::Vector<double, N> x_old = s.x;
-        Eigen::Vector<double, N> g_old = s.g;
+        s.bufs.x_old_buf = s.x;
+        s.bufs.g_old_buf = s.g;
+        Eigen::Vector<double, N>& x_old = s.bufs.x_old_buf;
+        Eigen::Vector<double, N>& g_old = s.bufs.g_old_buf;
         double f_old = s.objective_value;
 
         s.x = x_trial;
         s.objective_value = f_trial;
         s.problem->gradient(s.x, s.g);
-        s.c_eq = s.c_eq_trial;
-        s.c_ineq = s.c_ineq_trial;
+        s.c_eq = s.bufs.c_trial_buf.head(s.n_eq);
+        s.c_ineq = s.bufs.c_trial_buf.tail(s.n_ineq);
 
         // Save old Jacobian before re-evaluation for BFGS update (N&W eq. 18.13)
         if(m > 0)
-            s.J_all_old.noalias() = s.J_all;
+            s.bufs.J_all_old.noalias() = s.bufs.J_all;
 
         if(m > 0)
-            s.problem->constraint_jacobian(s.x, s.J_all);
-        s.J_eq = s.J_all.topRows(s.n_eq);
-        s.J_ineq = s.J_all.bottomRows(s.n_ineq);
+            s.problem->constraint_jacobian(s.x, s.bufs.J_all);
+        s.J_eq = s.bufs.J_all.topRows(s.n_eq);
+        s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
 
-        Eigen::Vector<double, N> sk = s.x - x_old;
+        Eigen::Vector<double, N>& grad_L_new = s.bufs.grad_L_new_buf;
+        Eigen::Vector<double, N>& grad_L_old = s.bufs.grad_L_old_buf;
+        Eigen::Vector<double, N>& sk = s.bufs.sk_buf;
+        Eigen::Vector<double, N>& yk = s.bufs.yk_buf;
 
         // Lagrangian gradient at new and old points using new multipliers.
         // grad_L_old must use the Jacobian at x_old (not x_new) so that
         // y_k = grad_L_new - grad_L_old captures constraint curvature.
         // Reference: N&W eq. 18.13.
-        Eigen::Vector<double, N> grad_L_new, grad_L_old;
         if(m > 0)
         {
-            // grad_L = grad_f - J^T * lambda (N&W eq. 18.2-18.3)
-            // Use J_all directly for new point (already updated above)
-            grad_L_new = s.g;
-            grad_L_new.noalias() -= s.J_all.transpose() * lambda_new;
-
-            // Use J_all_old for old point (saved before Jacobian re-evaluation)
-            grad_L_old = g_old;
-            grad_L_old.noalias() -= s.J_all_old.transpose() * lambda_new;
+            // Adopted from: argmin/detail/sqp_common.h compute_bfgs_pair_fused
+            //               (in-tree precedent).
+            //
+            // argmin variant: nw_sqp's lambda_new is the full m-sized QP-multiplier
+            //                 vector (lam_buf alias); the helper's m_total branch
+            //                 runs a single fused J_all^T * lam GEMV per gradient
+            //                 against topRows(m) of J_all_old / J_all.
+            argmin::detail::compute_bfgs_pair_fused<double, N>(
+                g_old, s.g, s.bufs.J_all_old, s.bufs.J_all,
+                lambda_new.head(m), m,
+                grad_L_old, grad_L_new,
+                sk, yk,
+                s.x, x_old);
         }
         else
         {
             grad_L_new = s.g;
             grad_L_old = g_old;
+            sk.noalias() = s.x - x_old;
+            yk.noalias() = grad_L_new - grad_L_old;
         }
-
-        Eigen::Vector<double, N> yk = grad_L_new - grad_L_old;
 
         // --- 6. BFGS curvature push (dense_ldl_bfgs, Powell-damped) ---
         // Skip BFGS updates on near-zero or non-positive curvature
@@ -878,12 +919,26 @@ struct nw_sqp_policy
         // N&W eq. 18.22-18.24 internally, but the explicit guard here
         // keeps the policy-step semantics legible.
         //
+        // On strictly-positive curvature push the BFGS curvature pair
+        // (Powell damping applied inside dense_ldl_bfgs::push per N&W eq.
+        // 18.22-18.24); on non-positive curvature drop the pair (the
+        // earlier fast-mode skip-and-count path was removed after
+        // empirical evidence showed it lost wall-time and iteration count
+        // against the Powell-damped path on every measured cell).
+        //
+        // The bfgs_skip_count diagnostic field on step_result is retained
+        // for cross-policy schema parity but is now never incremented
+        // here; the local counter feeds the existing post-step
+        // diagnostics propagation untouched.
+        //
         // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
-        //            N&W Procedure 18.2 damping guard.
+        //            N&W Procedure 18.2 damping guard;
+        //            N&W eq. 18.22-18.24 (Powell damping).
         const double sTy = sk.dot(yk);
-        if(sk.norm() > 1e-15 && sTy > 0.0)
+        if(sk.norm() > 1e-15)
         {
-            s.hessian.push(sk, yk);
+            if(sTy > 0.0)
+                s.hessian.push(sk, yk);
         }
 
         // --- 7. Update multipliers and iteration ---
@@ -917,28 +972,55 @@ struct nw_sqp_policy
         //            Definition 12.1 (KKT conditions: stationarity +
         //            dual feasibility + complementarity);
         //            eq. 12.34 (Lagrangian stationarity leg).
-        Eigen::VectorXd lambda_eq_kkt = Eigen::VectorXd::Zero(s.n_eq);
-        Eigen::VectorXd mu_ineq_kkt = Eigen::VectorXd::Zero(s.n_ineq);
+        //
+        // Strided re-estimation: when options.multiplier_reest_every_k
+        // > 1 the helper is invoked only on steps where
+        // (s.iteration % k == 0); on the skip path the prior step's
+        // s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf are reused
+        // (state-resident, zero-alloc; Bertsekas 1996 §4.2). The
+        // .setZero() pair MUST live inside the gate-fire branch so
+        // the skip path reuses prior values rather than zeroing them.
+        // At k=1 the gate always fires; behavior is bit-identical to
+        // unconditional re-estimation.
         if(m > 0)
         {
-            Eigen::Vector<double, N> g_fixed = s.g;
-            Eigen::VectorXd lambda_reest =
-                detail::estimate_multipliers_active_set<double,
-                                                        N,
-                                                        Eigen::Dynamic,
-                                                        Eigen::Dynamic>(
-                    g_fixed, s.J_eq, s.J_ineq, s.c_ineq);
-            if(s.n_eq > 0)
-                lambda_eq_kkt = lambda_reest.head(s.n_eq);
-            if(s.n_ineq > 0)
-                mu_ineq_kkt = lambda_reest.segment(s.n_eq, s.n_ineq);
+            // Clamp the user-supplied stride to >= 1 at the read site.
+            // A value of 0 maps to 1 (re-estimate every step) rather than
+            // triggering integer-divide-by-zero (SIGFPE on x86-64). The
+            // default-constructed value is non-zero (1 accurate / 5 fast),
+            // so this clamp only engages when a caller explicitly assigns 0.
+            const std::size_t reest_stride = std::max<std::size_t>(
+                options.multiplier_reest_every_k, std::size_t{1});
+            if(s.iteration % reest_stride == 0)
+            {
+                s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+                s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
+                // Adopted from: argmin/detail/lagrangian.h compute_kkt_multipliers_active_set.
+                argmin::detail::compute_kkt_multipliers_active_set<double, N,
+                                                                  Eigen::Dynamic,
+                                                                  Eigen::Dynamic>(
+                    s.g, s.J_eq, s.J_ineq, s.c_ineq,
+                    s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+            }
+            // else: reuse s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf
+            //       from the prior step's gate-fire path (or from
+            //       init() which leaves them zero — equivalent to "no
+            //       active set yet identified" at iter 0).
+        }
+        else
+        {
+            // Unconstrained branch: KKT residual collapses to ||grad_f||;
+            // zero the buffers so the kkt_residual helper sees a clean
+            // multiplier vector regardless of prior state.
+            s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+            s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
         }
         double kkt = detail::kkt_residual<double,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic>(
             s.g, s.J_eq, s.J_ineq,
-            lambda_eq_kkt, mu_ineq_kkt,
+            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
             s.c_eq, s.c_ineq);
 
         // Primal feasibility (L-infinity) reported into
@@ -956,15 +1038,11 @@ struct nw_sqp_policy
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
-            // Surface BFGS-reset count for telemetry. Zero on the
-            // common success path (Armijo + SOC accepted on the
-            // first try); non-zero only when the BFGS-reset retry
-            // loop above performed at least one reset before the
-            // QP + Armijo + SOC chain accepted a descent direction.
-            // Caller telemetry can distinguish "step accepted on
-            // first try" from "step accepted only after BFGS
-            // curvature was discarded".
-            .diagnostics = solver_diagnostics{.bfgs_reset_count = reset_count},
+            .diagnostics = {
+                .bfgs_reset_count = reset_count,
+                .bfgs_skip_count = bfgs_skip_count,
+                .nan_eval_count = nan_eval_count,
+            },
         };
     }
 
@@ -972,21 +1050,19 @@ struct nw_sqp_policy
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
-        constexpr int M = state_type<P>::M;
-
         const int n = static_cast<int>(x0.size());
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
         if(m > 0)
-            s.problem->constraints(x0, s.c_all);
-        s.c_eq = s.c_all.head(s.n_eq);
-        s.c_ineq = s.c_all.tail(s.n_ineq);
+            s.problem->constraints(x0, s.bufs.c_all);
+        s.c_eq = s.bufs.c_all.head(s.n_eq);
+        s.c_ineq = s.bufs.c_all.tail(s.n_ineq);
         if(m > 0)
-            s.problem->constraint_jacobian(x0, s.J_all);
-        s.J_eq = s.J_all.topRows(s.n_eq);
-        s.J_ineq = s.J_all.bottomRows(s.n_ineq);
+            s.problem->constraint_jacobian(x0, s.bufs.J_all);
+        s.J_eq = s.bufs.J_all.topRows(s.n_eq);
+        s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
         s.iteration = 0;
     }
 
@@ -1013,23 +1089,13 @@ private:
         }
         return false;
     }
-
-    template <typename P>
-    static double lagrangian_gradient_norm(const state_type<P>& s)
-    {
-        constexpr int M = state_type<P>::M;
-
-        const int n = static_cast<int>(s.x.size());
-        const int m = s.n_eq + s.n_ineq;
-        if(m == 0)
-            return s.g.norm();
-
-        Eigen::Matrix<double, Eigen::Dynamic, N> A(m, n);
-        if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
-        if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
-        return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
-    }
 };
+
+// Single-mode shape: nw_sqp_policy_accurate is retained as a
+// source-call-site readable alias for the bare template, matching
+// tr_sqp_policy_accurate on the surviving dual-mode trust-region policy.
+template <int N = dynamic_dimension>
+using nw_sqp_policy_accurate = nw_sqp_policy<N>;
 
 }
 

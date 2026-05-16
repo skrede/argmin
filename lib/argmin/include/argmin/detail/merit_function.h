@@ -75,57 +75,102 @@ Scalar update_penalty(Scalar sigma,
     return std::max(sigma, required);
 }
 
-// Cold-start calibration of the L1 merit penalty parameter sigma.
+// Cold-start initial penalty calibration.
 //
-// Combines two iter-0 floors so that the first SQP step lands on a
-// merit function whose violation term genuinely dominates the
-// objective term:
+// After the first QP solve at iter 0, sigma must be at least as large
+// as the multiplier scale to ensure the SQP direction is a descent
+// direction for the L1 merit (N&W eq. 18.36). The default cold-start
+// value (1.0) underestimates the required penalty on problems with
+// large multipliers (e.g. HS071), causing the line search to reject
+// the iter-0 step and the policy to park infeasible.
 //
-//   1. lambda-floor: sigma >= max_i |lambda_i| + delta. Same shape as
-//      update_penalty's monotone rule (N&W eq. 18.36) but applied
-//      unconditionally at iter-0 with delta = 1.0 instead of the
-//      monotone-update delta = 1e-4.
-//   2. K-factor magnitude floor:
-//      sigma >= K * max(1, |f_0| / (||c_0||_1 + eps)).
-//      A problem-scale floor that guards against pathologically
-//      small lambda at iter-0 on objective-dominated initial points
-//      (e.g. HS071 from x_0 = (1, 5, 5, 1) where ||lambda||_inf is
-//      O(1) but |f_0| / ||c_0||_1 is O(5)).
+// calibrate_initial_penalty(sigma_in, lambda_qp, safety) returns
+//   max(sigma_in, ||lambda_qp||_inf + safety),
+// mirroring update_penalty's monotone-up form but as a one-shot
+// initialisation rather than a per-step update.
 //
-// Returns sigma_calibrated >= sigma_in. Caller is responsible for
-// gating the call to iter-0 only; this function does not check
-// state.iteration.
+// Adopted from: NLopt slsqp.c implicit cold-start from QP lambda
+//               (slsqp.c on the iter-0 path uses lambda from the
+//                first QP solve to set the penalty scale before
+//                any merit evaluation).
+// Reference: N&W 2e eq. 18.36 (sigma sufficient for L1-merit descent);
+//            Powell 1978 ("A fast algorithm for nonlinearly
+//            constrained optimization calculations") Section 6
+//            (cold-start safety_factor = 1 recommendation);
+//            Kraft 1988 DFVLR-FB 88-28 §2.2.6 (sigma update rule);
+//            PITFALLS §B remedy 1 (single-line scalar cold-start).
 //
-// argmin variant: combines the N&W lambda-floor with a magnitude
-// floor; rationale: HS071 cold-start with x_0 = (1, 5, 5, 1) admits
-// a near-feasible iter-0 step under raw N&W eq. 18.36 (lambda is
-// small) and parks the iterate strongly infeasible.
-//
-// Reference: N&W 2e Section 18.3 / eq. 18.36 (lambda-floor for
-//            descent on the L1 merit);
-//            Kraft 1988 DFVLR-FB 88-28 Section 2.2.6 (sigma update
-//            companion); the K-factor problem-scale floor is the
-//            magnitude-aware companion that closes objective-
-//            dominated cold-starts where ||lambda||_inf is small
-//            but |f_0| / ||c_0||_1 is large.
+// argmin variant: scalar sigma calibration without per-constraint
+//                 mu_j smoothing; NLopt slsqp.c:1988-1994 maintains
+//                 a per-constraint mu_j vector; rationale: scalar
+//                 fix delivers HS071 closure without the regression
+//                 risk of per-constraint smoothing on already-stable
+//                 hs026 / hs039 trajectories. Per-constraint mu_j
+//                 is an empirically-gated future extension.
 template <typename Scalar, int M = argmin::dynamic_dimension>
 Scalar calibrate_initial_penalty(Scalar sigma_in,
                                  const Eigen::Vector<Scalar, M>& lambda_qp,
-                                 Scalar f_0,
-                                 Scalar c_0_l1,
-                                 Scalar K_factor = Scalar(10),
-                                 Scalar delta = Scalar(1))
+                                 Scalar safety = Scalar(1.0))
 {
-    Scalar sigma = sigma_in;
-    if(lambda_qp.size() > 0)
+    if(lambda_qp.size() == 0)
+        return sigma_in;
+    Scalar required = lambda_qp.cwiseAbs().maxCoeff() + safety;
+    return std::max(sigma_in, required);
+}
+
+// h4-weighted directional derivative of the L1 merit.
+//
+// Adopted from: argmin/solver/kraft_slsqp_policy.h:541-542 (in-tree
+//               precedent — h4-weighted directional derivative).
+// Reference: Kraft 1988 DFVLR-FB 88-28 §3.4 (h4 = 1 - relaxation_factor);
+//            N&W 2e Section 18.3 (L1 merit directional derivative).
+//
+// argmin variant: extends l1_merit_directional_derivative with a
+//                 multiplicative h4 factor on the violation term.
+//                 nw_sqp / filter_slsqp / filter_nw_sqp lineages call
+//                 with h4 = 1 (bit-identical to the existing helper).
+template <typename Scalar,
+          int Meq = argmin::dynamic_dimension,
+          int Mineq = argmin::dynamic_dimension>
+ARGMIN_FORCE_INLINE Scalar l1_merit_dphi_h4(
+    Scalar grad_f_dot_p,
+    const Eigen::Vector<Scalar, Meq>& c_eq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq,
+    Scalar sigma,
+    Scalar h4 = Scalar(1))
+{
+    const Scalar viol = constraint_violation(c_eq, c_ineq);
+    return grad_f_dot_p - sigma * h4 * viol;
+}
+
+// Cold-bump sigma so that the L1-merit slope becomes strictly negative.
+//
+// Adopted from: argmin/solver/kraft_slsqp_policy.h:544-555 (in-tree
+//               precedent — sigma cold-bump for descent guarantee);
+//               argmin/solver/nw_sqp_policy.h:447-463 (parallel pattern).
+// Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.6;
+//            N&W 2e Section 18.3 (penalty parameter cold-bump).
+//
+// argmin variant: scalar form with sigma_max cap. Idempotent;
+//                 monotone-up: sigma never decreases.
+template <typename Scalar>
+ARGMIN_FORCE_INLINE Scalar bump_sigma_for_descent(
+    Scalar sigma_in,
+    Scalar grad_f_dot_p,
+    Scalar violation,
+    Scalar h4 = Scalar(1),
+    Scalar sigma_max = Scalar(1e10))
+{
+    const Scalar dphi = grad_f_dot_p - sigma_in * h4 * violation;
+    if(dphi >= Scalar(0) && violation > Scalar(0) && h4 > Scalar(0))
     {
-        const Scalar lambda_floor = lambda_qp.cwiseAbs().maxCoeff() + delta;
-        sigma = std::max(sigma, lambda_floor);
+        using std::abs;
+        const Scalar bumped = std::max(
+            sigma_in,
+            abs(grad_f_dot_p) / (violation * h4) + Scalar(1));
+        return std::min(bumped, sigma_max);
     }
-    const Scalar denom = c_0_l1 + Scalar(1e-12);
-    const Scalar magnitude_floor =
-        K_factor * std::max(Scalar(1), std::abs(f_0) / denom);
-    return std::max(sigma, magnitude_floor);
+    return sigma_in;
 }
 
 }

@@ -7,10 +7,12 @@
 //         s.t. A_eq x = b_eq           (equality)
 //              A_ineq x >= b_ineq      (inequality)
 //
-// Reference: N&W Algorithm 16.1, pp. 460-463 (active-set method for convex QP)
+// Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463 (active-set method
+//            for convex QP; phase-1 feasibility invariant on x0)
 //            N&W Section 16.2, eq. 16.16-16.19 (null-space method)
 //            N&W eq. 16.29 (blocking step length)
-//            N&W Section 16.5 (indefinite QP extensions)
+//            N&W Section 16.5, Lemma 16.5 (indefinite QP extensions; minimum-
+//            norm under-determined solution via thin QR)
 
 #include "argmin/detail/givens_qr_update.h"
 #include "argmin/types.h"
@@ -21,6 +23,7 @@
 #include <Eigen/Cholesky>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <utility>
@@ -388,7 +391,22 @@ public:
 
     // Solve QP subproblem using pre-allocated workspace.
     //
-    // Reference: N&W Algorithm 16.1, pp. 460-463.
+    // Accepts any x0; if x0 violates A_eq * x0 = b_eq within `tol`, a
+    // minimum-norm phase-1 correction projects x onto the equality
+    // manifold per N&W Section 16.1's feasibility invariant before the
+    // active-set loop begins. The active-set algorithm itself assumes
+    // the iterate is feasible w.r.t. the working-set equalities (the
+    // m >= n branch in solve_equality_subproblem returns p = 0 only
+    // under that precondition).
+    //
+    // Preconditions:
+    //   - A_eq is of shape m_eq x n with m_eq <= n; over-determined
+    //     equality systems are unsupported and will assert in debug
+    //     builds (the phase-1 thin-QR projection writes into a buffer
+    //     of size n and uses a topLeftCorner(m_eq, m_eq) triangular
+    //     view, both of which require m_eq <= n).
+    //
+    // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
     template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
     qp_result<Scalar, N, M> solve(
         const Eigen::Matrix<Scalar, N, N>& G,
@@ -404,8 +422,8 @@ public:
         const int m_eq = A_eq.rows();
         const int m_ineq = A_ineq.rows();
         const int m_total = m_eq + m_ineq;
-        const int max_iter = static_cast<int>(opts.max_iterations.value_or(200));
-        const auto tol = static_cast<Scalar>(opts.tolerance.value_or(1e-12));
+        const int max_iter = static_cast<int>(opts.max_iterations);
+        const auto tol = static_cast<Scalar>(opts.tolerance);
 
         if(m_eq > 0)
         {
@@ -426,6 +444,46 @@ public:
             constraint_vector(b_view), m_eq, tol, W_);
 
         Eigen::Vector<Scalar, N> x = x0;
+
+        // Phase-1 feasibility projection. The active-set machinery in
+        // solve_equality_subproblem assumes x is feasible w.r.t. the
+        // working-set equalities (m>=n branch returns p=0 unconditionally).
+        // Restore that invariant at entry by projecting any infeasible x0
+        // onto the equality manifold via the minimum-norm correction
+        //   dx = A_eq^T (A_eq A_eq^T)^{-1} (b_eq - A_eq x).
+        // With a thin QR factorization A_eq^T = Q * R (Q is n x m_eq,
+        // R is m_eq x m_eq upper triangular when A_eq has full row rank),
+        // the closed-form min-norm solution is dx = Q * R^{-T} * residual.
+        // Reference: N&W 2e Section 16.1, Algorithm 16.1, pp. 460-463
+        //            (feasibility invariant); N&W 2e Section 10.3 / Lemma 16.5
+        //            (minimum-norm under-determined solution).
+        // No direct production-library precedent: active-set QP literature
+        // assumes feasible x0; this fix internalizes the precondition.
+        if(m_eq > 0)
+        {
+            // Precondition: A_eq must be of shape m_eq x n with m_eq <= n.
+            // The thin QR factorization of A_eq.transpose() packs R into an
+            // (n x m_eq) matrix; topLeftCorner(m_eq, m_eq) is well-defined
+            // only when m_eq <= n. Callers that construct over-determined
+            // problems (m_eq > n) hit UB without this guard.
+            assert(m_eq <= n
+                   && "active_set_qp_solver: m_eq must be <= n for phase-1 feasibility projection");
+
+            const auto residual = (b_eq - A_eq * x).eval();
+            if(residual.cwiseAbs().maxCoeff() > tol)
+            {
+                qr_lambda_.compute(A_eq.transpose());
+                rhs_.head(n).setZero();
+                rhs_.head(m_eq) = qr_lambda_.matrixQR()
+                    .topLeftCorner(m_eq, m_eq)
+                    .template triangularView<Eigen::Upper>()
+                    .transpose()
+                    .solve(residual);
+                rhs_.head(n).applyOnTheLeft(qr_lambda_.householderQ());
+                x += rhs_.head(n);
+            }
+        }
+
         qr_valid_ = false;
         givens_update_count_ = 0;
 
@@ -506,7 +564,11 @@ public:
         return res;
     }
 
-    // Box-constraint overload.
+    // Box-constraint overload. Folds box bounds into the augmented
+    // inequality block and forwards to the general overload, so it
+    // inherits the phase-1 feasibility projection automatically.
+    //
+    // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
     template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
     qp_result<Scalar, N, M> solve(
         const Eigen::Matrix<Scalar, N, N>& G,
@@ -676,8 +738,8 @@ qp_result<Scalar, N> solve_qp(
     const int m_eq = A_eq.rows();
     const int m_ineq = A_ineq.rows();
     const int m_total = m_eq + m_ineq;
-    const int max_iter = static_cast<int>(opts.max_iterations.value_or(200));
-    const auto tol = static_cast<Scalar>(opts.tolerance.value_or(1e-12));
+    const int max_iter = static_cast<int>(opts.max_iterations);
+    const auto tol = static_cast<Scalar>(opts.tolerance);
 
     // Assemble full constraint matrix: [A_eq; A_ineq] x >= [b_eq; b_ineq]
     // (Equality constraints treated as a_i^T x = b_i, always active.)

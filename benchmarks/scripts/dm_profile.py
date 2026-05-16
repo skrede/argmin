@@ -47,10 +47,19 @@ solved-fraction (rho_s at the maximum theta) accompanies each figure in
 
 The set of problem classes is discovered at runtime from the ``class``
 column of ``publish_summary.csv`` -- the underlying classification enum is
-a bitmask over six atomic flags producing combined strings such as
+a bitmask over seven atomic flags producing combined strings such as
 ``inequality_bound_constrained`` or ``global_inequality`` whose presence in
 any given run depends on which problems the registry iterated. Hardcoding
 a static class tuple would silently drop combined-class profiles.
+
+For the published per-step Dolan-More profile the cohort is filtered to
+the HS suite (the ``application``-flagged shapes -- n in [30, 120] -- are
+dropped) and to the named per-step solver subset
+``{kraft_slsqp_accurate, tr_sqp_accurate, tr_sqp_fast, nlopt_slsqp}``
+(reduced from five entries after the line-search SQP family was
+empirically collapsed to single-mode; tr_sqp retains both modes);
+see ``.planning/research/FEATURES.md`` section 6 for the honest-position
+statement on per-step performance comparisons.
 
 Reference: E. D. Dolan and J. J. More, "Benchmarking Optimization Software
 with Performance Profiles", Mathematical Programming 91(2):201-213, 2002.
@@ -74,11 +83,140 @@ TAU_GRID = (1e-4, 1e-6, 1e-8, 1e-10, 1e-12)
 METRICS = ("wall_us", "f_evals")
 
 # PROBLEM_CLASSES is discovered at runtime from publish_summary.csv -- do not
-# hardcode. The underlying problem_class enum is a bitmask combining six
+# hardcode. The underlying problem_class enum is a bitmask combining seven
 # atomic flags (unconstrained, bound_constrained, inequality, equality,
-# mixed, global) into strings like "inequality_bound_constrained" via
-# to_string(); the exact set present in any run depends on which
-# problem_registry problems were iterated.
+# mixed, global, application) into strings like
+# "inequality_bound_constrained" via to_string(); the exact set present in
+# any run depends on which problem_registry problems were iterated. The
+# `application`-flagged shapes (n in [30, 120]) are excluded from the
+# Dolan-More cohort -- see HS_SUITE_EXCLUDE_TOKEN.
+
+
+# Dolan-More assumes a homogeneous problem cohort; mixing small-n HS
+# textbook problems (n <= 6) with application-shaped problems
+# (n in [30, 120]) inflates the cohort heterogeneity that the method
+# was not designed for. Application cells appear in publish_summary.csv
+# (their regression gates are enforced separately by the regression
+# checker) but do not appear in the Dolan-More figures.
+HS_SUITE_EXCLUDE_TOKEN = "application"
+
+
+# Per-step Dolan-More cohort governance: argmin's honest-position
+# (.planning/research/FEATURES.md section 6, "Per-Step Performance Comparison
+# Table") is that argmin has paired per-HS-problem-microseconds-per-step
+# numbers only against NLopt at argmin's problem sizes (n <= 50). Ipopt,
+# KNITRO, SNOPT, and scipy SLSQP publish CUTEst-aggregate figures that are
+# not in the same comparison frame as argmin's per-HS-problem-us/step
+# measurements; including them in the per-step Dolan-More cohort silently
+# inflates the comparison. The PROHIBITED_IN_PER_STEP set is enforced as a
+# hard assertion at script entry; the assertion is non-bypassable.
+PER_STEP_VALID_SOLVERS = frozenset({
+    # argmin internal solvers (paired publish_bench measurements). The
+    # line-search SQP family is single-mode after the empirical _fast
+    # collapse; tr_sqp retains both modes.
+    "kraft_slsqp_accurate",
+    "nw_sqp_accurate",
+    "filter_slsqp_accurate",
+    "filter_nw_sqp_accurate",
+    "tr_sqp_fast", "tr_sqp_accurate",
+    # NLopt (the only external library with paired per-step
+    # per-HS-problem numbers at argmin's problem sizes).
+    "nlopt_slsqp", "nlopt_mma", "nlopt_lbfgs", "nlopt_bobyqa",
+    "nlopt_crs2", "nlopt_isres",
+})
+
+PROHIBITED_IN_PER_STEP = frozenset({
+    "ipopt", "knitro", "snopt", "scipy_slsqp",
+})
+
+# The named profile cohort for the argmin per-step Dolan-More figures
+# (kraft_slsqp as the sole line-search representative after the _fast
+# collapse, tr_sqp accurate + fast at parity, NLopt SLSQP as the
+# external reference).
+PROFILE_SOLVERS = frozenset({
+    "kraft_slsqp_accurate",
+    "tr_sqp_accurate",
+    "tr_sqp_fast",
+    "nlopt_slsqp",
+})
+
+
+def _assert_no_prohibited_solvers(summary: pd.DataFrame) -> None:
+    """Refuse to build a per-step Dolan-More profile when the plot cohort
+    contains a CUTEst-aggregate-only solver.
+
+    See ``.planning/research/FEATURES.md`` section 6 (Per-Step Performance
+    Comparison Table) for the full honest-position statement. The guard runs
+    against the post-cohort-filter dataframe -- i.e., whatever rows are about
+    to be plotted. In default mode the named-subset cohort excludes every
+    prohibited solver by construction and the guard is a no-op. In
+    ``--no-cohort-filter`` diagnostic mode the cohort widens to every solver
+    present in the HS-suite-filtered input; if a prohibited solver is in that
+    widened cohort the guard exits 2 so a stray ipopt / knitro / snopt /
+    scipy_slsqp row cannot reach a published profile.
+    """
+
+    if "solver" not in summary.columns:
+        return
+    prohibited_present = sorted(
+        set(summary["solver"].astype(str).unique())
+        .intersection(PROHIBITED_IN_PER_STEP))
+    if not prohibited_present:
+        return
+    sys.stderr.write(
+        "dm_profile: refusing to build per-step Dolan-More profile because "
+        "publish_summary.csv contains prohibited solvers: "
+        f"{prohibited_present}.\n"
+        "Per the argmin honest-position on per-step performance, only NLopt "
+        "has paired per-HS-problem-microseconds-per-step numbers in the same "
+        "comparison frame as argmin's publish_bench cells. Ipopt, KNITRO, "
+        "SNOPT, and scipy SLSQP publish CUTEst-aggregate figures that are "
+        "not reportable alongside per-HS comparisons.\n"
+        "See .planning/research/FEATURES.md section 6 for the full "
+        "honest-position statement.\n")
+    sys.exit(2)
+
+
+def _apply_cohort_filters(summary: pd.DataFrame,
+                          apply_solver_subset: bool) -> pd.DataFrame:
+    """Apply the HS-suite + solver-subset filters to the loaded summary.
+
+    The HS-suite filter excludes ``problem_class::application`` rows
+    unconditionally. The solver-subset filter restricts to
+    ``PROFILE_SOLVERS``; it is skipped when ``apply_solver_subset`` is
+    ``False`` (diagnostic mode via ``--no-cohort-filter``).
+    """
+
+    before_rows = len(summary)
+    if "class" in summary.columns:
+        mask = ~summary["class"].astype(str).str.contains(
+            HS_SUITE_EXCLUDE_TOKEN, na=False)
+        filtered = summary[mask].copy()
+    else:
+        filtered = summary.copy()
+    sys.stderr.write(
+        f"dm_profile: HS-suite filter dropped "
+        f"{before_rows - len(filtered)} application-shaped rows; "
+        f"profile cohort = {len(filtered)} rows.\n")
+
+    if apply_solver_subset:
+        filtered = filtered[
+            filtered["solver"].astype(str).isin(PROFILE_SOLVERS)].copy()
+        if filtered.empty:
+            sys.stderr.write(
+                "dm_profile: no rows match the per-step profile cohort "
+                f"{sorted(PROFILE_SOLVERS)}; nothing to plot.\n")
+            sys.exit(1)
+        present = sorted(set(filtered["solver"].astype(str).unique()))
+        sys.stderr.write(
+            f"dm_profile: profile cohort solvers = {present}\n")
+    else:
+        sys.stderr.write(
+            "dm_profile: --no-cohort-filter active; solver-subset filter "
+            "skipped. The HS-suite filter and the prohibited-solver "
+            "assertion remain in force.\n")
+
+    return filtered
 
 
 def _safe_tau_token(tau: float) -> str:
@@ -218,13 +356,11 @@ def _collect_t_tau_rows(run_dir: Path,
 
         pair = _disambiguate_solver_problem(stem_no_seed, known_pairs)
         if pair is None:
-            # Last-resort: split on the rightmost underscore.
-            sp = stem_no_seed.rsplit("_", 1)
-            if len(sp) != 2:
-                print(f"dm_profile: cannot disambiguate {trace_path.name}",
-                      file=sys.stderr)
-                continue
-            pair = (sp[0], sp[1])
+            # Trace file's (solver, problem) is not in the cohort-filtered
+            # summary. Skip silently -- this is the expected path for traces
+            # whose solver was excluded by the named-cohort filter (e.g.,
+            # ipopt traces when the default PROFILE_SOLVERS cohort is active).
+            continue
 
         solver, problem = pair
         if problem not in f_star_by_problem:
@@ -340,6 +476,13 @@ def main() -> int:
                               "default: all discovered classes)."))
     parser.add_argument("--dry-run", action="store_true",
                         help="Skip file writes; print intended output paths.")
+    parser.add_argument("--no-cohort-filter", action="store_true",
+                        help=("Diagnostic use only: bypass the named-subset "
+                              "profile cohort filter and plot every solver "
+                              "present in publish_summary.csv. The HS-suite "
+                              "class filter and the prohibited-solver "
+                              "assertion (see FEATURES.md section 6) remain "
+                              "in force."))
     args = parser.parse_args()
 
     run_dir: Path = args.run_dir
@@ -348,6 +491,20 @@ def main() -> int:
         output_dir.mkdir(parents=True, exist_ok=True)
 
     summary = _load_summary(run_dir)
+
+    # HS-suite filter (excluding application-shaped cells) + named profile
+    # cohort filter. The HS-suite filter applies unconditionally; the
+    # named-subset filter respects --no-cohort-filter.
+    summary = _apply_cohort_filters(
+        summary, apply_solver_subset=not args.no_cohort_filter)
+
+    # Honest-position guard: prohibited per-step solvers in the post-filter
+    # cohort terminate the run before any plotting or report writing. Default
+    # mode's named cohort excludes them by construction, so this is a no-op
+    # there; --no-cohort-filter mode triggers the guard if a prohibited
+    # solver survives into the plot cohort.
+    _assert_no_prohibited_solvers(summary)
+
     if args.solvers:
         summary = summary[summary["solver"].isin(args.solvers)].copy()
         if summary.empty:

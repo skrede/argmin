@@ -426,7 +426,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             opts.set_step_threshold(1e-15);
             opts.set_objective_threshold(1e-15);
 
-            cmaes_policy policy;
+            cmaes_policy<> policy;
             policy.options.initial_sigma = 1.0;
             policy.options.lambda = 64u;
             policy.options.seed = 42u;
@@ -445,7 +445,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             opts.set_step_threshold(1e-15);
             opts.set_objective_threshold(1e-15);
 
-            cmaes_policy policy;
+            cmaes_policy<> policy;
             policy.options.initial_sigma = 0.5;
             policy.options.seed = 42u;
             basic_solver solver{policy, problem, x0, opts};
@@ -463,7 +463,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             opts.set_step_threshold(1e-15);
             opts.set_objective_threshold(1e-15);
 
-            cmaes_policy policy;
+            cmaes_policy<> policy;
             policy.options.initial_sigma = 1.0;
             policy.options.seed = 42u;
             basic_solver solver{policy, problem, x0, opts};

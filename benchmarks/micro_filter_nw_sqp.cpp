@@ -12,15 +12,59 @@
 #include "argmin/solver/basic_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+#include "argmin/detail/bench/alloc_counter.h"
+#endif
+
 #include <Eigen/Core>
 
 #include <nlopt.hpp>
+
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <new>
+#endif
 
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <print>
+#include <string_view>
+
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+// Bench-only ::operator new override translation unit (see micro_kraft_slsqp.cpp
+// for full rationale). Compiled into the bench executable only.
+namespace argmin::detail::bench
+{
+    std::atomic<std::size_t> g_alloc_count{0};
+}
+
+void* operator new(std::size_t n)
+{
+    ++argmin::detail::bench::g_alloc_count;
+    void* r = std::malloc(n);
+    if(!r) throw std::bad_alloc{};
+    return r;
+}
+
+void* operator new(std::size_t n, std::align_val_t a)
+{
+    ++argmin::detail::bench::g_alloc_count;
+    void* r = nullptr;
+    if(::posix_memalign(&r, static_cast<std::size_t>(a), n) != 0)
+        throw std::bad_alloc{};
+    return r;
+}
+
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+#endif
 
 namespace
 {
@@ -329,8 +373,21 @@ double nlopt_hs076_ineq2(unsigned, const double* x, double* grad, void*)
     return -(x[1] + 4.0 * x[2] - 1.5);
 }
 
+// Sweep result: extends timing with primal feasibility and a feasible
+// flag so the envelope-sweep TSV can report (f, cv, outer_iters).
+struct sweep_row
+{
+    double f;
+    double cv;
+    std::uint32_t outer_iters;
+    bool accepted;
+};
+
 template <typename Problem>
-timing bench_argmin(const Problem& problem, std::uint32_t reps)
+timing bench_argmin(const Problem& problem,
+                    std::uint32_t reps,
+                    std::optional<double> gamma_f = std::nullopt,
+                    std::optional<double> gamma_h = std::nullopt)
 {
     auto x0 = problem.initial_point();
     argmin::solver_options opts;
@@ -339,9 +396,16 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
     opts.set_objective_threshold(1e-8);
     opts.set_step_threshold(1e-12);
 
+    // Wachter & Biegler 2006 Section 2.3 envelope margins, threaded
+    // through filter_nw_sqp_policy::options_type when set on the CLI.
+    typename argmin::filter_nw_sqp_policy<>::options_type policy_opts;
+    if(gamma_f) policy_opts.gamma_f = *gamma_f;
+    if(gamma_h) policy_opts.gamma_h = *gamma_h;
+
     // Warmup.
     {
-        argmin::basic_solver solver{argmin::filter_nw_sqp_policy<>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::filter_nw_sqp_policy<>{},
+                                    problem, x0, opts, policy_opts};
         solver.solve();
     }
 
@@ -350,7 +414,8 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::filter_nw_sqp_policy<>{}, problem, x0, opts};
+        argmin::basic_solver solver{argmin::filter_nw_sqp_policy<>{},
+                                    problem, x0, opts, policy_opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -358,6 +423,42 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
     auto t1 = std::chrono::high_resolution_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, iters};
+}
+
+// Single-run probe used by the envelope sweep harness. Reports best
+// strictly-feasible (f, cv, outer_iters) under the configured envelope.
+//
+// Rebinds the policy to the problem's compile-time dimension so that
+// the matching options_type instantiation can be passed alongside (the
+// 5-arg basic_solver ctor has a same_as<Policy::options_type> guard).
+//
+// Tolerance regime mirrors tests/unit/filter_nw_sqp_test.cpp HS043 cell:
+// tight objective and step thresholds with a 500-outer-iter budget so
+// envelope cells with extra rejections still have room to converge.
+template <typename Problem>
+sweep_row sweep_argmin(const Problem& problem,
+                       std::optional<double> gamma_f,
+                       std::optional<double> gamma_h)
+{
+    using policy_t = argmin::filter_nw_sqp_policy<
+        argmin::problem_dimension_v<Problem>>;
+
+    auto x0 = problem.initial_point();
+    argmin::solver_options opts;
+    opts.max_iterations = 500;
+    opts.set_gradient_threshold(1e-4);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-12);
+
+    typename policy_t::options_type policy_opts;
+    if(gamma_f) policy_opts.gamma_f = *gamma_f;
+    if(gamma_h) policy_opts.gamma_h = *gamma_h;
+
+    argmin::basic_solver solver{policy_t{}, problem, x0, opts, policy_opts};
+    auto result = solver.solve();
+    return {result.objective_value, result.constraint_violation,
+            result.iterations,
+            result.constraint_violation <= opts.feasibility_tolerance};
 }
 
 timing bench_nlopt_hs043(std::uint32_t reps)
@@ -618,10 +719,84 @@ bool probe_regression_hs024_iter_bound()
     return ok;
 }
 
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+// Hot-loop allocation gate (see micro_kraft_slsqp.cpp for full rationale).
+int probe_alloc_free_hot_loop()
+{
+    hs071_dynamic problem;
+    Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
+    argmin::solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-10);
+
+    argmin::basic_solver solver{argmin::filter_nw_sqp_policy<>{}, problem, x0, opts};
+
+    solver.step();
+    solver.step();
+
+    argmin::detail::bench::reset_alloc_count();
+    argmin::detail::bench::arm_alloc_trace();
+    for(int i = 0; i < 10; ++i)
+        solver.step();
+    argmin::detail::bench::disarm_alloc_trace();
+
+    const std::size_t allocs = argmin::detail::bench::read_alloc_count();
+    if(allocs != 0)
+    {
+        std::fprintf(stderr,
+                     "ALLOC TRACE FAIL (filter_nw_sqp): %zu allocations during 10-step hot loop\n",
+                     allocs);
+        return 1;
+    }
+    std::println("  filter_nw_sqp alloc-free hot loop: 0 allocations / 10 steps");
+    return 0;
+}
+#endif
+
 }
 
-int main()
+int main(int argc, char** argv)
 {
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+    (void)argc; (void)argv;
+    return probe_alloc_free_hot_loop();
+#endif
+
+    // Parse --gamma-f / --gamma-h CLI overrides for the filter envelope
+    // sweep. When both are provided the binary switches into sweep mode:
+    // the regression probes and NLopt comparison are skipped, and a
+    // single-run TSV-friendly line per problem is emitted on stdout
+    // ("policy\tgamma_f\tgamma_h\tproblem\tf\tcv\touter_iters\taccepted").
+    //
+    // Reference: Wachter & Biegler 2006 Section 2.3 (envelope margins).
+    std::optional<double> cli_gamma_f;
+    std::optional<double> cli_gamma_h;
+    for(int i = 1; i + 1 < argc; ++i)
+    {
+        std::string_view arg{argv[i]};
+        if(arg == "--gamma-f")
+            cli_gamma_f = std::stod(argv[++i]);
+        else if(arg == "--gamma-h")
+            cli_gamma_h = std::stod(argv[++i]);
+    }
+
+    if(cli_gamma_f && cli_gamma_h)
+    {
+        const double gf = *cli_gamma_f;
+        const double gh = *cli_gamma_h;
+        auto emit = [gf, gh](std::string_view name, const sweep_row& r) {
+            std::println("filter_nw_sqp\t{:.0e}\t{:.0e}\t{}\t{:.10e}\t{:.10e}\t{}\t{}",
+                         gf, gh, name, r.f, r.cv, r.outer_iters,
+                         r.accepted ? 1 : 0);
+        };
+        emit("HS043", sweep_argmin(hs043_dynamic{}, cli_gamma_f, cli_gamma_h));
+        emit("HS024", sweep_argmin(argmin::hs024<>{}, cli_gamma_f, cli_gamma_h));
+        emit("HS076", sweep_argmin(hs076_dynamic{}, cli_gamma_f, cli_gamma_h));
+        return 0;
+    }
+
     constexpr std::uint32_t reps = 500;
 
     if(!probe_kkt_residual())
@@ -637,7 +812,7 @@ int main()
     // HS043
     {
         std::println("\n--- HS043 (inequality, n=4, f*=-44) ---");
-        auto nab  = bench_argmin(hs043_dynamic{}, reps);
+        auto nab  = bench_argmin(hs043_dynamic{}, reps, cli_gamma_f, cli_gamma_h);
         auto nlop = bench_nlopt_hs043(reps);
         print_row("argmin", nab);
         print_row("nlopt", nlop);
@@ -648,7 +823,7 @@ int main()
     // HS071
     {
         std::println("\n--- HS071 (mixed, n=4, f*~17.014) ---");
-        auto nab  = bench_argmin(hs071_dynamic{}, reps);
+        auto nab  = bench_argmin(hs071_dynamic{}, reps, cli_gamma_f, cli_gamma_h);
         auto nlop = bench_nlopt_hs071(reps);
         print_row("argmin", nab);
         print_row("nlopt", nlop);
@@ -659,7 +834,7 @@ int main()
     // HS076
     {
         std::println("\n--- HS076 (inequality + box, n=4, f*=-4.68) ---");
-        auto nab  = bench_argmin(hs076_dynamic{}, reps);
+        auto nab  = bench_argmin(hs076_dynamic{}, reps, cli_gamma_f, cli_gamma_h);
         auto nlop = bench_nlopt_hs076(reps);
         print_row("argmin", nab);
         print_row("nlopt", nlop);
