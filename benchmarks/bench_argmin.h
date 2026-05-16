@@ -271,6 +271,14 @@ auto run_argmin_solver(std::string_view solver_name,
             : static_cast<double>(trace.back().f_current);
         benchmark::DoNotOptimize(final_obj_safe);
 
+        // Final-iter cv pulled from the trace tail (the per-iter trace is
+        // the in-process record of what the policy reported on each step);
+        // the trace is empty only on degenerate problems that never enter
+        // the step loop, in which case 0.0 stands in.
+        const double final_cv = trace.empty()
+            ? 0.0
+            : trace.back().cv;
+
         return benchmark_result{
             .solver = solver_name,
             .library = "argmin",
@@ -290,6 +298,7 @@ auto run_argmin_solver(std::string_view solver_name,
             .final_objective = final_obj_safe,
             .known_optimum = prob.optimal_value(),
             .accuracy = std::abs(final_obj_safe - prob.optimal_value()),
+            .constraint_violation = final_cv,
             .status = detail::status_string(final_status),
         };
     }
@@ -330,6 +339,7 @@ auto run_argmin_solver(std::string_view solver_name,
             .final_objective = result.objective_value,
             .known_optimum = prob.optimal_value(),
             .accuracy = std::abs(result.objective_value - prob.optimal_value()),
+            .constraint_violation = static_cast<double>(result.constraint_violation),
             .status = detail::status_string(result.status),
         };
     }

@@ -12,6 +12,23 @@
 //
 // Usage:
 //   regression_check <publish_summary.csv> <regression_baseline.csv>
+//                    [--accuracy-cutoff <DOUBLE>] [--cv-cutoff <DOUBLE>]
+//
+// Status-aware accept-as-pass rule. Rows whose baseline disposition is
+// `expected=skip` but whose every-seed `status=stalled` AND
+// `accuracy < accuracy_cutoff` (default 1e-12) AND
+// `constraint_violation < cv_cutoff` (default 1e-8) are promoted
+// in-memory to `expected=pass` and gated against the baseline bounds
+// for accuracy / outer-iters / per-step wall / cv. The promotion
+// catches cells that stall at machine precision on strictly-feasible
+// minimizers (|f - f*| at 1e-13..1e-16, cv at 1e-14..1e-16); without it
+// the harness cannot tell these passing-on-the-math cells from genuine
+// algorithmic failures because the solver returns `stalled`. The rule
+// does NOT apply to `status=max_iterations` or other non-stall statuses
+// -- those are algorithmic-failure signals that should not be conflated
+// with machine-precision convergence. The (accuracy_cutoff, cv_cutoff)
+// pair is empirically selected by a narrow sweep recorded under the
+// project's planning shadow repo.
 //
 // Exit codes:
 //   0  every expected:pass cell satisfies every bound, every
@@ -36,6 +53,12 @@
 // runs where per-step timing variance overwhelms the pad. The
 // iteration, accuracy, status, and cv gates remain active. The
 // production 11-seed sweep leaves this unset so the wall gate fires.
+//
+// Env-var ARGMIN_REGRESSION_CHECK_PROMOTE_LOG=1 prints one stderr line
+// per promoted row in the form
+// `PROMOTE: solver=... problem=... mode=... max_accuracy=... max_cv=...`,
+// used by the threshold-pair sweep harness to count promotions per
+// (accuracy_cutoff, cv_cutoff) configuration.
 
 #include <algorithm>
 #include <charconv>
@@ -55,6 +78,21 @@
 
 namespace
 {
+
+// ---- Status-aware accept-as-pass rule defaults ----------------------------
+//
+// The skip-to-pass promotion thresholds. A baseline row with
+// `expected=skip` is promoted in-memory to `expected=pass` when every
+// seed reports `status=stalled` AND `accuracy < kAccuracyCutoff` AND
+// `cv < kCvCutoff`. Selected by a narrow sweep over
+// (accuracy in {1e-10, 1e-12, 1e-14}) x (cv in {1e-6, 1e-8, 1e-10}) per
+// the project's empirical-sweep policy; the chosen pair (1e-12, 1e-8)
+// matches the per-iter machine-precision-stall trace evidence on the
+// line-search SQP HS-suite stall family. CLI flags
+// `--accuracy-cutoff` and `--cv-cutoff` override these at runtime.
+
+constexpr double kAccuracyCutoff = 1e-12;
+constexpr double kCvCutoff       = 1e-8;
 
 // ---- CSV reader ----------------------------------------------------------
 
@@ -217,24 +255,109 @@ struct aggregate_row
     return m;
 }
 
+// Status-aware accept-as-pass predicate. Returns true iff every seed in
+// the aggregate reports status=stalled AND a strictly-positive accuracy
+// strictly below accuracy_cutoff AND (cv column present with) every
+// cv-seed strictly below cv_cutoff. The cv column is required: a cell
+// with no cv data cannot be promoted because there is no evidence the
+// stall is on the feasible manifold.
+[[nodiscard]] auto status_aware_promotes_to_pass(const aggregate_row& agg,
+                                                 double accuracy_cutoff,
+                                                 double cv_cutoff) -> bool
+{
+    if(agg.status_seeds.empty()) return false;
+    for(const auto& s : agg.status_seeds)
+        if(s != "stalled") return false;
+
+    if(agg.accuracy_seeds.empty()) return false;
+    for(double a : agg.accuracy_seeds)
+        if(!(a > 0.0 && a < accuracy_cutoff)) return false;
+
+    if(!agg.cv_available || agg.cv_seeds.empty()) return false;
+    for(double cv : agg.cv_seeds)
+        if(!(cv < cv_cutoff)) return false;
+
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
 {
-    if(argc != 3)
+    // Positional argv: [1] = publish_summary.csv, [2] = baseline.csv.
+    // Optional flags: --accuracy-cutoff DOUBLE, --cv-cutoff DOUBLE,
+    //                 --help / -h.
+    double accuracy_cutoff = kAccuracyCutoff;
+    double cv_cutoff       = kCvCutoff;
+
+    std::vector<std::string_view> positional;
+    positional.reserve(2);
+
+    auto print_usage = [](std::ostream& os)
     {
-        std::cerr << "Usage: regression_check <publish_summary.csv> <regression_baseline.csv>\n";
+        os << "Usage: regression_check <publish_summary.csv> <regression_baseline.csv>\n"
+              "                        [--accuracy-cutoff DOUBLE]\n"
+              "                        [--cv-cutoff DOUBLE]\n"
+              "\n"
+              "Options:\n"
+              "  --accuracy-cutoff DOUBLE  Status-aware promote-to-pass accuracy threshold (default 1e-12).\n"
+              "  --cv-cutoff       DOUBLE  Status-aware promote-to-pass cv threshold       (default 1e-8).\n"
+              "  --help, -h                Print this message and exit.\n";
+    };
+
+    for(int i = 1; i < argc; ++i)
+    {
+        std::string_view arg = argv[i];
+        if(arg == "--help" || arg == "-h")
+        {
+            print_usage(std::cout);
+            return 0;
+        }
+        if(arg == "--accuracy-cutoff" && i + 1 < argc)
+        {
+            if(!parse_double(argv[++i], accuracy_cutoff))
+            {
+                std::cerr << "regression_check: invalid --accuracy-cutoff value\n";
+                return 1;
+            }
+            continue;
+        }
+        if(arg == "--cv-cutoff" && i + 1 < argc)
+        {
+            if(!parse_double(argv[++i], cv_cutoff))
+            {
+                std::cerr << "regression_check: invalid --cv-cutoff value\n";
+                return 1;
+            }
+            continue;
+        }
+        if(!arg.empty() && arg.front() == '-')
+        {
+            std::cerr << "regression_check: unknown or incomplete option '" << arg << "'\n";
+            print_usage(std::cerr);
+            return 1;
+        }
+        positional.push_back(arg);
+    }
+
+    if(positional.size() != 2)
+    {
+        print_usage(std::cerr);
         return 1;
     }
 
-    std::filesystem::path summary_path  = argv[1];
-    std::filesystem::path baseline_path = argv[2];
+    std::filesystem::path summary_path  = std::string(positional[0]);
+    std::filesystem::path baseline_path = std::string(positional[1]);
 
     const char* disable_wall_env = std::getenv("REGRESSION_CHECK_DISABLE_WALL_GATE");
     const bool  disable_wall_gate =
         disable_wall_env != nullptr && std::string_view{disable_wall_env} == "1";
     if(disable_wall_gate)
         std::cerr << "INFO: REGRESSION_CHECK_DISABLE_WALL_GATE=1; max_us_per_step gate disabled\n";
+
+    const char* promote_log_env = std::getenv("ARGMIN_REGRESSION_CHECK_PROMOTE_LOG");
+    const bool  promote_log_enabled =
+        promote_log_env != nullptr && std::string_view{promote_log_env} == "1";
 
     csv_table   summary;
     csv_table   baseline;
@@ -365,8 +488,35 @@ int main(int argc, char** argv)
         matched[key] = true;
         const auto& agg = it->second;
 
+        // Status-aware accept-as-pass: a skip row whose every seed
+        // reports status=stalled AND accuracy<cutoff AND cv<cutoff is
+        // promoted in-memory to a pass cell so the gate enforces
+        // convergence on machine-precision stalls. See the file
+        // preamble for the rule rationale.
+        std::string effective_expect{expect};
         if(expect == "skip")
-            continue;
+        {
+            if(status_aware_promotes_to_pass(agg, accuracy_cutoff, cv_cutoff))
+            {
+                effective_expect = "pass";
+                if(promote_log_enabled)
+                {
+                    const double promoted_max_acc = max_double(agg.accuracy_seeds);
+                    const double promoted_max_cv  = agg.cv_seeds.empty()
+                        ? std::numeric_limits<double>::quiet_NaN()
+                        : max_double(agg.cv_seeds);
+                    std::cerr << "PROMOTE: solver=" << solver
+                              << " problem=" << problem
+                              << " mode=" << mode
+                              << " max_accuracy=" << promoted_max_acc
+                              << " max_cv=" << promoted_max_cv << '\n';
+                }
+            }
+            else
+            {
+                continue;
+            }
+        }
 
         bool any_nonconverged = false;
         for(const auto& s : agg.status_seeds)
@@ -395,7 +545,7 @@ int main(int argc, char** argv)
         const bool pass_us_effective = disable_wall_gate || pass_us;
         const bool numeric_all_pass  = pass_us_effective && pass_iters && pass_acc && pass_cv;
 
-        if(expect == "pass")
+        if(effective_expect == "pass")
         {
             if(!pass_us && !disable_wall_gate)
                 emit_breach(solver, problem, mode, "max_us_per_step",
@@ -410,7 +560,12 @@ int main(int argc, char** argv)
             if(agg.cv_available && !pass_cv)
                 emit_breach(solver, problem, mode, "max_cv_log10",
                             measured_cv_log10, max_cv_log10);
-            if(any_nonconverged)
+            // status-gate: original-pass rows require every seed
+            // converged; promoted rows (effective_expect=pass, expect=skip)
+            // accept the every-seed-stalled disposition by construction of
+            // the promotion predicate, so the converged-all-seeds gate is
+            // only applied to the original-pass cohort.
+            if(any_nonconverged && expect != "skip")
             {
                 std::cerr << "BREACH: solver=" << solver
                           << " problem=" << problem
@@ -420,7 +575,7 @@ int main(int argc, char** argv)
                 ++breach_count;
             }
         }
-        else if(expect == "shouldfail")
+        else if(effective_expect == "shouldfail")
         {
             // shouldfail cell unexpectedly converges if every seed
             // converged AND every numeric gate held.
@@ -434,7 +589,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            std::cerr << "WARN: unknown expected disposition '" << expect
+            std::cerr << "WARN: unknown expected disposition '" << effective_expect
                       << "' for solver=" << solver
                       << " problem=" << problem
                       << " mode=" << mode
