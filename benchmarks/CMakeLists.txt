@@ -475,6 +475,24 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Filter envelope sweep harness (argmin-only). Sweeps the asymmetric
+# (gamma_f, gamma_h) envelope on HS043 with HS024 + HS076 regression
+# guards across both filter_slsqp and filter_nw_sqp; prints a
+# selectable accurate-mode default per policy.
+add_executable(filter_envelope_sweep filter_envelope_sweep.cpp)
+target_link_libraries(filter_envelope_sweep PRIVATE argmin::argmin)
+target_compile_options(filter_envelope_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(filter_envelope_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Diagnostic KKT-breakdown harness (throwaway; emits per-iter CSV across
 # the four SQP premature-ftol regressions, the byrd_lbfgsb null-step
 # termination gap, and the hs071 diagnostic byproduct case). Opt-in
