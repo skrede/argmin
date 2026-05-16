@@ -136,6 +136,34 @@ struct byrd_omojokun_result
 //   Bd_cg_buf        -- caller-owned Steihaug-CG scratch buffers in
 //                       joint space.
 //   p_out            -- caller-owned composite-step output (v + u).
+//   penalty          -- in/out adaptive L2-merit penalty parameter.
+//                       Owned by the caller's policy state so it persists
+//                       across composite-step calls; updated per the
+//                       LNP / scipy update_penalty heuristic before
+//                       return. The augmented predicted/actual reductions
+//                       weight the feasibility leg by `penalty` on both
+//                       sides.
+//   penalty_factor   -- in: heuristic growth factor controlling how
+//                       aggressively the penalty grows. The post-step
+//                       update sets
+//                         new_penalty = max(penalty,
+//                                           hredd / ((1 - penalty_factor)
+//                                                     * vpred))
+//                       when both vpred > 0 and hredd > 0 (and the denom
+//                       is positive); otherwise the penalty stays.
+//
+// Reference: Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
+//            8(3):682-706 Section 3.3 equations 3.4-3.5 (augmented
+//            merit + penalty update rule); equation 1.13 (penalty
+//            growth margin). Adopted from scipy
+//            optimize/_trustregion_constr/equality_constrained_sqp.py
+//            update_penalty. The scipy reference default for
+//            penalty_factor is 0.3; this library's default is selected
+//            empirically by an HS-suite sweep (the most conservative
+//            non-regressing value, currently driven toward a
+//            second-order correction retry on the inequality leg to
+//            absorb the freeze-on-feasibility regression that larger
+//            growth factors produce in isolation).
 template <typename Scalar, int N, typename HessianOp, typename TrialEval>
 byrd_omojokun_result byrd_omojokun_composite_step(
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& z_k,
@@ -159,7 +187,9 @@ byrd_omojokun_result byrd_omojokun_composite_step(
     Eigen::Ref<Eigen::Vector<Scalar, N>> r_cg_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>> d_cg_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>> Bd_cg_buf,
-    Eigen::Ref<Eigen::Vector<Scalar, N>> p_out)
+    Eigen::Ref<Eigen::Vector<Scalar, N>> p_out,
+    Scalar& penalty,
+    Scalar penalty_factor)
 {
     using std::sqrt;
     (void)z_k;  // z_k is documented as input; the helper operates in
@@ -314,40 +344,94 @@ byrd_omojokun_result byrd_omojokun_composite_step(
     // ── Composite step ─────────────────────────────────────────────
     p_out = v_buf + u_buf;
 
-    // ── Predicted reduction (augmented) ────────────────────────────
+    // ── Predicted reduction (augmented, with LNP penalty) ──────────
     //
     // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3 eq. 3.4-3.5;
     //            scipy equality_constrained_sqp.py predicted-reduction
     //            formula.
     //
-    //   pred = -g^T p - 0.5 * p^T B p + (||c||_2 - ||A p + c||_2)
+    //   pred = -g^T p - 0.5 * p^T B p
+    //        + penalty * (||c||_2 - ||A p + c||_2)
     //
-    // The two terms split the reduction into objective progress and
-    // linearized-feasibility progress; this is the augmented-reduction
-    // convention that handles v != 0 cleanly.
+    // The penalty (passed in by the caller as an adaptive in/out
+    // parameter) weights the feasibility leg against the objective leg.
+    // vpred = ||c||_2 - ||A p + c||_2 is the linearized-feasibility
+    // predicted reduction AT the current x: both norms are computed at
+    // the linearization point, NOT across iterates. This is the load-
+    // bearing correctness point — the previous-iterate end residual
+    // (c_norm_old) belongs in the actual-reduction leg, not in vpred.
     Eigen::Vector<Scalar, N> Bp = hessian_op(p_out);
     const Scalar Bp_dot_p = p_out.dot(Bp);
     Eigen::VectorXd Ap_plus_c = A * p_out + c;
     const Scalar c_norm_lin = c.norm();
     const Scalar Ap_plus_c_norm = Ap_plus_c.norm();
+    const Scalar vpred = c_norm_lin - Ap_plus_c_norm;
     const Scalar predicted =
         -g.dot(p_out) - Scalar{0.5} * Bp_dot_p
-        + (c_norm_lin - Ap_plus_c_norm);
+        + penalty * vpred;
 
-    // ── Actual reduction ───────────────────────────────────────────
+    // ── Actual reduction (augmented, with LNP penalty) ─────────────
     //
     // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3;
     //            scipy equality_constrained_sqp.py ratio test.
     //
-    //   actual = (f_old + ||c(z_k)||_2)
-    //          - (f_new + ||c(z_k + p)||_2)
+    //   actual = (f_old + penalty * ||c(z_k)||_2)
+    //          - (f_new + penalty * ||c(z_k + p)||_2)
     //
-    // The L2 merit (objective + L2 constraint norm); matches scipy +
-    // Nocedal-Wright convention.
+    // The penalty weight matches the predicted-reduction shape so the
+    // ratio is well-posed under non-unit penalty.
     std::pair<Scalar, Scalar> trial = trial_eval(p_out);
     const Scalar f_new = trial.first;
     const Scalar c_norm_new = trial.second;
-    const Scalar actual = (f_old + c_norm_old) - (f_new + c_norm_new);
+    const Scalar actual =
+        (f_old + penalty * c_norm_old) - (f_new + penalty * c_norm_new);
+
+    // ── Penalty update (LNP / scipy update_penalty heuristic) ──────
+    //
+    // Reference: Lalee, Nocedal, Plantenga 1998 equation 1.13;
+    //            scipy update_penalty. The penalty grows only when
+    //            the objective-leg descent magnitude (hredd) exceeds
+    //            the (1 - penalty_factor)-scaled feasibility-leg
+    //            predicted reduction (vpred); otherwise the penalty
+    //            stays.
+    //
+    // argmin variant: penalty_factor = 0 disables the adaptive growth
+    // entirely (the heuristic gate is short-circuited). This makes
+    // penalty_factor = 0 semantically equivalent to "fixed penalty at
+    // its initial value" — when state-resident penalty is initialized
+    // to 1 and never updated, the augmented merit collapses to the
+    // unweighted L2 form that argmin shipped prior to the adaptive-
+    // penalty plumbing. Non-zero penalty_factor opts into the
+    // heuristic; the literature shape (always-on growth) is recovered
+    // by any strictly-positive penalty_factor. This is a deliberate
+    // choice: the swept HS-suite empirics at HEAD show that even the
+    // literature-default growth shape (hredd / vpred) regresses the
+    // four existing-passing cells without a paired second-order
+    // correction retry on the inequality leg. Keeping the no-growth
+    // endpoint as a true no-op leaves the default landing path safe
+    // while the runtime knob remains available for downstream SOC
+    // pairing.
+    //
+    // hredd is the objective predicted-reduction MAGNITUDE under the
+    // quadratic model; the sign convention matches scipy's
+    // "hredd > 0 means descent". The denom guard handles
+    // penalty_factor >= 1 (degenerate runtime values) gracefully by
+    // skipping the update — that knob slot is empirically restricted
+    // to the [0, 1) interval by the literature heuristic.
+    if(penalty_factor > Scalar{0})
+    {
+        const Scalar hredd =
+            -(g.dot(p_out) + Scalar{0.5} * Bp_dot_p);
+        if(vpred > Scalar{0} && hredd > Scalar{0})
+        {
+            const Scalar denom = (Scalar{1} - penalty_factor) * vpred;
+            if(denom > Scalar{0})
+            {
+                const Scalar candidate = hredd / denom;
+                penalty = std::max(penalty, candidate);
+            }
+        }
+    }
 
     // ── Ratio and radius update ────────────────────────────────────
     //

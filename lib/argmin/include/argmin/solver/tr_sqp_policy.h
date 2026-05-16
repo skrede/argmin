@@ -149,6 +149,20 @@ struct tr_sqp_policy
     static constexpr double default_initial_trust_radius = 1.0;
     static constexpr double default_min_trust_radius     = 1e-12;
 
+    // Adaptive L2-merit penalty parameter defaults. The penalty is
+    // persistent state on the joint Byrd-Omojokun ratio test (the
+    // augmented merit weights the feasibility leg by `penalty`); the
+    // penalty_factor is the LNP heuristic growth factor.
+    //
+    // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3 (initial
+    //            penalty; growth factor); scipy update_penalty
+    //            (penalty_factor = 0.3 default; argmin selects a
+    //            conservative value empirically — the largest entry in
+    //            {0.0, 0.01, 0.05, 0.1, 0.3} that does not regress the
+    //            existing HS-suite acceptance bars).
+    static constexpr double default_initial_penalty = 1.0;
+    static constexpr double default_penalty_factor  = 0.0;
+
     struct options_type
     {
         // Direct-field-default form: literature-defaulted scalars are
@@ -175,6 +189,26 @@ struct tr_sqp_policy
         // treated as 1 (re-estimate every step) by the read-site clamp.
         std::size_t multiplier_reest_every_k{
             default_multiplier_reest_every_k};
+
+        // Initial value for the adaptive L2-merit penalty parameter.
+        // The state's `penalty` field is seeded from this at init() /
+        // reset() time and then updated in place by the LNP / scipy
+        // update_penalty heuristic on every composite-step call.
+        //
+        // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3.
+        double initial_penalty{default_initial_penalty};
+
+        // LNP heuristic growth factor for the adaptive L2-merit penalty.
+        // Selected empirically across {0.0, 0.01, 0.05, 0.1, 0.3} as
+        // the largest non-regressing value on the existing HS-suite
+        // acceptance bars; larger values may be selected once a paired
+        // second-order correction retry on the inequality leg absorbs
+        // the freeze-on-feasibility regression that they produce in
+        // isolation.
+        //
+        // Reference: Lalee, Nocedal, Plantenga 1998 equation 1.13;
+        //            scipy update_penalty.
+        double penalty_factor{default_penalty_factor};
     };
 
     options_type options{};
@@ -226,6 +260,14 @@ struct tr_sqp_policy
         // step(). The skeleton seeds it from options.initial_trust_radius
         // at init / reset time.
         double trust_radius{default_initial_trust_radius};
+
+        // Adaptive L2-merit penalty parameter (in/out across composite-
+        // step calls). Seeded from options.initial_penalty at init() /
+        // reset() time; the byrd_omojokun helper updates it in place per
+        // the LNP / scipy update_penalty heuristic on every step.
+        //
+        // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3.
+        double penalty{default_initial_penalty};
 
         // LDLT workspace pair used by detail::equality_feasibility_warmstart
         // on the joint Jacobian inside the byrd_omojokun normal-step leg.
@@ -382,6 +424,7 @@ struct tr_sqp_policy
         s.lambda = Eigen::VectorXd::Zero(m);
 
         s.trust_radius = options.initial_trust_radius;
+        s.penalty      = options.initial_penalty;
         s.iteration = 0;
 
         return s;
@@ -587,7 +630,8 @@ struct tr_sqp_policy
             f_old, c_norm_old,
             trial_eval,
             s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
-            v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out);
+            v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+            s.penalty, options.penalty_factor);
 
         // Section L -- Radius update consumes the helper's verdict.
         s.trust_radius = bo.new_delta;
@@ -825,6 +869,7 @@ struct tr_sqp_policy
 
         s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
         s.trust_radius = options.initial_trust_radius;
+        s.penalty      = options.initial_penalty;
         s.iteration = 0;
     }
 

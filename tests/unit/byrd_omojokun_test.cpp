@@ -134,13 +134,16 @@ TEST_CASE("byrd_omojokun pure equality quadratic accepts and progresses",
     const double c_norm_old = c.norm();
     trial_eval_quadratic teval{g, B, A, c, f_old};
 
+    double penalty = 1.0;
+    const double penalty_factor = 0.0;
     auto r = byrd_omojokun_composite_step<double, 2>(
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
         f_old, c_norm_old, teval,
         AAt_workspace, ldlt_workspace, w_workspace,
-        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out);
+        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        penalty, penalty_factor);
 
     // Normal step must reduce the linearized residual:
     // ||A v + c|| < ||c||.
@@ -210,13 +213,16 @@ TEST_CASE("byrd_omojokun rank-deficient A triggers Cauchy fallback",
     const double c_norm_old = c.norm();
     trial_eval_quadratic teval{g, B, A, c, f_old};
 
+    double penalty = 1.0;
+    const double penalty_factor = 0.0;
     auto r = byrd_omojokun_composite_step<double, 2>(
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
         f_old, c_norm_old, teval,
         AAt_workspace, ldlt_workspace, w_workspace,
-        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out);
+        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        penalty, penalty_factor);
 
     // Helper must not crash and must produce a finite step that
     // respects the displaced TR bound on the normal step.
@@ -270,13 +276,16 @@ TEST_CASE("byrd_omojokun Maratos-shape problem rejects unsafe step",
     const double c_norm_old = 0.0;
     trial_eval_maratos teval{g, B, x_linearize, f_old};
 
+    double penalty = 1.0;
+    const double penalty_factor = 0.0;
     auto r = byrd_omojokun_composite_step<double, 2>(
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
         f_old, c_norm_old, teval,
         AAt_workspace, ldlt_workspace, w_workspace,
-        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out);
+        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        penalty, penalty_factor);
 
     INFO("rho=" << r.rho
          << "  actual=" << r.actual_reduction
@@ -326,13 +335,16 @@ TEST_CASE("byrd_omojokun ratio > 0.75 at TR boundary expands radius",
     const double c_norm_old = 0.0;
     trial_eval_quadratic teval{g, B, A, c, f_old};
 
+    double penalty = 1.0;
+    const double penalty_factor = 0.0;
     auto r = byrd_omojokun_composite_step<double, 2>(
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
         f_old, c_norm_old, teval,
         AAt_workspace, ldlt_workspace, w_workspace,
-        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out);
+        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        penalty, penalty_factor);
 
     INFO("rho=" << r.rho
          << "  ||p||=" << p_out.norm()
@@ -378,13 +390,16 @@ TEST_CASE("byrd_omojokun interior step holds radius",
     const double c_norm_old = 0.0;
     trial_eval_quadratic teval{g, B, A, c, f_old};
 
+    double penalty = 1.0;
+    const double penalty_factor = 0.0;
     auto r = byrd_omojokun_composite_step<double, 2>(
         z_k, g, hop, A, c,
         delta_in, eps, /*max_cg_iter=*/20,
         lower_displaced, upper_displaced,
         f_old, c_norm_old, teval,
         AAt_workspace, ldlt_workspace, w_workspace,
-        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out);
+        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        penalty, penalty_factor);
 
     INFO("rho=" << r.rho
          << "  ||p||=" << p_out.norm()
@@ -394,4 +409,118 @@ TEST_CASE("byrd_omojokun interior step holds radius",
     // is gated off; radius held at delta_in.
     CHECK(p_out.norm() < 0.9 * delta_in);
     CHECK(r.new_delta == Approx(delta_in).margin(1e-12));
+}
+
+// ─── Penalty-update side-effect cells ──────────────────────────────
+//
+// Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3 equation 1.13;
+//            scipy update_penalty heuristic. The penalty grows only
+//            when the objective-leg descent magnitude (hredd) exceeds
+//            the (1 - penalty_factor)-scaled feasibility-leg predicted
+//            reduction (vpred). The two cells below pin the gate
+//            shapes: (a) vpred > 0 + hredd > 0 grows the penalty,
+//            (b) vpred <= 0 leaves the penalty at its initial value.
+
+TEST_CASE("byrd_omojokun_composite_step penalty grows when "
+          "objective-leg descent magnitude exceeds scaled "
+          "feasibility-leg predicted reduction",
+          "[byrd_omojokun][penalty][grow]")
+{
+    // Single equality with a generous Cauchy fit so the normal step
+    // shrinks ||c|| by a clear margin (vpred > 0). The objective has
+    // a large -g.dot(p) on the same step, so hredd dominates vpred
+    // and the heuristic bumps penalty above its initial value at any
+    // strictly positive penalty_factor.
+    Eigen::Vector2d g;
+    g << 10.0, -10.0;
+    Eigen::Matrix2d B = Eigen::Matrix2d::Identity();
+
+    Eigen::MatrixXd A(1, 2);
+    A << 1.0, 1.0;
+    Eigen::VectorXd c(1);
+    c << 0.5;
+
+    const double delta_in = 10.0;
+    const double eps = 1e-8;
+
+    Eigen::Vector2d z_k = Eigen::Vector2d::Zero();
+    Eigen::Vector2d lower_displaced;
+    lower_displaced << -kInf, -kInf;
+    Eigen::Vector2d upper_displaced;
+    upper_displaced << kInf, kInf;
+
+    Eigen::MatrixXd AAt_workspace(1, 1);
+    Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(1);
+    Eigen::VectorXd w_workspace(1);
+    Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+
+    hessian_op_2d hop{B};
+    const double f_old = 0.0;
+    const double c_norm_old = c.norm();
+    trial_eval_quadratic teval{g, B, A, c, f_old};
+
+    double penalty = 1.0;
+    const double penalty_factor = 0.3;  // scipy default; ensures the
+                                         // growth branch fires when
+                                         // hredd > vpred.
+    [[maybe_unused]] auto r = byrd_omojokun_composite_step<double, 2>(
+        z_k, g, hop, A, c,
+        delta_in, eps, /*max_cg_iter=*/20,
+        lower_displaced, upper_displaced,
+        f_old, c_norm_old, teval,
+        AAt_workspace, ldlt_workspace, w_workspace,
+        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        penalty, penalty_factor);
+
+    INFO("penalty post-step=" << penalty);
+    CHECK(penalty > 1.0);
+}
+
+TEST_CASE("byrd_omojokun_composite_step penalty stays at initial "
+          "value when vpred is non-positive",
+          "[byrd_omojokun][penalty][stay]")
+{
+    // Unconstrained problem: no equality, c is empty, so c_norm_lin
+    // and Ap_plus_c_norm are both zero and vpred = 0. The penalty
+    // update gate is closed; penalty must equal its initial value
+    // post-call regardless of penalty_factor.
+    Eigen::Vector2d g;
+    g << -1.0, 0.0;
+    Eigen::Matrix2d B = Eigen::Matrix2d::Identity();
+
+    Eigen::MatrixXd A(0, 2);
+    Eigen::VectorXd c(0);
+
+    const double delta_in = 10.0;
+    const double eps = 1e-12;
+
+    Eigen::Vector2d z_k = Eigen::Vector2d::Zero();
+    Eigen::Vector2d lower_displaced;
+    lower_displaced << -kInf, -kInf;
+    Eigen::Vector2d upper_displaced;
+    upper_displaced << kInf, kInf;
+
+    Eigen::MatrixXd AAt_workspace(0, 0);
+    Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(0);
+    Eigen::VectorXd w_workspace(0);
+    Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+
+    hessian_op_2d hop{B};
+    const double f_old = 0.0;
+    const double c_norm_old = 0.0;
+    trial_eval_quadratic teval{g, B, A, c, f_old};
+
+    double penalty = 1.0;
+    const double penalty_factor = 0.3;
+    [[maybe_unused]] auto r = byrd_omojokun_composite_step<double, 2>(
+        z_k, g, hop, A, c,
+        delta_in, eps, /*max_cg_iter=*/20,
+        lower_displaced, upper_displaced,
+        f_old, c_norm_old, teval,
+        AAt_workspace, ldlt_workspace, w_workspace,
+        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        penalty, penalty_factor);
+
+    INFO("penalty post-step=" << penalty);
+    CHECK(penalty == 1.0);
 }

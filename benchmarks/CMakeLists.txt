@@ -102,6 +102,28 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Adaptive-penalty growth-factor sweep harness for tr_sqp_policy. Drives
+# the policy across penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} on the
+# existing HS-suite cells (HS026/HS028/HS043/HS071/HS076) under both
+# accurate and fast modes; emits a JSON record per (penalty_factor,
+# cell, mode) plus a selection block identifying the largest non-
+# regressing default per the existing tr_sqp_test.cpp acceptance bars.
+# Non-ctest, one-shot.
+add_executable(penalty_factor_sweep penalty_factor_sweep.cpp)
+target_link_libraries(penalty_factor_sweep PRIVATE argmin::argmin)
+
+target_compile_options(penalty_factor_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(penalty_factor_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Optional comparison library hooks (NLopt LD_SLSQP and similar).
 
 option(ARGMIN_BENCH_NLOPT "Build NLopt comparison benchmarks" ON)
