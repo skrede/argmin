@@ -85,6 +85,7 @@ using rebind_policy_t = typename rebind_policy<Policy, N>::type;
     case solver_status::xtol_reached:     return "xtol_reached";
     case solver_status::maxeval_reached:  return "maxeval_reached";
     case solver_status::roundoff_limited:   return "roundoff_limited";
+    case solver_status::trust_region_step_rejected: return "trust_region_step_rejected";
     case solver_status::objective_stalled: return "objective_stalled";
     case solver_status::time_limit_reached: return "time_limit_reached";
     case solver_status::aborted:           return "aborted";

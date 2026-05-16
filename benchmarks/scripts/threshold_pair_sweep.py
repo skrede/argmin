@@ -146,7 +146,7 @@ def main() -> int:
 
     # Markdown.
     lines = []
-    lines.append(f"# Plan-04 threshold-pair sweep\n")
+    lines.append(f"# Threshold-pair sweep for regression_check status-aware promote-to-pass\n")
     lines.append(f"**HEAD:** `{args.head_sha}`\n")
     lines.append(f"**Summary input:** `{args.summary}`\n")
     lines.append(f"**Baseline input:** `{args.baseline}`\n")

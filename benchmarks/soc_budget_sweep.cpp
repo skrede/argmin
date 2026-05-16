@@ -144,6 +144,7 @@ struct cell_record
     std::size_t soc_max_iter;
     double      objective_value;
     double      constraint_violation;
+    double      gradient_norm;
     double      f_err;            // |f - f*| / max(|f*|, 1.0)
     std::uint32_t iterations;
     double      wall_us;
@@ -175,7 +176,8 @@ bool within_strict_bar(std::string_view problem_name,
                        sqp_mode          mode,
                        double            f,
                        double            f_star,
-                       double            cv)
+                       double            cv,
+                       double            grad_norm)
 {
     if(problem_name == "hs026")
     {
@@ -187,7 +189,11 @@ bool within_strict_bar(std::string_view problem_name,
     {
         if(mode == sqp_mode::fast)
             return std::abs(f - 0.0) <= 1e-2 && cv < 1e-2;
-        return std::abs(f - 0.0) <= 1e-6 && cv < 1e-4;
+        // Accurate-mode HS028 unit test (tr_sqp_test.cpp:558-562) also
+        // asserts gradient_norm < 1e-4; mirror it here so a sweep-passing
+        // configuration cannot ship to the unit-test gate with an
+        // above-threshold gradient.
+        return std::abs(f - 0.0) <= 1e-6 && cv < 1e-4 && grad_norm < 1e-4;
     }
     if(problem_name == "hs050")
     {
@@ -247,6 +253,7 @@ cell_record run_cell(double pf, std::size_t soc_iter, const Problem& problem,
     rec.soc_max_iter         = soc_iter;
     rec.objective_value      = result.objective_value;
     rec.constraint_violation = solver.constraint_violation();
+    rec.gradient_norm        = result.gradient_norm;
     rec.f_err                = f_err;
     rec.iterations           = static_cast<std::uint32_t>(result.iterations);
     rec.wall_us              = wall_us;
@@ -289,13 +296,15 @@ void run_cell_block(const std::string& problem_name,
             auto a = run_cell<PolicyAccurate>(pf, soc, problem, max_iterations);
             a.within_strict_bar = within_strict_bar(problem_name, sqp_mode::accurate,
                                                     a.objective_value, f_star,
-                                                    a.constraint_violation);
+                                                    a.constraint_violation,
+                                                    a.gradient_norm);
             acc_block.records.push_back(std::move(a));
 
             auto f = run_cell<PolicyFast>(pf, soc, problem, max_iterations);
             f.within_strict_bar = within_strict_bar(problem_name, sqp_mode::fast,
                                                     f.objective_value, f_star,
-                                                    f.constraint_violation);
+                                                    f.constraint_violation,
+                                                    f.gradient_norm);
             fst_block.records.push_back(std::move(f));
         }
     }

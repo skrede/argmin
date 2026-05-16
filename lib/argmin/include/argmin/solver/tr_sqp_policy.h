@@ -732,9 +732,10 @@ struct tr_sqp_policy
         //
         // Rejection: if all options.soc_max_iterations retries are
         // rejected, the policy falls through to Sections L/M/N with
-        // the LAST retry's verdict (the radius has shrunk by
-        // tr_shrink_factor on each retry, mirroring the primary
-        // rejection path's radius shrink across retries).
+        // the LAST retry's verdict; the trust radius from that retry
+        // reflects exactly one tr_shrink_factor application (not
+        // chained shrinks), because each retry is invoked with
+        // delta_pre_step as input.
         //
         // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.1;
         //            Nocedal and Wright 2e Section 18.3 (Maratos
