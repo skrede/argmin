@@ -13,16 +13,17 @@
 # convergence (per-seed status divergence) outside the published gate.
 solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,expected
 # skip: empirical max accuracy log10=0.841 exceeds the per-mode bound -8.0 for (bobyqa, ik_pose_batch_6, default); known_optimum is informational, not the true f*.
-bobyqa,ik_pose_batch_6,default,28,-8.0,858,-6.0,skip
+# skip: empirical max accuracy log10=0.841 exceeds the per-mode bound -8.0 for (bobyqa, ik_pose_batch_6, default); known_optimum is informational, not the true f*.
+bobyqa,ik_pose_batch_6,default,26,-8.0,858,-6.0,skip
 # skip: empirical max accuracy log10=0.910 exceeds the per-mode bound -8.0 for (byrd_lbfgsb, ik_pose_batch_6, default); known_optimum is informational, not the true f*.
 byrd_lbfgsb,ik_pose_batch_6,default,15,-8.0,45,-6.0,skip
-filter_nw_sqp_accurate,hs006,accurate,3,-8.0,12,-6.0,pass
-filter_nw_sqp_accurate,hs007,accurate,4,-8.0,12,-6.0,pass
-filter_nw_sqp_accurate,hs024,accurate,2,-8.0,16,-6.0,pass
-filter_nw_sqp_accurate,hs026,accurate,2,-8.0,45,-6.0,pass
+filter_nw_sqp_accurate,hs006,accurate,2,-8.0,12,-6.0,pass
+filter_nw_sqp_accurate,hs007,accurate,2,-8.0,12,-6.0,pass
+filter_nw_sqp_accurate,hs024,accurate,3,-8.0,16,-6.0,pass
+filter_nw_sqp_accurate,hs026,accurate,3,-8.0,45,-6.0,pass
 filter_nw_sqp_accurate,hs028,accurate,3,-8.0,13,-6.0,pass
 # skip: every seed status in ['stalled'] for (filter_nw_sqp_accurate, hs035, accurate); no converged seed to derive a pass bound.
-filter_nw_sqp_accurate,hs035,accurate,3,-8.0,13,-6.0,skip
+filter_nw_sqp_accurate,hs035,accurate,4,-8.0,13,-6.0,skip
 filter_nw_sqp_accurate,hs039,accurate,3,-8.0,19,-6.0,pass
 filter_nw_sqp_accurate,hs040,accurate,4,-8.0,12,-6.0,pass
 # skip: every seed status in ['max_iterations'] for (filter_nw_sqp_accurate, hs043, accurate); no converged seed to derive a pass bound.
@@ -33,237 +34,140 @@ filter_nw_sqp_accurate,hs050,accurate,4,-8.0,21,-6.0,skip
 # skip: every seed status in ['stalled'] for (filter_nw_sqp_accurate, hs051, accurate); no converged seed to derive a pass bound.
 filter_nw_sqp_accurate,hs051,accurate,4,-8.0,10,-6.0,skip
 # skip: every seed status in ['max_iterations'] for (filter_nw_sqp_accurate, hs071, accurate); no converged seed to derive a pass bound.
-filter_nw_sqp_accurate,hs071,accurate,89,-8.0,13000,-6.0,skip
+filter_nw_sqp_accurate,hs071,accurate,79,-8.0,13000,-6.0,skip
 # skip: every seed status in ['stalled'] for (filter_nw_sqp_accurate, hs076, accurate); no converged seed to derive a pass bound.
-filter_nw_sqp_accurate,hs076,accurate,4,-8.0,8,-6.0,skip
+filter_nw_sqp_accurate,hs076,accurate,6,-8.0,8,-6.0,skip
 # skip: empirical max accuracy log10=0.958 exceeds the per-mode bound -8.0 for (filter_nw_sqp_accurate, nmpc_lqr_h10, accurate); known_optimum is informational, not the true f*.
-filter_nw_sqp_accurate,nmpc_lqr_h10,accurate,230,-8.0,28,-6.0,skip
+filter_nw_sqp_accurate,nmpc_lqr_h10,accurate,216,-8.0,28,-6.0,skip
 # skip: every seed status in ['stalled'] for (filter_nw_sqp_accurate, nmpc_lqr_h20, accurate); no converged seed to derive a pass bound.
-filter_nw_sqp_accurate,nmpc_lqr_h20,accurate,1501,-8.0,36,-6.0,skip
-# skip: every seed status in ['stalled'] for (filter_nw_sqp_fast, hs006, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,hs006,fast,2,-4.0,11,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_nw_sqp_fast, hs007, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,hs007,fast,2,-4.0,12,-4.0,skip
-filter_nw_sqp_fast,hs024,fast,3,-4.0,17,-4.0,pass
-filter_nw_sqp_fast,hs026,fast,2,-4.0,102,-4.0,pass
-filter_nw_sqp_fast,hs028,fast,2,-4.0,15,-4.0,pass
-# skip: every seed status in ['stalled'] for (filter_nw_sqp_fast, hs035, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,hs035,fast,4,-4.0,13,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_nw_sqp_fast, hs039, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,hs039,fast,3,-4.0,19,-4.0,skip
-filter_nw_sqp_fast,hs040,fast,3,-4.0,13,-4.0,pass
-# skip: every seed status in ['max_iterations'] for (filter_nw_sqp_fast, hs043, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,hs043,fast,5,-4.0,13000,-4.0,skip
-filter_nw_sqp_fast,hs048,fast,3,-4.0,12,-4.0,pass
-# skip: every seed status in ['stalled'] for (filter_nw_sqp_fast, hs050, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,hs050,fast,4,-4.0,25,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_nw_sqp_fast, hs051, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,hs051,fast,4,-4.0,10,-4.0,skip
-# skip: every seed status in ['max_iterations'] for (filter_nw_sqp_fast, hs071, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,hs071,fast,16,-4.0,13000,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_nw_sqp_fast, hs076, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,hs076,fast,6,-4.0,8,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_nw_sqp_fast, nmpc_lqr_h10, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,nmpc_lqr_h10,fast,216,-4.0,28,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_nw_sqp_fast, nmpc_lqr_h20, fast); no converged seed to derive a pass bound.
-filter_nw_sqp_fast,nmpc_lqr_h20,fast,1377,-4.0,36,-4.0,skip
-filter_slsqp_accurate,hs006,accurate,2,-8.0,12,-6.0,pass
+filter_nw_sqp_accurate,nmpc_lqr_h20,accurate,1403,-8.0,36,-6.0,skip
+filter_slsqp_accurate,hs006,accurate,3,-8.0,12,-6.0,pass
 filter_slsqp_accurate,hs007,accurate,2,-8.0,12,-6.0,pass
-filter_slsqp_accurate,hs024,accurate,2,-8.0,16,-6.0,pass
+filter_slsqp_accurate,hs024,accurate,3,-8.0,16,-6.0,pass
 filter_slsqp_accurate,hs026,accurate,2,-8.0,42,-6.0,pass
 filter_slsqp_accurate,hs028,accurate,3,-8.0,13,-6.0,pass
 # skip: every seed status in ['stalled'] for (filter_slsqp_accurate, hs035, accurate); no converged seed to derive a pass bound.
-filter_slsqp_accurate,hs035,accurate,3,-8.0,13,-6.0,skip
+filter_slsqp_accurate,hs035,accurate,4,-8.0,13,-6.0,skip
 filter_slsqp_accurate,hs039,accurate,3,-8.0,19,-6.0,pass
-filter_slsqp_accurate,hs040,accurate,3,-8.0,12,-6.0,pass
-filter_slsqp_accurate,hs043,accurate,3,-8.0,16,-6.0,pass
+filter_slsqp_accurate,hs040,accurate,4,-8.0,12,-6.0,pass
+filter_slsqp_accurate,hs043,accurate,4,-8.0,16,-6.0,pass
 filter_slsqp_accurate,hs048,accurate,4,-8.0,8,-6.0,pass
 # skip: every seed status in ['stalled'] for (filter_slsqp_accurate, hs050, accurate); no converged seed to derive a pass bound.
-filter_slsqp_accurate,hs050,accurate,5,-8.0,21,-6.0,skip
+filter_slsqp_accurate,hs050,accurate,4,-8.0,21,-6.0,skip
 # skip: every seed status in ['stalled'] for (filter_slsqp_accurate, hs051, accurate); no converged seed to derive a pass bound.
 filter_slsqp_accurate,hs051,accurate,4,-8.0,10,-6.0,skip
 # skip: every seed status in ['stalled'] for (filter_slsqp_accurate, hs071, accurate); no converged seed to derive a pass bound.
-filter_slsqp_accurate,hs071,accurate,5,-8.0,10,-6.0,skip
+filter_slsqp_accurate,hs071,accurate,7,-8.0,10,-6.0,skip
 # skip: every seed status in ['stalled'] for (filter_slsqp_accurate, hs076, accurate); no converged seed to derive a pass bound.
-filter_slsqp_accurate,hs076,accurate,4,-8.0,8,-6.0,skip
+filter_slsqp_accurate,hs076,accurate,7,-8.0,8,-6.0,skip
 # skip: empirical max accuracy log10=0.958 exceeds the per-mode bound -8.0 for (filter_slsqp_accurate, nmpc_lqr_h10, accurate); known_optimum is informational, not the true f*.
-filter_slsqp_accurate,nmpc_lqr_h10,accurate,131,-8.0,28,-6.0,skip
+filter_slsqp_accurate,nmpc_lqr_h10,accurate,128,-8.0,28,-6.0,skip
 # skip: every seed status in ['stalled'] for (filter_slsqp_accurate, nmpc_lqr_h20, accurate); no converged seed to derive a pass bound.
-filter_slsqp_accurate,nmpc_lqr_h20,accurate,710,-8.0,36,-6.0,skip
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, hs006, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,hs006,fast,2,-4.0,11,-4.0,skip
-filter_slsqp_fast,hs007,fast,3,-4.0,13,-4.0,pass
-filter_slsqp_fast,hs024,fast,4,-4.0,17,-4.0,pass
-filter_slsqp_fast,hs026,fast,2,-4.0,45,-4.0,pass
-filter_slsqp_fast,hs028,fast,2,-4.0,15,-4.0,pass
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, hs035, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,hs035,fast,5,-4.0,13,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, hs039, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,hs039,fast,2,-4.0,19,-4.0,skip
-filter_slsqp_fast,hs040,fast,3,-4.0,13,-4.0,pass
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, hs043, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,hs043,fast,5,-4.0,13,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, hs048, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,hs048,fast,3,-4.0,12,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, hs050, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,hs050,fast,3,-4.0,25,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, hs051, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,hs051,fast,4,-4.0,10,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, hs071, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,hs071,fast,8,-4.0,10,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, hs076, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,hs076,fast,7,-4.0,8,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, nmpc_lqr_h10, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,nmpc_lqr_h10,fast,113,-4.0,28,-4.0,skip
-# skip: every seed status in ['stalled'] for (filter_slsqp_fast, nmpc_lqr_h20, fast); no converged seed to derive a pass bound.
-filter_slsqp_fast,nmpc_lqr_h20,fast,561,-4.0,36,-4.0,skip
-kraft_slsqp_accurate,hs006,accurate,2,-8.0,12,-6.0,pass
+filter_slsqp_accurate,nmpc_lqr_h20,accurate,665,-8.0,36,-6.0,skip
+kraft_slsqp_accurate,hs006,accurate,3,-8.0,12,-6.0,pass
 kraft_slsqp_accurate,hs007,accurate,2,-8.0,12,-6.0,pass
-kraft_slsqp_accurate,hs024,accurate,2,-8.0,17,-6.0,pass
+kraft_slsqp_accurate,hs024,accurate,3,-8.0,17,-6.0,pass
 kraft_slsqp_accurate,hs026,accurate,2,-8.0,200,-6.0,pass
 kraft_slsqp_accurate,hs028,accurate,2,-8.0,15,-6.0,pass
 # skip: every seed status in ['stalled'] for (kraft_slsqp_accurate, hs035, accurate); no converged seed to derive a pass bound.
-kraft_slsqp_accurate,hs035,accurate,2,-8.0,13,-6.0,skip
+kraft_slsqp_accurate,hs035,accurate,3,-8.0,13,-6.0,skip
 # skip: every seed status in ['stalled'] for (kraft_slsqp_accurate, hs039, accurate); no converged seed to derive a pass bound.
-kraft_slsqp_accurate,hs039,accurate,2,-8.0,19,-6.0,skip
-kraft_slsqp_accurate,hs040,accurate,2,-8.0,13,-6.0,pass
+kraft_slsqp_accurate,hs039,accurate,3,-8.0,19,-6.0,skip
+kraft_slsqp_accurate,hs040,accurate,3,-8.0,13,-6.0,pass
 # skip: every seed status in ['stalled'] for (kraft_slsqp_accurate, hs043, accurate); no converged seed to derive a pass bound.
 kraft_slsqp_accurate,hs043,accurate,3,-8.0,13,-6.0,skip
-kraft_slsqp_accurate,hs048,accurate,3,-8.0,10,-6.0,pass
+kraft_slsqp_accurate,hs048,accurate,4,-8.0,10,-6.0,pass
 # skip: every seed status in ['stalled'] for (kraft_slsqp_accurate, hs050, accurate); no converged seed to derive a pass bound.
 kraft_slsqp_accurate,hs050,accurate,3,-8.0,21,-6.0,skip
 # skip: every seed status in ['stalled'] for (kraft_slsqp_accurate, hs051, accurate); no converged seed to derive a pass bound.
-kraft_slsqp_accurate,hs051,accurate,3,-8.0,10,-6.0,skip
+kraft_slsqp_accurate,hs051,accurate,4,-8.0,10,-6.0,skip
 # skip: every seed status in ['stalled'] for (kraft_slsqp_accurate, hs071, accurate); no converged seed to derive a pass bound.
-kraft_slsqp_accurate,hs071,accurate,4,-8.0,10,-6.0,skip
+kraft_slsqp_accurate,hs071,accurate,7,-8.0,10,-6.0,skip
 # skip: every seed status in ['stalled'] for (kraft_slsqp_accurate, hs076, accurate); no converged seed to derive a pass bound.
-kraft_slsqp_accurate,hs076,accurate,3,-8.0,8,-6.0,skip
+kraft_slsqp_accurate,hs076,accurate,5,-8.0,8,-6.0,skip
 # skip: empirical max accuracy log10=0.958 exceeds the per-mode bound -8.0 for (kraft_slsqp_accurate, nmpc_lqr_h10, accurate); known_optimum is informational, not the true f*.
-kraft_slsqp_accurate,nmpc_lqr_h10,accurate,103,-8.0,28,-6.0,skip
+kraft_slsqp_accurate,nmpc_lqr_h10,accurate,100,-8.0,28,-6.0,skip
 # skip: every seed status in ['stalled'] for (kraft_slsqp_accurate, nmpc_lqr_h20, accurate); no converged seed to derive a pass bound.
-kraft_slsqp_accurate,nmpc_lqr_h20,accurate,517,-8.0,36,-6.0,skip
-kraft_slsqp_fast,hs006,fast,3,-4.0,13,-4.0,pass
-kraft_slsqp_fast,hs007,fast,2,-4.0,12,-4.0,pass
-kraft_slsqp_fast,hs024,fast,3,-4.0,17,-4.0,pass
-kraft_slsqp_fast,hs026,fast,2,-4.0,112,-4.0,pass
-kraft_slsqp_fast,hs028,fast,3,-4.0,15,-4.0,pass
-# skip: every seed status in ['stalled'] for (kraft_slsqp_fast, hs035, fast); no converged seed to derive a pass bound.
-kraft_slsqp_fast,hs035,fast,3,-4.0,13,-4.0,skip
-# skip: every seed status in ['stalled'] for (kraft_slsqp_fast, hs039, fast); no converged seed to derive a pass bound.
-kraft_slsqp_fast,hs039,fast,3,-4.0,19,-4.0,skip
-kraft_slsqp_fast,hs040,fast,3,-4.0,13,-4.0,pass
-kraft_slsqp_fast,hs043,fast,4,-4.0,13,-4.0,pass
-kraft_slsqp_fast,hs048,fast,4,-4.0,12,-4.0,pass
-# skip: every seed status in ['stalled'] for (kraft_slsqp_fast, hs050, fast); no converged seed to derive a pass bound.
-kraft_slsqp_fast,hs050,fast,4,-4.0,25,-4.0,skip
-# skip: every seed status in ['stalled'] for (kraft_slsqp_fast, hs051, fast); no converged seed to derive a pass bound.
-kraft_slsqp_fast,hs051,fast,5,-4.0,10,-4.0,skip
-# skip: every seed status in ['stalled'] for (kraft_slsqp_fast, hs071, fast); no converged seed to derive a pass bound.
-kraft_slsqp_fast,hs071,fast,7,-4.0,12,-4.0,skip
-# skip: every seed status in ['stalled'] for (kraft_slsqp_fast, hs076, fast); no converged seed to derive a pass bound.
-kraft_slsqp_fast,hs076,fast,6,-4.0,8,-4.0,skip
-# skip: empirical max accuracy log10=0.958 exceeds the per-mode bound -4.0 for (kraft_slsqp_fast, nmpc_lqr_h10, fast); known_optimum is informational, not the true f*.
-kraft_slsqp_fast,nmpc_lqr_h10,fast,107,-4.0,28,-4.0,skip
-# skip: every seed status in ['stalled'] for (kraft_slsqp_fast, nmpc_lqr_h20, fast); no converged seed to derive a pass bound.
-kraft_slsqp_fast,nmpc_lqr_h20,fast,530,-4.0,36,-4.0,skip
+kraft_slsqp_accurate,nmpc_lqr_h20,accurate,500,-8.0,36,-6.0,skip
 # skip: empirical max accuracy log10=0.910 exceeds the per-mode bound -8.0 for (lbfgsb, ik_pose_batch_6, default); known_optimum is informational, not the true f*.
 lbfgsb,ik_pose_batch_6,default,22,-8.0,41,-6.0,skip
 # skip: empirical max accuracy log10=0.841 exceeds the per-mode bound -8.0 for (multistart_bobyqa, ik_pose_batch_6, default); known_optimum is informational, not the true f*.
-multistart_bobyqa,ik_pose_batch_6,default,28,-8.0,858,-6.0,skip
-nw_sqp_accurate,hs006,accurate,2,-8.0,12,-6.0,pass
-nw_sqp_accurate,hs007,accurate,2,-8.0,12,-6.0,pass
-nw_sqp_accurate,hs026,accurate,2,-8.0,46,-6.0,pass
-nw_sqp_accurate,hs028,accurate,2,-8.0,13,-6.0,pass
-nw_sqp_accurate,hs039,accurate,3,-8.0,19,-6.0,pass
+multistart_bobyqa,ik_pose_batch_6,default,26,-8.0,858,-6.0,skip
+nw_sqp_accurate,hs006,accurate,3,-8.0,12,-6.0,pass
+nw_sqp_accurate,hs007,accurate,3,-8.0,12,-6.0,pass
+nw_sqp_accurate,hs026,accurate,3,-8.0,46,-6.0,pass
+nw_sqp_accurate,hs028,accurate,3,-8.0,13,-6.0,pass
+nw_sqp_accurate,hs039,accurate,4,-8.0,19,-6.0,pass
 nw_sqp_accurate,hs040,accurate,4,-8.0,12,-6.0,pass
-nw_sqp_accurate,hs048,accurate,4,-8.0,8,-6.0,pass
+nw_sqp_accurate,hs048,accurate,6,-8.0,8,-6.0,pass
 # skip: every seed status in ['stalled'] for (nw_sqp_accurate, hs050, accurate); no converged seed to derive a pass bound.
-nw_sqp_accurate,hs050,accurate,5,-8.0,21,-6.0,skip
+nw_sqp_accurate,hs050,accurate,4,-8.0,21,-6.0,skip
 # skip: every seed status in ['stalled'] for (nw_sqp_accurate, hs051, accurate); no converged seed to derive a pass bound.
-nw_sqp_accurate,hs051,accurate,4,-8.0,10,-6.0,skip
+nw_sqp_accurate,hs051,accurate,5,-8.0,10,-6.0,skip
 # skip: every seed status in ['max_iterations'] for (nw_sqp_accurate, hs071, accurate); no converged seed to derive a pass bound.
-nw_sqp_accurate,hs071,accurate,34,-8.0,13000,-6.0,skip
+nw_sqp_accurate,hs071,accurate,30,-8.0,13000,-6.0,skip
 # skip: empirical max accuracy log10=0.958 exceeds the per-mode bound -8.0 for (nw_sqp_accurate, nmpc_lqr_h10, accurate); known_optimum is informational, not the true f*.
-nw_sqp_accurate,nmpc_lqr_h10,accurate,240,-8.0,28,-6.0,skip
+nw_sqp_accurate,nmpc_lqr_h10,accurate,218,-8.0,28,-6.0,skip
 # skip: every seed status in ['stalled'] for (nw_sqp_accurate, nmpc_lqr_h20, accurate); no converged seed to derive a pass bound.
-nw_sqp_accurate,nmpc_lqr_h20,accurate,1504,-8.0,36,-6.0,skip
-nw_sqp_fast,hs006,fast,3,-4.0,13,-4.0,pass
-# skip: every seed status in ['stalled'] for (nw_sqp_fast, hs007, fast); no converged seed to derive a pass bound.
-nw_sqp_fast,hs007,fast,2,-4.0,12,-4.0,skip
-nw_sqp_fast,hs026,fast,2,-4.0,111,-4.0,pass
-nw_sqp_fast,hs028,fast,3,-4.0,15,-4.0,pass
-# skip: every seed status in ['stalled'] for (nw_sqp_fast, hs039, fast); no converged seed to derive a pass bound.
-nw_sqp_fast,hs039,fast,3,-4.0,19,-4.0,skip
-nw_sqp_fast,hs040,fast,4,-4.0,13,-4.0,pass
-nw_sqp_fast,hs048,fast,4,-4.0,12,-4.0,pass
-# skip: every seed status in ['stalled'] for (nw_sqp_fast, hs050, fast); no converged seed to derive a pass bound.
-nw_sqp_fast,hs050,fast,5,-4.0,25,-4.0,skip
-# skip: every seed status in ['stalled'] for (nw_sqp_fast, hs051, fast); no converged seed to derive a pass bound.
-nw_sqp_fast,hs051,fast,5,-4.0,10,-4.0,skip
-# skip: every seed status in ['max_iterations'] for (nw_sqp_fast, hs071, fast); no converged seed to derive a pass bound.
-nw_sqp_fast,hs071,fast,6,-4.0,13000,-4.0,skip
-# skip: every seed status in ['stalled'] for (nw_sqp_fast, nmpc_lqr_h10, fast); no converged seed to derive a pass bound.
-nw_sqp_fast,nmpc_lqr_h10,fast,206,-4.0,28,-4.0,skip
-# skip: every seed status in ['stalled'] for (nw_sqp_fast, nmpc_lqr_h20, fast); no converged seed to derive a pass bound.
-nw_sqp_fast,nmpc_lqr_h20,fast,1363,-4.0,36,-4.0,skip
+nw_sqp_accurate,nmpc_lqr_h20,accurate,1407,-8.0,36,-6.0,skip
 # skip: every seed status in ['stalled'] for (tr_sqp_accurate, hs006, accurate); no converged seed to derive a pass bound.
 tr_sqp_accurate,hs006,accurate,2,-8.0,137,-6.0,skip
 # skip: every seed status in ['stalled'] for (tr_sqp_accurate, hs007, accurate); no converged seed to derive a pass bound.
 tr_sqp_accurate,hs007,accurate,2,-8.0,41,-6.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_accurate, hs024, accurate); no converged seed to derive a pass bound.
 tr_sqp_accurate,hs024,accurate,2,-8.0,26,-6.0,skip
-# skip: every seed status in ['stalled', 'unknown'] for (tr_sqp_accurate, hs026, accurate); no converged seed to derive a pass bound.
-tr_sqp_accurate,hs026,accurate,2,-8.0,2996,-6.0,skip
+# skip: every seed status in ['stalled'] for (tr_sqp_accurate, hs026, accurate); no converged seed to derive a pass bound.
+tr_sqp_accurate,hs026,accurate,2,-8.0,2429,-6.0,skip
 tr_sqp_accurate,hs028,accurate,2,-8.0,37,-6.0,pass
-# skip: every seed status in ['stalled', 'unknown'] for (tr_sqp_accurate, hs035, accurate); no converged seed to derive a pass bound.
-tr_sqp_accurate,hs035,accurate,2,-8.0,294,-6.0,skip
+# skip: every seed status in ['stalled'] for (tr_sqp_accurate, hs035, accurate); no converged seed to derive a pass bound.
+tr_sqp_accurate,hs035,accurate,2,-8.0,97,-6.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_accurate, hs039, accurate); no converged seed to derive a pass bound.
-tr_sqp_accurate,hs039,accurate,2,-8.0,249,-6.0,skip
+tr_sqp_accurate,hs039,accurate,3,-8.0,468,-6.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_accurate, hs040, accurate); no converged seed to derive a pass bound.
-tr_sqp_accurate,hs040,accurate,2,-8.0,340,-6.0,skip
-tr_sqp_accurate,hs043,accurate,2,-8.0,350,-6.0,shouldfail
+tr_sqp_accurate,hs040,accurate,2,-8.0,32,-6.0,skip
+tr_sqp_accurate,hs043,accurate,2,-8.0,33,-6.0,shouldfail
 # skip: every seed status in ['stalled'] for (tr_sqp_accurate, hs048, accurate); no converged seed to derive a pass bound.
-tr_sqp_accurate,hs048,accurate,3,-8.0,85,-6.0,skip
+tr_sqp_accurate,hs048,accurate,3,-8.0,84,-6.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_accurate, hs050, accurate); no converged seed to derive a pass bound.
 tr_sqp_accurate,hs050,accurate,2,-8.0,33,-6.0,skip
 # skip: every seed status in ['stalled'] for (tr_sqp_accurate, hs051, accurate); no converged seed to derive a pass bound.
 tr_sqp_accurate,hs051,accurate,3,-8.0,147,-6.0,skip
-# skip: every seed status in ['stalled', 'unknown'] for (tr_sqp_accurate, hs071, accurate); no converged seed to derive a pass bound.
-tr_sqp_accurate,hs071,accurate,3,-8.0,336,-6.0,skip
-# skip: every seed status in ['stalled', 'unknown'] for (tr_sqp_accurate, hs076, accurate); no converged seed to derive a pass bound.
+# skip: every seed status in ['stalled'] for (tr_sqp_accurate, hs071, accurate); no converged seed to derive a pass bound.
+tr_sqp_accurate,hs071,accurate,3,-8.0,328,-6.0,skip
+# skip: every seed status in ['stalled'] for (tr_sqp_accurate, hs076, accurate); no converged seed to derive a pass bound.
 tr_sqp_accurate,hs076,accurate,2,-8.0,348,-6.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_accurate, nmpc_lqr_h10, accurate); no converged seed to derive a pass bound.
-tr_sqp_accurate,nmpc_lqr_h10,accurate,19,-8.0,81,-6.0,skip
+tr_sqp_accurate,nmpc_lqr_h10,accurate,16,-8.0,32,-6.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_accurate, nmpc_lqr_h20, accurate); no converged seed to derive a pass bound.
-tr_sqp_accurate,nmpc_lqr_h20,accurate,93,-8.0,94,-6.0,skip
+tr_sqp_accurate,nmpc_lqr_h20,accurate,83,-8.0,34,-6.0,skip
 # skip: every seed status in ['stalled'] for (tr_sqp_fast, hs006, fast); no converged seed to derive a pass bound.
 tr_sqp_fast,hs006,fast,2,-4.0,5184,-4.0,skip
 # skip: every seed status in ['stalled'] for (tr_sqp_fast, hs007, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,hs007,fast,2,-4.0,141,-4.0,skip
+tr_sqp_fast,hs007,fast,2,-4.0,136,-4.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_fast, hs024, fast); no converged seed to derive a pass bound.
 tr_sqp_fast,hs024,fast,2,-4.0,26,-4.0,skip
-# skip: every seed status in ['stalled', 'unknown'] for (tr_sqp_fast, hs026, fast); no converged seed to derive a pass bound.
+# skip: every seed status in ['stalled'] for (tr_sqp_fast, hs026, fast); no converged seed to derive a pass bound.
 tr_sqp_fast,hs026,fast,2,-4.0,297,-4.0,skip
 # skip: every seed status in ['stalled'] for (tr_sqp_fast, hs028, fast); no converged seed to derive a pass bound.
 tr_sqp_fast,hs028,fast,2,-4.0,2881,-4.0,skip
-# skip: every seed status in ['stalled', 'unknown'] for (tr_sqp_fast, hs035, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,hs035,fast,2,-4.0,275,-4.0,skip
+# skip: every seed status in ['stalled'] for (tr_sqp_fast, hs035, fast); no converged seed to derive a pass bound.
+tr_sqp_fast,hs035,fast,2,-4.0,909,-4.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_fast, hs039, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,hs039,fast,2,-4.0,138,-4.0,skip
+tr_sqp_fast,hs039,fast,2,-4.0,62,-4.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_fast, hs040, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,hs040,fast,2,-4.0,1268,-4.0,skip
-tr_sqp_fast,hs043,fast,2,-4.0,30,-4.0,shouldfail
+tr_sqp_fast,hs040,fast,2,-4.0,32,-4.0,skip
+tr_sqp_fast,hs043,fast,2,-4.0,33,-4.0,shouldfail
 # skip: every seed status in ['stalled'] for (tr_sqp_fast, hs048, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,hs048,fast,2,-4.0,93,-4.0,skip
-# skip: every seed status in ['stalled', 'unknown'] for (tr_sqp_fast, hs050, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,hs050,fast,2,-4.0,260,-4.0,skip
-# skip: every seed status in ['stalled', 'unknown'] for (tr_sqp_fast, hs051, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,hs051,fast,2,-4.0,107,-4.0,skip
-# skip: every seed status in ['stalled', 'unknown'] for (tr_sqp_fast, hs071, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,hs071,fast,2,-4.0,387,-4.0,skip
+tr_sqp_fast,hs048,fast,2,-4.0,90,-4.0,skip
+# skip: every seed status in ['unknown'] for (tr_sqp_fast, hs050, fast); no converged seed to derive a pass bound.
+tr_sqp_fast,hs050,fast,2,-4.0,64,-4.0,skip
+# skip: every seed status in ['stalled'] for (tr_sqp_fast, hs051, fast); no converged seed to derive a pass bound.
+tr_sqp_fast,hs051,fast,3,-4.0,107,-4.0,skip
+# skip: every seed status in ['stalled'] for (tr_sqp_fast, hs071, fast); no converged seed to derive a pass bound.
+tr_sqp_fast,hs071,fast,2,-4.0,289,-4.0,skip
 # skip: every seed status in ['stalled'] for (tr_sqp_fast, hs076, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,hs076,fast,3,-4.0,457,-4.0,skip
+tr_sqp_fast,hs076,fast,2,-4.0,348,-4.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_fast, nmpc_lqr_h10, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,nmpc_lqr_h10,fast,20,-4.0,73,-4.0,skip
+tr_sqp_fast,nmpc_lqr_h10,fast,16,-4.0,41,-4.0,skip
 # skip: every seed status in ['unknown'] for (tr_sqp_fast, nmpc_lqr_h20, fast); no converged seed to derive a pass bound.
-tr_sqp_fast,nmpc_lqr_h20,fast,67,-4.0,123,-4.0,skip
+tr_sqp_fast,nmpc_lqr_h20,fast,62,-4.0,43,-4.0,skip
