@@ -113,12 +113,17 @@ HS_SUITE_EXCLUDE_TOKEN = "application"
 PER_STEP_VALID_SOLVERS = frozenset({
     # argmin internal solvers (paired publish_bench measurements). The
     # line-search SQP family is single-mode after the empirical _fast
-    # collapse; tr_sqp retains both modes.
+    # collapse; the trust-region SQP family (tr_sqp + filter_trsqp) retains
+    # both modes since per-mode dispatch is a published API surface and
+    # per-mode comparison is meaningful. The filter_trsqp entries inherit
+    # the Wachter & Biegler 2005/2006 filter-LS lineage paired with the
+    # Byrd-Omojokun 1987 composite step per Lalee, Nocedal & Plantenga 1998.
     "kraft_slsqp_accurate",
     "nw_sqp_accurate",
     "filter_slsqp_accurate",
     "filter_nw_sqp_accurate",
     "tr_sqp_fast", "tr_sqp_accurate",
+    "filter_trsqp_fast", "filter_trsqp_accurate",
     # NLopt (the only external library with paired per-step
     # per-HS-problem numbers at argmin's problem sizes).
     "nlopt_slsqp", "nlopt_mma", "nlopt_lbfgs", "nlopt_bobyqa",
@@ -131,12 +136,17 @@ PROHIBITED_IN_PER_STEP = frozenset({
 
 # The named profile cohort for the argmin per-step Dolan-More figures
 # (kraft_slsqp as the sole line-search representative after the _fast
-# collapse, tr_sqp accurate + fast at parity, NLopt SLSQP as the
-# external reference).
+# collapse; tr_sqp + filter_trsqp at parity on both modes, paired against
+# NLopt SLSQP as the external reference). The filter_trsqp entries follow
+# the Fletcher & Leyffer 2002 filter-acceptance + Byrd-Omojokun 1987
+# composite step lineage per Lalee, Nocedal & Plantenga 1998, with the
+# Wachter & Biegler 2005/2006 filter-LS refinement.
 PROFILE_SOLVERS = frozenset({
     "kraft_slsqp_accurate",
     "tr_sqp_accurate",
     "tr_sqp_fast",
+    "filter_trsqp_accurate",
+    "filter_trsqp_fast",
     "nlopt_slsqp",
 })
 
