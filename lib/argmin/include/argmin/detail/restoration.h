@@ -214,15 +214,34 @@ restoration_result feasibility_restoration(
         // inner reject sequence by lambda_max -- once lambda hits the
         // cap and the step still fails to reduce ||c||, return
         // lambda_grew_unbounded.
+        //
+        // Allocation-free loop body: the lambda diagonal regularizer
+        // is applied directly to JtJ_buf in place via a delta-add
+        // (`diagonal += new_lambda - applied_lambda`) so JtJ_buf
+        // carries the correct (J^T J + lambda I) at the top of every
+        // LDLT compute without ever copying the full n x n matrix.
+        // `lambda_applied` is reset to 0 once per outer iter to match
+        // the fresh JtJ = J^T J written at the top of the outer body.
+        // The LDLT solve writes into the caller-owned dx_buf via
+        // .noalias() to suppress the temporary that bare
+        // `dx_buf = ldlt_buf.solve(rhs_buf)` would otherwise
+        // materialize. Net: no heap traffic inside the
+        // while(!inner_accepted) block, matching the helper's
+        // documented contract.
         bool inner_accepted = false;
+        Scalar lambda_applied = Scalar(0);
         while(!inner_accepted)
         {
             // Add the lambda I regularizer in place. The diagonal
             // adjustment is the standard LM perturbation; the LDLT
-            // factorization picks up the regularized matrix.
-            Eigen::MatrixXd reg = JtJ_buf;
-            reg.diagonal().array() += lambda;
-            ldlt_buf.compute(reg);
+            // factorization picks up the regularized matrix. On the
+            // next inner trial (lambda grew) we first undo the prior
+            // diagonal bump, then apply the new one, so JtJ_buf
+            // alternates between the bare J^T J and the regularized
+            // form without ever copying the full n x n matrix.
+            JtJ_buf.diagonal().array() += (lambda - lambda_applied);
+            lambda_applied = lambda;
+            ldlt_buf.compute(JtJ_buf);
 
             if(ldlt_buf.info() != Eigen::Success)
             {
@@ -249,10 +268,12 @@ restoration_result feasibility_restoration(
             }
 
             // Solve into dx_buf. LDLT::solve returns an
-            // Eigen::Solve expression; the assignment to the
-            // caller-owned dx_buf evaluates it in place.
-            const Eigen::VectorXd dx_solve = ldlt_buf.solve(rhs_buf);
-            dx_buf = dx_solve;
+            // Eigen::Solve expression; assigning through .noalias()
+            // evaluates it directly into the caller-owned dx_buf
+            // without materializing an intermediate VectorXd. Safe
+            // because dx_buf does not alias rhs_buf (separate
+            // caller-owned allocations per the helper contract).
+            dx_buf.noalias() = ldlt_buf.solve(rhs_buf);
 
             if(!dx_buf.allFinite())
             {

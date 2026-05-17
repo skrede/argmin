@@ -26,10 +26,21 @@
 // Hessian approximation lives on the joint space via
 // dense_ldl_bfgs<double, N>.
 //
-// Restoration phase is out of scope: when the trust radius collapses
-// below the floor and the filter still rejects, the policy returns a
-// null step carrying solver_status::trust_region_step_rejected; the
-// stall-window machinery in basic_solver decides termination.
+// Feasibility-restoration prototype is wired in behind a four-way
+// gate (trust_radius below floor, filter rejected the candidate,
+// restoration_max_iter > 0, and h_current above the feasibility
+// tolerance). When the gate fires, the policy delegates to the
+// Levenberg-Marquardt feasibility-restoration helper in
+// detail/restoration.h to drive ||c(x)||_2 below
+// restoration_feasibility_tolerance; on convergence the policy
+// resumes composite-step from the restored iterate with a BFGS reset
+// and a refreshed (f, h) seed in the filter. On non-convergence the
+// policy falls through to the trust-radius-collapse null-step
+// emission and the stall-window machinery in basic_solver decides
+// termination. The argmin variant is the minimal-viable LM
+// simplification of the full IPOPT restoration phase (no slack
+// reformulation, no multiplier leg, no in-restoration filter
+// integration).
 //
 // argmin variant: filter acceptance on the Byrd-Omojokun composite step.
 //                 Replaces the inline L2-merit augmented ratio test
@@ -38,7 +49,9 @@
 //                 sum|c_eq| + sum max(0, -c_ineq) matches the
 //                 filter_slsqp / filter_nw_sqp convention. Dual
 //                 reject-gate (TR-shrink vs switching-condition) runtime
-//                 knob; restoration phase out of scope.
+//                 knob; the LM feasibility-restoration hook is opt-in
+//                 via restoration_max_iter and delegates to the helper
+//                 in detail/restoration.h.
 //
 // Reference: Fletcher and Leyffer 2002 Math. Programming 91:239-269
 //            Section 2.1 (filter dominance);
@@ -48,10 +61,15 @@
 //            Wachter and Biegler 2005 SIAM J. Optim. 16(1):1-31
 //            Section 2.3 (switching condition; kappa, s defaults);
 //            Wachter and Biegler 2006 Math. Programming 106:25-57
-//            Section 2.3 eq. 6 (filter envelope; gamma_f, gamma_h);
+//            Section 2.3 eq. 6 (filter envelope; gamma_f, gamma_h)
+//            and Section 3.3 (IPOPT feasibility-restoration phase;
+//            the LM helper in detail/restoration.h is a minimal
+//            simplification thereof);
 //            Nocedal and Wright 2e Section 18.5 Algorithm 18.4
 //            (Byrd-Omojokun composite step);
-//            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim. 8(3):682-706;
+//            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim. 8(3):682-706
+//            Section 3.1 (v-optimal restoration; structurally similar
+//            alternative to the LM restoration prototype used here);
 //            scipy/optimize/_trustregion_constr (public-API reference).
 
 #include "argmin/detail/lagrangian.h"
@@ -212,14 +230,19 @@ struct filter_trsqp_policy
     // Empirically-selected per-mode defaults from an HS-suite sweep
     // across the filter envelope (gamma_f, gamma_h), the reject-gate
     // variant (tr_shrink vs switching_condition), the switching-
-    // condition parameters (kappa, s), the initial trust radius, and
-    // the restoration budget. The per-mode ternary follows the
+    // condition parameters (kappa, s), and the restoration budget.
+    // All knobs except `default_initial_trust_radius` and
+    // `default_min_trust_radius` are per-mode dispatched through the
+    // ternary block below; the trust-radius defaults are uniform
+    // across modes per the empirical sweep outcome (the picked
+    // initial radius coincided across modes and was lifted out of
+    // the per-mode block above). The per-mode ternary follows the
     // cross-policy mode-dispatch convention: `accurate` prioritizes
     // convergence quality, `fast` prioritizes per-step wall. The two
-    // modes happen to coincide on the current pick; the ternary shape
-    // is preserved so the per-mode independence convention is
-    // structurally visible and a future re-tune can split them
-    // without a code-shape change.
+    // modes happen to coincide on the current pick for the
+    // empirically-swept axes; the ternary shape is preserved so the
+    // per-mode independence convention is structurally visible and a
+    // future re-tune can split them without a code-shape change.
     //
     // Reference: Fletcher and Leyffer 2002 Math. Programming
     //            91:239-269 Section 2.1 (filter dominance);
@@ -989,30 +1012,47 @@ struct filter_trsqp_policy
         // Section L -- Radius update consumes the caller-side verdict.
         s.trust_radius = new_delta;
 
-        // Feasibility-restoration hook. Fires only on the three-way
+        // Feasibility-restoration hook. Fires only on the four-way
         // conjunction
-        //   (trust_radius < min_trust_radius) AND
-        //   (filter rejected the most recent candidate)         AND
-        //   (restoration_max_iter > 0).
+        //   (trust_radius < min_trust_radius)                  AND
+        //   (filter rejected the most recent candidate)        AND
+        //   (restoration_max_iter > 0)                         AND
+        //   (h_current > restoration_feasibility_tolerance).
         // Any single conjunct false leaves the original null-step
         // emission path (Section M) and the filter-reject path
-        // (Section N) untouched. On converged restoration the helper
-        // mutates s.x in place and the policy resumes composite-step
-        // at the restored iterate with a BFGS reset (the restoration
-        // step is a feasibility step, not a Lagrangian step; the
-        // prior B approximation is stale). On non-converged
-        // restoration control falls through to the Section M emission
-        // below; the iters_used count is propagated to the
-        // diagnostics field so a downstream sweep can attribute the
-        // outcome.
+        // (Section N) untouched. The fourth conjunct is the
+        // feasibility guard: restoration is a feasibility-restoration
+        // phase, vacuous on an already-feasible iterate; the helper's
+        // entry short-circuit at restoration.h returns `converged`
+        // with `iterations_used = 0` in that case (Fletcher, Leyffer,
+        // Toint 2002 Section 3 -- restoration applies on
+        // infeasibility-driven stalls only), but the policy would
+        // still uselessly reset the BFGS approximation, expand the
+        // trust radius back to the initial value, and re-add the
+        // already-present (f, h) pair to the filter. Gating on
+        // h_current avoids that wasted state churn on a Maratos-like
+        // KKT-stationarity stall at a feasible iterate.
+        //
+        // On converged restoration the helper mutates s.x in place
+        // and the policy resumes composite-step at the restored
+        // iterate with a BFGS reset (the restoration step is a
+        // feasibility step, not a Lagrangian step; the prior B
+        // approximation is stale). On non-converged restoration
+        // control falls through to the Section M emission below; the
+        // iters_used count is propagated to the diagnostics field so
+        // a downstream sweep can attribute the outcome.
         //
         // Reference: Nocedal and Wright 2e Section 10.3;
         //            Wachter and Biegler 2006 Math. Programming
-        //            106:25-57 Section 3.3.
+        //            106:25-57 Section 3.3;
+        //            Fletcher, Leyffer, Toint 2002 SIAM J. Optim.
+        //            13(1):44-59 Section 3 (feasibility-restoration
+        //            applicability gate).
         std::size_t restoration_iters_used_out = 0;
         if(s.trust_radius < options.min_trust_radius
            && !accepted
-           && options.restoration_max_iter > 0)
+           && options.restoration_max_iter > 0
+           && h_current > options.restoration_feasibility_tolerance)
         {
             // x-space (not joint slack-augmented) constraint and
             // jacobian closures. The LM helper operates on the
@@ -1052,6 +1092,21 @@ struct filter_trsqp_policy
                 // stale.
                 s.hessian.reset();
                 s.trust_radius = options.initial_trust_radius;
+
+                // Clear the active-set multiplier buffers. They
+                // correspond to the pre-restoration (J_eq, J_ineq)
+                // linearization and would otherwise contaminate the
+                // next iter's grad_L = grad_f - J^T lambda
+                // computation (Section B reads them directly). Under
+                // fast mode the active-set re-estimate stride is 5,
+                // so a stale multiplier can persist for up to 5
+                // iters post-restoration; zeroing here forces the
+                // next-iter grad_L to collapse to grad_f and lets
+                // Section P re-estimate from scratch.
+                if(s.n_eq > 0)
+                    s.bufs.kkt_lambda_eq_buf.head(s.n_eq).setZero();
+                if(n_ineq > 0)
+                    s.bufs.kkt_mu_ineq_buf.head(n_ineq).setZero();
 
                 // Re-evaluate f, g, c, J at the restored s.x into the
                 // SHARED sqp_state_buffers; the restoration helper
