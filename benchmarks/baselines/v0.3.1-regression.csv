@@ -76,7 +76,7 @@ filter_slsqp_accurate,nmpc_lqr_h20,accurate,655,-8.0,36,-6.0,skip
 filter_trsqp_accurate,hs006,accurate,2,-8.0,88,-6.0,skip
 # skip: every seed status in ['stalled'] for (filter_trsqp_accurate, hs007, accurate); no converged seed to derive a pass bound.
 filter_trsqp_accurate,hs007,accurate,2,-8.0,52,-6.0,skip
-# shouldfail: cell tagged [!shouldfail] in tr_sqp_test.cpp per the trace-derived mechanism family; expected to fail at least one convergence gate at default options.
+# shouldfail: HS024 — L2-merit structural rejection. Filter acceptance gate cannot overcome locally-infeasible objective-improving steps (Fletcher-Leyffer 2002 §2.3; Wachter-Biegler 2005 §2.3). Cell tagged [!shouldfail] in filter_trsqp_test.cpp.
 filter_trsqp_accurate,hs024,accurate,2,-8.0,93,-6.0,shouldfail
 # skip: every seed status in ['stalled'] for (filter_trsqp_accurate, hs026, accurate); no converged seed to derive a pass bound.
 filter_trsqp_accurate,hs026,accurate,2,-8.0,593,-6.0,skip
@@ -87,7 +87,7 @@ filter_trsqp_accurate,hs035,accurate,2,-8.0,47,-6.0,skip
 # skip: every seed status in ['max_iterations'] for (filter_trsqp_accurate, hs039, accurate); no converged seed to derive a pass bound.
 filter_trsqp_accurate,hs039,accurate,2,-8.0,60,-6.0,skip
 filter_trsqp_accurate,hs040,accurate,3,-8.0,49,-6.0,pass
-# shouldfail: cell tagged [!shouldfail] in tr_sqp_test.cpp per the trace-derived mechanism family; expected to fail at least one convergence gate at default options.
+# shouldfail: HS043 — closability-vs-default-config gap. Cell closable empirically under extended grid + restoration but not at locked per-mode defaults (Hock-Schittkowski 1981 problem 43). Cell tagged [!shouldfail] in filter_trsqp_test.cpp.
 filter_trsqp_accurate,hs043,accurate,2,-8.0,43,-6.0,shouldfail
 # skip: every seed status in ['stalled'] for (filter_trsqp_accurate, hs048, accurate); no converged seed to derive a pass bound.
 filter_trsqp_accurate,hs048,accurate,3,-8.0,67,-6.0,skip
@@ -95,9 +95,9 @@ filter_trsqp_accurate,hs048,accurate,3,-8.0,67,-6.0,skip
 filter_trsqp_accurate,hs050,accurate,3,-8.0,138,-6.0,skip
 # skip: every seed status in ['max_iterations'] for (filter_trsqp_accurate, hs051, accurate); no converged seed to derive a pass bound.
 filter_trsqp_accurate,hs051,accurate,3,-8.0,73,-6.0,skip
-# shouldfail: cell tagged [!shouldfail] in tr_sqp_test.cpp per the trace-derived mechanism family; expected to fail at least one convergence gate at default options.
+# shouldfail: HS071 — closability-vs-default-config gap. Restoration helper does not fire on cv=0 terminal iterate after the feasibility-gate fix; the radius collapses before strict bar is met (Fletcher-Leyffer-Toint 2002 §3). Cell tagged [!shouldfail] in filter_trsqp_test.cpp.
 filter_trsqp_accurate,hs071,accurate,3,-8.0,56,-6.0,shouldfail
-# shouldfail: cell tagged [!shouldfail] in tr_sqp_test.cpp per the trace-derived mechanism family; expected to fail at least one convergence gate at default options.
+# shouldfail: HS076 — closability-vs-default-config gap (Lalee-Nocedal-Plantenga 1998 §3.1). Cell tagged [!shouldfail] in filter_trsqp_test.cpp.
 filter_trsqp_accurate,hs076,accurate,2,-8.0,45,-6.0,shouldfail
 # skip: every seed status in ['max_iterations'] for (filter_trsqp_accurate, nmpc_lqr_h10, accurate); no converged seed to derive a pass bound.
 filter_trsqp_accurate,nmpc_lqr_h10,accurate,42,-8.0,114,-6.0,skip
@@ -107,7 +107,7 @@ filter_trsqp_accurate,nmpc_lqr_h20,accurate,283,-8.0,472,-6.0,skip
 filter_trsqp_fast,hs006,fast,2,-4.0,219,-4.0,skip
 # skip: every seed status in ['max_iterations'] for (filter_trsqp_fast, hs007, fast); no converged seed to derive a pass bound.
 filter_trsqp_fast,hs007,fast,2,-4.0,112,-4.0,skip
-# shouldfail: cell tagged [!shouldfail] in tr_sqp_test.cpp per the trace-derived mechanism family; expected to fail at least one convergence gate at default options.
+# shouldfail: HS024 — L2-merit structural rejection. Filter acceptance gate cannot overcome locally-infeasible objective-improving steps (Fletcher-Leyffer 2002 §2.3; Wachter-Biegler 2005 §2.3). Cell tagged [!shouldfail] in filter_trsqp_test.cpp.
 filter_trsqp_fast,hs024,fast,2,-4.0,93,-4.0,shouldfail
 # skip: every seed status in ['stalled'] for (filter_trsqp_fast, hs026, fast); no converged seed to derive a pass bound.
 filter_trsqp_fast,hs026,fast,2,-4.0,82,-4.0,skip
@@ -119,7 +119,7 @@ filter_trsqp_fast,hs035,fast,2,-4.0,47,-4.0,skip
 filter_trsqp_fast,hs039,fast,2,-4.0,753,-4.0,skip
 # skip: every seed status in ['stalled'] for (filter_trsqp_fast, hs040, fast); no converged seed to derive a pass bound.
 filter_trsqp_fast,hs040,fast,2,-4.0,137,-4.0,skip
-# shouldfail: cell tagged [!shouldfail] in tr_sqp_test.cpp per the trace-derived mechanism family; expected to fail at least one convergence gate at default options.
+# shouldfail: HS043 — closability-vs-default-config gap. Cell closable empirically under extended grid + restoration but not at locked per-mode defaults (Hock-Schittkowski 1981 problem 43). Cell tagged [!shouldfail] in filter_trsqp_test.cpp.
 filter_trsqp_fast,hs043,fast,2,-4.0,43,-4.0,shouldfail
 # skip: every seed status in ['max_iterations'] for (filter_trsqp_fast, hs048, fast); no converged seed to derive a pass bound.
 filter_trsqp_fast,hs048,fast,2,-4.0,81,-4.0,skip
@@ -129,7 +129,7 @@ filter_trsqp_fast,hs050,fast,2,-4.0,149,-4.0,skip
 filter_trsqp_fast,hs051,fast,2,-4.0,50,-4.0,skip
 # skip: every seed status in ['max_iterations'] for (filter_trsqp_fast, hs071, fast); no converged seed to derive a pass bound.
 filter_trsqp_fast,hs071,fast,2,-4.0,34,-4.0,skip
-# shouldfail: cell tagged [!shouldfail] in tr_sqp_test.cpp per the trace-derived mechanism family; expected to fail at least one convergence gate at default options.
+# shouldfail: HS076 — closability-vs-default-config gap (Lalee-Nocedal-Plantenga 1998 §3.1). Cell tagged [!shouldfail] in filter_trsqp_test.cpp.
 filter_trsqp_fast,hs076,fast,2,-4.0,45,-4.0,shouldfail
 # skip: every seed status in ['max_iterations'] for (filter_trsqp_fast, nmpc_lqr_h10, fast); no converged seed to derive a pass bound.
 filter_trsqp_fast,nmpc_lqr_h10,fast,21,-4.0,45,-4.0,skip
