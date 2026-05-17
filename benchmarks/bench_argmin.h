@@ -36,6 +36,7 @@
 #include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
+#include "argmin/solver/filter_trsqp_policy.h"
 #include "argmin/solver/projected_gradient_gn_policy.h"
 #include "argmin/solver/augmented_lagrangian_policy.h"
 
@@ -521,6 +522,16 @@ void run_all_argmin_solvers(
     {
         run_constrained("tr_sqp_fast",     tr_sqp_policy_fast<>{});
         run_constrained("tr_sqp_accurate", tr_sqp_policy_accurate<>{});
+    }
+
+    // Filter trust-region SQP (Byrd-Omojokun composite step paired with
+    // Fletcher-Leyffer filter acceptance per Wachter-Biegler 2005/2006).
+    // Both modes dispatched on every constrained differentiable bound-aware
+    // cell, mirroring the tr_sqp registration pattern.
+    if constexpr(is_constrained && differentiable<Problem> && is_bound)
+    {
+        run_constrained("filter_trsqp_fast",     filter_trsqp_policy_fast<>{});
+        run_constrained("filter_trsqp_accurate", filter_trsqp_policy_accurate<>{});
     }
 
     // Augmented Lagrangian (with L-BFGS-B inner): any constrained problem.
