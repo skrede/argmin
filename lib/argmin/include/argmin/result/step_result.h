@@ -100,6 +100,24 @@ struct step_result
         //            and second-order correction; line-search analog at
         //            kraft_slsqp_policy.h Section 2.2.4).
         std::size_t soc_retry_count{0};
+        // Feasibility-restoration inner-iteration counter for the LM
+        // helper invoked from the filter trust-region SQP policy's
+        // reject-after-radius-collapse branch. Increments by the helper's
+        // returned iterations_used count whenever restoration fires;
+        // populated on both the converged emit path (when restoration
+        // restored a feasible iterate and the policy resumed composite
+        // step) and the fall-through trust-radius-collapse null-step
+        // emit path (when restoration ran but did not converge). Zero
+        // for any policy that does not invoke restoration, including
+        // filter_trsqp at its default restoration_max_iter = 0.
+        //
+        // Reference: Nocedal and Wright 2e Section 10.3 (Levenberg-
+        //            Marquardt for least-squares);
+        //            Wachter and Biegler 2006 Math. Programming
+        //            106:25-57 Section 3.3 (IPOPT restoration phase;
+        //            argmin variant ships a minimal-viable LM
+        //            simplification).
+        std::size_t restoration_iters_used{0};
     };
     solver_diagnostics diagnostics{};
 };

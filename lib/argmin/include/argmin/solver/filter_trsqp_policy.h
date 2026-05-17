@@ -56,6 +56,7 @@
 
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/sqp_common.h"
+#include "argmin/detail/restoration.h"
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/byrd_omojokun.h"
 #include "argmin/detail/steihaug_cg.h"
@@ -228,6 +229,19 @@ struct filter_trsqp_policy
     static constexpr double default_filter_switching_kappa = 1e-4;
     static constexpr double default_filter_switching_s     = 2.3;
 
+    // Feasibility-restoration knob defaults (minimal-viable Levenberg-
+    // Marquardt prototype; opt-in zero default keeps the policy
+    // behavior bit-identical to the pre-restoration ship-state for any
+    // caller that does not explicitly enable restoration).
+    //
+    // Reference: Nocedal and Wright 2e Section 10.3 (Levenberg-Marquardt
+    //            for least-squares);
+    //            Wachter and Biegler 2006 Math. Programming 106:25-57
+    //            Section 3.3 (IPOPT restoration phase; full version).
+    static constexpr std::size_t default_restoration_max_iter =
+        std::size_t{0};
+    static constexpr double default_restoration_lambda_init = 1e-3;
+
     struct options_type
     {
         // Direct-field-default form: literature-defaulted scalars are
@@ -280,6 +294,46 @@ struct filter_trsqp_policy
         // Wachter-Biegler 2005 Table 1.
         double filter_switching_kappa{default_filter_switching_kappa};
         double filter_switching_s{default_filter_switching_s};
+
+        // Feasibility-restoration knobs (minimal-viable Levenberg-
+        // Marquardt prototype). The restoration hook fires only on the
+        // three-way conjunction
+        //   (trust_radius < min_trust_radius) AND
+        //   (filter rejected the most recent candidate)         AND
+        //   (restoration_max_iter > 0);
+        // any single conjunct false leaves the policy's
+        // pre-restoration null-step emission and filter-reject paths
+        // unchanged. The opt-in-zero default keeps the policy behavior
+        // bit-identical for callers that do not explicitly enable
+        // restoration.
+        //
+        // Buffer-aliasing rule: the restoration helper uses
+        // DEDICATED state buffers (restoration_c, restoration_c_trial,
+        // restoration_J, restoration_JtJ, restoration_rhs,
+        // restoration_dx, restoration_xtrial, restoration_ldlt) sized
+        // at init() time when restoration_max_iter > 0. The shared
+        // sqp_state_buffers c_all / c_trial_buf are NOT passed into the
+        // helper -- they have live readers in the trial-evaluation
+        // closure and the filter h-evaluation block, and the
+        // restoration helper's inner-loop mutations during the LM
+        // iteration would corrupt step-internal state.
+        //
+        // Init-time invariant: restoration_max_iter MUST be set BEFORE
+        // basic_solver construction. The lazy-init guard in init()
+        // reads the option once at policy construction; mid-solve
+        // changes do not re-size the restoration_* buffers and the
+        // hook would dereference unsized buffers.
+        //
+        // Reference: Nocedal and Wright 2e Section 10.3 (Levenberg-
+        //            Marquardt for least-squares);
+        //            Wachter and Biegler 2006 Math. Programming
+        //            106:25-57 Section 3.3 (IPOPT restoration phase;
+        //            this prototype is a minimal-viable LM
+        //            simplification).
+        std::size_t restoration_max_iter{default_restoration_max_iter};
+        double restoration_lambda_init{default_restoration_lambda_init};
+        double restoration_feasibility_tolerance{
+            default_feasibility_tolerance};
     };
 
     options_type options{};
@@ -350,6 +404,27 @@ struct filter_trsqp_policy
         Eigen::MatrixXd AAt_workspace;
         Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;
         Eigen::VectorXd w_workspace;
+
+        // Restoration helper buffers. Allocated only when
+        // options.restoration_max_iter > 0 at policy construction time
+        // (lazy-init guard keeps zero-restoration callers at the
+        // pre-restoration memory footprint). The c and c_trial buffers
+        // are DEDICATED to the restoration helper -- the shared
+        // sqp_state_buffers c_all / c_trial_buf cannot be aliased here
+        // because they have live readers in the trial_eval closure and
+        // the filter h-evaluation block, and the restoration helper's
+        // inner-loop mutations would corrupt step-internal state on the
+        // failed-restoration fall-through path.
+        //
+        // Reference: Nocedal and Wright 2e Section 10.3.
+        Eigen::VectorXd              restoration_c;
+        Eigen::VectorXd              restoration_c_trial;
+        Eigen::MatrixXd              restoration_J;
+        Eigen::MatrixXd              restoration_JtJ;
+        Eigen::Vector<double, N>     restoration_rhs;
+        Eigen::Vector<double, N>     restoration_dx;
+        Eigen::Vector<double, N>     restoration_xtrial;
+        Eigen::LDLT<Eigen::MatrixXd> restoration_ldlt;
 
         double objective_value{};
         // Lagrangian-Hessian approximation on the JOINT (x, s) space;
@@ -436,6 +511,29 @@ struct filter_trsqp_policy
             s.AAt_workspace.resize(m_joint, m_joint);
             s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(m_joint);
             s.w_workspace.resize(m_joint);
+        }
+
+        // Lazy-init restoration helper buffers. Allocated only when
+        // restoration is opted in; the zero-default keeps the
+        // post-init memory footprint identical to the
+        // pre-restoration ship-state for callers that leave the knob
+        // at its default. The x-only constraint count
+        // m_xonly = n_eq + n_ineq is consumed by the helper (not the
+        // joint slack-augmented count).
+        if(options.restoration_max_iter > 0)
+        {
+            const int m_xonly = s.n_eq + s.n_ineq;
+            if(m_xonly > 0)
+            {
+                s.restoration_c.resize(m_xonly);
+                s.restoration_c_trial.resize(m_xonly);
+                s.restoration_J.resize(m_xonly, n);
+                s.restoration_JtJ.resize(n, n);
+            }
+            s.restoration_rhs.resize(n);
+            s.restoration_dx.resize(n);
+            s.restoration_xtrial.resize(n);
+            s.restoration_ldlt = Eigen::LDLT<Eigen::MatrixXd>(n);
         }
 
         // Constraint evaluation on the un-reformulated x-only shape.
@@ -861,6 +959,128 @@ struct filter_trsqp_policy
         // Section L -- Radius update consumes the caller-side verdict.
         s.trust_radius = new_delta;
 
+        // Feasibility-restoration hook. Fires only on the three-way
+        // conjunction
+        //   (trust_radius < min_trust_radius) AND
+        //   (filter rejected the most recent candidate)         AND
+        //   (restoration_max_iter > 0).
+        // Any single conjunct false leaves the original null-step
+        // emission path (Section M) and the filter-reject path
+        // (Section N) untouched. On converged restoration the helper
+        // mutates s.x in place and the policy resumes composite-step
+        // at the restored iterate with a BFGS reset (the restoration
+        // step is a feasibility step, not a Lagrangian step; the
+        // prior B approximation is stale). On non-converged
+        // restoration control falls through to the Section M emission
+        // below; the iters_used count is propagated to the
+        // diagnostics field so a downstream sweep can attribute the
+        // outcome.
+        //
+        // Reference: Nocedal and Wright 2e Section 10.3;
+        //            Wachter and Biegler 2006 Math. Programming
+        //            106:25-57 Section 3.3.
+        std::size_t restoration_iters_used_out = 0;
+        if(s.trust_radius < options.min_trust_radius
+           && !accepted
+           && options.restoration_max_iter > 0)
+        {
+            // x-space (not joint slack-augmented) constraint and
+            // jacobian closures. The LM helper operates on the
+            // original x with the original c(x); slack lifting is a
+            // filter_trsqp internal that does not belong in the
+            // feasibility-restoration objective.
+            auto cfn = [&s](const Eigen::Vector<double, N>& xv,
+                            Eigen::VectorXd&                 cv)
+            {
+                s.problem->constraints(xv, cv);
+            };
+            auto jfn = [&s](const Eigen::Vector<double, N>& xv,
+                            Eigen::MatrixXd&                 Jv)
+            {
+                s.problem->constraint_jacobian(xv, Jv);
+            };
+
+            const auto restoration_outcome =
+                argmin::detail::feasibility_restoration<double, N>(
+                    s.x, cfn, jfn, s.lower, s.upper,
+                    options.restoration_max_iter,
+                    options.restoration_lambda_init,
+                    options.restoration_feasibility_tolerance,
+                    s.restoration_c, s.restoration_c_trial,
+                    s.restoration_J, s.restoration_JtJ,
+                    s.restoration_rhs, s.restoration_dx,
+                    s.restoration_xtrial, s.restoration_ldlt);
+            restoration_iters_used_out =
+                restoration_outcome.iterations_used;
+
+            if(restoration_outcome.status
+               == argmin::detail::restoration_status::converged)
+            {
+                // BFGS reset on the post-restoration iterate. The
+                // restoration step is a feasibility step, not a
+                // Lagrangian step; the prior LDL B approximation is
+                // stale.
+                s.hessian.reset();
+                s.trust_radius = options.initial_trust_radius;
+
+                // Re-evaluate f, g, c, J at the restored s.x into the
+                // SHARED sqp_state_buffers; the restoration helper
+                // buffers are no longer consumed after this point in
+                // the iteration.
+                s.objective_value = s.problem->value(s.x);
+                s.problem->gradient(s.x, s.g);
+                if(m_total > 0)
+                {
+                    s.problem->constraints(s.x, s.bufs.c_all);
+                    s.problem->constraint_jacobian(s.x, s.bufs.J_all);
+                    s.c_eq   = s.bufs.c_all.head(s.n_eq);
+                    s.c_ineq = s.bufs.c_all.tail(n_ineq);
+                    s.J_eq   = s.bufs.J_all.topRows(s.n_eq);
+                    s.J_ineq = s.bufs.J_all.bottomRows(n_ineq);
+                }
+
+                // Refresh the slack vector to keep the joint residual
+                // c_ineq - s nominally zero at the restored iterate
+                // (mirroring the init()-time s_slack seeding).
+                if(n_ineq > 0)
+                    s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
+
+                // Re-envelope the filter set with the restored
+                // (f, h_restored) seed. The prototype does NOT
+                // integrate the filter during restoration (Wachter-
+                // Biegler 2006 Section 3.3's full version does); the
+                // outer policy re-enters with the post-restoration
+                // filter state and lets the next composite-step
+                // attempt earn or lose acceptance against the
+                // refreshed envelope.
+                double h_restored = 0.0;
+                if(s.n_eq > 0)
+                    h_restored += s.c_eq.cwiseAbs().sum();
+                if(n_ineq > 0)
+                    h_restored += (-s.c_ineq).cwiseMax(0.0).sum();
+                s.filter.add(s.objective_value, h_restored);
+
+                ++s.iteration;
+                auto r = argmin::detail::null_step_result<
+                    double, N, Eigen::Dynamic, Eigen::Dynamic>(
+                    s.objective_value, s.g, s.J_eq, s.J_ineq,
+                    s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
+                    s.c_eq, s.c_ineq, s.x.norm(),
+                    /*bfgs_reset_count=*/std::size_t{1},
+                    solver_status::running);
+                r.diagnostics.bfgs_skip_count = bfgs_skip_count;
+                r.diagnostics.soc_retry_count = soc_retry_count;
+                r.diagnostics.restoration_iters_used =
+                    restoration_iters_used_out;
+                return r;
+            }
+            // Restoration did not converge; fall through to the
+            // Section M null-step emission below. The iters_used
+            // count is captured into diagnostics on that emission
+            // path so the failed-restoration case still surfaces the
+            // iter count to downstream sweep consumers.
+        }
+
         // Section M -- Trust-radius collapse path. Below the policy-
         // level floor the policy emits a null-step carrying the new
         // solver_status entry; the convergence framework's stall
@@ -877,6 +1097,8 @@ struct filter_trsqp_policy
                 solver_status::trust_region_step_rejected);
             r.diagnostics.bfgs_skip_count = bfgs_skip_count;
             r.diagnostics.soc_retry_count = soc_retry_count;
+            r.diagnostics.restoration_iters_used =
+                restoration_iters_used_out;
             ++s.iteration;
             return r;
         }
