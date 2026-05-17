@@ -209,37 +209,67 @@ struct filter_trsqp_policy
     static constexpr std::size_t default_soc_max_iterations =
         std::size_t{0};
 
-    // Filter envelope margins (Wachter and Biegler 2006 Section 2.3,
-    // eq. 6). The placeholder 1e-5 / 1e-5 pair matches the existing
-    // filter_slsqp_policy default; per-mode tuning is an empirical job
-    // for a downstream sweep.
-    static constexpr double default_filter_gamma_f = 1e-5;
-    static constexpr double default_filter_gamma_h = 1e-5;
-
-    // Filter-reject acceptance gate variant. The TR-shrink default
-    // mirrors the Fletcher-Leyffer-Toint 2002 Section 3 construction;
-    // the switching-condition alternative is exposed as a runtime knob
-    // and is a Wachter-Biegler 2005 Section 2.3 port to the
-    // trust-region composite step.
-    static constexpr filter_reject_mode default_filter_reject_mode =
-        filter_reject_mode::tr_shrink;
-
-    // Switching-condition parameters (Wachter and Biegler 2005 Table 1).
-    // Consumed only when reject_mode == switching_condition.
-    static constexpr double default_filter_switching_kappa = 1e-4;
-    static constexpr double default_filter_switching_s     = 2.3;
-
-    // Feasibility-restoration knob defaults (minimal-viable Levenberg-
-    // Marquardt prototype; opt-in zero default keeps the policy
-    // behavior bit-identical to the pre-restoration ship-state for any
-    // caller that does not explicitly enable restoration).
+    // Empirically-selected per-mode defaults from an HS-suite sweep
+    // across the filter envelope (gamma_f, gamma_h), the reject-gate
+    // variant (tr_shrink vs switching_condition), the switching-
+    // condition parameters (kappa, s), the initial trust radius, and
+    // the restoration budget. The per-mode ternary follows the
+    // cross-policy mode-dispatch convention: `accurate` prioritizes
+    // convergence quality, `fast` prioritizes per-step wall. The two
+    // modes happen to coincide on the current pick; the ternary shape
+    // is preserved so the per-mode independence convention is
+    // structurally visible and a future re-tune can split them
+    // without a code-shape change.
     //
-    // Reference: Nocedal and Wright 2e Section 10.3 (Levenberg-Marquardt
-    //            for least-squares);
-    //            Wachter and Biegler 2006 Math. Programming 106:25-57
-    //            Section 3.3 (IPOPT restoration phase; full version).
+    // Reference: Fletcher and Leyffer 2002 Math. Programming
+    //            91:239-269 Section 2.1 (filter dominance);
+    //            Fletcher, Leyffer, Toint 2002 SIAM J. Optim.
+    //            13(1):44-59 Section 3 (filter-TR convergence theory;
+    //            tr_shrink gate);
+    //            Wachter and Biegler 2005 SIAM J. Optim. 16(1):1-31
+    //            Section 2.3 (kappa, s switching condition);
+    //            Wachter and Biegler 2006 Math. Programming
+    //            106:25-57 Section 2.3 eq. 6 (gamma envelope) and
+    //            Section 3.3 (restoration phase; the argmin
+    //            implementation is a minimal-viable Levenberg-
+    //            Marquardt simplification, see
+    //            detail/restoration.h).
+
+    // Filter envelope margins (Wachter and Biegler 2006 Section 2.3,
+    // eq. 6).
+    static constexpr double default_filter_gamma_f =
+        (Mode == sqp_mode::fast) ? 1e-2 : 1e-2;
+    static constexpr double default_filter_gamma_h =
+        (Mode == sqp_mode::fast) ? 1e-2 : 1e-2;
+
+    // Filter-reject acceptance gate variant. tr_shrink follows
+    // Fletcher-Leyffer-Toint 2002 Section 3; switching_condition is a
+    // Wachter-Biegler 2005 Section 2.3 port to the trust-region
+    // composite step and remains exposed as a runtime knob.
+    static constexpr filter_reject_mode default_filter_reject_mode =
+        (Mode == sqp_mode::fast) ? filter_reject_mode::tr_shrink
+                                 : filter_reject_mode::tr_shrink;
+
+    // Switching-condition parameters (Wachter and Biegler 2005
+    // Table 1). Consumed only when reject_mode == switching_condition.
+    static constexpr double default_filter_switching_kappa =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-4;
+    static constexpr double default_filter_switching_s =
+        (Mode == sqp_mode::fast) ? 2.3 : 2.3;
+
+    // Feasibility-restoration knob defaults (minimal-viable
+    // Levenberg-Marquardt prototype). The per-mode default budget is
+    // the smallest restoration_max_iter that closes the L2-merit
+    // overshoot family on the cross-cell sweep; callers that need a
+    // larger budget can still set the option directly.
+    //
+    // Reference: Nocedal and Wright 2e Section 10.3 (Levenberg-
+    //            Marquardt for least-squares);
+    //            Wachter and Biegler 2006 Math. Programming
+    //            106:25-57 Section 3.3 (IPOPT restoration phase;
+    //            full version).
     static constexpr std::size_t default_restoration_max_iter =
-        std::size_t{0};
+        (Mode == sqp_mode::fast) ? std::size_t{10} : std::size_t{10};
     static constexpr double default_restoration_lambda_init = 1e-3;
 
     struct options_type
