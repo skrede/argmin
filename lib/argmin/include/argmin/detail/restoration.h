@@ -103,7 +103,7 @@ enum class restoration_status : std::uint8_t
 // classification, the iteration count used (for diagnostics roll-up
 // at the caller), the final feasibility residual norm, and the final
 // lambda value (for sweep-time tuning of lambda_init).
-struct restoration_result
+struct lm_restoration_result
 {
     restoration_status status;
     std::size_t        iterations_used;
@@ -139,7 +139,7 @@ struct restoration_result
 //                  caller's allocation site.
 template <typename Scalar, int N, typename ConstraintFn,
           typename JacobianFn>
-restoration_result feasibility_restoration(
+lm_restoration_result feasibility_restoration(
     Eigen::Ref<Eigen::Vector<Scalar, N>>              x,
     ConstraintFn&&                                    constraints,
     JacobianFn&&                                      jacobian,
@@ -160,7 +160,7 @@ restoration_result feasibility_restoration(
     using std::min;
     using std::max;
 
-    restoration_result result{};
+    lm_restoration_result result{};
     result.status          = restoration_status::max_iter_reached;
     result.iterations_used = 0;
     result.final_c_norm_l2 =
