@@ -493,6 +493,28 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Filter envelope + switching-condition + initial-trust-radius +
+# restoration sweep harness for filter_trsqp_policy. Drives the policy
+# across the cross product of (gamma_f, gamma_h, reject_mode, kappa, s,
+# initial_trust_radius, restoration_max_iter, sqp_mode, problem, seed)
+# on the HS-suite cells consumed by the empirical-default-selection
+# workflow; emits a JSON record per (config, cell, seed) plus an MD
+# analysis. argv-driven; sweep_kind dispatches the grid. Non-ctest,
+# one-shot.
+add_executable(filter_trsqp_sweep filter_trsqp_sweep.cpp)
+target_link_libraries(filter_trsqp_sweep PRIVATE argmin::argmin)
+target_compile_options(filter_trsqp_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(filter_trsqp_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Diagnostic KKT-breakdown harness (throwaway; emits per-iter CSV across
 # the four SQP premature-ftol regressions, the byrd_lbfgsb null-step
 # termination gap, and the hs071 diagnostic byproduct case). Opt-in
