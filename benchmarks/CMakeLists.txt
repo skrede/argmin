@@ -336,6 +336,23 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
+    # filter-trust-region SQP per-iter wall-time micro bench. Pairs
+    # argmin's filter_trsqp_policy (Byrd-Omojokun composite step inside
+    # a Fletcher-Leyffer filter envelope) against NLopt's LD_SLSQP on
+    # the closed-cell workload. Mode-parametric on sqp_mode (accurate +
+    # fast); covers HS028 / HS026 on both modes and HS071 on fast only.
+    add_executable(micro_filter_trsqp micro_filter_trsqp.cpp)
+    target_link_libraries(micro_filter_trsqp PRIVATE argmin::argmin NLopt::nlopt)
+    target_compile_options(micro_filter_trsqp PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    if(ARGMIN_LTO_SUPPORTED)
+        set_target_properties(micro_filter_trsqp PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+
     # Allocation-tracing variants of the four micro_*_sqp benches. Each
     # variant compiles the same source under ARGMIN_BENCH_TRACE_ALLOC=1
     # (which switches main() into a 2-step-warmup + 10-step hot-loop
