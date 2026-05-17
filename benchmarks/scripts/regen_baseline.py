@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate benchmarks/baselines/v0.3.0-regression.csv from a publish_summary.csv.
+"""Regenerate a canonical regression baseline from a publish_summary.csv.
 
 Aggregates per-seed publish_summary rows into per-(solver, problem, mode)
 cells; computes the per-cell bounds with a 1.30 pad over the per-step wall
@@ -29,6 +29,8 @@ COHORT_SOLVERS = {
     "byrd_lbfgsb",
     "filter_nw_sqp_accurate",
     "filter_slsqp_accurate",
+    "filter_trsqp_accurate",
+    "filter_trsqp_fast",
     "kraft_slsqp_accurate",
     "lbfgsb",
     "multistart_bobyqa",
@@ -82,6 +84,22 @@ KNOWN_FAILURE_CELLS = {
     ("tr_sqp_fast",     "hs043", "fast"),
     ("tr_sqp_accurate", "hs050", "accurate"),
     ("tr_sqp_fast",     "hs050", "fast"),
+    # Filter trust-region SQP shouldfail set per the test-side disposition
+    # documented in tests/unit/filter_trsqp_test.cpp (the [!shouldfail] tag
+    # in that test file is the contract; mechanism citations live in that
+    # file's comment blocks). Mechanism families: L2-merit structural
+    # rejection on HS024 (Fletcher-Leyffer-Toint 2002 sec.4); composite-step
+    # divergence on HS043 / HS076 at locked defaults (Lalee-Nocedal-Plantenga
+    # 1998 restoration disposition); strict-bar exemption on HS071/accurate
+    # (Maratos failure mode under fast-mode dispatch closes; accurate mode
+    # does not at locked envelope).
+    ("filter_trsqp_accurate", "hs024", "accurate"),
+    ("filter_trsqp_fast",     "hs024", "fast"),
+    ("filter_trsqp_accurate", "hs043", "accurate"),
+    ("filter_trsqp_fast",     "hs043", "fast"),
+    ("filter_trsqp_accurate", "hs071", "accurate"),
+    ("filter_trsqp_accurate", "hs076", "accurate"),
+    ("filter_trsqp_fast",     "hs076", "fast"),
 }
 
 
@@ -157,6 +175,44 @@ def load_curated_cells(prior_baseline: Path) -> set[tuple[str, str, str]]:
     return out
 
 
+def expand_cohort_for_new_solvers(
+    curated: set[tuple[str, str, str]],
+    ref_solver: str,
+    new_solvers: list[str],
+) -> set[tuple[str, str, str]]:
+    """Augment the curated cell set with new solvers using a reference solver's
+    cell list as the template.
+
+    When a new policy is added between baseline regenerations, the prior
+    baseline has zero rows for that policy and load_curated_cells therefore
+    omits every (new_solver, problem, mode) tuple, causing the regen to
+    silently drop those rows. This helper takes the (problem, mode) pairs
+    that ref_solver covers in the curated set and emits matching tuples
+    for each new_solver under the new_solver's own dispatch mode.
+
+    The cohort widening is explicit (called by name in main()), not silent.
+    """
+    ref_cells = [(p, m) for (s, p, m) in curated if s == ref_solver]
+    if not ref_cells:
+        print(f"regen_baseline: WARN: reference solver {ref_solver!r} not "
+              f"present in curated cohort; cohort expansion is a no-op",
+              file=sys.stderr)
+        return set(curated)
+    out = set(curated)
+    added = 0
+    for new_solver in new_solvers:
+        dispatch_mode = solver_dispatch_mode(new_solver)
+        for (problem, _ref_mode) in ref_cells:
+            tup = (new_solver, problem, dispatch_mode)
+            if tup not in out:
+                out.add(tup)
+                added += 1
+    print(f"regen_baseline: cohort expansion added {added} new cells "
+          f"(ref_solver={ref_solver}, new_solvers={new_solvers})",
+          file=sys.stderr)
+    return out
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--summary", required=True, type=Path,
@@ -175,6 +231,23 @@ def main() -> int:
     curated_cells = load_curated_cells(args.prior_baseline)
     print(f"regen_baseline: curated cohort size = {len(curated_cells)} cells",
           file=sys.stderr)
+
+    # If a new policy in COHORT_SOLVERS is not present in the prior baseline,
+    # the curated set excludes its rows. Detect any such policies and expand
+    # the cohort using filter_nw_sqp_accurate as the reference (its cell list
+    # is the canonical SQP-family coverage spanning the HS suite plus the
+    # NMPC fixtures). This widening is intentional and explicit (logged to
+    # stderr) -- the policies-eligible-for-expansion list is the source of
+    # truth, not an implicit cohort widen.
+    prior_solvers = {s for (s, _p, _m) in curated_cells}
+    missing_new_solvers = [s for s in sorted(COHORT_SOLVERS)
+                           if s not in prior_solvers]
+    if missing_new_solvers:
+        curated_cells = expand_cohort_for_new_solvers(
+            curated_cells,
+            ref_solver="filter_nw_sqp_accurate",
+            new_solvers=missing_new_solvers,
+        )
 
     # Load summary, aggregate per (solver, problem, dispatch_mode).
     with args.summary.open("r", newline="") as f:

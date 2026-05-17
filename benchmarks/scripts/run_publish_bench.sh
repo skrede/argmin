@@ -24,7 +24,7 @@
 #   REGRESSION_CHECK_BINARY  path to regression_check executable
 #                            (default build/bench/benchmarks/regression_check)
 #   REGRESSION_BASELINE      path to baseline CSV
-#                            (default benchmarks/baselines/v0.3.0-regression.csv)
+#                            (default benchmarks/baselines/v0.3.1-regression.csv)
 #
 # Exit 0 on success; non-zero if the binary is missing, the bench run
 # fails, or the regression gate fails. regression_check exit codes:
@@ -39,7 +39,7 @@ BENCH_BINARY="${BENCH_BINARY:-build/bench/benchmarks/publish_bench}"
 OUT_ROOT="${OUT_ROOT:-.planning/benchmarks/publish}"
 RUN_REGRESSION_CHECK="${RUN_REGRESSION_CHECK:-1}"
 REGRESSION_CHECK_BINARY="${REGRESSION_CHECK_BINARY:-build/bench/benchmarks/regression_check}"
-REGRESSION_BASELINE="${REGRESSION_BASELINE:-benchmarks/baselines/v0.3.0-regression.csv}"
+REGRESSION_BASELINE="${REGRESSION_BASELINE:-benchmarks/baselines/v0.3.1-regression.csv}"
 
 # Dolan-More post-step opt-out. Set RUN_DM_PROFILE=0 to skip the
 # performance-profile generation; the bench run + any other post-steps

@@ -712,7 +712,7 @@ if(ARGMIN_BENCH_IPOPT)
 endif()
 
 # Standalone regression gate. Consumes publish_summary.csv and a checked-in
-# per-cell baseline (benchmarks/baselines/v0.3.0-regression.csv); exits
+# per-cell baseline (benchmarks/baselines/v0.3.1-regression.csv); exits
 # non-zero on any expected:pass cell breaching a numeric bound or any
 # expected:shouldfail cell unexpectedly converging. C++23 std-only --
 # no Eigen, no argmin, no Catch2, no NLopt; pure CSV bound comparison.
@@ -741,7 +741,7 @@ if(CMAKE_TESTING_ENABLED)
                 "OUT_ROOT=${CMAKE_BINARY_DIR}/regression_gate_runs"
                 "BENCH_BINARY=$<TARGET_FILE:publish_bench>"
                 "REGRESSION_CHECK_BINARY=$<TARGET_FILE:regression_check>"
-                "REGRESSION_BASELINE=${CMAKE_SOURCE_DIR}/benchmarks/baselines/v0.3.0-regression.csv"
+                "REGRESSION_BASELINE=${CMAKE_SOURCE_DIR}/benchmarks/baselines/v0.3.1-regression.csv"
                 # Per-step wall variance dominates at SEED_COUNT=3; the
                 # outer-iter, accuracy, status, and cv gates stay active.
                 # Full 11-seed sweep via run_publish_bench.sh enforces the
