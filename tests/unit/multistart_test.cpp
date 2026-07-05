@@ -1,6 +1,7 @@
 #include "argmin/detail/halton.h"
 #include "argmin/solver/multistart_policy.h"
 #include "argmin/solver/bobyqa_policy.h"
+#include "argmin/solver/cobyla_policy.h"
 #include "argmin/solver/basic_solver.h"
 #include "argmin/formulation/concepts.h"
 
@@ -10,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <type_traits>
 
 using Catch::Approx;
 using namespace argmin;
@@ -59,7 +61,69 @@ struct multimodal_2d
     Eigen::VectorXd upper_bounds() const { return ub; }
 };
 
+// Bound- and inequality-constrained problem for exercising constraint
+// mirroring through the multistart decorator. Feasible when x0 + x1 >= 10
+// (argmin convention: constraints() returns c with c >= 0 meaning
+// feasible; see tests/unit/cobyla_test.cpp's simple_constrained). The
+// feasible half-plane is pushed far enough from the origin that no
+// initial-simplex vertex near x0=(0,0) can reach it, so cobyla's
+// feasibility-seeking best-point selection cannot mask the violation at
+// x0 the way it would for a barely-infeasible starting point.
+struct infeasible_constrained_2d
+{
+    static constexpr int problem_dimension = dynamic_dimension;
+
+    int dimension() const { return 2; }
+
+    double value(const Eigen::VectorXd& x) const
+    {
+        return x[0] * x[0] + x[1] * x[1];
+    }
+
+    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    {
+        c.resize(1);
+        c[0] = x[0] + x[1] - 10.0;
+    }
+
+    int num_equality() const { return 0; }
+    int num_inequality() const { return 1; }
+
+    Eigen::VectorXd lower_bounds() const { return Eigen::VectorXd::Constant(2, -10.0); }
+    Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd::Constant(2, 10.0); }
+};
+
+// Fixed-dimension (compile-time N=2) bound-constrained problem, used to pin
+// that multistart_policy propagates the inner policy's fixed-size vector
+// type through its decorator state instead of collapsing it to a dynamic
+// Eigen::VectorXd.
+struct fixed_dim_quadratic
+{
+    static constexpr int problem_dimension = 2;
+
+    int dimension() const { return 2; }
+
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        return (x[0] - 1.0) * (x[0] - 1.0) + (x[1] + 2.0) * (x[1] + 2.0);
+    }
+
+    Eigen::Vector<double, 2> lower_bounds() const
+    {
+        return Eigen::Vector<double, 2>::Constant(-10.0);
+    }
+
+    Eigen::Vector<double, 2> upper_bounds() const
+    {
+        return Eigen::Vector<double, 2>::Constant(10.0);
+    }
+};
+
 }
+
+static_assert(constrained_values<infeasible_constrained_2d>);
+static_assert(bound_constrained<infeasible_constrained_2d>);
+static_assert(bound_constrained<fixed_dim_quadratic>);
 
 TEST_CASE("halton van der Corput sequence", "[multistart]")
 {
@@ -188,4 +252,92 @@ TEST_CASE("multistart respects max_restarts", "[multistart]")
     // Should terminate (not run forever) -- either converged or hit max_iterations.
     CHECK(std::isfinite(result.objective_value));
     CHECK(result.iterations <= 5000);
+}
+
+TEST_CASE("multistart reports an honest status on restart exhaustion, not converged",
+          "[multistart]")
+{
+    // Drive the exhaustion branch directly through the decorator (mirrors
+    // restarting_policy_test.cpp's direct state/step manipulation) so the
+    // assertion is deterministic and does not depend on whether a real
+    // optimization run happens to stagnate enough times to exhaust
+    // restarts within budget.
+    multistart_booth problem{
+        .lb = Eigen::VectorXd{{-10.0, -10.0}},
+        .ub = Eigen::VectorXd{{10.0, 10.0}},
+    };
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+
+    using ms_policy = multistart_policy<bobyqa_policy<>>;
+    ms_policy::options_type policy_opts;
+    policy_opts.max_restarts = 0;  // exhausted as soon as a restart is attempted
+
+    ms_policy policy;
+    auto state = policy.init(problem, x0, opts, policy_opts);
+
+    // Force the exhaustion branch: restart_count (0) >= max_restarts (0).
+    state.restart_pending = true;
+    auto result = policy.step(state);
+
+    REQUIRE(result.policy_status.has_value());
+    CHECK(*result.policy_status == solver_status::budget_exhausted);
+    CHECK(*result.policy_status != solver_status::converged);
+}
+
+TEST_CASE("multistart mirrors inner constraint violation through the decorator",
+          "[multistart]")
+{
+    infeasible_constrained_2d problem;
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+
+    using ms_policy = multistart_policy<cobyla_policy>;
+    basic_solver solver{ms_policy{}, problem, x0, opts};
+
+    // The initial iterate is deeply infeasible (c = 0 + 0 - 10 = -10) and
+    // stays infeasible however cobyla's initial-simplex best-point
+    // selection resolves it. If multistart_policy failed to mirror the
+    // inner cobyla policy's c_eq / c_ineq into its own decorator state,
+    // constraint_violation() would silently read 0 instead of the real
+    // inner violation.
+    CHECK(solver.constraint_violation() > 0.0);
+}
+
+TEST_CASE("multistart propagates the inner policy's fixed-N vector type",
+          "[multistart]")
+{
+    // Compile-time pin: a fixed-N inner policy keeps fully-fixed state
+    // inside the decorator instead of collapsing to Eigen::VectorXd.
+    static_assert(std::is_same_v<
+        decltype(std::declval<multistart_policy<bobyqa_policy<2>>
+            ::state_type<fixed_dim_quadratic>>().x),
+        Eigen::Vector<double, 2>>);
+
+    // Regression pin: a dynamic-N inner policy keeps a dynamic vector.
+    static_assert(std::is_same_v<
+        decltype(std::declval<multistart_policy<bobyqa_policy<>>
+            ::state_type<multistart_booth>>().x),
+        Eigen::VectorXd>);
+
+    // Runtime exercise of the fixed-N path: basic_solver's CTAD rebinds
+    // the un-rebound multistart_policy<bobyqa_policy<>> to N=2 from the
+    // problem's compile-time dimension, so the decorator's state actually
+    // instantiates with Eigen::Vector<double, 2> end to end.
+    fixed_dim_quadratic problem;
+    Eigen::Vector<double, 2> x0;
+    x0 << 0.0, 0.0;
+
+    solver_options opts;
+    opts.max_iterations = 500;
+    opts.set_gradient_threshold(1e-12);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+
+    using ms_policy = multistart_policy<bobyqa_policy<>>;
+    basic_solver solver{ms_policy{}, problem, x0, opts};
+    auto result = solver.solve();
+
+    CHECK(result.x[0] == Approx(1.0).margin(0.05));
+    CHECK(result.x[1] == Approx(-2.0).margin(0.05));
 }

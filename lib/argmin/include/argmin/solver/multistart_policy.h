@@ -18,6 +18,7 @@
 #include "argmin/detail/halton.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
+#include "argmin/solver/restarting_policy.h"
 
 #include "argmin/formulation/concepts.h"
 
@@ -26,6 +27,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <utility>
 
 namespace argmin
 {
@@ -52,20 +54,31 @@ struct multistart_policy
         // this SKIP deactivates.
     };
 
+    // Reuses restarting_policy's inner-state resolution (state_type<P> when the
+    // inner policy templates on the problem, plain state_type otherwise) instead
+    // of duplicating it, and derives x / lower / upper / best_ever_x from the
+    // inner state's own vector type so fixed-N inner policies keep fully-fixed
+    // state inside this decorator rather than collapsing to Eigen::VectorXd.
     template <typename P = void>
     struct state_type
     {
-        typename Inner::template state_type<P> inner;
-        Eigen::VectorXd x{};
-        Eigen::VectorXd lower{};
-        Eigen::VectorXd upper{};
+        detail::resolve_inner_state_t<Inner, P> inner;
+        decltype(std::declval<detail::resolve_inner_state_t<Inner, P>>().x) x{};
+        decltype(x) lower{};
+        decltype(x) upper{};
         double objective_value{};
         std::uint32_t stagnation_count{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
-        Eigen::VectorXd best_ever_x{};
+        decltype(x) best_ever_x{};
         bool restart_pending{false};
         std::uint16_t restart_count{0};
         int dimension{0};
+
+        // Mirrors the inner policy's constraint residuals so
+        // basic_solver::constraint_violation() reads the real inner violation
+        // for constrained inner policies instead of silently reading zero.
+        Eigen::VectorXd c_eq{};
+        Eigen::VectorXd c_ineq{};
     };
 
     Inner inner_policy_{};
@@ -85,7 +98,7 @@ struct multistart_policy
     }
 
     template <typename Problem, typename Convergence>
-    state_type<Problem> init(const Problem& problem, const Eigen::VectorXd& x0,
+    state_type<Problem> init(const Problem& problem, const auto& x0,
                              const solver_options<Convergence>& opts,
                              const options_type& policy_opts)
     {
@@ -95,15 +108,13 @@ struct multistart_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type<Problem> init(const Problem& problem, const Eigen::VectorXd& x0,
+    state_type<Problem> init(const Problem& problem, const auto& x0,
                              const solver_options<Convergence>& opts)
     {
         state_type<Problem> s;
         s.inner = inner_policy_.init(problem, x0, opts);
-        s.x = s.inner.x;
-        s.objective_value = s.inner.objective_value;
-        s.best_ever_value = s.objective_value;
-        s.best_ever_x = s.x;
+        s.best_ever_value = s.inner.objective_value;
+        s.best_ever_x = s.inner.x;
         s.dimension = problem.dimension();
 
         if constexpr(bound_constrained<Problem>)
@@ -112,6 +123,7 @@ struct multistart_policy
             s.upper = problem.upper_bounds();
         }
 
+        sync_from_inner(s);
         return s;
     }
 
@@ -124,7 +136,10 @@ struct multistart_policy
 
             if(s.restart_count >= effective_max_restarts())
             {
-                // All restarts exhausted -- restore best-ever solution.
+                // All restarts exhausted -- restore best-ever solution and
+                // report an honest terminal status. The restart budget
+                // running out proves nothing about optimality, so this must
+                // not be reported as solver_status::converged.
                 s.x = s.best_ever_x;
                 s.objective_value = s.best_ever_value;
                 s.inner.x = s.best_ever_x;
@@ -135,14 +150,18 @@ struct multistart_policy
                     .step_size = 0.0,
                     .objective_change = 0.0,
                     .improved = false,
-                    .policy_status = solver_status::converged,
+                    .policy_status = solver_status::budget_exhausted,
                 };
             }
 
-            // Generate Halton-seeded starting point within bounds.
+            // Generate Halton-seeded starting point within bounds. Widened to
+            // Eigen::VectorXd on both ternary branches: halton_to_bounds always
+            // returns a dynamic vector, while s.best_ever_x may now be a
+            // fixed-N vector for fixed-N inner policies, and the conditional
+            // operator requires a single common type.
             Eigen::VectorXd new_x0 = (s.lower.size() > 0 && s.upper.size() > 0)
                 ? detail::halton_to_bounds(s.restart_count, s.dimension, s.lower, s.upper)
-                : s.best_ever_x;
+                : Eigen::VectorXd(s.best_ever_x);
 
             inner_policy_.reset_clear(s.inner, new_x0);
             ++s.restart_count;
@@ -184,7 +203,7 @@ struct multistart_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::VectorXd& x0)
+    void reset(state_type<P>& s, const auto& x0)
     {
         inner_policy_.reset(s.inner, x0);
         s.stagnation_count = 0;
@@ -193,7 +212,7 @@ struct multistart_policy
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type<P>& s, const auto& x0)
     {
         inner_policy_.reset_clear(s.inner, x0);
         s.stagnation_count = 0;
@@ -210,6 +229,11 @@ private:
     {
         s.x = s.inner.x;
         s.objective_value = s.inner.objective_value;
+        if constexpr(requires { s.inner.c_eq; s.inner.c_ineq; })
+        {
+            s.c_eq = s.inner.c_eq;
+            s.c_ineq = s.inner.c_ineq;
+        }
     }
 };
 
