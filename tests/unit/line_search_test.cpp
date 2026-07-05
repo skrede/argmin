@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <vector>
 
 using Catch::Approx;
 using namespace argmin;
@@ -271,10 +272,102 @@ TEST_CASE("strong_wolfe with insufficient iterations", "[line_search][strong_wol
         return 2.0 * (alpha - 2.0);
     };
 
+    double phi0 = 4.0;
+
     line_search_options opts;
     opts.max_iterations = 0;
 
-    auto result = strong_wolfe(phi, dphi, 4.0, -4.0, opts);
+    auto result = strong_wolfe(phi, dphi, phi0, -4.0, opts);
 
     CHECK_FALSE(result.success);
+    // Armijo-consistent failure contract: value == phi0, not 0.
+    CHECK(result.value == Approx(phi0));
+}
+
+TEST_CASE("strong_wolfe bracketing expands from a unit initial step", "[line_search][strong_wolfe]")
+{
+    // phi(alpha) = (alpha - 50)^2; minimum at alpha = 50.
+    // With a large max_alpha, the bracketing phase must start at the
+    // unit initial trial (N&W Algorithm 3.5, alpha_1 = 1) and grow
+    // geometrically toward max_alpha, rather than jumping straight to
+    // max_alpha on the first trial.
+    auto phi = [](double alpha) -> double
+    {
+        double t = alpha - 50.0;
+        return t * t;
+    };
+
+    auto dphi = [](double alpha) -> double
+    {
+        return 2.0 * (alpha - 50.0);
+    };
+
+    double phi0 = phi(0.0);
+    double dphi0 = dphi(0.0);
+
+    std::vector<double> evaluated_alphas;
+    auto tracked_phi = [&](double alpha) -> double
+    {
+        evaluated_alphas.push_back(alpha);
+        return phi(alpha);
+    };
+
+    line_search_options opts;
+    opts.max_alpha = 100.0;
+
+    auto result = strong_wolfe(tracked_phi, dphi, phi0, dphi0, opts);
+
+    REQUIRE_FALSE(evaluated_alphas.empty());
+    CHECK(evaluated_alphas.front() == Approx(1.0));
+
+    bool intermediate_trial_found = false;
+    for(double a : evaluated_alphas)
+    {
+        if(a > 1.0 && a < opts.max_alpha)
+        {
+            intermediate_trial_found = true;
+            break;
+        }
+    }
+    CHECK(intermediate_trial_found);
+
+    CHECK(result.success);
+}
+
+TEST_CASE("strong_wolfe gates a non-finite trial encountered during expansion", "[line_search][strong_wolfe]")
+{
+    // phi has constant slope -1 on [0, 5) -- never satisfying the default
+    // curvature condition -- and is non-finite for alpha >= 5, forcing the
+    // bracketing phase's geometric expansion (1, 2, 4, 8, ...) to encounter
+    // a non-finite trial. Without the isfinite gate, the non-finite value
+    // would silently fail the ordered Armijo/value comparisons (false <
+    // anything is false) and be treated as an accepted, decreasing point.
+    auto phi = [](double alpha) -> double
+    {
+        if(alpha >= 5.0)
+            return std::numeric_limits<double>::quiet_NaN();
+        return -alpha;
+    };
+
+    auto dphi = [](double alpha) -> double
+    {
+        if(alpha >= 5.0)
+            return std::numeric_limits<double>::quiet_NaN();
+        return -1.0;
+    };
+
+    double phi0 = phi(0.0);
+    double dphi0 = dphi(0.0);
+
+    line_search_options opts;
+    opts.max_alpha = 100.0;
+
+    auto result = strong_wolfe(phi, dphi, phi0, dphi0, opts);
+
+    CHECK_FALSE(result.success);
+    // Armijo-consistent failure contract: value == phi0, not 0.
+    CHECK(result.value == Approx(phi0));
+    // The gate must actually have fired -- this counter is only
+    // incremented by the isfinite gate, never by the ordered comparisons.
+    CHECK(result.diagnostics.nan_eval_count > 0);
 }

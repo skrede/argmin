@@ -20,9 +20,20 @@ namespace argmin
 //   (ii) |phi'(alpha)| <= c2 * |phi'(0)|               (curvature)
 //
 // The algorithm proceeds in two phases:
-//   1. Bracketing (N&W Algorithm 3.5): find an interval [lo, hi] that
-//      contains a point satisfying both conditions.
+//   1. Bracketing (N&W Algorithm 3.5): starting from a unit initial trial
+//      (alpha_1 = 1), grow geometrically -- capped at max_alpha -- until an
+//      interval [lo, hi] that contains a point satisfying both conditions
+//      is found.
 //   2. Zoom (N&W Algorithm 3.6): bisect the bracket to find the point.
+//
+// NaN/Inf gate semantics mirror the Armijo backtracker (see
+// argmin/line_search/armijo.h): every trial phi(alpha), and the slope
+// phi'(alpha) where it is evaluated, is tested with std::isfinite before
+// any ordered Armijo/value-increase/curvature comparison, so a non-finite
+// trial is routed toward the zoom bracket rather than flowing NaN through
+// an ordered comparison. Any return path that does not achieve success
+// reports result.value = phi0 and result.success = false, matching the
+// Armijo backtracker's failure contract.
 //
 // Reference: N&W Algorithms 3.5/3.6, pp. 60-62.
 //            K&W Algorithm 4.4 (strong Wolfe line search).
@@ -35,8 +46,21 @@ template <typename Phi, typename DPhi, typename Scalar = double>
                                                       const line_search_options& opts = {})
 {
     line_search_result<Scalar> result;
+    result.value = phi0;
 
     auto budget_ok = [&]() { return result.evaluations < opts.max_iterations; };
+
+    // Any return path that has not achieved success reports value = phi0,
+    // matching the Armijo backtracker's failure contract (see armijo.h).
+    auto finalize = [&](line_search_result<Scalar> r) -> line_search_result<Scalar>
+    {
+        if(!r.success)
+        {
+            r.value = phi0;
+            r.success = false;
+        }
+        return r;
+    };
 
     // Quadratic interpolation minimizer (N&W p. 59).
     // Given (a_lo, phi_lo, dphi_lo) and (a_hi, phi_hi), returns the
@@ -86,7 +110,14 @@ template <typename Phi, typename DPhi, typename Scalar = double>
             Scalar phi_j = phi(alpha_j);
             ++result.evaluations;
 
-            if(phi_j > phi0 + opts.c1 * alpha_j * dphi0 || phi_j >= phi_lo)
+            bool phi_j_finite = std::isfinite(phi_j);
+            if(!phi_j_finite)
+                ++result.diagnostics.nan_eval_count;
+
+            // NaN/Inf gate: a non-finite trial is treated as an upper
+            // bracket (short-circuits before the ordered comparisons).
+            if(!phi_j_finite ||
+               phi_j > phi0 + opts.c1 * alpha_j * dphi0 || phi_j >= phi_lo)
             {
                 alpha_hi = alpha_j;
                 phi_hi = phi_j;
@@ -96,7 +127,11 @@ template <typename Phi, typename DPhi, typename Scalar = double>
                 Scalar dphi_j = dphi(alpha_j);
                 ++result.evaluations;
 
-                if(std::abs(dphi_j) <= opts.c2 * std::abs(dphi0))
+                bool dphi_j_finite = std::isfinite(dphi_j);
+                if(!dphi_j_finite)
+                    ++result.diagnostics.nan_eval_count;
+
+                if(dphi_j_finite && std::abs(dphi_j) <= opts.c2 * std::abs(dphi0))
                 {
                     result.alpha = alpha_j;
                     result.value = phi_j;
@@ -104,7 +139,7 @@ template <typename Phi, typename DPhi, typename Scalar = double>
                     return result;
                 }
 
-                if(dphi_j * (alpha_hi - alpha_lo) >= Scalar(0))
+                if(!dphi_j_finite || dphi_j * (alpha_hi - alpha_lo) >= Scalar(0))
                 {
                     alpha_hi = alpha_lo;
                     phi_hi = phi_lo;
@@ -134,25 +169,37 @@ template <typename Phi, typename DPhi, typename Scalar = double>
     Scalar alpha_prev = Scalar(0);
     Scalar phi_prev = phi0;
     Scalar dphi_prev = dphi0;
-    Scalar alpha = opts.max_alpha;
+    Scalar alpha = std::min(Scalar(1), opts.max_alpha);
+    result.alpha = alpha;
 
     for(int i = 1; budget_ok(); ++i)
     {
         Scalar phi_alpha = phi(alpha);
         ++result.evaluations;
 
-        // Condition 1: Armijo violated or value increased from previous
-        if(phi_alpha > phi0 + opts.c1 * alpha * dphi0 ||
+        bool phi_alpha_finite = std::isfinite(phi_alpha);
+        if(!phi_alpha_finite)
+            ++result.diagnostics.nan_eval_count;
+
+        // Condition 1: non-finite trial, Armijo violated, or value
+        // increased from previous. The isfinite gate short-circuits the
+        // ordered comparisons that follow it.
+        if(!phi_alpha_finite ||
+           phi_alpha > phi0 + opts.c1 * alpha * dphi0 ||
            (phi_alpha >= phi_prev && i > 1))
         {
-            return zoom(alpha_prev, alpha, phi_prev, dphi_prev, phi_alpha);
+            return finalize(zoom(alpha_prev, alpha, phi_prev, dphi_prev, phi_alpha));
         }
 
         Scalar dphi_alpha = dphi(alpha);
         ++result.evaluations;
 
+        bool dphi_alpha_finite = std::isfinite(dphi_alpha);
+        if(!dphi_alpha_finite)
+            ++result.diagnostics.nan_eval_count;
+
         // Condition 2: both Wolfe conditions satisfied
-        if(std::abs(dphi_alpha) <= opts.c2 * std::abs(dphi0))
+        if(dphi_alpha_finite && std::abs(dphi_alpha) <= opts.c2 * std::abs(dphi0))
         {
             result.alpha = alpha;
             result.value = phi_alpha;
@@ -160,28 +207,29 @@ template <typename Phi, typename DPhi, typename Scalar = double>
             return result;
         }
 
-        // Condition 3: positive slope -- bracket found in reversed order
-        if(dphi_alpha >= Scalar(0))
+        // Condition 3: non-finite slope, or positive slope -- bracket
+        // found in reversed order.
+        if(!dphi_alpha_finite || dphi_alpha >= Scalar(0))
         {
-            return zoom(alpha, alpha_prev, phi_alpha, dphi_alpha, phi_prev);
+            return finalize(zoom(alpha, alpha_prev, phi_alpha, dphi_alpha, phi_prev));
         }
 
-        // Expand step: double alpha, capped at max_alpha
+        // Expand step: geometric growth from the unit initial trial
+        // (N&W Algorithm 3.5), capped at max_alpha.
         alpha_prev = alpha;
         phi_prev = phi_alpha;
         dphi_prev = dphi_alpha;
         alpha = std::min(Scalar(2) * alpha, opts.max_alpha);
+        result.alpha = alpha;
 
-        // If alpha cannot grow further, we are stuck at max_alpha
+        // If alpha cannot grow further, we are stuck at max_alpha.
         if(alpha == alpha_prev)
         {
-            result.alpha = alpha;
-            result.value = phi_alpha;
-            return result;
+            return finalize(result);
         }
     }
 
-    return result;
+    return finalize(result);
 }
 
 }
