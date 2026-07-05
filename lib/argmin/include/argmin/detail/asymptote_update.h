@@ -86,7 +86,7 @@ void update_asymptotes(
         // has a denominator singularity as (U - x) or (x - L) -> 0.
         //
         // Reference: Svanberg 1987, Section 3.
-        Scalar min_dist = static_cast<Scalar>(opts.minimum_distance_fraction.value_or(0.01)) * range;
+        Scalar min_dist = static_cast<Scalar>(opts.minimum_distance_fraction) * range;
         L[j] = std::min(L[j], x[j] - min_dist);
         U[j] = std::max(U[j], x[j] + min_dist);
 
@@ -100,7 +100,7 @@ void update_asymptotes(
         // Reference: Svanberg 2002, Section 4.2 (CCSA conservativity
         //            preconditions); arjendeetman/GCMMA-MMA-Python mmasub
         //            (paper port: albefaup = 10 default).
-        Scalar max_dist = static_cast<Scalar>(opts.maximum_distance_fraction.value_or(10.0)) * range;
+        Scalar max_dist = static_cast<Scalar>(opts.maximum_distance_fraction) * range;
         L[j] = std::max(L[j], x[j] - max_dist);
         U[j] = std::min(U[j], x[j] + max_dist);
     }

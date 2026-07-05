@@ -290,11 +290,11 @@ template <typename Scalar = double>
 Scalar update_radius(Scalar delta, Scalar rho, Scalar step_norm, Scalar delta_max,
                      const trust_region_options& opts = {})
 {
-    const auto eta_good = static_cast<Scalar>(opts.eta_good.value_or(0.7));
-    const auto eta_poor = static_cast<Scalar>(opts.eta_poor.value_or(0.1));
-    const auto step_thr = static_cast<Scalar>(opts.step_threshold.value_or(0.5));
-    const auto expand = static_cast<Scalar>(opts.expand_factor.value_or(2.0));
-    const auto shrink = static_cast<Scalar>(opts.shrink_factor.value_or(0.5));
+    const auto eta_good = static_cast<Scalar>(opts.eta_good);
+    const auto eta_poor = static_cast<Scalar>(opts.eta_poor);
+    const auto step_thr = static_cast<Scalar>(opts.step_threshold);
+    const auto expand = static_cast<Scalar>(opts.expand_factor);
+    const auto shrink = static_cast<Scalar>(opts.shrink_factor);
 
     if(rho > eta_good && step_norm > step_thr * delta)
         return std::min(expand * delta, delta_max);
@@ -346,7 +346,7 @@ int check_geometry(const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
                    const trust_region_options& opts = {})
 {
     const int m = Y.cols();
-    const auto geo_factor = static_cast<Scalar>(opts.geometry_factor.value_or(2.0));
+    const auto geo_factor = static_cast<Scalar>(opts.geometry_factor);
     Scalar worst_dist = geo_factor * delta;
     int worst_idx = -1;
 

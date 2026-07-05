@@ -23,7 +23,6 @@ struct solver_options
     using convergence_type = Convergence;
 
     std::uint32_t max_iterations{1000};
-    std::uint8_t verbosity{0};
     std::optional<std::chrono::nanoseconds> max_time{};
     std::optional<double> constraint_tolerance{};
     // Threshold used by basic_solver's best-seen feasibility-first

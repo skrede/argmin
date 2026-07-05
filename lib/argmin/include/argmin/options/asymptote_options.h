@@ -1,8 +1,6 @@
 #ifndef HPP_GUARD_ARGMIN_OPTIONS_ASYMPTOTE_OPTIONS_H
 #define HPP_GUARD_ARGMIN_OPTIONS_ASYMPTOTE_OPTIONS_H
 
-#include <optional>
-
 namespace argmin
 {
 
@@ -30,8 +28,8 @@ namespace argmin
 //            albefalow = 0.01, albefaup = 10 default).
 struct asymptote_options
 {
-    std::optional<double> minimum_distance_fraction{};  // min (U - L) / range (default: 0.01, Svanberg 1987)
-    std::optional<double> maximum_distance_fraction{};  // max (U - L) / range (default: 10.0,  Svanberg 2002)
+    double minimum_distance_fraction{0.01};  // min (U - L) / range (Svanberg 1987)
+    double maximum_distance_fraction{10.0};  // max (U - L) / range (Svanberg 2002)
 };
 
 }

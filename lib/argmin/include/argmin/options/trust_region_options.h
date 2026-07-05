@@ -1,8 +1,6 @@
 #ifndef HPP_GUARD_ARGMIN_OPTIONS_TRUST_REGION_OPTIONS_H
 #define HPP_GUARD_ARGMIN_OPTIONS_TRUST_REGION_OPTIONS_H
 
-#include <optional>
-
 namespace argmin
 {
 
@@ -10,12 +8,12 @@ namespace argmin
 // Reference: Powell 2009, Sections 3-6.
 struct trust_region_options
 {
-    std::optional<double> eta_good{};           // rho threshold for expansion (default: 0.7, Powell S5)
-    std::optional<double> eta_poor{};           // rho threshold for contraction (default: 0.1, Powell S5)
-    std::optional<double> expand_factor{};      // radius expansion multiplier (default: 2.0, Powell S5)
-    std::optional<double> shrink_factor{};      // radius contraction multiplier (default: 0.5, Powell S5)
-    std::optional<double> step_threshold{};     // step/delta ratio for expansion (default: 0.5, Powell S5)
-    std::optional<double> geometry_factor{};    // geometry check distance factor (default: 2.0, Powell S6)
+    double eta_good{0.7};           // rho threshold for expansion (Powell S5)
+    double eta_poor{0.1};           // rho threshold for contraction (Powell S5)
+    double expand_factor{2.0};      // radius expansion multiplier (Powell S5)
+    double shrink_factor{0.5};      // radius contraction multiplier (Powell S5)
+    double step_threshold{0.5};     // step/delta ratio for expansion (Powell S5)
+    double geometry_factor{2.0};    // geometry check distance factor (Powell S6)
 };
 
 }

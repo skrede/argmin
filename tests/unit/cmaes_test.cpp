@@ -426,13 +426,11 @@ TEST_CASE("cmaes_policy: ipop stagnation_window_min recompute", "[cmaes]")
     policy.options.cmaes.objective_value_tolerance = 1e-30;
     policy.options.cmaes.step_size_tolerance = 1e-30;
     // Pin the legacy single-axis sigma_collapse threshold to the §B.3
-    // default 1e-12 explicitly. The legacy probe falls back through the
-    // value_or precedence chain (sigma_collapse_threshold ->
-    // step_size_tolerance -> 1e-12), so when step_size_tolerance is set
-    // to 1e-30 above (to defeat §B.3 TolX) the legacy probe would
-    // inherit that 1e-30 unless sigma_collapse_threshold is explicitly
-    // set. Pinning to 1e-12 keeps the legacy probe active at its paper
-    // baseline while TolX is defeated.
+    // default 1e-12 explicitly. sigma_collapse_threshold is a direct-value
+    // field independent of step_size_tolerance, so defeating §B.3 TolX
+    // above (step_size_tolerance = 1e-30) leaves this probe at its paper
+    // baseline; pinning it here documents that the legacy probe stays
+    // active and drives the IPOP restart.
     policy.options.cmaes.sigma_collapse_threshold = 1e-12;
 
     basic_solver solver{policy, problem, x0, opts};
@@ -634,8 +632,11 @@ TEST_CASE("cmaes_policy: tol_fun exit on smooth descent", "[cmaes]")
     policy.options.initial_sigma = 0.5;
     policy.options.seed = 42u;
     // Defeat TolX so TolFun is what fires (TolX would fire first on this
-    // setup at the default 1e-12 once sigma collapses).
+    // setup at the default 1e-12 once sigma collapses). The legacy
+    // single-axis sigma_collapse probe shares TolX's 1e-12 baseline and
+    // is a direct-value field, so defeat it explicitly too.
     policy.options.cmaes.step_size_tolerance = 1e-30;
+    policy.options.cmaes.sigma_collapse_threshold = 1e-30;
 
     basic_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
@@ -683,8 +684,8 @@ TEST_CASE("cmaes_policy: tol_x exit on contracted distribution", "[cmaes]")
 TEST_CASE("cmaes_policy: objective_value_tolerance user override", "[cmaes]")
 {
     // The user-override plumbing for objective_value_tolerance routes
-    // through cmaes_options and is consumed via value_or(1e-12) at the
-    // §B.3 item 6 check site. A loose user threshold (1e-6) MUST fire
+    // through cmaes_options and is read directly (direct-value default
+    // 1e-12) at the §B.3 item 6 check site. A loose user threshold (1e-6) MUST fire
     // earlier than the default (1e-12). We compare iter counts on two
     // identical runs differing only in the user threshold.
     rosenbrock<double> problem{};
@@ -703,6 +704,7 @@ TEST_CASE("cmaes_policy: objective_value_tolerance user override", "[cmaes]")
         policy.options.initial_sigma = 0.5;
         policy.options.seed = 42u;
         policy.options.cmaes.step_size_tolerance = 1e-30;
+        policy.options.cmaes.sigma_collapse_threshold = 1e-30;
         basic_solver solver{policy, problem, x0, opts};
         auto result = solver.solve(opts);
         REQUIRE(result.status == solver_status::ftol_reached);
@@ -716,6 +718,7 @@ TEST_CASE("cmaes_policy: objective_value_tolerance user override", "[cmaes]")
         policy.options.initial_sigma = 0.5;
         policy.options.seed = 42u;
         policy.options.cmaes.step_size_tolerance = 1e-30;
+        policy.options.cmaes.sigma_collapse_threshold = 1e-30;
         policy.options.cmaes.objective_value_tolerance = 1e-6;
         basic_solver solver{policy, problem, x0, opts};
         auto result = solver.solve(opts);
@@ -760,7 +763,7 @@ TEST_CASE("cmaes_policy: sigma_collapse_threshold user override", "[cmaes]")
         policy.options.cmaes.objective_value_tolerance = 1e-30;
         policy.options.cmaes.step_size_tolerance = 1e-30;
         if(threshold.has_value())
-            policy.options.cmaes.sigma_collapse_threshold = threshold;
+            policy.options.cmaes.sigma_collapse_threshold = *threshold;
         basic_solver solver{policy, problem, x0, opts};
         auto result = solver.solve(opts);
         REQUIRE(result.status == solver_status::roundoff_limited);
@@ -771,8 +774,8 @@ TEST_CASE("cmaes_policy: sigma_collapse_threshold user override", "[cmaes]")
     const std::uint32_t iters_loose = run(1e-6);
 
     // The loose user threshold MUST fire earlier (fewer iterations) than
-    // the default 1e-12 baseline. This proves the legacy override hook
-    // is still wired through the `value_or` precedence chain.
+    // the direct-value default 1e-12 baseline. This proves the legacy
+    // override hook is still wired via a direct field read.
     CHECK(iters_loose < iters_default);
 }
 
@@ -992,11 +995,10 @@ TEST_CASE("cmaes_policy: ipop decomposition_skip_k recompute", "[cmaes]")
     policy.options.cmaes.objective_value_tolerance = 1e-30;
     policy.options.cmaes.step_size_tolerance = 1e-30;
     // Pin sigma_collapse_threshold to the §B.3 default so the legacy
-    // probe stays active despite step_size_tolerance defeating TolX. The
-    // legacy probe falls back through value_or precedence
-    // (sigma_collapse_threshold -> step_size_tolerance -> 1e-12), so
-    // setting step_size_tolerance to 1e-30 would otherwise drag the
-    // legacy threshold to 1e-30 too.
+    // probe stays active despite step_size_tolerance defeating TolX.
+    // sigma_collapse_threshold is a direct-value field independent of
+    // step_size_tolerance, so this simply keeps the legacy probe at its
+    // 1e-12 paper baseline.
     policy.options.cmaes.sigma_collapse_threshold = 1e-12;
 
     basic_solver solver{policy, problem, x0, opts};

@@ -60,25 +60,24 @@ struct augmented_lagrangian_policy
 
     struct options_type
     {
-        std::optional<scalar_type> mu_init{};                      // default: 0.1 (Conn-Gould-Toint)
-        std::optional<scalar_type> mu_decrease{};                  // default: 0.25 (Conn-Gould-Toint)
-        std::optional<scalar_type> mu_min{};                       // default: 1e-6 (Conn-Gould-Toint)
-        std::optional<std::uint32_t> inner_max_iterations{};       // default: 200
-        std::optional<std::uint32_t> max_outer_iterations{};       // default: 50 (K&W 10.9)
-        std::optional<scalar_type> constraint_tolerance{};         // default: 1e-6 (K&W 10.9)
-        std::optional<scalar_type> inner_gradient_tolerance{};     // default: 1e-6 (K&W 10.9)
-        std::optional<scalar_type> feasibility_progress{};         // default: 0.25 (N&W 17.4)
+        scalar_type mu_init{scalar_type(0.1)};                     // Conn-Gould-Toint
+        scalar_type mu_decrease{scalar_type(0.25)};                // Conn-Gould-Toint
+        scalar_type mu_min{scalar_type(1e-6)};                     // Conn-Gould-Toint
+        std::uint32_t inner_max_iterations{200};
+        scalar_type constraint_tolerance{scalar_type(1e-6)};       // K&W 10.9
+        scalar_type inner_gradient_tolerance{scalar_type(1e-6)};   // K&W 10.9
+        scalar_type feasibility_progress{scalar_type(0.25)};       // N&W 17.4
         typename InnerPolicy::options_type inner_opts = {};
 
         // Persist the inner solver across outer iterations, preserving
         // compact_lbfgs curvature pairs via lbfgsb_policy::reset().
-        std::optional<bool> warm_start_inner{};                   // default: true
+        bool warm_start_inner{true};
 
         // Conn-Gould-Toint (1991) adaptive inner tolerance schedule.
         // inner_tol = max(eta / mu^alpha, inner_grad_tol)
         // Reference: N&W Algorithm 17.4, Step 2.
-        std::optional<scalar_type> inner_tolerance_eta{};         // default: 0.1
-        std::optional<scalar_type> inner_tolerance_alpha{};       // default: 0.1
+        scalar_type inner_tolerance_eta{scalar_type(0.1)};
+        scalar_type inner_tolerance_alpha{scalar_type(0.9)};
         std::uint16_t stall_window{100};
     };
 
@@ -254,7 +253,7 @@ struct augmented_lagrangian_policy
         options = policy_opts;
         auto s = init(problem, x0, solver_opts);
         s.opts = policy_opts;
-        s.mu = policy_opts.mu_init.value_or(scalar_type(0.1));
+        s.mu = policy_opts.mu_init;
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
         return s;
     }
@@ -299,7 +298,7 @@ struct augmented_lagrangian_policy
         s.lambda_ineq = Eigen::VectorX<scalar_type>::Zero(s.n_ineq);
 
         // Penalty
-        s.mu = s.opts.mu_init.value_or(scalar_type(0.1));
+        s.mu = s.opts.mu_init;
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.outer_iter = 0;
 
@@ -324,12 +323,12 @@ struct augmented_lagrangian_policy
     {
         const int n = static_cast<int>(s.x.size());
 
-        const scalar_type inner_grad_tol = s.opts.inner_gradient_tolerance.value_or(scalar_type(1e-6));
-        const std::uint32_t inner_max = s.opts.inner_max_iterations.value_or(200);
-        const scalar_type mu_dec = s.opts.mu_decrease.value_or(scalar_type(0.25));
-        const scalar_type mu_floor = s.opts.mu_min.value_or(scalar_type(1e-6));
-        const scalar_type feas_progress = s.opts.feasibility_progress.value_or(scalar_type(0.25));
-        const scalar_type con_tol = s.opts.constraint_tolerance.value_or(scalar_type(1e-6));
+        const scalar_type inner_grad_tol = s.opts.inner_gradient_tolerance;
+        const std::uint32_t inner_max = s.opts.inner_max_iterations;
+        const scalar_type mu_dec = s.opts.mu_decrease;
+        const scalar_type mu_floor = s.opts.mu_min;
+        const scalar_type feas_progress = s.opts.feasibility_progress;
+        const scalar_type con_tol = s.opts.constraint_tolerance;
 
         // Evaluate constraints at current x
         {
@@ -378,8 +377,8 @@ struct augmented_lagrangian_policy
         // the schedule essentially flat across the mu range, effectively
         // running the inner solver to its default tolerance on every
         // outer iter regardless of penalty.
-        const scalar_type tol_eta = s.opts.inner_tolerance_eta.value_or(scalar_type(0.1));
-        const scalar_type tol_alpha = s.opts.inner_tolerance_alpha.value_or(scalar_type(0.9));
+        const scalar_type tol_eta = s.opts.inner_tolerance_eta;
+        const scalar_type tol_alpha = s.opts.inner_tolerance_alpha;
         const scalar_type inner_tol = std::max(
             static_cast<scalar_type>(tol_eta / std::pow(s.mu, tol_alpha)),
             inner_grad_tol);
@@ -407,7 +406,7 @@ struct augmented_lagrangian_policy
         // Force cold-start when mu changed since the last inner solve;
         // honor the user's warm_start_inner request only when mu is
         // stable (the multiplier-only-update branch).
-        const bool warm_start_requested = s.opts.warm_start_inner.value_or(true);
+        const bool warm_start_requested = s.opts.warm_start_inner;
         const bool mu_changed = s.mu_at_last_inner_solve.has_value()
                                 && *s.mu_at_last_inner_solve != s.mu;
         const bool warm_start = warm_start_requested && !mu_changed;
@@ -580,7 +579,7 @@ struct augmented_lagrangian_policy
         reset(s, x0);
         s.lambda_eq.setZero();
         s.lambda_ineq.setZero();
-        s.mu = s.opts.mu_init.value_or(scalar_type(0.1));
+        s.mu = s.opts.mu_init;
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
         if(s.ctx)
         {

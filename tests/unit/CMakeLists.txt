@@ -54,6 +54,7 @@ add_executable(argmin_unit_tests
     cmaes_generation_pin_test.cpp
     isres_best_track_test.cpp
     mma_coefficient_pin_test.cpp
+    options_test.cpp
 )
 
 target_link_libraries(argmin_unit_tests

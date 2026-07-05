@@ -220,7 +220,6 @@ public:
                  const solver_options<Convergence>& opts = {})
         : policy_{std::move(policy)}
         , max_iterations_{opts.max_iterations}
-        , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , feasibility_tolerance_{opts.feasibility_tolerance}
@@ -247,7 +246,6 @@ public:
                  const solver_options<Convergence>& opts = {})
         : policy_{rebind_policy(std::forward<OrigPolicy>(orig))}
         , max_iterations_{opts.max_iterations}
-        , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , feasibility_tolerance_{opts.feasibility_tolerance}
@@ -264,7 +262,6 @@ public:
     basic_solver(const P& problem, const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts = {})
         : max_iterations_{opts.max_iterations}
-        , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , feasibility_tolerance_{opts.feasibility_tolerance}
@@ -286,7 +283,6 @@ public:
                  const PolicyOpts& policy_opts)
         : policy_{std::move(policy)}
         , max_iterations_{opts.max_iterations}
-        , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , feasibility_tolerance_{opts.feasibility_tolerance}
@@ -313,7 +309,6 @@ public:
                  const solver_options<Convergence>& opts,
                  const PolicyOpts& policy_opts)
         : max_iterations_{opts.max_iterations}
-        , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , feasibility_tolerance_{opts.feasibility_tolerance}
@@ -332,7 +327,6 @@ public:
                  const solver_options<Convergence>& opts,
                  const PolicyOpts& policy_opts)
         : max_iterations_{opts.max_iterations}
-        , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , feasibility_tolerance_{opts.feasibility_tolerance}
@@ -352,7 +346,6 @@ public:
                  const solver_options<Convergence>& opts,
                  const solver_options<>&)
         : max_iterations_{opts.max_iterations}
-        , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
         , feasibility_tolerance_{opts.feasibility_tolerance}
@@ -370,7 +363,6 @@ public:
     basic_solver(basic_solver&& other) noexcept
         : policy_{std::move(other.policy_)}
         , max_iterations_{other.max_iterations_}
-        , verbosity_{other.verbosity_}
         , max_time_{other.max_time_}
         , constraint_tolerance_{other.constraint_tolerance_}
         , feasibility_tolerance_{other.feasibility_tolerance_}
@@ -390,7 +382,6 @@ public:
         {
             policy_ = std::move(other.policy_);
             max_iterations_ = other.max_iterations_;
-            verbosity_ = other.verbosity_;
             max_time_ = other.max_time_;
             constraint_tolerance_ = other.constraint_tolerance_;
             feasibility_tolerance_ = other.feasibility_tolerance_;
@@ -878,7 +869,6 @@ private:
 
     Policy policy_{};
     std::uint32_t max_iterations_{1000};
-    std::uint8_t verbosity_{0};
     std::optional<std::chrono::nanoseconds> max_time_{};
     std::optional<double> constraint_tolerance_{};
     // Mirrors solver_options::feasibility_tolerance (constructor-time
@@ -949,14 +939,6 @@ basic_solver(Policy, const Problem&,
                     problem_dimension_v<Problem>,
                     Problem,
                     Convergence>;
-
-// D-04: convenience type aliases for common configurations.
-
-template <typename Policy, int N = dynamic_dimension, typename Problem = void>
-using realtime_solver = basic_solver<Policy, N, Problem>;
-
-template <typename Policy, int N = dynamic_dimension, typename Problem = void>
-using gradient_solver = basic_solver<Policy, N, Problem>;
 
 }
 

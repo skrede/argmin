@@ -80,12 +80,9 @@ public:
         const mma_subproblem_options& opts = {})
     {
         constexpr Scalar eps = Scalar(1e-10);
-        const int max_iter = static_cast<int>(
-            opts.dual_max_iterations.value_or(50));
-        const auto tol = static_cast<Scalar>(
-            opts.dual_tolerance.value_or(1e-9));
-        const auto bt = static_cast<Scalar>(
-            opts.backtrack_factor.value_or(0.95));
+        const int max_iter = static_cast<int>(opts.dual_max_iterations);
+        const auto tol = static_cast<Scalar>(opts.dual_tolerance);
+        const auto bt = static_cast<Scalar>(opts.backtrack_factor);
 
         if(m_ == 0)
         {

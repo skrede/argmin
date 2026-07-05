@@ -103,7 +103,6 @@ struct bobyqa_policy
         std::optional<std::uint16_t> num_interpolation_points{};  // default: 2n+1 (Powell 2009)
         std::optional<double> initial_trust_radius{};             // default: auto, 10% of max bound range (Powell 2009)
         std::optional<double> final_trust_radius{};               // default: 1e-8, stopping criterion on delta (Powell 2009)
-        std::optional<double> step_convergence_factor{};          // default: 1e-3
         trust_region_options trust{};                              // Embedded trust region params
         std::uint16_t stall_window{200};
         double feasibility_gate{std::numeric_limits<double>::infinity()};

@@ -496,7 +496,7 @@ TEST_CASE("basic_solver CTAD rebind preserves configured policy options",
     SECTION("lvalue policy is accepted and its options survive the rebind")
     {
         lbfgsb_policy<> configured;
-        configured.options.history_depth = 7;  // non-default configured option
+        configured.options.stall_window = 7;  // non-default configured option
 
         basic_solver solver{configured, prob, x0, opts};
 
@@ -505,19 +505,17 @@ TEST_CASE("basic_solver CTAD rebind preserves configured policy options",
         static_assert(std::is_same_v<
             std::remove_cvref_t<decltype(solver.policy())>, lbfgsb_policy<2>>);
 
-        REQUIRE(solver.policy().options.history_depth.has_value());
-        CHECK(*solver.policy().options.history_depth == 7);
+        CHECK(solver.policy().options.stall_window == 7);
     }
 
     SECTION("rvalue policy carrying configured options preserves them")
     {
         lbfgsb_policy<> configured;
-        configured.options.history_depth = 9;
+        configured.options.stall_window = 9;
 
         basic_solver solver{std::move(configured), prob, x0, opts};
 
-        REQUIRE(solver.policy().options.history_depth.has_value());
-        CHECK(*solver.policy().options.history_depth == 9);
+        CHECK(solver.policy().options.stall_window == 9);
     }
 }
 

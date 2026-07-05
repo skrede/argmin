@@ -58,8 +58,8 @@ struct restarting_policy
     struct options_type
     {
         typename Inner::options_type inner{};
-        std::optional<std::uint32_t> stagnation_limit{};
-        std::optional<double> population_multiplier{};
+        std::optional<std::uint32_t> stagnation_limit{};  // truly optional: unset = auto formula 10 + ceil(30 n / lambda)
+        double population_multiplier{2.0};                // IPOP doubling (Auger & Hansen 2005)
         // stall_window / feasibility_gate intentionally not declared on the decorator.
         // restarting_policy emits synthetic (obj_change=1.0, step_size=1.0) step_results on
         // restart and maintains its own internal stall logic (see the restart-trigger block
@@ -238,7 +238,7 @@ private:
         ++s.restart_count;
 
         // IPOP: population = initial_lambda * 2^restart_count
-        double multiplier = options.population_multiplier.value_or(2.0);
+        double multiplier = options.population_multiplier;
         auto new_pop = static_cast<std::uint32_t>(
             s.initial_lambda * std::pow(multiplier, s.restart_count));
 

@@ -234,7 +234,6 @@ TEST_CASE("augmented lagrangian warm-start converges on HS071",
 
     policy_type::options_type policy_opts;
     policy_opts.warm_start_inner = true;
-    policy_opts.max_outer_iterations = 100;
     // Flat inner tolerance schedule (alpha = 0.1) keeps the inner
     // subproblem solved to a tight tolerance from iter-0 onward.
     // Under composite-KKT gating in gradient_tolerance_criterion
@@ -271,7 +270,6 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
     // Warm-start run
     policy_type::options_type warm_opts;
     warm_opts.warm_start_inner = true;
-    warm_opts.max_outer_iterations = 100;
     // Flat inner tolerance schedule: see "augmented lagrangian
     // warm-start converges on HS071" for rationale.
     warm_opts.inner_tolerance_alpha = 0.1;
@@ -289,7 +287,6 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
     // Cold-start run
     policy_type::options_type cold_opts;
     cold_opts.warm_start_inner = false;
-    cold_opts.max_outer_iterations = 100;
     cold_opts.inner_tolerance_alpha = 0.1;
 
     basic_solver<policy_type, D, hs071<>> cold_solver{problem, x0, sopts, cold_opts};
@@ -326,7 +323,6 @@ TEST_CASE("augmented lagrangian adaptive tolerance converges on HS071",
     policy_type::options_type policy_opts;
     policy_opts.inner_tolerance_eta = 0.1;
     policy_opts.inner_tolerance_alpha = 0.1;
-    policy_opts.max_outer_iterations = 100;
 
     solver_options opts;
     opts.max_iterations = 100;
@@ -352,7 +348,6 @@ TEST_CASE("augmented lagrangian cold-start still works on HS071",
 
     policy_type::options_type policy_opts;
     policy_opts.warm_start_inner = false;
-    policy_opts.max_outer_iterations = 100;
     // Flat inner tolerance schedule: see "augmented lagrangian
     // warm-start converges on HS071" for rationale.
     policy_opts.inner_tolerance_alpha = 0.1;

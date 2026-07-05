@@ -671,27 +671,20 @@ struct pwq_reparameterization_policy
         // §B.3 EXIT-only TolX block below (item 7) and is the canonical
         // disposition for the criterion. This site is RETAINED as a
         // user-override hook for legacy callers that explicitly set
-        // `cmaes_options::sigma_collapse_threshold`. The
-        // `value_or(value_or(default))` chain documents precedence:
-        //   1. explicit `sigma_collapse_threshold`,
-        //   2. else explicit `step_size_tolerance` (so a user setting the
-        //      §B.3 TolX option transparently lifts the legacy single-axis
-        //      check to the same threshold; the two checks then share a
-        //      numerical baseline and the §B.3 per-coord TolX strictly
-        //      subsumes this max-axis legacy check),
-        //   3. else the §B.3 default 1e-12 * initial_sigma.
+        // `cmaes_options::sigma_collapse_threshold` (direct-value default
+        // 1e-12 * initial_sigma; a caller wanting the §B.3 TolX baseline
+        // sets that field directly).
         // The legacy probe also remains an IPOP restart trigger (recycled
         // by the {Stagnation, sigma_collapse, ConditionCov} restart-set
         // logic below), while the §B.3 EXIT-only criteria always exit and
         // are never recycled.
         const double legacy_tol_factor =
-            options.cmaes.sigma_collapse_threshold.value_or(
-                options.cmaes.step_size_tolerance.value_or(1e-12));
+            options.cmaes.sigma_collapse_threshold;
         if(s.sigma * s.D.maxCoeff() < legacy_tol_factor * s.initial_sigma)
             policy_status = solver_status::roundoff_limited;
 
         // Condition number explosion detection (diverged)
-        double cond_limit = options.cmaes.condition_number_limit.value_or(1e14);
+        double cond_limit = options.cmaes.condition_number_limit;
         double cond = s.D.maxCoeff() / std::max(s.D.minCoeff(), 1e-30);
         if(!policy_status.has_value() && cond * cond > cond_limit)
             policy_status = solver_status::diverged;
@@ -754,7 +747,7 @@ struct pwq_reparameterization_policy
         // Status mapping: ftol_reached.
         if(!policy_status.has_value())
         {
-            const double tol_fun = options.cmaes.objective_value_tolerance.value_or(1e-12);
+            const double tol_fun = options.cmaes.objective_value_tolerance;
             const auto tol_fun_window = static_cast<std::size_t>(
                 10 + std::ceil(30.0 * static_cast<double>(n)
                                / static_cast<double>(s.params.lambda)));
@@ -812,7 +805,7 @@ struct pwq_reparameterization_policy
         // Status mapping: roundoff_limited (numerical floor reached).
         if(!policy_status.has_value())
         {
-            const double tol_x = options.cmaes.step_size_tolerance.value_or(1e-12)
+            const double tol_x = options.cmaes.step_size_tolerance
                                  * s.initial_sigma;
             bool tol_x_all_coords = true;
             for(int i = 0; i < n; ++i)

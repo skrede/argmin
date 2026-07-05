@@ -40,11 +40,13 @@ struct multistart_policy
     template <int M>
     using rebind = multistart_policy<typename Inner::template rebind<M>>;
 
+    static constexpr std::uint16_t default_max_restarts = 10;
+
     struct options_type
     {
         typename Inner::options_type inner{};
-        std::optional<std::uint16_t> max_restarts{};
-        std::optional<std::uint32_t> stall_budget_per_restart{};
+        std::uint16_t max_restarts{default_max_restarts};
+        std::optional<std::uint32_t> stall_budget_per_restart{};  // truly optional: unset = auto 10 + 30 n
         // stall_window / feasibility_gate intentionally not declared on the decorator.
         // multistart_policy emits synthetic (obj_change=1.0, step_size=1.0) step_results on
         // restart-consuming steps; exposing an external stall_window would double-fire against
@@ -84,11 +86,9 @@ struct multistart_policy
     Inner inner_policy_{};
     options_type options{};
 
-    static constexpr std::uint16_t default_max_restarts = 10;
-
     std::uint16_t effective_max_restarts() const
     {
-        return options.max_restarts.value_or(default_max_restarts);
+        return options.max_restarts;
     }
 
     std::uint32_t effective_stall_budget(int n) const
