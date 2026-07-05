@@ -237,6 +237,145 @@ TEST_CASE("solve_qp N&W Example 16.1 equality", "[qp]")
     CHECK(result.x[2] == Approx(1.0).margin(1e-8));
 }
 
+// ---------------------------------------------------------------------------
+// Dual-multiplier assertions on hand-solvable QPs.
+//
+// The active-set solver returns lambda satisfying the stationarity relation
+// A_W^T lambda = G x + d at the solution (N&W eq. 16.30/16.37), where A_W
+// collects the rows of the active constraints. Each case below derives the
+// multipliers in closed form from the KKT conditions and pins both their
+// values and their signs (dual feasibility for inequalities).
+//
+// Reference: Nocedal & Wright, "Numerical Optimization" 2e, Section 16.5
+//            (KKT conditions and multiplier recovery), Examples 16.1/16.3.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("solve_qp equality multipliers match hand-derived KKT duals", "[qp][dual]")
+{
+    // N&W Example 16.1: min 0.5 x^T G x + d^T x  s.t. A_eq x = b_eq with
+    //   G = [[6,2,1],[2,5,2],[1,2,4]],  d = [-8,-3,-3],
+    //   A_eq = [[1,0,1],[0,1,1]],  b_eq = [3, 0].
+    // At x* = [2, -1, 1] the gradient is
+    //   G x* + d = [11, 1, 4] + [-8, -3, -3] = [3, -2, 1].
+    // Stationarity A_eq^T lambda = G x* + d gives
+    //   [lambda1, lambda2, lambda1 + lambda2] = [3, -2, 1]
+    //   => lambda1 = 3,  lambda2 = -2   (and 3 + (-2) = 1 checks out).
+    // Equality multipliers are free in sign: lambda1 = +3, lambda2 = -2.
+    Eigen::MatrixXd G(3, 3);
+    G << 6.0, 2.0, 1.0,
+         2.0, 5.0, 2.0,
+         1.0, 2.0, 4.0;
+    Eigen::VectorXd d{{-8.0, -3.0, -3.0}};
+    Eigen::MatrixXd A_eq(2, 3);
+    A_eq << 1.0, 0.0, 1.0,
+            0.0, 1.0, 1.0;
+    Eigen::VectorXd b_eq{{3.0, 0.0}};
+    Eigen::MatrixXd A_ineq(0, 3);
+    Eigen::VectorXd b_ineq(0);
+    Eigen::VectorXd x0{{1.0, -2.0, 2.0}};
+
+    auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    CHECK(result.status == qp_status::optimal);
+    REQUIRE(result.lambda.size() == 2);
+    CHECK(result.lambda[0] == Approx(3.0).margin(1e-8));
+    CHECK(result.lambda[1] == Approx(-2.0).margin(1e-8));
+}
+
+TEST_CASE("solve_qp single-active-inequality multiplier is a nonnegative KKT dual",
+          "[qp][dual]")
+{
+    // min 0.5 (x1^2 + x2^2)  s.t.  x1 + x2 >= 1   (feasible form a^T x >= b).
+    // KKT with G = I, d = 0, a = [1, 1], mu >= 0:
+    //   stationarity  G x + d = a^T mu  =>  x = mu * [1, 1]
+    //   active        x1 + x2 = 1       =>  2 mu = 1  =>  mu = 1/2
+    //   dual feas.    mu = 0.5 >= 0
+    //   primal        x* = (0.5, 0.5)
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd d = Eigen::VectorXd::Zero(2);
+    Eigen::MatrixXd A_eq(0, 2);
+    Eigen::VectorXd b_eq(0);
+    Eigen::MatrixXd A_ineq(1, 2);
+    A_ineq << 1.0, 1.0;
+    Eigen::VectorXd b_ineq{{1.0}};
+    Eigen::VectorXd x0{{1.0, 0.0}};
+
+    auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    CHECK(result.status == qp_status::optimal);
+    CHECK(result.x[0] == Approx(0.5).margin(1e-10));
+    CHECK(result.x[1] == Approx(0.5).margin(1e-10));
+    REQUIRE(result.lambda.size() == 1);
+    CHECK(result.lambda[0] == Approx(0.5).margin(1e-8));
+    CHECK(result.lambda[0] >= 0.0);  // dual feasibility
+}
+
+TEST_CASE("solve_qp N&W 16.3 active-inequality multiplier matches KKT dual",
+          "[qp][dual]")
+{
+    // min (x1 - 1)^2 + (x2 - 2.5)^2  =>  G = 2I, d = [-2, -5].
+    // Constraints a_i^T x >= b_i, rows of A_ineq below. At x* = (1.4, 1.7)
+    // only constraint 0 (x1 - 2 x2 + 2 >= 0) is active:
+    //   grad = G x* + d = (0.8, -1.6),  a_0 = [1, -2].
+    //   stationarity grad = mu_0 a_0:  0.8 = mu_0,  -1.6 = -2 mu_0
+    //     => mu_0 = 0.8   (consistent),  dual feas. mu_0 = 0.8 >= 0.
+    //   x1 = 1 + mu_0/2 = 1.4,  x2 = 2.5 - mu_0 = 1.7, active row satisfied.
+    // All other inequality multipliers are zero (inactive/interior).
+    Eigen::MatrixXd G = 2.0 * Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd d{{-2.0, -5.0}};
+    Eigen::MatrixXd A_eq(0, 2);
+    Eigen::VectorXd b_eq(0);
+    Eigen::MatrixXd A_ineq(5, 2);
+    A_ineq << 1.0, -2.0,
+             -1.0, -2.0,
+             -1.0,  2.0,
+              1.0,  0.0,
+              0.0,  1.0;
+    Eigen::VectorXd b_ineq(5);
+    b_ineq << -2.0, -6.0, -2.0, 0.0, 0.0;
+    Eigen::VectorXd x0{{2.0, 0.0}};
+
+    auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    CHECK(result.status == qp_status::optimal);
+    REQUIRE(result.lambda.size() == 5);
+    CHECK(result.lambda[0] == Approx(0.8).margin(1e-7));
+    CHECK(result.lambda[0] >= 0.0);  // dual feasibility on the active row
+    for(int i = 1; i < 5; ++i)
+        CHECK(result.lambda[i] == Approx(0.0).margin(1e-7));
+}
+
+TEST_CASE("solve_qp returns computed multipliers on max-iteration exit",
+          "[qp][dual]")
+{
+    // RED against the current substrate. When the active-set loop exhausts
+    // its iteration budget it currently scatters a ZERO multiplier vector
+    // into the result (the max-iteration exit path builds the full lambda
+    // from a zero working-set vector, discarding the multipliers it just
+    // computed). A truncated solve on the N&W 16.3 geometry keeps at least
+    // one inequality active in the working set, so the returned lambda must
+    // carry a nonzero computed multiplier -- not be identically zero.
+    Eigen::MatrixXd G = 2.0 * Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd d{{-2.0, -5.0}};
+    Eigen::MatrixXd A_eq(0, 2);
+    Eigen::VectorXd b_eq(0);
+    Eigen::MatrixXd A_ineq(5, 2);
+    A_ineq << 1.0, -2.0,
+             -1.0, -2.0,
+             -1.0,  2.0,
+              1.0,  0.0,
+              0.0,  1.0;
+    Eigen::VectorXd b_ineq(5);
+    b_ineq << -2.0, -6.0, -2.0, 0.0, 0.0;
+    Eigen::VectorXd x0{{2.0, 0.0}};
+    qp_options opts{.max_iterations = 1};
+
+    auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
+
+    REQUIRE(result.status == qp_status::max_iterations);
+    CHECK(result.lambda.cwiseAbs().maxCoeff() > 0.0);
+}
+
 // Givens QR update tests.
 // Reference: Golub & Van Loan, "Matrix Computations" 4th ed., Algorithm 5.1.3.
 //            N&W Algorithm 16.3 (QR update in active-set context).

@@ -556,6 +556,91 @@ TEST_CASE("kraft_lsq_qp_solver infinite bounds not augmented", "[kraft_lsq_qp]")
     CHECK(res.x[1] == Approx(4.0).margin(1e-10));
 }
 
+// ---------------------------------------------------------------------------
+// Dual-multiplier assertions on hand-solvable subproblems.
+//
+// kraft_lsq_qp_solver minimizes 0.5 p^T B p + g^T p subject to A_eq p = b_eq,
+// A_ineq p >= b_ineq, and box bounds. Its Lagrangian is
+//   L = 0.5 p^T B p + g^T p - lambda_eq^T (A_eq p - b_eq)
+//                           - mu^T   (A_ineq p - b_ineq)   (mu >= 0),
+// so stationarity reads B p + g = A_eq^T lambda_eq + A_ineq^T mu. The result
+// exposes lambda in [lambda_eq | mu] order; inequality multipliers are
+// non-negative by construction (dual feasibility). The cases below pin those
+// multipliers to their closed-form KKT values and signs.
+//
+// Reference: Kraft (1988), DFVLR-FB 88-28, Section 3.2 (multiplier recovery);
+//            Nocedal & Wright, "Numerical Optimization" 2e, Section 16.5.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("kraft_lsq_qp_solver equality multiplier matches hand-derived KKT dual",
+          "[kraft_lsq_qp][dual]")
+{
+    // min 0.5 (p1^2 + p2^2)  s.t.  p1 + p2 = 1.
+    //   stationarity  I p = A_eq^T lambda_eq,  A_eq = [1, 1]
+    //     => p = lambda_eq * [1, 1]
+    //   feasibility   p1 + p2 = 1  =>  2 lambda_eq = 1  =>  lambda_eq = 1/2.
+    // Equality multipliers are free in sign; here lambda_eq = +0.5.
+    constexpr int n = 2;
+    Eigen::Matrix<double, n, n> B = Eigen::Matrix<double, n, n>::Identity();
+    Eigen::Vector<double, n> g = Eigen::Vector<double, n>::Zero();
+
+    Eigen::Matrix<double, Eigen::Dynamic, n> A_eq(1, n);
+    A_eq << 1.0, 1.0;
+    Eigen::VectorXd b_eq(1);
+    b_eq << 1.0;
+    Eigen::Matrix<double, Eigen::Dynamic, n> A_ineq(0, n);
+    Eigen::VectorXd b_ineq(0);
+
+    const double inf = std::numeric_limits<double>::infinity();
+    Eigen::Vector<double, n> p_lo{{-inf, -inf}};
+    Eigen::Vector<double, n> p_hi{{ inf,  inf}};
+
+    kraft_lsq_qp_solver<double, n> solver;
+    solver.resize(n, 1, 0, 0, 0);
+    auto res = solver.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+
+    CHECK(res.status == qp_status::optimal);
+    CHECK(res.x[0] == Approx(0.5).margin(1e-10));
+    CHECK(res.x[1] == Approx(0.5).margin(1e-10));
+    REQUIRE(res.lambda.size() >= 1);
+    CHECK(res.lambda[0] == Approx(0.5).margin(1e-8));
+}
+
+TEST_CASE("kraft_lsq_qp_solver active-inequality multiplier is a nonnegative KKT dual",
+          "[kraft_lsq_qp][dual]")
+{
+    // min 0.5 (p1^2 + p2^2)  s.t.  p1 + p2 >= 1  (feasible form a^T p >= b).
+    //   stationarity  I p = a^T mu,  a = [1, 1],  mu >= 0
+    //     => p = mu * [1, 1]
+    //   active        p1 + p2 = 1  =>  2 mu = 1  =>  mu = 1/2 >= 0.
+    //   primal        p* = (0.5, 0.5).
+    constexpr int n = 2;
+    Eigen::Matrix<double, n, n> B = Eigen::Matrix<double, n, n>::Identity();
+    Eigen::Vector<double, n> g = Eigen::Vector<double, n>::Zero();
+
+    Eigen::Matrix<double, Eigen::Dynamic, n> A_eq(0, n);
+    Eigen::VectorXd b_eq(0);
+    Eigen::Matrix<double, Eigen::Dynamic, n> A_ineq(1, n);
+    A_ineq << 1.0, 1.0;
+    Eigen::VectorXd b_ineq(1);
+    b_ineq << 1.0;
+
+    const double inf = std::numeric_limits<double>::infinity();
+    Eigen::Vector<double, n> p_lo{{-inf, -inf}};
+    Eigen::Vector<double, n> p_hi{{ inf,  inf}};
+
+    kraft_lsq_qp_solver<double, n> solver;
+    solver.resize(n, 0, 1, 0, 0);
+    auto res = solver.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+
+    CHECK(res.status == qp_status::optimal);
+    CHECK(res.x[0] == Approx(0.5).margin(1e-10));
+    CHECK(res.x[1] == Approx(0.5).margin(1e-10));
+    REQUIRE(res.lambda.size() >= 1);
+    CHECK(res.lambda[0] == Approx(0.5).margin(1e-8));
+    CHECK(res.lambda[0] >= 0.0);  // dual feasibility
+}
+
 TEST_CASE("kraft_lsq_qp_solver mixed HS071-like subproblem", "[kraft_lsq_qp]")
 {
     // Simplified QP of SQP shape: n=4, B=I, g arbitrary,
