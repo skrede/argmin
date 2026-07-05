@@ -1166,3 +1166,86 @@ TEST_CASE("objective_tolerance_rel_criterion fires ftol when kkt_residual under 
     REQUIRE(status.has_value());
     CHECK(*status == solver_status::ftol_reached);
 }
+
+// ---------------------------------------------------------------------------
+// default_convergence direct-value literature defaults: none of the four
+// criteria composing default_convergence is inert-by-default any more
+// (gradient/objective/step carry direct-value thresholds; stall remains an
+// opt-in override -- see convergence.h for citations and the sweep summary).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("default-constructed gradient_tolerance_criterion fires without being configured",
+          "[convergence][defaults]")
+{
+    gradient_tolerance_criterion crit{};
+    step_result<double> r{.gradient_norm = 1e-9};
+    const auto status = crit.check(r, 5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::converged);
+}
+
+TEST_CASE("default-constructed objective_tolerance_criterion fires without being configured",
+          "[convergence][defaults]")
+{
+    objective_tolerance_criterion crit{};
+    step_result<double> r{.objective_change = 1e-15};
+    const auto status = crit.check(r, 5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::ftol_reached);
+}
+
+TEST_CASE("default-constructed step_tolerance_criterion fires without being configured",
+          "[convergence][defaults]")
+{
+    step_tolerance_criterion crit{};
+    step_result<double> r{.step_size = 1e-15};
+    const auto status = crit.check(r, 5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::stalled);
+}
+
+TEST_CASE("default_convergence returns a terminator on a converged Rosenbrock-like trace",
+          "[convergence][defaults]")
+{
+    // A synthetic converged trace (tiny gradient, tiny objective change,
+    // tiny step) at iteration > 1: a default-constructed default_convergence
+    // must return a by-criterion status without any threshold configured.
+    default_convergence conv{};
+    step_result<double> r{
+        .objective_value = 1e-30,
+        .gradient_norm = 1e-12,
+        .step_size = 1e-12,
+        .objective_change = 1e-20,
+    };
+    const auto status = conv.check(r, 10);
+    REQUIRE(status.has_value());
+}
+
+TEST_CASE("defaulted L-BFGS-B solve() on Rosenbrock terminates by criterion well before max_iterations",
+          "[convergence][defaults]")
+{
+    // Regression proof for the default-convergence-never-fires bug: prior
+    // to the direct-value literature defaults, every default_convergence
+    // threshold was std::nullopt, so L-BFGS-B on Rosenbrock reached
+    // f ~ 2.5e-31 around iteration 30 and then burned the remaining ~970
+    // iterations of the 1000-iteration default budget, returning
+    // max_iterations (empirically confirmed against the pre-fix headers:
+    // status == max_iterations, iterations == 1000). With the fix, the
+    // fully-defaulted solve (no set_*_threshold calls at all) now
+    // terminates by criterion at iteration 15 (empirically measured),
+    // roughly 2x the iteration where the objective first reaches
+    // machine-zero, and well under 1% of the default 1000-iteration
+    // budget.
+    rosenbrock<double> problem{};
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+
+    solver_options<> opts;  // fully defaulted: no threshold configured
+    basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>,
+                 rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
+    auto result = solver.solve();
+
+    CHECK(result.status != solver_status::max_iterations);
+    CHECK(result.status != solver_status::budget_exhausted);
+    CHECK(result.iterations < 100);
+    CHECK(result.objective_value < 1e-8);
+}

@@ -132,7 +132,8 @@ using resolve_state_t =
 //
 // Reference: K&W Section 4.4 (convergence criteria), N&W Section 3.1.
 
-template <typename Policy, int N = dynamic_dimension, typename Problem = void>
+template <typename Policy, int N = dynamic_dimension, typename Problem = void,
+          typename Convergence = default_convergence>
 class basic_solver
 {
 public:
@@ -173,7 +174,7 @@ public:
         }
     }
 
-    template <typename P, typename Convergence = default_convergence>
+    template <typename P>
     basic_solver(Policy policy, const P& problem,
                  const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts = {})
@@ -182,6 +183,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
         , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
@@ -194,8 +196,7 @@ public:
     // CTAD converting constructor: accepts an un-rebound policy and discards
     // it, default-constructing the rebound policy. Enables deduction guides
     // that rebind Policy to the problem's compile-time dimension.
-    template <typename OrigPolicy, typename P,
-              typename Convergence = default_convergence>
+    template <typename OrigPolicy, typename P>
         requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
               && requires { typename OrigPolicy::template rebind<N>; }
               && std::same_as<Policy, typename OrigPolicy::template rebind<N>>
@@ -206,6 +207,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
         , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
@@ -215,13 +217,14 @@ public:
             forward_policy_hints(policy_.options);
     }
 
-    template <typename P, typename Convergence = default_convergence>
+    template <typename P>
     basic_solver(const P& problem, const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts = {})
         : max_iterations_{opts.max_iterations}
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
         , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
@@ -231,7 +234,7 @@ public:
             forward_policy_hints(policy_.options);
     }
 
-    template <typename P, typename PolicyOpts, typename Convergence = default_convergence>
+    template <typename P, typename PolicyOpts>
         requires has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
     basic_solver(Policy policy, const P& problem,
@@ -243,6 +246,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
         , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
@@ -252,8 +256,7 @@ public:
     }
 
     // CTAD converting constructor with policy options.
-    template <typename OrigPolicy, typename P, typename PolicyOpts,
-              typename Convergence = default_convergence>
+    template <typename OrigPolicy, typename P, typename PolicyOpts>
         requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
               && requires { typename OrigPolicy::template rebind<N>; }
               && std::same_as<Policy, typename OrigPolicy::template rebind<N>>
@@ -267,6 +270,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
         , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
@@ -275,7 +279,7 @@ public:
         forward_policy_hints(policy_opts);
     }
 
-    template <typename P, typename PolicyOpts, typename Convergence = default_convergence>
+    template <typename P, typename PolicyOpts>
         requires has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
     basic_solver(const P& problem, const Eigen::VectorX<scalar_type>& x0,
@@ -285,6 +289,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
         , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
     {
@@ -295,7 +300,7 @@ public:
 
     // Overload for policies without options_type: the fourth argument is
     // solver_options<> (the policy_options_t fallback) and is ignored.
-    template <typename P, typename Convergence = default_convergence>
+    template <typename P>
         requires (!has_options_type<Policy>)
     basic_solver(const P& problem, const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts,
@@ -304,6 +309,7 @@ public:
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
         , problem_ptr_{bind_problem(problem)}
         , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
     {
@@ -321,6 +327,7 @@ public:
         , verbosity_{other.verbosity_}
         , max_time_{other.max_time_}
         , constraint_tolerance_{other.constraint_tolerance_}
+        , feasibility_tolerance_{other.feasibility_tolerance_}
         , stored_convergence_{other.stored_convergence_}
         , problem_ptr_{other.problem_ptr_}
         , state_{std::move(other.state_)}
@@ -338,6 +345,7 @@ public:
             verbosity_ = other.verbosity_;
             max_time_ = other.max_time_;
             constraint_tolerance_ = other.constraint_tolerance_;
+            feasibility_tolerance_ = other.feasibility_tolerance_;
             stored_convergence_ = other.stored_convergence_;
             problem_ptr_ = other.problem_ptr_;
             state_ = std::move(other.state_);
@@ -363,11 +371,20 @@ public:
     }
 
     // Solve with default convergence (uses stored max_iterations).
+    //
+    // Builds solver_options<Convergence> (the class's own stored convergence
+    // type, not solver_options<>) so a non-default Convergence is used
+    // without coercion, and copies the constructor-configured
+    // constraint_tolerance_/feasibility_tolerance_ into the local opts so the
+    // best-seen feasibility comparator honors them instead of reverting to
+    // solver_options's 1e-6 default.
     solve_result<scalar_type, N> solve()
     {
-        solver_options<> opts;
+        solver_options<Convergence> opts;
         opts.max_iterations = max_iterations_;
         opts.max_time = max_time_;
+        opts.constraint_tolerance = constraint_tolerance_;
+        opts.feasibility_tolerance = feasibility_tolerance_;
         opts.convergence = stored_convergence_;
         auto result = step_n(max_iterations_, opts);
         // Propagate the per-criterion telemetry that step_n writes into
@@ -380,18 +397,22 @@ public:
     }
 
     // Solve with explicit convergence policy via solver_options.
-    template <typename Convergence>
-    solve_result<scalar_type, N> solve(const solver_options<Convergence>& opts)
+    template <typename ExplicitConvergence>
+    solve_result<scalar_type, N> solve(const solver_options<ExplicitConvergence>& opts)
     {
         return step_n(opts.max_iterations, opts);
     }
 
-    // Step with budget, default convergence.
+    // Step with budget, default convergence. See solve() above for the
+    // rationale on building solver_options<Convergence> and copying the
+    // stored tolerances.
     solve_result<scalar_type, N> step_n(std::uint32_t budget)
     {
-        solver_options<> opts;
+        solver_options<Convergence> opts;
         opts.max_iterations = max_iterations_;
         opts.max_time = max_time_;
+        opts.constraint_tolerance = constraint_tolerance_;
+        opts.feasibility_tolerance = feasibility_tolerance_;
         opts.convergence = stored_convergence_;
         auto result = step_n(budget, opts);
         stored_convergence_.last_check_results_ =
@@ -407,9 +428,9 @@ public:
     //   3. Execute policy step
     //   4. Check policy-reported failure (D-16: policy failure is final)
     //   5. Check convergence policy
-    template <typename Convergence>
+    template <typename OptsConvergence>
     solve_result<scalar_type, N> step_n(std::uint32_t budget,
-                                        const solver_options<Convergence>& opts)
+                                        const solver_options<OptsConvergence>& opts)
     {
         auto t0 = std::chrono::steady_clock::now();
 
@@ -506,10 +527,12 @@ public:
         // Back-copy per-criterion telemetry from the caller-owned opts into
         // stored_convergence_ when types match, so solver.convergence()
         // .last_check_results() reflects the most recent step_n(budget, opts)
-        // call. For Convergence != default_convergence (e.g. the
-        // slsqp_compatible_convergence alias), consumers read last_check_results
+        // call. For an OptsConvergence that differs from the solver's own
+        // stored Convergence type (e.g. passing a solver_options<
+        // slsqp_compatible_convergence> to a basic_solver whose Convergence
+        // is default_convergence), consumers read last_check_results
         // directly from their own opts.convergence instance.
-        if constexpr(std::is_same_v<Convergence, default_convergence>)
+        if constexpr(std::is_same_v<OptsConvergence, decltype(stored_convergence_)>)
         {
             stored_convergence_.last_check_results_ =
                 opts.convergence.last_check_results_;
@@ -568,87 +591,16 @@ public:
         abort_flag_.store(false, std::memory_order_relaxed);
     }
 
-    template <typename Criterion>
-    void store_criterion(const Criterion& c)
-    {
-        if constexpr(std::same_as<Criterion, gradient_tolerance_criterion>)
-        {
-            if constexpr(requires { std::get<gradient_tolerance_criterion>(stored_convergence_.criteria); })
-                std::get<gradient_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
-        }
-        else if constexpr(std::same_as<Criterion, objective_tolerance_criterion>)
-        {
-            using criteria_tuple = decltype(stored_convergence_.criteria);
-            if constexpr(detail::tuple_contains_v<objective_tolerance_criterion, criteria_tuple>)
-            {
-                auto& dst = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
-                dst.threshold = c.threshold;
-                dst.stationarity_threshold = c.stationarity_threshold;
-            }
-            else if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
-            {
-                auto& dst = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
-                dst.threshold = c.threshold;
-                dst.stationarity_threshold = c.stationarity_threshold;
-            }
-        }
-        else if constexpr(std::same_as<Criterion, step_tolerance_criterion>)
-        {
-            using criteria_tuple = decltype(stored_convergence_.criteria);
-            if constexpr(detail::tuple_contains_v<step_tolerance_criterion, criteria_tuple>)
-                std::get<step_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
-            else if constexpr(detail::tuple_contains_v<step_tolerance_rel_criterion, criteria_tuple>)
-                std::get<step_tolerance_rel_criterion>(stored_convergence_.criteria).threshold = c.threshold;
-        }
-        else if constexpr(std::same_as<Criterion, objective_tolerance_rel_criterion>)
-        {
-            using criteria_tuple = decltype(stored_convergence_.criteria);
-            if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
-            {
-                auto& dst = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
-                dst.threshold = c.threshold;
-                dst.stationarity_threshold = c.stationarity_threshold;
-            }
-            else if constexpr(detail::tuple_contains_v<objective_tolerance_criterion, criteria_tuple>)
-            {
-                auto& dst = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
-                dst.threshold = c.threshold;
-                dst.stationarity_threshold = c.stationarity_threshold;
-            }
-        }
-        else if constexpr(std::same_as<Criterion, step_tolerance_rel_criterion>)
-        {
-            using criteria_tuple = decltype(stored_convergence_.criteria);
-            if constexpr(detail::tuple_contains_v<step_tolerance_rel_criterion, criteria_tuple>)
-                std::get<step_tolerance_rel_criterion>(stored_convergence_.criteria).threshold = c.threshold;
-            else if constexpr(detail::tuple_contains_v<step_tolerance_criterion, criteria_tuple>)
-                std::get<step_tolerance_criterion>(stored_convergence_.criteria).threshold = c.threshold;
-        }
-        else if constexpr(std::same_as<Criterion, stall_tolerance_criterion>)
-        {
-            if constexpr(requires { std::get<stall_tolerance_criterion>(stored_convergence_.criteria); })
-            {
-                auto& dst = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
-                dst.threshold = c.threshold;
-                dst.window = c.window;
-                dst.track_best_seen_feasible = c.track_best_seen_feasible;
-            }
-        }
-    }
-
-    template <typename Convergence>
+    // Stores the constructor's convergence policy by value, with no
+    // field-by-field remap: Convergence is the solver's own class-template
+    // parameter (deduced from the ctor's solver_options<Convergence>
+    // argument via CTAD), so stored_convergence_ always has the exact same
+    // type as the argument here. A relative-tolerance Convergence is stored
+    // -- and later checked -- as a relative-tolerance policy; there is no
+    // absolute-criterion coercion.
     void store_convergence(const Convergence& conv)
     {
-        if constexpr(requires { conv.criteria; })
-        {
-            std::apply([this](const auto&... cs) {
-                (store_criterion(cs), ...);
-            }, conv.criteria);
-        }
-        if constexpr(requires { conv.inner; })
-        {
-            store_convergence(conv.inner);
-        }
+        stored_convergence_ = conv;
     }
 
     // Forwards solver-level options (currently constraint_tolerance) into
@@ -668,7 +620,6 @@ public:
     // threshold, since kkt_residual now carries the primal-feasibility
     // legs directly. The max preserves the pre-31.1 unconstrained default
     // (1e-8) whenever constraint_tolerance is unset or looser.
-    template <typename Convergence>
     void forward_solver_hints(const solver_options<Convergence>& opts)
     {
         using criteria_tuple = decltype(stored_convergence_.criteria);
@@ -676,19 +627,13 @@ public:
         {
             auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
             if(opts.constraint_tolerance)
-            {
-                const double current = ftol.stationarity_threshold.value_or(1e-8);
-                ftol.stationarity_threshold = std::max(current, *opts.constraint_tolerance);
-            }
+                ftol.stationarity_threshold = std::max(ftol.stationarity_threshold, *opts.constraint_tolerance);
         }
         if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
         {
             auto& ftol_rel = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
             if(opts.constraint_tolerance)
-            {
-                const double current = ftol_rel.stationarity_threshold.value_or(1e-8);
-                ftol_rel.stationarity_threshold = std::max(current, *opts.constraint_tolerance);
-            }
+                ftol_rel.stationarity_threshold = std::max(ftol_rel.stationarity_threshold, *opts.constraint_tolerance);
         }
     }
 
@@ -697,7 +642,15 @@ public:
     {
         if constexpr(requires { policy_opts.stall_window; })
         {
-            if constexpr(requires { std::get<stall_tolerance_criterion>(stored_convergence_.criteria); })
+            // detail::tuple_contains_v (not a raw `requires { std::get<...> }`
+            // probe) is required here: libstdc++'s std::get<T> on a tuple
+            // lacking T fails via a static_assert inside the function body,
+            // which is not a SFINAE-friendly substitution failure and would
+            // hard-error for any Convergence lacking stall_tolerance_criterion
+            // (e.g. a caller-supplied policy combining a stall_window-bearing
+            // policy's options with a bespoke non-stall convergence type).
+            if constexpr(detail::tuple_contains_v<stall_tolerance_criterion,
+                                                   decltype(stored_convergence_.criteria)>)
             {
                 auto& stall = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
                 stall.window = policy_opts.stall_window;
@@ -721,9 +674,8 @@ public:
                 auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
                 if(policy_opts.kkt_tolerance)
                 {
-                    const double current = ftol.stationarity_threshold.value_or(1e-8);
                     ftol.stationarity_threshold =
-                        std::max(current, *policy_opts.kkt_tolerance);
+                        std::max(ftol.stationarity_threshold, *policy_opts.kkt_tolerance);
                 }
             }
             if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
@@ -731,9 +683,8 @@ public:
                 auto& ftol_rel = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
                 if(policy_opts.kkt_tolerance)
                 {
-                    const double current = ftol_rel.stationarity_threshold.value_or(1e-8);
                     ftol_rel.stationarity_threshold =
-                        std::max(current, *policy_opts.kkt_tolerance);
+                        std::max(ftol_rel.stationarity_threshold, *policy_opts.kkt_tolerance);
                 }
             }
         }
@@ -818,7 +769,13 @@ private:
     std::uint8_t verbosity_{0};
     std::optional<std::chrono::nanoseconds> max_time_{};
     std::optional<double> constraint_tolerance_{};
-    default_convergence stored_convergence_{};
+    // Mirrors solver_options::feasibility_tolerance (constructor-time
+    // configured); read back into the locally-rebuilt solver_options on the
+    // defaulted solve()/step_n(budget) paths so the best-seen feasibility
+    // comparator honors the constructor's configured value instead of
+    // reverting to solver_options's own 1e-6 default.
+    double feasibility_tolerance_{1e-6};
+    Convergence stored_convergence_{};
     const Problem* problem_ptr_{nullptr};
     state_type state_;
     std::uint32_t iterations_{0};
@@ -840,15 +797,22 @@ private:
 // of the implicit deduction guide which defaults Problem to void.
 
 // Policy + Problem + x0 + opts
+//
+// Convergence is deduced here from the opts argument's solver_options<
+// Convergence> type and flows into the class's own Convergence template
+// parameter, so a non-default Convergence (e.g. a custom relative-tolerance
+// policy) is stored without coercion to default_convergence.
 template <typename Policy, typename Problem, typename Convergence>
 basic_solver(Policy, const Problem&,
              const Eigen::VectorX<typename Policy::scalar_type>&,
              const solver_options<Convergence>&)
     -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
                     problem_dimension_v<Problem>,
-                    Problem>;
+                    Problem,
+                    Convergence>;
 
-// Policy + Problem + x0 (no opts)
+// Policy + Problem + x0 (no opts): Convergence is not deducible here, so it
+// keeps the class's own default_convergence default.
 template <typename Policy, typename Problem>
 basic_solver(Policy, const Problem&,
              const Eigen::VectorX<typename Policy::scalar_type>&)
@@ -864,7 +828,8 @@ basic_solver(Policy, const Problem&,
              const solver_options<Convergence>&, const PolicyOpts&)
     -> basic_solver<typename Policy::template rebind<problem_dimension_v<Problem>>,
                     problem_dimension_v<Problem>,
-                    Problem>;
+                    Problem,
+                    Convergence>;
 
 // D-04: convenience type aliases for common configurations.
 

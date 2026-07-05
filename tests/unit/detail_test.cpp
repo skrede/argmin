@@ -442,12 +442,18 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
             s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));
     }
 
-    // Threshold left at std::nullopt -> fall back to bound_relative form
-    // with `fallback_ratio`. mean_range = 2, sqrt(n) = sqrt(2). With
-    // fallback_ratio = 1.0 the fall-back fires (1e-7 < 1.0 * 2 / sqrt(2)).
+    // default_convergence's step_tolerance_criterion now carries a
+    // direct-value literature default (1e-8; see convergence.h) instead of
+    // an inert std::nullopt, so a freshly-constructed default_convergence
+    // is never in the "threshold absent" state and always takes the
+    // engaged (non-fallback) branch: mean_sigma (1e-7) does not beat the
+    // 1e-8 default, so the predicate returns false regardless of
+    // fallback_ratio. The genuine fallback path (Convergence lacking
+    // step_tolerance_criterion entirely) is exercised by the
+    // slsqp_compatible_convergence case below.
     {
         argmin::default_convergence conv{};
-        CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
+        CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1.0, n, lower, upper));
         CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));

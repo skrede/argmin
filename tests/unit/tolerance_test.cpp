@@ -45,7 +45,11 @@ TEST_CASE("objective_tolerance_rel stops basic_solver", "[tolerance]")
 
     quadratic prob;
     Eigen::VectorXd x0{{3.0, 4.0}};
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    // Explicit 4-arg spelling (Policy, N, Problem, Convergence): mock_policy
+    // has no rebind<N>, so bare CTAD cannot deduce Policy here, and the
+    // Convergence template parameter must be spelled out to store `conv`
+    // (rather than defaulting to default_convergence) without coercion.
+    basic_solver<test::mock_policy, argmin::dynamic_dimension, void, conv> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::ftol_reached);
@@ -69,7 +73,9 @@ TEST_CASE("step_tolerance_rel stops basic_solver", "[tolerance]")
 
     quadratic prob;
     Eigen::VectorXd x0{{3.0, 4.0}};
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    // See the objective_tolerance_rel test above for why Convergence must
+    // be spelled explicitly here.
+    basic_solver<test::mock_policy, argmin::dynamic_dimension, void, conv> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::xtol_reached);

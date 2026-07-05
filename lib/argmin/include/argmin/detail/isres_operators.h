@@ -349,13 +349,14 @@ inline bool sigma_collapsed_bound_relative(
 
 // Sigma-collapse predicate (xtol-coupled form, convergence-policy template).
 //
-// Reads the user-set step_tolerance_criterion::threshold from the
-// convergence policy; if the policy lacks step_tolerance_criterion OR
-// the threshold is std::nullopt, silently falls back to the
+// Reads the step_tolerance_criterion::threshold from the convergence
+// policy (a direct-value literature default, never absent -- see
+// convergence.h); if the policy lacks step_tolerance_criterion entirely
+// (e.g. slsqp_compatible_convergence, which only carries
+// step_tolerance_rel_criterion), silently falls back to the
 // bound-relative form with the variant's `fallback_ratio`. The
 // tuple_contains_v gate keeps the function compilable against any
-// convergence type (`slsqp_compatible_convergence`, which only carries
-// step_tolerance_rel_criterion, takes the fallback path).
+// convergence type.
 //
 // Reference: Runarsson, T. P., and Yao, X. (2005), IEEE Trans. SMC-C
 //            35(2):233-243, Section V (termination); K&W 2e Section 8.6.
@@ -373,8 +374,7 @@ inline bool sigma_collapsed_xtol_coupled(
                                   decltype(convergence.criteria)>)
     {
         const auto& crit = std::get<step_tolerance_criterion>(convergence.criteria);
-        if(crit.threshold)
-            return mean_sigma < *crit.threshold;
+        return mean_sigma < crit.threshold;
     }
     const double mean_range = (upper - lower).mean();
     return mean_sigma < fallback_ratio * mean_range

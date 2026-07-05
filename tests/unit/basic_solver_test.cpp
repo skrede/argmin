@@ -1,5 +1,6 @@
 #include "mock_policy.h"
 #include "argmin/solver/basic_solver.h"
+#include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/result/status.h"
 
@@ -16,6 +17,89 @@ struct quadratic
 
     int dimension() const { return 2; }
     double value(const Eigen::Vector<double, 2>& x) const { return 0.5 * x.squaredNorm(); }
+};
+
+// Gradient-bearing quadratic for the CTAD-with-custom-Convergence test below
+// (lbfgsb_policy needs an analytic gradient; mock_policy has no rebind<N>
+// so it cannot participate in bare CTAD).
+struct quadratic_with_gradient
+{
+    static constexpr int problem_dimension = 2;
+
+    int dimension() const { return 2; }
+    double value(const Eigen::Vector<double, 2>& x) const { return 0.5 * x.squaredNorm(); }
+    void gradient(const Eigen::Vector<double, 2>& x, Eigen::Vector<double, 2>& g) const { g = x; }
+};
+
+// Scripted two-step policy for the best-seen-feasibility tolerance test
+// below: step 1 reports a small constraint violation (5e-4) with a lower
+// objective (5.0); step 2 reports exact feasibility (cv=0) with a higher
+// objective (10.0). Under the default feasibility_tolerance (1e-6) step 1
+// is infeasible and step 2 wins; under a widened tolerance (1e-3) step 1
+// becomes feasible and wins on the lower objective. Deliberately has no
+// c_eq/c_ineq state members, so seed_best_cv() reports the unconstrained
+// fallback (0.0) and the constructed Problem is void (single-arg
+// basic_solver<Policy> spelling), so seed_best_f() reports +infinity --
+// both steps must out-compete that seed on their own terms.
+struct scripted_feasibility_policy
+{
+    using scalar_type = double;
+
+    struct state_type
+    {
+        Eigen::VectorXd x;
+        double objective_value{};
+        int step_count{0};
+    };
+
+    template <typename Problem, typename Convergence = argmin::default_convergence>
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
+                    const argmin::solver_options<Convergence>&)
+    {
+        return state_type{.x = x0, .objective_value = 100.0};
+    }
+
+    argmin::step_result<double> step(state_type& s)
+    {
+        ++s.step_count;
+        // gradient_norm/step_size/objective_change are deliberately set
+        // well above every default_convergence criterion's direct-value
+        // literature default (see convergence.h) so this scripted budget
+        // runs to completion instead of tripping an unrelated criterion
+        // early -- this test isolates the best-seen feasibility-tolerance
+        // comparator, not the convergence policy.
+        if(s.step_count == 1)
+        {
+            s.objective_value = 5.0;
+            return argmin::step_result<double>{
+                .objective_value = 5.0,
+                .gradient_norm = 1.0,
+                .step_size = 1.0,
+                .objective_change = -95.0,
+                .constraint_violation = 5e-4,
+            };
+        }
+        s.objective_value = 10.0;
+        return argmin::step_result<double>{
+            .objective_value = 10.0,
+            .gradient_norm = 1.0,
+            .step_size = 1.0,
+            .objective_change = 5.0,
+            .constraint_violation = 0.0,
+        };
+    }
+
+    void reset(state_type& s, const Eigen::VectorXd& x0)
+    {
+        s.x = x0;
+        s.objective_value = 100.0;
+        s.step_count = 0;
+    }
+
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    {
+        reset(s, x0);
+    }
 };
 
 TEST_CASE("basic_solver step", "[solver]")
@@ -102,6 +186,12 @@ TEST_CASE("basic_solver convergence on objective_change", "[solver]")
     quadratic prob;
     Eigen::VectorXd x0{{0.001, 0.001}};
     solver_options<> opts;
+    // Loosen gradient/step so the objective (ftol) criterion is isolated
+    // as the one under test: gradient_tolerance_criterion now carries a
+    // direct-value literature default (1e-5, see convergence.h) and would
+    // otherwise fire first on this geometrically-shrinking mock trajectory.
+    std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-15;
+    std::get<step_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-15;
     std::get<objective_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-8;
 
     basic_solver<test::mock_policy> solver{prob, x0, opts};
@@ -237,4 +327,108 @@ TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
         auto result2 = solver.solve(opts);
         CHECK(result2.status == solver_status::converged);
     }
+}
+
+// ---------------------------------------------------------------------------
+// User-Convergence storage without lossy remap.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("basic_solver stores a non-default explicit Convergence and honors it on the defaulted solve() path",
+          "[solver]")
+{
+    // mock_policy has no rebind<N>, so it cannot participate in bare CTAD;
+    // the Convergence template parameter is spelled out explicitly here
+    // (basic_solver<Policy, N, Problem, Convergence>) instead.
+    using rel_conv = convergence_policy<objective_tolerance_rel_criterion>;
+
+    quadratic prob;
+    Eigen::VectorXd x0{{3.0, 4.0}};
+    solver_options<rel_conv> opts;
+    opts.max_iterations = 1000;
+    opts.convergence.criteria = {objective_tolerance_rel_criterion{.threshold = 1e-2}};
+
+    basic_solver<test::mock_policy, argmin::dynamic_dimension, void, rel_conv> solver{prob, x0, opts};
+
+    // Defaulted call path (no opts argument): must use the solver's own
+    // stored rel_conv, not a coerced default_convergence.
+    auto result = solver.solve();
+
+    CHECK(result.status == solver_status::ftol_reached);
+    CHECK(result.iterations < 1000);
+}
+
+TEST_CASE("basic_solver CTAD deduces a non-default Convergence and honors it on the defaulted solve() path",
+          "[solver]")
+{
+    // lbfgsb_policy supports rebind<N>, so Convergence flows through the
+    // "Policy + Problem + x0 + opts" deduction guide via bare CTAD -- no
+    // template arguments are spelled out at all.
+    using rel_conv = convergence_policy<step_tolerance_rel_criterion>;
+
+    quadratic_with_gradient prob;
+    Eigen::VectorXd x0{{3.0, 4.0}};
+    solver_options<rel_conv> opts;
+    opts.max_iterations = 1000;
+    std::get<0>(opts.convergence.criteria).threshold = 0.5;
+
+    basic_solver solver{lbfgsb_policy<>{}, prob, x0, opts};
+    auto result = solver.solve();
+
+    // Stops on the relative step criterion (xtol_reached), not on a
+    // coerced absolute one -- default_convergence has no
+    // step_tolerance_rel_criterion slot at all, so this can only pass if
+    // the solver's stored Convergence really is rel_conv.
+    CHECK(result.status == solver_status::xtol_reached);
+    CHECK(result.iterations < 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Construction-time constraint/feasibility tolerance honored on defaulted
+// call paths (solve() / step_n(budget), no opts argument).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance on step_n(budget)",
+          "[solver]")
+{
+    quadratic prob;
+    Eigen::VectorXd x0{{1.0, 1.0}};
+
+    SECTION("default feasibility_tolerance: the exactly-feasible, higher-objective step wins")
+    {
+        solver_options<> opts;  // feasibility_tolerance left at its 1e-6 default
+        basic_solver<scripted_feasibility_policy> solver{prob, x0, opts};
+        auto result = solver.step_n(2);
+
+        CHECK(result.objective_value == Approx(10.0));
+        CHECK(result.constraint_violation == Approx(0.0));
+    }
+
+    SECTION("widened construction-time feasibility_tolerance: the lower-objective step wins")
+    {
+        solver_options<> opts;
+        opts.feasibility_tolerance = 1e-3;  // configured at construction
+
+        basic_solver<scripted_feasibility_policy> solver{prob, x0, opts};
+        auto result = solver.step_n(2);
+
+        CHECK(result.objective_value == Approx(5.0));
+        CHECK(result.constraint_violation == Approx(5e-4));
+    }
+}
+
+TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance on solve()",
+          "[solver]")
+{
+    quadratic prob;
+    Eigen::VectorXd x0{{1.0, 1.0}};
+
+    solver_options<> opts;
+    opts.max_iterations = 2;
+    opts.feasibility_tolerance = 1e-3;
+
+    basic_solver<scripted_feasibility_policy> solver{prob, x0, opts};
+    auto result = solver.solve();
+
+    CHECK(result.objective_value == Approx(5.0));
+    CHECK(result.constraint_violation == Approx(5e-4));
 }

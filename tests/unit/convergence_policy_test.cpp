@@ -32,13 +32,25 @@ TEST_CASE("gradient_tolerance_criterion fires on small gradient",
     CHECK(*status == solver_status::converged);
 }
 
-// -- Test 2: gradient_tolerance_criterion disabled with nullopt --
+// -- Test 2: gradient_tolerance_criterion carries a direct-value literature
+// default (1e-5) and fires out of the box -- it is no longer inert by
+// default (see convergence.h for the citation).
 
-TEST_CASE("gradient_tolerance_criterion disabled returns nullopt",
+TEST_CASE("gradient_tolerance_criterion fires on default-constructed threshold",
           "[convergence_policy]")
 {
     gradient_tolerance_criterion c{};
     step_result<double> r{.gradient_norm = 1e-20};
+    auto status = c.check(r, 5);
+    REQUIRE(status.has_value());
+    CHECK(*status == solver_status::converged);
+}
+
+TEST_CASE("gradient_tolerance_criterion does not fire above the default threshold",
+          "[convergence_policy]")
+{
+    gradient_tolerance_criterion c{};
+    step_result<double> r{.gradient_norm = 1.0};
     auto status = c.check(r, 5);
     CHECK(!status.has_value());
 }
@@ -158,18 +170,22 @@ TEST_CASE("convergence_policy first match wins", "[convergence_policy]")
     CHECK(*status == solver_status::converged);
 }
 
-// -- Test 8: convergence_policy with all nullopt returns nullopt --
+// -- Test 8: convergence_policy with default-constructed criteria does not
+// fire when residuals are all well above the direct-value literature
+// defaults (gradient_tolerance_criterion, objective_tolerance_criterion,
+// and step_tolerance_criterion are no longer inert-by-default; see
+// convergence.h for the citations).
 
-TEST_CASE("convergence_policy all disabled returns nullopt",
+TEST_CASE("convergence_policy with default thresholds does not fire on large residuals",
           "[convergence_policy]")
 {
     convergence_policy<gradient_tolerance_criterion,
                        objective_tolerance_criterion,
                        step_tolerance_criterion> cp{};
     step_result<double> r{
-        .gradient_norm = 1e-20,
-        .step_size = 1e-20,
-        .objective_change = 1e-20,
+        .gradient_norm = 1.0,
+        .step_size = 1.0,
+        .objective_change = 1.0,
     };
     auto status = cp.check(r, 5);
     CHECK(!status.has_value());
@@ -279,8 +295,7 @@ TEST_CASE("set_objective_threshold propagates stationarity_threshold",
     opts.set_objective_threshold(1e-10);
 
     auto& crit = std::get<objective_tolerance_criterion>(opts.convergence.criteria);
-    REQUIRE(crit.stationarity_threshold.has_value());
-    CHECK(*crit.stationarity_threshold == 1e-10);
+    CHECK(crit.stationarity_threshold == 1e-10);
 }
 
 // -- Test 15: full policy with stationarity gate on stagnant non-stationary point --
@@ -419,7 +434,9 @@ TEST_CASE("convergence_policy last_check_results reports mid-tuple fire when ear
 {
     convergence_policy<gradient_tolerance_criterion,
                        step_tolerance_criterion> policy{};
-    // Gradient criterion disabled (threshold left at std::nullopt).
+    // Gradient criterion left at its direct-value default (1e-5); the
+    // step_result below (gradient_norm = 1.0) is well above that default,
+    // so it still does not fire.
     std::get<1>(policy.criteria).threshold = 1e-6;
 
     step_result<double> r{};
