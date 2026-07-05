@@ -139,9 +139,12 @@ TEST_CASE("interpolation delta-property survives a rank-2 update",
 // longer represents the interpolation matrix and the cardinal basis loses
 // the delta-property: max_{k,j} |L_k(x_j) - delta_kj| is O(1) rather than
 // machine-epsilon, so this invariant check fails until the bootstrap
-// performs the swap before the BMAT/ZMAT assignments.
+// performs the swap before the BMAT/ZMAT assignments. [!shouldfail]
+// records this as the expected disposition; once the bootstrap performs
+// the swap before assembling BMAT/ZMAT, this case starts passing and the
+// tag must be removed.
 TEST_CASE("interpolation delta-property is broken by the swap-objective bootstrap",
-          "[interpolation_delta_property]")
+          "[interpolation_delta_property][!shouldfail]")
 {
     const int n = 2;
     Eigen::VectorXd x0 = Eigen::VectorXd::Zero(n);

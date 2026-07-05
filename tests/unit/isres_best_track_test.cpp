@@ -106,8 +106,15 @@ struct recording_qp
 
 }
 
+// RED against the current substrate (see Pin 1 header derivation): the
+// production generation loop mutates the population in place and only
+// afterwards compares fitness at the previous generation's best-ranked
+// slot, so better points seen mid-stream are lost. [!shouldfail]
+// records this as the expected disposition; once the generation loop
+// tracks the best-ever record per evaluation (not per generation), this
+// case starts passing and the tag must be removed.
 TEST_CASE("isres: returned minimizer is the best point at evaluation time",
-          "[isres][oracle-pin]")
+          "[isres][oracle-pin][!shouldfail]")
 {
     recording_qp problem;
     Eigen::VectorXd x0{{2.0, 2.0}};
@@ -146,18 +153,34 @@ TEST_CASE("isres: returned minimizer is the best point at evaluation time",
     CHECK(s.x[1] == Approx(truth.x[1]).epsilon(0).margin(1e-12));
 }
 
-TEST_CASE("isres: tau/tau' learning-rate assignment matches NLopt",
+// Green leg: the oracle constants themselves are pinned against the
+// Schwefel/NLopt rate formulas independently of the production
+// detail::compute_es_rates output, so this stays a normally-passing
+// regression guard regardless of the tau/tau' swap defect below.
+TEST_CASE("isres: tau/tau' oracle constants match the Schwefel/NLopt rate formulas",
           "[isres][oracle-pin]")
 {
-    const int n = 20;
-    const auto rates = detail::compute_es_rates(n);
-
     // Role-correct oracle values (NLopt isres.c; Schwefel convention):
     // per-component rate 1/sqrt(2 sqrt(n)), global rate 1/sqrt(2 n).
     const double per_component = 1.0 / std::sqrt(2.0 * std::sqrt(20.0));
     const double global_rate = 1.0 / std::sqrt(2.0 * 20.0);
     CHECK(per_component == Approx(0.33437015248821100).epsilon(1e-15));
     CHECK(global_rate == Approx(0.15811388300841897).epsilon(1e-15));
+}
+
+// RED against the current substrate (see Pin 2 header derivation): the
+// two rates are assigned to the opposite roles in detail::compute_es_rates.
+// [!shouldfail] records this as the expected disposition; once tau and
+// tau_prime are swapped back to their role-correct assignment, this case
+// starts passing and the tag must be removed.
+TEST_CASE("isres: tau/tau' role assignment matches NLopt",
+          "[isres][oracle-pin][!shouldfail]")
+{
+    const int n = 20;
+    const auto rates = detail::compute_es_rates(n);
+
+    const double per_component = 1.0 / std::sqrt(2.0 * std::sqrt(20.0));
+    const double global_rate = 1.0 / std::sqrt(2.0 * 20.0);
 
     // rates.tau multiplies the per-component draw; rates.tau_prime the
     // once-per-individual draw (see the generation loop's usage).

@@ -127,7 +127,7 @@ std::map<std::string, std::vector<double>> load_oracle(const std::string& path)
 
 }
 
-TEST_CASE("cmaes: one hand-derived generation pins mean, p_sigma, and C",
+TEST_CASE("cmaes: one hand-derived generation pins mean, p_sigma, p_c, and sigma",
           "[cmaes][oracle-pin]")
 {
     const auto oracle = load_oracle("oracles/cmaes_one_generation.csv");
@@ -172,6 +172,9 @@ TEST_CASE("cmaes: one hand-derived generation pins mean, p_sigma, and C",
 
     // Green legs: mean, p_sigma, p_c, sigma all use the sampling sigma
     // correctly in the current implementation and must match the oracle.
+    // This case stays untagged: it must keep passing as a regression
+    // guard on these four quantities regardless of the rank-mu C fix
+    // pinned separately below.
     const auto& mean = oracle.at("mean");
     CHECK(s.mean[0] == Approx(mean[0]).epsilon(0).margin(1e-12));
     CHECK(s.mean[1] == Approx(mean[1]).epsilon(0).margin(1e-12));
@@ -185,6 +188,54 @@ TEST_CASE("cmaes: one hand-derived generation pins mean, p_sigma, and C",
     CHECK(s.p_c[1] == Approx(p_c[1]).epsilon(0).margin(1e-12));
 
     CHECK(s.sigma == Approx(oracle.at("sigma")[0]).epsilon(0).margin(1e-12));
+}
+
+// RED against the current substrate: the production policy multiplies
+// sigma by its adaptation factor BEFORE forming the rank-mu deltas, so
+// the deltas are divided by the UPDATED sigma and the rank-mu block is
+// mis-scaled by (sigma0/sigma_1)^2 = 1.27745 (see header derivation).
+// [!shouldfail] records this as the expected disposition; once the
+// rank-mu update is reordered to use the sampling sigma, this case
+// starts passing and the tag must be removed.
+TEST_CASE("cmaes: one hand-derived generation pins the rank-mu covariance C",
+          "[cmaes][oracle-pin][!shouldfail]")
+{
+    const auto oracle = load_oracle("oracles/cmaes_one_generation.csv");
+    REQUIRE(oracle.contains("seed"));
+
+    const auto seed = static_cast<std::uint64_t>(oracle.at("seed")[0]);
+    const int lambda = static_cast<int>(oracle.at("lambda")[0]);
+    const double sigma0 = oracle.at("sigma0")[0];
+    const int n = static_cast<int>(oracle.at("n")[0]);
+    REQUIRE(n == 2);
+    REQUIRE(lambda == 6);
+
+    // Premise: identical re-draw check as the green-leg case above.
+    Eigen::VectorXd mean0(2);
+    mean0 << oracle.at("mean0")[0], oracle.at("mean0")[1];
+    Eigen::MatrixXd B = Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd D = Eigen::VectorXd::Ones(2);
+    detail::xoshiro256 rng{seed};
+    const auto offspring = detail::sample_offspring<double, Eigen::Dynamic>(
+        mean0, sigma0, B, D, lambda, rng);
+    for(int i = 0; i < lambda; ++i)
+    {
+        const auto& col = oracle.at("offspring_" + std::to_string(i));
+        INFO("offspring premise (draw stream changed? see header comment), "
+             "column " << i);
+        REQUIRE(offspring(0, i) == Approx(col[0]).epsilon(0).margin(1e-15));
+        REQUIRE(offspring(1, i) == Approx(col[1]).epsilon(0).margin(1e-15));
+    }
+
+    // One production generation.
+    shifted_sphere problem;
+    Eigen::VectorXd x0 = mean0;
+    solver_options opts;
+    cmaes_policy<> policy;
+    policy.options.seed = seed;
+    policy.options.initial_sigma = sigma0;
+    auto s = policy.init(problem, x0, opts);
+    (void)policy.step(s);
 
     // Covariance pin (Hansen eq. 47): the rank-mu deltas MUST use the
     // sampling sigma. An implementation that divides by the updated

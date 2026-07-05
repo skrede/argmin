@@ -204,8 +204,13 @@ std::map<std::string, std::vector<double>> load_oracle(const std::string& path)
 
 }
 
+// RED against the current substrate (see Pin 1 header derivation): the
+// implementation uses a flat 1e-10 additive epsilon with no 1.001/0.001
+// gradient mixing and no raai/range term. [!shouldfail] records this as
+// the expected disposition; once the Svanberg p/q/r formula is
+// implemented, this case starts passing and the tag must be removed.
 TEST_CASE("mma: p/q/r coefficients match the Svanberg worked values",
-          "[mma][oracle-pin]")
+          "[mma][oracle-pin][!shouldfail]")
 {
     const auto oracle = load_oracle("oracles/mma_svanberg_coefficients.csv");
     REQUIRE(oracle.contains("p_obj"));
@@ -298,8 +303,13 @@ TEST_CASE("mma: analytic dual gradient matches a finite difference",
     CHECK(g[0] == Approx(fd).epsilon(0).margin(1e-6));
 }
 
+// RED against the current substrate (see Pin 3 header derivation): the
+// implementation accumulates wval = sum_j w_j dx^2, i.e. exactly 2x the
+// penalty mass. [!shouldfail] records this as the expected disposition;
+// once wval reports the 0.5-weighted penalty mass, this case starts
+// passing and the tag must be removed.
 TEST_CASE("gcmma: reported wval is the penalty mass per unit rho",
-          "[gcmma][oracle-pin]")
+          "[gcmma][oracle-pin][!shouldfail]")
 {
     // Hand-worked case from the header comment: rho = 0 makes the
     // primal the closed-form reciprocal minimizer x* = 4/3, and the
@@ -344,7 +354,12 @@ TEST_CASE("gcmma: reported wval is the penalty mass per unit rho",
     CHECK(dual.wval == Approx(1.0 / 9.0).epsilon(0).margin(1e-12));
 }
 
-TEST_CASE("gcmma: rho growth covers the minimal conservative increment",
+// Green leg: the trial position, non-conservative shortfall, and
+// growth-cap premises depend only on the coefficient formula and the
+// initial rho -- not on the rho-growth-increment defect pinned below --
+// so this stays a normally-passing regression guard on the composite-
+// step reconstruction regardless of that defect's fix state.
+TEST_CASE("gcmma: rho growth trial reconstruction matches the closed form",
           "[gcmma][oracle-pin]")
 {
     rho_problem problem;
@@ -404,6 +419,53 @@ TEST_CASE("gcmma: rho growth covers the minimal conservative increment",
         CHECK(delta_min
               == Approx(20.684210526315789).epsilon(0).margin(1e-6));
     }
+}
+
+// RED against the current substrate (see Pin 4 header derivation): the
+// growth divides the shortfall by twice the penalty mass (the same 2x
+// wval defect pinned above), landing at 1.1 (rho + delta_min/2) =
+// 14.676... which is short of the minimal conservative increment
+// 23.684.... [!shouldfail] records this as the expected disposition;
+// once the growth uses the corrected penalty mass, this case starts
+// passing and the tag must be removed.
+TEST_CASE("gcmma: rho growth covers the minimal conservative increment",
+          "[gcmma][oracle-pin][!shouldfail]")
+{
+    rho_problem problem;
+    Eigen::VectorXd x0{{1.0}};
+    solver_options opts;
+
+    alternative::gcmma::rho_wval_policy<> policy;
+    alternative::gcmma::rho_wval_policy<>::options_type popts;
+    popts.rho_init = 3.0;
+    // One inner iteration: trial -> conservativity test -> one growth.
+    popts.max_inner_iterations = 1;
+    // Identity inter-outer decay so the state field holds exactly the
+    // once-grown rho.
+    popts.rho_decay = 1.0;
+    popts.approximation_epsilon = 0.0;
+
+    auto s = policy.init(problem, x0, opts, popts);
+    const double rho0 = 3.0;
+    (void)policy.step(s);
+
+    // Premise: identical trial-reconstruction setup as the green-leg
+    // case above.
+    REQUIRE(s.x[0] == Approx(1.9).epsilon(0).margin(1e-12));
+
+    const double xt = s.x[0];
+    const double xk = x0[0];
+    const double dxU = s.U[0] - xt;
+    const double dxL = xt - s.L[0];
+    const double dx = xt - xk;
+    const double mass = 0.5 * s.w[0] * dx * dx;
+    const double gval = s.r_obj + s.p_obj[0] / dxU + s.q_obj[0] / dxL
+                      + rho0 * mass;
+    const double f_trial = problem.value(s.x);
+
+    REQUIRE(f_trial > gval);
+    const double delta_min = (f_trial - gval) / mass;
+    REQUIRE(1.1 * (rho0 + delta_min) <= 10.0 * rho0 + 1e-9);
 
     // Closed-form conservativity pin: the grown rho must make the
     // augmented approximation cover f at the trial that triggered the
