@@ -38,6 +38,7 @@ add_executable(argmin_unit_tests
     zero_copy_test.cpp
     finite_difference_test.cpp
     kkt_residual_test.cpp
+    sqp_common_joint_test.cpp
     dense_ldl_bfgs_test.cpp
     sqp_step_result_consistency_test.cpp
     steihaug_cg_test.cpp

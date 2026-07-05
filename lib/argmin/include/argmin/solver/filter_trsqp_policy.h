@@ -702,21 +702,33 @@ struct filter_trsqp_policy
         // Section B -- Joint Lagrangian gradient at the current iterate.
         //
         // x-block: g - J_eq^T lambda_eq - J_ineq^T mu_ineq
-        // s-block: -mu_ineq (slack-leg vanishes at KKT by
-        //                    complementarity, so joint and x-only norms
-        //                    coincide at convergence).
-        {
-            Eigen::Vector<double, N> grad_L_x = s.g;
-            if(s.n_eq > 0)
-                grad_L_x.noalias() -= s.J_eq.transpose()
-                                    * s.bufs.kkt_lambda_eq_buf;
-            if(n_ineq > 0)
-                grad_L_x.noalias() -= s.J_ineq.transpose()
-                                    * s.bufs.kkt_mu_ineq_buf;
-            s.joint_grad_L_new_buf.head(n) = grad_L_x;
-            if(n_ineq > 0)
-                s.joint_grad_L_new_buf.tail(n_ineq) = -s.bufs.kkt_mu_ineq_buf;
-        }
+        // s-block: +mu_ineq (the joint multiplier consistent with the
+        //          x-block is nu = -mu on the slack-equality rows, so
+        //          grad_s L = -nu = +mu; derivation at
+        //          detail::assemble_joint_lagrangian_gradient. This
+        //          block does NOT vanish at a KKT point -- it equals
+        //          the slack-bound multiplier zeta = mu -- which is
+        //          why stationarity is measured with the box-projected
+        //          form in Section E, not the raw norm).
+        argmin::detail::assemble_joint_lagrangian_gradient<double, N>(
+            s.g, s.J_eq, s.J_ineq,
+            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
+            n, n_ineq, s.joint_grad_L_new_buf);
+
+        // Bound-aware composite KKT residual at the current iterate
+        // (Section S and the null-step emission paths). The
+        // stationarity leg is the box-projected form, so kkt-gated
+        // convergence can fire at solutions with an active box bound
+        // (the raw leg equals the unmodeled bound multiplier there).
+        auto bound_aware_kkt = [&s]() -> double {
+            return argmin::detail::kkt_residual<double,
+                                                Eigen::Dynamic,
+                                                Eigen::Dynamic,
+                                                Eigen::Dynamic>(
+                s.g, s.J_eq, s.J_ineq,
+                s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
+                s.c_eq, s.c_ineq, s.x, s.lower, s.upper);
+        };
 
         // Section C -- Joint Jacobian A and joint residual c.
         //
@@ -744,24 +756,10 @@ struct filter_trsqp_policy
             c_joint.tail(n_ineq) = -s.c_ineq + s.s_slack;
         }
 
-        // Section D -- Forcing tolerance eps_k.
-        //
-        // Reference: Eisenstat and Walker 1996 (accurate-mode);
-        //            Dembo, Eisenstat, Steihaug 1982 (fast-mode).
-        const double grad_L_norm =
-            s.joint_grad_L_new_buf.template lpNorm<Eigen::Infinity>();
-        double eps_k;
-        if constexpr (Mode == sqp_mode::fast)
-            eps_k = std::min(0.1, grad_L_norm);
-        else
-            eps_k = std::min(0.5, std::sqrt(grad_L_norm));
-
-        // Section E -- Steihaug-CG inner-iteration cap.
-        const std::size_t max_cg_iter =
-            options.max_cg_iterations_multiplier
-            * static_cast<std::size_t>(n_total);
-
-        // Section F -- Displaced joint bounds: (lower - z_k, upper - z_k).
+        // Section D -- Displaced joint bounds: (lower - z_k, upper - z_k).
+        // Steihaug-CG projects on the displaced box at each inner
+        // iteration, and the box-projected stationarity measure in
+        // Section E reads the same displaced box.
         Eigen::VectorXd lower_joint(n_total);
         Eigen::VectorXd upper_joint(n_total);
         lower_joint.head(n) = (s.lower - s.x).template cast<double>();
@@ -771,6 +769,32 @@ struct filter_trsqp_policy
             lower_joint.tail(n_ineq) = -s.s_slack;
             upper_joint.tail(n_ineq).setConstant(inf);
         }
+
+        // Section E -- Forcing tolerance eps_k.
+        //
+        // Reference: Eisenstat and Walker 1996 (accurate-mode);
+        //            Dembo, Eisenstat, Steihaug 1982 (fast-mode).
+        // The forcing sequence reads the BOX-PROJECTED joint
+        // stationarity measure ||P(z - grad_L, l, u) - z||_inf rather
+        // than the raw joint gradient norm: the raw norm is floored at
+        // mu on inequality-active problems (the +mu slack block of the
+        // joint gradient), which would cap the attainable inner-solve
+        // accuracy at sqrt(mu_max) under the Eisenstat-Walker schedule.
+        // At interior points the two measures coincide. The forcing
+        // formulas themselves are unchanged; only the driving norm is.
+        const double proj_stationarity =
+            argmin::detail::projected_stationarity_displaced<double>(
+                s.joint_grad_L_new_buf, lower_joint, upper_joint);
+        double eps_k;
+        if constexpr (Mode == sqp_mode::fast)
+            eps_k = std::min(0.1, proj_stationarity);
+        else
+            eps_k = std::min(0.5, std::sqrt(proj_stationarity));
+
+        // Section F -- Steihaug-CG inner-iteration cap.
+        const std::size_t max_cg_iter =
+            options.max_cg_iterations_multiplier
+            * static_cast<std::size_t>(n_total);
 
         // Section G -- Hessian-vector-product closure.
         auto hessian_op = [&s](const Eigen::VectorXd& v) -> Eigen::VectorXd {
@@ -1153,6 +1177,7 @@ struct filter_trsqp_policy
                     s.c_eq, s.c_ineq, s.x.norm(),
                     /*bfgs_reset_count=*/std::size_t{1},
                     solver_status::running);
+                r.kkt_residual = bound_aware_kkt();
                 r.diagnostics.bfgs_skip_count = bfgs_skip_count;
                 r.diagnostics.soc_retry_count = soc_retry_count;
                 r.diagnostics.restoration_iters_used =
@@ -1180,6 +1205,7 @@ struct filter_trsqp_policy
                 s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
                 s.c_eq, s.c_ineq, s.x.norm(), /*bfgs_reset_count=*/0,
                 solver_status::trust_region_step_rejected);
+            r.kkt_residual = bound_aware_kkt();
             r.diagnostics.bfgs_skip_count = bfgs_skip_count;
             r.diagnostics.soc_retry_count = soc_retry_count;
             r.diagnostics.restoration_iters_used =
@@ -1199,6 +1225,7 @@ struct filter_trsqp_policy
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
                 s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
                 s.c_eq, s.c_ineq, s.x.norm(), /*bfgs_reset_count=*/0);
+            r.kkt_residual = bound_aware_kkt();
             r.diagnostics.bfgs_skip_count = bfgs_skip_count;
             r.diagnostics.soc_retry_count = soc_retry_count;
             ++s.iteration;
@@ -1206,10 +1233,21 @@ struct filter_trsqp_policy
         }
 
         // Section O -- Step acceptance.
+        //
+        // Save the joint old iterate plus the OLD-point objective
+        // gradient and Jacobians for the fixed-multiplier BFGS pair
+        // (N&W 18.13 evaluates BOTH gradient legs against the NEW
+        // multipliers, so the old-point quantities must survive the
+        // re-evaluation below; mirrors the line-search family's
+        // J_all_old retention consumed by compute_bfgs_pair_fused).
         s.joint_x_old_buf.head(n) = s.x;
         if(n_ineq > 0)
             s.joint_x_old_buf.tail(n_ineq) = s.s_slack;
-        s.joint_grad_L_old_buf = s.joint_grad_L_new_buf;
+        s.bufs.g_old_buf = s.g;
+        if(s.n_eq > 0)
+            s.bufs.J_all_old.topRows(s.n_eq) = s.J_eq;
+        if(n_ineq > 0)
+            s.bufs.J_all_old.bottomRows(n_ineq) = s.J_ineq;
 
         s.x.noalias() += p_out.head(n);
         if(n_ineq > 0)
@@ -1255,26 +1293,27 @@ struct filter_trsqp_policy
             s.bufs.kkt_mu_ineq_buf.setZero(n_ineq);
         }
 
-        // Section Q -- New joint Lagrangian gradient at z_{k+1} and the
-        // BFGS curvature pair (s_k, y_k) on the joint (x, s) space.
-        {
-            Eigen::Vector<double, N> grad_L_x_new = s.g;
-            if(s.n_eq > 0)
-                grad_L_x_new.noalias() -= s.J_eq.transpose()
-                                        * s.bufs.kkt_lambda_eq_buf;
-            if(n_ineq > 0)
-                grad_L_x_new.noalias() -= s.J_ineq.transpose()
-                                        * s.bufs.kkt_mu_ineq_buf;
-            s.joint_grad_L_new_buf.head(n) = grad_L_x_new;
-            if(n_ineq > 0)
-                s.joint_grad_L_new_buf.tail(n_ineq) = -s.bufs.kkt_mu_ineq_buf;
-        }
-
-        s.joint_sk_buf.head(n) = s.x;
+        // Section Q -- Joint BFGS curvature pair (s_k, y_k) on the
+        // (x, s) space via the shared fixed-multiplier helper. Both
+        // gradient legs are evaluated against the NEW multiplier
+        // estimate (N&W 2e eq. 18.13): the old leg re-uses the
+        // retained old-point gradient / Jacobians from Section O, the
+        // new leg lands in joint_grad_L_new_buf for the stationarity
+        // report in Section S. The slack block of y is structurally
+        // zero (grad_s L = +mu is z-independent under fixed
+        // multipliers).
+        z_k.head(n) = s.x;
         if(n_ineq > 0)
-            s.joint_sk_buf.tail(n_ineq) = s.s_slack;
-        s.joint_sk_buf.noalias() -= s.joint_x_old_buf;
-        s.joint_yk_buf = s.joint_grad_L_new_buf - s.joint_grad_L_old_buf;
+            z_k.tail(n_ineq) = s.s_slack;
+        argmin::detail::compute_joint_bfgs_pair<double, N>(
+            s.bufs.g_old_buf, s.g,
+            s.bufs.J_all_old.topRows(s.n_eq),
+            s.bufs.J_all_old.bottomRows(n_ineq),
+            s.J_eq, s.J_ineq,
+            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
+            z_k, s.joint_x_old_buf, n, n_ineq,
+            s.joint_grad_L_old_buf, s.joint_grad_L_new_buf,
+            s.joint_sk_buf, s.joint_yk_buf);
 
         // Section R -- BFGS curvature-pair push under the per-mode
         // skip-on-non-positive-curvature gate.
@@ -1299,21 +1338,30 @@ struct filter_trsqp_policy
             }
         }
 
-        // Section S -- KKT residual on the x-only un-reformulated
-        // problem.
+        // Section S -- Bound-aware KKT residual on the x-only
+        // un-reformulated problem. gradient_norm reports the
+        // box-projected joint stationarity measure
+        // ||P(z - grad_L, l, u) - z||_inf (the raw joint norm is
+        // floored at mu by the +mu slack block at inequality-active
+        // solutions and is not a stationarity measure there; at
+        // interior points the two coincide).
         //
         // Reference: Nocedal and Wright 2e Definition 12.1;
-        //            Section 12.3 + eq. 12.34.
-        const double kkt = detail::kkt_residual<double,
-                                                Eigen::Dynamic,
-                                                Eigen::Dynamic,
-                                                Eigen::Dynamic>(
-            s.g, s.J_eq, s.J_ineq,
-            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
-            s.c_eq, s.c_ineq);
+        //            Section 12.3 + eq. 12.34;
+        //            Section 16.7 (projected-gradient optimality).
+        const double kkt = bound_aware_kkt();
 
+        // Re-displace the joint box at the accepted iterate for the
+        // projected stationarity report (the Section D box was
+        // displaced at the pre-step iterate; the upper slack leg stays
+        // +inf).
+        lower_joint.head(n) = (s.lower - s.x).template cast<double>();
+        upper_joint.head(n) = (s.upper - s.x).template cast<double>();
+        if(n_ineq > 0)
+            lower_joint.tail(n_ineq) = -s.s_slack;
         const double grad_L_norm_new =
-            s.joint_grad_L_new_buf.template lpNorm<Eigen::Infinity>();
+            argmin::detail::projected_stationarity_displaced<double>(
+                s.joint_grad_L_new_buf, lower_joint, upper_joint);
 
         return step_result<double>{
             .objective_value      = s.objective_value,

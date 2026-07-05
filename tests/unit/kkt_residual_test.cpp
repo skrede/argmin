@@ -152,6 +152,82 @@ TEST_CASE("kkt_residual captures dual feasibility violation",
     CHECK(r >= 0.3);   // dual-feas leg at minimum; stationarity may dominate
 }
 
+TEST_CASE("composite kkt_residual with an active box bound: raw overload is "
+          "pinned at the bound multiplier, bound-aware overload is zero",
+          "[kkt_residual][bound]")
+{
+    // Hand-derived KKT point with one active box bound and a nonzero
+    // bound multiplier:
+    //
+    //   min x_0 + 0.5 x_1^2   s.t.   x_0 >= 0 (box),
+    //                                c_ineq(x) = x_1 + 1 >= 0 (inactive).
+    //
+    // At x* = (0, 0): grad_f = (1, 0). Stationarity with the bound
+    // multiplier zeta on x_0 >= 0 reads grad_f - zeta e_0 = 0, so
+    // zeta = 1 > 0 with x_0 active (complementarity holds). The
+    // inactive inequality carries mu = 0, c_ineq(x*) = 1.
+    //
+    // The raw-stationarity composite has no bound leg: its Leg 1 is
+    // ||grad_f||_inf = 1 == |zeta| -- the residual equals the
+    // unmodeled bound multiplier and is structurally bounded away
+    // from zero at this solution, so a kkt-gated convergence
+    // criterion can never fire here (N&W Definition 12.1 with bound
+    // multipliers; Section 16.7).
+    //
+    // The bound-aware overload's projected Leg 1:
+    //   P(x - grad_L, l, u) - x = clamp((-1, 0), (0, -inf), (inf, inf))
+    //                             - (0, 0) = (0, 0)  ->  0.
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    Eigen::Vector<double, 2> x{{0.0, 0.0}};
+    Eigen::Vector<double, 2> grad_f{{1.0, 0.0}};
+    Eigen::Matrix<double, 0, 2> J_eq;
+    Eigen::Matrix<double, 1, 2> J_ineq;
+    J_ineq << 0.0, 1.0;
+    Eigen::Vector<double, 0> lambda_eq;
+    Eigen::Vector<double, 1> mu_ineq{{0.0}};
+    Eigen::Vector<double, 0> c_eq;
+    Eigen::Vector<double, 1> c_ineq{{1.0}};
+    Eigen::Vector<double, 2> lower{{0.0, -inf}};
+    Eigen::Vector<double, 2> upper{{inf, inf}};
+
+    const double r_raw = detail::kkt_residual<double, 2, 0, 1>(
+        grad_f, J_eq, J_ineq, lambda_eq, mu_ineq, c_eq, c_ineq);
+    CHECK(r_raw == 1.0);
+
+    const double r_bound_aware = detail::kkt_residual<double, 2, 0, 1>(
+        grad_f, J_eq, J_ineq, lambda_eq, mu_ineq, c_eq, c_ineq,
+        x, lower, upper);
+    CHECK(r_bound_aware < 1e-12);
+}
+
+TEST_CASE("composite kkt_residual bound-aware overload equals the raw "
+          "overload at interior points",
+          "[kkt_residual][bound]")
+{
+    // Interior point with loose bounds: the projection is inactive and
+    // the projected stationarity leg collapses to the raw
+    // ||grad_L||_inf, so the two overloads agree exactly (no behavior
+    // change for problems without active bounds).
+    Eigen::Vector<double, 2> x{{0.5, -0.3}};
+    Eigen::Vector<double, 2> grad_f{{0.7, -0.2}};
+    Eigen::Matrix<double, 0, 2> J_eq;
+    Eigen::Matrix<double, 1, 2> J_ineq;
+    J_ineq << 0.3, 1.1;
+    Eigen::Vector<double, 0> lambda_eq;
+    Eigen::Vector<double, 1> mu_ineq{{0.25}};
+    Eigen::Vector<double, 0> c_eq;
+    Eigen::Vector<double, 1> c_ineq{{0.4}};
+    Eigen::Vector<double, 2> lower{{-10.0, -10.0}};
+    Eigen::Vector<double, 2> upper{{10.0, 10.0}};
+
+    const double r_raw = detail::kkt_residual<double, 2, 0, 1>(
+        grad_f, J_eq, J_ineq, lambda_eq, mu_ineq, c_eq, c_ineq);
+    const double r_bound_aware = detail::kkt_residual<double, 2, 0, 1>(
+        grad_f, J_eq, J_ineq, lambda_eq, mu_ineq, c_eq, c_ineq,
+        x, lower, upper);
+    CHECK(r_raw == r_bound_aware);
+}
+
 TEST_CASE("kkt_residual_bound interior point equals gradient infinity norm",
           "[kkt_residual][bound]")
 {

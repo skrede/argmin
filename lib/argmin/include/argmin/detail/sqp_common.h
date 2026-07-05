@@ -286,6 +286,112 @@ ARGMIN_FORCE_INLINE void compute_bfgs_pair_fused(
     yk_out.noalias() = grad_L_new - grad_L_old;
 }
 
+// Joint (x, s) Lagrangian gradient for the slack-reformulated TR-SQP
+// family.
+//
+// The slack reformulation casts c_ineq(x) >= 0 as the joint equality
+// r(x, s) = -c_ineq(x) + s = 0 with s >= 0 (the internal sign flip
+// matches the policies' joint Jacobian rows [-J_ineq, I]). With the
+// external Lagrangian L = f - lambda^T c_eq - mu^T c_ineq (mu >= 0,
+// detail/lagrangian.h convention), the joint multiplier nu on r that
+// reproduces the same x-block is nu = -mu:
+//
+//   grad_x L_joint = g - J_eq^T lambda + J_ineq^T nu
+//                  = g - J_eq^T lambda - J_ineq^T mu,
+//   grad_s L_joint = -nu = +mu.
+//
+// The slack block is therefore +mu_ineq — NOT -mu_ineq, and it does
+// NOT vanish at a KKT point: it equals the slack-bound multiplier
+// zeta = mu >= 0 there. The correct joint stationarity measure is the
+// box-projected one, ||P(z - grad_L_joint, l, u) - z||_inf, which IS
+// zero at KKT (the slack sits at its bound with the inward gradient
+// +mu projecting to a zero step).
+//
+// Reference: Nocedal and Wright 2e Section 18.5 (slack reformulation)
+//            and Section 16.7 (projected-gradient optimality);
+//            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim. 8(3)
+//            Section 3.1 (joint-space composite step).
+template <typename Scalar, int N>
+ARGMIN_FORCE_INLINE void assemble_joint_lagrangian_gradient(
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>&                 g,
+    const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& J_eq,
+    const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& J_ineq,
+    const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>&    lambda_eq,
+    const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>&    mu_ineq,
+    int n,
+    int n_ineq,
+    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> grad_L_joint_out)
+{
+    grad_L_joint_out.head(n) = g;
+    if(J_eq.rows() > 0)
+        grad_L_joint_out.head(n).noalias() -= J_eq.transpose() * lambda_eq;
+    if(n_ineq > 0)
+    {
+        grad_L_joint_out.head(n).noalias() -= J_ineq.transpose() * mu_ineq;
+        grad_L_joint_out.tail(n_ineq) = mu_ineq;
+    }
+}
+
+// Joint (x, s) BFGS curvature pair with the NEW multipliers held fixed
+// at both points (N&W 2e eq. 18.13):
+//
+//   y = grad_L(z_{k+1}, lambda_{k+1}) - grad_L(z_k, lambda_{k+1}).
+//
+// Both gradients are evaluated against lambda_{k+1} / mu_{k+1}; the
+// old-point leg therefore needs the OLD-point objective gradient and
+// OLD-point Jacobians (caller retains them across the post-step
+// re-evaluation, mirroring the line-search family's J_all_old pattern
+// consumed by compute_bfgs_pair_fused above). A mixed-multiplier pair
+// y = grad_L(z+, lambda+) - grad_L(z, lambda_old) injects the
+// non-curvature term J(z_k)^T (lambda_+ - lambda_old) into the secant
+// and pollutes the Hessian approximation whenever multipliers move.
+//
+// argmin variant: joint (x, s) space. Because grad_s L_joint = +mu is
+// independent of z (see assemble_joint_lagrangian_gradient), the slack
+// block of y under the fixed-multiplier pair is (+mu_+) - (+mu_+) = 0
+// identically; it is set to exactly zero here (structural fact, not a
+// numerical cancellation).
+//
+// Reference: Nocedal and Wright 2e eq. 18.13 (fixed lambda_{k+1} at
+//            both points); Kraft 1988 DFVLR-FB 88-28 Section 2.2.5.
+template <typename Scalar, int N>
+ARGMIN_FORCE_INLINE void compute_joint_bfgs_pair(
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>&                 g_old,
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>&                 g_new,
+    const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& J_eq_old,
+    const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& J_ineq_old,
+    const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& J_eq_new,
+    const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& J_ineq_new,
+    const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>&    lambda_eq_plus,
+    const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>&    mu_ineq_plus,
+    const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>&    z_new,
+    const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>&    z_old,
+    int n,
+    int n_ineq,
+    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> grad_L_joint_old_out,
+    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> grad_L_joint_new_out,
+    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> sk_out,
+    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> yk_out)
+{
+    // Old-point gradient recomputed with the NEW multipliers against
+    // the retained old-point Jacobians (N&W 18.13's fixed-lambda_+
+    // requirement); new-point gradient with the same multipliers.
+    assemble_joint_lagrangian_gradient<Scalar, N>(
+        g_old, J_eq_old, J_ineq_old, lambda_eq_plus, mu_ineq_plus,
+        n, n_ineq, grad_L_joint_old_out);
+    assemble_joint_lagrangian_gradient<Scalar, N>(
+        g_new, J_eq_new, J_ineq_new, lambda_eq_plus, mu_ineq_plus,
+        n, n_ineq, grad_L_joint_new_out);
+
+    sk_out = z_new - z_old;
+    yk_out.head(n) = grad_L_joint_new_out.head(n)
+                   - grad_L_joint_old_out.head(n);
+    // Structural zero: grad_s L_joint = +mu_+ at both points under the
+    // fixed-multiplier pair, so the slack block of y is exactly zero.
+    if(n_ineq > 0)
+        yk_out.tail(n_ineq).setZero();
+}
+
 // Adopted from: argmin/solver/nw_sqp_policy.h:222-232, :297-300 (in-tree
 //               precedent — LDLT-based equality-feasibility warm-start).
 // Reference: N&W 2e Section 18.3 (equality-feasibility step);
