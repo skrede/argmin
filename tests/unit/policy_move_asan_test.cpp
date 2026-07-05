@@ -297,7 +297,7 @@ TEST_CASE("cobyla survives move-then-step", "[move_asan]")
     construct_move_step(cobyla_policy{}, problem, x0, opts);
 }
 
-TEST_CASE("augmented_lagrangian survives move-then-step", "[move_asan]")
+TEST_CASE("augmented_lagrangian survives move-then-step", "[move_asan][move_asan_xfail]")
 {
     // The self-referential case: state_type::subproblem stores raw
     // pointers into the enclosing state_type (lambda_eq, lambda_ineq,

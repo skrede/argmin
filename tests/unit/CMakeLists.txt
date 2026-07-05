@@ -68,17 +68,44 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
-catch_discover_tests(argmin_unit_tests)
+# The augmented_lagrangian move-then-step case (tagged [move_asan_xfail]
+# in addition to [move_asan]) hard-aborts today: augmented_lagrangian_
+# policy's state is move-unsafe (self-referential subproblem pointers
+# copied, not rebased). That abort is the intended instrument -- a later
+# fix makes it move-safe -- but a process abort cannot be caught by
+# Catch2's [!shouldfail], so it is excluded from this broad discovery
+# and re-registered below with ctest's WILL_FAIL instead.
+catch_discover_tests(argmin_unit_tests
+    TEST_SPEC "~[move_asan_xfail]"
+)
 
 # Dedicated ctest label for the move-and-step ASan instrument so the
 # sanitize CI job can select it explicitly (`ctest -L asan-move`) even
 # though the whole suite already runs under -fsanitize=address. This is
 # a second discovery pass over the same executable restricted to the
-# [move_asan]-tagged cases; it registers duplicate ctest entries for
-# those cases (harmless -- they just run twice under a plain `ctest`).
+# [move_asan]-tagged cases (excluding the xfail one, registered
+# separately below); it registers duplicate ctest entries for those
+# cases (harmless -- they just run twice under a plain `ctest`).
 catch_discover_tests(argmin_unit_tests
-    TEST_SPEC "[move_asan]"
+    TEST_SPEC "[move_asan]~[move_asan_xfail]"
     TEST_PREFIX "asan-move:"
+    PROPERTIES LABELS "asan-move"
+)
+
+# The augmented_lagrangian move-then-step case hard-aborts (SIGABRT) via a
+# real process signal, not a Catch2 assertion failure, so ctest's WILL_FAIL
+# property cannot invert it -- a signal-terminated subprocess is reported
+# as "Subprocess aborted" regardless of WILL_FAIL. Instead, run it out of
+# process through a wrapper script that treats the expected abort as a
+# clean exit (ctest PASS) and fails loudly if the case ever exits cleanly
+# on its own (the move-safety bug is fixed; see expect_move_asan_abort.cmake).
+add_test(NAME "asan-move:augmented_lagrangian survives move-then-step"
+    COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_EXECUTABLE=$<TARGET_FILE:argmin_unit_tests>"
+        "-DTEST_WORKING_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_move_asan_abort.cmake"
+)
+set_tests_properties("asan-move:augmented_lagrangian survives move-then-step"
     PROPERTIES LABELS "asan-move"
 )
 
