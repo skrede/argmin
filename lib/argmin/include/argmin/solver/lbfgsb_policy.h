@@ -160,6 +160,7 @@ struct lbfgsb_policy
                 .improved = false,
                 .x_norm = s.x.norm(),
                 .kkt_residual = kkt,
+                .evaluations = 0,  // no line search ran on this null step
             };
         }
         auto& result = *dir;
@@ -261,6 +262,9 @@ struct lbfgsb_policy
             .x_norm = x_norm,
             .kkt_residual = kkt,
             .policy_status = policy_status,
+            // Line-search trial evaluations plus the objective evaluation at
+            // the projected accepted iterate -- the genuine per-step count.
+            .evaluations = static_cast<std::uint32_t>(ls.evaluations) + 1u,
         };
     }
 

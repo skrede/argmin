@@ -213,9 +213,13 @@ TEST_CASE("solver_group all retired stops iteration", "[tolerance]")
                        test::diverging_mock_policy> group(prob, x0, opts);
     auto result = group.step_n(1000, opts);
 
-    // Both policies fail, group should stop early
+    // Both policies fail and retire, so the group stops well before the
+    // 1000 budget. The reported iteration count must be the real number of
+    // steps executed before all solvers retired -- not the requested budget
+    // (which would falsely claim 1000 iterations of work never performed).
     CHECK(result.status == solver_status::budget_exhausted);
-    CHECK(result.iterations == 1000);
+    CHECK(result.iterations < 1000);
+    CHECK(result.iterations > 0);
 
     auto& results = group.results();
     CHECK(results[0].status == solver_status::roundoff_limited);

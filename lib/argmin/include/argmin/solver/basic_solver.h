@@ -14,6 +14,7 @@
 
 #include <Eigen/Core>
 
+#include <bit>
 #include <cmath>
 #include <tuple>
 #include <atomic>
@@ -174,6 +175,45 @@ public:
         }
     }
 
+    // Copy a source policy's options into the rebound policy's options. The
+    // CTAD rebind changes only the compile-time dimension N; options_type
+    // carries no N-dependent members, so the source and rebound option
+    // aggregates are structurally identical though distinct C++ types (each
+    // is a nested type of a different Policy specialization). Their field
+    // layout is therefore identical and a trivially-copyable relocation is
+    // exact. When the types coincide (no dimension change) this degrades to
+    // a plain assignment.
+    template <typename Dst, typename Src>
+    static void assign_rebound_options(Dst& dst, const Src& src)
+    {
+        if constexpr(std::is_same_v<Dst, Src>)
+            dst = src;
+        else
+        {
+            static_assert(std::is_trivially_copyable_v<Dst>
+                          && std::is_trivially_copyable_v<Src>
+                          && sizeof(Dst) == sizeof(Src),
+                          "rebind must carry the configured policy options "
+                          "across the dimension change: the source and "
+                          "rebound option aggregates must be layout-identical "
+                          "trivially-copyable types");
+            dst = std::bit_cast<Dst>(src);
+        }
+    }
+
+    // Build the rebound policy for the converting CTAD constructors,
+    // preserving the caller's configured options instead of silently
+    // default-constructing them away. Accepts both lvalue and rvalue source
+    // policies.
+    template <typename OrigPolicy>
+    static Policy rebind_policy(OrigPolicy&& orig)
+    {
+        Policy p{};
+        if constexpr(has_options_type<Policy>)
+            assign_rebound_options(p.options, orig.options);
+        return p;
+    }
+
     template <typename P>
     basic_solver(Policy policy, const P& problem,
                  const Eigen::VectorX<scalar_type>& x0,
@@ -193,17 +233,20 @@ public:
             forward_policy_hints(policy_.options);
     }
 
-    // CTAD converting constructor: accepts an un-rebound policy and discards
-    // it, default-constructing the rebound policy. Enables deduction guides
-    // that rebind Policy to the problem's compile-time dimension.
+    // CTAD converting constructor: accepts an un-rebound policy and rebinds
+    // it to the problem's compile-time dimension, preserving the caller's
+    // configured options. The requires-clause strips cvref from OrigPolicy so
+    // both lvalue and rvalue source policies are accepted (an lvalue deduces
+    // OrigPolicy as a reference type, which has no nested rebind alias).
     template <typename OrigPolicy, typename P>
         requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
-              && requires { typename OrigPolicy::template rebind<N>; }
-              && std::same_as<Policy, typename OrigPolicy::template rebind<N>>
-    basic_solver(OrigPolicy&&, const P& problem,
+              && requires { typename std::remove_cvref_t<OrigPolicy>::template rebind<N>; }
+              && std::same_as<Policy, typename std::remove_cvref_t<OrigPolicy>::template rebind<N>>
+    basic_solver(OrigPolicy&& orig, const P& problem,
                  const Eigen::VectorX<scalar_type>& x0,
                  const solver_options<Convergence>& opts = {})
-        : max_iterations_{opts.max_iterations}
+        : policy_{rebind_policy(std::forward<OrigPolicy>(orig))}
+        , max_iterations_{opts.max_iterations}
         , verbosity_{opts.verbosity}
         , max_time_{opts.max_time}
         , constraint_tolerance_{opts.constraint_tolerance}
@@ -255,11 +298,14 @@ public:
         forward_policy_hints(policy_opts);
     }
 
-    // CTAD converting constructor with policy options.
+    // CTAD converting constructor with policy options. The explicit
+    // policy_opts (already rebound-typed) is installed by init(); the
+    // requires-clause strips cvref from OrigPolicy so an lvalue source policy
+    // is accepted.
     template <typename OrigPolicy, typename P, typename PolicyOpts>
         requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
-              && requires { typename OrigPolicy::template rebind<N>; }
-              && std::same_as<Policy, typename OrigPolicy::template rebind<N>>
+              && requires { typename std::remove_cvref_t<OrigPolicy>::template rebind<N>; }
+              && std::same_as<Policy, typename std::remove_cvref_t<OrigPolicy>::template rebind<N>>
               && has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
     basic_solver(OrigPolicy&&, const P& problem,
@@ -332,6 +378,8 @@ public:
         , problem_ptr_{other.problem_ptr_}
         , state_{std::move(other.state_)}
         , iterations_{other.iterations_}
+        , function_evaluations_{other.function_evaluations_}
+        , last_gradient_norm_{other.last_gradient_norm_}
         , last_status_{other.last_status_}
         , abort_flag_{other.abort_flag_.load(std::memory_order_relaxed)}
     {}
@@ -350,6 +398,8 @@ public:
             problem_ptr_ = other.problem_ptr_;
             state_ = std::move(other.state_);
             iterations_ = other.iterations_;
+            function_evaluations_ = other.function_evaluations_;
+            last_gradient_norm_ = other.last_gradient_norm_;
             last_status_ = other.last_status_;
             abort_flag_.store(other.abort_flag_.load(std::memory_order_relaxed),
                               std::memory_order_relaxed);
@@ -357,16 +407,28 @@ public:
         return *this;
     }
 
+    // Single iteration with per-step convergence consultation.
+    //
+    // Beyond executing the policy step and updating telemetry, step() checks
+    // the stored convergence criteria against the produced result and updates
+    // the solver's reported status(). A caller driving a tick loop via step()
+    // alone (MPC/IK) therefore sees a by-criterion terminal status without
+    // reimplementing the stopping tests or paying the step_n(1) cost of
+    // rebuilding options and reseeding best-seen tracking. The stored
+    // convergence and the running iteration counter are reused as-is; no
+    // options are rebuilt. Policy-reported failure (policy_status) takes
+    // precedence over the convergence verdict.
     step_result<scalar_type> step()
     {
-        auto result = policy_.step(state_);
-        // Central x_norm fill so step_tolerance_rel_criterion can use a
-        // consistent denominator without per-policy churn. Policies own
-        // constraint_violation (previously overwritten here, which destroyed
-        // filter-policy semantics where the reported violation corresponds
-        // to the returned trial/restoration step).
-        result.x_norm = state_.x.norm();
-        ++iterations_;
+        auto result = step_impl();
+
+        if(result.policy_status)
+            last_status_ = *result.policy_status;
+        else if(auto conv = stored_convergence_.check(result, iterations_))
+            last_status_ = *conv;
+        else
+            last_status_ = solver_status::running;
+
         return result;
     }
 
@@ -378,6 +440,15 @@ public:
     // constraint_tolerance_/feasibility_tolerance_ into the local opts so the
     // best-seen feasibility comparator honors them instead of reverting to
     // solver_options's 1e-6 default.
+    //
+    // Re-entrancy: solve() and step_n(budget) are continuations, not
+    // restarts. Each call executes up to its budget of ADDITIONAL iterations
+    // from the current iterate, and the iteration counter, evaluation
+    // counter, and any windowed convergence state accumulate across calls. A
+    // second solve() therefore resumes where the first stopped (a warm
+    // restart), which is the semantics a tick-loop caller wants. To restart
+    // from a clean counter and a new starting point, call reset() (preserves
+    // algorithm state) or reset_clear() (drops it) first.
     solve_result<scalar_type, N> solve()
     {
         solver_options<Convergence> opts;
@@ -484,7 +555,11 @@ public:
                 }
             }
 
-            last = step();
+            // step_impl() (not the public step()) runs the raw iteration:
+            // the convergence loop below owns the stopping decision through
+            // opts.convergence, so a second per-step convergence consult
+            // inside step() would double-advance windowed criteria.
+            last = step_impl();
 
             // Best-seen update: compare after every step including the
             // one that triggers policy_status or convergence, so the
@@ -543,7 +618,11 @@ public:
         return solve_result<scalar_type, N>{
             .status = status,
             .iterations = iterations_,
-            .function_evaluations = iterations_,
+            // Genuine accumulated evaluation count (summed from each step's
+            // reported step_result::evaluations), not an alias of the
+            // iteration count. Policies that evaluate several times per
+            // iteration (line searches) report > iterations here.
+            .function_evaluations = function_evaluations_,
             .objective_value = best_f,
             .gradient_norm = last.gradient_norm,
             .constraint_violation = best_cv,
@@ -561,6 +640,17 @@ public:
 
     solver_status status() const { return last_status_; }
 
+    // The wrapped policy instance (options included). Lets a caller confirm
+    // the configuration that actually reached the policy -- notably that a
+    // CTAD rebind preserved the configured options rather than resetting
+    // them.
+    const Policy& policy() const { return policy_; }
+
+    // The gradient-like norm reported by the most recent step, or a NaN
+    // sentinel when no step has run yet (genuinely unavailable -- never a
+    // fabricated 0 that would read as a stationary point).
+    scalar_type gradient_norm() const { return last_gradient_norm_; }
+
     scalar_type constraint_violation() const
     {
         if constexpr(requires { state_.c_eq; state_.c_ineq; })
@@ -577,6 +667,8 @@ public:
     {
         policy_.reset(state_, Eigen::Vector<scalar_type, N>(x0));
         iterations_ = 0;
+        function_evaluations_ = 0;
+        last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
         last_status_ = solver_status::running;
         abort_flag_.store(false, std::memory_order_relaxed);
     }
@@ -587,6 +679,8 @@ public:
     {
         policy_.reset_clear(state_, Eigen::Vector<scalar_type, N>(x0));
         iterations_ = 0;
+        function_evaluations_ = 0;
+        last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
         last_status_ = solver_status::running;
         abort_flag_.store(false, std::memory_order_relaxed);
     }
@@ -728,6 +822,24 @@ public:
     }
 
 private:
+    // Raw single iteration shared by the public step() and the step_n()
+    // convergence loop. Executes the policy step, fills x_norm centrally
+    // (so step_tolerance_rel_criterion has a consistent denominator without
+    // per-policy churn -- policies own constraint_violation, previously
+    // overwritten here), advances the iteration and evaluation counters, and
+    // records the reported gradient norm. Deliberately does NOT consult
+    // convergence: the public step() adds that on top, while step_n() owns
+    // its own stopping decision.
+    step_result<scalar_type> step_impl()
+    {
+        auto result = policy_.step(state_);
+        result.x_norm = state_.x.norm();
+        ++iterations_;
+        function_evaluations_ += result.evaluations;
+        last_gradient_norm_ = result.gradient_norm;
+        return result;
+    }
+
     // Seed best-seen f at step_n entry via a direct problem evaluation.
     // Requires Problem != void (i.e. the class-template Problem slot was
     // filled by CTAD or explicit instantiation). Legacy non-template
@@ -779,6 +891,13 @@ private:
     const Problem* problem_ptr_{nullptr};
     state_type state_;
     std::uint32_t iterations_{0};
+    // Accumulated genuine evaluation count (sum of per-step
+    // step_result::evaluations); reported as solve_result::function_evaluations
+    // instead of aliasing the iteration count.
+    std::uint32_t function_evaluations_{0};
+    // Gradient-like norm from the most recent step; NaN until the first step
+    // (genuinely unavailable), never a fabricated 0.
+    scalar_type last_gradient_norm_{std::numeric_limits<scalar_type>::quiet_NaN()};
     solver_status last_status_{solver_status::running};
     std::atomic<bool> abort_flag_{false};
 };

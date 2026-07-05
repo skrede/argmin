@@ -4,6 +4,7 @@
 #include "argmin/result/status.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 
 namespace argmin
@@ -45,6 +46,15 @@ struct step_result
     // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity).
     std::optional<Scalar> kkt_residual{};
     std::optional<solver_status> policy_status{};
+
+    // Objective/merit evaluations performed during this single step, e.g.
+    // the trial-point evaluations a line search makes. Defaults to 1 --
+    // every real step evaluates the objective at least once. basic_solver
+    // accumulates this across steps so solve_result::function_evaluations
+    // reports the genuine evaluation count instead of aliasing the
+    // iteration count. Policies that perform inner evaluation loops (line
+    // searches, restoration phases) should report the true count here.
+    std::uint32_t evaluations{1};
 
     // Per-step solver diagnostics for telemetry. Defaulted-member
     // sub-struct so future fields can be added without touching

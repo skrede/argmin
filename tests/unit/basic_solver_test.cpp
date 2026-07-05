@@ -3,6 +3,10 @@
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/result/status.h"
+#include "argmin/test_functions/rosenbrock.h"
+
+#include <cmath>
+#include <type_traits>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -100,6 +104,46 @@ struct scripted_feasibility_policy
     {
         reset(s, x0);
     }
+};
+
+// Policy that performs a fixed number of objective evaluations per step
+// (mimicking a line search) and never converges by criterion, so step_n's
+// iteration count equals the budget while its evaluation count is a genuine
+// multiple of it. Pins that solve_result::function_evaluations accumulates
+// the real per-step count instead of aliasing the iteration count.
+struct multi_eval_policy
+{
+    using scalar_type = double;
+
+    struct state_type
+    {
+        Eigen::VectorXd x;
+        double objective_value{};
+    };
+
+    template <typename Problem, typename Convergence = argmin::default_convergence>
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
+                    const argmin::solver_options<Convergence>&)
+    {
+        return state_type{.x = x0, .objective_value = 100.0};
+    }
+
+    static constexpr std::uint32_t evals_per_step = 3;
+
+    argmin::step_result<double> step(state_type&)
+    {
+        return argmin::step_result<double>{
+            .objective_value = 100.0,
+            .gradient_norm = 10.0,
+            .step_size = 1.0,
+            .objective_change = -1.0,
+            .improved = true,
+            .evaluations = evals_per_step,
+        };
+    }
+
+    void reset(state_type& s, const Eigen::VectorXd& x0) { s.x = x0; }
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0) { reset(s, x0); }
 };
 
 TEST_CASE("basic_solver step", "[solver]")
@@ -431,4 +475,149 @@ TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance
 
     CHECK(result.objective_value == Approx(5.0));
     CHECK(result.constraint_violation == Approx(5e-4));
+}
+
+// ---------------------------------------------------------------------------
+// CTAD rebind preserves configured policy options and accepts lvalue policies.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("basic_solver CTAD rebind preserves configured policy options",
+          "[solver][ctad]")
+{
+    // quadratic_with_gradient::problem_dimension == 2, so the deduction guide
+    // rebinds lbfgsb_policy<> (dynamic) to lbfgsb_policy<2>: the converting
+    // constructor -- not the plain same-type constructor -- runs. The
+    // configured option must survive the rebind rather than being reset by a
+    // default-constructed rebound policy.
+    quadratic_with_gradient prob;
+    Eigen::VectorXd x0{{3.0, 4.0}};
+    solver_options<> opts;
+
+    SECTION("lvalue policy is accepted and its options survive the rebind")
+    {
+        lbfgsb_policy<> configured;
+        configured.options.history_depth = 7;  // non-default configured option
+
+        basic_solver solver{configured, prob, x0, opts};
+
+        // The converting ctor really ran: the stored policy is the rebound
+        // fixed-dimension type, not the dynamic source type.
+        static_assert(std::is_same_v<
+            std::remove_cvref_t<decltype(solver.policy())>, lbfgsb_policy<2>>);
+
+        REQUIRE(solver.policy().options.history_depth.has_value());
+        CHECK(*solver.policy().options.history_depth == 7);
+    }
+
+    SECTION("rvalue policy carrying configured options preserves them")
+    {
+        lbfgsb_policy<> configured;
+        configured.options.history_depth = 9;
+
+        basic_solver solver{std::move(configured), prob, x0, opts};
+
+        REQUIRE(solver.policy().options.history_depth.has_value());
+        CHECK(*solver.policy().options.history_depth == 9);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// step() consults convergence and updates status; solve() re-entrancy.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("basic_solver step() consults convergence and reports a by-criterion status",
+          "[solver][step]")
+{
+    quadratic_with_gradient prob;
+    Eigen::VectorXd x0{{3.0, 4.0}};
+    solver_options<> opts;
+
+    basic_solver solver{lbfgsb_policy<>{}, prob, x0, opts};
+
+    // No step yet: the solver is running.
+    CHECK(solver.status() == solver_status::running);
+
+    // Pure step() tick loop (no step_n): the stored default convergence must
+    // flip status() to a by-criterion terminal state at the stationary
+    // iterate, with no criterion re-implemented by the caller.
+    bool terminal = false;
+    for(int i = 0; i < 200; ++i)
+    {
+        solver.step();
+        if(solver.status() != solver_status::running)
+        {
+            terminal = true;
+            break;
+        }
+    }
+    REQUIRE(terminal);
+    CHECK(solver.status() == solver_status::converged);
+}
+
+TEST_CASE("basic_solver solve() re-entrancy is a continuation; reset() restarts",
+          "[solver][reentrancy]")
+{
+    quadratic prob;
+    Eigen::VectorXd x0{{3.0, 4.0}};
+    solver_options<> opts;
+    std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
+
+    basic_solver<test::mock_policy> solver{prob, x0, opts};
+
+    auto r1 = solver.solve(opts);
+    REQUIRE(r1.status == solver_status::converged);
+    const auto n1 = r1.iterations;
+    REQUIRE(n1 > 0);
+
+    // Second solve() WITHOUT reset is a continuation: the iteration counter
+    // accumulates, so the solver resumes from the converged iterate and
+    // reports a strictly larger cumulative count.
+    auto r2 = solver.solve(opts);
+    CHECK(r2.iterations > n1);
+
+    // reset() restarts the counter and the iterate; the next solve() reports
+    // the same fresh count as the first, strictly below the continuation.
+    solver.reset(x0);
+    auto r3 = solver.solve(opts);
+    CHECK(r3.iterations == n1);
+    CHECK(r3.iterations < r2.iterations);
+}
+
+// ---------------------------------------------------------------------------
+// Truthful telemetry: function_evaluations counts real evaluations.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("basic_solver reports genuine function_evaluations, not an iteration alias",
+          "[solver][telemetry]")
+{
+    quadratic prob;
+    Eigen::VectorXd x0{{1.0, 1.0}};
+    solver_options<> opts;
+
+    basic_solver<multi_eval_policy> solver{prob, x0, opts};
+    auto result = solver.step_n(5);
+
+    CHECK(result.iterations == 5);
+    // Three evaluations per iteration, genuinely accumulated -- impossible
+    // under the old function_evaluations = iterations_ alias.
+    CHECK(result.function_evaluations == 5 * multi_eval_policy::evals_per_step);
+    CHECK(result.function_evaluations > result.iterations);
+}
+
+TEST_CASE("basic_solver function_evaluations counts real line-search evaluations",
+          "[solver][telemetry]")
+{
+    // Rosenbrock's curved valley forces the strong-Wolfe line search to make
+    // several trial evaluations per iteration, so the accumulated evaluation
+    // count must exceed the iteration count.
+    rosenbrock<> prob{.n = 2};
+    Eigen::VectorXd x0{{-1.2, 1.0}};
+    solver_options<> opts;
+    opts.max_iterations = 200;
+
+    basic_solver solver{lbfgsb_policy<>{}, prob, x0, opts};
+    auto result = solver.solve(opts);
+
+    CHECK(result.iterations > 0);
+    CHECK(result.function_evaluations > result.iterations);
 }

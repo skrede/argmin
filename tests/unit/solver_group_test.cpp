@@ -475,3 +475,53 @@ TEST_CASE("standalone basic_solver treats the same borderline iterate as feasibl
 
     CHECK(result.objective_value == Approx(10.0));
 }
+
+TEST_CASE("group step_n reports the executed iteration count on early break, not the budget",
+          "[solver_group][telemetry]")
+{
+    quadratic_group prob;
+    Eigen::VectorXd x0{{4.0, 4.0}};
+    solver_options opts;
+
+    // Both policies retire (report converged) on their own 2nd step;
+    // round-robin retires both within 4 group steps -- far short of the 100
+    // budget. The reported iteration/evaluation counts must reflect the 4
+    // steps that actually ran, not the requested budget.
+    basic_solver_group<round_robin_schedule, argmin::dynamic_dimension, void,
+                       test::converging_mock_policy, test::converging_mock_policy>
+        group{prob, x0, opts};
+
+    auto result = group.step_n(100);
+
+    CHECK(result.status == solver_status::budget_exhausted);
+    CHECK(result.iterations == 4);
+    CHECK(result.iterations < 100);
+    // One evaluation per step here, genuinely accumulated -- not the budget.
+    CHECK(result.function_evaluations == 4);
+}
+
+TEST_CASE("group populate_active_results reports a real gradient_norm, not a hardcoded zero",
+          "[solver_group][telemetry]")
+{
+    quadratic_group prob;
+    Eigen::VectorXd x0{{2.0, 2.0}};
+    solver_options opts;
+
+    // Neither mock_policy retires, so both are active when
+    // populate_active_results fills the per-solver results after the run.
+    // Each active solver's result must carry its real last-reported gradient
+    // norm (x.norm() > 0 after stepping), never the old fabricated 0.0 that
+    // reads as a stationary point.
+    basic_solver_group<round_robin_schedule, argmin::dynamic_dimension, void,
+                       test::mock_policy, test::mock_policy>
+        group{prob, x0, opts};
+
+    group.step_n(4);
+
+    const auto& results = group.results();
+    for(const auto& r : results)
+    {
+        CHECK(std::isfinite(r.gradient_norm));
+        CHECK(r.gradient_norm > 0.0);
+    }
+}

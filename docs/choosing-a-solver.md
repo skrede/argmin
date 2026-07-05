@@ -14,13 +14,13 @@ If you only remember one rule: **`lbfgsb` for unconstrained / box-constrained, `
 | Least-squares (sum of squares of residuals), unconstrained | `lm` | Levenberg-Marquardt; exploits the Gauss-Newton structure, much faster than treating it as generic unconstrained. |
 | Least-squares, box-constrained | `projected_gn` (J explicitly) or `projected_gradient_gn` (J via gradient) | Active-set Gauss-Newton with bound projection; the standard choice for inverse kinematics. |
 | Derivative-free, smooth, small `n` (≤ 20) | `bobyqa` | Powell's quadratic-model trust region. Local solver — finds the nearest minimum. |
-| Derivative-free, multimodal, small `n` | `multistart_bobyqa` | Wraps `bobyqa` with random restarts. Modest improvement, not a global solver. |
+| Derivative-free, multimodal, small `n` | `multistart_policy` wrapping `bobyqa` | Wraps `bobyqa` with random restarts. Modest improvement, not a global solver. |
 | Equality + inequality constrained, gradients available | `kraft_slsqp` | Faithful Kraft 1988 SLSQP with native box bounds. The default constrained solver. |
 | Same as above, **filter line-search** | `filter_slsqp` | Fletcher-Leyffer 2002 filter acceptance instead of L1 merit. Sometimes converges where `kraft_slsqp` stalls; usually a few more iterations. |
 | Constrained problem with separable structure (topology / structural opt) | `mma`, `gcmma`, or `ccsa_quadratic` | Method of Moving Asymptotes (Svanberg 1987 / 2002). Best when the objective and constraints are well-approximated by separable convex functions in `1/(U-x)` and `1/(x-L)`. |
 | Constrained problem, derivative-free | `cobyla` (with caveats) or `augmented_lagrangian` wrapping `bobyqa` | See "Known limitations" below before reaching for COBYLA. |
 | General constrained, want to use any unconstrained solver as the inner | `augmented_lagrangian` | Meta-policy. Wraps any unconstrained or box-constrained policy and handles equality + inequality via penalty + multiplier updates. |
-| Bound-constrained, multimodal, no gradients | `cmaes` or `restarting_cmaes` | Covariance Matrix Adaptation Evolution Strategy. `restarting_cmaes` adds Hansen-Auger IPOP restarts for harder landscapes. |
+| Bound-constrained, multimodal, no gradients | `cmaes` or `restarting_policy` wrapping `cmaes` | Covariance Matrix Adaptation Evolution Strategy. The restarting wrapper adds Hansen-Auger IPOP restarts for harder landscapes. |
 | Bound-constrained, multimodal, **with constraints** | `isres` | Runarsson-Yao 2005 stochastic ranking ES. Handles inequality constraints via stochastic ranking. |
 | Local solver but you want random restarts | `multistart_policy<InnerPolicy>` | Wraps any local policy. |
 | CMA-ES with restart strategy | `restarting_policy<cmaes_policy<>>` | The IPOP-CMA-ES restart wrapper. |
@@ -43,9 +43,9 @@ Phase 33 hotfixed COBYLA's adaptive `parmu` parameter, closing the silent-wrong-
 
 ### CMA-ES on Ackley / Schwefel
 
-`cmaes` and `restarting_cmaes` converge to local minima rather than the global optimum on `ackley_2`, `ackley_10`, and `schwefel_2`. The local-minimum escape is weaker than the Hansen-Auger active-CMA reference. On Rastrigin (2-D and 10-D) and Griewank (2-D) the median seed reaches machine zero; the gap is concentrated on landscapes with very flat basins.
+`cmaes` and the restarting wrapper around it converge to local minima rather than the global optimum on `ackley_2`, `ackley_10`, and `schwefel_2`. The local-minimum escape is weaker than the Hansen-Auger active-CMA reference. On Rastrigin (2-D and 10-D) and Griewank (2-D) the median seed reaches machine zero; the gap is concentrated on landscapes with very flat basins.
 
-**Workaround:** for those specific landscapes, run with multiple seeds and take the best, or use `restarting_cmaes` which improves the success rate on Rastrigin / Griewank but does not close the Ackley / Schwefel gap. An active-CMA variant is in the v0.3.x scope.
+**Workaround:** for those specific landscapes, run with multiple seeds and take the best, or use `restarting_policy` wrapping `cmaes` which improves the success rate on Rastrigin / Griewank but does not close the Ackley / Schwefel gap. An active-CMA variant is in the v0.3.x scope.
 
 ### MMA / GCMMA conjoined-gate FAILs
 
@@ -59,7 +59,7 @@ MMA and GCMMA reach the correct objective on the cells they were designed for (H
 
 **`mma` vs `gcmma` vs `ccsa_quadratic`.** Use `mma` for Svanberg 1987 baseline. Use `gcmma` (globally convergent MMA, Svanberg 2002) when the inner subproblem must be conservative — typically when the objective has very different curvature than the asymptote approximation predicts. `ccsa_quadratic` swaps the rational MMA approximation for a quadratic; rarely the right call but kept for parity with reference implementations.
 
-**`cmaes` vs `restarting_cmaes`.** Use `restarting_cmaes` when you don't know whether the global optimum is in the initial basin. The IPOP restart doubles the population on each restart up to a cap, dramatically improving the chance of escaping local minima, at the cost of a 2-10x increase in function evaluations.
+**`cmaes` vs the restarting wrapper.** Use `restarting_policy` wrapping `cmaes` when you don't know whether the global optimum is in the initial basin. The IPOP restart doubles the population on each restart up to a cap, dramatically improving the chance of escaping local minima, at the cost of a 2-10x increase in function evaluations.
 
 **`augmented_lagrangian` vs `kraft_slsqp` for general constraints.** `kraft_slsqp` is faster when gradients are available and accurate. `augmented_lagrangian` is what you want when (a) you want to use a derivative-free inner like `bobyqa`, (b) gradients are noisy, or (c) you want to plug in an inner you've already characterised (the meta-policy is parameterised on the inner type).
 
@@ -68,6 +68,9 @@ MMA and GCMMA reach the correct objective on the cells they were designed for (H
 Every policy template takes an `N` parameter that propagates to inner Eigen types. Pass a concrete `int` for fixed dimensions (`lbfgsb_policy<2>` for a 2-D problem) and `argmin::dynamic_dimension` (the default) for runtime-sized problems. Fixed dimensions enable stack allocation, more aggressive inlining, and eliminate heap traffic in the hot path — the difference is meaningful for small `n` in tight loops (IK, MPC).
 
 ```cpp
+// Fully-spelled fixed-dimension form (Problem given, so state_type resolves).
 basic_solver<lbfgsb_policy<2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};
-basic_solver<lbfgsb_policy<>>                            generic{problem, x0, opts};
+// CTAD deduces N and Problem from the arguments; the policy is rebound to the
+// problem's dimension automatically.
+basic_solver generic{lbfgsb_policy<>{}, problem, x0, opts};
 ```

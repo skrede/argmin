@@ -165,6 +165,12 @@ public:
         step_result<scalar_type> last{};
         solver_status status = solver_status::running;
 
+        // Real executed counts, so an early break (all solvers retired, a
+        // time limit, or a converged criterion) reports what actually ran
+        // rather than the full budget.
+        std::uint32_t executed = 0;
+        std::uint32_t evaluations = 0;
+
         for(std::uint32_t i = 0; i < budget; ++i)
         {
             // Time limit check (D-11: between steps)
@@ -186,6 +192,8 @@ public:
             }
 
             last = step();
+            ++executed;
+            evaluations += last.evaluations;
 
             // For groups, policy failure retires the individual policy (handled in step()).
             // Only stop the entire group if ALL policies are retired.
@@ -219,8 +227,10 @@ public:
 
         return solve_result<scalar_type, N>{
             .status = status,
-            .iterations = budget,
-            .function_evaluations = budget,
+            // Real executed iteration count and accumulated evaluation count,
+            // not the requested budget -- an early break reports what ran.
+            .iterations = executed,
+            .function_evaluations = evaluations,
             .objective_value = objective_at(best_idx, seq),
             .gradient_norm = last.gradient_norm,
             .constraint_violation = constraint_violation_at(best_idx, seq),
@@ -391,7 +401,10 @@ private:
                 results_[i] = solve_result<scalar_type, N>{
                     .status = group_status,
                     .objective_value = solver.state().objective_value,
-                    .gradient_norm = 0.0,
+                    // Real last-reported gradient norm for this active solver
+                    // (NaN sentinel if it never stepped) -- never a fabricated
+                    // 0 that would read as a stationary point.
+                    .gradient_norm = solver.gradient_norm(),
                     .constraint_violation = solver.constraint_violation(),
                     .x = solver.state().x,
                     .wall_time = wall_time,

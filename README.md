@@ -14,7 +14,7 @@ The library is built around three properties that matter when the optimiser sits
 
 What is solid:
 - L-BFGS-B (`lbfgsb`, `byrd_lbfgsb`) — unconstrained and box-constrained smooth problems
-- BOBYQA (`bobyqa`, `multistart_bobyqa`) — derivative-free, small `n`
+- BOBYQA (`bobyqa`, plus `multistart_policy` wrapping it) — derivative-free, small `n`
 - Levenberg-Marquardt (`lm`) and Projected Gauss-Newton (`projected_gn`, `projected_gradient_gn`) — least-squares
 - Kraft SLSQP (`kraft_slsqp`, `filter_slsqp`) — equality + inequality constrained
 - MMA / GCMMA / CCSA-quadratic — separable convex approximation
@@ -82,7 +82,7 @@ int main()
     opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 500;
 
-    basic_solver<lbfgsb_policy<>> solver{problem, x0, opts};
+    basic_solver solver{lbfgsb_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     std::cout << "status: " << static_cast<int>(result.status) << '\n'
@@ -91,7 +91,7 @@ int main()
 }
 ```
 
-Bring your own problem by satisfying the `differentiable` concept (and `bound_constrained`, `equality_constrained`, `inequality_constrained` as appropriate). See `lib/argmin/include/argmin/formulation/concepts.h`.
+Bring your own problem by satisfying the `differentiable` concept (and `bound_constrained`, `constrained_values`, `constrained` as appropriate). See `lib/argmin/include/argmin/formulation/concepts.h`.
 
 ## Step-level execution
 
