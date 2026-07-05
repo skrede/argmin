@@ -14,12 +14,15 @@
 //     a Boolean acceptance check; on accept the step is always added to
 //     the filter; on reject the trust-region radius shrinks and the
 //     step is not added.
-//   * switching_condition (Wachter-Biegler 2005 Section 2.3): an
-//     accepted step is classified f-type (objective-dominated) when
-//     predicted > kappa * h_current^s and h-type otherwise; f-type
-//     accepted steps are NOT added to the filter (allowing revisits);
-//     h-type accepted steps are added. Rejection path is identical to
-//     tr_shrink.
+//   * switching_condition (Wachter-Biegler 2006 Section 2.3, eqs.
+//     18-20, Algorithm A): acceptance requires the filter memory check
+//     AND the eq. 18 current-iterate margin; a step is classified
+//     f-type when the eq. 19 switching condition (on grad_f^T p, gated
+//     by the theta_min floor) and the eq. 20 sufficient-objective-
+//     reduction condition both hold. f-type accepted steps are NOT
+//     added to the filter (Algorithm A step A-7 -- they are reversible
+//     and must not pollute the filter); every other accepted step is
+//     added. Rejection path is identical to tr_shrink.
 //
 // Inequalities are reformulated via slacks (c_ineq(x) + s = 0, s >= 0).
 // The joint primal is z = (x, s) in R^{n + n_ineq}; the Lagrangian
@@ -134,15 +137,18 @@ struct filter_trsqp_policy
     // Fletcher-Leyffer-Toint 2002 Section 3 (filter is a Boolean
     // acceptance check; on accept always add to filter, on reject
     // shrink the trust region and do not add). switching_condition
-    // follows Wachter-Biegler 2005 Section 2.3 (an accepted step is
-    // f-type when predicted > kappa * h_current^s and h-type otherwise;
-    // f-type accepted steps are NOT added to the filter, allowing
-    // revisits; h-type accepted steps are added).
+    // follows Wachter-Biegler 2006 Section 2.3 / Algorithm A:
+    // acceptance additionally requires the eq. 18 margin against the
+    // current iterate; an accepted step is f-type when the eq. 19
+    // switching condition on grad_f^T p (gated by theta_min) and the
+    // eq. 20 sufficient-f-reduction condition both hold; f-type
+    // accepted steps are NOT added to the filter (allowing revisits);
+    // all other accepted steps are added (step A-7).
     //
     // Reference: Fletcher, Leyffer, Toint 2002 SIAM J. Optim.
     //            13(1):44-59 Section 3;
-    //            Wachter and Biegler 2005 SIAM J. Optim. 16(1):1-31
-    //            Section 2.3.
+    //            Wachter and Biegler 2006 Math. Programming 106:25-57
+    //            Section 2.3 eqs. 18-20, Algorithm A step A-7.
     enum class filter_reject_mode : std::uint8_t
     {
         tr_shrink,
@@ -238,7 +244,10 @@ struct filter_trsqp_policy
     // Empirically-selected per-mode defaults from an HS-suite sweep
     // across the filter envelope (gamma_f, gamma_h), the reject-gate
     // variant (tr_shrink vs switching_condition), the switching-
-    // condition parameters (kappa, s), and the restoration budget.
+    // condition parameters (since re-based onto the Wachter-Biegler
+    // eq. 19/20 form at the literature-fixed Section 4 constants;
+    // they sit on the post-fix re-sweep register), and the
+    // restoration budget.
     // All knobs except `default_initial_trust_radius` and
     // `default_min_trust_radius` are per-mode dispatched through the
     // ternary block below; the trust-radius defaults are uniform
@@ -275,18 +284,33 @@ struct filter_trsqp_policy
 
     // Filter-reject acceptance gate variant. tr_shrink follows
     // Fletcher-Leyffer-Toint 2002 Section 3; switching_condition is a
-    // Wachter-Biegler 2005 Section 2.3 port to the trust-region
-    // composite step and remains exposed as a runtime knob.
+    // Wachter-Biegler 2006 Section 2.3 / Algorithm A port to the
+    // trust-region composite step and remains exposed as a runtime
+    // knob.
     static constexpr filter_reject_mode default_filter_reject_mode =
         (Mode == sqp_mode::fast) ? filter_reject_mode::tr_shrink
                                  : filter_reject_mode::tr_shrink;
 
-    // Switching-condition parameters (Wachter and Biegler 2005
-    // Table 1). Consumed only when reject_mode == switching_condition.
-    static constexpr double default_filter_switching_kappa =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-4;
-    static constexpr double default_filter_switching_s =
+    // Switching-condition parameters in the Wachter-Biegler form
+    // (eq. 19: (-grad_f^T p)^s_phi > delta * h_current^s_theta;
+    // eq. 20: f_trial <= f_current + eta_phi * grad_f^T p). Values
+    // are the literature-fixed W-B Section 4 defaults (delta = 1,
+    // s_theta = 1.1, s_phi = 2.3, eta_phi = 1e-4); they sit on the
+    // post-fix re-sweep register but ship at the cited constants.
+    // Consumed only when reject_mode == switching_condition. The
+    // per-mode ternary shape is preserved per the cross-policy
+    // mode-dispatch convention (both modes currently coincide).
+    //
+    // Reference: Wachter and Biegler 2006 Math. Programming
+    //            106:25-57 Section 4 (default constants).
+    static constexpr double default_filter_switching_delta =
+        (Mode == sqp_mode::fast) ? 1.0 : 1.0;
+    static constexpr double default_filter_switching_s_theta =
+        (Mode == sqp_mode::fast) ? 1.1 : 1.1;
+    static constexpr double default_filter_switching_s_phi =
         (Mode == sqp_mode::fast) ? 2.3 : 2.3;
+    static constexpr double default_filter_switching_eta_phi =
+        (Mode == sqp_mode::fast) ? 1e-4 : 1e-4;
 
     // Feasibility-restoration knob defaults (minimal-viable
     // Levenberg-Marquardt prototype). The per-mode default budget is
@@ -345,16 +369,27 @@ struct filter_trsqp_policy
         // Filter-reject gate variant. tr_shrink follows
         // Fletcher-Leyffer-Toint 2002 Section 3 (always add accepted
         // steps to the filter; shrink the trust region on reject).
-        // switching_condition follows Wachter-Biegler 2005 Section 2.3
-        // (f-type accepted steps are NOT added; h-type accepted steps
-        // are added; rejection path identical to tr_shrink).
+        // switching_condition follows Wachter-Biegler 2006 Section 2.3
+        // / Algorithm A (eq. 18 current-iterate margin required for
+        // acceptance; f-type accepted steps -- eq. 19 switching AND
+        // eq. 20 sufficient reduction -- are NOT added; all other
+        // accepted steps are added; rejection path identical to
+        // tr_shrink).
         filter_reject_mode reject_mode{default_filter_reject_mode};
 
-        // Switching-condition parameters (consumed only when
-        // reject_mode == switching_condition). Defaults from
-        // Wachter-Biegler 2005 Table 1.
-        double filter_switching_kappa{default_filter_switching_kappa};
-        double filter_switching_s{default_filter_switching_s};
+        // Switching-condition parameters in the W-B form (consumed
+        // only when reject_mode == switching_condition). delta and
+        // s_theta shape the eq. 19 right-hand side
+        // delta * h_current^s_theta, s_phi is the eq. 19 exponent on
+        // the directional term -grad_f^T p, and eta_phi is the eq. 20
+        // Armijo-type sufficient-reduction fraction. Defaults are the
+        // literature-fixed Wachter-Biegler 2006 Section 4 constants.
+        double filter_switching_delta{default_filter_switching_delta};
+        double filter_switching_s_theta{
+            default_filter_switching_s_theta};
+        double filter_switching_s_phi{default_filter_switching_s_phi};
+        double filter_switching_eta_phi{
+            default_filter_switching_eta_phi};
 
         // Feasibility-restoration knobs (minimal-viable Levenberg-
         // Marquardt prototype). The restoration hook fires only on the
@@ -487,6 +522,27 @@ struct filter_trsqp_policy
         Eigen::Vector<double, N>     restoration_xtrial;
         Eigen::LDLT<Eigen::MatrixXd> restoration_ldlt;
 
+        // Snapshot of the iterate at restoration entry. The LM helper
+        // mutates s.x in place across its accepted inner steps, so a
+        // failed (or filter-unacceptable) restoration must restore the
+        // entry iterate to keep s.x consistent with the state-resident
+        // f / g / c / J evaluations that were NOT refreshed on the
+        // failure path.
+        Eigen::Vector<double, N>     restoration_x_entry;
+
+        // Restoration budget latch. Set when a restoration attempt
+        // exhausts its budget (or exits without producing an iterate
+        // acceptable to the augmented filter); while set, the
+        // restoration entry gate short-circuits so a failed
+        // restoration does not re-burn its full budget on every
+        // subsequent step of a terminal stall window. Cleared on any
+        // ACCEPTED step (x moved, so the local feasibility landscape
+        // changed) and on reset()/reset_clear(). Parameter-free by
+        // design: the latch is a pure state machine on events the
+        // policy already observes, so there is no numeric knob to
+        // sweep.
+        bool restoration_exhausted{false};
+
         double objective_value{};
         // Lagrangian-Hessian approximation on the JOINT (x, s) space;
         // sized n + n_ineq.
@@ -594,6 +650,7 @@ struct filter_trsqp_policy
             s.restoration_rhs.resize(n);
             s.restoration_dx.resize(n);
             s.restoration_xtrial.resize(n);
+            s.restoration_x_entry.resize(n);
             s.restoration_ldlt = Eigen::LDLT<Eigen::MatrixXd>(n);
         }
 
@@ -640,13 +697,17 @@ struct filter_trsqp_policy
         s.iteration = 0;
 
         // Initialize the filter with h_max = 1e4 * max(1, h_0) per the
-        // Wachter-Biegler 2006 eq. 8 ceiling, thread the configured
-        // envelope margins onto it, and seed it with (f_0, h_0) so the
-        // first trial's dominance check is well-defined. h_0 follows
-        // the L1 aggregate convention (sum |c_eq| + sum max(0, -c_ineq))
+        // Wachter-Biegler 2006 eq. 8 ceiling and the entry floor
+        // theta_min = 1e-4 * max(1, h_0) per W-B 2006 Section 4 (so an
+        // exactly-feasible visited point cannot turn the filter into a
+        // permanent monotone-f gate), thread the configured envelope
+        // margins onto it, and seed it with (f_0, h_0) so the first
+        // trial's dominance check is well-defined. h_0 follows the L1
+        // aggregate convention (sum |c_eq| + sum max(0, -c_ineq))
         // verbatim from the filter_slsqp closure-capture pattern.
         //
-        // Reference: Wachter and Biegler 2006 eq. (8);
+        // Reference: Wachter and Biegler 2006 eq. (8) and Section 4
+        //            (theta_max / theta_min scaling);
         //            Fletcher and Leyffer 2002 Section 2.1 (the
         //            initial filter is seeded with the iter-0 point so
         //            dominance is well-defined on trial 0).
@@ -655,7 +716,8 @@ struct filter_trsqp_policy
             h_0 += s.c_eq.cwiseAbs().sum();
         if(s.n_ineq > 0)
             h_0 += (-s.c_ineq).cwiseMax(0.0).sum();
-        s.filter.initialize(1e4 * std::max(1.0, h_0));
+        s.filter.initialize(1e4 * std::max(1.0, h_0),
+                            1e-4 * std::max(1.0, h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
         s.filter.add(s.objective_value, h_0);
 
@@ -899,6 +961,21 @@ struct filter_trsqp_policy
             v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
             s.penalty, 0.0);
 
+        // Directional objective-model term grad_f^T p of the PRIMARY
+        // composite step, consumed by the switching-condition
+        // classification (W-B eq. 19 is defined on the directional
+        // term, an f-model quantity; the slack block of the joint
+        // objective gradient is zero so only the x-block contributes).
+        // Computed ONCE from the primary step and NOT refreshed across
+        // SOC retries: W-B Section 2.4 keeps the original direction in
+        // the switching test (19) and the right-hand side of (20) for
+        // second-order-corrected trials.
+        //
+        // Reference: Wachter and Biegler 2006 Section 2.3 eq. (19),
+        //            Section 2.4 (SOC keeps the uncorrected direction
+        //            in the switching and Armijo tests).
+        const double grad_f_dot_p = s.g.dot(p_out.head(n));
+
         // Filter dispatch lambda. Computes h_trial from the
         // post-trial_eval s.bufs.c_trial_buf via the VectorBlock
         // head/tail closure-capture idiom (filter_slsqp_policy:639-643;
@@ -931,6 +1008,7 @@ struct filter_trsqp_policy
 
         auto compute_accept_and_radius = [&s, &h_current, &p_out,
                                           &compute_h_trial,
+                                          grad_f_dot_p,
                                           f_old, this](
             const argmin::detail::byrd_omojokun_step_result& bo,
             double delta_input)
@@ -938,8 +1016,50 @@ struct filter_trsqp_policy
         {
             const double h_trial = compute_h_trial();
 
-            const bool acceptable = s.filter.is_acceptable(bo.f_new,
-                                                           h_trial);
+            // Acceptance + augmentation verdict per reject-gate
+            // variant. tr_shrink (default): plain filter memory check,
+            // always add on accept (FLT-style TR filter practice, made
+            // safe by the theta_min entry floor -- an accepted exactly-
+            // feasible point enters at violation theta_min instead of
+            // turning the filter into a monotone-f gate).
+            // switching_condition: W-B Algorithm A -- the shared
+            // helper enforces the eq. 18 current-iterate margin on top
+            // of the filter memory check and classifies f-type steps
+            // (eq. 19 switching AND eq. 20 sufficient reduction, both
+            // on the primary step's grad_f^T p); genuine f-type
+            // accepts leave the filter unchanged, all other accepts
+            // augment it (step A-7). f_old is the current iterate's
+            // objective (s.x has not moved between attempts).
+            //
+            // Reference: Fletcher, Leyffer, Toint 2002 Section 3
+            //            (tr_shrink); Wachter and Biegler 2006
+            //            Section 2.3 eqs. 18-20, Algorithm A steps
+            //            A-5.3, A-5.4, A-7 (switching_condition).
+            bool acceptable;
+            bool add_to_filter;
+            if(options.reject_mode
+               == filter_reject_mode::switching_condition)
+            {
+                const argmin::detail::wb_switching_params<double>
+                    wb_params{options.filter_switching_delta,
+                              options.filter_switching_s_theta,
+                              options.filter_switching_s_phi,
+                              options.filter_switching_eta_phi};
+                const auto verdict =
+                    argmin::detail::wb_switching_acceptance<double>(
+                        s.filter, f_old, h_current,
+                        bo.f_new, h_trial, grad_f_dot_p,
+                        options.gamma_f, options.gamma_h,
+                        s.filter.theta_min(), wb_params);
+                acceptable    = verdict.accept;
+                add_to_filter = verdict.augment;
+            }
+            else
+            {
+                acceptable = s.filter.is_acceptable(bo.f_new, h_trial);
+                add_to_filter = acceptable;
+            }
+
             if(!acceptable)
             {
                 return {false,
@@ -980,26 +1100,10 @@ struct filter_trsqp_policy
                         argmin::detail::tr_delta_max);
             }
 
-            // Filter add: TR-shrink mode always adds on accept;
-            // switching-condition mode classifies an accepted step as
-            // f-type when predicted > kappa * h_current^s and skips
-            // the filter add (allowing revisits); h-type accepted
-            // steps are added. The classification uses the
-            // ITERATION-ENTRY h_current (NOT refreshed across primary
-            // step and SOC retry, because s.x has not moved).
-            //
-            // Reference: Wachter and Biegler 2005 Section 2.3.
-            bool add_to_filter = true;
-            if(options.reject_mode
-               == filter_reject_mode::switching_condition)
-            {
-                const double rhs =
-                    options.filter_switching_kappa
-                    * std::pow(h_current,
-                               options.filter_switching_s);
-                const bool f_type = bo.predicted > rhs;
-                add_to_filter = !f_type;
-            }
+            // Filter augmentation per the verdict computed above. The
+            // classification used the ITERATION-ENTRY h_current (NOT
+            // refreshed across primary step and SOC retry, because
+            // s.x has not moved).
             if(add_to_filter)
                 s.filter.add(bo.f_new, h_trial);
 
@@ -1115,39 +1219,58 @@ struct filter_trsqp_policy
         // Section L -- Radius update consumes the caller-side verdict.
         s.trust_radius = new_delta;
 
-        // Feasibility-restoration hook. Fires only on the four-way
+        // Feasibility-restoration hook. Fires only on the five-way
         // conjunction
         //   (trust_radius < min_trust_radius)                  AND
         //   (filter rejected the most recent candidate)        AND
         //   (restoration_max_iter > 0)                         AND
-        //   (h_current > restoration_feasibility_tolerance).
+        //   (h_current > restoration_feasibility_tolerance)    AND
+        //   (no exhausted restoration attempt latched).
         // Any single conjunct false leaves the original null-step
         // emission path (Section M) and the filter-reject path
         // (Section N) untouched. The fourth conjunct is the
         // feasibility guard: restoration is a feasibility-restoration
-        // phase, vacuous on an already-feasible iterate; the helper's
-        // entry short-circuit at restoration.h returns `converged`
-        // with `iterations_used = 0` in that case (Fletcher, Leyffer,
-        // Toint 2002 Section 3 -- restoration applies on
-        // infeasibility-driven stalls only), but the policy would
-        // still uselessly reset the BFGS approximation, expand the
-        // trust radius back to the initial value, and re-add the
-        // already-present (f, h) pair to the filter. Gating on
-        // h_current avoids that wasted state churn on a Maratos-like
-        // KKT-stationarity stall at a feasible iterate.
+        // phase, vacuous on an already-feasible iterate (Fletcher,
+        // Leyffer, Toint 2002 Section 3 -- restoration applies on
+        // infeasibility-driven stalls only). A feasible-iterate
+        // Maratos-type stall is NOT restoration's problem: with the
+        // theta_min entry floor on the filter (exactly-feasible
+        // entries no longer force strict monotone-f) and the
+        // corrected SOC retry, that stall escapes through the
+        // second-order correction instead, so the gate keeps the
+        // h_current > tol condition without needing to fire at
+        // feasible points. The fifth conjunct is the budget latch: a
+        // restoration attempt that exhausted its budget (or exited
+        // without an iterate acceptable to the augmented filter) does
+        // not re-burn restoration_max_iter LM iterations on every
+        // subsequent step of a terminal stall window; the latch
+        // clears when an accepted step moves x or on reset().
         //
-        // On converged restoration the helper mutates s.x in place
-        // and the policy resumes composite-step at the restored
-        // iterate with a BFGS reset (the restoration step is a
-        // feasibility step, not a Lagrangian step; the prior B
-        // approximation is stale). On non-converged restoration
-        // control falls through to the Section M emission below; the
-        // iters_used count is propagated to the diagnostics field so
-        // a downstream sweep can attribute the outcome.
+        // Filter-augmentation order (W-B Algorithm A step A-9): the
+        // iterate that TRIGGERED restoration is added to the filter
+        // BEFORE restoration runs, and the restoration result must be
+        // acceptable to the AUGMENTED filter; the restoration output
+        // itself is never added (W-B practice -- adding it would
+        // anchor the filter at the restored point).
+        //
+        // On converged-and-acceptable restoration the policy resumes
+        // composite-step at the restored iterate with a BFGS reset
+        // (the restoration step is a feasibility step, not a
+        // Lagrangian step; the prior B approximation is stale). On a
+        // failed attempt (budget exhausted, degenerate, or output not
+        // acceptable to the augmented filter) the entry iterate is
+        // restored from the snapshot -- the LM helper mutates s.x in
+        // place across its accepted inner steps, and the state-
+        // resident f / g / c / J are NOT refreshed on the failure
+        // path -- the latch is set, and control falls through to the
+        // Section M emission below; the iters_used count is
+        // propagated to the diagnostics field so a downstream sweep
+        // can attribute the outcome.
         //
         // Reference: Nocedal and Wright 2e Section 10.3;
         //            Wachter and Biegler 2006 Math. Programming
-        //            106:25-57 Section 3.3;
+        //            106:25-57 Section 3.3 and Algorithm A steps
+        //            A-7, A-9 (augment-then-restore order);
         //            Fletcher, Leyffer, Toint 2002 SIAM J. Optim.
         //            13(1):44-59 Section 3 (feasibility-restoration
         //            applicability gate).
@@ -1155,8 +1278,20 @@ struct filter_trsqp_policy
         if(s.trust_radius < options.min_trust_radius
            && !accepted
            && options.restoration_max_iter > 0
-           && h_current > options.restoration_feasibility_tolerance)
+           && h_current > options.restoration_feasibility_tolerance
+           && !s.restoration_exhausted)
         {
+            // W-B A-9: augment the filter with the rejected current
+            // iterate (f_k, h_k) BEFORE entering restoration. The
+            // restoration exit below is checked against this
+            // augmented filter.
+            s.filter.add(s.objective_value, h_current);
+
+            // Snapshot the entry iterate; the LM helper mutates s.x
+            // in place and the failure path must undo that to keep
+            // s.x consistent with the un-refreshed state evaluations.
+            s.restoration_x_entry = s.x;
+
             // x-space (not joint slack-augmented) constraint and
             // jacobian closures. The LM helper operates on the
             // original x with the original c(x); slack lifting is a
@@ -1186,8 +1321,35 @@ struct filter_trsqp_policy
             restoration_iters_used_out =
                 restoration_outcome.iterations_used;
 
+            // Restoration exit acceptability (W-B A-9): the restored
+            // iterate must be acceptable to the filter as augmented
+            // with the triggering iterate above. Probed on locals
+            // BEFORE committing any state so the reject path only has
+            // to undo the helper's in-place x mutation. c_trial_buf is
+            // free here: the trial-evaluation closure has no further
+            // readers this iteration.
+            bool restoration_acceptable = false;
+            double restoration_h = 0.0;
+            double restoration_f = 0.0;
             if(restoration_outcome.status
                == argmin::detail::restoration_status::converged)
+            {
+                restoration_f = s.problem->value(s.x);
+                if(m_total > 0)
+                    s.problem->constraints(s.x, s.bufs.c_trial_buf);
+                if(s.n_eq > 0)
+                    restoration_h += s.bufs.c_trial_buf.head(s.n_eq)
+                                        .cwiseAbs().sum();
+                if(n_ineq > 0)
+                    restoration_h +=
+                        (-s.bufs.c_trial_buf.tail(n_ineq))
+                            .cwiseMax(0.0).sum();
+                restoration_acceptable =
+                    s.filter.is_acceptable(restoration_f,
+                                           restoration_h);
+            }
+
+            if(restoration_acceptable)
             {
                 // BFGS reset on the post-restoration iterate. The
                 // restoration step is a feasibility step, not a
@@ -1233,21 +1395,12 @@ struct filter_trsqp_policy
                 if(n_ineq > 0)
                     s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
 
-                // Re-envelope the filter set with the restored
-                // (f, h_restored) seed. The prototype does NOT
-                // integrate the filter during restoration (Wachter-
-                // Biegler 2006 Section 3.3's full version does); the
-                // outer policy re-enters with the post-restoration
-                // filter state and lets the next composite-step
-                // attempt earn or lose acceptance against the
-                // refreshed envelope.
-                double h_restored = 0.0;
-                if(s.n_eq > 0)
-                    h_restored += s.c_eq.cwiseAbs().sum();
-                if(n_ineq > 0)
-                    h_restored += (-s.c_ineq).cwiseMax(0.0).sum();
-                s.filter.add(s.objective_value, h_restored);
-
+                // The restoration OUTPUT is deliberately NOT added to
+                // the filter (W-B practice: the filter was augmented
+                // with the TRIGGERING iterate before restoration ran,
+                // step A-9; adding the output would anchor the filter
+                // at the restored point and block the very region the
+                // solver is about to re-enter).
                 ++s.iteration;
                 auto r = argmin::detail::null_step_result<
                     double, N, Eigen::Dynamic, Eigen::Dynamic>(
@@ -1263,11 +1416,19 @@ struct filter_trsqp_policy
                     restoration_iters_used_out;
                 return r;
             }
-            // Restoration did not converge; fall through to the
-            // Section M null-step emission below. The iters_used
-            // count is captured into diagnostics on that emission
-            // path so the failed-restoration case still surfaces the
-            // iter count to downstream sweep consumers.
+            // Failed attempt: budget exhausted / degenerate LM exit,
+            // or a converged output that is not acceptable to the
+            // augmented filter. Undo the helper's in-place x mutation
+            // (the state-resident f / g / c / J still describe the
+            // entry iterate) and set the budget latch so subsequent
+            // steps of the stall window do not re-burn the budget.
+            // Control falls through to the Section M null-step
+            // emission below; the iters_used count is captured into
+            // diagnostics on that emission path so the failed-
+            // restoration case still surfaces the iter count to
+            // downstream sweep consumers.
+            s.x = s.restoration_x_entry;
+            s.restoration_exhausted = true;
         }
 
         // Section M -- Trust-radius collapse path. Below the policy-
@@ -1313,6 +1474,12 @@ struct filter_trsqp_policy
 
         // Section O -- Step acceptance.
         //
+        // An accepted step moves x, so the local feasibility landscape
+        // a latched failed restoration was stuck in has changed: clear
+        // the budget latch so a future stall may attempt restoration
+        // again.
+        s.restoration_exhausted = false;
+
         // Save the joint old iterate plus the OLD-point objective
         // gradient and Jacobians for the fixed-multiplier BFGS pair
         // (N&W 18.13 evaluates BOTH gradient legs against the NEW
@@ -1465,9 +1632,16 @@ struct filter_trsqp_policy
         };
     }
 
-    // Hot start -- preserves BFGS Hessian; clears the filter so it
-    // re-seeds on the next reset_clear or relies on the seed already
-    // performed by init().
+    // Hot start -- preserves the BFGS Hessian. The filter is cleared
+    // and RESEEDED here (clear-then-seed, exactly as reset_clear
+    // seeds): filter_set::clear() erases the init()-time seed along
+    // with everything else, so a reset without a reseed would leave
+    // the next solve's first dominance check against an empty filter
+    // with a stale h_max ceiling. Stale cross-run state is zeroed as
+    // well: the KKT multiplier buffers (so the first post-reset joint
+    // Lagrangian gradient does not consume multipliers estimated at
+    // an unrelated point), the inert BO-internal penalty, and the
+    // restoration budget latch.
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
@@ -1491,12 +1665,35 @@ struct filter_trsqp_policy
 
         s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
         s.trust_radius = options.initial_trust_radius;
+        // Inert at this policy's composite-step call site
+        // (penalty_factor = 0.0 keeps the LNP update a no-op) but
+        // re-seeded anyway so no cross-run value survives a reset.
+        s.penalty = 1.0;
         s.iteration = 0;
+        s.restoration_exhausted = false;
+
+        s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+        s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
+
+        // Clear-then-seed at the new x0 (same seeding as init /
+        // reset_clear): h_max = 1e4 * max(1, h_0), entry floor
+        // theta_min = 1e-4 * max(1, h_0).
+        //
+        // Reference: Wachter and Biegler 2006 eq. (8) and Section 4.
         s.filter.clear();
+        double h_0 = 0.0;
+        if(s.n_eq > 0)
+            h_0 += s.c_eq.cwiseAbs().sum();
+        if(s.n_ineq > 0)
+            h_0 += (-s.c_ineq).cwiseMax(0.0).sum();
+        s.filter.initialize(1e4 * std::max(1.0, h_0),
+                            1e-4 * std::max(1.0, h_0));
+        s.filter.set_envelope(options.gamma_f, options.gamma_h);
+        s.filter.add(s.objective_value, h_0);
     }
 
-    // Cold restart -- clears BFGS Hessian and reseeds the filter with
-    // the current iterate's (f_0, h_0).
+    // Cold restart -- additionally clears the BFGS Hessian and the
+    // multiplier estimate; the filter reseed is performed by reset().
     template <typename P>
     void reset_clear(state_type<P>& s,
                      const Eigen::Vector<double, N>& x0)
@@ -1504,14 +1701,6 @@ struct filter_trsqp_policy
         reset(s, x0);
         s.hessian.reset();
         s.lambda.setZero();
-        double h_0 = 0.0;
-        if(s.n_eq > 0)
-            h_0 += s.c_eq.cwiseAbs().sum();
-        if(s.n_ineq > 0)
-            h_0 += (-s.c_ineq).cwiseMax(0.0).sum();
-        s.filter.initialize(1e4 * std::max(1.0, h_0));
-        s.filter.set_envelope(options.gamma_f, options.gamma_h);
-        s.filter.add(s.objective_value, h_0);
     }
 };
 

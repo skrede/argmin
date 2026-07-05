@@ -1212,6 +1212,15 @@ struct tr_sqp_policy
         s.trust_radius = options.initial_trust_radius;
         s.penalty      = options.initial_penalty;
         s.iteration = 0;
+
+        // Zero the active-set multiplier buffers: they were estimated
+        // at the pre-reset iterate's linearization, and the first
+        // post-reset joint Lagrangian gradient reads them directly --
+        // without the zeroing it would consume multipliers from an
+        // unrelated point (under fast mode's re-estimation stride the
+        // stale values could persist for several iterations).
+        s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+        s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
     }
 
     // Cold restart -- clears BFGS Hessian.

@@ -64,22 +64,30 @@ public:
                         Scalar gamma_h = Scalar(1e-5))
         : gamma_f_(gamma_f), gamma_h_(gamma_h) {}
 
-    // Initialize the filter with a maximum constraint violation ceiling.
+    // Initialize the filter with a maximum constraint violation ceiling
+    // and an optional violation floor applied to stored entries.
     //
     // Callers set h_max = 1e4 * max(1, h_0) where h_0 is the initial
-    // constraint violation.
+    // constraint violation, and theta_min = 1e-4 * max(1, h_0) when the
+    // consuming policy opts into the floored-entry variant. The zero
+    // default preserves the un-floored behavior bit-for-bit for callers
+    // that pass only h_max.
     //
     // Pre-reserves the underlying entry vector to a typical SQP iteration
     // budget so that hot-path add() calls do not trigger geometric vector
     // growth (which would allocate). 256 entries cover well past any
     // realistic SQP iteration count for the line-search filter family;
     // the extra capacity is small (16 B/entry on x86_64 with double).
-    void initialize(Scalar h_max)
+    //
+    // Reference: Wachter & Biegler 2006 Section 4 (theta_max and
+    //            theta_min scaling against max{1, theta(x_0)}).
+    void initialize(Scalar h_max, Scalar theta_min = Scalar(0))
     {
         entries_.clear();
         if(entries_.capacity() < 256)
             entries_.reserve(256);
         h_max_ = h_max;
+        theta_min_ = theta_min;
     }
 
     // Re-set the envelope on an existing filter_set without
@@ -120,15 +128,30 @@ public:
     // Add a point to the filter, pruning any entries dominated by the
     // new point. An existing entry (f_j, h_j) is dominated if
     // f_j >= f AND h_j >= h.
+    //
+    // The stored violation is floored at theta_min_ so h-domination is
+    // never vacuous: an exactly-feasible point enters the filter with
+    // violation theta_min_, leaving trials with
+    // h_trial < (1 - gamma_h) * theta_min_ acceptable on the h leg.
+    // Without the floor an h = 0 entry makes the h-domination condition
+    // hold for every trial, degenerating acceptance to strict monotone-f
+    // anchored at any exactly-feasible visited point (a permanent gate
+    // with no escape at Maratos-type stalls). The default theta_min_ = 0
+    // reproduces the un-floored behavior exactly.
+    //
+    // Reference: Wachter & Biegler 2006 Section 2.3 (theta_min gating)
+    //            and Section 4 (theta_min = 1e-4 * max{1, theta(x_0)}).
     void add(Scalar f, Scalar h)
     {
+        const Scalar h_floored = std::max(h, theta_min_);
         entries_.erase(
             std::remove_if(entries_.begin(), entries_.end(),
-                           [f, h](const filter_entry<Scalar>& e) {
-                               return e.objective >= f && e.violation >= h;
+                           [f, h_floored](const filter_entry<Scalar>& e) {
+                               return e.objective >= f
+                                      && e.violation >= h_floored;
                            }),
             entries_.end());
-        entries_.push_back({f, h});
+        entries_.push_back({f, h_floored});
     }
 
     bool empty() const { return entries_.empty(); }
@@ -138,13 +161,26 @@ public:
         return static_cast<std::uint16_t>(entries_.size());
     }
 
-    void clear() { entries_.clear(); }
+    // Reset to the freshly-constructed state: entries dropped, the
+    // violation ceiling restored to the default-construction value, and
+    // the entry floor back to zero. A cleared filter must not retain
+    // the previous run's h_max ceiling or theta_min floor -- callers
+    // that need run-specific values re-initialize() after clear().
+    void clear()
+    {
+        entries_.clear();
+        h_max_ = Scalar(1e4);
+        theta_min_ = Scalar(0);
+    }
 
     Scalar h_max() const { return h_max_; }
+
+    Scalar theta_min() const { return theta_min_; }
 
 private:
     std::vector<filter_entry<Scalar>> entries_{};
     Scalar h_max_{Scalar(1e4)};
+    Scalar theta_min_{Scalar(0)};
     Scalar gamma_f_{Scalar(1e-5)};
     Scalar gamma_h_{Scalar(1e-5)};
 };
@@ -169,6 +205,107 @@ bool is_f_type_iteration(Scalar h_k, Scalar grad_f_dot_p, Scalar h_max,
     if(grad_f_dot_p >= Scalar(0))
         return false;
     return std::pow(-grad_f_dot_p, s_f) > delta * std::pow(h_k, s_h);
+}
+
+// Wachter-Biegler switching-condition parameters. Literature-fixed
+// defaults from W-B 2006 Section 4:
+//   delta = 1, s_theta = 1.1, s_phi = 2.3, eta_phi = 1e-4.
+//
+// Reference: Wachter & Biegler 2006, Section 4 (default constants);
+//            eq. (19) (switching condition); eq. (20) (Armijo-type
+//            sufficient objective reduction).
+template <typename Scalar = double>
+struct wb_switching_params
+{
+    Scalar delta{Scalar(1)};
+    Scalar s_theta{Scalar(1.1)};
+    Scalar s_phi{Scalar(2.3)};
+    Scalar eta_phi{Scalar(1e-4)};
+};
+
+// Verdict of the W-B filter acceptance with switching-condition
+// classification.
+//
+//   accept  -- trial passes the filter memory check AND the
+//              current-iterate margin (eq. 18).
+//   f_type  -- switching condition (eq. 19) and the sufficient-
+//              objective-reduction condition (eq. 20) both hold;
+//              a genuine objective-driven step.
+//   augment -- the filter must be augmented with the ACCEPTED step
+//              (Algorithm A step A-7: augment iff the accepted step
+//              is not f-type). Always false on rejection.
+struct wb_acceptance_verdict
+{
+    bool accept;
+    bool f_type;
+    bool augment;
+};
+
+// Wachter-Biegler filter acceptance with switching-condition
+// classification, trust-region form (unit step, alpha = 1 in eqs.
+// 19/20 -- the composite step is accepted or rejected whole; radius
+// management replaces backtracking).
+//
+// Acceptance requires BOTH:
+//   1. Filter memory check (eq. 6 margins + h_max ceiling) against
+//      the stored filter (Algorithm A step A-5.3).
+//   2. Current-iterate margin (eq. 18): sufficient progress vs the
+//      CURRENT iterate on at least one leg,
+//          h_trial <= (1 - gamma_h) * h_current
+//       or f_trial <= f_current - gamma_f * h_current.
+//      Without this margin no monotone quantity exists across
+//      f-type accepts (which do not augment the filter) and cycling
+//      through stale filter gaps is possible.
+//
+// Classification (consumed by the caller's augmentation rule A-7):
+//   switching (eq. 19, alpha = 1, gated by the theta_min floor of
+//   W-B Section 2.3):
+//       h_current <= theta_min
+//       AND grad_f_dot_p < 0
+//       AND (-grad_f_dot_p)^s_phi > delta * h_current^s_theta
+//   sufficient reduction (eq. 20, alpha = 1):
+//       f_trial <= f_current + eta_phi * grad_f_dot_p
+//   f_type = switching AND sufficient reduction. f-type accepted
+//   steps leave the filter unchanged (they are reversible and must
+//   not pollute the filter); every other accepted step augments it.
+//
+// grad_f_dot_p is the DIRECTIONAL objective-model term grad_f^T p of
+// eq. (19) -- an f-model quantity, not a Lagrangian-model reduction.
+// For second-order-corrected trials the caller passes the ORIGINAL
+// step's grad_f^T p (W-B Section 2.4: the switching test and the
+// right-hand side of eq. 20 keep the uncorrected direction).
+//
+// Reference: Wachter & Biegler 2006, Math. Programming 106:25-57,
+//            Section 2.3 eqs. (18)-(20), Algorithm A steps A-5.3,
+//            A-5.4, A-7; Section 4 (default constants).
+template <typename Scalar>
+wb_acceptance_verdict wb_switching_acceptance(
+    const filter_set<Scalar>& filter,
+    Scalar f_current, Scalar h_current,
+    Scalar f_trial, Scalar h_trial,
+    Scalar grad_f_dot_p,
+    Scalar gamma_f, Scalar gamma_h,
+    Scalar theta_min,
+    const wb_switching_params<Scalar>& params = {})
+{
+    const bool filter_ok = filter.is_acceptable(f_trial, h_trial);
+
+    const bool current_ok =
+        h_trial <= (Scalar(1) - gamma_h) * h_current
+        || f_trial <= f_current - gamma_f * h_current;
+
+    const bool switching =
+        h_current <= theta_min
+        && grad_f_dot_p < Scalar(0)
+        && std::pow(-grad_f_dot_p, params.s_phi)
+               > params.delta * std::pow(h_current, params.s_theta);
+
+    const bool sufficient =
+        f_trial <= f_current + params.eta_phi * grad_f_dot_p;
+
+    const bool accept = filter_ok && current_ok;
+    const bool f_type = switching && sufficient;
+    return {accept, f_type, accept && !f_type};
 }
 
 }
