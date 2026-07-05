@@ -18,24 +18,18 @@
 //            Byrd 1987, "Robust trust region methods for constrained
 //            optimization", talk SIAM Conf. on Optimization.
 
-#include "argmin/solver/filter_trsqp_policy.h"
-#include "argmin/solver/basic_solver.h"
-#include "argmin/test_functions/hock_schittkowski.h"
-
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
 #include "argmin/detail/bench/alloc_counter.h"
 #endif
 
+#include "argmin/solver/filter_trsqp_policy.h"
+#include "argmin/solver/tr_sqp_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
+
 #include <Eigen/Core>
 
 #include <nlopt.hpp>
-
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include <atomic>
-#include <cstdio>
-#include <cstdlib>
-#include <new>
-#endif
 
 #include <chrono>
 #include <cmath>
@@ -45,37 +39,6 @@
 #include <print>
 #include <string_view>
 #include <type_traits>
-
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Bench-only ::operator new override translation unit (see micro_kraft_slsqp.cpp
-// for full rationale). Compiled into the bench executable only.
-namespace argmin::detail::bench
-{
-    std::atomic<std::size_t> g_alloc_count{0};
-}
-
-void* operator new(std::size_t n)
-{
-    ++argmin::detail::bench::g_alloc_count;
-    void* r = std::malloc(n);
-    if(!r) throw std::bad_alloc{};
-    return r;
-}
-
-void* operator new(std::size_t n, std::align_val_t a)
-{
-    ++argmin::detail::bench::g_alloc_count;
-    void* r = nullptr;
-    if(::posix_memalign(&r, static_cast<std::size_t>(a), n) != 0)
-        throw std::bad_alloc{};
-    return r;
-}
-
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
-#endif
 
 namespace
 {
@@ -615,15 +578,24 @@ bool probe_regression_hs028()
     return ok;
 }
 
+}
+
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Hot-loop allocation gate (see micro_kraft_slsqp.cpp for full rationale).
-// Bound to filter_trsqp_policy_accurate<> for consistency with the
-// line-search SQP family's accurate-mode hot-loop probes. HS028 (the
-// D-04 reference cell) is used in place of HS071: HS071 on accurate
-// is a known non-converging cell at the locked defaults, while HS028
-// converges cleanly and exercises the composite-step accept path with
-// every step.
-int probe_alloc_free_hot_loop()
+// Pre-fix allocation witness for the trust-region SQP family. HS028 converges
+// cleanly and exercises the composite-step accept path on every step. Arms
+// across a steady-state step window plus a reset() (fixed problem dimension,
+// so reset's internal x0 copy stays on the stack and only genuine policy heap
+// traffic is counted). The reviewer measured 29-55 mallocs/step for
+// filter_trsqp, never settling; the witness asserts the un-blinded gate
+// observes at least 20/step -- the exact traffic the old operator-new-only
+// counter read as zero. Defining ARGMIN_ALLOC_TRACE_TR_SQP selects the bare
+// tr_sqp_policy so the same driver covers both trust-region policies.
+//
+// Mode is selected by ARGMIN_ALLOC_GATE_EXPECT (via evaluate_gate): the
+// default expects nonzero (this pre-fix witness); defining
+// ARGMIN_ALLOC_GATE_EXPECT_ZERO flips the same assertion into the post-hoist
+// zero-allocation gate that the hoisting work must satisfy.
+int argmin_alloc_trace_probe()
 {
     argmin::hs028<> problem;
     Eigen::Vector<double, argmin::hs028<>::problem_dimension> x0 =
@@ -634,40 +606,40 @@ int probe_alloc_free_hot_loop()
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
 
-    argmin::basic_solver solver{
-        argmin::filter_trsqp_policy_accurate<argmin::hs028<>::problem_dimension>{},
-        problem, x0, opts};
+#ifdef ARGMIN_ALLOC_TRACE_TR_SQP
+    using policy_t = argmin::tr_sqp_policy<argmin::hs028<>::problem_dimension,
+                                           argmin::sqp_mode::accurate>;
+    const char* const label = "tr_sqp";
+    constexpr std::size_t min_per_step = 1;
+#else
+    using policy_t =
+        argmin::filter_trsqp_policy_accurate<argmin::hs028<>::problem_dimension>;
+    const char* const label = "filter_trsqp";
+    constexpr std::size_t min_per_step = 20;
+#endif
+
+    argmin::basic_solver solver{policy_t{}, problem, x0, opts};
 
     solver.step();
     solver.step();
 
+    constexpr std::size_t hot_steps = 10;
     argmin::detail::bench::reset_alloc_count();
     argmin::detail::bench::arm_alloc_trace();
-    for(int i = 0; i < 10; ++i)
+    for(std::size_t i = 0; i < hot_steps; ++i)
+        solver.step();
+    solver.reset(x0);
+    for(std::size_t i = 0; i < hot_steps; ++i)
         solver.step();
     argmin::detail::bench::disarm_alloc_trace();
 
-    const std::size_t allocs = argmin::detail::bench::read_alloc_count();
-    if(allocs != 0)
-    {
-        std::fprintf(stderr,
-                     "ALLOC TRACE FAIL (filter_trsqp): %zu allocations during 10-step hot loop\n",
-                     allocs);
-        return 1;
-    }
-    std::println("  filter_trsqp alloc-free hot loop: 0 allocations / 10 steps");
-    return 0;
+    return argmin::detail::bench::evaluate_gate(label, 2 * hot_steps, min_per_step);
 }
 #endif
 
-}
-
+#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main(int argc, char** argv)
 {
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-    (void)argc; (void)argv;
-    return probe_alloc_free_hot_loop();
-#endif
 
     // Parse --gamma-f / --gamma-h CLI overrides for the filter envelope
     // sweep. When both are provided the binary switches into sweep mode:
@@ -776,3 +748,4 @@ int main(int argc, char** argv)
             nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
     }
 }
+#endif

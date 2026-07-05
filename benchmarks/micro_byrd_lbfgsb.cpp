@@ -11,6 +11,10 @@
 //            for Bound Constrained Optimization", SIAM J. Sci. Comput.
 //            16(5), pp. 1190-1208.
 
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+#include "argmin/detail/bench/alloc_counter.h"
+#endif
+
 #include "argmin/solver/byrd_lbfgsb_policy.h"
 #include "argmin/solver/basic_solver.h"
 #include "argmin/test_functions/more_garbow_hillstrom.h"
@@ -21,6 +25,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <print>
 
@@ -335,6 +340,79 @@ bool probe_regression_brown_badly_scaled()
 
 }
 
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+namespace
+{
+
+// Fixed-dimension wide-bounds Rosenbrock for the allocation gate (see
+// micro_lbfgsb.cpp for the fixed-dimension / pre-allocated-reset rationale).
+struct rosenbrock_fixed
+{
+    static constexpr int problem_dimension = 2;
+
+    int dimension() const { return 2; }
+
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        const double t1 = 1.0 - x[0];
+        const double t2 = x[1] - x[0] * x[0];
+        return t1 * t1 + 100.0 * t2 * t2;
+    }
+
+    void gradient(const Eigen::Vector<double, 2>& x,
+                  Eigen::Vector<double, 2>& g) const
+    {
+        g[0] = -2.0 * (1.0 - x[0]) - 400.0 * x[0] * (x[1] - x[0] * x[0]);
+        g[1] = 200.0 * (x[1] - x[0] * x[0]);
+    }
+
+    Eigen::Vector<double, 2> lower_bounds() const
+    {
+        return Eigen::Vector<double, 2>{-5.0, -5.0};
+    }
+
+    Eigen::Vector<double, 2> upper_bounds() const
+    {
+        return Eigen::Vector<double, 2>{5.0, 5.0};
+    }
+};
+
+}
+
+// byrd_lbfgsb shares the L-BFGS-B all-free hot path and is expected
+// allocation-free on the steady-state loop and reset(). Held to the
+// zero-allocation gate immediately (min_per_step = 0).
+int argmin_alloc_trace_probe()
+{
+    rosenbrock_fixed problem;
+    Eigen::Vector<double, 2> x0{-1.2, 1.0};
+    const Eigen::VectorXd x0_reset = x0;
+    argmin::solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-10);
+
+    argmin::basic_solver solver{argmin::byrd_lbfgsb_policy<2>{}, problem, x0, opts};
+
+    solver.step();
+    solver.step();
+
+    constexpr std::size_t hot_steps = 10;
+    argmin::detail::bench::reset_alloc_count();
+    argmin::detail::bench::arm_alloc_trace();
+    for(std::size_t i = 0; i < hot_steps; ++i)
+        solver.step();
+    solver.reset(x0_reset);
+    for(std::size_t i = 0; i < hot_steps; ++i)
+        solver.step();
+    argmin::detail::bench::disarm_alloc_trace();
+
+    return argmin::detail::bench::evaluate_gate("byrd_lbfgsb", 2 * hot_steps, 0);
+}
+#endif
+
+#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main()
 {
     constexpr std::uint32_t reps = 10000;
@@ -370,3 +448,4 @@ int main()
     std::println("  perf record -F 99999 -g -- ./micro_byrd_lbfgsb");
     std::println("  perf report --stdio --percent-limit=1.0");
 }
+#endif

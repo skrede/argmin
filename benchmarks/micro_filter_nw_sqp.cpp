@@ -8,24 +8,17 @@
 //            penalty function", Math. Program. 91:239-269;
 //            N&W Chapter 18 (dense BFGS SQP).
 
-#include "argmin/solver/filter_nw_sqp_policy.h"
-#include "argmin/solver/basic_solver.h"
-#include "argmin/test_functions/hock_schittkowski.h"
-
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
 #include "argmin/detail/bench/alloc_counter.h"
 #endif
 
+#include "argmin/solver/filter_nw_sqp_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/test_functions/hock_schittkowski.h"
+
 #include <Eigen/Core>
 
 #include <nlopt.hpp>
-
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include <atomic>
-#include <cstdio>
-#include <cstdlib>
-#include <new>
-#endif
 
 #include <chrono>
 #include <cmath>
@@ -34,37 +27,6 @@
 #include <optional>
 #include <print>
 #include <string_view>
-
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Bench-only ::operator new override translation unit (see micro_kraft_slsqp.cpp
-// for full rationale). Compiled into the bench executable only.
-namespace argmin::detail::bench
-{
-    std::atomic<std::size_t> g_alloc_count{0};
-}
-
-void* operator new(std::size_t n)
-{
-    ++argmin::detail::bench::g_alloc_count;
-    void* r = std::malloc(n);
-    if(!r) throw std::bad_alloc{};
-    return r;
-}
-
-void* operator new(std::size_t n, std::align_val_t a)
-{
-    ++argmin::detail::bench::g_alloc_count;
-    void* r = nullptr;
-    if(::posix_memalign(&r, static_cast<std::size_t>(a), n) != 0)
-        throw std::bad_alloc{};
-    return r;
-}
-
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
-#endif
 
 namespace
 {
@@ -719,9 +681,14 @@ bool probe_regression_hs024_iter_bound()
     return ok;
 }
 
+}
+
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Hot-loop allocation gate (see micro_kraft_slsqp.cpp for full rationale).
-int probe_alloc_free_hot_loop()
+// Pre-fix allocation witness for filter_nw_sqp (see micro_kraft_slsqp.cpp for
+// the shared rationale). The filter line-search SQP path allocates per step
+// in the current code, so the witness requires the un-blinded gate to observe
+// it across the armed step window and reset().
+int argmin_alloc_trace_probe()
 {
     hs071_dynamic problem;
     Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
@@ -736,33 +703,24 @@ int probe_alloc_free_hot_loop()
     solver.step();
     solver.step();
 
+    constexpr std::size_t hot_steps = 10;
     argmin::detail::bench::reset_alloc_count();
     argmin::detail::bench::arm_alloc_trace();
-    for(int i = 0; i < 10; ++i)
+    for(std::size_t i = 0; i < hot_steps; ++i)
+        solver.step();
+    solver.reset(x0);
+    for(std::size_t i = 0; i < hot_steps; ++i)
         solver.step();
     argmin::detail::bench::disarm_alloc_trace();
 
-    const std::size_t allocs = argmin::detail::bench::read_alloc_count();
-    if(allocs != 0)
-    {
-        std::fprintf(stderr,
-                     "ALLOC TRACE FAIL (filter_nw_sqp): %zu allocations during 10-step hot loop\n",
-                     allocs);
-        return 1;
-    }
-    std::println("  filter_nw_sqp alloc-free hot loop: 0 allocations / 10 steps");
-    return 0;
+    return argmin::detail::bench::evaluate_gate(
+        "filter_nw_sqp", 2 * hot_steps, 1);
 }
 #endif
 
-}
-
+#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main(int argc, char** argv)
 {
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-    (void)argc; (void)argv;
-    return probe_alloc_free_hot_loop();
-#endif
 
     // Parse --gamma-f / --gamma-h CLI overrides for the filter envelope
     // sweep. When both are provided the binary switches into sweep mode:
@@ -842,3 +800,4 @@ int main(int argc, char** argv)
             nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
     }
 }
+#endif

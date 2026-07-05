@@ -14,6 +14,10 @@
 //            K&W Section 6.3-6.4 Algorithm 6.3 (Levenberg-Marquardt).
 //            N&W Section 10.2-10.3 (nonlinear least-squares).
 
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+#include "argmin/detail/bench/alloc_counter.h"
+#endif
+
 #include "argmin/solver/lm_policy.h"
 #include "argmin/solver/basic_solver.h"
 
@@ -21,6 +25,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <print>
 
@@ -148,6 +153,43 @@ bool probe_kkt_residual()
 
 }
 
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+// Levenberg-Marquardt allocates a fresh trial-residual vector per step in the
+// current code (the residual buffers stay dynamically sized), so this is a
+// witness target now: the un-blinded gate must observe at least 1 allocation
+// per step. The workspace hoist that makes it allocation-free is out of scope
+// here; when it lands, flipping to the zero-alloc gate is the acceptance.
+int argmin_alloc_trace_probe()
+{
+    rosenbrock_ls problem;
+    Eigen::VectorXd x0{{-1.0, 1.0}};
+    const Eigen::VectorXd x0_reset = x0;
+    argmin::solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-12);
+    opts.set_objective_threshold(1e-14);
+    opts.set_step_threshold(1e-14);
+
+    argmin::basic_solver solver{argmin::lm_policy{}, problem, x0, opts};
+
+    solver.step();
+    solver.step();
+
+    constexpr std::size_t hot_steps = 10;
+    argmin::detail::bench::reset_alloc_count();
+    argmin::detail::bench::arm_alloc_trace();
+    for(std::size_t i = 0; i < hot_steps; ++i)
+        solver.step();
+    solver.reset(x0_reset);
+    for(std::size_t i = 0; i < hot_steps; ++i)
+        solver.step();
+    argmin::detail::bench::disarm_alloc_trace();
+
+    return argmin::detail::bench::evaluate_gate("lm", 2 * hot_steps, 1);
+}
+#endif
+
+#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main()
 {
     constexpr std::uint32_t reps = 10000;
@@ -169,3 +211,4 @@ int main()
     std::println("  perf record -F 99999 -g -- ./micro_lm");
     std::println("  perf report --stdio --percent-limit=1.0");
 }
+#endif

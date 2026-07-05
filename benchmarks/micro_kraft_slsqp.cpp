@@ -7,6 +7,10 @@
 //            Nonlinear Programming Codes", Lecture Notes in Economics
 //            and Mathematical Systems, Vol. 187, Springer.
 
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+#include "argmin/detail/bench/alloc_counter.h"
+#endif
+
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
@@ -14,64 +18,15 @@
 #include "argmin/solver/basic_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
-#endif
-
 #include <Eigen/Core>
 
 #include <nlopt.hpp>
-
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include <atomic>
-#include <cstdio>
-#include <cstdlib>
-#include <new>
-#endif
 
 #include <array>
 #include <print>
 #include <chrono>
 #include <cstdint>
 #include <optional>
-
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Bench-only ::operator new override translation unit. Increments
-// the bench-local atomic allocation counter on every heap allocation;
-// the counter is armed only between arm_alloc_trace / disarm_alloc_trace
-// calls (those toggle Eigen's runtime malloc gate via
-// EIGEN_RUNTIME_NO_MALLOC). Compiled into bench executables only;
-// the argmin library itself does NOT carry this override.
-//
-// Adopted from: argmin/detail/bench/alloc_counter.h skeleton.
-// Reference: Eigen runtime malloc gate; cpp.reference.com operator-new.
-namespace argmin::detail::bench
-{
-    std::atomic<std::size_t> g_alloc_count{0};
-}
-
-void* operator new(std::size_t n)
-{
-    ++argmin::detail::bench::g_alloc_count;
-    void* r = std::malloc(n);
-    if(!r) throw std::bad_alloc{};
-    return r;
-}
-
-void* operator new(std::size_t n, std::align_val_t a)
-{
-    ++argmin::detail::bench::g_alloc_count;
-    void* r = nullptr;
-    if(::posix_memalign(&r, static_cast<std::size_t>(a), n) != 0)
-        throw std::bad_alloc{};
-    return r;
-}
-
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
-#endif
 
 namespace
 {
@@ -944,15 +899,21 @@ bool probe_regression_hs026()
     return ok;
 }
 
+}
+
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Hot-loop allocation gate: warm up the solver for two steps to absorb
-// lazy Eigen / dense_ldl_bfgs allocations, arm the trace + Eigen's
-// runtime malloc gate, run ten hot steps, assert zero allocations.
-// Returns 0 on pass, 1 on fail.
+// Pre-fix allocation witness for kraft_slsqp. Warms up to absorb lazy
+// first-step allocations, then arms the trace across a steady-state step
+// window and a reset() before reading the sensors. The reviewer measured
+// ~14 mallocs/step steady-state for this policy; the witness asserts the
+// un-blinded gate observes at least 10/step, which the old
+// operator-new-only counter read as zero.
 //
-// Reference: bench-only allocation tracing infrastructure
-//            (argmin/detail/bench/alloc_counter.h).
-int probe_alloc_free_hot_loop()
+// Mode is selected by ARGMIN_ALLOC_GATE_EXPECT (via evaluate_gate): the
+// default expects nonzero (this pre-fix witness); defining
+// ARGMIN_ALLOC_GATE_EXPECT_ZERO flips the same assertion into the post-hoist
+// zero-allocation gate.
+int argmin_alloc_trace_probe()
 {
     hs071_fixed problem;
     Eigen::Vector<double, 4> x0{1.0, 5.0, 5.0, 1.0};
@@ -965,37 +926,28 @@ int probe_alloc_free_hot_loop()
     argmin::basic_solver solver{argmin::kraft_slsqp_policy<4>{},
                                 problem, x0, opts};
 
-    // 2-step warmup absorbs lazy first-push BFGS allocations.
+    // Warmup absorbs lazy first-push BFGS allocations.
     solver.step();
     solver.step();
 
+    constexpr std::size_t hot_steps = 10;
     argmin::detail::bench::reset_alloc_count();
     argmin::detail::bench::arm_alloc_trace();
-    for(int i = 0; i < 10; ++i)
+    for(std::size_t i = 0; i < hot_steps; ++i)
+        solver.step();
+    solver.reset(x0);
+    for(std::size_t i = 0; i < hot_steps; ++i)
         solver.step();
     argmin::detail::bench::disarm_alloc_trace();
 
-    const std::size_t allocs = argmin::detail::bench::read_alloc_count();
-    if(allocs != 0)
-    {
-        std::fprintf(stderr,
-                     "ALLOC TRACE FAIL (kraft_slsqp): %zu allocations during 10-step hot loop\n",
-                     allocs);
-        return 1;
-    }
-    std::println("  kraft_slsqp alloc-free hot loop: 0 allocations / 10 steps");
-    return 0;
+    return argmin::detail::bench::evaluate_gate(
+        "kraft_slsqp", 2 * hot_steps, 10);
 }
 #endif
 
-}
-
+#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main()
 {
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-    return probe_alloc_free_hot_loop();
-#endif
-
     constexpr std::uint32_t reps = 10000;
 
     if(!probe_kkt_residual())
@@ -1143,3 +1095,4 @@ int main()
     std::println("  perf record -F 99999 -g -- ./micro_kraft_slsqp");
     std::println("  perf report --stdio --percent-limit=1.0");
 }
+#endif

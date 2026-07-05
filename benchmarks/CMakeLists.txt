@@ -23,6 +23,35 @@ endif()
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ARGMIN_LTO_SUPPORTED)
 
+# Allocation-gate target factory. Each gate target pairs a micro_* driver with
+# the shared alloc_trace_main.cpp, which owns the counting eigen_assert, the
+# atomic counters, the strong-symbol C-allocator interposition, and main().
+# Targets build in the shipping Release config (-O3 via the Release flags plus
+# -march=native) with EIGEN_RUNTIME_NO_MALLOC so Eigen's runtime malloc gate
+# routes into the report-and-continue counter rather than aborting. This gate
+# is the load-bearing embeddability instrument: it observes Eigen's
+# aligned_malloc traffic, which the retired global-operator-new counter could
+# not see. LTO is intentionally left off here so cross-TU optimization cannot
+# reason around the interposed allocator or the report-and-continue gate.
+function(argmin_add_alloc_gate _target _source _test_name)
+    add_executable(${_target} ${_source} alloc_trace_main.cpp)
+    target_link_libraries(${_target} PRIVATE argmin::argmin)
+    if(NLopt_FOUND)
+        target_link_libraries(${_target} PRIVATE NLopt::nlopt)
+    endif()
+    target_compile_definitions(${_target} PRIVATE
+        ARGMIN_BENCH_TRACE_ALLOC=1
+        EIGEN_RUNTIME_NO_MALLOC
+        ${ARGN})
+    target_compile_options(${_target} PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+            -march=native -fno-math-errno -fno-trapping-math
+        >
+    )
+    add_test(NAME ${_test_name} COMMAND ${_target})
+    set_tests_properties(${_test_name} PROPERTIES LABELS "alloc-gate")
+endfunction()
+
 # Main benchmark executable (always builds).
 add_executable(argmin_bench
     benchmark_driver.cpp
@@ -353,54 +382,30 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
-    # Allocation-tracing variants of the four micro_*_sqp benches. Each
-    # variant compiles the same source under ARGMIN_BENCH_TRACE_ALLOC=1
-    # (which switches main() into a 2-step-warmup + 10-step hot-loop
-    # probe asserting zero hot-loop allocations) and EIGEN_RUNTIME_NO_MALLOC=1
-    # (which makes Eigen::internal::set_is_malloc_allowed take effect).
-    # CTest entries fail the build if any policy allocates on the hot path.
-    foreach(_alloc_target IN ITEMS
-        micro_kraft_slsqp_alloc_trace
-        micro_nw_sqp_alloc_trace
-        micro_filter_slsqp_alloc_trace
-        micro_filter_nw_sqp_alloc_trace)
-        if(_alloc_target STREQUAL "micro_kraft_slsqp_alloc_trace")
-            set(_alloc_source micro_kraft_slsqp.cpp)
-            set(_alloc_test_name sqp_alloc_free_kraft)
-        elseif(_alloc_target STREQUAL "micro_nw_sqp_alloc_trace")
-            set(_alloc_source micro_nw_sqp.cpp)
-            set(_alloc_test_name sqp_alloc_free_nw)
-        elseif(_alloc_target STREQUAL "micro_filter_slsqp_alloc_trace")
-            set(_alloc_source micro_filter_slsqp.cpp)
-            set(_alloc_test_name sqp_alloc_free_filter_slsqp)
-        else()
-            set(_alloc_source micro_filter_nw_sqp.cpp)
-            set(_alloc_test_name sqp_alloc_free_filter_nw)
-        endif()
-
-        add_executable(${_alloc_target} ${_alloc_source})
-        target_link_libraries(${_alloc_target} PRIVATE argmin::argmin NLopt::nlopt)
-        # ARGMIN_BENCH_TRACE_ALLOC=1 enables the bench-side ::operator new
-        # override + counter; the per-policy probe asserts the counter
-        # remains zero across the hot loop. EIGEN_RUNTIME_NO_MALLOC is
-        # intentionally NOT defined here: the Eigen runtime gate aborts
-        # via assert() on the first allocation, which is too aggressive
-        # for the report-and-continue posture; the bench-level counter
-        # detects the same condition without aborting and lets the probe
-        # fail gracefully with a clear stderr message.
-        target_compile_definitions(${_alloc_target} PRIVATE
-            ARGMIN_BENCH_TRACE_ALLOC=1)
-        target_compile_options(${_alloc_target} PRIVATE
-            $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-                -march=native -fno-math-errno -fno-trapping-math
-            >
-        )
-        if(ARGMIN_LTO_SUPPORTED)
-            set_target_properties(${_alloc_target} PROPERTIES
-                INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-        endif()
-        add_test(NAME ${_alloc_test_name} COMMAND ${_alloc_target})
-    endforeach()
+    # Allocation-gate targets for every real-time-claimed policy plus their
+    # reset() paths. Each pairs a micro_* driver's argmin_alloc_trace_probe()
+    # with the shared alloc_trace_main.cpp (see argmin_add_alloc_gate above).
+    # The known-allocating constrained solvers run as pre-fix witnesses: the
+    # gate must observe the reviewer-measured per-step allocation traffic,
+    # proving it is no longer blind. The already-clean L-BFGS-B family runs as
+    # a zero-allocation gate. tr_sqp reuses the filter_trsqp driver with a
+    # policy-select define so both trust-region policies are covered.
+    argmin_add_alloc_gate(micro_kraft_slsqp_alloc_trace
+        micro_kraft_slsqp.cpp sqp_alloc_gate_kraft)
+    argmin_add_alloc_gate(micro_nw_sqp_alloc_trace
+        micro_nw_sqp.cpp sqp_alloc_gate_nw)
+    argmin_add_alloc_gate(micro_filter_slsqp_alloc_trace
+        micro_filter_slsqp.cpp sqp_alloc_gate_filter_slsqp)
+    argmin_add_alloc_gate(micro_filter_nw_sqp_alloc_trace
+        micro_filter_nw_sqp.cpp sqp_alloc_gate_filter_nw)
+    argmin_add_alloc_gate(micro_filter_trsqp_alloc_trace
+        micro_filter_trsqp.cpp sqp_alloc_gate_filter_trsqp)
+    argmin_add_alloc_gate(micro_tr_sqp_alloc_trace
+        micro_filter_trsqp.cpp sqp_alloc_gate_tr_sqp ARGMIN_ALLOC_TRACE_TR_SQP)
+    argmin_add_alloc_gate(micro_byrd_lbfgsb_alloc_trace
+        micro_byrd_lbfgsb.cpp alloc_gate_byrd_lbfgsb)
+    argmin_add_alloc_gate(micro_lbfgsb_alloc_trace
+        micro_lbfgsb.cpp alloc_gate_lbfgsb)
 
     add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
     target_link_libraries(micro_augmented_lagrangian PRIVATE argmin::argmin NLopt::nlopt)
@@ -476,6 +481,10 @@ if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(micro_lm PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
+
+# Levenberg-Marquardt allocation gate. Independent of NLopt, so it lives
+# outside the NLopt_FOUND block. Registered under the alloc-gate label.
+argmin_add_alloc_gate(micro_lm_alloc_trace micro_lm.cpp alloc_gate_lm)
 
 # Active-set QP micro-benchmark (argmin-only, no external dependencies).
 add_executable(micro_active_set_qp micro_active_set_qp.cpp)
