@@ -297,14 +297,16 @@ TEST_CASE("cobyla survives move-then-step", "[move_asan]")
     construct_move_step(cobyla_policy{}, problem, x0, opts);
 }
 
-TEST_CASE("augmented_lagrangian survives move-then-step", "[move_asan][move_asan_xfail]")
+TEST_CASE("augmented_lagrangian survives move-then-step", "[move_asan]")
 {
-    // The self-referential case: state_type::subproblem stores raw
-    // pointers into the enclosing state_type (lambda_eq, lambda_ineq,
-    // mu, and the per-inner-iter buffers), and the persisted inner
-    // basic_solver's problem pointer is the address of that same
-    // subproblem. Neither is rebased across a move. Expected to abort
-    // under ASan.
+    // The self-referential case. state_type::subproblem references outer
+    // state (lambda_eq, lambda_ineq, mu, bounds) and the per-inner-iter
+    // buffers, and the persisted inner basic_solver caches the address of
+    // that subproblem. state_type now boxes the subproblem, its buffers,
+    // and the inner solver in one heap node reached through a single
+    // owning pointer, and re-seeds the subproblem's outer-state pointers
+    // at the top of every step -- so a memberwise move leaves every
+    // internal address valid and the moved-to solver steps cleanly.
     hs076<> problem;
     auto x0 = problem.initial_point();
     solver_options<> opts;

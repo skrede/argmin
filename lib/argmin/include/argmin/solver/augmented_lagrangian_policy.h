@@ -44,6 +44,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 
 namespace argmin
@@ -127,18 +128,6 @@ struct augmented_lagrangian_policy
         int n_ineq = 0;
         std::uint32_t outer_iter = 0;
 
-        // Pre-allocated subproblem evaluation buffers (static-audit AL4/AL5).
-        // Mutated per-inner-iter by subproblem::value / gradient via pointers
-        // held in the subproblem struct; storing them here lets the subproblem
-        // remain a stateless view while inner f / g calls become alloc-free.
-        // c_all_buf is sized (m_eq + m_ineq); J_all_buf is sized
-        // (m_eq + m_ineq, dim); g_tmp_buf is the dimension-bridge fast-path
-        // temporary used when the inner solver's compile-time N differs from
-        // the outer problem's.
-        Eigen::VectorX<scalar_type> c_all_buf;
-        Eigen::MatrixX<scalar_type> J_all_buf;
-        Eigen::Vector<scalar_type, g_tmp_buf_dim> g_tmp_buf;
-
         options_type opts;
 
         // Synthetic subproblem for the inner solver.
@@ -155,10 +144,10 @@ struct augmented_lagrangian_policy
             const Eigen::VectorX<scalar_type>* lam_eq;
             const Eigen::VectorX<scalar_type>* lam_ineq;
             const scalar_type* pen;
-            // Pointers to state-owned per-inner-iter buffers; mutated by
+            // Pointers to the boxed per-inner-iter buffers; mutated by
             // value() / gradient() through the indirection. Eliminates the
             // O(outer * inner * m) c_all / J_all / g_tmp allocations the
-            // pre-fix subproblem incurred (static-audit AL4 / AL5).
+            // pre-fix subproblem incurred.
             Eigen::VectorX<scalar_type>* c_all_buf;
             Eigen::MatrixX<scalar_type>* J_all_buf;
             Eigen::Vector<scalar_type, g_tmp_buf_dim>* g_tmp_buf;
@@ -217,11 +206,43 @@ struct augmented_lagrangian_policy
 
         using rebound_inner = typename InnerPolicy::template rebind<N>;
 
-        // Persisted inner solver for warm-start.
-        // Constructed on first outer step, reset() on subsequent steps
-        // to preserve compact_lbfgs curvature pairs (S, Y, theta).
-        std::optional<subproblem> sub_storage;
-        std::optional<basic_solver<rebound_inner, N, subproblem>> inner_solver;
+        // Heap-boxed inner context.
+        //
+        // The subproblem stores raw pointers to its evaluation buffers and to
+        // outer state (multipliers, penalty, bounds), and the persisted inner
+        // solver caches the address of the subproblem. basic_solver's move is
+        // an unconditional noexcept memberwise move, so holding these directly
+        // in the state would leave every such pointer dangling after a move.
+        //
+        // Boxing the subproblem, its buffers, and the inner solver in one heap
+        // node keeps their addresses stable across a move: the node is reached
+        // through a single owning pointer, so a memberwise move transfers
+        // ownership and every address inside the node survives. The subproblem
+        // pointers that must address genuine outer-state fields (mu,
+        // multipliers, bounds) -- which a memberwise move does relocate -- are
+        // re-seeded against the live state at the top of every step().
+        struct al_inner_context
+        {
+            // Pre-allocated subproblem evaluation buffers. Mutated per-inner-
+            // iter by subproblem::value / gradient via pointers held in the
+            // subproblem struct; storing them here lets the subproblem remain
+            // a stateless view while inner f / g calls stay alloc-free.
+            // c_all_buf is sized (m_eq + m_ineq); J_all_buf is sized
+            // (m_eq + m_ineq, dim); g_tmp_buf is the dimension-bridge
+            // fast-path temporary used when the inner solver's compile-time N
+            // differs from the outer problem's.
+            Eigen::VectorX<scalar_type> c_all_buf;
+            Eigen::MatrixX<scalar_type> J_all_buf;
+            Eigen::Vector<scalar_type, g_tmp_buf_dim> g_tmp_buf;
+
+            // Synthetic subproblem for the inner solver, plus the persisted
+            // inner solver itself (warm-started across outer iterations to
+            // preserve compact_lbfgs curvature pairs).
+            std::optional<subproblem> sub_storage;
+            std::optional<basic_solver<rebound_inner, N, subproblem>> inner_solver;
+        };
+
+        std::unique_ptr<al_inner_context> ctx;
     };
 
     template <typename Problem, typename Convergence>
@@ -257,18 +278,21 @@ struct augmented_lagrangian_policy
         s.x = x0;
         s.f = problem.value(x0);
 
-        // Pre-allocate per-inner-iter subproblem buffers (static-audit
-        // AL4 / AL5). Reused across all inner f / g calls; subproblem
-        // mutates them via pointers held in its struct.
+        // Allocate the heap-boxed inner context and pre-size its per-inner-
+        // iter subproblem buffers. Reused across all inner f / g calls; the
+        // subproblem mutates them via pointers held in its struct. Boxing
+        // keeps these addresses stable across a solver move.
+        s.ctx = std::make_unique<typename state_type<Problem>::al_inner_context>();
+        auto& ctx = *s.ctx;
         const int m = s.n_eq + s.n_ineq;
-        s.c_all_buf.resize(m);
-        s.J_all_buf.resize(m, n);
-        s.g_tmp_buf.resize(n);
+        ctx.c_all_buf.resize(m);
+        ctx.J_all_buf.resize(m, n);
+        ctx.g_tmp_buf.resize(n);
 
         if(m > 0)
-            problem.constraints(x0, s.c_all_buf);
-        s.c_eq = s.c_all_buf.head(s.n_eq);
-        s.c_ineq = s.c_all_buf.tail(s.n_ineq);
+            problem.constraints(x0, ctx.c_all_buf);
+        s.c_eq = ctx.c_all_buf.head(s.n_eq);
+        s.c_ineq = ctx.c_all_buf.tail(s.n_ineq);
 
         // Initialize multipliers to zero
         s.lambda_eq = Eigen::VectorX<scalar_type>::Zero(s.n_eq);
@@ -317,26 +341,32 @@ struct augmented_lagrangian_policy
             s.c_ineq = c_all.tail(s.n_ineq);
         }
 
-        // Build subproblem on first call (pointer-based: auto-sees updated
-        // mu/lambda via pointer dereference).
+        // Build the subproblem on first call, then re-seed its self-
+        // references at the top of every step. The buffer pointers address
+        // node-owned storage (stable across a move); the outer-state pointers
+        // (bounds, multipliers, penalty) address state fields that a
+        // memberwise move relocates, so they must be refreshed against the
+        // live state before the inner solve dereferences them. The subproblem
+        // itself lives in the heap node, so its address -- cached by the
+        // persisted inner solver -- stays valid across the move.
         using subproblem = typename state_type<P>::subproblem;
-        using rebound_inner = typename state_type<P>::rebound_inner;
-        if(!s.sub_storage.has_value())
+        auto& ctx = *s.ctx;
+        if(!ctx.sub_storage.has_value())
+            ctx.sub_storage.emplace();
         {
-            s.sub_storage.emplace(subproblem{
-                .outer = s.problem,
-                .dim = n,
-                .lo = &s.lower,
-                .hi = &s.upper,
-                .lam_eq = &s.lambda_eq,
-                .lam_ineq = &s.lambda_ineq,
-                .pen = &s.mu,
-                .c_all_buf = &s.c_all_buf,
-                .J_all_buf = &s.J_all_buf,
-                .g_tmp_buf = &s.g_tmp_buf,
-                .neq = s.n_eq,
-                .nineq = s.n_ineq,
-            });
+            subproblem& sp = *ctx.sub_storage;
+            sp.outer = s.problem;
+            sp.dim = n;
+            sp.lo = &s.lower;
+            sp.hi = &s.upper;
+            sp.lam_eq = &s.lambda_eq;
+            sp.lam_ineq = &s.lambda_ineq;
+            sp.pen = &s.mu;
+            sp.c_all_buf = &ctx.c_all_buf;
+            sp.J_all_buf = &ctx.J_all_buf;
+            sp.g_tmp_buf = &ctx.g_tmp_buf;
+            sp.neq = s.n_eq;
+            sp.nineq = s.n_ineq;
         }
 
         // Adaptive inner tolerance (Conn-Gould-Toint 1991; N&W Algorithm 17.4).
@@ -381,20 +411,20 @@ struct augmented_lagrangian_policy
         const bool mu_changed = s.mu_at_last_inner_solve.has_value()
                                 && *s.mu_at_last_inner_solve != s.mu;
         const bool warm_start = warm_start_requested && !mu_changed;
-        if(warm_start && s.inner_solver.has_value())
+        if(warm_start && ctx.inner_solver.has_value())
         {
             // Warm restart: preserves compact_lbfgs curvature pairs (S, Y, theta).
             // Reference: N&W Section 9.2 (compact L-BFGS warm-start rationale).
-            s.inner_solver->reset(s.x);
+            ctx.inner_solver->reset(s.x);
         }
         else
         {
             // Cold start: construct fresh inner solver.
-            s.inner_solver.emplace(*s.sub_storage, s.x, inner_opts);
+            ctx.inner_solver.emplace(*ctx.sub_storage, s.x, inner_opts);
         }
         s.mu_at_last_inner_solve = s.mu;
 
-        auto inner_result = s.inner_solver->solve(inner_opts);
+        auto inner_result = ctx.inner_solver->solve(inner_opts);
 
         // Extract solution from inner solver
         scalar_type f_old = s.f;
@@ -538,8 +568,9 @@ struct augmented_lagrangian_policy
         }
         s.outer_iter = 0;
         // Destroy inner solver; will be reconstructed next step.
-        // Subproblem storage is kept (pointers remain valid).
-        s.inner_solver.reset();
+        // Subproblem storage is kept (its pointers are re-seeded next step).
+        if(s.ctx)
+            s.ctx->inner_solver.reset();
     }
 
     template <typename P>
@@ -551,8 +582,11 @@ struct augmented_lagrangian_policy
         s.lambda_ineq.setZero();
         s.mu = s.opts.mu_init.value_or(scalar_type(0.1));
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
-        s.sub_storage.reset();
-        s.inner_solver.reset();
+        if(s.ctx)
+        {
+            s.ctx->sub_storage.reset();
+            s.ctx->inner_solver.reset();
+        }
     }
 };
 
