@@ -281,6 +281,28 @@ int lsei(
 
     x.noalias() = ws.Qc * ws.y;
 
+    // When the equality system fully determines x (m_eq == n, i.e. n2 == 0)
+    // the inner LSI branch -- the only place G x >= h is enforced -- is
+    // skipped entirely, so a determined x that violates the inequalities was
+    // previously returned as mode 1 ("success"). Verify feasibility here and
+    // route a violation to mode 4, the same "inequalities incompatible" code
+    // the LSI path returns, so the outer solver enters Kraft 1988 Section 3.4
+    // augmented-QP recovery instead of stepping to an infeasible point.
+    //
+    // The tolerance reuses the same eps * n * 10 relative feasibility band
+    // that lsi() applies to its own transformed constraints (see lsi.h), so
+    // the check is scale-consistent with the existing substrate and adds no
+    // new absolute epsilon.
+    //
+    // Reference: Kraft 1988 DFVLR-FB 88-28 Section 3.4 (infeasible-QP
+    //            recovery); Lawson & Hanson 1974 Chapter 23 (LSI mode codes).
+    if(n2 == 0 && m_ineq > 0)
+    {
+        const Scalar feas_tol = eps * Scalar(n) * Scalar(10);
+        if((G * x - h).minCoeff() < -feas_tol)
+            return 4;
+    }
+
     // ------------------------------------------------------------------
     // Recover equality multipliers from the gradient projection on y_1.
     //

@@ -26,6 +26,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -52,10 +53,26 @@ struct qp_result
 };
 
 // Determine initial working set from feasible point x0.
-// Equality constraints (indices 0..n_eq-1) are always active.
-// Inequality constraints active if |a_i^T x0 - b_i| < tolerance.
+// Equality constraints (indices 0..n_eq-1) are always candidates.
+// Inequality constraints are candidates if |a_i^T x0 - b_i| < tolerance.
 //
-// Reference: N&W Section 16.4, p. 460.
+// A candidate is admitted only if its gradient row is linearly independent
+// of the rows already admitted: the null-space / multiplier machinery
+// (N&W Algorithm 16.3) requires A_W to have full row rank. Admitting a
+// linearly dependent row (e.g. constraints x1 >= 0 and 2*x1 >= 0 both active
+// at the same vertex) yields a rank-deficient A_W whose unpivoted QR solve
+// produces NaN multipliers that then compare as "no negative multiplier",
+// so the solver returns the start vertex mislabeled optimal. Candidates are
+// scanned in ascending index (equalities first) so the retained set is the
+// lowest-index independent basis, which is consistent with Bland's anti-
+// cycling rule applied elsewhere.
+//
+// Rank is tested with Eigen's ColPivHouseholderQR at its default rank
+// threshold (machine epsilon scaled by the matrix dimension) -- the library-
+// standard relative rank tolerance, not a hand-tuned absolute constant.
+//
+// Reference: N&W Section 16.4, p. 460; N&W Algorithm 16.3 (full-row-rank
+//            working-set prerequisite).
 template <typename Scalar, int N = argmin::dynamic_dimension, int M = argmin::dynamic_dimension>
 std::vector<int> initial_working_set(
     const Eigen::Vector<Scalar, N>& x0,
@@ -64,18 +81,38 @@ std::vector<int> initial_working_set(
     int n_eq,
     Scalar tolerance)
 {
-    std::vector<int> W;
     const int m = static_cast<int>(A_full.rows());
-    W.reserve(m);
+    const int n = static_cast<int>(A_full.cols());
 
+    std::vector<int> candidates;
+    candidates.reserve(m);
     for(int i = 0; i < n_eq; ++i)
-        W.push_back(i);
-
+        candidates.push_back(i);
     for(int i = n_eq; i < m; ++i)
     {
         Scalar residual = A_full.row(i).dot(x0) - b_full[i];
         if(std::abs(residual) < tolerance)
-            W.push_back(i);
+            candidates.push_back(i);
+    }
+
+    std::vector<int> W;
+    W.reserve(candidates.size());
+    Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_W(0, n);
+    int rank = 0;
+    for(int idx : candidates)
+    {
+        if(rank >= n) break;  // at most n independent rows exist
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> trial(A_W.rows() + 1, n);
+        if(A_W.rows() > 0) trial.topRows(A_W.rows()) = A_W;
+        trial.row(A_W.rows()) = A_full.row(idx);
+        Eigen::ColPivHouseholderQR<Eigen::Matrix<Scalar, Eigen::Dynamic, N>> qr(trial);
+        const int new_rank = static_cast<int>(qr.rank());
+        if(new_rank > rank)
+        {
+            A_W = std::move(trial);
+            rank = new_rank;
+            W.push_back(idx);
+        }
     }
     return W;
 }
@@ -95,25 +132,32 @@ template <typename Scalar, int N = argmin::dynamic_dimension, int Mw = argmin::d
 std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp(
     const Eigen::Matrix<Scalar, N, N>& G,
     const Eigen::Vector<Scalar, N>& g_k,
-    const Eigen::Matrix<Scalar, Mw, N>& A_W)
+    const Eigen::Matrix<Scalar, Mw, N>& A_W,
+    bool* reduced_hessian_ok = nullptr)
 {
     const int n = G.rows();
     const int m = A_W.rows();
+    if(reduced_hessian_ok) *reduced_hessian_ok = true;
 
     // No active constraints: unconstrained sub-step
     if(m == 0)
     {
         Eigen::LLT<Eigen::Matrix<Scalar, N, N>> llt(G);
+        if(reduced_hessian_ok && llt.info() != Eigen::Success)
+            *reduced_hessian_ok = false;
         Eigen::Vector<Scalar, N> p = llt.solve(-g_k);
         return {p, Eigen::Vector<Scalar, Mw>{}};
     }
 
-    // Fully constrained: p = 0, compute multipliers only
+    // Fully constrained: p = 0, compute multipliers only.
+    // Rank-revealing ColPivHouseholderQR: a working set that reached here
+    // with dependent rows would otherwise yield NaN multipliers from the
+    // unpivoted solve (see initial_working_set for the failure instance).
     if(m >= n)
     {
         Eigen::Vector<Scalar, N> p = Eigen::Vector<Scalar, N>::Zero(n);
         // lambda from (A_W)^T lambda = g_k  (eq. 16.30: sum a_i lambda_i = g)
-        auto qr = A_W.transpose().householderQr();
+        auto qr = A_W.transpose().colPivHouseholderQr();
         Eigen::Vector<Scalar, Mw> lambda = qr.solve(g_k);
         return {p, lambda};
     }
@@ -146,9 +190,13 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp
     ZtGZ.noalias() = Z.transpose() * G * Z;
     Eigen::LLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> llt(std::move(ZtGZ));
 
-    // Check inertia: if reduced Hessian is not positive (semi)definite,
-    // the subproblem direction may point to a saddle.
-    // For convex QP this won't happen; for indefinite we fall through.
+    // Check inertia: if the reduced Hessian Z^T G Z is not positive definite
+    // the LLT fails and the subproblem direction is unreliable (the QP is
+    // non-convex on the current null space). Surface it to the caller instead
+    // of consuming a NaN solve. For the convex contract this never fires.
+    if(reduced_hessian_ok && llt.info() != Eigen::Success)
+        *reduced_hessian_ok = false;
+
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1> rhs(nz);
     rhs.noalias() = -(Z.transpose() * g_k);
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1> p_z = llt.solve(rhs);
@@ -160,7 +208,7 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp
     rhs_lam.noalias() = Y.transpose() * (g_k + G * p);
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> AY(m, rank);
     AY.noalias() = A_W * Y;
-    auto qr_ay = AY.transpose().householderQr();
+    auto qr_ay = AY.transpose().colPivHouseholderQr();
     Eigen::Vector<Scalar, Mw> lambda = qr_ay.solve(rhs_lam);
 
     return {p, lambda};
@@ -211,22 +259,47 @@ std::pair<Scalar, int> blocking_step_length(
     return {alpha, blocking_idx};
 }
 
-// Find the inequality constraint in working set with the most negative multiplier.
+// Choose the inequality constraint to leave the working set.
 // Equality constraints (indices < n_eq) are never candidates for removal.
-// Returns -1 if all inequality multipliers >= -tolerance.
+// Returns -1 (optimal for this working set) if all inequality multipliers
+// are >= -tolerance.
 //
-// Reference: N&W Algorithm 16.1 (multiplier check step).
+// Default rule: most negative multiplier (fastest descent). When `bland` is
+// set the selection switches to the eligible constraint of LOWEST global
+// index (Bland's rule), which provably prevents cycling on degenerate
+// vertices at the cost of slower progress.
+//
+// Reference: N&W Algorithm 16.1 (multiplier check step); Bland (1977) via
+//            N&W Section 13.5 (anti-cycling pivot selection).
 template <typename Scalar, int Mw = argmin::dynamic_dimension>
 int most_negative_multiplier(
     const Eigen::Vector<Scalar, Mw>& lambda_W,
     const std::vector<int>& working_set,
     int n_eq,
-    Scalar tolerance)
+    Scalar tolerance,
+    bool bland = false)
 {
-    Scalar min_val = -tolerance;
-    int drop_idx = -1;
     const int wsize = static_cast<int>(working_set.size());
 
+    if(bland)
+    {
+        int drop_idx = -1;
+        int best_global = std::numeric_limits<int>::max();
+        for(int k = 0; k < wsize; ++k)
+        {
+            if(working_set[k] < n_eq) continue;
+            if(k < lambda_W.size() && lambda_W[k] < -tolerance
+               && working_set[k] < best_global)
+            {
+                best_global = working_set[k];
+                drop_idx = k;
+            }
+        }
+        return drop_idx;
+    }
+
+    Scalar min_val = -tolerance;
+    int drop_idx = -1;
     for(int k = 0; k < wsize; ++k)
     {
         if(working_set[k] < n_eq) continue;
@@ -283,6 +356,8 @@ void build_full_lambda(
 }
 
 // In-place initial_working_set: writes into pre-allocated output vector.
+// Applies the same rank-revealing admission as the value-returning overload
+// (dependent gradient rows are skipped so A_W keeps full row rank).
 template <typename Scalar, int N = argmin::dynamic_dimension, int M = argmin::dynamic_dimension>
 void initial_working_set(
     const Eigen::Vector<Scalar, N>& x0,
@@ -294,15 +369,35 @@ void initial_working_set(
 {
     W.clear();
     const int m = static_cast<int>(A_full.rows());
+    const int n = static_cast<int>(A_full.cols());
 
+    std::vector<int> candidates;
+    candidates.reserve(m);
     for(int i = 0; i < n_eq; ++i)
-        W.push_back(i);
-
+        candidates.push_back(i);
     for(int i = n_eq; i < m; ++i)
     {
         Scalar residual = A_full.row(i).dot(x0) - b_full[i];
         if(std::abs(residual) < tolerance)
-            W.push_back(i);
+            candidates.push_back(i);
+    }
+
+    Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_W(0, n);
+    int rank = 0;
+    for(int idx : candidates)
+    {
+        if(rank >= n) break;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> trial(A_W.rows() + 1, n);
+        if(A_W.rows() > 0) trial.topRows(A_W.rows()) = A_W;
+        trial.row(A_W.rows()) = A_full.row(idx);
+        Eigen::ColPivHouseholderQR<Eigen::Matrix<Scalar, Eigen::Dynamic, N>> qr(trial);
+        const int new_rank = static_cast<int>(qr.rank());
+        if(new_rank > rank)
+        {
+            A_W = std::move(trial);
+            rank = new_rank;
+            W.push_back(idx);
+        }
     }
 }
 
@@ -372,6 +467,7 @@ public:
         , b_full_(max_constraints)
         , A_W_(max_constraints, n)
         , qr_lambda_(n, n)
+        , qr_rr_(n, n)
         , llt_reduced_(n)
         , Q_explicit_(n, n)
         , R_(n, max_constraints)
@@ -487,20 +583,46 @@ public:
         qr_valid_ = false;
         givens_update_count_ = 0;
 
+        // Anti-cycling budget: switch to Bland's lowest-index leaving rule
+        // after 2*(n + m) iterations (Bland 1977; N&W Section 13.5).
+        const int bland_threshold = 2 * (n + m_total);
+
+        // Last multipliers computed, with the working set they belong to, so
+        // the max-iteration exit returns genuine duals rather than zeros.
+        constraint_vector last_lambda_W;
+        std::vector<int> last_W;
+
         for(int iter = 0; iter < max_iter; ++iter)
         {
+            const bool bland = iter >= bland_threshold;
             g_k_.head(n).noalias() = G * x + d;
 
             const int wsize = static_cast<int>(W_.size());
             for(int k = 0; k < wsize; ++k)
                 A_W_.row(k) = A_full_.row(W_[k]);
 
+            bool reduced_hessian_ok = true;
             auto [p, lambda_W] = solve_equality_subproblem(
-                G, g_k_.head(n), A_W_.topRows(wsize), n, wsize);
+                G, g_k_.head(n), A_W_.topRows(wsize), n, wsize,
+                &reduced_hessian_ok);
+
+            last_lambda_W = lambda_W;
+            last_W = W_;
+
+            if(!reduced_hessian_ok)
+            {
+                build_full_lambda(lambda_W, W_, m_total, lambda_full_);
+                qp_result<Scalar, N, M> res;
+                res.x = x;
+                res.lambda = lambda_full_.head(m_total);
+                res.status = qp_status::indefinite_hessian;
+                res.iterations = iter;
+                return res;
+            }
 
             if(p.norm() < tol)
             {
-                int drop = most_negative_multiplier(lambda_W, W_, m_eq, tol);
+                int drop = most_negative_multiplier(lambda_W, W_, m_eq, tol, bland);
                 if(drop == -1)
                 {
                     build_full_lambda(lambda_W, W_, m_total, lambda_full_);
@@ -553,9 +675,9 @@ public:
             }
         }
 
-        constraint_vector zero_lam = constraint_vector::Zero(
-            static_cast<int>(W_.size()));
-        build_full_lambda(zero_lam, W_, m_total, lambda_full_);
+        // Max-iteration exit: return the last computed multipliers for the
+        // working set they were solved against, not a zero vector.
+        build_full_lambda(last_lambda_W, last_W, m_total, lambda_full_);
         qp_result<Scalar, N, M> res;
         res.x = x;
         res.lambda = lambda_full_.head(m_total);
@@ -644,11 +766,16 @@ private:
         const Eigen::Ref<const n_vector>& g_k,
         const Eigen::Ref<const constraint_matrix>& A_W,
         int n,
-        int m)
+        int m,
+        bool* reduced_hessian_ok = nullptr)
     {
+        if(reduced_hessian_ok) *reduced_hessian_ok = true;
+
         if(m == 0)
         {
             llt_reduced_.compute(G);
+            if(reduced_hessian_ok && llt_reduced_.info() != Eigen::Success)
+                *reduced_hessian_ok = false;
             n_vector p = llt_reduced_.solve(-g_k);
             qr_valid_ = false;
             return {p, constraint_vector{}};
@@ -656,9 +783,12 @@ private:
 
         if(m >= n)
         {
+            // Rank-revealing solve: a dependent working-set row would make the
+            // unpivoted QR produce NaN multipliers. ColPivHouseholderQR keeps
+            // the least-squares multipliers finite on a degenerate vertex.
             n_vector p = n_vector::Zero(n);
-            qr_lambda_.compute(A_W.transpose());
-            constraint_vector lambda = qr_lambda_.solve(g_k);
+            qr_rr_.compute(A_W.transpose());
+            constraint_vector lambda = qr_rr_.solve(g_k);
             return {p, lambda};
         }
 
@@ -673,6 +803,8 @@ private:
         ZtGZ_.topLeftCorner(n - rank, n - rank).noalias() =
             Z_block.transpose() * G * Z_block;
         llt_reduced_.compute(ZtGZ_.topLeftCorner(n - rank, n - rank));
+        if(reduced_hessian_ok && llt_reduced_.info() != Eigen::Success)
+            *reduced_hessian_ok = false;
 
         rhs_.head(n - rank).noalias() = -(Z_block.transpose() * g_k);
         p_z_.head(n - rank) = llt_reduced_.solve(rhs_.head(n - rank));
@@ -680,8 +812,8 @@ private:
 
         auto AY = (A_W * Y_block).eval();
         rhs_lam_.head(rank).noalias() = Y_block.transpose() * (g_k + G * p);
-        qr_lambda_.compute(AY.transpose());
-        constraint_vector lambda = qr_lambda_.solve(rhs_lam_.head(rank));
+        qr_rr_.compute(AY.transpose());
+        constraint_vector lambda = qr_rr_.solve(rhs_lam_.head(rank));
 
         return {p, lambda};
     }
@@ -694,6 +826,7 @@ private:
     constraint_matrix A_W_;
 
     Eigen::HouseholderQR<qr_lambda_matrix> qr_lambda_;
+    Eigen::ColPivHouseholderQR<qr_lambda_matrix> qr_rr_;
     Eigen::LLT<n_square_matrix> llt_reduced_;
     q_matrix Q_explicit_;
     qr_matrix R_;
@@ -759,17 +892,46 @@ qp_result<Scalar, N> solve_qp(
     auto W = initial_working_set<Scalar, N>(x0, A_full, b_full, m_eq, tol);
     Eigen::Vector<Scalar, N> x = x0;
 
+    // Anti-cycling: after this many iterations without convergence, switch
+    // the leaving-constraint choice to Bland's lowest-index rule, which
+    // provably terminates on degenerate vertices. 2*(n + m) is the standard
+    // heuristic budget before the guard engages (Bland 1977; N&W Section 13.5).
+    const int bland_threshold = 2 * (n + m_total);
+
+    // Snapshot of the multipliers computed for the working set they were
+    // solved against, so the max-iteration exit can return the last genuinely
+    // computed duals instead of a zero vector.
+    Eigen::Matrix<Scalar, Eigen::Dynamic, 1> last_lambda_W;
+    std::vector<int> last_W;
+
     for(int iter = 0; iter < max_iter; ++iter)
     {
+        const bool bland = iter >= bland_threshold;
         Eigen::Vector<Scalar, N> g_k = (G * x + d).eval();
         auto A_W = extract_working_rows(A_full, W);
 
-        auto [p, lambda_W] = solve_equality_qp<Scalar, N>(G, g_k, A_W);
+        bool reduced_hessian_ok = true;
+        auto [p, lambda_W] = solve_equality_qp<Scalar, N>(
+            G, g_k, A_W, &reduced_hessian_ok);
+
+        last_lambda_W = lambda_W;
+        last_W = W;
+
+        if(!reduced_hessian_ok)
+        {
+            auto lambda_full = build_full_lambda(lambda_W, W, m_total);
+            qp_result<Scalar, N> res;
+            res.x = x;
+            res.lambda = lambda_full;
+            res.status = qp_status::indefinite_hessian;
+            res.iterations = iter;
+            return res;
+        }
 
         if(p.norm() < tol)
         {
             // At stationary point for current working set -- check multipliers
-            int drop = most_negative_multiplier(lambda_W, W, m_eq, tol);
+            int drop = most_negative_multiplier(lambda_W, W, m_eq, tol, bland);
             if(drop == -1)
             {
                 // All inequality multipliers non-negative: optimal
@@ -781,7 +943,7 @@ qp_result<Scalar, N> solve_qp(
                 res.iterations = iter;
                 return res;
             }
-            // Remove the constraint with most negative multiplier
+            // Remove the constraint with the selected multiplier
             W.erase(W.begin() + drop);
         }
         else
@@ -796,9 +958,9 @@ qp_result<Scalar, N> solve_qp(
         }
     }
 
-    Eigen::Matrix<Scalar, Eigen::Dynamic, 1> zero_lam =
-        Eigen::Matrix<Scalar, Eigen::Dynamic, 1>::Zero(static_cast<int>(W.size()));
-    auto lambda_full = build_full_lambda(zero_lam, W, m_total);
+    // Max-iteration exit: return the multipliers last computed for the
+    // working set they were solved against (N&W eq. 16.30), not zeros.
+    auto lambda_full = build_full_lambda(last_lambda_W, last_W, m_total);
     qp_result<Scalar, N> res;
     res.x = x;
     res.lambda = lambda_full;

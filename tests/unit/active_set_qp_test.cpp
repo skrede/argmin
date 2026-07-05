@@ -345,15 +345,15 @@ TEST_CASE("solve_qp N&W 16.3 active-inequality multiplier matches KKT dual",
         CHECK(result.lambda[i] == Approx(0.0).margin(1e-7));
 }
 
-// RED against the current substrate. When the active-set loop exhausts
-// its iteration budget it currently scatters a ZERO multiplier vector
-// into the result (the max-iteration exit path builds the full lambda
-// from a zero working-set vector, discarding the multipliers it just
-// computed). [!shouldfail] records this as the expected disposition;
-// once the max-iteration exit path preserves the computed multipliers,
-// this case starts passing and the tag must be removed.
+// Max-iteration exit now preserves the last multipliers computed for the
+// working set they were solved against, instead of scattering a zero vector.
+// On the truncated N&W 16.3 solve below the initial working set has two
+// active inequalities with hand-derivable duals (-2, -1), so the returned
+// lambda must carry a nonzero computed multiplier. (Previously tagged
+// [!shouldfail] against the zero-scatter substrate; the tag is removed now
+// that the exit path returns the computed duals.)
 TEST_CASE("solve_qp returns computed multipliers on max-iteration exit",
-          "[qp][dual][!shouldfail]")
+          "[qp][dual]")
 {
     // A truncated solve on the N&W 16.3 geometry keeps at least
     // one inequality active in the working set, so the returned lambda must
@@ -377,6 +377,102 @@ TEST_CASE("solve_qp returns computed multipliers on max-iteration exit",
 
     REQUIRE(result.status == qp_status::max_iterations);
     CHECK(result.lambda.cwiseAbs().maxCoeff() > 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// Working-set independence and anti-cycling pins.
+//
+// The null-space method (N&W Algorithm 16.3) requires the working-set matrix
+// A_W to have full row rank. Admitting linearly dependent gradient rows
+// (parallel active constraints at a degenerate vertex) violates that
+// precondition. The rank-revealing admission keeps the lowest-index
+// independent basis; Bland's rule (Bland 1977; N&W Section 13.5) guarantees
+// termination once the iteration budget is exceeded.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("initial_working_set admits only linearly independent rows",
+          "[qp][working-set]")
+{
+    // x1 >= 0 and 2*x1 >= 0 have parallel gradients and are both near-active
+    // at x0 = (0, 0.5). Their candidate set {0, 1} is rank 1. Full-row-rank
+    // admission must retain only the first (lowest-index) row.
+    //
+    // Pre-fix: W = {0, 1} with rank(A_W) = 1 < |W| (dependent row admitted).
+    // Post-fix: W = {0} with rank(A_W) = 1 = |W| (full row rank).
+    Eigen::MatrixXd A(2, 2);
+    A << 1.0, 0.0,
+         2.0, 0.0;
+    Eigen::VectorXd b{{0.0, 0.0}};
+    Eigen::VectorXd x0{{0.0, 0.5}};
+
+    auto W = initial_working_set<double>(x0, A, b, /*n_eq=*/0, /*tol=*/1e-9);
+
+    REQUIRE_FALSE(W.empty());
+    Eigen::MatrixXd A_W(static_cast<int>(W.size()), 2);
+    for(int k = 0; k < static_cast<int>(W.size()); ++k)
+        A_W.row(k) = A.row(W[k]);
+    const int rank = static_cast<int>(A_W.colPivHouseholderQr().rank());
+    CHECK(rank == static_cast<int>(W.size()));  // no linearly dependent row admitted
+}
+
+TEST_CASE("solve_qp leaves a degenerate active vertex for the interior optimum",
+          "[qp][working-set][dual]")
+{
+    // finding-2 geometry: min 0.5||x||^2 - (x1 + x2)  (G = I, d = (-1,-1))
+    // s.t. x1 >= 0, 2*x1 >= 0 (parallel), x2 >= 0, started at the origin where
+    // all three are active. The unconstrained minimizer (1, 1) is feasible, so
+    // the solver must leave the degenerate vertex and return it with every
+    // multiplier zero (no constraint active at the interior optimum). The
+    // active dual is hand-derivable: grad = G x* + d = 0 at (1, 1), so
+    // A_W^T lambda = 0 forces lambda = 0 for any working set.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd d{{-1.0, -1.0}};
+    Eigen::MatrixXd A_eq(0, 2);
+    Eigen::VectorXd b_eq(0);
+    Eigen::MatrixXd A_ineq(3, 2);
+    A_ineq << 1.0, 0.0,
+              2.0, 0.0,
+              0.0, 1.0;
+    Eigen::VectorXd b_ineq{{0.0, 0.0, 0.0}};
+    Eigen::VectorXd x0{{0.0, 0.0}};
+
+    auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    CHECK(result.status == qp_status::optimal);
+    CHECK(result.x[0] == Approx(1.0).margin(1e-8));
+    CHECK(result.x[1] == Approx(1.0).margin(1e-8));
+    REQUIRE(result.lambda.size() == 3);
+    for(int i = 0; i < 3; ++i)
+        CHECK(result.lambda[i] == Approx(0.0).margin(1e-8));  // interior optimum: zero duals
+}
+
+TEST_CASE("solve_qp terminates on a redundant-constraint degenerate vertex",
+          "[qp][working-set]")
+{
+    // The optimum (0, 0) sits at a vertex with redundant parallel active
+    // constraints (x1 >= 0 and 3*x1 >= 0; x2 >= 0 and 5*x2 >= 0), a classic
+    // degeneracy that can cycle under an arbitrary-tie leaving rule. Rank-
+    // revealing admission plus the Bland fallback guarantee termination; the
+    // solver must return the correct optimum with status optimal rather than
+    // exhausting its iteration budget.
+    Eigen::MatrixXd G = 2.0 * Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd d{{2.0, 2.0}};  // unconstrained min (-1,-1); with x >= 0 -> (0,0)
+    Eigen::MatrixXd A_eq(0, 2);
+    Eigen::VectorXd b_eq(0);
+    Eigen::MatrixXd A_ineq(4, 2);
+    A_ineq << 1.0, 0.0,
+              3.0, 0.0,
+              0.0, 1.0,
+              0.0, 5.0;
+    Eigen::VectorXd b_ineq{{0.0, 0.0, 0.0, 0.0}};
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    qp_options opts{.max_iterations = 50};
+
+    auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
+
+    CHECK(result.status == qp_status::optimal);
+    CHECK(result.x[0] == Approx(0.0).margin(1e-8));
+    CHECK(result.x[1] == Approx(0.0).margin(1e-8));
 }
 
 // Givens QR update tests.

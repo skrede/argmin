@@ -605,11 +605,22 @@ TEST_CASE("Two-loop fast path direction equivalence", "[lbfgsb]")
 
         // Directions must match to machine epsilon.
         // Normalize by direction magnitude to get relative error.
+        //
+        // The relative direction error is dominated by the conditioning of the
+        // reduced Hessian at each step: on this rosenbrock run all iterations
+        // agree to < 16 eps except one ill-conditioned step where the shared
+        // direction is tiny and the error scales with kappa(reduced Hessian).
+        // There the two algebraically identical paths agree to ~1.4e3 eps
+        // (~3e-13) -- the exact figure depends on the in-contract middle-matrix
+        // factorization (PartialPivLU), which pivots differently from the
+        // previous (out-of-contract) LDLT. 1e4 * eps keeps a safety margin
+        // over the measured worst case while still rejecting any genuine
+        // divergence (which is O(1), eleven orders larger).
         double d_norm = std::max(d_fast.norm(), d_gcp.norm());
         if(d_norm > 1e-15)
         {
             double rel_error = (d_fast - d_gcp).norm() / d_norm;
-            CHECK(rel_error < 1000 * eps);
+            CHECK(rel_error < 10000 * eps);
         }
 
         // Take a step using the fast path direction (quasi-Newton).
