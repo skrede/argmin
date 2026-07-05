@@ -540,6 +540,190 @@ TEST_CASE("byrd_omojokun_composite_step penalty grows when "
     CHECK(penalty > 1.0);
 }
 
+// ─── Kernel pins: null-space invariant and hand-derived value pins ─
+//
+// Reference: Nocedal and Wright 2e Section 18.5, eq. 18.45-18.50
+//            (Byrd-Omojokun composite step; the tangential leg must
+//             satisfy A*u = 0 so it preserves the normal step's
+//             linearized-feasibility gain).
+//
+// Shared failure instance (round-1 reviewer, finding 1): minimize x2
+// subject to x1 = 0 from z = (1, 1) with B = I, lambda = 0, delta = 10
+// (interior; no active box). Every quantity below is hand-derived in
+// this comment from N&W 18.45-18.50, none pinned from a run:
+//
+//   objective f(x) = x2                => g = (0, 1)
+//   constraint     x1 = 0 at z = (1,1) => A = [1, 0], c = (1)
+//   normal step   v = -A^T (A A^T)^{-1} c = (-1, 0)  (A v + c = 0)
+//   tangential gradient g_t = g + B v = (-1, 1)
+//   null(A) = span{e2}; project g_t onto null(A) => (0, 1)
+//   1-D CG minimizer of g_t^T u + 0.5 u^T u along e2 => u = (0, -1)
+//   composite p = v + u = (-1, -1),  A u = 0  (invariant holds)
+//   vpred     = ||c|| - ||A p + c|| = 1 - 0 = 1
+//   predicted = -g^T p - 0.5 p^T B p = 1 - 1 = 0
+//
+// Pre-fix code (no null-space projection) minimizes the tangential
+// model over the FULL joint space: u = -B^{-1} g_t = (1, -1), so
+// p = (0, -1) with ||A u||_inf = 1 (invariant violated), vpred = 0
+// (the tangential leg undid the normal step's feasibility gain), and
+// predicted = 0.5. Those wrong values are the recorded pre-fix reds.
+
+namespace
+{
+
+// One-shot driver for the shared null-space failure instance. Returns
+// the composite step in p_out and the raw result POD.
+byrd_omojokun_step_result run_nullspace_instance(
+    Eigen::Vector2d& u_buf_out,
+    Eigen::Vector2d& p_out_out)
+{
+    Eigen::Vector2d g;
+    g << 0.0, 1.0;
+    Eigen::Matrix2d B = Eigen::Matrix2d::Identity();
+
+    Eigen::MatrixXd A(1, 2);
+    A << 1.0, 0.0;
+    Eigen::VectorXd c(1);
+    c << 1.0;
+
+    const double delta_in = 10.0;
+    const double eps = 1e-10;
+
+    Eigen::Vector2d z_k;
+    z_k << 1.0, 1.0;
+    Eigen::Vector2d lower_displaced;
+    lower_displaced << -kInf, -kInf;
+    Eigen::Vector2d upper_displaced;
+    upper_displaced << kInf, kInf;
+
+    Eigen::MatrixXd AAt_workspace(1, 1);
+    Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(1);
+    Eigen::VectorXd w_workspace(1);
+    Eigen::Vector2d v_buf, r_cg_buf, d_cg_buf, Bd_cg_buf;
+
+    hessian_op_2d hop{B};
+    trial_eval_quadratic teval{g, B, A, c, 0.0};
+
+    double penalty = 1.0;
+    const double penalty_factor = 0.0;
+    auto r = byrd_omojokun_composite_step<double, 2>(
+        z_k, g, hop, A, c,
+        delta_in, eps, /*max_cg_iter=*/20,
+        lower_displaced, upper_displaced,
+        teval,
+        AAt_workspace, ldlt_workspace, w_workspace,
+        v_buf, u_buf_out, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out_out,
+        penalty, penalty_factor);
+    return r;
+}
+
+}
+
+TEST_CASE("byrd_omojokun tangential step satisfies A*u = 0 in null(A)",
+          "[kernel-pin][byrd_omojokun][nullspace]")
+{
+    // Pin 1 (N&W 18.49): the tangential leg must lie in null(A_joint).
+    // Pre-fix ||A*u||_inf = 1.0 (recorded red); post-fix ~0.
+    Eigen::Vector2d u_buf, p_out;
+    Eigen::MatrixXd A(1, 2);
+    A << 1.0, 0.0;
+    (void)run_nullspace_instance(u_buf, p_out);
+
+    const double Au_inf = (A * u_buf).cwiseAbs().maxCoeff();
+    const double scale = std::max(1.0, A.norm() * u_buf.norm());
+    INFO("||A*u||_inf = " << Au_inf << "  u = (" << u_buf[0]
+         << ", " << u_buf[1] << ")");
+    CHECK(Au_inf <= 1e-10 * scale);
+}
+
+TEST_CASE("byrd_omojokun vpred = 1.0 and predicted = 0.0 (hand-derived)",
+          "[kernel-pin][byrd_omojokun][value]")
+{
+    // Pin 2 (N&W 18.45-18.50): vpred == ||c|| - ||A p + c|| == 1.0 and
+    // predicted == -g^T p - 0.5 p^T B p == 0.0. Pre-fix recorded reds:
+    // vpred = 0.0, predicted = 0.5.
+    Eigen::Vector2d u_buf, p_out;
+    auto r = run_nullspace_instance(u_buf, p_out);
+
+    INFO("vpred = " << r.vpred << "  predicted = " << r.predicted
+         << "  p = (" << p_out[0] << ", " << p_out[1] << ")");
+    CHECK(r.vpred == Approx(1.0).margin(1e-12));
+    CHECK(r.predicted == Approx(0.0).margin(1e-12));
+}
+
+TEST_CASE("byrd_omojokun vpred >= 0 across a delta grid (5-D, 2 eq)",
+          "[kernel-pin][byrd_omojokun][vpred]")
+{
+    // Pin 3: vpred >= 0 must hold structurally on every composite step
+    // once the tangential leg is confined to null(A). Deterministic
+    // well-conditioned instance (fixed literals, not RNG, for exact
+    // reproducibility): A fixes the first two coordinates, and the
+    // objective gradient loads those same coordinates so the pre-fix
+    // full-space tangential step re-violates linearized feasibility
+    // (vpred < 0) for the interior deltas. Post-fix vpred = ||c|| >= 0.
+    Eigen::MatrixXd A(2, 5);
+    A << 1.0, 0.0, 0.0, 0.0, 0.0,
+         0.0, 1.0, 0.0, 0.0, 0.0;
+    Eigen::VectorXd c(2);
+    c << 0.5, 0.5;
+
+    Eigen::Matrix<double, 5, 5> B = Eigen::Matrix<double, 5, 5>::Identity();
+    Eigen::Vector<double, 5> g;
+    g << 5.0, 5.0, 0.0, 0.0, 0.0;
+
+    struct hop5
+    {
+        Eigen::Matrix<double, 5, 5> B;
+        Eigen::Vector<double, 5> operator()(
+            const Eigen::Ref<const Eigen::Vector<double, 5>>& v) const
+        {
+            return (B * v).eval();
+        }
+    } hop{B};
+
+    struct teval5
+    {
+        Eigen::Vector<double, 5> g;
+        Eigen::Matrix<double, 5, 5> B;
+        Eigen::MatrixXd A;
+        Eigen::VectorXd c;
+        std::pair<double, double> operator()(
+            const Eigen::Ref<const Eigen::Vector<double, 5>>& p) const
+        {
+            return {g.dot(p) + 0.5 * p.dot(B * p), (A * p + c).norm()};
+        }
+    } teval{g, B, A, c};
+
+    Eigen::Vector<double, 5> z_k = Eigen::Vector<double, 5>::Zero();
+    Eigen::Vector<double, 5> lower_displaced =
+        Eigen::Vector<double, 5>::Constant(-kInf);
+    Eigen::Vector<double, 5> upper_displaced =
+        Eigen::Vector<double, 5>::Constant(kInf);
+
+    for(double delta : {0.5, 1.0, 2.0, 5.0, 10.0})
+    {
+        Eigen::MatrixXd AAt_workspace(2, 2);
+        Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(2);
+        Eigen::VectorXd w_workspace(2);
+        Eigen::Vector<double, 5> v_buf, u_buf, r_cg_buf, d_cg_buf,
+            Bd_cg_buf, p_out;
+
+        double penalty = 1.0;
+        auto r = byrd_omojokun_composite_step<double, 5>(
+            z_k, g, hop, A, c,
+            delta, 1e-10, /*max_cg_iter=*/50,
+            lower_displaced, upper_displaced,
+            teval,
+            AAt_workspace, ldlt_workspace, w_workspace,
+            v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+            penalty, 0.0);
+
+        INFO("delta = " << delta << "  vpred = " << r.vpred
+             << "  ||A*u||_inf = " << (A * u_buf).cwiseAbs().maxCoeff());
+        CHECK(r.vpred >= -1e-12);
+    }
+}
+
 TEST_CASE("byrd_omojokun_composite_step penalty stays at initial "
           "value when vpred is non-positive",
           "[byrd_omojokun][penalty][stay]")

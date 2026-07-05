@@ -176,6 +176,27 @@ public:
         {
             Scalar dt = bp.t - t_old;
 
+            // Segment-entry test (Byrd-Lu-Nocedal Algorithm CP): the
+            // reconstructed f'(t_old+) below is the derivative at the
+            // entry of THIS segment on the reduced direction. When it is
+            // non-negative the model is already non-decreasing along the
+            // remaining free direction, so the generalized Cauchy point
+            // is at t_old -- returning at the next breakpoint instead
+            // (the prior behavior) overshoots the active set by one
+            // segment whenever non-diagonal curvature pushes f'(t_old+)
+            // >= 0.
+            //
+            // Reference: Byrd, R. H., Lu, P., Nocedal, J. (1995),
+            //   "A limited-memory algorithm for bound-constrained
+            //   optimization," SIAM J. Sci. Comput. 16(5), Algorithm CP.
+            if(f_prime >= Scalar(0))
+            {
+                x_cauchy_.noalias() = x + z_;
+                x_cauchy_ = project<Scalar, N>(x_cauchy_, lower, upper);
+                classify_indices<Scalar, N>(x_cauchy_, lower, upper, result_);
+                return result_;
+            }
+
             if(f_double_prime > Scalar(0) && f_prime < Scalar(0))
             {
                 Scalar t_star = t_old - f_prime / f_double_prime;
@@ -236,8 +257,26 @@ public:
             f_prime = g.dot(d_) + z_.dot(Bd_);
         }
 
-        Scalar t_last = bps_.back().t;
-        x_cauchy_.noalias() = x - t_last * g;
+        // After the last breakpoint the entry derivative f_prime =
+        // f'(t_last+) is strictly negative (a non-negative value would
+        // have returned at the segment-entry test above). Byrd-Lu-Nocedal
+        // Algorithm CP performs the final-segment minimization along the
+        // remaining free direction d_: the minimizer is at t_last +
+        // delta_t* with delta_t* = -f'/f'' when f'' > 0. Omitting it
+        // (the prior behavior returned x(t_last)) left the GCP short of
+        // the segment minimum and produced a suboptimal active set.
+        //
+        // Reference: Byrd, Lu, Nocedal 1995 Algorithm CP, final-segment
+        //            minimization.
+        if(f_double_prime > Scalar(0))
+        {
+            Scalar dt_star = -f_prime / f_double_prime;
+            x_cauchy_.noalias() = x + z_ + dt_star * d_;
+        }
+        else
+        {
+            x_cauchy_.noalias() = x + z_;
+        }
         x_cauchy_ = project<Scalar, N>(x_cauchy_, lower, upper);
         classify_indices<Scalar, N>(x_cauchy_, lower, upper, result_);
         return result_;

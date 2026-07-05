@@ -320,6 +320,83 @@ ARGMIN_FORCE_INLINE void equality_feasibility_warmstart(
     p0_out.noalias() = J_eq.transpose() * w_workspace;
 }
 
+// Orthogonal projection onto null(A) via the AA^T normal equations.
+//
+// Computes, in place, z = x - A^T (A A^T)^{-1} A x -- the orthogonal
+// projector onto the null space of A (equivalently, x with its
+// range(A^T) component removed). The caller supplies a prepared LDLT of
+// A A^T (the same factorization the Byrd-Omojokun normal step already
+// builds) and an m-sized scratch vector, so the full-rank path performs
+// no heap allocation: one A x (m*n), one LDLT back-solve (m^2), one
+// A^T y (m*n) per projection.
+//
+// Iterative refinement (Gould, Hribar, Nocedal 2001, "Solution of the
+// Trust-Region Subproblem Using the Lanczos Method" / their projected-CG
+// preconditioner, Algorithm 5.1-5.2): after the projection the residual
+// orthogonality ||A z||_inf / max(1, ||A||_inf ||z||_inf) is measured
+// and the projection is re-applied while it exceeds the tolerance, up to
+// refine_passes additional passes. This absorbs the drift off null(A)
+// that accumulated rounding introduces in the normal-equations
+// projector at tight tolerances.
+//
+// Rank-deficient A (ldlt.info() != Success): fall back to the projector
+// built from a rank-revealing ColPivHouseholderQR of A^T, z = x - Q1
+// Q1^T x with Q1 the first rank(A) columns of Q. Correctness fallback
+// only -- it allocates and is off the hot path (the composite step also
+// flags normal_step_lsq_fallback on this branch).
+//
+// Reference: Gould, Hribar, Nocedal 2001 SIAM J. Sci. Comput. 23(6);
+//            Nocedal and Wright 2e Section 16.3 Algorithm 16.2
+//            (projected CG); scipy optimize/_trustregion_constr/
+//            projections.py (normal-equations projection).
+template <typename Scalar, int N>
+ARGMIN_FORCE_INLINE void null_space_project(
+    const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& A,
+    Eigen::LDLT<Eigen::MatrixXd>& ldlt,
+    Eigen::Ref<Eigen::Vector<Scalar, N>> x,
+    Eigen::VectorXd& m_scratch,
+    int refine_passes)
+{
+    const int m = static_cast<int>(A.rows());
+    if(m == 0)
+        return;  // null(A) is all of R^n; nothing to remove.
+
+    if(ldlt.info() != Eigen::Success)
+    {
+        // Rank-deficient AA^T: project off range(A^T) via pivoted QR.
+        Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(
+            A.transpose());
+        const int r = static_cast<int>(qr.rank());
+        if(r == 0)
+            return;
+        const Eigen::MatrixXd Q =
+            qr.householderQ()
+            * Eigen::MatrixXd::Identity(A.cols(), r);
+        x.noalias() -= Q * (Q.transpose() * x);
+        return;
+    }
+
+    // Full-rank normal-equations projection.
+    m_scratch.noalias() = A * x;
+    ldlt.solveInPlace(m_scratch);
+    x.noalias() -= A.transpose() * m_scratch;
+
+    // Iterative refinement to hold ||A z|| at the projection tolerance.
+    const Scalar A_inf = A.template lpNorm<Eigen::Infinity>();
+    for(int pass = 0; pass < refine_passes; ++pass)
+    {
+        m_scratch.noalias() = A * x;
+        const Scalar ortho = m_scratch.template lpNorm<Eigen::Infinity>();
+        const Scalar scale =
+            std::max(Scalar(1),
+                     A_inf * x.template lpNorm<Eigen::Infinity>());
+        if(ortho <= Scalar(1e-14) * scale)
+            break;
+        ldlt.solveInPlace(m_scratch);
+        x.noalias() -= A.transpose() * m_scratch;
+    }
+}
+
 // Adopted from: argmin/detail/bound_projection.h:19 (in-tree precedent
 //               — detail::project clip-to-box utility).
 // Reference: N&W 2e Section 17.3 (projected-step trial-iterate idiom).

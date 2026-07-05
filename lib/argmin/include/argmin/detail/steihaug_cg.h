@@ -1,63 +1,58 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_STEIHAUG_CG_H
 #define HPP_GUARD_ARGMIN_DETAIL_STEIHAUG_CG_H
 
-// Steihaug-Toint truncated CG for the trust-region subproblem
+// Projected Steihaug-Toint truncated CG for the trust-region subproblem
 //
-//   min  q(p) = g^T p + 0.5 p^T B p     s.t.  ||p|| <= delta
+//   min  q(p) = g^T p + 0.5 p^T B p     s.t.  ||p|| <= delta,  A p = 0,
+//                                             lower <= p <= upper
+//
+// Every residual and search direction is projected onto null(A) by the
+// caller-supplied projector, so all iterates stay in null(A) by
+// construction (Gould-Hribar-Nocedal 2001 Algorithm 6.2; scipy
+// projected_cg). Consumers that do not constrain the step to a null
+// space (the pure box/TR trust-region subproblem) pass the identity
+// projector and recover the ordinary Steihaug-Toint iteration.
 //
 // Exit conditions:
-//   1. forcing             — residual norm satisfies caller-supplied
-//                            forcing tolerance ||r|| <= eps * ||r_0||.
-//   2. negative_curvature  — d^T B d <= 0; follow d to the TR boundary.
-//   3. boundary            — trial iterate exits the trust region;
-//                            truncate to ||p|| = delta along d.
-//   4. max_iterations      — inner-iteration cap reached; return last
-//                            accepted iterate (the outer ratio test
-//                            decides whether to accept or reject).
+//   1. forcing             — projected residual norm satisfies the
+//                            caller-supplied forcing tolerance
+//                            ||Z r|| <= eps * ||Z r_0||.
+//   2. negative_curvature  — d^T B d <= 0; follow d to the nearest of
+//                            the TR boundary and the blocking box face.
+//   3. boundary            — the CG minimizer along d would leave the
+//                            trust region or cross a box face; truncate
+//                            AT that face/boundary before stepping.
+//   4. max_iterations      — inner-iteration cap reached.
 //
-// The Hessian enters as a generic Hessian-vector-product callable so
-// this helper stays Hessian-source-blind (consumers wire a
-// dense_ldl_bfgs::multiply closure at the call site without dragging
-// the BFGS header into this translation unit).
-//
-// Bounds are passed in displaced form (lower - z_k, upper - z_k) so
-// the projection inside the inner loop operates on the step p, not
-// the iterate z. On bound activation the loop performs a Lin-More
-// free-variable restart: it re-seeds p_k to the projected step,
-// recomputes the residual r = g + B p_k, resets d = -r, and continues.
-//
-// Adopted from: scipy/optimize/_trustregion_constr/qp_subproblem.py
-//               (projected_cg; argmin variant: no explicit null-space
-//                projector — bounds-projection at each inner iteration
-//                via detail::project handles slack + box bounds
-//                uniformly on the joint (x, s) space).
+// Boundary/box handling is truncate-before-step: along the current
+// direction the step to the TR boundary and the step to the nearest box
+// face are computed, the smaller is taken, and the iterate is truncated
+// there BEFORE it is applied. There is no post-step box projection: q is
+// monotone along d up to the CG step length (convex case) and for all
+// positive step lengths under negative curvature, so truncation
+// preserves the Steihaug model-decrease guarantee, whereas clipping an
+// overshooting iterate back onto the box does not.
 //
 // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
-//            Section 7.3 Algorithm 7.2 (truncated CG);
-//            Steihaug 1983, SIAM J. Numer. Anal. 20(3):626-637;
-//            Toint 1981 in Duff (ed.), "Sparse Matrices and Their
-//            Uses", Academic Press, 57-88;
-//            Conn, Gould, Toint 2000 MOS-SIAM "Trust-Region Methods"
-//            Chapter 7 Section 7.5 (Steihaug-Toint termination);
-//            Lin and More 1999, SIAM J. Optim. 9(4):1100-1127
-//            (free-variable restart on bound activation).
-//
-// argmin variant: bounds-projection inner loop on the joint (x, s)
-//                 space, treating slack lower-bound s >= 0 uniformly
-//                 with x's box bounds via the displaced-box
-//                 detail::project invocation; the forcing tolerance
-//                 is a caller-supplied scalar so per-mode forcing
-//                 (Eisenstat-Walker 1996, Dembo-Eisenstat-Steihaug
-//                 1982) lives at the policy site, not in this helper.
+//            Section 7.3 Algorithm 7.2 (truncated CG) and Section 16.3
+//            Algorithm 16.2 (projected CG);
+//            Gould, Hribar, Nocedal 2001 SIAM J. Sci. Comput. 23(6)
+//            Algorithm 6.2 (projected preconditioned CG; Polak-Ribiere
+//            beta); scipy optimize/_trustregion_constr/qp_subproblem.py
+//            (projected_cg; box/spherical truncation);
+//            Steihaug 1983 SIAM J. Numer. Anal. 20(3):626-637;
+//            Conn, Gould, Toint 2000 MOS-SIAM Chapter 7 Section 7.5
+//            (Steihaug-Toint termination; model-decrease on truncation).
 
 #include "argmin/types.h"
-#include "argmin/detail/bound_projection.h"
 
 #include <Eigen/Core>
 
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <utility>
 
 namespace argmin::detail
 {
@@ -70,30 +65,36 @@ enum class cg_exit_status : std::uint8_t
     max_iterations
 };
 
-// Steihaug-Toint truncated CG inner loop.
+// Default (identity) projector: leaves its argument unchanged. Consumers
+// that solve the unconstrained-in-null-space subproblem (no A p = 0
+// side constraint) pass this and recover the ordinary Steihaug-Toint
+// iteration.
+struct identity_null_projector
+{
+    template <typename Derived>
+    void operator()(Eigen::MatrixBase<Derived>&) const
+    {
+    }
+};
+
+// Projected Steihaug-Toint truncated CG inner loop.
 //
-// Inputs:
-//   g                 — gradient of the quadratic at p = 0.
-//   hessian_op        — Hessian-vector-product callable; must accept
-//                       a const Eigen::Ref to the step vector and
-//                       return an Eigen::Vector of the same dimension
-//                       (assignable into Bd_buf).
-//   delta             — trust-region radius (positive).
-//   eps               — forcing tolerance; the loop terminates when
-//                       ||r_k|| <= eps * ||r_0||.
-//   lower_displaced   — displaced lower bound (lower - z_k).
-//   upper_displaced   — displaced upper bound (upper - z_k).
-//   max_iter          — inner-iteration cap.
-//   p_out             — caller-owned step output (written on every exit).
-//   r_buf, d_buf,
-//   Bd_buf            — caller-owned scratch buffers, each pre-sized to
-//                       g.size(); the helper allocates no heap memory in
-//                       the hot path.
+// Inputs mirror the previous helper, with two additions:
+//   project_null   — callable invoked as project_null(v) that projects
+//                    the Eigen vector v onto null(A) in place. Defaults
+//                    to the identity (no side constraint).
+//   blocking_out   — optional; when non-null it receives the index of
+//                    the box coordinate that truncated the step (a box
+//                    face was hit strictly before the TR boundary), or
+//                    -1 if the exit was a TR-boundary / interior event.
+//                    Consumers implementing a free-set restart read it;
+//                    the default box-face exit ignores it.
 //
-// Workspaces follow the same caller-owned-Ref convention as
-// equality_feasibility_warmstart in sqp_common.h.
+// r_buf holds the PROJECTED residual Z r (not the full residual); the
+// three-buffer caller-owned scratch convention is unchanged.
 template <typename Scalar, int N = argmin::dynamic_dimension,
-          typename HessianOp>
+          typename HessianOp,
+          typename Projector = identity_null_projector>
 ARGMIN_FORCE_INLINE cg_exit_status steihaug_cg(
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g,
     HessianOp&& hessian_op,
@@ -105,39 +106,46 @@ ARGMIN_FORCE_INLINE cg_exit_status steihaug_cg(
     Eigen::Ref<Eigen::Vector<Scalar, N>> p_out,
     Eigen::Ref<Eigen::Vector<Scalar, N>> r_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>> d_buf,
-    Eigen::Ref<Eigen::Vector<Scalar, N>> Bd_buf)
+    Eigen::Ref<Eigen::Vector<Scalar, N>> Bd_buf,
+    Projector project_null = {},
+    int* blocking_out = nullptr,
+    bool warm_start = false)
 {
     using std::sqrt;
 
     const Scalar delta_sq = delta * delta;
+    const Scalar inf = std::numeric_limits<Scalar>::infinity();
+    if(blocking_out != nullptr)
+        *blocking_out = -1;
 
-    // p_0 = 0; r_0 = g; d_0 = -g.
-    p_out.setZero();
-    r_buf = g;
-    d_buf.noalias() = -g;
-
-    const Scalar r0_norm_sq = r_buf.squaredNorm();
-    const Scalar r0_norm = sqrt(r0_norm_sq);
-
-    // Degenerate stationary-point check. eps * ||r_0|| is the forcing
-    // bound; if ||r_0|| already lies below it (including the ||r_0|| == 0
-    // case) the zero step is the forcing-exit solution.
-    if(r0_norm <= eps * r0_norm)
+    // Residual buffer holds the PROJECTED residual Z r; d_0 = -Z r_0
+    // stays in null(A). Cold start begins at p_0 = 0 (r_0 = g); warm
+    // start (Lin-More free-set restart) continues from the current
+    // p_out with r_0 = g + B p_out, so a coordinate pinned by the
+    // projector keeps its already-reached box-face value.
+    if(warm_start)
     {
-        // Trivially satisfied when r0_norm == 0; for r0_norm > 0 the
-        // condition collapses to (1 - eps) * r0_norm <= 0, i.e. eps >= 1.
-        // Both branches return the zero step at the forcing exit.
-        if(r0_norm == Scalar(0))
-            return cg_exit_status::forcing;
+        r_buf.noalias() = g + hessian_op(p_out);
     }
+    else
+    {
+        p_out.setZero();
+        r_buf = g;
+    }
+    project_null(r_buf);
+    d_buf.noalias() = -r_buf;
 
-    // Boundary intersection: positive root of
+    // rg = ||Z r||^2 = r^T Z r (Z symmetric idempotent). The forcing
+    // test and the CG scalars are driven by this projected quantity.
+    Scalar rg = r_buf.squaredNorm();
+    const Scalar rg0 = rg;
+    if(rg0 <= Scalar(0))
+        return cg_exit_status::forcing;  // stationary within null(A).
+    const Scalar eps_sq_rg0 = (eps * eps) * rg0;
+
+    // Step to the TR boundary along d: positive root of
     //   tau^2 ||d||^2 + 2 tau <p, d> + ||p||^2 - delta^2 = 0.
-    // Discriminant clamp std::max(0, disc) is load-bearing — it absorbs
-    // floating-point noise when ||p|| == delta and d is co-linear with p.
-    //
-    // Reference: Nocedal and Wright eq. 7.13; Conn, Gould, Toint 2000
-    //            §7.5 (the tau-quadratic for Steihaug-Toint).
+    // Reference: N&W eq. 7.13; Conn-Gould-Toint 2000 §7.5.
     const auto tau_to_boundary =
         [delta_sq](const Eigen::Ref<const Eigen::Vector<Scalar, N>>& p_k,
                    const Eigen::Ref<const Eigen::Vector<Scalar, N>>& d_k)
@@ -149,87 +157,91 @@ ARGMIN_FORCE_INLINE cg_exit_status steihaug_cg(
         const Scalar p_dot_d = p_k.dot(d_k);
         const Scalar p_sq = p_k.squaredNorm();
         const Scalar disc = p_dot_d * p_dot_d - d_sq * (p_sq - delta_sq);
-        const Scalar disc_clamped =
-            disc > Scalar(0) ? disc : Scalar(0);
+        const Scalar disc_clamped = disc > Scalar(0) ? disc : Scalar(0);
         return (-p_dot_d + sqrt(disc_clamped)) / d_sq;
     };
 
-    Scalar r_dot_r = r0_norm_sq;
-    const Scalar eps_sq_r0_sq = (eps * eps) * r0_norm_sq;
+    // Step to the nearest displaced box face along d (componentwise
+    // ratio test); returns {tau, blocking coordinate}. A coordinate
+    // already at/beyond its face in the direction of motion yields
+    // tau = 0 (the step is blocked immediately).
+    const auto tau_to_face =
+        [&lower_displaced, &upper_displaced, inf](
+            const Eigen::Ref<const Eigen::Vector<Scalar, N>>& p_k,
+            const Eigen::Ref<const Eigen::Vector<Scalar, N>>& d_k)
+        -> std::pair<Scalar, int>
+    {
+        Scalar tau = inf;
+        int coord = -1;
+        for(int i = 0; i < d_k.size(); ++i)
+        {
+            Scalar t;
+            if(d_k[i] > Scalar(0) && upper_displaced[i] < inf)
+                t = (upper_displaced[i] - p_k[i]) / d_k[i];
+            else if(d_k[i] < Scalar(0) && lower_displaced[i] > -inf)
+                t = (lower_displaced[i] - p_k[i]) / d_k[i];
+            else
+                continue;
+            if(t < Scalar(0))
+                t = Scalar(0);
+            if(t < tau)
+            {
+                tau = t;
+                coord = i;
+            }
+        }
+        return {tau, coord};
+    };
 
     for(std::size_t k = 0; k < max_iter; ++k)
     {
-        // Bd = B * d_k.
         Bd_buf = hessian_op(d_buf);
         const Scalar kappa = d_buf.dot(Bd_buf);
 
-        // Negative-curvature exit: follow d_k to the TR boundary, then
-        // project onto the displaced box. The projection is the
-        // bounds-aware analog of the unconstrained Steihaug exit and
-        // is consistent with Lin-More restart on activated bounds.
+        const Scalar tau_tr = tau_to_boundary(p_out, d_buf);
+        const auto [tau_box, coord] = tau_to_face(p_out, d_buf);
+        const Scalar tau_block = tau_box < tau_tr ? tau_box : tau_tr;
+
+        // Negative-curvature exit: q decreases without bound along d, so
+        // step as far as the trust region and box permit, then stop.
         if(kappa <= Scalar(0))
         {
-            const Scalar tau = tau_to_boundary(p_out, d_buf);
-            p_out.noalias() += tau * d_buf;
-            p_out = detail::project<Scalar, N>(
-                p_out, lower_displaced, upper_displaced);
+            p_out.noalias() += tau_block * d_buf;
+            if(blocking_out != nullptr && tau_box < tau_tr)
+                *blocking_out = coord;
             return cg_exit_status::negative_curvature;
         }
 
-        const Scalar alpha = r_dot_r / kappa;
+        const Scalar alpha = rg / kappa;
 
-        // Trust-region boundary truncation. Use squared norm to skip
-        // the sqrt on the common-case "still inside" check.
-        const Scalar p_trial_norm_sq =
-            p_out.squaredNorm()
-            + Scalar(2) * alpha * p_out.dot(d_buf)
-            + alpha * alpha * d_buf.squaredNorm();
-        if(p_trial_norm_sq >= delta_sq)
+        // Boundary/box truncation: if the CG minimizer along d would
+        // leave the feasible region, truncate at the blocking face
+        // BEFORE stepping (no post-step projection).
+        if(alpha >= tau_block)
         {
-            const Scalar tau = tau_to_boundary(p_out, d_buf);
-            p_out.noalias() += tau * d_buf;
-            p_out = detail::project<Scalar, N>(
-                p_out, lower_displaced, upper_displaced);
+            p_out.noalias() += tau_block * d_buf;
+            if(blocking_out != nullptr && tau_box < tau_tr)
+                *blocking_out = coord;
             return cg_exit_status::boundary;
         }
 
-        // Provisional iterate; project on the displaced box. On bound
-        // activation perform a Lin-More free-variable restart:
-        // re-seed p_k to the projected iterate, recompute the residual
-        // at the new point, reset the search direction, and continue.
-        Eigen::Vector<Scalar, N> p_trial = p_out + alpha * d_buf;
-        Eigen::Vector<Scalar, N> p_proj = detail::project<Scalar, N>(
-            p_trial, lower_displaced, upper_displaced);
+        // Interior CG step.
+        p_out.noalias() += alpha * d_buf;
 
-        if((p_proj - p_trial).squaredNorm() > Scalar(0))
-        {
-            p_out = p_proj;
-            // r = g + B * p_k at the projected iterate.
-            r_buf = g;
-            Bd_buf = hessian_op(p_out);
-            r_buf.noalias() += Bd_buf;
-            d_buf.noalias() = -r_buf;
-            r_dot_r = r_buf.squaredNorm();
-
-            // Forcing-sequence check at the projected restart point.
-            if(r_dot_r <= eps_sq_r0_sq)
-                return cg_exit_status::forcing;
-            continue;
-        }
-
-        // Standard CG step: accept p_trial; update residual via the
-        // three-term recurrence r_{k+1} = r_k + alpha * Bd; check the
-        // forcing-sequence early-exit; then build the new direction.
-        p_out = p_trial;
+        // Update the projected residual in place:
+        //   g_{k+1} = Z r_{k+1} = Z r_k + alpha Z (B d_k)
+        //           = r_buf + alpha * project(B d_k).
+        // r_buf already holds Z r_k; project B d_k and accumulate.
+        project_null(Bd_buf);
         r_buf.noalias() += alpha * Bd_buf;
-        const Scalar r_new_dot_r_new = r_buf.squaredNorm();
+        const Scalar rg_new = r_buf.squaredNorm();
 
-        if(r_new_dot_r_new <= eps_sq_r0_sq)
+        if(rg_new <= eps_sq_rg0)
             return cg_exit_status::forcing;
 
-        const Scalar beta = r_new_dot_r_new / r_dot_r;
-        d_buf = -r_buf + beta * d_buf;
-        r_dot_r = r_new_dot_r_new;
+        const Scalar beta = rg_new / rg;
+        d_buf = -r_buf + beta * d_buf;  // stays in null(A).
+        rg = rg_new;
     }
 
     return cg_exit_status::max_iterations;

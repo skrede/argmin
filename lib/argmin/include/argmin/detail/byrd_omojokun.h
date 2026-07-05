@@ -69,6 +69,7 @@
 #include <Eigen/Core>
 #include <Eigen/Cholesky>
 
+#include <vector>
 #include <utility>
 #include <algorithm>
 #include <cmath>
@@ -100,6 +101,36 @@ inline constexpr double tr_shrink_factor  = 0.25;
 inline constexpr double tr_expand_factor  = 2.0;
 inline constexpr double tr_delta_max      = 1e10;
 inline constexpr double tr_boundary_guard = 0.9;   // expand only when ||p|| >= 0.9 * delta
+
+// Number of iterative-refinement passes applied by the null-space
+// projector on the tangential leg (Gould-Hribar-Nocedal 2001 Alg.
+// 5.1-5.2). scipy's projected_cg always refines once. The count was
+// swept over {0, 1, 2}: on the small, well-conditioned Jacobians of
+// the HS trust-region cohort the projector is already exact after the
+// first solve (||A u||_inf = 0 at every count; no HS accuracy
+// difference), and the orthogonality early-break inside the projector
+// makes count 2 identical to count 1 once orthogonality is reached
+// (pass 1). One pass is retained: it is the scipy/GHN standard, its HS
+// cost with the early-break is a single orthogonality-check matvec
+// (equal to zero passes when the projection is already exact), and it
+// guards against null-space drift on ill-conditioned Jacobians outside
+// the HS cohort where zero passes would accumulate rounding.
+inline constexpr int null_space_refine_passes = 1;
+
+// Box-face handling on the tangential leg. false selects the
+// scipy/GHN-standard truncate-and-stop (variant A): on a box-face hit
+// the projected CG stops with a boundary-class exit. true selects the
+// Lin-More free-set restart (variant B): the blocking coordinate is
+// pinned at its box-face value (a unit row is added to the null-space
+// projector so the warm-restarted tangential leg holds it there) and
+// the subproblem is re-solved on the reduced free set. Variant B is
+// selected by the HS-suite comparison recorded in the plan summary
+// (net +6 passing cells: 9 red->green flips vs 3 green->red, against
+// variant A's 5 vs 6). When the normal step is box-infeasible on the
+// slack block, variant A's truncate-and-stop collapses the tangential
+// leg to a near-zero step; variant B's free-set restart keeps making
+// objective progress on the remaining coordinates.
+inline constexpr bool tangential_lin_more_restart = true;
 
 // Composite-step result POD returned by byrd_omojokun_composite_step.
 //
@@ -239,6 +270,24 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
 
     const Scalar delta_n = zeta * delta;
 
+    // ── Factorize A A^T once per composite step ────────────────────
+    //
+    // The tangential-leg null-space projector needs (A A^T)^{-1} on
+    // EVERY step with constraints, and the normal-step LSQ-Newton
+    // branch needs the same factorization. Assemble and factor it once
+    // here; both legs reuse ldlt_workspace. have_factorization is false
+    // on a rank-deficient A A^T (LDLT flags info() != Success), in which
+    // case the normal step falls back to pure Cauchy and the projector
+    // takes its rank-revealing QR fallback.
+    const int m_total = static_cast<int>(A.rows());
+    bool have_factorization = false;
+    if(m_total > 0)
+    {
+        AAt_workspace.noalias() = A * A.transpose();
+        ldlt_workspace.compute(AAt_workspace);
+        have_factorization = (ldlt_workspace.info() == Eigen::Success);
+    }
+
     // ── Normal-step dogleg ─────────────────────────────────────────
     //
     // Reference: Nocedal and Wright 2e eq. 18.45-18.50; Lalee,
@@ -281,27 +330,18 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
             }
             else
             {
-                // LSQ Newton step via the shared LDLT warm-start
-                // helper. equality_feasibility_warmstart computes
-                //   p0 = A^T (A A^T)^{-1} b_eq  with  b_eq = c;
-                // we want v_N = -p0.  LDLT (not LLT) is rank-
-                // revealing via info() != Success on numerically
-                // singular A A^T. Materialize a concrete Matrix and
-                // VectorXd from the Eigen::Ref inputs because the
-                // shared helper signature takes const lvalue refs to
-                // concrete types (sqp_common.h:298-321).
-                Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_dense = A;
-                Eigen::VectorXd b_eq = c;
-                Eigen::Vector<Scalar, N> v_N(g.size());
+                // LSQ Newton step reusing the A A^T factorization built
+                // at composite-step entry: v_N = -A^T (A A^T)^{-1} c.
+                // LDLT (not LLT) is rank-revealing via info() != Success
+                // on numerically singular A A^T. solveInPlace writes the
+                // back-solve into the caller-owned w_workspace with no
+                // heap allocation.
+                w_workspace = c;
+                ldlt_workspace.solveInPlace(w_workspace);
+                Eigen::Vector<Scalar, N> v_N =
+                    -(A.transpose() * w_workspace);
 
-                detail::equality_feasibility_warmstart<Scalar, N, Eigen::Dynamic>(
-                    A_dense, b_eq,
-                    AAt_workspace, ldlt_workspace,
-                    w_workspace, v_N);
-                v_N *= Scalar(-1);
-
-                if(ldlt_workspace.info() != Eigen::Success
-                   || !v_N.allFinite())
+                if(!have_factorization || !v_N.allFinite())
                 {
                     // Rank-deficient AA^T; LDLT flagged. Fall back
                     // to pure Cauchy truncated to the TR boundary.
@@ -338,29 +378,26 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
         }
     }
 
-    // ── Tangential-step Steihaug-CG ────────────────────────────────
+    // ── Tangential-step projected Steihaug-CG ──────────────────────
     //
-    // Reference: Nocedal and Wright 2e Section 7.3 Algorithm 7.2
-    //            (truncated CG); Steihaug 1983 SIAM J. Numer. Anal.
-    //            20(3):626-637.
+    // Reference: Nocedal and Wright 2e Section 16.3 Algorithm 16.2
+    //            (projected CG); Gould-Hribar-Nocedal 2001 Algorithm
+    //            6.2; scipy qp_subproblem.projected_cg.
     //
-    // Tangential subproblem gradient at u = 0 is g_t = g + B v, per
-    // the quadratic q_t(u) = (g + B v)^T u + 0.5 u^T B u. Steihaug-CG
-    // operates with the tangential TR bound ||v + u|| <= delta; we
-    // pass the FULL radius (not zeta * delta) and shift the displaced
-    // box by -v_buf so the inner iterate starts from u = 0 on top of
-    // v_buf.
+    // Tangential subproblem gradient at u = 0 is g_t = g + B v, per the
+    // quadratic q_t(u) = (g + B v)^T u + 0.5 u^T B u. The tangential
+    // step u is confined to null(A) (N&W 18.49) so it preserves the
+    // normal step's linearized-feasibility gain; the projector below
+    // reuses the A A^T factorization built at entry.
     Eigen::Vector<Scalar, N> Bv = hessian_op(v_buf);
     Eigen::Vector<Scalar, N> g_t = g + Bv;
 
-    // Compute the tangential radius: Steihaug-CG enforces ||u|| <=
-    // delta_t where delta_t = sqrt(max(0, delta^2 - ||v||^2)) so
-    // ||v + u||^2 = ||v||^2 + 2 v^T u + ||u||^2 stays below delta^2
-    // when u is roughly orthogonal to v; in practice the conservative
-    // delta_t below preserves the trust-region constraint on the
-    // composite step for the common case where the tangential step is
-    // approximately orthogonal to the normal step (Lalee-Nocedal-
-    // Plantenga 1998 Section 3.3 derivation).
+    // Tangential radius: because u in null(A) is exactly orthogonal to
+    // the normal step v in range(A^T), ||v + u||^2 = ||v||^2 + ||u||^2
+    // holds exactly, so enforcing ||u|| <= delta_t = sqrt(delta^2 -
+    // ||v||^2) makes the composite step satisfy ||v + u|| <= delta
+    // exactly (no longer an approximation, as it was before the
+    // null-space projection landed).
     const Scalar v_norm_sq = v_buf.squaredNorm();
     const Scalar delta_sq = delta * delta;
     const Scalar remainder = delta_sq - v_norm_sq;
@@ -370,12 +407,83 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     Eigen::Vector<Scalar, N> lower_t = lower_displaced - v_buf;
     Eigen::Vector<Scalar, N> upper_t = upper_displaced - v_buf;
 
+    // Null-space projector: z <- z - A^T (A A^T)^{-1} A z, reusing
+    // ldlt_workspace and w_workspace. Identity when there are no
+    // constraints (null(A) is the whole space).
+    auto project_null = [&](auto& vec)
+    {
+        if(m_total > 0)
+            detail::null_space_project<Scalar, N>(
+                A, ldlt_workspace, vec, w_workspace,
+                null_space_refine_passes);
+    };
+
+    int blocking_coord = -1;
     result.tangential_cg_status = detail::steihaug_cg<Scalar, N>(
-        g_t, std::forward<HessianOp>(hessian_op),
+        g_t, hessian_op,
         delta_t, eps,
         lower_t, upper_t,
         max_cg_iter,
-        u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf);
+        u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf,
+        project_null, &blocking_coord);
+
+    // Variant B (Lin-More free-set restart): on a box-face-blocked exit
+    // fix the blocking coordinate, augment A with its unit row so the
+    // projector pins that coordinate, refactor the reduced normal
+    // equations, and re-solve. Retained OFF by default (variant A, the
+    // scipy/GHN truncate-and-stop, is the reference-standard mechanism;
+    // the HS-suite comparison in the plan summary showed variant B added
+    // no passing cell). The augmented factorization is local scratch so
+    // the caller-owned ldlt_workspace stays consistent for downstream
+    // reuse.
+    if constexpr(tangential_lin_more_restart)
+    {
+        if(m_total > 0)
+        {
+            const int n = static_cast<int>(g.size());
+            std::vector<int> fixed;
+            int restarts = 0;
+            while(blocking_coord >= 0 && restarts < n)
+            {
+                fixed.push_back(blocking_coord);
+                ++restarts;
+
+                const int m_aug = m_total + static_cast<int>(fixed.size());
+                Eigen::MatrixXd A_aug(m_aug, n);
+                A_aug.topRows(m_total) = A;
+                for(std::size_t f = 0; f < fixed.size(); ++f)
+                {
+                    A_aug.row(m_total + static_cast<int>(f)).setZero();
+                    A_aug(m_total + static_cast<int>(f), fixed[f]) =
+                        Scalar(1);
+                }
+
+                Eigen::MatrixXd AAt_aug = A_aug * A_aug.transpose();
+                Eigen::LDLT<Eigen::MatrixXd> ldlt_aug(AAt_aug);
+                Eigen::VectorXd w_aug(m_aug);
+                const Eigen::Ref<const Eigen::Matrix<Scalar,
+                    Eigen::Dynamic, N>> A_aug_ref(A_aug);
+
+                auto project_aug = [&](auto& vec)
+                {
+                    detail::null_space_project<Scalar, N>(
+                        A_aug_ref, ldlt_aug, vec, w_aug,
+                        null_space_refine_passes);
+                };
+
+                blocking_coord = -1;
+                result.tangential_cg_status =
+                    detail::steihaug_cg<Scalar, N>(
+                        g_t, hessian_op,
+                        delta_t, eps,
+                        lower_t, upper_t,
+                        max_cg_iter,
+                        u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf,
+                        project_aug, &blocking_coord,
+                        /*warm_start=*/true);
+            }
+        }
+    }
 
     // ── Composite step ─────────────────────────────────────────────
     p_out = v_buf + u_buf;
