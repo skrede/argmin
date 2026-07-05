@@ -2,6 +2,7 @@
 #define HPP_GUARD_ARGMIN_SCHEDULE_BASIC_SOLVER_GROUP_H
 
 #include "argmin/solver/basic_solver.h"
+#include "argmin/formulation/concepts.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
 #include "argmin/result/status.h"
@@ -34,6 +35,13 @@ class basic_solver_group
 {
 public:
     using scalar_type = typename std::tuple_element_t<0, std::tuple<Policies...>>::scalar_type;
+
+    // Enforce the schedule contract: an ill-formed schedule (missing select /
+    // notify / reset) fails here with a one-line diagnostic instead of a deep
+    // template error at the select()/notify() call sites.
+    static_assert(schedule<Schedule>,
+                  "Schedule does not satisfy the schedule contract: it must "
+                  "expose select(n), reset(), and notify(step_result).");
 
     template <typename P, typename Convergence = default_convergence>
         requires (std::constructible_from<basic_solver<Policies, N, Problem>, const P&,
@@ -102,6 +110,17 @@ public:
     const std::array<solve_result<scalar_type, N>, sizeof...(Policies)>& results() const
     {
         return results_;
+    }
+
+    // Reset every solver to a new starting point and restart the schedule.
+    // Mirrors basic_solver::reset: each policy's reset() reseeds its solver,
+    // retirement flags are cleared, and Schedule::reset() restarts the
+    // selection state through init_schedule().
+    void reset(const Eigen::VectorX<scalar_type>& x0)
+    {
+        reset_solvers(x0, std::index_sequence_for<Policies...>{});
+        retired_ = {};
+        init_schedule();
     }
 
     solve_result<scalar_type, N> solve()
@@ -187,10 +206,22 @@ public:
 private:
     void init_schedule()
     {
+        // Restart the schedule's selection state so a reused group (or a
+        // caller-supplied, pre-advanced schedule) resumes deterministically
+        // from the first solver. set_num_solvers stays opt-in: only stateful
+        // schedules that cache the solver count provide it.
+        schedule_.reset();
         if constexpr(requires { schedule_.set_num_solvers(std::size_t{}); })
         {
             schedule_.set_num_solvers(sizeof...(Policies));
         }
+    }
+
+    template <std::size_t... Is>
+    void reset_solvers(const Eigen::VectorX<scalar_type>& x0,
+                       std::index_sequence<Is...>)
+    {
+        (std::get<Is>(solvers_).reset(x0), ...);
     }
 
     template <typename P, typename Convergence, std::size_t... Is>

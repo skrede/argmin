@@ -235,3 +235,58 @@ TEST_CASE("basic_solver_group existing constructor still works",
         CHECK(result.step_size == Approx(0.5));
     }
 }
+
+// Schedule that counts reset() calls through an external counter, used to
+// observe that the group actually drives Schedule::reset() (previously never
+// called) at construction and on group reset.
+namespace
+{
+struct reset_probe_schedule
+{
+    int* reset_calls{nullptr};
+    std::size_t current_index{0};
+
+    void reset()
+    {
+        current_index = 0;
+        if(reset_calls) ++*reset_calls;
+    }
+
+    std::size_t select(std::size_t num_solvers)
+    {
+        std::size_t idx = current_index;
+        current_index = (current_index + 1) % num_solvers;
+        return idx;
+    }
+
+    template <typename Scalar>
+    void notify(const argmin::step_result<Scalar>&) {}
+};
+}
+
+TEST_CASE("basic_solver_group drives Schedule::reset", "[solver_group]")
+{
+    quadratic_group prob;
+    Eigen::VectorXd x0{{2.0, 2.0}};
+    solver_options opts;
+
+    int reset_calls = 0;
+    reset_probe_schedule sched{.reset_calls = &reset_calls};
+
+    basic_solver_group<reset_probe_schedule, argmin::dynamic_dimension, void,
+                       test::mock_policy, test::mock_policy>
+        group{prob, x0, opts, sched};
+
+    // init_schedule() runs Schedule::reset() once at construction.
+    CHECK(reset_calls == 1);
+
+    // Advance the schedule index, then reset the group: the schedule's
+    // selection state must restart from solver 0 and reset() fire again.
+    group.step();
+    group.reset(x0);
+    CHECK(reset_calls == 2);
+
+    // After the group reset, selection restarts at the first solver.
+    auto r = group.step();
+    CHECK(r.objective_value < 0.5 * x0.squaredNorm());
+}

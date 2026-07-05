@@ -123,13 +123,12 @@ using resolve_state_t =
 // defaults to void and is ignored. For policies with template
 // state_type<P>, Problem is used to instantiate the state.
 //
-// Policy contract (deducing this):
-//   - Policy::scalar_type         -- scalar type (double, float)
-//   - Policy::state_type          or Policy::template state_type<P>
-//   - policy.init(problem, x0, opts) -> state_type or state_type<Problem>
-//   - policy.step(state)          -> step_result<scalar_type>
-//   - policy.reset(state, x0)     -> void
-//   - policy.reset_clear(state, x0) -> void
+// The policy contract is enforced by the solver_policy concept
+// (argmin/formulation/concepts.h), static_assert-ed in the class body
+// immediately after the state_type alias. It pins the harness-visible surface
+// (scalar_type; step/reset/reset_clear; state.x); init() is intentionally left
+// unconstrained since it is templated on Problem/Convergence and its shape is
+// an implementation detail.
 //
 // Reference: K&W Section 4.4 (convergence criteria), N&W Section 3.1.
 
@@ -140,6 +139,16 @@ public:
     using policy_type = Policy;
     using scalar_type = typename Policy::scalar_type;
     using state_type = detail::resolve_state_t<Policy, Problem>;
+
+    // Enforce the policy contract at the one scope where state_type resolves
+    // (resolve_state_t depends on Problem). A policy missing step/reset/
+    // reset_clear or a state without an x member fails here with a one-line
+    // diagnostic at the construction site instead of a deep template error.
+    static_assert(solver_policy<Policy, state_type, scalar_type>,
+                  "Policy does not satisfy the solver_policy contract: it must "
+                  "expose scalar_type and step(state) / reset(state, x0) / "
+                  "reset_clear(state, x0), and its state must expose x. "
+                  "Construct via CTAD from a problem + x0.");
 
     // Rebinds the incoming problem reference onto the class-template
     // Problem slot so step_n can call value()/constraints() directly

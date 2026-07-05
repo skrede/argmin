@@ -9,6 +9,9 @@
 #include "argmin/formulation/concepts.h"
 #include "argmin/solver/basic_solver.h"
 #include "argmin/solver/options.h"
+#include "argmin/schedule/round_robin_schedule.h"
+#include "argmin/schedule/fallback_schedule.h"
+#include "argmin/schedule/time_boxed_schedule.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
@@ -233,7 +236,111 @@ struct mock_solver_no_cv
 
 static_assert(!argmin::nlp_solver<mock_solver_no_cv>);
 
+// ---------------------------------------------------------------------------
+// Harness contract: solver_policy / solver_state / schedule concepts.
+//
+// These lock the enforcement introduced at the harness (basic_solver static-
+// asserts solver_policy; basic_solver_group static-asserts schedule). The
+// negative cases prove the concepts are non-vacuous: a policy missing
+// reset_clear, or a state without x, or a schedule missing reset, is rejected.
+// ---------------------------------------------------------------------------
+
+// A well-formed minimal state and policy that satisfy the contract.
+struct good_state
+{
+    Eigen::VectorXd x;
+};
+
+struct good_policy
+{
+    using scalar_type = double;
+    argmin::step_result<double> step(good_state&) { return {}; }
+    void reset(good_state&, const Eigen::VectorXd&) {}
+    void reset_clear(good_state&, const Eigen::VectorXd&) {}
+};
+
+static_assert(argmin::solver_state<good_state>);
+static_assert(argmin::solver_policy<good_policy, good_state>);
+
+// A state without x is not a solver_state (and cannot back a solver_policy).
+struct state_no_x
+{
+    double objective_value{};
+};
+
+static_assert(!argmin::solver_state<state_no_x>);
+static_assert(!argmin::solver_policy<good_policy, state_no_x>);
+
+// A policy missing reset_clear is rejected by solver_policy.
+struct policy_no_reset_clear
+{
+    using scalar_type = double;
+    argmin::step_result<double> step(good_state&) { return {}; }
+    void reset(good_state&, const Eigen::VectorXd&) {}
+    // deliberately omitting reset_clear()
+};
+
+static_assert(!argmin::solver_policy<policy_no_reset_clear, good_state>);
+
+// A policy missing scalar_type is rejected by solver_policy.
+struct policy_no_scalar_type
+{
+    argmin::step_result<double> step(good_state&) { return {}; }
+    void reset(good_state&, const Eigen::VectorXd&) {}
+    void reset_clear(good_state&, const Eigen::VectorXd&) {}
+};
+
+static_assert(!argmin::solver_policy<policy_no_scalar_type, good_state>);
+
+// Opt-in constrained-state refinement.
+struct constrained_state
+{
+    Eigen::VectorXd x;
+    Eigen::VectorXd c_eq;
+    Eigen::VectorXd c_ineq;
+};
+
+static_assert(argmin::constrained_policy_state<constrained_state>);
+static_assert(!argmin::constrained_policy_state<good_state>);
+
+// A well-formed minimal schedule satisfies the schedule contract.
+struct good_schedule
+{
+    std::size_t select(std::size_t) { return 0; }
+    void reset() {}
+    template <typename Scalar>
+    void notify(const argmin::step_result<Scalar>&) {}
+};
+
+static_assert(argmin::schedule<good_schedule>);
+
+// A schedule missing reset() is rejected by the schedule concept.
+struct schedule_no_reset
+{
+    std::size_t select(std::size_t) { return 0; }
+    template <typename Scalar>
+    void notify(const argmin::step_result<Scalar>&) {}
+    // deliberately omitting reset()
+};
+
+static_assert(!argmin::schedule<schedule_no_reset>);
+
+// A schedule missing notify() is rejected by the schedule concept.
+struct schedule_no_notify
+{
+    std::size_t select(std::size_t) { return 0; }
+    void reset() {}
+    // deliberately omitting notify()
+};
+
+static_assert(!argmin::schedule<schedule_no_notify>);
+
 }
+
+// The three shipped schedules satisfy the schedule contract.
+static_assert(argmin::schedule<argmin::round_robin_schedule>);
+static_assert(argmin::schedule<argmin::fallback_schedule>);
+static_assert(argmin::schedule<argmin::time_boxed_schedule>);
 
 // ---------------------------------------------------------------------------
 // HS test functions satisfy constrained + differentiable + bound_constrained

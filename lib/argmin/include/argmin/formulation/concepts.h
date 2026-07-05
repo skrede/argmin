@@ -8,6 +8,7 @@
 
 #include <Eigen/Core>
 
+#include <cstddef>
 #include <concepts>
 
 namespace argmin
@@ -131,6 +132,75 @@ concept nlp_solver = requires(Solver& solver, const Solver& csolver,
     { solver.reset_clear(x0) };
     { solver.abort() };
     { csolver.constraint_violation() } -> std::convertible_to<S>;
+};
+
+// Harness contract for solver states.
+//
+// basic_solver dereferences exactly one member on every driven state: x, the
+// current iterate. step() reads state.x for the x_norm fill, and both reset
+// paths hand a fresh x0 to the policy which writes it into state.x. This is the
+// minimal, mandatory surface every policy state must expose.
+template <typename State>
+concept solver_state = requires(const State& s)
+{
+    { s.x };
+};
+
+// Opt-in refinement for constrained policy states.
+//
+// The best-seen seeding and the solver's constraint_violation() reporting probe
+// c_eq / c_ineq behind if-constexpr guards so unconstrained policies (lbfgsb,
+// cmaes, ...) are never forced to carry dead constraint members. This concept
+// names that opt-in surface for the constrained paths without folding it into
+// the mandatory solver_state contract.
+template <typename State>
+concept constrained_policy_state = solver_state<State> &&
+    requires(const State& s)
+{
+    { s.c_eq };
+    { s.c_ineq };
+};
+
+// Harness contract for solver policies (duck-typed, no base class).
+//
+// basic_solver drives a policy through init/step/reset/reset_clear and reads
+// state.x. solver_policy pins exactly the harness-visible surface so an
+// ill-formed policy fails at the construction site with a one-line diagnostic
+// instead of a deep template-instantiation error.
+//
+// init(problem, x0, opts) is deliberately NOT constrained structurally: it is
+// templated on the problem and convergence types and its shape is an
+// implementation detail; freezing it would block workspace-layout evolution.
+//
+// Move-safety is a documented invariant, not a compile-time check: a policy
+// with self-referential state (e.g. a subproblem caching addresses of sibling
+// state fields) must box those self-references so they survive basic_solver's
+// noexcept move.
+template <typename Policy, typename State, typename S = double>
+concept solver_policy = solver_state<State> &&
+    requires(Policy& policy, State& state, const Eigen::VectorX<S>& x0)
+{
+    typename Policy::scalar_type;
+    { policy.step(state) } -> std::convertible_to<step_result<S>>;
+    { policy.reset(state, x0) };
+    { policy.reset_clear(state, x0) };
+};
+
+// Harness contract for solver-group schedules (duck-typed, no base class).
+//
+// basic_solver_group unconditionally drives a schedule through select() and
+// notify() each step and reset() when the group is (re)initialized. schedule
+// pins that mandatory surface. set_num_solvers() is intentionally left out of
+// the contract: only stateful schedules that cache the solver count need it, so
+// the group probes it behind if-constexpr and stateless schedules that read the
+// count directly from select(n) need not provide it.
+template <typename Schedule, typename S = double>
+concept schedule = requires(Schedule& sched, std::size_t n,
+                            const step_result<S>& result)
+{
+    { sched.select(n) } -> std::convertible_to<std::size_t>;
+    { sched.reset() };
+    { sched.notify(result) };
 };
 
 }
