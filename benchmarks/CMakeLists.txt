@@ -156,7 +156,7 @@ endif()
 # Joint (penalty_factor, soc_max_iterations) sweep harness for
 # tr_sqp_policy. Drives the policy across the cross product of
 # penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} and soc_max_iterations
-# in {0, 1, 2, 3} on the HS-suite cells (reference and closure-target
+# in {0, 1, 2, 4} on the HS-suite cells (reference and closure-target
 # subsets, both sqp_mode variants); emits a JSON record per
 # (pf, soc_iter, cell, mode) plus a selection block recording the joint
 # disposition (closure-count improvement vs the no-op baseline).

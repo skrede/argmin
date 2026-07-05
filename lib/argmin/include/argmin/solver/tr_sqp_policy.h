@@ -152,16 +152,27 @@ struct tr_sqp_policy
     // Adaptive L2-merit penalty parameter defaults. The penalty is
     // persistent state on the joint Byrd-Omojokun ratio test (the
     // augmented merit weights the feasibility leg by `penalty`); the
-    // penalty_factor is the LNP heuristic growth factor.
+    // penalty_factor is the LNP heuristic growth factor that fires only
+    // when the model predicts a positive violation decrease (qm > 0).
+    //
+    // default_penalty_factor is re-derived (2026-07-05) from a fresh
+    // sweep over penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} on the
+    // HS-suite closure axis (HS024/035/039/040/043/050) gated on the
+    // non-regression reference axis (HS026/028/071/076), both sqp_mode
+    // variants, under the qm > 0 growth gate. On this corrected gate the
+    // baseline penalty_factor = 0 closes 8 of 12 closure-target tuples,
+    // while every non-zero entry holds the full reference axis and
+    // closes all 12; 0.3 is the lexicographic winner (full closure, no
+    // reference regression, fewest closure-target iterations of the
+    // full-closure entries) and coincides with the scipy update_penalty
+    // literature default. The value is a re-derived winner, not a
+    // carried-forward lock.
     //
     // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3 (initial
     //            penalty; growth factor); scipy update_penalty
-    //            (penalty_factor = 0.3 default; argmin selects a
-    //            conservative value empirically — the largest entry in
-    //            {0.0, 0.01, 0.05, 0.1, 0.3} that does not regress the
-    //            existing HS-suite acceptance bars).
+    //            (penalty_factor = 0.3 default).
     static constexpr double default_initial_penalty = 1.0;
-    static constexpr double default_penalty_factor  = 0.0;
+    static constexpr double default_penalty_factor  = 0.3;
 
     // Second-order correction retry budget. On a rejected primary
     // composite step whose trial violation did not decrease (the
@@ -175,49 +186,33 @@ struct tr_sqp_policy
     // expansion); between retries the violation must contract by
     // detail::kappa_soc or the loop aborts.
     //
-    // Default selected empirically by a widened joint sweep across
-    // (penalty_factor, soc_max_iterations) on:
+    // Default re-derived (2026-07-05) from the joint
+    // (penalty_factor, soc_max_iterations) sweep across
+    // penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} and
+    // soc_max_iterations in {0, 1, 2, 4}, on:
     //   - reference cells (non-regression gate): HS026, HS028, HS071,
     //     HS076 in both sqp_mode variants;
     //   - closure-target cells: HS024, HS035, HS039, HS040, HS043,
     //     HS050 in both sqp_mode variants.
     //
-    // The (penalty_factor=0, soc_max_iterations=0) pair is the unique
-    // configuration in the 20-point grid that preserves every
-    // reference-cell tuple within the per-mode strict bar (1% f_err
-    // and 1e-4 cv for accurate; 5% f_err and 1e-2 cv for fast).
+    // On the corrected kernel (SOC residual c(z+p) - A p with the
+    // -A p subtraction present, LNP penalty growth gated on qm > 0,
+    // and the grad-L-predicted / f-measured ratio test) the corrected
+    // penalty growth at default_penalty_factor closes every closure-
+    // target tuple at soc_max_iterations = 0. Adding SOC retries on top
+    // (soc in {1, 2, 4}) does not improve the closure count or the
+    // reference axis and only spends iterations, so the SOC retry
+    // budget re-locks to 0: the retry is an opt-in knob, not a default.
+    // The per-mode strict bar is 1% f_err and 1e-4 cv for accurate,
+    // 5% f_err and 1e-2 cv for fast.
     //
-    // CONTAMINATED-EVIDENCE NOTE: that sweep ran BEFORE the SOC
-    // residual (missing -A p subtraction), the LNP penalty gate
-    // (inverted growth condition), and the ratio-test objective model
-    // (grad-L predicted vs f-measured actual) were corrected. The
-    // recorded signatures -- "every non-zero soc_max_iterations
-    // regresses HS076", "every non-zero penalty_factor regresses
-    // HS026 fast / HS028 fast / HS071 accurate" -- were the
-    // signatures of those defects, not properties of the SOC/penalty
-    // mechanisms. The defaults are retained unchanged here and are
-    // re-locked by a re-sweep against the corrected mechanisms.
-    //
-    // Individual closure-target cells DO close at non-default
-    // configurations under the same sweep: HS039 accurate at any
-    // pf >= 0.01 paired with soc >= 2; HS040 fast at any pf paired
-    // with soc >= 2; HS050 both modes at (pf=0, soc >= 1). All such
-    // closures cost at least one reference-cell regression, so they
-    // are not eligible to become the default. The cookbook setting
-    // for an HS039-like equality-constraint workload that the
-    // reference cells do not gate is `policy.options.penalty_factor
-    // = 0.01` and `policy.options.soc_max_iterations = 2`; the user
-    // assigns the fields directly if the workload class is suitable.
+    // A workload whose curvature exhibits the Maratos effect can opt in
+    // with `policy.options.soc_max_iterations = 2` (paired with the
+    // default penalty growth); the user assigns the field directly.
     //
     // soc_max_iterations = 0 disables the retry entirely; the
     // helper's existing single-step rejection branch returns a
     // null-step result on the first rejection (pre-SOC behavior).
-    //
-    // Strict closure of the merit-overshoot cell family (HS035 /
-    // HS039 / HS040 / HS043) requires a different fix surface —
-    // filter-based ratio test, interior-point slack barrier, or
-    // v-optimal restoration leg — none of which are in scope of this
-    // knob surface.
     //
     // Reference: Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
     //            8(3):682-706 Section 3.1 (v-optimal restoration shape);

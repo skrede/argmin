@@ -10,13 +10,19 @@
 // to the swept value (no rebuild between values: the penalty_factor is
 // a runtime knob). For every (penalty_factor, cell, mode) tuple the
 // harness records iterations, final objective, final constraint
-// violation (inf-norm), terminal solver status, wall microseconds,
-// `f_err = |f - f*| / max(|f*|, 1.0)`, and a `converged_at_strict_bar`
-// flag derived from the tr_sqp_test.cpp acceptance bars. The selection
-// rule for the production default penalty_factor is the LARGEST value
-// that does not regress HS026/HS028/HS071/HS076 against those bars
-// (HS043 is informational only — its closure is the subject of a
-// downstream second-order correction retry plan).
+// violation (inf-norm), final gradient norm, terminal solver status,
+// wall microseconds, `f_err = |f - f*| / max(|f*|, 1.0)`, and a
+// `within_strict_bar` flag derived from the tr_sqp_test.cpp acceptance
+// bars. The selection rule for the production default penalty_factor is
+// the LARGEST value that does not regress HS026/HS028/HS071/HS076
+// against those bars (HS043 is informational only).
+//
+// Predicate parity: within_strict_bar is held byte-for-byte in step
+// with the SOC sweep's predicate, including the HS028-accurate
+// gradient_norm gate. An earlier revision omitted that gate here; a
+// sweep that scores a default under a softer predicate than the peer
+// sweep (and the unit gate) re-locks an unsound default no matter how
+// correct the kernel is, so the gate is restored for the re-run.
 //
 // Output: a single JSON document with a per-cell `by_penalty_factor`
 // block plus a summary. Default output path is
@@ -102,6 +108,7 @@ struct cell_record
     double      penalty_factor;
     double      objective_value;
     double      constraint_violation;
+    double      gradient_norm;
     double      f_err;            // |f - f*| / max(|f*|, 1.0)
     std::uint32_t iterations;
     double      wall_us;
@@ -110,14 +117,22 @@ struct cell_record
 };
 
 // Strict-bar predicate matching the tr_sqp_test.cpp acceptance shapes.
-// HS026 / HS028 / HS043 use absolute objective bars (f* = 0 for 026/028;
-// for 043 f* = -44 and the test uses the relative f_err < 0.01 bar);
-// HS071 / HS076 use relative f_err bars.
+// This predicate is kept byte-for-byte in step with the SOC sweep's
+// within_strict_bar (accuracy bar, cv bar, AND the gradient_norm gate
+// for the HS028 accurate ridge). A previous revision of this harness
+// omitted the gradient_norm gate that the SOC sweep enforced; the two
+// sweeps must share one predicate so a default re-locked from one is
+// never softer than the bar the other (and the unit test) applies.
+//
+// HS026 / HS028 use absolute objective bars (f* = 0); HS043 / HS071 /
+// HS076 use relative f_err bars. HS028 accurate additionally asserts
+// gradient_norm < 1e-4 to mirror the tr_sqp_test.cpp HS028 acceptance.
 bool within_strict_bar(std::string_view problem_name,
                        sqp_mode          mode,
                        double            f,
                        double            f_star,
-                       double            cv)
+                       double            cv,
+                       double            grad_norm)
 {
     if(problem_name == "hs026")
     {
@@ -129,7 +144,10 @@ bool within_strict_bar(std::string_view problem_name,
     {
         if(mode == sqp_mode::fast)
             return std::abs(f - 0.0) <= 1e-2 && cv < 1e-2;
-        return std::abs(f - 0.0) <= 1e-6 && cv < 1e-4;
+        // Gradient-norm gate mirrors the SOC sweep and the HS028
+        // accurate unit cell; a penalty that ships an above-threshold
+        // gradient must not read as a passing default.
+        return std::abs(f - 0.0) <= 1e-6 && cv < 1e-4 && grad_norm < 1e-4;
     }
     if(problem_name == "hs071")
     {
@@ -192,6 +210,7 @@ cell_record run_cell(double pf, const Problem& problem,
     rec.penalty_factor       = pf;
     rec.objective_value      = result.objective_value;
     rec.constraint_violation = solver.constraint_violation();
+    rec.gradient_norm        = result.gradient_norm;
     rec.f_err                = f_err;
     rec.iterations           = static_cast<std::uint32_t>(result.iterations);
     rec.wall_us              = wall_us;
@@ -232,13 +251,15 @@ void run_cell_block(const std::string& problem_name,
         auto a = run_cell<PolicyAccurate>(pf, problem, max_iterations);
         a.within_strict_bar = within_strict_bar(problem_name, sqp_mode::accurate,
                                                 a.objective_value, f_star,
-                                                a.constraint_violation);
+                                                a.constraint_violation,
+                                                a.gradient_norm);
         acc_block.records.push_back(std::move(a));
 
         auto f = run_cell<PolicyFast>(pf, problem, max_iterations);
         f.within_strict_bar = within_strict_bar(problem_name, sqp_mode::fast,
                                                 f.objective_value, f_star,
-                                                f.constraint_violation);
+                                                f.constraint_violation,
+                                                f.gradient_norm);
         fst_block.records.push_back(std::move(f));
     }
 
@@ -289,6 +310,7 @@ void write_json(const std::vector<cell_block>& blocks,
             out << "        \"" << key.str() << "\": {"
                 << "\"f\": "      << fmt_num(r.objective_value)
                 << ", \"cv\": "   << fmt_num(r.constraint_violation)
+                << ", \"grad_norm\": " << fmt_num(r.gradient_norm)
                 << ", \"f_err\": "<< fmt_num(r.f_err)
                 << ", \"iters\": "<< r.iterations
                 << ", \"wall_us\": "<< fmt_num(r.wall_us)
@@ -306,7 +328,7 @@ void write_json(const std::vector<cell_block>& blocks,
     out << "  ],\n";
 
     out << "  \"selection\": {\n";
-    out << "    \"d04_gate_cells\": [\"hs026\", \"hs028\", \"hs071\", \"hs076\"],\n";
+    out << "    \"reference_gate_cells\": [\"hs026\", \"hs028\", \"hs071\", \"hs076\"],\n";
     out << "    \"selected_penalty_factor\": ";
     if(selected_default) out << fmt_num(*selected_default);
     else                 out << "null";
@@ -416,14 +438,13 @@ int main(int argc, char** argv)
     }
 
     // Selection rule:
-    //   D-04 gate cells = {hs026, hs028, hs071, hs076} (both modes).
-    //   Pass iff every D-04 cell's `within_strict_bar` is true at the
-    //   given penalty_factor. Among the passers, pick the LARGEST
+    //   Reference-gate cells = {hs026, hs028, hs071, hs076} (both modes).
+    //   Pass iff every reference cell's `within_strict_bar` is true at
+    //   the given penalty_factor. Among the passers, pick the LARGEST
     //   penalty_factor — the most aggressive non-regressing growth
-    //   shape. If no penalty_factor passes D-04 (even 0.0), surface
-    //   that fact in the JSON and stdout; the plan-level deviation
-    //   protocol covers the next steps.
-    auto passes_d04 = [&](double pf) -> bool {
+    //   shape. If no penalty_factor passes the reference gate (even
+    //   0.0), surface that fact in the JSON and stdout.
+    auto passes_reference_gate = [&](double pf) -> bool {
         for(const auto& b : blocks)
         {
             if(b.spec.name == "hs043") continue;
@@ -439,18 +460,18 @@ int main(int argc, char** argv)
     std::optional<double> selected;
     for(auto it = std::rbegin(kPenaltyFactors); it != std::rend(kPenaltyFactors); ++it)
     {
-        if(passes_d04(*it))
+        if(passes_reference_gate(*it))
         {
             selected = *it;
             break;
         }
     }
 
-    std::cout << "\nD-04 gate (hs026/hs028/hs071/hs076, both modes):\n";
+    std::cout << "\nReference gate (hs026/hs028/hs071/hs076, both modes):\n";
     for(double pf : kPenaltyFactors)
     {
         std::cout << "  penalty_factor=" << std::fixed << std::setprecision(2)
-                  << pf << " : " << (passes_d04(pf) ? "PASS" : "REGRESS")
+                  << pf << " : " << (passes_reference_gate(pf) ? "PASS" : "REGRESS")
                   << "\n";
     }
 
@@ -458,8 +479,8 @@ int main(int argc, char** argv)
     if(selected)
     {
         std::ostringstream os;
-        os << "Largest penalty_factor in the swept grid that holds D-04 on "
-              "{hs026, hs028, hs071, hs076} across modes: "
+        os << "Largest penalty_factor in the swept grid that holds the "
+              "reference gate on {hs026, hs028, hs071, hs076} across modes: "
            << std::fixed << std::setprecision(2) << *selected << ".";
         rationale = os.str();
         std::cout << "\nselected default penalty_factor = "
@@ -468,8 +489,9 @@ int main(int argc, char** argv)
     else
     {
         rationale =
-            "NO penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} holds D-04 on "
-            "the four existing-passing cells across modes. The adaptive-"
+            "NO penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} holds the "
+            "reference gate on the four existing-passing cells across modes. "
+            "The adaptive-"
             "penalty plumbing is net-negative as a standalone landing; the "
             "freeze-on-feasibility regression is structural and needs a "
             "paired second-order correction retry on the inequality leg to "

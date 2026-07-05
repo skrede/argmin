@@ -40,13 +40,14 @@
 //                 constraint_violation < 1e-4; fast relaxes to < 5e-2
 //                 / 1e-2. Cells whose optimum is f* = 0 use an absolute
 //                 |f - f*| margin because the relative-error ratio is
-//                 ill-posed there. Seven [!shouldfail] cells carry a
-//                 mechanism-citation comment block above the test
-//                 case; one [!mayfail] cell (HS050 / accurate)
-//                 isolates the optimization-level-sensitive strict
-//                 absolute bar at f = 5e-18 (Debug) vs f = 5e-5
-//                 (-O3); the remaining twelve untagged cells assert
-//                 the strict publication bars. The cells exercise the
+//                 ill-posed there. One [!shouldfail] cell
+//                 (HS043 / accurate) carries a mechanism-citation
+//                 comment block above the test case; one [!mayfail]
+//                 cell (HS050 / accurate) isolates the optimization-
+//                 level-sensitive strict absolute bar at f = 5e-18
+//                 (Debug) vs f = 5e-5 (-O3); the remaining cells
+//                 assert the strict publication bars. The cells
+//                 exercise the
 //                 slack-augmented joint constraint formulation, the
 //                 multiplier-reestimation cadence (with the post-
 //                 restoration multiplier-clear step that unblocks
@@ -83,37 +84,26 @@
 using Catch::Approx;
 using namespace argmin;
 
-// HS024 [!shouldfail] disposition on both modes.
-//
-// Mechanism: L2-merit structural rejection. At the strictly-feasible
-// initial iterate the unconstrained Newton direction produces a
-// linearized inequality residual A p + c that is non-zero even when
-// the actual constraint violation stays at zero; the L2-merit
-// augmented predicted-reduction is structurally negative on any
-// step that perturbs the linearization, regardless of objective
-// descent. The rho gate rejects iter 2; the trust radius shrinks
-// to the floor over twenty rejected steps and termination fires.
-// Filter acceptance was expected to close this failure mode by
-// replacing the L2-merit ratio test with (f, h) Pareto dominance,
-// but on HS024 the rho-gate termination path is reached before the
-// restoration three-way reject-hook (Delta < min_trust_radius AND
-// filter blocks AND restoration_max_iter > 0) can fire, so the
-// Levenberg-Marquardt restoration helper never runs.
+// HS024 converges to f* = -1 on both modes. The former rho-gate
+// termination at the strictly-feasible start — where the linearized
+// inequality residual A p + c was non-zero and the L2-merit
+// predicted-reduction read as structurally negative before the
+// composite step's null-space confinement and joint slack-gradient
+// sign were corrected — no longer fires: the filter now accepts the
+// (f, h)-improving composite step and the trajectory reaches the
+// optimum from the feasible start.
 //
 // Reference: Fletcher and Leyffer 2002 SIAM J. Optim. 13(1):44-59
-//            Section 1 (L2-merit augmented ratio test);
-//            Nocedal and Wright 2e Section 18.5 eq. 18.43-18.50
-//            (Byrd-Omojokun composite step rho gate);
+//            Section 1 (filter acceptance);
+//            Nocedal and Wright 2e Section 18.5 (Byrd-Omojokun
+//            composite step);
 //            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
-//            8(3):682-706 Section 3.3 (augmented merit + penalty
-//            update);
-//            Wachter and Biegler 2006 Math. Programming 106:25-57
-//            Section 3.3 (restoration phase entry condition).
+//            8(3):682-706 Section 3.3 (augmented merit update).
 //
 // Hock and Schittkowski 1981 problem 24.
 TEMPLATE_TEST_CASE_SIG(
-    "filter_trsqp HS024 (parametric on mode) [known failure]",
-    "[sqp][filter_trsqp][regression][mode][!shouldfail]",
+    "filter_trsqp HS024 (parametric on mode)",
+    "[sqp][filter_trsqp][regression][mode]",
     ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs024<>::problem_dimension>,
     filter_trsqp_policy_fast<hs024<>::problem_dimension>)
@@ -342,47 +332,70 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-// HS043 [!shouldfail] disposition on both modes.
+// HS043 splits by mode at the locked filter defaults. Fast mode
+// converges to the strict relative-error bar; accurate mode reaches a
+// zero-violation terminal iterate whose objective misses the tighter
+// accurate bar (f_err ~ 1.7e-2 > 1e-2), so the accurate cell retains
+// the [!shouldfail] disposition.
 //
-// Mechanism: closability-vs-locked-defaults gap interacting with the
-// already-feasible-iterate restoration gate. HS043 closes empirically
-// under the closed-restoration sweep tier (accurate mode:
-// gamma_f = gamma_h = 1e-2, switching_condition, kappa = 1e-4,
-// s = 2.3, delta0 = 10, restoration_max_iter = 10, median 40 outer
-// iters across eleven seeds; fast mode: gamma_f = gamma_h = 1e-5,
-// tr_shrink, delta0 = 1, restoration_max_iter = 10, median 33 outer
-// iters). At the locked per-mode defaults (gamma_f = gamma_h = 1e-2,
-// tr_shrink, delta0 = 1, restoration_max_iter = 10) the trajectory
-// reaches a terminal iterate with zero constraint violation but an
-// objective value f ~ -40.4 that misses the strict relative-error
-// bar (f_err = 0.082 > 0.05 for fast, > 0.01 for accurate); the
-// already-feasible-iterate gate on the restoration helper
-// (introduced to prevent the Levenberg-Marquardt step from
-// perturbing iterates that have already satisfied feasibility)
-// correctly skips restoration at the terminal iterate, so no
-// further objective descent fires. A per-cell test override or a
-// per-mode default revision (or a richer reject-path policy that
-// dispatches restoration on objective stagnation in addition to the
-// Delta-collapse gate) closes this in a future release.
+// Mechanism: at the locked per-mode defaults (gamma_f = gamma_h =
+// 1e-2, tr_shrink, delta0 = 1, restoration_max_iter = 10) the
+// already-feasible-iterate gate on the Levenberg-Marquardt
+// restoration helper correctly skips restoration once ||c|| is zero,
+// so the accurate trajectory holds at its terminal objective rather
+// than descending the last relative-error decade. A per-mode default
+// revision, or a reject-path policy that dispatches restoration on
+// objective stagnation in addition to the Delta-collapse gate, closes
+// the accurate cell in a future release. The fast bar (5e-2) absorbs
+// the same terminal gap cleanly, so the fast cell ships untagged.
 //
 // Reference: Fletcher and Leyffer 2002 SIAM J. Optim. 13(1):44-59
 //            Section 2.1 (filter dominance vs L2-merit ratio test);
 //            Nocedal and Wright 2e Section 18.5 Algorithm 18.4
 //            (Byrd-Omojokun composite step);
-//            Lalee, Nocedal, Plantenga 1998 Section 3.1
-//            (slack reformulation merit limitations);
 //            Wachter and Biegler 2006 Math. Programming 106:25-57
 //            Section 3.3 (restoration phase configuration; the
-//            already-feasible-iterate skip is a sound termination
-//            of the restoration leg when ||c|| has been driven to
-//            zero by the composite step).
+//            already-feasible-iterate skip is a sound termination of
+//            the restoration leg when ||c|| has been driven to zero).
 //
 // Hock and Schittkowski 1981 problem 43.
 TEMPLATE_TEST_CASE_SIG(
-    "filter_trsqp HS043 (parametric on mode) [known failure]",
+    "filter_trsqp HS043 (accurate mode) [known failure]",
     "[sqp][filter_trsqp][regression][mode][!shouldfail]",
     ((typename Policy), Policy),
-    filter_trsqp_policy_accurate<hs043<>::problem_dimension>,
+    filter_trsqp_policy_accurate<hs043<>::problem_dimension>)
+{
+    using policy_t = Policy;
+
+    hs043<> problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(policy_t::default_gradient_tolerance);
+    opts.set_step_threshold(policy_t::default_step_tolerance_rel);
+    opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
+
+    basic_solver solver{policy_t{}, problem, x0, opts};
+    auto result = solver.solve(opts);
+
+    // HS043 optimum: f* = -44 at (0, 1, 2, -1). The accurate cell is
+    // expected to MISS the strict 1e-2 relative bar at the locked
+    // defaults; [!shouldfail] reports the miss as the expected
+    // disposition.
+    const double f_star = problem.optimal_value();
+    const double f_err  = std::abs(result.objective_value - f_star)
+                          / std::abs(f_star);
+
+    CHECK(f_err < 0.01);
+    CHECK(solver.constraint_violation() < 1e-4);
+}
+
+// HS043 fast mode converges to the relaxed 5e-2 relative bar at the
+// locked filter defaults (terminal f_err ~ 8.6e-3, zero violation).
+TEMPLATE_TEST_CASE_SIG(
+    "filter_trsqp HS043 (fast mode)",
+    "[sqp][filter_trsqp][regression][mode]",
+    ((typename Policy), Policy),
     filter_trsqp_policy_fast<hs043<>::problem_dimension>)
 {
     using policy_t = Policy;
@@ -398,23 +411,13 @@ TEMPLATE_TEST_CASE_SIG(
     basic_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    // HS043 optimum: f* = -44 at (0, 1, 2, -1). Strict bars are the
-    // bar the cell is expected to MISS at the locked defaults;
-    // [!shouldfail] reports the miss as the expected disposition.
+    // HS043 optimum: f* = -44 at (0, 1, 2, -1).
     const double f_star = problem.optimal_value();
     const double f_err  = std::abs(result.objective_value - f_star)
                           / std::abs(f_star);
 
-    if constexpr(policy_t::mode_ == sqp_mode::fast)
-    {
-        CHECK(f_err < 0.05);
-        CHECK(solver.constraint_violation() < 1e-2);
-    }
-    else
-    {
-        CHECK(f_err < 0.01);
-        CHECK(solver.constraint_violation() < 1e-4);
-    }
+    CHECK(f_err < 0.05);
+    CHECK(solver.constraint_violation() < 1e-2);
 }
 
 // HS050 closes empirically on both modes at the locked defaults
@@ -499,36 +502,22 @@ TEMPLATE_TEST_CASE_SIG(
     CHECK(solver.constraint_violation() < 1e-2);
 }
 
-// HS071 [!shouldfail] disposition on accurate mode only (fast mode
-// closes at the locked defaults with median 26 outer iters).
-//
-// Mechanism: empirical-reality default selection. HS071 / accurate
-// closes under (gamma_f = 1e-2, gamma_h = 1e-6, reject_mode =
-// tr_shrink, kappa = 1e-4, s = 2.3, delta0 = 0.1,
-// restoration_max_iter = 10) with median 90 outer iters across
-// eleven seeds (closed-restoration), but not under the locked
-// accurate-mode defaults (gamma_h = 1e-2, delta0 = 1). The
-// empirical-reality branch of the per-mode default selection
-// produced a locked config that does not cross-validate against
-// the strict non-regression sub-gate on HS071 / accurate; the
-// disposition table records this as a binding-non-regression
-// surfacing rather than a true regression (the pre-sweep placeholder
-// defaults also produced 0/11 closure on this cell, so the locked
-// defaults are not strictly worse).
+// HS071 accurate converges to f* = 17.014 at the locked filter
+// defaults. The former miss was a symptom of the composite step's
+// pre-correction null-space handling and slack-gradient sign, not of
+// the filter envelope constants: with those corrected the accurate
+// trajectory closes from the initial iterate (terminal f_err ~ 2.6e-8,
+// zero violation) without needing a per-mode default revision.
 //
 // Reference: Wachter and Biegler 2005 SIAM J. Optim. 16(1):1-31
-//            Section 2.3 (filter switching condition; informs the
-//            kappa / s envelope choice);
-//            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
-//            8(3):682-706 Section 3.3 (multi-mode default
-//            selection trade-off pattern);
+//            Section 2.3 (filter switching condition);
 //            Nocedal and Wright 2e Section 18.5 Algorithm 18.4
 //            (Byrd-Omojokun composite step trust-radius schedule).
 //
 // Hock and Schittkowski 1981 problem 71.
 TEMPLATE_TEST_CASE_SIG(
-    "filter_trsqp HS071 (accurate mode) [known failure]",
-    "[sqp][filter_trsqp][regression][mode][!shouldfail]",
+    "filter_trsqp HS071 (accurate mode)",
+    "[sqp][filter_trsqp][regression][mode]",
     ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs071<>::problem_dimension>)
 {
@@ -597,37 +586,25 @@ TEMPLATE_TEST_CASE_SIG(
     CHECK(solver.constraint_violation() < 1e-2);
 }
 
-// HS076 [!shouldfail] disposition on both modes.
-//
-// Mechanism: empirical-reality default selection -- both modes.
-// HS076 closes under per-mode-specific configurations
-// (gamma_f = 1e-5, gamma_h in {1e-5, 1e-2}, reject_mode =
-// tr_shrink, delta0 = 10, restoration_max_iter = 0) with median 46
-// outer iters on accurate and 36 on fast (closed-extended). The
-// locked defaults (gamma_f = gamma_h = 1e-2, delta0 = 1,
-// restoration_max_iter = 10) leave HS076 at zero-of-eleven seed
-// closure on both modes. As with HS071 / accurate this is a
-// binding-non-regression surfacing, not a true regression: the
-// pre-sweep placeholder defaults were also at 0/11 on HS076 on
-// both modes, so the locked defaults are not strictly worse. The
-// filter envelope at gamma_h = 1e-5 narrows the dominance margin
-// enough for HS076 to commit to acceptable iterates; the locked
-// gamma_h = 1e-2 retains too much filter-envelope headroom for
-// the (||c||, f) pair to clear the dominance test in time.
+// HS076 converges to f* = -4.6818 on both modes at the locked filter
+// defaults (terminal f_err ~ 2.2e-4 accurate / 1.6e-3 fast, zero
+// violation). The former both-mode miss was a symptom of the
+// composite step's pre-correction null-space handling and slack-
+// gradient sign rather than the filter envelope width: with those
+// corrected the (||c||, f) pair clears the dominance test from the
+// initial iterate at the locked gamma_h = 1e-2 without an envelope
+// retune.
 //
 // Reference: Fletcher and Leyffer 2002 SIAM J. Optim. 13(1):44-59
 //            Section 2.3 (filter envelope width gamma_f / gamma_h);
 //            Wachter and Biegler 2005 SIAM J. Optim. 16(1):1-31
 //            Section 2.3 eq. 6 (envelope-width sensitivity to the
-//            constraint scale);
-//            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
-//            8(3):682-706 Section 3.1 (closable-but-blocked failure
-//            mode under non-cross-validated defaults).
+//            constraint scale).
 //
 // Hock and Schittkowski 1981 problem 76.
 TEMPLATE_TEST_CASE_SIG(
-    "filter_trsqp HS076 (parametric on mode) [known failure]",
-    "[sqp][filter_trsqp][regression][mode][!shouldfail]",
+    "filter_trsqp HS076 (parametric on mode)",
+    "[sqp][filter_trsqp][regression][mode]",
     ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs076<>::problem_dimension>,
     filter_trsqp_policy_fast<hs076<>::problem_dimension>)

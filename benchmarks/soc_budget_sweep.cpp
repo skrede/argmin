@@ -3,7 +3,7 @@
 //
 // Drives the trust-region SQP policy across the cross product of:
 //   - penalty_factor:        {0.0, 0.01, 0.05, 0.1, 0.3}
-//   - soc_max_iterations:    {0, 1, 2, 3}
+//   - soc_max_iterations:    {0, 1, 2, 4}
 //   - HS-suite cell:         HS024, HS026, HS028, HS035, HS039, HS040,
 //                            HS043, HS050, HS071, HS076
 //   - mode:                  sqp_mode::accurate, sqp_mode::fast
@@ -101,7 +101,7 @@ using argmin::sqp_mode;
 using argmin::tr_sqp_policy;
 
 constexpr double      kPenaltyFactors[] = {0.0, 0.01, 0.05, 0.1, 0.3};
-constexpr std::size_t kSocMaxIters[]    = {0, 1, 2, 3};
+constexpr std::size_t kSocMaxIters[]    = {0, 1, 2, 4};
 
 std::string_view status_name(argmin::solver_status s)
 {
@@ -158,7 +158,7 @@ struct cell_record
 // because the relative f_err formula is ill-posed at zero.
 //
 // Per-cell bar shapes (matching tr_sqp_test.cpp where the cell exists
-// and the Plan-45 trace-classification table for the new closure-target
+// and the trace-classification table for the new closure-target
 // cells):
 //   - HS024 (f* = -1):       relative-against-1, both modes.
 //   - HS026 (f* = 0):        absolute, both modes.
@@ -401,6 +401,7 @@ void write_json(const std::vector<cell_block>& blocks,
             out << "        \"" << key.str() << "\": {"
                 << "\"f\": "      << fmt_num(r.objective_value)
                 << ", \"cv\": "   << fmt_num(r.constraint_violation)
+                << ", \"grad_norm\": " << fmt_num(r.gradient_norm)
                 << ", \"f_err\": "<< fmt_num(r.f_err)
                 << ", \"iters\": "<< r.iterations
                 << ", \"wall_us\": "<< fmt_num(r.wall_us)
@@ -514,7 +515,7 @@ int main(int argc, char** argv)
             std::cout <<
                 "soc_budget_sweep: drive tr_sqp_policy across the joint\n"
                 "  (penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3},\n"
-                "   soc_max_iterations in {0, 1, 2, 3}) grid on the\n"
+                "   soc_max_iterations in {0, 1, 2, 4}) grid on the\n"
                 "  HS-suite cells:\n"
                 "    - reference (non-regression gate): HS026, HS028, HS071, HS076\n"
                 "    - closure targets (improvement axis): HS024, HS035, HS039,\n"

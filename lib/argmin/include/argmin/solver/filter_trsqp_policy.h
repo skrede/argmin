@@ -228,11 +228,13 @@ struct filter_trsqp_policy
     // expansion); between retries the violation must contract by
     // detail::kappa_soc or the loop aborts.
     //
-    // The zero default predates the SOC-residual correction (the
-    // pre-correction assembly injected a spurious +A p feasibility
-    // error, and the sweep that locked 0 recorded that defect's
-    // signature); it is retained unchanged here and re-locked by a
-    // re-sweep against the corrected mechanism.
+    // The zero default is re-derived (2026-07-05, lockstep with
+    // tr_sqp_policy) against the corrected SOC residual
+    // c(z+p) - A p. With the residual assembled correctly the filter
+    // acceptance closes its HS-suite closure targets without a SOC
+    // retry, so the retry budget re-locks to 0 as an opt-in knob
+    // rather than a default; a Maratos-curvature workload opts in via
+    // `policy.options.soc_max_iterations`.
     //
     // Reference: Nocedal and Wright 2e Section 18.3 (Maratos effect
     //            and SOC pairing); Wachter and Biegler 2006 Math.

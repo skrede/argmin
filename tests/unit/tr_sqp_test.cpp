@@ -145,44 +145,24 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-// HS043 is documented as a known-failure cell for the current
-// trust-region SQP implementation. Empirical behavior at the
-// current HEAD:
-//   - x0 = (0, 0, 0, 0) is strictly feasible (c_ineq = (8, 10, 5)).
-//   - The objective gradient at x0 is g = (-5, -5, -21, 7); the joint
-//     Newton direction overshoots the trust-region boundary by 2x and
-//     the L2-merit ratio test accepts the first step at f = -21.4
-//     (cv = 0). Iteration 1 expands the radius to 2.0 and accepts a
-//     step that pushes the iterate into infeasibility (cv = 1.59)
-//     while still reducing the L2 merit because the objective drops
-//     to f = -45.3.
-//   - By iteration 3 the iterate is at f = -48.6 / cv = 2.79 -- below
-//     f* = -44 in the infeasible region -- and the L2 merit has no
-//     descent direction within the contracting trust region. The
-//     radius collapses to the floor and the policy emits
-//     solver_status::trust_region_step_rejected.
-//
-// The underlying weakness is the slack-mediated L2 merit:
-// f + ||c_ineq - s||_2 admits a steep f-decrease that outpaces the
-// linearized feasibility leg when the unconstrained Newton direction
-// at x0 is large and the slack update lags (the slack-leg of the
-// Lagrangian gradient is -mu_ineq and the first-step multiplier
-// estimate is identity-Hessian-driven). A second-order correction on
-// the inequality leg or an interior-point-style slack barrier would
-// address this; both are out of scope for the current HS-suite
-// acceptance gate and tracked as candidates for a follow-up sweep.
-//
-// The [!shouldfail] tag captures the current state without removing
-// the cell: a future fix that makes HS043 converge will register as
-// "should-have-failed-but-passed" and surface the regression signal.
+// HS043 converges to the strict per-mode bar. The earlier slack-
+// mediated L2-merit overshoot (a steep f-decrease outpacing the
+// linearized feasibility leg on the large iter-0 Newton direction)
+// was a symptom of the pre-correction ratio-test objective model and
+// the unconditioned penalty: with the ratio test comparing the grad-L
+// predicted decrease against the f-measured actual, and the adaptive
+// L2-merit penalty growing at the re-derived default_penalty_factor
+// when the model predicts a feasibility decrease, the composite step
+// no longer trades feasibility for objective and the trajectory lands
+// at f* = -44 with zero violation.
 //
 // Reference: Hock & Schittkowski (1981), Problem 43; Lalee, Nocedal,
-//            Plantenga 1998 Section 3.1 (slack reformulation merit
-//            limitations); Nocedal and Wright 2e Section 18.5
-//            (Byrd-Omojokun composite step).
+//            Plantenga 1998 Section 3.3 (adaptive penalty growth);
+//            Nocedal and Wright 2e Section 18.5 (Byrd-Omojokun
+//            composite step).
 TEMPLATE_TEST_CASE_SIG(
-    "tr_sqp HS043 (parametric on mode) [known failure]",
-    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    "tr_sqp HS043 (parametric on mode)",
+    "[sqp][tr_sqp][regression][mode]",
     ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs043<>::problem_dimension>,
     tr_sqp_policy_fast<hs043<>::problem_dimension>)
@@ -217,68 +197,26 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-// HS024 is documented as a known-failure cell for the current
-// trust-region SQP implementation. Empirical behavior at the
-// current HEAD:
-//   - x0 = (1, 0.5) is strictly feasible: c_ineq = (0.0774, 1.866,
-//     4.134), all box-bounds x >= 0 are strictly satisfied
-//     (1 > 0, 0.5 > 0), the slack lower bound s >= 0 is strictly
-//     satisfied (s_slack = c_ineq, all positive).
-//   - Objective gradient at x0 is g = (-0.01069, -0.0802) (in the
-//     1 / (27 sqrt 3) scaling); ||g||_inf = 0.0802 is the iter-0
-//     KKT residual.
-//   - The composite-step helper hits the c.norm() == 0 short-circuit
-//     in the normal-step leg (byrd_omojokun.h:215) and zeroes v_buf;
-//     Steihaug-CG then computes a non-trivial tangential candidate
-//     u_buf of norm ||g|| ~ 0.081 (no bound activation truncates
-//     the projection at byrd_omojokun.h:317-342).
-//   - The L2-merit augmented predicted-reduction at
-//     byrd_omojokun.h:369-371 evaluates to
-//       predicted = +0.5 ||g||^2  +  penalty * (||c|| - ||A p + c||)
-//                 = +0.00322      +  1.0 * (0 - 0.224)
-//                 ~= -0.221  (strictly NEGATIVE)
-//     because the linearized inequality residual A p + c is non-zero
-//     even though the actual cv stays at zero (the unconstrained
-//     Newton direction perturbs the linearization off the feasibility
-//     manifold). Per Nocedal and Wright 2e eq. 18.43-18.50 the L2
-//     merit is monotone non-decreasing in ||A p + c|| / ||c|| at a
-//     strictly-feasible iterate, so any non-zero step is rejected by
-//     the ratio test (rho = actual / pred_guarded < tr_eta_1).
-//   - The radius shrinks by tr_shrink_factor = 0.25 per rejected iter
-//     for 20 iterations, after which the iter cap fires; if the iter
-//     budget were larger, Section M of the policy would emit
-//     solver_status::trust_region_step_rejected once the radius
-//     dropped below min_trust_radius = 1e-12.
-//
-// The underlying weakness is the L2-merit ratio test on strictly-
-// feasible iterates with non-trivial unconstrained Newton direction:
-// the predicted reduction's feasibility leg (penalty * (||c|| -
-// ||A p + c||)) is structurally negative for any step that perturbs
-// the linearization, regardless of objective descent. The bounded
-// (initial_penalty, penalty_factor) knob surface cannot fix this --
-// a penalty sweep down to 1e-8 either preserves the strictly-feasible
-// stall (penalty >= ~0.05) or flips the cell into an infeasible stall
-// at cv ~ 0.7 (penalty <= ~0.01), neither of which closes to f*.
-// Closure requires either a filter-based ratio test (accept on
-// objective-OR-feasibility improvement, layered on top of the
-// composite step) or an interior-point-style log-barrier on the
-// slack leg; both restructure the helper around a new acceptance
-// criterion and are out of scope for an in-policy fix.
-//
-// The [!shouldfail] tag captures the current state without removing
-// the cell: a future fix that makes HS024 converge will register as
-// "should-have-failed-but-passed" and surface the regression signal
-// for the closure milestone.
+// HS024 converges to f* = -1 at the strict per-mode bar. The former
+// strictly-feasible stall was a symptom of the L2-merit ratio test's
+// predicted-reduction shape before the objective model was corrected:
+// the feasibility leg penalty * (||c|| - ||A p + c||) read as
+// structurally negative for any step that perturbed the linearization
+// off the feasibility manifold, so every non-zero step was rejected
+// and the radius collapsed. With the ratio test comparing the grad-L
+// predicted decrease against the f-measured actual, and the adaptive
+// penalty growing at the re-derived default_penalty_factor, the
+// composite step is accepted and the cell converges from the
+// strictly-feasible start.
 //
 // Reference: Hock & Schittkowski (1981), Problem 24; Nocedal and
 //            Wright 2e Section 18.5 Algorithm 18.4 (Byrd-Omojokun
-//            composite step) and eq. 18.43-18.50 (L2-merit
-//            predicted-reduction shape); Lalee, Nocedal, Plantenga
-//            1998 SIAM J. Optim. 8(3):682-706 Section 3.3 (augmented
-//            merit + penalty update).
+//            composite step); Lalee, Nocedal, Plantenga 1998 SIAM J.
+//            Optim. 8(3):682-706 Section 3.3 (augmented merit +
+//            penalty update).
 TEMPLATE_TEST_CASE_SIG(
-    "tr_sqp HS024 (parametric on mode) [known failure]",
-    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    "tr_sqp HS024 (parametric on mode)",
+    "[sqp][tr_sqp][regression][mode]",
     ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs024<>::problem_dimension>,
     tr_sqp_policy_fast<hs024<>::problem_dimension>)
@@ -313,69 +251,36 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-// HS035 / HS039 / HS040 / HS050 are documented as known-failure cells
-// for the current trust-region SQP implementation, with the failure
-// mechanism shared across HS035 / HS039 / HS040 / HS043 (merit
-// overshoot on the slack-augmented L2 merit) and a distinct mechanism
-// for HS050 (composite-step divergence).
-//
-// HS035 / HS039 / HS040 share the equality-and-inequality merit
-// overshoot mechanism with the existing HS043 known-failure cell:
-//   - The Byrd-Omojokun composite step accepts trial steps that drive
-//     the L2-merit weighted sum (objective + penalty * (||c|| - ||A p +
-//     c||)) downward by overshooting the objective at the expense of
-//     the feasibility leg. On the equality-constraint cells (HS039 /
-//     HS040 / HS028-like family) the helper computes a tangential step
-//     whose linearization satisfies the equality constraint, but the
-//     accepted iterate ends up off the constraint manifold; subsequent
-//     iters oscillate between feasibility recovery and objective
-//     descent, with neither leg making bounded progress to f*.
-//   - The widened (penalty_factor, soc_max_iterations) sweep on the
-//     full HS024 / HS026 / HS028 / HS035 / HS039 / HS040 / HS043 /
-//     HS050 / HS071 / HS076 cell axis shows that HS039 accurate and
-//     HS040 fast and HS050 (both modes) can be brought inside the
-//     per-mode strict bar at non-default (penalty_factor,
-//     soc_max_iterations) configurations, but every such configuration
-//     regresses at least one of the reference cells (HS026 fast / HS028
-//     fast / HS071 accurate / HS076 both modes). The sweep selects the
-//     opt-in-zero default (penalty_factor = 0, soc_max_iterations = 0);
-//     non-passing closure-target cells stay tagged known-failure.
-//   - HS035 fast is borderline-passing under the publish_bench's 699-
-//     iter fast-mode budget (f_err = 1.78e-3 inside the 5% bar at
-//     iter 699) and known-failure under the 200-iter cap used by the
-//     other unit cells (f_err = 0.138 outside the 5% bar at iter 200);
-//     the cell here uses the 200-iter cap for parity with the rest of
-//     the test suite.
-//
-// HS050 is the composite-step-divergence cell: monotone objective
-// descent and monotone cv reduction, but the KKT residual GROWS over
-// the trajectory. The iterate drifts away from the first-order
-// optimality conditions even as the policy makes progress on
-// individual merit-function components. The (penalty_factor,
-// soc_max_iterations) knobs cannot address this — the cell terminates
-// far from f* under every swept configuration that preserves the
-// reference set.
-//
-// Closure of the merit-overshoot family requires a filter-based ratio
-// test layered on top of the Byrd-Omojokun composite step (objective-
-// OR-feasibility descent, not strict L2-merit descent), or a slack-
-// barrier reformulation of the inequality leg; closure of HS050
-// requires a composite-step variant that does not allow the KKT
-// residual to grow on monotone-descent trajectories. Both are out of
-// scope for the current (penalty_factor, soc_max_iterations) knob
-// surface.
+// HS035 / HS039 / HS040 / HS050 converge to the strict per-mode bar.
+// The former merit-overshoot family (HS035 / HS039 / HS040, sharing
+// the equality-and-inequality slack-augmented L2-merit mechanism) and
+// the HS050 composite-step-divergence cell were symptoms of the
+// pre-correction ratio-test objective model and the unconditioned
+// penalty growth, not of a missing acceptance criterion:
+//   - With the ratio test comparing the grad-L predicted decrease
+//     against the f-measured actual, the composite step no longer
+//     accepts trial steps that drive the L2-merit weighted sum down by
+//     trading feasibility for objective; the equality-constraint cells
+//     stay on the constraint manifold instead of oscillating between
+//     feasibility recovery and objective descent.
+//   - The adaptive L2-merit penalty growing at the re-derived
+//     default_penalty_factor (when the model predicts a feasibility
+//     decrease) closes the whole family; the joint sweep confirms full
+//     closure on both modes at soc_max_iterations = 0.
+//   - HS050 no longer drifts off the first-order optimality conditions:
+//     the corrected model keeps the KKT residual contracting along the
+//     monotone-descent trajectory.
 //
 // Reference: Hock & Schittkowski (1981), Problems 35, 39, 40, 50;
 //            Nocedal and Wright 2e Section 18.5 Algorithm 18.4
 //            (Byrd-Omojokun composite step); Lalee, Nocedal,
 //            Plantenga 1998 SIAM J. Optim. 8(3):682-706 Section 3.1
 //            (v-optimal restoration) and Section 3.3 (augmented merit
-//            penalty update); Fletcher and Leyffer 2002 Math. Program.
-//            91:239-269 (filter-trust-region pairing).
+//            penalty update).
 
 TEMPLATE_TEST_CASE_SIG(
-    "tr_sqp HS035 (parametric on mode) [known failure]",
-    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    "tr_sqp HS035 (parametric on mode)",
+    "[sqp][tr_sqp][regression][mode]",
     ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs035<>::problem_dimension>,
     tr_sqp_policy_fast<hs035<>::problem_dimension>)
@@ -411,8 +316,8 @@ TEMPLATE_TEST_CASE_SIG(
 }
 
 TEMPLATE_TEST_CASE_SIG(
-    "tr_sqp HS039 (parametric on mode) [known failure]",
-    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    "tr_sqp HS039 (parametric on mode)",
+    "[sqp][tr_sqp][regression][mode]",
     ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs039<>::problem_dimension>,
     tr_sqp_policy_fast<hs039<>::problem_dimension>)
@@ -448,8 +353,8 @@ TEMPLATE_TEST_CASE_SIG(
 }
 
 TEMPLATE_TEST_CASE_SIG(
-    "tr_sqp HS040 (parametric on mode) [known failure]",
-    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    "tr_sqp HS040 (parametric on mode)",
+    "[sqp][tr_sqp][regression][mode]",
     ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs040<>::problem_dimension>,
     tr_sqp_policy_fast<hs040<>::problem_dimension>)
@@ -485,8 +390,8 @@ TEMPLATE_TEST_CASE_SIG(
 }
 
 TEMPLATE_TEST_CASE_SIG(
-    "tr_sqp HS050 (parametric on mode) [known failure]",
-    "[sqp][tr_sqp][regression][mode][!shouldfail]",
+    "tr_sqp HS050 (parametric on mode)",
+    "[sqp][tr_sqp][regression][mode]",
     ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs050<>::problem_dimension>,
     tr_sqp_policy_fast<hs050<>::problem_dimension>)
