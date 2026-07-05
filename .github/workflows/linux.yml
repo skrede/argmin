@@ -124,6 +124,63 @@ jobs:
       - name: Test
         run: cd build && ctest --output-on-failure
 
+  warnings:
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+
+    runs-on: ubuntu-24.04
+    name: warnings (${{ matrix.build_type }})
+
+    # Advisory cell: ARGMIN_WARNING_FLAGS is now wired onto the
+    # header-compiling test target and surfaced here with -Werror in
+    # both Debug and Release so the flagged headers are visible. The
+    # header fixes themselves are production-code changes out of scope
+    # for the verification-instruments work, so this cell does not gate
+    # the pipeline yet. Flip continue-on-error to false once the
+    # flagged headers are cleaned up.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: |
+          cmake . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_CXX_FLAGS="-Werror" \
+            -DARGMIN_BUILD_TESTS=ON \
+            -DARGMIN_CMAKE_FETCH_DEPS=ON
+
+      - name: Build
+        run: cmake --build build
+
+  labeled-instruments:
+    runs-on: ubuntu-24.04
+    name: labeled instruments (alloc-gate, oracle-pin)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: |
+          cmake . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DARGMIN_BUILD_TESTS=ON \
+            -DARGMIN_BUILD_BENCHMARKS=ON \
+            -DARGMIN_CMAKE_FETCH_DEPS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run alloc-gate and oracle-pin instruments
+        run: cd build && ctest --output-on-failure -L "alloc-gate|oracle-pin"
+
   install-test:
     runs-on: ubuntu-24.04
 

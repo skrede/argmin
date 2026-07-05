@@ -10,7 +10,6 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 set(ARGMIN_WARNING_FLAGS
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /utf-8>
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:
-        -fPIC
         -Wall
         -Wextra
         -Wpedantic
