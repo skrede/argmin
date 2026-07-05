@@ -328,6 +328,234 @@ struct high_violation_mock_policy
     }
 };
 
+// Mock policy that reports converged after exactly 2 steps.
+// Used for testing that a converged solver is retired by the group (never
+// re-stepped) rather than kept in rotation forever.
+
+struct converging_mock_policy
+{
+    using scalar_type = double;
+
+    struct state_type
+    {
+        Eigen::VectorXd x;
+        double objective_value{};
+        std::uint32_t step_count{};
+    };
+
+    template <typename Problem, typename Convergence = argmin::default_convergence>
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
+                    const argmin::solver_options<Convergence>&)
+    {
+        return {.x = x0, .objective_value = 0.5 * x0.squaredNorm()};
+    }
+
+    argmin::step_result<double> step(state_type& s)
+    {
+        ++s.step_count;
+        s.x *= 0.5;
+        s.objective_value = 0.5 * s.x.squaredNorm();
+        argmin::step_result<double> r{
+            .objective_value = s.objective_value,
+            .gradient_norm = s.x.norm(),
+            .step_size = 0.5,
+            .objective_change = -s.objective_value,
+            .improved = true,
+            .x_norm = s.x.norm(),
+        };
+        if(s.step_count >= 2)
+            r.policy_status = argmin::solver_status::converged;
+        return r;
+    }
+
+    void reset(state_type& s, const Eigen::VectorXd& x0)
+    {
+        s.x = x0;
+        s.objective_value = 0.5 * x0.squaredNorm();
+        s.step_count = 0;
+    }
+
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    {
+        reset(s, x0);
+    }
+};
+
+// Mock policy at the feasibility_tolerance boundary: constraint_violation
+// is 5e-7, strictly inside basic_solver's default feasibility_tolerance
+// (1e-6, options.h) but strictly outside a bare-zero tolerance. Used to
+// check that basic_solver_group's feasibility default agrees with
+// basic_solver's, rather than judging this borderline iterate infeasible.
+
+struct borderline_feasible_mock_policy
+{
+    using scalar_type = double;
+
+    struct state_type
+    {
+        Eigen::VectorXd x;
+        double objective_value{};
+        Eigen::VectorXd c_eq;
+        Eigen::VectorXd c_ineq;
+    };
+
+    template <typename Problem, typename Convergence = argmin::default_convergence>
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
+                    const argmin::solver_options<Convergence>&)
+    {
+        return state_type{
+            .x = x0,
+            .objective_value = 10.0,
+            .c_eq = Eigen::VectorXd(0),
+            .c_ineq = Eigen::VectorXd{{-5e-7}},
+        };
+    }
+
+    argmin::step_result<double> step(state_type& s)
+    {
+        return argmin::step_result<double>{
+            .objective_value = s.objective_value,
+            .gradient_norm = s.x.norm(),
+            .step_size = 0.1,
+            .objective_change = 0.0,
+            .improved = false,
+            .constraint_violation = 5e-7,
+        };
+    }
+
+    void reset(state_type& s, const Eigen::VectorXd& x0)
+    {
+        s.x = x0;
+    }
+
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    {
+        reset(s, x0);
+    }
+};
+
+// Mock policy that is exactly feasible (cv = 0) with a worse objective than
+// borderline_feasible_mock_policy. Paired with it to detect a feasibility
+// default mismatch: under an incorrect value_or(0) tolerance this policy
+// alone would be judged feasible and would win on the feasible-beats-
+// infeasible rule despite its worse objective.
+
+struct feasible_worse_objective_mock_policy
+{
+    using scalar_type = double;
+
+    struct state_type
+    {
+        Eigen::VectorXd x;
+        double objective_value{};
+        Eigen::VectorXd c_eq;
+        Eigen::VectorXd c_ineq;
+    };
+
+    template <typename Problem, typename Convergence = argmin::default_convergence>
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
+                    const argmin::solver_options<Convergence>&)
+    {
+        return state_type{
+            .x = x0,
+            .objective_value = 20.0,
+            .c_eq = Eigen::VectorXd(0),
+            .c_ineq = Eigen::VectorXd{{0.0}},
+        };
+    }
+
+    argmin::step_result<double> step(state_type& s)
+    {
+        return argmin::step_result<double>{
+            .objective_value = s.objective_value,
+            .gradient_norm = s.x.norm(),
+            .step_size = 0.1,
+            .objective_change = 0.0,
+            .improved = false,
+            .constraint_violation = 0.0,
+        };
+    }
+
+    void reset(state_type& s, const Eigen::VectorXd& x0)
+    {
+        s.x = x0;
+    }
+
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    {
+        reset(s, x0);
+    }
+};
+
+// Mock policy for testing basic_solver's own best-seen feasibility
+// tolerance in isolation: step 1 is borderline-feasible (cv = 5e-7,
+// obj = 10), step 2 is unambiguously feasible but worse (cv = 0, obj = 20).
+// Also seeds the same borderline c_ineq at init() so the pre-loop best-seen
+// seed (basic_solver.h seed_best_cv) starts from the same borderline value.
+
+struct borderline_then_worse_mock_policy
+{
+    using scalar_type = double;
+
+    struct state_type
+    {
+        Eigen::VectorXd x;
+        double objective_value{};
+        Eigen::VectorXd c_eq;
+        Eigen::VectorXd c_ineq;
+        std::uint32_t step_count{};
+    };
+
+    template <typename Problem, typename Convergence = argmin::default_convergence>
+    state_type init(const Problem&, const Eigen::VectorXd& x0,
+                    const argmin::solver_options<Convergence>&)
+    {
+        return state_type{
+            .x = x0,
+            .objective_value = 10.0,
+            .c_eq = Eigen::VectorXd(0),
+            .c_ineq = Eigen::VectorXd{{-5e-7}},
+        };
+    }
+
+    argmin::step_result<double> step(state_type& s)
+    {
+        ++s.step_count;
+        if(s.step_count == 1)
+        {
+            s.objective_value = 10.0;
+            s.c_ineq(0) = -5e-7;
+        }
+        else
+        {
+            s.objective_value = 20.0;
+            s.c_ineq(0) = 0.0;
+        }
+
+        return argmin::step_result<double>{
+            .objective_value = s.objective_value,
+            .gradient_norm = s.x.norm(),
+            .step_size = 0.1,
+            .objective_change = 0.0,
+            .improved = false,
+            .constraint_violation = (s.step_count == 1 ? 5e-7 : 0.0),
+        };
+    }
+
+    void reset(state_type& s, const Eigen::VectorXd& x0)
+    {
+        s.x = x0;
+        s.objective_value = 10.0;
+        s.c_ineq(0) = -5e-7;
+        s.step_count = 0;
+    }
+
+    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    {
+        reset(s, x0);
+    }
+};
+
 // Mock policy that reports roundoff_limited after exactly 3 steps.
 // Used for testing policy_status propagation and solver group retirement.
 

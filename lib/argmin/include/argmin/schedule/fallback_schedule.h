@@ -13,6 +13,13 @@ namespace argmin
 // Runs the first solver until it stalls (stall_threshold consecutive
 // non-improving steps), then switches to the next solver. If all solvers
 // stall, cycles back to the first.
+//
+// select() does not know about solver retirement -- it can return an
+// already-retired index (e.g. the current solver retires via roundoff /
+// divergence / convergence before ever stalling out on this schedule's own
+// terms). basic_solver_group::step() is responsible for skip-scanning past
+// a retired index returned here; this schedule only needs to keep
+// producing its normal stall-driven sequence.
 
 struct fallback_schedule
 {

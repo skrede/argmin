@@ -14,6 +14,11 @@ namespace argmin
 // Gives each solver a fixed time slice. When the slice is exhausted,
 // moves to the next solver. Uses steady_clock (monotonic, not affected
 // by wall-clock adjustments).
+//
+// Like fallback_schedule, select() does not know about solver retirement
+// and can return an already-retired index between slice expirations.
+// basic_solver_group::step() skip-scans past a retired index; this
+// schedule only needs to keep producing its normal time-sliced sequence.
 
 struct time_boxed_schedule
 {

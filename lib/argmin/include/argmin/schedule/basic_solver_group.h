@@ -54,6 +54,7 @@ public:
         , schedule_{std::move(schedule)}
         , max_iterations_{opts.max_iterations}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
     {
         init_schedule();
     }
@@ -73,6 +74,7 @@ public:
         , schedule_{std::move(schedule)}
         , max_iterations_{opts.max_iterations}
         , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
     {
         init_schedule();
     }
@@ -81,19 +83,39 @@ public:
     {
         constexpr std::size_t n = sizeof...(Policies);
 
-        // Find next non-retired policy
+        if(all_retired())
+        {
+            // No live solver remains. Returning a value-initialized
+            // step_result here would masquerade as a real step (objective
+            // 0, gradient 0) and could falsely satisfy a caller's own
+            // convergence check; report a truthful terminal outcome
+            // instead.
+            return terminal_result();
+        }
+
+        // Skip-scan for the next live solver. fallback_schedule and
+        // time_boxed_schedule only advance their internal index on stall
+        // / time-slice expiry, not on retirement, so a repeated
+        // schedule_.select(n) call can keep returning an already-retired
+        // index forever. Query the schedule once for its proposed index,
+        // then scan forward over the live solvers from there -- since
+        // all_retired() is false above, at least one live index exists
+        // within the next n slots.
+        std::size_t idx = schedule_.select(n);
         for(std::size_t attempt = 0; attempt < n; ++attempt)
         {
-            std::size_t idx = schedule_.select(n);
             if(!retired_[idx])
             {
                 auto result = step_at(idx, std::index_sequence_for<Policies...>{});
                 schedule_.notify(result);
 
-                // Retire on failure status
+                // Retire on failure or (per-policy) convergence status so a
+                // converged solver stops being re-stepped and cannot
+                // livelock the group.
                 if(result.policy_status &&
                    (*result.policy_status == solver_status::roundoff_limited ||
-                    *result.policy_status == solver_status::diverged))
+                    *result.policy_status == solver_status::diverged ||
+                    *result.policy_status == solver_status::converged))
                 {
                     retired_[idx] = true;
                     populate_result(idx, result, std::index_sequence_for<Policies...>{});
@@ -101,10 +123,14 @@ public:
 
                 return result;
             }
+            idx = (idx + 1) % n;
         }
 
-        // All retired
-        return step_result<scalar_type>{};
+        // Unreachable given the all_retired() guard above: every index was
+        // found retired mid-scan even though all_retired() reported false.
+        // Fall back to the same truthful terminal outcome rather than a
+        // fabricated result.
+        return terminal_result();
     }
 
     const std::array<solve_result<scalar_type, N>, sizeof...(Policies)>& results() const
@@ -252,7 +278,13 @@ private:
         scalar_type best_obj = std::numeric_limits<scalar_type>::max();
         scalar_type best_cv = std::numeric_limits<scalar_type>::max();
         std::size_t best_idx = 0;
-        scalar_type tol = constraint_tolerance_.value_or(scalar_type(0));
+        // User-supplied constraint_tolerance takes precedence; otherwise
+        // fall back to the same feasibility_tolerance default basic_solver
+        // uses for its own best-seen comparator (options.h), so a group and
+        // a standalone solver judge the same iterate's feasibility
+        // identically.
+        scalar_type tol = constraint_tolerance_.value_or(
+            static_cast<scalar_type>(feasibility_tolerance_));
 
         auto check = [&](std::size_t idx, const auto& solver)
         {
@@ -313,6 +345,20 @@ private:
         return true;
     }
 
+    // Truthful "no live solver" outcome for step(). Distinguishable from a
+    // real step by construction: policy_status is explicitly set (never
+    // nullopt, unlike an in-progress real step) and the metrics are NaN
+    // rather than the misleading value-initialized 0, so a NaN-oblivious
+    // comparison (e.g. `< threshold`) can never read this as convergence.
+    static step_result<scalar_type> terminal_result()
+    {
+        step_result<scalar_type> r{};
+        r.objective_value = std::numeric_limits<scalar_type>::quiet_NaN();
+        r.gradient_norm = std::numeric_limits<scalar_type>::quiet_NaN();
+        r.policy_status = solver_status::budget_exhausted;
+        return r;
+    }
+
     template <std::size_t... Is>
     void populate_result(std::size_t idx, const step_result<scalar_type>& sr,
                          std::index_sequence<Is...>)
@@ -359,6 +405,7 @@ private:
     Schedule schedule_;
     std::uint32_t max_iterations_{1000};
     std::optional<double> constraint_tolerance_{};
+    double feasibility_tolerance_{1e-6};
     std::array<bool, sizeof...(Policies)> retired_{};
     std::array<solve_result<scalar_type, N>, sizeof...(Policies)> results_{};
 };
