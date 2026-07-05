@@ -208,3 +208,25 @@ jobs:
       - name: Run consumer test
         run: |
           ./build-consumer/integration_test
+
+  system-eigen-suite:
+    runs-on: ubuntu-24.04
+    name: system-eigen (integration path)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system Eigen and Catch2
+        run: sudo apt-get update && sudo apt-get install -y libeigen3-dev catch2
+
+      - name: Configure (system deps, no FetchContent)
+        run: |
+          cmake . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DARGMIN_BUILD_TESTS=ON \
+            -DARGMIN_CMAKE_FETCH_DEPS=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test (including the integration consumer path)
+        run: cd build && ctest --output-on-failure
