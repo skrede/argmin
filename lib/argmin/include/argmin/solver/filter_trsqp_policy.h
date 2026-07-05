@@ -210,20 +210,28 @@ struct filter_trsqp_policy
     static constexpr double default_initial_trust_radius = 1.0;
     static constexpr double default_min_trust_radius     = 1e-12;
 
-    // Second-order correction retry budget on the inequality leg. On a
-    // rejected primary composite step, the policy iterates the SOC
-    // retry up to this many times: each retry recomputes the
-    // linearized inequality residual at the trial point x + p with the
-    // original Jacobian J(x), then re-calls the composite-step helper
-    // with the corrected residual. The trust-region radius is held
-    // fixed across retries (the retry exploits curvature information
-    // from the trial-point residual, not radius expansion).
+    // Second-order correction retry budget. On a rejected primary
+    // composite step whose trial violation did not decrease (the
+    // Maratos regime), the policy iterates the SOC retry up to this
+    // many times: each retry assembles the SOC residual
+    // c(z + p) - A_joint p at the trial point with the original
+    // Jacobian (detail::assemble_joint_soc), then re-calls the
+    // composite-step helper with the corrected residual. The trust-
+    // region radius is held fixed across retries (the retry exploits
+    // curvature information from the trial-point residual, not radius
+    // expansion); between retries the violation must contract by
+    // detail::kappa_soc or the loop aborts.
     //
-    // Reference: Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
-    //            8(3):682-706 Section 3.1 (v-optimal restoration shape);
-    //            Nocedal and Wright 2e Section 18.3 (Maratos effect and
-    //            the line-search second-order correction analog at
-    //            kraft_slsqp_policy Section 2.2.4).
+    // The zero default predates the SOC-residual correction (the
+    // pre-correction assembly injected a spurious +A p feasibility
+    // error, and the sweep that locked 0 recorded that defect's
+    // signature); it is retained unchanged here and re-locked by a
+    // re-sweep against the corrected mechanism.
+    //
+    // Reference: Nocedal and Wright 2e Section 18.3 (Maratos effect
+    //            and SOC pairing); Wachter and Biegler 2006 Math.
+    //            Programming 106:25-57 Section 2.4, Algorithm A steps
+    //            A-5.7..A-5.9.
     static constexpr std::size_t default_soc_max_iterations =
         std::size_t{0};
 
@@ -845,6 +853,18 @@ struct filter_trsqp_policy
         if(n_ineq > 0)
             z_k.tail(n_ineq) = s.s_slack;
 
+        // Joint OBJECTIVE gradient: x-block grad f, slack block zero
+        // (the slack variables do not enter f). Consumed by the
+        // helper's predicted objective-leg reduction -- an f-model
+        // quantity, matching the f-measured actual_obj in the radius
+        // rho rule and the W-B eq. (14) f-model reduction consumed by
+        // the switching-condition classification. The joint LAGRANGIAN
+        // gradient (Section B) keeps driving the quadratic step model.
+        Eigen::VectorXd g_obj_joint(n_total);
+        g_obj_joint.head(n) = s.g;
+        if(n_ineq > 0)
+            g_obj_joint.tail(n_ineq).setZero();
+
         Eigen::VectorXd v_buf(n_total);
         Eigen::VectorXd u_buf(n_total);
         Eigen::VectorXd r_cg_buf(n_total);
@@ -869,7 +889,7 @@ struct filter_trsqp_policy
         const double delta_pre_step = s.trust_radius;
         auto bo_step = argmin::detail::byrd_omojokun_composite_step<
             double, Eigen::Dynamic>(
-            z_k, s.joint_grad_L_new_buf,
+            z_k, s.joint_grad_L_new_buf, g_obj_joint,
             hessian_op,
             A_joint, c_joint,
             s.trust_radius, eps_k, max_cg_iter,
@@ -891,11 +911,13 @@ struct filter_trsqp_policy
         // from the enclosing scope; it is the iteration-entry
         // violation, NOT refreshed between primary step and SOC retry,
         // because s.x has not moved.
-        auto compute_accept_and_radius = [&s, &h_current, &p_out,
-                                          f_old, this](
-            const argmin::detail::byrd_omojokun_step_result& bo,
-            double delta_input)
-            -> std::pair<bool, double>
+        // Trial-point violation aggregate (Fletcher-Leyffer L1 form,
+        // same measure as h_current) read from the c_trial_buf that
+        // trial_eval populated during the most recent helper call.
+        // Consumed by the filter dispatch below AND by the Section K'
+        // SOC trigger / continuation gates (the filter family's theta
+        // measure).
+        auto compute_h_trial = [&s]() -> double
         {
             double h_trial = 0.0;
             if(s.n_eq > 0)
@@ -904,6 +926,17 @@ struct filter_trsqp_policy
             if(s.n_ineq > 0)
                 h_trial += (-s.bufs.c_trial_buf.tail(s.n_ineq))
                               .cwiseMax(0.0).sum();
+            return h_trial;
+        };
+
+        auto compute_accept_and_radius = [&s, &h_current, &p_out,
+                                          &compute_h_trial,
+                                          f_old, this](
+            const argmin::detail::byrd_omojokun_step_result& bo,
+            double delta_input)
+            -> std::pair<bool, double>
+        {
+            const double h_trial = compute_h_trial();
 
             const bool acceptable = s.filter.is_acceptable(bo.f_new,
                                                            h_trial);
@@ -924,21 +957,28 @@ struct filter_trsqp_policy
             // Reference: Fletcher, Leyffer, Toint 2002 Section 3 --
             //            filter-TR decouples acceptance from radius
             //            update.
+            // Explicit no-expand branch on a non-positive predicted
+            // reduction: N&W Algorithm 4.1's ratio test assumes
+            // pred > 0. Forming rho = actual / max(pred, eps) here
+            // would produce |rho| ~ 1e16 on a legitimately negative
+            // prediction and expand the radius on a model-increasing
+            // step. The radius is held; only a genuinely very-
+            // successful objective-leg prediction expands.
             const double actual_obj = f_old - bo.f_new;
-            const double pred_guarded = std::max(
-                bo.predicted, std::numeric_limits<double>::epsilon());
-            const double rho = actual_obj / pred_guarded;
             const double step_norm = p_out.norm();
 
-            double new_delta;
-            if(rho > argmin::detail::tr_eta_2
-               && step_norm
-                  >= argmin::detail::tr_boundary_guard * delta_input)
-                new_delta = std::min(
-                    argmin::detail::tr_expand_factor * delta_input,
-                    argmin::detail::tr_delta_max);
-            else
-                new_delta = delta_input;
+            double new_delta = delta_input;
+            if(bo.predicted > 0.0)
+            {
+                const double rho = actual_obj / bo.predicted;
+                if(rho > argmin::detail::tr_eta_2
+                   && step_norm
+                      >= argmin::detail::tr_boundary_guard
+                         * delta_input)
+                    new_delta = std::min(
+                        argmin::detail::tr_expand_factor * delta_input,
+                        argmin::detail::tr_delta_max);
+            }
 
             // Filter add: TR-shrink mode always adds on accept;
             // switching-condition mode classifies an accepted step as
@@ -969,14 +1009,28 @@ struct filter_trsqp_policy
         auto [accepted, new_delta] =
             compute_accept_and_radius(bo_step, s.trust_radius);
 
-        // Section K' -- Second-order correction retry on the inequality
-        // leg. On a rejected primary composite step, recompute the
-        // linearized constraint residual at the trial point z_k + p
-        // with the ORIGINAL Jacobian A_joint (Lalee, Nocedal, Plantenga
-        // 1998 Section 3.1 v-optimal restoration shape). The helper is
-        // re-called with the corrected c_joint_soc; the trust radius
-        // input is held at delta_pre_step across retries (no chained
-        // shrinks).
+        // Section K' -- Second-order correction retry. On a rejected
+        // primary composite step in the MARATOS REGIME (trial filter
+        // violation did not decrease: h_trial >= h_current, the
+        // theta(z + p) >= theta(z_k) gate of Wachter-Biegler A-5.7),
+        // re-assemble the SOC residual
+        //   c_soc = c(z_k + p) - A_joint p
+        // at the trial point with the ORIGINAL Jacobian A_joint via
+        // the shared detail::assemble_joint_soc helper: subtracting
+        // A_joint p preserves the linear constraint model and leaves
+        // only the curvature remainder for the corrective re-solve
+        // (N&W Section 18.3; Wachter-Biegler 2006 eq. 24/27 in the
+        // full-step convention). The helper is re-called with
+        // c_joint_soc; the trust radius input is held at
+        // delta_pre_step across retries (no chained shrinks). An
+        // ordinary rejection whose violation already fell is driven
+        // by the objective leg; the retry stays out (a NaN h_trial
+        // fails the >= comparison and skips the retry too).
+        //
+        // Continuation: between retries the trial violation must
+        // contract by detail::kappa_soc (Wachter-Biegler A-5.9) or
+        // the loop aborts; a NaN retry violation fails the negated
+        // contraction test and aborts.
         //
         // The retry's filter dispatch reads the SAME h_current
         // captured at iteration entry (BEFORE the original BO call):
@@ -984,16 +1038,23 @@ struct filter_trsqp_policy
         // h_current would be both a no-op and a code-smell-inviting
         // bug.
         //
-        // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.1;
-        //            Nocedal and Wright 2e Section 18.3 (Maratos
-        //            effect and SOC pairing).
+        // Reference: Nocedal and Wright 2e Section 18.3 (Maratos
+        //            effect and SOC pairing); Wachter and Biegler
+        //            2006 Math. Programming 106:25-57 Section 2.4,
+        //            Algorithm A steps A-5.7..A-5.9.
         std::size_t soc_retry_count = 0;
-        if(!accepted && options.soc_max_iterations > 0)
+        if(!accepted && options.soc_max_iterations > 0
+           && compute_h_trial() >= h_current)
         {
             Eigen::Vector<double, N> x_trial(n);
             Eigen::VectorXd s_trial(n_ineq);
             Eigen::VectorXd c_all_trial(m_total);
+            Eigen::VectorXd c_trial_joint(m_total);
             Eigen::VectorXd c_joint_soc(m_total);
+
+            // Filter-measure violation of the most recent trial,
+            // driving the kappa_soc contraction test across retries.
+            double theta_trial_prev = compute_h_trial();
 
             for(std::size_t soc_iter = 0;
                 soc_iter < options.soc_max_iterations;
@@ -1008,14 +1069,21 @@ struct filter_trsqp_policy
                 if(m_total > 0)
                     s.problem->constraints(x_trial, c_all_trial);
                 if(s.n_eq > 0)
-                    c_joint_soc.head(s.n_eq) = c_all_trial.head(s.n_eq);
+                    c_trial_joint.head(s.n_eq) =
+                        c_all_trial.head(s.n_eq);
                 if(n_ineq > 0)
-                    c_joint_soc.tail(n_ineq) =
+                    c_trial_joint.tail(n_ineq) =
                         -c_all_trial.tail(n_ineq) + s_trial;
+
+                // SOC residual through the shared assembly helper:
+                // c_soc = c_trial_joint - A_joint * p_out.
+                argmin::detail::assemble_joint_soc<double,
+                                                   Eigen::Dynamic>(
+                    c_trial_joint, A_joint, p_out, c_joint_soc);
 
                 bo_step = argmin::detail::byrd_omojokun_composite_step<
                     double, Eigen::Dynamic>(
-                    z_k, s.joint_grad_L_new_buf,
+                    z_k, s.joint_grad_L_new_buf, g_obj_joint,
                     hessian_op,
                     A_joint, c_joint_soc,
                     delta_pre_step, eps_k, max_cg_iter,
@@ -1030,6 +1098,17 @@ struct filter_trsqp_policy
 
                 if(accepted)
                     break;
+
+                // Continuation gate (Wachter-Biegler A-5.9): abort
+                // unless the retry's trial violation contracted by
+                // kappa_soc relative to the previous trial. The
+                // negated form routes a NaN violation to the abort
+                // branch.
+                const double theta_trial_new = compute_h_trial();
+                if(!(theta_trial_new
+                     < argmin::detail::kappa_soc * theta_trial_prev))
+                    break;
+                theta_trial_prev = theta_trial_new;
             }
         }
 

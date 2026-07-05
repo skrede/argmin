@@ -629,6 +629,153 @@ TEST_CASE("tr_sqp _fast wall <= _accurate wall (HS071)",
 // the group's reported best result, not on the individual solvers. This
 // is the runtime form of the `nlp_solver` concept satisfaction landed
 // at compile-time on tests/compile/sqp_mode_racing_test.cpp.
+// ─── Second-order-correction trigger pins ──────────────────────────
+//
+// Reference: Nocedal and Wright 2e Section 18.3 (Maratos effect; the
+//            second-order correction belongs where the constraint
+//            violation FAILS to fall on a rejected step);
+//            Wachter and Biegler 2006 Math. Programming 106:25-57
+//            Section 2.4 / Algorithm A-5.7..A-5.9 (SOC trigger
+//            theta(x + p) >= theta(x_k)).
+//
+// The SOC retry must fire only in the Maratos regime: a rejected step
+// whose trial violation did NOT decrease. A rejected step whose
+// violation DID decrease (ordinary merit rejection driven by the
+// objective leg) must not enter the SOC loop -- re-solving against
+// the corrected residual cannot help there, and the retry burns
+// constraint evaluations and can perturb the iterate off the active
+// manifold.
+
+namespace
+{
+
+// Maratos-shape instance (the classical curved-constraint example):
+//   min  2 (x1^2 + x2^2 - 1) - x1   s.t.  x1^2 + x2^2 - 1 = 0.
+// From a feasible point on the circle the tangential SQP step leaves
+// the trial violation at O(||p||^2) > 0 = theta_k while the merit
+// worsens, so the primary step is rejected with the violation NOT
+// decreased -- the SOC trigger regime.
+struct maratos_circle
+{
+    static constexpr int problem_dimension = 2;
+    static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 1;
+
+    [[nodiscard]] int dimension() const { return 2; }
+    [[nodiscard]] int num_equality() const { return 1; }
+    [[nodiscard]] int num_inequality() const { return 0; }
+
+    [[nodiscard]] double value(const Eigen::Vector2d& x) const
+    {
+        return 2.0 * (x.squaredNorm() - 1.0) - x[0];
+    }
+
+    void gradient(const Eigen::Vector2d& x, Eigen::Vector2d& g) const
+    {
+        g[0] = 4.0 * x[0] - 1.0;
+        g[1] = 4.0 * x[1];
+    }
+
+    void constraints(const Eigen::Vector2d& x, auto& c) const
+    {
+        c[0] = x.squaredNorm() - 1.0;
+    }
+
+    void constraint_jacobian(const Eigen::Vector2d& x, auto& J) const
+    {
+        J(0, 0) = 2.0 * x[0];
+        J(0, 1) = 2.0 * x[1];
+    }
+};
+
+// Ordinary-rejection instance: steep quadratic objective against a
+// LINEAR equality. From x0 = (0, 0) the composite step's normal leg
+// contracts the violation (|0.8 - 1| = 0.2 < 1) but the trial
+// objective explodes (f = 100 * 0.8^2 = 64), so the merit ratio test
+// rejects while the violation DECREASED -- the non-Maratos rejection
+// regime where the SOC must stay out.
+struct steep_objective_linear_eq
+{
+    static constexpr int problem_dimension = 2;
+    static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 1;
+
+    [[nodiscard]] int dimension() const { return 2; }
+    [[nodiscard]] int num_equality() const { return 1; }
+    [[nodiscard]] int num_inequality() const { return 0; }
+
+    [[nodiscard]] double value(const Eigen::Vector2d& x) const
+    {
+        return 100.0 * x[0] * x[0];
+    }
+
+    void gradient(const Eigen::Vector2d& x, Eigen::Vector2d& g) const
+    {
+        g[0] = 200.0 * x[0];
+        g[1] = 0.0;
+    }
+
+    void constraints(const Eigen::Vector2d& x, auto& c) const
+    {
+        c[0] = x[0] - 1.0;
+    }
+
+    void constraint_jacobian(const Eigen::Vector2d&, auto& J) const
+    {
+        J(0, 0) = 1.0;
+        J(0, 1) = 0.0;
+    }
+};
+
+}
+
+TEST_CASE("tr_sqp SOC retry fires on a rejected step whose violation "
+          "did not decrease (Maratos regime)",
+          "[sqp][tr_sqp][soc][trigger]")
+{
+    maratos_circle problem;
+    Eigen::VectorXd x0(2);
+    x0 << std::cos(0.1), std::sin(0.1);  // feasible: theta_k = 0
+
+    solver_options opts;
+    opts.max_iterations = 5;
+
+    tr_sqp_policy_accurate<2> pol{};
+    pol.options.soc_max_iterations = 2;
+    basic_solver solver{pol, problem, x0, opts};
+
+    // First composite step: tangential move along the circle, trial
+    // violation sin^2(0.1) > 0 = theta_k, merit worsens -> rejected
+    // with violation not decreased -> the SOC loop must be entered.
+    auto sr = solver.step();
+    INFO("soc_retry_count = " << sr.diagnostics.soc_retry_count);
+    CHECK(sr.diagnostics.soc_retry_count >= 1);
+}
+
+TEST_CASE("tr_sqp SOC retry stays out on a rejected step whose "
+          "violation decreased",
+          "[sqp][tr_sqp][soc][trigger]")
+{
+    steep_objective_linear_eq problem;
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(2);
+
+    solver_options opts;
+    opts.max_iterations = 5;
+
+    tr_sqp_policy_accurate<2> pol{};
+    pol.options.soc_max_iterations = 2;
+    basic_solver solver{pol, problem, x0, opts};
+
+    // First composite step: normal leg contracts the violation
+    // 1 -> 0.2 but the trial objective explodes -> merit rejection
+    // with violation DECREASED -> the SOC loop must NOT be entered.
+    auto sr = solver.step();
+    INFO("soc_retry_count = " << sr.diagnostics.soc_retry_count
+         << "  is_null_step = " << sr.is_null_step);
+    CHECK(sr.is_null_step);
+    CHECK(sr.diagnostics.soc_retry_count == 0);
+}
+
 TEST_CASE("kraft_slsqp_accurate vs tr_sqp_accurate race on HS071",
           "[sqp][tr_sqp][mode][race]")
 {

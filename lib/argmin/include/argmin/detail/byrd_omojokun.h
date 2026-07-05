@@ -12,20 +12,23 @@
 //                     steihaug_cg.h).
 //   3. Composite:     p = v + u.
 //   4. Penalty:       update the in/out adaptive penalty parameter per
-//                     the Lalee-Nocedal-Plantenga heuristic so the value
-//                     reflects the curvature at the proposed composite
-//                     step. The penalty itself is internal to the helper
-//                     (per-step quadratic-model state, not an acceptance
-//                     verdict).
+//                     the Lalee-Nocedal-Plantenga rule so the value
+//                     reflects the quadratic model at the proposed
+//                     composite step. The penalty itself is internal to
+//                     the helper (per-step quadratic-model state, not
+//                     an acceptance verdict).
 //
 // The helper returns raw decision inputs (predicted objective-leg
-// reduction, feasibility-leg predicted reduction vpred, trial-point
-// f_new + c_norm_new) and lets the caller decide acceptance and the
-// radius update. Caller-side merit gates that consume these inputs:
+// reduction on the f-model, feasibility-leg predicted reduction vpred,
+// trial-point f_new + c_norm_new) and lets the caller decide
+// acceptance and the radius update. Caller-side merit gates that
+// consume these inputs:
 //   * tr_sqp_policy applies the augmented L2-merit ratio test
 //     rho = (f_old + penalty * c_norm_old
 //            - f_new - penalty * c_norm_new)
-//           / max(predicted + penalty * vpred, eps)
+//           / (predicted + penalty * vpred)
+//     with an explicit reject branch when the augmented predicted
+//     reduction is non-positive (N&W Algorithm 4.1 assumes pred > 0),
 //     plus the eta_1/eta_2 radius update at its single call site.
 //   * filter_trsqp_policy applies a Fletcher-Leyffer dominance check
 //     on (f_new, h_new) against its filter set; the radius update
@@ -139,11 +142,17 @@ inline constexpr bool tangential_lin_more_restart = true;
 // p_out to z_k based on its own acceptance gate built from these
 // fields:
 //   predicted  -- the unweighted-objective predicted reduction
-//                 -g^T p - 0.5 p^T B p (the quadratic-model decrease in
-//                 the objective leg). Callers form the augmented
-//                 predicted reduction as predicted + penalty * vpred
-//                 if they use an L2-merit ratio test; filter-style
-//                 callers consume the unweighted predicted directly.
+//                 -g_obj^T p - 0.5 p^T B p (the quadratic-model
+//                 decrease in the OBJECTIVE leg, evaluated against the
+//                 objective gradient g_obj, NOT the Lagrangian
+//                 gradient g -- the actual reduction the callers
+//                 compare against is measured on f, so the model leg
+//                 must be too; a grad-L leg would carry the
+//                 -lambda^T A p bias whenever infeasible with nonzero
+//                 multipliers). Callers form the augmented predicted
+//                 reduction as predicted + penalty * vpred if they use
+//                 an L2-merit ratio test; filter-style callers consume
+//                 the unweighted predicted directly.
 //   vpred      -- the feasibility-leg predicted reduction
 //                 ||c||_2 - ||A p + c||_2 evaluated AT the
 //                 linearization point (both terms at z_k; this is NOT
@@ -176,7 +185,16 @@ struct byrd_omojokun_step_result
 //
 // Inputs:
 //   z_k              -- current iterate (joint primal variable).
-//   g                -- joint Lagrangian gradient at z_k.
+//   g                -- joint Lagrangian gradient at z_k. Drives the
+//                       quadratic STEP model (tangential gradient
+//                       g_t = g + B v) -- the SQP subproblem models
+//                       the Lagrangian.
+//   g_obj            -- joint OBJECTIVE gradient at z_k (x-block
+//                       grad f, slack block zero; assembled by the
+//                       caller). Drives the predicted objective-leg
+//                       reduction and the LNP penalty gate: both are
+//                       f-model quantities because the caller's actual
+//                       reduction is measured on f.
 //   hessian_op       -- Hessian-vector-product callable; must accept a
 //                       const Eigen::Ref to a step vector and return an
 //                       Eigen::Vector of the same dimension.
@@ -211,31 +229,32 @@ struct byrd_omojokun_step_result
 //                       return. Callers that do not consume the
 //                       penalty (filter-style acceptance) may pass a
 //                       dummy field; the helper does not gate on it.
-//   penalty_factor   -- in: heuristic growth factor controlling how
-//                       aggressively the penalty grows. The post-step
-//                       update sets
+//   penalty_factor   -- in: LNP growth margin (rho_margin in eq. 1.13)
+//                       controlling how aggressively the penalty
+//                       grows. The post-step update sets
 //                         new_penalty = max(penalty,
-//                                           hredd / ((1 - penalty_factor)
-//                                                     * vpred))
-//                       when both vpred > 0 and hredd > 0 (and the denom
-//                       is positive); otherwise the penalty stays.
+//                                           qm / ((1 - penalty_factor)
+//                                                  * vpred))
+//                       when vpred > 0 AND the objective model change
+//                       qm = g_obj^T p + 0.5 p^T B p is positive (a
+//                       feasibility-driven step that worsens the
+//                       objective model); on descent-model steps
+//                       (qm <= 0) and on vpred <= 0 the penalty stays.
 //
 // Reference: Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
 //            8(3):682-706 Section 3.3 equations 3.4-3.5 (augmented
 //            merit + penalty update rule); equation 1.13 (penalty
 //            growth margin). Adopted from scipy
 //            optimize/_trustregion_constr/equality_constrained_sqp.py
-//            update_penalty. The scipy reference default for
-//            penalty_factor is 0.3; this library's default is selected
-//            empirically by an HS-suite sweep (the most conservative
-//            non-regressing value, currently driven toward a
-//            second-order correction retry on the inequality leg to
-//            absorb the freeze-on-feasibility regression that larger
-//            growth factors produce in isolation).
+//            update_penalty (gates on quadratic_model > 0). The scipy
+//            reference default for penalty_factor is 0.3; this
+//            library's default is 0 (growth disabled) pending an
+//            HS-suite re-sweep against the corrected gate.
 template <typename Scalar, int N, typename HessianOp, typename TrialEval>
 byrd_omojokun_step_result byrd_omojokun_composite_step(
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& z_k,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g,
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g_obj,
     HessianOp&& hessian_op,
     const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& A,
     const Eigen::Ref<const Eigen::VectorXd>& c,
@@ -378,6 +397,62 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
         }
     }
 
+    // ── Normal-step box confinement ────────────────────────────────
+    //
+    // The dogleg above solves the sphere-constrained least squares
+    // ignoring the displaced box, but the box is a HARD constraint:
+    // on the slack block a normal step below the displaced lower
+    // bound -s takes the slack negative, after which the joint
+    // residual -c_ineq + s can vanish at a genuinely VIOLATED
+    // inequality -- the merit function goes blind to the true
+    // violation and the iterate stalls at a constraint-violation
+    // floor of |s|. The tangential leg cannot repair this: its box
+    // [lower_t, upper_t] only constrains u, and u = 0 (a converged
+    // projected-CG residual) leaves p = v box-infeasible.
+    //
+    // Fix shape (scipy modified_dogleg is box-aware in exactly this
+    // way -- its dogleg candidates are intersected with the box and
+    // ranked on ||A x + b||):
+    //   1. clamp v coordinate-wise into the displaced box. For a
+    //      box-feasible iterate the displaced box contains 0, so the
+    //      clamp shrinks per-coordinate magnitudes and both the box
+    //      and the ||v|| <= zeta * delta sphere remain satisfied;
+    //   2. the clamp can break the dogleg's residual-descent
+    //      property, so re-optimize the scale t in [0, 1] on the
+    //      exact 1-D quadratic ||A (t v) + c||^2 (minimizer
+    //      t* = -(A v . c) / ||A v||^2, clamped to [0, 1]); t v stays
+    //      inside the box (the box is convex and contains 0) and
+    //      inside the sphere. This keeps ||A v + c|| <= ||c||, so
+    //      vpred >= 0 stays structural.
+    //
+    // Note: a clamped v generally leaves range(A^T), so the exact
+    // v-u orthogonality that makes ||v + u||^2 = ||v||^2 + ||u||^2
+    // (see the tangential-radius comment below) becomes an upper
+    // bound approximation on steps where the clamp engaged; the
+    // composite step can then exceed delta by at most the lost
+    // cross-term. The clamp engages only on box-escaping steps where
+    // the alternative is an infeasible iterate.
+    if(c.norm() != Scalar(0))
+    {
+        Eigen::Vector<Scalar, N> v_clamped =
+            v_buf.cwiseMax(lower_displaced).cwiseMin(upper_displaced);
+        if((v_clamped - v_buf).squaredNorm() > Scalar(0))
+        {
+            Eigen::VectorXd Av = A * v_clamped;
+            const Scalar Av_sq = Av.squaredNorm();
+            if(Av_sq > Scalar(0))
+            {
+                const Scalar t = std::clamp(
+                    -(Av.dot(c)) / Av_sq, Scalar(0), Scalar(1));
+                v_buf = t * v_clamped;
+            }
+            else
+            {
+                v_buf = v_clamped;
+            }
+        }
+    }
+
     // ── Tangential-step projected Steihaug-CG ──────────────────────
     //
     // Reference: Nocedal and Wright 2e Section 16.3 Algorithm 16.2
@@ -494,8 +569,15 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     //            scipy equality_constrained_sqp.py predicted-reduction
     //            formula.
     //
-    //   predicted (objective leg)   = -g^T p - 0.5 * p^T B p
+    //   predicted (objective leg)   = -g_obj^T p - 0.5 * p^T B p
     //   vpred     (feasibility leg) = ||c||_2 - ||A p + c||_2
+    //
+    // The objective leg is evaluated against the OBJECTIVE gradient
+    // g_obj, not the Lagrangian gradient g that drives the step model:
+    // the caller's actual reduction is measured on f, and a grad-L
+    // model leg would inject the -lambda^T A p bias (approximately
+    // +lambda^T c) into rho whenever the iterate is infeasible with
+    // nonzero multipliers, distorting accept/reject.
     //
     // Both norms in vpred are at the linearization point, NOT across
     // iterates. The previous-iterate end residual (||c(z_k)||_2 at the
@@ -511,7 +593,7 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     const Scalar Ap_plus_c_norm = Ap_plus_c.norm();
     const Scalar vpred = c_norm_lin - Ap_plus_c_norm;
     const Scalar predicted =
-        -g.dot(p_out) - Scalar{0.5} * Bp_dot_p;
+        -g_obj.dot(p_out) - Scalar{0.5} * Bp_dot_p;
 
     // ── Trial evaluation at z_k + p ─────────────────────────────────
     //
@@ -523,48 +605,47 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     const Scalar f_new = trial.first;
     const Scalar c_norm_new = trial.second;
 
-    // ── Penalty update (LNP / scipy update_penalty heuristic) ──────
+    // ── Penalty update (LNP / scipy update_penalty rule) ───────────
     //
     // Reference: Lalee, Nocedal, Plantenga 1998 equation 1.13;
-    //            scipy update_penalty. The penalty grows only when
-    //            the objective-leg descent magnitude (hredd) exceeds
-    //            the (1 - penalty_factor)-scaled feasibility-leg
-    //            predicted reduction (vpred); otherwise the penalty
-    //            stays.
+    //            scipy update_penalty (gates on quadratic_model > 0).
+    //
+    // The LNP condition requires the predicted merit reduction to
+    // dominate the feasibility leg:
+    //
+    //   -qm + pi * vpred >= rho_margin * pi * vpred,
+    //   qm = g_obj^T p + 0.5 p^T B p   (objective-model CHANGE).
+    //
+    // On a descent-model step (qm <= 0) the condition holds for every
+    // pi > 0 and the penalty stays. The penalty grows only when the
+    // objective model WORSENS on the step (qm > 0 -- a feasibility-
+    // driven step) with vpred > 0, to the closed-form candidate
+    //
+    //   pi >= qm / ((1 - penalty_factor) * vpred),
+    //
+    // where penalty_factor plays the rho_margin role. The gate reads
+    // g_obj (the f-model), matching the predicted objective leg above.
     //
     // argmin variant: penalty_factor = 0 disables the adaptive growth
-    // entirely (the heuristic gate is short-circuited). This makes
+    // entirely (the gate is short-circuited). This makes
     // penalty_factor = 0 semantically equivalent to "fixed penalty at
     // its initial value" — when state-resident penalty is initialized
     // to 1 and never updated, the augmented merit collapses to the
-    // unweighted L2 form that argmin shipped prior to the adaptive-
-    // penalty plumbing. Non-zero penalty_factor opts into the
-    // heuristic; the literature shape (always-on growth) is recovered
-    // by any strictly-positive penalty_factor. This is a deliberate
-    // choice: the swept HS-suite empirics at HEAD show that even the
-    // literature-default growth shape (hredd / vpred) regresses the
-    // four existing-passing cells without a paired second-order
-    // correction retry on the inequality leg. Keeping the no-growth
-    // endpoint as a true no-op leaves the default landing path safe
-    // while the runtime knob remains available for downstream SOC
-    // pairing.
-    //
-    // hredd is the objective predicted-reduction MAGNITUDE under the
-    // quadratic model; the sign convention matches scipy's
-    // "hredd > 0 means descent". The denom guard handles
+    // unweighted L2 form. The default stays 0 pending an HS-suite
+    // re-sweep against the corrected gate; non-zero penalty_factor
+    // opts into the literature rule. The denom guard handles
     // penalty_factor >= 1 (degenerate runtime values) gracefully by
-    // skipping the update — that knob slot is empirically restricted
-    // to the [0, 1) interval by the literature heuristic.
+    // skipping the update — the knob slot is restricted to [0, 1) by
+    // the literature rule.
     if(penalty_factor > Scalar{0})
     {
-        const Scalar hredd =
-            -(g.dot(p_out) + Scalar{0.5} * Bp_dot_p);
-        if(vpred > Scalar{0} && hredd > Scalar{0})
+        const Scalar qm = g_obj.dot(p_out) + Scalar{0.5} * Bp_dot_p;
+        if(vpred > Scalar{0} && qm > Scalar{0})
         {
             const Scalar denom = (Scalar{1} - penalty_factor) * vpred;
             if(denom > Scalar{0})
             {
-                const Scalar candidate = hredd / denom;
+                const Scalar candidate = qm / denom;
                 penalty = std::max(penalty, candidate);
             }
         }

@@ -392,6 +392,66 @@ ARGMIN_FORCE_INLINE void compute_joint_bfgs_pair(
         yk_out.tail(n_ineq).setZero();
 }
 
+// Second-order-correction continuation threshold. Between SOC retries
+// the trial constraint violation must contract by at least this factor
+// (theta_new < kappa_soc * theta_old) or the retry loop aborts: a
+// correction that fails to shrink the violation is not operating in
+// the Maratos regime and further re-solves only burn constraint
+// evaluations.
+//
+// Reference: Wachter and Biegler 2006, "On the implementation of an
+//            interior-point filter line-search algorithm", Math.
+//            Programming 106(1):25-57, Algorithm A step A-5.9 and the
+//            Section 4 constants table (kappa_soc = 0.99). Literature-
+//            fixed scalar, not an argmin empirical selection; it is
+//            re-sweepable together with the SOC iteration budget once
+//            the corrected residual is exercised at non-zero defaults.
+inline constexpr double kappa_soc = 0.99;
+
+// Second-order-correction residual assembly for the trust-region SQP
+// family (shared by tr_sqp_policy and filter_trsqp_policy Section K').
+//
+// Computes, into the caller-owned buffer,
+//
+//   c_soc = c(z_k + p) - A(z_k) * p,
+//
+// the standard SOC residual: subtracting the linearized-constraint
+// contribution A p preserves the linear part of the constraint model
+// and leaves only the CURVATURE remainder for the corrective re-solve.
+// For exactly linear constraints c(z + p) = c(z) + A p, so
+// c_soc == c(z_k) identically and the SOC re-solve reproduces the
+// primary subproblem. Re-solving against c(z + p) alone (the pre-fix
+// assembly) injects a spurious +A p feasibility error into the retry.
+//
+// In the correction convention of Wachter-Biegler eq. (27),
+// c_soc = alpha * c(z_k) + c(z_k + alpha p) with alpha = 1 (full-step
+// trust-region convention) equals this full-re-solve target up to the
+// sign convention of the linear term: both preserve alpha * c(z_k)
+// and add only the curvature remainder c(z + p) - c(z) - A p.
+//
+// Inputs:
+//   c_trial_joint -- joint constraint residual re-evaluated at
+//                    z_k + p under the caller's slack-reformulation
+//                    sign convention.
+//   A_joint       -- joint constraint Jacobian at z_k (NOT at the
+//                    trial point; the SOC keeps the original
+//                    linearization).
+//   p             -- the rejected composite step.
+//
+// Reference: Nocedal and Wright 2e Section 18.3 (second-order
+//            correction); Wachter and Biegler 2006 eq. (24)/(27).
+template <typename Scalar, int N>
+ARGMIN_FORCE_INLINE void assemble_joint_soc(
+    const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>&    c_trial_joint,
+    const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& A_joint,
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>&                 p,
+    Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> c_soc_out)
+{
+    c_soc_out = c_trial_joint;
+    if(A_joint.rows() > 0)
+        c_soc_out.noalias() -= A_joint * p;
+}
+
 // Adopted from: argmin/solver/nw_sqp_policy.h:222-232, :297-300 (in-tree
 //               precedent — LDLT-based equality-feasibility warm-start).
 // Reference: N&W 2e Section 18.3 (equality-feasibility step);
