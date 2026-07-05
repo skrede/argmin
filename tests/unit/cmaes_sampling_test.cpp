@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <numeric>
 
@@ -159,4 +160,94 @@ TEST_CASE("cmaes_sampling: ziggurat_normal tail draws are finite and nonzero",
     // Sanity check: both signs should be represented in the tail.
     CHECK(positive_tail > 0);
     CHECK(negative_tail > 0);
+}
+
+TEST_CASE("cmaes_sampling: ziggurat_normal produces draws beyond the truncation sentinel R",
+          "[cmaes_sampling][!shouldfail]")
+{
+    // Expected to FAIL against the current production ziggurat_normal (a
+    // known, not-yet-fixed truncation defect -- see the comment below).
+    // [!shouldfail] records this as the expected disposition, per the
+    // project's established fix-detector convention (see
+    // filter_trsqp_test.cpp): once the sampler is corrected this case
+    // will start passing, which Catch2 reports as an unexpected success,
+    // forcing the tag's removal at that point.
+    // cmaes_sampling_ziggurat.h's strip-0 common-path acceptance test uses
+    // the ratio x_table[0]/x_table[1], where x_table[0] = v/f(R) ~ 3.911
+    // (the sentinel) and x_table[1] << R. That ratio is >> 1, so
+    // "u < ratio" (u in [0,1)) is true for every strip-0 draw -- the tail
+    // fallback beneath it is never reached, and |z| is truncated at the
+    // sentinel ~3.911 rather than following the true unbounded normal tail.
+    // The chi-square/tail-band tests above (fixed at 3.5 sigma, well
+    // inside the truncation point) cannot see this: they only exercise
+    // draws already known to lie below 3.911. This statistic looks past
+    // the truncation point itself.
+    argmin::detail::xoshiro256 rng{42u};
+    constexpr int N_DRAWS = 400'000;
+    constexpr double TAIL_BOUND = 3.911;
+    int beyond = 0;
+    for(int i = 0; i < N_DRAWS; ++i)
+    {
+        const double z = argmin::detail::alternative::ziggurat::ziggurat_normal<double>(rng);
+        if(std::abs(z) > TAIL_BOUND) ++beyond;
+    }
+    // Expected count for a correct (untruncated) standard-normal sampler:
+    // 2 * (1 - Phi(3.911)) * 400000 ~ 37; a [15, 70] band absorbs
+    // run-to-run sampling variation (Poisson-ish, sd ~ 6) without
+    // false-positiving.
+    INFO("draws with |z| > " << TAIL_BOUND << " in " << N_DRAWS << ": " << beyond
+         << " (expected ~37 for an untruncated sampler)");
+    CHECK(beyond > 15);
+    CHECK(beyond < 70);
+}
+
+TEST_CASE("cmaes_sampling: marsaglia_normal is bit-identical across "
+          "identically-seeded odd-consumption sequences",
+          "[cmaes_sampling][!shouldfail]")
+{
+    // Expected to FAIL against the current production marsaglia_normal (a
+    // known, not-yet-fixed thread_local pair-cache leak -- see the
+    // comment below). [!shouldfail] records this as the expected
+    // disposition, per the same fix-detector convention as above.
+    // cmaes_sampling_marsaglia.h's pair cache is thread_local -- scoped to
+    // the process/thread, not to an RNG instance or a draw sequence. An
+    // EVEN total consumption (the historical n=2 determinism test) always
+    // starts and ends each sequence with an empty cache, so it is
+    // structurally blind to this. An ODD total consumption leaves one
+    // spare cached when a sequence ends; the next identically-seeded
+    // sequence should still reproduce the first sequence bit-for-bit (same
+    // seed => same raw stream => same output), but instead its first draw
+    // is silently satisfied from the stale spare left over by the PRIOR
+    // sequence.
+    constexpr int n_draws = 5; // odd lambda*n
+    constexpr std::uint64_t seed = 123u;
+
+    // Normalize the entering cache state so this test is independent of
+    // whatever earlier TEST_CASEs (or Catch2 execution order/shuffling)
+    // left behind: two draws is an even consumption, which always leaves
+    // the cache empty afterward.
+    {
+        argmin::detail::xoshiro256 warmup_rng{999u};
+        argmin::detail::alternative::marsaglia::marsaglia_normal<double>(warmup_rng);
+        argmin::detail::alternative::marsaglia::marsaglia_normal<double>(warmup_rng);
+    }
+
+    std::array<double, n_draws> seq1{};
+    {
+        argmin::detail::xoshiro256 rng{seed};
+        for(int i = 0; i < n_draws; ++i)
+            seq1[static_cast<std::size_t>(i)]
+                = argmin::detail::alternative::marsaglia::marsaglia_normal<double>(rng);
+    }
+
+    std::array<double, n_draws> seq2{};
+    {
+        argmin::detail::xoshiro256 rng{seed}; // identically-seeded, freshly rebuilt
+        for(int i = 0; i < n_draws; ++i)
+            seq2[static_cast<std::size_t>(i)]
+                = argmin::detail::alternative::marsaglia::marsaglia_normal<double>(rng);
+    }
+
+    INFO("seq1[0]=" << seq1[0] << " seq2[0]=" << seq2[0]);
+    CHECK(seq1 == seq2);
 }
