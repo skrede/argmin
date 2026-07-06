@@ -337,13 +337,13 @@ TEST_CASE("mma: analytic dual gradient matches a finite difference",
     CHECK(g[0] == Approx(fd).epsilon(0).margin(1e-6));
 }
 
-// RED against the current substrate (see Pin 3 header derivation): the
-// implementation accumulates wval = sum_j w_j dx^2, i.e. exactly 2x the
-// penalty mass. [!shouldfail] records this as the expected disposition;
-// once wval reports the 0.5-weighted penalty mass, this case starts
-// passing and the tag must be removed.
+// The dual problem reports wval as the 0.5-weighted penalty mass per
+// unit rho (sum_j 0.5 w_j dx^2), the denominator of the minimal
+// conservative rho increment. (Pre-fix it accumulated sum_j w_j dx^2,
+// exactly twice the mass, which halved every rho increment; that defect
+// is corrected and this pin is now green.)
 TEST_CASE("gcmma: reported wval is the penalty mass per unit rho",
-          "[gcmma][oracle-pin][!shouldfail]")
+          "[gcmma][oracle-pin]")
 {
     // Hand-worked case from the header comment: rho = 0 makes the
     // primal the closed-form reciprocal minimizer x* = 4/3, and the
@@ -455,15 +455,15 @@ TEST_CASE("gcmma: rho growth trial reconstruction matches the closed form",
     }
 }
 
-// RED against the current substrate (see Pin 4 header derivation): the
-// growth divides the shortfall by twice the penalty mass (the same 2x
-// wval defect pinned above), landing at 1.1 (rho + delta_min/2) =
-// 14.676... which is short of the minimal conservative increment
-// 23.684.... [!shouldfail] records this as the expected disposition;
-// once the growth uses the corrected penalty mass, this case starts
-// passing and the tag must be removed.
+// The rho growth divides the shortfall by the corrected penalty mass, so
+// the grown approximation covers f at the trial that triggered the
+// growth: rho' = 1.1 (rho + S/mass) = 26.05... >= rho + delta_min =
+// 23.684.... (Pre-fix the growth divided by twice the mass and landed at
+// 1.1 (rho + delta_min/2) = 14.676... < 23.684..., under-covering the
+// very trial that fired the growth; that defect is corrected and this pin
+// is now green.)
 TEST_CASE("gcmma: rho growth covers the minimal conservative increment",
-          "[gcmma][oracle-pin][!shouldfail]")
+          "[gcmma][oracle-pin]")
 {
     rho_problem problem;
     Eigen::VectorXd x0{{1.0}};

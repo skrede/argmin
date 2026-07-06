@@ -82,8 +82,12 @@ struct mma_augmented_dual_problem
     mutable Eigen::Vector<Scalar, N> x_primal;
     mutable Scalar gval{0};
     mutable Eigen::Vector<Scalar, M> gcval;
-    // wval = sum_j w_j * (x_primal_j - x_kj)^2; used by rho-growth
-    // formulas in the conservativity loop.
+    // wval = sum_j 0.5 * w_j * (x_primal_j - x_kj)^2, the penalty mass per
+    // unit rho (the rho-linear coefficient of the augmented approximation
+    // at x_primal). It is the denominator of the minimal conservative rho
+    // increment delta_min = (f(x_trial) - gval) / wval used in the
+    // conservativity loop, matching NLopt mma.c (gval += rho * dx2sig;
+    // wval += dx2sig, dx2sig = 0.5 * dx^2 / sigma^2).
     mutable Scalar wval{0};
 
     [[nodiscard]] int dimension() const { return m_dual; }
@@ -224,7 +228,10 @@ private:
             for(int i = 0; i < m_dual; ++i)
                 gcval[i] += pc(i, j) / dxU + qc(i, j) / dxL
                           + rhoc[i] * quad_j;
-            wval += Scalar(2) * quad_j;  // sum_j w_j * dx_j^2
+            // Penalty mass per unit rho: gval is augmented by rho * quad_j,
+            // so its rho-linear coefficient (and thus the minimal-increment
+            // denominator) is sum_j quad_j, not sum_j w_j * dx_j^2.
+            wval += quad_j;
         }
     }
 };

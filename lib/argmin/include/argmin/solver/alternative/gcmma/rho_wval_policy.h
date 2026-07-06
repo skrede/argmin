@@ -15,8 +15,10 @@
 //         rho_con[i] := min(10*rho_con[i],
 //                           1.1*(rho_con[i] + (-c_trial[i] - g_tilde_i)/wval))
 //
-// where wval = sum_j w_j * (x_trial_j - x_kj)^2 captures the
-// quadratic-penalty mass at the trial point.
+// where wval = sum_j 0.5 * w_j * (x_trial_j - x_kj)^2 is the
+// quadratic-penalty mass per unit rho at the trial point (the
+// rho-linear coefficient of the augmented approximation, and the
+// denominator of the minimal conservative rho increment).
 //
 // Trade-off vs. the move-limit-shrink variant:
 //   + Adapts the approximation itself rather than wasting dual solves
@@ -308,8 +310,10 @@ struct rho_wval_policy
                                    s.U[j] - move_lim * (s.U[j] - s.x[j]),
                                    s.x[j] + mb});
             // Asymmetric-asymptote generalization of NLopt's
-            // sigma^-2 weight; reduces to 1/sigma^2 in the symmetric
-            // case where U-x_k = x_k-L = sigma.
+            // sigma^-2 weight. In the symmetric case U-x_k = x_k-L =
+            // sigma this weight (U-L)/(dxU*dxL) = 2*sigma/sigma^2 = 2/sigma;
+            // the factor-2 is absorbed into the 0.5 penalty-mass scaling so
+            // the augmented quadratic matches NLopt's 0.5*(dx/sigma)^2.
             const double dxU = s.U[j] - s.x[j];
             const double dxL = s.x[j] - s.L[j];
             s.w[j] = (s.U[j] - s.L[j]) / (dxU * dxL);
