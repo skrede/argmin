@@ -156,7 +156,7 @@ struct lm_policy
         for(int i = 0; i < n; ++i)
             H(i, i) += s.lambda * std::max(H(i, i), diag_min);
 
-        // Solve damped normal equations via LDLT (D-07)
+        // Solve damped normal equations via LDLT
         Eigen::Vector<double, N> h = H.ldlt().solve(-g);
 
         // Trial point
@@ -183,7 +183,7 @@ struct lm_policy
         // improvement.
         double rho = detail::gain_ratio(actual, predicted);
 
-        // Accept/reject with Nielsen (1999) lambda update (D-06)
+        // Accept/reject with Nielsen (1999) lambda update
         const double old_value = s.objective_value;
         bool accepted = rho > 0.0;
 
