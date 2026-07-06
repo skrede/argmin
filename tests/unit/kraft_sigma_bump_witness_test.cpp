@@ -141,7 +141,7 @@ struct sigma_bump_problem
 // the first pass with no reset. Pinned [!shouldfail]: pre-fix
 // bfgs_reset_count is 1.
 TEST_CASE("kraft_slsqp accepts the unit step across a penalty cold-bump without a spurious BFGS reset",
-          "[kraft_slsqp][sigma_bump][witness][!shouldfail]")
+          "[kraft_slsqp][sigma_bump][witness]")
 {
     sigma_bump_problem problem;
     Eigen::VectorXd x0{{0.0, 0.0}};

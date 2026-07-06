@@ -644,9 +644,19 @@ struct kraft_slsqp_policy
                 s.sigma, grad_f_dot_p, constraint_viol_0, h4, 1e10);
             if(sigma_bumped > s.sigma)
             {
+                const double sigma_old = s.sigma;
                 s.sigma = sigma_bumped;
                 dphi_merit = argmin::detail::l1_merit_dphi_h4<double>(
                     grad_f_dot_p, s.c_eq, s.c_ineq, s.sigma, h4);
+                // Re-baseline the Armijo merit at the post-bump penalty.
+                // merit_0 was evaluated with the pre-bump sigma; the trial
+                // merits inside the line search read the post-bump sigma, so
+                // without this correction the Armijo test carries a constant
+                // (sigma_new - sigma_old) * theta(x_k) offset that makes
+                // sufficient decrease unattainable when the bump fires at a
+                // violated iterate. The offset is exact for the L1 merit,
+                // so add it algebraically rather than re-evaluating.
+                merit_0 += (s.sigma - sigma_old) * constraint_viol_0;
             }
 
             // Backtracking Armijo line search on the L1 merit.
