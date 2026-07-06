@@ -26,6 +26,46 @@
 using Catch::Approx;
 using namespace argmin;
 
+namespace
+{
+
+// Unconstrained convex quadratic on a wide box. With a small initial rho
+// the fresh reciprocal approximation is non-conservative near a steep
+// left flank: its minimizer overshoots the true minimum. Used to exercise
+// the conservativity loop's null-step-and-retry on a non-conservative,
+// non-improving trial.
+struct wide_quadratic
+{
+    static constexpr int problem_dimension = dynamic_dimension;
+
+    int dimension() const { return 1; }
+    int num_equality() const { return 0; }
+    int num_inequality() const { return 0; }
+
+    double value(const Eigen::VectorXd& x) const { return x[0] * x[0]; }
+
+    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    {
+        g.resize(1);
+        g[0] = 2.0 * x[0];
+    }
+
+    void constraints(const Eigen::VectorXd&, Eigen::VectorXd& c) const
+    {
+        c.resize(0);
+    }
+
+    void constraint_jacobian(const Eigen::VectorXd&, Eigen::MatrixXd& J) const
+    {
+        J.resize(0, 1);
+    }
+
+    Eigen::VectorXd lower_bounds() const { return Eigen::VectorXd{{-10.0}}; }
+    Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd{{10.0}}; }
+};
+
+}
+
 TEST_CASE("gcmma rho-wval converges on HS024", "[gcmma_rho_wval]")
 {
     hs024 problem;
@@ -84,4 +124,69 @@ TEST_CASE("gcmma rho-wval converges on HS076", "[gcmma_rho_wval]")
     const auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(-4.6818).margin(0.05));
+}
+
+// Conservativity loop: a non-conservative trial that would move to a
+// strictly worse point is never committed. With rho_init at its floor and
+// a single inner iteration (no room to grow rho back to conservativity),
+// the reciprocal approximation at x0 = -3 overshoots to x ~ 6 where the
+// true objective (36) exceeds f(x0) = 9. The step must be a null step:
+// x is left unchanged, no improvement is claimed, and the grown rho is
+// retained (not decayed) for the next outer iteration.
+TEST_CASE("gcmma rho-wval null-steps on a non-conservative worse trial",
+          "[gcmma_rho_wval]")
+{
+    wide_quadratic problem;
+    Eigen::VectorXd x0{{-3.0}};
+    solver_options opts;
+
+    alternative::gcmma::rho_wval_policy<> policy;
+    alternative::gcmma::rho_wval_policy<>::options_type popts;
+    popts.rho_init = 1e-5;
+    popts.rho_min = 1e-5;
+    popts.max_inner_iterations = 1;
+    popts.rho_decay = 1.0;
+    popts.raai = 0.0;
+
+    auto s = policy.init(problem, x0, opts, popts);
+    const double f0 = s.f;
+    const double rho0 = s.rho_obj;
+    const auto r = policy.step(s);
+
+    CHECK(r.is_null_step);
+    CHECK_FALSE(r.improved);
+    CHECK(s.x[0] == Approx(-3.0).margin(1e-15));  // x unchanged
+    CHECK(s.f == Approx(f0).margin(1e-15));
+    // rho was grown on the non-conservative trial and retained (the
+    // null-step path returns before the inter-outer decay).
+    CHECK(s.rho_obj > rho0);
+}
+
+// Positive control: a non-conservative but merit-improving trial is still
+// committed (the conservativity loop is permissive toward descent). From
+// x0 = -5 the same fresh approximation overshoots to x ~ 4 where the true
+// objective (16) is below f(x0) = 25, so the step commits.
+TEST_CASE("gcmma rho-wval commits a non-conservative improving trial",
+          "[gcmma_rho_wval]")
+{
+    wide_quadratic problem;
+    Eigen::VectorXd x0{{-5.0}};
+    solver_options opts;
+
+    alternative::gcmma::rho_wval_policy<> policy;
+    alternative::gcmma::rho_wval_policy<>::options_type popts;
+    popts.rho_init = 1e-5;
+    popts.rho_min = 1e-5;
+    popts.max_inner_iterations = 1;
+    popts.rho_decay = 1.0;
+    popts.raai = 0.0;
+
+    auto s = policy.init(problem, x0, opts, popts);
+    const double f0 = s.f;
+    const auto r = policy.step(s);
+
+    CHECK_FALSE(r.is_null_step);
+    CHECK(r.improved);
+    CHECK(s.f < f0);
+    CHECK(s.x[0] != Approx(-5.0));  // x moved
 }

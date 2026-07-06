@@ -443,6 +443,52 @@ struct rho_wval_policy
                         1.1 * (s.rho_con[i]
                                + (gi_trial - dual_prob.gcval[i]) / wval));
             }
+
+            // Null-step-and-retry on inner exhaustion (mirrors the CCSA
+            // quadratic policy). rho has just been grown but the last trial
+            // is still non-conservative; committing it can move to a worse
+            // or more-infeasible point (the approximation under-predicted
+            // there). Commit only a merit-improving trial; otherwise take a
+            // null step that keeps x fixed and retains the grown rho (no
+            // inter-outer decay) so the next outer iteration re-solves a
+            // strictly more conservative approximation.
+            if(inner + 1 == max_inner)
+            {
+                double viol_old = 0.0;
+                double viol_new = 0.0;
+                for(int i = 0; i < m; ++i)
+                {
+                    viol_old = std::max(viol_old, -s.c_ineq[i]);
+                    viol_new = std::max(viol_new, -c_trial[i]);
+                }
+                const bool acceptable =
+                    (f_trial < s.f && viol_new <= viol_old + 1e-12)
+                    || (viol_new < viol_old - 1e-12);
+
+                if(!acceptable)
+                {
+                    const Eigen::Matrix<double, 0, N> J_eq_empty(0, n);
+                    const Eigen::Vector<double, 0> lambda_eq_empty;
+                    const Eigen::Vector<double, 0> c_eq_empty;
+                    const double kkt = detail::kkt_residual<double, N, 0, MC>(
+                        s.g, J_eq_empty, s.J_ineq,
+                        lambda_eq_empty, s.y_dual, c_eq_empty, s.c_ineq);
+
+                    return step_result<double>{
+                        .objective_value = s.f,
+                        .gradient_norm = s.g.norm(),
+                        .step_size = 0.0,
+                        .objective_change = 0.0,
+                        .improved = false,
+                        .is_null_step = true,
+                        .constraint_violation =
+                            detail::primal_feasibility_inf(
+                                c_eq_empty, s.c_ineq),
+                        .x_norm = s.x.norm(),
+                        .kkt_residual = kkt,
+                    };
+                }
+            }
         }
 
         // 5. Inter-outer rho decay.
