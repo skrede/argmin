@@ -123,3 +123,58 @@ TEST_CASE("cmaes_policy: unbounded restart keeps the initial-point anchor",
 
     CHECK(s.mean == x0);
 }
+
+TEST_CASE("cmaes_policy: reset() re-derives the same quantities as init()",
+          "[cmaes][reset]")
+{
+    // reset() must reproduce every configuration-derived quantity init()
+    // computes, so a reset run behaves identically to a fresh run. On a
+    // bounded problem with no explicit population this exercises the
+    // bounded population floor (which reset() previously skipped), plus the
+    // stagnation window, the eigendecomposition skip period, and the
+    // boundary-axis cycle index (which reset() previously left stale).
+    bounded_quadratic problem{
+        .lb = Eigen::VectorXd::Constant(2, -5.0),
+        .ub = Eigen::VectorXd::Constant(2, 5.0)};
+
+    Eigen::VectorXd x0{{1.0, -2.0}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    cmaes_policy<> policy;
+    policy.options.seed = 7u;
+    policy.options.initial_sigma = 1.0;
+
+    // Fresh init() derivations.
+    auto s = policy.init(problem, x0, opts);
+    const auto init_lambda = s.params.lambda;
+    const auto init_stagnation = s.stagnation_window_min;
+    const auto init_skip_k = s.decomposition_skip_k;
+    const auto init_axis = s.axis_cycle_index;
+
+    // The bounded floor must have engaged (max(4n, 4 + floor(3 ln n)) = 8
+    // at n = 2, above the unimodal default of 6).
+    REQUIRE(init_lambda == 8);
+
+    // Advance several generations so the covariance state, generation
+    // counter, and step-size move away from their init values, then force
+    // the boundary-axis cycle index to a non-init position so reset()'s
+    // restoration of it is observable independent of the mod-n wrap.
+    for(int i = 0; i < 12; ++i)
+        (void)policy.step(s);
+    s.axis_cycle_index = init_axis + 1;
+    REQUIRE(s.axis_cycle_index != init_axis);
+    REQUIRE(s.generation != 0);
+
+    // reset() must restore every derived quantity to its init value.
+    policy.reset(s, x0);
+    CHECK(s.params.lambda == init_lambda);
+    CHECK(s.stagnation_window_min == init_stagnation);
+    CHECK(s.decomposition_skip_k == init_skip_k);
+    CHECK(s.axis_cycle_index == init_axis);
+
+    // And the covariance state is a clean identity basis, matching init.
+    CHECK(s.covariance_dirty == false);
+    CHECK(s.C == Eigen::MatrixXd::Identity(2, 2));
+    CHECK(s.D == Eigen::VectorXd::Ones(2));
+    CHECK(s.initial_d_max == 1.0);
+}

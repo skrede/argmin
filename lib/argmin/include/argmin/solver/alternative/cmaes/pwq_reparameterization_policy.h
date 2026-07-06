@@ -1136,19 +1136,30 @@ struct pwq_reparameterization_policy
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
         const int n = x0.size();
-        // Refresh strategy parameters for the current options.lambda value
-        // so any caller that updates options.lambda and then calls reset()
-        // gets a refreshed adaptation parameter set (mu, mueff, c_sigma,
-        // d_sigma, c_c, c_1, c_mu, weights, chi_n). Mirrors the in-policy
-        // IPOP branch's recompute (in step()) and the libcmaes contract
-        // (cmaparameters.cc::initialize_parameters re-invoked from
-        // ipopcmastrategy.cc on each lambda bump).
+        // Refresh strategy parameters and every configuration-derived
+        // quantity exactly as init() does, so a reset run is identical to a
+        // fresh run on the same configured problem. Mirrors the in-policy
+        // population-doubling branch's recompute and the libcmaes contract
+        // (cmaparameters.cc::initialize_parameters re-invoked per restart).
         //
         // References:
         //   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
-        s.params = detail::compute_constants(n,
-            static_cast<int>(options.lambda.value_or(0)));
+        //   Hansen (2023) arXiv:1604.00772 §7.1 (bounded population floor),
+        //   §B.2 (eigendecomposition skip period), §B.3 (stagnation window).
+        //
+        // Population size: honor an explicit override, else apply the same
+        // bounded-problem floor init() uses (a bounded landscape uses at
+        // least max(4n, 4 + floor(3 ln n)); the minimal default is
+        // unimodal-sized). Without this floor a reset on a bounded problem
+        // quietly drops to the smaller default and diverges from init().
+        int pop_lambda = options.lambda.has_value()
+            ? static_cast<int>(options.lambda.value())
+            : 0;
+        if(pop_lambda == 0 && s.has_bounds)
+            pop_lambda = std::max(4 * n,
+                static_cast<int>(4 + std::floor(3.0 * std::log(n))));
+        s.params = detail::compute_constants(n, pop_lambda);
         if(s.params.lambda > state_type<P>::MaxPop)
             throw std::runtime_error(
                 "cmaes::reset: options.lambda exceeds MaxPop -- "
@@ -1162,10 +1173,41 @@ struct pwq_reparameterization_policy
         s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
         s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
         s.D = Eigen::Vector<double, N>::Ones(n);
+        s.eigen_solver.compute(s.C);
+        s.covariance_dirty = false;
+        s.initial_d_max = s.D.maxCoeff();
         s.sigma = s.initial_sigma;
         s.generation = 0;
+        s.axis_cycle_index = 0;
         s.best_fitness_history.clear();
         s.median_fitness_history.clear();
+
+        // Eigendecomposition skip period (Hansen §B.2): same
+        // override-or-formula init() applies, against the refreshed
+        // c_1 + c_mu.
+        if(options.eigendecomposition_skip_generations.has_value())
+        {
+            s.decomposition_skip_k =
+                options.eigendecomposition_skip_generations.value();
+        }
+        else
+        {
+            const double skip_denom =
+                10.0 * static_cast<double>(n)
+                * (s.params.c_1 + s.params.c_mu);
+            s.decomposition_skip_k = std::max(
+                std::uint32_t{1},
+                static_cast<std::uint32_t>(std::floor(1.0 / skip_denom)));
+        }
+
+        // Minimum stagnation history window (Hansen §B.3 "Stagnation"),
+        // recomputed for the current lambda; honors the user override.
+        s.stagnation_window_min = std::uint32_t{120}
+            + static_cast<std::uint32_t>(
+                std::ceil(30.0 * static_cast<double>(n)
+                          / static_cast<double>(s.params.lambda)));
+        if(options.stagnation_window.has_value())
+            s.stagnation_window_min = *options.stagnation_window;
     }
 
     template <typename P>
