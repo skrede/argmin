@@ -524,7 +524,7 @@ TEST_CASE("projected_gn_policy: active set exercised", "[projected_gn]")
 }
 
 // --------------------------------------------------------------------------
-// FAM-14 gain-ratio witness: direct model reduction at an active bound.
+// Gain-ratio witness: direct model reduction at an active bound.
 // --------------------------------------------------------------------------
 
 namespace
@@ -599,7 +599,7 @@ TEST_CASE("projected_gn_policy: exact gain ratio at an active bound",
     CHECK(solver.state().objective_value == Approx(1.125).margin(1e-8));
 }
 
-// Sibling parity: projected_gradient_gn_policy carries the identical FAM-14
+// Sibling parity: projected_gradient_gn_policy carries the identical
 // defect and fix. Both its backtracking and dogleg paths now use the direct
 // model reduction at the actual accepted displacement, so the gain ratio is
 // exact on this quadratic and objective_change is honest.

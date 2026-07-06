@@ -243,7 +243,7 @@ TEST_CASE("lm_policy populates kkt_residual", "[lm][kkt]")
     CHECK(populated);
 }
 
-// FAM-14 gain-ratio witness (LM). Two properties of the guarded gain ratio:
+// Gain-ratio witness (LM). Two properties of the guarded gain ratio:
 //
 //  (1) On a linear-residual (exactly quadratic) least-squares problem the
 //      Gauss-Newton model is exact, so the direct model reduction
