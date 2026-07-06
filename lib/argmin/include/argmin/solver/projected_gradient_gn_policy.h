@@ -271,17 +271,26 @@ private:
 
         if(accepted)
         {
+            // Gain ratio via the direct model reduction evaluated at the ACTUAL
+            // accepted (projected, backtracked) displacement d_acc = x_trial - x:
+            //   predicted = -g^T d_acc - 0.5 * ||J d_acc||^2
+            // computed with the pre-update Jacobian. This replaces the Nielsen
+            // LM predicted-reduction identity applied to the full alpha=1
+            // projected direction, which is only valid for the exact unprojected
+            // LM step and yields a fictitious denominator near an active bound.
+            Eigen::VectorXd d_acc = (x_trial - s.x).eval();
+            double actual = old_value - f_trial;
+            double predicted = -(g.dot(d_acc) + 0.5 * (s.J * d_acc).squaredNorm());
+            double rho = (std::isfinite(f_trial) && predicted > 0.0)
+                             ? actual / predicted
+                             : 0.0;
+
             s.x = x_trial;
             s.r = r_trial;
             s.eval_jacobian(s.x, s.J);
             s.objective_value = f_trial;
 
-            // Nielsen (1999) lambda update using gain ratio
-            double actual = old_value - f_trial;
-            double predicted = detail::predicted_reduction_lm(
-                d, g, s.lambda, options.diagonal_min_clamp, H.diagonal());
-            double rho = (std::abs(predicted) < 1e-30) ? 1.0 : actual / predicted;
-
+            // Nielsen (1999) lambda update using the guarded gain ratio
             double factor = 1.0 - std::pow(2.0 * rho - 1.0, 3.0);
             s.lambda *= std::max(1.0 / 3.0, factor);
             s.nu = 2.0;
@@ -298,7 +307,10 @@ private:
 
         ++s.iteration;
 
-        double effective_change = accepted ? (s.objective_value - old_value) : s.lambda;
+        // objective_change carries the ACTUAL objective change (zero on a
+        // rejected step); the former hack reported lambda here, leaking an
+        // internal damping value into the user-visible step_result.
+        double effective_change = s.objective_value - old_value;
 
         // KKT residual for bound-constrained least-squares: projected-gradient
         // infinity-norm using the gradient g = J^T r of 0.5*||r||^2.
@@ -344,13 +356,17 @@ private:
         s.eval_residuals(x_trial, r_trial);
         double f_trial = 0.5 * r_trial.squaredNorm();
 
-        // Gain ratio
+        // Gain ratio via the direct model reduction at the accepted (projected)
+        // dogleg step: predicted = -g^T d - 0.5 * ||J d||^2, valid for any d.
+        // The trial is accepted only when predicted > 0 and f_trial is finite,
+        // replacing the |predicted|<1e-30 -> rho=1 silent accept.
         double actual = s.objective_value - f_trial;
-        double predicted = detail::predicted_reduction_tr(d, g, H);
-        double rho = (std::abs(predicted) < 1e-30) ? 1.0 : actual / predicted;
+        double predicted = -(g.dot(d) + 0.5 * (s.J * d).squaredNorm());
+        const bool valid = std::isfinite(f_trial) && predicted > 0.0;
+        double rho = valid ? actual / predicted : 0.0;
 
         const double old_value = s.objective_value;
-        bool accepted = rho > 0.0;
+        bool accepted = valid && rho > 0.0;
 
         double expand_thresh = options.trust_region_expand_threshold.value_or(0.75);
         double shrink_thresh = options.trust_region_shrink_threshold.value_or(0.25);
@@ -370,7 +386,9 @@ private:
 
         ++s.iteration;
 
-        double effective_change = accepted ? (s.objective_value - old_value) : s.lambda;
+        // objective_change carries the ACTUAL objective change (zero on a
+        // rejected step) instead of the leaked lambda proxy.
+        double effective_change = s.objective_value - old_value;
 
         // KKT residual for bound-constrained least-squares: projected-gradient
         // infinity-norm using the gradient g = J^T r of 0.5*||r||^2.

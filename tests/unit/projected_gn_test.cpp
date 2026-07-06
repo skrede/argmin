@@ -598,3 +598,48 @@ TEST_CASE("projected_gn_policy: exact gain ratio at an active bound",
     CHECK(solver.state().x(1) == Approx(0.25).margin(1e-8));
     CHECK(solver.state().objective_value == Approx(1.125).margin(1e-8));
 }
+
+// Sibling parity: projected_gradient_gn_policy carries the identical FAM-14
+// defect and fix. Both its backtracking and dogleg paths now use the direct
+// model reduction at the actual accepted displacement, so the gain ratio is
+// exact on this quadratic and objective_change is honest.
+TEST_CASE("projected_gradient_gn_policy: exact gain ratio at an active bound",
+          "[projected_gn][gain_ratio]")
+{
+    bounded_linear_ls problem;
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+
+    auto run = [&](bool dogleg)
+    {
+        solver_options opts;
+        opts.max_iterations = 100;
+        opts.set_gradient_threshold(1e-12);
+        projected_gradient_gn_policy::options_type policy_opts{};
+        policy_opts.use_dogleg = dogleg;
+
+        basic_solver solver{projected_gradient_gn_policy{}, problem, x0, opts, policy_opts};
+
+        double prev_f = solver.state().objective_value;
+        for(int i = 0; i < 40; ++i)
+        {
+            auto sr = solver.step();
+            if(sr.improved)
+            {
+                double true_change = sr.objective_value - prev_f;
+                CHECK(sr.objective_change == Approx(true_change).margin(1e-14));
+            }
+            prev_f = sr.objective_value;
+            if(sr.policy_status)
+                break;
+            if(sr.kkt_residual.value_or(sr.gradient_norm) < 1e-12)
+                break;
+        }
+
+        // Constrained optimum: x0 pinned at the upper bound 0.5, x1 = 0.25.
+        CHECK(solver.state().x(0) == Approx(0.5).margin(1e-6));
+        CHECK(solver.state().x(1) == Approx(0.25).margin(1e-6));
+    };
+
+    SECTION("backtracking mode") { run(false); }
+    SECTION("dogleg mode") { run(true); }
+}
