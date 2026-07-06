@@ -362,36 +362,40 @@ struct bobyqa_policy
         // Update BMAT/ZMAT if denominator is healthy.
         // If denominator collapses, skip the factored update and trigger rescue.
         bool denom_ok = (denom > 1e-20);
+        bool improved = false;
         if(denom_ok)
         {
             detail::update_bmat_zmat(s.sys, vlag, beta, denom, knew);
             detail::update_model_on_replacement(s.sys, x_new_shifted, f_new, knew, d);
+
+            // Accept the step only once the point is safely inside the
+            // factored interpolation set: moving s.x while the model is stale
+            // would report a point the quadratic model does not interpolate.
+            if(f_new < old_f)
+            {
+                s.x_scaled = x_new_abs;
+                s.x = x_new_orig;
+                s.objective_value = f_new;
+                improved = true;
+
+                // If update_model_on_replacement didn't already update kopt
+                // (it does when f_new < fval[kopt]), ensure consistency.
+                if(s.sys.kopt != knew && f_new < s.sys.fval[s.sys.kopt])
+                {
+                    s.sys.kopt = knew;
+                    s.sys.xopt = s.sys.xpt.col(knew).head(n);
+                }
+            }
         }
         else
         {
-            // Denominator collapse: just update point data for consistency.
-            s.sys.fval[knew] = f_new;
-            for(int i = 0; i < n; ++i)
-                s.sys.xpt(i, knew) = x_new_shifted[i];
+            // Denominator collapse: the trial point cannot be incorporated
+            // without destroying the BMAT/ZMAT factorization. Powell never
+            // writes behind the factorization, so leave xpt/fval/kopt/xopt and
+            // the incumbent s.x untouched and let the rescue counter trigger a
+            // full rebuild; overwriting the node here would leave the factored
+            // inverse representing a different point set than xpt/fval.
             ++s.rescue_counter;
-        }
-
-        // Accept step if strictly better.
-        bool improved = false;
-        if(f_new < old_f)
-        {
-            s.x_scaled = x_new_abs;
-            s.x = x_new_orig;
-            s.objective_value = f_new;
-            improved = true;
-
-            // If update_model_on_replacement didn't already update kopt
-            // (it does when f_new < fval[kopt]), ensure consistency.
-            if(denom_ok && s.sys.kopt != knew && f_new < s.sys.fval[s.sys.kopt])
-            {
-                s.sys.kopt = knew;
-                s.sys.xopt = s.sys.xpt.col(knew).head(n);
-            }
         }
 
         // Powell 2009, Section 6 (ALTMOV): geometry improvement.

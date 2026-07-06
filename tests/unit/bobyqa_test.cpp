@@ -785,3 +785,43 @@ TEST_CASE("bobyqa incremental model infrastructure", "[bobyqa][incremental]")
             CHECK(model_inc.g[i] == Approx(model_svd.g[i]).margin(1e-8));
     }
 }
+
+// The reported incumbent must never diverge from the factored model's best
+// point. A previous denom-collapse path overwrote fval/xpt behind the
+// BMAT/ZMAT factorization and moved s.x to the accepted trial without updating
+// kopt/xopt, so the model's incumbent and the reported x could disagree. With
+// the no-mutate collapse path, the reported (x, f) stay tied to the model's
+// (xbase + xopt, fval[kopt]) every step.
+TEST_CASE("bobyqa incumbent stays consistent with the factored model", "[bobyqa]")
+{
+    bobyqa_rosenbrock problem;
+    problem.n = 2;
+    problem.lb = Eigen::VectorXd::Constant(2, -5.0);
+    problem.ub = Eigen::VectorXd::Constant(2, 5.0);
+    Eigen::VectorXd x0(2);
+    x0 << -1.2, 1.0;
+
+    solver_options opts;
+    bobyqa_policy<dynamic_dimension> pol;
+    auto s = pol.init(problem, x0, opts);
+
+    for(int it = 0; it < 120; ++it)
+    {
+        auto r = pol.step(s);
+
+        // Reported objective is a genuine evaluation of the reported point.
+        CHECK(problem.value(s.x) == Approx(s.objective_value).margin(1e-9));
+
+        // The incumbent matches the model's best node fval[kopt].
+        CHECK(s.objective_value == Approx(s.sys.fval[s.sys.kopt]).margin(1e-9));
+
+        // The reported x is the model's best point mapped back to originals.
+        Eigen::VectorXd model_best_scaled = s.sys.xbase + s.sys.xopt;
+        Eigen::VectorXd model_best_orig =
+            (model_best_scaled.array() * s.scale.array()).matrix();
+        CHECK((s.x - model_best_orig).norm() < 1e-9);
+
+        if(r.policy_status && *r.policy_status == solver_status::converged)
+            break;
+    }
+}
