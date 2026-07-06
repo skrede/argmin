@@ -182,7 +182,7 @@ TEST_CASE("filter_slsqp rejects a marginal-f, exploding-h unit step",
 //     h(x_k)     = 0
 //     h(x_k + p) = |(x_k + p)|^2 - 1 = 0.00996884 > 0   -> Maratos regime.
 TEST_CASE("slsqp fires a second-order correction at a near-feasible Maratos step",
-          "[slsqp][soc][witness][!shouldfail]")
+          "[slsqp][soc][witness]")
 {
     const double th = 0.1;
     Eigen::VectorXd xk{{std::cos(th), std::sin(th)}};

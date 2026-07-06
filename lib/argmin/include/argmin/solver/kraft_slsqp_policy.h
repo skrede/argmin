@@ -96,7 +96,6 @@ struct kraft_slsqp_policy
     template <int M>
     using rebind = kraft_slsqp_policy<M>;
 
-    static constexpr double default_soc_violation_threshold = 1e-3;
     static constexpr double default_gradient_tolerance = 1e-8;
     static constexpr double default_step_tolerance_rel = 1e-12;
     static constexpr double default_feasibility_tolerance = 1e-6;
@@ -178,15 +177,8 @@ struct kraft_slsqp_policy
         // indirection). Callers who want a non-default value assign the field
         // directly.
         //
-        // Reference: Kraft 1988 §2.2.6 (initial penalty default 1.0);
-        //            Kraft 1988 §2.2.4 / N&W §18.3 (SOC threshold; per-mode
-        //            1e-2 fast / 1e-3 accurate).
+        // Reference: Kraft 1988 §2.2.6 (initial penalty default 1.0).
         double initial_penalty{default_initial_penalty};
-        // Minimum constraint violation at x_k below which the second-order
-        // correction (Maratos retry) is skipped on Armijo failure. Below this
-        // threshold the linearization is consistent enough that the SoC step
-        // adds work without materially changing the search direction.
-        double soc_violation_threshold{default_soc_violation_threshold};
 
         // Embedded line-search params. Designated-initializer order follows
         // line_search_options field-declaration order (c1, c2, rho,
@@ -447,6 +439,11 @@ struct kraft_slsqp_policy
         // the return site (ls_soc is declared inside the SOC if-block and
         // is not visible at the bottom of step()).
         std::size_t nan_eval_count = 0;
+        // Second-order-correction retry counter. Increments once per SOC
+        // trigger (Maratos-effect rejection) regardless of whether the
+        // correction step is ultimately accepted; surfaced on every
+        // step_result return path for telemetry.
+        std::size_t soc_retry_count = 0;
 
         // Survives the retry loop into the post-loop accept-step block.
         detail::qp_result<double, N> qp_res;
@@ -682,7 +679,17 @@ struct kraft_slsqp_policy
             //
             // The correction step dp is added to p and the line search
             // is retried with the combined direction.
-            if(!ls.success && constraint_viol_0 > options.soc_violation_threshold)
+            //
+            // Trigger (IPOPT Section 2.4): the full unit step is rejected AND
+            // it did not reduce the L1 constraint violation, theta(x+p) >=
+            // theta(x_k). This is the Maratos signature -- the linearization
+            // underestimates constraint curvature near a feasible iterate --
+            // and is independent of the current iterate's own violation level.
+            // The full step counts as rejected when the merit line search
+            // either failed outright or accepted a backtracked short step
+            // (alpha < 1); the latter is the Maratos regime replacing the
+            // quadratic step with a linearly-convergent one.
+            if(!ls.success || alpha < 1.0)
             {
                 if constexpr(constrained<P>)
                 {
@@ -696,38 +703,51 @@ struct kraft_slsqp_policy
                         auto c_eq_trial = s.bufs.c_trial_buf.head(s.n_eq);
                         auto c_ineq_trial = s.bufs.c_trial_buf.tail(s.n_ineq);
 
+                        // Full-unit-step violation theta(x+p) (L1), computed
+                        // inline over head/tail blocks to avoid a temporary.
+                        double h_full = 0.0;
                         if(s.n_eq > 0)
-                            s.bufs.b_eq_soc_buf.noalias() = -c_eq_trial + s.J_eq * p;
+                            h_full += c_eq_trial.cwiseAbs().sum();
                         if(s.n_ineq > 0)
-                            s.bufs.b_ineq_soc_buf.noalias() = -c_ineq_trial + s.J_ineq * p;
+                            h_full += (-c_ineq_trial).cwiseMax(0.0).sum();
 
-                        // Reuse the (E, f) factored on this step's main QP
-                        // solve: the Hessian and gradient have not changed
-                        // between the main solve and this SOC retry, only
-                        // the constraint RHS (b_eq_soc_buf, b_ineq_soc_buf).
-                        auto soc_res = s.qp_solver.solve_with_factored_hessian(
-                            s.bufs.E_buf, s.bufs.f_buf, s.g,
-                            s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
-                            s.bufs.p_lo_buf, s.bufs.p_hi_buf);
-
-                        if(soc_res.status == detail::qp_status::optimal)
+                        if(h_full >= constraint_viol_0)
                         {
-                            s.p_combined_buf.noalias() = p + soc_res.x;
-                            auto phi_soc = [&](double a) {
-                                ++s.line_search_calls;
-                                // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
-                                s.bufs.x_trial_buf.noalias() = s.x + a * s.p_combined_buf;
-                                s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
-                                return merit(s.bufs.x_trial_buf);
-                            };
-                            auto ls_soc = armijo(phi_soc, merit_0, dphi_merit,
-                                                 options.line_search);
-                            nan_eval_count += ls_soc.diagnostics.nan_eval_count;
-                            if(ls_soc.success && ls_soc.alpha > alpha)
+                            ++soc_retry_count;
+
+                            if(s.n_eq > 0)
+                                s.bufs.b_eq_soc_buf.noalias() = -c_eq_trial + s.J_eq * p;
+                            if(s.n_ineq > 0)
+                                s.bufs.b_ineq_soc_buf.noalias() = -c_ineq_trial + s.J_ineq * p;
+
+                            // Reuse the (E, f) factored on this step's main QP
+                            // solve: the Hessian and gradient have not changed
+                            // between the main solve and this SOC retry, only
+                            // the constraint RHS (b_eq_soc_buf, b_ineq_soc_buf).
+                            auto soc_res = s.qp_solver.solve_with_factored_hessian(
+                                s.bufs.E_buf, s.bufs.f_buf, s.g,
+                                s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
+                                s.bufs.p_lo_buf, s.bufs.p_hi_buf);
+
+                            if(soc_res.status == detail::qp_status::optimal)
                             {
-                                p = s.p_combined_buf;
-                                alpha = ls_soc.alpha;
-                                ls_success = true;
+                                s.p_combined_buf.noalias() = p + soc_res.x;
+                                auto phi_soc = [&](double a) {
+                                    ++s.line_search_calls;
+                                    // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
+                                    s.bufs.x_trial_buf.noalias() = s.x + a * s.p_combined_buf;
+                                    s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
+                                    return merit(s.bufs.x_trial_buf);
+                                };
+                                auto ls_soc = armijo(phi_soc, merit_0, dphi_merit,
+                                                     options.line_search);
+                                nan_eval_count += ls_soc.diagnostics.nan_eval_count;
+                                if(ls_soc.success && ls_soc.alpha > alpha)
+                                {
+                                    p = s.p_combined_buf;
+                                    alpha = ls_soc.alpha;
+                                    ls_success = true;
+                                }
                             }
                         }
                     }
@@ -779,6 +799,7 @@ struct kraft_slsqp_policy
                 // Surface the Armijo NaN-recovery count accumulated across
                 // the main LS and any SOC retry within this step() call.
                 r.diagnostics.nan_eval_count = nan_eval_count;
+                r.diagnostics.soc_retry_count = soc_retry_count;
                 return r;
             }
 
@@ -1002,6 +1023,7 @@ struct kraft_slsqp_policy
                 .bfgs_reset_count = reset_count,
                 .bfgs_skip_count = 0,
                 .nan_eval_count = nan_eval_count,
+                .soc_retry_count = soc_retry_count,
             },
         };
     }

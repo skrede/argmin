@@ -85,9 +85,6 @@ struct filter_slsqp_policy
     static constexpr double default_gradient_tolerance = 1e-8;
     static constexpr double default_step_tolerance_rel = 1e-12;
     static constexpr double default_feasibility_tolerance = 1e-6;
-    // Kraft 1988 §2.2.4 + N&W §18.3 (SOC violation threshold). Converges
-    // with the kraft_slsqp / nw_sqp lineage values.
-    static constexpr double default_soc_violation_threshold = 1e-3;
 
     // Armijo backtracking budget (NLopt-parity sustained backtracking
     // before declaring exhaustion).
@@ -166,7 +163,6 @@ struct filter_slsqp_policy
         };
         detail::restoration_strategy restoration{detail::restoration_strategy::hybrid};
         std::uint16_t max_restoration_steps{10};
-        double soc_violation_threshold{default_soc_violation_threshold};
         std::uint16_t stall_window{50};
 
         // Filter envelope margins (Wachter & Biegler 2006 Section 2.3,
@@ -418,6 +414,11 @@ struct filter_slsqp_policy
         //
         // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
         std::size_t nan_eval_count = 0;
+        // Second-order-correction retry counter. Increments once per SOC
+        // trigger (Maratos-effect rejection) regardless of whether the
+        // correction step is ultimately accepted; surfaced on every
+        // step_result return path for telemetry.
+        std::size_t soc_retry_count = 0;
 
         // Loop-carried variables that survive the retry block into the
         // post-loop accept-step block. Restoration-success returns inline
@@ -510,6 +511,7 @@ struct filter_slsqp_policy
                                 .bfgs_reset_count = reset_count,
                                 .bfgs_skip_count = 0,
                                 .nan_eval_count = nan_eval_count,
+                                .soc_retry_count = soc_retry_count,
                             },
                         };
                     }
@@ -576,6 +578,7 @@ struct filter_slsqp_policy
             // bfgs_skip_count local — the Powell-damped path is
             // unconditional on the Kraft lineage).
             r.diagnostics.nan_eval_count = nan_eval_count;
+            r.diagnostics.soc_retry_count = soc_retry_count;
             ++s.iteration;
             return r;
             }  // end !zero_step_restoration_attempted else-branch
@@ -611,6 +614,10 @@ struct filter_slsqp_policy
         alpha = 1.0;
         double f_trial = f_k;
         double h_trial = h_k;
+        // Constraint violation at the full unit step theta(x_k + p), captured
+        // on the alpha = 1 backtracking pass. Drives the IPOPT Section 2.4
+        // second-order-correction trigger below.
+        double h_full_step = h_k;
 
         const double c1 = options.line_search.c1;
         const double rho = options.line_search.rho;
@@ -665,6 +672,11 @@ struct filter_slsqp_policy
                 continue;
             }
 
+            // Record the full-unit-step violation once, on the first
+            // (alpha = 1) finite trial, for the SOC trigger below.
+            if(ls == 0)
+                h_full_step = h_trial;
+
             if(f_type)
             {
                 // F-type acceptance (Wachter & Biegler 2006 Algorithm A):
@@ -694,19 +706,28 @@ struct filter_slsqp_policy
             alpha *= rho;
         }
 
-        // Second-order correction for severe Maratos effect.
-        // Fires when the step was rejected AND the current point has
-        // significant constraint violation, indicating the linearization
-        // underestimated constraint curvature.
+        // Second-order correction for the Maratos effect. Fires when the
+        // full unit step was rejected AND it did not reduce the constraint
+        // violation (theta(x_k + p) >= theta(x_k)), the signature of the
+        // linearization underestimating constraint curvature near a feasible
+        // iterate. This is the IPOPT Section 2.4 trigger, independent of the
+        // current iterate's own violation level.
+        //
+        // The full unit step counts as rejected whenever it was not
+        // accepted at alpha = 1 (either the line search failed outright or
+        // it accepted a backtracked short step, alpha < 1) -- the Maratos
+        // effect manifests precisely as a backtracked acceptance replacing
+        // the quadratic full step.
         //
         // Reference: Wachter & Biegler 2006 Section 2.4;
         //            N&W Section 18.3 (Maratos effect).
-        if(!accepted && h_k > options.soc_violation_threshold)
+        if((!accepted || alpha < 1.0) && h_full_step >= h_k)
         {
             if constexpr(constrained<P>)
             {
                 if(s.n_eq + s.n_ineq > 0)
                 {
+                    ++soc_retry_count;
                     // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
                     Eigen::Vector<double, N> x_full = s.x + p;
                     x_full = detail::project(x_full, s.lower, s.upper);
@@ -853,6 +874,7 @@ struct filter_slsqp_policy
                                 .bfgs_reset_count = reset_count,
                                 .bfgs_skip_count = 0,
                                 .nan_eval_count = nan_eval_count,
+                                .soc_retry_count = soc_retry_count,
                             },
                         };
                     }
@@ -898,6 +920,7 @@ struct filter_slsqp_policy
                     .bfgs_reset_count = reset_count,
                     .bfgs_skip_count = 0,
                     .nan_eval_count = nan_eval_count,
+                    .soc_retry_count = soc_retry_count,
                 },
             };
         }
@@ -1124,6 +1147,7 @@ struct filter_slsqp_policy
                 .bfgs_reset_count = reset_count,
                 .bfgs_skip_count = 0,
                 .nan_eval_count = nan_eval_count,
+                .soc_retry_count = soc_retry_count,
             },
         };
     }
