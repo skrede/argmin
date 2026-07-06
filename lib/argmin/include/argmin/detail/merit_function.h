@@ -153,8 +153,23 @@ ARGMIN_FORCE_INLINE Scalar l1_merit_dphi_h4(
 //
 // argmin variant: scalar form with sigma_max cap. Idempotent;
 //                 monotone-up: sigma never decreases.
+//
+// Result of a sigma cold-bump. sigma is the (possibly capped) penalty to
+// use; saturated is true iff the descent-restoring bump exceeded sigma_max
+// and was clamped, meaning the returned sigma is provably NOT large enough
+// to make p a descent direction. Callers act on saturated by short-
+// circuiting the doomed line search into their recovery ladder rather than
+// backtracking against an unsatisfiable Armijo test. A plain aggregate:
+// allocation-free, register-returnable, exception/RTTI-free.
 template <typename Scalar>
-ARGMIN_FORCE_INLINE Scalar bump_sigma_for_descent(
+struct sigma_bump_result
+{
+    Scalar sigma;
+    bool saturated;
+};
+
+template <typename Scalar>
+ARGMIN_FORCE_INLINE sigma_bump_result<Scalar> bump_sigma_for_descent(
     Scalar sigma_in,
     Scalar grad_f_dot_p,
     Scalar violation,
@@ -168,9 +183,13 @@ ARGMIN_FORCE_INLINE Scalar bump_sigma_for_descent(
         const Scalar bumped = std::max(
             sigma_in,
             abs(grad_f_dot_p) / (violation * h4) + Scalar(1));
-        return std::min(bumped, sigma_max);
+        // Saturation is decided on the uncapped bump, BEFORE the clamp:
+        // once bumped exceeds sigma_max the clamped sigma leaves the merit
+        // slope non-negative, so the caller must recover rather than search.
+        const bool saturated = bumped > sigma_max;
+        return {std::min(bumped, sigma_max), saturated};
     }
-    return sigma_in;
+    return {sigma_in, false};
 }
 
 }

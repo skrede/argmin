@@ -63,6 +63,7 @@ add_executable(argmin_unit_tests
     slsqp_line_search_witness_test.cpp
     nw_sqp_soc_witness_test.cpp
     kraft_sigma_bump_witness_test.cpp
+    merit_function_test.cpp
 )
 
 target_link_libraries(argmin_unit_tests

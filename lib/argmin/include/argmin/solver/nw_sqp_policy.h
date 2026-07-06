@@ -604,6 +604,12 @@ struct nw_sqp_policy
         // If dphi0 >= 0, the penalty is insufficient for descent.
         // Increase sigma until the SQP direction is a descent direction
         // for the L1 merit function (N&W eq. 18.36).
+        //
+        // sigma_saturated records whether the bump hit the sigma_max cap and
+        // left the merit slope non-negative; on saturation the merit line
+        // search below is bypassed entirely (bounded-work short-circuit into
+        // the BFGS-reset retry / null-step recovery ladder).
+        bool sigma_saturated = false;
         if(dphi0 >= 0.0)
         {
             double cv = detail::constraint_violation(s.c_eq, s.c_ineq);
@@ -617,9 +623,11 @@ struct nw_sqp_policy
                 //                 with h4 = 1 reduces to abs(grad_f_dot_p) / cv + 1 — bit-
                 //                 identical for grad_f_dot_p >= 0 (the only branch reached
                 //                 here, since dphi0 >= 0 implies grad_f_dot_p >= sigma * cv > 0).
-                s.sigma = argmin::detail::bump_sigma_for_descent<double>(
+                const auto sigma_bump = argmin::detail::bump_sigma_for_descent<double>(
                     s.sigma, grad_f_dot_p, cv, /*h4=*/1.0,
                     /*sigma_max=*/default_sigma_max);
+                s.sigma = sigma_bump.sigma;
+                sigma_saturated = sigma_bump.saturated;
                 phi0 = detail::l1_merit(s.objective_value,
                                         s.c_eq, s.c_ineq, s.sigma);
                 dphi0 = grad_f_dot_p - s.sigma * cv;
@@ -647,7 +655,10 @@ struct nw_sqp_policy
         f_trial = s.objective_value;
         ls_success = false;
 
-        for(std::uint16_t ls = 0; ls < max_ls; ++ls)
+        // On sigma saturation the loop guard is false from the first
+        // iteration: the doomed merit search is skipped, ls_success stays
+        // false, and control falls straight through to the recovery ladder.
+        for(std::uint16_t ls = 0; ls < max_ls && !sigma_saturated; ++ls)
         {
             x_trial = s.x + alpha * p;
 
@@ -734,7 +745,7 @@ struct nw_sqp_policy
         // values keep h_full NaN so the trigger comparison is false and
         // the retry is skipped.
         double h_full = std::numeric_limits<double>::quiet_NaN();
-        if((!ls_success || alpha < 1.0) && m > 0)
+        if((!ls_success || alpha < 1.0) && m > 0 && !sigma_saturated)
         {
             Eigen::Vector<double, N> x_full = s.x + p;
             if(has_finite_bounds)

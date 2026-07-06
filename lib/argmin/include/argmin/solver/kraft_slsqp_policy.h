@@ -640,8 +640,10 @@ struct kraft_slsqp_policy
             //            N&W 2e Section 18.5 eq. 18.36.
             //
             // Adopted from: argmin/detail/merit_function.h bump_sigma_for_descent.
-            const double sigma_bumped = argmin::detail::bump_sigma_for_descent<double>(
+            const auto sigma_bump = argmin::detail::bump_sigma_for_descent<double>(
                 s.sigma, grad_f_dot_p, constraint_viol_0, h4, 1e10);
+            const double sigma_bumped = sigma_bump.sigma;
+            const bool sigma_saturated = sigma_bump.saturated;
             if(sigma_bumped > s.sigma)
             {
                 const double sigma_old = s.sigma;
@@ -660,18 +662,33 @@ struct kraft_slsqp_policy
             }
 
             // Backtracking Armijo line search on the L1 merit.
-            auto phi_ls = [&](double alpha_) {
-                ++s.line_search_calls;
-                // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
-                s.bufs.x_trial_buf.noalias() = s.x + alpha_ * p;
-                s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
-                return merit(s.bufs.x_trial_buf);
-            };
+            //
+            // When the penalty cold-bump saturated at sigma_max the merit
+            // slope is provably non-negative: every backtracking trial fails
+            // the Armijo test and the full line-search budget (and the SOC
+            // retry) is burned for nothing. Skip the doomed search and route
+            // straight into the BFGS-reset retry / null-step recovery ladder
+            // below by treating the step as a line-search failure.
+            bool ls_success = false;
+            if(sigma_saturated)
+            {
+                alpha = 0.0;
+            }
+            else
+            {
+                auto phi_ls = [&](double alpha_) {
+                    ++s.line_search_calls;
+                    // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
+                    s.bufs.x_trial_buf.noalias() = s.x + alpha_ * p;
+                    s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
+                    return merit(s.bufs.x_trial_buf);
+                };
 
-            auto ls = armijo(phi_ls, merit_0, dphi_merit, options.line_search);
-            alpha = ls.alpha;
-            bool ls_success = ls.success;
-            nan_eval_count += ls.diagnostics.nan_eval_count;
+                auto ls = armijo(phi_ls, merit_0, dphi_merit, options.line_search);
+                alpha = ls.alpha;
+                ls_success = ls.success;
+                nan_eval_count += ls.diagnostics.nan_eval_count;
+            }
 
             // Second-order correction (Kraft 1988 Section 2.2.4,
             // N&W Section 18.3 "Maratos effect").
@@ -701,7 +718,7 @@ struct kraft_slsqp_policy
             // either failed outright or accepted a backtracked short step
             // (alpha < 1); the latter is the Maratos regime replacing the
             // quadratic step with a linearly-convergent one.
-            if(!ls.success || alpha < 1.0)
+            if((!ls_success || alpha < 1.0) && !sigma_saturated)
             {
                 if constexpr(constrained<P>)
                 {

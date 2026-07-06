@@ -64,9 +64,10 @@ int main()
             -1.0, c_eq_v, c_ineq, 1.0, 1.0);
         (void)dphi;
 
-        const double sigma = argmin::detail::bump_sigma_for_descent<double>(
+        const auto sigma = argmin::detail::bump_sigma_for_descent<double>(
             1.0, -1.0, 0.5, 1.0, 1e10);
-        (void)sigma;
+        (void)sigma.sigma;
+        (void)sigma.saturated;
     }
 
     // Compile + link smoke test for the five sqp_common helpers.

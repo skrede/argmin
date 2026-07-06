@@ -1,95 +1,95 @@
-// Unit tests for the L1-merit penalty calibration helpers.
+// Unit witnesses for the L1-merit penalty cold-bump helper
+// bump_sigma_for_descent.
 //
-// Validates calibrate_initial_penalty's two iter-0 floors:
-//   1. Lambda-floor: sigma >= max_i |lambda_i| + delta (sufficient
-//      penalty for L1-merit descent).
-//   2. K-factor magnitude floor:
-//      sigma >= K * max(1, |f_0| / (||c_0||_1 + eps))
-//      (problem-scale floor guarding against under-weighted violation
-//      term on objective-dominated initial points).
+// The helper raises sigma so the L1-merit directional derivative becomes
+// strictly negative (p a descent direction), capped at sigma_max. When the
+// descent-restoring bump would exceed the cap it is clamped and the returned
+// sigma_bump_result.saturated flag is set: the clamped sigma is provably too
+// small to make p a descent direction, so the consuming SQP policies must
+// short-circuit their line search into the recovery ladder rather than
+// backtracking against an unsatisfiable Armijo test. These cases pin that
+// signal with hand-computed values.
 //
 // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
 //            Section 18.3, eq. 18.36 (sufficient penalty for descent);
-//            Kraft 1988 DFVLR-FB 88-28, Section 2.2.6 (sigma update).
+//            Kraft 1988 DFVLR-FB 88-28, Section 2.2.6 (sigma update);
+//            Powell 1978, Section 6 (penalty cold-bump).
 
 #include "argmin/detail/merit_function.h"
 
-#include <Eigen/Core>
-
-#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-using Catch::Approx;
 using namespace argmin;
 
-TEST_CASE("calibrate_initial_penalty enforces lambda-floor", "[detail][merit]")
+TEST_CASE("bump_sigma_for_descent signals saturation when the bump hits sigma_max",
+          "[detail][merit][sigma_bump]")
 {
-    // lambda_max = 5.0; lambda-floor = 5.0 + 1.0 = 6.0.
-    // K-factor-floor = 10 * max(1, |1.0| / (100 + eps)) = 10 * 1 = 10.0.
-    // Result = max(0.5, 6.0, 10.0) = 10.0 (K-factor dominates here).
-    Eigen::VectorXd lambda(2);
-    lambda << 5.0, -3.0;
-    const double sigma_in = 0.5;
-    const double f_0 = 1.0;
-    const double c_0_l1 = 100.0;
-    const double K_factor = 10.0;
-    const double delta = 1.0;
+    // dphi = grad_f_dot_p - sigma_in * h4 * violation
+    //      = 1e6 - 1.0 * 1.0 * 1.0 = 999999 >= 0  -> guard taken.
+    // bumped = max(sigma_in, |grad_f_dot_p| / (violation * h4) + 1)
+    //        = max(1.0, 1e6 / 1.0 + 1) = 1000001.
+    // saturated = (1000001 > sigma_max = 100) = true (decided before clamp).
+    // sigma = min(1000001, 100) = 100.
+    const double sigma_in = 1.0;
+    const double grad_f_dot_p = 1.0e6;
+    const double violation = 1.0;
+    const double h4 = 1.0;
+    const double sigma_max = 100.0;
 
-    const double sigma = detail::calibrate_initial_penalty<double, Eigen::Dynamic>(
-        sigma_in, lambda, f_0, c_0_l1, K_factor, delta);
+    const auto result = detail::bump_sigma_for_descent<double>(
+        sigma_in, grad_f_dot_p, violation, h4, sigma_max);
 
-    CHECK(sigma == Approx(10.0));
+    CHECK(result.saturated == true);
+    CHECK(result.sigma == sigma_max);  // capped at 100.0 exactly
 }
 
-TEST_CASE("calibrate_initial_penalty enforces K-factor magnitude floor",
-          "[detail][merit]")
+TEST_CASE("bump_sigma_for_descent does not saturate when the bump stays below sigma_max",
+          "[detail][merit][sigma_bump]")
 {
-    // lambda-floor = 0.1 + 1.0 = 1.1.
-    // K-factor-floor = 10 * max(1, 100/1) = 1000.
-    // Result = max(0.5, 1.1, 1000) = 1000 (K-factor dominates).
-    Eigen::VectorXd lambda(1);
-    lambda << 0.1;
-    const double sigma_in = 0.5;
-    const double f_0 = 100.0;
-    const double c_0_l1 = 1.0;
-    const double K_factor = 10.0;
-    const double delta = 1.0;
+    // Same descent-restoring bump (1000001) but a cap well above it: the
+    // clamp is inert, the uncapped sigma is returned, and saturated is false.
+    const double sigma_in = 1.0;
+    const double grad_f_dot_p = 1.0e6;
+    const double violation = 1.0;
+    const double h4 = 1.0;
+    const double sigma_max = 1.0e10;
 
-    const double sigma = detail::calibrate_initial_penalty<double, Eigen::Dynamic>(
-        sigma_in, lambda, f_0, c_0_l1, K_factor, delta);
+    const auto result = detail::bump_sigma_for_descent<double>(
+        sigma_in, grad_f_dot_p, violation, h4, sigma_max);
 
-    CHECK(sigma == Approx(1000.0));
+    CHECK(result.saturated == false);
+    CHECK(result.sigma == 1000001.0);  // |grad_f_dot_p| / violation + 1
 }
 
-TEST_CASE("calibrate_initial_penalty preserves sigma_in when both floors inactive",
-          "[detail][merit]")
+TEST_CASE("bump_sigma_for_descent passes sigma through when p is already a descent direction",
+          "[detail][merit][sigma_bump]")
 {
-    // Empty lambda disables the lambda-floor.
-    // K-factor-floor = 10 * max(1, 1/1) = 10.
-    // Result = max(sigma_in=1e15, 10) = sigma_in (monotone preservation).
-    Eigen::VectorXd lambda;  // empty
-    const double sigma_in = 1e15;
-    const double f_0 = 1.0;
-    const double c_0_l1 = 1.0;
+    // dphi = -5.0 - 10.0 * 1.0 * 1.0 = -15 < 0 -> guard NOT taken; the helper
+    // returns sigma_in bit-identically with saturated = false.
+    const double sigma_in = 10.0;
+    const double grad_f_dot_p = -5.0;
+    const double violation = 1.0;
 
-    const double sigma = detail::calibrate_initial_penalty<double, Eigen::Dynamic>(
-        sigma_in, lambda, f_0, c_0_l1, 10.0, 1.0);
+    const auto result = detail::bump_sigma_for_descent<double>(
+        sigma_in, grad_f_dot_p, violation);
 
-    CHECK(sigma == Approx(1e15));
+    CHECK(result.saturated == false);
+    CHECK(result.sigma == sigma_in);  // 10.0 exactly, no bump
 }
 
-TEST_CASE("calibrate_initial_penalty is monotone non-decreasing",
-          "[detail][merit][property]")
+TEST_CASE("bump_sigma_for_descent passes sigma through at a feasible iterate",
+          "[detail][merit][sigma_bump]")
 {
-    // For any sigma_in, the calibrated value must be >= sigma_in
-    // (the function never decreases the input penalty).
-    Eigen::VectorXd lambda(3);
-    lambda << 1.0, 2.0, -3.0;
+    // violation == 0 disables the guard even with a non-negative slope: no
+    // finite bump can restore descent at a feasible point, so sigma_in is
+    // returned unchanged and unsaturated.
+    const double sigma_in = 2.0;
+    const double grad_f_dot_p = 5.0;
+    const double violation = 0.0;
 
-    for(double sigma_in : {0.0, 0.5, 1.0, 5.0, 100.0, 1e6, 1e12})
-    {
-        const double sigma = detail::calibrate_initial_penalty<double, Eigen::Dynamic>(
-            sigma_in, lambda, 7.0, 2.0, 10.0, 1.0);
-        CHECK(sigma >= sigma_in);
-    }
+    const auto result = detail::bump_sigma_for_descent<double>(
+        sigma_in, grad_f_dot_p, violation);
+
+    CHECK(result.saturated == false);
+    CHECK(result.sigma == sigma_in);  // 2.0 exactly, no bump
 }
