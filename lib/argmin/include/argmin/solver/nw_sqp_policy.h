@@ -443,17 +443,37 @@ struct nw_sqp_policy
 
         bool has_finite_bounds = has_finite_box(s.lower, s.upper);
 
+        // Inequality-feasible warm start for the main QP. At an
+        // inequality-infeasible iterate the violated rows have
+        // b_ineq = -c_ineq > 0, so the zero / equality-projected p0
+        // violates them and active_set_qp_solver (whose phase-1
+        // restores equality feasibility only) freezes at the warm
+        // start: blocking_step_length clamps alpha to 0 against the
+        // violated rows and the policy stalls at an infeasible
+        // stationary-looking point. At feasible iterates b_ineq <= 0,
+        // the pre-check inside the helper passes, and the projection
+        // is a no-op — the healthy path is untouched.
+        //
+        // Adopted from: argmin/detail/sqp_common.h soc_seed_projection.
         if(has_finite_bounds)
         {
             s.bufs.p_lo_buf.noalias() = s.lower - s.x;
             s.bufs.p_hi_buf.noalias() = s.upper - s.x;
             p0 = p0.cwiseMax(s.bufs.p_lo_buf).cwiseMin(s.bufs.p_hi_buf);
+            detail::soc_seed_projection<double, N>(
+                s.J_ineq, s.bufs.b_ineq_workspace,
+                s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                /*use_bounds=*/true, s.bufs, p0);
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                    s.J_eq, s.bufs.b_eq_workspace, s.J_ineq, s.bufs.b_ineq_workspace,
                                    s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0, qp_opts);
         }
         else
         {
+            detail::soc_seed_projection<double, N>(
+                s.J_ineq, s.bufs.b_ineq_workspace,
+                s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                /*use_bounds=*/false, s.bufs, p0);
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                    s.J_eq, s.bufs.b_eq_workspace, s.J_ineq, s.bufs.b_ineq_workspace,
                                    p0, qp_opts);
@@ -744,6 +764,18 @@ struct nw_sqp_policy
             if(s.n_ineq > 0)
                 s.bufs.b_ineq_soc_buf.noalias() = -c_ineq_full + s.J_ineq * p;
 
+            // Inequality-feasible SOC warm start. p is a stationary
+            // point of the unchanged QP objective, and the QP solver's
+            // phase-1 restores equality feasibility only, so seeding
+            // the re-solve at an inequality-infeasible p makes the
+            // working-set loop terminate at p without consulting the
+            // corrected RHS. Project p onto the corrected inequality
+            // polyhedron (min-norm LDP shift; bound rows stacked in the
+            // bounded branch) before the solve; equality-only problems
+            // (n_ineq == 0) are untouched inside the helper.
+            //
+            // Adopted from: argmin/detail/sqp_common.h
+            //               soc_seed_projection.
             detail::qp_result<double, N> qp_soc;
             if(has_finite_bounds)
             {
@@ -751,6 +783,10 @@ struct nw_sqp_policy
                 // build above; reuse without re-computing s.lower - s.x.
                 Eigen::Vector<double, N> p0_soc = p;
                 p0_soc = p0_soc.cwiseMax(s.bufs.p_lo_buf).cwiseMin(s.bufs.p_hi_buf);
+                detail::soc_seed_projection<double, N>(
+                    s.J_ineq, s.bufs.b_ineq_soc_buf,
+                    s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                    /*use_bounds=*/true, s.bufs, p0_soc);
                 qp_soc = s.qp_solver.solve(
                     s.hessian.hessian(), s.g,
                     s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
@@ -758,10 +794,15 @@ struct nw_sqp_policy
             }
             else
             {
+                Eigen::Vector<double, N> p0_soc = p;
+                detail::soc_seed_projection<double, N>(
+                    s.J_ineq, s.bufs.b_ineq_soc_buf,
+                    s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                    /*use_bounds=*/false, s.bufs, p0_soc);
                 qp_soc = s.qp_solver.solve(
                     s.hessian.hessian(), s.g,
                     s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
-                    p, qp_opts);
+                    p0_soc, qp_opts);
             }
 
             if(qp_soc.status == detail::qp_status::optimal)

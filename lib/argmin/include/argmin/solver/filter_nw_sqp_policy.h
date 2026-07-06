@@ -503,11 +503,27 @@ struct filter_nw_sqp_policy
                 s.AAt_workspace, s.ldlt_feasibility, s.w_workspace, p0);
         }
 
+        // Inequality-feasible warm start for the main QP. At an
+        // inequality-infeasible iterate the violated rows have
+        // b_ineq = -c_ineq > 0, so the zero / equality-projected p0
+        // violates them and active_set_qp_solver (whose phase-1
+        // restores equality feasibility only) freezes at the warm
+        // start: blocking_step_length clamps alpha to 0 against the
+        // violated rows and the policy stalls at an infeasible
+        // stationary-looking point. At feasible iterates b_ineq <= 0,
+        // the pre-check inside the helper passes, and the projection
+        // is a no-op — the healthy path is untouched.
+        //
+        // Adopted from: argmin/detail/sqp_common.h soc_seed_projection.
         if(has_bounds)
         {
             s.bufs.p_lo_buf.noalias() = s.lower - s.x;
             s.bufs.p_hi_buf.noalias() = s.upper - s.x;
             p0 = p0.cwiseMax(s.bufs.p_lo_buf).cwiseMin(s.bufs.p_hi_buf);
+            detail::soc_seed_projection<double, N>(
+                s.J_ineq, s.bufs.b_ineq_workspace,
+                s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                /*use_bounds=*/true, s.bufs, p0);
             // Adopted from: argmin/solver/nw_sqp_policy.h::step QP-solve site
             //               (in-tree precedent — stateful active_set_qp_solver::solve).
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
@@ -517,6 +533,10 @@ struct filter_nw_sqp_policy
         }
         else
         {
+            detail::soc_seed_projection<double, N>(
+                s.J_ineq, s.bufs.b_ineq_workspace,
+                s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                /*use_bounds=*/false, s.bufs, p0);
             // Adopted from: argmin/solver/nw_sqp_policy.h::step QP-multiplier-extract
             //               site (in-tree precedent — stateful active_set_qp_solver::solve, no-bounds overload).
             qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
@@ -822,6 +842,18 @@ struct filter_nw_sqp_policy
                 s.bufs.b_ineq_soc_buf.noalias()
                     = -s.bufs.c_all.tail(s.n_ineq) + s.J_ineq * p;
 
+            // Inequality-feasible SOC warm start. p is a stationary
+            // point of the unchanged QP objective, and the QP solver's
+            // phase-1 restores equality feasibility only, so seeding
+            // the re-solve at an inequality-infeasible p makes the
+            // working-set loop terminate at p without consulting the
+            // corrected RHS. Project p onto the corrected inequality
+            // polyhedron (min-norm LDP shift; bound rows stacked in the
+            // bounded branch) before the solve; equality-only problems
+            // (n_ineq == 0) are untouched inside the helper.
+            //
+            // Adopted from: argmin/detail/sqp_common.h
+            //               soc_seed_projection.
             detail::qp_result<double, N> qp_soc;
             if(has_bounds)
             {
@@ -832,6 +864,10 @@ struct filter_nw_sqp_policy
                 Eigen::Vector<double, N> p0_soc = p;
                 p0_soc = p0_soc.cwiseMax(s.bufs.p_lo_buf)
                              .cwiseMin(s.bufs.p_hi_buf);
+                detail::soc_seed_projection<double, N>(
+                    s.J_ineq, s.bufs.b_ineq_soc_buf,
+                    s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                    /*use_bounds=*/true, s.bufs, p0_soc);
                 qp_soc = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                            s.J_eq, s.bufs.b_eq_soc_buf,
                                            s.J_ineq, s.bufs.b_ineq_soc_buf,
@@ -843,10 +879,15 @@ struct filter_nw_sqp_policy
                 // Adopted from: argmin/solver/nw_sqp_policy.h::step SOC
                 //               retry site (in-tree precedent — stateful
                 //               active_set_qp_solver, no-bounds overload).
+                Eigen::Vector<double, N> p0_soc = p;
+                detail::soc_seed_projection<double, N>(
+                    s.J_ineq, s.bufs.b_ineq_soc_buf,
+                    s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                    /*use_bounds=*/false, s.bufs, p0_soc);
                 qp_soc = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                            s.J_eq, s.bufs.b_eq_soc_buf,
                                            s.J_ineq, s.bufs.b_ineq_soc_buf,
-                                           p, qp_opts);
+                                           p0_soc, qp_opts);
             }
 
             if(qp_soc.status == detail::qp_status::optimal)

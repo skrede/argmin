@@ -7,15 +7,16 @@
 // adopted by the line-search SQP family (kraft_slsqp, nw_sqp,
 // filter_slsqp, filter_nw_sqp), plus the shared helper functions
 // (null_step_result, extract_qp_multipliers, compute_bfgs_pair_fused,
-// equality_feasibility_warmstart, step_with_projection) that
-// consolidate the duplicated patterns at the four SQP policy hot
-// paths.
+// equality_feasibility_warmstart, soc_seed_projection,
+// step_with_projection) that consolidate the duplicated patterns at
+// the four SQP policy hot paths.
 //
 // Reference: Nocedal and Wright, "Numerical Optimization" 2e, Section 18
 //            (sequential quadratic programming);
 //            Kraft 1988 DFVLR-FB 88-28 (line-search SLSQP).
 
 #include "argmin/types.h"
+#include "argmin/detail/ldp.h"
 #include "argmin/detail/lagrangian.h"
 #include "argmin/result/step_result.h"
 #include "argmin/detail/kkt_residual.h"
@@ -25,6 +26,7 @@
 #include <Eigen/Core>
 #include <Eigen/Cholesky>
 
+#include <limits>
 #include <cstddef>
 #include <optional>
 #include <algorithm>
@@ -82,6 +84,23 @@ struct sqp_state_buffers
     Eigen::Matrix<Scalar, N, N> E_buf;
     Eigen::Vector<Scalar, N> f_buf;
 
+    // Second-order-correction warm-start projection scratch (see
+    // soc_seed_projection below): stacked LDP polyhedron rows
+    // (inequality rows plus up to 2n finite-bound rows), the min-norm
+    // shift and its multipliers, and the dual-NNLS workspaces threaded
+    // through detail::ldp. Sized for the worst case (every bound
+    // finite); detail::ldp re-shapes the nnls_* views to the actual row
+    // count, which is constant per problem instance, so the projection
+    // is allocation-free at steady state.
+    Eigen::MatrixXd soc_ldp_G_buf;
+    Eigen::VectorXd soc_ldp_h_buf;
+    Eigen::VectorXd soc_ldp_q_buf;
+    Eigen::VectorXd soc_ldp_lambda_buf;
+    Eigen::MatrixXd soc_nnls_A_buf;
+    Eigen::VectorXd soc_nnls_b_buf;
+    Eigen::VectorXd soc_nnls_x_buf;
+    Eigen::VectorXd soc_nnls_w_buf;
+
     void resize(int n, int n_eq, int n_ineq);
 };
 
@@ -119,6 +138,16 @@ inline void sqp_state_buffers<Scalar, N>::resize(int n, int n_eq, int n_ineq)
 
     E_buf.resize(n, n);
     f_buf.resize(n);
+
+    const int soc_rows = n_ineq + 2 * n;
+    soc_ldp_G_buf.resize(soc_rows, n);
+    soc_ldp_h_buf.resize(soc_rows);
+    soc_ldp_q_buf.resize(n);
+    soc_ldp_lambda_buf.resize(soc_rows);
+    soc_nnls_A_buf.resize(n + 1, soc_rows);
+    soc_nnls_b_buf.resize(n + 1);
+    soc_nnls_x_buf.resize(soc_rows);
+    soc_nnls_w_buf.resize(soc_rows);
 }
 
 // Adopted from: argmin/result/step_result.h schema (in-tree precedent —
@@ -484,6 +513,121 @@ ARGMIN_FORCE_INLINE void equality_feasibility_warmstart(
     w_workspace = b_eq;
     ldlt_workspace.solveInPlace(w_workspace);
     p0_out.noalias() = J_eq.transpose() * w_workspace;
+}
+
+// Inequality-feasible warm start for the second-order-correction QP.
+//
+// The SOC re-solve warm-starts active_set_qp_solver at the rejected
+// primary direction p. p is a stationary point of the UNCHANGED QP
+// objective (only the constraint RHS moved), and the solver's phase-1
+// projection restores equality feasibility only: an inequality-
+// infeasible warm start sits outside its documented precondition
+// (blocking_step_length clamps alpha to 0 against violated rows), so
+// the working-set loop terminates at the warm start without ever
+// consulting the corrected RHS and the "correction" degenerates to a
+// re-test of the already-rejected step. On rows active in the Maratos
+// regime the corrected RHS carries the curvature remainder,
+// b_ineq_soc ~ kappa * ||p||^2 > J_ineq * p, so both p and the plain
+// cold start q = 0 are genuinely infeasible exactly when the
+// correction has work to do.
+//
+// Restore the precondition with the minimum-norm shift onto the SOC
+// inequality polyhedron: solve the least-distance program
+//
+//   min ||q||  s.t.  J_ineq * q >= b_ineq_soc - J_ineq * p
+//                    (plus, with a box, p_lo <= p + q <= p_hi on the
+//                     finite bound rows; infinite bounds contribute no
+//                     row -- an infinite h entry would poison the dual
+//                     NNLS data)
+//
+// via detail::ldp and seed the SOC QP at p + q, which satisfies
+// J_ineq * (p + q) >= b_ineq_soc by construction. Equality rows are
+// deliberately NOT stacked: the QP solver's phase-1 min-norm
+// projection restores them at entry, and on purely equality-
+// constrained problems (n_ineq == 0) this helper is a no-op so that
+// path is left undisturbed.
+//
+// Fallback: an incompatible polyhedron (LDP mode 4, empty half-space
+// intersection) keeps the seed at p -- strictly no worse than the
+// unprojected warm start. The SOC attempt is never aborted here.
+//
+// Returns true when the seed was replaced by the projected point,
+// false when it was already feasible for every stacked row or the LDP
+// declared the rows incompatible.
+//
+// Reference: Lawson & Hanson 1974 Ch. 23.4 (LDP via dual NNLS);
+//            N&W 2e Section 16.1 Algorithm 16.1 (active-set
+//            feasibility invariant) and Section 18.3 (second-order
+//            correction).
+template <typename Scalar, int N>
+ARGMIN_FORCE_INLINE bool soc_seed_projection(
+    const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& J_ineq,
+    const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>& b_ineq_soc,
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>& p_lo,
+    const Eigen::Ref<const Eigen::Vector<Scalar, N>>& p_hi,
+    bool use_bounds,
+    sqp_state_buffers<Scalar, N>& bufs,
+    Eigen::Ref<Eigen::Vector<Scalar, N>> seed)
+{
+    const int n = static_cast<int>(seed.size());
+    const int n_ineq = static_cast<int>(J_ineq.rows());
+    if(n_ineq <= 0)
+        return false;  // Equality-only SOC: phase-1 already handles it.
+
+    constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+
+    // Stack the polyhedron in the shifted variable q = seed' - seed:
+    // rows [0, n_ineq) are J_ineq * q >= b_ineq_soc - J_ineq * seed,
+    // then one identity row per finite lower bound (q_i >= p_lo_i -
+    // seed_i) and one negated identity row per finite upper bound
+    // (-q_i >= seed_i - p_hi_i). G / h are top-block views into the
+    // worst-case-sized scratch; detail::ldp reads only the leading m
+    // rows.
+    auto& G = bufs.soc_ldp_G_buf;
+    auto& h = bufs.soc_ldp_h_buf;
+
+    G.topRows(n_ineq) = J_ineq;
+    h.head(n_ineq) = b_ineq_soc;
+    h.head(n_ineq).noalias() -= J_ineq * seed;
+    int m = n_ineq;
+
+    if(use_bounds)
+    {
+        for(int i = 0; i < n; ++i)
+        {
+            if(p_lo[i] > -inf)
+            {
+                G.row(m).setZero();
+                G(m, i) = Scalar(1);
+                h[m] = p_lo[i] - seed[i];
+                ++m;
+            }
+            if(p_hi[i] < inf)
+            {
+                G.row(m).setZero();
+                G(m, i) = Scalar(-1);
+                h[m] = seed[i] - p_hi[i];
+                ++m;
+            }
+        }
+    }
+
+    // Feasibility pre-check: q = 0 satisfies every stacked row exactly
+    // when h <= 0, i.e. the warm start already lies in the corrected
+    // polyhedron. The dominant case away from curved active manifolds;
+    // skip the LDP entirely.
+    if(h.head(m).maxCoeff() <= Scalar(0))
+        return false;
+
+    const int ldp_mode = ldp<Scalar, Eigen::Dynamic, Eigen::Dynamic>(
+        G, h, bufs.soc_ldp_q_buf, bufs.soc_ldp_lambda_buf,
+        bufs.soc_nnls_A_buf, bufs.soc_nnls_b_buf,
+        bufs.soc_nnls_x_buf, bufs.soc_nnls_w_buf, m, n);
+    if(ldp_mode != 1)
+        return false;  // Incompatible rows: keep the unprojected seed.
+
+    seed += bufs.soc_ldp_q_buf.head(n);
+    return true;
 }
 
 // Orthogonal projection onto null(A) via the AA^T normal equations.
