@@ -751,7 +751,16 @@ struct filter_slsqp_policy
 
                     if(soc_res.status == detail::qp_status::optimal)
                     {
-                        Eigen::Vector<double, N> p_soc = p + soc_res.x;
+                        // The SOC RHS -c(x + p) + J * p re-anchors the
+                        // linearized constraints at the full unit step, so
+                        // the re-solved QP direction is ALREADY the full
+                        // corrected step from the current iterate: the trial
+                        // is x + p_soc, NOT x + p + p_soc. Composing p again
+                        // double-counts the step and lands at
+                        // x + 2p + O(||p||^2), re-lifting the violation the
+                        // correction was meant to remove (N&W 2e Section 18.3
+                        // replacement-form SOC).
+                        Eigen::Vector<double, N> p_soc = soc_res.x;
                         double alpha_soc = 1.0;
 
                         for(std::uint16_t ls = 0; ls < max_ls; ++ls)

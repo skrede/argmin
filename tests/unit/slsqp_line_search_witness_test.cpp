@@ -168,11 +168,11 @@ TEST_CASE("filter_slsqp rejects a marginal-f, exploding-h unit step",
 // step increases the constraint violation (h(x_k + p) > h_k): the Maratos
 // regime. The correct trigger fires a second-order correction on this
 // rejection whenever theta(x_k + p) >= theta(x_k), independent of the current
-// iterate's own violation. The current gate only fires when the CURRENT
-// iterate is already substantially infeasible (h_k > 1e-3), so at h_k = 0 the
-// second-order correction never fires and the step degrades to a short
-// backtracked (linearly-convergent) move. The single-step signature of "SOC
-// fired" is diagnostics.soc_retry_count >= 1, which is 0 pre-fix.
+// iterate's own violation, AND composes the corrected trial as x + p_soc: the
+// SOC RHS -c(x + p) + J*p re-anchors the linearized constraints at the full
+// unit step, so the re-solved QP direction p_soc is already the full corrected
+// step from the current iterate. The earlier x + p + p_soc composition
+// double-counts p and lands at x + 2p + O(||p||^2), farther from the optimum.
 //
 // Hand-derived step at x_k = (cos 0.1, sin 0.1), exact SQP with B = I:
 //   tangent direction t_hat = (-sin th, cos th); QP step p = sin(th) * (-t_hat)
@@ -181,6 +181,17 @@ TEST_CASE("filter_slsqp rejects a marginal-f, exploding-h unit step",
 //                = ( 1.00497093,  0.00049875)
 //     h(x_k)     = 0
 //     h(x_k + p) = |(x_k + p)|^2 - 1 = 0.00996884 > 0   -> Maratos regime.
+//
+// The soc_retry_count >= 1 signature alone does NOT witness the composition:
+// the trigger fires for both the correct (x + p_soc) and the double-counting
+// (x + p + p_soc) trials. The landing assertions below discriminate. Measured
+// single-step landing at x_k (identical for both policies, f* = -1):
+//   double-count composition : f = -0.998744802, h = 1.55211e-06
+//   corrected composition    : f = -0.999962749, h = 2.48338e-05
+// The corrected step lands an order of magnitude closer to the optimum (f <
+// -0.9999 fails on the double-count's -0.9987) while keeping the violation at
+// O(||p||^2) (the hand-derived residual c = -0.00997 + 0.00999 ~ 2e-5; a
+// first-order landing would carry h ~ ||p|| ~ 0.1).
 TEST_CASE("slsqp fires a second-order correction at a near-feasible Maratos step",
           "[slsqp][soc][witness]")
 {
@@ -198,6 +209,9 @@ TEST_CASE("slsqp fires a second-order correction at a near-feasible Maratos step
     CHECK(h_k == Approx(0.0).margin(1e-12));
     CHECK(h_full > h_k);
 
+    // O(||p||^2) scale for the corrected landing's residual bound.
+    const double p_sq = p.squaredNorm();
+
     solver_options<> opts;
     opts.max_iterations = 500;
 
@@ -206,9 +220,14 @@ TEST_CASE("slsqp fires a second-order correction at a near-feasible Maratos step
         maratos_problem problem;
         basic_solver solver{filter_slsqp_policy<>{}, problem, xk, opts};
         auto sr = solver.step();
-        // Correct behavior: the second-order correction fires on the Maratos
-        // rejection. Pre-fix soc_retry_count stays 0 (gate needs h_k > 1e-3).
+        // SOC fires on the Maratos rejection.
         CHECK(sr.diagnostics.soc_retry_count >= std::size_t{1});
+        // Corrected full step (x + p_soc) lands near the optimum; the
+        // double-count composition (x + p + p_soc) parks at f ~ -0.9987 and
+        // fails this bound.
+        CHECK(sr.objective_value < -0.9999);
+        // Landing violation is second-order in ||p||, not first-order.
+        CHECK(sr.constraint_violation < 0.01 * p_sq);
     }
 
     SECTION("kraft_slsqp")
@@ -217,5 +236,7 @@ TEST_CASE("slsqp fires a second-order correction at a near-feasible Maratos step
         basic_solver solver{kraft_slsqp_policy<>{}, problem, xk, opts};
         auto sr = solver.step();
         CHECK(sr.diagnostics.soc_retry_count >= std::size_t{1});
+        CHECK(sr.objective_value < -0.9999);
+        CHECK(sr.constraint_violation < 0.01 * p_sq);
     }
 }

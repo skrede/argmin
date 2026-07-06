@@ -687,8 +687,10 @@ struct kraft_slsqp_policy
             //   b_eq_soc  = -c_eq(x + p)  + J_eq(x)  * p
             //   b_ineq_soc = -c_ineq(x + p) + J_ineq(x) * p
             //
-            // The correction step dp is added to p and the line search
-            // is retried with the combined direction.
+            // Because the RHS re-anchors the linearized constraints at the
+            // full unit step (the +J*p term), the re-solved QP direction is
+            // already the full corrected step from the current iterate; the
+            // line search is retried on that direction directly.
             //
             // Trigger (IPOPT Section 2.4): the full unit step is rejected AND
             // it did not reduce the L1 constraint violation, theta(x+p) >=
@@ -741,7 +743,15 @@ struct kraft_slsqp_policy
 
                             if(soc_res.status == detail::qp_status::optimal)
                             {
-                                s.p_combined_buf.noalias() = p + soc_res.x;
+                                // The SOC RHS -c(x + p) + J * p re-anchors the
+                                // linearized constraints at the full unit
+                                // step, so soc_res.x is ALREADY the full
+                                // corrected step from the current iterate: the
+                                // trial is x + p_soc, NOT x + p + p_soc.
+                                // Composing p again double-counts the step and
+                                // lands at x + 2p + O(||p||^2), re-lifting the
+                                // violation the correction was meant to remove.
+                                s.p_combined_buf.noalias() = soc_res.x;
                                 auto phi_soc = [&](double a) {
                                     ++s.line_search_calls;
                                     // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
