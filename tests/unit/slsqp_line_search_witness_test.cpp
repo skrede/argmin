@@ -145,7 +145,7 @@ double violation_at(const maratos_problem& p, const Eigen::VectorXd& x)
 // the ceiling h_max = 1e4. Pinned [!shouldfail]: the pre-fix code accepts the
 // bypass and the post-step violation is 1e5 >> 1e4.
 TEST_CASE("filter_slsqp rejects a marginal-f, exploding-h unit step",
-          "[filter_slsqp][witness][!shouldfail]")
+          "[filter_slsqp][witness]")
 {
     filter_bypass_problem problem;
     Eigen::VectorXd x0{{0.0, 0.0}};

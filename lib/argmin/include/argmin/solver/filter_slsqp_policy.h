@@ -667,8 +667,15 @@ struct filter_slsqp_policy
 
             if(f_type)
             {
-                // Armijo f-descent check.
-                if(f_trial <= f_k + c1 * alpha * grad_f_dot_p)
+                // F-type acceptance (Wachter & Biegler 2006 Algorithm A):
+                // filter acceptability and the h_max ceiling are required
+                // in ADDITION to the Armijo f-descent test, not replaced by
+                // it. A trial that improves f marginally while inflating the
+                // constraint violation past the filter envelope must be
+                // rejected; the Armijo test alone does not see the violation.
+                if(s.filter.is_acceptable(f_trial, h_trial)
+                   && f_trial <= f_k + c1 * alpha * grad_f_dot_p
+                   && h_trial <= s.filter.h_max())
                 {
                     accepted = true;
                     break;
@@ -764,7 +771,13 @@ struct filter_slsqp_policy
                             bool soc_accepted = false;
                             if(f_type)
                             {
-                                if(f_soc <= f_k + c1 * alpha_soc * grad_f_dot_p)
+                                // Same both-conditions f-type rule as the
+                                // main line search: filter acceptability and
+                                // the h_max ceiling gate the SOC trial in
+                                // addition to Armijo f-descent.
+                                if(s.filter.is_acceptable(f_soc, h_soc)
+                                   && f_soc <= f_k + c1 * alpha_soc * grad_f_dot_p
+                                   && h_soc <= s.filter.h_max())
                                     soc_accepted = true;
                             }
                             else
