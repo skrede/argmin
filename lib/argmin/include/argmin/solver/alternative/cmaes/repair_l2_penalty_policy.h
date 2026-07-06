@@ -440,11 +440,16 @@ struct repair_l2_penalty_policy
         // 12. Set new mean
         s.mean = mean_new;
 
-        // 13. Eigendecompose updated C (reuses pre-allocated solver workspace).
-        // Hansen (2023) arXiv:1604.00772: eigendecomposition skip.
-        // Dirty flag (D-09): skip when covariance unchanged.
-        // Periodic (D-10): decompose every K generations.
-        if(s.covariance_dirty || s.generation % s.decomposition_skip_k == 0)
+        // 13. Eigendecompose the updated C on the periodic cadence
+        // (reuses the pre-allocated solver workspace). The covariance
+        // moves every generation, but the eigenbasis B and axis lengths D
+        // are refreshed only once every K generations and reused (stale)
+        // in between: the O(n^3) eigendecomposition is the per-generation
+        // hot spot, and Hansen (2023, arXiv:1604.00772 §B.2) amortizes it
+        // across K generations. The dirty flag additionally suppresses a
+        // redundant decomposition when C has not changed since the last
+        // one; the covariance update above sets it whenever C moves.
+        if(s.covariance_dirty && s.generation % s.decomposition_skip_k == 0)
         {
             detail::eigendecompose(s.C, s.B, s.D, s.eigen_solver);
             s.covariance_dirty = false;

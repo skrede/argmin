@@ -111,6 +111,9 @@ void update_covariance(Eigen::Matrix<Scalar, N, N>& C,
     // Enforce symmetry
     C = (C + C.transpose()) * Scalar(0.5);
 
+    // C changed this generation: mark the cached eigenbasis stale so the
+    // next decomposition on the periodic cadence refreshes B and D. The
+    // caller reuses the stale eigenbasis until then.
     covariance_dirty = true;
 }
 

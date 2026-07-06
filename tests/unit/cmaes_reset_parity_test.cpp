@@ -58,6 +58,18 @@ struct unbounded_quadratic
     double value(const Eigen::VectorXd& x) const { return x.squaredNorm(); }
 };
 
+// Strongly anisotropic quadratic: the covariance deforms markedly, so a
+// scheduled eigendecomposition visibly moves B and D.
+struct anisotropic_quadratic
+{
+    static constexpr int problem_dimension = argmin::dynamic_dimension;
+    int dimension() const { return 2; }
+    double value(const Eigen::VectorXd& x) const
+    {
+        return x[0] * x[0] + 100.0 * x[1] * x[1];
+    }
+};
+
 }
 
 TEST_CASE("cmaes_policy: bounded restart draws the mean uniformly in the box",
@@ -177,4 +189,46 @@ TEST_CASE("cmaes_policy: reset() re-derives the same quantities as init()",
     CHECK(s.C == Eigen::MatrixXd::Identity(2, 2));
     CHECK(s.D == Eigen::VectorXd::Ones(2));
     CHECK(s.initial_d_max == 1.0);
+}
+
+TEST_CASE("cmaes_policy: eigendecomposition cadence skips between refreshes",
+          "[cmaes][cadence]")
+{
+    // The covariance moves every generation, but the eigenbasis (B, D) is
+    // refreshed only once every K generations and reused unchanged in
+    // between. With an explicit skip period of 3, the generations that do
+    // not land on the cadence must leave B and D bit-identical, while a
+    // generation that does land on the cadence refreshes them.
+    anisotropic_quadratic problem;
+
+    Eigen::VectorXd x0{{2.0, 2.0}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    cmaes_policy<> policy;
+    policy.options.seed = 3u;
+    policy.options.initial_sigma = 1.0;
+    policy.options.eigendecomposition_skip_generations = 3u;
+
+    auto s = policy.init(problem, x0, opts);
+    REQUIRE(s.decomposition_skip_k == 3u);
+
+    // Generation 0 lands on the cadence (0 % 3 == 0) and decomposes.
+    (void)policy.step(s);
+    const Eigen::MatrixXd B_after_decomp = s.B;
+    const Eigen::VectorXd D_after_decomp = s.D;
+
+    // Generations 1 and 2 are off-cadence: B and D are reused unchanged
+    // even though the covariance keeps moving.
+    (void)policy.step(s);   // generation 1 at the gate -> skip
+    CHECK(s.B == B_after_decomp);
+    CHECK(s.D == D_after_decomp);
+
+    (void)policy.step(s);   // generation 2 at the gate -> skip
+    CHECK(s.B == B_after_decomp);
+    CHECK(s.D == D_after_decomp);
+
+    // Generation 3 lands on the cadence again and refreshes the basis; on
+    // this anisotropic problem the covariance has moved, so D changes.
+    (void)policy.step(s);   // generation 3 at the gate -> decompose
+    CHECK(s.D != D_after_decomp);
 }
