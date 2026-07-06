@@ -100,7 +100,6 @@ struct bobyqa_policy
 
     struct options_type
     {
-        std::optional<std::uint16_t> num_interpolation_points{};  // default: 2n+1 (Powell 2009)
         std::optional<double> initial_trust_radius{};             // default: auto, 10% of max bound range (Powell 2009)
         std::optional<double> final_trust_radius{};               // default: 1e-8, stopping criterion on delta (Powell 2009)
         trust_region_options trust{};                              // Embedded trust region params
@@ -222,10 +221,12 @@ struct bobyqa_policy
         s.x = detail::project(x0, s.lower, s.upper);
         s.x_scaled = (s.x.array() / s.scale.array()).matrix();
 
-        // Number of interpolation points (Powell 2009)
-        s.m = options.num_interpolation_points.has_value()
-                  ? static_cast<int>(options.num_interpolation_points.value())
-                  : 2 * n + 1;
+        // Number of interpolation points. The BMAT/ZMAT bootstrap assembles
+        // exactly the 2n+1 coordinate-perturbation system (Powell 2009), so
+        // this is fixed rather than configurable: a value above 2n+1 would let
+        // step() index past the assembled points, and a smaller value would
+        // mis-shape the factored algebra.
+        s.m = 2 * n + 1;
 
         // Final trust radius
         s.final_trust_radius = options.final_trust_radius.value_or(1e-8);
