@@ -404,25 +404,40 @@ struct bobyqa_policy
         //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L743
         if(d_norm < 0.5 * s.rho && s.rho > s.rho_end)
         {
-            // Select knew_geo as the point with largest |L_k(xopt)|.
-            auto lagrange_at_xopt = detail::compute_lagrange_at(s.sys, s.sys.xopt);
-
-            int knew_geo = (s.sys.kopt == 0) ? 1 : 0;
-            double max_abs_lk = std::abs(lagrange_at_xopt[knew_geo]);
+            // Select knew_geo as the interpolation point farthest from xopt
+            // (Powell's geometry criterion). The cardinal basis satisfies
+            // L_k(xopt) == delta_{k,kopt}, so scoring by |L_k(xopt)| ties every
+            // candidate at zero and degenerates to index 0; the point whose
+            // distance from xopt is largest is the one whose poisedness the
+            // geometry step must repair.
+            int knew_geo = -1;
+            double dist_geo_sq = 0.0;
             for(int i = 0; i < s.m; ++i)
             {
                 if(i == s.sys.kopt) continue;
-                double abs_lk = std::abs(lagrange_at_xopt[i]);
-                if(abs_lk > max_abs_lk)
+                double dsq = (s.sys.xpt.col(i).head(n) - s.sys.xopt).squaredNorm();
+                if(dsq > dist_geo_sq)
                 {
-                    max_abs_lk = abs_lk;
+                    dist_geo_sq = dsq;
                     knew_geo = i;
                 }
             }
 
+            // Powell's distance gate: refresh geometry only when the farthest
+            // point sits beyond max(2*delta, 10*rho) of xopt; otherwise the
+            // interpolation set is already compact and the iteration falls
+            // through to a rho reduction.
+            const double geo_gate = std::max(2.0 * s.delta, 10.0 * s.rho);
+            if(knew_geo >= 0 && dist_geo_sq > geo_gate * geo_gate)
+            {
+            const double dist_geo = std::sqrt(dist_geo_sq);
+            // ALTMOV subproblem radius (Powell 2009 eq. 6.x): shrink toward
+            // the point being moved but never below rho.
+            const double adelt = std::max(std::min(0.1 * dist_geo, 0.5 * s.delta), s.rho);
+
             // ALTMOV geometry step: find the point maximizing |L_knew_geo|.
             Eigen::Vector<double, N> geo_pt_shifted = detail::altmov_geometry_step<double, N>(
-                s.sys, knew_geo, s.rho, s.lower_scaled - s.sys.xbase,
+                s.sys, knew_geo, adelt, s.lower_scaled - s.sys.xbase,
                 s.upper_scaled - s.sys.xbase);
 
             Eigen::Vector<double, N> geo_pt_abs = detail::project(
@@ -457,6 +472,7 @@ struct bobyqa_policy
                     s.objective_value = geo_f;
                     improved = true;
                 }
+            }
             }
         }
 

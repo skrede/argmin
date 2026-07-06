@@ -227,6 +227,23 @@ interpolation_system<Scalar, N> bootstrap_interpolation_system(
         Scalar f_pos = sys.fval[1 + j];
         Scalar f_neg = sys.fval[1 + n + j];
 
+        // Swap points if stepa and stepb have opposite signs and f_neg < f_pos,
+        // so the better point sits at index 1+j. This must happen BEFORE the
+        // BMAT/ZMAT assignments below: those encode the factored inverse of the
+        // interpolation matrix at the final point positions, so assembling them
+        // from the pre-swap coordinates breaks the Lagrange delta-property on
+        // every swapped axis. Mirrors NLopt prelim_(), where the swap precedes
+        // the BMAT/ZMAT writes. The two-sided stencil (hq/gopt) and the
+        // symmetric factor terms are invariant under a consistent swap; only
+        // bmat(1+n+j, j) = -0.5 / xpt(j, 1+j) reads the swapped position.
+        if(stepa * stepb < Scalar(0) && f_neg < f_pos)
+        {
+            sys.fval[1 + n + j] = f_pos;
+            sys.fval[1 + j] = f_neg;
+            sys.xpt(j, 1 + j) = stepb;
+            sys.xpt(j, 1 + n + j) = stepa;
+        }
+
         // Gradient from two-sided stencil.
         Scalar diff = stepb - stepa;
         Scalar temp = (f_neg - fbeg) / stepb;
@@ -249,20 +266,6 @@ interpolation_system<Scalar, N> bootstrap_interpolation_system(
         sys.zmat(0, j) = std::sqrt(Scalar(2)) / (stepa * stepb);
         sys.zmat(1 + n + j, j) = std::sqrt(Scalar(0.5)) / rhosq;
         sys.zmat(1 + j, j) = -sys.zmat(0, j) - sys.zmat(1 + n + j, j);
-
-        // Swap points if stepa and stepb have opposite signs and f_neg < f_pos.
-        // This ensures the better point is at index 1+j.
-        // Adapted from NLopt prelim_() lines 1908-1917.
-        if(stepa * stepb < Scalar(0))
-        {
-            if(f_neg < f_pos)
-            {
-                sys.fval[1 + n + j] = f_pos;
-                sys.fval[1 + j] = f_neg;
-                sys.xpt(j, 1 + j) = stepb;
-                sys.xpt(j, 1 + n + j) = stepa;
-            }
-        }
     }
 
     // Find best point.
