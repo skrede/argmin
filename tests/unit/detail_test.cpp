@@ -3,6 +3,7 @@
 #include "argmin/detail/subspace_minimization.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/cmaes_constants.h"
 #include "argmin/detail/xoshiro256.h"
 #include "argmin/solver/convergence.h"
 
@@ -512,4 +513,23 @@ TEST_CASE("ISRES operators preserve existing detail symbols byte-for-byte",
 
     argmin::detail::isres_operator_workspace<double, Eigen::Dynamic> ws(n);
     (void)ws;  // ctor compiles, no fields exposed for direct check.
+}
+
+TEST_CASE("compute_constants clamps lambda_override to keep mu_eff finite",
+          "[cmaes_constants]")
+{
+    // lambda_override = 1 would give mu = lambda/2 = 0 and then
+    // mu_eff = 1 / sum_pos_sq = 1/0 = inf (the positive-weight loop runs
+    // zero times). The override must be clamped to >= 2 so mu >= 1 and
+    // mu_eff stays finite.
+    const auto p1 = argmin::detail::compute_constants<double>(4, 1);
+    CHECK(p1.lambda >= 2);
+    CHECK(p1.mu >= 1);
+    CHECK(std::isfinite(p1.mu_eff));
+    CHECK(p1.mu_eff > 0.0);
+
+    // A normal override (>= 2) is untouched.
+    const auto p8 = argmin::detail::compute_constants<double>(4, 8);
+    CHECK(p8.lambda == 8);
+    CHECK(std::isfinite(p8.mu_eff));
 }

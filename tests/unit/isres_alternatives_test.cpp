@@ -19,6 +19,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 
 using Catch::Approx;
 using namespace argmin;
@@ -371,6 +372,91 @@ TEST_CASE("nlopt_faithful: oversized population is rejected with invalid_problem
     auto sr = policy.step(s);
     REQUIRE(sr.policy_status.has_value());
     CHECK(*sr.policy_status == solver_status::invalid_problem);
+}
+
+// ---------------------------------------------------------------------------
+// Infinite-bounds handling is explicit, not a silent [-1, 1] box. ISRES
+// cannot sample uniformly to +/- infinity, so a coordinate with an
+// infinite edge is SEEDED in a finite interval centered on x0 (half-width
+// 2), instead of the old silent [-1, 1] fallback that ignored x0. The
+// real (infinite) bounds still govern mutation, so the search is free to
+// leave the seeding box.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Coordinate 0 is fully unbounded (-inf, +inf); coordinate 1 is boxed.
+struct unbounded_coord_constrained
+{
+    static constexpr int problem_dimension = dynamic_dimension;
+
+    int dimension() const { return 2; }
+
+    double value(const Eigen::VectorXd& x) const
+    {
+        return x[0] * x[0] + x[1] * x[1];
+    }
+
+    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    {
+        c.resize(1);
+        c[0] = x[0] + x[1] + 100.0;  // satisfied across the seeding box
+    }
+
+    int num_equality() const { return 0; }
+    int num_inequality() const { return 1; }
+
+    Eigen::VectorXd lower_bounds() const
+    {
+        return Eigen::VectorXd{
+            {-std::numeric_limits<double>::infinity(), -10.0}};
+    }
+
+    Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd{
+            {std::numeric_limits<double>::infinity(), 10.0}};
+    }
+};
+
+}
+
+TEST_CASE("nlopt_faithful: infinite bounds seed a finite box centered on x0, not a silent [-1,1]",
+          "[isres][alternatives][nlopt_faithful]")
+{
+    unbounded_coord_constrained problem;
+    // x0's unbounded coordinate sits at 5.0 -- far outside the old silent
+    // [-1, 1] fallback box, so the seeded population betrays which box was
+    // used.
+    Eigen::VectorXd x0{{5.0, 0.5}};
+    solver_options opts;
+    opts.max_iterations = 1;
+
+    alternative::isres::nlopt_faithful_policy<> policy;
+    policy.options.seed = 42u;
+
+    auto s = policy.init(problem, x0, opts);
+
+    // x0 is injected at column 0 (unchanged: within the real bounds).
+    CHECK(s.population(0, 0) == Approx(5.0));
+    CHECK(s.population(1, 0) == Approx(0.5));
+
+    // Every other seeded individual's unbounded coordinate must lie in the
+    // x0-centered finite box [5 - 2, 5 + 2] = [3, 7]. A silent [-1, 1]
+    // (or [-10, 1]) fallback would place them at or below 1, so requiring
+    // all of them above 1 pins the explicit x0-centered seeding.
+    for(int j = 1; j < s.lambda; ++j)
+    {
+        INFO("individual " << j << " coord0 = " << s.population(0, j));
+        CHECK(s.population(0, j) >= 3.0);
+        CHECK(s.population(0, j) <= 7.0);
+    }
+
+    // The solver still runs (the infinite bound is not rejected): a step
+    // produces a finite objective.
+    auto sr = policy.step(s);
+    CHECK(std::isfinite(sr.objective_value));
 }
 
 // ---------------------------------------------------------------------------

@@ -34,14 +34,56 @@ inline constexpr double van_der_corput(std::uint32_t i, std::uint32_t b)
     return result;
 }
 
-// First 10 prime bases for Halton sequences (supports up to 10 dimensions).
-inline constexpr std::array<std::uint32_t, 10> halton_primes = {
-    2, 3, 5, 7, 11, 13, 17, 19, 23, 29
+// First 64 prime bases for Halton sequences. Covers the common
+// dimensionality range with distinct compile-time bases; higher
+// dimensions extend the sequence at runtime via halton_base().
+inline constexpr std::array<std::uint32_t, 64> halton_primes = {
+      2,   3,   5,   7,  11,  13,  17,  19,  23,  29,
+     31,  37,  41,  43,  47,  53,  59,  61,  67,  71,
+     73,  79,  83,  89,  97, 101, 103, 107, 109, 113,
+    127, 131, 137, 139, 149, 151, 157, 163, 167, 173,
+    179, 181, 191, 193, 197, 199, 211, 223, 227, 229,
+    233, 239, 241, 251, 257, 263, 269, 271, 277, 281,
+    283, 293, 307, 311
 };
 
+// Distinct prime base for coordinate `d` (0-indexed). Every dimension
+// gets its OWN prime -- there is no modular reuse, so no two coordinates
+// share a base (which would collapse those coordinates onto a diagonal
+// and defeat multi-start coverage). For d within the compile-time table
+// the base is a table lookup; beyond it, the next prime after the last
+// table entry is found by trial division, keeping bases distinct and
+// increasing for arbitrarily many dimensions.
+//
+// Reference: Halton (1960).
+inline std::uint32_t halton_base(int d)
+{
+    if(d < static_cast<int>(halton_primes.size()))
+        return halton_primes[static_cast<std::size_t>(d)];
+
+    int count = static_cast<int>(halton_primes.size());
+    std::uint32_t candidate = halton_primes.back();
+    while(count <= d)
+    {
+        candidate += 2;  // all primes past 2 are odd; the table ends odd
+        bool is_prime = true;
+        for(std::uint32_t p = 3; p * p <= candidate; p += 2)
+        {
+            if(candidate % p == 0)
+            {
+                is_prime = false;
+                break;
+            }
+        }
+        if(is_prime)
+            ++count;
+    }
+    return candidate;
+}
+
 // Generate the i-th Halton point in [0, 1]^n.
-// Each dimension uses a different prime base from halton_primes.
-// Supports up to 10 dimensions; for n > 10, wraps back to base 2.
+// Each dimension uses a distinct prime base (halton_base(d)); no two
+// coordinates share a base for any n.
 //
 // Reference: Halton (1960).
 inline Eigen::VectorXd halton_point(std::uint32_t index, int n)
@@ -49,9 +91,7 @@ inline Eigen::VectorXd halton_point(std::uint32_t index, int n)
     Eigen::VectorXd point(n);
     for(int d = 0; d < n; ++d)
     {
-        std::uint32_t base = (d < 10)
-            ? halton_primes[static_cast<std::size_t>(d)]
-            : halton_primes[static_cast<std::size_t>(d % 10)];
+        const std::uint32_t base = halton_base(d);
         point[d] = van_der_corput(index + 1, base);  // +1: skip index 0 (returns 0.0)
     }
     return point;

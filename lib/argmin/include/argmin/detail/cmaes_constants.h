@@ -44,9 +44,12 @@ cmaes_params<Scalar, Lambda> compute_constants(int n, int lambda_override = 0)
 {
     cmaes_params<Scalar, Lambda> p{};
 
-    // Population size: K&W Eq. 8.19
+    // Population size: K&W Eq. 8.19. A lambda_override of 1 would give
+    // mu = lambda/2 = 0 below, and then mu_eff = 1/sum_pos_sq = 1/0 = inf
+    // (the positive-weight loop runs zero times); clamp any positive
+    // override to at least 2 so mu >= 1 and mu_eff stays finite.
     p.lambda = (lambda_override > 0)
-        ? lambda_override
+        ? std::max(2, lambda_override)
         : 4 + static_cast<int>(std::floor(Scalar(3) * std::log(static_cast<Scalar>(n))));
 
     // Parent count: K&W Eq. 8.22
