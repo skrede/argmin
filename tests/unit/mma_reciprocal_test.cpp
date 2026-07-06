@@ -358,11 +358,12 @@ TEST_CASE("bounded dual keeps the multiplier bounded on an infeasible start",
     CHECK(unbounded_max > 1e3 * bounded_max);
 }
 
-// End-to-end: with the bounded-dual elastics, CCSA reaches the true
-// optimum from an inequality-infeasible start where the classic dual
-// would otherwise stall. min x0^2 + x1^2 s.t. x0 >= 3 from (0, 0);
-// x* = (3, 0), f* = 9, and the conservativity test sees the relaxed
-// constraint (so the elastic-relaxed subproblem is reported feasible).
+// End-to-end: with the bounded-dual box on the constraint multipliers,
+// CCSA reaches the true optimum from an inequality-infeasible start where
+// the classic (unbounded) dual would otherwise stall. min x0^2 + x1^2
+// s.t. x0 >= 3 from (0, 0); x* = (3, 0), f* = 9. The conservativity test
+// compares the raw approximation values (Svanberg concheck); the bounded
+// dual is what keeps the infeasible-start subproblem well posed.
 TEST_CASE("ccsa with bounded-dual elastics converges from an infeasible start",
           "[mma_reciprocal][elastics]")
 {

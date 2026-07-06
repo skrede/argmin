@@ -390,9 +390,6 @@ struct raa_augmented_policy
         Eigen::Vector<double, N> x_trial(n);
         double f_trial = s.f;
         Eigen::VectorXd c_trial = s.c_ineq;
-        // Relaxed constraint values g_tilde_i(x*) - y_i* and elastic slacks.
-        Eigen::Vector<double, MC> gcval_relaxed = dual_prob.gcval;
-        Eigen::Vector<double, MC> y_elastic = dual_prob.gcval;
 
         // Persistent inner dual solver: construct the box-constrained solver
         // state once per outer iteration and cold-restart it (reset_clear
@@ -436,9 +433,6 @@ struct raa_augmented_policy
                 s.y_dual = ds->x;
                 (void)dual_prob.value(s.y_dual);
                 x_trial = dual_prob.x_primal;
-                detail::recover_elastic_slacks(
-                    s.y_dual, s.c_dual, dual_prob.gcval,
-                    y_elastic, gcval_relaxed);
             }
             else
             {
@@ -456,17 +450,21 @@ struct raa_augmented_policy
                 c_trial = c_tmp;
             }
 
-            // Conservativity test against the relaxed values g_tilde_i - y_i.
+            // Conservativity test (Svanberg 2002 concheck) against the raw
+            // approximation values g_tilde_i(x*): conservative when
+            // g_tilde_i(x*) >= f_i(x*) for every constraint. The artificial
+            // slacks that keep the subproblem feasible do not enter the
+            // comparison.
             bool conservative = (dual_prob.gval >= f_trial);
             for(int i = 0; i < m && conservative; ++i)
-                conservative = (gcval_relaxed[i] >= -c_trial[i]);
+                conservative = (dual_prob.gcval[i] >= -c_trial[i]);
 
             if(conservative) break;
 
             // raa-growth: Svanberg 2002 eq. 3.7-3.8 spirit. dval_sum
             // captures total d_j mass at the trial; growth ensures the
             // augmented approximation crosses the true value for the
-            // failing constraints (evaluated on the relaxed approximation).
+            // failing constraints (evaluated on the raw approximation).
             // raa-growth. Svanberg 2002 eq. 3.9 raa' = 1.1*(raa + delta)
             // (svanberg schedule) vs the pre-fix raa + 2*delta; delta is the
             // conservativity shortfall per unit d_j mass. Both capped at 10x.
@@ -485,9 +483,9 @@ struct raa_augmented_policy
             for(int i = 0; i < m; ++i)
             {
                 const double gi_trial = -c_trial[i];
-                if(gi_trial > gcval_relaxed[i])
+                if(gi_trial > dual_prob.gcval[i])
                 {
-                    const double delta = (gi_trial - gcval_relaxed[i]) / dsum;
+                    const double delta = (gi_trial - dual_prob.gcval[i]) / dsum;
                     s.raa_con[i] = grow(s.raa_con[i], delta);
                 }
             }

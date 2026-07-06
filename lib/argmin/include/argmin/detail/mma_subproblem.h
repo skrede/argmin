@@ -56,10 +56,12 @@ namespace argmin::detail
 //                    subproblem violation.
 // The relaxed constraint value g_tilde_i(x*) - y_i is therefore the raw
 // g_tilde_i on an inactive/exactly-honored constraint and 0 on one the
-// elastic absorbed. The conservativity test and the KKT report read this
-// relaxed value, not the raw g_tilde_i, so an elastically-relaxed
-// constraint neither spuriously grows the penalty nor is mis-reported as
-// violated at the subproblem optimum.
+// elastic absorbed. This recovery exists for the bounded-dual KKT
+// relations and subproblem-feasibility reporting; it is NOT used in the
+// conservativity gate. The conservativity check compares the RAW
+// approximation values g_tilde_i(x*) against the true values f_i(x*)
+// (Svanberg 2002 concheck) -- the artificial slacks cancel in the honest
+// relaxed-problem descent argument and do not enter that comparison.
 //
 // lambda is the solved dual (0 <= lambda_i <= c_i), c_dual the per-
 // constraint bounds, gcval the raw approximation constraint values

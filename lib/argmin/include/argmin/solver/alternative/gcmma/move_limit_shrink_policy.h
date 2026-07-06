@@ -362,9 +362,6 @@ struct move_limit_shrink_policy
         Eigen::Vector<double, N> x_trial(n);
         double f_trial = s.f;
         Eigen::VectorXd c_trial = s.c_ineq;
-        // Relaxed constraint values g_tilde_i(x*) - y_i* and elastic slacks.
-        Eigen::Vector<double, MC> gcval_relaxed = dual_prob.gcval;
-        Eigen::Vector<double, MC> y_elastic = dual_prob.gcval;
 
         // Persistent inner dual solver: construct the box-constrained solver
         // state once per outer iteration and cold-restart it (reset_clear
@@ -406,9 +403,6 @@ struct move_limit_shrink_policy
                 s.y_dual = ds->x;
                 (void)dual_prob.value(s.y_dual);
                 x_trial = dual_prob.x_primal;
-                detail::recover_elastic_slacks(
-                    s.y_dual, s.c_dual, dual_prob.gcval,
-                    y_elastic, gcval_relaxed);
             }
             else
             {
@@ -427,14 +421,16 @@ struct move_limit_shrink_policy
                 c_trial = c_tmp;
             }
 
-            // Conservativity test (Svanberg 2002 §4.2 form) against the
-            // relaxed constraint values g_tilde_i - y_i:
+            // Conservativity test (Svanberg 2002 §4.2 concheck) against the
+            // raw approximation values g_tilde_i(x*):
             //   Objective: gval >= f_trial.
             //   Constraints (MMA convention g_i = -c_i):
-            //     (gcval[i] - y_i) >= -c_trial[i].
+            //     gcval[i] >= -c_trial[i].
+            // The artificial slacks that keep the subproblem feasible do
+            // not enter the comparison.
             bool conservative = (dual_prob.gval >= f_trial);
             for(int i = 0; i < m && conservative; ++i)
-                conservative = (gcval_relaxed[i] >= -c_trial[i]);
+                conservative = (dual_prob.gcval[i] >= -c_trial[i]);
 
             if(conservative) break;
 

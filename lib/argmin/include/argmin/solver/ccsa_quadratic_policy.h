@@ -406,10 +406,6 @@ struct ccsa_quadratic_policy
         Eigen::Vector<double, N> x_trial(n);
         double f_trial = s.f;
         Eigen::VectorXd c_ineq_trial = s.c_ineq;
-        // Relaxed constraint values g_tilde_i(x*) - y_i* and recovered
-        // elastic slacks (populated by the dual solve).
-        Eigen::Vector<double, MC> gcval_relaxed = dual_prob.gcval;
-        Eigen::Vector<double, MC> y_elastic = dual_prob.gcval;
 
         // Persistent inner dual solver: construct the box-constrained solver
         // state once per outer iteration and cold-restart it (reset_clear
@@ -461,12 +457,6 @@ struct ccsa_quadratic_policy
                 // dual_prob.x_primal, gval, wval, gcval.
                 (void)dual_prob.value(s.y_dual);
                 x_trial = dual_prob.x_primal;
-                // Recover the primal elastic slacks and the relaxed
-                // constraint values (raw g_tilde_i on an inactive
-                // constraint, 0 on one the elastic absorbed).
-                detail::recover_elastic_slacks(
-                    s.y_dual, s.c_dual, dual_prob.gcval,
-                    y_elastic, gcval_relaxed);
             }
             else
             {
@@ -487,8 +477,13 @@ struct ccsa_quadratic_policy
                 c_ineq_trial = c_tmp;
             }
 
-            // Conservativity test (NLopt ccsa_quadratic.c lines 448, 461)
-            // against the relaxed constraint values g_tilde_i - y_i.
+            // Conservativity test (NLopt ccsa_quadratic.c lines 468-469)
+            // against the raw approximation values g_tilde_i(x*): the
+            // approximation is conservative when g_tilde_i(x*) >= f_i(x*)
+            // for every constraint (Svanberg 2002 concheck; the artificial
+            // slacks that keep the subproblem feasible do not enter this
+            // comparison -- they cancel in the honest relaxed-problem
+            // descent argument).
             bool inner_done = (dual_prob.gval >= f_trial);
             bool feasible_cur = true;
             double infeasibility_cur = 0.0;
@@ -496,7 +491,7 @@ struct ccsa_quadratic_policy
             {
                 double gi_trial = -c_ineq_trial[i];
                 inner_done = inner_done
-                    && (gcval_relaxed[i] >= gi_trial);
+                    && (dual_prob.gcval[i] >= gi_trial);
                 if(gi_trial > 0.0)
                 {
                     feasible_cur = false;
@@ -518,8 +513,9 @@ struct ccsa_quadratic_policy
             if(inner_done)
                 break;
 
-            // Rho growth on non-conservative trial (NLopt mma.c:502-503),
-            // on the relaxed constraint approximation.
+            // Rho growth on non-conservative trial (NLopt
+            // ccsa_quadratic.c lines 511-517), on the raw approximation
+            // shortfall f_i(x*) - g_tilde_i(x*).
             double wval = std::max(dual_prob.wval, 1e-20);
             if(f_trial > dual_prob.gval)
                 s.rho = std::min(10.0 * s.rho,
@@ -527,10 +523,10 @@ struct ccsa_quadratic_policy
             for(int i = 0; i < m; ++i)
             {
                 double gi_trial = -c_ineq_trial[i];
-                if(gi_trial > gcval_relaxed[i])
+                if(gi_trial > dual_prob.gcval[i])
                     s.rhoc[i] = std::min(10.0 * s.rhoc[i],
                         1.1 * (s.rhoc[i]
-                               + (gi_trial - gcval_relaxed[i])
+                               + (gi_trial - dual_prob.gcval[i])
                                  / wval));
             }
 
