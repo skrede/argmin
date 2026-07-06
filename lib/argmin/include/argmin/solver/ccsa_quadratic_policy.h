@@ -45,7 +45,6 @@
 #include <Eigen/Core>
 
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -137,6 +136,12 @@ struct ccsa_quadratic_policy
         bool feasible{false};
         double infeasibility{0.0};
 
+        // Set during init() when the problem carries equality constraints.
+        // CCSA sizes its constraint buffers for inequalities only; an
+        // equality-constrained problem is rejected at the top of step()
+        // before any constraint evaluation. See init() for the rationale.
+        bool invalid_problem{false};
+
         options_type opts;
     };
 
@@ -176,14 +181,22 @@ struct ccsa_quadratic_policy
                       "ccsa_quadratic_policy requires differentiable<Problem>");
         static_assert(constrained<Problem>,
                       "ccsa_quadratic_policy requires constrained<Problem>");
-        assert(problem.num_equality() == 0
-               && "MMA handles inequality constraints only. "
-                  "Use SQP or augmented Lagrangian for equality constraints.");
 
         const int n = problem.dimension();
+        const int n_eq = problem.num_equality();
         const int m_ineq = problem.num_inequality();
+        // Full constraint count. problem.constraints()/constraint_jacobian()
+        // write n_eq + n_ineq rows with the equalities first, so any probe
+        // buffer must be sized on the total or an equality-constrained
+        // problem overflows it (a heap out-of-bounds write in release,
+        // where the debug precondition assert is compiled out). CCSA
+        // handles inequality constraints only; equality-constrained
+        // problems are flagged here and rejected at the top of step(). Use
+        // SQP or an augmented Lagrangian for equality constraints.
+        const int n_all = n_eq + m_ineq;
         state_type<Problem> s;
         s.problem = &problem;
+        s.invalid_problem = (n_eq > 0);
 
         s.x = x0;
         s.g.resize(n);
@@ -192,14 +205,20 @@ struct ccsa_quadratic_policy
 
         s.f = problem.value(x0);
         problem.gradient(x0, s.g);
-        if(m_ineq > 0)
+        if(n_all > 0)
         {
-            Eigen::VectorXd c_tmp(m_ineq);
+            // Size the probe on the full constraint count (equalities
+            // first) so the evaluation cannot overflow even when the
+            // problem is about to be rejected for carrying equalities.
+            Eigen::VectorXd c_tmp(n_all);
             problem.constraints(x0, c_tmp);
-            s.c_ineq = c_tmp;
-            Eigen::MatrixXd J_tmp(m_ineq, n);
+            Eigen::MatrixXd J_tmp(n_all, n);
             problem.constraint_jacobian(x0, J_tmp);
-            s.J_ineq = J_tmp;
+            if(!s.invalid_problem)
+            {
+                s.c_ineq = c_tmp;
+                s.J_ineq = J_tmp;
+            }
         }
 
         if constexpr(bound_constrained<Problem>)
@@ -234,10 +253,11 @@ struct ccsa_quadratic_policy
         s.rhoc.resize(m_ineq);
         s.rhoc.setConstant(ri);
 
-        // Initial feasibility assessment.
+        // Initial feasibility assessment. Skipped for a rejected problem
+        // whose inequality buffer was intentionally left unpopulated.
         s.feasible = true;
         s.infeasibility = 0.0;
-        for(int i = 0; i < m_ineq; ++i)
+        for(int i = 0; i < m_ineq && !s.invalid_problem; ++i)
         {
             double gi = -s.c_ineq[i]; // g_i <= 0 form
             if(gi > 0.0)
@@ -264,6 +284,25 @@ struct ccsa_quadratic_policy
 
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
+
+        // Reject equality-constrained problems before touching any
+        // constraint buffer (they are sized for inequalities only). This
+        // is a hard, exception-free runtime precondition failure surfaced
+        // as a terminal status; the caller must route equalities through
+        // SQP or an augmented Lagrangian.
+        if(s.invalid_problem)
+        {
+            return step_result<double>{
+                .objective_value = s.f,
+                .gradient_norm = s.g.norm(),
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .x_norm = s.x.norm(),
+                .policy_status = solver_status::invalid_problem,
+            };
+        }
 
         const std::uint16_t max_inner =
             s.opts.max_inner_iterations.value_or(15);

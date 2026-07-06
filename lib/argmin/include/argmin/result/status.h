@@ -26,7 +26,14 @@ enum class solver_status : std::uint8_t
     trust_region_step_rejected,
     objective_stalled,
     time_limit_reached,
-    aborted
+    aborted,
+    // The problem as posed violates a hard precondition of the chosen
+    // method and cannot be solved as given -- for example, an
+    // equality-constrained problem handed to an inequality-and-box-only
+    // method whose constraint buffers have no room for equality rows.
+    // Signalled at runtime (the library is exception-free) so the caller
+    // observes a terminal status instead of undefined behavior.
+    invalid_problem
 };
 
 }

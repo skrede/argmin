@@ -5,6 +5,7 @@ add_executable(argmin_unit_tests
     lm_test.cpp
     sqp_test.cpp
     ccsa_quadratic_test.cpp
+    mma_equality_reject_test.cpp
     mma_reciprocal_test.cpp
     gcmma_move_limit_shrink_test.cpp
     gcmma_rho_wval_test.cpp
