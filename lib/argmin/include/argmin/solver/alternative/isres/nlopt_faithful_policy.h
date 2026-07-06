@@ -270,7 +270,10 @@ struct nlopt_faithful_policy
             options.population_size.value_or(
                 static_cast<std::uint32_t>(20 * (n + 1))));
         const double frac = options.parent_fraction.value_or(1.0 / 7.0);
-        s.mu = std::max(1, static_cast<int>(s.lambda * frac));
+        // mu = ceil(lambda * frac) (NLopt isres.c: mu = ceil(pop/7)),
+        // NOT a truncating int() cast: at lambda=60 the default fraction
+        // gives ceil(60/7) = 9 survivors, not int(8.571) = 8.
+        s.mu = std::max(1, static_cast<int>(std::ceil(s.lambda * frac)));
         s.pf = options.ranking_probability.value_or(0.45);
         // The alpha state field carries the sigma-smoothing weight,
         // NOT pull-to-best (which this variant does not implement).
@@ -309,6 +312,13 @@ struct nlopt_faithful_policy
             detail::initialize_population<N>(
                 n, s.lambda, s.lower, s.upper, *s.rng);
         s.population.leftCols(s.lambda) = initial_population;
+
+        // Inject x0 into the initial population (NLopt isres.c:128 seeds
+        // the first individual with the caller's starting point rather
+        // than discarding it). Clamp to the box so the injected point is
+        // feasible with respect to the bounds. This makes the solver
+        // warm-startable: a good x0 participates in the first ranking.
+        s.population.col(0) = x0.cwiseMax(s.lower).cwiseMin(s.upper);
 
         const auto initial_sigmas =
             detail::initialize_sigmas<N>(n, s.lambda, s.lower, s.upper);
@@ -486,12 +496,56 @@ struct nlopt_faithful_policy
         for(int j = 0; j < mu; ++j)
             s.x0_snapshot_buf.col(j) = s.population.col(j);
 
-        // (3) Top-mu DE-style differential variation (NLopt
-        // isres.c:254-260). The per-component fallback check at the
-        // boundary makes the body inline rather than calling the
-        // column-level free function detail::differential_variation();
-        // the operator is, however, the same: x[rk] += gamma *
-        // (x0_snapshot[0] - x0_snapshot[k+1]).
+        // (3) Bottom [mu, lambda) standard mutation FIRST (NLopt
+        // isres.c mutates the non-survivors before the survivors). Parent
+        // for slot k is the rank-(k%mu) survivor; because this loop runs
+        // before the survivor differential variation below, it reads the
+        // survivors' UN-mutated positions/sigmas as parents (the faithful
+        // order -- mutating survivors first would corrupt these parents).
+        // No differential variation here: there is no second anchor.
+        for(int k = mu; k < lambda; ++k)
+        {
+            const std::uint32_t rk =
+                s.indices_buf[static_cast<std::size_t>(k)];
+            const std::uint32_t ri =
+                s.indices_buf[static_cast<std::size_t>(k % mu)];
+            const double taup_rand = s.rates.tau_prime * normal(rng);
+
+            for(int j = 0; j < n; ++j)
+            {
+                const double sigmamax = (s.upper(j) - s.lower(j))
+                    / std::sqrt(static_cast<double>(n));
+                const double sigi = s.sigmas(j, ri);
+
+                s.sigmas(j, rk) = detail::log_normal_mutate(
+                    sigi, s.rates.tau, taup_rand, sigmamax, rng);
+
+                for(std::uint16_t try_k = 0;
+                    try_k < resample_budget;
+                    ++try_k)
+                {
+                    s.population(j, rk) = s.population(j, ri)
+                        + s.sigmas(j, rk) * normal(rng);
+                    if(s.population(j, rk) >= s.lower(j)
+                       && s.population(j, rk) <= s.upper(j))
+                        break;
+                    if(try_k + 1 == resample_budget)
+                        s.population(j, rk) = std::clamp(
+                            s.population(j, rk),
+                            s.lower(j), s.upper(j));
+                }
+                s.sigmas(j, rk) =
+                    sigi + alpha * (s.sigmas(j, rk) - sigi);
+            }
+        }
+
+        // (4) Top-mu DE-style differential variation (NLopt
+        // isres.c:254-260), applied AFTER the non-survivors so their
+        // parents above saw the un-mutated survivors. The per-component
+        // fallback check at the boundary makes the body inline rather
+        // than calling the column-level free function
+        // detail::differential_variation(); the operator is, however, the
+        // same: x[rk] += gamma * (x0_snapshot[0] - x0_snapshot[k+1]).
         for(int k = 0; k < mu; ++k)
         {
             const std::uint32_t rk =
@@ -546,46 +600,6 @@ struct nlopt_faithful_policy
                     s.sigmas(j, rk) =
                         sigi + alpha * (s.sigmas(j, rk) - sigi);
                 }
-            }
-        }
-
-        // (4) Bottom [mu, lambda) standard mutation only
-        // (NLopt isres.c:266-277). Parent for slot k is the rank-(k%mu)
-        // individual (NLopt convention); no differential variation
-        // because there is no second anchor.
-        for(int k = mu; k < lambda; ++k)
-        {
-            const std::uint32_t rk =
-                s.indices_buf[static_cast<std::size_t>(k)];
-            const std::uint32_t ri =
-                s.indices_buf[static_cast<std::size_t>(k % mu)];
-            const double taup_rand = s.rates.tau_prime * normal(rng);
-
-            for(int j = 0; j < n; ++j)
-            {
-                const double sigmamax = (s.upper(j) - s.lower(j))
-                    / std::sqrt(static_cast<double>(n));
-                const double sigi = s.sigmas(j, ri);
-
-                s.sigmas(j, rk) = detail::log_normal_mutate(
-                    sigi, s.rates.tau, taup_rand, sigmamax, rng);
-
-                for(std::uint16_t try_k = 0;
-                    try_k < resample_budget;
-                    ++try_k)
-                {
-                    s.population(j, rk) = s.population(j, ri)
-                        + s.sigmas(j, rk) * normal(rng);
-                    if(s.population(j, rk) >= s.lower(j)
-                       && s.population(j, rk) <= s.upper(j))
-                        break;
-                    if(try_k + 1 == resample_budget)
-                        s.population(j, rk) = std::clamp(
-                            s.population(j, rk),
-                            s.lower(j), s.upper(j));
-                }
-                s.sigmas(j, rk) =
-                    sigi + alpha * (s.sigmas(j, rk) - sigi);
             }
         }
 
@@ -753,6 +767,10 @@ struct nlopt_faithful_policy
             detail::initialize_population<N>(
                 n, s.lambda, s.lower, s.upper, *s.rng);
         s.population.leftCols(s.lambda) = initial_population;
+
+        // Inject x0 into the initial population on reset too (same
+        // warm-start seeding as init(); NLopt isres.c:128).
+        s.population.col(0) = x0.cwiseMax(s.lower).cwiseMin(s.upper);
 
         const auto initial_sigmas =
             detail::initialize_sigmas<N>(n, s.lambda, s.lower, s.upper);

@@ -239,6 +239,32 @@ struct equality_qp
 
 }
 
+// Generation-loop faithfulness: mu = ceil(lambda/7) (NLopt rounding, not
+// a truncating int cast) and x0 is injected into the initial population
+// (NLopt seeds the first individual with the caller's starting point
+// instead of discarding it).
+TEST_CASE("isres: mu rounds up (ceil) and x0 is injected into the initial population",
+          "[isres][oracle-pin]")
+{
+    recording_qp problem;
+    Eigen::VectorXd x0{{2.0, 2.0}};
+    solver_options opts;
+
+    isres_policy<> policy;
+    policy.options.seed = 42u;
+    policy.options.population_size = 60u;  // ceil(60/7) = 9, trunc = 8
+
+    auto s = policy.init(problem, x0, opts);
+
+    // mu-rounding: ceil(60/7) = 9, not int(60 * (1/7)) = 8.
+    CHECK(s.lambda == 60);
+    CHECK(s.mu == 9);
+
+    // x0-injection: the first individual is exactly the (in-bounds) x0.
+    CHECK(s.population(0, 0) == Approx(2.0).epsilon(0).margin(1e-12));
+    CHECK(s.population(1, 0) == Approx(2.0).epsilon(0).margin(1e-12));
+}
+
 // Equality-constrained best gate: whenever the solver emits a converged
 // status (ftol_reached), the RETURNED x must be feasible within the
 // feasibility gate. Pre-fix the feasible branch required v <= 0.0
