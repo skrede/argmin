@@ -12,11 +12,17 @@ sampling-level helpers.
 
 | Variant | Mechanism | Reference | Empirical role |
 |---|---|---|---|
-| `cmaes_sampling_marsaglia.h` | Marsaglia polar Gaussian on xoshiro256+; pair-cached via thread_local. | Marsaglia & Bray (1964), SIAM Review 6(3). | **Production winner** (Plan 05 perf-record A/B on micro_cmaes): drops the production std::normal_distribution<xoshiro256+> slice from 10.55% to 8.39% self-time, lowest combined sample_offspring + Gaussian transform cost (11.86%), tied with Ziggurat at end-to-end wall (495 ms vs 496 ms 5-rep median). Wins on tiebreaker by implementation simplicity (30 LOC body, no compile-time table). |
-| `cmaes_sampling_ziggurat.h` | 256-region compile-time-table Ziggurat with Marsaglia-Tsang tail-handling. | Marsaglia & Tsang (2000), J. Statistical Software 5(8); Doornik (2005). | Loses by 0.16 pp on combined sample_offspring + Gaussian transform self-time (12.02% vs 11.86% Marsaglia); tied at end-to-end wall. The 256-region table-lookup pressure offsets the lower per-draw cost. Stays buildable for future re-comparison via temporary include swap in `detail/cmaes_sampling.h`. |
+| `cmaes_sampling_marsaglia.h` | Marsaglia polar Gaussian on xoshiro256+; both halves of each polar pair are consumed locally within one call (no persistent cache), so the output is a pure function of the RNG stream. | Marsaglia & Bray (1964), SIAM Review 6(3). | **Production winner** (perf-record A/B on micro_cmaes): drops the production std::normal_distribution<xoshiro256+> slice from 10.55% to 8.39% self-time, lowest combined sample_offspring + Gaussian transform cost, at indistinguishable end-to-end wall. Wins on implementation simplicity (no compile-time table). |
 
-See `benchmarks/micro_cmaes.cpp` and the plan A/B verdict doc for the
-perf-record A/B and the empirical decision.
+A 256-region compile-time-table Ziggurat variant (Marsaglia & Tsang 2000;
+Doornik 2005) was also evaluated but removed: its published-style
+construction truncated the tail at the sentinel |z| ~ 3.911 (the strip-0
+acceptance ratio was >> 1, so the tail fallback was never reached), a
+correctness defect whose marginal speed edge did not justify the
+maintenance risk for a non-production variant.
+
+See `benchmarks/micro_cmaes.cpp` for the perf-record A/B and the
+empirical decision.
 
 ## Lifecycle
 
