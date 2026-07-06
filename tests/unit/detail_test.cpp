@@ -503,9 +503,12 @@ TEST_CASE("ISRES operators preserve existing detail symbols byte-for-byte",
     const int n = 4;
     argmin::detail::es_learning_rates rates =
         argmin::detail::compute_es_rates(n);
-    CHECK(rates.tau == Approx(1.0 / std::sqrt(2.0 * n)));
-    CHECK(rates.tau_prime
+    // Role-correct assignment (Schwefel/NLopt): tau is the per-component
+    // rate 1/sqrt(2*sqrt(n)); tau_prime the once-per-individual global
+    // rate 1/sqrt(2*n).
+    CHECK(rates.tau
           == Approx(1.0 / std::sqrt(2.0 * std::sqrt(static_cast<double>(n)))));
+    CHECK(rates.tau_prime == Approx(1.0 / std::sqrt(2.0 * n)));
 
     argmin::detail::isres_operator_workspace<double, Eigen::Dynamic> ws(n);
     (void)ws;  // ctor compiles, no fields exposed for direct check.

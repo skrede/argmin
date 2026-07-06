@@ -93,6 +93,13 @@ Eigen::Matrix<Scalar, N, Eigen::Dynamic> initialize_sigmas(
 // Mutate a single individual with log-normal step-size adaptation
 // and differential variation.
 //
+// UNUSED / deletion candidate: this free function has no callers in
+// the library (grep-confirmed). Its local tau/tau_prime meaning is the
+// inverse of the shared es_learning_rates convention above (here tau is
+// the once-per-individual global noise and tau_prime the per-component
+// noise), a pre-rewrite artifact. It is left intact rather than edited
+// to keep this change one-cause; a future cleanup should remove it.
+//
 // Returns (offspring position, new sigma).
 //
 // Steps:
@@ -230,11 +237,23 @@ Eigen::Vector<Scalar, Lambda> compute_violations(
     return violations;
 }
 
-// Standard ES learning rates for log-normal step-size adaptation.
+// Standard ES learning rates for log-normal step-size adaptation
+// (Schwefel 1995 convention; NLopt 2.10.0 isres.c).
 //
-// tau = 1 / sqrt(2*n), tau_prime = 1 / sqrt(2*sqrt(n))
+//   tau       = 1 / sqrt(2*sqrt(n))   -- per-component rate; applied
+//               once per coordinate in the log-normal sigma update
+//               (consumed as rates.tau by log_normal_mutate).
+//   tau_prime = 1 / sqrt(2*n)         -- global rate; applied once per
+//               individual to the shared log-normal noise
+//               (consumed as rates.tau_prime for the taup draw).
 //
-// Reference: K&W Section 8.6.
+// The per-component rate must EXCEED the global rate for n > 1: it
+// shrinks as n^(-1/4), the global rate as n^(-1/2). NLopt's isres.c
+// draws taup = tau_prime * N(0,1) once per individual and adds
+// tau * N_j(0,1) per component; the field names above match that
+// consumption exactly.
+//
+// Reference: NLopt 2.10.0 isres.c; Schwefel (1995); K&W Section 8.6.
 struct es_learning_rates
 {
     double tau;
@@ -245,8 +264,8 @@ inline es_learning_rates compute_es_rates(int n)
 {
     double nd = static_cast<double>(n);
     return {
-        .tau = 1.0 / std::sqrt(2.0 * nd),
-        .tau_prime = 1.0 / std::sqrt(2.0 * std::sqrt(nd)),
+        .tau = 1.0 / std::sqrt(2.0 * std::sqrt(nd)),
+        .tau_prime = 1.0 / std::sqrt(2.0 * nd),
     };
 }
 

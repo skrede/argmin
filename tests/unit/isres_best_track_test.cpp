@@ -168,13 +168,14 @@ TEST_CASE("isres: tau/tau' oracle constants match the Schwefel/NLopt rate formul
     CHECK(global_rate == Approx(0.15811388300841897).epsilon(1e-15));
 }
 
-// RED against the current substrate (see Pin 2 header derivation): the
-// two rates are assigned to the opposite roles in detail::compute_es_rates.
-// [!shouldfail] records this as the expected disposition; once tau and
-// tau_prime are swapped back to their role-correct assignment, this case
-// starts passing and the tag must be removed.
+// Now PASSES: detail::compute_es_rates assigns the per-component rate
+// 1/sqrt(2*sqrt(n)) to rates.tau and the global rate 1/sqrt(2*n) to
+// rates.tau_prime, matching the generation loop's consumption
+// (rates.tau_prime scales the once-per-individual taup draw; rates.tau
+// the per-component draw in log_normal_mutate). Pre-fix the two
+// formulas were assigned to the opposite roles.
 TEST_CASE("isres: tau/tau' role assignment matches NLopt",
-          "[isres][oracle-pin][!shouldfail]")
+          "[isres][oracle-pin]")
 {
     const int n = 20;
     const auto rates = detail::compute_es_rates(n);
