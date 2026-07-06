@@ -123,9 +123,15 @@ int lsi(
     ws.E_dyn = E;
     ws.qr.compute(ws.E_dyn);
 
+    // Eigen's ColPivHouseholderQR::setThreshold(t) declares a pivot
+    // nonzero iff |pivot| > t * |maxPivot|: it premultiplies the supplied
+    // threshold by the largest pivot magnitude internally. Passing the
+    // absolute product eps*n*maxPivot here would therefore be squared to
+    // an effective eps*n*maxPivot^2 rank cutoff. Pass the relative factor
+    // eps*n only and let Eigen apply the maxPivot scaling, yielding the
+    // intended rank threshold eps*n*|maxPivot|.
     const Scalar thresh = std::numeric_limits<Scalar>::epsilon()
-                          * Scalar(n)
-                          * ws.qr.maxPivot();
+                          * Scalar(n);
     ws.qr.setThreshold(thresh);
     const int rank = static_cast<int>(ws.qr.rank());
     if(rank < n)
