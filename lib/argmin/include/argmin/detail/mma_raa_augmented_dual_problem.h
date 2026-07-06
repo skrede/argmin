@@ -131,6 +131,23 @@ private:
         return (U - L) * (term1 - term2);
     }
 
+    // Second derivative d^2 d_j / dx^2, closed form. With a = x - x_k,
+    // u = U - x, l = x - L, s = (u l)' = U + L - 2x, and ul = u l:
+    //   d'' = 2 (U-L) [ ul^2 - 2 a s ul + a^2 ul + a^2 s^2 ] / ul^3.
+    // Used for the exact Newton slope of the augmented FOC (replaces a
+    // finite difference).
+    static Scalar d_second(Scalar x, Scalar x_k, Scalar L, Scalar U)
+    {
+        const Scalar a = x - x_k;
+        const Scalar u = U - x;
+        const Scalar l = x - L;
+        const Scalar s = U + L - Scalar(2) * x;
+        const Scalar ul = u * l;
+        return Scalar(2) * (U - L)
+             * (ul * ul - Scalar(2) * a * s * ul + a * a * ul + a * a * s * s)
+             / (ul * ul * ul);
+    }
+
     // Per-component Newton on the augmented FOC. The function is monotone
     // increasing in x_j (each piece -- the reciprocal terms and the d_j
     // derivative term in (alpha, beta) -- contributes a non-negative
@@ -157,17 +174,14 @@ private:
             const Scalar f = P / (dxU * dxU) - Q / (dxL * dxL)
                              + R * d_deriv(x, x_k, L, U);
 
-            // Numerical derivative of f for Newton step. f' is positive
-            // throughout (L, U) for a strictly-convex augmented Lagrangian,
-            // so a finite-difference approximation is acceptable; use
-            // analytical where convenient.
-            const Scalar h = std::max(Scalar(1e-8) * std::abs(x),
-                                      Scalar(1e-12));
-            const Scalar dxU_p = U - (x + h);
-            const Scalar dxL_p = (x + h) - L;
-            const Scalar f_p = P / (dxU_p * dxU_p) - Q / (dxL_p * dxL_p)
-                               + R * d_deriv(x + h, x_k, L, U);
-            const Scalar fp = (f_p - f) / h;
+            // Exact Newton slope f'(x) = 2P/dxU^3 + 2Q/dxL^3 + R d''(x).
+            // f' is strictly positive throughout (L, U) for the convex
+            // augmented approximation, so the root is unique. (Replaces a
+            // finite difference that doubled the d_j evaluations per Newton
+            // iteration.)
+            const Scalar fp = Scalar(2) * P / (dxU * dxU * dxU)
+                            + Scalar(2) * Q / (dxL * dxL * dxL)
+                            + R * d_second(x, x_k, L, U);
 
             if(std::abs(f) < newton_tol)
                 break;
