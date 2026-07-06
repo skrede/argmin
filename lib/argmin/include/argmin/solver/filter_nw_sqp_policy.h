@@ -83,9 +83,6 @@ struct filter_nw_sqp_policy
     static constexpr double default_gradient_tolerance = 1e-8;
     static constexpr double default_step_tolerance_rel = 1e-12;
     static constexpr double default_feasibility_tolerance = 1e-6;
-    // Kraft 1988 §2.2.4 + N&W §18.3 (SOC violation threshold). Converges
-    // with the kraft_slsqp / nw_sqp lineage values.
-    static constexpr double default_soc_violation_threshold = 1e-3;
 
     // Armijo backtracking budget (NLopt-parity sustained backtracking
     // before declaring exhaustion); mirrors the kraft + nw_sqp lineages.
@@ -164,7 +161,6 @@ struct filter_nw_sqp_policy
         };
         detail::restoration_strategy restoration{detail::restoration_strategy::hybrid};
         std::uint16_t max_restoration_steps{10};
-        double soc_violation_threshold{default_soc_violation_threshold};
         std::uint16_t stall_window{50};
 
         // Filter envelope margins (Wachter & Biegler 2006 Section 2.3,

@@ -67,7 +67,6 @@ struct nw_sqp_policy
     template <int M>
     using rebind = nw_sqp_policy<M>;
 
-    static constexpr double default_soc_violation_threshold = 1e-3;
     static constexpr double default_gradient_tolerance = 1e-8;
     static constexpr double default_step_tolerance_rel = 1e-12;
     static constexpr double default_feasibility_tolerance = 1e-6;
@@ -148,16 +147,6 @@ struct nw_sqp_policy
             .max_iterations = default_qp_max_iterations,
             .tolerance = default_qp_tolerance,
         };
-        // Maratos second-order correction retry threshold. SOC fires when
-        // Armijo rejects the trial step AND the constraint violation at x_k
-        // exceeds this threshold. Below the threshold the linearization is
-        // consistent enough that the SOC step adds work without materially
-        // changing the search direction. Direct-field-default form
-        // (mirrors kraft_slsqp_policy::options_type::soc_violation_threshold).
-        //
-        // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (SOC threshold);
-        //            N&W 2e §18.3 (Maratos effect).
-        double soc_violation_threshold{default_soc_violation_threshold};
         std::uint16_t stall_window{50};
 
         // BFGS-reset retry cap on line-search exhaustion. On Armijo

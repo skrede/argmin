@@ -137,14 +137,20 @@ TEST_CASE("nw_sqp family fires a second-order correction at a near-feasible "
 // the quadratic / second-order-corrected step and reaches the optimum. Pinned
 // [!shouldfail]: the pre-fix run returns f ~ -40.375.
 //
-// This is the diagnostic for the nw_sqp-family SOC defect. If restoring the
-// Maratos SOC trigger (theta(x + p) >= theta(x_k), replacing the h_k > 1e-3
-// heuristic) alone does not resolve the over-rejection, the next suspect is the
-// filter_nw_sqp SOC residual assembly, which drives the correction RHS from the
-// stored trial-constraint buffer WITHOUT re-evaluating the full-step constraint
-// c(x + p) and WITHOUT the +J*p linearization term that the SLSQP-side residual
-// carries. Both candidate root causes are stated here without asserting which;
-// the fix plan resolves it and records an honest resolved / partial verdict.
+// This is the diagnostic for the nw_sqp-family SOC defect chain. The Maratos
+// trigger (theta(x + p) >= theta(x_k)) and the N&W Section 18.3 residual
+// re-anchor (-c(x + p) + J*p) are in place and verified by the single-step
+// witness above, yet this case still parks at f ~ -40.375: on HS043 the SOC
+// QP is warm-started at the main-QP solution p, which is a stationary point
+// of the identical QP objective, so active_set_qp_solver's working-set loop
+// terminates immediately at p without ever consulting the corrected RHS
+// (measured: |p_soc| == |p| and h(x_soc) == h(x + p) on every fired SOC).
+// The solver's phase-1 projection restores equality feasibility only; an
+// inequality-infeasible warm start is outside its documented precondition,
+// so the correction degenerates to a re-test of the already-rejected full
+// step on inequality-constrained problems. Resolving this requires an
+// inequality-feasible SOC warm start or QP-substrate phase-1 support; the
+// tag stays until that lands.
 TEST_CASE("filter_nw_sqp reaches the HS043 optimum without over-rejection",
           "[filter_nw_sqp][hs043][witness][!shouldfail]")
 {
