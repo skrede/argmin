@@ -370,14 +370,22 @@ struct pwq_reparameterization_policy
         }
         s.initial_sigma = s.sigma;
 
-        // Lambda: user override or auto-compute, with bounded-problem minimum.
-        // Hansen (2023): lambda >= 4*N recommended for multimodal landscape coverage.
+        // Population size: user override, else the Hansen (2023,
+        // arXiv:1604.00772 §B.1) default 4 + floor(3 ln n), for both
+        // bounded and unbounded problems. A bounded landscape does NOT get
+        // a widened floor: a sweep over {4 + floor(3 ln n), 2n, 4n, 8n} on
+        // bounded unimodal controls (sphere, Rosenbrock) and multimodal
+        // problems (Rastrigin, Ackley, Schwefel) at n = 2, 5, 10 showed the
+        // larger populations inflate the unimodal eval count 2-4x while
+        // buying only marginal gains on the hard multimodal problems (which
+        // remain largely unsolved even at 8n); Ackley reaches near-full
+        // success at the Hansen default for a fraction of the cost. The
+        // population-doubling restart is the designed escalation path when
+        // a base run stalls on a multimodal landscape, so the base default
+        // stays at the efficient Hansen value.
         int pop_lambda = options.lambda.has_value()
             ? static_cast<int>(options.lambda.value())
             : 0;
-        if(pop_lambda == 0 && s.has_bounds)
-            pop_lambda = std::max(4 * n,
-                static_cast<int>(4 + std::floor(3.0 * std::log(n))));
         s.params = detail::compute_constants(n, pop_lambda);
 
         // Convert the silent UB at lambda > MaxPop into a hard
@@ -1187,20 +1195,15 @@ struct pwq_reparameterization_policy
         // References:
         //   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
-        //   Hansen (2023) arXiv:1604.00772 §7.1 (bounded population floor),
+        //   Hansen (2023) arXiv:1604.00772 §B.1 (population default),
         //   §B.2 (eigendecomposition skip period), §B.3 (stagnation window).
         //
-        // Population size: honor an explicit override, else apply the same
-        // bounded-problem floor init() uses (a bounded landscape uses at
-        // least max(4n, 4 + floor(3 ln n)); the minimal default is
-        // unimodal-sized). Without this floor a reset on a bounded problem
-        // quietly drops to the smaller default and diverges from init().
+        // Population size: honor an explicit override, else the same Hansen
+        // default 4 + floor(3 ln n) init() applies (no widened bounded
+        // floor), so a reset matches a fresh run.
         int pop_lambda = options.lambda.has_value()
             ? static_cast<int>(options.lambda.value())
             : 0;
-        if(pop_lambda == 0 && s.has_bounds)
-            pop_lambda = std::max(4 * n,
-                static_cast<int>(4 + std::floor(3.0 * std::log(n))));
         s.params = detail::compute_constants(n, pop_lambda);
         if(s.params.lambda > state_type<P>::MaxPop)
             throw std::runtime_error(

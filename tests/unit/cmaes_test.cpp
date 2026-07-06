@@ -218,7 +218,8 @@ TEST_CASE("cmaes_policy: initial per-coordinate spread scales with each box widt
     CHECK(s.C(1, 1) == Approx(s.D[1] * s.D[1]).epsilon(1e-10));
 }
 
-TEST_CASE("cmaes_policy: lambda minimum for bounded problems", "[cmaes]")
+TEST_CASE("cmaes_policy: bounded problems use the Hansen population default",
+          "[cmaes]")
 {
     bounded_rosenbrock problem{
         .n = 2,
@@ -233,12 +234,15 @@ TEST_CASE("cmaes_policy: lambda minimum for bounded problems", "[cmaes]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    // No explicit lambda -- should enforce 4*N = 8 minimum for bounded N=2.
+    // No explicit lambda -- a bounded problem uses the same Hansen default
+    // as an unbounded one, 4 + floor(3 ln n) = 6 at n = 2 (no widened
+    // bounded floor; the population-doubling restart is the multimodal
+    // escalation path).
     cmaes_policy<> policy;
     policy.options.seed = 42u;
 
     basic_solver solver{policy, problem, x0, opts};
-    CHECK(solver.state().params.lambda >= 8);
+    CHECK(solver.state().params.lambda == 6);
 }
 
 TEST_CASE("cmaes_policy: solves bounded Rastrigin", "[cmaes]")
@@ -274,22 +278,13 @@ TEST_CASE("cmaes_policy: solves bounded Rastrigin", "[cmaes]")
 
 TEST_CASE("cmaes_policy: Rastrigin 2D global optimum with IPOP", "[cmaes]")
 {
-    // Validates CMA-01 (sigma scaled from bound range: (5.12-(-5.12))/3 = 3.41)
-    // and CMA-02 (lambda >= 4*N = 8 for bounded problem).
-    // Rastrigin is highly multimodal; IPOP restarts explore multiple basins.
+    // An IPOP-configured CMA-ES reaches the Rastrigin global optimum from a
+    // multimodal start. Rastrigin is highly multimodal; the restart escalation
+    // probes multiple basins when the base run stalls. The meaningful bar is
+    // reaching the global basin; whether a restart actually had to fire is
+    // trajectory-dependent (the corrected covariance can reach the optimum at
+    // the base population on a favorable seed) and is not asserted.
     // Reference: K&W Section 8.7 (CMA-ES benchmark).
-    //
-    // Seed selection: production sample_offspring forwards to the
-    // Marsaglia polar Gaussian variant (Marsaglia & Bray 1964;
-    // empirical winner per the perf-record A/B). The Marsaglia
-    // RNG-byte -> Gaussian-value mapping differs from
-    // std::normal_distribution, so the trajectory at the prior
-    // seed=2 lands in a Rastrigin local basin (f=1.99) under the
-    // new sampler. Seed=5 lands in the global basin (f~0.076)
-    // under Marsaglia and preserves the test's intent (validate
-    // CMA-01/CMA-02 wiring on a successful run). Per
-    // `feedback_correctness_over_compat`: re-baseline rather than
-    // preserve byte-exact reproducibility against the prior sampler.
     rastrigin<double> problem{.n = 2};
 
     Eigen::VectorXd x0{{3.0, 3.0}};
@@ -307,7 +302,6 @@ TEST_CASE("cmaes_policy: Rastrigin 2D global optimum with IPOP", "[cmaes]")
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value < 1.0);
-    CHECK(solver.state().params.lambda >= 8);
 }
 
 TEST_CASE("cmaes_policy: bounded Rosenbrock", "[cmaes]")
@@ -344,9 +338,9 @@ namespace
 
 // Bounded flat-objective problem: every value is identical so the CMA-ES
 // EqualFunValues stagnation criterion fires deterministically once enough
-// generations of identical fitness accumulate. Bounded so the policy applies
-// the lambda = max(4*n, 4 + floor(3*ln(n))) minimum, giving a known starting
-// lambda for the IPOP recompute regression test.
+// generations of identical fitness accumulate. The population follows the
+// Hansen default 4 + floor(3 ln n), giving a known starting lambda for the
+// IPOP recompute regression test.
 struct flat_bounded
 {
     int n{2};
@@ -1432,21 +1426,18 @@ TEST_CASE("cmaes_policy: MaxPopulation template parameter widens IPOP cap",
     REQUIRE_THROWS_AS(narrow_policy.init(problem, x0, opts), std::runtime_error);
 }
 
-// Lock the init()-time lambda<=MaxPop assertion. A bounded problem
-// with n=130 + default `cmaes_policy<>` (MaxPop=512) silently
-// UB-resizes the per-step buffers at auto-lambda = 4*130 = 520 > 512
-// when init() does not validate. Once init() asserts, the call must
-// throw std::runtime_error with an actionable message.
+// Lock the init()-time lambda<=MaxPop assertion. A population above the
+// default `cmaes_policy<>` cap (MaxPop=512) would silently UB-resize the
+// per-step buffers (`Eigen::Matrix<..., 0, MaxPop, ...>`); init() must
+// instead throw std::runtime_error with an actionable message.
 //
 // Reference:
 //   Hansen, N. (2023). The CMA Evolution Strategy: A Tutorial.
 //   arXiv:1604.00772 §B.1: default population size lambda = 4 + floor(3*ln(n)).
-//   The bounded heuristic in this codebase widens the default to
-//   max(4*n, 4 + floor(3*ln(n))) for box-constrained inputs.
-TEST_CASE("cmaes_policy: init throws when auto-lambda exceeds MaxPop",
+TEST_CASE("cmaes_policy: init throws when lambda exceeds MaxPop",
           "[cmaes][maxpop]")
 {
-    constexpr int n = 130;
+    constexpr int n = 4;
     bounded_rosenbrock problem{
         .n  = n,
         .lb = Eigen::VectorXd::Constant(n, -5.0),
@@ -1458,9 +1449,8 @@ TEST_CASE("cmaes_policy: init throws when auto-lambda exceeds MaxPop",
 
     cmaes_policy<> policy;          // default MaxPopulation -> MaxPop = 512
     policy.options.seed = 42u;
+    policy.options.lambda = 520u;   // above the 512 static buffer cap
 
-    // Auto-computed pop_lambda for n=130 (bounded) is
-    // max(4*n, 4 + floor(3*ln(n))) = max(520, 18) = 520 > 512.
     REQUIRE_THROWS_AS(policy.init(problem, x0, opts), std::runtime_error);
 }
 

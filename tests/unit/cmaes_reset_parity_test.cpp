@@ -140,11 +140,10 @@ TEST_CASE("cmaes_policy: reset() re-derives the same quantities as init()",
           "[cmaes][reset]")
 {
     // reset() must reproduce every configuration-derived quantity init()
-    // computes, so a reset run behaves identically to a fresh run. On a
-    // bounded problem with no explicit population this exercises the
-    // bounded population floor (which reset() previously skipped), plus the
-    // stagnation window, the eigendecomposition skip period, and the
-    // boundary-axis cycle index (which reset() previously left stale).
+    // computes, so a reset run behaves identically to a fresh run: the
+    // population size, the stagnation window, the eigendecomposition skip
+    // period, and the boundary-axis cycle index (which reset() previously
+    // left stale).
     bounded_quadratic problem{
         .lb = Eigen::VectorXd::Constant(2, -5.0),
         .ub = Eigen::VectorXd::Constant(2, 5.0)};
@@ -163,9 +162,9 @@ TEST_CASE("cmaes_policy: reset() re-derives the same quantities as init()",
     const auto init_skip_k = s.decomposition_skip_k;
     const auto init_axis = s.axis_cycle_index;
 
-    // The bounded floor must have engaged (max(4n, 4 + floor(3 ln n)) = 8
-    // at n = 2, above the unimodal default of 6).
-    REQUIRE(init_lambda == 8);
+    // Bounded problems use the Hansen population default 4 + floor(3 ln n)
+    // = 6 at n = 2 (no widened bounded floor).
+    REQUIRE(init_lambda == 6);
 
     // Advance several generations so the covariance state, generation
     // counter, and step-size move away from their init values, then force
