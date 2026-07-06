@@ -1029,15 +1029,19 @@ struct pwq_reparameterization_policy
 
                 // Auger & Hansen 2005, "A Restart CMA Evolution Strategy
                 // with Increasing Population Size", CEC 2005 §III: each
-                // IPOP restart re-anchors the distribution mean to the
-                // user-provided initial point x0. Without this re-anchor
-                // the lambda-doubling staircase only widens the sampling
-                // distribution around the prior run's terminal mean and
-                // re-explores the SAME basin. libcmaes-aligned per
-                // ipopcmastrategy.cc reset_search_state ->
-                // CMASolutions(Parameters&) at cmasolutions.cc:49
-                // (_xmean = p._x0min for the fixed-x0 case).
+                // restart re-anchors the distribution mean so the widened
+                // population probes a NEW basin instead of re-sampling the
+                // prior run's terminal basin with a wider distribution.
+                // For a finite search box the anchor is drawn uniformly at
+                // random within [lower, upper] per coordinate; coordinates
+                // with an infinite extent (and the fully unbounded case)
+                // keep the user's initial point, which has no finite domain
+                // to sample. libcmaes draws the restart mean uniformly in
+                // the box when the domain has finite extent
+                // (ipopcmastrategy.cc reset_search_state) and falls back to
+                // the fixed x0 otherwise (cmasolutions.cc:49).
                 s.mean = s.x0;
+                randomize_restart_mean(s);
 
                 // Hansen 2023 (arXiv:1604.00772) §B.2 (Strategy internal
                 // numerical effort): K = max(1, floor(1 / (10 * n *
@@ -1102,6 +1106,32 @@ struct pwq_reparameterization_policy
         };
     }
 
+    // Auger & Hansen 2005 §III restart-mean randomization. Draws the
+    // distribution mean uniformly within the finite search box per
+    // coordinate so a restart probes a new basin rather than re-sampling
+    // the previous one. A no-op when the problem is unbounded or a
+    // coordinate has infinite extent (no finite domain to draw from); the
+    // caller leaves s.mean at the initial point on those coordinates.
+    // Consumes from the policy RNG, so successive restarts draw distinct
+    // anchors while remaining reproducible under a fixed seed.
+    template <typename P>
+    void randomize_restart_mean(state_type<P>& s)
+    {
+        if(!s.has_bounds)
+            return;
+        const int n = static_cast<int>(s.mean.size());
+        for(int i = 0; i < n; ++i)
+        {
+            const double lo = s.lower[i];
+            const double hi = s.upper[i];
+            if(std::isfinite(lo) && std::isfinite(hi) && hi > lo)
+            {
+                std::uniform_real_distribution<double> u(lo, hi);
+                s.mean[i] = u(s.rng);
+            }
+        }
+    }
+
     template <typename P>
     void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
@@ -1141,7 +1171,12 @@ struct pwq_reparameterization_policy
     template <typename P>
     void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
     {
+        // reset() re-derives the init-time quantities and anchors the mean
+        // at x0; a restart additionally randomizes the mean within the box
+        // (Auger & Hansen 2005 §III) so the external restart decorator gets
+        // basin diversity, matching the in-policy IPOP branch.
         reset(s, x0);
+        randomize_restart_mean(s);
     }
 };
 
