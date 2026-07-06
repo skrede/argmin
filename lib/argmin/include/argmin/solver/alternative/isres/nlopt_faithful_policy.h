@@ -624,47 +624,52 @@ struct nlopt_faithful_policy
             s.violations[k] = violation_sum;
         }
 
-        // (6) Best-ever bookkeeping: rolling best_ever_violation with a
-        // Pareto-tightened pre-feasible update predicate.
-        const std::uint32_t best_ranked = s.indices_buf[0];
-        const double best_ranked_f = s.fitnesses[best_ranked];
-        const double best_ranked_v = s.violations[best_ranked];
+        // (6) Per-evaluation best-ever bookkeeping (NLopt isres.c:174-193).
+        // Check EVERY individual at evaluation time against the best-ever
+        // (x, f, v) record, not the previous generation's rank-0 slot
+        // (which by this point holds an overwritten fitness). The
+        // replacement predicate is feasibility-first with a feasibility
+        // tolerance so it works for equality-constrained problems, where
+        // the L2-squared violation v = sum c_eq^2 is never exactly zero:
+        //   - a candidate within the feasibility tolerance beats any best
+        //     that is not,
+        //   - among two feasible points, lower objective wins,
+        //   - among two infeasible points, lower violation wins.
+        // This makes the returned minimizer the best FEASIBLE point the
+        // solver evaluated (or the least-infeasible point if none is
+        // feasible), and it never regresses across generations.
+        const double feas_tol = options.feasibility_gate;
+        const auto better_than_best = [&](double f, double v) {
+            const bool cand_feasible = (v <= feas_tol);
+            const bool best_feasible = (s.best_ever_violation <= feas_tol);
+            if(cand_feasible != best_feasible)
+                return cand_feasible;
+            if(cand_feasible)
+                return f < s.best_ever_value;
+            return v < s.best_ever_violation;
+        };
 
-        if(best_ranked_f < s.best_ever_value && best_ranked_v <= 0.0)
+        bool best_updated = false;
+        for(int k = 0; k < lambda; ++k)
         {
-            s.best_ever_value = best_ranked_f;
-            s.best_ever_violation = 0.0;
-            s.objective_value = best_ranked_f;
-            s.x = s.population.col(best_ranked);
-
-            if(n_c > 0)
+            if(better_than_best(s.fitnesses[k], s.violations[k]))
             {
-                Eigen::VectorXd c(n_c);
-                s.problem->constraints(s.x, c);
-                s.c_eq = c.head(s.n_eq);
-                s.c_ineq = c.tail(s.n_ineq);
+                s.best_ever_value = s.fitnesses[k];
+                s.best_ever_violation = s.violations[k];
+                s.objective_value = s.fitnesses[k];
+                s.x = s.population.col(k);
+                best_updated = true;
             }
         }
-        else if(s.best_ever_value
-                == std::numeric_limits<double>::infinity())
-        {
-            // Pre-feasible witness: only update on Pareto improvement
-            // (lower violation AND not-worse fitness).
-            if(best_ranked_v < s.best_ever_violation
-               && best_ranked_f <= s.objective_value)
-            {
-                s.best_ever_violation = best_ranked_v;
-                s.objective_value = best_ranked_f;
-                s.x = s.population.col(best_ranked);
 
-                if(n_c > 0)
-                {
-                    Eigen::VectorXd c(n_c);
-                    s.problem->constraints(s.x, c);
-                    s.c_eq = c.head(s.n_eq);
-                    s.c_ineq = c.tail(s.n_ineq);
-                }
-            }
+        // Refresh the cached constraint split for the returned x once, if
+        // it changed this generation.
+        if(best_updated && n_c > 0)
+        {
+            Eigen::VectorXd c(n_c);
+            s.problem->constraints(s.x, c);
+            s.c_eq = c.head(s.n_eq);
+            s.c_ineq = c.tail(s.n_ineq);
         }
 
         ++s.generation;
@@ -693,9 +698,13 @@ struct nlopt_faithful_policy
             ? (s.best_ever_value - prev_best_ever_value)
             : mean_sigma;
 
-        const std::uint32_t rank0 = s.indices_buf[0];
-        const double v_best = s.violations[rank0];
-        const bool feasible = (v_best <= options.feasibility_gate);
+        // Gate the emitted convergence status on the RETURNED x's
+        // feasibility (the best-ever record), not the current rank-0
+        // individual: otherwise the solver could emit ftol_reached while
+        // returning an infeasible point (e.g. on equality-constrained
+        // problems, where no offspring is ever exactly feasible).
+        const bool feasible =
+            (s.best_ever_violation <= options.feasibility_gate);
 
         const double collapse_ratio =
             options.sigma_collapse_ratio.value_or(1e-9);

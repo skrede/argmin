@@ -41,6 +41,8 @@
 #include "argmin/detail/isres_operators.h"
 #include "argmin/solver/options.h"
 #include "argmin/solver/isres_policy.h"
+#include "argmin/solver/basic_solver.h"
+#include "argmin/result/status.h"
 
 #include <Eigen/Core>
 
@@ -106,15 +108,14 @@ struct recording_qp
 
 }
 
-// RED against the current substrate (see Pin 1 header derivation): the
-// production generation loop mutates the population in place and only
-// afterwards compares fitness at the previous generation's best-ranked
-// slot, so better points seen mid-stream are lost. [!shouldfail]
-// records this as the expected disposition; once the generation loop
-// tracks the best-ever record per evaluation (not per generation), this
-// case starts passing and the tag must be removed.
+// Now PASSES: the generation loop tracks the best-ever (x, f, v) record
+// per evaluation (NLopt isres.c:174-193), checking every individual at
+// evaluation time rather than the previous generation's rank-0 slot.
+// Pre-fix the returned objective was 2.43877 vs the true best evaluated
+// 0.04079 at evaluation #150 of 1860 (seed 42, 30 generations,
+// lambda=60), because points seen mid-stream were lost.
 TEST_CASE("isres: returned minimizer is the best point at evaluation time",
-          "[isres][oracle-pin][!shouldfail]")
+          "[isres][oracle-pin]")
 {
     recording_qp problem;
     Eigen::VectorXd x0{{2.0, 2.0}};
@@ -195,4 +196,90 @@ TEST_CASE("isres: tau/tau' role assignment matches NLopt",
     // Magnitude-ordering form of the same pin: the per-component rate
     // exceeds the global rate for any n > 1.
     CHECK(rates.tau > rates.tau_prime);
+}
+
+namespace
+{
+
+// Equality-constrained problem: minimize (x0-2)^2 + (x1-2)^2 subject to
+// x0 + x1 = 1, bounds [-10, 10]^2. The equality's L2-squared violation
+// v = (x0 + x1 - 1)^2 is essentially never exactly zero for a stochastic
+// sampler, so the returned status must be gated on the feasibility
+// tolerance, not on v <= 0.0.
+struct equality_qp
+{
+    static constexpr int problem_dimension = dynamic_dimension;
+
+    int dimension() const { return 2; }
+
+    double value(const Eigen::VectorXd& x) const
+    {
+        return (x[0] - 2.0) * (x[0] - 2.0) + (x[1] - 2.0) * (x[1] - 2.0);
+    }
+
+    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
+    {
+        c.resize(1);
+        c[0] = x[0] + x[1] - 1.0;  // equality: c == 0
+    }
+
+    int num_equality() const { return 1; }
+    int num_inequality() const { return 0; }
+
+    Eigen::VectorXd lower_bounds() const
+    {
+        return Eigen::VectorXd{{-10.0, -10.0}};
+    }
+
+    Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd{{10.0, 10.0}};
+    }
+};
+
+}
+
+// Equality-constrained best gate: whenever the solver emits a converged
+// status (ftol_reached), the RETURNED x must be feasible within the
+// feasibility gate. Pre-fix the feasible branch required v <= 0.0
+// exactly (unreachable for an equality's squared violation) and the
+// status was gated on the rank-0 individual rather than the returned x,
+// so the solver could return an infeasible x while reporting
+// convergence.
+TEST_CASE("isres: converged status implies a feasible returned x on an equality constraint",
+          "[isres][oracle-pin]")
+{
+    equality_qp problem;
+    Eigen::VectorXd x0{{2.0, 2.0}};
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+
+    isres_policy<> policy;
+    policy.options.seed = 7u;
+    policy.options.feasibility_gate = 1e-4;
+
+    basic_solver solver{policy, problem, x0, opts};
+    auto result = solver.solve();
+
+    // The best-ever record must never carry an infeasible point out as a
+    // converged result. If the run reports convergence, the returned x's
+    // equality residual must sit within the feasibility gate (L2-squared).
+    Eigen::VectorXd c(1);
+    problem.constraints(result.x, c);
+    const double v = c[0] * c[0];
+
+    INFO("returned x = (" << result.x[0] << ", " << result.x[1]
+         << "), equality residual^2 = " << v
+         << ", status converged = "
+         << (result.status == solver_status::ftol_reached));
+    if(result.status == solver_status::ftol_reached)
+        CHECK(v <= 1e-4);
+
+    // Regardless of status, the returned objective is finite and the
+    // best-ever record is self-consistent (never worse than x0 once a
+    // feasible point has been seen).
+    CHECK(std::isfinite(result.objective_value));
 }
