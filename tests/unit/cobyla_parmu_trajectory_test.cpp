@@ -10,20 +10,30 @@
 // BOTH the objective and the maximum violation carries a non-positive
 // predicted objective increase and therefore must NOT raise parmu.
 //
-// The current driver inverts this: it computes the raise factor from the
+// The pre-rewrite driver inverted this: it computed the raise factor from the
 // predicted objective DECREASE (prerec = -g.d) rather than the predicted
-// objective increase, so it inflates parmu on precisely the objective-and-
-// feasibility-improving steps where a faithful COBYLA leaves it untouched.
+// objective increase, so it inflated parmu on precisely the objective-and-
+// feasibility-improving steps where a faithful COBYLA leaves it untouched
+// (worst observed growth factor 6.14e10 on HS024). The Powell-faithful driver
+// now computes barmu = sum / prerec, where sum is the k=(m+1) term of the
+// linear-model reduction (sum = g.d, the predicted objective CHANGE) and
+// prerec = resmax_old - resnew >= 0 (the predicted reduction in the MAXIMUM
+// violation). parmu is raised (to 2*barmu) only when parmu < 1.5*barmu, which
+// requires barmu > 0, i.e. sum > 0: a predicted objective INCREASE. A step that
+// improves the objective has g.d <= 0, so barmu <= 0 and the raise never fires.
+//
+// Hand-computed witness (HS048, first joint-improving step): the objective
+// falls 62 -> 51.8784 and the maximum violation falls 2 -> 8.9e-16 while parmu
+// stays 0. Across HS048 that run takes 31 joint-improving steps and grows parmu
+// on none of them; the same holds across HS050/051/024 (the aggregate the CHECK
+// below asserts).
+//
 // This pin drives the live policy on the pinned Hock-Schittkowski problems,
 // records the (parmu, objective, max-violation) stream, and asserts that no
-// joint-improving step grew parmu. It fails against the inverted-direction
-// code and is tagged [!shouldfail] to record that expected disposition; once
-// the merit direction is corrected the tag must be removed.
-//
-// The checked-in NLopt (f2c'd Powell) reference optima in
-// oracles/cobyla_parmu_trajectory.csv are the bar the corrected driver's
-// convergence is pinned against separately; here they anchor the problem
-// set and confirm the oracle plumbing resolves.
+// joint-improving step grew parmu. The checked-in NLopt (f2c'd Powell)
+// reference optima in oracles/cobyla_parmu_trajectory.csv are the bar the
+// corrected driver's convergence is pinned against separately; here they anchor
+// the problem set and confirm the oracle plumbing resolves.
 
 #include "argmin/solver/cobyla_policy.h"
 #include "argmin/solver/options.h"
@@ -141,12 +151,12 @@ void accumulate(int max_steps, int& joint_steps, int& parmu_grew_on_joint,
 
 }
 
-// The corrected merit direction is the bar; against the current inverted
-// parmu update at least one joint-improving step inflates parmu, so this
-// case fails today and is recorded [!shouldfail].
+// The corrected merit direction is the bar: no joint objective-and-feasibility
+// improving step raises parmu. This passed once the driver adopted Powell's
+// barmu = sum/prerec direction (see the witness in the file header).
 TEST_CASE("cobyla parmu never grows on a joint objective-and-feasibility "
           "improving step",
-          "[cobyla][oracle-pin][!shouldfail]")
+          "[cobyla][oracle-pin]")
 {
     // The oracle anchors the problem set and confirms the checked-in NLopt
     // reference optima resolve next to the test binary.

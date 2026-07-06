@@ -15,10 +15,45 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <map>
 #include <cmath>
+#include <string>
+#include <vector>
+#include <fstream>
+#include <sstream>
 
 using Catch::Approx;
 using namespace argmin;
+
+namespace
+{
+
+// Minimal oracle CSV reader (mirrors the CMA-ES / MMA / parmu-pin readers):
+// '#' lines are comments, data lines are "name,v1,v2,...".
+std::map<std::string, std::vector<double>> load_cobyla_oracle(const std::string& path)
+{
+    std::map<std::string, std::vector<double>> rows;
+    std::ifstream in(path);
+    if(!in.is_open())
+        return rows;
+    std::string line;
+    while(std::getline(in, line))
+    {
+        if(line.empty() || line.front() == '#')
+            continue;
+        std::istringstream ss(line);
+        std::string name;
+        std::getline(ss, name, ',');
+        std::vector<double> vals;
+        std::string tok;
+        while(std::getline(ss, tok, ','))
+            vals.push_back(std::stod(tok));
+        rows.emplace(name, std::move(vals));
+    }
+    return rows;
+}
+
+}
 
 namespace
 {
@@ -98,25 +133,15 @@ TEST_CASE("cobyla_policy: simple constrained 2D", "[cobyla]")
 
 TEST_CASE("cobyla_policy: HS024", "[cobyla][hs]")
 {
-    // HS024 in 2D, f* = -1.0 at x* = (3, sqrt(3)). Pre-Phase-33-hotfix
-    // argmin returned f = -0.30 with cv ~ 0 (silent wrong-optimum, the
-    // dominant motivator of the static-audit C1 finding). The previous
-    // test bar `Approx(-1.0).margin(1.0)` and `cv < 0.5` was wide
-    // enough to pass on that wrong answer.
-    //
-    // Phase 33 hotfix (Powell adaptive parmu + parmu-gated termination
-    // + denormalized-simplex fix + tightened geometry threshold)
-    // moves argmin to f = -0.652 with cv = 0 -- still not f*, but a
-    // 50% closure of the gap. The remaining gap to f* = -1.0 requires
-    // the v0.3.x faithfulness rewrite (static-audit C2 trstlp,
-    // C3 select-replacement-vertex, C10 geometry step). The bar below
-    // locks the hotfix gain (must beat the prior wrong-optimum f =
-    // -0.30 by a wide margin) and the feasibility (must be exactly
-    // feasible to match the corrected merit), while staying above f*
-    // (cannot claim to reach the true optimum yet).
-    //
-    // When the v0.3.x rewrite lands, tighten this to
-    // `Approx(-1.0).margin(0.01)` and `cv < 1e-6`.
+    // HS024 in 2D, f* = -1.0 at x* = (3, sqrt(3)). The pre-rewrite
+    // penalized-subgradient driver stalled at f = -0.30 (wrong optimum) and,
+    // after a partial hotfix, at f = -0.652. The Powell-faithful two-stage
+    // TRSTLP driver reaches the true optimum, so the bar is now tight and
+    // pinned against the checked-in NLopt reference optimum.
+    const auto oracle = load_cobyla_oracle("oracles/cobyla_convergence.csv");
+    REQUIRE(oracle.contains("hs024_fopt"));
+    REQUIRE(oracle.contains("hs024_xopt"));
+
     hs024 problem;
     auto x0 = problem.initial_point();
     solver_options opts;
@@ -130,12 +155,71 @@ TEST_CASE("cobyla_policy: HS024", "[cobyla][hs]")
 
     INFO("HS024 objective: " << result.objective_value);
     INFO("HS024 cv:        " << solver.constraint_violation());
-    // Beats the pre-hotfix wrong optimum f = -0.30 by a wide margin:
-    CHECK(result.objective_value < -0.5);
-    // Doesn't claim to hit f* = -1.0 (deferred to v0.3.x rewrite):
-    CHECK(result.objective_value > -1.05);
-    // Feasibility is now exact under adaptive parmu:
-    CHECK(solver.constraint_violation() < 1e-4);
+    CHECK(result.objective_value == Approx(oracle.at("hs024_fopt")[0]).margin(1e-4));
+    CHECK(result.objective_value == Approx(-1.0).margin(1e-4));
+    CHECK(result.x(0) == Approx(oracle.at("hs024_xopt")[0]).margin(1e-3));
+    CHECK(result.x(1) == Approx(oracle.at("hs024_xopt")[1]).margin(1e-3));
+    CHECK(solver.constraint_violation() < 1e-6);
+}
+
+// Equality-constrained convergence: HS048/050/051 all have f* = 0 at the
+// all-ones minimizer. The pre-rewrite driver reached wrong optima on these
+// (the L1-sum merit and penalized-subgradient stand-in); the Powell-faithful
+// max-violation merit + two-stage TRSTLP close them. Pinned against the
+// checked-in NLopt (f2c'd Powell) reference optima.
+namespace
+{
+
+template <typename Problem>
+void check_cobyla_optimum(const char* name, double f_oracle,
+                          const std::vector<double>& x_oracle)
+{
+    Problem problem;
+    auto x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+
+    basic_solver solver{cobyla_policy{}, problem, x0, opts};
+    auto result = solver.solve();
+
+    INFO(name << " objective: " << result.objective_value);
+    INFO(name << " cv:        " << solver.constraint_violation());
+    // Reaches f* = 0 (the oracle fopt is ~1e-20; our rhoend = 1e-8 stops a
+    // little sooner, so pin to the shared true optimum with a small margin).
+    CHECK(result.objective_value == Approx(0.0).margin(1e-6));
+    CHECK(std::abs(result.objective_value - f_oracle) < 1e-6);
+    for(int i = 0; i < static_cast<int>(x_oracle.size()); ++i)
+        CHECK(result.x(i) == Approx(x_oracle[i]).margin(1e-3));
+    CHECK(solver.constraint_violation() < 1e-6);
+}
+
+}
+
+TEST_CASE("cobyla_policy: HS048/050/051 equality-constrained optima", "[cobyla][hs]")
+{
+    const auto oracle = load_cobyla_oracle("oracles/cobyla_convergence.csv");
+    REQUIRE(oracle.contains("hs048_fopt"));
+    REQUIRE(oracle.contains("hs050_fopt"));
+    REQUIRE(oracle.contains("hs051_fopt"));
+
+    SECTION("HS048")
+    {
+        check_cobyla_optimum<hs048<>>("HS048", oracle.at("hs048_fopt")[0],
+                                      oracle.at("hs048_xopt"));
+    }
+    SECTION("HS050")
+    {
+        check_cobyla_optimum<hs050<>>("HS050", oracle.at("hs050_fopt")[0],
+                                      oracle.at("hs050_xopt"));
+    }
+    SECTION("HS051")
+    {
+        check_cobyla_optimum<hs051<>>("HS051", oracle.at("hs051_fopt")[0],
+                                      oracle.at("hs051_xopt"));
+    }
 }
 
 TEST_CASE("cobyla_policy: basic_solver_group compatibility", "[cobyla][solver_group]")
