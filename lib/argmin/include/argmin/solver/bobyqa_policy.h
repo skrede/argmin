@@ -135,6 +135,41 @@ struct bobyqa_policy
         bool initialized{false};
     };
 
+    // Clamp the interpolation radius so it never exceeds half of the smallest
+    // finite bound range: rhobeg <= 0.5 * min_i (upper_i - lower_i). This is
+    // the precondition that lets the 2n bootstrap perturbations stay inside
+    // the box on every finite-bounded coordinate.
+    static double clamp_radius_to_bounds(double h,
+                                         const Eigen::Vector<double, N>& lower_scaled,
+                                         const Eigen::Vector<double, N>& upper_scaled)
+    {
+        const int n = lower_scaled.size();
+        for(int i = 0; i < n; ++i)
+        {
+            double range_i = upper_scaled[i] - lower_scaled[i];
+            if(std::isfinite(range_i) && range_i < 2.0 * h)
+                h = 0.5 * range_i;
+        }
+        return (h > 0.0) ? h : 1.0;
+    }
+
+    // Move x0 at least h inside every finite bound. Unbounded coordinates are
+    // left untouched. After this, x0 +/- h stays within [lower, upper] on all
+    // finite-bounded coordinates.
+    static void shift_inside_bounds(Eigen::Vector<double, N>& x_scaled, double h,
+                                    const Eigen::Vector<double, N>& lower_scaled,
+                                    const Eigen::Vector<double, N>& upper_scaled)
+    {
+        const int n = x_scaled.size();
+        for(int i = 0; i < n; ++i)
+        {
+            if(std::isfinite(lower_scaled[i]))
+                x_scaled[i] = std::max(x_scaled[i], lower_scaled[i] + h);
+            if(std::isfinite(upper_scaled[i]))
+                x_scaled[i] = std::min(x_scaled[i], upper_scaled[i] - h);
+        }
+    }
+
     template <typename Problem, typename Convergence>
         requires objective<Problem> && bound_constrained<Problem>
     state_type<Problem> init(const Problem& problem,
@@ -208,6 +243,18 @@ struct bobyqa_policy
             }
             h = (max_range > 0.0) ? 0.1 * max_range : 1.0;
         }
+
+        // Bound-safety repair (core BOBYQA guarantee: the objective is NEVER
+        // evaluated outside [xl, xu]). Powell requires rhobeg <= 0.5 * min
+        // finite bound range and x0 at least rhobeg inside every finite bound
+        // so the 2n coordinate perturbations of the bootstrap stay feasible.
+        // Repair rather than reject: clamp h on tight ranges and shift x0
+        // inward, which keeps near-bound or tight-box starts solvable instead
+        // of tripping a domain error on log/sqrt objectives.
+        h = clamp_radius_to_bounds(h, s.lower_scaled, s.upper_scaled);
+        shift_inside_bounds(s.x_scaled, h, s.lower_scaled, s.upper_scaled);
+        s.x = (s.x_scaled.array() * s.scale.array()).matrix();
+
         s.delta = h;
         s.delta_max = 10.0 * h;
 
@@ -490,6 +537,8 @@ struct bobyqa_policy
         {
             double h = s.rho;
             Eigen::Vector<double, N> x_base_new = s.sys.xbase + s.sys.xopt;
+            h = clamp_radius_to_bounds(h, s.lower_scaled, s.upper_scaled);
+            shift_inside_bounds(x_base_new, h, s.lower_scaled, s.upper_scaled);
 
             s.sys = detail::bootstrap_interpolation_system<double, N>(
                 x_base_new, h, s.lower_scaled, s.upper_scaled,
@@ -543,6 +592,9 @@ struct bobyqa_policy
         s.initialized = false;
 
         double h = s.delta;
+        h = clamp_radius_to_bounds(h, s.lower_scaled, s.upper_scaled);
+        shift_inside_bounds(s.x_scaled, h, s.lower_scaled, s.upper_scaled);
+        s.x = (s.x_scaled.array() * s.scale.array()).matrix();
 
         s.sys = detail::bootstrap_interpolation_system<double, N>(
             s.x_scaled, h, s.lower_scaled, s.upper_scaled,

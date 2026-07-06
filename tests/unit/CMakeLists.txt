@@ -14,6 +14,7 @@ add_executable(argmin_unit_tests
     isres_alternatives_test.cpp
     cobyla_test.cpp
     bobyqa_test.cpp
+    bobyqa_bounds_test.cpp
     lbfgsb_test.cpp
     cmaes_test.cpp
     cmaes_sampling_test.cpp
