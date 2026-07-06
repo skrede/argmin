@@ -204,24 +204,24 @@ struct projected_gn_policy
         s.eval_residuals(x_trial, r_trial);
         double f_trial = 0.5 * r_trial.squaredNorm();
 
-        // Gain ratio
+        // Gain ratio via the direct model reduction evaluated at the ACCEPTED
+        // (projected/backtracked) step d:
+        //   predicted = -g^T d - 0.5 * ||J d||^2
+        // This is valid for any d. The Nielsen LM predicted-reduction identity
+        // (0.5 h^T (lambda D h - g)) holds only when d is the exact unprojected
+        // LM step; on a projected step near an active bound it yields a
+        // fictitious denominator that spuriously inflates lambda. Both
+        // globalization modes now share this direct form, and the trial is
+        // accepted only when predicted > 0 and the trial objective is finite.
         double actual = s.objective_value - f_trial;
-        double predicted;
-        if(options.use_dogleg)
-        {
-            predicted = detail::predicted_reduction_tr(d, g, H);
-        }
-        else
-        {
-            predicted = detail::predicted_reduction_lm(
-                d, g, s.lambda, options.diagonal_min_clamp, H.diagonal());
-        }
+        double predicted = -(g.dot(d) + 0.5 * (s.J * d).squaredNorm());
 
-        double rho = (std::abs(predicted) < 1e-30) ? 1.0 : actual / predicted;
+        const bool valid = std::isfinite(f_trial) && predicted > 0.0;
+        double rho = valid ? actual / predicted : 0.0;
 
         // Accept/reject with globalization update
         const double old_value = s.objective_value;
-        bool accepted = rho > 0.0;
+        bool accepted = valid && rho > 0.0;
 
         double expand_thresh = options.trust_region_expand_threshold.value_or(0.75);
         double shrink_thresh = options.trust_region_shrink_threshold.value_or(0.25);
@@ -265,11 +265,13 @@ struct projected_gn_policy
 
         ++s.iteration;
 
-        // Report h.norm() as step_size even on rejection to prevent
-        // basic_solver stall detection from firing prematurely.
-        // On rejection, report lambda as objective_change proxy to prevent
-        // ftol_reached from firing.
-        double effective_change = accepted ? (s.objective_value - old_value) : s.lambda;
+        // Report h.norm() as step_size even on rejection so basic_solver's
+        // stall detection does not fire while lambda is still adapting.
+        // objective_change carries the ACTUAL objective change (zero on a
+        // rejected step); the former hack that reported lambda here leaked an
+        // internal damping value into the user-visible step_result, and
+        // ftol_reached is correctly gated on the KKT residual.
+        double effective_change = s.objective_value - old_value;
 
         // KKT residual for bound-constrained least-squares: projected-gradient
         // infinity-norm using the gradient g = J^T r of 0.5*||r||^2.

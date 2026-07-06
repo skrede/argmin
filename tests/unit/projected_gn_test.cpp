@@ -522,3 +522,79 @@ TEST_CASE("projected_gn_policy: active set exercised", "[projected_gn]")
     // x(0) should be at or very near the upper bound 0.5
     CHECK(result.x(0) >= 0.5 - 1e-6);
 }
+
+// --------------------------------------------------------------------------
+// FAM-14 gain-ratio witness: direct model reduction at an active bound.
+// --------------------------------------------------------------------------
+
+namespace
+{
+
+// Bounded linear least squares: r(x) = x - b, so f = 0.5||x - b||^2 is exactly
+// quadratic and the Gauss-Newton model is exact. b = (2, 0.25) lies outside the
+// box on the first coordinate, so the constrained optimum pins x0 at its upper
+// bound 0.5 (active set) with x1 = 0.25 interior; f* = 0.5*(1.5^2) = 1.125.
+struct bounded_linear_ls
+{
+    static constexpr int problem_dimension = dynamic_dimension;
+
+    int dimension() const { return 2; }
+    int num_residuals() const { return 2; }
+
+    static Eigen::Vector2d bvec() { return Eigen::Vector2d{2.0, 0.25}; }
+
+    double value(const Eigen::VectorXd& x) const
+    {
+        return 0.5 * (x - bvec()).squaredNorm();
+    }
+    void residuals(const Eigen::VectorXd& x, Eigen::VectorXd& r) const
+    {
+        r = x - bvec();
+    }
+    void jacobian(const Eigen::VectorXd& /*x*/, Eigen::MatrixXd& J) const
+    {
+        J = Eigen::Matrix2d::Identity();
+    }
+    Eigen::VectorXd lower_bounds() const { return Eigen::VectorXd{{-2.0, -2.0}}; }
+    Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd{{0.5, 2.0}}; }
+};
+
+}
+
+// The direct model reduction -g^T d - 0.5||J d||^2 is exact for this quadratic,
+// even for the projected step d that lands on the active bound, so the gain
+// ratio is 1 and each accepted step's reported objective_change equals the true
+// objective decrease (no lambda proxy). The old LM predicted-reduction identity
+// on the projected step produced a fictitious denominator here.
+TEST_CASE("projected_gn_policy: exact gain ratio at an active bound",
+          "[projected_gn][gain_ratio]")
+{
+    bounded_linear_ls problem;
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_gradient_threshold(1e-12);
+
+    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+
+    double prev_f = solver.state().objective_value;
+    for(int i = 0; i < 30; ++i)
+    {
+        auto sr = solver.step();
+        if(sr.improved)
+        {
+            double true_change = sr.objective_value - prev_f;
+            CHECK(sr.objective_change == Approx(true_change).margin(1e-14));
+        }
+        prev_f = sr.objective_value;
+        if(sr.policy_status)
+            break;
+        if(sr.kkt_residual.value_or(sr.gradient_norm) < 1e-12)
+            break;
+    }
+
+    // Constrained optimum: x0 pinned at the upper bound 0.5, x1 = 0.25.
+    CHECK(solver.state().x(0) == Approx(0.5).margin(1e-8));
+    CHECK(solver.state().x(1) == Approx(0.25).margin(1e-8));
+    CHECK(solver.state().objective_value == Approx(1.125).margin(1e-8));
+}
