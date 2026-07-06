@@ -76,6 +76,17 @@ struct raa_augmented_policy
         std::optional<double> raa_min{};                      // 1e-7
         std::optional<double> raa_decay{};                    // 0.5
 
+        // raa penalty schedule (Svanberg 2002 §3, eqs. 3.6-3.9). When true,
+        // the raa floor is recomputed each outer iteration from the current
+        // gradient as (0.1/n) * sum_j |dg_j| * range_j (3.6), so the penalty
+        // scales with the objective/constraint magnitude instead of the
+        // fixed raa_min (which wastes inner budget on large-scale
+        // objectives), and the non-conservative growth is 1.1*(raa + delta)
+        // (3.9) rather than raa + 2*delta. When false, the pre-fix schedule
+        // (fixed floor + raa + 2*delta growth). Default set by the empirical
+        // scale-robustness sweep.
+        bool raa_svanberg_schedule{true};
+
         std::optional<double> stall_tolerance_threshold{};
         std::uint16_t stall_window{50};
     };
@@ -220,8 +231,44 @@ struct raa_augmented_policy
             s.opts.max_inner_iterations.value_or(15);
         const double raa_min = s.opts.raa_min.value_or(1e-7);
         const double raa_decay = s.opts.raa_decay.value_or(0.5);
+        const bool svanberg = s.opts.raa_svanberg_schedule;
 
         constexpr double inf = std::numeric_limits<double>::infinity();
+
+        // Svanberg 2002 eq. 3.6 gradient-scaled raa floor, recomputed each
+        // outer iteration so the penalty tracks the objective/constraint
+        // magnitude: raa_floor_i = (0.1/n) * sum_j |dg_ij| * range_j. This
+        // replaces the fixed raa_min as the decay floor and as a lower bound
+        // on the starting raa (the fixed 1e-5/1e-7 wastes inner conservativity
+        // budget on large-scale objectives). range_j is the box width for a
+        // bounded variable, the scale proxy max(|x_j|, 1) for an unbounded one.
+        auto range_of = [&](int j) {
+            if(s.lower[j] > -inf && s.upper[j] < inf)
+                return s.upper[j] - s.lower[j];
+            return std::max(std::abs(s.x[j]), 1.0);
+        };
+        double raa_floor_obj = raa_min;
+        Eigen::Vector<double, MC> raa_floor_con =
+            Eigen::Vector<double, MC>::Constant(m, raa_min);
+        if(svanberg)
+        {
+            const double inv_n = 0.1 / static_cast<double>(std::max(n, 1));
+            double sum_obj = 0.0;
+            for(int j = 0; j < n; ++j)
+                sum_obj += std::abs(s.g[j]) * range_of(j);
+            raa_floor_obj = std::max(inv_n * sum_obj, raa_min);
+            for(int i = 0; i < m; ++i)
+            {
+                double sum_con = 0.0;
+                for(int j = 0; j < n; ++j)
+                    sum_con += std::abs(s.J_ineq(i, j)) * range_of(j);
+                raa_floor_con[i] = std::max(inv_n * sum_con, raa_min);
+            }
+            // Start each outer at least at the gradient-scaled floor.
+            s.raa_obj = std::max(s.raa_obj, raa_floor_obj);
+            for(int i = 0; i < m; ++i)
+                s.raa_con[i] = std::max(s.raa_con[i], raa_floor_con[i]);
+        }
 
         // 1. Asymptote oscillation update.
         if(s.iteration >= 2)
@@ -405,13 +452,20 @@ struct raa_augmented_policy
             // captures total d_j mass at the trial; growth ensures the
             // augmented approximation crosses the true value for the
             // failing constraints (evaluated on the relaxed approximation).
+            // raa-growth. Svanberg 2002 eq. 3.9 raa' = 1.1*(raa + delta)
+            // (svanberg schedule) vs the pre-fix raa + 2*delta; delta is the
+            // conservativity shortfall per unit d_j mass. Both capped at 10x.
             const double dsum = std::max(dual_prob.dval_sum, 1e-20);
+            auto grow = [&](double raa, double delta) {
+                const double target = svanberg
+                    ? 1.1 * (raa + delta)
+                    : std::max(1.1 * raa, raa + delta / 0.5);
+                return std::min(10.0 * raa, target);
+            };
             if(f_trial > dual_prob.gval)
             {
                 const double delta = (f_trial - dual_prob.gval) / dsum;
-                s.raa_obj = std::min(
-                    10.0 * s.raa_obj,
-                    std::max(1.1 * s.raa_obj, s.raa_obj + delta / 0.5));
+                s.raa_obj = grow(s.raa_obj, delta);
             }
             for(int i = 0; i < m; ++i)
             {
@@ -419,18 +473,17 @@ struct raa_augmented_policy
                 if(gi_trial > gcval_relaxed[i])
                 {
                     const double delta = (gi_trial - gcval_relaxed[i]) / dsum;
-                    s.raa_con[i] = std::min(
-                        10.0 * s.raa_con[i],
-                        std::max(1.1 * s.raa_con[i],
-                                 s.raa_con[i] + delta / 0.5));
+                    s.raa_con[i] = grow(s.raa_con[i], delta);
                 }
             }
         }
 
-        // 5. Inter-outer raa decay.
-        s.raa_obj = std::max(raa_decay * s.raa_obj, raa_min);
+        // 5. Inter-outer raa decay toward the scale-adaptive floor (the
+        //    gradient-scaled raa_floor under the Svanberg schedule, else the
+        //    fixed raa_min).
+        s.raa_obj = std::max(raa_decay * s.raa_obj, raa_floor_obj);
         for(int i = 0; i < m; ++i)
-            s.raa_con[i] = std::max(raa_decay * s.raa_con[i], raa_min);
+            s.raa_con[i] = std::max(raa_decay * s.raa_con[i], raa_floor_con[i]);
 
         // 6. Commit trial.
         const double f_old = s.f;

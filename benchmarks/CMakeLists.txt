@@ -153,6 +153,28 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# GCMMA raa-augmented penalty-schedule sweep. Compares the Svanberg 2002
+# eqs. 3.6-3.9 schedule (gradient-scaled raa floor recomputed per outer +
+# 1.1*(raa+delta) growth) against the pre-fix fixed-floor + raa+2*delta
+# schedule on HS024/HS035/HS076 at objective scales {1, 1e3, 1e6}; records
+# outer iterations to a relative-objective target and the relative-error
+# floor so the shipped schedule is scale-robust and does not regress
+# convergence. Non-ctest, one-shot.
+add_executable(gcmma_raa_schedule_sweep gcmma_raa_schedule_sweep.cpp)
+target_link_libraries(gcmma_raa_schedule_sweep PRIVATE argmin::argmin)
+
+target_compile_options(gcmma_raa_schedule_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(gcmma_raa_schedule_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Bounded-dual elastics scale sweep for the MMA/GCMMA/CCSA policies.
 # Drives dual_bound_scale over {0.1, 1, 10, 1000, 10000, +inf} on
 # inequality-infeasible-start cells (HS024 from an infeasible interior
