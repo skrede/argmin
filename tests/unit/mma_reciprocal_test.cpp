@@ -20,6 +20,9 @@
 //            Int. J. Numer. Methods Engng 24:359-373, Section 5
 //            (separability assumption for convergence).
 
+#include "argmin/detail/mma_reciprocal_dual_problem.h"
+#include "argmin/solver/lbfgsb_policy.h"
+#include "argmin/solver/options.h"
 #include "argmin/solver/mma_policy.h"
 #include "argmin/solver/basic_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -87,6 +90,83 @@ struct separable_beam
     }
 };
 
+}
+
+// Dual-solve termination must key on the projected KKT residual, not the
+// raw dual gradient norm. The MMA dual is box-constrained (y >= 0); at a
+// solution with an inactive constraint (y_i* = 0 with g_tilde_i(x*) < 0)
+// the raw gradient component g_i = -g_tilde_i stays bounded away from
+// zero, so a raw-gradient-gated inner loop cannot recognize optimality and
+// falls through to its iteration cap. The projected KKT residual (the
+// bound-constrained stationarity measure lbfgsb reports on step_result)
+// correctly certifies the solution.
+//
+// Worked dual: n = 1, m = 1. L = 0, U = 2, alpha = 0.05, beta = 1.95;
+// objective p0 = q0 = 1, r_obj = 0 (unconstrained primal minimizer x = 1,
+// interior); constraint pc = qc = 0.1, rc = -5 so g_tilde_1(1) = 0.1 +
+// 0.1 - 5 = -4.8 < 0 (slack). The dual objective -W(y) = -(gval - 4.8 y)
+// increases in y, so y* = 0 and the raw gradient there is |g| = 4.8.
+TEST_CASE("mma dual solve terminates on the projected KKT residual",
+          "[mma_reciprocal]")
+{
+    Eigen::VectorXd L{{0.0}}, U{{2.0}};
+    Eigen::VectorXd alpha{{0.05}}, beta{{1.95}};
+    Eigen::VectorXd p0{{1.0}}, q0{{1.0}};
+    Eigen::MatrixXd pc(1, 1), qc(1, 1);
+    pc(0, 0) = 0.1;
+    qc(0, 0) = 0.1;
+    Eigen::VectorXd rc{{-5.0}};
+
+    detail::mma_reciprocal_dual_problem<double, Eigen::Dynamic,
+                                        Eigen::Dynamic> dual;
+    dual.L_out = &L;
+    dual.U_out = &U;
+    dual.alpha_out = &alpha;
+    dual.beta_out = &beta;
+    dual.p_obj_out = &p0;
+    dual.q_obj_out = &q0;
+    dual.p_con_out = &pc;
+    dual.q_con_out = &qc;
+    dual.r_obj = 0.0;
+    dual.r_con_out = &rc;
+    dual.n_primal = 1;
+    dual.m_dual = 1;
+
+    // Solve the dual from a warm start y0 = 1 with the production inner
+    // loop, gated on the projected KKT residual.
+    Eigen::VectorXd y0{{1.0}};
+    lbfgsb_policy<Eigen::Dynamic> dp;
+    solver_options<default_convergence> dopts;
+    dopts.max_iterations = 100;
+    dopts.set_gradient_threshold(1e-9);
+    dopts.set_step_threshold(1e-15);
+    auto ds = dp.init(dual, y0, dopts);
+
+    step_result<double> last{};
+    int iters = 0;
+    for(int k = 0; k < 100; ++k)
+    {
+        last = dp.step(ds);
+        ++iters;
+        if(last.kkt_residual.value_or(last.gradient_norm) < 1e-9
+           || last.step_size < 1e-15)
+            break;
+    }
+
+    // The inner solver surfaces the projected KKT residual (the measure
+    // the AL composition reads for its inner tolerance).
+    REQUIRE(last.kkt_residual.has_value());
+
+    // Optimality: the projected residual certifies the solution, and it
+    // was reached well inside the 100-iteration cap.
+    CHECK(*last.kkt_residual < 1e-7);
+    CHECK(iters < 100);
+
+    // The inactive constraint drives y* to its lower bound, where the raw
+    // dual gradient norm stays bounded away from zero -- a raw-gradient
+    // gate could never have certified this solution.
+    CHECK(ds.x[0] == Approx(0.0).margin(1e-6));
+    CHECK(last.gradient_norm > 1.0);
 }
 
 // Plumbing test: init, step, dual solve, reset all execute without crash

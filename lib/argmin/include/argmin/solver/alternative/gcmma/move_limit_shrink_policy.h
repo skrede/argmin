@@ -350,7 +350,13 @@ struct move_limit_shrink_policy
                 for(int k = 0; k < 100; ++k)
                 {
                     auto dsr = dp.step(ds);
-                    if(dsr.gradient_norm < 1e-9 || dsr.step_size < 1e-15)
+                    // Terminate on the projected KKT residual (the box-
+                    // constrained dual's stationarity measure), not the raw
+                    // gradient norm: at a dual solution with an inactive
+                    // constraint (y_i = 0) the raw component stays bounded
+                    // away from zero and the loop would run to its cap.
+                    if(dsr.kkt_residual.value_or(dsr.gradient_norm) < 1e-9
+                       || dsr.step_size < 1e-15)
                         break;
                 }
                 s.y_dual = ds.x;
