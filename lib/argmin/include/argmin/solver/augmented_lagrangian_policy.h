@@ -119,9 +119,13 @@ struct augmented_lagrangian_policy
         // compact_lbfgs curvature pairs via lbfgsb_policy::reset().
         bool warm_start_inner{true};
 
-        // Conn-Gould-Toint (1991) adaptive inner tolerance schedule.
-        // inner_tol = max(eta / mu^alpha, inner_grad_tol)
-        // Reference: N&W Algorithm 17.4, Step 2.
+        // Conn-Gould-Toint (1991) / N&W Algorithm 17.4 adaptive inner
+        // stopping-tolerance (omega_k) schedule. omega_0 = eta * mu^alpha;
+        // thereafter omega tightens multiplicatively (omega *= mu^alpha) on
+        // every multiplier update and is re-derived (omega = eta * mu^alpha)
+        // whenever the penalty is reduced. Because mu < 1, both branches
+        // shrink omega, so omega_k -> 0 even under multiplier-only progress.
+        // Reference: N&W Algorithm 17.4, Step 2; CGT 1991 Section 3.
         scalar_type inner_tolerance_eta{scalar_type(0.1)};
         scalar_type inner_tolerance_alpha{scalar_type(0.9)};
         std::uint16_t stall_window{100};
@@ -165,6 +169,15 @@ struct augmented_lagrangian_policy
         // reduction). Multiplier-only updates leave mu fixed and are
         // small enough that warm-starting is OK.
         std::optional<scalar_type> mu_at_last_inner_solve{};
+
+        // Adaptive inner stopping tolerance (omega_k) of the CGT/N&W
+        // Algorithm 17.4 two-branch schedule. Persisted across outer
+        // iterations so the schedule can tighten multiplicatively on
+        // multiplier updates (penalty pinned) and re-derive from the
+        // penalty regime on penalty reductions -- driving omega_k -> 0
+        // even when the penalty parameter never moves. Lazily initialized
+        // on the first step from the initial penalty.
+        std::optional<scalar_type> omega{};
 
         Eigen::Vector<scalar_type, N> lower;
         Eigen::Vector<scalar_type, N> upper;
@@ -538,20 +551,27 @@ struct augmented_lagrangian_policy
             sp.nineq = s.n_ineq;
         }
 
-        // Adaptive inner tolerance (Conn-Gould-Toint 1991; N&W Algorithm 17.4).
-        // inner_tol = max(eta / mu^alpha, tol_final)
-        // Early outer iterations (large mu) get loose tolerance; as mu
-        // decreases the inner solve tightens toward the final tolerance.
-        // CGT 1991 §3 prescribes alpha >= 0.9 to couple inner/outer
-        // iterations meaningfully; the prior alpha = 0.1 default left
-        // the schedule essentially flat across the mu range, effectively
-        // running the inner solver to its default tolerance on every
-        // outer iter regardless of penalty.
+        // Adaptive inner stopping tolerance (Conn-Gould-Toint 1991; N&W
+        // Algorithm 17.4). omega_k is carried in state across outer
+        // iterations and updated by the two-branch schedule at the bottom of
+        // step(): it tightens multiplicatively on multiplier updates and is
+        // re-derived from the penalty regime on penalty reductions. Here we
+        // only consume the current omega_k, lazily seeding it from the
+        // initial penalty on the first outer iteration.
+        //
+        // omega_0 = eta * mu^alpha and, since mu < 1 (penalty term
+        // 1/(2 mu) ||c||^2, mu decreasing), every subsequent update strictly
+        // shrinks omega -- so omega_k -> 0 (floored at inner_grad_tol) even
+        // when the penalty parameter is pinned across multiplier-only outer
+        // iterations. This is the reverse of a schedule that would loosen as
+        // mu shrinks; the inner solve must tighten as the penalty regime
+        // tightens. CGT 1991 §3 prescribes alpha >= 0.9 to couple the inner
+        // and outer iterations meaningfully.
         const scalar_type tol_eta = s.opts.inner_tolerance_eta;
         const scalar_type tol_alpha = s.opts.inner_tolerance_alpha;
-        const scalar_type inner_tol = std::max(
-            static_cast<scalar_type>(tol_eta / std::pow(s.mu, tol_alpha)),
-            inner_grad_tol);
+        if(!s.omega.has_value())
+            s.omega = static_cast<scalar_type>(tol_eta * std::pow(s.mu, tol_alpha));
+        const scalar_type inner_tol = std::max(*s.omega, inner_grad_tol);
 
         solver_options<> inner_opts;
         inner_opts.max_iterations = inner_max;
@@ -755,7 +775,10 @@ struct augmented_lagrangian_policy
         // K&W Algorithm 10.2 / N&W Algorithm 17.4:
         // Conn, Gould & Toint (1991) recommend updating multipliers only
         // when sufficient feasibility progress is observed, and decreasing
-        // the penalty parameter otherwise.
+        // the penalty parameter otherwise. The inner stopping tolerance
+        // omega_k follows the same two-branch split: tighten on the
+        // multiplier-update (success) branch, re-derive from the new penalty
+        // on the penalty-reduction (failure) branch.
         if(gate_viol < feas_progress * s.prev_viol || s.outer_iter == 0)
         {
             if constexpr(lift_equalities_only)
@@ -776,10 +799,21 @@ struct augmented_lagrangian_policy
                 detail::update_multipliers(
                     s.lambda_eq, s.lambda_ineq, s.c_eq, s.c_ineq, s.mu);
             }
+
+            // Success branch: penalty is pinned, so tighten the inner
+            // tolerance multiplicatively (mu < 1). This is what drives
+            // omega_k -> 0 across multiplier-only outer iterations, where
+            // the from-scratch mu^alpha form would sit flat forever.
+            s.omega = *s.omega * std::pow(s.mu, tol_alpha);
         }
         else
         {
             s.mu = std::max(s.mu * mu_dec, mu_floor);
+            // Failure branch: the penalty regime just tightened; re-derive
+            // omega from the new (smaller) mu rather than carrying the
+            // possibly-unreachable tolerance accumulated in the previous
+            // regime.
+            s.omega = static_cast<scalar_type>(tol_eta * std::pow(s.mu, tol_alpha));
         }
         s.prev_viol = gate_viol;
 
@@ -811,6 +845,9 @@ struct augmented_lagrangian_policy
             s.c_ineq = c_all.tail(s.n_ineq);
         }
         s.outer_iter = 0;
+        // Re-seed the adaptive inner tolerance on the next step from the
+        // current penalty regime.
+        s.omega.reset();
         // Destroy inner solver; will be reconstructed next step.
         // Subproblem storage is kept (its pointers are re-seeded next step).
         if(s.ctx)
