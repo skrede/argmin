@@ -1,9 +1,8 @@
 // Independent correctness witnesses for the nw_sqp-family (dense-BFGS) SQP
 // second-order-correction gate. Two cases, each a hand-derived or
-// re-baseline-independent assertion of the CORRECT post-fix behavior, tagged
-// [!shouldfail] because the defect is still present. The first is a single-step
-// Maratos SOC-trigger witness paralleling the SLSQP one; the second is the
-// HS043 strictly-feasible-descent over-rejection witness.
+// re-baseline-independent assertion of the correct behavior. The first is a
+// single-step Maratos SOC-trigger witness paralleling the SLSQP one; the
+// second is the HS043 strictly-feasible-descent over-rejection witness.
 //
 // Reference: Nocedal & Wright 2e Section 18.3 (Maratos effect, second-order
 //            correction); IPOPT Section 2.4 (SOC trigger); Wachter & Biegler
@@ -79,21 +78,22 @@ double violation_at(const maratos_problem& p, const Eigen::VectorXd& x)
 
 }  // namespace
 
-// WITNESS (nw_sqp-family SOC gate inverted vs the Maratos effect).
+// WITNESS (nw_sqp-family SOC trigger vs the Maratos effect).
 //
 // Parallels the SLSQP single-step SOC witness: at a near-feasible iterate
 // (h_k = 0) the full unit step increases the violation (h(x_k + p) > h_k). The
-// correct trigger fires a second-order correction on this rejection whenever
-// theta(x_k + p) >= theta(x_k); the current gate only fires when the current
-// iterate is already infeasible (h_k > 1e-3), so SOC never fires at h_k = 0.
-// The single-step signature of "SOC fired" is diagnostics.soc_retry_count >= 1,
-// which is 0 pre-fix. Hand-derived quantities at x_k = (cos 0.1, sin 0.1):
+// correct trigger fires a second-order correction on this full-step rejection
+// whenever theta(x_k + p) >= theta(x_k); a gate keyed to the violation at the
+// current iterate (h_k above a fixed threshold) can never fire at h_k = 0,
+// which is exactly the Maratos regime. The single-step signature of "SOC
+// fired" is diagnostics.soc_retry_count >= 1. Hand-derived quantities at
+// x_k = (cos 0.1, sin 0.1):
 //   p          = (sin^2 th, -sin th cos th) = ( 0.00996673, -0.09933467)
 //   x_k + p    = ( 1.00497093, 0.00049875)
 //   h(x_k)     = 0,   h(x_k + p) = 0.00996884 > 0  -> Maratos regime.
 TEST_CASE("nw_sqp family fires a second-order correction at a near-feasible "
           "Maratos step",
-          "[nw_sqp][soc][witness][!shouldfail]")
+          "[nw_sqp][soc][witness]")
 {
     const double th = 0.1;
     Eigen::VectorXd xk{{std::cos(th), std::sin(th)}};

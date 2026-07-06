@@ -434,6 +434,15 @@ struct filter_nw_sqp_policy
         //
         // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
         std::size_t nan_eval_count = 0;
+        // Second-order correction retry counter. Increments once per SOC
+        // retry attempt at the full-step rejection site (regardless of
+        // whether the retry succeeds); surfaced through the contracted
+        // step_result diagnostic of the same name (trust-region SQP
+        // precedent).
+        //
+        // Reference: N&W 2e Section 18.3 (Maratos effect, second-order
+        //            correction).
+        std::size_t soc_retry_count = 0;
 
         // Loop-carried variables that survive the retry block into the
         // post-loop accept-step block. The only path that exits the loop
@@ -610,6 +619,7 @@ struct filter_nw_sqp_policy
             // null-step return.
             r.diagnostics.nan_eval_count = nan_eval_count;
             r.diagnostics.bfgs_skip_count = bfgs_skip_count;
+            r.diagnostics.soc_retry_count = soc_retry_count;
             return r;
         }
 
@@ -754,75 +764,136 @@ struct filter_nw_sqp_policy
             alpha *= rho_shrink;
         }
 
-        // Second-order correction (SOC) if rejected and infeasible.
-        if(!accepted && h_k > options.soc_violation_threshold)
+        // Second-order correction (SOC) on rejection of the full step in
+        // the Maratos regime.
+        //
+        // Near a tight active set the linearised constraints understate
+        // quadratic curvature: the violation at the full unit step is
+        // second-order in ||p|| even though p is a valid first-order
+        // descent direction, so the filter / Armijo tests reject the
+        // trial. The trigger is the filter line-search SOC convention:
+        // attempt the correction when the full step was rejected
+        // (line-search failure or a backtracked acceptance) AND failed to
+        // reduce the constraint violation, theta(x + p) >= theta(x_k).
+        // Re-solve the QP with the constraint RHS re-anchored at the
+        // full unit step with the original Jacobian (matching the
+        // nw_sqp / kraft_slsqp / filter_slsqp residual assembly):
+        //   b_eq_soc   = -c_eq(x + p)   + J_eq(x)   * p
+        //   b_ineq_soc = -c_ineq(x + p) + J_ineq(x) * p
+        //
+        // Reference: Wachter & Biegler 2006 Section 2.4 (SOC trigger on
+        //            rejection of the first trial step with
+        //            theta(x + p) >= theta(x_k));
+        //            N&W 2e Section 18.3 (Maratos effect, SOC).
+        //
+        // theta(x + p): L1 constraint violation at the full unit step,
+        // evaluated into c_all (NOT c_trial_buf: on a backtracked
+        // acceptance c_trial_buf already holds the accepted trial
+        // constraints consumed by the accept block). Non-finite
+        // constraint values keep h_full NaN so the trigger comparison
+        // is false and the retry is skipped.
+        double h_full = std::numeric_limits<double>::quiet_NaN();
+        if((!accepted || alpha < 1.0) && m > 0)
         {
+            Eigen::Vector<double, N> x_full = s.x + p;
+            if(has_bounds)
+                x_full = detail::project(x_full, s.lower, s.upper);
+
+            s.problem->constraints(x_full, s.bufs.c_all);
+            if(s.bufs.c_all.allFinite())
+            {
+                h_full = 0.0;
+                if(s.n_eq > 0)
+                    h_full += s.bufs.c_all.head(s.n_eq).cwiseAbs().sum();
+                if(s.n_ineq > 0)
+                    h_full += (-s.bufs.c_all.tail(s.n_ineq))
+                                  .cwiseMax(0.0).sum();
+            }
+        }
+
+        if(h_full >= h_k)
+        {
+            ++soc_retry_count;
+
             // SOC RHS lives in state-resident b_eq_soc_buf / b_ineq_soc_buf
-            // (sqp_state_buffers fields) — replaces the prior per-step
-            // b_eq_soc / b_ineq_soc local materializations. Drives the SOC
-            // RHS from c_trial_buf head()/tail() expressions directly to
-            // avoid c_eq_trial / c_ineq_trial VectorXd materialization.
+            // (sqp_state_buffers fields); c_all holds c(x + p) from the
+            // trigger evaluation above. N&W Section 18.3 form
+            // -c(x + p) + J * p, assembled exactly as in nw_sqp_policy.
             if(s.n_eq > 0)
-                s.bufs.b_eq_soc_buf.noalias() = -s.bufs.c_trial_buf.head(s.n_eq);
+                s.bufs.b_eq_soc_buf.noalias()
+                    = -s.bufs.c_all.head(s.n_eq) + s.J_eq * p;
             if(s.n_ineq > 0)
                 s.bufs.b_ineq_soc_buf.noalias()
-                    = -s.bufs.c_trial_buf.tail(s.n_ineq);
+                    = -s.bufs.c_all.tail(s.n_ineq) + s.J_ineq * p;
 
             detail::qp_result<double, N> qp_soc;
             if(has_bounds)
             {
-                Eigen::Vector<double, N> p_lower_soc = s.lower - x_trial;
-                Eigen::Vector<double, N> p_upper_soc = s.upper - x_trial;
-                Eigen::Vector<double, N> p_soc_0 = Eigen::Vector<double, N>::Zero(n);
-                // Adopted from: argmin/solver/nw_sqp_policy.h::step main-LS
-                //               Armijo backtrack site (in-tree precedent —
-                //               stateful active_set_qp_solver SOC-retry path).
+                // p_lo_buf / p_hi_buf already hold s.lower - s.x /
+                // s.upper - s.x from the main QP build above; reuse them.
+                // Adopted from: argmin/solver/nw_sqp_policy.h::step SOC
+                //               retry site (in-tree precedent).
+                Eigen::Vector<double, N> p0_soc = p;
+                p0_soc = p0_soc.cwiseMax(s.bufs.p_lo_buf)
+                             .cwiseMin(s.bufs.p_hi_buf);
                 qp_soc = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                            s.J_eq, s.bufs.b_eq_soc_buf,
                                            s.J_ineq, s.bufs.b_ineq_soc_buf,
-                                           p_lower_soc, p_upper_soc, p_soc_0,
-                                           qp_opts);
+                                           s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                                           p0_soc, qp_opts);
             }
             else
             {
-                Eigen::Vector<double, N> p_soc_0 = Eigen::Vector<double, N>::Zero(n);
-                // Adopted from: argmin/solver/nw_sqp_policy.h::step main-LS
-                //               NaN-gate site (in-tree precedent — stateful
+                // Adopted from: argmin/solver/nw_sqp_policy.h::step SOC
+                //               retry site (in-tree precedent — stateful
                 //               active_set_qp_solver, no-bounds overload).
                 qp_soc = s.qp_solver.solve(s.hessian.hessian(), s.g,
                                            s.J_eq, s.bufs.b_eq_soc_buf,
                                            s.J_ineq, s.bufs.b_ineq_soc_buf,
-                                           p_soc_0, qp_opts);
+                                           p, qp_opts);
             }
 
-            Eigen::Vector<double, N> x_soc = x_trial + qp_soc.x;
-            if(has_bounds)
-                x_soc = detail::project(x_soc, s.lower, s.upper);
-
-            double f_soc = s.problem->value(x_soc);
-            // SOC re-evaluates c at x_soc directly into c_trial_buf, then
-            // computes constraint_violation / l1_merit inline on the
-            // VectorBlock head()/tail() expressions to avoid the
-            // c_eq_soc / c_ineq_soc VectorXd materialization. If the SOC
-            // trial is accepted, c_trial_buf already holds c(x_soc) and
-            // becomes the s.c_eq / s.c_ineq source after the LS block.
-            if(m > 0)
-                s.problem->constraints(x_soc, s.bufs.c_trial_buf);
-            double viol_soc = 0.0;
-            if(s.n_eq > 0)
-                viol_soc += s.bufs.c_trial_buf.head(s.n_eq).cwiseAbs().sum();
-            if(s.n_ineq > 0)
-                viol_soc += (-s.bufs.c_trial_buf.tail(s.n_ineq))
-                                .cwiseMax(0.0).sum();
-            double h_soc = viol_soc;
-            double phi_soc = f_soc + s.sigma * viol_soc;
-            if(s.filter.is_acceptable(f_soc, h_soc)
-               && phi_soc <= phi0 + c1 * dphi0)
+            if(qp_soc.status == detail::qp_status::optimal)
             {
-                x_trial = x_soc;
-                f_trial = f_soc;
-                h_trial = h_soc;
-                accepted = true;
+                // The re-solved QP already yields the full corrected
+                // direction from the current iterate (its constraint RHS
+                // -c(x + p) + J * p models the linearization error of the
+                // whole step), so the trial is x + p_soc, NOT
+                // x + p + p_soc: with the replacement-form RHS, adding p
+                // again would double-count the step and land at
+                // x + 2p + O(||p||^2).
+                Eigen::Vector<double, N> x_soc = s.x + qp_soc.x;
+                if(has_bounds)
+                    x_soc = detail::project(x_soc, s.lower, s.upper);
+
+                double f_soc = s.problem->value(x_soc);
+                // SOC re-evaluates c at x_soc into c_all, then computes
+                // constraint_violation / l1_merit inline on the VectorBlock
+                // head()/tail() expressions to avoid the c_eq_soc /
+                // c_ineq_soc VectorXd materialization.
+                s.problem->constraints(x_soc, s.bufs.c_all);
+                double viol_soc = 0.0;
+                if(s.n_eq > 0)
+                    viol_soc += s.bufs.c_all.head(s.n_eq).cwiseAbs().sum();
+                if(s.n_ineq > 0)
+                    viol_soc += (-s.bufs.c_all.tail(s.n_ineq))
+                                    .cwiseMax(0.0).sum();
+                double h_soc = viol_soc;
+                double phi_soc = f_soc + s.sigma * viol_soc;
+                if(std::isfinite(f_soc) && s.bufs.c_all.allFinite()
+                   && s.filter.is_acceptable(f_soc, h_soc)
+                   && phi_soc <= phi0 + c1 * dphi0)
+                {
+                    x_trial = x_soc;
+                    f_trial = f_soc;
+                    h_trial = h_soc;
+                    alpha = 1.0;
+                    // Accept-block contract: c_trial_buf holds c at the
+                    // accepted trial point (becomes the s.c_eq / s.c_ineq
+                    // source after the LS block).
+                    s.bufs.c_trial_buf = s.bufs.c_all;
+                    accepted = true;
+                }
             }
         }
 
@@ -898,6 +969,7 @@ struct filter_nw_sqp_policy
                         .bfgs_reset_count = reset_count,
                         .bfgs_skip_count = bfgs_skip_count,
                         .nan_eval_count = nan_eval_count,
+                        .soc_retry_count = soc_retry_count,
                     },
                 };
             }
@@ -970,6 +1042,7 @@ struct filter_nw_sqp_policy
                     .bfgs_reset_count = reset_count,
                     .bfgs_skip_count = bfgs_skip_count,
                     .nan_eval_count = nan_eval_count,
+                    .soc_retry_count = soc_retry_count,
                 },
             };
         }
@@ -1162,6 +1235,7 @@ struct filter_nw_sqp_policy
                 .bfgs_reset_count = reset_count,
                 .bfgs_skip_count = bfgs_skip_count,
                 .nan_eval_count = nan_eval_count,
+                .soc_retry_count = soc_retry_count,
             },
         };
     }

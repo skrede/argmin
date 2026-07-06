@@ -387,6 +387,15 @@ struct nw_sqp_policy
         //
         // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
         std::size_t nan_eval_count = 0;
+        // Second-order correction retry counter. Increments once per SOC
+        // retry attempt at the full-step rejection site (regardless of
+        // whether the retry succeeds); surfaced through the contracted
+        // step_result diagnostic of the same name (trust-region SQP
+        // precedent).
+        //
+        // Reference: N&W 2e Section 18.3 (Maratos effect, second-order
+        //            correction).
+        std::size_t soc_retry_count = 0;
 
         // Loop-carried variables that survive the retry block into the
         // post-loop accept-step block. The cold-start sigma calibration
@@ -558,6 +567,7 @@ struct nw_sqp_policy
             // diagnostic and the consistency suite asserts on it).
             r.diagnostics.nan_eval_count = nan_eval_count;
             r.diagnostics.bfgs_skip_count = bfgs_skip_count;
+            r.diagnostics.soc_retry_count = soc_retry_count;
             return r;
         }
 
@@ -675,18 +685,23 @@ struct nw_sqp_policy
             alpha *= ls_rho;
         }
 
-        // Maratos second-order correction retry on Armijo failure.
+        // Maratos second-order correction retry on rejection of the full
+        // step.
         //
-        // On rejection of the trial step the L1 merit can be lifted by the
-        // nonlinear constraint residual at x + p even when p is a valid
-        // first-order descent direction (the Maratos effect: linearised
-        // constraints understate quadratic curvature near a tight active
-        // set). Re-solve the QP with the constraint RHS re-anchored at the
-        // trial point:
+        // Near a tight active set the linearised constraints understate
+        // quadratic curvature, so the L1 merit at the full unit step is
+        // lifted by the second-order constraint residual even when p is a
+        // valid first-order descent direction (the Maratos effect). The
+        // trigger is the filter line-search SOC convention: attempt the
+        // correction when the full step was rejected (line-search failure
+        // or a backtracked acceptance) AND failed to reduce the constraint
+        // violation, theta(x + p) >= theta(x_k). Re-solve the QP with the
+        // constraint RHS re-anchored at the trial point:
         //   b_eq_soc  = -c_eq(x + p)  + J_eq(x)  * p
         //   b_ineq_soc = -c_ineq(x + p) + J_ineq(x) * p
-        // and accept the combined direction p + p_soc if the Armijo test
-        // passes on the L1 merit.
+        // and accept the corrected direction p_soc if the Armijo test
+        // passes on the L1 merit at a step length exceeding the plain
+        // backtracked one.
         //
         // Adopted from: argmin/solver/kraft_slsqp_policy.h::step SOC retry
         //               block (in-tree precedent).
@@ -697,17 +712,41 @@ struct nw_sqp_policy
         //                 (E, f) form. The SOC math is identical; the QP
         //                 API differs.
         //
-        // Reference: Kraft 1988 DFVLR-FB 88-28 §2.2.4 (Maratos SOC);
+        // Reference: Wachter & Biegler 2006 Section 2.4 (SOC trigger on
+        //            rejection of the first trial step with
+        //            theta(x + p) >= theta(x_k));
+        //            Kraft 1988 DFVLR-FB 88-28 §2.2.4 (Maratos SOC);
         //            N&W 2e §18.3 (Maratos effect, second-order correction).
         const double cv_now = detail::constraint_violation(s.c_eq, s.c_ineq);
 
-        if(!ls_success && cv_now > options.soc_violation_threshold && m > 0)
+        // theta(x + p): L1 constraint violation at the full unit step,
+        // evaluated only when the full step was rejected. Leaves c(x + p)
+        // in s.bufs.c_all for the SOC RHS below. Non-finite constraint
+        // values keep h_full NaN so the trigger comparison is false and
+        // the retry is skipped.
+        double h_full = std::numeric_limits<double>::quiet_NaN();
+        if((!ls_success || alpha < 1.0) && m > 0)
         {
             Eigen::Vector<double, N> x_full = s.x + p;
             if(has_finite_bounds)
                 x_full = detail::project(x_full, s.lower, s.upper);
 
             s.problem->constraints(x_full, s.bufs.c_all);
+            if(s.bufs.c_all.allFinite())
+            {
+                h_full = 0.0;
+                if(s.n_eq > 0)
+                    h_full += s.bufs.c_all.head(s.n_eq).cwiseAbs().sum();
+                if(s.n_ineq > 0)
+                    h_full += (-s.bufs.c_all.tail(s.n_ineq))
+                                  .cwiseMax(0.0).sum();
+            }
+        }
+
+        if(h_full >= cv_now && m > 0)
+        {
+            ++soc_retry_count;
+
             auto c_eq_full = s.bufs.c_all.head(s.n_eq);
             auto c_ineq_full = s.bufs.c_all.tail(s.n_ineq);
 
@@ -738,14 +777,30 @@ struct nw_sqp_policy
 
             if(qp_soc.status == detail::qp_status::optimal)
             {
-                Eigen::Vector<double, N> p_combined = p + qp_soc.x;
+                // The re-solved QP already yields the full corrected
+                // direction from the current iterate: its constraint RHS
+                // -c(x + p) + J * p models the linearization error of the
+                // whole step, so the corrected trial is x + p_soc, NOT
+                // x + p + p_soc — with the replacement-form RHS, adding p
+                // again double-counts the step and lands at
+                // x + 2p + O(||p||^2), which re-lifts the violation the
+                // correction was meant to remove.
+                const Eigen::Vector<double, N>& p_soc = qp_soc.x;
                 double alpha_soc = 1.0;
                 Eigen::Vector<double, N> x_trial_soc = s.x;
                 double f_trial_soc{s.objective_value};
 
                 for(std::uint16_t ls = 0; ls < max_ls; ++ls)
                 {
-                    x_trial_soc = s.x + alpha_soc * p_combined;
+                    // A corrected step supersedes an already-accepted
+                    // backtracked step only at a strictly larger step
+                    // length (kraft_slsqp SOC precedence rule); once
+                    // alpha_soc falls to the accepted alpha the retry
+                    // cannot improve on the main line search.
+                    if(ls_success && alpha_soc <= alpha)
+                        break;
+
+                    x_trial_soc = s.x + alpha_soc * p_soc;
 
                     if(has_finite_bounds)
                         x_trial_soc = detail::project(x_trial_soc,
@@ -777,7 +832,7 @@ struct nw_sqp_policy
 
                     if(phi_trial_soc <= phi0 + ls_c1 * alpha_soc * dphi0)
                     {
-                        p = p_combined;
+                        p = p_soc;
                         alpha = alpha_soc;
                         x_trial = x_trial_soc;
                         f_trial = f_trial_soc;
@@ -846,6 +901,7 @@ struct nw_sqp_policy
             // its in-class default 0).
             r.diagnostics.bfgs_skip_count = bfgs_skip_count;
             r.diagnostics.nan_eval_count = nan_eval_count;
+            r.diagnostics.soc_retry_count = soc_retry_count;
             return r;
         }
 
@@ -1042,6 +1098,7 @@ struct nw_sqp_policy
                 .bfgs_reset_count = reset_count,
                 .bfgs_skip_count = bfgs_skip_count,
                 .nan_eval_count = nan_eval_count,
+                .soc_retry_count = soc_retry_count,
             },
         };
     }
