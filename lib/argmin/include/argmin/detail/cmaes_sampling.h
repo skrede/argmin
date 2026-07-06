@@ -11,15 +11,16 @@
 //     self-time on the Gaussian-transform slice
 //   - marsaglia (alternative::marsaglia::marsaglia_normal):
 //     8.39% self-time, 5-rep median wall 495 ms
-//   - ziggurat  (alternative::ziggurat::ziggurat_normal):
-//     7.51% self-time, 5-rep median wall 496 ms
-// Marsaglia wins the conjoined "lowest combined sample_offspring
-// shell + Gaussian draw self-time" tiebreaker (11.86% vs ziggurat's
-// 12.02%) at indistinguishable median wall, with simpler
-// implementation (no compile-time table; same scalar arithmetic on
-// every draw). Loser stays buildable under
-// detail/alternative/cmaes_sampling_ziggurat.h for future
-// re-comparison per the README lifecycle.
+// Marsaglia wins the "lowest combined sample_offspring shell +
+// Gaussian draw self-time" comparison with a simple implementation
+// (no compile-time table; same scalar arithmetic on every draw).
+//
+// A Ziggurat variant was evaluated (7.51% self-time, indistinguishable
+// median wall) but removed: its published-style construction truncated
+// the tail at the sentinel |z| ~ 3.911 (the strip-0 acceptance ratio
+// was >> 1, so the tail fallback was never reached), which is a
+// correctness defect and higher maintenance risk than its marginal
+// speed edge justified for a non-production variant.
 //
 // Generates lambda offspring from the multivariate normal
 // distribution N(mean, sigma^2 * C) and provides repair+penalty for
