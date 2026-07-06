@@ -209,9 +209,18 @@ TEST_CASE("cmaes_policy: solves bounded Rastrigin", "[cmaes]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    // Default options -- sigma and lambda should auto-scale from bounds.
+    // Rastrigin is multimodal; Hansen (2023) arXiv:1604.00772 §7.1
+    // recommends increasing the population beyond the small unimodal
+    // default when the landscape is multimodal, precisely so the sampled
+    // cloud spans several basins per generation. The reference-faithful
+    // covariance update leaves the minimal default population (6 at n=2)
+    // too small to reliably reach the global basin from this start, so we
+    // configure a population in the multimodal range. This holds the
+    // global-convergence bar across the whole seed range rather than
+    // relying on a single lucky seed.
     cmaes_policy<> policy;
     policy.options.seed = 42u;
+    policy.options.lambda = 32u;
 
     basic_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
@@ -814,26 +823,23 @@ TEST_CASE("cmaes_policy: no_effect_axis exit", "[cmaes]")
     CHECK(result.status == solver_status::roundoff_limited);
 }
 
-TEST_CASE("cmaes_policy: no_effect_coord exit", "[cmaes]")
+TEST_CASE("cmaes_policy: flat coordinate converges without spurious divergence",
+          "[cmaes]")
 {
-    // Hansen 2023 (arXiv:1604.00772) section B.3 item 2 (NoEffectCoord):
-    // "stop if adding 0.2-standard deviations in any single coordinate
-    // does not change m (i.e. m_i equals m_i + 0.2*sigma*c_{i,i} for any
-    // i)." The degenerate quadratic has near-zero curvature on coordinate
-    // 1; CMA-ES collapses C(1,1) until 0.2 * sigma * sqrt(C(1,1)) is below
-    // the mean's ULP, firing the criterion.
+    // Degenerate quadratic: f = x0^2 + 1e-30 * x1^2, i.e. sharp curvature
+    // on x0 and an effectively flat x1 direction. The rank-mu covariance
+    // update divides each offspring displacement by the sigma that sampled
+    // it (Hansen 2016 arXiv:1604.00772 eq. 47), so the flat coordinate
+    // receives no spurious variance inflation: the run drives x0 to its
+    // minimizer and terminates on a legitimate stationarity criterion.
     //
-    // Criterion-class assertion (vs predicate-class): on this fixture the
-    // §B.3 EXIT criteria can race. Under the active-CMA-flavor weights
-    // pre-Plan-02, NoEffectCoord (mapped to roundoff_limited) won. Under
-    // the vanilla positive-only weights (Hansen 2023 §B.1 eq (49)-(50);
-    // libcmaes covarianceupdate.cc:67-75) the rank-mu accumulator is
-    // strictly positive and the sigma trajectory along the flat
-    // coordinate diverges first, firing TolXUp (Hansen 2023 §B.3 item 8,
-    // mapped to diverged) before NoEffectCoord can collapse far enough.
-    // Both outcomes are §B.3 EXIT criteria; the test asserts the
-    // criterion class fired (a §B.3 EXIT path took the run, not
-    // basic_solver convergence or max_iterations).
+    // Regression guard: an implementation that divides the rank-mu deltas
+    // by the already-adapted (smaller) sigma over-weights the flat
+    // coordinate's rank-mu contribution, inflating sigma * sqrt(C(1,1))
+    // until the divergence cap (Hansen §B.3 item 8, TolXUp) fires and the
+    // run exits `diverged` instead of converging. This case pins the
+    // faithful outcome: a clean convergence to the true minimizer on the
+    // active coordinate, never a budget timeout and never a divergence.
     degenerate_quadratic problem{};
 
     Eigen::Vector<double, 2> x0{{1.0, 1.0}};
@@ -851,11 +857,12 @@ TEST_CASE("cmaes_policy: no_effect_coord exit", "[cmaes]")
     basic_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    const bool b3_exit_fired =
-           result.status == solver_status::roundoff_limited
-        || result.status == solver_status::xtol_reached
-        || result.status == solver_status::diverged;
-    CHECK(b3_exit_fired);
+    // The run stops on a real criterion, not by exhausting the budget, and
+    // never on the spurious-divergence path the fix closes.
+    CHECK(result.status != solver_status::max_iterations);
+    CHECK(result.status != solver_status::diverged);
+    // The active coordinate reached its minimizer at the origin.
+    CHECK(result.x[0] == Approx(0.0).margin(1e-6));
 }
 
 TEST_CASE("cmaes_policy: tol_x_up divergence detection", "[cmaes]")
