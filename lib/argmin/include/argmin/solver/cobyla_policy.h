@@ -22,6 +22,14 @@
 // equality to the pair {h, -h}, and every finite box bound to a linear
 // constraint, matching the reference COBYLA treatment of bounds.
 //
+// Provenance: this port follows NLopt's cobyla.c (an f2c translation of
+// Powell's Fortran plus Steven G. Johnson's modifications), not Powell's
+// paper verbatim. Two behaviors come from the NLopt/SGJ line and are NOT
+// in Powell 1994: the trust-region radius may be doubled on an accurate
+// predicted-vs-actual reduction (Powell's rho is monotone non-increasing),
+// and a small pseudo-random jitter perturbs degenerate geometry steps. Do
+// not "correct" either against the 1994 paper -- they are intentional.
+//
 // Reference: Powell, M. J. D. (1994) "A direct search optimization method that
 //            models the objective and constraint functions by linear
 //            interpolation." K&W 2e, Section 10.7.
