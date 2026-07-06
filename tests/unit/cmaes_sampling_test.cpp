@@ -203,22 +203,22 @@ TEST_CASE("cmaes_sampling: ziggurat_normal produces draws beyond the truncation 
 
 TEST_CASE("cmaes_sampling: marsaglia_normal is bit-identical across "
           "identically-seeded odd-consumption sequences",
-          "[cmaes_sampling][!shouldfail]")
+          "[cmaes_sampling]")
 {
-    // Expected to FAIL against the current production marsaglia_normal (a
-    // known, not-yet-fixed thread_local pair-cache leak -- see the
-    // comment below). [!shouldfail] records this as the expected
-    // disposition, per the same fix-detector convention as above.
-    // cmaes_sampling_marsaglia.h's pair cache is thread_local -- scoped to
-    // the process/thread, not to an RNG instance or a draw sequence. An
-    // EVEN total consumption (the historical n=2 determinism test) always
-    // starts and ends each sequence with an empty cache, so it is
-    // structurally blind to this. An ODD total consumption leaves one
-    // spare cached when a sequence ends; the next identically-seeded
-    // sequence should still reproduce the first sequence bit-for-bit (same
-    // seed => same raw stream => same output), but instead its first draw
-    // is silently satisfied from the stale spare left over by the PRIOR
-    // sequence.
+    // Now PASSES: marsaglia_normal is stateless with respect to prior
+    // calls -- it computes one polar pair and discards the spare, so its
+    // output is a pure function of the RNG stream. The former
+    // thread_local pair cache (scoped to the process/thread, not to an
+    // RNG instance or a draw sequence) leaked the spare half-pair across
+    // sequences: an EVEN total consumption (the historical n=2
+    // determinism test) always started and ended with an empty cache and
+    // was structurally blind to it, but an ODD total consumption left one
+    // spare cached when a sequence ended, and the next identically-seeded
+    // sequence silently consumed that stale spare as its first draw --
+    // breaking seeded reproducibility. This case uses an ODD draw count
+    // so the pre-fix leak was observable (seq1[0]=-0.507399 vs
+    // seq2[0]=1.02799); with the cache removed both sequences reproduce
+    // the same seed bit-for-bit.
     constexpr int n_draws = 5; // odd lambda*n
     constexpr std::uint64_t seed = 123u;
 

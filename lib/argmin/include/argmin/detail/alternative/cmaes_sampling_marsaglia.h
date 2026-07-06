@@ -12,12 +12,18 @@
 // argmin + libstdc++ + xoshiro256+ stack is reported in the Plan
 // 05 A/B verdict doc.
 //
-// The pair-cache is thread_local: even-rank Gaussian draws produce
-// a pair whose second element is cached for the next call. The
-// publish_bench / micro_cmaes / unit harnesses are single-threaded,
-// so thread_local is trivially safe and avoids touching the policy
-// state_type. NO new dynamic Eigen per CONTEXT D-12; the cache is
-// two scalars + a one-byte flag.
+// The pair-cache carries NO cross-call state: each single draw
+// computes one polar pair and discards the spare, so the value a
+// caller receives is a pure function of the RNG stream it passes in.
+// An earlier version cached the spare half-pair in a `thread_local`,
+// which leaked draws across independently-seeded RNG instances and
+// across separate draw sequences on the same thread: two identically
+// seeded sequences of ODD length would disagree on their first draw,
+// because the second sequence silently consumed the spare left over
+// by the first. That broke seeded reproducibility (the same seed no
+// longer implied the same stream). To retain the pair efficiency
+// without the leakage, sample_offspring below consumes both halves of
+// each polar pair locally within a single call.
 //
 // References:
 //   Marsaglia, G. & Bray, T. A. (1964) "A Convenient Method for
@@ -59,25 +65,17 @@ auto marsaglia_polar(RNG& rng) -> std::pair<Scalar, Scalar>
     }
 }
 
-// Single N(0,1) draw with the spare half-pair cached for the next
-// call. Single-threaded harness; thread_local keeps the cache
-// per-thread so a future multithreaded caller remains correct.
+// Single N(0,1) draw. Stateless with respect to prior calls: it
+// computes one polar pair and returns the first half, discarding the
+// spare. The result depends only on the RNG stream, so identically
+// seeded RNGs always produce identical draw sequences (no cross-call
+// or cross-instance carry-over). Callers wanting to consume both
+// halves of a pair should use sample_offspring, which fills its
+// buffer two components at a time.
 template <typename Scalar = double, typename RNG>
 auto marsaglia_normal(RNG& rng) -> Scalar
 {
-    thread_local Scalar cached_value{0};
-    thread_local bool has_cached{false};
-
-    if(has_cached)
-    {
-        has_cached = false;
-        return cached_value;
-    }
-
-    auto [a, b] = marsaglia_polar<Scalar>(rng);
-    cached_value = b;
-    has_cached = true;
-    return a;
+    return marsaglia_polar<Scalar>(rng).first;
 }
 
 // Sample lambda offspring x_i = mean + sigma * B * D * z_i, z_i ~ N(0, I).
@@ -105,8 +103,19 @@ auto sample_offspring(
     for(int i = 0; i < lambda; ++i)
     {
         Eigen::Vector<Scalar, N> z(n);
-        for(int j = 0; j < n; ++j)
-            z[j] = marsaglia_normal<Scalar>(rng);
+        // Consume both halves of each polar pair locally: fill z two
+        // components at a time. No persistent cache, so the RNG stream
+        // fully determines the output. For odd n the final component
+        // takes the first half of a fresh pair and drops the spare.
+        int j = 0;
+        for(; j + 1 < n; j += 2)
+        {
+            const auto [a, b] = marsaglia_polar<Scalar>(rng);
+            z[j] = a;
+            z[j + 1] = b;
+        }
+        if(j < n)
+            z[j] = marsaglia_polar<Scalar>(rng).first;
 
         offspring.col(i).noalias() = mean + sigma * (B * D.asDiagonal() * z);
     }
