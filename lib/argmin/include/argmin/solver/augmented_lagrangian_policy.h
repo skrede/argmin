@@ -20,6 +20,31 @@
 // schedule where inner tolerance loosens in early outer iterations
 // and tightens as mu decreases (N&W Algorithm 17.4).
 //
+// Constrained inner solvers (the moving-asymptotes family) are also
+// supported, by partial elimination (Bertsekas 1982, Section 4.2; the
+// NLopt AUGLAG_EQ pattern): ONLY the equalities are lifted into the
+// augmented objective, while the inequalities and the box are forwarded
+// unmodified to the inner solver, which handles them natively. The inner
+// solver is fed the equality-lifting subproblem view (eq_subproblem) via a
+// compile-time concept-probe fork; the outer method of multipliers then
+// updates the equality multipliers only.
+//
+// Convergence-guarantee scope for the constrained-inner composition. Under
+// the standard augmented-Lagrangian assumptions -- the inner stopping
+// tolerance driven to zero on the inner problem's KKT residual, finite box
+// bounds, a constraint qualification (MFCQ) on the pass-through
+// inequalities, and a constraint qualification at limit points -- the
+// composition inherits a convergence guarantee when the inner solver is
+// the globally convergent variant or its quadratic-penalty sibling, both of
+// which converge to a KKT point of their (relaxed) inner subproblem. The
+// plain moving-asymptotes inner solver carries NO such guarantee: the
+// original 1987 method is a heuristic with no convergence theorem and can
+// cycle, so composing it under the augmented Lagrangian is permitted but
+// guarantee-free. Inner termination therefore keys on the inner KKT
+// residual (step_result::kkt_residual), NOT the raw objective-gradient
+// norm, which for the moving-asymptotes family is not a stationarity
+// measure of the constrained inner subproblem.
+//
 // Reference: K&W Section 10.9, Algorithm 10.2;
 //            N&W Section 17.4, Algorithm 17.4;
 //            Conn, Gould, Toint (1991) "A globally convergent
@@ -46,9 +71,30 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 namespace argmin
 {
+
+namespace detail
+{
+
+// Classifies an inner-solver state as constrained or bound-constrained by
+// the structural presence of an inequality-constraint field. A constrained
+// separable-approximation inner solver (moving-asymptotes and its globally
+// convergent / quadratic-penalty variants) lifts the problem's inequality
+// constraints into its own per-problem state; a bound-constrained inner
+// solver (limited-memory BFGS for bounds, derivative-free quadratic
+// interpolation) carries no such field. The augmented Lagrangian uses this
+// signal to decide whether the inner solver handles inequalities natively,
+// and therefore which synthetic subproblem view to feed it.
+template <typename State>
+concept inner_state_tracks_inequalities = requires(const State& s)
+{
+    { s.c_ineq };
+};
+
+}
 
 template <typename InnerPolicy = lbfgsb_policy<>, int N = dynamic_dimension>
 struct augmented_lagrangian_policy
@@ -203,7 +249,130 @@ struct augmented_lagrangian_policy
             [[nodiscard]] Eigen::Vector<scalar_type, N> upper_bounds() const { return *hi; }
         };
 
+        // Equality-lifting synthetic subproblem for a constrained inner
+        // solver (moving-asymptotes family). This is the partial-elimination
+        // (Bertsekas 1982, Section 4.2) / NLopt AUGLAG_EQ view: ONLY the
+        // equalities are absorbed into the augmented objective (quadratic
+        // penalty + Hestenes-Powell multiplier term over the equalities),
+        // while the inequalities and the box are forwarded UNMODIFIED so the
+        // constrained inner solver handles them natively with its own
+        // guarantees intact. It reports num_equality() -> 0 (the equalities
+        // are gone from the constraint set, folded into value/gradient) and
+        // num_inequality() -> the outer inequality count, so it satisfies the
+        // constrained concept the inner solver static_asserts.
+        //
+        // Holds the same raw pointers into outer state as `subproblem` and is
+        // re-seeded identically at the top of every step() (move-safety).
+        struct eq_subproblem
+        {
+            enum : int { problem_dimension = N };
+            const P* outer;
+            int dim;
+            const Eigen::Vector<scalar_type, N>* lo;
+            const Eigen::Vector<scalar_type, N>* hi;
+            const Eigen::VectorX<scalar_type>* lam_eq;
+            const Eigen::VectorX<scalar_type>* lam_ineq;
+            const scalar_type* pen;
+            Eigen::VectorX<scalar_type>* c_all_buf;
+            Eigen::MatrixX<scalar_type>* J_all_buf;
+            Eigen::Vector<scalar_type, g_tmp_buf_dim>* g_tmp_buf;
+            int neq, nineq;
+
+            [[nodiscard]] int dimension() const { return dim; }
+
+            [[nodiscard]] scalar_type value(const Eigen::Vector<scalar_type, N>& x) const
+            {
+                scalar_type fval = outer->value(x);
+                if(neq + nineq > 0)
+                    outer->constraints(x, *c_all_buf);
+                // Augment ONLY the equalities. The empty inequality block
+                // (tail(0)) zeroes the inequality contribution: the helper's
+                // inequality loop runs over c_ineq.size() == 0 iterations and
+                // never touches lam_ineq.
+                return detail::augmented_lagrangian_value(
+                    fval,
+                    c_all_buf->head(neq),
+                    c_all_buf->tail(0),
+                    *lam_eq, *lam_ineq, *pen);
+            }
+
+            void gradient(const Eigen::Vector<scalar_type, N>& x,
+                          Eigen::Vector<scalar_type, N>& g) const
+            {
+                constexpr int PD = P::problem_dimension;
+                if constexpr(N == PD)
+                {
+                    outer->gradient(x, g);
+                }
+                else
+                {
+                    outer->gradient(Eigen::Vector<scalar_type, N>(x), *g_tmp_buf);
+                    g = *g_tmp_buf;
+                }
+                if(neq > 0)
+                {
+                    outer->constraints(x, *c_all_buf);
+                    outer->constraint_jacobian(x, *J_all_buf);
+                }
+                // Only the equality rows contribute; the empty inequality
+                // block leaves J_ineq unread (guarded by c_ineq.size() > 0).
+                detail::augmented_lagrangian_gradient_inplace(
+                    g,
+                    J_all_buf->topRows(neq),
+                    J_all_buf->topRows(0),
+                    c_all_buf->head(neq),
+                    c_all_buf->tail(0),
+                    *lam_eq, *lam_ineq, *pen);
+            }
+
+            // Forward ONLY the outer inequalities (argmin convention: c >= 0
+            // feasible). outer->constraints writes neq + nineq entries with
+            // the equalities first, so the inequalities are the trailing
+            // nineq entries.
+            void constraints(const Eigen::Vector<scalar_type, N>& x,
+                             Eigen::VectorX<scalar_type>& c) const
+            {
+                if(neq + nineq > 0)
+                    outer->constraints(x, *c_all_buf);
+                c = c_all_buf->tail(nineq);
+            }
+
+            void constraint_jacobian(const Eigen::Vector<scalar_type, N>& x,
+                                     Eigen::MatrixX<scalar_type>& J) const
+            {
+                if(neq + nineq > 0)
+                    outer->constraint_jacobian(x, *J_all_buf);
+                J = J_all_buf->bottomRows(nineq);
+            }
+
+            [[nodiscard]] int num_equality() const { return 0; }
+            [[nodiscard]] int num_inequality() const { return nineq; }
+
+            [[nodiscard]] Eigen::Vector<scalar_type, N> lower_bounds() const { return *lo; }
+            [[nodiscard]] Eigen::Vector<scalar_type, N> upper_bounds() const { return *hi; }
+        };
+
         using rebound_inner = typename InnerPolicy::template rebind<N>;
+
+        // AUGLAG_EQ concept-probe fork. A constrained inner solver (the
+        // moving-asymptotes family) tracks the problem's inequalities in its
+        // per-problem state; a bound-constrained inner solver does not. When
+        // the inner solver is constrained, lift ONLY the equalities into the
+        // augmented objective and pass the inequalities + box straight
+        // through (eq_subproblem); when it is bound-constrained, fold ALL
+        // constraints into the augmented objective (subproblem).
+        static constexpr bool lift_equalities_only = []
+        {
+            if constexpr(requires {
+                typename rebound_inner::template state_type<eq_subproblem>; })
+                return detail::inner_state_tracks_inequalities<
+                    typename rebound_inner::template state_type<eq_subproblem>>;
+            else
+                return false;
+        }();
+
+        using active_subproblem =
+            std::conditional_t<lift_equalities_only, eq_subproblem, subproblem>;
 
         // Heap-boxed inner context.
         //
@@ -237,8 +406,8 @@ struct augmented_lagrangian_policy
             // Synthetic subproblem for the inner solver, plus the persisted
             // inner solver itself (warm-started across outer iterations to
             // preserve compact_lbfgs curvature pairs).
-            std::optional<subproblem> sub_storage;
-            std::optional<basic_solver<rebound_inner, N, subproblem>> inner_solver;
+            std::optional<active_subproblem> sub_storage;
+            std::optional<basic_solver<rebound_inner, N, active_subproblem>> inner_solver;
         };
 
         std::unique_ptr<al_inner_context> ctx;
@@ -348,12 +517,13 @@ struct augmented_lagrangian_policy
         // live state before the inner solve dereferences them. The subproblem
         // itself lives in the heap node, so its address -- cached by the
         // persisted inner solver -- stays valid across the move.
-        using subproblem = typename state_type<P>::subproblem;
+        using active_subproblem = typename state_type<P>::active_subproblem;
+        constexpr bool lift_equalities_only = state_type<P>::lift_equalities_only;
         auto& ctx = *s.ctx;
         if(!ctx.sub_storage.has_value())
             ctx.sub_storage.emplace();
         {
-            subproblem& sp = *ctx.sub_storage;
+            active_subproblem& sp = *ctx.sub_storage;
             sp.outer = s.problem;
             sp.dim = n;
             sp.lo = &s.lower;
@@ -385,6 +555,16 @@ struct augmented_lagrangian_policy
 
         solver_options<> inner_opts;
         inner_opts.max_iterations = inner_max;
+        // The inner adaptive tolerance gates the inner solve on its KKT
+        // residual, not the raw objective-gradient norm: gradient_tolerance_
+        // criterion compares kkt_residual.value_or(gradient_norm) against
+        // this threshold, and every supported inner solver (both the bound-
+        // constrained solvers and the constrained moving-asymptotes family)
+        // populates step_result::kkt_residual with a genuine stationarity
+        // measure of its subproblem. For the constrained inner that measure
+        // is the projected inner-KKT residual from the dual solve -- the
+        // correct omega_k -> 0 quantity for the augmented-Lagrangian outer
+        // schedule; the raw gradient norm would be the wrong measure there.
         std::get<gradient_tolerance_criterion>(inner_opts.convergence.criteria)
             .threshold = inner_tol;
         std::get<objective_tolerance_criterion>(inner_opts.convergence.criteria)
@@ -452,7 +632,23 @@ struct augmented_lagrangian_policy
         // Reference: N&W 2e Definition 12.1 (KKT primal feasibility);
         //            Conn-Gould-Toint 1991 Section 3 (scale invariance of
         //            feasibility-progress gates).
+        // Reported feasibility is always the full (equality + inequality)
+        // residual. The feasibility-progress gate that drives the outer
+        // multiplier/penalty update, however, must track only the
+        // constraints the outer loop owns: on the AUGLAG_EQ branch the
+        // inequalities are the inner solver's responsibility, so the gate
+        // keys on the equality residual alone.
         scalar_type viol = detail::primal_feasibility_inf(s.c_eq, s.c_ineq);
+        scalar_type gate_viol;
+        if constexpr(lift_equalities_only)
+        {
+            const Eigen::VectorX<scalar_type> empty_ineq(0);
+            gate_viol = detail::primal_feasibility_inf(s.c_eq, empty_ineq);
+        }
+        else
+        {
+            gate_viol = viol;
+        }
 
         scalar_type step_norm = (s.x - x_old).norm();
 
@@ -488,35 +684,68 @@ struct augmented_lagrangian_policy
             Eigen::Matrix<scalar_type, Eigen::Dynamic, N> J_eq_new = J_all.topRows(s.n_eq);
             Eigen::Matrix<scalar_type, Eigen::Dynamic, N> J_ineq_new = J_all.bottomRows(s.n_ineq);
 
-            auto aug_grad = detail::augmented_lagrangian_gradient(
-                grad_f, J_eq_new, J_ineq_new, s.c_eq, s.c_ineq,
-                s.lambda_eq, s.lambda_ineq, s.mu);
-            reported_grad_norm = aug_grad.norm();
+            if constexpr(lift_equalities_only)
+            {
+                // AUGLAG_EQ KKT residual. The equality multipliers are the
+                // outer Hestenes-Powell estimates (s.lambda_eq); the
+                // inequality multipliers live in the inner constrained
+                // solver's dual (state().y_dual), surfaced here as mu_ineq
+                // with no sign flip (the inner dual already uses the argmin
+                // c_ineq >= 0 convention). The reported gradient norm is the
+                // stationarity leg of the ORIGINAL Lagrangian, not the
+                // equality-augmented objective, since the inequalities are
+                // now carried by mu_ineq rather than folded into the penalty.
+                //
+                // Reference: N&W 2e Definition 12.1 / eq. 12.34; Bertsekas
+                //            1982 Section 4.2 (partial elimination).
+                Eigen::VectorX<scalar_type> mu_ineq = ctx.inner_solver->state().y_dual;
+                Eigen::Vector<scalar_type, N> grad_L = grad_f;
+                if(s.n_eq > 0)
+                    grad_L.noalias() -= J_eq_new.transpose() * s.lambda_eq;
+                if(s.n_ineq > 0)
+                    grad_L.noalias() -= J_ineq_new.transpose() * mu_ineq;
+                reported_grad_norm = grad_L.norm();
 
-            // Reference: N&W 2e Definition 12.1 (KKT conditions:
-            //            stationarity, primal feasibility, dual
-            //            feasibility, complementarity); eq. 12.34
-            //            (Lagrangian stationarity leg). Dual
-            //            feasibility leg is identically zero here
-            //            because detail::update_multipliers projects
-            //            lambda_ineq onto the non-negative orthant
-            //            per N&W 17.55.
-            //
-            // Template parameters are specified explicitly because
-            // auglag's locally-constructed grad_f (Vector<Scalar, N>)
-            // and J_eq_new (Matrix<Scalar, Dynamic, N>) combine
-            // compile-time and dynamic-sized dimensions in a way that
-            // cannot be deduced from the fully-dynamic multiplier and
-            // constraint vectors (VectorX<Scalar>). We instantiate the
-            // fully-dynamic variant so the Ref-based parameters bind
-            // all argument types uniformly.
-            kkt = detail::kkt_residual<scalar_type,
-                                       Eigen::Dynamic,
-                                       Eigen::Dynamic,
-                                       Eigen::Dynamic>(
-                grad_f, J_eq_new, J_ineq_new,
-                s.lambda_eq, s.lambda_ineq,
-                s.c_eq, s.c_ineq);
+                kkt = detail::kkt_residual<scalar_type,
+                                           Eigen::Dynamic,
+                                           Eigen::Dynamic,
+                                           Eigen::Dynamic>(
+                    grad_f, J_eq_new, J_ineq_new,
+                    s.lambda_eq, mu_ineq,
+                    s.c_eq, s.c_ineq);
+            }
+            else
+            {
+                auto aug_grad = detail::augmented_lagrangian_gradient(
+                    grad_f, J_eq_new, J_ineq_new, s.c_eq, s.c_ineq,
+                    s.lambda_eq, s.lambda_ineq, s.mu);
+                reported_grad_norm = aug_grad.norm();
+
+                // Reference: N&W 2e Definition 12.1 (KKT conditions:
+                //            stationarity, primal feasibility, dual
+                //            feasibility, complementarity); eq. 12.34
+                //            (Lagrangian stationarity leg). Dual
+                //            feasibility leg is identically zero here
+                //            because detail::update_multipliers projects
+                //            lambda_ineq onto the non-negative orthant
+                //            per N&W 17.55.
+                //
+                // Template parameters are specified explicitly because
+                // auglag's locally-constructed grad_f (Vector<Scalar, N>)
+                // and J_eq_new (Matrix<Scalar, Dynamic, N>) combine
+                // compile-time and dynamic-sized dimensions in a way that
+                // cannot be deduced from the fully-dynamic multiplier and
+                // constraint vectors (VectorX<Scalar>). We instantiate the
+                // fully-dynamic variant so the Ref-based parameters bind
+                // all argument types uniformly.
+                kkt = detail::kkt_residual<scalar_type,
+                                           Eigen::Dynamic,
+                                           Eigen::Dynamic,
+                                           Eigen::Dynamic>(
+                    grad_f, J_eq_new, J_ineq_new,
+                    s.lambda_eq, s.lambda_ineq,
+                    s.c_eq, s.c_ineq);
+            }
         }
         else
         {
@@ -527,16 +756,32 @@ struct augmented_lagrangian_policy
         // Conn, Gould & Toint (1991) recommend updating multipliers only
         // when sufficient feasibility progress is observed, and decreasing
         // the penalty parameter otherwise.
-        if(viol < feas_progress * s.prev_viol || s.outer_iter == 0)
+        if(gate_viol < feas_progress * s.prev_viol || s.outer_iter == 0)
         {
-            detail::update_multipliers(
-                s.lambda_eq, s.lambda_ineq, s.c_eq, s.c_ineq, s.mu);
+            if constexpr(lift_equalities_only)
+            {
+                // AUGLAG_EQ (Bertsekas 1982 Section 4.2 partial elimination):
+                // the outer method of multipliers owns the equalities only.
+                // Update lambda_eq alone (Hestenes-Powell); the inequality
+                // multipliers live in the inner constrained solver's dual.
+                // Passing a fresh empty vector as the inequality-multiplier
+                // argument leaves the real s.lambda_ineq untouched (the
+                // inequality loop iterates over the empty vector's size).
+                Eigen::VectorX<scalar_type> empty_ineq(0);
+                detail::update_multipliers(
+                    s.lambda_eq, empty_ineq, s.c_eq, empty_ineq, s.mu);
+            }
+            else
+            {
+                detail::update_multipliers(
+                    s.lambda_eq, s.lambda_ineq, s.c_eq, s.c_ineq, s.mu);
+            }
         }
         else
         {
             s.mu = std::max(s.mu * mu_dec, mu_floor);
         }
-        s.prev_viol = viol;
+        s.prev_viol = gate_viol;
 
         ++s.outer_iter;
 
