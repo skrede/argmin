@@ -71,6 +71,18 @@ struct ccsa_dual_problem
     mutable Scalar wval{0};
     mutable Eigen::Vector<Scalar, M> gcval;
 
+    // Single-evaluation cache. Within one dual solve rho/rhoc are fixed, so
+    // eval_primal is a pure function of y; the box-constrained inner solver
+    // evaluates value() and gradient() at the same y (line search), which
+    // otherwise recomputes the per-component primal twice. Cache the last y
+    // and reuse the populated gval/wval/gcval/x_primal on a repeat. The
+    // outer loop calls invalidate_cache() whenever it mutates the penalty
+    // parameters (once per inner conservativity iteration).
+    mutable Eigen::Vector<Scalar, M> cache_y_;
+    mutable bool cache_valid_{false};
+
+    void invalidate_cache() const { cache_valid_ = false; }
+
     [[nodiscard]] int dimension() const { return m_dual; }
 
     // Minimize -W(y) where W(y) = gval + sum y_i gcval_i.
@@ -113,6 +125,9 @@ private:
     // Mirror of NLopt ccsa_quadratic.c dual_func() lines 100-141.
     void eval_primal(const Eigen::Vector<Scalar, M>& y) const
     {
+        if(cache_valid_ && cache_y_.size() == y.size() && cache_y_ == y)
+            return;
+
         constexpr Scalar eps = Scalar(1e-20);
 
         Scalar u = rho_out;
@@ -161,6 +176,9 @@ private:
             for(int i = 0; i < m_dual; ++i)
                 gcval[i] += dfc(i, j) * dx + (*rhoc_out)[i] * dx2sig;
         }
+
+        cache_y_ = y;
+        cache_valid_ = true;
     }
 };
 

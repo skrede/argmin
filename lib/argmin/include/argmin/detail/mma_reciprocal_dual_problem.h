@@ -95,6 +95,16 @@ struct mma_reciprocal_dual_problem
     mutable Scalar gval{0};
     mutable Eigen::Vector<Scalar, M> gcval;
 
+    // Single-evaluation cache: within one move-limit window eval_primal is a
+    // pure function of y, but the box-constrained inner solver evaluates
+    // value() and gradient() at the same y (line search). Cache the last y
+    // and reuse the populated gval/gcval/x_primal. The outer loop calls
+    // invalidate_cache() whenever it mutates the window (per inner iter).
+    mutable Eigen::Vector<Scalar, M> cache_y_;
+    mutable bool cache_valid_{false};
+
+    void invalidate_cache() const { cache_valid_ = false; }
+
     [[nodiscard]] int dimension() const { return m_dual; }
 
     [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, M>& y) const
@@ -131,6 +141,9 @@ private:
     // Compute primal x(y) per component and populate v_obj, v_con.
     void eval_primal(const Eigen::Vector<Scalar, M>& y) const
     {
+        if(cache_valid_ && cache_y_.size() == y.size() && cache_y_ == y)
+            return;
+
         const auto& L = *L_out;
         const auto& U = *U_out;
         const auto& alpha = *alpha_out;
@@ -179,6 +192,9 @@ private:
             for(int i = 0; i < m_dual; ++i)
                 gcval[i] += pc(i, j) / dxU + qc(i, j) / dxL;
         }
+
+        cache_y_ = y;
+        cache_valid_ = true;
     }
 };
 

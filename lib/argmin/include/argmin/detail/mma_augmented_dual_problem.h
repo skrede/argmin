@@ -100,6 +100,16 @@ struct mma_augmented_dual_problem
     // wval += dx2sig, dx2sig = 0.5 * dx^2 / sigma^2).
     mutable Scalar wval{0};
 
+    // Single-evaluation cache: within one dual solve rho/rhoc are fixed, so
+    // eval_primal is a pure function of y; the box-constrained inner solver
+    // evaluates value() and gradient() at the same y (line search). Cache
+    // the last y and reuse the populated gval/gcval/wval/x_primal. The outer
+    // loop calls invalidate_cache() whenever it mutates rho (per inner iter).
+    mutable Eigen::Vector<Scalar, M> cache_y_;
+    mutable bool cache_valid_{false};
+
+    void invalidate_cache() const { cache_valid_ = false; }
+
     [[nodiscard]] int dimension() const { return m_dual; }
 
     [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, M>& y) const
@@ -189,6 +199,9 @@ private:
 
     void eval_primal(const Eigen::Vector<Scalar, M>& y) const
     {
+        if(cache_valid_ && cache_y_.size() == y.size() && cache_y_ == y)
+            return;
+
         const auto& L = *L_out;
         const auto& U = *U_out;
         const auto& x_k = *x_k_out;
@@ -245,6 +258,9 @@ private:
             // denominator) is sum_j quad_j, not sum_j w_j * dx_j^2.
             wval += quad_j;
         }
+
+        cache_y_ = y;
+        cache_valid_ = true;
     }
 };
 

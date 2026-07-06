@@ -89,6 +89,17 @@ struct mma_raa_augmented_dual_problem
     // dval_sum = sum_j d_j(x_primal, x_k); used by raa-growth formulas.
     mutable Scalar dval_sum{0};
 
+    // Single-evaluation cache: within one dual solve raa is fixed, so
+    // eval_primal is a pure function of y; the box-constrained inner solver
+    // evaluates value() and gradient() at the same y (line search). Cache
+    // the last y and reuse the populated gval/gcval/dval_sum/x_primal. The
+    // outer loop calls invalidate_cache() whenever it mutates raa (per inner
+    // iteration).
+    mutable Eigen::Vector<Scalar, M> cache_y_;
+    mutable bool cache_valid_{false};
+
+    void invalidate_cache() const { cache_valid_ = false; }
+
     [[nodiscard]] int dimension() const { return m_dual; }
 
     [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, M>& y) const
@@ -217,6 +228,9 @@ private:
 
     void eval_primal(const Eigen::Vector<Scalar, M>& y) const
     {
+        if(cache_valid_ && cache_y_.size() == y.size() && cache_y_ == y)
+            return;
+
         const auto& L = *L_out;
         const auto& U = *U_out;
         const auto& x_k = *x_k_out;
@@ -268,6 +282,9 @@ private:
                           + raac[i] * dj;
             dval_sum += dj;
         }
+
+        cache_y_ = y;
+        cache_valid_ = true;
     }
 };
 

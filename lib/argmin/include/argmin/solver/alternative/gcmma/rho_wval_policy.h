@@ -417,21 +417,36 @@ struct rho_wval_policy
         Eigen::Vector<double, MC> gcval_relaxed = dual_prob.gcval;
         Eigen::Vector<double, MC> y_elastic = dual_prob.gcval;
 
+        // Persistent inner dual solver: construct the box-constrained solver
+        // state once per outer iteration and cold-restart it (reset_clear
+        // clears the L-BFGS curvature so each inner solve starts fresh, as a
+        // per-inner re-construction would, while reusing the allocated
+        // buffers) rather than re-allocating it on every conservativity
+        // iteration.
+        DualPolicy<MC> dp;
+        solver_options<default_convergence> dopts;
+        dopts.max_iterations = 100;
+        dopts.set_gradient_threshold(1e-9);
+        dopts.set_step_threshold(1e-15);
+        using dual_state_t = decltype(dp.init(dual_prob, s.y_dual, dopts));
+        std::optional<dual_state_t> ds;
+
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
             dual_prob.rho_obj = s.rho_obj;
+            // rho_obj/rho_con changed since the previous inner iteration:
+            // drop the single-evaluation cache before re-solving the dual.
+            dual_prob.invalidate_cache();
 
             if(m > 0)
             {
-                DualPolicy<MC> dp;
-                solver_options<default_convergence> dopts;
-                dopts.max_iterations = 100;
-                dopts.set_gradient_threshold(1e-9);
-                dopts.set_step_threshold(1e-15);
-                auto ds = dp.init(dual_prob, s.y_dual, dopts);
+                if(!ds)
+                    ds.emplace(dp.init(dual_prob, s.y_dual, dopts));
+                else
+                    dp.reset_clear(*ds, s.y_dual);
                 for(int k = 0; k < 100; ++k)
                 {
-                    auto dsr = dp.step(ds);
+                    auto dsr = dp.step(*ds);
                     // Terminate on the projected KKT residual (the box-
                     // constrained dual's stationarity measure), not the raw
                     // gradient norm: at a dual solution with an inactive
@@ -441,7 +456,7 @@ struct rho_wval_policy
                        || dsr.step_size < 1e-15)
                         break;
                 }
-                s.y_dual = ds.x;
+                s.y_dual = ds->x;
                 (void)dual_prob.value(s.y_dual);
                 x_trial = dual_prob.x_primal;
                 // Recover the primal elastic slacks and the relaxed

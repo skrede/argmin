@@ -411,27 +411,41 @@ struct ccsa_quadratic_policy
         Eigen::Vector<double, MC> gcval_relaxed = dual_prob.gcval;
         Eigen::Vector<double, MC> y_elastic = dual_prob.gcval;
 
+        // Persistent inner dual solver: construct the box-constrained solver
+        // state once per outer iteration and cold-restart it (reset_clear
+        // clears the L-BFGS curvature so each inner solve starts fresh, as a
+        // per-inner re-construction would, while reusing the allocated
+        // buffers) rather than re-allocating it on every conservativity
+        // iteration.
+        DualPolicy<MC> dp;
+        solver_options<default_convergence> dopts;
+        dopts.max_iterations = 100;
+        dopts.set_gradient_threshold(1e-9);
+        dopts.set_step_threshold(1e-15);
+        using dual_state_t = decltype(dp.init(dual_prob, s.y_dual, dopts));
+        std::optional<dual_state_t> ds;
+
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
             // Update mutable rho/rhoc on the dual problem (these grow
-            // on non-conservative trials within the inner loop).
+            // on non-conservative trials within the inner loop) and drop
+            // the single-evaluation cache before re-solving the dual.
             dual_prob.rho_out = s.rho;
             dual_prob.rhoc_out = &s.rhoc;
+            dual_prob.invalidate_cache();
 
             // Solve the dual via DualPolicy. The dual problem is
             // m-dimensional box-constrained (y >= 0). The solver
             // warm-starts from s.y_dual.
             if(m > 0)
             {
-                DualPolicy<MC> dp;
-                solver_options<default_convergence> dopts;
-                dopts.max_iterations = 100;
-                dopts.set_gradient_threshold(1e-9);
-                dopts.set_step_threshold(1e-15);
-                auto ds = dp.init(dual_prob, s.y_dual, dopts);
+                if(!ds)
+                    ds.emplace(dp.init(dual_prob, s.y_dual, dopts));
+                else
+                    dp.reset_clear(*ds, s.y_dual);
                 for(int k = 0; k < 100; ++k)
                 {
-                    auto dsr = dp.step(ds);
+                    auto dsr = dp.step(*ds);
                     // Terminate on the projected KKT residual (the box-
                     // constrained dual's stationarity measure), not the raw
                     // gradient norm: at a dual solution with an inactive
@@ -441,7 +455,7 @@ struct ccsa_quadratic_policy
                        || dsr.step_size < 1e-15)
                         break;
                 }
-                s.y_dual = ds.x;
+                s.y_dual = ds->x;
 
                 // Evaluate primal at the converged y to populate
                 // dual_prob.x_primal, gval, wval, gcval.

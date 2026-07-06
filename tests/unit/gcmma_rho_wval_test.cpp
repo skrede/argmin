@@ -13,6 +13,8 @@
 // quantitative trade-off.
 
 #include "argmin/solver/alternative/gcmma/rho_wval_policy.h"
+#include "argmin/solver/lbfgsb_policy.h"
+#include "argmin/solver/options.h"
 #include "argmin/solver/basic_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
@@ -28,6 +30,38 @@ using namespace argmin;
 
 namespace
 {
+
+// Construction-counting wrapper over lbfgsb_policy: counts inner dual-solver
+// constructions (init) and cold restarts (reset_clear) so a test can assert
+// the persistent inner solver is built once per outer iteration and reused
+// (reset_clear) across the conservativity loop, rather than re-allocated on
+// every inner iteration.
+inline int g_dual_init_count = 0;
+inline int g_dual_reset_clear_count = 0;
+
+template <int M>
+struct counting_lbfgsb
+{
+    lbfgsb_policy<M> inner_;
+
+    template <typename Problem, typename Convergence>
+    auto init(const Problem& p, const Eigen::Vector<double, M>& x0,
+              const solver_options<Convergence>& opts)
+    {
+        ++g_dual_init_count;
+        return inner_.init(p, x0, opts);
+    }
+
+    template <typename State>
+    auto step(State& s) { return inner_.step(s); }
+
+    template <typename State>
+    void reset_clear(State& s, const Eigen::Vector<double, M>& x0)
+    {
+        ++g_dual_reset_clear_count;
+        inner_.reset_clear(s, x0);
+    }
+};
 
 // Unconstrained convex quadratic on a wide box. With a small initial rho
 // the fresh reciprocal approximation is non-conservative near a steep
@@ -189,4 +223,37 @@ TEST_CASE("gcmma rho-wval commits a non-conservative improving trial",
     CHECK(r.improved);
     CHECK(s.f < f0);
     CHECK(s.x[0] != Approx(-5.0));  // x moved
+}
+
+// Per-iter-cost: the inner box-constrained dual solver is constructed once
+// per outer iteration and cold-restarted (reset_clear) across the inner
+// conservativity loop, not re-allocated on every inner iteration. HS024's
+// cubic objective is non-conservative under the reciprocal approximation, so
+// the inner loop runs several iterations per outer step -- a per-inner
+// re-construction would call init up to max_inner times per outer.
+TEST_CASE("gcmma rho-wval constructs the dual solver once per outer",
+          "[gcmma_rho_wval]")
+{
+    hs024 problem;
+    Eigen::Vector<double, 2> x0 = problem.initial_point();
+    solver_options opts;
+    opts.max_iterations = 500;
+
+    alternative::gcmma::rho_wval_policy<
+        hs024<>::problem_dimension, counting_lbfgsb> policy;
+    auto s = policy.init(problem, x0, opts);
+
+    g_dual_init_count = 0;
+    g_dual_reset_clear_count = 0;
+
+    constexpr int kOuter = 10;
+    for(int i = 0; i < kOuter; ++i)
+        (void)policy.step(s);
+
+    // Exactly one construction per outer step (not one per inner iteration).
+    CHECK(g_dual_init_count == kOuter);
+    // The persistent state was cold-restarted across inner iterations, so at
+    // least one outer step ran a multi-iteration conservativity loop that
+    // reused the state rather than re-allocating it.
+    CHECK(g_dual_reset_clear_count > 0);
 }
