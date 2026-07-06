@@ -87,6 +87,15 @@ struct mma_policy
         // asymptote distance reserved off each side of x_k.
         std::optional<double> move_limit_fraction{};      // default: 0.1
 
+        // Move bound (Svanberg 2007 notes eqs. 2.8-2.9, "XXMOVE"): the
+        // trial step is additionally capped to x_k +/- move_bound_fraction
+        // * range_j, where range_j is the box width for a bounded variable
+        // and, for an unbounded one, the scale proxy 2*max(|x_kj|, 1)
+        // (a box-width analog). Without this cap an unbounded variable's
+        // asymptote can inflate without bound. Literature default 0.5, so a
+        // direct value.
+        double move_bound_fraction{0.5};
+
         // Numerical stabilization epsilon for p_ij, q_ij. Avoids zero
         // P_j(y) or Q_j(y) when both objective and constraint gradients
         // vanish in component j. Not in the original paper.
@@ -310,13 +319,30 @@ struct mma_policy
             }
         }
 
-        // 2. Move limits (Svanberg 1987 eq. 19).
+        // 2. Move limits (Svanberg 2007 notes eqs. 2.8-2.9): the box, the
+        //    0.1 asymptote buffer, and the XXMOVE=0.5 move bound
+        //    x_k +/- move_bnd * range_j. range_j is the box width for a
+        //    bounded variable; for an unbounded one it is the scale proxy
+        //    2*max(|x_kj|, 1) -- the factor 2 gives a box-width analog (twice
+        //    the 0.5-fraction initial asymptote half-width), so the bound
+        //    coincides with the initial asymptote and engages only once the
+        //    asymptote inflates, rather than over-constraining every step.
+        const double move_bnd = s.opts.move_bound_fraction;
         for(int j = 0; j < n; ++j)
         {
-            s.alpha[j] = std::max(s.L[j] + move_lim * (s.x[j] - s.L[j]),
-                                  s.lower[j]);
-            s.beta[j]  = std::min(s.U[j] - move_lim * (s.U[j] - s.x[j]),
-                                  s.upper[j]);
+            double range;
+            if(s.lower[j] > -inf && s.upper[j] < inf)
+                range = s.upper[j] - s.lower[j];
+            else
+                range = 2.0 * std::max(std::abs(s.x[j]), 1.0);
+            const double mb = move_bnd * range;
+
+            s.alpha[j] = std::max({s.lower[j],
+                                   s.L[j] + move_lim * (s.x[j] - s.L[j]),
+                                   s.x[j] - mb});
+            s.beta[j]  = std::min({s.upper[j],
+                                   s.U[j] - move_lim * (s.U[j] - s.x[j]),
+                                   s.x[j] + mb});
         }
 
         // 3. Approximation params (Svanberg 1987 eq. 7) and constants

@@ -50,7 +50,13 @@ TEST_CASE("gcmma move-limit-shrink converges on HS024",
 }
 
 // HS035 (n=3, m=1 inequality + bound, f* = 1/9). Move-limit-shrink is
-// expected to make substantial progress but may stall short of f*.
+// expected to make substantial progress but may stall short of f*. Its
+// variables are half-bounded (lower 0, upper +inf), so the faithful move
+// bound engages once the moving asymptote inflates and caps the per-step
+// travel; combined with this variant's own window shrinkage that makes it
+// converge markedly slower than the canonical rho-growth GCMMA (it is a
+// non-production research variant). The step budget is sized to let it
+// still demonstrate substantial progress under that faithful cap.
 TEST_CASE("gcmma move-limit-shrink makes progress on HS035",
           "[gcmma_move_limit_shrink]")
 {
@@ -59,7 +65,7 @@ TEST_CASE("gcmma move-limit-shrink makes progress on HS035",
     const double f_x0 = problem.value(x0);
 
     solver_options opts;
-    opts.max_iterations = 500;
+    opts.max_iterations = 6000;
     opts.set_gradient_threshold(1e-5);
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);

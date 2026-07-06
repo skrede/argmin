@@ -177,6 +177,37 @@ struct rho_problem
     Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd{{2.0}}; }
 };
 
+// Unbounded 1-D problem (no box) for the move-bound cap: without a finite
+// range the move limit must fall back to the scale proxy max(|x_k|, 1) so
+// the trial window stays bounded. Not bound_constrained, so the policy
+// runs with +/-inf bounds.
+struct unbounded_1d
+{
+    static constexpr int problem_dimension = dynamic_dimension;
+
+    int dimension() const { return 1; }
+    int num_equality() const { return 0; }
+    int num_inequality() const { return 0; }
+
+    double value(const Eigen::VectorXd& x) const { return x[0] * x[0]; }
+
+    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
+    {
+        g.resize(1);
+        g[0] = 2.0 * x[0];
+    }
+
+    void constraints(const Eigen::VectorXd&, Eigen::VectorXd& c) const
+    {
+        c.resize(0);
+    }
+
+    void constraint_jacobian(const Eigen::VectorXd&, Eigen::MatrixXd& J) const
+    {
+        J.resize(0, 1);
+    }
+};
+
 // Minimal oracle CSV reader: '#' lines are comments; data lines are
 // "name,v1,v2,...". Returns name -> values.
 std::map<std::string, std::vector<double>> load_oracle(const std::string& path)
@@ -475,4 +506,47 @@ TEST_CASE("gcmma: rho growth covers the minimal conservative increment",
     INFO("rho after growth " << s.rho_obj << ", required at least "
          << rho0 + delta_min);
     CHECK(s.rho_obj >= rho0 + delta_min - 1e-9);
+}
+
+// Move-limit move bound (Svanberg 2007 notes eqs. 2.8-2.9). alpha_j/beta_j
+// must include the XXMOVE = 0.5 term x_k +/- 0.5*range_j in addition to the
+// box and the 0.1 asymptote buffer. For an unbounded variable range_j is the
+// box-width analog 2*max(|x_k|, 1). The factor 2 makes the bound coincide
+// with the initial asymptote so it does not over-constrain the first step;
+// it engages only once the asymptote has inflated. This case forces that
+// inflated regime with a large initial asymptote and checks the bound then
+// caps the step where the two-term (box + 0.1 buffer) form would not.
+//
+// Worked case: unbounded x, x_k = 3, asymptote_init_unbounded = 5 so the
+// init half-width is 5*max(|3|,1) = 15, giving L = -12, U = 18. The move
+// bound uses range = 2*max(|3|,1) = 6, move bound = 0.5*6 = 3:
+//   alpha = max(-inf, -12 + 0.1*15, 3 - 3) = max(-10.5, 0) = 0
+//   beta  = min(+inf, 18 - 0.1*15, 3 + 3) = min(16.5, 6) = 6
+// The two-term form would give alpha = -10.5, beta = 16.5; the move bound
+// caps the inflated window to [0, 6].
+TEST_CASE("mma: alpha/beta include the XXMOVE move bound (unbounded)",
+          "[mma][oracle-pin]")
+{
+    unbounded_1d problem;
+    Eigen::VectorXd x0{{3.0}};
+    solver_options opts;
+
+    mma_policy<> policy;
+    mma_policy<>::options_type popts;
+    popts.asymptote_init_unbounded = 5.0;   // force an inflated asymptote
+    auto s = policy.init(problem, x0, opts, popts);
+
+    // Premise: inflated init asymptotes L = -12, U = 18.
+    REQUIRE(s.L[0] == Approx(-12.0).margin(1e-12));
+    REQUIRE(s.U[0] == Approx(18.0).margin(1e-12));
+
+    (void)policy.step(s);
+
+    // The move bound caps both sides of the inflated window.
+    CHECK(s.alpha[0] == Approx(0.0).margin(1e-12));
+    CHECK(s.beta[0] == Approx(6.0).margin(1e-12));
+    // And it is strictly tighter than the two-term (box + 0.1 buffer)
+    // window that would otherwise leave alpha at -10.5 and beta at 16.5.
+    CHECK(s.beta[0] < 16.5 - 1e-9);
+    CHECK(s.alpha[0] > -10.5 + 1e-9);
 }

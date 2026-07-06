@@ -62,6 +62,7 @@ struct raa_augmented_policy
         std::optional<double> asymptote_min_fraction{};   // 1e-4
         std::optional<double> asymptote_max_fraction{};   // 10.0
         std::optional<double> move_limit_fraction{};      // 0.1
+        double move_bound_fraction{0.5};                  // Svanberg XXMOVE
         std::optional<double> approximation_epsilon{};    // 1e-10
 
         std::optional<std::uint16_t> max_inner_iterations{};  // 15
@@ -232,13 +233,26 @@ struct raa_augmented_policy
             }
         }
 
-        // 2. Move limits.
+        // 2. Move limits (Svanberg 2007 notes eqs. 2.8-2.9): the box, the
+        //    0.1 asymptote buffer, and the XXMOVE=0.5 move bound
+        //    x_k +/- move_bnd * range_j with the box-width analog
+        //    2*max(|x_kj|, 1) for an unbounded variable.
+        const double move_bnd = s.opts.move_bound_fraction;
         for(int j = 0; j < n; ++j)
         {
-            s.alpha[j] = std::max(s.L[j] + move_lim * (s.x[j] - s.L[j]),
-                                  s.lower[j]);
-            s.beta[j]  = std::min(s.U[j] - move_lim * (s.U[j] - s.x[j]),
-                                  s.upper[j]);
+            double range;
+            if(s.lower[j] > -inf && s.upper[j] < inf)
+                range = s.upper[j] - s.lower[j];
+            else
+                range = 2.0 * std::max(std::abs(s.x[j]), 1.0);
+            const double mb = move_bnd * range;
+
+            s.alpha[j] = std::max({s.lower[j],
+                                   s.L[j] + move_lim * (s.x[j] - s.L[j]),
+                                   s.x[j] - mb});
+            s.beta[j]  = std::min({s.upper[j],
+                                   s.U[j] - move_lim * (s.U[j] - s.x[j]),
+                                   s.x[j] + mb});
         }
 
         // 3. Approximation params + r_i constants.
