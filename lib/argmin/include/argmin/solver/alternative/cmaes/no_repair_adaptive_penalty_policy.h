@@ -450,7 +450,12 @@ struct no_repair_adaptive_penalty_policy
                   + std::sqrt(s.params.c_sigma * (2.0 - s.params.c_sigma) * s.params.mu_eff)
                     * C_inv_sqrt_dw;
 
-        // 7. Update sigma
+        // 7. Update sigma. Cache the sampling sigma first: the rank-mu
+        // covariance deltas (step 10) divide each offspring displacement
+        // by the sigma that SAMPLED it, i.e. this pre-update value. The
+        // step-size is adapted only after the covariance is formed
+        // (Hansen 2016, arXiv:1604.00772, eq. 47; purecma.tell ordering).
+        const double sampling_sigma = s.sigma;
         s.sigma *= std::exp(s.params.c_sigma / s.params.d_sigma
                           * (s.p_sigma.norm() / s.params.chi_n - 1.0));
 
@@ -471,7 +476,7 @@ struct no_repair_adaptive_penalty_policy
         // was sized to current lambda in init() / on IPOP growth above.
         auto deltas = s.deltas_buf.leftCols(lambda);
         for(int i = 0; i < lambda; ++i)
-            deltas.col(i) = (offspring.col(idx[i]) - mean_old) / s.sigma;
+            deltas.col(i) = (offspring.col(idx[i]) - mean_old) / sampling_sigma;
 
         // 11. Update covariance
         detail::update_covariance(s.C, s.p_c, h_sigma,

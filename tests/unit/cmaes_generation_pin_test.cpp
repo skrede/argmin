@@ -190,15 +190,14 @@ TEST_CASE("cmaes: one hand-derived generation pins mean, p_sigma, p_c, and sigma
     CHECK(s.sigma == Approx(oracle.at("sigma")[0]).epsilon(0).margin(1e-12));
 }
 
-// RED against the current substrate: the production policy multiplies
-// sigma by its adaptation factor BEFORE forming the rank-mu deltas, so
-// the deltas are divided by the UPDATED sigma and the rank-mu block is
-// mis-scaled by (sigma0/sigma_1)^2 = 1.27745 (see header derivation).
-// [!shouldfail] records this as the expected disposition; once the
-// rank-mu update is reordered to use the sampling sigma, this case
-// starts passing and the tag must be removed.
+// The rank-mu covariance deltas divide each offspring displacement by
+// the sigma that SAMPLED it (the pre-update step size), so the rank-mu
+// block of C matches Hansen eq. 47 exactly. An implementation that
+// divides by the already-updated sigma mis-scales the rank-mu block by
+// (sigma0/sigma_1)^2 = 1.27745 (see header derivation) and fails the
+// C(0,0) leg by ~1.3e-2; this case pins against that regression.
 TEST_CASE("cmaes: one hand-derived generation pins the rank-mu covariance C",
-          "[cmaes][oracle-pin][!shouldfail]")
+          "[cmaes][oracle-pin]")
 {
     const auto oracle = load_oracle("oracles/cmaes_one_generation.csv");
     REQUIRE(oracle.contains("seed"));
