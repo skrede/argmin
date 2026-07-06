@@ -175,6 +175,49 @@ TEST_CASE("cmaes_policy: sigma scales from bounds", "[cmaes]")
     CHECK(solver.state().sigma == Approx(10.0 / 3.0).epsilon(1e-10));
 }
 
+TEST_CASE("cmaes_policy: initial per-coordinate spread scales with each box width",
+          "[cmaes]")
+{
+    // On an anisotropic box the initial per-coordinate sampling standard
+    // deviation must scale with that coordinate's own range (~0.3 of the
+    // width, Hansen tutorial), not with the widest coordinate's range. The
+    // scalar step size stays tied to the widest range; the per-coordinate
+    // anisotropy is carried in the initial covariance diagonal, so the
+    // effective spread on coordinate i is sigma * D_i = range_i / 3.
+    bounded_rosenbrock problem{
+        .n = 2,
+        .lb = Eigen::VectorXd{{-1.0, -100.0}},
+        .ub = Eigen::VectorXd{{1.0, 100.0}},
+    };
+
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 10;
+
+    cmaes_policy<> policy;
+    policy.options.seed = 42u;
+
+    basic_solver solver{policy, problem, x0, opts};
+    const auto& s = solver.state();
+
+    const double range0 = 2.0;    // upper[0] - lower[0]
+    const double range1 = 200.0;  // upper[1] - lower[1]
+
+    // Scalar step size follows the widest range.
+    CHECK(s.sigma == Approx(range1 / 3.0).epsilon(1e-10));
+
+    // Effective initial spread per coordinate is range_i / 3.
+    CHECK(s.sigma * s.D[0] == Approx(range0 / 3.0).epsilon(1e-10));
+    CHECK(s.sigma * s.D[1] == Approx(range1 / 3.0).epsilon(1e-10));
+
+    // The spread ratio equals the box-width ratio.
+    CHECK(s.D[0] / s.D[1] == Approx(range0 / range1).epsilon(1e-10));
+
+    // The covariance diagonal is consistent with D (C_ii = D_i^2).
+    CHECK(s.C(0, 0) == Approx(s.D[0] * s.D[0]).epsilon(1e-10));
+    CHECK(s.C(1, 1) == Approx(s.D[1] * s.D[1]).epsilon(1e-10));
+}
+
 TEST_CASE("cmaes_policy: lambda minimum for bounded problems", "[cmaes]")
 {
     bounded_rosenbrock problem{

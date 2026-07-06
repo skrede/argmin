@@ -408,13 +408,50 @@ struct pwq_reparameterization_policy
         s.p_c = Eigen::Vector<double, N>::Zero(n);
         s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
         s.D = Eigen::Vector<double, N>::Ones(n);
+
+        // Anisotropic-box initial scaling. Hansen (2023) arXiv:1604.00772
+        // sets the initial per-coordinate step to ~0.3*(ub-lb); with a
+        // single scalar step size that scale must be carried per
+        // coordinate in the initial covariance diagonal, otherwise a
+        // narrow coordinate is sampled at the width of the widest one
+        // (an isotropic ellipsoid of radius max_range/3 in every
+        // direction). The scale ratio range_i/max_range gives an initial
+        // per-coordinate standard deviation sigma * D_i = range_i/3, and
+        // the widest finite coordinate keeps unit scale so an isotropic
+        // box is unchanged. Only applied when sigma is auto-derived from
+        // the bounds; an explicit initial_sigma is a deliberate isotropic
+        // scalar choice and is respected as given.
+        if(s.has_bounds && !options.initial_sigma.has_value())
+        {
+            double max_range = 0.0;
+            for(int i = 0; i < n; ++i)
+            {
+                const double range = s.upper[i] - s.lower[i];
+                if(std::isfinite(range) && range > max_range)
+                    max_range = range;
+            }
+            if(max_range > 0.0)
+            {
+                for(int i = 0; i < n; ++i)
+                {
+                    const double range = s.upper[i] - s.lower[i];
+                    const double ratio =
+                        (std::isfinite(range) && range > 0.0)
+                            ? range / max_range
+                            : 1.0;
+                    s.D[i] = ratio;
+                    s.C(i, i) = ratio * ratio;
+                }
+            }
+        }
+
         s.eigen_solver.compute(s.C);
         s.covariance_dirty = false;
 
         // Hansen 2023 (arXiv:1604.00772) section B.3 item 8 (TolXUp) baseline.
-        // Recorded at init so the divergence cap survives even if the D
-        // initialization is changed in the future. With the canonical D = 1
-        // initialization, initial_d_max == 1.0.
+        // Recorded at init from the actual initial D. The widest finite
+        // coordinate carries unit scale, so initial_d_max == 1.0 for both
+        // the isotropic and the anisotropic-box initialization above.
         s.initial_d_max = s.D.maxCoeff();
         s.axis_cycle_index = 0;
 
