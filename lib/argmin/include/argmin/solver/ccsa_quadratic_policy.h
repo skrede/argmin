@@ -91,6 +91,13 @@ struct ccsa_quadratic_policy
 
         std::optional<std::uint16_t> max_inner_iterations{};  // default: 15
 
+        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale *
+        // max(|g_i(x0)|, 1). The per-constraint scale reference keeps the
+        // exact-l1-penalty condition c_i > |mu_i*| scale-relative; the
+        // scale multiplier is empirical (swept). See detail/mma_subproblem.h
+        // recover_elastic_slacks(). Direct value.
+        double dual_bound_scale{1000.0};
+
         // Framework-side stall detection threshold. Wired by
         // basic_solver::forward_policy_hints into
         // stall_tolerance_criterion with best_seen_feasible tracking.
@@ -122,6 +129,12 @@ struct ccsa_quadratic_policy
         // Warm-started dual variables (m-dimensional). Persists across
         // inner and outer iterations. Initialized to zero.
         Eigen::Vector<double, M> y_dual;
+
+        // Bounded-dual elastics. c_dual_ref[i] = max(|g_i(x0)|, 1) is the
+        // fixed per-constraint scale reference; c_dual[i] =
+        // dual_bound_scale * c_dual_ref[i] is the working dual upper bound.
+        Eigen::Vector<double, M> c_dual_ref;
+        Eigen::Vector<double, M> c_dual;
 
         // Fallback subproblem solver for the m=0 case (no constraints,
         // analytic primal without dual solve).
@@ -220,6 +233,13 @@ struct ccsa_quadratic_policy
                 s.J_ineq = J_tmp;
             }
         }
+
+        s.c_dual_ref.resize(m_ineq);
+        s.c_dual_ref.setOnes();
+        s.c_dual.resize(m_ineq);
+        if(!s.invalid_problem)
+            for(int i = 0; i < m_ineq; ++i)
+                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
 
         if constexpr(bound_constrained<Problem>)
         {
@@ -374,9 +394,22 @@ struct ccsa_quadratic_policy
         dual_prob.x_primal.resize(n);
         dual_prob.gcval.resize(m);
 
+        // Bounded-dual elastics: box the constraint multipliers at
+        // c_i = dual_bound_scale * max(|g_i(x0)|, 1) so an inequality-
+        // infeasible iterate cannot make the subproblem infeasible and
+        // drive the dual unbounded (Svanberg 2002 relaxed subproblem,
+        // a_i = 0 instance).
+        if(m > 0)
+            s.c_dual = s.opts.dual_bound_scale * s.c_dual_ref;
+        dual_prob.c_dual_out = &s.c_dual;
+
         Eigen::Vector<double, N> x_trial(n);
         double f_trial = s.f;
         Eigen::VectorXd c_ineq_trial = s.c_ineq;
+        // Relaxed constraint values g_tilde_i(x*) - y_i* and recovered
+        // elastic slacks (populated by the dual solve).
+        Eigen::Vector<double, MC> gcval_relaxed = dual_prob.gcval;
+        Eigen::Vector<double, MC> y_elastic = dual_prob.gcval;
 
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
@@ -414,6 +447,12 @@ struct ccsa_quadratic_policy
                 // dual_prob.x_primal, gval, wval, gcval.
                 (void)dual_prob.value(s.y_dual);
                 x_trial = dual_prob.x_primal;
+                // Recover the primal elastic slacks and the relaxed
+                // constraint values (raw g_tilde_i on an inactive
+                // constraint, 0 on one the elastic absorbed).
+                detail::recover_elastic_slacks(
+                    s.y_dual, s.c_dual, dual_prob.gcval,
+                    y_elastic, gcval_relaxed);
             }
             else
             {
@@ -434,7 +473,8 @@ struct ccsa_quadratic_policy
                 c_ineq_trial = c_tmp;
             }
 
-            // Conservativity test (NLopt ccsa_quadratic.c lines 448, 461).
+            // Conservativity test (NLopt ccsa_quadratic.c lines 448, 461)
+            // against the relaxed constraint values g_tilde_i - y_i.
             bool inner_done = (dual_prob.gval >= f_trial);
             bool feasible_cur = true;
             double infeasibility_cur = 0.0;
@@ -442,7 +482,7 @@ struct ccsa_quadratic_policy
             {
                 double gi_trial = -c_ineq_trial[i];
                 inner_done = inner_done
-                    && (dual_prob.gcval[i] >= gi_trial);
+                    && (gcval_relaxed[i] >= gi_trial);
                 if(gi_trial > 0.0)
                 {
                     feasible_cur = false;
@@ -464,7 +504,8 @@ struct ccsa_quadratic_policy
             if(inner_done)
                 break;
 
-            // Rho growth on non-conservative trial (NLopt mma.c:502-503).
+            // Rho growth on non-conservative trial (NLopt mma.c:502-503),
+            // on the relaxed constraint approximation.
             double wval = std::max(dual_prob.wval, 1e-20);
             if(f_trial > dual_prob.gval)
                 s.rho = std::min(10.0 * s.rho,
@@ -472,10 +513,10 @@ struct ccsa_quadratic_policy
             for(int i = 0; i < m; ++i)
             {
                 double gi_trial = -c_ineq_trial[i];
-                if(gi_trial > dual_prob.gcval[i])
+                if(gi_trial > gcval_relaxed[i])
                     s.rhoc[i] = std::min(10.0 * s.rhoc[i],
                         1.1 * (s.rhoc[i]
-                               + (gi_trial - dual_prob.gcval[i])
+                               + (gi_trial - gcval_relaxed[i])
                                  / wval));
             }
 
@@ -572,6 +613,8 @@ struct ccsa_quadratic_policy
             Eigen::MatrixXd J_tmp(m, static_cast<int>(s.x.size()));
             s.problem->constraint_jacobian(x0, J_tmp);
             s.J_ineq = J_tmp;
+            for(int i = 0; i < m; ++i)
+                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
         }
         s.iteration = 0;
         s.x_old1 = x0;

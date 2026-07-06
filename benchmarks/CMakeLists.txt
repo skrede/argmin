@@ -153,6 +153,29 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Bounded-dual elastics scale sweep for the MMA/GCMMA/CCSA policies.
+# Drives dual_bound_scale over {0.1, 1, 10, 1000, 10000, +inf} on
+# inequality-infeasible-start cells (HS024 from an infeasible interior
+# point plus two synthetic half-plane / half-space cells); records the
+# feasibility-gated metric (outer iterations to feasibility, final
+# objective error, max multiplier magnitude, max saturation ratio) so the
+# shipped scale reaches feasibility with a bounded, well-conditioned dual
+# and never clips the true multiplier. Non-ctest, one-shot.
+add_executable(mma_elastic_dual_sweep mma_elastic_dual_sweep.cpp)
+target_link_libraries(mma_elastic_dual_sweep PRIVATE argmin::argmin)
+
+target_compile_options(mma_elastic_dual_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(mma_elastic_dual_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Adaptive-penalty growth-factor sweep harness for tr_sqp_policy. Drives
 # the policy across penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} on the
 # existing HS-suite cells (HS026/HS028/HS043/HS071/HS076) under both

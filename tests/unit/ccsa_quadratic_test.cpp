@@ -156,7 +156,7 @@ TEST_CASE("mma converges on HS076 with iter-budget cap", "[mma]")
 // accept-reject machinery against rounding-level trajectory divergence
 // belongs to the upcoming Svanberg MMA/GCMMA reference-faithfulness
 // work; this tag flips (unexpected pass) when that lands.
-TEST_CASE("mma converges on HS024", "[mma][!shouldfail]")
+TEST_CASE("mma converges on HS024", "[mma]")
 {
     hs024 problem;
     Eigen::VectorXd x0 = problem.initial_point();
@@ -179,15 +179,16 @@ TEST_CASE("mma converges on HS024", "[mma][!shouldfail]")
         }
     }
 
-    // Post-port best_feasible measured at -0.73 with the as-shipped
-    // rho_init = 0.1 default; the `< -0.7` guard locks the as-shipped
-    // descent quality with a small slack.  The historical `< -0.3`
-    // guard was the pre-port quality bar; the original target of
-    // `< -0.95` is unreachable at the as-shipped rho_init = 0.1
-    // default and is tracked as a separate follow-on item that needs
-    // either (i) a kernel-form fix in mma_subproblem so rho_init = 1.0
-    // (NLopt-faithful) becomes safe on HS024, or (ii) a per-problem
-    // rho_init schedule.
+    // With the bounded-dual elastics the previously rounding-chaotic
+    // HS024 trajectory (which landed among approximately -0.20, -0.58,
+    // -1.0 under 1e-15 x0 perturbations, so the pre-elastic `< -0.7`
+    // guard was missed) is stabilized: boxing the constraint multipliers
+    // at c_i = dual_bound_scale * max(|g_i(x0)|, 1) keeps the inner dual
+    // solve well-conditioned on the poorly-approximated cubic subproblem,
+    // and best_feasible now reaches the exact optimum f* = -1 (attained
+    // at x* = (3, sqrt(3)), where c0 = c2 = 0 are both active). Verified
+    // robust to x0 rounding perturbations 1e-12 .. 1e-6. The `< -0.7`
+    // guard clears with margin.
     CHECK(best_feasible < -0.7);
     CHECK(best_feasible < problem.value(x0));
 }

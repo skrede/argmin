@@ -34,6 +34,7 @@
 
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/mma_augmented_dual_problem.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
@@ -73,6 +74,13 @@ struct rho_wval_policy
         std::optional<double> move_limit_fraction{};      // 0.1
         double move_bound_fraction{0.5};                  // Svanberg XXMOVE
         double raai{1e-5};                                // p/q regularizer
+
+        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale *
+        // max(|g_i(x0)|, 1). The per-constraint scale reference keeps the
+        // exact-l1-penalty condition c_i > |mu_i*| scale-relative; the
+        // scale multiplier is empirical (swept). See detail/mma_subproblem.h
+        // recover_elastic_slacks(). Direct value.
+        double dual_bound_scale{1000.0};
 
         // Conservativity loop and rho parameters.
         std::optional<std::uint16_t> max_inner_iterations{};  // 15
@@ -114,6 +122,12 @@ struct rho_wval_policy
         Eigen::Vector<double, N> x_old1, x_old2;
         Eigen::Vector<double, N> lower, upper;
         Eigen::Vector<double, M> y_dual;
+
+        // Bounded-dual elastics. c_dual_ref[i] = max(|g_i(x0)|, 1) is the
+        // fixed per-constraint scale reference; c_dual[i] =
+        // dual_bound_scale * c_dual_ref[i] is the working dual upper bound.
+        Eigen::Vector<double, M> c_dual_ref;
+        Eigen::Vector<double, M> c_dual;
 
         std::uint32_t iteration{0};
 
@@ -184,6 +198,9 @@ struct rho_wval_policy
         s.rho_obj = 1.0;
         s.y_dual.resize(m);
         s.y_dual.setZero();
+        s.c_dual_ref.resize(m);
+        s.c_dual_ref.setOnes();
+        s.c_dual.resize(m);
 
         s.f = problem.value(x0);
         problem.gradient(x0, s.g);
@@ -200,6 +217,10 @@ struct rho_wval_policy
             {
                 s.c_ineq = c_tmp;
                 s.J_ineq = J_tmp;
+                // Elastic dual-bound scale reference max(|g_i(x0)|, 1),
+                // g_i = -c_ineq_i (fixed for the run).
+                for(int i = 0; i < m; ++i)
+                    s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
             }
         }
 
@@ -379,9 +400,22 @@ struct rho_wval_policy
         dual_prob.x_primal.resize(n);
         dual_prob.gcval.resize(m);
 
+        // Bounded-dual elastics: box the constraint multipliers at
+        // c_i = dual_bound_scale * max(|g_i(x0)|, 1) so an inequality-
+        // infeasible iterate cannot make the subproblem infeasible and
+        // drive the dual unbounded (Svanberg 2002 relaxed subproblem,
+        // a_i = 0 instance).
+        if(m > 0)
+            s.c_dual = s.opts.dual_bound_scale * s.c_dual_ref;
+        dual_prob.c_dual_out = &s.c_dual;
+
         Eigen::Vector<double, N> x_trial(n);
         double f_trial = s.f;
         Eigen::VectorXd c_trial = s.c_ineq;
+        // Relaxed constraint values g_tilde_i(x*) - y_i* and recovered
+        // elastic slacks (populated by the dual solve; see below).
+        Eigen::Vector<double, MC> gcval_relaxed = dual_prob.gcval;
+        Eigen::Vector<double, MC> y_elastic = dual_prob.gcval;
 
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
@@ -410,6 +444,13 @@ struct rho_wval_policy
                 s.y_dual = ds.x;
                 (void)dual_prob.value(s.y_dual);
                 x_trial = dual_prob.x_primal;
+                // Recover the primal elastic slacks and the relaxed
+                // constraint values the conservativity test and rho growth
+                // read (raw g_tilde_i on an inactive constraint, 0 on one
+                // the elastic absorbed at a saturated multiplier).
+                detail::recover_elastic_slacks(
+                    s.y_dual, s.c_dual, dual_prob.gcval,
+                    y_elastic, gcval_relaxed);
             }
             else
             {
@@ -427,14 +468,16 @@ struct rho_wval_policy
                 c_trial = c_tmp;
             }
 
-            // Conservativity test (Svanberg 2002 §4.2).
+            // Conservativity test (Svanberg 2002 §4.2) against the relaxed
+            // constraint values g_tilde_i - y_i.
             bool conservative = (dual_prob.gval >= f_trial);
             for(int i = 0; i < m && conservative; ++i)
-                conservative = (dual_prob.gcval[i] >= -c_trial[i]);
+                conservative = (gcval_relaxed[i] >= -c_trial[i]);
 
             if(conservative) break;
 
-            // NLopt mma.c rho-growth (lines 388-391).
+            // NLopt mma.c rho-growth (lines 388-391), on the relaxed
+            // constraint approximation.
             const double wval = std::max(dual_prob.wval, 1e-20);
             if(f_trial > dual_prob.gval)
                 s.rho_obj = std::min(
@@ -443,11 +486,11 @@ struct rho_wval_policy
             for(int i = 0; i < m; ++i)
             {
                 const double gi_trial = -c_trial[i];
-                if(gi_trial > dual_prob.gcval[i])
+                if(gi_trial > gcval_relaxed[i])
                     s.rho_con[i] = std::min(
                         10.0 * s.rho_con[i],
                         1.1 * (s.rho_con[i]
-                               + (gi_trial - dual_prob.gcval[i]) / wval));
+                               + (gi_trial - gcval_relaxed[i]) / wval));
             }
 
             // Null-step-and-retry on inner exhaustion (mirrors the CCSA
@@ -557,6 +600,8 @@ struct rho_wval_policy
             Eigen::MatrixXd J_tmp(m, static_cast<int>(s.x.size()));
             s.problem->constraint_jacobian(x0, J_tmp);
             s.J_ineq = J_tmp;
+            for(int i = 0; i < m; ++i)
+                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
         }
         s.iteration = 0;
         s.x_old1 = x0;

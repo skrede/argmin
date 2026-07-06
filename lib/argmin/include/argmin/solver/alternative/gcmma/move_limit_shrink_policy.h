@@ -39,6 +39,7 @@
 
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/mma_reciprocal_dual_problem.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
@@ -89,6 +90,11 @@ struct move_limit_shrink_policy
         // Distance-scaled p/q regularizer (Svanberg 2007 notes 2.3-2.4).
         double raai{1e-5};
 
+        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale *
+        // max(|g_i(x0)|, 1). Scale multiplier is empirical (swept). See
+        // detail/mma_subproblem.h recover_elastic_slacks(). Direct value.
+        double dual_bound_scale{1000.0};
+
         // Conservativity loop: max inner iterations and shrink factor.
         // shrink_factor = 0.5 contracts [alpha, beta] toward x_k by half
         // each non-conservative trial.
@@ -125,6 +131,12 @@ struct move_limit_shrink_policy
         Eigen::Vector<double, N> x_old1, x_old2;
         Eigen::Vector<double, N> lower, upper;
         Eigen::Vector<double, M> y_dual;
+
+        // Bounded-dual elastics. c_dual_ref[i] = max(|g_i(x0)|, 1) is the
+        // fixed per-constraint scale reference; c_dual[i] =
+        // dual_bound_scale * c_dual_ref[i] is the working dual upper bound.
+        Eigen::Vector<double, M> c_dual_ref;
+        Eigen::Vector<double, M> c_dual;
 
         std::uint32_t iteration{0};
         options_type opts;
@@ -172,6 +184,9 @@ struct move_limit_shrink_policy
         s.r_con.resize(m);
         s.y_dual.resize(m);
         s.y_dual.setZero();
+        s.c_dual_ref.resize(m);
+        s.c_dual_ref.setOnes();
+        s.c_dual.resize(m);
 
         s.f = problem.value(x0);
         problem.gradient(x0, s.g);
@@ -183,6 +198,8 @@ struct move_limit_shrink_policy
             Eigen::MatrixXd J_tmp(m, n);
             problem.constraint_jacobian(x0, J_tmp);
             s.J_ineq = J_tmp;
+            for(int i = 0; i < m; ++i)
+                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
         }
 
         if constexpr(bound_constrained<Problem>)
@@ -333,9 +350,21 @@ struct move_limit_shrink_policy
         dual_prob.x_primal.resize(n);
         dual_prob.gcval.resize(m);
 
+        // Bounded-dual elastics: box the constraint multipliers at
+        // c_i = dual_bound_scale * max(|g_i(x0)|, 1) so an inequality-
+        // infeasible iterate cannot make the subproblem infeasible and
+        // drive the dual unbounded (Svanberg 2002 relaxed subproblem,
+        // a_i = 0 instance).
+        if(m > 0)
+            s.c_dual = s.opts.dual_bound_scale * s.c_dual_ref;
+        dual_prob.c_dual_out = &s.c_dual;
+
         Eigen::Vector<double, N> x_trial(n);
         double f_trial = s.f;
         Eigen::VectorXd c_trial = s.c_ineq;
+        // Relaxed constraint values g_tilde_i(x*) - y_i* and elastic slacks.
+        Eigen::Vector<double, MC> gcval_relaxed = dual_prob.gcval;
+        Eigen::Vector<double, MC> y_elastic = dual_prob.gcval;
 
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
@@ -362,6 +391,9 @@ struct move_limit_shrink_policy
                 s.y_dual = ds.x;
                 (void)dual_prob.value(s.y_dual);
                 x_trial = dual_prob.x_primal;
+                detail::recover_elastic_slacks(
+                    s.y_dual, s.c_dual, dual_prob.gcval,
+                    y_elastic, gcval_relaxed);
             }
             else
             {
@@ -380,14 +412,14 @@ struct move_limit_shrink_policy
                 c_trial = c_tmp;
             }
 
-            // Conservativity test (Svanberg 2002 §4.2 form):
-            //   g_tilde_i(x_trial) >= g_i(x_trial) for all i.
+            // Conservativity test (Svanberg 2002 §4.2 form) against the
+            // relaxed constraint values g_tilde_i - y_i:
             //   Objective: gval >= f_trial.
             //   Constraints (MMA convention g_i = -c_i):
-            //     gcval[i] >= -c_trial[i].
+            //     (gcval[i] - y_i) >= -c_trial[i].
             bool conservative = (dual_prob.gval >= f_trial);
             for(int i = 0; i < m && conservative; ++i)
-                conservative = (dual_prob.gcval[i] >= -c_trial[i]);
+                conservative = (gcval_relaxed[i] >= -c_trial[i]);
 
             if(conservative) break;
 
@@ -455,6 +487,8 @@ struct move_limit_shrink_policy
             Eigen::MatrixXd J_tmp(m, static_cast<int>(s.x.size()));
             s.problem->constraint_jacobian(x0, J_tmp);
             s.J_ineq = J_tmp;
+            for(int i = 0; i < m; ++i)
+                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
         }
         s.iteration = 0;
         s.x_old1 = x0;

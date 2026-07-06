@@ -327,30 +327,22 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
 //
 // Pre-port MMA reached only the reciprocal plateau approximately -0.58
 // due to the unconditional-accept path admitting non-conservative
-// trials.  Post-port (Svanberg 2002 inner conservativity loop) descended
-// to approximately -0.73 at the as-shipped rho_init = 0.1 default; the
-// `< -0.7` guard locked that quality, mirroring the dedicated HS024
-// case in ccsa_quadratic_test.cpp.  The historical
-// `< problem.value(x0)` monotonic-improvement guard is preserved as the
-// pre-port reference.
+// trials.  The MMA outer loop was then chaotic at rounding level (x0
+// perturbations of 1e-15 to 1e-10 flipped best_feasible among
+// approximately -0.20, -0.58, -1.0 under the identical substrate), so
+// the `< -0.7` guard was missed on the lucky-vs-unlucky rounding
+// trajectory.
 //
-// [!shouldfail]: the `< -0.7` guard is currently missed (best_feasible
-// lands at approximately -0.204) after the compact L-BFGS middle-matrix
-// solve moved from an out-of-contract LDLT of the indefinite middle
-// matrix to an in-contract PartialPivLU.  Instrumented replay against a
-// long-double FullPivLU reference over the actual HS024 middle solves
-// shows the new factorization is strictly more accurate (zero solves
-// where PartialPivLU fails while LDLT succeeds, versus 618 solves where
-// LDLT alone degrades to relative errors up to 3.7e-1), and the MMA
-// outer loop is chaotic at rounding level (x0 perturbations of 1e-15 to
-// 1e-10 flip best_feasible among approximately -0.20, -0.58, -1.0 under
-// the identical substrate).  The prior pass rode a lucky rounding
-// trajectory of the out-of-contract factorization.  Robustifying the
-// CCSA/MMA accept-reject machinery belongs to the upcoming Svanberg
-// MMA/GCMMA reference-faithfulness work; this tag flips (unexpected
-// pass) when that lands.  See the matching tagged case in
-// ccsa_quadratic_test.cpp for the full evidence trail.
-TEST_CASE("mma on hock-schittkowski HS024", "[hs][mma][!shouldfail]")
+// The bounded-dual elastics (Svanberg MMA/GCMMA reference-faithfulness
+// work) stabilize this: boxing the constraint multipliers at
+// c_i = dual_bound_scale * max(|g_i(x0)|, 1) keeps the inner dual solve
+// well-conditioned on the poorly-approximated cubic subproblem, and
+// best_feasible now reaches the exact optimum f* = -1 robustly (verified
+// across x0 rounding perturbations 1e-12 .. 1e-6). The tag flip the
+// prior evidence trail predicted ("flips when the Svanberg
+// reference-faithfulness work lands") has landed. The
+// `< problem.value(x0)` monotonic-improvement guard is preserved.
+TEST_CASE("mma on hock-schittkowski HS024", "[hs][mma]")
 {
     solver_options opts;
     opts.set_gradient_threshold(1e-5);

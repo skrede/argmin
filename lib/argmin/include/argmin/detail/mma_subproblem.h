@@ -33,9 +33,65 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace argmin::detail
 {
+
+// Primal elastic recovery for the bounded-dual subproblem (the second
+// half of the Svanberg 2002 relaxed-subproblem, a_i = 0 instance).
+//
+// The relaxed subproblem replaces each approximation constraint
+// g_tilde_i(x) <= 0 with the elastic g_tilde_i(x) - y_i <= 0, y_i >= 0,
+// penalized by c_i * y_i in the objective; its dual multiplier is boxed
+// 0 <= lambda_i <= c_i (see the c_dual_out member on the four
+// *_dual_problem headers). At the dual solution the primal slack is
+// recovered from the y-stationarity / complementarity KKT relations:
+//   lambda_i < c_i : the y_i >= 0 multiplier is c_i - lambda_i > 0, so
+//                    y_i = 0 (the elastic is inert; the constraint is
+//                    honored exactly by the approximation);
+//   lambda_i = c_i : the elastic is active and complementarity on the
+//                    relaxed constraint forces g_tilde_i(x*) - y_i = 0,
+//                    so y_i = max(g_tilde_i(x*), 0) absorbs the whole
+//                    subproblem violation.
+// The relaxed constraint value g_tilde_i(x*) - y_i is therefore the raw
+// g_tilde_i on an inactive/exactly-honored constraint and 0 on one the
+// elastic absorbed. The conservativity test and the KKT report read this
+// relaxed value, not the raw g_tilde_i, so an elastically-relaxed
+// constraint neither spuriously grows the penalty nor is mis-reported as
+// violated at the subproblem optimum.
+//
+// lambda is the solved dual (0 <= lambda_i <= c_i), c_dual the per-
+// constraint bounds, gcval the raw approximation constraint values
+// g_tilde_i(x*) cached by the dual problem's eval_primal at lambda.
+// Outputs y_elastic (the recovered slacks) and gcval_relaxed (the
+// relaxed constraint values). A component with c_i = +infinity (the
+// un-elastic classic dual) never saturates and recovers y_i = 0.
+//
+// Reference: Svanberg 2002, SIAM J. Optim. 12(2):555-573, Section 2
+//            (the relaxed subproblem) and Section 5 (KKT relations).
+template <typename Scalar, int M>
+void recover_elastic_slacks(
+    const Eigen::Vector<Scalar, M>& lambda,
+    const Eigen::Vector<Scalar, M>& c_dual,
+    const Eigen::Vector<Scalar, M>& gcval,
+    Eigen::Vector<Scalar, M>& y_elastic,
+    Eigen::Vector<Scalar, M>& gcval_relaxed)
+{
+    const int m = static_cast<int>(lambda.size());
+    y_elastic.resize(m);
+    gcval_relaxed.resize(m);
+    constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+    for(int i = 0; i < m; ++i)
+    {
+        const Scalar ci = c_dual[i];
+        // Saturation to within a relative tolerance of the box bound.
+        const bool saturated =
+            ci < inf && lambda[i] >= ci * (Scalar(1) - Scalar(1e-6));
+        y_elastic[i] = saturated ? std::max(gcval[i], Scalar(0)) : Scalar(0);
+        gcval_relaxed[i] = gcval[i] - y_elastic[i];
+    }
+}
 
 template <typename Scalar = double, int N = argmin::dynamic_dimension,
           int M = argmin::dynamic_dimension>

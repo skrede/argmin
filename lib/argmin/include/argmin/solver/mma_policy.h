@@ -106,6 +106,14 @@ struct mma_policy
         // empirical sweep. Direct value.
         double raai{1e-5};
 
+        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale *
+        // max(|g_i(x0)|, 1). Boxing the constraint multipliers keeps the
+        // subproblem dual bounded when an inequality-infeasible iterate
+        // makes the subproblem infeasible (Svanberg 2002 relaxed
+        // subproblem, a_i = 0 instance). Scale multiplier is empirical
+        // (swept). Direct value.
+        double dual_bound_scale{1000.0};
+
         // Stall detection (forwarded by basic_solver into a
         // stall_tolerance_criterion).
         std::optional<double> stall_tolerance_threshold{}; // default: 1e-6
@@ -149,6 +157,12 @@ struct mma_policy
 
         // Warm-started dual variables (m-dim, y >= 0).
         Eigen::Vector<double, M> y_dual;
+
+        // Bounded-dual elastics. c_dual_ref[i] = max(|g_i(x0)|, 1) is the
+        // fixed per-constraint scale reference; c_dual[i] =
+        // dual_bound_scale * c_dual_ref[i] is the working dual upper bound.
+        Eigen::Vector<double, M> c_dual_ref;
+        Eigen::Vector<double, M> c_dual;
 
         std::uint32_t iteration{0};
 
@@ -214,6 +228,9 @@ struct mma_policy
         s.r_con.resize(m);
         s.y_dual.resize(m);
         s.y_dual.setZero();
+        s.c_dual_ref.resize(m);
+        s.c_dual_ref.setOnes();
+        s.c_dual.resize(m);
 
         s.f = problem.value(x0);
         problem.gradient(x0, s.g);
@@ -230,6 +247,8 @@ struct mma_policy
             {
                 s.c_ineq = c_tmp;
                 s.J_ineq = J_tmp;
+                for(int i = 0; i < m; ++i)
+                    s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
             }
         }
 
@@ -416,6 +435,15 @@ struct mma_policy
         dual_prob.x_primal.resize(n);
         dual_prob.gcval.resize(m);
 
+        // Bounded-dual elastics: box the constraint multipliers at
+        // c_i = dual_bound_scale * max(|g_i(x0)|, 1) so an inequality-
+        // infeasible iterate cannot make the subproblem infeasible and
+        // drive the dual unbounded. Plain MMA has no conservativity loop,
+        // so only the dual box (not the primal y-recovery) applies here.
+        if(m > 0)
+            s.c_dual = s.opts.dual_bound_scale * s.c_dual_ref;
+        dual_prob.c_dual_out = &s.c_dual;
+
         Eigen::Vector<double, N> x_trial(n);
 
         if(m > 0)
@@ -512,6 +540,8 @@ struct mma_policy
             Eigen::MatrixXd J_tmp(m, static_cast<int>(s.x.size()));
             s.problem->constraint_jacobian(x0, J_tmp);
             s.J_ineq = J_tmp;
+            for(int i = 0; i < m; ++i)
+                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
         }
         s.iteration = 0;
         s.x_old1 = x0;

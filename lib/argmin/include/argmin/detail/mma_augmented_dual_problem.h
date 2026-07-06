@@ -71,6 +71,16 @@ struct mma_augmented_dual_problem
     Scalar rho_obj{0};
     const Eigen::Vector<Scalar, M>* rho_con_out{};
 
+    // Per-constraint dual upper bound c_i (bounded-dual elastics). When
+    // set, the dual multiplier of constraint i is boxed 0 <= lambda_i
+    // <= c_i (the dual face of the Svanberg 2002 relaxed-subproblem
+    // elastic y_i, a_i = 0 instance), so an inequality-infeasible outer
+    // iterate cannot make the subproblem infeasible and drive the dual
+    // unbounded. A null pointer leaves the bound at +infinity. See
+    // detail/mma_subproblem.h recover_elastic_slacks() for the paired
+    // primal y-recovery.
+    const Eigen::Vector<Scalar, M>* c_dual_out{};
+
     int n_primal{0};
     int m_dual{0};
 
@@ -116,6 +126,8 @@ struct mma_augmented_dual_problem
 
     [[nodiscard]] Eigen::Vector<Scalar, M> upper_bounds() const
     {
+        if(c_dual_out != nullptr)
+            return *c_dual_out;
         return Eigen::Vector<Scalar, M>::Constant(
             m_dual, std::numeric_limits<Scalar>::infinity());
     }
