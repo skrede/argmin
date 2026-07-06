@@ -242,3 +242,144 @@ TEST_CASE("lm_policy populates kkt_residual", "[lm][kkt]")
     }
     CHECK(populated);
 }
+
+// FAM-14 gain-ratio witness (LM). Two properties of the guarded gain ratio:
+//
+//  (1) On a linear-residual (exactly quadratic) least-squares problem the
+//      Gauss-Newton model is exact, so the direct model reduction
+//      predicted = -h^T g - 0.5||J h||^2 equals the actual reduction and the
+//      gain ratio is 1 on every accepted step. lambda then contracts by the
+//      floor factor 1/3 (Nielsen: 1 - (2*rho-1)^3 = 0 at rho = 1). The solver
+//      reaches the exact minimizer, and each accepted step's reported
+//      objective_change equals the true objective decrease (no lambda proxy).
+//
+//  (2) On a step the solver rejects (the trial overshoots and increases the
+//      objective), objective_change is exactly 0 -- the honest change for an
+//      iterate that did not move -- rather than the internal lambda value the
+//      former hack leaked into step_result. step_size stays positive so no
+//      false stall is reported.
+namespace
+{
+
+// Linear-residual least squares: r(x) = A x - b, so f = 0.5||A x - b||^2 is
+// exactly quadratic and the Gauss-Newton model is exact. Minimizer solves
+// A x = b; here A = [[2,0],[1,3]], b = [2,6] -> x* = (1, 5/3).
+struct linear_ls_2d
+{
+    static constexpr int problem_dimension = 2;
+
+    int dimension() const { return 2; }
+    int num_residuals() const { return 2; }
+
+    static Eigen::Matrix2d A()
+    {
+        Eigen::Matrix2d a;
+        a << 2.0, 0.0, 1.0, 3.0;
+        return a;
+    }
+    static Eigen::Vector2d b()
+    {
+        return Eigen::Vector2d{2.0, 6.0};
+    }
+
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        Eigen::Vector2d r = A() * x - b();
+        return 0.5 * r.squaredNorm();
+    }
+    void residuals(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& r) const
+    {
+        r = A() * x - b();
+    }
+    void jacobian(const Eigen::Vector<double, 2>& /*x*/, Eigen::MatrixXd& J) const
+    {
+        J = A();
+    }
+};
+
+// Scalar quartic-merit least squares: r(x) = x^2 - 1, f = 0.5 (x^2 - 1)^2.
+// From x0 = 0.1 the tiny initial lambda yields a Gauss-Newton step that
+// overshoots to x ~ 5, so the first trial is rejected.
+struct scalar_overshoot_ls
+{
+    static constexpr int problem_dimension = 1;
+
+    int dimension() const { return 1; }
+    int num_residuals() const { return 1; }
+
+    double value(const Eigen::Vector<double, 1>& x) const
+    {
+        double r = x(0) * x(0) - 1.0;
+        return 0.5 * r * r;
+    }
+    void residuals(const Eigen::Vector<double, 1>& x, Eigen::VectorXd& r) const
+    {
+        r(0) = x(0) * x(0) - 1.0;
+    }
+    void jacobian(const Eigen::Vector<double, 1>& x, Eigen::MatrixXd& J) const
+    {
+        J(0, 0) = 2.0 * x(0);
+    }
+};
+
+}
+
+TEST_CASE("lm_policy: exact gain ratio on a quadratic; honest objective_change",
+          "[lm][gain_ratio]")
+{
+    linear_ls_2d problem;
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-12);
+
+    basic_solver solver{lm_policy<2>{}, problem, x0, opts};
+
+    // Each accepted step's reported objective_change must equal the true
+    // objective decrease (the value before minus the value after), never a
+    // lambda proxy.
+    double prev_f = solver.state().objective_value;
+    for(int i = 0; i < 20; ++i)
+    {
+        auto sr = solver.step();
+        if(sr.improved)
+        {
+            double true_change = sr.objective_value - prev_f;
+            CHECK(sr.objective_change == Approx(true_change).margin(1e-14));
+        }
+        prev_f = sr.objective_value;
+        if(sr.policy_status)
+            break;
+        if(sr.kkt_residual.value_or(sr.gradient_norm) < 1e-12)
+            break;
+    }
+
+    // Exact minimizer of the quadratic: A x = b -> x* = (1, 5/3).
+    CHECK(solver.state().objective_value < 1e-18);
+    CHECK(solver.state().x(0) == Approx(1.0).margin(1e-8));
+    CHECK(solver.state().x(1) == Approx(5.0 / 3.0).margin(1e-8));
+}
+
+TEST_CASE("lm_policy: rejected step reports zero objective_change, not lambda",
+          "[lm][gain_ratio]")
+{
+    scalar_overshoot_ls problem;
+    Eigen::VectorXd x0{{0.1}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-12);
+
+    basic_solver solver{lm_policy<1>{}, problem, x0, opts};
+
+    // Step 1: the Gauss-Newton step overshoots, so the trial is rejected. The
+    // reported objective_change must be exactly 0 (the iterate did not move),
+    // NOT the internal lambda value, and step_size stays positive.
+    auto sr = solver.step();
+    CHECK_FALSE(sr.improved);
+    CHECK(sr.objective_change == 0.0);
+    CHECK(sr.step_size > 0.0);
+
+    // The solver still converges to a root of x^2 = 1 after damping recovers.
+    auto result = solver.solve();
+    CHECK(std::abs(std::abs(result.x(0)) - 1.0) < 1e-5);
+}

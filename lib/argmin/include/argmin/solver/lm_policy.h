@@ -166,17 +166,25 @@ struct lm_policy
         s.problem->residuals(x_trial, r_trial);
         double f_trial = 0.5 * r_trial.squaredNorm();
 
-        // Gain ratio (Nielsen 1999): predicted reduction using original J
-        // predicted = -h^T g - 0.5 * ||J*h||^2
+        // Gain ratio (Nielsen 1999): direct model reduction using the original
+        // Jacobian, predicted = -h^T g - 0.5 * ||J*h||^2. For the exact LM step
+        // this equals 0.5*||J*h||^2 + lambda*h^T D h >= 0, so a non-positive
+        // predicted reduction signals a degenerate or garbage solve rather than
+        // a real model decrease -- in that case the trial must NOT be accepted.
         double actual = s.objective_value - f_trial;
         double predicted = -(h.dot(g) + 0.5 * (s.J * h).squaredNorm());
 
-        // Guard against near-zero predicted reduction
-        double rho = (std::abs(predicted) < 1e-30) ? 1.0 : actual / predicted;
+        // Guarded gain ratio: require a strictly positive predicted reduction
+        // and a finite trial objective before dividing. The former replaces the
+        // former |predicted|<1e-30 -> rho=1.0 silent accept (which accepted a
+        // degenerate step); the latter gates a NaN/Inf residual evaluation so a
+        // divergent trial can never masquerade as an improvement.
+        const bool valid = std::isfinite(f_trial) && predicted > 0.0;
+        double rho = valid ? actual / predicted : 0.0;
 
         // Accept/reject with Nielsen (1999) lambda update (D-06)
         const double old_value = s.objective_value;
-        bool accepted = rho > 0.0;
+        bool accepted = valid && rho > 0.0;
 
         if(accepted)
         {
@@ -210,17 +218,23 @@ struct lm_policy
 
         ++s.iteration;
 
-        // Divergence detection: objective grows 100x from initial
+        // Divergence detection: a non-finite trial that the guard rejected, or
+        // an objective that has grown 100x from its initial value, is a genuine
+        // failure rather than a routine damping increase.
         std::optional<solver_status> policy_status{};
-        if(s.initial_objective > 0.0 && s.objective_value > 100.0 * s.initial_objective)
+        if(!std::isfinite(f_trial))
+            policy_status = solver_status::diverged;
+        else if(s.initial_objective > 0.0 && s.objective_value > 100.0 * s.initial_objective)
             policy_status = solver_status::diverged;
 
-        // Report h.norm() as step_size even on rejection to prevent
-        // basic_solver stall detection from firing prematurely. The solver
-        // is still making progress by adjusting lambda.
-        // On rejection, report lambda as objective_change proxy to prevent
-        // ftol_reached from firing.
-        double effective_change = accepted ? (s.objective_value - old_value) : s.lambda;
+        // Report h.norm() as step_size even on rejection so basic_solver's stall
+        // detection does not fire while the solver is still adjusting lambda.
+        // objective_change carries the ACTUAL objective change (zero on a
+        // rejected step, where the iterate did not move); the former hack that
+        // reported lambda here leaked an internal damping value into the
+        // user-visible step_result. ftol_reached is now correctly gated on the
+        // KKT residual (convergence.h), so no proxy is needed to suppress it.
+        double effective_change = s.objective_value - old_value;
 
         // KKT residual for unconstrained least-squares: infinity-norm of the
         // gradient g = J^T r of 0.5*||r||^2. First-order optimality holds iff
