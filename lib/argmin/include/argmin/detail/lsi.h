@@ -18,6 +18,7 @@
 #include <Eigen/Core>
 #include <Eigen/QR>
 
+#include <algorithm>
 #include <limits>
 #include <cmath>
 
@@ -210,8 +211,15 @@ int lsi(
         // transformed constraints (this is how the "origin is feasible"
         // degenerate LDP case is resolved by the LSI caller).
         bool feasible = true;
+        // Origin-feasible band on the transformed constraints, relative to
+        // the constraint scale ||h_t||_inf (floored at 1). An absolute band
+        // misclassifies a large-scaled transformed RHS: h_t inherits the
+        // scale of h and the QR back-transform, so a fixed eps*n*10 rejects
+        // origin-feasibility for problems whose natural units exceed 1.
         const Scalar feas_eps = std::numeric_limits<Scalar>::epsilon()
-                                * Scalar(n) * Scalar(10);
+                                * Scalar(n) * Scalar(10)
+                                * std::max(Scalar(1),
+                                           ws.h_t.cwiseAbs().maxCoeff());
         for(int i = 0; i < m_ineq; ++i)
         {
             if(ws.h_t[i] > feas_eps)

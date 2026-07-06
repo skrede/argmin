@@ -16,6 +16,7 @@
 #include <Eigen/QR>
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 
 namespace argmin::detail
@@ -139,7 +140,7 @@ Eigen::Vector<Scalar, Eigen::Dynamic> estimate_multipliers_active_set(
     const Eigen::Matrix<Scalar, Meq, N>& J_eq,
     const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
     const Eigen::Vector<Scalar, Mineq>& c_ineq,
-    Scalar active_tol = Scalar(1e-8))
+    Scalar active_kappa = std::sqrt(std::numeric_limits<Scalar>::epsilon()))
 {
     const Eigen::Index n = grad_f.size();
     const Eigen::Index n_eq = J_eq.rows();
@@ -148,10 +149,24 @@ Eigen::Vector<Scalar, Eigen::Dynamic> estimate_multipliers_active_set(
     Eigen::Vector<Scalar, Eigen::Dynamic> lambda_full =
         Eigen::Vector<Scalar, Eigen::Dynamic>::Zero(n_eq + n_ineq);
 
-    // Count active inequalities (|c_ineq[i]| < active_tol).
+    // Per-row-relative active-set band. A constraint is active when its
+    // residual is small in its OWN units: |c_ineq[i]| < kappa * max(1,
+    // ||J_ineq.row(i)||). Rescaling a constraint by s multiplies both
+    // c_ineq[i] and ||J_ineq.row(i)|| by s, so this band is scale-invariant
+    // -- unlike a fixed absolute tolerance, which drops a genuinely active
+    // constraint whose gradient (hence residual) carries non-unit scale.
+    // kappa defaults to sqrt(eps), the classical working-set identification
+    // band. max(1, .) preserves the absolute floor for unit-scaled rows.
+    const auto active_band = [&](Eigen::Index i) -> Scalar
+    {
+        return active_kappa
+               * std::max(Scalar(1), J_ineq.row(i).norm());
+    };
+
+    // Count active inequalities.
     Eigen::Index n_active = 0;
     for(Eigen::Index i = 0; i < n_ineq; ++i)
-        if(std::abs(c_ineq[i]) < active_tol)
+        if(std::abs(c_ineq[i]) < active_band(i))
             ++n_active;
 
     const Eigen::Index m_active = n_eq + n_active;
@@ -164,7 +179,7 @@ Eigen::Vector<Scalar, Eigen::Dynamic> estimate_multipliers_active_set(
         A_active.topRows(n_eq) = J_eq;
     Eigen::Index row = n_eq;
     for(Eigen::Index i = 0; i < n_ineq; ++i)
-        if(std::abs(c_ineq[i]) < active_tol)
+        if(std::abs(c_ineq[i]) < active_band(i))
         {
             A_active.row(row) = J_ineq.row(i);
             ++row;
@@ -183,7 +198,7 @@ Eigen::Vector<Scalar, Eigen::Dynamic> estimate_multipliers_active_set(
     // Active inequality multipliers: clipped to >= 0 for dual feasibility.
     Eigen::Index ak = 0;
     for(Eigen::Index i = 0; i < n_ineq; ++i)
-        if(std::abs(c_ineq[i]) < active_tol)
+        if(std::abs(c_ineq[i]) < active_band(i))
         {
             lambda_full[n_eq + i] = std::max(Scalar(0), lambda_active[n_eq + ak]);
             ++ak;
@@ -213,10 +228,10 @@ ARGMIN_FORCE_INLINE void compute_kkt_multipliers_active_set(
     const Eigen::Vector<Scalar, Mineq>& c_ineq,
     Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> lam_eq_out,
     Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> mu_ineq_out,
-    Scalar active_tol = Scalar(1e-8))
+    Scalar active_kappa = std::sqrt(std::numeric_limits<Scalar>::epsilon()))
 {
     const Eigen::Vector<Scalar, Eigen::Dynamic> lambda_full =
-        estimate_multipliers_active_set(g, J_eq, J_ineq, c_ineq, active_tol);
+        estimate_multipliers_active_set(g, J_eq, J_ineq, c_ineq, active_kappa);
 
     const Eigen::Index n_eq = J_eq.rows();
     const Eigen::Index n_ineq = J_ineq.rows();

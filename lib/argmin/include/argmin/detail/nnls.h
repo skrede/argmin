@@ -41,6 +41,7 @@
 
 #include <Eigen/Core>
 
+#include <algorithm>
 #include <limits>
 #include <cmath>
 
@@ -87,6 +88,18 @@ nnls_result<Scalar> nnls(
 
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
     const int max_iter = 3 * n;
+
+    // Matrix-scaled tolerance (Lawson-Hanson / scipy.optimize.nnls
+    // convention). The dual w_j = (A^T r)_j and the primal components x_j
+    // both inherit the column scale of A, so an absolute machine-eps test
+    // converges/drops at the wrong point on a matrix whose entries are not
+    // O(1). Scale the KKT, ratio-denominator, and column-drop thresholds by
+    // ||A||_inf (largest absolute row sum), floored at 1 so unit-scaled
+    // problems retain their historical absolute band. max(m,n)*eps is the
+    // standard dimension-dependent base factor.
+    const Scalar A_inf = A.cwiseAbs().rowwise().sum().maxCoeff();
+    const Scalar nnls_scale = std::max(A_inf, Scalar(1));
+    const Scalar kkt_tol = Scalar(std::max(m, n)) * eps * nnls_scale;
 
     // Maintained-factorization workspaces. A_buf holds Q^T A (rows below
     // active pivots are zero on P columns; nonzero on Z columns). b_buf
@@ -157,7 +170,7 @@ nnls_result<Scalar> nnls(
         }
 
         // KKT satisfied: all duals on Z are non-positive (within tol).
-        if(t < 0 || wmax <= eps * Scalar(n))
+        if(t < 0 || wmax <= kkt_tol)
         {
             result.mode = 1;
             break;
@@ -258,7 +271,7 @@ nnls_result<Scalar> nnls(
                 if(z[j] <= Scalar(0))
                 {
                     const Scalar denom = x[j] - z[j];
-                    if(denom > eps)
+                    if(denom > eps * nnls_scale)
                     {
                         const Scalar ratio = x[j] / denom;
                         if(ratio < alpha)
@@ -291,7 +304,7 @@ nnls_result<Scalar> nnls(
             for(int drop_pos = nsetp - 1; drop_pos >= 0; --drop_pos)
             {
                 const int j_drop = indx[drop_pos];
-                if(x[j_drop] > eps * Scalar(10))
+                if(x[j_drop] > eps * Scalar(10) * nnls_scale)
                     continue;
 
                 // Drop column at drop_pos. Shift indx[drop_pos+1..n-1]

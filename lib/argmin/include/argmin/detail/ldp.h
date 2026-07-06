@@ -126,9 +126,33 @@ int ldp(
 
     // fac = -r[n] = 1 - h^T u
     const Scalar fac = -r[n];
-    const Scalar rnorm_sq = r.squaredNorm();
 
-    if(rnorm_sq <= eps || fac <= eps)
+    // Incompatibility (empty half-space intersection) is certified by Farkas:
+    // there exists u >= 0 with G^T u = 0 and h^T u = 1, i.e. the primal-
+    // recovery residual ||G^T u|| = ||r.head(n)|| vanishes while fac = 1 -
+    // h^T u collapses to 0. The former absolute tests (rnorm_sq <= eps ||
+    // fac <= eps) mixed a squared residual against an unsquared epsilon and,
+    // worse, fired on merely large-norm FEASIBLE solutions: when ||x|| is
+    // large the recovery denominator fac shrinks toward eps even though the
+    // constraints are perfectly compatible. Test the primal residual against
+    // its natural scale ||G||_inf * ||u|| instead (which stays O(||u||) for a
+    // feasible boundary solution and only vanishes for the Farkas
+    // certificate), and reject on fac <= 0 -- the exact condition under which
+    // the recovery x = (G^T u)/fac ceases to be finite and positive.
+    const Scalar u_norm = nnls_x_vec.head(m).norm();
+    // Only the leading m x n block of G is logical; callers (soc_seed_
+    // projection) pass a worst-case-sized scratch whose trailing rows hold
+    // stale data. Scope the scale proxy to the block ldp actually reads.
+    const Scalar G_scale = G.topLeftCorner(m, n).cwiseAbs().maxCoeff();
+    Scalar primal_resid_sq = Scalar(0);
+    for(int i = 0; i < n; ++i)
+        primal_resid_sq += r[i] * r[i];
+    const Scalar farkas_ref = G_scale * u_norm;
+    const bool farkas_incompatible =
+        (u_norm > Scalar(0))
+        && (primal_resid_sq <= eps * farkas_ref * farkas_ref);
+
+    if(farkas_incompatible || fac <= Scalar(0))
         return 4;  // incompatible inequality constraints
 
     for(int i = 0; i < n; ++i)

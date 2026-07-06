@@ -20,6 +20,7 @@
 #include <Eigen/Core>
 #include <Eigen/QR>
 
+#include <algorithm>
 #include <limits>
 #include <cmath>
 
@@ -176,11 +177,23 @@ int lsei(
     ws.R_c_upper = ws.qr_c.matrixQR().topLeftCorner(m_eq, m_eq)
                           .template triangularView<Eigen::Upper>();
 
-    // Check rank via diagonal of R_c.
-    for(int i = 0; i < m_eq; ++i)
+    // Check rank via diagonal of R_c, relative to the largest diagonal
+    // magnitude. Testing a raw R-diagonal against an absolute eps*n*10 band
+    // is not scale-invariant: column scaling of C multiplies every diagonal
+    // uniformly, so a well-conditioned but non-unit-scaled equality block is
+    // wrongly flagged rank-deficient. maxAbsDiag is the cheap in-place scale
+    // proxy (kept over a ColPivHouseholderQR switch).
     {
-        if(std::abs(ws.R_c_upper(i, i)) <= eps * Scalar(n) * Scalar(10))
-            return 6;
+        Scalar max_abs_diag = Scalar(0);
+        for(int i = 0; i < m_eq; ++i)
+            max_abs_diag = std::max(max_abs_diag, std::abs(ws.R_c_upper(i, i)));
+        const Scalar rank_tol = eps * Scalar(n) * Scalar(10)
+                                * std::max(Scalar(1), max_abs_diag);
+        for(int i = 0; i < m_eq; ++i)
+        {
+            if(std::abs(ws.R_c_upper(i, i)) <= rank_tol)
+                return 6;
+        }
     }
 
     // Solve R_c^T * y1 = d for y1 (lower triangular solve).
@@ -236,10 +249,16 @@ int lsei(
         if(m_ineq <= 0)
         {
             // Pure equality-constrained LS: solve R_e y2 = Qt_f.head(n2).
-            // Check R_e rank.
+            // Check R_e rank relative to its largest diagonal magnitude
+            // (scale-invariant; see the R_c rank test above).
+            Scalar max_abs_diag_e = Scalar(0);
+            for(int i = 0; i < n2; ++i)
+                max_abs_diag_e = std::max(max_abs_diag_e, std::abs(ws.R_e(i, i)));
+            const Scalar rank_tol_e = eps * Scalar(n) * Scalar(10)
+                                      * std::max(Scalar(1), max_abs_diag_e);
             for(int i = 0; i < n2; ++i)
             {
-                if(std::abs(ws.R_e(i, i)) <= eps * Scalar(n) * Scalar(10))
+                if(std::abs(ws.R_e(i, i)) <= rank_tol_e)
                     return 6;
             }
             ws.y2_dyn = ws.R_e.template triangularView<Eigen::Upper>()
@@ -289,16 +308,20 @@ int lsei(
     // the LSI path returns, so the outer solver enters Kraft 1988 Section 3.4
     // augmented-QP recovery instead of stepping to an infeasible point.
     //
-    // The tolerance reuses the same eps * n * 10 relative feasibility band
-    // that lsi() applies to its own transformed constraints (see lsi.h), so
-    // the check is scale-consistent with the existing substrate and adds no
-    // new absolute epsilon.
+    // The feasibility band is relative to the constraint scale ||h||_inf
+    // (floored at 1): a fully determined x carries the equality-solve scale,
+    // so a determined point at ||h|| ~ 1e10 incurs an absolute residual far
+    // above any fixed eps*n band while its RELATIVE violation is negligible.
+    // sqrt(eps) is the standard feasibility tolerance and keeps unit-scaled
+    // violations (O(1)) routed to mode 4 exactly as before.
     //
     // Reference: Kraft 1988 DFVLR-FB 88-28 Section 3.4 (infeasible-QP
     //            recovery); Lawson & Hanson 1974 Chapter 23 (LSI mode codes).
     if(n2 == 0 && m_ineq > 0)
     {
-        const Scalar feas_tol = eps * Scalar(n) * Scalar(10);
+        using std::sqrt;
+        const Scalar feas_tol = sqrt(eps)
+                                * std::max(Scalar(1), h.cwiseAbs().maxCoeff());
         if((G * x - h).minCoeff() < -feas_tol)
             return 4;
     }
