@@ -344,6 +344,36 @@ TEST_CASE("nlopt_faithful: xtol_coupled falls back to bound-relative when thresh
 }
 
 // ---------------------------------------------------------------------------
+// Runtime storage-cap guard (memory safety): a requested population size
+// that exceeds the bounded-storage cap must not resize past the
+// compile-time max-columns bound (undefined behavior). init() poisons the
+// state and the first step() returns solver_status::invalid_problem
+// exception-free, rather than silently UB-ing.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("nlopt_faithful: oversized population is rejected with invalid_problem, not UB",
+          "[isres][alternatives][nlopt_faithful][status]")
+{
+    simple_constrained problem;
+    Eigen::VectorXd x0{{0.5, 0.5}};
+    solver_options opts;
+    opts.max_iterations = 1;
+
+    alternative::isres::nlopt_faithful_policy<> policy;
+    policy.options.seed = 42u;
+    // MaxLambda is 1792 for the default state; request more so the
+    // bounded-storage cap is exceeded.
+    policy.options.population_size = 4000u;
+
+    auto s = policy.init(problem, x0, opts);
+    REQUIRE(s.storage_exceeded);
+
+    auto sr = policy.step(s);
+    REQUIRE(sr.policy_status.has_value());
+    CHECK(*sr.policy_status == solver_status::invalid_problem);
+}
+
+// ---------------------------------------------------------------------------
 // Algorithmic-divergence test: runarsson_yao_paper's rank-permuted
 // snapshot pattern produces a different first-step trajectory than
 // nlopt_faithful's physical-slot snapshot when the population's rank-0

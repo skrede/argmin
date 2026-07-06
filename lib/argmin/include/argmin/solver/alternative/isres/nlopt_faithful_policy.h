@@ -176,6 +176,16 @@ struct nlopt_faithful_policy
         double best_ever_value{std::numeric_limits<double>::infinity()};
         double best_ever_violation{std::numeric_limits<double>::infinity()};
 
+        // Poison flag: set by init() when the requested population sizing
+        // exceeds the bounded-storage caps (MaxLambda / MaxMu). init()
+        // then skips the unsafe resize() calls (a resize past the
+        // compile-time max-cols bound is undefined behavior) and step()
+        // returns solver_status::invalid_problem on the first call. The
+        // library is exception-free, so this is surfaced as a terminal
+        // status rather than a throw (cf. the CMA-ES throw path, tracked
+        // separately for removal).
+        bool storage_exceeded{false};
+
         // Constraint evaluation buffers. n_eq / n_ineq are problem
         // properties only known at init() time, so these stay dynamic.
         Eigen::Matrix<double, Eigen::Dynamic, 1, 0,
@@ -285,6 +295,24 @@ struct nlopt_faithful_policy
         const std::uint64_t seed = options.seed.value_or(
             static_cast<std::uint64_t>(std::random_device{}()));
         s.rng.emplace(seed);
+
+        // Runtime storage-cap guard (memory safety). The population /
+        // sigma / offspring buffers are Eigen matrices with a compile-time
+        // maximum-columns bound of MaxLambda, and the x0 snapshot buffer is
+        // bounded at MaxMu columns; resizing past those bounds is undefined
+        // behavior. If the requested sizing exceeds the caps, poison the
+        // state, skip every unsafe resize, and let the first step() return
+        // solver_status::invalid_problem (exception-free precondition
+        // failure). Set x/objective to safe defaults so basic_solver can
+        // read the state before that first step().
+        using ST = state_type<Problem>;
+        if(s.lambda > ST::MaxLambda || s.mu > ST::MaxMu)
+        {
+            s.storage_exceeded = true;
+            s.x = x0;
+            s.objective_value = std::numeric_limits<double>::infinity();
+            return s;
+        }
 
         // Pre-allocate per-step buffers. The bounded-storage Eigen
         // matrices keep their max-storage allocation; resize() only
@@ -460,6 +488,23 @@ struct nlopt_faithful_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
+        // Storage-cap poison (memory safety): init() detected that the
+        // requested population sizing exceeds the bounded-storage caps and
+        // skipped the unsafe resizes. Surface a terminal status instead of
+        // touching the un-sized buffers.
+        if(s.storage_exceeded)
+        {
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = 0.0,
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .x_norm = s.x.norm(),
+                .policy_status = solver_status::invalid_problem,
+            };
+        }
+
         const int n = static_cast<int>(s.x.size());
         const int mu = s.mu;
         const int lambda = s.lambda;
