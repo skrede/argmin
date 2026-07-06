@@ -383,3 +383,66 @@ TEST_CASE("lm_policy: rejected step reports zero objective_change, not lambda",
     auto result = solver.solve();
     CHECK(std::abs(std::abs(result.x(0)) - 1.0) < 1e-5);
 }
+
+// detail::gain_ratio identity pin (Task-3 numerics-free extraction).
+//
+// The guarded gain ratio previously written inline at lm_policy,
+// projected_gn_policy and projected_gradient_gn_policy was hoisted into
+// detail::gain_ratio(actual, predicted). This pin records the exact
+// pre-extraction numeric fingerprint (final objective, minimizer, and a
+// trajectory hash mixing every step's objective_change and step_size) for the
+// LM policy so any drift introduced by the extraction is caught: a refactor
+// that moves a number is a bug, not a re-baseline.
+#include "argmin/detail/gain_ratio.h"
+
+TEST_CASE("detail::gain_ratio guarded semantics", "[lm][gain_ratio]")
+{
+    // Positive predicted, positive actual -> exact ratio.
+    CHECK(detail::gain_ratio(2.0, 4.0) == Approx(0.5));
+    // Negative actual (objective grew) -> negative ratio (reject signal < 0).
+    CHECK(detail::gain_ratio(-1.0, 4.0) == Approx(-0.25));
+    // Non-positive predicted -> 0 (no meaningful ratio).
+    CHECK(detail::gain_ratio(2.0, 0.0) == 0.0);
+    CHECK(detail::gain_ratio(2.0, -3.0) == 0.0);
+    // Non-finite actual (a NaN/Inf trial objective) -> 0.
+    CHECK(detail::gain_ratio(std::nan(""), 4.0) == 0.0);
+    CHECK(detail::gain_ratio(std::numeric_limits<double>::infinity(), 4.0) == 0.0);
+}
+
+namespace
+{
+
+double lm_trajectory_fingerprint(double& out_f, double& out_x0, double& out_x1)
+{
+    linear_ls_2d problem;
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 50;
+    opts.set_gradient_threshold(1e-12);
+    basic_solver solver{lm_policy<2>{}, problem, x0, opts};
+    double fp = 0.0;
+    for(int i = 0; i < 50; ++i)
+    {
+        auto r = solver.step();
+        fp += r.objective_change * 1e6 + r.step_size;
+        if(r.policy_status || r.kkt_residual.value_or(r.gradient_norm) < 1e-12)
+            break;
+    }
+    out_f = solver.state().objective_value;
+    out_x0 = solver.state().x(0);
+    out_x1 = solver.state().x(1);
+    return fp;
+}
+
+}
+
+TEST_CASE("lm_policy: gain_ratio extraction is numerically identical", "[lm][gain_ratio]")
+{
+    double f, x0, x1;
+    double fp = lm_trajectory_fingerprint(f, x0, x1);
+    // Values captured from the post-Task-2, pre-extraction build.
+    CHECK(f == 0.0);
+    CHECK(x0 == 1.0);
+    CHECK(x1 == 1.6666666666666667);
+    CHECK(fp == -19999998.054262113);
+}

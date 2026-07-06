@@ -26,6 +26,7 @@
 //            K&W Section 6.3 (Levenberg-Marquardt).
 
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/gain_ratio.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/projected_gn_step.h"
 #include "argmin/derivative/finite_difference.h"
@@ -281,9 +282,7 @@ private:
             Eigen::VectorXd d_acc = (x_trial - s.x).eval();
             double actual = old_value - f_trial;
             double predicted = -(g.dot(d_acc) + 0.5 * (s.J * d_acc).squaredNorm());
-            double rho = (std::isfinite(f_trial) && predicted > 0.0)
-                             ? actual / predicted
-                             : 0.0;
+            double rho = detail::gain_ratio(actual, predicted);
 
             s.x = x_trial;
             s.r = r_trial;
@@ -362,11 +361,10 @@ private:
         // replacing the |predicted|<1e-30 -> rho=1 silent accept.
         double actual = s.objective_value - f_trial;
         double predicted = -(g.dot(d) + 0.5 * (s.J * d).squaredNorm());
-        const bool valid = std::isfinite(f_trial) && predicted > 0.0;
-        double rho = valid ? actual / predicted : 0.0;
+        double rho = detail::gain_ratio(actual, predicted);
 
         const double old_value = s.objective_value;
-        bool accepted = valid && rho > 0.0;
+        bool accepted = rho > 0.0;
 
         double expand_thresh = options.trust_region_expand_threshold.value_or(0.75);
         double shrink_thresh = options.trust_region_shrink_threshold.value_or(0.25);

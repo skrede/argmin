@@ -18,6 +18,7 @@
 //            K&W Section 6.3-6.4 Algorithm 6.3 (Levenberg-Marquardt).
 //            N&W Section 10.2-10.3 (nonlinear least-squares).
 
+#include "argmin/detail/gain_ratio.h"
 #include "argmin/derivative/finite_difference.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
@@ -174,17 +175,17 @@ struct lm_policy
         double actual = s.objective_value - f_trial;
         double predicted = -(h.dot(g) + 0.5 * (s.J * h).squaredNorm());
 
-        // Guarded gain ratio: require a strictly positive predicted reduction
-        // and a finite trial objective before dividing. The former replaces the
-        // former |predicted|<1e-30 -> rho=1.0 silent accept (which accepted a
-        // degenerate step); the latter gates a NaN/Inf residual evaluation so a
-        // divergent trial can never masquerade as an improvement.
-        const bool valid = std::isfinite(f_trial) && predicted > 0.0;
-        double rho = valid ? actual / predicted : 0.0;
+        // Guarded gain ratio (detail::gain_ratio): requires a strictly positive
+        // predicted reduction and a finite actual reduction before dividing,
+        // returning 0 otherwise. This replaces the |predicted|<1e-30 -> rho=1.0
+        // silent accept and gates a NaN/Inf residual evaluation (which makes
+        // `actual` non-finite) so a divergent trial cannot masquerade as an
+        // improvement.
+        double rho = detail::gain_ratio(actual, predicted);
 
         // Accept/reject with Nielsen (1999) lambda update (D-06)
         const double old_value = s.objective_value;
-        bool accepted = valid && rho > 0.0;
+        bool accepted = rho > 0.0;
 
         if(accepted)
         {

@@ -643,3 +643,79 @@ TEST_CASE("projected_gradient_gn_policy: exact gain ratio at an active bound",
     SECTION("backtracking mode") { run(false); }
     SECTION("dogleg mode") { run(true); }
 }
+
+// detail::gain_ratio identity pin (Task-3 numerics-free extraction) for the
+// two projected Gauss-Newton siblings. The fingerprints (final objective,
+// minimizer, and a trajectory hash over every step's objective_change and
+// step_size) were captured from the post-Task-2, pre-extraction build; the
+// extraction must not move any of them.
+TEST_CASE("projected_gn_policy: gain_ratio extraction is numerically identical",
+          "[projected_gn][gain_ratio]")
+{
+    bounded_linear_ls problem;
+    Eigen::VectorXd x0{{-1.0, -1.0}};
+    solver_options opts;
+    opts.max_iterations = 100;
+    opts.set_gradient_threshold(1e-12);
+    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+
+    double fp = 0.0;
+    for(int i = 0; i < 100; ++i)
+    {
+        auto r = solver.step();
+        fp += r.objective_change * 1e6 + r.step_size;
+        if(r.policy_status || r.kkt_residual.value_or(r.gradient_norm) < 1e-12)
+            break;
+    }
+    CHECK(solver.state().objective_value == 1.125);
+    CHECK(solver.state().x(0) == 0.5);
+    CHECK(solver.state().x(1) == 0.24999999995377051);
+    CHECK(fp == -4156246.7519980022);
+}
+
+TEST_CASE("projected_gradient_gn_policy: gain_ratio extraction is numerically identical",
+          "[projected_gn][gain_ratio]")
+{
+    auto fingerprint = [](bool dogleg, double& f, double& x0, double& x1)
+    {
+        bounded_linear_ls problem;
+        Eigen::VectorXd start{{-1.0, -1.0}};
+        solver_options opts;
+        opts.max_iterations = 100;
+        opts.set_gradient_threshold(1e-12);
+        projected_gradient_gn_policy::options_type po{};
+        po.use_dogleg = dogleg;
+        basic_solver solver{projected_gradient_gn_policy{}, problem, start, opts, po};
+        double fp = 0.0;
+        for(int i = 0; i < 100; ++i)
+        {
+            auto r = solver.step();
+            fp += r.objective_change * 1e6 + r.step_size;
+            if(r.policy_status || r.kkt_residual.value_or(r.gradient_norm) < 1e-12)
+                break;
+        }
+        f = solver.state().objective_value;
+        x0 = solver.state().x(0);
+        x1 = solver.state().x(1);
+        return fp;
+    };
+
+    SECTION("backtracking mode")
+    {
+        double f, x0, x1;
+        double fp = fingerprint(false, f, x0, x1);
+        CHECK(f == 1.125);
+        CHECK(x0 == 0.5);
+        CHECK(x1 == 0.25);
+        CHECK(fp == -4156240.7540793722);
+    }
+    SECTION("dogleg mode")
+    {
+        double f, x0, x1;
+        double fp = fingerprint(true, f, x0, x1);
+        CHECK(f == 1.125);
+        CHECK(x0 == 0.5);
+        CHECK(x1 == 0.24999999999999786);
+        CHECK(fp == -4156246.903846154);
+    }
+}
