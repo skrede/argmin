@@ -235,13 +235,14 @@ std::map<std::string, std::vector<double>> load_oracle(const std::string& path)
 
 }
 
-// RED against the current substrate (see Pin 1 header derivation): the
-// implementation uses a flat 1e-10 additive epsilon with no 1.001/0.001
-// gradient mixing and no raai/range term. [!shouldfail] records this as
-// the expected disposition; once the Svanberg p/q/r formula is
-// implemented, this case starts passing and the tag must be removed.
+// The Svanberg p/q/r formula -- the 1.001/0.001 gradient mixing plus the
+// distance-scaled raai/range regularizer (in place of the former flat
+// additive epsilon, which collapsed the reciprocal minimizer onto the
+// window midpoint) -- reproduces the hand-derived oracle coefficients.
+// raai is set to the oracle's 1e-5 so this pins the formula independent of
+// the shipped (sweep-derived) default.
 TEST_CASE("mma: p/q/r coefficients match the Svanberg worked values",
-          "[mma][oracle-pin][!shouldfail]")
+          "[mma][oracle-pin]")
 {
     const auto oracle = load_oracle("oracles/mma_svanberg_coefficients.csv");
     REQUIRE(oracle.contains("p_obj"));
@@ -250,7 +251,9 @@ TEST_CASE("mma: p/q/r coefficients match the Svanberg worked values",
     Eigen::VectorXd x0{{1.0, 2.0}};
     solver_options opts;
     mma_policy<> policy;
-    auto s = policy.init(problem, x0, opts);
+    mma_policy<>::options_type popts;
+    popts.raai = 1e-5;
+    auto s = policy.init(problem, x0, opts, popts);
     (void)policy.step(s);
 
     // The first step computes the approximation at x0 with the init
@@ -405,7 +408,7 @@ TEST_CASE("gcmma: rho growth trial reconstruction matches the closed form",
     // Identity inter-outer decay so the state field holds exactly the
     // once-grown rho.
     popts.rho_decay = 1.0;
-    popts.approximation_epsilon = 0.0;
+    popts.raai = 0.0;
 
     auto s = policy.init(problem, x0, opts, popts);
     const double rho0 = 3.0;
@@ -474,7 +477,7 @@ TEST_CASE("gcmma: rho growth covers the minimal conservative increment",
     // Identity inter-outer decay so the state field holds exactly the
     // once-grown rho.
     popts.rho_decay = 1.0;
-    popts.approximation_epsilon = 0.0;
+    popts.raai = 0.0;
 
     auto s = policy.init(problem, x0, opts, popts);
     const double rho0 = 3.0;

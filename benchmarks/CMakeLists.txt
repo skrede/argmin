@@ -131,6 +131,28 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# MMA subproblem-regularizer sweep harness. Drives mma_policy across the
+# raai (distance-scaled p/q regularizer) grid {0, 1e-6, 1e-5, 1e-4} and
+# the asymptote_min_fraction (ASYMIN) grid {1e-4, 1e-3, 1e-2} on the
+# MMA-compatible HS024/HS035/HS043/HS076 cells plus a small-gradient-
+# terminal quartic. Records the terminal KKT-residual floor, terminal
+# wandering, and oscillation-onset counts. Emits a JSON record. Non-ctest;
+# one-shot.
+add_executable(mma_regularizer_sweep mma_regularizer_sweep.cpp)
+target_link_libraries(mma_regularizer_sweep PRIVATE argmin::argmin)
+
+target_compile_options(mma_regularizer_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(mma_regularizer_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Adaptive-penalty growth-factor sweep harness for tr_sqp_policy. Drives
 # the policy across penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} on the
 # existing HS-suite cells (HS026/HS028/HS043/HS071/HS076) under both

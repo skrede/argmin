@@ -96,10 +96,15 @@ struct mma_policy
         // direct value.
         double move_bound_fraction{0.5};
 
-        // Numerical stabilization epsilon for p_ij, q_ij. Avoids zero
-        // P_j(y) or Q_j(y) when both objective and constraint gradients
-        // vanish in component j. Not in the original paper.
-        std::optional<double> approximation_epsilon{};    // default: 1e-10
+        // Distance-scaled regularizer constant for p_ij, q_ij (Svanberg
+        // 2007 notes eqs. 2.3-2.4, "raai"). Each coefficient carries a
+        // raai/range_j term that keeps P_j(y), Q_j(y) strictly positive
+        // (they never vanish when a gradient component is zero) while
+        // scaling with the problem range, unlike a flat additive epsilon
+        // which collapses the reciprocal approximation onto its window
+        // midpoint. Literature default 1e-5; provisional pending the
+        // empirical sweep. Direct value.
+        double raai{1e-5};
 
         // Stall detection (forwarded by basic_solver into a
         // stall_tolerance_criterion).
@@ -279,7 +284,7 @@ struct mma_policy
         const double s_min_f = s.opts.asymptote_min_fraction.value_or(1e-4);
         const double s_max_f = s.opts.asymptote_max_fraction.value_or(10.0);
         const double move_lim = s.opts.move_limit_fraction.value_or(0.1);
-        const double eps_pq = s.opts.approximation_epsilon.value_or(1e-10);
+        const double raai = s.opts.raai;
         const double s_init_un = s.opts.asymptote_init_unbounded.value_or(1.0);
 
         constexpr double inf = std::numeric_limits<double>::infinity();
@@ -356,10 +361,26 @@ struct mma_policy
         {
             const double dxU = s.U[j] - s.x[j];
             const double dxL = s.x[j] - s.L[j];
+
+            // Distance-scaled regularizer raai/range_j (Svanberg 2007
+            // notes eqs. 2.3-2.4). range_j is the box width for a bounded
+            // variable, a scale proxy max(|x_kj|, 1) for an unbounded one.
+            double range;
+            if(s.lower[j] > -inf && s.upper[j] < inf)
+                range = s.upper[j] - s.lower[j];
+            else
+                range = std::max(std::abs(s.x[j]), 1.0);
+            const double raa_reg = raai / range;
+
+            // Svanberg's gradient mixing: the uphill direction carries
+            // 1.001 * |g|, the downhill direction 0.001 * |g|, so a
+            // component with vanishing gradient still has a positive,
+            // range-scaled coefficient and the zero-gradient minimizer
+            // stays at x_k rather than the window midpoint.
             const double gp = std::max(s.g[j], 0.0);
             const double gm = std::max(-s.g[j], 0.0);
-            s.p_obj[j] = gp * dxU * dxU + eps_pq;
-            s.q_obj[j] = gm * dxL * dxL + eps_pq;
+            s.p_obj[j] = dxU * dxU * (1.001 * gp + 0.001 * gm + raa_reg);
+            s.q_obj[j] = dxL * dxL * (0.001 * gp + 1.001 * gm + raa_reg);
             s.r_obj -= s.p_obj[j] / dxU + s.q_obj[j] / dxL;
 
             for(int i = 0; i < m; ++i)
@@ -370,8 +391,10 @@ struct mma_policy
                 const double gij = -s.J_ineq(i, j);
                 const double gpij = std::max(gij, 0.0);
                 const double gmij = std::max(-gij, 0.0);
-                s.p_con(i, j) = gpij * dxU * dxU + eps_pq;
-                s.q_con(i, j) = gmij * dxL * dxL + eps_pq;
+                s.p_con(i, j) =
+                    dxU * dxU * (1.001 * gpij + 0.001 * gmij + raa_reg);
+                s.q_con(i, j) =
+                    dxL * dxL * (0.001 * gpij + 1.001 * gmij + raa_reg);
                 s.r_con[i] -= s.p_con(i, j) / dxU + s.q_con(i, j) / dxL;
             }
         }

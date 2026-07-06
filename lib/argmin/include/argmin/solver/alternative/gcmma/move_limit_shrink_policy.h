@@ -86,8 +86,8 @@ struct move_limit_shrink_policy
         std::optional<double> move_limit_fraction{};      // 0.1
         double move_bound_fraction{0.5};                  // Svanberg XXMOVE
 
-        // Approximation stabilization epsilon.
-        std::optional<double> approximation_epsilon{};    // 1e-10
+        // Distance-scaled p/q regularizer (Svanberg 2007 notes 2.3-2.4).
+        double raai{1e-5};
 
         // Conservativity loop: max inner iterations and shrink factor.
         // shrink_factor = 0.5 contracts [alpha, beta] toward x_k by half
@@ -216,7 +216,7 @@ struct move_limit_shrink_policy
         const double s_min_f = s.opts.asymptote_min_fraction.value_or(1e-4);
         const double s_max_f = s.opts.asymptote_max_fraction.value_or(10.0);
         const double move_lim = s.opts.move_limit_fraction.value_or(0.1);
-        const double eps_pq = s.opts.approximation_epsilon.value_or(1e-10);
+        const double raai = s.opts.raai;
         const std::uint16_t max_inner =
             s.opts.max_inner_iterations.value_or(15);
         const double shrink = s.opts.shrink_factor.value_or(0.5);
@@ -282,17 +282,33 @@ struct move_limit_shrink_policy
         {
             const double dxU = s.U[j] - s.x[j];
             const double dxL = s.x[j] - s.L[j];
+
+            // Distance-scaled regularizer raai/range_j (Svanberg 2007
+            // notes eqs. 2.3-2.4) with a scale proxy for unbounded
+            // variables, plus the 1.001/0.001 gradient mixing so a
+            // zero-gradient component keeps its minimizer at x_k.
+            double range;
+            if(s.lower[j] > -inf && s.upper[j] < inf)
+                range = s.upper[j] - s.lower[j];
+            else
+                range = std::max(std::abs(s.x[j]), 1.0);
+            const double raa_reg = raai / range;
+
             const double gp = std::max(s.g[j], 0.0);
             const double gm = std::max(-s.g[j], 0.0);
-            s.p_obj[j] = gp * dxU * dxU + eps_pq;
-            s.q_obj[j] = gm * dxL * dxL + eps_pq;
+            s.p_obj[j] = dxU * dxU * (1.001 * gp + 0.001 * gm + raa_reg);
+            s.q_obj[j] = dxL * dxL * (0.001 * gp + 1.001 * gm + raa_reg);
             s.r_obj -= s.p_obj[j] / dxU + s.q_obj[j] / dxL;
 
             for(int i = 0; i < m; ++i)
             {
                 const double gij = -s.J_ineq(i, j);
-                s.p_con(i, j) = std::max(gij, 0.0) * dxU * dxU + eps_pq;
-                s.q_con(i, j) = std::max(-gij, 0.0) * dxL * dxL + eps_pq;
+                const double gpij = std::max(gij, 0.0);
+                const double gmij = std::max(-gij, 0.0);
+                s.p_con(i, j) =
+                    dxU * dxU * (1.001 * gpij + 0.001 * gmij + raa_reg);
+                s.q_con(i, j) =
+                    dxL * dxL * (0.001 * gpij + 1.001 * gmij + raa_reg);
                 s.r_con[i] -= s.p_con(i, j) / dxU + s.q_con(i, j) / dxL;
             }
         }
