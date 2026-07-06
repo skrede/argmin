@@ -59,6 +59,8 @@ add_executable(argmin_unit_tests
     isres_best_track_test.cpp
     mma_coefficient_pin_test.cpp
     options_test.cpp
+    slsqp_line_search_witness_test.cpp
+    nw_sqp_soc_witness_test.cpp
 )
 
 target_link_libraries(argmin_unit_tests
