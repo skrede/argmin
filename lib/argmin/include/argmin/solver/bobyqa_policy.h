@@ -195,13 +195,30 @@ struct bobyqa_policy
         // Variable rescaling (Powell 2009, PRELIM concept).
         // Compute scale factors from bound ranges so that the trust region
         // treats all variables equally regardless of their physical scales.
-        // scale[i] = (upper[i] - lower[i]) when both bounds are finite, else 1.0.
-        // Normalize by maxCoeff so the largest range maps to 1.0.
+        //
+        // Mixed finite/infinite bounds must be scaled coherently. Using a raw
+        // 1.0 for unbounded coordinates and then normalizing by the largest
+        // range collapses every unbounded coordinate to 1 / max_finite_range:
+        // when some bounded variable has a range > 1 (the common case on the
+        // Hock-Schittkowski set), the unbounded coordinates are then stepped
+        // hundreds of times too small. Instead, use the largest finite range as
+        // the reference scale for unbounded coordinates, so they share scale 1
+        // with the widest bounded variable after normalization rather than
+        // being suppressed.
         s.scale.resize(n);
+        double ref_range = 0.0;
         for(int i = 0; i < n; ++i)
         {
             double range = s.upper[i] - s.lower[i];
-            s.scale[i] = std::isfinite(range) ? range : 1.0;
+            if(std::isfinite(range) && range > ref_range)
+                ref_range = range;
+        }
+        if(ref_range <= 0.0)
+            ref_range = 1.0;
+        for(int i = 0; i < n; ++i)
+        {
+            double range = s.upper[i] - s.lower[i];
+            s.scale[i] = std::isfinite(range) ? range : ref_range;
         }
         double max_scale = s.scale.maxCoeff();
         if(max_scale > 0.0)

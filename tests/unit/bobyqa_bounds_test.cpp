@@ -17,15 +17,43 @@
 
 #include <Eigen/Core>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
 #include <limits>
 
+using Catch::Approx;
 using namespace argmin;
 
 namespace
 {
+
+// Quadratic with an interior minimum at (10, -3); coordinate 1 is unbounded,
+// coordinate 0 has a wide finite range -- exercises mixed-bound scaling.
+struct mixed_bound_problem
+{
+    static constexpr int problem_dimension = dynamic_dimension;
+    int dimension() const { return 2; }
+    double value(const Eigen::VectorXd& x) const
+    {
+        double a = x[0] - 10.0;
+        double b = x[1] + 3.0;
+        return a * a + b * b;
+    }
+    Eigen::VectorXd lower_bounds() const
+    {
+        Eigen::VectorXd lb(2);
+        lb << -100.0, -std::numeric_limits<double>::infinity();
+        return lb;
+    }
+    Eigen::VectorXd upper_bounds() const
+    {
+        Eigen::VectorXd ub(2);
+        ub << 100.0, std::numeric_limits<double>::infinity();
+        return ub;
+    }
+};
 
 // A quadratic that is only "defined" on the box: any evaluation strictly
 // outside [lb, ub] (beyond a rounding tolerance) is recorded as a domain
@@ -126,5 +154,32 @@ TEST_CASE("bobyqa repairs a box tighter than twice the requested radius",
 
     INFO("out-of-bounds evaluations: " << breaches);
     CHECK(breaches == 0);
+    CHECK(result.objective_value < 1e-6);
+}
+
+// Coherent mixed finite/infinite bound scaling: an unbounded coordinate must
+// not be suppressed just because another coordinate has a wide finite range.
+// It shares the reference scale of the widest bounded variable instead of
+// collapsing to 1 / max_range.
+TEST_CASE("bobyqa scales mixed finite/infinite bounds coherently", "[bobyqa][bounds]")
+{
+    mixed_bound_problem problem;
+    Eigen::VectorXd x0(2);
+    x0 << 0.0, 0.0;
+    solver_options opts;
+
+    bobyqa_policy<dynamic_dimension> pol;
+    auto s = pol.init(problem, x0, opts);
+
+    // The bounded variable (range 200) and the unbounded variable share the
+    // reference scale, so both normalize to 1.0 -- the unbounded coordinate is
+    // NOT suppressed to 1/200.
+    CHECK(s.scale[0] == Approx(1.0));
+    CHECK(s.scale[1] == Approx(1.0));
+
+    // And it converges to the interior optimum on the unbounded coordinate.
+    opts.max_iterations = 400;
+    basic_solver solver{bobyqa_policy<dynamic_dimension>{}, problem, x0, opts};
+    auto result = solver.solve();
     CHECK(result.objective_value < 1e-6);
 }
