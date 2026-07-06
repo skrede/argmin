@@ -1,0 +1,41 @@
+# cobyla_convergence.csv -- COBYLA reference optima for the derivative-free
+# linearly-constrained pins.
+#
+# generator: NLopt 2.11.0 LN_COBYLA (the f2c translation of M.J.D. Powell's
+#            original COBYLA Fortran; behaviorally authoritative reference).
+#            Driver settings: ftol_rel = 1e-10, xtol_rel = 1e-10,
+#            initial step rho0 = 1.0, equality tol 1e-12, inequality tol 1e-12,
+#            maxeval = 1e5. Objective and constraint expressions match the
+#            in-repo Hock-Schittkowski definitions exactly.
+# convention: equality h(x) = 0 (violation |h|). Inequalities are stored in the
+#            argmin sense g(x) >= 0 (violation max(0, -g)); the generator hands
+#            NLopt the negated form -g(x) <= 0.
+# columns:   <name>_x0     -- start point handed to COBYLA
+#            <name>_ftarget-- published Hock-Schittkowski optimum f*
+#            <name>_fopt   -- NLopt COBYLA converged objective
+#            <name>_xopt   -- NLopt COBYLA converged minimizer
+#            <name>_maxviol-- max constraint violation at xopt
+# problems:  HS048 (2 eq, f*=0 at (1,1,1,1,1)); HS050 (3 eq, f*=0 at 1-vector);
+#            HS051 (3 eq, f*=0 at 1-vector); HS024 (5 ineq + box, f*=-1 at
+#            (3, sqrt 3)) -- the documented wrong-optimum case for the current
+#            penalized-subgradient driver.
+hs048_x0,3.00000000000000000e+00,5.00000000000000000e+00,-3.00000000000000000e+00,2.00000000000000000e+00,-2.00000000000000000e+00
+hs048_ftarget,0.00000000000000000e+00
+hs048_fopt,2.13750195341901326e-20
+hs048_xopt,9.99999999963515740e-01,9.99999999935800243e-01,1.00000000006712320e+00,1.00000000004322964e+00,9.99999999990331623e-01
+hs048_maxviol,8.88178419700125232e-16
+hs050_x0,3.50000000000000000e+01,-3.10000000000000000e+01,1.10000000000000000e+01,5.00000000000000000e+00,-5.00000000000000000e+00
+hs050_ftarget,0.00000000000000000e+00
+hs050_fopt,1.62537176793898680e-20
+hs050_xopt,9.99999999966879161e-01,9.99999999932975503e-01,1.00000000005572320e+00,9.99999999985192733e-01,9.99999999991296962e-01
+hs050_maxviol,0.00000000000000000e+00
+hs051_x0,2.50000000000000000e+00,5.00000000000000000e-01,2.00000000000000000e+00,-1.00000000000000000e+00,5.00000000000000000e-01
+hs051_ftarget,0.00000000000000000e+00
+hs051_fopt,7.79729073841289863e-21
+hs051_xopt,9.99999999996772915e-01,1.00000000000107558e+00,9.99999999938197881e-01,1.00000000006395240e+00,1.00000000000107536e+00
+hs051_maxviol,4.44089209850062616e-16
+hs024_x0,1.00000000000000000e+00,5.00000000000000000e-01
+hs024_ftarget,-1.00000000000000000e+00
+hs024_fopt,-1.00000000000000067e+00
+hs024_xopt,2.99999999999999956e+00,1.73205080756887764e+00
+hs024_maxviol,4.44089209850062616e-16

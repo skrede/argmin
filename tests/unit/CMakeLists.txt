@@ -58,6 +58,7 @@ add_executable(argmin_unit_tests
     interpolation_delta_property_test.cpp
     hs_gradient_fd_test.cpp
     cmaes_generation_pin_test.cpp
+    cobyla_parmu_trajectory_test.cpp
     cmaes_reset_parity_test.cpp
     isres_best_track_test.cpp
     mma_coefficient_pin_test.cpp
