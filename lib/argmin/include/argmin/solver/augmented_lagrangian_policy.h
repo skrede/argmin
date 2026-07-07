@@ -610,7 +610,14 @@ struct augmented_lagrangian_policy
         const bool mu_changed = s.mu_at_last_inner_solve.has_value()
                                 && *s.mu_at_last_inner_solve != s.mu;
         const bool warm_start = warm_start_requested && !mu_changed;
-        if(warm_start && ctx.inner_solver.has_value())
+        if(!ctx.inner_solver.has_value())
+        {
+            // First use only: construct the persistent inner solver once.
+            // Every subsequent outer iteration reuses this instance via
+            // reset / reset_clear -- the solver is never reconstructed.
+            ctx.inner_solver.emplace(*ctx.sub_storage, s.x, inner_opts);
+        }
+        else if(warm_start)
         {
             // Warm restart: preserves compact_lbfgs curvature pairs (S, Y, theta).
             // Reference: N&W Section 9.2 (compact L-BFGS warm-start rationale).
@@ -618,8 +625,17 @@ struct augmented_lagrangian_policy
         }
         else
         {
-            // Cold start: construct fresh inner solver.
-            ctx.inner_solver.emplace(*ctx.sub_storage, s.x, inner_opts);
+            // Cold restart WITHOUT reconstruction. A mu change makes the
+            // L-BFGS curvature pairs stale: they encode the inverse Hessian
+            // of the previous penalty's augmented Lagrangian and CGT 1991 §3
+            // prescribes a fresh inner state after each penalty reduction.
+            // reset_clear discards exactly that curvature, delivering the
+            // cold-start semantics on the persisted solver -- the identical
+            // starting state a freshly constructed solver would hold, with no
+            // reconstruction. (The per-solve budget and convergence gates are
+            // supplied by the step_n / solve call below, so they need not be
+            // re-installed here.)
+            ctx.inner_solver->reset_clear(s.x);
         }
         s.mu_at_last_inner_solve = s.mu;
 
