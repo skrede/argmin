@@ -30,13 +30,28 @@ namespace argmin::detail
 // Persistent workspace for lsei() so the routine does not allocate per
 // call. Sized once via resize() at the maximum problem shape; subsequent
 // calls at smaller shapes reuse the existing storage.
-template <typename Scalar>
+//
+// MaxN bounds the decision-variable axis at compile time. The two QR
+// factorizations (Q_c from C^T, Q_e from the reduced E) and their
+// Householder-sequence apply destinations (Qc, Qt_f) carry an inline
+// MaxN x MaxN capacity so applyThisOnTheLeft materializes its internal
+// product temporary in that storage instead of the heap. MaxN ==
+// Eigen::Dynamic degrades every bounded member to a plain heap-backed
+// dynamic matrix (the runtime-dimension instantiation). The bound also
+// threads into the nested lsi_workspace so the inner reduced solve is
+// bounded by the same MaxN.
+template <typename Scalar, int MaxN = Eigen::Dynamic>
 struct lsei_workspace
 {
     using matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
     using vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
 
-    matrix_t Qc;
+    using qr_matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                                      Eigen::ColMajor, MaxN, MaxN>;
+    using qr_vector_t = Eigen::Matrix<Scalar, Eigen::Dynamic, 1,
+                                      Eigen::ColMajor, MaxN, 1>;
+
+    qr_matrix_t Qc;
     matrix_t R_c_upper;
     vector_t y1;
     matrix_t E_tilde;
@@ -44,22 +59,22 @@ struct lsei_workspace
     matrix_t G_tilde;
     vector_t h_red;
     matrix_t R_e;
-    vector_t Qt_f;
+    qr_vector_t Qt_f;
     matrix_t E_small;
     vector_t f_small_vec;
     matrix_t G_small;
     vector_t y2_dyn;
     vector_t y;
 
-    Eigen::HouseholderQR<matrix_t> qr_c;
-    Eigen::HouseholderQR<matrix_t> qr_e;
+    Eigen::HouseholderQR<qr_matrix_t> qr_c;
+    Eigen::HouseholderQR<qr_matrix_t> qr_e;
 
     // Persistent apply-workspaces for the Householder-sequence
     // materializations, so applyThisOnTheLeft does not allocate its
     // internal scratch per call. hseq_qc sizes to the Q_c column count
     // (n); hseq_qtf sizes to the Q_e^T-times-vector column count (1).
-    vector_t hseq_qc;
-    vector_t hseq_qtf;
+    qr_vector_t hseq_qc;
+    qr_vector_t hseq_qtf;
 
     // Buffers used to recover lambda_eq from the gradient projection on
     // the y_1 subspace at the LSEI optimum. Sized to n.
@@ -67,8 +82,9 @@ struct lsei_workspace
     vector_t lambda_eq_qgrad;   // E^T * resid - G^T * lambda_ineq
 
     // Nested workspace for the inner lsi() call. Sized for the reduced
-    // problem (n2, m_ineq) and reused across solves.
-    lsi_workspace<Scalar> lsi_ws;
+    // problem (n2, m_ineq) and reused across solves. Threads the same MaxN
+    // bound so the reduced solve is stack-bounded as well.
+    lsi_workspace<Scalar, MaxN> lsi_ws;
 
     void resize(int n, int m_eq, int m_ineq)
     {
@@ -132,7 +148,7 @@ struct lsei_workspace
 // Reference: Kraft 1988 DFVLR-FB 88-28, Section 3.2, eq. 3.19-3.21;
 //            Lawson & Hanson 1974, Ch. 23.6;
 //            N&W 2e Section 16.5 (KKT multiplier recovery via QR(C^T)).
-template <typename Scalar, int N>
+template <typename Scalar, int N, int MaxN>
 int lsei(
     const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& C,
     const Eigen::Vector<Scalar, Eigen::Dynamic>& d,
@@ -143,7 +159,7 @@ int lsei(
     Eigen::Vector<Scalar, N>& x,
     Eigen::Vector<Scalar, Eigen::Dynamic>& lambda_eq,
     Eigen::Vector<Scalar, Eigen::Dynamic>& lambda_ineq,
-    lsei_workspace<Scalar>& ws,
+    lsei_workspace<Scalar, MaxN>& ws,
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>& nnls_A,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_x_vec,

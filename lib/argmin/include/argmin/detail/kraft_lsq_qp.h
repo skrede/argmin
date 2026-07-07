@@ -420,7 +420,7 @@ private:
     Eigen::Vector<Scalar, Eigen::Dynamic> qp_lambda_eq_;
     Eigen::Vector<Scalar, Eigen::Dynamic> qp_lambda_ineq_;
 
-    lsei_workspace<Scalar> lsei_ws_;
+    lsei_workspace<Scalar, N> lsei_ws_;
 };
 
 }

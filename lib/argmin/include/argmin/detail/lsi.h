@@ -28,16 +28,31 @@ namespace argmin::detail
 // Persistent workspace for lsi() so the routine does not allocate per
 // call. Sized once via resize() at the maximum problem shape; subsequent
 // calls at smaller shapes reuse the existing storage.
-template <typename Scalar>
+//
+// MaxN bounds the decision-variable axis at compile time. The QR
+// factorization and its Householder-sequence apply destinations are stored
+// as runtime-sized matrices carrying an inline MaxN x MaxN capacity: the
+// factorization runs the same runtime-length kernel as a plain dynamic
+// matrix (so no arithmetic changes), but the apply's internal product
+// temporary materializes in the inline storage rather than on the heap.
+// MaxN == Eigen::Dynamic degrades every bounded member to a plain
+// heap-backed dynamic matrix -- the runtime-dimension instantiation, which
+// is not required to be allocation-free.
+template <typename Scalar, int MaxN = Eigen::Dynamic>
 struct lsi_workspace
 {
     using matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
     using vector_t = Eigen::Vector<Scalar, Eigen::Dynamic>;
 
-    matrix_t E_dyn;
-    Eigen::ColPivHouseholderQR<matrix_t> qr;
+    using qr_matrix_t = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                                      Eigen::ColMajor, MaxN, MaxN>;
+    using qr_vector_t = Eigen::Matrix<Scalar, Eigen::Dynamic, 1,
+                                      Eigen::ColMajor, MaxN, 1>;
+
+    qr_matrix_t E_dyn;
+    Eigen::ColPivHouseholderQR<qr_matrix_t> qr;
     matrix_t R;
-    vector_t y1;
+    qr_vector_t y1;
     matrix_t G_perm;
     matrix_t G_tT;
     matrix_t G_t;
@@ -49,7 +64,7 @@ struct lsi_workspace
 
     // Persistent apply-workspace for the Q^T * f Householder-sequence
     // materialization (sizes to the vector column count, 1).
-    vector_t hseq_y1;
+    qr_vector_t hseq_y1;
 
     void resize(int n, int m_ineq)
     {
@@ -92,7 +107,7 @@ struct lsi_workspace
 //
 // Reference: Lawson, C.L. & Hanson, R.J. (1974). Solving Least Squares
 //            Problems. Ch. 23.5, Algorithm LSI; eq. 23.18 for KKT lambda.
-template <typename Scalar, int N>
+template <typename Scalar, int N, int MaxN>
 int lsi(
     Eigen::Matrix<Scalar, N, N>& E,
     Eigen::Vector<Scalar, N>& f,
@@ -100,7 +115,7 @@ int lsi(
     const Eigen::Vector<Scalar, Eigen::Dynamic>& h,
     Eigen::Vector<Scalar, N>& x,
     Eigen::Vector<Scalar, Eigen::Dynamic>& lambda_ineq,
-    lsi_workspace<Scalar>& ws,
+    lsi_workspace<Scalar, MaxN>& ws,
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>& nnls_A,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_x_vec,
@@ -111,21 +126,28 @@ int lsi(
     // QR call site dispatch note.
     //
     // The caller ABI keeps E as Matrix<Scalar, N, N> so fixed-N callers
-    // benefit from compile-time storage on the input. For the column-
-    // pivoting Householder QR itself, however, we copy E into a dynamic
-    // buffer (ws.E_dyn) and factor the copy. At runtime N=6 this routes
-    // through Eigen's dynamic-size ColPivHouseholderQR kernel, which
-    // profiles measurably faster than the fixed-size 6x6 specialization
-    // on the downstream workloads this routine is called from.
+    // benefit from compile-time storage on the input. The column-pivoting
+    // Householder QR factors a copy in ws.E_dyn, which is a runtime-sized
+    // matrix carrying an inline MaxN x MaxN capacity: the factorization runs
+    // the same runtime-length ColPivHouseholderQR kernel as a plain dynamic
+    // matrix (measurably faster than the fixed-size NxN specialization on the
+    // downstream workloads), while the Householder-sequence apply that
+    // materializes Q^T f into ws.y1 keeps its internal product temporary in
+    // that inline storage rather than reaching the heap. A plain dynamic
+    // ws.E_dyn (MaxN == Eigen::Dynamic, the runtime-dimension instantiation)
+    // instead heap-allocates that temporary on every solve. Bounding the
+    // storage is therefore both allocation-free at fixed N and faster: the
+    // HS071 / synthetic-6DoF micro-benchmark drops ~20% per step versus the
+    // plain-dynamic workspace, with bit-identical iterates.
     //
-    // Downstream quantities (R, y1, x_prime, rhs, y) live in the
-    // workspace as dynamic vectors; the back-transform writes the final
-    // result into the fixed-size x output.
+    // Downstream quantities (R, x_prime, rhs, y) remain plain dynamic
+    // vectors; the back-transform writes the final result into the
+    // fixed-size x output.
     //
     // Reference: Lawson, C.L. & Hanson, R.J. (1974). Solving Least
     //            Squares Problems. Ch. 23.5, Algorithm LSI.
 
-    // Copy E into the dynamic-dimension workspace; QR factorizes in place.
+    // Copy E into the QR workspace (max-N-bounded); QR factorizes in place.
     if(ws.E_dyn.rows() != n || ws.E_dyn.cols() != n) ws.E_dyn.resize(n, n);
     ws.E_dyn = E;
     ws.qr.compute(ws.E_dyn);

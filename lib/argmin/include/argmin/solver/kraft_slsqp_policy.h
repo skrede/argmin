@@ -398,6 +398,19 @@ struct kraft_slsqp_policy
         // finite/infinite box bounds without re-allocating.
         s.qp_solver.resize(n, s.n_eq, s.n_ineq, n, n);
 
+        // Pre-size the persistent QP result multiplier buffers to the real
+        // constraint count. The fill-into QP solve unconditionally issues
+        // out.lambda.setZero(m_real); pre-sizing here reuses that storage from
+        // the first solve onward -- including the second-order-correction
+        // result, whose first sizing would otherwise fall inside the hot loop
+        // the first time a Maratos correction fires. The values are always
+        // overwritten by the QP solve before any read, so this is sizing only.
+        const int m_real_qp = s.n_eq + s.n_ineq;
+        s.qp_res.x.setZero(n);
+        s.qp_res.lambda.setZero(m_real_qp);
+        s.soc_qp_res.x.setZero(n);
+        s.soc_qp_res.lambda.setZero(m_real_qp);
+
         return s;
     }
 
