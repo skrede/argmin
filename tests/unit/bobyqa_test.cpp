@@ -12,9 +12,62 @@
 #include <cmath>
 #include <iostream>
 #include <numeric>
+#include <map>
+#include <string>
+#include <vector>
+#include <fstream>
+#include <sstream>
 
 using Catch::Approx;
 using namespace argmin;
+
+namespace
+{
+// Minimal oracle CSV reader (mirrors the COBYLA load_oracle reader):
+// '#' lines are comments, data lines are "name,v1,v2,...".
+std::map<std::string, std::vector<double>> load_bobyqa_oracle(const std::string& path)
+{
+    std::map<std::string, std::vector<double>> rows;
+    std::ifstream in(path);
+    if(!in.is_open())
+        return rows;
+    std::string line;
+    while(std::getline(in, line))
+    {
+        if(line.empty() || line.front() == '#')
+            continue;
+        std::istringstream ss(line);
+        std::string name;
+        std::getline(ss, name, ',');
+        std::vector<double> vals;
+        std::string tok;
+        while(std::getline(ss, tok, ','))
+            vals.push_back(std::stod(tok));
+        rows.emplace(name, std::move(vals));
+    }
+    return rows;
+}
+
+// Curved far-from-origin Rosenbrock: min f = 0 at (10, 100), |x*| ~ 100 from the
+// origin. The non-quadratic valley exposes an endgame-accuracy floor at
+// rho_end = 1e-8 that the origin shift is meant to unlock (a quadratic would be
+// modeled exactly). Matches the far_rosenbrock row of the oracle CSV.
+struct far_rosenbrock
+{
+    static constexpr int problem_dimension = 2;
+    Eigen::Vector<double, 2> lb;
+    Eigen::Vector<double, 2> ub;
+    int dimension() const { return 2; }
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        double t1 = 10.0 - x[0];
+        double t2 = x[1] - x[0] * x[0];
+        return t1 * t1 + 100.0 * t2 * t2;
+    }
+    Eigen::Vector<double, 2> lower_bounds() const { return lb; }
+    Eigen::Vector<double, 2> upper_bounds() const { return ub; }
+};
+}
 
 namespace
 {
@@ -986,5 +1039,117 @@ TEST_CASE("bobyqa relative scaden/biglsq selection and refusal", "[bobyqa]")
         double beta_bad = -1e6;
         auto bad = policy::select_replacement_relative(sys, vb.vlag, beta_bad, delta, sys.xopt);
         CHECK(bad.refuse);
+    }
+}
+
+// Quantitative acceptance against the checked-in NLopt LN_BOBYQA oracle.
+//
+// (1) Endgame accuracy: the origin shift lets the driver drive the curved
+//     far-from-origin Rosenbrock to |f - f*| well below the ~1e-6 floor the
+//     pre-rewrite driver reported, reaching the rho_end = 1e-8 endgame.
+// (2) Eval-count regression: HS001/002/005/Booth converge to the reference
+//     optima with evaluation counts near the NLopt oracle (the short-step skip
+//     keeps the driver from spending evaluations on sub-rho trials), staying
+//     within a small factor of the reference rather than regressing far past it.
+//
+// The eval counts differ from the oracle within a modest band because argmin
+// solves in an internally rescaled frame and uses an approximate box TRSBOX;
+// the pin bounds the count at 1.5x the reference (2x for HS002, whose bound is
+// active at the solution) so a genuine regression is caught while the frame
+// difference is tolerated.
+TEST_CASE("bobyqa convergence and eval count match the NLopt oracle", "[bobyqa][oracle-pin]")
+{
+    const auto oracle = load_bobyqa_oracle("oracles/bobyqa_convergence.csv");
+    REQUIRE(oracle.contains("hs001_nevals"));
+    REQUIRE(oracle.contains("far_rosenbrock_nevals"));
+
+    auto solve_hs = [&](auto hs) {
+        Eigen::Vector<double, 2> x0 = hs.initial_point();
+        solver_options opts;
+        opts.max_iterations = 20000;
+        opts.set_gradient_threshold(1e-15);
+        opts.set_objective_threshold(0.0);
+        opts.set_step_threshold(0.0);
+        bobyqa_policy<2>::options_type popts;
+        popts.final_trust_radius = 1e-8;
+        basic_solver solver{bobyqa_policy<2>{popts}, hs, x0, opts};
+        return solver.solve(opts);
+    };
+
+    SECTION("HS001 -- interior optimum, short-step efficiency")
+    {
+        auto r = solve_hs(argmin::hs001<double>{});
+        CHECK(r.objective_value < 1e-6);
+        CHECK(r.x[0] == Approx(oracle.at("hs001_xopt")[0]).margin(1e-3));
+        CHECK(r.x[1] == Approx(oracle.at("hs001_xopt")[1]).margin(1e-3));
+        // Toward the oracle count (216), not regressing far past it, and an
+        // improvement on the pre-rewrite driver (which needed ~280 iterations).
+        CHECK(r.function_evaluations <= static_cast<std::uint32_t>(1.5 * oracle.at("hs001_nevals")[0]));
+    }
+
+    SECTION("HS002 -- bound-active Rosenbrock local basin")
+    {
+        auto r = solve_hs(argmin::hs002<double>{});
+        // BOBYQA settles in the negative-x0 valley basin recorded by the oracle.
+        CHECK(r.objective_value == Approx(oracle.at("hs002_fopt")[0]).margin(1e-3));
+        CHECK(r.x[0] == Approx(oracle.at("hs002_xopt")[0]).margin(1e-3));
+        CHECK(r.x[1] == Approx(oracle.at("hs002_xopt")[1]).margin(1e-3));
+        CHECK(r.function_evaluations <= static_cast<std::uint32_t>(2.0 * oracle.at("hs002_nevals")[0]));
+    }
+
+    SECTION("HS005 -- trigonometric interior optimum")
+    {
+        auto r = solve_hs(argmin::hs005<double>{});
+        CHECK(r.objective_value == Approx(oracle.at("hs005_fopt")[0]).margin(1e-5));
+        CHECK(r.x[0] == Approx(oracle.at("hs005_xopt")[0]).margin(1e-3));
+        CHECK(r.x[1] == Approx(oracle.at("hs005_xopt")[1]).margin(1e-3));
+        CHECK(r.function_evaluations <= static_cast<std::uint32_t>(1.5 * oracle.at("hs005_nevals")[0]));
+    }
+
+    SECTION("Booth -- eval-count efficiency")
+    {
+        bobyqa_booth problem{
+            .lb = Eigen::Vector<double, 2>{{-10.0, -10.0}},
+            .ub = Eigen::Vector<double, 2>{{10.0, 10.0}},
+        };
+        Eigen::Vector<double, 2> x0{0.0, 0.0};
+        solver_options opts;
+        opts.max_iterations = 20000;
+        opts.set_gradient_threshold(1e-15);
+        opts.set_objective_threshold(0.0);
+        opts.set_step_threshold(0.0);
+        bobyqa_policy<2>::options_type popts;
+        popts.final_trust_radius = 1e-8;
+        basic_solver solver{bobyqa_policy<2>{popts}, problem, x0, opts};
+        auto r = solver.solve(opts);
+        CHECK(r.objective_value < 1e-8);
+        CHECK(r.x[0] == Approx(oracle.at("booth_xopt")[0]).margin(1e-3));
+        CHECK(r.x[1] == Approx(oracle.at("booth_xopt")[1]).margin(1e-3));
+        CHECK(r.function_evaluations <= static_cast<std::uint32_t>(1.5 * oracle.at("booth_nevals")[0]));
+    }
+
+    SECTION("far-from-origin Rosenbrock -- endgame accuracy the origin shift unlocks")
+    {
+        far_rosenbrock problem{
+            .lb = Eigen::Vector<double, 2>{{-1000.0, -1000.0}},
+            .ub = Eigen::Vector<double, 2>{{1000.0, 1000.0}},
+        };
+        Eigen::Vector<double, 2> x0{0.0, 0.0};
+        solver_options opts;
+        opts.max_iterations = 50000;
+        opts.set_gradient_threshold(1e-15);
+        opts.set_objective_threshold(0.0);
+        opts.set_step_threshold(0.0);
+        bobyqa_policy<2>::options_type popts;
+        popts.initial_trust_radius = 10.0;
+        popts.final_trust_radius = 1e-8;
+        basic_solver solver{bobyqa_policy<2>{popts}, problem, x0, opts};
+        auto r = solver.solve(opts);
+
+        // The endgame criterion: |f - f*| reaches ~1e-8 (the reference lands at
+        // ~5e-21). The pre-rewrite driver floored at ~1e-6 on this problem.
+        CHECK(r.objective_value < 1e-8);
+        CHECK(r.x[0] == Approx(oracle.at("far_rosenbrock_xopt")[0]).margin(1e-3));
+        CHECK(r.x[1] == Approx(oracle.at("far_rosenbrock_xopt")[1]).margin(1e-2));
     }
 }

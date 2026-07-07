@@ -712,21 +712,33 @@ struct bobyqa_policy
                 {
                     if(vquad >= 0.0)
                     {
-                        // A trust step that fails to reduce Q: the calculation
-                        // is complete (bobyqb_ lines 2632-2637).
-                        terminated = true;
-                        loc = label::l60;
-                        break;
-                    }
-                    ratio = (f - old_fopt) / vquad;
-                    if(ratio <= 0.1)
+                        // The trust step failed to reduce the model. Powell
+                        // returns here (bobyqb_ lines 2632-2637) because his
+                        // exact TRSBOX only produces a non-descent step at a
+                        // genuine roundoff limit. argmin's approximate XBDI-CG
+                        // box solver can return a non-descent step at a
+                        // non-stationary point, so aborting the whole solve
+                        // would stop short of the optimum. Treat it instead as
+                        // a failed trust iteration: shrink delta and let the
+                        // geometry / rho-reduction path carry progress (rho
+                        // exhaustion remains the true termination).
+                        ratio = 0.0;
                         s.delta = std::min(0.5 * s.delta, dnorm);
-                    else if(ratio <= 0.7)
-                        s.delta = std::max(0.5 * s.delta, dnorm);
+                        if(s.delta <= 1.5 * s.rho)
+                            s.delta = s.rho;
+                    }
                     else
-                        s.delta = std::max(0.5 * s.delta, 2.0 * dnorm);
-                    if(s.delta <= 1.5 * s.rho)
-                        s.delta = s.rho;
+                    {
+                        ratio = (f - old_fopt) / vquad;
+                        if(ratio <= 0.1)
+                            s.delta = std::min(0.5 * s.delta, dnorm);
+                        else if(ratio <= 0.7)
+                            s.delta = std::max(0.5 * s.delta, dnorm);
+                        else
+                            s.delta = std::max(0.5 * s.delta, 2.0 * dnorm);
+                        if(s.delta <= 1.5 * s.rho)
+                            s.delta = s.rho;
+                    }
 
                     // Recompute knew/denom now that the new (improving) point is
                     // known, measuring distances from xnew instead of xopt
