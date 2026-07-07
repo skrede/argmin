@@ -100,6 +100,7 @@ int lsi(
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_x_vec,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_w,
+    nnls_workspace<Scalar>& nnls_ws,
     int n, int m_ineq)
 {
     // QR call site dispatch note.
@@ -197,7 +198,7 @@ int lsi(
     if(ws.ldp_lambda.size() != m_ineq) ws.ldp_lambda.resize(m_ineq);
     int ldp_mode = ldp<Scalar, Eigen::Dynamic, Eigen::Dynamic>(
         ws.G_t, ws.h_t, ws.x_prime, ws.ldp_lambda,
-        nnls_A, nnls_b, nnls_x_vec, nnls_w,
+        nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws,
         m_ineq, n);
 
     // LSI inequality multipliers = LDP multipliers (constraint rows

@@ -54,6 +54,7 @@ int ldp(
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_x_vec,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_w,
+    nnls_workspace<Scalar>& nnls_ws,
     int m, int n)
 {
     using std::sqrt;
@@ -90,7 +91,7 @@ int ldp(
     nnls_w.setZero();
 
     auto result = nnls<Scalar, Eigen::Dynamic, Eigen::Dynamic>(
-        nnls_A, nnls_b, nnls_x_vec, nnls_w, n + 1, m);
+        nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n + 1, m);
 
     if(result.mode != 1)
         return 4;
@@ -109,7 +110,10 @@ int ldp(
     //
     // If the residual is numerically zero (or fac is non-positive) the
     // constraints are incompatible (no strictly feasible x exists).
-    Eigen::Vector<Scalar, Eigen::Dynamic> r(n + 1);
+    // r is hoisted into the threaded nnls_workspace (grow-only) so the
+    // recovery incurs no per-call allocation at steady state.
+    if(nnls_ws.r_buf.size() < n + 1) nnls_ws.r_buf.resize(n + 1);
+    auto r = nnls_ws.r_buf.head(n + 1);
     for(int i = 0; i < n; ++i)
     {
         Scalar s = Scalar(0);

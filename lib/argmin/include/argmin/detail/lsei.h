@@ -139,6 +139,7 @@ int lsei(
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_b,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_x_vec,
     Eigen::Vector<Scalar, Eigen::Dynamic>& nnls_w,
+    nnls_workspace<Scalar>& nnls_ws,
     int n, int m_eq, int m_ineq)
 {
     // ------------------------------------------------------------------
@@ -149,7 +150,7 @@ int lsei(
         if(lambda_eq.size() != 0) lambda_eq.setZero();
         return lsi<Scalar, N>(
             E, f, G, h, x, lambda_ineq, ws.lsi_ws,
-            nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m_ineq);
+            nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n, m_ineq);
     }
 
     if(lambda_eq.size() != m_eq) lambda_eq.resize(m_eq);
@@ -283,7 +284,7 @@ int lsei(
                 ws.E_small, ws.f_small_vec, ws.G_small, ws.h_red, ws.y2_dyn,
                 lambda_ineq,
                 ws.lsi_ws,
-                nnls_A, nnls_b, nnls_x_vec, nnls_w, n2, m_ineq);
+                nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n2, m_ineq);
 
             if(lsi_mode != 1)
                 return lsi_mode;

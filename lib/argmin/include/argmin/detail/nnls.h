@@ -56,6 +56,50 @@ struct nnls_result
     int iterations{};
 };
 
+// Caller-owned maintained-factorization workspace for nnls().
+//
+// Holds the six grow-only buffers the incremental-QR NNLS iteration needs
+// (Q^T A, Q^T b, the back-substitution scratch, the column permutation,
+// the P-membership flags, and the Householder essential scratch), plus the
+// r_buf residual buffer the LDP primal recovery threads through. Previously
+// these lived as function-local per-thread static buffers; hoisting them to a
+// caller-threaded object removes the hidden static state (unsuitable for
+// re-entrancy and embedded/MCU targets) while preserving the grow-only
+// steady-state-allocation-free semantics.
+//
+// The QP substrate owns one of these (kraft_lsq_qp as a member; the SOC
+// projection path via sqp_state_buffers) and threads it through the
+// lsei -> lsi -> ldp -> nnls cascade exactly as the nnls_* problem-data
+// scratch is already threaded.
+template <typename Scalar>
+struct nnls_workspace
+{
+    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> A_buf;
+    Eigen::Vector<Scalar, Eigen::Dynamic> b_buf;
+    Eigen::Vector<Scalar, Eigen::Dynamic> z_buf;
+    Eigen::Vector<int, Eigen::Dynamic> indx_buf;
+    Eigen::Vector<int, Eigen::Dynamic> in_P_buf;
+    Eigen::Vector<Scalar, Eigen::Dynamic> hh_buf;
+
+    // LDP dual-recovery residual (length n+1 in the LDP's dimensions);
+    // hoisted out of ldp()'s per-call `Eigen::Vector r(n + 1)`.
+    Eigen::Vector<Scalar, Eigen::Dynamic> r_buf;
+
+    // Grow-only capacity ensure for the nnls factorization buffers.
+    // Buffers enlarge only when a larger problem arrives, so a fixed
+    // problem shape reuses the existing storage with no allocation --
+    // identical conditionals to the prior per-thread-static grow-only path.
+    void ensure(int m, int n)
+    {
+        if(A_buf.rows() < m || A_buf.cols() < n) A_buf.resize(m, n);
+        if(b_buf.size() < m) b_buf.resize(m);
+        if(z_buf.size() < n) z_buf.resize(n);
+        if(indx_buf.size() < n) indx_buf.resize(n);
+        if(in_P_buf.size() < n) in_P_buf.resize(n);
+        if(hh_buf.size() < m) hh_buf.resize(m);
+    }
+};
+
 // Solve min ||A*x - b||^2 s.t. x >= 0.
 //
 // A is (m x n), b is (m), x is (n), w is (n) dual vector. A and b may be
@@ -66,14 +110,15 @@ struct nnls_result
 // The iteration limit is fixed at 3*n, matching Lawson & Hanson and the
 // NLopt / SciPy convention; on exhaustion the routine returns mode=3.
 //
-// Workspace: thread_local maintained-factorization buffers eliminate the
-// per-inner-iter heap allocation of the prior fresh-QR path.
+// Workspace: caller-owned maintained-factorization buffers (nnls_workspace)
+// eliminate the per-inner-iter heap allocation of the prior fresh-QR path.
 template <typename Scalar, int M, int N>
 nnls_result<Scalar> nnls(
     Eigen::Matrix<Scalar, M, N>& A,
     Eigen::Vector<Scalar, M>& b,
     Eigen::Vector<Scalar, N>& x,
     Eigen::Vector<Scalar, N>& w,
+    nnls_workspace<Scalar>& ws,
     int m, int n)
 {
     using std::abs;
@@ -104,29 +149,19 @@ nnls_result<Scalar> nnls(
     // Maintained-factorization workspaces. A_buf holds Q^T A (rows below
     // active pivots are zero on P columns; nonzero on Z columns). b_buf
     // holds Q^T b. indx is the column permutation: positions [0, nsetp)
-    // are P (in addition order), [nsetp, n) are Z.
-    thread_local Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> A_buf;
-    thread_local Eigen::Vector<Scalar, Eigen::Dynamic> b_buf;
-    thread_local Eigen::Vector<Scalar, Eigen::Dynamic> z_buf;
-    thread_local Eigen::Vector<int, Eigen::Dynamic> indx_buf;
-    thread_local Eigen::Vector<int, Eigen::Dynamic> in_P_buf;
-    thread_local Eigen::Vector<Scalar, Eigen::Dynamic> hh_buf;
+    // are P (in addition order), [nsetp, n) are Z. Caller-owned via
+    // nnls_workspace; grow-only ensure preserves the prior per-thread-static
+    // steady-state-allocation-free behavior.
+    ws.ensure(m, n);
 
-    if(A_buf.rows() < m || A_buf.cols() < n) A_buf.resize(m, n);
-    if(b_buf.size() < m) b_buf.resize(m);
-    if(z_buf.size() < n) z_buf.resize(n);
-    if(indx_buf.size() < n) indx_buf.resize(n);
-    if(in_P_buf.size() < n) in_P_buf.resize(n);
-    if(hh_buf.size() < m) hh_buf.resize(m);
-
-    auto A_factored = A_buf.topLeftCorner(m, n);
-    auto b_factored = b_buf.head(m);
+    auto A_factored = ws.A_buf.topLeftCorner(m, n);
+    auto b_factored = ws.b_buf.head(m);
     A_factored = A;
     b_factored = b;
 
-    auto z = z_buf.head(n);
-    auto indx = indx_buf.head(n);
-    auto in_P = in_P_buf.head(n);
+    auto z = ws.z_buf.head(n);
+    auto indx = ws.indx_buf.head(n);
+    auto in_P = ws.in_P_buf.head(n);
 
     x.setZero();
     w.setZero();
@@ -207,7 +242,7 @@ nnls_result<Scalar> nnls(
         // argument (length tail_len - 1) and the (tau, beta) outputs.
         if(tail_len > 1)
         {
-            auto essential = hh_buf.head(tail_len - 1);
+            auto essential = ws.hh_buf.head(tail_len - 1);
             tail_t.makeHouseholder(essential, tau, beta);
             // Zero the column in-place: pivot at row nsetp = beta,
             // rows [nsetp+1, m) = 0.
@@ -220,12 +255,12 @@ nnls_result<Scalar> nnls(
                 const int j = indx[k];
                 if(j == t) continue;
                 auto col_seg = A_factored.col(j).segment(nsetp, tail_len);
-                col_seg.applyHouseholderOnTheLeft(essential, tau, hh_buf.data() + (tail_len - 1));
+                col_seg.applyHouseholderOnTheLeft(essential, tau, ws.hh_buf.data() + (tail_len - 1));
             }
 
             // Apply H to b_factored at rows [nsetp, m).
             auto b_seg = b_factored.segment(nsetp, tail_len);
-            b_seg.applyHouseholderOnTheLeft(essential, tau, hh_buf.data() + (tail_len - 1));
+            b_seg.applyHouseholderOnTheLeft(essential, tau, ws.hh_buf.data() + (tail_len - 1));
         }
         else
         {

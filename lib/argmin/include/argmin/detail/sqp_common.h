@@ -101,6 +101,11 @@ struct sqp_state_buffers
     Eigen::VectorXd soc_nnls_x_buf;
     Eigen::VectorXd soc_nnls_w_buf;
 
+    // Maintained-factorization workspace threaded into detail::nnls through
+    // the SOC-projection detail::ldp call (replaces nnls's former
+    // thread_local statics). Grow-only; steady-state allocation-free.
+    nnls_workspace<Scalar> soc_nnls_ws;
+
     void resize(int n, int n_eq, int n_ineq);
 };
 
@@ -622,7 +627,7 @@ ARGMIN_FORCE_INLINE bool soc_seed_projection(
     const int ldp_mode = ldp<Scalar, Eigen::Dynamic, Eigen::Dynamic>(
         G, h, bufs.soc_ldp_q_buf, bufs.soc_ldp_lambda_buf,
         bufs.soc_nnls_A_buf, bufs.soc_nnls_b_buf,
-        bufs.soc_nnls_x_buf, bufs.soc_nnls_w_buf, m, n);
+        bufs.soc_nnls_x_buf, bufs.soc_nnls_w_buf, bufs.soc_nnls_ws, m, n);
     if(ldp_mode != 1)
         return false;  // Incompatible rows: keep the unprojected seed.
 

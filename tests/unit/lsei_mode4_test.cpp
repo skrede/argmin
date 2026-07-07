@@ -50,10 +50,11 @@ int run_lsei_1d(double d_val, double h_val, double& x_out)
     ws.resize(n, m_eq, m_ineq);
     Eigen::MatrixXd nnls_A(n + 1, m_ineq);
     Eigen::VectorXd nnls_b(n + 1), nnls_x(m_ineq), nnls_w(m_ineq);
+    nnls_workspace<double> nnls_ws;
 
     int mode = lsei<double, Eigen::Dynamic>(
         C, d_vec, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
-        nnls_A, nnls_b, nnls_x, nnls_w, n, m_eq, m_ineq);
+        nnls_A, nnls_b, nnls_x, nnls_w, nnls_ws, n, m_eq, m_ineq);
     x_out = x[0];
     return mode;
 }

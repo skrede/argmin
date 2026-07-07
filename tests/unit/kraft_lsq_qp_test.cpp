@@ -29,7 +29,8 @@ TEST_CASE("NNLS identity with positive RHS", "[nnls]")
     Eigen::Vector<double, n> x = Eigen::Vector<double, n>::Zero();
     Eigen::Vector<double, n> w = Eigen::Vector<double, n>::Zero();
 
-    auto result = nnls<double, n, n>(A, b, x, w, n, n);
+    nnls_workspace<double> nnls_ws;
+    auto result = nnls<double, n, n>(A, b, x, w, nnls_ws, n, n);
 
     CHECK(result.mode == 1);
     CHECK(x[0] == Approx(1.0).margin(1e-12));
@@ -49,7 +50,8 @@ TEST_CASE("NNLS identity with mixed-sign RHS clamps negatives to zero", "[nnls]"
     Eigen::Vector<double, n> x = Eigen::Vector<double, n>::Zero();
     Eigen::Vector<double, n> w = Eigen::Vector<double, n>::Zero();
 
-    auto result = nnls<double, n, n>(A, b, x, w, n, n);
+    nnls_workspace<double> nnls_ws;
+    auto result = nnls<double, n, n>(A, b, x, w, nnls_ws, n, n);
 
     CHECK(result.mode == 1);
     CHECK(x[0] == Approx(2.0).margin(1e-12));
@@ -73,7 +75,8 @@ TEST_CASE("NNLS overdetermined 3x2 system", "[nnls]")
     Eigen::Vector<double, n> x = Eigen::Vector<double, n>::Zero();
     Eigen::Vector<double, n> w = Eigen::Vector<double, n>::Zero();
 
-    auto result = nnls<double, m, n>(A, b, x, w, m, n);
+    nnls_workspace<double> nnls_ws;
+    auto result = nnls<double, m, n>(A, b, x, w, nnls_ws, m, n);
 
     CHECK(result.mode == 1);
     CHECK(x[0] == Approx(1.0).margin(1e-12));
@@ -100,7 +103,8 @@ TEST_CASE("NNLS clipping: unconstrained optimum has one negative component", "[n
     Eigen::Vector<double, n> x = Eigen::Vector<double, n>::Zero();
     Eigen::Vector<double, n> w = Eigen::Vector<double, n>::Zero();
 
-    auto result = nnls<double, m, n>(A, b, x, w, m, n);
+    nnls_workspace<double> nnls_ws;
+    auto result = nnls<double, m, n>(A, b, x, w, nnls_ws, m, n);
 
     CHECK(result.mode == 1);
     CHECK(x[0] == Approx(0.0).margin(1e-12));
@@ -129,7 +133,8 @@ TEST_CASE("LDP simple 2D halfspace", "[ldp]")
     Eigen::VectorXd nnls_w;
 
     Eigen::Vector<double, m> ldp_lambda;
-    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
+    nnls_workspace<double> nnls_ws;
+    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, m, n);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(0.5).margin(1e-12));
@@ -156,7 +161,8 @@ TEST_CASE("LDP triangle constraint", "[ldp]")
     Eigen::VectorXd nnls_w;
 
     Eigen::Vector<double, m> ldp_lambda;
-    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
+    nnls_workspace<double> nnls_ws;
+    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, m, n);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(1.5).margin(1e-9));
@@ -186,7 +192,8 @@ TEST_CASE("LDP trivial: origin is feasible", "[ldp]")
     Eigen::VectorXd nnls_w;
 
     Eigen::Vector<double, m> ldp_lambda;
-    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
+    nnls_workspace<double> nnls_ws;
+    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, m, n);
 
     // Caller of LDP (LSI) treats mode != 1 as "origin is the solution"
     // in this degenerate case; we just check x is numerically zero.
@@ -212,7 +219,8 @@ TEST_CASE("LDP infeasible constraints", "[ldp]")
     Eigen::VectorXd nnls_w;
 
     Eigen::Vector<double, m> ldp_lambda;
-    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
+    nnls_workspace<double> nnls_ws;
+    int mode = ldp<double, m, n>(G, h, x, ldp_lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, m, n);
 
     CHECK(mode != 1);
 }
@@ -239,8 +247,9 @@ TEST_CASE("LSI unconstrained reduces to ordinary LS", "[lsi]")
     argmin::detail::lsi_workspace<double> ws;
     ws.resize(n, 0);
     Eigen::VectorXd lambda_ineq;
+    nnls_workspace<double> nnls_ws;
     int mode = lsi<double, n>(E, f, G, h, x, lambda_ineq, ws,
-                              nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 0);
+                              nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n, 0);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(3.0).margin(1e-12));
@@ -271,8 +280,9 @@ TEST_CASE("LSI 2D with one active inequality", "[lsi]")
     argmin::detail::lsi_workspace<double> ws;
     ws.resize(n, m);
     Eigen::VectorXd lambda_ineq;
+    nnls_workspace<double> nnls_ws;
     int mode = lsi<double, n>(E, f, G, h, x, lambda_ineq, ws,
-                              nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m);
+                              nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n, m);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(0.5).margin(1e-10));
@@ -302,8 +312,9 @@ TEST_CASE("LSI 2D with inactive inequality", "[lsi]")
     argmin::detail::lsi_workspace<double> ws;
     ws.resize(n, m);
     Eigen::VectorXd lambda_ineq;
+    nnls_workspace<double> nnls_ws;
     int mode = lsi<double, n>(E, f, G, h, x, lambda_ineq, ws,
-                              nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m);
+                              nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n, m);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(3.0).margin(1e-10));
@@ -341,8 +352,9 @@ TEST_CASE("LSEI equality only", "[lsei]")
     argmin::detail::lsei_workspace<double> ws;
     ws.resize(n, 1, 0);
     Eigen::VectorXd lambda_eq, lambda_ineq;
+    nnls_workspace<double> nnls_ws;
     int mode = lsei<double, n>(C, d, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
-                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 1, 0);
+                               nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n, 1, 0);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(0.5).margin(1e-10));
@@ -374,8 +386,9 @@ TEST_CASE("LSEI equality plus inactive inequality", "[lsei]")
     argmin::detail::lsei_workspace<double> ws;
     ws.resize(n, 1, 1);
     Eigen::VectorXd lambda_eq, lambda_ineq;
+    nnls_workspace<double> nnls_ws;
     int mode = lsei<double, n>(C, d, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
-                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 1, 1);
+                               nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n, 1, 1);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(0.5).margin(1e-10));
@@ -410,8 +423,9 @@ TEST_CASE("LSEI equality plus active inequality", "[lsei]")
     argmin::detail::lsei_workspace<double> ws;
     ws.resize(n, 1, 1);
     Eigen::VectorXd lambda_eq, lambda_ineq;
+    nnls_workspace<double> nnls_ws;
     int mode = lsei<double, n>(C, d, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
-                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 1, 1);
+                               nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n, 1, 1);
 
     CHECK(mode == 1);
     CHECK(x[0] == Approx(1.0).margin(1e-8));
@@ -441,8 +455,9 @@ TEST_CASE("LSEI rank deficient equality is reported", "[lsei]")
     argmin::detail::lsei_workspace<double> ws;
     ws.resize(n, 2, 0);
     Eigen::VectorXd lambda_eq, lambda_ineq;
+    nnls_workspace<double> nnls_ws;
     int mode = lsei<double, n>(C, d, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
-                               nnls_A, nnls_b, nnls_x_vec, nnls_w, n, 2, 0);
+                               nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n, 2, 0);
 
     CHECK(mode == 6);
 }

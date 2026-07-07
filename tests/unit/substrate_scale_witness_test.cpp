@@ -88,8 +88,9 @@ TEST_CASE("substrate scale witness: LDP accepts a large-norm feasible solution",
     Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> nnls_A;
     Eigen::Vector<double, Eigen::Dynamic> nnls_b, nnls_x_vec, nnls_w;
 
+    argmin::detail::nnls_workspace<double> nnls_ws;
     const int mode = argmin::detail::ldp<double, Eigen::Dynamic, Eigen::Dynamic>(
-        G, h, x, lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, m, n);
+        G, h, x, lambda, nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, m, n);
 
     INFO("mode = " << mode << "  x = " << x[0]);
     CHECK(mode == 1);
@@ -130,9 +131,10 @@ int run_lsei_1d(double d_val, double h_val, double& x_out)
     Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> nnls_A;
     Eigen::VectorXd nnls_b, nnls_x_vec, nnls_w;
 
+    argmin::detail::nnls_workspace<double> nnls_ws;
     const int mode = argmin::detail::lsei<double, Eigen::Dynamic>(
         C, d_vec, E, f, G, h, x, lambda_eq, lambda_ineq, ws,
-        nnls_A, nnls_b, nnls_x_vec, nnls_w, n, m_eq, m_ineq);
+        nnls_A, nnls_b, nnls_x_vec, nnls_w, nnls_ws, n, m_eq, m_ineq);
     x_out = x[0];
     return mode;
 }

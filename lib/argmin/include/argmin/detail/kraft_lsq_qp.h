@@ -307,7 +307,7 @@ private:
             x_out_,
             qp_lambda_eq_, qp_lambda_ineq_,
             lsei_ws_,
-            nnls_A_, nnls_b_, nnls_x_vec_, nnls_w_,
+            nnls_A_, nnls_b_, nnls_x_vec_, nnls_w_, nnls_ws_,
             n, m_eq, m_aug);
 
         out.x = x_out_;
@@ -361,6 +361,11 @@ private:
     Eigen::Vector<Scalar, Eigen::Dynamic> nnls_b_;
     Eigen::Vector<Scalar, Eigen::Dynamic> nnls_x_vec_;
     Eigen::Vector<Scalar, Eigen::Dynamic> nnls_w_;
+
+    // Maintained-factorization workspace threaded into detail::nnls through
+    // the lsei -> lsi -> ldp cascade (replaces nnls's former thread_local
+    // statics). Grow-only; steady-state allocation-free after resize().
+    nnls_workspace<Scalar> nnls_ws_;
 
     // Lambda outputs from lsei: equality multipliers (size m_eq) and
     // inequality multipliers (size m_aug = m_ineq + n_finite_lower +
