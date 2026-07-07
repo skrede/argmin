@@ -1190,6 +1190,82 @@ TEST_CASE("bobyqa relative scaden/biglsq selection and refusal", "[bobyqa]")
     }
 }
 
+// Least-Frobenius-norm model reset (Powell 2009, Section 4; NLopt bobyqb_ lines
+// 2824-2923). After each trust iteration Powell compares the projected gradient
+// magnitude of the current explicit-Hessian model (gqsq) against that of the
+// least-Frobenius-norm interpolant (gisq). A counter (itest) accumulates while
+// the current model dominates the interpolant by a factor of ten and resets
+// otherwise; on the third consecutive domination the model is replaced by the
+// interpolant (gopt <- interpolant gradient, pq <- interpolant weights, hq <-
+// 0). This exercises the counter increment/reset and the replacement on
+// hand-built model states rather than trusting it fires in an end-to-end run.
+TEST_CASE("bobyqa least-Frobenius-norm model reset triggers and installs the interpolant",
+          "[bobyqa]")
+{
+    using policy = bobyqa_policy<2>;
+    auto obj = [](const Eigen::Vector<double, 2>& x) {
+        return 2.0 * x[0] * x[0] + 3.0 * x[1] * x[1] + x[0] * x[1] - x[0];
+    };
+    Eigen::Vector<double, 2> x0{0.3, -0.2};
+    Eigen::Vector<double, 2> lo{-5.0, -5.0};
+    Eigen::Vector<double, 2> hi{5.0, 5.0};
+    auto sys = argmin::detail::bootstrap_interpolation_system<double, 2>(
+        x0, 0.5, lo, hi, obj);
+    Eigen::Vector<double, 2> sl = lo - sys.xbase;
+    Eigen::Vector<double, 2> su = hi - sys.xbase;
+
+    SECTION("a well-modeled quadratic never triggers a reset")
+    {
+        // On an exact quadratic the interpolant reproduces the model gradient,
+        // so the current model never dominates: the counter stays at zero and no
+        // replacement occurs.
+        int itest = 0;
+        auto r = policy::frobenius_model_reset(sys, sl, su, itest);
+        CHECK(r.gisq > 0.0);
+        CHECK(r.gqsq == Approx(r.gisq));
+        CHECK(itest == 0);
+        CHECK_FALSE(r.reset_applied);
+    }
+
+    SECTION("three consecutive dominations reset the model to the interpolant")
+    {
+        // Blow up the explicit-Hessian model gradient so it dominates the
+        // interpolant's by far more than the reference's factor of ten.
+        sys.gopt *= 1e3;
+
+        int itest = 0;
+        auto r1 = policy::frobenius_model_reset(sys, sl, su, itest);
+        CHECK(itest == 1);
+        CHECK_FALSE(r1.reset_applied);
+        CHECK(r1.gqsq > 10.0 * r1.gisq);
+
+        auto r2 = policy::frobenius_model_reset(sys, sl, su, itest);
+        CHECK(itest == 2);
+        CHECK_FALSE(r2.reset_applied);
+
+        auto r3 = policy::frobenius_model_reset(sys, sl, su, itest);
+        // The third consecutive domination fires the replacement and zeroes the
+        // counter.
+        CHECK(r3.reset_applied);
+        CHECK(itest == 0);
+
+        // The reset zeroes the explicit Hessian ...
+        const int nh = 2 * (2 + 1) / 2;
+        for(int i = 0; i < nh; ++i)
+            CHECK(sys.hq[i] == 0.0);
+
+        // ... and installs the interpolant gradient into gopt: a subsequent
+        // evaluation therefore sees the current model's gradient EQUAL the
+        // interpolant's (gopt now IS the interpolant gradient), so it no longer
+        // dominates and cannot re-trigger.
+        int itest2 = 0;
+        auto r4 = policy::frobenius_model_reset(sys, sl, su, itest2);
+        CHECK(r4.gqsq == Approx(r4.gisq).margin(1e-12));
+        CHECK(itest2 == 0);
+        CHECK_FALSE(r4.reset_applied);
+    }
+}
+
 // Quantitative acceptance against the checked-in NLopt LN_BOBYQA oracle.
 //
 // (1) Endgame accuracy: the origin shift lets the driver drive the curved

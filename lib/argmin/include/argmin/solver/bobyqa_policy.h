@@ -161,6 +161,13 @@ struct bobyqa_policy
         int nfsav{0};
         int nresc{0};
         int nevals{0};
+
+        // Counts consecutive trust iterations whose explicit-Hessian model
+        // gradient dominates the least-Frobenius-norm interpolant's gradient by
+        // the reference's factor of ten (Powell 2009, Section 4; NLopt bobyqb_
+        // lines 2900-2923). On the third such iteration the model is replaced by
+        // the least-Frobenius-norm interpolant to shed accumulated Hessian error.
+        int itest{0};
         std::uint32_t nevals_reported{0};
         double diffa{0.0};
         double diffb{0.0};
@@ -424,6 +431,112 @@ struct bobyqa_policy
         return c;
     }
 
+    // Outcome of the least-Frobenius-norm model-reset test.
+    struct frobenius_reset_result
+    {
+        double gqsq{0.0};        // projected magnitude of the current model gradient
+        double gisq{0.0};        // projected magnitude of the interpolant gradient
+        bool reset_applied{false};  // whether gopt/pq/hq were replaced this call
+    };
+
+    // Powell's least-Frobenius-norm model reset (bobyqb_ lines 2824-2923).
+    //
+    // Forms the least-Frobenius-norm interpolant to the current data and takes
+    // its gradient at xopt. It then compares the projected magnitude of the
+    // current explicit-Hessian model gradient (gqsq, using sys.gopt) against the
+    // interpolant's (gisq), projecting out the components a bound-active xopt
+    // would push into its bound. The itest counter increments while the current
+    // model dominates by the reference's factor of ten and resets otherwise;
+    // after three consecutive dominations the current model's Hessian has
+    // accumulated enough error that the interpolant is the better model, so
+    // gopt/pq/hq are replaced by it and itest is reset.
+    //
+    // Reads bmat/zmat/xpt/fval/gopt/xopt; writes gopt/pq/hq only on reset. sl/su
+    // are the bound offsets lower_scaled - xbase and upper_scaled - xbase.
+    template <typename Sys>
+    static frobenius_reset_result frobenius_model_reset(
+        Sys& sys, const Eigen::Vector<double, N>& sl,
+        const Eigen::Vector<double, N>& su, int& itest)
+    {
+        const int n = sys.xbase.size();
+        const int mm = sys.m_points;
+        const int nptm = mm - n - 1;
+
+        using vec_m =
+            Eigen::Vector<double, Sys::MaxM>;
+
+        vec_m lfvlag(mm);   // fval[k] - fval[kopt]
+        vec_m w(mm);        // least-Frobenius-norm pq weights
+        for(int k = 0; k < mm; ++k)
+        {
+            lfvlag[k] = sys.fval[k] - sys.fval[sys.kopt];
+            w[k] = 0.0;
+        }
+        for(int j = 0; j < nptm; ++j)
+        {
+            double sum = 0.0;
+            for(int k = 0; k < mm; ++k)
+                sum += sys.zmat(k, j) * lfvlag[k];
+            for(int k = 0; k < mm; ++k)
+                w[k] += sum * sys.zmat(k, j);
+        }
+
+        vec_m wpq(mm);      // saved interpolant pq
+        vec_m wscaled(mm);  // (xpt_k . xopt) * pq_k for the gradient sum
+        for(int k = 0; k < mm; ++k)
+        {
+            double sum = sys.xpt.col(k).head(n).dot(sys.xopt);
+            wpq[k] = w[k];
+            wscaled[k] = sum * w[k];
+        }
+
+        Eigen::Vector<double, N> gi(n);  // interpolant gradient at xopt
+        frobenius_reset_result r;
+        for(int i = 0; i < n; ++i)
+        {
+            double sum = 0.0;
+            for(int k = 0; k < mm; ++k)
+                sum += sys.bmat(k, i) * lfvlag[k] + sys.xpt(i, k) * wscaled[k];
+            if(sys.xopt[i] == sl[i])
+            {
+                double gq = std::min(0.0, sys.gopt[i]);
+                double gc = std::min(0.0, sum);
+                r.gqsq += gq * gq;
+                r.gisq += gc * gc;
+            }
+            else if(sys.xopt[i] == su[i])
+            {
+                double gq = std::max(0.0, sys.gopt[i]);
+                double gc = std::max(0.0, sum);
+                r.gqsq += gq * gq;
+                r.gisq += gc * gc;
+            }
+            else
+            {
+                r.gqsq += sys.gopt[i] * sys.gopt[i];
+                r.gisq += sum * sum;
+            }
+            gi[i] = sum;
+        }
+
+        ++itest;
+        if(r.gqsq < 10.0 * r.gisq)
+            itest = 0;
+        if(itest >= 3)
+        {
+            for(int i = 0; i < n; ++i)
+                sys.gopt[i] = gi[i];
+            for(int k = 0; k < mm; ++k)
+                sys.pq[k] = wpq[k];
+            const int nh = n * (n + 1) / 2;
+            for(int i = 0; i < nh; ++i)
+                sys.hq[i] = 0.0;
+            itest = 0;
+            r.reset_applied = true;
+        }
+        return r;
+    }
+
     // One advance of Powell's bobyqb driver: run the ntrits state machine from
     // the top of a trust-region iteration (label L60) until it has evaluated
     // the objective at least once and is ready to begin the next trust-region
@@ -436,6 +549,10 @@ struct bobyqa_policy
     // and rho-reduction transitions are executed inline, so a single call may
     // contract rho several times before an evaluation occurs; the reported
     // evaluation count is the true number of objective calls.
+    //
+    // After each trust iteration the least-Frobenius-norm model reset test runs
+    // (frobenius_model_reset): a degraded explicit-Hessian model is replaced by
+    // the interpolant once it dominates for three consecutive iterations.
     //
     // Reference: Powell, M. J. D. (2009), Section 5.
     //   Ported statement-for-statement from NLopt bobyqb_ lines 2100-3053.
@@ -828,6 +945,17 @@ struct bobyqa_policy
                 bool improved_here = (f < old_fopt);
                 if(improved_here)
                     s.xoptsq = s.sys.xopt.squaredNorm();
+
+                if(s.ntrits > 0)
+                {
+                    // Least-Frobenius-norm model reset (bobyqb_ lines 2824-2923):
+                    // when the explicit-Hessian model's gradient dominates the
+                    // interpolant's for three consecutive trust iterations, shed
+                    // the accumulated Hessian error by adopting the interpolant.
+                    Eigen::Vector<double, N> sl = s.lower_scaled - s.sys.xbase;
+                    Eigen::Vector<double, N> su = s.upper_scaled - s.sys.xbase;
+                    frobenius_model_reset(s.sys, sl, su, s.itest);
+                }
 
                 if(s.ntrits == 0)
                 {
