@@ -368,39 +368,161 @@ struct rosenbrock_fixed
     }
 };
 
+// Bound-active fixture for the L-BFGS-B allocation gate.
+//
+// rosenbrock_fixed above keeps every variable interior, so the solver stays on
+// the all-free two-loop-recursion path and never touches the generalized-
+// Cauchy-point -> free-variable subspace -> reduced_hessian / multiply branch.
+// A zero-allocation gate measured only on that fixture would certify "including
+// the bound-active path" vacuously.
+//
+// This quadratic places its unconstrained minimizer OUTSIDE the box on the
+// first axis (x0* = 2, upper bound 1) and interior on the second (x1* = 0.5):
+// the constrained solution pins x0 to its upper bound while x1 stays free, so
+// every steady-state step enters the bound-active branch with a non-empty free
+// set -- exactly the code the claim must exercise.
+struct bounded_quadratic_fixed
+{
+    static constexpr int problem_dimension = 2;
+
+    int dimension() const { return 2; }
+
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        const double a = x[0] - 2.0;
+        const double b = x[1] - 0.5;
+        return a * a + b * b;
+    }
+
+    void gradient(const Eigen::Vector<double, 2>& x,
+                  Eigen::Vector<double, 2>& g) const
+    {
+        g[0] = 2.0 * (x[0] - 2.0);
+        g[1] = 2.0 * (x[1] - 0.5);
+    }
+
+    Eigen::Vector<double, 2> lower_bounds() const
+    {
+        return Eigen::Vector<double, 2>{0.0, 0.0};
+    }
+
+    Eigen::Vector<double, 2> upper_bounds() const
+    {
+        return Eigen::Vector<double, 2>{1.0, 1.0};
+    }
+};
+
+// Pre-hoist witness floor for the bound-active branch. The dynamic
+// reduced_hessian plus the multiply rhs/z temporaries allocate every step this
+// branch runs; the floor is a non-blindness lower bound (comfortably below the
+// measured Release count, comfortably above zero). Under
+// ARGMIN_ALLOC_GATE_EXPECT_ZERO this floor is ignored and the same branch is
+// held to the zero-allocation gate.
+constexpr std::size_t lbfgsb_bound_active_witness = 4;
+
 }
 
 // L-BFGS-B is expected allocation-free on its steady-state hot loop and
-// reset() (the all-free two-loop recursion path). min_per_step = 0 holds it to
-// the zero-allocation gate immediately: the un-blinded gate must not
-// false-positive on an already-clean policy.
+// reset(). Two scenarios run: the wide-bounds all-free path (held to the
+// zero-allocation gate immediately) and a bound-active path that exercises the
+// GCP -> free-variable subspace -> reduced_hessian / multiply branch. The
+// bound-active scenario carries a path-entry assertion so the gate can never
+// certify the claim without actually running the branch.
 int argmin_alloc_trace_probe()
 {
-    rosenbrock_fixed problem;
-    Eigen::Vector<double, 2> x0{-1.2, 1.0};
-    const Eigen::VectorXd x0_reset = x0;
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
+    int rc = 0;
 
-    argmin::step_budget_solver solver{argmin::lbfgsb_policy<2>{}, problem, x0, opts};
+    // Scenario 1: wide-bounds all-free fast path -- allocation-free at HEAD and
+    // must stay so.
+    {
+        rosenbrock_fixed problem;
+        Eigen::Vector<double, 2> x0{-1.2, 1.0};
+        const Eigen::VectorXd x0_reset = x0;
+        argmin::solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_gradient_threshold(1e-8);
+        opts.set_objective_threshold(1e-10);
+        opts.set_step_threshold(1e-10);
 
-    solver.step();
-    solver.step();
+        argmin::step_budget_solver solver{argmin::lbfgsb_policy<2>{}, problem, x0, opts};
 
-    constexpr std::size_t hot_steps = 10;
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    for(std::size_t i = 0; i < hot_steps; ++i)
         solver.step();
-    solver.reset(x0_reset);
-    for(std::size_t i = 0; i < hot_steps; ++i)
         solver.step();
-    argmin::detail::bench::disarm_alloc_trace();
 
-    return argmin::detail::bench::evaluate_gate("lbfgsb", 2 * hot_steps, 0);
+        constexpr std::size_t hot_steps = 10;
+        argmin::detail::bench::reset_alloc_count();
+        argmin::detail::bench::arm_alloc_trace();
+        for(std::size_t i = 0; i < hot_steps; ++i)
+            solver.step();
+        solver.reset(x0_reset);
+        for(std::size_t i = 0; i < hot_steps; ++i)
+            solver.step();
+        argmin::detail::bench::disarm_alloc_trace();
+
+        rc |= argmin::detail::bench::evaluate_gate("lbfgsb", 2 * hot_steps, 0);
+    }
+
+    // Scenario 2: bound-active path (GCP -> free-variable subspace ->
+    // reduced_hessian / multiply).
+    {
+        bounded_quadratic_fixed problem;
+        Eigen::Vector<double, 2> x0{0.1, 0.1};
+        const Eigen::VectorXd x0_reset = x0;
+        argmin::solver_options opts;
+        opts.max_iterations = 200;
+        opts.set_gradient_threshold(1e-8);
+        opts.set_objective_threshold(1e-10);
+        opts.set_step_threshold(1e-10);
+
+        argmin::step_budget_solver solver{argmin::lbfgsb_policy<2>{}, problem, x0, opts};
+
+        solver.step();
+        solver.step();
+
+        // Path-entry observable: a bound is active exactly when the shared
+        // direction predicate rejects the all-free fast path, i.e. when the
+        // solver takes the GCP + subspace branch this scenario targets.
+        std::size_t bound_active_steps = 0;
+        auto observe_path = [&]() {
+            const auto& st = solver.state();
+            if(!argmin::detail::all_variables_free<double, 2>(
+                   st.x, st.g, st.lower, st.upper))
+                ++bound_active_steps;
+        };
+
+        constexpr std::size_t hot_steps = 10;
+        argmin::detail::bench::reset_alloc_count();
+        argmin::detail::bench::arm_alloc_trace();
+        for(std::size_t i = 0; i < hot_steps; ++i)
+        {
+            solver.step();
+            observe_path();
+        }
+        solver.reset(x0_reset);
+        for(std::size_t i = 0; i < hot_steps; ++i)
+        {
+            solver.step();
+            observe_path();
+        }
+        argmin::detail::bench::disarm_alloc_trace();
+
+        if(bound_active_steps == 0)
+        {
+            std::println(stderr,
+                "  [alloc-gate] lbfgsb_bound_active FAIL: fixture never entered "
+                "the bound-active branch (path-entry assertion) -- a zero-mode "
+                "gate would certify the claim vacuously");
+            return 1;
+        }
+        std::println("  [alloc-gate] lbfgsb_bound_active path-entry: {}/{} armed "
+                     "steps had an active bound",
+                     bound_active_steps, 2 * hot_steps);
+
+        rc |= argmin::detail::bench::evaluate_gate(
+            "lbfgsb_bound_active", 2 * hot_steps, lbfgsb_bound_active_witness);
+    }
+
+    return rc;
 }
 #endif
 
