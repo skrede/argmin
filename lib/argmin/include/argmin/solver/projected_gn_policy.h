@@ -101,6 +101,10 @@ struct projected_gn_policy
         // J. On the dynamic axis J is itself a MatrixXd and is written directly,
         // leaving this buffer unused.
         Eigen::MatrixXd J_raw;
+
+        // Caller-owned scratch for the reduced solve and trial evaluation,
+        // sized once and reused so the step is allocation-free at fixed N.
+        detail::projected_gn_workspace<N> ws;
     };
 
     template <typename Problem, typename Convergence>
@@ -131,6 +135,9 @@ struct projected_gn_policy
         s.J.resize(s.num_residuals, n);
         if constexpr(N != Eigen::Dynamic)
             s.J_raw.resize(s.num_residuals, n);
+        s.ws.free_indices.reserve(static_cast<std::size_t>(n));
+        s.ws.r_trial.resize(s.num_residuals);
+        s.ws.Jd.resize(s.num_residuals);
         s.problem->residuals(s.x, s.r);
         evaluate_jacobian(s);
         s.objective_value = 0.5 * s.r.squaredNorm();
@@ -154,7 +161,7 @@ struct projected_gn_policy
         Eigen::Vector<double, N> g = (s.J.transpose() * s.r).eval();
 
         // Active-set identification (N&W Section 16.6)
-        auto free_indices = detail::identify_free_set(s.x, g, s.lower, s.upper);
+        detail::identify_free_set_into(s.x, g, s.lower, s.upper, s.ws.free_indices);
 
         Eigen::Vector<double, N> h;
         if(options.use_dogleg)
@@ -162,15 +169,15 @@ struct projected_gn_policy
             // Extract reduced system for dogleg
             Eigen::MatrixXd H_free;
             Eigen::VectorXd g_free;
-            detail::extract_reduced_system(H, g, free_indices, H_free, g_free);
+            detail::extract_reduced_system(H, g, s.ws.free_indices, H_free, g_free);
 
-            h = detail::dogleg_step(s.J, H_free, g_free, free_indices, n, s.delta);
+            h = detail::dogleg_step(s.J, H_free, g_free, s.ws.free_indices, n, s.delta);
         }
         else
         {
             // Nielsen/LM mode: solve damped reduced system
-            h = detail::solve_reduced_gn(H, g, free_indices,
-                                         s.lambda, options.diagonal_min_clamp);
+            detail::solve_reduced_gn_into(H, g, s.lambda,
+                                          options.diagonal_min_clamp, s.ws, h);
         }
 
         // Project trial point onto bounds before evaluating (N&W Section 16.7)
@@ -181,9 +188,8 @@ struct projected_gn_policy
         Eigen::Vector<double, N> d = (x_trial - s.x).eval();
 
         // Evaluate trial residuals
-        Eigen::VectorXd r_trial(s.num_residuals);
-        s.problem->residuals(x_trial, r_trial);
-        double f_trial = 0.5 * r_trial.squaredNorm();
+        s.problem->residuals(x_trial, s.ws.r_trial);
+        double f_trial = 0.5 * s.ws.r_trial.squaredNorm();
 
         // Gain ratio via the direct model reduction evaluated at the ACCEPTED
         // (projected/backtracked) step d:
@@ -195,7 +201,8 @@ struct projected_gn_policy
         // globalization modes now share this direct form, and the trial is
         // accepted only when predicted > 0 and the trial objective is finite.
         double actual = s.objective_value - f_trial;
-        double predicted = -(g.dot(d) + 0.5 * (s.J * d).squaredNorm());
+        s.ws.Jd.noalias() = s.J * d;
+        double predicted = -(g.dot(d) + 0.5 * s.ws.Jd.squaredNorm());
 
         double rho = detail::gain_ratio(actual, predicted);
 
@@ -209,7 +216,7 @@ struct projected_gn_policy
         if(accepted)
         {
             s.x = x_trial;
-            s.r = r_trial;
+            s.r = s.ws.r_trial;
             evaluate_jacobian(s);
             s.objective_value = f_trial;
 
@@ -278,6 +285,9 @@ struct projected_gn_policy
         s.J.resize(s.num_residuals, n);
         if constexpr(N != Eigen::Dynamic)
             s.J_raw.resize(s.num_residuals, n);
+        s.ws.free_indices.reserve(static_cast<std::size_t>(n));
+        s.ws.r_trial.resize(s.num_residuals);
+        s.ws.Jd.resize(s.num_residuals);
         s.problem->residuals(s.x, s.r);
         evaluate_jacobian(s);
         s.objective_value = 0.5 * s.r.squaredNorm();

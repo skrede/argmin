@@ -28,6 +28,30 @@
 namespace argmin::detail
 {
 
+// Caller-owned scratch for the projected Gauss-Newton step, hoisted out of the
+// per-call helper bodies so the hot loop is allocation-free at a fixed
+// dimension. The buffers are sized once (init/reset) and reused: the free-set
+// index list keeps its capacity across active-set changes, the reduced-system
+// matrix/vector and the LDLT reuse their storage while the free-set size is
+// stable, and the trial-residual / J*d buffers ride the runtime residual axis.
+//
+// Owned by policy state (never a helper-local static or thread_local), mirroring
+// the ldp / soc_nnls caller-owned-workspace threading convention.
+template <int N = dynamic_dimension>
+struct projected_gn_workspace
+{
+    // Active-set reduced-solve buffers (Nielsen/LM path).
+    std::vector<int> free_indices;
+    Eigen::MatrixXd H_free;
+    Eigen::VectorXd g_free;
+    Eigen::LDLT<Eigen::MatrixXd> ldlt;
+    Eigen::VectorXd h_free;
+
+    // Trial-evaluation buffers on the runtime residual axis (both paths).
+    Eigen::VectorXd r_trial;
+    Eigen::VectorXd Jd;
+};
+
 // Identify free (non-active) variable indices for active-set projection.
 //
 // A variable i is active if it sits at a bound and the gradient points into
@@ -60,6 +84,35 @@ inline std::vector<int> identify_free_set(
     }
 
     return free_indices;
+}
+
+// Fill a caller-owned free-index list in place (reusing its capacity).
+//
+// Identical selection to identify_free_set; the only difference is the sink:
+// out.clear() preserves the vector's capacity so no allocation occurs once the
+// buffer has grown to hold up to n indices. The bound arguments are taken by
+// Eigen::Ref so a compile-time-dimension Vector<double, N> binds without a copy.
+
+inline void identify_free_set_into(
+    const Eigen::Ref<const Eigen::VectorXd>& x,
+    const Eigen::Ref<const Eigen::VectorXd>& gradient,
+    const Eigen::Ref<const Eigen::VectorXd>& lower,
+    const Eigen::Ref<const Eigen::VectorXd>& upper,
+    std::vector<int>& out)
+{
+    const int n = static_cast<int>(x.size());
+    out.clear();
+
+    for(int i = 0; i < n; ++i)
+    {
+        double eps = std::numeric_limits<double>::epsilon() * std::max(1.0, std::abs(x(i)));
+        bool at_lower = x(i) <= lower(i) + eps;
+        bool at_upper = x(i) >= upper(i) - eps;
+        bool active = (at_lower && gradient(i) > 0.0) ||
+                      (at_upper && gradient(i) < 0.0);
+        if(!active)
+            out.push_back(i);
+    }
 }
 
 // Extract H_free submatrix and g_free subvector from free indices.
@@ -135,6 +188,58 @@ inline Eigen::VectorXd solve_reduced_gn(
 
     Eigen::VectorXd h_free = H_free.ldlt().solve(-g_free);
     return scatter_to_full(h_free, free_indices, n);
+}
+
+// Allocation-free reduced Gauss-Newton solve into a caller-owned step buffer.
+//
+// Same computation as solve_reduced_gn -- extract the free submatrix/subvector,
+// apply the diagonal-scaled damping, LDLT-solve, scatter back -- but every
+// intermediate lives in the caller-owned workspace and the full step is written
+// into h_out. With a stable free-set size across steps the workspace matrices,
+// the LDLT internal storage, and h_out all reuse their allocations. The bound
+// H / gradient are taken by Eigen::Ref so the policy's compile-time-dimension
+// Matrix<double, N, N> / Vector<double, N> bind without a copy.
+//
+// Reference: K&W Eq. 6.11 (Marquardt diagonal scaling).
+//            N&W Section 10.2-10.3 (Gauss-Newton normal equations).
+
+template <int N>
+void solve_reduced_gn_into(
+    const Eigen::Ref<const Eigen::MatrixXd>& H,
+    const Eigen::Ref<const Eigen::VectorXd>& gradient,
+    double lambda,
+    double diagonal_min_clamp,
+    projected_gn_workspace<N>& ws,
+    Eigen::Vector<double, N>& h_out)
+{
+    const int n = static_cast<int>(gradient.size());
+    const int n_free = static_cast<int>(ws.free_indices.size());
+
+    h_out.resize(n);
+    h_out.setZero();
+
+    if(n_free == 0)
+        return;
+
+    ws.H_free.resize(n_free, n_free);
+    ws.g_free.resize(n_free);
+    for(int i = 0; i < n_free; ++i)
+    {
+        auto fi = ws.free_indices[static_cast<std::size_t>(i)];
+        ws.g_free(i) = gradient(fi);
+        for(int j = 0; j < n_free; ++j)
+            ws.H_free(i, j) = H(fi, ws.free_indices[static_cast<std::size_t>(j)]);
+    }
+
+    // Diagonal-scaled damping (K&W Eq. 6.11, Marquardt 1963)
+    for(int i = 0; i < n_free; ++i)
+        ws.H_free(i, i) += lambda * std::max(ws.H_free(i, i), diagonal_min_clamp);
+
+    ws.ldlt.compute(ws.H_free);
+    ws.h_free = ws.ldlt.solve(-ws.g_free);
+
+    for(int i = 0; i < n_free; ++i)
+        h_out(ws.free_indices[static_cast<std::size_t>(i)]) = ws.h_free(i);
 }
 
 // Extract columns at free_indices from the Jacobian.

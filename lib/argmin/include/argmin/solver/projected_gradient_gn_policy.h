@@ -106,6 +106,10 @@ struct projected_gradient_gn_policy
         // Write scratch for the analytic/FD Jacobian evaluation (see
         // projected_gn_policy for the fixed-N-vs-dynamic sink rationale).
         Eigen::MatrixXd J_raw;
+
+        // Caller-owned scratch for the trial evaluation / reduced solve, sized
+        // once and reused so the step is allocation-free at fixed N.
+        detail::projected_gn_workspace<N> ws;
     };
 
     template <typename Problem, typename Convergence>
@@ -136,6 +140,9 @@ struct projected_gradient_gn_policy
         s.J.resize(s.num_residuals, n);
         if constexpr(N != Eigen::Dynamic)
             s.J_raw.resize(s.num_residuals, n);
+        s.ws.free_indices.reserve(static_cast<std::size_t>(n));
+        s.ws.r_trial.resize(s.num_residuals);
+        s.ws.Jd.resize(s.num_residuals);
         s.problem->residuals(s.x, s.r);
         evaluate_jacobian(s);
         s.objective_value = 0.5 * s.r.squaredNorm();
@@ -176,6 +183,9 @@ struct projected_gradient_gn_policy
         s.J.resize(s.num_residuals, n);
         if constexpr(N != Eigen::Dynamic)
             s.J_raw.resize(s.num_residuals, n);
+        s.ws.free_indices.reserve(static_cast<std::size_t>(n));
+        s.ws.r_trial.resize(s.num_residuals);
+        s.ws.Jd.resize(s.num_residuals);
         s.problem->residuals(s.x, s.r);
         evaluate_jacobian(s);
         s.objective_value = 0.5 * s.r.squaredNorm();
@@ -226,15 +236,14 @@ private:
 
         bool accepted = false;
         Eigen::Vector<double, N> x_trial(n);
-        Eigen::VectorXd r_trial(s.num_residuals);
         double f_trial{};
 
         for(std::uint32_t k = 0; k < max_bt; ++k)
         {
             Eigen::Vector<double, N> x_candidate = (s.x + alpha * d).eval();
             x_trial = detail::project(x_candidate, s.lower, s.upper);
-            s.problem->residuals(x_trial, r_trial);
-            f_trial = 0.5 * r_trial.squaredNorm();
+            s.problem->residuals(x_trial, s.ws.r_trial);
+            f_trial = 0.5 * s.ws.r_trial.squaredNorm();
 
             // Armijo condition: f(x_trial) <= f(x) + c * alpha * g^T d
             if(f_trial <= s.objective_value + c * alpha * gTd)
@@ -258,11 +267,12 @@ private:
             // LM step and yields a fictitious denominator near an active bound.
             Eigen::Vector<double, N> d_acc = (x_trial - s.x).eval();
             double actual = old_value - f_trial;
-            double predicted = -(g.dot(d_acc) + 0.5 * (s.J * d_acc).squaredNorm());
+            s.ws.Jd.noalias() = s.J * d_acc;
+            double predicted = -(g.dot(d_acc) + 0.5 * s.ws.Jd.squaredNorm());
             double rho = detail::gain_ratio(actual, predicted);
 
             s.x = x_trial;
-            s.r = r_trial;
+            s.r = s.ws.r_trial;
             evaluate_jacobian(s);
             s.objective_value = f_trial;
 
@@ -315,13 +325,13 @@ private:
         const Eigen::Matrix<double, N, N>& H, const Eigen::Vector<double, N>& g, int n)
     {
         // Active-set identification for dogleg (N&W Section 16.6)
-        auto free_indices = detail::identify_free_set(s.x, g, s.lower, s.upper);
+        detail::identify_free_set_into(s.x, g, s.lower, s.upper, s.ws.free_indices);
 
         Eigen::MatrixXd H_free;
         Eigen::VectorXd g_free;
-        detail::extract_reduced_system(H, g, free_indices, H_free, g_free);
+        detail::extract_reduced_system(H, g, s.ws.free_indices, H_free, g_free);
 
-        Eigen::Vector<double, N> h = detail::dogleg_step(s.J, H_free, g_free, free_indices, n, s.delta);
+        Eigen::Vector<double, N> h = detail::dogleg_step(s.J, H_free, g_free, s.ws.free_indices, n, s.delta);
 
         // Project trial point onto bounds (N&W Section 16.7)
         Eigen::Vector<double, N> x_plus_h = (s.x + h).eval();
@@ -329,16 +339,16 @@ private:
         Eigen::Vector<double, N> d = (x_trial - s.x).eval();
 
         // Evaluate trial residuals
-        Eigen::VectorXd r_trial(s.num_residuals);
-        s.problem->residuals(x_trial, r_trial);
-        double f_trial = 0.5 * r_trial.squaredNorm();
+        s.problem->residuals(x_trial, s.ws.r_trial);
+        double f_trial = 0.5 * s.ws.r_trial.squaredNorm();
 
         // Gain ratio via the direct model reduction at the accepted (projected)
         // dogleg step: predicted = -g^T d - 0.5 * ||J d||^2, valid for any d.
         // The trial is accepted only when predicted > 0 and f_trial is finite,
         // replacing the |predicted|<1e-30 -> rho=1 silent accept.
         double actual = s.objective_value - f_trial;
-        double predicted = -(g.dot(d) + 0.5 * (s.J * d).squaredNorm());
+        s.ws.Jd.noalias() = s.J * d;
+        double predicted = -(g.dot(d) + 0.5 * s.ws.Jd.squaredNorm());
         double rho = detail::gain_ratio(actual, predicted);
 
         const double old_value = s.objective_value;
@@ -350,7 +360,7 @@ private:
         if(accepted)
         {
             s.x = x_trial;
-            s.r = r_trial;
+            s.r = s.ws.r_trial;
             evaluate_jacobian(s);
             s.objective_value = f_trial;
         }
