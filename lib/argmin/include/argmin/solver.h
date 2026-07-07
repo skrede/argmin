@@ -2,6 +2,7 @@
 #define HPP_GUARD_ARGMIN_SOLVER_H
 
 #include "argmin/solver/options.h"
+#include "argmin/solver/stepper.h"
 #include "argmin/solver/lm_policy.h"
 #include "argmin/solver/mma_policy.h"
 #include "argmin/solver/basic_solver.h"
