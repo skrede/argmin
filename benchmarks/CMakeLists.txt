@@ -487,6 +487,18 @@ if(NLopt_FOUND)
         micro_augmented_lagrangian.cpp alloc_gate_augmented_lagrangian
         ARGMIN_ALLOC_GATE_EXPECT_ZERO)
 
+    # Projected Gauss-Newton family. Both probes drive a fixed-2 bounded linear
+    # least-squares fixture whose first coordinate pins at its upper bound, so
+    # the active-set / projection path is entered (asserted in the probe) with a
+    # stable free set across the armed window. After the per-call scratch hoist
+    # both run in zero-allocation mode.
+    argmin_add_alloc_gate(micro_projected_gn_alloc_trace
+        micro_projected_gn.cpp alloc_gate_projected_gn
+        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
+    argmin_add_alloc_gate(micro_projected_gradient_gn_alloc_trace
+        micro_projected_gradient_gn.cpp alloc_gate_projected_gradient_gn
+        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
+
     add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
     target_link_libraries(micro_augmented_lagrangian PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_augmented_lagrangian PRIVATE
