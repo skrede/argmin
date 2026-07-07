@@ -15,7 +15,6 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
-#include <stdexcept>
 
 using Catch::Approx;
 using namespace argmin;
@@ -1374,7 +1373,9 @@ TEST_CASE("cmaes_policy: reset refreshes params on lambda bump", "[cmaes]")
 //   2. init() with options.lambda > 512 succeeds when MaxPopulation
 //      is wide enough (no buffer-overflow UB), and step() runs at
 //      that wide population without crashing.
-//   3. init() with options.lambda > MaxPop throws std::runtime_error.
+//   3. init() with options.lambda > MaxPop rejects the problem via the
+//      solver_status::invalid_problem status return (the library is
+//      exception-free).
 //
 // Reference:
 //   Auger, A. & Hansen, N. (2005). A Restart CMA Evolution Strategy
@@ -1419,22 +1420,29 @@ TEST_CASE("cmaes_policy: MaxPopulation template parameter widens IPOP cap",
         && state.params.lambda <= 512;
     CHECK_FALSE(stalled_before_512);
 
-    // (3) init() with options.lambda > MaxPop throws std::runtime_error.
+    // (3) init() with options.lambda > MaxPop rejects via invalid_problem:
+    // the state is flagged and the first step() returns the status rather
+    // than resizing the buffers past the static MaxPop bound.
     policy_narrow_t narrow_policy;
     narrow_policy.options.seed = 42u;
     narrow_policy.options.lambda = 257u;    // > MaxPop=256
-    REQUIRE_THROWS_AS(narrow_policy.init(problem, x0, opts), std::runtime_error);
+    auto narrow_state = narrow_policy.init(problem, x0, opts);
+    REQUIRE(narrow_state.invalid_problem);
+    auto narrow_r = narrow_policy.step(narrow_state);
+    REQUIRE(narrow_r.policy_status.has_value());
+    CHECK(*narrow_r.policy_status == solver_status::invalid_problem);
 }
 
-// Lock the init()-time lambda<=MaxPop assertion. A population above the
+// Lock the init()-time lambda<=MaxPop guard. A population above the
 // default `cmaes_policy<>` cap (MaxPop=512) would silently UB-resize the
 // per-step buffers (`Eigen::Matrix<..., 0, MaxPop, ...>`); init() must
-// instead throw std::runtime_error with an actionable message.
+// instead flag the state and step() must return
+// solver_status::invalid_problem (the library is exception-free).
 //
 // Reference:
 //   Hansen, N. (2023). The CMA Evolution Strategy: A Tutorial.
 //   arXiv:1604.00772 §B.1: default population size lambda = 4 + floor(3*ln(n)).
-TEST_CASE("cmaes_policy: init throws when lambda exceeds MaxPop",
+TEST_CASE("cmaes_policy: init flags invalid_problem when lambda exceeds MaxPop",
           "[cmaes][maxpop]")
 {
     constexpr int n = 4;
@@ -1451,7 +1459,13 @@ TEST_CASE("cmaes_policy: init throws when lambda exceeds MaxPop",
     policy.options.seed = 42u;
     policy.options.lambda = 520u;   // above the 512 static buffer cap
 
-    REQUIRE_THROWS_AS(policy.init(problem, x0, opts), std::runtime_error);
+    auto state = policy.init(problem, x0, opts);
+    REQUIRE(state.invalid_problem);
+
+    auto r = policy.step(state);
+    REQUIRE(r.policy_status.has_value());
+    CHECK(*r.policy_status == solver_status::invalid_problem);
+    CHECK(r.is_null_step);
 }
 
 // Lock the NaN-guard always-exit contract: a NaN in s.sigma, s.D, or

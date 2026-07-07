@@ -182,8 +182,8 @@ struct nlopt_faithful_policy
         // compile-time max-cols bound is undefined behavior) and step()
         // returns solver_status::invalid_problem on the first call. The
         // library is exception-free, so this is surfaced as a terminal
-        // status rather than a throw (cf. the CMA-ES throw path, tracked
-        // separately for removal).
+        // status rather than a throw (the same invalid_problem status-return
+        // idiom guards the CMA-ES population-cap path).
         bool storage_exceeded{false};
 
         // Constraint evaluation buffers. n_eq / n_ineq are problem

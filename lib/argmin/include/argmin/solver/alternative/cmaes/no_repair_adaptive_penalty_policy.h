@@ -64,7 +64,6 @@
 #include <numeric>
 #include <optional>
 #include <random>
-#include <stdexcept>
 #include <vector>
 
 namespace argmin::alternative::cmaes
@@ -156,6 +155,17 @@ struct no_repair_adaptive_penalty_policy
 
         bool covariance_dirty{false};
         std::uint32_t decomposition_skip_k{1};
+
+        // Set during init()/reset() when the auto-computed or requested
+        // population size exceeds the compile-time MaxPop cap. The lambda-
+        // sized per-step buffers below are Eigen::Matrix<..., 0, MaxPop, ...>
+        // with a static maximum-rows bound; resizing them past MaxPop is
+        // undefined behavior. When this flag is set, init()/reset() skip
+        // those sizing calls and step() returns solver_status::invalid_problem
+        // on its first call, before any buffer is touched. Raise the
+        // MaxPopulation template parameter on cmaes_policy to admit a wider
+        // population.
+        bool invalid_problem{false};
 
         // Per-step buffers (static-audit G10). Pre-allocated to MaxPop
         // so step() does not heap-resize them on the hot path. lambda
@@ -257,28 +267,32 @@ struct no_repair_adaptive_penalty_policy
                 static_cast<int>(4 + std::floor(3.0 * std::log(n))));
         s.params = detail::compute_constants(n, pop_lambda);
 
-        // Convert the silent UB at lambda > MaxPop into a hard
-        // failure: s.fitnesses_buf et al. are
+        // Reject the silent UB at lambda > MaxPop as a terminal status
+        // rather than a resize: s.fitnesses_buf et al. are
         // `Eigen::Matrix<..., 0, MaxPop, ...>` with a static
         // maximum-rows compile-time bound; a resize past MaxPop is
-        // undefined behavior. Throw with an actionable message so
-        // the caller knows to widen the MaxPopulation template
-        // parameter.
-        if(s.params.lambda > state_type<Problem>::MaxPop)
-            throw std::runtime_error(
-                "cmaes::init: auto-computed lambda exceeds MaxPop -- "
-                "raise the MaxPopulation template parameter on cmaes_policy");
+        // undefined behavior. Flag the state so the lambda-sized sizing
+        // below is skipped and step() returns
+        // solver_status::invalid_problem on its first call. Raise the
+        // MaxPopulation template parameter on cmaes_policy to admit the
+        // requested population.
+        s.invalid_problem = (s.params.lambda > state_type<Problem>::MaxPop);
 
         // Pre-allocate per-step buffers (static-audit G10). Sized to
         // current lambda; step() uses .head(lambda) / .leftCols(lambda)
         // to track the working size, and re-resizes only on IPOP
         // doublings. The compile-time MaxPop cap on the matrix
-        // template still protects against pathological growth.
-        s.fitnesses_buf.resize(s.params.lambda);
-        s.unpenalized_buf.resize(s.params.lambda);
-        s.idx_buf.resize(static_cast<std::size_t>(s.params.lambda));
-        s.deltas_buf.resize(n, s.params.lambda);
-        s.gen_fitnesses_buf.resize(static_cast<std::size_t>(s.params.lambda));
+        // template still protects against pathological growth. Gated on
+        // the population-cap check so an over-cap lambda never resizes
+        // past the static MaxPop bound.
+        if(!s.invalid_problem)
+        {
+            s.fitnesses_buf.resize(s.params.lambda);
+            s.unpenalized_buf.resize(s.params.lambda);
+            s.idx_buf.resize(static_cast<std::size_t>(s.params.lambda));
+            s.deltas_buf.resize(n, s.params.lambda);
+            s.gen_fitnesses_buf.resize(static_cast<std::size_t>(s.params.lambda));
+        }
 
         s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
         s.p_sigma = Eigen::Vector<double, N>::Zero(n);
@@ -350,6 +364,26 @@ struct no_repair_adaptive_penalty_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
+        // Reject an over-cap population before touching any lambda-sized
+        // buffer (they were left unsized by init()/reset() precisely so
+        // this path cannot resize past the static MaxPop bound). This is a
+        // hard, exception-free runtime precondition failure surfaced as a
+        // terminal status; the caller must raise the MaxPopulation template
+        // parameter on cmaes_policy.
+        if(s.invalid_problem)
+        {
+            return step_result<double>{
+                .objective_value = s.objective_value,
+                .gradient_norm = 0.0,
+                .step_size = 0.0,
+                .objective_change = 0.0,
+                .improved = false,
+                .is_null_step = true,
+                .x_norm = s.x.norm(),
+                .policy_status = solver_status::invalid_problem,
+            };
+        }
+
         const int n = s.mean.size();
         const int lambda = s.params.lambda;
         const int mu = s.params.mu;
@@ -1030,10 +1064,12 @@ struct no_repair_adaptive_penalty_policy
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
         s.params = detail::compute_constants(n,
             static_cast<int>(options.lambda.value_or(0)));
-        if(s.params.lambda > state_type<P>::MaxPop)
-            throw std::runtime_error(
-                "cmaes::reset: options.lambda exceeds MaxPop -- "
-                "raise the MaxPopulation template parameter on cmaes_policy");
+        // Re-evaluate the population-cap guard on the refreshed lambda. A
+        // reset that lands over the cap flags the state so step() returns
+        // solver_status::invalid_problem instead of resizing the lambda-
+        // sized buffers past the static MaxPop bound; a reset back under
+        // the cap clears the flag.
+        s.invalid_problem = (s.params.lambda > state_type<P>::MaxPop);
         s.mean = x0;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
