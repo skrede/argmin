@@ -225,6 +225,13 @@ struct filter_slsqp_policy
         detail::kraft_lsq_qp_recovery_solver<double, N> qp_solver;
         detail::filter_set<double> filter;
 
+        // Persistent QP result buffers (main step + second-order
+        // correction). State-resident so the fill-into QP solve reuses
+        // their x / lambda storage across step() calls -- no per-solve
+        // allocation for the QP multipliers at steady state.
+        detail::qp_result<double, N> qp_res;
+        detail::qp_result<double, N> soc_qp_res;
+
         // Cross-policy state-resident buffer struct. Consolidates the
         // per-step / per-line-search trial buffers, the BFGS curvature-
         // pair buffers, the constraint-axis workspaces (c_all, c_trial,
@@ -345,6 +352,16 @@ struct filter_slsqp_policy
 
         s.qp_solver.resize(n, s.n_eq, s.n_ineq, n, n);
 
+        // Pre-size the persistent QP result multiplier buffers to the real
+        // constraint count so the fill-into QP solve's out.lambda.setZero()
+        // reuses their storage from the first solve onward, including the
+        // second-order-correction result.
+        const int m_real_qp = s.n_eq + s.n_ineq;
+        s.qp_res.x.setZero(n);
+        s.qp_res.lambda.setZero(m_real_qp);
+        s.soc_qp_res.x.setZero(n);
+        s.soc_qp_res.lambda.setZero(m_real_qp);
+
         return s;
     }
 
@@ -424,7 +441,7 @@ struct filter_slsqp_policy
         // post-loop accept-step block. Restoration-success returns inline
         // from inside the loop; the only path that exits via `break` is
         // the LS/filter accept path (accepted = true).
-        detail::qp_result<double, N> qp_res;
+        detail::qp_result<double, N>& qp_res = s.qp_res;
         Eigen::Vector<double, N>& p = s.bufs.p_buf;
         double alpha = 1.0;
         // f_k and h_k are computed from s.objective_value / s.c_eq / s.c_ineq
@@ -448,7 +465,8 @@ struct filter_slsqp_policy
         s.bufs.p_lo_buf.noalias() = s.lower - s.x;
         s.bufs.p_hi_buf.noalias() = s.upper - s.x;
 
-        qp_res = s.qp_solver.solve_with_factored_hessian(
+        s.qp_solver.solve_with_factored_hessian_into(
+            qp_res,
             s.bufs.E_buf, s.bufs.f_buf, s.g,
             s.J_eq, s.bufs.b_eq_workspace,
             s.J_ineq, s.bufs.b_ineq_workspace,
@@ -744,7 +762,9 @@ struct filter_slsqp_policy
                     // Reuse the (E, f) factored on this step's main QP
                     // solve: Hessian and gradient unchanged, only the
                     // constraint RHS differs (SOC retry).
-                    auto soc_res = s.qp_solver.solve_with_factored_hessian(
+                    detail::qp_result<double, N>& soc_res = s.soc_qp_res;
+                    s.qp_solver.solve_with_factored_hessian_into(
+                        soc_res,
                         s.bufs.E_buf, s.bufs.f_buf, s.g,
                         s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
                         s.bufs.p_lo_buf, s.bufs.p_hi_buf);
@@ -1136,7 +1156,7 @@ struct filter_slsqp_policy
         // else: reuse s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf from
         //       the prior step's gate-fire path.
         double kkt = detail::kkt_residual<double,
-                                          Eigen::Dynamic,
+                                          N,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic>(
             s.g, s.J_eq, s.J_ineq,
@@ -1223,14 +1243,16 @@ private:
     //                 differ across SQP policies; a shared helper would need
     //                 a concept-or-trait abstraction not yet in place.
     template <typename P>
-    static double lagrangian_gradient_norm(const state_type<P>& s)
+    static double lagrangian_gradient_norm(state_type<P>& s)
     {
-        const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
         if(m == 0)
             return s.g.norm();
 
-        Eigen::Matrix<double, Eigen::Dynamic, N> A(m, n);
+        // Stacked Jacobian assembled into the state-resident buffer
+        // (sized once at init/reset) rather than a per-call A(m, n),
+        // keeping the reporting leg allocation-free at steady state.
+        Eigen::Matrix<double, Eigen::Dynamic, N>& A = s.bufs.lag_A_buf;
         if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
         if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
         return detail::lagrangian_gradient(s.g, A, s.lambda).norm();

@@ -117,7 +117,7 @@ struct sqp_state_buffers
     // Caller-owned workspace for compute_kkt_multipliers_active_set
     // (persistent QR + reduced-Jacobian buffer). Grow-only; the
     // multiplier re-estimation leg re-uses it across steps.
-    kkt_multiplier_workspace<Scalar> kkt_ws;
+    kkt_multiplier_workspace<Scalar, N> kkt_ws;
 
     void resize(int n, int n_eq, int n_ineq);
 };

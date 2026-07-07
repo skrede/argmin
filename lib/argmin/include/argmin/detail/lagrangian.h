@@ -215,14 +215,25 @@ Eigen::Vector<Scalar, Eigen::Dynamic> estimate_multipliers_active_set(
 // Owned by the SQP policy state (via sqp_state_buffers); grow-only, so
 // steady-state re-estimation at a stable active-set shape performs no
 // allocation.
-template <typename Scalar>
+// MaxN bounds the decision-variable axis at compile time. The QR factorizes
+// A_active^T, an n x m_active matrix whose reduced active set satisfies
+// m_active <= n <= MaxN under the LICQ that the SQP multiplier estimate
+// already assumes (linearly independent active constraint gradients). Both QR
+// axes and the least-squares right-hand side are therefore bounded by MaxN, so
+// the factorization's internal buffers, the solve's rhs copy, and the
+// Householder apply's scratch all live in inline storage at fixed N. MaxN ==
+// Eigen::Dynamic degrades to plain heap-backed storage (the runtime-dimension
+// instantiation), which is not required to be allocation-free.
+template <typename Scalar, int MaxN = Eigen::Dynamic>
 struct kkt_multiplier_workspace
 {
-    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> A_active;
+    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                  Eigen::ColMajor, MaxN, MaxN> A_active;
     Eigen::ColPivHouseholderQR<
-        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> qr;
-    Eigen::Vector<Scalar, Eigen::Dynamic> grad_f_dyn;
-    Eigen::Vector<Scalar, Eigen::Dynamic> lambda_active;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic,
+                      Eigen::ColMajor, MaxN, MaxN>> qr;
+    Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor, MaxN, 1> grad_f_dyn;
+    Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor, MaxN, 1> lambda_active;
 };
 
 // Active-set multiplier estimate with scatter into caller-owned outputs.
@@ -245,13 +256,14 @@ struct kkt_multiplier_workspace
 template <typename Scalar,
           int N = argmin::dynamic_dimension,
           int Meq = argmin::dynamic_dimension,
-          int Mineq = argmin::dynamic_dimension>
+          int Mineq = argmin::dynamic_dimension,
+          int MaxN = Eigen::Dynamic>
 ARGMIN_FORCE_INLINE void compute_kkt_multipliers_active_set(
     const Eigen::Vector<Scalar, N>& g,
     const Eigen::Matrix<Scalar, Meq, N>& J_eq,
     const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
     const Eigen::Vector<Scalar, Mineq>& c_ineq,
-    kkt_multiplier_workspace<Scalar>& ws,
+    kkt_multiplier_workspace<Scalar, MaxN>& ws,
     Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> lam_eq_out,
     Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> mu_ineq_out,
     Scalar active_kappa = std::sqrt(std::numeric_limits<Scalar>::epsilon()))
