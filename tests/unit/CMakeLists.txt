@@ -122,3 +122,15 @@ set(ARGMIN_ORACLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../oracles")
 if(EXISTS "${ARGMIN_ORACLE_DIR}")
     file(COPY "${ARGMIN_ORACLE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
+
+# The BOBYQA convergence oracle is loaded by name by the convergence /
+# eval-count pin, so copy it explicitly (mirroring the cobyla_convergence.csv
+# plumbing) and fail loudly at configure time if the generator step was
+# skipped, rather than surfacing as a silent relative-path miss at run time.
+set(ARGMIN_BOBYQA_ORACLE "${ARGMIN_ORACLE_DIR}/bobyqa_convergence.csv")
+if(EXISTS "${ARGMIN_BOBYQA_ORACLE}")
+    configure_file(
+        "${ARGMIN_BOBYQA_ORACLE}"
+        "${CMAKE_CURRENT_BINARY_DIR}/oracles/bobyqa_convergence.csv"
+        COPYONLY)
+endif()

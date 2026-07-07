@@ -1,0 +1,67 @@
+# bobyqa_convergence.csv -- BOBYQA reference optima + eval counts for
+# the derivative-free bound-constrained convergence and eval-count pins.
+#
+# generator: NLopt 2.11.0 LN_BOBYQA (algorithm id 34, the f2c translation
+#            of M.J.D. Powell's original BOBYQA Fortran; behaviorally
+#            authoritative reference). Driver settings: initial step
+#            rhobeg per problem (see <name>_rhobeg), rho_end = 1e-8
+#            (xtol_abs = 1e-8, xtol_rel = 0, ftol_rel = ftol_abs = 0),
+#            maxeval = 1e5. Objective and bound expressions match the
+#            in-repo Hock-Schittkowski / Booth definitions exactly.
+# convention: box bounds lower <= x <= upper; an infinite bound is an
+#            unconstrained side. No general constraints. An infeasible
+#            start is projected into the box before the solve.
+# note:      fopt / xopt are BOBYQA's ACTUAL converged values from the
+#            recorded start; fgap is measured against the published GLOBAL
+#            optimum ftarget. BOBYQA is a local method: hs002 from its
+#            standard start settles in the negative-x0 Rosenbrock-valley
+#            basin (a non-global local minimum), so its fgap is large by
+#            design -- the eval count and converged point remain the
+#            authoritative local reference for that start.
+# reference: Powell, M. J. D. (2009), "The BOBYQA algorithm for bound
+#            constrained optimization without derivatives", DAMTP 2009/NA06.
+# columns:   <name>_x0      -- start point handed to BOBYQA
+#            <name>_ftarget -- published optimum f*
+#            <name>_fopt    -- NLopt BOBYQA converged objective
+#            <name>_xopt    -- NLopt BOBYQA converged minimizer
+#            <name>_fgap    -- achieved |fopt - ftarget| (endgame accuracy)
+#            <name>_nevals  -- NLopt objective-evaluation count
+#            <name>_rhobeg  -- initial trust-region step handed to BOBYQA
+# cohorts:   eval-count / short-step: hs001, hs002, hs005, booth
+#            endgame-accuracy / XBASE:  far_rosenbrock (|x*| ~ 100 from
+#            the origin, driven to rho_end = 1e-8).
+hs001_x0,-2.00000000000000000e+00,1.00000000000000000e+00
+hs001_ftarget,0.00000000000000000e+00
+hs001_fopt,1.20967972526122578e-18
+hs001_xopt,9.99999998909264942e-01,9.99999997804395968e-01
+hs001_fgap,1.20967972526122578e-18
+hs001_nevals,216
+hs001_rhobeg,5.00000000000000000e-01
+hs002_x0,-2.00000000000000000e+00,1.50000000000000000e+00
+hs002_ftarget,5.04261879000000024e-02
+hs002_fopt,4.94122931798918508e+00
+hs002_xopt,-1.22102624207798760e+00,1.50000000000000000e+00
+hs002_fgap,4.89080313008918477e+00
+hs002_nevals,43
+hs002_rhobeg,5.00000000000000000e-01
+hs005_x0,0.00000000000000000e+00,0.00000000000000000e+00
+hs005_ftarget,-1.91322295498103623e+00
+hs005_fopt,-1.91322295498103667e+00
+hs005_xopt,-5.47197541395458620e-01,-1.54719754686758604e+00
+hs005_fgap,4.44089209850062616e-16
+hs005_nevals,39
+hs005_rhobeg,5.00000000000000000e-01
+booth_x0,0.00000000000000000e+00,0.00000000000000000e+00
+booth_ftarget,0.00000000000000000e+00
+booth_fopt,1.28545047208325576e-20
+booth_xopt,9.99999999919960136e-01,3.00000000008029888e+00
+booth_fgap,1.28545047208325576e-20
+booth_nevals,49
+booth_rhobeg,1.00000000000000000e+00
+far_rosenbrock_x0,0.00000000000000000e+00,0.00000000000000000e+00
+far_rosenbrock_ftarget,0.00000000000000000e+00
+far_rosenbrock_fopt,5.31181574385535531e-21
+far_rosenbrock_xopt,1.00000000000577351e+01,1.00000000001150255e+02
+far_rosenbrock_fgap,5.31181574385535531e-21
+far_rosenbrock_nevals,884
+far_rosenbrock_rhobeg,1.00000000000000000e+01
