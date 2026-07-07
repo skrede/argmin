@@ -16,7 +16,7 @@ namespace argmin
 
 // Concept hierarchy for optimization problem formulations.
 //
-// Maps the textbook taxonomy (K&W Ch. 1, N&W Ch. 1) to C++23 concepts:
+// Maps the textbook taxonomy (K&W Ch. 1, N&W Ch. 1) to C++20 concepts:
 //   objective          -- f(x) : R^n -> R
 //   differentiable     -- objective + gradient
 //   second_order       -- differentiable + Hessian

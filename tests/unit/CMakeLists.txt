@@ -73,6 +73,7 @@ add_executable(argmin_unit_tests
     kraft_sigma_bump_witness_test.cpp
     merit_function_test.cpp
     substrate_scale_witness_test.cpp
+    expected_test.cpp
 )
 
 target_link_libraries(argmin_unit_tests

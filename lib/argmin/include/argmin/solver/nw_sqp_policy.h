@@ -9,7 +9,8 @@
 //   3. Backtracking line search on L1 merit function (Section 18.5)
 //   4. Damped BFGS update of Hessian of Lagrangian (Procedure 18.2)
 //
-// The policy satisfies the basic_solver contract via deducing this.
+// The policy satisfies the basic_solver contract with plain member functions
+// (init/step, no explicit-object parameter).
 // Requires: differentiable<Problem> && constrained<Problem>.
 // Box bounds: detected via if constexpr(bound_constrained<Problem>).
 //

@@ -1,10 +1,10 @@
 # argmin
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
 ![Status](https://img.shields.io/badge/status-public%20preview-orange.svg)
 
-Header-only C++23 nonlinear optimization library. Every solver is a policy that plugs into `basic_solver<Policy>` and exposes a uniform `step()` / `solve()` / `step_n(budget)` interface. Algorithms are textbook-cited (Kochenderfer & Wheeler 2e, Nocedal & Wright 2e, plus original papers).
+Header-only nonlinear optimization library with a C++20 language floor (using C++23 features, such as `std::expected`, when the toolchain provides them). Every solver is a policy that plugs into `basic_solver<Policy>` and exposes a uniform `step()` / `solve()` / `step_n(budget)` interface. Algorithms are textbook-cited (Kochenderfer & Wheeler 2e, Nocedal & Wright 2e, plus original papers).
 
 The library is built around three properties that matter when the optimiser sits inside a larger system: compile-time dimensions that propagate into Eigen types, header-only distribution with no compiled artifacts, and step-level execution control suitable for control loops, IK chains, or MPC ticks.
 
@@ -30,7 +30,7 @@ See [docs/choosing-a-solver.md](docs/choosing-a-solver.md) for a problem-class-t
 
 ## Requirements
 
-- C++23 compiler: GCC 14+, Clang 18+, MSVC 17.10+
+- C++20 compiler (floor): GCC 10+, Clang 13+, MSVC 17.0+; a C++23 toolchain (GCC 14+, Clang 18+, MSVC 17.10+) is used when available
 - CMake 3.28+
 - Eigen 3.4+ (auto-fetched via FetchContent if not provided)
 

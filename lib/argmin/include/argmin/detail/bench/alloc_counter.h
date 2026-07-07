@@ -177,6 +177,8 @@ inline int evaluate_gate(const char* label, std::size_t armed_steps,
 
 #else
 
+#include <cstddef>
+
 namespace argmin::detail::bench
 {
 
