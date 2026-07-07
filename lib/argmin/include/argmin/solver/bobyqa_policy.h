@@ -549,7 +549,23 @@ struct bobyqa_policy
 
             case label::l90:
             {
-                // (Origin shift is inserted here in a later stage.)
+                // Origin shift (bobyqb_ L90, lines 2215-2316): when the trust
+                // centre has drifted far from xbase, severe cancellation occurs
+                // in the model and Lagrange functions. Shift xbase to xopt so
+                // xopt becomes zero, re-centering BMAT/ZMAT/HQ/XPT. This runs
+                // BEFORE the VLAG/BETA computation at L230 so the step is
+                // expressed in the shifted frame; performing it afterward would
+                // corrupt beta.
+                //
+                // sl/su are recomputed on the fly as lower_scaled - xbase, so
+                // the sl -= xopt / su -= xopt bookkeeping is automatic. The
+                // displacement d is invariant under the shift, so the trial
+                // point in the new frame is simply xopt(=0) + d.
+                if(dsq <= s.xoptsq * 1e-3)
+                {
+                    detail::shift_xbase(s.sys);
+                    s.xoptsq = 0.0;
+                }
                 xnew = s.sys.xopt + d;
                 loc = (s.ntrits == 0) ? label::l210 : label::l230;
                 break;
