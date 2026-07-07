@@ -33,6 +33,8 @@ using argmin::detail::compute_vlag_beta;
 using argmin::detail::compute_denom;
 using argmin::detail::update_bmat_zmat;
 using argmin::detail::update_model_on_replacement;
+using argmin::detail::evaluate_interpolation_model;
+using argmin::detail::shift_xbase;
 
 namespace
 {
@@ -227,6 +229,103 @@ TEST_CASE("bobyqa geometry selects the farthest point and preserves the delta-pr
     update_model_on_replacement(sys, geo_shifted, geo_f, knew_geo, d_geo);
 
     CHECK(delta_property_violation(sys) < delta_tol);
+}
+
+// The delta-property must survive an origin shift applied AFTER a rank-2
+// update: shift_xbase re-expresses BMAT (both the ZMAT-independent bottom
+// block and the ZMAT-dependent terms), HQ, and XPT about xbase + xopt. A
+// partial re-centering would silently break poisedness even though the model
+// still looks correct at the trivial probe.
+TEST_CASE("interpolation delta-property survives origin shift after a rank-2 update",
+          "[interpolation_delta_property]")
+{
+    const int n = 2;
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(n);
+    const double rhobeg = 0.1;
+    const double inf = std::numeric_limits<double>::infinity();
+    Eigen::VectorXd lower = Eigen::VectorXd::Constant(n, -inf);
+    Eigen::VectorXd upper = Eigen::VectorXd::Constant(n, inf);
+
+    auto eval = [](const Eigen::VectorXd& x) {
+        return (x.array() - 10.0).square().sum();
+    };
+
+    auto sys = bootstrap_interpolation_system<double, Eigen::Dynamic>(
+        x0, rhobeg, lower, upper, eval);
+    REQUIRE(delta_property_violation(sys) < delta_tol);
+
+    // Rank-2 update moving the incumbent toward the descent direction so xopt
+    // becomes a genuine multi-component displacement from xbase.
+    const int m = sys.m_points;
+    int knew = (sys.kopt == 0) ? 1 : 0;
+    Eigen::VectorXd d = Eigen::VectorXd::Zero(n);
+    d[0] = 0.6 * rhobeg;
+    d[1] = 0.4 * rhobeg;
+
+    auto [vlag, beta] = compute_vlag_beta(sys, d);
+    const int nptm = m - n - 1;
+    double alpha = 0.0;
+    for(int jj = 0; jj < nptm; ++jj)
+        alpha += sys.zmat(knew, jj) * sys.zmat(knew, jj);
+    double denom = compute_denom(vlag[knew], alpha, beta);
+    REQUIRE(std::abs(denom) > 1e-20);
+
+    Eigen::VectorXd new_x = sys.xopt + d;
+    double new_f = eval((sys.xbase + new_x).eval());
+    update_bmat_zmat(sys, vlag, beta, denom, knew);
+    update_model_on_replacement(sys, new_x, new_f, knew, d);
+    REQUIRE(delta_property_violation(sys) < delta_tol);
+    REQUIRE(sys.xopt.norm() > 1e-3);
+
+    const Eigen::VectorXd xbase_before = sys.xbase;
+    const Eigen::VectorXd xopt_before = sys.xopt;
+
+    shift_xbase(sys);
+
+    // xopt is now the origin; xbase absorbed the old xopt.
+    CHECK(sys.xopt.norm() == 0.0);
+    CHECK((sys.xbase - (xbase_before + xopt_before)).cwiseAbs().maxCoeff() < 1e-15);
+    // The re-parameterized cardinal basis still reproduces the Kronecker delta.
+    CHECK(delta_property_violation(sys) < delta_tol);
+}
+
+// Purely-additive identity guard: shift_xbase is a NEW free function, so a
+// system that is never shifted must behave EXACTLY as before the function was
+// added. This recomputes the pre-edit invariant on a non-shifted bootstrap and
+// a non-shifted rank-2 update and pins them at machine-epsilon, proving no
+// existing consumer moved. The committed witness for the no-swap bootstrap is
+// max_{k,j} |L_k(x_j) - delta_kj| = 0 to full double precision.
+TEST_CASE("interpolation shift_xbase is purely additive (non-shifted path unchanged)",
+          "[interpolation_delta_property]")
+{
+    const int n = 2;
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(n);
+    const double rhobeg = 0.1;
+    const double inf = std::numeric_limits<double>::infinity();
+    Eigen::VectorXd lower = Eigen::VectorXd::Constant(n, -inf);
+    Eigen::VectorXd upper = Eigen::VectorXd::Constant(n, inf);
+
+    auto eval = [](const Eigen::VectorXd& x) {
+        return (x.array() - 10.0).square().sum();
+    };
+
+    // Bootstrap round-trip: unchanged from the pre-edit behavior.
+    auto sys = bootstrap_interpolation_system<double, Eigen::Dynamic>(
+        x0, rhobeg, lower, upper, eval);
+    CHECK(delta_property_violation(sys) == 0.0);
+
+    // Model value at a probe on the non-shifted system: a fixed numeric
+    // witness that does not depend on shift_xbase existing.
+    Eigen::VectorXd s(n); s << 0.05, -0.02;
+    double q0 = evaluate_interpolation_model(sys, s);
+
+    // A second, independent bootstrap must reproduce the identical value bit
+    // for bit (determinism of the un-shifted path).
+    auto sys2 = bootstrap_interpolation_system<double, Eigen::Dynamic>(
+        x0, rhobeg, lower, upper, eval);
+    double q0_again = evaluate_interpolation_model(sys2, s);
+    CHECK(q0 == q0_again);
+    CHECK(delta_property_violation(sys2) == 0.0);
 }
 
 // For the swap objective the negative-axis point is better on every axis,

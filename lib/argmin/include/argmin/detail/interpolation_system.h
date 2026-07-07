@@ -872,6 +872,124 @@ void update_model_on_replacement(
     }
 }
 
+// Shift the base point XBASE so that XOPT becomes the origin.
+//
+// Severe cancellation occurs in the factored algebra when XOPT drifts far
+// from XBASE. This re-expresses the entire interpolation system about
+// xbase + xopt: BMAT (both the ZMAT-independent bottom-block terms and the
+// ZMAT-dependent terms), the explicit Hessian HQ, and the interpolation
+// points XPT are all re-centered, then xbase += xopt, xopt = 0, xoptsq = 0.
+//
+// The shift is an EXACT re-parameterization: the quadratic model Q and every
+// Lagrange function L_k are numerically unchanged in absolute coordinates.
+// The delta-property (L_k(x_j) = delta_kj) therefore survives the shift.
+//
+// The scaled bounds sl/su are NOT stored in the system; the caller subtracts
+// the old xopt from its own sl/su (or, equivalently, keeps deriving them from
+// lower_scaled - xbase, which is automatically consistent after the shift).
+//
+// Reference: Powell 2009, Section 5 (origin shift).
+//   Ported statement-for-statement from NLopt bobyqb_() lines 2215-2316
+//   (the L90 block).
+//   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2215
+template <typename Scalar, int N>
+void shift_xbase(interpolation_system<Scalar, N>& sys)
+{
+    const int32_t n = sys.xbase.size();
+    const int32_t m = sys.m_points;
+    const int32_t nptm = m - n - 1;
+
+    const Scalar xoptsq = sys.xopt.squaredNorm();
+    const Scalar fracsq = Scalar(0.25) * xoptsq;
+
+    // Workspace vectors (fixed-size for compile-time N, resized otherwise).
+    Eigen::Vector<Scalar, interpolation_system<Scalar, N>::MaxM> wnpt;
+    Eigen::Vector<Scalar, interpolation_system<Scalar, N>::MaxM> vlag;
+    Eigen::Vector<Scalar, N> wloc;
+    Eigen::Vector<Scalar, N> vloc;
+    Eigen::Vector<Scalar, N> wcol;
+    if constexpr(N == Eigen::Dynamic)
+    {
+        wnpt.resize(m);
+        vlag.resize(m);
+        wloc.resize(n);
+        vloc.resize(n);
+        wcol.resize(n);
+    }
+
+    // Changes to BMAT that do not depend on ZMAT (the symmetric bottom block).
+    Scalar sumpq = Scalar(0);
+    for(int32_t k = 0; k < m; ++k)
+    {
+        sumpq += sys.pq[k];
+        Scalar sum = -Scalar(0.5) * xoptsq;
+        for(int32_t i = 0; i < n; ++i)
+            sum += sys.xpt(i, k) * sys.xopt[i];
+        wnpt[k] = sum;
+        Scalar temp = fracsq - Scalar(0.5) * sum;
+        for(int32_t i = 0; i < n; ++i)
+        {
+            wloc[i] = sys.bmat(k, i);
+            vloc[i] = sum * sys.xpt(i, k) + temp * sys.xopt[i];
+            const int32_t ip = m + i;
+            for(int32_t j = 0; j <= i; ++j)
+                sys.bmat(ip, j) += wloc[i] * vloc[j] + vloc[i] * wloc[j];
+        }
+    }
+
+    // Changes to BMAT that depend on ZMAT.
+    for(int32_t jj = 0; jj < nptm; ++jj)
+    {
+        Scalar sumz = Scalar(0);
+        Scalar sumw = Scalar(0);
+        for(int32_t k = 0; k < m; ++k)
+        {
+            sumz += sys.zmat(k, jj);
+            vlag[k] = wnpt[k] * sys.zmat(k, jj);
+            sumw += vlag[k];
+        }
+        for(int32_t j = 0; j < n; ++j)
+        {
+            Scalar sum = (fracsq * sumz - Scalar(0.5) * sumw) * sys.xopt[j];
+            for(int32_t k = 0; k < m; ++k)
+                sum += vlag[k] * sys.xpt(j, k);
+            wcol[j] = sum;
+            for(int32_t k = 0; k < m; ++k)
+                sys.bmat(k, j) += sum * sys.zmat(k, jj);
+        }
+        for(int32_t i = 0; i < n; ++i)
+        {
+            const int32_t ip = m + i;
+            Scalar temp = wcol[i];
+            for(int32_t j = 0; j <= i; ++j)
+                sys.bmat(ip, j) += temp * wcol[j];
+        }
+    }
+
+    // Complete the shift: revise the explicit Hessian HQ, re-center XPT,
+    // and enforce symmetry of the BMAT bottom block.
+    int32_t ih = 0;
+    for(int32_t j = 0; j < n; ++j)
+    {
+        wcol[j] = -Scalar(0.5) * sumpq * sys.xopt[j];
+        for(int32_t k = 0; k < m; ++k)
+        {
+            wcol[j] += sys.pq[k] * sys.xpt(j, k);
+            sys.xpt(j, k) -= sys.xopt[j];
+        }
+        for(int32_t i = 0; i <= j; ++i)
+        {
+            sys.hq[ih] += wcol[i] * sys.xopt[j] + sys.xopt[i] * wcol[j];
+            ++ih;
+            sys.bmat(m + i, j) = sys.bmat(m + j, i);
+        }
+    }
+
+    // xbase absorbs xopt; the best point becomes the new origin.
+    sys.xbase += sys.xopt;
+    sys.xopt.setZero();
+}
+
 }
 
 #endif
