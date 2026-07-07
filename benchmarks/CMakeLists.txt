@@ -478,6 +478,15 @@ if(NLopt_FOUND)
     argmin_add_alloc_gate(micro_lbfgsb_alloc_trace
         micro_lbfgsb.cpp alloc_gate_lbfgsb ARGMIN_ALLOC_GATE_EXPECT_ZERO)
 
+    # augmented_lagrangian outer method-of-multipliers path is allocation-free
+    # at fixed N in steady state, INCLUDING the penalty-reduction path (a
+    # reset_clear on the persisted inner solver, not a reconstruction), so the
+    # gate runs in zero-allocation mode. The probe asserts a mu reduction
+    # occurred inside the armed window so the zero-mode pass is not vacuous.
+    argmin_add_alloc_gate(micro_augmented_lagrangian_alloc_trace
+        micro_augmented_lagrangian.cpp alloc_gate_augmented_lagrangian
+        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
+
     add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
     target_link_libraries(micro_augmented_lagrangian PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_augmented_lagrangian PRIVATE

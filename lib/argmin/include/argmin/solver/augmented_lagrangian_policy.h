@@ -248,6 +248,8 @@ struct augmented_lagrangian_policy
             Eigen::VectorX<scalar_type>* c_all_buf;
             Eigen::MatrixX<scalar_type>* J_all_buf;
             Eigen::Vector<scalar_type, g_tmp_buf_dim>* g_tmp_buf;
+            Eigen::VectorX<scalar_type>* shift_eq_buf;
+            Eigen::VectorX<scalar_type>* shift_ineq_buf;
             int neq, nineq;
 
             [[nodiscard]] int dimension() const { return dim; }
@@ -285,16 +287,18 @@ struct augmented_lagrangian_policy
                     outer->constraint_jacobian(x, *J_all_buf);
                 }
                 // In-place mat-vec gradient (AL9). topRows / bottomRows /
-                // head / tail are passed as Eigen expressions that the
-                // helper consumes via DenseBase template deduction --
-                // zero materialization.
+                // head / tail are passed as Eigen expressions the helper
+                // consumes via DenseBase deduction; the multiplier-shift
+                // vectors are formed in the caller-owned shift workspaces so
+                // no per-inner-iteration heap temporary is materialized.
                 detail::augmented_lagrangian_gradient_inplace(
                     g,
                     J_all_buf->topRows(neq),
                     J_all_buf->bottomRows(nineq),
                     c_all_buf->head(neq),
                     c_all_buf->tail(nineq),
-                    *lam_eq, *lam_ineq, *pen);
+                    *lam_eq, *lam_ineq, *pen,
+                    *shift_eq_buf, *shift_ineq_buf);
             }
 
             [[nodiscard]] Eigen::Vector<scalar_type, N> lower_bounds() const { return *lo; }
@@ -328,6 +332,8 @@ struct augmented_lagrangian_policy
             Eigen::VectorX<scalar_type>* c_all_buf;
             Eigen::MatrixX<scalar_type>* J_all_buf;
             Eigen::Vector<scalar_type, g_tmp_buf_dim>* g_tmp_buf;
+            Eigen::VectorX<scalar_type>* shift_eq_buf;
+            Eigen::VectorX<scalar_type>* shift_ineq_buf;
             int neq, nineq;
 
             [[nodiscard]] int dimension() const { return dim; }
@@ -367,14 +373,16 @@ struct augmented_lagrangian_policy
                     outer->constraint_jacobian(x, *J_all_buf);
                 }
                 // Only the equality rows contribute; the empty inequality
-                // block leaves J_ineq unread (guarded by c_ineq.size() > 0).
+                // block leaves J_ineq unread (guarded by c_ineq.size() > 0)
+                // and its shift workspace untouched.
                 detail::augmented_lagrangian_gradient_inplace(
                     g,
                     J_all_buf->topRows(neq),
                     J_all_buf->topRows(0),
                     c_all_buf->head(neq),
                     c_all_buf->tail(0),
-                    *lam_eq, *lam_ineq, *pen);
+                    *lam_eq, *lam_ineq, *pen,
+                    *shift_eq_buf, *shift_ineq_buf);
             }
 
             // Forward ONLY the outer inequalities (argmin convention: c >= 0
@@ -464,6 +472,27 @@ struct augmented_lagrangian_policy
             // allocation.
             Eigen::VectorX<scalar_type> c_all_outer_buf;
 
+            // Outer-iteration reporting scratch, sized once at init. The
+            // equality / inequality Jacobian row-blocks (m_eq x n and
+            // m_ineq x n) are materialized here from J_all_buf so the
+            // Lagrangian-gradient and KKT-residual reporting reuses contiguous
+            // fixed-N-column buffers instead of allocating per completed outer
+            // iteration. mu_ineq_buf snapshots the AUGLAG_EQ inner dual.
+            Eigen::Matrix<scalar_type, Eigen::Dynamic, N> J_eq_report_buf;
+            Eigen::Matrix<scalar_type, Eigen::Dynamic, N> J_ineq_report_buf;
+            Eigen::VectorX<scalar_type> mu_ineq_buf;
+
+            // Multiplier-shift workspaces (m_eq and m_ineq), sized once at
+            // init. The augmented-Lagrangian gradient forms the shift vectors
+            // (lambda - c/mu, and its non-negative part for inequalities) here
+            // before the Jacobian-transpose products, so feeding a live
+            // expression into a gemv -- which would materialize a per-call heap
+            // temporary because gemv reads each rhs coefficient once per output
+            // row -- is avoided on both the inner-subproblem gradient path and
+            // the outer reporting path.
+            Eigen::VectorX<scalar_type> shift_eq_buf;
+            Eigen::VectorX<scalar_type> shift_ineq_buf;
+
             // Synthetic subproblem for the inner solver, plus the persisted
             // inner solver itself (warm-started across outer iterations to
             // preserve compact_lbfgs curvature pairs).
@@ -518,6 +547,11 @@ struct augmented_lagrangian_policy
         ctx.J_all_buf.resize(m, n);
         ctx.g_tmp_buf.resize(n);
         ctx.c_all_outer_buf.resize(m);
+        ctx.J_eq_report_buf.resize(s.n_eq, n);
+        ctx.J_ineq_report_buf.resize(s.n_ineq, n);
+        ctx.mu_ineq_buf.resize(s.n_ineq);
+        ctx.shift_eq_buf.resize(s.n_eq);
+        ctx.shift_ineq_buf.resize(s.n_ineq);
 
         if(m > 0)
             problem.constraints(x0, ctx.c_all_buf);
@@ -588,6 +622,8 @@ struct augmented_lagrangian_policy
             sp.c_all_buf = &ctx.c_all_buf;
             sp.J_all_buf = &ctx.J_all_buf;
             sp.g_tmp_buf = &ctx.g_tmp_buf;
+            sp.shift_eq_buf = &ctx.shift_eq_buf;
+            sp.shift_ineq_buf = &ctx.shift_ineq_buf;
             sp.neq = s.n_eq;
             sp.nineq = s.n_ineq;
         }
@@ -821,47 +857,63 @@ struct augmented_lagrangian_policy
             }
 
             const int m = s.n_eq + s.n_ineq;
-            Eigen::MatrixX<scalar_type> J_all(m, n);
+            // Materialize the constraint Jacobian and its equality /
+            // inequality row-blocks into the hoisted reporting buffers (J_all
+            // reuses the inner-subproblem Jacobian buffer, free now that the
+            // inner solve is complete). The row-blocks are contiguous fixed-N-
+            // column buffers so the kkt_residual / Lagrangian-gradient calls
+            // bind them by Ref with no per-iteration allocation.
             if(m > 0)
-                s.problem->constraint_jacobian(s.x, J_all);
-            Eigen::Matrix<scalar_type, Eigen::Dynamic, N> J_eq_new = J_all.topRows(s.n_eq);
-            Eigen::Matrix<scalar_type, Eigen::Dynamic, N> J_ineq_new = J_all.bottomRows(s.n_ineq);
+                s.problem->constraint_jacobian(s.x, ctx.J_all_buf);
+            ctx.J_eq_report_buf = ctx.J_all_buf.topRows(s.n_eq);
+            ctx.J_ineq_report_buf = ctx.J_all_buf.bottomRows(s.n_ineq);
 
+            // kkt_residual is instantiated with the policy's compile-time N
+            // (not fully dynamic) so its Ref parameters bind grad_f
+            // (Vector<Scalar, N>) and the fixed-N-column Jacobian blocks
+            // without conversion copies, and its internal Lagrangian-gradient
+            // vector is fixed-N (stack, not heap) at fixed N. Meq / Mineq stay
+            // dynamic to match the runtime constraint counts.
             if constexpr(lift_equalities_only)
             {
                 // AUGLAG_EQ KKT residual. The equality multipliers are the
                 // outer Hestenes-Powell estimates (s.lambda_eq); the
                 // inequality multipliers live in the inner constrained
-                // solver's dual (state().y_dual), surfaced here as mu_ineq
-                // with no sign flip (the inner dual already uses the argmin
-                // c_ineq >= 0 convention). The reported gradient norm is the
-                // stationarity leg of the ORIGINAL Lagrangian, not the
-                // equality-augmented objective, since the inequalities are
-                // now carried by mu_ineq rather than folded into the penalty.
+                // solver's dual (state().y_dual), snapshotted into the hoisted
+                // mu_ineq buffer with no sign flip (the inner dual already
+                // uses the argmin c_ineq >= 0 convention). The reported
+                // gradient norm is the stationarity leg of the ORIGINAL
+                // Lagrangian, not the equality-augmented objective, since the
+                // inequalities are now carried by mu_ineq rather than folded
+                // into the penalty.
                 //
                 // Reference: N&W 2e Definition 12.1 / eq. 12.34; Bertsekas
                 //            1982 Section 4.2 (partial elimination).
-                Eigen::VectorX<scalar_type> mu_ineq = ctx.inner_solver->state().y_dual;
+                ctx.mu_ineq_buf = ctx.inner_solver->state().y_dual;
                 Eigen::Vector<scalar_type, N> grad_L = grad_f;
                 if(s.n_eq > 0)
-                    grad_L.noalias() -= J_eq_new.transpose() * s.lambda_eq;
+                    grad_L.noalias() -= ctx.J_eq_report_buf.transpose() * s.lambda_eq;
                 if(s.n_ineq > 0)
-                    grad_L.noalias() -= J_ineq_new.transpose() * mu_ineq;
+                    grad_L.noalias() -= ctx.J_ineq_report_buf.transpose() * ctx.mu_ineq_buf;
                 reported_grad_norm = grad_L.norm();
 
-                kkt = detail::kkt_residual<scalar_type,
-                                           Eigen::Dynamic,
+                kkt = detail::kkt_residual<scalar_type, N,
                                            Eigen::Dynamic,
                                            Eigen::Dynamic>(
-                    grad_f, J_eq_new, J_ineq_new,
-                    s.lambda_eq, mu_ineq,
+                    grad_f, ctx.J_eq_report_buf, ctx.J_ineq_report_buf,
+                    s.lambda_eq, ctx.mu_ineq_buf,
                     s.c_eq, s.c_ineq);
             }
             else
             {
-                auto aug_grad = detail::augmented_lagrangian_gradient(
-                    grad_f, J_eq_new, J_ineq_new, s.c_eq, s.c_ineq,
-                    s.lambda_eq, s.lambda_ineq, s.mu);
+                // In-place Lagrangian-gradient reporting into a fixed-N stack
+                // vector (the return-by-value wrapper is avoided so nothing
+                // heap-allocates on the completed-outer-iteration path).
+                Eigen::Vector<scalar_type, N> aug_grad = grad_f;
+                detail::augmented_lagrangian_gradient_inplace(
+                    aug_grad, ctx.J_eq_report_buf, ctx.J_ineq_report_buf,
+                    s.c_eq, s.c_ineq, s.lambda_eq, s.lambda_ineq, s.mu,
+                    ctx.shift_eq_buf, ctx.shift_ineq_buf);
                 reported_grad_norm = aug_grad.norm();
 
                 // Reference: N&W 2e Definition 12.1 (KKT conditions:
@@ -872,20 +924,10 @@ struct augmented_lagrangian_policy
                 //            because detail::update_multipliers projects
                 //            lambda_ineq onto the non-negative orthant
                 //            per N&W 17.55.
-                //
-                // Template parameters are specified explicitly because
-                // auglag's locally-constructed grad_f (Vector<Scalar, N>)
-                // and J_eq_new (Matrix<Scalar, Dynamic, N>) combine
-                // compile-time and dynamic-sized dimensions in a way that
-                // cannot be deduced from the fully-dynamic multiplier and
-                // constraint vectors (VectorX<Scalar>). We instantiate the
-                // fully-dynamic variant so the Ref-based parameters bind
-                // all argument types uniformly.
-                kkt = detail::kkt_residual<scalar_type,
-                                           Eigen::Dynamic,
+                kkt = detail::kkt_residual<scalar_type, N,
                                            Eigen::Dynamic,
                                            Eigen::Dynamic>(
-                    grad_f, J_eq_new, J_ineq_new,
+                    grad_f, ctx.J_eq_report_buf, ctx.J_ineq_report_buf,
                     s.lambda_eq, s.lambda_ineq,
                     s.c_eq, s.c_ineq);
             }

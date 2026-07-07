@@ -107,6 +107,42 @@ void augmented_lagrangian_gradient_inplace(
                        * (lambda_ineq.derived() - c_ineq.derived() / mu).cwiseMax(Scalar(0));
 }
 
+// Allocation-free in-place form. The equality / inequality multiplier-shift
+// vectors are formed in the caller-owned workspaces shift_eq_ws /
+// shift_ineq_ws (each pre-sized to the matching constraint count) before the
+// Jacobian-transpose products. This avoids the per-call dynamic temporary the
+// expression form materializes: feeding a live (lambda - c/mu) expression into
+// a gemv makes Eigen evaluate it into a heap temporary because the product
+// reads each right-hand-side coefficient once per output row.
+template <typename Scalar, int N,
+          typename JeqExpr, typename JineqExpr,
+          typename CeqExpr, typename CineqExpr,
+          typename LeqExpr, typename LineqExpr>
+void augmented_lagrangian_gradient_inplace(
+    Eigen::Vector<Scalar, N>& g,
+    const Eigen::DenseBase<JeqExpr>& J_eq,
+    const Eigen::DenseBase<JineqExpr>& J_ineq,
+    const Eigen::DenseBase<CeqExpr>& c_eq,
+    const Eigen::DenseBase<CineqExpr>& c_ineq,
+    const Eigen::DenseBase<LeqExpr>& lambda_eq,
+    const Eigen::DenseBase<LineqExpr>& lambda_ineq,
+    Scalar mu,
+    Eigen::VectorX<Scalar>& shift_eq_ws,
+    Eigen::VectorX<Scalar>& shift_ineq_ws)
+{
+    if(c_eq.size() > 0)
+    {
+        shift_eq_ws = lambda_eq.derived() - c_eq.derived() / mu;
+        g.noalias() -= J_eq.derived().transpose() * shift_eq_ws;
+    }
+    if(c_ineq.size() > 0)
+    {
+        shift_ineq_ws =
+            (lambda_ineq.derived() - c_ineq.derived() / mu).cwiseMax(Scalar(0));
+        g.noalias() -= J_ineq.derived().transpose() * shift_ineq_ws;
+    }
+}
+
 // Backward-compatible return-by-value wrapper. Allocates a copy of
 // grad_f internally; the in-place form above should be preferred on the
 // hot path. Kept for the AL convergence-diagnostic call site that
