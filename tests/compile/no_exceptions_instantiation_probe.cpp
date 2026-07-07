@@ -242,7 +242,7 @@ int main()
     {
         bounded_fixed_rosenbrock_ls problem;
         Eigen::Vector<double, 2> x0(-1.0, 1.0);
-        exercise(projected_gn_policy{}, problem, x0);
+        exercise(projected_gn_policy<>{}, problem, x0);
     }
 
     return 0;

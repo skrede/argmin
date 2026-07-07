@@ -19,6 +19,11 @@
 //
 // Nielsen (1999) adaptive damping controls the LM parameter lambda.
 //
+// The problem is bound by a stored pointer and dispatched at compile time
+// (residuals/value analytic; Jacobian analytic-or-finite-difference via
+// if constexpr, no type erasure). The decision variable and box are typed on
+// the compile-time dimension N; the residual count m stays a runtime axis.
+//
 // Reference: N&W Algorithm 16.1 (projected gradient with backtracking).
 //            N&W Section 10.2-10.3 (Gauss-Newton method).
 //            N&W Section 16.7 (projected search directions).
@@ -47,12 +52,13 @@
 namespace argmin
 {
 
+template <int N = dynamic_dimension>
 struct projected_gradient_gn_policy
 {
     using scalar_type = double;
 
     template <int M>
-    using rebind = projected_gradient_gn_policy;
+    using rebind = projected_gradient_gn_policy<M>;
 
     struct options_type
     {
@@ -80,27 +86,30 @@ struct projected_gradient_gn_policy
 
     options_type options{};
 
+    template <typename P = void>
     struct state_type
     {
-        Eigen::VectorXd x;
-        Eigen::VectorXd lower;
-        Eigen::VectorXd upper;
+        const P* problem{nullptr};
+
+        Eigen::Vector<double, N> x;
+        Eigen::Vector<double, N> lower;
+        Eigen::Vector<double, N> upper;
         double objective_value{};
         double lambda{};
         double nu{2.0};
         double delta{1.0};
         Eigen::VectorXd r;
-        Eigen::MatrixXd J;
+        Eigen::Matrix<double, Eigen::Dynamic, N> J;
         std::uint32_t iteration{0};
         int num_residuals{};
 
-        std::function<double(const Eigen::VectorXd&)> eval_value;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_residuals;
-        std::function<void(const Eigen::VectorXd&, Eigen::MatrixXd&)> eval_jacobian;
+        // Write scratch for the analytic/FD Jacobian evaluation (see
+        // projected_gn_policy for the fixed-N-vs-dynamic sink rationale).
+        Eigen::MatrixXd J_raw;
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
+    state_type<Problem> init(const Problem& problem, const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
@@ -108,10 +117,11 @@ struct projected_gradient_gn_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
+    state_type<Problem> init(const Problem& problem, const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>&)
     {
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
         const int n = static_cast<int>(x0.size());
 
         // Cache bounds and project initial point (N&W Section 16.7)
@@ -121,53 +131,16 @@ struct projected_gradient_gn_policy
         s.num_residuals = problem.num_residuals();
         s.delta = options.trust_region_radius.value_or(1.0);
 
-        // Capture closures (problem must outlive solver)
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
-            return problem.value(v);
-        };
-        s.eval_residuals = [&problem](const Eigen::VectorXd& v, Eigen::VectorXd& rr) {
-            problem.residuals(v, rr);
-        };
-
-        // Jacobian dispatch: analytic when available, FD fallback
-        if constexpr(requires(const Problem& p, const Eigen::VectorXd& xx, Eigen::MatrixXd& JJ) {
-                         p.jacobian(xx, JJ);
-                     })
-        {
-            s.eval_jacobian = [&problem](const Eigen::VectorXd& v, Eigen::MatrixXd& JJ) {
-                problem.jacobian(v, JJ);
-            };
-        }
-        else
-        {
-            const int m = s.num_residuals;
-            s.eval_jacobian = [&problem, m](const Eigen::VectorXd& v, Eigen::MatrixXd& JJ) {
-                auto residual_fn = [&problem](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
-                    problem.residuals(xx, rr);
-                };
-                fd_jacobian(residual_fn, v, JJ, m);
-            };
-        }
-
         // Evaluate initial residuals and Jacobian
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, n);
-        s.eval_residuals(s.x, s.r);
-        s.eval_jacobian(s.x, s.J);
+        if constexpr(N != Eigen::Dynamic)
+            s.J_raw.resize(s.num_residuals, n);
+        s.problem->residuals(s.x, s.r);
+        evaluate_jacobian(s);
         s.objective_value = 0.5 * s.r.squaredNorm();
 
-        // Initialize lambda (Nielsen 1999)
-        if(options.initial_lambda > 0.0)
-        {
-            s.lambda = options.initial_lambda;
-        }
-        else
-        {
-            Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
-            double max_diag = diag.maxCoeff();
-            s.lambda = (max_diag > 0.0) ? options.tau * max_diag : 1e-4;
-        }
-
+        init_lambda(s);
         s.nu = 2.0;
         return s;
     }
@@ -177,15 +150,16 @@ struct projected_gradient_gn_policy
     // Default mode: solves full damped system, projects onto bounds, applies
     // Armijo backtracking on the projected step (N&W Algorithm 16.1).
     // Dogleg mode: same trust-region approach as projected_gn_policy.
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
 
         // Gauss-Newton Hessian approximation: H = J^T J
-        Eigen::MatrixXd H = (s.J.transpose() * s.J).eval();
+        Eigen::Matrix<double, N, N> H = (s.J.transpose() * s.J).eval();
 
         // Gradient of 0.5*||r||^2: g = J^T r
-        Eigen::VectorXd g = (s.J.transpose() * s.r).eval();
+        Eigen::Vector<double, N> g = (s.J.transpose() * s.r).eval();
 
         if(options.use_dogleg)
             return step_dogleg(s, H, g, n);
@@ -193,34 +167,27 @@ struct projected_gradient_gn_policy
         return step_backtracking(s, H, g, n);
     }
 
-    void reset(state_type& s, Eigen::Ref<const Eigen::VectorXd> x0)
+    template <typename P>
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
+        const int n = static_cast<int>(x0.size());
         s.r.resize(s.num_residuals);
-        s.J.resize(s.num_residuals, static_cast<int>(x0.size()));
-        s.eval_residuals(s.x, s.r);
-        s.eval_jacobian(s.x, s.J);
+        s.J.resize(s.num_residuals, n);
+        if constexpr(N != Eigen::Dynamic)
+            s.J_raw.resize(s.num_residuals, n);
+        s.problem->residuals(s.x, s.r);
+        evaluate_jacobian(s);
         s.objective_value = 0.5 * s.r.squaredNorm();
 
-        // Initialize lambda (Nielsen 1999), honoring the configured
-        // initial_lambda / tau exactly as init() -- read the option fields
-        // directly rather than duplicating the literature default.
-        if(options.initial_lambda > 0.0)
-        {
-            s.lambda = options.initial_lambda;
-        }
-        else
-        {
-            Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
-            double max_diag = diag.maxCoeff();
-            s.lambda = (max_diag > 0.0) ? options.tau * max_diag : 1e-4;
-        }
+        init_lambda(s);
         s.nu = 2.0;
         s.delta = options.trust_region_radius.value_or(1.0);
         s.iteration = 0;
     }
 
-    void reset_clear(state_type& s, Eigen::Ref<const Eigen::VectorXd> x0)
+    template <typename P>
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         reset(s, x0);
     }
@@ -231,21 +198,22 @@ private:
     // Solves the full damped system (H + lambda*D)h = -g, projects onto bounds
     // to get direction d = P(x + h) - x, then backtracks alpha until the
     // Armijo sufficient decrease condition holds on the projected trial point.
+    template <typename P>
     step_result<double> step_backtracking(
-        state_type& s,
-        const Eigen::MatrixXd& H, const Eigen::VectorXd& g, int n)
+        state_type<P>& s,
+        const Eigen::Matrix<double, N, N>& H, const Eigen::Vector<double, N>& g, int n)
     {
         // Solve full damped system: (H + lambda*D) h = -g
-        Eigen::MatrixXd H_damped = H;
+        Eigen::Matrix<double, N, N> H_damped = H;
         for(int i = 0; i < n; ++i)
             H_damped(i, i) += s.lambda * std::max(H(i, i), options.diagonal_min_clamp);
 
-        Eigen::VectorXd h = H_damped.ldlt().solve(-g);
+        Eigen::Vector<double, N> h = H_damped.ldlt().solve(-g);
 
         // Projected direction (N&W Section 16.7):
         // d = P(x + h, l, u) - x
-        Eigen::VectorXd x_plus_h = (s.x + h).eval();
-        Eigen::VectorXd d = detail::project(x_plus_h, s.lower, s.upper) - s.x;
+        Eigen::Vector<double, N> x_plus_h = (s.x + h).eval();
+        Eigen::Vector<double, N> d = detail::project(x_plus_h, s.lower, s.upper) - s.x;
 
         // Directional derivative along projected direction
         double gTd = g.dot(d);
@@ -257,15 +225,15 @@ private:
         const std::uint32_t max_bt = options.max_backtrack;
 
         bool accepted = false;
-        Eigen::VectorXd x_trial(n);
+        Eigen::Vector<double, N> x_trial(n);
         Eigen::VectorXd r_trial(s.num_residuals);
         double f_trial{};
 
         for(std::uint32_t k = 0; k < max_bt; ++k)
         {
-            Eigen::VectorXd x_candidate = (s.x + alpha * d).eval();
+            Eigen::Vector<double, N> x_candidate = (s.x + alpha * d).eval();
             x_trial = detail::project(x_candidate, s.lower, s.upper);
-            s.eval_residuals(x_trial, r_trial);
+            s.problem->residuals(x_trial, r_trial);
             f_trial = 0.5 * r_trial.squaredNorm();
 
             // Armijo condition: f(x_trial) <= f(x) + c * alpha * g^T d
@@ -288,14 +256,14 @@ private:
             // LM predicted-reduction identity applied to the full alpha=1
             // projected direction, which is only valid for the exact unprojected
             // LM step and yields a fictitious denominator near an active bound.
-            Eigen::VectorXd d_acc = (x_trial - s.x).eval();
+            Eigen::Vector<double, N> d_acc = (x_trial - s.x).eval();
             double actual = old_value - f_trial;
             double predicted = -(g.dot(d_acc) + 0.5 * (s.J * d_acc).squaredNorm());
             double rho = detail::gain_ratio(actual, predicted);
 
             s.x = x_trial;
             s.r = r_trial;
-            s.eval_jacobian(s.x, s.J);
+            evaluate_jacobian(s);
             s.objective_value = f_trial;
 
             // Nielsen (1999) lambda update using the guarded gain ratio
@@ -323,7 +291,7 @@ private:
         // KKT residual for bound-constrained least-squares: projected-gradient
         // infinity-norm using the gradient g = J^T r of 0.5*||r||^2.
         // Reference: N&W 2e Section 16.7 (projected gradient optimality).
-        double kkt = detail::kkt_residual_bound<double, dynamic_dimension>(
+        double kkt = detail::kkt_residual_bound<double, N>(
             s.x, g, s.lower, s.upper);
 
         return step_result<double>{
@@ -341,9 +309,10 @@ private:
     // Same as projected_gn_policy dogleg mode: active-set identification,
     // dogleg interpolation on free subspace, projection onto bounds, gain-ratio
     // acceptance with trust-region radius update.
+    template <typename P>
     step_result<double> step_dogleg(
-        state_type& s,
-        const Eigen::MatrixXd& H, const Eigen::VectorXd& g, int n)
+        state_type<P>& s,
+        const Eigen::Matrix<double, N, N>& H, const Eigen::Vector<double, N>& g, int n)
     {
         // Active-set identification for dogleg (N&W Section 16.6)
         auto free_indices = detail::identify_free_set(s.x, g, s.lower, s.upper);
@@ -352,16 +321,16 @@ private:
         Eigen::VectorXd g_free;
         detail::extract_reduced_system(H, g, free_indices, H_free, g_free);
 
-        Eigen::VectorXd h = detail::dogleg_step(s.J, H_free, g_free, free_indices, n, s.delta);
+        Eigen::Vector<double, N> h = detail::dogleg_step(s.J, H_free, g_free, free_indices, n, s.delta);
 
         // Project trial point onto bounds (N&W Section 16.7)
-        Eigen::VectorXd x_plus_h = (s.x + h).eval();
-        Eigen::VectorXd x_trial = detail::project(x_plus_h, s.lower, s.upper);
-        Eigen::VectorXd d = (x_trial - s.x).eval();
+        Eigen::Vector<double, N> x_plus_h = (s.x + h).eval();
+        Eigen::Vector<double, N> x_trial = detail::project(x_plus_h, s.lower, s.upper);
+        Eigen::Vector<double, N> d = (x_trial - s.x).eval();
 
         // Evaluate trial residuals
         Eigen::VectorXd r_trial(s.num_residuals);
-        s.eval_residuals(x_trial, r_trial);
+        s.problem->residuals(x_trial, r_trial);
         double f_trial = 0.5 * r_trial.squaredNorm();
 
         // Gain ratio via the direct model reduction at the accepted (projected)
@@ -382,7 +351,7 @@ private:
         {
             s.x = x_trial;
             s.r = r_trial;
-            s.eval_jacobian(s.x, s.J);
+            evaluate_jacobian(s);
             s.objective_value = f_trial;
         }
 
@@ -400,7 +369,7 @@ private:
         // KKT residual for bound-constrained least-squares: projected-gradient
         // infinity-norm using the gradient g = J^T r of 0.5*||r||^2.
         // Reference: N&W 2e Section 16.7 (projected gradient optimality).
-        double kkt = detail::kkt_residual_bound<double, dynamic_dimension>(
+        double kkt = detail::kkt_residual_bound<double, N>(
             s.x, g, s.lower, s.upper);
 
         return step_result<double>{
@@ -411,6 +380,58 @@ private:
             .improved = accepted,
             .kkt_residual = kkt,
         };
+    }
+
+    // Analytic-Jacobian detection on the least-squares problem interface.
+    template <typename P>
+    static constexpr bool has_analytic_jacobian =
+        requires(const P& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
+            p.jacobian(xx, JJ);
+        };
+
+    // Evaluate the Jacobian at s.x into s.J (analytic or finite-difference).
+    template <typename P>
+    void evaluate_jacobian(state_type<P>& s) const
+    {
+        auto write = [&s](Eigen::MatrixXd& sink) {
+            if constexpr(has_analytic_jacobian<P>)
+            {
+                s.problem->jacobian(s.x, sink);
+            }
+            else
+            {
+                auto residual_fn = [&s](const auto& xx, Eigen::VectorXd& rr) {
+                    s.problem->residuals(xx, rr);
+                };
+                fd_jacobian<N>(residual_fn, s.x, sink, s.num_residuals);
+            }
+        };
+
+        if constexpr(N == Eigen::Dynamic)
+        {
+            write(s.J);
+        }
+        else
+        {
+            write(s.J_raw);
+            s.J = s.J_raw;
+        }
+    }
+
+    // Initialize lambda (Nielsen 1999) honoring initial_lambda / tau.
+    template <typename P>
+    void init_lambda(state_type<P>& s) const
+    {
+        if(options.initial_lambda > 0.0)
+        {
+            s.lambda = options.initial_lambda;
+        }
+        else
+        {
+            Eigen::Vector<double, N> diag = (s.J.transpose() * s.J).diagonal();
+            double max_diag = diag.maxCoeff();
+            s.lambda = (max_diag > 0.0) ? options.tau * max_diag : 1e-4;
+        }
     }
 };
 

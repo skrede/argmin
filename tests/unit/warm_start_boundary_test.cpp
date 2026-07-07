@@ -197,13 +197,13 @@ TEST_CASE("projected_gn warm reset honors options.tau",
     solver_options opts;
     opts.max_iterations = 10;
 
-    projected_gn_policy::options_type popts_default{}; // tau = 1e-3
-    projected_gn_policy::options_type popts_tau{};
+    projected_gn_policy<>::options_type popts_default{}; // tau = 1e-3
+    projected_gn_policy<>::options_type popts_tau{};
     popts_tau.tau = 5e-2;
 
-    step_budget_solver s_default{projected_gn_policy{}, problem, x0, opts,
+    step_budget_solver s_default{projected_gn_policy<>{}, problem, x0, opts,
                                  popts_default};
-    step_budget_solver s_tau{projected_gn_policy{}, problem, x0, opts, popts_tau};
+    step_budget_solver s_tau{projected_gn_policy<>{}, problem, x0, opts, popts_tau};
 
     s_default.reset(x0);
     s_tau.reset(x0);

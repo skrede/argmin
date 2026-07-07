@@ -416,8 +416,8 @@ void run_all_argmin_solvers(
     // Projected GN: bound-constrained least-squares (no general constraints).
     if constexpr(least_squares<Problem> && is_bound && !is_constrained)
     {
-        run("projected_gn", projected_gn_policy{});
-        run("projected_gradient_gn", projected_gradient_gn_policy{});
+        run("projected_gn", projected_gn_policy<>{});
+        run("projected_gradient_gn", projected_gradient_gn_policy<>{});
     }
 
     // SLSQP: any constrained problem. The line-search SQP family is

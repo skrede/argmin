@@ -276,7 +276,7 @@ TEST_CASE("projected_gn survives move-then-step", "[move_asan]")
     Eigen::VectorXd x0{{-1.0, 1.0}};
     solver_options<> opts;
 
-    construct_move_step(projected_gn_policy{}, problem, x0, opts);
+    construct_move_step(projected_gn_policy<>{}, problem, x0, opts);
 }
 
 TEST_CASE("bobyqa survives move-then-step", "[move_asan]")

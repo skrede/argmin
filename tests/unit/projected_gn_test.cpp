@@ -8,7 +8,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cmath>
+#include <vector>
 #include <cstdint>
 #include <numbers>
 
@@ -265,7 +267,7 @@ TEST_CASE("projected_gn_policy: bounded Rosenbrock LS", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.13);
@@ -282,7 +284,7 @@ TEST_CASE("projected_gn_policy: bounded exponential fitting", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.01);
@@ -297,7 +299,7 @@ TEST_CASE("projected_gn_policy: bounded Powell singular", "[projected_gn]")
     opts.max_iterations = 500;
     opts.set_gradient_threshold(1e-8);
 
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-6);
@@ -312,7 +314,7 @@ TEST_CASE("projected_gn_policy: SE(3)-like proxy (TEST-11)", "[projected_gn]")
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-12);
 
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-10);
@@ -333,10 +335,10 @@ TEST_CASE("projected_gn_policy: dogleg mode", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    projected_gn_policy::options_type policy_opts{};
+    projected_gn_policy<>::options_type policy_opts{};
     policy_opts.use_dogleg = true;
 
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts, policy_opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts, policy_opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.13);
@@ -355,7 +357,7 @@ TEST_CASE("projected_gradient_gn_policy: bounded Rosenbrock LS", "[projected_gn]
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gradient_gn_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.13);
@@ -372,7 +374,7 @@ TEST_CASE("projected_gradient_gn_policy: SE(3)-like proxy (TEST-11)", "[projecte
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-12);
 
-    step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gradient_gn_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-10);
@@ -393,10 +395,10 @@ TEST_CASE("projected_gradient_gn_policy: dogleg mode", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    projected_gradient_gn_policy::options_type policy_opts{};
+    projected_gradient_gn_policy<>::options_type policy_opts{};
     policy_opts.use_dogleg = true;
 
-    step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts, policy_opts};
+    step_budget_solver solver{projected_gradient_gn_policy<>{}, problem, x0, opts, policy_opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.13);
@@ -411,7 +413,7 @@ TEST_CASE("projected_gn_policy: FD Jacobian fallback", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
 
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.2);
@@ -433,7 +435,7 @@ TEST_CASE("projected_gn_policy populates kkt_residual", "[projected_gn][kkt]")
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-8);
 
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
 
     bool populated = false;
     for(int i = 0; i < 10; ++i)
@@ -466,7 +468,7 @@ TEST_CASE("projected_gradient_gn_policy populates kkt_residual",
 
     SECTION("backtracking mode")
     {
-        step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
+        step_budget_solver solver{projected_gradient_gn_policy<>{}, problem, x0, opts};
 
         bool populated = false;
         for(int i = 0; i < 10; ++i)
@@ -485,10 +487,10 @@ TEST_CASE("projected_gradient_gn_policy populates kkt_residual",
 
     SECTION("dogleg mode")
     {
-        projected_gradient_gn_policy::options_type policy_opts{};
+        projected_gradient_gn_policy<>::options_type policy_opts{};
         policy_opts.use_dogleg = true;
 
-        step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts,
+        step_budget_solver solver{projected_gradient_gn_policy<>{}, problem, x0, opts,
                             policy_opts};
 
         bool populated = false;
@@ -516,7 +518,7 @@ TEST_CASE("projected_gn_policy: active set exercised", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // x(0) should be at or very near the upper bound 0.5
@@ -575,7 +577,7 @@ TEST_CASE("projected_gn_policy: exact gain ratio at an active bound",
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-12);
 
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
 
     double prev_f = solver.state().objective_value;
     for(int i = 0; i < 30; ++i)
@@ -614,10 +616,10 @@ TEST_CASE("projected_gradient_gn_policy: exact gain ratio at an active bound",
         solver_options opts;
         opts.max_iterations = 100;
         opts.set_gradient_threshold(1e-12);
-        projected_gradient_gn_policy::options_type policy_opts{};
+        projected_gradient_gn_policy<>::options_type policy_opts{};
         policy_opts.use_dogleg = dogleg;
 
-        step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts, policy_opts};
+        step_budget_solver solver{projected_gradient_gn_policy<>{}, problem, x0, opts, policy_opts};
 
         double prev_f = solver.state().objective_value;
         for(int i = 0; i < 40; ++i)
@@ -667,7 +669,7 @@ TEST_CASE("projected_gn_policy: gain_ratio extraction is numerically identical",
     solver_options opts;
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-12);
-    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
 
     double fp = 0.0;
     for(int i = 0; i < 100; ++i)
@@ -693,9 +695,9 @@ TEST_CASE("projected_gradient_gn_policy: gain_ratio extraction is numerically id
         solver_options opts;
         opts.max_iterations = 100;
         opts.set_gradient_threshold(1e-12);
-        projected_gradient_gn_policy::options_type po{};
+        projected_gradient_gn_policy<>::options_type po{};
         po.use_dogleg = dogleg;
-        step_budget_solver solver{projected_gradient_gn_policy{}, problem, start, opts, po};
+        step_budget_solver solver{projected_gradient_gn_policy<>{}, problem, start, opts, po};
         double fp = 0.0;
         for(int i = 0; i < 100; ++i)
         {
@@ -728,4 +730,116 @@ TEST_CASE("projected_gradient_gn_policy: gain_ratio extraction is numerically id
         CHECK(x1 == 0.24999999999999786);
         CHECK(fp == Approx(-4156246.903846154).epsilon(trajectory_fp_rel_tol));
     }
+}
+
+// --------------------------------------------------------------------------
+// Fixed-N identity pin: the compile-time-dimension path must reproduce the
+// runtime-dimension trajectory bit-for-bit.
+//
+// The problem's problem_dimension drives the CTAD deduction guide, which
+// rebinds the policy to projected_gn_policy<N>. bounded_powell_singular_ls
+// declares dynamic_dimension (rebinds to the dynamic path); the fixed-4
+// twin below declares problem_dimension = 4 (rebinds to
+// projected_gn_policy<4>, decision variable + box on Vector<double, 4>).
+// Both run the identical Powell-singular least-squares math, so the whole
+// objective / step-size / iterate sequence must match exactly -- the
+// de-type-erasure and axis typing introduce no numerical drift.
+// --------------------------------------------------------------------------
+
+namespace
+{
+
+// Fixed-dimension twin of bounded_powell_singular_ls: identical residuals and
+// Jacobian, but the decision variable is a compile-time Vector<double, 4>.
+struct bounded_powell_singular_ls_fixed4
+{
+    static constexpr int problem_dimension = 4;
+
+    int dimension() const { return 4; }
+    int num_residuals() const { return 4; }
+
+    double value(const Eigen::Vector<double, 4>& x) const
+    {
+        double r0 = x(0) + 10.0 * x(1);
+        double r1 = std::sqrt(5.0) * (x(2) - x(3));
+        double r2 = (x(1) - 2.0 * x(2)) * (x(1) - 2.0 * x(2));
+        double r3 = std::sqrt(10.0) * (x(0) - x(3)) * (x(0) - x(3));
+        return 0.5 * (r0 * r0 + r1 * r1 + r2 * r2 + r3 * r3);
+    }
+
+    void residuals(const Eigen::Vector<double, 4>& x, Eigen::VectorXd& r) const
+    {
+        r(0) = x(0) + 10.0 * x(1);
+        r(1) = std::sqrt(5.0) * (x(2) - x(3));
+        r(2) = (x(1) - 2.0 * x(2)) * (x(1) - 2.0 * x(2));
+        r(3) = std::sqrt(10.0) * (x(0) - x(3)) * (x(0) - x(3));
+    }
+
+    void jacobian(const Eigen::Vector<double, 4>& x, Eigen::MatrixXd& J) const
+    {
+        J.setZero();
+        J(0, 0) = 1.0;
+        J(0, 1) = 10.0;
+        J(1, 2) = std::sqrt(5.0);
+        J(1, 3) = -std::sqrt(5.0);
+        J(2, 1) = 2.0 * (x(1) - 2.0 * x(2));
+        J(2, 2) = -4.0 * (x(1) - 2.0 * x(2));
+        J(3, 0) = 2.0 * std::sqrt(10.0) * (x(0) - x(3));
+        J(3, 3) = -2.0 * std::sqrt(10.0) * (x(0) - x(3));
+    }
+
+    Eigen::VectorXd lower_bounds() const
+    {
+        return Eigen::VectorXd{{-5.0, -5.0, -5.0, -5.0}};
+    }
+
+    Eigen::VectorXd upper_bounds() const
+    {
+        return Eigen::VectorXd{{2.0, 2.0, 5.0, 5.0}};
+    }
+};
+
+// Record the full per-step trajectory (objective / step_size / iterate) so the
+// two dimension axes can be compared coefficient-by-coefficient.
+template <typename Problem>
+std::vector<std::array<double, 6>> record_trajectory(const Problem& problem,
+                                                     const Eigen::VectorXd& x0)
+{
+    solver_options opts;
+    opts.max_iterations = 60;
+    opts.set_gradient_threshold(1e-12);
+    step_budget_solver solver{projected_gn_policy<>{}, problem, x0, opts};
+
+    std::vector<std::array<double, 6>> trace;
+    for(int i = 0; i < 60; ++i)
+    {
+        auto r = solver.step();
+        const auto& s = solver.state();
+        trace.push_back({r.objective_value, r.step_size,
+                         r.gradient_norm, s.x(0), s.x(1), s.x(2)});
+        if(r.policy_status)
+            break;
+    }
+    return trace;
+}
+
+}
+
+TEST_CASE("projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory",
+          "[projected_gn][rebind]")
+{
+    Eigen::VectorXd x0{{3.0, -1.0, 0.0, 1.0}};
+
+    bounded_powell_singular_ls dyn;      // problem_dimension = dynamic_dimension
+    bounded_powell_singular_ls_fixed4 fix4; // problem_dimension = 4 -> rebind<4>
+
+    auto dyn_trace = record_trajectory(dyn, x0);
+    auto fix_trace = record_trajectory(fix4, x0);
+
+    REQUIRE(dyn_trace.size() == fix_trace.size());
+    REQUIRE(dyn_trace.size() > 5);
+
+    for(std::size_t i = 0; i < dyn_trace.size(); ++i)
+        for(std::size_t k = 0; k < 6; ++k)
+            CHECK(dyn_trace[i][k] == fix_trace[i][k]); // exact equality
 }

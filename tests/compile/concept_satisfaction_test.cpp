@@ -388,8 +388,8 @@ static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::lm_policy<>>
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::cobyla_policy>>);
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::isres_policy<>>>);
 
-static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::projected_gn_policy>>);
-static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::projected_gradient_gn_policy>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::projected_gn_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::projected_gradient_gn_policy<>>>);
 
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::multistart_policy<argmin::bobyqa_policy<>>>>);
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::restarting_policy<argmin::cmaes_policy<>>>>);

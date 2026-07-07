@@ -13,6 +13,14 @@
 // active when it sits at a bound and the gradient points into that bound.
 // Trial points are projected onto bounds before evaluation (N&W Section 16.7).
 //
+// The problem is bound by a stored pointer and dispatched at compile time:
+// residuals/value come straight off the least-squares interface, and the
+// Jacobian is analytic when the problem exposes jacobian() and a central
+// finite-difference fallback otherwise (both selected with if constexpr, no
+// type erasure). The decision variable and box are typed on the compile-time
+// dimension N (Vector<double, N>); the residual count m stays a runtime axis,
+// so the Jacobian is Matrix<double, Dynamic, N>.
+//
 // Reference: N&W Section 10.2-10.3 (Gauss-Newton method).
 //            N&W Section 16.6 (active-set identification for bound constraints).
 //            N&W Algorithm 4.1 (trust-region update).
@@ -41,12 +49,13 @@
 namespace argmin
 {
 
+template <int N = dynamic_dimension>
 struct projected_gn_policy
 {
     using scalar_type = double;
 
     template <int M>
-    using rebind = projected_gn_policy;
+    using rebind = projected_gn_policy<M>;
 
     struct options_type
     {
@@ -69,27 +78,33 @@ struct projected_gn_policy
 
     options_type options{};
 
+    template <typename P = void>
     struct state_type
     {
-        Eigen::VectorXd x;
-        Eigen::VectorXd lower;
-        Eigen::VectorXd upper;
+        const P* problem{nullptr};
+
+        Eigen::Vector<double, N> x;
+        Eigen::Vector<double, N> lower;
+        Eigen::Vector<double, N> upper;
         double objective_value{};
         double lambda{};
         double nu{2.0};
         double delta{1.0};
         Eigen::VectorXd r;
-        Eigen::MatrixXd J;
+        Eigen::Matrix<double, Eigen::Dynamic, N> J;
         std::uint32_t iteration{0};
         int num_residuals{};
 
-        std::function<double(const Eigen::VectorXd&)> eval_value;
-        std::function<void(const Eigen::VectorXd&, Eigen::VectorXd&)> eval_residuals;
-        std::function<void(const Eigen::VectorXd&, Eigen::MatrixXd&)> eval_jacobian;
+        // Write scratch for the analytic/FD Jacobian evaluation. The problem's
+        // jacobian()/fd_jacobian sink is a runtime-sized MatrixXd; on the
+        // fixed-N axis it is filled here and copied into the compile-time-typed
+        // J. On the dynamic axis J is itself a MatrixXd and is written directly,
+        // leaving this buffer unused.
+        Eigen::MatrixXd J_raw;
     };
 
     template <typename Problem, typename Convergence>
-    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
+    state_type<Problem> init(const Problem& problem, const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
@@ -97,10 +112,11 @@ struct projected_gn_policy
     }
 
     template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem& problem, const Eigen::VectorXd& x0,
+    state_type<Problem> init(const Problem& problem, const Eigen::Vector<double, N>& x0,
                     const solver_options<Convergence>&)
     {
-        state_type s;
+        state_type<Problem> s;
+        s.problem = &problem;
         const int n = static_cast<int>(x0.size());
 
         // Cache bounds and project initial point
@@ -110,73 +126,37 @@ struct projected_gn_policy
         s.num_residuals = problem.num_residuals();
         s.delta = options.trust_region_radius.value_or(1.0);
 
-        // Capture closures (problem must outlive solver)
-        s.eval_value = [&problem](const Eigen::VectorXd& v) {
-            return problem.value(v);
-        };
-        s.eval_residuals = [&problem](const Eigen::VectorXd& v, Eigen::VectorXd& rr) {
-            problem.residuals(v, rr);
-        };
-
-        // Jacobian dispatch: analytic when available, FD fallback
-        if constexpr(requires(const Problem& p, const Eigen::VectorXd& xx, Eigen::MatrixXd& JJ) {
-                         p.jacobian(xx, JJ);
-                     })
-        {
-            s.eval_jacobian = [&problem](const Eigen::VectorXd& v, Eigen::MatrixXd& JJ) {
-                problem.jacobian(v, JJ);
-            };
-        }
-        else
-        {
-            const int m = s.num_residuals;
-            s.eval_jacobian = [&problem, m](const Eigen::VectorXd& v, Eigen::MatrixXd& JJ) {
-                auto residual_fn = [&problem](const Eigen::VectorXd& xx, Eigen::VectorXd& rr) {
-                    problem.residuals(xx, rr);
-                };
-                fd_jacobian(residual_fn, v, JJ, m);
-            };
-        }
-
         // Evaluate initial residuals and Jacobian
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, n);
-        s.eval_residuals(s.x, s.r);
-        s.eval_jacobian(s.x, s.J);
+        if constexpr(N != Eigen::Dynamic)
+            s.J_raw.resize(s.num_residuals, n);
+        s.problem->residuals(s.x, s.r);
+        evaluate_jacobian(s);
         s.objective_value = 0.5 * s.r.squaredNorm();
 
-        // Initialize lambda (Nielsen 1999)
-        if(options.initial_lambda > 0.0)
-        {
-            s.lambda = options.initial_lambda;
-        }
-        else
-        {
-            Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
-            double max_diag = diag.maxCoeff();
-            s.lambda = (max_diag > 0.0) ? options.tau * max_diag : 1e-4;
-        }
-
+        init_lambda(s);
         s.nu = 2.0;
         return s;
     }
 
     // One projected GN iteration with active-set identification and
     // Nielsen (1999) / dogleg (N&W 4.1) globalization.
-    step_result<double> step(state_type& s)
+    template <typename P>
+    step_result<double> step(state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
 
         // Gauss-Newton Hessian approximation: H = J^T J
-        Eigen::MatrixXd H = (s.J.transpose() * s.J).eval();
+        Eigen::Matrix<double, N, N> H = (s.J.transpose() * s.J).eval();
 
         // Gradient of 0.5*||r||^2: g = J^T r
-        Eigen::VectorXd g = (s.J.transpose() * s.r).eval();
+        Eigen::Vector<double, N> g = (s.J.transpose() * s.r).eval();
 
         // Active-set identification (N&W Section 16.6)
         auto free_indices = detail::identify_free_set(s.x, g, s.lower, s.upper);
 
-        Eigen::VectorXd h;
+        Eigen::Vector<double, N> h;
         if(options.use_dogleg)
         {
             // Extract reduced system for dogleg
@@ -194,15 +174,15 @@ struct projected_gn_policy
         }
 
         // Project trial point onto bounds before evaluating (N&W Section 16.7)
-        Eigen::VectorXd x_plus_h = (s.x + h).eval();
-        Eigen::VectorXd x_trial = detail::project(x_plus_h, s.lower, s.upper);
+        Eigen::Vector<double, N> x_plus_h = (s.x + h).eval();
+        Eigen::Vector<double, N> x_trial = detail::project(x_plus_h, s.lower, s.upper);
 
         // Effective step after projection
-        Eigen::VectorXd d = (x_trial - s.x).eval();
+        Eigen::Vector<double, N> d = (x_trial - s.x).eval();
 
         // Evaluate trial residuals
         Eigen::VectorXd r_trial(s.num_residuals);
-        s.eval_residuals(x_trial, r_trial);
+        s.problem->residuals(x_trial, r_trial);
         double f_trial = 0.5 * r_trial.squaredNorm();
 
         // Gain ratio via the direct model reduction evaluated at the ACCEPTED
@@ -230,7 +210,7 @@ struct projected_gn_policy
         {
             s.x = x_trial;
             s.r = r_trial;
-            s.eval_jacobian(s.x, s.J);
+            evaluate_jacobian(s);
             s.objective_value = f_trial;
 
             if(options.use_dogleg)
@@ -276,7 +256,7 @@ struct projected_gn_policy
         // KKT residual for bound-constrained least-squares: projected-gradient
         // infinity-norm using the gradient g = J^T r of 0.5*||r||^2.
         // Reference: N&W 2e Section 16.7 (projected gradient optimality).
-        double kkt = detail::kkt_residual_bound<double, dynamic_dimension>(
+        double kkt = detail::kkt_residual_bound<double, N>(
             s.x, g, s.lower, s.upper);
 
         return step_result<double>{
@@ -289,36 +269,89 @@ struct projected_gn_policy
         };
     }
 
-    void reset(state_type& s, Eigen::Ref<const Eigen::VectorXd> x0)
+    template <typename P>
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
+        const int n = static_cast<int>(x0.size());
         s.r.resize(s.num_residuals);
-        s.J.resize(s.num_residuals, static_cast<int>(x0.size()));
-        s.eval_residuals(s.x, s.r);
-        s.eval_jacobian(s.x, s.J);
+        s.J.resize(s.num_residuals, n);
+        if constexpr(N != Eigen::Dynamic)
+            s.J_raw.resize(s.num_residuals, n);
+        s.problem->residuals(s.x, s.r);
+        evaluate_jacobian(s);
         s.objective_value = 0.5 * s.r.squaredNorm();
 
-        // Initialize lambda (Nielsen 1999), honoring the configured
-        // initial_lambda / tau exactly as init() -- read the option fields
-        // directly rather than duplicating the literature default.
+        init_lambda(s);
+        s.nu = 2.0;
+        s.delta = options.trust_region_radius.value_or(1.0);
+        s.iteration = 0;
+    }
+
+    template <typename P>
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    {
+        reset(s, x0);
+    }
+
+private:
+    // Analytic-Jacobian detection on the least-squares problem interface: the
+    // problem exposes jacobian(x, J) with x on the compile-time dimension and a
+    // runtime-sized MatrixXd sink (N&W least_squares concept). When absent, the
+    // central finite-difference fallback is selected instead.
+    template <typename P>
+    static constexpr bool has_analytic_jacobian =
+        requires(const P& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
+            p.jacobian(xx, JJ);
+        };
+
+    // Evaluate the Jacobian at s.x into s.J. On the dynamic axis J is a MatrixXd
+    // and is written in place; on the fixed-N axis the runtime sink J_raw is
+    // filled and copied into the compile-time-typed J.
+    template <typename P>
+    void evaluate_jacobian(state_type<P>& s) const
+    {
+        auto write = [&s](Eigen::MatrixXd& sink) {
+            if constexpr(has_analytic_jacobian<P>)
+            {
+                s.problem->jacobian(s.x, sink);
+            }
+            else
+            {
+                auto residual_fn = [&s](const auto& xx, Eigen::VectorXd& rr) {
+                    s.problem->residuals(xx, rr);
+                };
+                fd_jacobian<N>(residual_fn, s.x, sink, s.num_residuals);
+            }
+        };
+
+        if constexpr(N == Eigen::Dynamic)
+        {
+            write(s.J);
+        }
+        else
+        {
+            write(s.J_raw);
+            s.J = s.J_raw;
+        }
+    }
+
+    // Initialize lambda (Nielsen 1999), honoring the configured
+    // initial_lambda / tau exactly. Reads the option fields directly rather
+    // than duplicating the literature default.
+    template <typename P>
+    void init_lambda(state_type<P>& s) const
+    {
         if(options.initial_lambda > 0.0)
         {
             s.lambda = options.initial_lambda;
         }
         else
         {
-            Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
+            Eigen::Vector<double, N> diag = (s.J.transpose() * s.J).diagonal();
             double max_diag = diag.maxCoeff();
             s.lambda = (max_diag > 0.0) ? options.tau * max_diag : 1e-4;
         }
-        s.nu = 2.0;
-        s.delta = options.trust_region_radius.value_or(1.0);
-        s.iteration = 0;
-    }
-
-    void reset_clear(state_type& s, Eigen::Ref<const Eigen::VectorXd> x0)
-    {
-        reset(s, x0);
     }
 };
 

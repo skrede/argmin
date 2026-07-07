@@ -80,7 +80,7 @@ timing bench_argmin_active_set(std::uint32_t reps)
 
     // Warmup.
     {
-        argmin::step_budget_solver solver{argmin::projected_gn_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::projected_gn_policy<>{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -89,7 +89,7 @@ timing bench_argmin_active_set(std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::step_budget_solver solver{argmin::projected_gn_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::projected_gn_policy<>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -158,7 +158,7 @@ bool probe_kkt_residual()
     opts.max_iterations = 40;
     opts.set_gradient_threshold(1e-10);
 
-    argmin::step_budget_solver solver{argmin::projected_gn_policy{}, problem, x0, opts};
+    argmin::step_budget_solver solver{argmin::projected_gn_policy<>{}, problem, x0, opts};
 
     argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
