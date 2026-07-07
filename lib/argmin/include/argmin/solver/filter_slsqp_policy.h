@@ -1167,6 +1167,7 @@ struct filter_slsqp_policy
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
+        double h_0 = 0.0;
         if constexpr(constrained<P>)
         {
             if(s.n_eq + s.n_ineq > 0)
@@ -1178,9 +1179,20 @@ struct filter_slsqp_policy
                 s.problem->constraint_jacobian(x0, s.bufs.J_all);
                 s.J_eq = s.bufs.J_all.topRows(s.n_eq);
                 s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
+
+                h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
             }
         }
+        // Clear then re-seed the filter at the NEW x0. A warm reset must not
+        // inherit the previous run's h_max ceiling: a high-violation restart
+        // that kept a too-tight ceiling would reject its own first step. Seed
+        // exactly as init() / reset_clear() -- h_max = 1e4 * max(1, h_0) with
+        // the configured envelope margins.
+        //
+        // Reference: Wachter and Biegler 2006 eq. (8), Section 2.3.
         s.filter.clear();
+        s.filter.initialize(1e4 * std::max(1.0, h_0));
+        s.filter.set_envelope(options.gamma_f, options.gamma_h);
         s.iteration = 0;
     }
 
@@ -1189,11 +1201,6 @@ struct filter_slsqp_policy
     {
         reset(s, x0);
         s.hessian.reset();
-        double h_0 = 0.0;
-        if constexpr(constrained<P>)
-            h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
-        s.filter.initialize(1e4 * std::max(1.0, h_0));
-        s.filter.set_envelope(options.gamma_f, options.gamma_h);
     }
 
 private:
