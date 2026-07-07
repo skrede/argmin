@@ -1297,16 +1297,19 @@ struct filter_nw_sqp_policy
     void reset(state_type<Problem>& s,
                Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
+        // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so
+        // a dynamic-N warm reset does not materialize a heap temporary when the
+        // problem method takes a plain vector.
         s.x = x0;
-        s.objective_value = s.problem->value(x0);
-        s.problem->gradient(x0, s.g);
+        s.objective_value = s.problem->value(s.x);
+        s.problem->gradient(s.x, s.g);
         const int m = s.n_eq + s.n_ineq;
         if(m > 0)
         {
-            s.problem->constraints(x0, s.bufs.c_all);
+            s.problem->constraints(s.x, s.bufs.c_all);
             s.c_eq = s.bufs.c_all.head(s.n_eq);
             s.c_ineq = s.bufs.c_all.tail(s.n_ineq);
-            s.problem->constraint_jacobian(x0, s.bufs.J_all);
+            s.problem->constraint_jacobian(s.x, s.bufs.J_all);
             s.J_eq = s.bufs.J_all.topRows(s.n_eq);
             s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
         }

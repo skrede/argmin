@@ -1069,18 +1069,23 @@ struct kraft_slsqp_policy
     template <typename P>
     void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
+        // Land the caller buffer into state storage first, then evaluate the
+        // problem at s.x (a concrete Eigen::Vector of the exact argument type)
+        // rather than at the Ref: a dynamic-N Ref bound to a problem method
+        // taking a plain VectorXd would otherwise materialize a heap temporary,
+        // defeating the allocation-free warm path.
         s.x = x0;
-        s.objective_value = s.problem->value(x0);
-        s.problem->gradient(x0, s.g);
+        s.objective_value = s.problem->value(s.x);
+        s.problem->gradient(s.x, s.g);
         if constexpr(constrained<P>)
         {
             if(s.n_eq + s.n_ineq > 0)
             {
-                s.problem->constraints(x0, s.bufs.c_all);
+                s.problem->constraints(s.x, s.bufs.c_all);
                 s.c_eq = s.bufs.c_all.head(s.n_eq);
                 s.c_ineq = s.bufs.c_all.tail(s.n_ineq);
 
-                s.problem->constraint_jacobian(x0, s.bufs.J_all);
+                s.problem->constraint_jacobian(s.x, s.bufs.J_all);
                 s.J_eq = s.bufs.J_all.topRows(s.n_eq);
                 s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
             }
