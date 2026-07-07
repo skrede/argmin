@@ -17,3 +17,15 @@ add_executable(sqp_mode_racing_test sqp_mode_racing_test.cpp)
 target_link_libraries(sqp_mode_racing_test PRIVATE argmin::argmin)
 target_compile_options(sqp_mode_racing_test PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
 add_test(NAME sqp_mode_racing_test COMMAND sqp_mode_racing_test)
+
+# Exceptions-off instantiation probe. Built and linked (never syntax-only)
+# with -fno-exceptions -fno-rtti so that any surviving throw in an
+# instantiated solver-policy path fails the compile. Kept in the default
+# build so local ctest exercises the exceptions-off guarantee.
+add_executable(argmin_no_exceptions_probe no_exceptions_instantiation_probe.cpp)
+target_link_libraries(argmin_no_exceptions_probe PRIVATE argmin::argmin)
+target_compile_options(argmin_no_exceptions_probe PRIVATE
+    ${ARGMIN_TEST_RELEASE_FLAGS}
+    -fno-exceptions
+    -fno-rtti)
+add_test(NAME argmin_no_exceptions_probe COMMAND argmin_no_exceptions_probe)
