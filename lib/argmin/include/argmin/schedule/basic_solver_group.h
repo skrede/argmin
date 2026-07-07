@@ -13,7 +13,6 @@
 #include <Eigen/Core>
 
 #include <array>
-#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -160,30 +159,17 @@ public:
     solve_result<scalar_type, N> step_n(std::uint32_t budget,
                                         const solver_options<Convergence>& opts = {})
     {
-        auto t0 = std::chrono::steady_clock::now();
-
         step_result<scalar_type> last{};
         solver_status status = solver_status::running;
 
-        // Real executed counts, so an early break (all solvers retired, a
-        // time limit, or a converged criterion) reports what actually ran
-        // rather than the full budget.
+        // Real executed counts, so an early break (all solvers retired or a
+        // converged criterion) reports what actually ran rather than the full
+        // budget.
         std::uint32_t executed = 0;
         std::uint32_t evaluations = 0;
 
         for(std::uint32_t i = 0; i < budget; ++i)
         {
-            // Time limit check (D-11: between steps)
-            if(opts.max_time)
-            {
-                auto elapsed = std::chrono::steady_clock::now() - t0;
-                if(elapsed >= *opts.max_time)
-                {
-                    status = solver_status::time_limit_reached;
-                    break;
-                }
-            }
-
             // All policies retired -- stop iteration
             if(all_retired())
             {
@@ -217,10 +203,8 @@ public:
             status = solver_status::budget_exhausted;
         }
 
-        auto t1 = std::chrono::steady_clock::now();
-
         // Populate results for non-retired policies
-        populate_active_results(status, t1 - t0, std::index_sequence_for<Policies...>{});
+        populate_active_results(status, std::index_sequence_for<Policies...>{});
 
         auto best_idx = best_solver_index(std::index_sequence_for<Policies...>{});
         auto seq = std::index_sequence_for<Policies...>{};
@@ -235,7 +219,6 @@ public:
             .gradient_norm = last.gradient_norm,
             .constraint_violation = constraint_violation_at(best_idx, seq),
             .x = best_x(seq),
-            .wall_time = t1 - t0,
         };
     }
 
@@ -391,7 +374,6 @@ private:
 
     template <std::size_t... Is>
     void populate_active_results(solver_status group_status,
-                                 std::chrono::steady_clock::duration wall_time,
                                  std::index_sequence<Is...>)
     {
         auto fill = [&](std::size_t i, const auto& solver)
@@ -407,7 +389,6 @@ private:
                     .gradient_norm = solver.gradient_norm(),
                     .constraint_violation = solver.constraint_violation(),
                     .x = solver.state().x,
-                    .wall_time = wall_time,
                 };
             }
         };

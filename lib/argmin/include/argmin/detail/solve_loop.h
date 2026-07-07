@@ -6,7 +6,6 @@
 #include "argmin/result/status.h"
 #include "argmin/solver/options.h"
 
-#include <chrono>
 #include <cstdint>
 
 namespace argmin
@@ -47,8 +46,8 @@ constexpr bool is_better(Scalar f_cand, Scalar cv_cand,
 
 // The single solve loop body shared by every driver facade.
 //
-// A surface type (the basic step driver, the budget drivers, the passive
-// stepper) supplies its already-configured solver_core and a budget
+// A surface type (the step-budget driver, the time-budget drivers, the
+// passive stepper) supplies its already-configured solver_core and a budget
 // predicate; the loop owns the abort -> budget -> step_impl -> best-seen ->
 // policy-status -> convergence -> terminal-resolution anatomy exactly once so
 // distinct surfaces never duplicate it.
@@ -60,13 +59,15 @@ constexpr bool is_better(Scalar f_cand, Scalar cv_cand,
 //   4. Check policy-reported failure (policy failure is final)
 //   5. Check the convergence policy
 //
-// The budget predicate is invoked with the loop's own steady_clock start
-// point t0 (the same stamp used for the reported wall_time), so a time-based
-// predicate measures against the identical origin the loop reports. The
-// predicate reads no wall clock of its own for the origin; it only samples
-// the current time and compares. Confining the chrono machinery to the time
-// drivers is a later step -- for now the sole predicate is the wall-time
-// deadline and the budget-exhausted verdict maps to time_limit_reached.
+// The loop is deliberately wall-clock-free: it reads no steady_clock and
+// includes no <chrono>, so the step-budget driver (which passes an always-
+// false predicate) is chrono-free by construction. The budget predicate is
+// invoked with the running loop index i; a time-budget driver builds a
+// predicate that captures its own deadline (and poll cadence) and reads the
+// clock itself, keeping every chrono symbol confined to the time path. A
+// true verdict maps to time_limit_reached. Wall_time, when reported, is
+// measured by the time driver around this call -- the base result the loop
+// returns carries no wall_time.
 template <typename Core, typename OptsConvergence, typename BudgetExhausted>
 typename Core::solve_result_type
 run_solve_loop(Core& core, std::uint32_t budget,
@@ -74,8 +75,6 @@ run_solve_loop(Core& core, std::uint32_t budget,
                BudgetExhausted&& budget_exhausted)
 {
     using scalar_type = typename Core::scalar_type;
-
-    auto t0 = std::chrono::steady_clock::now();
 
     solver_status status = solver_status::running;
     step_result<scalar_type> last{};
@@ -111,7 +110,9 @@ run_solve_loop(Core& core, std::uint32_t budget,
         }
 
         // Budget predicate check (between steps, not inside the policy).
-        if(budget_exhausted(t0))
+        // The predicate is handed the loop index i so a time-budget driver
+        // can poll its deadline only every K iterations.
+        if(budget_exhausted(i))
         {
             status = solver_status::time_limit_reached;
             break;
@@ -168,8 +169,6 @@ run_solve_loop(Core& core, std::uint32_t budget,
     // consumers read last_check_results directly from their own instance.
     core.back_copy_convergence(opts.convergence);
 
-    auto t1 = std::chrono::steady_clock::now();
-
     return typename Core::solve_result_type{
         .status = status,
         .iterations = core.iteration_count(),
@@ -182,7 +181,6 @@ run_solve_loop(Core& core, std::uint32_t budget,
         .gradient_norm = last.gradient_norm,
         .constraint_violation = best_cv,
         .x = best_x,
-        .wall_time = t1 - t0,
     };
 }
 

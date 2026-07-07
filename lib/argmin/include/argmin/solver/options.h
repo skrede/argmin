@@ -3,7 +3,6 @@
 
 #include "argmin/solver/convergence.h"
 
-#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <tuple>
@@ -11,7 +10,14 @@
 namespace argmin
 {
 
-// Solver configuration carrying convergence policy and iteration limits.
+// Shared, wall-clock-free solver configuration: convergence policy, iteration
+// budget, and the feasibility-first tolerances. This is the common core
+// embedded by every driver -- the step-budget driver consumes it directly,
+// and the time-budget drivers embed it as a member alongside their own
+// wall-clock knobs (a deadline plus a poll cadence). Keeping the clock out of
+// this struct is what makes the step-budget path structurally clock-free: a
+// translation unit that only budgets by iterations never pulls in the
+// standard-library clock header.
 //
 // The Convergence template parameter is a convergence_policy<Criteria...>
 // that composes criterion types via fold expression. Individual tolerance
@@ -23,7 +29,6 @@ struct solver_options
     using convergence_type = Convergence;
 
     std::uint32_t max_iterations{1000};
-    std::optional<std::chrono::nanoseconds> max_time{};
     std::optional<double> constraint_tolerance{};
     // Threshold used by basic_solver's best-seen feasibility-first
     // comparator: an iterate with constraint_violation <= this value

@@ -89,7 +89,7 @@
 
 #include "argmin/solver/options.h"
 #include "argmin/solver/sqp_mode.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 
 #include "argmin/types.h"
 
@@ -1717,8 +1717,8 @@ using filter_trsqp_policy_accurate =
 // failures at the first compile of any TU that includes this header
 // rather than waiting for the downstream compile-test TU. Mirrors the
 // pattern in tests/compile/sqp_mode_racing_test.cpp.
-static_assert(nlp_solver<basic_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
-static_assert(nlp_solver<basic_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>>);
+static_assert(nlp_solver<step_budget_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
+static_assert(nlp_solver<step_budget_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>>);
 
 }
 

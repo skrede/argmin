@@ -10,6 +10,8 @@
 #include "argmin/solver/basic_solver.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/result/status.h"
+#include "argmin/solver/time_budget_solver.h"
+#include "argmin/solver/time_budget_options.h"
 #include "argmin/schedule/basic_solver_group.h"
 #include "argmin/schedule/round_robin_schedule.h"
 
@@ -82,17 +84,17 @@ TEST_CASE("step_tolerance_rel stops basic_solver", "[tolerance]")
     CHECK(result.iterations < 1000);
 }
 
-// -- Test 12: max_time stops with time_limit_reached --
+// -- Test 12: time_budget_solver stops with time_limit_reached --
 
-TEST_CASE("max_time stops with time_limit_reached", "[tolerance]")
+TEST_CASE("time budget stops with time_limit_reached", "[tolerance]")
 {
-    solver_options<> opts;
-    opts.max_iterations = 1000000;
+    time_budget_options<> opts;
+    opts.core.max_iterations = 1000000;
     opts.max_time = std::chrono::milliseconds(1);
 
     quadratic prob;
     Eigen::VectorXd x0{{1.0, 1.0}};
-    basic_solver<test::non_converging_policy> solver{prob, x0, opts};
+    time_budget_solver<test::non_converging_policy> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::time_limit_reached);

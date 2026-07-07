@@ -24,6 +24,7 @@ add_executable(argmin_unit_tests
     cmaes_sampling_test.cpp
     restarting_policy_test.cpp
     tolerance_test.cpp
+    budget_driver_test.cpp
     scheduling_test.cpp
     convergence_test.cpp
     line_search_test.cpp

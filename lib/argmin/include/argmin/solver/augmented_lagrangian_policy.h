@@ -10,7 +10,7 @@
 // subproblem satisfies differentiable + bound_constrained so that
 // gradient-based and derivative-free inner solvers both work.
 //
-// Warm-start: the inner basic_solver is persisted across outer
+// Warm-start: the inner step_budget_solver is persisted across outer
 // iterations, preserving compact_lbfgs curvature pairs via
 // lbfgsb_policy::reset(). The subproblem's penalty parameter is
 // stored as a pointer to the outer state's mu, so multiplier and
@@ -56,8 +56,8 @@
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/solver/lbfgsb_policy.h"
-#include "argmin/solver/basic_solver.h"
 #include "argmin/solver/options.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/result/step_result.h"
 #include "argmin/types.h"
 
@@ -391,7 +391,7 @@ struct augmented_lagrangian_policy
         //
         // The subproblem stores raw pointers to its evaluation buffers and to
         // outer state (multipliers, penalty, bounds), and the persisted inner
-        // solver caches the address of the subproblem. basic_solver's move is
+        // solver caches the address of the subproblem. step_budget_solver's move is
         // an unconditional noexcept memberwise move, so holding these directly
         // in the state would leave every such pointer dangling after a move.
         //
@@ -420,7 +420,7 @@ struct augmented_lagrangian_policy
             // inner solver itself (warm-started across outer iterations to
             // preserve compact_lbfgs curvature pairs).
             std::optional<active_subproblem> sub_storage;
-            std::optional<basic_solver<rebound_inner, N, active_subproblem>> inner_solver;
+            std::optional<step_budget_solver<rebound_inner, N, active_subproblem>> inner_solver;
         };
 
         std::unique_ptr<al_inner_context> ctx;

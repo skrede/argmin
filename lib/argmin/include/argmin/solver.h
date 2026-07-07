@@ -14,7 +14,11 @@
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/restarting_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/step_budget_solver.h"
+#include "argmin/solver/time_budget_solver.h"
+#include "argmin/solver/time_budget_options.h"
 #include "argmin/solver/ccsa_quadratic_policy.h"
 #include "argmin/solver/augmented_lagrangian_policy.h"
+#include "argmin/solver/step_and_time_budget_solver.h"
 
 #endif
