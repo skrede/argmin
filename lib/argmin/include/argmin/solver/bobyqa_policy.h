@@ -506,6 +506,15 @@ struct bobyqa_policy
 
         while(true)
         {
+            // A terminate request (roundoff-collapsed denominator with no rescue
+            // left, or the end-game short-step evaluation) is a real exit: leave
+            // the driver at once rather than re-entering L60 and re-running
+            // identical trust passes until the safety cap. The reference returns
+            // straight out on these paths (bobyqb_ lines 2483-2484, 2546-2547,
+            // 2585-2586). Without this the machine spins with no state change and
+            // then reports a false convergence.
+            if(terminated)
+                break;
             // Return once an evaluation has been made and the driver is back at
             // the top of a trust-region iteration; keep looping through the
             // no-eval short-step / rho-reduction transitions otherwise.
@@ -889,7 +898,11 @@ struct bobyqa_policy
             .improved = improved,
             .x_norm = s.x.norm(),
         };
-        r.evaluations = std::max<std::uint32_t>(evals, 1u);
+        // Report the true number of objective calls this step made. A terminate
+        // path that exits without evaluating (a refused, unrescuable denominator)
+        // legitimately makes zero calls; fabricating a phantom evaluation there
+        // would corrupt the accumulated evaluation total.
+        r.evaluations = evals;
         if(terminated)
             r.policy_status = solver_status::converged;
         return r;

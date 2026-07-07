@@ -10,6 +10,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
+#include <cstdint>
 #include <iostream>
 #include <numeric>
 #include <map>
@@ -905,6 +907,84 @@ struct counting_booth
     Eigen::Vector<double, 2> lower_bounds() const { return lb; }
     Eigen::Vector<double, 2> upper_bounds() const { return ub; }
 };
+}
+
+// Collapsing-denominator termination (no-rescue roundoff limit).
+//
+// When every candidate update denominator collapses (here forced by an
+// objective that returns NaN, so scaden stays 0 and biglsq >= 0 makes the
+// refusal test scaden <= 0.5*biglsq always true) and no rescue budget remains,
+// the reference returns immediately as roundoff-limited (bobyqb_ lines
+// 2483-2484 / 2546-2547). The driver's terminate flag must be a real loop exit:
+// otherwise it re-runs identical trust passes until an internal safety cap and
+// then reports a false convergence with zero state change.
+//
+// The instrument counts every objective call. The step must terminate promptly
+// (a bounded, tiny number of calls) rather than spinning, and the reported
+// evaluation count must not be inflated by a fabricated phantom evaluation on
+// the no-eval terminate path.
+namespace
+{
+struct counting_nan
+{
+    static constexpr int problem_dimension = 2;
+    int* calls{nullptr};
+    int dimension() const { return 2; }
+    double value(const Eigen::Vector<double, 2>&) const
+    {
+        if(calls) ++(*calls);
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    Eigen::Vector<double, 2> lower_bounds() const { return {-10.0, -10.0}; }
+    Eigen::Vector<double, 2> upper_bounds() const { return {10.0, 10.0}; }
+};
+}
+
+TEST_CASE("bobyqa terminates promptly on a collapsing denominator instead of spinning",
+          "[bobyqa]")
+{
+    int calls = 0;
+    counting_nan problem{.calls = &calls};
+
+    Eigen::Vector<double, 2> x0{0.0, 0.0};
+    solver_options opts;
+    bobyqa_policy<2> pol;
+    auto s = pol.init(problem, x0, opts);
+
+    // After init the bootstrap has made exactly the 2n+1 evaluations.
+    REQUIRE(calls == s.m);
+    REQUIRE(s.nevals == s.m);
+
+    auto r = pol.step(s);
+
+    // The first step hits the unrescuable refusal path and must exit at once:
+    // it makes no further objective calls (the terminate path evaluates nothing)
+    // and reports termination.
+    CHECK(calls == s.m);
+    CHECK(s.nevals == s.m);
+    REQUIRE(r.policy_status.has_value());
+    CHECK(*r.policy_status == solver_status::converged);
+
+    // Machine-independent spin detector: the state machine increments ntrits
+    // once at the top of every trust-region pass (L60). A driver that ignores
+    // the terminate request re-enters L60 and increments ntrits on every one of
+    // the ~200000 safety-cap passes before falsely reporting convergence; a
+    // driver that treats terminate as a real loop exit leaves after a single
+    // pass, so ntrits stays tiny.
+    CHECK(s.ntrits < 100);
+
+    // A full solve on the same pathological objective returns without spending
+    // the iteration budget on phantom work: the only objective calls are the
+    // 2n+1 bootstrap plus the solver's single best-seen seed evaluation; the
+    // driver itself never evaluates past the refusal.
+    int calls2 = 0;
+    counting_nan problem2{.calls = &calls2};
+    solver_options opts2;
+    opts2.max_iterations = 1000;
+    basic_solver solver{bobyqa_policy<2>{}, problem2, x0, opts2};
+    auto sr = solver.solve(opts2);
+    CHECK(calls2 <= 2 * (2 * 2 + 1));
+    CHECK(sr.function_evaluations <= static_cast<std::uint32_t>(2 * (2 * 2 + 1)));
 }
 
 // Short-step no-evaluation instrument (FAM short-step skip).
