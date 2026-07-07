@@ -416,6 +416,15 @@ struct augmented_lagrangian_policy
             Eigen::MatrixX<scalar_type> J_all_buf;
             Eigen::Vector<scalar_type, g_tmp_buf_dim> g_tmp_buf;
 
+            // Outer-loop constraint scratch (m = m_eq + m_ineq), sized once at
+            // init and reused by step() to evaluate the outer constraints at
+            // the current / post-inner-solve iterate. Kept distinct from
+            // c_all_buf (the inner subproblem's evaluation buffer) so an
+            // in-flight inner solve is never aliased by an outer constraint
+            // evaluation, and so step() incurs no per-call constraint-buffer
+            // allocation.
+            Eigen::VectorX<scalar_type> c_all_outer_buf;
+
             // Synthetic subproblem for the inner solver, plus the persisted
             // inner solver itself (warm-started across outer iterations to
             // preserve compact_lbfgs curvature pairs).
@@ -469,6 +478,7 @@ struct augmented_lagrangian_policy
         ctx.c_all_buf.resize(m);
         ctx.J_all_buf.resize(m, n);
         ctx.g_tmp_buf.resize(n);
+        ctx.c_all_outer_buf.resize(m);
 
         if(m > 0)
             problem.constraints(x0, ctx.c_all_buf);
@@ -512,10 +522,11 @@ struct augmented_lagrangian_policy
         const scalar_type feas_progress = s.opts.feasibility_progress;
         const scalar_type con_tol = s.opts.constraint_tolerance;
 
-        // Evaluate constraints at current x
+        // Evaluate constraints at current x, into the hoisted outer scratch
+        // (pre-sized at init) so step() incurs no per-call allocation here.
         {
             const int m = s.n_eq + s.n_ineq;
-            Eigen::VectorX<scalar_type> c_all(m);
+            auto& c_all = s.ctx->c_all_outer_buf;
             if(m > 0)
                 s.problem->constraints(s.x, c_all);
             s.c_eq = c_all.head(s.n_eq);
@@ -648,7 +659,7 @@ struct augmented_lagrangian_policy
         s.f = s.problem->value(s.x);
         {
             const int m = s.n_eq + s.n_ineq;
-            Eigen::VectorX<scalar_type> c_all(m);
+            auto& c_all = s.ctx->c_all_outer_buf;
             if(m > 0)
                 s.problem->constraints(s.x, c_all);
             s.c_eq = c_all.head(s.n_eq);
