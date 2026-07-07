@@ -104,11 +104,31 @@ public:
         const Eigen::Vector<Scalar, N>& p_lo,
         const Eigen::Vector<Scalar, N>& p_hi)
     {
+        qp_result<Scalar, N, M> out;
+        solve_into<M>(out, B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+        return out;
+    }
+
+    // Fill-into sibling of solve(): writes the result into the caller-owned
+    // qp_result. A caller that threads the same qp_result across solves
+    // keeps out.x / out.lambda storage and incurs no per-solve allocation
+    // for them (the fresh-qp_result solve() overload allocates them anew).
+    template <int M = argmin::dynamic_dimension>
+    void solve_into(
+        qp_result<Scalar, N, M>& out,
+        const Eigen::Matrix<Scalar, N, N>& B,
+        const Eigen::Vector<Scalar, N>& g,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_ineq,
+        const Eigen::Vector<Scalar, N>& p_lo,
+        const Eigen::Vector<Scalar, N>& p_hi)
+    {
         const int n = static_cast<int>(B.rows());
         const int m_eq = static_cast<int>(A_eq.rows());
         const int m_ineq = static_cast<int>(A_ineq.rows());
 
-        qp_result<Scalar, N, M> out;
         out.x.setZero(n);
 
         // -------------------------------------------------------------
@@ -134,7 +154,7 @@ public:
         if(llt.info() != Eigen::Success)
         {
             out.status = qp_status::indefinite_hessian;
-            return out;
+            return;
         }
 
         if(E_.rows() != n || E_.cols() != n) E_.resize(n, n);
@@ -154,8 +174,8 @@ public:
         // f = -L^{-1} g via a single forward triangular solve.
         f_ = -LM.template triangularView<Eigen::Lower>().solve(g);
 
-        return solve_lsei_<M>(out, n, m_eq, m_ineq,
-                              A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+        solve_lsei_<M>(out, n, m_eq, m_ineq,
+                       A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
     }
 
     // Solve the QP subproblem from a pre-factored Hessian.
@@ -176,11 +196,29 @@ public:
         const Eigen::Vector<Scalar, N>& p_lo,
         const Eigen::Vector<Scalar, N>& p_hi)
     {
+        qp_result<Scalar, N, M> out;
+        solve_with_factored_hessian_into<M>(
+            out, E, f, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+        return out;
+    }
+
+    // Fill-into sibling of solve_with_factored_hessian(): see solve_into().
+    template <int M = argmin::dynamic_dimension>
+    void solve_with_factored_hessian_into(
+        qp_result<Scalar, N, M>& out,
+        const Eigen::Matrix<Scalar, N, N>& E,
+        const Eigen::Vector<Scalar, N>& f,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_ineq,
+        const Eigen::Vector<Scalar, N>& p_lo,
+        const Eigen::Vector<Scalar, N>& p_hi)
+    {
         const int n = static_cast<int>(E.rows());
         const int m_eq = static_cast<int>(A_eq.rows());
         const int m_ineq = static_cast<int>(A_ineq.rows());
 
-        qp_result<Scalar, N, M> out;
         out.x.setZero(n);
 
         if(E_.rows() != n || E_.cols() != n) E_.resize(n, n);
@@ -189,16 +227,19 @@ public:
         E_ = E;
         f_ = f;
 
-        return solve_lsei_<M>(out, n, m_eq, m_ineq,
-                              A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+        solve_lsei_<M>(out, n, m_eq, m_ineq,
+                       A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
     }
 
 private:
     // LSEI cascade body shared by solve() and solve_with_factored_hessian().
     // Assumes E_ and f_ already populated; runs the augmented inequality
     // build, the LSEI call, and the multiplier scatter into the result.
+    // Fills the caller-owned `out` in place (no value return), so a caller
+    // that reuses the same qp_result across solves keeps out.lambda's
+    // storage and incurs no per-solve allocation for it.
     template <int M>
-    qp_result<Scalar, N, M> solve_lsei_(
+    void solve_lsei_(
         qp_result<Scalar, N, M>& out,
         int n, int m_eq, int m_ineq,
         const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
@@ -335,6 +376,11 @@ private:
         // in lambda_ineq[m_ineq..m_aug] are discarded). Inequality
         // multipliers from the cascade are already non-negative by
         // NNLS dual feasibility.
+        //
+        // out.lambda is caller-owned: setZero(m_real) reuses its existing
+        // storage when the caller threads the same qp_result across solves
+        // (resize is a no-op at a stable problem shape), so the scatter
+        // performs no per-solve allocation.
         const int m_real = m_eq + m_ineq;
         out.lambda.setZero(m_real);
         if(mode == 1 && m_real > 0)
@@ -344,8 +390,6 @@ private:
             if(m_ineq > 0)
                 out.lambda.segment(m_eq, m_ineq) = qp_lambda_ineq_.head(m_ineq);
         }
-
-        return out;
     }
 
 private:

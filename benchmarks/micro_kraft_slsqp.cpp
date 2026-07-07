@@ -902,15 +902,20 @@ bool probe_regression_hs026()
 }
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Pre-fix allocation witness for kraft_slsqp. Warms up to absorb lazy
-// first-step allocations, then arms the trace across a steady-state step
-// window and a reset() before reading the sensors. The reviewer measured
-// ~14 mallocs/step steady-state for this policy; the witness asserts the
-// un-blinded gate observes at least 10/step, which the old
-// operator-new-only counter read as zero.
+// Allocation witness for kraft_slsqp. Warms up to absorb lazy first-step
+// allocations, then arms the trace across a steady-state step window and a
+// reset() before reading the sensors. The original un-blinded reading was
+// ~19.9 mallocs/step; the QP-substrate hoists (caller-owned NNLS workspace,
+// persistent LSEI/LSI Householder workspaces, caller-owned QP multipliers)
+// have since brought steady state down to ~7.9/step. The remaining
+// allocations live in policy-local code (line-search trial vectors, the
+// second-order-correction scratch) and are hoisted separately; the witness
+// floor below is a non-blindness lower bound (comfortably below the current
+// count, comfortably above zero) that will be replaced by the zero-alloc
+// gate once the policy-local hoists land.
 //
 // Mode is selected by ARGMIN_ALLOC_GATE_EXPECT (via evaluate_gate): the
-// default expects nonzero (this pre-fix witness); defining
+// default expects nonzero (this witness); defining
 // ARGMIN_ALLOC_GATE_EXPECT_ZERO flips the same assertion into the post-hoist
 // zero-allocation gate.
 int argmin_alloc_trace_probe()
@@ -941,7 +946,7 @@ int argmin_alloc_trace_probe()
     argmin::detail::bench::disarm_alloc_trace();
 
     return argmin::detail::bench::evaluate_gate(
-        "kraft_slsqp", 2 * hot_steps, 10);
+        "kraft_slsqp", 2 * hot_steps, 5);
 }
 #endif
 

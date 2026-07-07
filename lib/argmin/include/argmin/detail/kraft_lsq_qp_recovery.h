@@ -226,11 +226,39 @@ public:
         const Eigen::Vector<Scalar, N>& p_lo,
         const Eigen::Vector<Scalar, N>& p_hi)
     {
-        auto direct = solver_.template solve_with_factored_hessian<M>(
-            E, f, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+        qp_result<Scalar, N, M> out;
+        solve_with_factored_hessian_into<M>(
+            out, E, f, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+        return out;
+    }
 
-        if(direct.status == qp_status::optimal)
-            return direct;
+    // Fill-into sibling of solve_with_factored_hessian(): writes into the
+    // caller-owned qp_result so a caller reusing the same result across
+    // solves incurs no per-solve allocation on the direct (optimal) path.
+    // The recovery branch is off the steady-state hot path.
+    template <int M = argmin::dynamic_dimension>
+    void solve_with_factored_hessian_into(
+        qp_result<Scalar, N, M>& out,
+        const Eigen::Matrix<Scalar, N, N>& E,
+        const Eigen::Vector<Scalar, N>& f,
+        const Eigen::Vector<Scalar, N>& g,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_ineq,
+        const Eigen::Vector<Scalar, N>& p_lo,
+        const Eigen::Vector<Scalar, N>& p_hi)
+    {
+        // Reset the recovery telemetry so a reused qp_result does not carry
+        // a stale relaxation_factor from a prior step's recovery into a
+        // direct-optimal solve (the fresh-result overload defaults it to 0).
+        out.relaxation_factor = Scalar(0);
+
+        solver_.template solve_with_factored_hessian_into<M>(
+            out, E, f, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+
+        if(out.status == qp_status::optimal)
+            return;
 
         // -------------------------------------------------------------
         // Recovery: reconstruct B = E^T E and run the augmented loop.
@@ -293,21 +321,21 @@ public:
 
             if(aug.status == qp_status::optimal)
             {
-                qp_result<Scalar, N, M> out;
                 out.x.resize(n);
                 out.x = aug.x.head(n);
                 out.lambda = aug.lambda;
                 out.status = qp_status::optimal;
                 out.iterations = attempt + 2;
                 out.relaxation_factor = aug.x[n];
-                return out;
+                return;
             }
 
             rho *= penalty_growth_;
         }
 
-        direct.relaxation_factor = Scalar(1);
-        return direct;
+        // Recovery exhausted: out still holds the direct (non-optimal)
+        // result; flag full relaxation and leave it as the returned step.
+        out.relaxation_factor = Scalar(1);
     }
 
 private:

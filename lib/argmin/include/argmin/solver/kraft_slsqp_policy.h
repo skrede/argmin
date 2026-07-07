@@ -249,6 +249,13 @@ struct kraft_slsqp_policy
         detail::dense_ldl_bfgs<double, N> hessian;
         detail::kraft_lsq_qp_recovery_solver<double, N> qp_solver;
 
+        // Persistent QP result buffers (main step + second-order
+        // correction). State-resident so the fill-into QP solve reuses
+        // their x / lambda storage across step() calls -- no per-solve
+        // allocation for the QP multipliers at steady state.
+        detail::qp_result<double, N> qp_res;
+        detail::qp_result<double, N> soc_qp_res;
+
         // Cross-policy state-resident buffer struct. Consolidates the
         // per-step / per-line-search trial buffers, the BFGS curvature-
         // pair buffers, the constraint-axis workspaces (c_all, c_trial,
@@ -446,7 +453,9 @@ struct kraft_slsqp_policy
         std::size_t soc_retry_count = 0;
 
         // Survives the retry loop into the post-loop accept-step block.
-        detail::qp_result<double, N> qp_res;
+        // Bound to the persistent state member so the fill-into QP solve
+        // reuses its storage across step() invocations.
+        detail::qp_result<double, N>& qp_res = s.qp_res;
         double alpha = 0.0;
         Eigen::Vector<double, N>& p = s.bufs.p_buf;
         // iter-0 cold start: fires at most once per outer step()
@@ -477,7 +486,8 @@ struct kraft_slsqp_policy
             s.bufs.p_lo_buf.noalias() = s.lower - s.x;
             s.bufs.p_hi_buf.noalias() = s.upper - s.x;
 
-            qp_res = s.qp_solver.solve_with_factored_hessian(
+            s.qp_solver.solve_with_factored_hessian_into(
+                qp_res,
                 s.bufs.E_buf, s.bufs.f_buf, s.g,
                 s.J_eq, s.bufs.b_eq_workspace,
                 s.J_ineq, s.bufs.b_ineq_workspace,
@@ -753,7 +763,9 @@ struct kraft_slsqp_policy
                             // solve: the Hessian and gradient have not changed
                             // between the main solve and this SOC retry, only
                             // the constraint RHS (b_eq_soc_buf, b_ineq_soc_buf).
-                            auto soc_res = s.qp_solver.solve_with_factored_hessian(
+                            detail::qp_result<double, N>& soc_res = s.soc_qp_res;
+                            s.qp_solver.solve_with_factored_hessian_into(
+                                soc_res,
                                 s.bufs.E_buf, s.bufs.f_buf, s.g,
                                 s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
                                 s.bufs.p_lo_buf, s.bufs.p_hi_buf);
