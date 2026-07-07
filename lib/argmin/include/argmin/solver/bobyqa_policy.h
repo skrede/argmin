@@ -369,6 +369,61 @@ struct bobyqa_policy
         return h;
     }
 
+    // Outcome of Powell's relative update-point selection.
+    struct replacement_choice
+    {
+        int knew{0};        // index of the point to delete
+        double denom{0.0};  // the chosen update denominator
+        bool refuse{true};  // true when the denominator is roundoff-collapsed
+    };
+
+    // Powell's relative scaden/biglsq update-point selection for a trust-region
+    // step (bobyqb_ lines 2493-2549). For each candidate k != kopt,
+    //   den = beta*hdiag_k + vlag[k]^2,
+    //   temp = max(1, (distsq_k / delta^2)^2)   (fourth power of distance),
+    // knew maximizes the weighted denominator temp*den, and biglsq tracks the
+    // largest weighted Lagrange value temp*vlag[k]^2. The update is REFUSED when
+    // scaden <= 0.5*biglsq -- the chosen denominator is dominated by a Lagrange
+    // value, signaling a roundoff collapse; the caller then rescues instead of
+    // applying a corrupt update. The best point kopt is never a candidate, and a
+    // failed selection is flagged by refuse rather than silently returning an
+    // arbitrary index.
+    //
+    // ref_point is the point distances are measured from: xopt for the
+    // pre-evaluation selection, or xnew for the post-evaluation recompute.
+    template <typename Sys, typename VlagVec>
+    static replacement_choice select_replacement_relative(
+        const Sys& sys, const VlagVec& vlag, double beta, double delta,
+        const Eigen::Vector<double, N>& ref_point)
+    {
+        const int nn = sys.xbase.size();
+        const int mm = sys.m_points;
+        const int nptm = mm - nn - 1;
+        const double delsq = delta * delta;
+
+        replacement_choice c;
+        double scaden = 0.0;
+        double biglsq = 0.0;
+        for(int k = 0; k < mm; ++k)
+        {
+            if(k == sys.kopt) continue;
+            double hdiag = zmat_hdiag(sys, k, nptm);
+            double den = beta * hdiag + vlag[k] * vlag[k];
+            double distsq = (sys.xpt.col(k).head(nn) - ref_point).squaredNorm();
+            double ratio_sq = distsq / delsq;
+            double temp = std::max(1.0, ratio_sq * ratio_sq);
+            if(temp * den > scaden)
+            {
+                scaden = temp * den;
+                c.knew = k;
+                c.denom = den;
+            }
+            biglsq = std::max(biglsq, temp * vlag[k] * vlag[k]);
+        }
+        c.refuse = (scaden <= 0.5 * biglsq);
+        return c;
+    }
+
     // One advance of Powell's bobyqb driver: run the ntrits state machine from
     // the top of a trust-region iteration (label L60) until it has evaluated
     // the objective at least once and is ready to begin the next trust-region
@@ -593,11 +648,12 @@ struct bobyqa_policy
 
                 if(s.ntrits == 0)
                 {
-                    // Geometry step: accept unless the denominator has
-                    // collapsed relative to vlag[knew]^2.
+                    // Geometry step: refuse when the denominator has collapsed
+                    // relative to the Lagrange value at the point being moved
+                    // (bobyqb_ line 2477).
                     alpha = zmat_hdiag(s.sys, knew, nptm);
                     denom = detail::compute_denom(vlag[knew], alpha, beta);
-                    if(denom <= 1e-20)
+                    if(denom <= 0.5 * vlag[knew] * vlag[knew])
                     {
                         if(s.nevals > s.nresc) { do_rescue(); loc = label::l60; break; }
                         terminated = true;
@@ -608,31 +664,20 @@ struct bobyqa_policy
                     break;
                 }
 
-                // Trust step: choose the point to delete before evaluating.
-                Eigen::VectorXd lv_xnew(s.m);
-                for(int k = 0; k < s.m; ++k)
-                    lv_xnew[k] = vlag[k];
-                Eigen::Vector<double, N> x_opt_abs = s.sys.xbase + s.sys.xopt;
-                Eigen::Vector<double, N> x_new_abs = detail::project(
-                    (s.sys.xbase + xnew).eval(), s.lower_scaled, s.upper_scaled);
-                Eigen::Matrix<double, N, Eigen::Dynamic> Y_abs(n, s.m);
-                Eigen::VectorXd fval_vec(s.m);
-                for(int k = 0; k < s.m; ++k)
+                // Trust step: choose the point to delete by Powell's relative
+                // scaden/biglsq test, measuring distances from xopt.
                 {
-                    Y_abs.col(k) = s.sys.xbase + s.sys.xpt.col(k).head(n);
-                    fval_vec[k] = s.sys.fval[k];
-                }
-                knew = detail::select_replacement(
-                    Y_abs, fval_vec, x_new_abs, s.sys.fval[s.sys.kopt], x_opt_abs,
-                    lv_xnew, s.delta);
-                alpha = zmat_hdiag(s.sys, knew, nptm);
-                denom = detail::compute_denom(vlag[knew], alpha, beta);
-                if(denom <= 1e-20)
-                {
-                    if(s.nevals > s.nresc) { do_rescue(); loc = label::l60; break; }
-                    terminated = true;
-                    loc = label::l60;
-                    break;
+                    replacement_choice c = select_replacement_relative(
+                        s.sys, vlag, beta, s.delta, s.sys.xopt);
+                    knew = c.knew;
+                    denom = c.denom;
+                    if(c.refuse)
+                    {
+                        if(s.nevals > s.nresc) { do_rescue(); loc = label::l60; break; }
+                        terminated = true;
+                        loc = label::l60;
+                        break;
+                    }
                 }
                 loc = label::l360;
                 break;
@@ -682,6 +727,32 @@ struct bobyqa_policy
                         s.delta = std::max(0.5 * s.delta, 2.0 * dnorm);
                     if(s.delta <= 1.5 * s.rho)
                         s.delta = s.rho;
+
+                    // Recompute knew/denom now that the new (improving) point is
+                    // known, measuring distances from xnew instead of xopt
+                    // (bobyqb_ lines 2656-2707). Keep the pre-evaluation
+                    // selection (ksav/densav) if the recomputed one collapses.
+                    // The recompute skips kopt (unlike the reference, which
+                    // includes it) so the shared model-update helper's kopt/xopt
+                    // move stays valid; the old best is kept as a node instead of
+                    // being ejected -- a benign point-set difference.
+                    if(f < old_fopt)
+                    {
+                        int ksav = knew;
+                        double densav = denom;
+                        replacement_choice c = select_replacement_relative(
+                            s.sys, vlag, beta, s.delta, xnew);
+                        if(c.refuse)
+                        {
+                            knew = ksav;
+                            denom = densav;
+                        }
+                        else
+                        {
+                            knew = c.knew;
+                            denom = c.denom;
+                        }
+                    }
                 }
 
                 detail::update_bmat_zmat(s.sys, vlag, beta, denom, knew);

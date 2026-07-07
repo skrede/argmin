@@ -918,3 +918,73 @@ TEST_CASE("bobyqa defers the short-step evaluation and still converges", "[bobyq
     CHECK(s.x[0] == Approx(1.0).margin(1e-3));
     CHECK(s.x[1] == Approx(3.0).margin(1e-3));
 }
+
+// Relative scaden/biglsq update-point selection (FAM update-safeguard).
+//
+// Powell selects the interpolation point to delete on a trust step by the
+// relative test den_k = beta*hdiag_k + vlag[k]^2 weighted by (dist_k/delta)^4,
+// refusing the update when the best weighted denominator is dominated by the
+// best weighted Lagrange value (scaden <= 0.5*biglsq). This replaces the earlier
+// absolute denom > 1e-20 gate. The pin checks the selection against an
+// independent recomputation of Powell's formula, that the best point kopt is
+// never selected, and that a collapsed denominator triggers the refusal path
+// instead of a corrupt update or a silent index-0 default.
+TEST_CASE("bobyqa relative scaden/biglsq selection and refusal", "[bobyqa]")
+{
+    using policy = bobyqa_policy<2>;
+    const int n = 2;
+    const int m = 2 * n + 1;
+    const int nptm = m - n - 1;
+
+    // Bootstrap a genuine interpolation system on a curved 2D quadratic.
+    auto obj = [](const Eigen::Vector<double, 2>& x) {
+        return 2.0 * x[0] * x[0] + 3.0 * x[1] * x[1] + x[0] * x[1] - x[0];
+    };
+    Eigen::Vector<double, 2> x0{0.3, -0.2};
+    Eigen::Vector<double, 2> lo{-5.0, -5.0};
+    Eigen::Vector<double, 2> hi{5.0, 5.0};
+    auto sys = argmin::detail::bootstrap_interpolation_system<double, 2>(
+        x0, 0.5, lo, hi, obj);
+
+    // A trial step and its exact VLAG/BETA from the factored system.
+    Eigen::Vector<double, 2> d{0.15, -0.1};
+    auto vb = argmin::detail::compute_vlag_beta(sys, d);
+    double delta = 0.5;
+
+    auto choice = policy::select_replacement_relative(sys, vb.vlag, vb.beta, delta, sys.xopt);
+
+    // Independent recomputation of Powell's scaden/biglsq formula.
+    const double delsq = delta * delta;
+    double scaden = 0.0, biglsq = 0.0, denom_expect = 0.0;
+    int knew_expect = 0;
+    for(int k = 0; k < m; ++k)
+    {
+        if(k == sys.kopt) continue;
+        double hdiag = 0.0;
+        for(int jj = 0; jj < nptm; ++jj)
+            hdiag += sys.zmat(k, jj) * sys.zmat(k, jj);
+        double den = vb.beta * hdiag + vb.vlag[k] * vb.vlag[k];
+        double distsq = (sys.xpt.col(k).head(n) - sys.xopt).squaredNorm();
+        double rsq = distsq / delsq;
+        double temp = std::max(1.0, rsq * rsq);
+        if(temp * den > scaden) { scaden = temp * den; knew_expect = k; denom_expect = den; }
+        biglsq = std::max(biglsq, temp * vb.vlag[k] * vb.vlag[k]);
+    }
+
+    CHECK(choice.knew == knew_expect);
+    CHECK(choice.denom == Approx(denom_expect));
+    CHECK(choice.refuse == (scaden <= 0.5 * biglsq));
+    // The best point is never selected for deletion.
+    CHECK(choice.knew != sys.kopt);
+
+    SECTION("collapsed denominator triggers refusal, not a corrupt update")
+    {
+        // Drive every den_k = beta*hdiag_k + vlag[k]^2 non-positive with a large
+        // negative beta so no candidate yields a positive weighted denominator;
+        // biglsq stays positive from the Lagrange values, so scaden(=0) <=
+        // 0.5*biglsq and the update must be refused.
+        double beta_bad = -1e6;
+        auto bad = policy::select_replacement_relative(sys, vb.vlag, beta_bad, delta, sys.xopt);
+        CHECK(bad.refuse);
+    }
+}
