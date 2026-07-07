@@ -39,6 +39,7 @@
 #include <limits>
 #include <optional>
 #include <tuple>
+#include <utility>
 
 namespace argmin
 {
@@ -132,6 +133,45 @@ struct bobyqa_policy
         bool last_improved{false};       // Whether the previous step improved the objective
         int m{};
         bool initialized{false};
+
+        // Powell bobyqb driver state (the ntrits state machine).
+        //
+        // ntrits is the number of consecutive trust-region iterations since the
+        // last "alternative" (geometry) iteration:
+        //   ntrits > 0  -- trust-region iteration (objective is evaluated)
+        //   ntrits == 0 -- alternative / ALTMOV geometry iteration (evaluated)
+        //   ntrits == -1 -- short step (dnorm < 0.5*rho): NOT evaluated, routed
+        //                   to a geometry refresh or a rho reduction instead.
+        //
+        // nfsav is the evaluation count captured at the start of work with the
+        // current rho (init, after a step longer than rho, after a rescue or a
+        // rho reduction). The nevals <= nfsav+2 guard sends the FIRST short step
+        // after a fresh rho refresh to geometry rather than straight to a rho
+        // reduction -- the bookkeeping whose absence stalls the driver.
+        //
+        // nevals mirrors Powell's evaluation counter (seeded to the 2n+1
+        // bootstrap count so the reported total matches the reference); nresc is
+        // its value at the last rescue.
+        //
+        // diffa/diffb/diffc hold |Q-error| at the last three interpolation
+        // points; xoptsq = ||xopt||^2, reset to zero by the origin shift.
+        //
+        // Reference: Powell 2009, Section 5; NLopt bobyqb_ lines 2100-3053.
+        int ntrits{0};
+        int nfsav{0};
+        int nresc{0};
+        int nevals{0};
+        std::uint32_t nevals_reported{0};
+        double diffa{0.0};
+        double diffb{0.0};
+        double diffc{0.0};
+        double xoptsq{0.0};
+
+        // Diagnostic: number of short-step trials whose objective evaluation was
+        // deferred (dnorm < 0.5*rho, ntrits = -1). Each such trial is NOT passed
+        // to the objective; the driver routes to a geometry or rho transition
+        // instead. Exposed so the no-evaluation property can be pinned.
+        int short_step_count{0};
     };
 
     // Clamp the interpolation radius so it never exceeds half of the smallest
@@ -302,288 +342,447 @@ struct bobyqa_policy
         s.rho = s.delta;
         s.rho_end = s.final_trust_radius;
 
+        // Seed the ntrits driver state. The bootstrap has evaluated the 2n+1
+        // interpolation points, so nevals starts there (matching the reference
+        // counter, which includes PRELIM). nfsav/nresc start at the same count.
+        s.nevals = s.m;
+        s.nevals_reported = 0;
+        s.nfsav = s.m;
+        s.nresc = s.m;
+        s.ntrits = 0;
+        s.diffa = 0.0;
+        s.diffb = 0.0;
+        s.diffc = 0.0;
+        s.xoptsq = s.sys.xopt.squaredNorm();
+
         return s;
     }
 
+    // Diagonal element of the ZMAT-factored H block: hdiag_k = sum_jj zmat(k,jj)^2.
+    // This is Powell's alpha for point k (bobyqb_ lines 2503-2510).
+    template <typename Sys>
+    static double zmat_hdiag(const Sys& sys, int k, int nptm)
+    {
+        double h = 0.0;
+        for(int jj = 0; jj < nptm; ++jj)
+            h += sys.zmat(k, jj) * sys.zmat(k, jj);
+        return h;
+    }
+
+    // One advance of Powell's bobyqb driver: run the ntrits state machine from
+    // the top of a trust-region iteration (label L60) until it has evaluated
+    // the objective at least once and is ready to begin the next trust-region
+    // iteration, or until the calculations with the final rho are complete.
+    //
+    // ntrits distinguishes the three iteration kinds (see state_type): a
+    // trust-region step (ntrits>0, evaluated), an ALTMOV geometry step
+    // (ntrits==0, evaluated), and a short step (ntrits==-1, NOT evaluated,
+    // routed to a geometry refresh or a rho reduction). The no-eval short-step
+    // and rho-reduction transitions are executed inline, so a single call may
+    // contract rho several times before an evaluation occurs; the reported
+    // evaluation count is the true number of objective calls.
+    //
+    // Reference: Powell, M. J. D. (2009), Section 5.
+    //   Ported statement-for-statement from NLopt bobyqb_ lines 2100-3053.
+    //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2100
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        double old_f = s.objective_value;
         const int n = s.x.size();
+        const int nptm = s.m - n - 1;
+        const double old_incumbent_f = s.objective_value;
 
-        // Model gradient at xopt (d=0 gives gopt directly).
-        Eigen::Vector<double, N> zero_d;
-        if constexpr(N == Eigen::Dynamic)
-            zero_d.setZero(n);
-        else
-            zero_d.setZero();
+        // Machine labels (the bobyqb_ goto targets, reified as a state variable).
+        enum class label { l60, l90, l210, l230, l360, l650, l680 };
 
-        Eigen::Vector<double, N> mg = detail::model_gradient_at(s.sys, zero_d);
-
-        // Build explicit Hessian for the trust-region subproblem.
-        // Cost: O(n^2 * m), acceptable for n < 20.
-        Eigen::Matrix<double, N, N> H = build_explicit_hessian<double, N>(s.sys);
-
-        // x_opt in absolute scaled coordinates for the trust-region solver.
-        Eigen::Vector<double, N> x_opt_abs = s.sys.xbase + s.sys.xopt;
-
-        // Solve trust-region subproblem in scaled coordinates.
-        Eigen::Vector<double, N> d = detail::solve_trust_region_box(
-            mg, H, x_opt_abs, s.delta, s.lower_scaled, s.upper_scaled);
-
-        double d_norm = d.norm();
-
-        // Powell 2009, Section 5: convergence via rho contraction.
-        if(s.rho <= s.rho_end && s.delta <= s.rho_end && !s.last_improved)
+        // Evaluate the objective at a trial point given in shifted coordinates
+        // (relative to xbase), clamping into the box so the objective is never
+        // probed outside [xl, xu]. Returns {f, x in scaled-absolute coords}.
+        auto eval_shifted = [&](const Eigen::Vector<double, N>& xn)
+            -> std::pair<double, Eigen::Vector<double, N>>
         {
-            return step_result<double>{
-                .objective_value = s.objective_value,
-                .gradient_norm = mg.norm(),
-                .step_size = 0.0,
-                .objective_change = 0.0,
-                .improved = false,
-                .x_norm = s.x.norm(),
-                .policy_status = solver_status::converged,
-            };
-        }
+            Eigen::Vector<double, N> xabs = detail::project(
+                (s.sys.xbase + xn).eval(), s.lower_scaled, s.upper_scaled);
+            Eigen::Vector<double, N> xorig = (xabs.array() * s.scale.array()).matrix();
+            double f = s.problem->value(xorig);
+            ++s.nevals;
+            return {f, xabs};
+        };
 
-        // Trial point: xopt + d in shifted coordinates (relative to xbase).
-        Eigen::Vector<double, N> x_new_shifted = s.sys.xopt + d;
-        Eigen::Vector<double, N> x_new_abs = detail::project(
-            (s.sys.xbase + x_new_shifted).eval(), s.lower_scaled, s.upper_scaled);
-        // Recompute the shifted coordinate after projection.
-        x_new_shifted = x_new_abs - s.sys.xbase;
-        // Recompute d after projection for accurate model prediction.
-        d = x_new_shifted - s.sys.xopt;
-
-        Eigen::Vector<double, N> x_new_orig =
-            (x_new_abs.array() * s.scale.array()).matrix();
-        double f_new = s.problem->value(x_new_orig);
-
-        // Model predictions: Q(xopt + d) - Q(xopt) = Q(d) since gopt is at xopt.
-        double q_predicted = detail::evaluate_interpolation_model(s.sys, d);
-
-        // Accuracy ratio.
-        //
-        // Reference: Powell 2009, eq. (3.1).
-        double accuracy_ratio = 0.0;
-        if(std::abs(q_predicted) > std::numeric_limits<double>::epsilon() * 100.0)
-            accuracy_ratio = (old_f - f_new) / (-q_predicted);
-
-        // (model predictions used for accuracy ratio above)
-
-        // Update trust-region radius (delta).
-        s.delta = detail::update_radius(s.delta, accuracy_ratio, d_norm, s.delta_max,
-                                        options.trust);
-
-        // Powell 2009, Section 5: rho contraction using three-regime schedule.
-        // Adapted from NLopt bobyqa.c lines 2993-3017.
-        // https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2993
-        if(s.delta <= s.rho)
-        {
-            if(accuracy_ratio <= 0.0 && std::max(s.delta, d_norm) <= s.rho && s.rho > s.rho_end)
-                std::tie(s.rho, s.delta) = detail::contract_rho(s.rho, s.rho_end);
-            s.delta = std::max(s.delta, s.rho);
-        }
-
-        // Powell 2009, Section 4: BMAT/ZMAT-based point replacement.
-        // Compute VLAG and BETA for the trial step.
-        auto [vlag, beta] = detail::compute_vlag_beta(s.sys, d);
-
-        // Lagrange values at the trial point (first m entries of vlag).
-        Eigen::VectorXd lv_xnew(s.m);
-        for(int k = 0; k < s.m; ++k)
-            lv_xnew[k] = vlag[k];
-
-        // Select replacement point using denominator*distance^4 weighting.
-        //
-        // Reference: Powell 2009, Section 4.
-        //   Adapted from NLopt bobyqa.c lines 2493-2549.
-        //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2493
-        //
-        // Use xpt columns (shifted coords) and x_opt_abs for distances
-        // in the select_replacement interface that expects absolute coords.
-        Eigen::Matrix<double, N, Eigen::Dynamic> Y_abs(n, s.m);
-        Eigen::VectorXd fval_vec(s.m);
-        for(int k = 0; k < s.m; ++k)
-        {
-            Y_abs.col(k) = s.sys.xbase + s.sys.xpt.col(k).head(n);
-            fval_vec[k] = s.sys.fval[k];
-        }
-
-        int knew = detail::select_replacement(
-            Y_abs, fval_vec, x_new_abs, f_new, x_opt_abs, lv_xnew, s.delta);
-
-        // Compute denominator for BMAT/ZMAT update.
-        // alpha = sum_j zmat[knew, j]^2 (diagonal element of Z*Z^T).
-        double alpha = 0.0;
-        {
-            int32_t nptm = s.m - n - 1;
-            for(int32_t jj = 0; jj < nptm; ++jj)
-                alpha += s.sys.zmat(knew, jj) * s.sys.zmat(knew, jj);
-        }
-        double denom = detail::compute_denom(vlag[knew], alpha, beta);
-
-        // Update BMAT/ZMAT if denominator is healthy.
-        // If denominator collapses, skip the factored update and trigger rescue.
-        bool denom_ok = (denom > 1e-20);
-        bool improved = false;
-        if(denom_ok)
-        {
-            detail::update_bmat_zmat(s.sys, vlag, beta, denom, knew);
-            detail::update_model_on_replacement(s.sys, x_new_shifted, f_new, knew, d);
-
-            // Accept the step only once the point is safely inside the
-            // factored interpolation set: moving s.x while the model is stale
-            // would report a point the quadratic model does not interpolate.
-            if(f_new < old_f)
-            {
-                s.x_scaled = x_new_abs;
-                s.x = x_new_orig;
-                s.objective_value = f_new;
-                improved = true;
-
-                // If update_model_on_replacement didn't already update kopt
-                // (it does when f_new < fval[kopt]), ensure consistency.
-                if(s.sys.kopt != knew && f_new < s.sys.fval[s.sys.kopt])
-                {
-                    s.sys.kopt = knew;
-                    s.sys.xopt = s.sys.xpt.col(knew).head(n);
-                }
-            }
-        }
-        else
-        {
-            // Denominator collapse: the trial point cannot be incorporated
-            // without destroying the BMAT/ZMAT factorization. Powell never
-            // writes behind the factorization, so leave xpt/fval/kopt/xopt and
-            // the incumbent s.x untouched and let the rescue counter trigger a
-            // full rebuild; overwriting the node here would leave the factored
-            // inverse representing a different point set than xpt/fval.
-            ++s.rescue_counter;
-        }
-
-        // Powell 2009, Section 6 (ALTMOV): geometry improvement.
-        // With BMAT/ZMAT, the exact Lagrange values enable effective ALTMOV
-        // placement, eliminating the numerical drift that made it unusable
-        // under the SVD model representation.
-        //
-        // Reference: Powell 2009, Section 6.
-        //   Adapted from NLopt bobyqa.c lines 743-1159.
-        //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L743
-        if(d_norm < 0.5 * s.rho && s.rho > s.rho_end)
-        {
-            // Select knew_geo as the interpolation point farthest from xopt
-            // (Powell's geometry criterion). The cardinal basis satisfies
-            // L_k(xopt) == delta_{k,kopt}, so scoring by |L_k(xopt)| ties every
-            // candidate at zero and degenerates to index 0; the point whose
-            // distance from xopt is largest is the one whose poisedness the
-            // geometry step must repair.
-            int knew_geo = -1;
-            double dist_geo_sq = 0.0;
-            for(int i = 0; i < s.m; ++i)
-            {
-                if(i == s.sys.kopt) continue;
-                double dsq = (s.sys.xpt.col(i).head(n) - s.sys.xopt).squaredNorm();
-                if(dsq > dist_geo_sq)
-                {
-                    dist_geo_sq = dsq;
-                    knew_geo = i;
-                }
-            }
-
-            // Powell's distance gate: refresh geometry only when the farthest
-            // point sits beyond max(2*delta, 10*rho) of xopt; otherwise the
-            // interpolation set is already compact and the iteration falls
-            // through to a rho reduction.
-            const double geo_gate = std::max(2.0 * s.delta, 10.0 * s.rho);
-            if(knew_geo >= 0 && dist_geo_sq > geo_gate * geo_gate)
-            {
-            const double dist_geo = std::sqrt(dist_geo_sq);
-            // ALTMOV subproblem radius (Powell 2009 eq. 6.x): shrink toward
-            // the point being moved but never below rho.
-            const double adelt = std::max(std::min(0.1 * dist_geo, 0.5 * s.delta), s.rho);
-
-            // ALTMOV geometry step: find the point maximizing |L_knew_geo|.
-            Eigen::Vector<double, N> geo_pt_shifted = detail::altmov_geometry_step<double, N>(
-                s.sys, knew_geo, adelt, s.lower_scaled - s.sys.xbase,
-                s.upper_scaled - s.sys.xbase);
-
-            Eigen::Vector<double, N> geo_pt_abs = detail::project(
-                (s.sys.xbase + geo_pt_shifted).eval(), s.lower_scaled, s.upper_scaled);
-            geo_pt_shifted = geo_pt_abs - s.sys.xbase;
-
-            Eigen::Vector<double, N> geo_pt_orig =
-                (geo_pt_abs.array() * s.scale.array()).matrix();
-            double geo_f = s.problem->value(geo_pt_orig);
-
-            // Compute VLAG/BETA for the geometry step.
-            Eigen::Vector<double, N> d_geo = geo_pt_shifted - s.sys.xopt;
-            auto [vlag_geo, beta_geo] = detail::compute_vlag_beta(s.sys, d_geo);
-
-            double alpha_geo = 0.0;
-            {
-                int32_t nptm = s.m - n - 1;
-                for(int32_t jj = 0; jj < nptm; ++jj)
-                    alpha_geo += s.sys.zmat(knew_geo, jj) * s.sys.zmat(knew_geo, jj);
-            }
-            double denom_geo = detail::compute_denom(vlag_geo[knew_geo], alpha_geo, beta_geo);
-
-            if(denom_geo > 1e-20)
-            {
-                detail::update_bmat_zmat(s.sys, vlag_geo, beta_geo, denom_geo, knew_geo);
-                detail::update_model_on_replacement(s.sys, geo_pt_shifted, geo_f, knew_geo, d_geo);
-
-                if(geo_f < s.objective_value)
-                {
-                    s.x_scaled = geo_pt_abs;
-                    s.x = geo_pt_orig;
-                    s.objective_value = geo_f;
-                    improved = true;
-                }
-            }
-            }
-        }
-
-        // Powell 2009, RESCUE concept: full interpolation system rebuild.
-        if(s.delta <= s.rho && !improved)
-            ++s.rescue_counter;
-        else if(improved)
-            s.rescue_counter = 0;
-
-        if(s.rescue_counter >= 3)
+        // Powell's RESCUE: rebuild the interpolation system from scratch about
+        // the current best point. Used when a chosen denominator has collapsed
+        // (bobyqb_ L190). Kept as the bootstrap rebuild (Powell never writes
+        // behind the factorization); the rebuild's 2n+1 evaluations are counted.
+        auto do_rescue = [&]()
         {
             double h = s.rho;
-            Eigen::Vector<double, N> x_base_new = s.sys.xbase + s.sys.xopt;
+            Eigen::Vector<double, N> xb = s.sys.xbase + s.sys.xopt;
             h = clamp_radius_to_bounds(h, s.lower_scaled, s.upper_scaled);
-            shift_inside_bounds(x_base_new, h, s.lower_scaled, s.upper_scaled);
-
+            shift_inside_bounds(xb, h, s.lower_scaled, s.upper_scaled);
             s.sys = detail::bootstrap_interpolation_system<double, N>(
-                x_base_new, h, s.lower_scaled, s.upper_scaled,
+                xb, h, s.lower_scaled, s.upper_scaled,
                 [&](const Eigen::Vector<double, N>& x_sc) {
-                    return s.problem->value(
-                        (x_sc.array() * s.scale.array()).matrix());
+                    return s.problem->value((x_sc.array() * s.scale.array()).matrix());
                 });
+            s.nevals += s.m;
+            s.nresc = s.nevals;
+            s.nfsav = s.nevals;
+            s.ntrits = 0;
+            s.xoptsq = s.sys.xopt.squaredNorm();
+        };
 
-            s.x_scaled = s.sys.xbase + s.sys.xopt;
-            s.x = (s.x_scaled.array() * s.scale.array()).matrix();
-            s.objective_value = s.sys.fval[s.sys.kopt];
-            s.rescue_counter = 0;
+        // Within-iteration locals (never persist across calls -- each call
+        // resumes at L60, the top of a fresh trust-region iteration).
+        Eigen::Vector<double, N> d, xnew, gnew;
+        Eigen::Vector<double, N> zero_d = Eigen::Vector<double, N>::Zero(n);
+        Eigen::Vector<double, detail::interpolation_system<double, N>::MaxMpN> vlag;
+        double dsq = 0.0, dnorm = 0.0, adelt = 0.0, ratio = 0.0;
+        double beta = 0.0, denom = 0.0, vquad = 0.0, alpha = 0.0;
+        double geo_distsq = 0.0;
+        double last_eval_dnorm = 0.0;
+        int knew = -1;
+
+        bool did_eval = false;
+        bool terminated = false;
+
+        label loc = label::l60;
+        int safety = 0;
+        const int safety_cap = 200000;
+
+        while(true)
+        {
+            // Return once an evaluation has been made and the driver is back at
+            // the top of a trust-region iteration; keep looping through the
+            // no-eval short-step / rho-reduction transitions otherwise.
+            if(loc == label::l60 && did_eval)
+                break;
+            if(++safety > safety_cap)
+            {
+                terminated = true;
+                break;
+            }
+
+            switch(loc)
+            {
+            case label::l60:
+            {
+                // Generate the trust-region step (TRSBOX) that minimizes the
+                // model subject to the trust radius and the box.
+                Eigen::Vector<double, N> mg = detail::model_gradient_at(s.sys, zero_d);
+                Eigen::Matrix<double, N, N> H = build_explicit_hessian<double, N>(s.sys);
+                Eigen::Vector<double, N> x_opt_abs = s.sys.xbase + s.sys.xopt;
+                d = detail::solve_trust_region_box(
+                    mg, H, x_opt_abs, s.delta, s.lower_scaled, s.upper_scaled);
+                dsq = d.squaredNorm();
+                dnorm = std::min(s.delta, std::sqrt(dsq));
+
+                if(dnorm < 0.5 * s.rho)
+                {
+                    // Short step: defer the evaluation (bobyqb_ L60, lines
+                    // 2157-2206). Route to a geometry refresh (L650) or a rho
+                    // reduction (L680) instead of evaluating this trial.
+                    s.ntrits = -1;
+                    ++s.short_step_count;
+                    geo_distsq = (10.0 * s.rho) * (10.0 * s.rho);
+
+                    bool go_650 = false;
+                    if(s.nevals <= s.nfsav + 2)
+                    {
+                        // First short step after a fresh rho refresh: refresh
+                        // the geometry rather than declaring the rho complete.
+                        go_650 = true;
+                    }
+                    else
+                    {
+                        double errbig = std::max({s.diffa, s.diffb, s.diffc});
+                        double frhosq = 0.125 * s.rho * s.rho;
+                        // crvmin is avoided: use the policy-visible minimum
+                        // diagonal model curvature as the errbig-test proxy
+                        // (the same per-coordinate curvature the bdtol loop
+                        // below uses). Keeps the port confined to the policy.
+                        double crvmin = std::numeric_limits<double>::infinity();
+                        for(int j = 0; j < n; ++j)
+                            crvmin = std::min(crvmin, H(j, j));
+                        if(crvmin > 0.0 && errbig > frhosq * crvmin)
+                        {
+                            go_650 = true;
+                        }
+                        else
+                        {
+                            // Per-coordinate boundary/curvature test (bobyqb_
+                            // lines 2179-2204): would freeing a bound-active
+                            // coordinate, plus its curvature over rho, still
+                            // predict improvement?
+                            double bdtol = errbig / s.rho;
+                            gnew = detail::model_gradient_at(s.sys, d);
+                            Eigen::Vector<double, N> sl = s.lower_scaled - s.sys.xbase;
+                            Eigen::Vector<double, N> su = s.upper_scaled - s.sys.xbase;
+                            xnew = s.sys.xopt + d;
+                            for(int j = 0; j < n; ++j)
+                            {
+                                double bdtest = bdtol;
+                                if(xnew[j] == sl[j]) bdtest = gnew[j];
+                                if(xnew[j] == su[j]) bdtest = -gnew[j];
+                                if(bdtest < bdtol)
+                                {
+                                    bdtest += 0.5 * H(j, j) * s.rho;
+                                    if(bdtest < bdtol)
+                                    {
+                                        go_650 = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Retain xnew for the deferred evaluation at end-game.
+                    xnew = s.sys.xopt + d;
+                    loc = go_650 ? label::l650 : label::l680;
+                    break;
+                }
+
+                ++s.ntrits;
+                loc = label::l90;
+                break;
+            }
+
+            case label::l90:
+            {
+                // (Origin shift is inserted here in a later stage.)
+                xnew = s.sys.xopt + d;
+                loc = (s.ntrits == 0) ? label::l210 : label::l230;
+                break;
+            }
+
+            case label::l210:
+            {
+                // ALTMOV geometry step for the KNEW-th point (chosen at L650).
+                Eigen::Vector<double, N> geo = detail::altmov_geometry_step<double, N>(
+                    s.sys, knew, adelt, s.lower_scaled - s.sys.xbase,
+                    s.upper_scaled - s.sys.xbase);
+                Eigen::Vector<double, N> geo_abs = detail::project(
+                    (s.sys.xbase + geo).eval(), s.lower_scaled, s.upper_scaled);
+                xnew = geo_abs - s.sys.xbase;
+                d = xnew - s.sys.xopt;
+                loc = label::l230;
+                break;
+            }
+
+            case label::l230:
+            {
+                auto vb = detail::compute_vlag_beta(s.sys, d);
+                vlag = vb.vlag;
+                beta = vb.beta;
+
+                if(s.ntrits == 0)
+                {
+                    // Geometry step: accept unless the denominator has
+                    // collapsed relative to vlag[knew]^2.
+                    alpha = zmat_hdiag(s.sys, knew, nptm);
+                    denom = detail::compute_denom(vlag[knew], alpha, beta);
+                    if(denom <= 1e-20)
+                    {
+                        if(s.nevals > s.nresc) { do_rescue(); loc = label::l60; break; }
+                        terminated = true;
+                        loc = label::l60;
+                        break;
+                    }
+                    loc = label::l360;
+                    break;
+                }
+
+                // Trust step: choose the point to delete before evaluating.
+                Eigen::VectorXd lv_xnew(s.m);
+                for(int k = 0; k < s.m; ++k)
+                    lv_xnew[k] = vlag[k];
+                Eigen::Vector<double, N> x_opt_abs = s.sys.xbase + s.sys.xopt;
+                Eigen::Vector<double, N> x_new_abs = detail::project(
+                    (s.sys.xbase + xnew).eval(), s.lower_scaled, s.upper_scaled);
+                Eigen::Matrix<double, N, Eigen::Dynamic> Y_abs(n, s.m);
+                Eigen::VectorXd fval_vec(s.m);
+                for(int k = 0; k < s.m; ++k)
+                {
+                    Y_abs.col(k) = s.sys.xbase + s.sys.xpt.col(k).head(n);
+                    fval_vec[k] = s.sys.fval[k];
+                }
+                knew = detail::select_replacement(
+                    Y_abs, fval_vec, x_new_abs, s.sys.fval[s.sys.kopt], x_opt_abs,
+                    lv_xnew, s.delta);
+                alpha = zmat_hdiag(s.sys, knew, nptm);
+                denom = detail::compute_denom(vlag[knew], alpha, beta);
+                if(denom <= 1e-20)
+                {
+                    if(s.nevals > s.nresc) { do_rescue(); loc = label::l60; break; }
+                    terminated = true;
+                    loc = label::l60;
+                    break;
+                }
+                loc = label::l360;
+                break;
+            }
+
+            case label::l360:
+            {
+                auto [f, xabs] = eval_shifted(xnew);
+                did_eval = true;
+                last_eval_dnorm = dnorm;
+
+                if(s.ntrits == -1)
+                {
+                    // The deferred short step is evaluated exactly once, at
+                    // end-game (bobyqb_ lines 2582-2586). The incumbent stays
+                    // the model's best node; terminate.
+                    terminated = true;
+                    loc = label::l60;
+                    break;
+                }
+
+                const double old_fopt = s.sys.fval[s.sys.kopt];
+                vquad = detail::evaluate_interpolation_model(s.sys, d);
+                double diff = f - old_fopt - vquad;
+                s.diffc = s.diffb;
+                s.diffb = s.diffa;
+                s.diffa = std::abs(diff);
+                if(dnorm > s.rho)
+                    s.nfsav = s.nevals;
+
+                if(s.ntrits > 0)
+                {
+                    if(vquad >= 0.0)
+                    {
+                        // A trust step that fails to reduce Q: the calculation
+                        // is complete (bobyqb_ lines 2632-2637).
+                        terminated = true;
+                        loc = label::l60;
+                        break;
+                    }
+                    ratio = (f - old_fopt) / vquad;
+                    if(ratio <= 0.1)
+                        s.delta = std::min(0.5 * s.delta, dnorm);
+                    else if(ratio <= 0.7)
+                        s.delta = std::max(0.5 * s.delta, dnorm);
+                    else
+                        s.delta = std::max(0.5 * s.delta, 2.0 * dnorm);
+                    if(s.delta <= 1.5 * s.rho)
+                        s.delta = s.rho;
+                }
+
+                detail::update_bmat_zmat(s.sys, vlag, beta, denom, knew);
+                detail::update_model_on_replacement(s.sys, xnew, f, knew, d);
+
+                bool improved_here = (f < old_fopt);
+                if(improved_here)
+                    s.xoptsq = s.sys.xopt.squaredNorm();
+
+                if(s.ntrits == 0)
+                {
+                    loc = label::l60;
+                    break;
+                }
+                if(f <= old_fopt + 0.1 * vquad)
+                {
+                    loc = label::l60;
+                    break;
+                }
+                geo_distsq = std::max((2.0 * s.delta) * (2.0 * s.delta),
+                                      (10.0 * s.rho) * (10.0 * s.rho));
+                loc = label::l650;
+                break;
+            }
+
+            case label::l650:
+            {
+                // Choose the interpolation point farthest from xopt beyond the
+                // geometry threshold (bobyqb_ lines 2946-2963).
+                knew = 0;
+                bool found = false;
+                double best = geo_distsq;
+                for(int k = 0; k < s.m; ++k)
+                {
+                    double sum = (s.sys.xpt.col(k).head(n) - s.sys.xopt).squaredNorm();
+                    if(sum > best)
+                    {
+                        best = sum;
+                        knew = k;
+                        found = true;
+                    }
+                }
+
+                if(found)
+                {
+                    double dist = std::sqrt(best);
+                    if(s.ntrits == -1)
+                    {
+                        s.delta = std::min(0.1 * s.delta, 0.5 * dist);
+                        if(s.delta <= 1.5 * s.rho)
+                            s.delta = s.rho;
+                    }
+                    s.ntrits = 0;
+                    adelt = std::max(std::min(0.1 * dist, s.delta), s.rho);
+                    dsq = adelt * adelt;
+                    loc = label::l90;
+                    break;
+                }
+
+                if(s.ntrits == -1)
+                    loc = label::l680;
+                else if(ratio > 0.0)
+                    loc = label::l60;
+                else if(std::max(s.delta, dnorm) > s.rho)
+                    loc = label::l60;
+                else
+                    loc = label::l680;
+                break;
+            }
+
+            case label::l680:
+            {
+                if(s.rho > s.rho_end)
+                {
+                    // The calculations with this rho are complete: contract rho
+                    // and delta and start a fresh trust-region round.
+                    std::tie(s.rho, s.delta) = detail::contract_rho(s.rho, s.rho_end);
+                    s.ntrits = 0;
+                    s.nfsav = s.nevals;
+                    loc = label::l60;
+                    break;
+                }
+                if(s.ntrits == -1)
+                {
+                    // Evaluate the deferred short Newton step once at end-game.
+                    loc = label::l360;
+                    break;
+                }
+                terminated = true;
+                loc = label::l60;
+                break;
+            }
+            }
         }
 
+        // Keep the reported incumbent tied to the model's best node.
+        s.x_scaled = s.sys.xbase + s.sys.xopt;
+        s.x = (s.x_scaled.array() * s.scale.array()).matrix();
+        s.objective_value = s.sys.fval[s.sys.kopt];
+
         ++s.iteration;
+        bool improved = s.objective_value < old_incumbent_f;
         s.last_improved = improved;
 
-        // Derivative-free convergence signalling.
-        double obj_change = s.objective_value - old_f;
-        double effective_step = improved ? d_norm : s.delta;
-        double effective_change = improved ? obj_change : s.delta;
-
-        double grad_proxy = mg.norm();
+        Eigen::Vector<double, N> gopt_now = detail::model_gradient_at(s.sys, zero_d);
+        double grad_proxy = gopt_now.norm();
         if(s.rho > s.rho_end)
             grad_proxy = std::max(grad_proxy, 1.0);
 
-        return step_result<double>{
+        double obj_change = s.objective_value - old_incumbent_f;
+        double effective_step = improved ? last_eval_dnorm : s.delta;
+        double effective_change = improved ? obj_change : s.delta;
+
+        std::uint32_t evals = static_cast<std::uint32_t>(s.nevals) - s.nevals_reported;
+        s.nevals_reported = static_cast<std::uint32_t>(s.nevals);
+
+        step_result<double> r{
             .objective_value = s.objective_value,
             .gradient_norm = grad_proxy,
             .step_size = effective_step,
@@ -591,6 +790,10 @@ struct bobyqa_policy
             .improved = improved,
             .x_norm = s.x.norm(),
         };
+        r.evaluations = std::max<std::uint32_t>(evals, 1u);
+        if(terminated)
+            r.policy_status = solver_status::converged;
+        return r;
     }
 
     // Cold restart -- BOBYQA has no warm-start mode since the interpolation

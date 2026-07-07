@@ -825,3 +825,96 @@ TEST_CASE("bobyqa incumbent stays consistent with the factored model", "[bobyqa]
             break;
     }
 }
+
+// An objective that records every point at which it is evaluated. Mirrors the
+// out-of-bounds instrument in bobyqa_bounds_test.cpp: the count of calls is the
+// ground-truth number of objective evaluations, independent of the driver's own
+// bookkeeping.
+namespace
+{
+struct counting_booth
+{
+    static constexpr int problem_dimension = 2;
+    Eigen::Vector<double, 2> lb;
+    Eigen::Vector<double, 2> ub;
+    int* calls{nullptr};
+
+    int dimension() const { return 2; }
+
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        if(calls) ++(*calls);
+        double t1 = x[0] + 2.0 * x[1] - 7.0;
+        double t2 = 2.0 * x[0] + x[1] - 5.0;
+        return t1 * t1 + t2 * t2;
+    }
+
+    Eigen::Vector<double, 2> lower_bounds() const { return lb; }
+    Eigen::Vector<double, 2> upper_bounds() const { return ub; }
+};
+}
+
+// Short-step no-evaluation instrument (FAM short-step skip).
+//
+// Powell defers the objective evaluation on a trust step shorter than 0.5*rho
+// (ntrits = -1): the trial is NOT passed to the objective; the driver instead
+// advances to a geometry refresh or a rho reduction, whose progress carries the
+// iteration. Without this deferral (and the nfsav routing that sends the first
+// short step after a rho refresh to geometry) the driver stalls -- a contained
+// skip without the ntrits machine failed the majority of cases.
+//
+// The instrument counts every objective call (ground truth) and compares it to
+// the driver's own evaluation counter. Because the driver only increments its
+// counter inside the single evaluation site, agreement proves that the deferred
+// short-step trials never reached the objective, while short_step_count > 0
+// proves the deferral branch actually fired and the solver still converged.
+TEST_CASE("bobyqa defers the short-step evaluation and still converges", "[bobyqa]")
+{
+    int calls = 0;
+    counting_booth problem{
+        .lb = Eigen::Vector<double, 2>{{-10.0, -10.0}},
+        .ub = Eigen::Vector<double, 2>{{10.0, 10.0}},
+        .calls = &calls,
+    };
+
+    Eigen::VectorXd x0{{0.0, 0.0}};
+    solver_options opts;
+    opts.max_iterations = 500;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(1e-14);
+    opts.set_step_threshold(1e-14);
+
+    bobyqa_policy<2> pol;
+    auto s = pol.init(problem, Eigen::Vector<double, 2>{0.0, 0.0}, opts);
+
+    // After init, the ground-truth call count equals the 2n+1 bootstrap and the
+    // driver's counter agrees.
+    REQUIRE(calls == s.m);
+    REQUIRE(s.nevals == s.m);
+
+    bool converged = false;
+    for(int it = 0; it < 2000; ++it)
+    {
+        auto r = pol.step(s);
+        // Ground-truth objective calls are exactly the driver's evaluation
+        // counter every step: the deferred short-step trials are never
+        // evaluated (they would inflate `calls` past `nevals` otherwise).
+        REQUIRE(calls == s.nevals);
+        if(r.policy_status && *r.policy_status == solver_status::converged)
+        {
+            converged = true;
+            break;
+        }
+    }
+
+    // The deferral branch fired (short steps occurred) ...
+    CHECK(s.short_step_count > 0);
+    // ... the accounting is exact (no skipped trial reached the objective) ...
+    CHECK(calls == s.nevals);
+    // ... and progress was maintained to the Booth optimum at (1, 3) despite
+    // skipping those evaluations (the nfsav routing prevents the stall).
+    CHECK(converged);
+    CHECK(s.objective_value < 1e-8);
+    CHECK(s.x[0] == Approx(1.0).margin(1e-3));
+    CHECK(s.x[1] == Approx(3.0).margin(1e-3));
+}
