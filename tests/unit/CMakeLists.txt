@@ -93,6 +93,26 @@ endif()
 
 catch_discover_tests(argmin_unit_tests)
 
+# Warm-start reset boundary sensor. Compiled into its own executable with
+# EIGEN_RUNTIME_NO_MALLOC so the macro's Eigen-side allocation guards are
+# scoped to this translation unit (defining it project-wide would perturb every
+# other unit's Eigen inlining). The test arms Eigen::internal's malloc gate
+# around a warm reset and asserts no Eigen heap allocation occurs at fixed or
+# dynamic N; it also pins the filter_slsqp re-seed and projected_gn tau fixes.
+add_executable(argmin_warm_start_boundary_test
+    warm_start_boundary_test.cpp
+)
+target_link_libraries(argmin_warm_start_boundary_test
+    PRIVATE
+        argmin::argmin
+        Catch2::Catch2WithMain
+)
+target_compile_definitions(argmin_warm_start_boundary_test
+    PRIVATE EIGEN_RUNTIME_NO_MALLOC)
+target_compile_options(argmin_warm_start_boundary_test
+    PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
+catch_discover_tests(argmin_warm_start_boundary_test)
+
 # Dedicated ctest label for the move-and-step ASan instrument so the
 # sanitize CI job can select it explicitly (`ctest -L asan-move`) even
 # though the whole suite already runs under -fsanitize=address. This is
