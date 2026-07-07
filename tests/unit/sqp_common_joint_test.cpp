@@ -31,7 +31,7 @@
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/solver/options.h"
 #include "argmin/solver/tr_sqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/filter_trsqp_policy.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
@@ -414,7 +414,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(Policy::default_step_tolerance_rel);
     opts.constraint_tolerance = Policy::default_feasibility_tolerance;
 
-    basic_solver solver{Policy{}, problem, x0, opts};
+    step_budget_solver solver{Policy{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::converged);

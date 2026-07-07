@@ -11,7 +11,7 @@
 
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -203,7 +203,7 @@ TEST_CASE("nw_sqp family fires a second-order correction at a near-feasible "
     SECTION("nw_sqp")
     {
         maratos_problem problem;
-        basic_solver solver{nw_sqp_policy<>{}, problem, xk, opts};
+        step_budget_solver solver{nw_sqp_policy<>{}, problem, xk, opts};
         auto sr = solver.step();
         CHECK(sr.diagnostics.soc_retry_count >= std::size_t{1});
     }
@@ -211,7 +211,7 @@ TEST_CASE("nw_sqp family fires a second-order correction at a near-feasible "
     SECTION("filter_nw_sqp")
     {
         maratos_problem problem;
-        basic_solver solver{filter_nw_sqp_policy<>{}, problem, xk, opts};
+        step_budget_solver solver{filter_nw_sqp_policy<>{}, problem, xk, opts};
         auto sr = solver.step();
         CHECK(sr.diagnostics.soc_retry_count >= std::size_t{1});
     }
@@ -254,7 +254,7 @@ TEST_CASE("filter_nw_sqp reaches the HS043 optimum without over-rejection",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{filter_nw_sqp_policy<hs043<>::problem_dimension>{},
+    step_budget_solver solver{filter_nw_sqp_policy<hs043<>::problem_dimension>{},
                         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -292,7 +292,7 @@ TEST_CASE("nw_sqp family reaches the joint equality+inequality Maratos "
     SECTION("nw_sqp")
     {
         joint_maratos_problem problem;
-        basic_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK(result.objective_value == Approx(f_star).margin(1e-6));
         CHECK(result.constraint_violation <= opts.feasibility_tolerance);
@@ -301,7 +301,7 @@ TEST_CASE("nw_sqp family reaches the joint equality+inequality Maratos "
     SECTION("filter_nw_sqp")
     {
         joint_maratos_problem problem;
-        basic_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK(result.objective_value == Approx(f_star).margin(1e-6));
         CHECK(result.constraint_violation <= opts.feasibility_tolerance);
@@ -314,7 +314,7 @@ TEST_CASE("nw_sqp family reaches the joint equality+inequality Maratos "
     SECTION("SOC fires along the nw_sqp trajectory")
     {
         joint_maratos_problem problem;
-        basic_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
         std::size_t soc_total = 0;
         for(int k = 0; k < 60; ++k)
             soc_total += solver.step().diagnostics.soc_retry_count;
@@ -346,7 +346,7 @@ TEST_CASE("nw_sqp family reaches the joint Maratos optimum under an "
     SECTION("nw_sqp")
     {
         joint_maratos_bounded_problem problem;
-        basic_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK(result.objective_value == Approx(f_star).margin(1e-6));
         CHECK(result.constraint_violation <= opts.feasibility_tolerance);
@@ -355,7 +355,7 @@ TEST_CASE("nw_sqp family reaches the joint Maratos optimum under an "
     SECTION("filter_nw_sqp")
     {
         joint_maratos_bounded_problem problem;
-        basic_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK(result.objective_value == Approx(f_star).margin(1e-6));
         CHECK(result.constraint_violation <= opts.feasibility_tolerance);
@@ -364,7 +364,7 @@ TEST_CASE("nw_sqp family reaches the joint Maratos optimum under an "
     SECTION("SOC fires along the bounded nw_sqp trajectory")
     {
         joint_maratos_bounded_problem problem;
-        basic_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<>{}, problem, x0, opts};
         std::size_t soc_total = 0;
         for(int k = 0; k < 60; ++k)
             soc_total += solver.step().diagnostics.soc_retry_count;

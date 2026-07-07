@@ -13,7 +13,7 @@
 namespace argmin::test
 {
 
-// Mock policy for testing basic_solver.
+// Mock policy for testing step_budget_solver.
 //
 // Implements gradient descent on f(x) = 0.5 * x^T * x (quadratic bowl).
 // gradient = x, so each step: x <- x - alpha * x = (1 - alpha) * x.
@@ -382,10 +382,10 @@ struct converging_mock_policy
 };
 
 // Mock policy at the feasibility_tolerance boundary: constraint_violation
-// is 5e-7, strictly inside basic_solver's default feasibility_tolerance
+// is 5e-7, strictly inside step_budget_solver's default feasibility_tolerance
 // (1e-6, options.h) but strictly outside a bare-zero tolerance. Used to
 // check that basic_solver_group's feasibility default agrees with
-// basic_solver's, rather than judging this borderline iterate infeasible.
+// step_budget_solver's, rather than judging this borderline iterate infeasible.
 
 struct borderline_feasible_mock_policy
 {
@@ -487,11 +487,11 @@ struct feasible_worse_objective_mock_policy
     }
 };
 
-// Mock policy for testing basic_solver's own best-seen feasibility
+// Mock policy for testing step_budget_solver's own best-seen feasibility
 // tolerance in isolation: step 1 is borderline-feasible (cv = 5e-7,
 // obj = 10), step 2 is unambiguously feasible but worse (cv = 0, obj = 20).
 // Also seeds the same borderline c_ineq at init() so the pre-loop best-seen
-// seed (basic_solver.h seed_best_cv) starts from the same borderline value.
+// seed (step_budget_solver.h seed_best_cv) starts from the same borderline value.
 
 struct borderline_then_worse_mock_policy
 {

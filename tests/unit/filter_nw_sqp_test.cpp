@@ -7,7 +7,7 @@
 // Reference: Hock & Schittkowski 1981; Fletcher & Leyffer 2002.
 
 #include "argmin/solver/filter_nw_sqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -21,7 +21,7 @@
 using Catch::Approx;
 using namespace argmin;
 
-static_assert(nlp_solver<basic_solver<filter_nw_sqp_policy<>>>,
+static_assert(nlp_solver<step_budget_solver<filter_nw_sqp_policy<>>>,
               "filter_nw_sqp_policy must satisfy nlp_solver concept");
 
 TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
@@ -40,7 +40,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{filter_nw_sqp_policy<hs071<>::problem_dimension>{},
+        step_budget_solver solver{filter_nw_sqp_policy<hs071<>::problem_dimension>{},
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -58,7 +58,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         // filter-acceptance over-rejection wanders the iterate to a
         // non-stationary region.
         //
-        // Under basic_solver's best-seen termination (NLopt convention),
+        // Under step_budget_solver's best-seen termination (NLopt convention),
         // the returned solve_result is the best strictly-feasible iterate
         // encountered, not the infeasible f=-44 trial. On HS043 the best
         // feasible iterate is f approximately -40.4, giving the margin
@@ -89,7 +89,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{filter_nw_sqp_policy<hs043<>::problem_dimension>{},
+        step_budget_solver solver{filter_nw_sqp_policy<hs043<>::problem_dimension>{},
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -107,7 +107,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
+        step_budget_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -126,7 +126,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{filter_nw_sqp_policy<hs076<>::problem_dimension>{},
+        step_budget_solver solver{filter_nw_sqp_policy<hs076<>::problem_dimension>{},
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -152,7 +152,7 @@ TEST_CASE("filter_nw_sqp populates kkt_residual and exposes is_null_step",
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    basic_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
+    step_budget_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
                         problem, x0, opts};
 
     bool populated = false;
@@ -194,7 +194,7 @@ TEST_CASE("filter_nw_sqp HS024 regression guard",
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{filter_nw_sqp_policy<hs024<>::problem_dimension>{},
+    step_budget_solver solver{filter_nw_sqp_policy<hs024<>::problem_dimension>{},
                         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -208,7 +208,7 @@ TEST_CASE("filter_nw_sqp HS024 regression guard",
 // search with the prior run's converged near-optimum already in the
 // filter, every trial point is dominance-rejected, and the outer loop
 // stalls at alpha -> 0. Cold-start tests do not exercise this path
-// because each constructs a fresh basic_solver. Surfaced by ctrlpp
+// because each constructs a fresh step_budget_solver. Surfaced by ctrlpp
 // nanobench harness reusing the nmpc instance across cells.
 //
 // Reference: Wachter & Biegler 2006, Section 3.3 (filter
@@ -225,7 +225,7 @@ TEST_CASE("filter_nw_sqp reset() clears filter for warm-start convergence",
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
 
-    basic_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
+    step_budget_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
                         problem, x0, opts};
 
     auto first = solver.solve(opts);
@@ -429,7 +429,7 @@ TEST_CASE("filter_nw_sqp converges on dynamic-dimension HS problems",
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
 
-        basic_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(1e-3));
@@ -464,7 +464,7 @@ TEST_CASE("filter_nw_sqp converges on dynamic-dimension HS problems",
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
 
-        basic_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(std::isfinite(result.objective_value));
@@ -481,7 +481,7 @@ TEST_CASE("filter_nw_sqp converges on dynamic-dimension HS problems",
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
 
-        basic_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{filter_nw_sqp_policy<>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.6818181818).margin(1e-3));
@@ -519,7 +519,7 @@ TEST_CASE("filter_nw_sqp HS071 mixed constraints (regression guard)",
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(std::isfinite(result.objective_value));
@@ -547,7 +547,7 @@ TEST_CASE("filter_nw_sqp HS043 inequality constraints (regression guard)",
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(-44.0).margin(4.0));
@@ -567,7 +567,7 @@ TEST_CASE("filter_nw_sqp HS026 (regression guard)",
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS026 optimum: f* = 0 at (1, 1, 1).
@@ -588,7 +588,7 @@ TEST_CASE("filter_nw_sqp HS028 (regression guard)",
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS028 optimum: f* = 0 at (0.5, -0.5, 0.5).

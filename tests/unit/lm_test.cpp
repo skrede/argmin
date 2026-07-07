@@ -1,5 +1,5 @@
 #include "argmin/solver/lm_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -129,7 +129,7 @@ TEST_CASE("lm_policy: Rosenbrock residual form", "[lm]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-12);
 
-    basic_solver solver{lm_policy{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-12);
@@ -146,7 +146,7 @@ TEST_CASE("lm_policy: exponential fitting", "[lm]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    basic_solver solver{lm_policy{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Data is approximate exponential, so residual won't be zero
@@ -162,7 +162,7 @@ TEST_CASE("lm_policy: FD Jacobian fallback", "[lm]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    basic_solver solver{lm_policy{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-8);
@@ -181,7 +181,7 @@ TEST_CASE("lm_policy: step_n budget", "[lm]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver solver{lm_policy{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy{}, problem, x0, opts};
     double f0 = solver.state().objective_value;
 
     auto result = solver.step_n(5);
@@ -200,7 +200,7 @@ TEST_CASE("lm_policy: rejected steps recovery", "[lm]")
     opts.max_iterations = 500;
     opts.set_gradient_threshold(1e-10);
 
-    basic_solver solver{lm_policy{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Should converge despite starting far away (some rejected steps expected)
@@ -226,7 +226,7 @@ TEST_CASE("lm_policy populates kkt_residual", "[lm][kkt]")
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-10);
 
-    basic_solver solver{lm_policy{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy{}, problem, x0, opts};
 
     bool populated = false;
     for(int i = 0; i < 10; ++i)
@@ -333,7 +333,7 @@ TEST_CASE("lm_policy: exact gain ratio on a quadratic; honest objective_change",
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-12);
 
-    basic_solver solver{lm_policy<2>{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy<2>{}, problem, x0, opts};
 
     // Each accepted step's reported objective_change must equal the true
     // objective decrease (the value before minus the value after), never a
@@ -369,7 +369,7 @@ TEST_CASE("lm_policy: rejected step reports zero objective_change, not lambda",
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-12);
 
-    basic_solver solver{lm_policy<1>{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy<1>{}, problem, x0, opts};
 
     // Step 1: the Gauss-Newton step overshoots, so the trial is rejected. The
     // reported objective_change must be exactly 0 (the iterate did not move),
@@ -433,7 +433,7 @@ double lm_trajectory_fingerprint(double& out_f, double& out_x0, double& out_x1)
     solver_options opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-12);
-    basic_solver solver{lm_policy<2>{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy<2>{}, problem, x0, opts};
     double fp = 0.0;
     for(int i = 0; i < 50; ++i)
     {

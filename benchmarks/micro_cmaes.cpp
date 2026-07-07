@@ -42,7 +42,7 @@
 #include "argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h"
 #include "argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h"
 #include "argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/ackley.h"
 #include "argmin/test_functions/rastrigin.h"
 #include "argmin/result/status.h"
@@ -203,7 +203,7 @@ timing bench_argmin(Policy policy, const Problem& problem,
 
     // Warmup.
     {
-        argmin::basic_solver solver{policy, problem, x0, opts, cmaes_opts};
+        argmin::step_budget_solver solver{policy, problem, x0, opts, cmaes_opts};
         solver.solve();
     }
 
@@ -212,7 +212,7 @@ timing bench_argmin(Policy policy, const Problem& problem,
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{policy, problem, x0, opts, cmaes_opts};
+        argmin::step_budget_solver solver{policy, problem, x0, opts, cmaes_opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -428,7 +428,7 @@ int main()
         cmaes_opts.seed = 42u;
         cmaes_opts.restart = argmin::cmaes_policy<2>::restart_strategy::ipop;
 
-        argmin::basic_solver solver{
+        argmin::step_budget_solver solver{
             argmin::cmaes_policy<2>{}, wrapped, x0, opts, cmaes_opts};
         auto result = solver.solve();
 
@@ -484,7 +484,7 @@ int main()
         // this run.
         cmaes_opts.cmaes.step_size_tolerance = 1e-30;
 
-        argmin::basic_solver solver{
+        argmin::step_budget_solver solver{
             argmin::cmaes_policy<2>{}, prob, x0, opts, cmaes_opts};
         auto result = solver.solve();
 

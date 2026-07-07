@@ -26,7 +26,7 @@
 #include "argmin/solver/options.h"
 #include "argmin/solver/mma_policy.h"
 #include "argmin/solver/ccsa_quadratic_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -185,7 +185,7 @@ TEST_CASE("strict mma plumbing executes on HS076", "[mma_reciprocal]")
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{
+    step_budget_solver solver{
         mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
@@ -207,7 +207,7 @@ TEST_CASE("strict mma converges on separable_beam", "[mma_reciprocal]")
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{
+    step_budget_solver solver{
         mma_policy<separable_beam::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
@@ -374,7 +374,7 @@ TEST_CASE("ccsa with bounded-dual elastics converges from an infeasible start",
     opts.set_gradient_threshold(1e-8);
     opts.set_step_threshold(1e-15);
 
-    basic_solver solver{
+    step_budget_solver solver{
         ccsa_quadratic_policy<halfspace_cell::problem_dimension>{},
         problem, x0, opts};
 

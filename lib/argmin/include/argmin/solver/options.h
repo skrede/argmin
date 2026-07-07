@@ -30,7 +30,7 @@ struct solver_options
 
     std::uint32_t max_iterations{1000};
     std::optional<double> constraint_tolerance{};
-    // Threshold used by basic_solver's best-seen feasibility-first
+    // Threshold used by step_budget_solver's best-seen feasibility-first
     // comparator: an iterate with constraint_violation <= this value
     // is treated as feasible when selecting the returned point.
     //

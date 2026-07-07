@@ -41,7 +41,7 @@
 #include "argmin/detail/isres_operators.h"
 #include "argmin/solver/options.h"
 #include "argmin/solver/isres_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/result/status.h"
 
 #include <Eigen/Core>
@@ -287,7 +287,7 @@ TEST_CASE("isres: converged status implies a feasible returned x on an equality 
     policy.options.seed = 7u;
     policy.options.feasibility_gate = 1e-4;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     // The best-ever record must never carry an infeasible point out as a

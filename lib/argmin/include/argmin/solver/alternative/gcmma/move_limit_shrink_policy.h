@@ -101,7 +101,7 @@ struct move_limit_shrink_policy
         std::optional<std::uint16_t> max_inner_iterations{};  // 15
         std::optional<double> shrink_factor{};               // 0.5
 
-        // Stall detection (forwarded by basic_solver).
+        // Stall detection (forwarded by step_budget_solver).
         std::optional<double> stall_tolerance_threshold{};   // 1e-6
         std::uint16_t stall_window{50};
     };

@@ -27,7 +27,7 @@
 //            Bertsekas 1996 §4.2 (stale-multiplier reuse rationale).
 //            N&W 2e §18.3 + Algorithm 18.3 (working-set identification).
 
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
@@ -45,7 +45,7 @@
 namespace
 {
 
-// One sweep cell: instantiate a basic_solver with Policy{}, set the
+// One sweep cell: instantiate a step_budget_solver with Policy{}, set the
 // problem's multiplier_reest_every_k stride from state.range(0), and
 // run the solve in the timed region. Iter count and final-status
 // surface as state.counters; wall comes from Google Benchmark.
@@ -73,7 +73,7 @@ void sweep_cell(benchmark::State& state)
     {
         Policy policy;
         policy.options.multiplier_reest_every_k = k;
-        argmin::basic_solver solver{policy, problem, x0, opts};
+        argmin::step_budget_solver solver{policy, problem, x0, opts};
         auto warm = solver.solve();
         benchmark::DoNotOptimize(warm);
     }
@@ -85,7 +85,7 @@ void sweep_cell(benchmark::State& state)
     {
         Policy policy;
         policy.options.multiplier_reest_every_k = k;
-        argmin::basic_solver solver{policy, problem, x0, opts};
+        argmin::step_budget_solver solver{policy, problem, x0, opts};
         auto result = solver.solve();
         benchmark::DoNotOptimize(result);
         iters_last = static_cast<std::uint32_t>(result.iterations);

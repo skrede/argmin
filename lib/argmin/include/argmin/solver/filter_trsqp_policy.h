@@ -39,7 +39,7 @@
 // resumes composite-step from the restored iterate with a BFGS reset
 // and a refreshed (f, h) seed in the filter. On non-convergence the
 // policy falls through to the trust-radius-collapse null-step
-// emission and the stall-window machinery in basic_solver decides
+// emission and the stall-window machinery in step_budget_solver decides
 // termination. The argmin variant is the minimal-viable LM
 // simplification of the full IPOPT restoration phase (no slack
 // reformulation, no multiplier leg, no in-restoration filter
@@ -346,7 +346,7 @@ struct filter_trsqp_policy
             default_max_cg_iterations_multiplier};
 
         // Stall window carried over from the line-search SQP family for
-        // basic_solver convergence-framework parity.
+        // step_budget_solver convergence-framework parity.
         std::uint16_t stall_window{50};
 
         // Active-set multiplier re-estimation stride. A value of 0 is
@@ -417,7 +417,7 @@ struct filter_trsqp_policy
         // iteration would corrupt step-internal state.
         //
         // Init-time invariant: restoration_max_iter MUST be set BEFORE
-        // basic_solver construction. The lazy-init guard in init()
+        // step_budget_solver construction. The lazy-init guard in init()
         // reads the option once at policy construction; mid-solve
         // changes do not re-size the restoration_* buffers and the
         // hook would dereference unsized buffers.

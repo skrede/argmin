@@ -21,7 +21,7 @@
 // do not pick it up via FetchContent.
 
 #include "argmin/solver/isres_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 
 #include <Eigen/Core>
 
@@ -131,7 +131,7 @@ seed_record run_one(std::uint64_t seed)
     // std::uint64_t to avoid any silent narrowing on assignment.
     policy.options.seed = seed;
 
-    argmin::basic_solver solver{policy, problem, x0, opts};
+    argmin::step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     return seed_record{

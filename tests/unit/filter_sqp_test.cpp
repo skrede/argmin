@@ -6,7 +6,7 @@
 //            Fletcher & Leyffer 2002 (filter SQP).
 
 #include "argmin/solver/filter_slsqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -21,7 +21,7 @@
 using Catch::Approx;
 using namespace argmin;
 
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::filter_slsqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::filter_slsqp_policy<>>>);
 
 TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
 {
@@ -37,7 +37,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-10);
 
-        basic_solver solver{filter_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{filter_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(17.014).margin(0.1));
@@ -75,7 +75,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-10);
 
-        basic_solver solver{filter_slsqp_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{filter_slsqp_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         // HS043 envelope sweep over {1e-3, 1e-4, 1e-5, 1e-6}^2 found
@@ -101,7 +101,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-10);
 
-        basic_solver solver{filter_slsqp_policy<hs039<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{filter_slsqp_policy<hs039<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(0.1));
@@ -122,7 +122,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-10);
 
-        basic_solver solver{filter_slsqp_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{filter_slsqp_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(0.111).margin(0.01));
@@ -143,7 +143,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-10);
 
-        basic_solver solver{filter_slsqp_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{filter_slsqp_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(0.1));
@@ -183,7 +183,7 @@ TEST_CASE("filter_slsqp on hock-schittkowski problems", "[hs][filter_slsqp]")
         policy_opts.restoration = detail::restoration_strategy::hybrid;
         policy_opts.max_restoration_steps = 3;
 
-        basic_solver solver{filter_slsqp_policy<hs071<>::problem_dimension>{},
+        step_budget_solver solver{filter_slsqp_policy<hs071<>::problem_dimension>{},
                             problem, x0, opts, policy_opts};
         auto result = solver.solve(opts);
 
@@ -211,7 +211,7 @@ TEST_CASE("filter_slsqp populates kkt_residual and exposes is_null_step",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-10);
 
-    basic_solver solver{filter_slsqp_policy<hs071<>::problem_dimension>{},
+    step_budget_solver solver{filter_slsqp_policy<hs071<>::problem_dimension>{},
                         problem, x0, opts};
 
     bool populated = false;
@@ -269,7 +269,7 @@ TEST_CASE("filter_slsqp HS024 regression guard",
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{
+    step_budget_solver solver{
         filter_slsqp_policy<hs024<>::problem_dimension>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
@@ -301,7 +301,7 @@ TEST_CASE("filter_slsqp converges on HS007 equality",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{filter_slsqp_policy<hs007<>::problem_dimension>{},
+    step_budget_solver solver{filter_slsqp_policy<hs007<>::problem_dimension>{},
                         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -326,7 +326,7 @@ TEST_CASE("filter_slsqp converges on HS028 quadratic with linear equality",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
+    step_budget_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
                         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -363,7 +363,7 @@ TEST_CASE("filter_slsqp diagnostics.bfgs_reset_count is zero on success path",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
+    step_budget_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
                         problem, x0, opts};
 
     // HS028 is well-conditioned; the BFGS reset retry should never
@@ -401,7 +401,7 @@ TEST_CASE("filter_slsqp restoration fires before BFGS-reset on constrained LS fa
     policy_opts.line_search.max_iterations = 0; // forces primary loop to skip
     policy_opts.bfgs_reset_max = 3;
 
-    basic_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
+    step_budget_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
                         problem, x0, opts, policy_opts};
 
     auto sr = solver.step();
@@ -430,7 +430,7 @@ TEST_CASE("filter_slsqp bfgs_reset_max = 0 disables the retry loop",
     policy_opts.line_search.max_iterations = 0; // forces accepted == false
     policy_opts.bfgs_reset_max = 0;
 
-    basic_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
+    step_budget_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{},
                         problem, x0, opts, policy_opts};
 
     auto sr = solver.step();
@@ -460,7 +460,7 @@ TEST_CASE("filter_slsqp HS007 Lagrangian gradient < 1e-4 at optimum",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{filter_slsqp_policy<hs007<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{filter_slsqp_policy<hs007<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
@@ -482,7 +482,7 @@ TEST_CASE("filter_slsqp HS028 Lagrangian gradient < 1e-4 at optimum",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{filter_slsqp_policy<hs028<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(0.0).margin(1e-6));
@@ -518,7 +518,7 @@ TEST_CASE("filter_slsqp HS071 mixed constraints (regression guard)",
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(17.014).margin(0.1));
@@ -543,7 +543,7 @@ TEST_CASE("filter_slsqp HS043 inequality constraints (regression guard)",
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(-44.0).margin(1.0));
@@ -563,7 +563,7 @@ TEST_CASE("filter_slsqp HS026 (regression guard)",
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS026 optimum: f* = 0 at (1, 1, 1). Filter lineage reaches the
@@ -588,7 +588,7 @@ TEST_CASE("filter_slsqp HS028 (regression guard)",
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS028 optimum: f* = 0 at (0.5, -0.5, 0.5).

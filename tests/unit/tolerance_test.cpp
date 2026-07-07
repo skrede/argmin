@@ -7,7 +7,7 @@
 //            K&W 2e Section 2.3 (stopping conditions).
 
 #include "mock_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/result/status.h"
 #include "argmin/solver/time_budget_solver.h"
@@ -33,9 +33,9 @@ struct quadratic
 
 }
 
-// -- Test 10: objective_tolerance_rel stops basic_solver --
+// -- Test 10: objective_tolerance_rel stops step_budget_solver --
 
-TEST_CASE("objective_tolerance_rel stops basic_solver", "[tolerance]")
+TEST_CASE("objective_tolerance_rel stops step_budget_solver", "[tolerance]")
 {
     using conv = convergence_policy<objective_tolerance_rel_criterion>;
 
@@ -51,16 +51,16 @@ TEST_CASE("objective_tolerance_rel stops basic_solver", "[tolerance]")
     // has no rebind<N>, so bare CTAD cannot deduce Policy here, and the
     // Convergence template parameter must be spelled out to store `conv`
     // (rather than defaulting to default_convergence) without coercion.
-    basic_solver<test::mock_policy, argmin::dynamic_dimension, void, conv> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy, argmin::dynamic_dimension, void, conv> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::ftol_reached);
     CHECK(result.iterations < 1000);
 }
 
-// -- Test 11: step_tolerance_rel stops basic_solver --
+// -- Test 11: step_tolerance_rel stops step_budget_solver --
 
-TEST_CASE("step_tolerance_rel stops basic_solver", "[tolerance]")
+TEST_CASE("step_tolerance_rel stops step_budget_solver", "[tolerance]")
 {
     // mock_policy: step_size=0.5 constant, x_norm = 5 * 0.5^k.
     // relative step = step_size / max(x_norm, 1.0).
@@ -77,7 +77,7 @@ TEST_CASE("step_tolerance_rel stops basic_solver", "[tolerance]")
     Eigen::VectorXd x0{{3.0, 4.0}};
     // See the objective_tolerance_rel test above for why Convergence must
     // be spelled explicitly here.
-    basic_solver<test::mock_policy, argmin::dynamic_dimension, void, conv> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy, argmin::dynamic_dimension, void, conv> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::xtol_reached);
@@ -100,32 +100,32 @@ TEST_CASE("time budget stops with time_limit_reached", "[tolerance]")
     CHECK(result.status == solver_status::time_limit_reached);
 }
 
-// -- Test 13: policy roundoff_limited propagates to basic_solver --
+// -- Test 13: policy roundoff_limited propagates to step_budget_solver --
 
-TEST_CASE("policy roundoff_limited propagates to basic_solver", "[tolerance]")
+TEST_CASE("policy roundoff_limited propagates to step_budget_solver", "[tolerance]")
 {
     solver_options<> opts;
     opts.max_iterations = 100;
 
     quadratic prob;
     Eigen::VectorXd x0{{2.0, 2.0}};
-    basic_solver<test::roundoff_mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::roundoff_mock_policy> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::roundoff_limited);
     CHECK(result.iterations == 3);
 }
 
-// -- Test 14: policy diverged propagates to basic_solver --
+// -- Test 14: policy diverged propagates to step_budget_solver --
 
-TEST_CASE("policy diverged propagates to basic_solver", "[tolerance]")
+TEST_CASE("policy diverged propagates to step_budget_solver", "[tolerance]")
 {
     solver_options<> opts;
     opts.max_iterations = 100;
 
     quadratic prob;
     Eigen::VectorXd x0{{1.0, 1.0}};
-    basic_solver<test::diverging_mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::diverging_mock_policy> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::diverged);
@@ -144,7 +144,7 @@ TEST_CASE("policy_status checked before convergence criteria", "[tolerance]")
 
     quadratic prob;
     Eigen::VectorXd x0{{2.0, 2.0}};
-    basic_solver<test::roundoff_mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::roundoff_mock_policy> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     // roundoff_mock reports roundoff_limited at step 3, and by then

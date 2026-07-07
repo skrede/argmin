@@ -27,7 +27,7 @@
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/types.h"
@@ -41,7 +41,7 @@ using namespace argmin;
 // -----------------------------------------------------------------------
 // The two operands of the static_assert below are spelled DIFFERENTLY:
 // the LHS goes through detail::policy_options_impl via the public alias
-// in argmin/solver/basic_solver.h, and the RHS names the nested
+// in argmin/solver/step_budget_solver.h, and the RHS names the nested
 // options_type directly off the policy. They must resolve to the same
 // concrete type. A regression in the alias's resolution path (e.g.
 // accidentally always picking the solver_options<> fallback when
@@ -196,10 +196,10 @@ static_assert(std::is_same_v<racing_filter_trsqp, racing_filter_trsqp>);
 // the line-search SQP policies do, so basic_solver_group can race them
 // against each other and downstream consumers (ctrlpp / cartan) can
 // inject either family through the same concept-templated entry point.
-static_assert(nlp_solver<basic_solver<tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
-static_assert(nlp_solver<basic_solver<tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>>);
-static_assert(nlp_solver<basic_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
-static_assert(nlp_solver<basic_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>>);
+static_assert(nlp_solver<step_budget_solver<tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
+static_assert(nlp_solver<step_budget_solver<tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>>);
+static_assert(nlp_solver<step_budget_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
+static_assert(nlp_solver<step_budget_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>>);
 
 // -----------------------------------------------------------------------
 // Gate 5b -- cross-family racing-tuple instantiation.

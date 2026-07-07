@@ -4,7 +4,7 @@
 // -fno-rtti at the C++20 floor. Unlike a -fsyntax-only header check --
 // which passes even when live throw sites remain in the instantiated
 // templates -- this probe forces every real-time-claimed solver policy
-// through basic_solver's init(), step() and reset() template bodies on
+// through step_budget_solver's init(), step() and reset() template bodies on
 // concrete small problems. A single surviving throw in any instantiated
 // path fails the -fno-exceptions compile, so the "exceptions-off-clean"
 // guarantee is exercised rather than merely asserted.
@@ -17,7 +17,7 @@
 
 #include "argmin/solver/options.h"
 #include "argmin/solver/lm_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/cmaes_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
@@ -53,7 +53,7 @@ void exercise(Policy policy, const Problem& problem, const Vec& x0)
     argmin::solver_options opts;
     opts.max_iterations = 2;
 
-    argmin::basic_solver solver{std::move(policy), problem, x0, opts};
+    argmin::step_budget_solver solver{std::move(policy), problem, x0, opts};
     const auto sr = solver.step();
     g_sink += sr.objective_value;
     solver.reset(x0);

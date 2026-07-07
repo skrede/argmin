@@ -5,7 +5,7 @@
 #include "argmin/test_functions/beale.h"
 #include "argmin/test_functions/booth.h"
 #include "argmin/test_functions/hock_schittkowski.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/ccsa_quadratic_policy.h"
@@ -73,7 +73,7 @@ TEST_CASE("fixed-dim booth value+gradient: zero dynamic allocation", "[zero-copy
 
 TEST_CASE("fixed-dim solver state types are stack-allocated", "[zero-copy]")
 {
-    using solver_type = basic_solver<lbfgsb_policy<2>, 2, beale<double>>;
+    using solver_type = step_budget_solver<lbfgsb_policy<2>, 2, beale<double>>;
     using state_type = typename solver_type::state_type;
 
     static_assert(std::is_same_v<decltype(state_type::x),

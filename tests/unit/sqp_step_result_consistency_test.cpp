@@ -36,7 +36,7 @@
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/filter_trsqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 #include "argmin/test_functions/problem_class.h"
@@ -188,7 +188,7 @@ TEMPLATE_TEST_CASE_SIG(
                 Policy::default_gradient_tolerance);
         }
 
-        basic_solver solver{Policy{}, problem, x0, opts};
+        step_budget_solver solver{Policy{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         // Fast-mode filter_trsqp stalls on HS007 above the 1e-4
@@ -269,7 +269,7 @@ TEMPLATE_TEST_CASE_SIG(
             opts.max_iterations = 800;
         }
 
-        basic_solver solver{Policy{}, problem, x0, opts};
+        step_budget_solver solver{Policy{}, problem, x0, opts};
 
         step_result<double> last{};
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -325,7 +325,7 @@ TEMPLATE_TEST_CASE_SIG(
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-12);
 
-        basic_solver solver{Policy{}, problem, x0, opts};
+        step_budget_solver solver{Policy{}, problem, x0, opts};
 
         bool kkt_seen = false;
         for(int i = 0; i < 200; ++i)
@@ -365,7 +365,7 @@ TEMPLATE_TEST_CASE_SIG(
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-10);
 
-        basic_solver solver{Policy{}, problem, x0, opts};
+        step_budget_solver solver{Policy{}, problem, x0, opts};
 
         step_result<double> last{};
         for(int i = 0; i < 200; ++i)
@@ -565,7 +565,7 @@ TEMPLATE_TEST_CASE_SIG(
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-12);
 
-        basic_solver solver{Policy{}, problem, x0, opts};
+        step_budget_solver solver{Policy{}, problem, x0, opts};
 
         std::size_t skip_total = 0;
         for(int i = 0; i < 200; ++i)
@@ -633,7 +633,7 @@ TEMPLATE_TEST_CASE_SIG(
             opts.set_objective_threshold(1e-12);
 
             // Default-options run (k=1 by per-mode default in accurate).
-            basic_solver solver_default{Policy{}, problem, x0, opts};
+            step_budget_solver solver_default{Policy{}, problem, x0, opts};
             auto result_default = solver_default.solve(opts);
 
             // Explicit k=1 run via the (Policy, problem, x0, opts,
@@ -641,7 +641,7 @@ TEMPLATE_TEST_CASE_SIG(
             // reach the rebound policy's options after CTAD rebind.
             typename PolicyN::options_type policy_opts{};
             policy_opts.multiplier_reest_every_k = std::size_t{1};
-            basic_solver solver_explicit{
+            step_budget_solver solver_explicit{
                 PolicyN{}, problem, x0, opts, policy_opts};
             auto result_explicit = solver_explicit.solve(opts);
 
@@ -677,13 +677,13 @@ TEMPLATE_TEST_CASE_SIG(
 
             typename PolicyN::options_type policy_opts_k1{};
             policy_opts_k1.multiplier_reest_every_k = std::size_t{1};
-            basic_solver solver_k1{
+            step_budget_solver solver_k1{
                 PolicyN{}, problem, x0, opts, policy_opts_k1};
             auto result_k1 = solver_k1.solve(opts);
 
             typename PolicyN::options_type policy_opts_k10{};
             policy_opts_k10.multiplier_reest_every_k = std::size_t{10};
-            basic_solver solver_k10{
+            step_budget_solver solver_k10{
                 PolicyN{}, problem, x0, opts, policy_opts_k10};
             auto result_k10 = solver_k10.solve(opts);
 
@@ -724,7 +724,7 @@ TEMPLATE_TEST_CASE_SIG(
             // Reference k=1 run.
             typename PolicyN::options_type policy_opts_k1{};
             policy_opts_k1.multiplier_reest_every_k = std::size_t{1};
-            basic_solver solver_k1{
+            step_budget_solver solver_k1{
                 PolicyN{}, problem, x0, opts, policy_opts_k1};
             auto result_k1 = solver_k1.solve(opts);
 
@@ -732,7 +732,7 @@ TEMPLATE_TEST_CASE_SIG(
             // step_result to the k=1 reference).
             typename PolicyN::options_type policy_opts_k0{};
             policy_opts_k0.multiplier_reest_every_k = std::size_t{0};
-            basic_solver solver_k0{
+            step_budget_solver solver_k0{
                 PolicyN{}, problem, x0, opts, policy_opts_k0};
             auto result_k0 = solver_k0.solve(opts);
 
@@ -792,7 +792,7 @@ TEMPLATE_TEST_CASE_SIG(
             opts.set_step_threshold(1e-12);
             opts.set_objective_threshold(1e-12);
 
-            basic_solver solver{Policy{}, problem, x0, opts};
+            step_budget_solver solver{Policy{}, problem, x0, opts};
 
             std::size_t nan_total = 0;
             bool any_finite_step = false;
@@ -858,7 +858,7 @@ TEMPLATE_TEST_CASE_SIG(
             opts.set_step_threshold(1e-12);
             opts.set_objective_threshold(1e-12);
 
-            basic_solver solver{Policy{}, problem, x0, opts};
+            step_budget_solver solver{Policy{}, problem, x0, opts};
 
             std::size_t nan_total = 0;
             for(int i = 0; i < 50; ++i)
@@ -930,7 +930,7 @@ TEMPLATE_TEST_CASE_SIG(
             if constexpr(requires { policy_opts.bfgs_reset_max; })
                 policy_opts.bfgs_reset_max = std::size_t{5};
 
-            basic_solver solver{
+            step_budget_solver solver{
                 PolicyN{}, problem, x0, opts, policy_opts};
 
             std::size_t outer_steps = 0;

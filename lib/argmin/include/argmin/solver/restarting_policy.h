@@ -8,7 +8,7 @@
 // forwards init/step/reset/reset_clear to the inner policy and monitors
 // for stagnation. When triggered, restart consumes one step() call.
 //
-// rebind<M> forwards through the decorator so basic_solver CTAD works
+// rebind<M> forwards through the decorator so step_budget_solver CTAD works
 // transparently.
 //
 // Reference: Auger & Hansen (2005), "A Restart CMA Evolution Strategy
@@ -32,7 +32,7 @@ namespace argmin
 namespace detail
 {
 // Resolve state_type: use Inner::state_type<P> when available, else Inner::state_type.
-// Mirrors basic_solver's resolve_state_t for use in policy decorators.
+// Mirrors step_budget_solver's resolve_state_t for use in policy decorators.
 template <typename InnerPolicy, typename P>
 consteval auto resolve_inner_state_tag()
 {
@@ -65,7 +65,7 @@ struct restarting_policy
         // restart and maintains its own internal stall logic (see the restart-trigger block
         // below). Exposing an external stall_window would double-fire against this internal
         // logic; feasibility_gate is inner-policy territory. Silent no-op made explicit here —
-        // see forward_policy_hints in basic_solver.h.
+        // see forward_policy_hints in step_budget_solver.h.
     };
 
     template <typename P = void>

@@ -15,7 +15,7 @@
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -397,7 +397,7 @@ timing bench_argmin(std::uint32_t reps)
     // Warmup + convergence check.
     std::uint32_t iters = 0;
     {
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
@@ -410,7 +410,7 @@ timing bench_argmin(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -438,7 +438,7 @@ timing bench_argmin_fixed(std::uint32_t reps)
     // Warmup + convergence check.
     std::uint32_t iters = 0;
     {
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
@@ -451,7 +451,7 @@ timing bench_argmin_fixed(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -479,7 +479,7 @@ timing bench_argmin_nw_sqp(std::uint32_t reps)
     // Warmup + convergence check.
     std::uint32_t iters = 0;
     {
-        argmin::basic_solver solver{argmin::nw_sqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
@@ -491,7 +491,7 @@ timing bench_argmin_nw_sqp(std::uint32_t reps)
     double fval = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::nw_sqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -516,7 +516,7 @@ timing bench_argmin_filter_slsqp(std::uint32_t reps)
 
     std::uint32_t iters = 0;
     {
-        argmin::basic_solver solver{argmin::filter_slsqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::filter_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
@@ -528,7 +528,7 @@ timing bench_argmin_filter_slsqp(std::uint32_t reps)
     double fval = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::filter_slsqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::filter_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -553,7 +553,7 @@ timing bench_argmin_filter_nw_sqp(std::uint32_t reps)
 
     std::uint32_t iters = 0;
     {
-        argmin::basic_solver solver{argmin::filter_nw_sqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::filter_nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
@@ -565,7 +565,7 @@ timing bench_argmin_filter_nw_sqp(std::uint32_t reps)
     double fval = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::filter_nw_sqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::filter_nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -677,7 +677,7 @@ timing bench_argmin_6dof(std::uint32_t reps)
 
     std::uint32_t iters = 0;
     {
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
@@ -690,7 +690,7 @@ timing bench_argmin_6dof(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -717,7 +717,7 @@ timing bench_argmin_6dof_fixed(std::uint32_t reps)
 
     std::uint32_t iters = 0;
     {
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
@@ -730,7 +730,7 @@ timing bench_argmin_6dof_fixed(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = static_cast<std::uint32_t>(result.iterations);
@@ -836,7 +836,7 @@ bool probe_kkt_residual()
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
+    argmin::step_budget_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
 
     argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -877,7 +877,7 @@ bool probe_regression_hs026()
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    argmin::basic_solver solver{
+    argmin::step_budget_solver solver{
         argmin::kraft_slsqp_policy<argmin::hs026<>::problem_dimension>{},
         p, x0, opts};
     argmin::step_result<double> last{};
@@ -923,7 +923,7 @@ int argmin_alloc_trace_probe()
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
 
-    argmin::basic_solver solver{argmin::kraft_slsqp_policy<4>{},
+    argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{},
                                 problem, x0, opts};
 
     // Warmup absorbs lazy first-push BFGS allocations.
@@ -1012,7 +1012,7 @@ int main()
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<-1> HS071",
                                  solver.convergence().last_check_results());
@@ -1025,7 +1025,7 @@ int main()
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<4>  HS071",
                                  solver.convergence().last_check_results());
@@ -1072,7 +1072,7 @@ int main()
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<-1> synthetic 6-DoF",
                                  solver.convergence().last_check_results());
@@ -1085,7 +1085,7 @@ int main()
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        argmin::basic_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<6>  synthetic 6-DoF",
                                  solver.convergence().last_check_results());

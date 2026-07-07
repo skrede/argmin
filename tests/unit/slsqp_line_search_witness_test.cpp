@@ -13,7 +13,7 @@
 
 #include "argmin/solver/filter_slsqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 
 #include <Eigen/Core>
 
@@ -152,7 +152,7 @@ TEST_CASE("filter_slsqp rejects a marginal-f, exploding-h unit step",
     solver_options<> opts;
     opts.max_iterations = 500;
 
-    basic_solver solver{filter_slsqp_policy<>{}, problem, x0, opts};
+    step_budget_solver solver{filter_slsqp_policy<>{}, problem, x0, opts};
     auto sr = solver.step();
 
     // Caller-set filter ceiling h_max = 1e4 * max(1, h_0) with h_0 = 0.
@@ -218,7 +218,7 @@ TEST_CASE("slsqp fires a second-order correction at a near-feasible Maratos step
     SECTION("filter_slsqp")
     {
         maratos_problem problem;
-        basic_solver solver{filter_slsqp_policy<>{}, problem, xk, opts};
+        step_budget_solver solver{filter_slsqp_policy<>{}, problem, xk, opts};
         auto sr = solver.step();
         // SOC fires on the Maratos rejection.
         CHECK(sr.diagnostics.soc_retry_count >= std::size_t{1});
@@ -233,7 +233,7 @@ TEST_CASE("slsqp fires a second-order correction at a near-feasible Maratos step
     SECTION("kraft_slsqp")
     {
         maratos_problem problem;
-        basic_solver solver{kraft_slsqp_policy<>{}, problem, xk, opts};
+        step_budget_solver solver{kraft_slsqp_policy<>{}, problem, xk, opts};
         auto sr = solver.step();
         CHECK(sr.diagnostics.soc_retry_count >= std::size_t{1});
         CHECK(sr.objective_value < -0.9999);

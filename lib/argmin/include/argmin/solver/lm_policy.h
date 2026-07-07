@@ -1,7 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_LM_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_LM_POLICY_H
 
-// Levenberg-Marquardt solver policy for basic_solver.
+// Levenberg-Marquardt solver policy for step_budget_solver.
 //
 // Implements the Levenberg-Marquardt method for nonlinear least-squares
 // problems. Trust-region approach with Gauss-Newton Hessian approximation
@@ -228,7 +228,7 @@ struct lm_policy
         else if(s.initial_objective > 0.0 && s.objective_value > 100.0 * s.initial_objective)
             policy_status = solver_status::diverged;
 
-        // Report h.norm() as step_size even on rejection so basic_solver's stall
+        // Report h.norm() as step_size even on rejection so step_budget_solver's stall
         // detection does not fire while the solver is still adjusting lambda.
         // objective_change carries the ACTUAL objective change (zero on a
         // rejected step, where the iterate did not move); the former hack that

@@ -2,7 +2,7 @@
 #include "argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h"
 #include "argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h"
 #include "argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/rosenbrock.h"
 #include "argmin/test_functions/rastrigin.h"
 #include "argmin/formulation/concepts.h"
@@ -74,7 +74,7 @@ TEST_CASE("cmaes_policy: Rosenbrock 2D", "[cmaes]")
     policy.options.initial_sigma = 0.5;
     policy.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value < 0.01);
@@ -97,7 +97,7 @@ TEST_CASE("cmaes_policy: Rastrigin 5D", "[cmaes]")
     policy.options.initial_sigma = 2.0;
     policy.options.seed = 123u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Rastrigin 3D is highly multimodal; CMA-ES should reach a good basin.
@@ -119,7 +119,7 @@ TEST_CASE("cmaes_policy: step_n budget", "[cmaes]")
     cmaes_policy<> policy;
     policy.options.seed = 7u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.step_n(10);
 
     CHECK(result.iterations <= 10);
@@ -143,7 +143,7 @@ TEST_CASE("cmaes_policy: IPOP restart", "[cmaes]")
     policy.options.restart = cmaes_policy<>::restart_strategy::ipop;
     policy.options.seed = 99u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Should complete without crash
@@ -170,7 +170,7 @@ TEST_CASE("cmaes_policy: sigma scales from bounds", "[cmaes]")
     cmaes_policy<> policy;
     policy.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     CHECK(solver.state().sigma == Approx(10.0 / 3.0).epsilon(1e-10));
 }
 
@@ -196,7 +196,7 @@ TEST_CASE("cmaes_policy: initial per-coordinate spread scales with each box widt
     cmaes_policy<> policy;
     policy.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     const auto& s = solver.state();
 
     const double range0 = 2.0;    // upper[0] - lower[0]
@@ -240,7 +240,7 @@ TEST_CASE("cmaes_policy: bounded problems use the Hansen population default",
     cmaes_policy<> policy;
     policy.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     CHECK(solver.state().params.lambda == 6);
 }
 
@@ -268,7 +268,7 @@ TEST_CASE("cmaes_policy: solves bounded Rastrigin", "[cmaes]")
     policy.options.seed = 42u;
     policy.options.lambda = 32u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     CHECK(result.iterations > 0);
@@ -297,7 +297,7 @@ TEST_CASE("cmaes_policy: Rastrigin 2D global optimum with IPOP", "[cmaes]")
     policy.options.restart = cmaes_policy<>::restart_strategy::ipop;
     policy.options.seed = 5u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value < 1.0);
@@ -322,7 +322,7 @@ TEST_CASE("cmaes_policy: bounded Rosenbrock", "[cmaes]")
     policy.options.initial_sigma = 0.5;
     policy.options.seed = 55u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value < 0.1);
@@ -389,7 +389,7 @@ TEST_CASE("cmaes_policy: stagnation_window_min initial value", "[cmaes]")
         Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, -1.0);
         policy_t policy;
         policy.options.seed = 42u;
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         const int n = 2;
         const int lambda = solver.state().params.lambda;
         const auto expected = static_cast<std::uint32_t>(120)
@@ -404,7 +404,7 @@ TEST_CASE("cmaes_policy: stagnation_window_min initial value", "[cmaes]")
         Eigen::VectorXd x0 = Eigen::VectorXd::Constant(5, 1.0);
         policy_t policy;
         policy.options.seed = 42u;
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         const int n = 5;
         const int lambda = solver.state().params.lambda;
         const auto expected = static_cast<std::uint32_t>(120)
@@ -419,7 +419,7 @@ TEST_CASE("cmaes_policy: stagnation_window_min initial value", "[cmaes]")
         Eigen::VectorXd x0 = Eigen::VectorXd::Constant(10, 1.0);
         policy_t policy;
         policy.options.seed = 42u;
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         const int n = 10;
         const int lambda = solver.state().params.lambda;
         const auto expected = static_cast<std::uint32_t>(120)
@@ -478,7 +478,7 @@ TEST_CASE("cmaes_policy: ipop stagnation_window_min recompute", "[cmaes]")
     // active and drives the IPOP restart.
     policy.options.cmaes.sigma_collapse_threshold = 1e-12;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
 
     const int n = 2;
     const int lambda_initial = solver.state().params.lambda;
@@ -605,7 +605,7 @@ TEST_CASE("cmaes_policy: equal_fun_values exact zero", "[cmaes]")
     // 1e-12 tolerance) so EqualFunValues is the criterion that fires.
     policy.options.cmaes.objective_value_tolerance = 1e-30;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::ftol_reached);
@@ -646,7 +646,7 @@ TEST_CASE("cmaes_policy: equal_fun_values rejects sub-epsilon", "[cmaes]")
     policy.options.cmaes.step_size_tolerance = 1e-30;
     policy.options.cmaes.sigma_collapse_threshold = 1e-30;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // With the literal `==` predicate, EqualFunValues must NOT fire on
@@ -667,8 +667,8 @@ TEST_CASE("cmaes_policy: tol_fun exit on smooth descent", "[cmaes]")
     Eigen::VectorXd x0{{-1.0, -1.0}};
     solver_options opts;
     opts.max_iterations = 2000;
-    // Use very tight basic_solver convergence to ensure the policy
-    // criterion (not basic_solver convergence) is what fires.
+    // Use very tight step_budget_solver convergence to ensure the policy
+    // criterion (not step_budget_solver convergence) is what fires.
     opts.set_gradient_threshold(1e-30);
     opts.set_objective_threshold(1e-30);
     opts.set_step_threshold(1e-30);
@@ -683,7 +683,7 @@ TEST_CASE("cmaes_policy: tol_fun exit on smooth descent", "[cmaes]")
     policy.options.cmaes.step_size_tolerance = 1e-30;
     policy.options.cmaes.sigma_collapse_threshold = 1e-30;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::ftol_reached);
@@ -719,7 +719,7 @@ TEST_CASE("cmaes_policy: tol_x exit on contracted distribution", "[cmaes]")
     // identical magnitude, but TolX's all-coords semantics is stricter.
     policy.options.cmaes.sigma_collapse_threshold = 1e-30;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::roundoff_limited);
@@ -750,7 +750,7 @@ TEST_CASE("cmaes_policy: objective_value_tolerance user override", "[cmaes]")
         policy.options.seed = 42u;
         policy.options.cmaes.step_size_tolerance = 1e-30;
         policy.options.cmaes.sigma_collapse_threshold = 1e-30;
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         auto result = solver.solve(opts);
         REQUIRE(result.status == solver_status::ftol_reached);
         iters_default = result.iterations;
@@ -765,7 +765,7 @@ TEST_CASE("cmaes_policy: objective_value_tolerance user override", "[cmaes]")
         policy.options.cmaes.step_size_tolerance = 1e-30;
         policy.options.cmaes.sigma_collapse_threshold = 1e-30;
         policy.options.cmaes.objective_value_tolerance = 1e-6;
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         auto result = solver.solve(opts);
         REQUIRE(result.status == solver_status::ftol_reached);
         iters_loose = result.iterations;
@@ -809,7 +809,7 @@ TEST_CASE("cmaes_policy: sigma_collapse_threshold user override", "[cmaes]")
         policy.options.cmaes.step_size_tolerance = 1e-30;
         if(threshold.has_value())
             policy.options.cmaes.sigma_collapse_threshold = *threshold;
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         auto result = solver.solve(opts);
         REQUIRE(result.status == solver_status::roundoff_limited);
         return result.iterations;
@@ -837,7 +837,7 @@ TEST_CASE("cmaes_policy: no_effect_axis exit", "[cmaes]")
     // NoEffectCoord, and TolX all map to roundoff_limited. We assert the
     // criterion class fired (status == roundoff_limited), which proves at
     // least one of the three roundoff-mapped criteria triggered the exit
-    // and not basic_solver convergence or max_iterations.
+    // and not step_budget_solver convergence or max_iterations.
     rosenbrock<double> problem{};
 
     Eigen::VectorXd x0{{0.99, 0.99}};
@@ -853,7 +853,7 @@ TEST_CASE("cmaes_policy: no_effect_axis exit", "[cmaes]")
     // Defeat TolFun so the no-effect / TolX class is what fires.
     policy.options.cmaes.objective_value_tolerance = 1e-30;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::roundoff_limited);
@@ -890,7 +890,7 @@ TEST_CASE("cmaes_policy: flat coordinate converges without spurious divergence",
     policy.options.seed = 42u;
     policy.options.cmaes.objective_value_tolerance = 1e-30;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // The run stops on a real criterion, not by exhausting the budget, and
@@ -925,7 +925,7 @@ TEST_CASE("cmaes_policy: tol_x_up divergence detection", "[cmaes]")
     policy.options.initial_sigma = 0.1;
     policy.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::diverged);
@@ -971,7 +971,7 @@ TEST_CASE("cmaes_policy: ipop mean reset to x0 on restart", "[cmaes]")
     policy.options.cmaes.objective_value_tolerance = 1e-30;
     policy.options.cmaes.step_size_tolerance = 1e-30;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
 
     const int lambda_initial = solver.state().params.lambda;
     REQUIRE(lambda_initial == 6);  // unbounded n=2 default
@@ -1044,7 +1044,7 @@ TEST_CASE("cmaes_policy: ipop decomposition_skip_k recompute", "[cmaes]")
     // 1e-12 paper baseline.
     policy.options.cmaes.sigma_collapse_threshold = 1e-12;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
 
     const int n = 2;
     const int lambda_initial = solver.state().params.lambda;
@@ -1073,7 +1073,7 @@ TEST_CASE("cmaes_policy: ipop bit-identity within process", "[cmaes]")
     // for the inner `cmaes` row (CONTEXT D-08 corrigendum: this row =
     // cmaes_policy<> with restart_strategy::ipop, NOT the restarting_policy
     // decorator). Two back-to-back runs from the SAME solver_options.seed
-    // on the SAME problem with FRESH basic_solver instances must produce
+    // on the SAME problem with FRESH step_budget_solver instances must produce
     // bit-identical final_objective and identical iteration counts.
     //
     // The IPOP branch uses no fresh entropy: s.rng is seeded once at init()
@@ -1115,7 +1115,7 @@ TEST_CASE("cmaes_policy: ipop bit-identity within process", "[cmaes]")
         policy.options.cmaes.objective_value_tolerance = 1e-30;
         policy.options.cmaes.step_size_tolerance = 1e-30;
 
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         return solver.solve(opts);
     };
 
@@ -1155,7 +1155,7 @@ TEST_CASE("cmaes_policy: weights tail is zero in vanilla default", "[cmaes]")
         policy.options.lambda = 6u;
         policy.options.seed = 42u;
 
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         (void) solver.step();
         const auto& state = solver.state();
         const auto& weights = state.params.weights;
@@ -1182,7 +1182,7 @@ TEST_CASE("cmaes_policy: weights tail is zero in vanilla default", "[cmaes]")
         policy.options.lambda = 12u;
         policy.options.seed = 42u;
 
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         (void) solver.step();
         const auto& state = solver.state();
         const auto& weights = state.params.weights;
@@ -1230,7 +1230,7 @@ TEST_CASE("alternative::cmaes::repair_l2_penalty_policy: caller-facing "
     policy.options.restart =
         alternative::cmaes::repair_l2_penalty_policy<>::restart_strategy::ipop;
 
-    basic_solver solver{policy, prob, x0, opts};
+    step_budget_solver solver{policy, prob, x0, opts};
     (void) solver.solve();
     const auto& state = solver.state();
 
@@ -1256,7 +1256,7 @@ TEST_CASE("alternative::cmaes::pwq_reparameterization_policy: caller-facing "
     policy.options.restart =
         alternative::cmaes::pwq_reparameterization_policy<>::restart_strategy::ipop;
 
-    basic_solver solver{policy, prob, x0, opts};
+    step_budget_solver solver{policy, prob, x0, opts};
     (void) solver.solve();
     const auto& state = solver.state();
 
@@ -1292,7 +1292,7 @@ TEST_CASE("alternative::cmaes::no_repair_adaptive_penalty_policy: caller-facing 
     policy.options.restart =
         alternative::cmaes::no_repair_adaptive_penalty_policy<>::restart_strategy::ipop;
 
-    basic_solver solver{policy, prob, x0, opts};
+    step_budget_solver solver{policy, prob, x0, opts};
     (void) solver.solve();
     const auto& state = solver.state();
 

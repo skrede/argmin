@@ -6,7 +6,7 @@ None of these are part of the production API; production policies live
 directly in `solver/`.
 
 Each variant satisfies the same `argmin::nlp_solver` concept as the
-production policies and can be plugged into `basic_solver` interchangeably
+production policies and can be plugged into `step_budget_solver` interchangeably
 for benchmarking.
 
 ## Subdirectories

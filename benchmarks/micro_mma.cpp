@@ -13,7 +13,7 @@
 //            NLopt 2.10.0 src/algs/mma/mma.c (ftol_rel convention).
 
 #include "argmin/solver/mma_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/ccsa_quadratic_policy.h"
 #include "argmin/solver/alternative/gcmma/rho_wval_policy.h"
 #include "argmin/solver/alternative/gcmma/raa_augmented_policy.h"
@@ -384,7 +384,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
 
     // Warmup.
     {
-        argmin::basic_solver solver{Policy{}, wrapped, x0, opts};
+        argmin::step_budget_solver solver{Policy{}, wrapped, x0, opts};
         solver.solve();
     }
 
@@ -395,7 +395,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         counts.reset();
-        argmin::basic_solver solver{Policy{}, wrapped, x0, opts};
+        argmin::step_budget_solver solver{Policy{}, wrapped, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         outer_g = static_cast<std::uint32_t>(counts.g);

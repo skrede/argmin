@@ -7,7 +7,7 @@ ISRES lives in `solver/isres_policy.h` and is a thin alias to the
 empirical winner among the variants here.
 
 Each variant satisfies the `argmin::nlp_solver` concept and can be
-plugged into `basic_solver` interchangeably for benchmarking.
+plugged into `step_budget_solver` interchangeably for benchmarking.
 
 | Variant | Mechanism | Reference | Empirical role |
 |---|---|---|---|

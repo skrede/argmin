@@ -1,7 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_LBFGSB_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_LBFGSB_POLICY_H
 
-// L-BFGS-B solver policy for basic_solver.
+// L-BFGS-B solver policy for step_budget_solver.
 //
 // Implements the Limited-memory BFGS algorithm for Bound-constrained
 // optimization. Each step computes: (1) Generalized Cauchy Point via

@@ -70,7 +70,7 @@
 //            Section 3.1 (SOC retry shape). Nocedal and Wright 2e
 //            Section 18.5 Algorithm 18.4 (Byrd-Omojokun composite step).
 
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -236,7 +236,7 @@ cell_record run_cell(double pf, std::size_t soc_iter, const Problem& problem,
     policy.options.penalty_factor      = pf;
     policy.options.soc_max_iterations  = soc_iter;
 
-    argmin::basic_solver solver{policy, problem, x0, opts};
+    argmin::step_budget_solver solver{policy, problem, x0, opts};
 
     const auto t0 = std::chrono::steady_clock::now();
     auto result = solver.solve(opts);

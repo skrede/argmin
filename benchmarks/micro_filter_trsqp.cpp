@@ -24,7 +24,7 @@
 
 #include "argmin/solver/filter_trsqp_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -247,7 +247,7 @@ timing bench_argmin(const Problem& problem,
     // constraint_tolerance::optional, which on fast-mode policies
     // disables the looser tolerance regime the bench is meant to time.
     {
-        argmin::basic_solver solver{policy_t{}, problem, x0, opts, policy_opts};
+        argmin::step_budget_solver solver{policy_t{}, problem, x0, opts, policy_opts};
         solver.solve(opts);
     }
 
@@ -256,7 +256,7 @@ timing bench_argmin(const Problem& problem,
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{policy_t{}, problem, x0, opts, policy_opts};
+        argmin::step_budget_solver solver{policy_t{}, problem, x0, opts, policy_opts};
         auto result = solver.solve(opts);
         fval = result.objective_value;
         iters = result.iterations;
@@ -271,7 +271,7 @@ timing bench_argmin(const Problem& problem,
 //
 // Rebinds the policy to the problem's compile-time dimension so that
 // the matching options_type instantiation can be passed alongside (the
-// 5-arg basic_solver ctor has a same_as<Policy::options_type> guard).
+// 5-arg step_budget_solver ctor has a same_as<Policy::options_type> guard).
 //
 // Gamma sweeps are an accurate-mode diagnostic; the policy is bound to
 // sqp_mode::accurate for sweep_argmin so the swept envelope is read
@@ -300,7 +300,7 @@ sweep_row sweep_argmin(const Problem& problem,
     if(gamma_f) policy_opts.gamma_f = *gamma_f;
     if(gamma_h) policy_opts.gamma_h = *gamma_h;
 
-    argmin::basic_solver solver{policy_t{}, problem, x0, opts, policy_opts};
+    argmin::step_budget_solver solver{policy_t{}, problem, x0, opts, policy_opts};
     auto result = solver.solve();
     return {result.objective_value, result.constraint_violation,
             result.iterations,
@@ -441,7 +441,7 @@ bool probe_kkt_residual()
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    argmin::basic_solver solver{
+    argmin::step_budget_solver solver{
         argmin::filter_trsqp_policy_accurate<argmin::hs028<>::problem_dimension>{},
         problem, x0, opts};
 
@@ -494,7 +494,7 @@ bool probe_regression_hs026()
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    argmin::basic_solver solver{
+    argmin::step_budget_solver solver{
         argmin::filter_trsqp_policy<argmin::hs026<>::problem_dimension, Mode>{},
         p, x0, opts};
     argmin::step_result<double> last{};
@@ -561,7 +561,7 @@ bool probe_regression_hs028()
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    argmin::basic_solver solver{policy_t{}, p, x0, opts};
+    argmin::step_budget_solver solver{policy_t{}, p, x0, opts};
     auto result = solver.solve(opts);
 
     constexpr double bar =
@@ -618,7 +618,7 @@ int argmin_alloc_trace_probe()
     constexpr std::size_t min_per_step = 20;
 #endif
 
-    argmin::basic_solver solver{policy_t{}, problem, x0, opts};
+    argmin::step_budget_solver solver{policy_t{}, problem, x0, opts};
 
     solver.step();
     solver.step();

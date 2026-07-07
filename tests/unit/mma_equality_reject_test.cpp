@@ -24,7 +24,7 @@
 #include "argmin/solver/mma_policy.h"
 #include "argmin/solver/gcmma_policy.h"
 #include "argmin/solver/ccsa_quadratic_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 
 #include <Eigen/Core>
 
@@ -96,7 +96,7 @@ solver_status solved_status(const eq_and_ineq_problem& problem,
 {
     solver_options<> opts;
     opts.max_iterations = 10;
-    basic_solver solver{Policy{}, problem, x0, opts};
+    step_budget_solver solver{Policy{}, problem, x0, opts};
     return solver.solve(opts).status;
 }
 

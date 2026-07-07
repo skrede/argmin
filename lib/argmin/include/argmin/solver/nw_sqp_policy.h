@@ -9,7 +9,7 @@
 //   3. Backtracking line search on L1 merit function (Section 18.5)
 //   4. Damped BFGS update of Hessian of Lagrangian (Procedure 18.2)
 //
-// The policy satisfies the basic_solver contract with plain member functions
+// The policy satisfies the step_budget_solver contract with plain member functions
 // (init/step, no explicit-object parameter).
 // Requires: differentiable<Problem> && constrained<Problem>.
 // Box bounds: detected via if constexpr(bound_constrained<Problem>).
@@ -513,7 +513,7 @@ struct nw_sqp_policy
         // active-set cycling). N&W 2e S18.4.
         //
         // is_null_step=true exempts this iterate from step_tolerance
-        // stall detection so basic_solver gives the policy another
+        // stall detection so step_budget_solver gives the policy another
         // iteration to break the degeneracy rather than flagging
         // solver_status::stalled on iter 2.
         //

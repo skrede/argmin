@@ -1,7 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_COBYLA_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_COBYLA_POLICY_H
 
-// COBYLA solver policy for basic_solver.
+// COBYLA solver policy for step_budget_solver.
 //
 // Implements Powell's Constrained Optimization BY Linear Approximation: a
 // derivative-free trust-region method that maintains a simplex of n+1 points,
@@ -10,7 +10,7 @@
 // merit penalty toward feasibility only when reaching feasibility costs
 // objective. The heavy lifting lives in detail::cobyla_engine, a faithful port
 // of Powell's cobylb driver; this policy adapts the argmin problem interface to
-// the engine and threads the incumbent through basic_solver.
+// the engine and threads the incumbent through step_budget_solver.
 //
 // Requires: objective<P,S> && constrained_values<P,S> && bound_constrained<P,S>.
 // No gradient or constraint Jacobian is needed -- COBYLA uses only function and
@@ -156,7 +156,7 @@ struct cobyla_policy
         // COBYLA owns its own termination: it iterates until the trust radius
         // RHO contracts to RHOEND and then reports xtol_reached via
         // policy_status. Until then the reported progress magnitudes are kept
-        // at the trust-radius scale so basic_solver's step / objective / stall
+        // at the trust-radius scale so step_budget_solver's step / objective / stall
         // criteria do not declare convergence prematurely -- the derivative-
         // free incumbent (the simplex pole) can hold still for several
         // evaluations while the model and geometry improve. The gradient proxy
@@ -219,7 +219,7 @@ private:
 
     // Build the Powell-convention evaluator (captures the problem by pointer)
     // and initialize the engine. The evaluator also refreshes s.c_eq / s.c_ineq
-    // so basic_solver's constraint_violation reporting sees the latest point.
+    // so step_budget_solver's constraint_violation reporting sees the latest point.
     template <typename P>
     void make_evaluator_and_init(state_type<P>& s, double rhobeg, double rhoend)
     {

@@ -7,7 +7,7 @@
 // the build fails with a clear concept-violation error.
 
 #include "argmin/formulation/concepts.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/options.h"
 #include "argmin/schedule/round_robin_schedule.h"
 #include "argmin/schedule/fallback_schedule.h"
@@ -243,7 +243,7 @@ static_assert(!argmin::steppable<mock_solver_no_cv>);
 // ---------------------------------------------------------------------------
 // Harness contract: solver_policy / solver_state / schedule concepts.
 //
-// These lock the enforcement introduced at the harness (basic_solver static-
+// These lock the enforcement introduced at the harness (step_budget_solver static-
 // asserts solver_policy; basic_solver_group static-asserts schedule). The
 // negative cases prove the concepts are non-vacuous: a policy missing
 // reset_clear, or a state without x, or a schedule missing reset, is rejected.
@@ -368,50 +368,50 @@ static_assert(argmin::bound_constrained<argmin::hs035<>>);
 
 // ---------------------------------------------------------------------------
 // nlp_solver concept satisfaction (INTG-02)
-// basic_solver<Policy> satisfies nlp_solver for all solver policies
+// step_budget_solver<Policy> satisfies nlp_solver for all solver policies
 // ---------------------------------------------------------------------------
 
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::nw_sqp_policy<>>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::filter_nw_sqp_policy<>>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::kraft_slsqp_policy<>>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::filter_slsqp_policy<>>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::lbfgsb_policy<>>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::byrd_lbfgsb_policy<>>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::bobyqa_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::filter_nw_sqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::kraft_slsqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::filter_slsqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::lbfgsb_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::byrd_lbfgsb_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::bobyqa_policy<>>>);
 
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::augmented_lagrangian_policy<>>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::ccsa_quadratic_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::augmented_lagrangian_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::ccsa_quadratic_policy<>>>);
 
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::cmaes_policy<>>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::lm_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::cmaes_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::lm_policy<>>>);
 
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::cobyla_policy>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::isres_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::cobyla_policy>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::isres_policy<>>>);
 
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::projected_gn_policy>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::projected_gradient_gn_policy>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::projected_gn_policy>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::projected_gradient_gn_policy>>);
 
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::multistart_policy<argmin::bobyqa_policy<>>>>);
-static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::restarting_policy<argmin::cmaes_policy<>>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::multistart_policy<argmin::bobyqa_policy<>>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::restarting_policy<argmin::cmaes_policy<>>>>);
 
 // ---------------------------------------------------------------------------
 // steppable core concept satisfaction
 //
-// basic_solver<Policy> exposes the full loop-owning surface, so it satisfies
+// step_budget_solver<Policy> exposes the full loop-owning surface, so it satisfies
 // both the core steppable contract and its nlp_solver refinement. These pin
 // that the split is additive: every nlp_solver is a steppable, across a
 // representative constrained policy, an unconstrained policy, and a
 // derivative-free policy.
 // ---------------------------------------------------------------------------
 
-static_assert(argmin::steppable<argmin::basic_solver<argmin::nw_sqp_policy<>>>);
-static_assert(argmin::steppable<argmin::basic_solver<argmin::lbfgsb_policy<>>>);
-static_assert(argmin::steppable<argmin::basic_solver<argmin::cmaes_policy<>>>);
+static_assert(argmin::steppable<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::steppable<argmin::step_budget_solver<argmin::lbfgsb_policy<>>>);
+static_assert(argmin::steppable<argmin::step_budget_solver<argmin::cmaes_policy<>>>);
 
 // nlp_solver refines steppable: satisfying the loop-owning concept implies
 // the core stepping surface holds too.
-static_assert(argmin::steppable<argmin::basic_solver<argmin::nw_sqp_policy<>>>
-              && argmin::nlp_solver<argmin::basic_solver<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::steppable<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>
+              && argmin::nlp_solver<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>);
 
 // problem_dimension concept verification
 static_assert(argmin::has_problem_dimension<argmin::himmelblau<>>);

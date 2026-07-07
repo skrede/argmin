@@ -99,7 +99,7 @@ struct ccsa_quadratic_policy
         double dual_bound_scale{1000.0};
 
         // Framework-side stall detection threshold. Wired by
-        // basic_solver::forward_policy_hints into
+        // step_budget_solver::forward_policy_hints into
         // stall_tolerance_criterion with best_seen_feasible tracking.
         std::optional<double> stall_tolerance_threshold{};  // default: 1e-6
         std::uint16_t stall_window{50};

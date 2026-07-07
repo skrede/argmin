@@ -383,7 +383,7 @@ struct filter_nw_sqp_policy
         // Invariant: s.objective_value, s.g, s.c_eq/c_ineq, s.J_eq/J_ineq
         // are fresh at s.x. Init() seeds them at x_0; each step()'s
         // bottom block (or the restoration branch) updates them at the
-        // accepted iterate before returning. basic_solver does not
+        // accepted iterate before returning. step_budget_solver does not
         // mutate state.x between policy.step() calls, so the redundant
         // top-of-step re-evaluation that this branch used to perform is
         // pure overhead (one wasted gradient + Jacobian + constraints
@@ -580,7 +580,7 @@ struct filter_nw_sqp_policy
             // active-set cycling). N&W 2e S18.4.
             //
             // is_null_step=true exempts this iterate from
-            // step_tolerance stall detection so basic_solver gives
+            // step_tolerance stall detection so step_budget_solver gives
             // the policy another iteration to break the degeneracy
             // rather than flagging solver_status::stalled on iter 2.
             //

@@ -1,7 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_KRAFT_SLSQP_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_KRAFT_SLSQP_POLICY_H
 
-// Kraft 1988 SLSQP policy for basic_solver.
+// Kraft 1988 SLSQP policy for step_budget_solver.
 //
 // Implements Sequential Least Squares Programming (SLSQP) faithful to
 // Kraft (1988) DFVLR-FB 88-28: dense damped BFGS Hessian of the
@@ -401,7 +401,7 @@ struct kraft_slsqp_policy
         // already fresh at s.x. Maintained by init() / reset() / the prior
         // step()'s post-update block at the bottom of this function, which
         // writes gradient and constraint data for the accepted new iterate
-        // before returning. basic_solver::step_n does not mutate state.x
+        // before returning. step_budget_solver::step_n does not mutate state.x
         // between policy.step() calls, so no top-of-step re-evaluation is
         // needed.
         const int n = s.n;

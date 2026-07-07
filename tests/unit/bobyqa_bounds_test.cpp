@@ -12,7 +12,7 @@
 //            constrained optimization without derivatives", DAMTP 2009/NA06.
 
 #include "argmin/solver/bobyqa_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/options.h"
 
 #include <Eigen/Core>
@@ -113,7 +113,7 @@ TEST_CASE("bobyqa never evaluates the objective outside the box with a near-boun
     solver_options opts;
     opts.max_iterations = 300;
 
-    basic_solver solver{bobyqa_policy<dynamic_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy<dynamic_dimension>{}, problem, x0, opts};
     auto result = solver.solve();
 
     INFO("out-of-bounds evaluations: " << breaches);
@@ -149,7 +149,7 @@ TEST_CASE("bobyqa repairs a box tighter than twice the requested radius",
     solver_options opts;
     opts.max_iterations = 300;
 
-    basic_solver solver{bobyqa_policy<dynamic_dimension>{popts}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy<dynamic_dimension>{popts}, problem, x0, opts};
     auto result = solver.solve();
 
     INFO("out-of-bounds evaluations: " << breaches);
@@ -179,7 +179,7 @@ TEST_CASE("bobyqa scales mixed finite/infinite bounds coherently", "[bobyqa][bou
 
     // And it converges to the interior optimum on the unbounded coordinate.
     opts.max_iterations = 400;
-    basic_solver solver{bobyqa_policy<dynamic_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy<dynamic_dimension>{}, problem, x0, opts};
     auto result = solver.solve();
     CHECK(result.objective_value < 1e-6);
 }

@@ -336,7 +336,7 @@ struct convergence_policy
 
     // Per-criterion statuses from the most recent check() call. Index
     // matches declaration order of Criteria...; a nullopt entry means
-    // the criterion did not fire. Reachable from basic_solver via
+    // the criterion did not fire. Reachable from step_budget_solver via
     // solver.convergence().last_check_results().
     [[nodiscard]] const std::array<std::optional<solver_status>,
                                    sizeof...(Criteria)>&
@@ -359,7 +359,7 @@ using default_convergence = convergence_policy<
 // acc=0 at slsqp.c:1047 with the literal comment "we do our own convergence
 // tests below", which disables its internal gradient-norm + constraint-
 // violation check. Consumers who want iter-count parity with NLopt on
-// IK-style workloads should instantiate basic_solver with this alias
+// IK-style workloads should instantiate step_budget_solver with this alias
 // instead of default_convergence. stall_tolerance_criterion is retained
 // as a safety cap -- NLopt relies on its outer max_eval for the same
 // purpose and the stall detector fills the equivalent role here.

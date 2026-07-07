@@ -10,7 +10,7 @@
 #include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
 #include "argmin/solver/restarting_policy.h"
 #include "argmin/solver/cmaes_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/schedule/basic_solver_group.h"
 #include "argmin/schedule/round_robin_schedule.h"
 #include "argmin/test_functions/rosenbrock.h"
@@ -150,7 +150,7 @@ TEST_CASE("isres_policy: simple constrained 2D", "[isres]")
     // benchmarks/isres_seed_sweep.cpp for the sweep harness.
     policy.options.seed = 1u;  // empirically validated
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     CHECK(result.objective_value < 1.0);
@@ -172,7 +172,7 @@ TEST_CASE("isres_policy: stochastic ranking selection", "[isres]")
     isres_policy<> policy;
     policy.options.seed = 123u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     // The unconstrained minimum is (0,0) with f=0 but that violates
@@ -199,7 +199,7 @@ TEST_CASE("restarting_policy<cmaes_policy<>>: Rosenbrock 2D", "[restarting][cmae
     policy.inner_policy_.options.initial_sigma = 0.5;
     policy.inner_policy_.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     // CMA-ES with IPOP restarts is stochastic; verify it ran and improved
@@ -221,7 +221,7 @@ TEST_CASE("restarting_policy<isres_policy<>>: restart compiles", "[restarting][i
     restarting_policy<isres_policy<>> policy;
     policy.inner_policy_.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     CHECK(std::isfinite(result.objective_value));

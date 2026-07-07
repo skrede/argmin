@@ -137,7 +137,7 @@ concept steppable = requires(Solver& solver, const Solver& csolver,
 //
 // Refines steppable with the loop-owning surface: solve() (drive to
 // convergence) and step_n(budget) (bounded run). Loop-owning drivers -- e.g.
-// basic_solver<Policy> for any constrained policy -- satisfy nlp_solver;
+// step_budget_solver<Policy> for any constrained policy -- satisfy nlp_solver;
 // passive step primitives that lack a convergence loop satisfy only
 // steppable.
 template <typename Solver, typename S = double>
@@ -150,7 +150,7 @@ concept nlp_solver = steppable<Solver, S> &&
 
 // Harness contract for solver states.
 //
-// basic_solver dereferences exactly one member on every driven state: x, the
+// step_budget_solver dereferences exactly one member on every driven state: x, the
 // current iterate. step() reads state.x for the x_norm fill, and both reset
 // paths hand a fresh x0 to the policy which writes it into state.x. This is the
 // minimal, mandatory surface every policy state must expose.
@@ -177,7 +177,7 @@ concept constrained_policy_state = solver_state<State> &&
 
 // Harness contract for solver policies (duck-typed, no base class).
 //
-// basic_solver drives a policy through init/step/reset/reset_clear and reads
+// step_budget_solver drives a policy through init/step/reset/reset_clear and reads
 // state.x. solver_policy pins exactly the harness-visible surface so an
 // ill-formed policy fails at the construction site with a one-line diagnostic
 // instead of a deep template-instantiation error.
@@ -188,7 +188,7 @@ concept constrained_policy_state = solver_state<State> &&
 //
 // Move-safety is a documented invariant, not a compile-time check: a policy
 // with self-referential state (e.g. a subproblem caching addresses of sibling
-// state fields) must box those self-references so they survive basic_solver's
+// state fields) must box those self-references so they survive step_budget_solver's
 // noexcept move.
 template <typename Policy, typename State, typename S = double>
 concept solver_policy = solver_state<State> &&

@@ -4,7 +4,7 @@
 // problem, HS024 convergence, and basic_solver_group compatibility.
 
 #include "argmin/solver/cobyla_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/schedule/basic_solver_group.h"
 #include "argmin/schedule/round_robin_schedule.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -124,7 +124,7 @@ TEST_CASE("cobyla_policy: simple constrained 2D", "[cobyla]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver solver{cobyla_policy{}, problem, x0, opts};
+    step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
     auto result = solver.solve();
 
     CHECK(result.objective_value < 0.6);
@@ -150,7 +150,7 @@ TEST_CASE("cobyla_policy: HS024", "[cobyla][hs]")
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver solver{cobyla_policy{}, problem, x0, opts};
+    step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
     auto result = solver.solve();
 
     INFO("HS024 objective: " << result.objective_value);
@@ -182,7 +182,7 @@ void check_cobyla_optimum(const char* name, double f_oracle,
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver solver{cobyla_policy{}, problem, x0, opts};
+    step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
     auto result = solver.solve();
 
     INFO(name << " objective: " << result.objective_value);
@@ -264,7 +264,7 @@ void run_cobyla_denorm_check(const char* name)
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver solver{cobyla_policy{}, problem, x0, opts};
+    step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
     auto result = solver.solve();
 
     INFO(name << ": objective_value = " << result.objective_value);

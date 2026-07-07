@@ -1,7 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_BOBYQA_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_BOBYQA_POLICY_H
 
-// BOBYQA solver policy for basic_solver.
+// BOBYQA solver policy for step_budget_solver.
 //
 // Implements Powell's Bound Optimization BY Quadratic Approximation.
 // A trust-region derivative-free method that maintains a quadratic

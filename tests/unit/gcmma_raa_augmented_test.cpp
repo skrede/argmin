@@ -3,7 +3,7 @@
 
 #include "argmin/detail/mma_raa_augmented_dual_problem.h"
 #include "argmin/solver/alternative/gcmma/raa_augmented_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -25,7 +25,7 @@ TEST_CASE("gcmma raa-augmented converges on HS024", "[gcmma_raa]")
     opts.set_gradient_threshold(1e-5);
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
-    basic_solver solver{
+    step_budget_solver solver{
         alternative::gcmma::raa_augmented_policy<
             hs024<>::problem_dimension>{},
         problem, x0, opts};
@@ -42,7 +42,7 @@ TEST_CASE("gcmma raa-augmented converges on HS035", "[gcmma_raa]")
     opts.set_gradient_threshold(1e-5);
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
-    basic_solver solver{
+    step_budget_solver solver{
         alternative::gcmma::raa_augmented_policy<
             hs035<>::problem_dimension>{},
         problem, x0, opts};
@@ -59,7 +59,7 @@ TEST_CASE("gcmma raa-augmented converges on HS076", "[gcmma_raa]")
     opts.set_gradient_threshold(1e-5);
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
-    basic_solver solver{
+    step_budget_solver solver{
         alternative::gcmma::raa_augmented_policy<
             hs076<>::problem_dimension>{},
         problem, x0, opts};

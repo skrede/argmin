@@ -6,7 +6,7 @@ CMA-ES lives in `solver/cmaes_policy.h` and is a thin alias to the
 empirical winner among the variants here.
 
 Each variant satisfies the same `argmin::nlp_solver` concept as the
-production policies and can be plugged into `basic_solver`
+production policies and can be plugged into `step_budget_solver`
 interchangeably for benchmarking.
 
 | Variant | Mechanism | Reference | Empirical role |

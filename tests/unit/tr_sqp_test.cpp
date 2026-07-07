@@ -25,7 +25,7 @@
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/schedule/basic_solver_group.h"
 #include "argmin/solver/tr_sqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/solver/options.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -61,7 +61,7 @@ double solve_wall_seconds(const Problem& problem, const Eigen::VectorXd& x0,
     opts.set_gradient_threshold(Policy::default_gradient_tolerance);
     opts.set_step_threshold(Policy::default_step_tolerance_rel);
     opts.constraint_tolerance = Policy::default_feasibility_tolerance;
-    basic_solver solver{Policy{}, problem, x0, opts};
+    step_budget_solver solver{Policy{}, problem, x0, opts};
     const auto t0 = std::chrono::steady_clock::now();
     [[maybe_unused]] auto result = solver.solve(opts);
     const auto t1 = std::chrono::steady_clock::now();
@@ -87,7 +87,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS071 optimum: f* = 17.0140173 at (1, 4.7429996, 3.8211499, 1.3794082).
@@ -128,7 +128,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS026 optimum: f* = 0 at (1, 1, 1). Absolute bar because f* = 0
@@ -177,7 +177,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS043 optimum: f* = -44 at (0, 1, 2, -1).
@@ -231,7 +231,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS024 optimum: f* = -1 at (3, sqrt(3)).
@@ -295,7 +295,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS035 optimum: f* = 1/9 ~ 0.11111 at (4/3, 7/9, 4/9).
@@ -332,7 +332,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS039 optimum: f* = -1 at (1, 1, 0, 0).
@@ -369,7 +369,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS040 optimum: f* = -0.25 at (1, 2^(1/3), 2^(1/2), -2^(-3/4)).
@@ -406,7 +406,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS050 optimum: f* = 0 at (1, 1, 1, 1, 1). Absolute bar because
@@ -440,7 +440,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS028 optimum: f* = 0 at (0.5, -0.5, 0.5). Accurate mode mirrors
@@ -484,7 +484,7 @@ TEMPLATE_TEST_CASE_SIG(
     opts.set_step_threshold(policy_t::default_step_tolerance_rel);
     opts.constraint_tolerance = policy_t::default_feasibility_tolerance;
 
-    basic_solver solver{policy_t{}, problem, x0, opts};
+    step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // HS076 optimum: f* = -4.6818181818... at
@@ -647,7 +647,7 @@ TEST_CASE("tr_sqp SOC retry fires on a rejected step whose violation "
 
     tr_sqp_policy_accurate<2> pol{};
     pol.options.soc_max_iterations = 2;
-    basic_solver solver{pol, problem, x0, opts};
+    step_budget_solver solver{pol, problem, x0, opts};
 
     // First composite step: tangential move along the circle, trial
     // violation sin^2(0.1) > 0 = theta_k, merit worsens -> rejected
@@ -669,7 +669,7 @@ TEST_CASE("tr_sqp SOC retry stays out on a rejected step whose "
 
     tr_sqp_policy_accurate<2> pol{};
     pol.options.soc_max_iterations = 2;
-    basic_solver solver{pol, problem, x0, opts};
+    step_budget_solver solver{pol, problem, x0, opts};
 
     // First composite step: normal leg contracts the violation
     // 1 -> 0.2 but the trial objective explodes -> merit rejection

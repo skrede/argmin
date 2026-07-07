@@ -17,7 +17,7 @@
 #include "argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h"
 #include "argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h"
 #include "argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
 
@@ -92,7 +92,7 @@ TEMPLATE_TEST_CASE("cmaes: over-cap population rejected as invalid_problem",
         policy.options.seed = 7u;
 
         // Construction / init() must not crash on the over-cap request.
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
 
         auto first = solver.step();
         REQUIRE(first.policy_status.has_value());
@@ -107,7 +107,7 @@ TEMPLATE_TEST_CASE("cmaes: over-cap population rejected as invalid_problem",
         policy.options.initial_sigma = 0.5;
         policy.options.seed = 7u;
 
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         auto result = solver.solve();
         CHECK(result.status == solver_status::invalid_problem);
     }
@@ -152,7 +152,7 @@ TEMPLATE_TEST_CASE("cmaes: over-cap population rejected as invalid_problem",
         run_opts.set_objective_threshold(1e-14);
         run_opts.set_step_threshold(1e-14);
 
-        basic_solver solver{policy, problem, x0, run_opts};
+        step_budget_solver solver{policy, problem, x0, run_opts};
         auto result = solver.solve(run_opts);
 
         CHECK(result.status != solver_status::invalid_problem);

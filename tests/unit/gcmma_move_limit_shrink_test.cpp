@@ -13,7 +13,7 @@
 // behavior across all three variants on the full problem set.
 
 #include "argmin/solver/alternative/gcmma/move_limit_shrink_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -40,7 +40,7 @@ TEST_CASE("gcmma move-limit-shrink converges on HS024",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{
+    step_budget_solver solver{
         alternative::gcmma::move_limit_shrink_policy<
             hs024<>::problem_dimension>{},
         problem, x0, opts};
@@ -70,7 +70,7 @@ TEST_CASE("gcmma move-limit-shrink makes progress on HS035",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{
+    step_budget_solver solver{
         alternative::gcmma::move_limit_shrink_policy<
             hs035<>::problem_dimension>{},
         problem, x0, opts};
@@ -97,7 +97,7 @@ TEST_CASE("gcmma move-limit-shrink makes progress on HS076",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{
+    step_budget_solver solver{
         alternative::gcmma::move_limit_shrink_policy<
             hs076<>::problem_dimension>{},
         problem, x0, opts};

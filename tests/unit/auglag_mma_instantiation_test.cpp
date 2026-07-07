@@ -24,7 +24,7 @@
 #include "argmin/solver/gcmma_policy.h"
 #include "argmin/solver/mma_policy.h"
 #include "argmin/solver/lbfgsb_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -106,7 +106,7 @@ void construct_move_step(Policy policy, const Problem& problem,
                          const Eigen::VectorXd& x0,
                          const solver_options<>& opts)
 {
-    basic_solver probe{std::move(policy), problem, x0, opts};
+    step_budget_solver probe{std::move(policy), problem, x0, opts};
     using solver_type = decltype(probe);
 
     auto heap_solver = std::make_unique<solver_type>(std::move(probe));
@@ -135,7 +135,7 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
 
     SECTION("augmented Lagrangian over moving asymptotes")
     {
-        basic_solver solver{augmented_lagrangian_policy<mma_policy<D>, D>{},
+        step_budget_solver solver{augmented_lagrangian_policy<mma_policy<D>, D>{},
             problem, x0, opts};
         auto sr = solver.step();
         CHECK(std::isfinite(sr.objective_value));
@@ -145,7 +145,7 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
 
     SECTION("augmented Lagrangian over globally convergent MMA")
     {
-        basic_solver solver{augmented_lagrangian_policy<gcmma_policy<D>, D>{},
+        step_budget_solver solver{augmented_lagrangian_policy<gcmma_policy<D>, D>{},
             problem, x0, opts};
         auto sr = solver.step();
         CHECK(std::isfinite(sr.objective_value));
@@ -155,7 +155,7 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
 
     SECTION("augmented Lagrangian over quadratic-penalty CCSA")
     {
-        basic_solver solver{augmented_lagrangian_policy<ccsa_quadratic_policy<D>, D>{},
+        step_budget_solver solver{augmented_lagrangian_policy<ccsa_quadratic_policy<D>, D>{},
             problem, x0, opts};
         auto sr = solver.step();
         CHECK(std::isfinite(sr.objective_value));

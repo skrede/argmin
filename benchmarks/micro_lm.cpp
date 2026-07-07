@@ -19,7 +19,7 @@
 #endif
 
 #include "argmin/solver/lm_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 
 #include <Eigen/Core>
 
@@ -85,7 +85,7 @@ timing bench_argmin(std::uint32_t reps)
 
     // Warmup.
     {
-        argmin::basic_solver solver{argmin::lm_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::lm_policy{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -94,7 +94,7 @@ timing bench_argmin(std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::lm_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::lm_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;
@@ -124,7 +124,7 @@ bool probe_kkt_residual()
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    argmin::basic_solver solver{argmin::lm_policy{}, problem, x0, opts};
+    argmin::step_budget_solver solver{argmin::lm_policy{}, problem, x0, opts};
 
     argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -170,7 +170,7 @@ int argmin_alloc_trace_probe()
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    argmin::basic_solver solver{argmin::lm_policy{}, problem, x0, opts};
+    argmin::step_budget_solver solver{argmin::lm_policy{}, problem, x0, opts};
 
     solver.step();
     solver.step();

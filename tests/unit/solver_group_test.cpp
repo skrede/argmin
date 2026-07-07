@@ -1,6 +1,6 @@
 #include "mock_policy.h"
 #include "argmin/result/status.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/schedule/fallback_schedule.h"
 #include "argmin/schedule/basic_solver_group.h"
 #include "argmin/schedule/round_robin_schedule.h"
@@ -79,14 +79,14 @@ TEST_CASE("basic_solver_group fold expression concept check", "[solver_group]")
     SUCCEED("fold expression concept check passed at compile time");
 }
 
-TEST_CASE("basic_solver step propagates constraint_violation", "[solver]")
+TEST_CASE("step_budget_solver step propagates constraint_violation", "[solver]")
 {
     quadratic_group prob;
 
     SECTION("constrained policy returns nonzero constraint_violation")
     {
         Eigen::VectorXd x0{{0.5, 0.5}};
-        basic_solver<test::constrained_mock_policy> solver{prob, x0};
+        step_budget_solver<test::constrained_mock_policy> solver{prob, x0};
         auto result = solver.step();
         CHECK(result.constraint_violation > 0.0);
     }
@@ -94,7 +94,7 @@ TEST_CASE("basic_solver step propagates constraint_violation", "[solver]")
     SECTION("unconstrained policy returns zero constraint_violation")
     {
         Eigen::VectorXd x0{{1.0, 1.0}};
-        basic_solver<test::mock_policy> solver{prob, x0};
+        step_budget_solver<test::mock_policy> solver{prob, x0};
         auto result = solver.step();
         CHECK(result.constraint_violation == 0.0);
     }
@@ -164,7 +164,7 @@ TEST_CASE("among infeasible solvers lowest violation wins",
     CHECK(result.objective_value == Approx(1.0));
 }
 
-TEST_CASE("basic_solver per-policy options forwarding",
+TEST_CASE("step_budget_solver per-policy options forwarding",
           "[solver][per-policy]")
 {
     quadratic_group prob;
@@ -174,14 +174,14 @@ TEST_CASE("basic_solver per-policy options forwarding",
     SECTION("custom step_size via policy options")
     {
         test::mock_policy_with_opts::options_type popts{.custom_step_size = 0.1};
-        basic_solver<test::mock_policy_with_opts> solver{prob, x0, opts, popts};
+        step_budget_solver<test::mock_policy_with_opts> solver{prob, x0, opts, popts};
         auto result = solver.step();
         CHECK(result.step_size == Approx(0.1));
     }
 
     SECTION("default step_size without policy options")
     {
-        basic_solver<test::mock_policy_with_opts> solver{prob, x0, opts};
+        step_budget_solver<test::mock_policy_with_opts> solver{prob, x0, opts};
         auto result = solver.step();
         CHECK(result.step_size == Approx(0.5));
     }
@@ -428,7 +428,7 @@ TEST_CASE("group retires a converged solver instead of re-stepping it",
     }
 }
 
-TEST_CASE("group feasibility default agrees with basic_solver's (1e-6, not value_or(0))",
+TEST_CASE("group feasibility default agrees with step_budget_solver's (1e-6, not value_or(0))",
           "[solver_group][feasibility]")
 {
     quadratic_group prob;
@@ -452,7 +452,7 @@ TEST_CASE("group feasibility default agrees with basic_solver's (1e-6, not value
     CHECK(result.objective_value == Approx(10.0));
 }
 
-TEST_CASE("standalone basic_solver treats the same borderline iterate as feasible",
+TEST_CASE("standalone step_budget_solver treats the same borderline iterate as feasible",
           "[solver][feasibility]")
 {
     quadratic_group prob;
@@ -465,12 +465,12 @@ TEST_CASE("standalone basic_solver treats the same borderline iterate as feasibl
     // borderline_then_worse_mock_policy: reports cv = 5e-7 (borderline
     // feasible under the 1e-6 default) with obj = 10 on step 1, then
     // cv = 0 (unambiguously feasible) with obj = 20 (worse) on step 2.
-    // Under basic_solver's feasibility_tolerance default (options.h,
+    // Under step_budget_solver's feasibility_tolerance default (options.h,
     // 1e-6 -- the same constant basic_solver_group now shares), step 1 is
     // judged feasible and its lower objective must win the best-seen
     // comparison over step 2, mirroring the group-level test above using
     // the identical borderline cv value.
-    basic_solver<test::borderline_then_worse_mock_policy> solver{prob, x0};
+    step_budget_solver<test::borderline_then_worse_mock_policy> solver{prob, x0};
     auto result = solver.step_n(2);
 
     CHECK(result.objective_value == Approx(10.0));

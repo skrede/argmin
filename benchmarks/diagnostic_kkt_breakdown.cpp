@@ -9,7 +9,7 @@
 // reference case (byrd_lbfgsb brown_badly_scaled) is retained as a
 // non-SQP trajectory carried over from the prior regression sweep.
 //
-// Each SQP case drives basic_solver::step() in a loop, inspects
+// Each SQP case drives step_budget_solver::step() in a loop, inspects
 // solver.state() + the returned step_result + the per-criterion
 // last_check_results(), and emits one CSV row per step on stdout.
 // Convergence thresholds are deliberately tight (1e-14 / 1e-18) so
@@ -56,7 +56,7 @@
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/detail/lagrangian.h"
@@ -303,7 +303,7 @@ kkt_leg_breakdown compute_lagrangian_breakdown(
 // -----------------------------------------------------------------
 // Case runners for the four SQP regressions + hs071 diagnostic case.
 // Each runner constructs the problem + x0 via initial_point(), builds
-// a basic_solver with tight convergence thresholds matching the
+// a step_budget_solver with tight convergence thresholds matching the
 // existing regression guards in tests/unit/kraft_slsqp_test.cpp line
 // 369-389, loops step() up to max_iterations, and emits one CSV row
 // per step.
@@ -327,7 +327,7 @@ void run_sqp_case(std::string_view case_label, Problem problem, Policy policy)
     opts.set_step_threshold(1e-18);
     opts.set_stationarity_threshold(1e-14);
 
-    argmin::basic_solver solver{policy, problem, x0, opts};
+    argmin::step_budget_solver solver{policy, problem, x0, opts};
 
     const double feasibility_gate_effective = opts.constraint_tolerance
         ? *opts.constraint_tolerance
@@ -343,7 +343,7 @@ void run_sqp_case(std::string_view case_label, Problem problem, Policy policy)
         final_iter = i + 1;
 
         // Drive the stored convergence policy so last_check_results()
-        // reflects this step. basic_solver::step() does NOT invoke
+        // reflects this step. step_budget_solver::step() does NOT invoke
         // convergence.check(); that happens inside solve()/step_n().
         // Call it explicitly here so the diagnostic row carries the
         // same fired-criterion index that step_n would report.
@@ -445,7 +445,7 @@ void run_byrd_brown_case()
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    argmin::basic_solver solver{argmin::byrd_lbfgsb_policy{}, problem, x0, opts};
+    argmin::step_budget_solver solver{argmin::byrd_lbfgsb_policy{}, problem, x0, opts};
 
     // byrd_lbfgsb default feasibility_gate is +inf (no primal-feasibility
     // gate; bound-constrained projected-gradient already absorbs it).

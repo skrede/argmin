@@ -13,7 +13,7 @@
 #endif
 
 #include "argmin/solver/filter_nw_sqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -366,7 +366,7 @@ timing bench_argmin(const Problem& problem,
 
     // Warmup.
     {
-        argmin::basic_solver solver{argmin::filter_nw_sqp_policy<>{},
+        argmin::step_budget_solver solver{argmin::filter_nw_sqp_policy<>{},
                                     problem, x0, opts, policy_opts};
         solver.solve();
     }
@@ -376,7 +376,7 @@ timing bench_argmin(const Problem& problem,
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{argmin::filter_nw_sqp_policy<>{},
+        argmin::step_budget_solver solver{argmin::filter_nw_sqp_policy<>{},
                                     problem, x0, opts, policy_opts};
         auto result = solver.solve();
         fval = result.objective_value;
@@ -392,7 +392,7 @@ timing bench_argmin(const Problem& problem,
 //
 // Rebinds the policy to the problem's compile-time dimension so that
 // the matching options_type instantiation can be passed alongside (the
-// 5-arg basic_solver ctor has a same_as<Policy::options_type> guard).
+// 5-arg step_budget_solver ctor has a same_as<Policy::options_type> guard).
 //
 // Tolerance regime mirrors tests/unit/filter_nw_sqp_test.cpp HS043 cell:
 // tight objective and step thresholds with a 500-outer-iter budget so
@@ -416,7 +416,7 @@ sweep_row sweep_argmin(const Problem& problem,
     if(gamma_f) policy_opts.gamma_f = *gamma_f;
     if(gamma_h) policy_opts.gamma_h = *gamma_h;
 
-    argmin::basic_solver solver{policy_t{}, problem, x0, opts, policy_opts};
+    argmin::step_budget_solver solver{policy_t{}, problem, x0, opts, policy_opts};
     auto result = solver.solve();
     return {result.objective_value, result.constraint_violation,
             result.iterations,
@@ -567,7 +567,7 @@ bool probe_kkt_residual()
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    argmin::basic_solver solver{argmin::filter_nw_sqp_policy<>{}, problem, x0, opts};
+    argmin::step_budget_solver solver{argmin::filter_nw_sqp_policy<>{}, problem, x0, opts};
 
     argmin::step_result<double> last_with_kkt{};
     bool any_kkt = false;
@@ -616,7 +616,7 @@ bool probe_regression_hs026()
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    argmin::basic_solver solver{
+    argmin::step_budget_solver solver{
         argmin::filter_nw_sqp_policy<argmin::hs026<>::problem_dimension>{},
         p, x0, opts};
     argmin::step_result<double> last{};
@@ -665,7 +665,7 @@ bool probe_regression_hs024_iter_bound()
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    argmin::basic_solver solver{
+    argmin::step_budget_solver solver{
         argmin::filter_nw_sqp_policy<argmin::hs024<>::problem_dimension>{},
         p, x0, opts};
     auto result = solver.solve(opts);
@@ -698,7 +698,7 @@ int argmin_alloc_trace_probe()
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
 
-    argmin::basic_solver solver{argmin::filter_nw_sqp_policy<>{}, problem, x0, opts};
+    argmin::step_budget_solver solver{argmin::filter_nw_sqp_policy<>{}, problem, x0, opts};
 
     solver.step();
     solver.step();

@@ -13,7 +13,7 @@
 #include "trace_entry.h"
 #include "problem_registry.h"
 
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/solver/lm_policy.h"
 #include "argmin/solver/cobyla_policy.h"
@@ -100,7 +100,7 @@ using rebind_policy_t = typename rebind_policy<Policy, N>::type;
 // Run a single argmin solver policy on a problem, collecting result and
 // optional per-iteration trace.
 //
-// Policy must be a valid basic_solver policy.
+// Policy must be a valid step_budget_solver policy.
 // Problem must provide value, gradient, dimension, optimal_value, initial_point.
 //
 // bench uses `default_convergence` uniformly across solver families; each
@@ -139,7 +139,7 @@ auto run_argmin_solver(std::string_view solver_name,
     // wall-clock budget knob. config.max_wall_time_s is intentionally NOT
     // enforced here; the gap is documented in the publication-mode
     // methodology write-up. A future seed may add a wall-clock check at
-    // the basic_solver step-loop level if non-trivial work justifies it.
+    // the step_budget_solver step-loop level if non-trivial work justifies it.
     auto x0 = prob.initial_point();
     solver_options<Convergence> opts{};
     opts.max_iterations = max_iterations;
@@ -197,7 +197,7 @@ auto run_argmin_solver(std::string_view solver_name,
         double f_best_running = std::numeric_limits<double>::infinity();
 
         using wrapped_t = counting_problem<Problem>;
-        basic_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
+        step_budget_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();
@@ -311,7 +311,7 @@ auto run_argmin_solver(std::string_view solver_name,
         // The no-args solve() path falls through to stored_convergence_
         // which is always default-constructed default_convergence.
         using wrapped_t = counting_problem<Problem>;
-        basic_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
+        step_budget_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
         auto t0 = std::chrono::high_resolution_clock::now();

@@ -265,7 +265,7 @@ struct projected_gn_policy
 
         ++s.iteration;
 
-        // Report h.norm() as step_size even on rejection so basic_solver's
+        // Report h.norm() as step_size even on rejection so step_budget_solver's
         // stall detection does not fire while lambda is still adapting.
         // objective_change carries the ACTUAL objective change (zero on a
         // rejected step); the former hack that reported lambda here leaked an

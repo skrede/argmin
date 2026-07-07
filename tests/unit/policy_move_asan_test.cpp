@@ -9,8 +9,8 @@
 // augmented_lagrangian_policy is exactly this shape: state_type::
 // subproblem stores pointers into the enclosing state (lambda_eq,
 // lambda_ineq, mu, the per-inner-iter buffers), and the persisted
-// inner basic_solver's problem pointer is the address of that same
-// subproblem. basic_solver's move constructor is unconditional
+// inner step_budget_solver's problem pointer is the address of that same
+// subproblem. step_budget_solver's move constructor is unconditional
 // noexcept memberwise move, so none of those pointers are rebased.
 //
 // This test is expected to abort under -fsanitize=address on the
@@ -26,7 +26,7 @@
 #include "argmin/solver/cobyla_policy.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/cmaes_policy.h"
 #include "argmin/solver/gcmma_policy.h"
 #include "argmin/solver/isres_policy.h"
@@ -190,7 +190,7 @@ struct simple_constrained
     }
 };
 
-// Constructs a basic_solver, steps it once (materializing whatever
+// Constructs a step_budget_solver, steps it once (materializing whatever
 // per-outer-iteration state the policy persists), moves it onto the
 // heap, steps again, moves it back onto the stack, then destroys the
 // heap intermediary before a final step().
@@ -207,7 +207,7 @@ void construct_move_step(Policy policy, const Problem& problem,
                          const Eigen::VectorXd& x0,
                          const solver_options<>& opts)
 {
-    basic_solver probe{std::move(policy), problem, x0, opts};
+    step_budget_solver probe{std::move(policy), problem, x0, opts};
     using solver_type = decltype(probe);
 
     auto heap_solver = std::make_unique<solver_type>(std::move(probe));
@@ -301,7 +301,7 @@ TEST_CASE("augmented_lagrangian survives move-then-step", "[move_asan]")
 {
     // The self-referential case. state_type::subproblem references outer
     // state (lambda_eq, lambda_ineq, mu, bounds) and the per-inner-iter
-    // buffers, and the persisted inner basic_solver caches the address of
+    // buffers, and the persisted inner step_budget_solver caches the address of
     // that subproblem. state_type now boxes the subproblem, its buffers,
     // and the inner solver in one heap node reached through a single
     // owning pointer, and re-seeds the subproblem's outer-state pointers

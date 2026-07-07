@@ -35,7 +35,7 @@
 #include "argmin/solver/alternative/isres/nlopt_faithful_policy.h"
 #include "argmin/solver/alternative/isres/original_argmin_policy.h"
 #include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/rastrigin.h"
 #include "argmin/test_functions/schwefel.h"
 
@@ -535,7 +535,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps,
     {
         Policy policy;
         policy.options.seed = seed_start;
-        argmin::basic_solver solver{policy, problem, x0, opts};
+        argmin::step_budget_solver solver{policy, problem, x0, opts};
         solver.solve();
     }
 
@@ -552,7 +552,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps,
         for(std::uint32_t r = 0; r < reps; ++r)
         {
             const auto t0 = std::chrono::high_resolution_clock::now();
-            argmin::basic_solver solver{policy, problem, x0, opts};
+            argmin::step_budget_solver solver{policy, problem, x0, opts};
             const auto result = solver.solve();
             const auto t1 = std::chrono::high_resolution_clock::now();
 

@@ -1,7 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_FILTER_SLSQP_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_FILTER_SLSQP_POLICY_H
 
-// Filter SQP policy for basic_solver.
+// Filter SQP policy for step_budget_solver.
 //
 // Mirrors kraft_slsqp_policy in QP solver (kraft_lsq_qp), Hessian
 // (dense_ldl_bfgs, packed L D L^T), and constraint handling. Differs
@@ -538,7 +538,7 @@ struct filter_slsqp_policy
             // Section 2.2.3.
             //
             // is_null_step=true exempts this iterate from
-            // step_tolerance stall detection so basic_solver does not
+            // step_tolerance stall detection so step_budget_solver does not
             // double-report the stall via the tolerance criterion on
             // top of the policy-reported solver_status::stalled below.
             //

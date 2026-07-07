@@ -12,7 +12,7 @@
 
 #include "argmin/solver/augmented_lagrangian_policy.h"
 #include "argmin/solver/gcmma_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 
 #include <Eigen/Core>
 
@@ -149,7 +149,7 @@ TEST_CASE("auglag_gcmma_equality_test: converges on a pure equality problem",
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-5);
 
-    basic_solver solver{augmented_lagrangian_policy<gcmma_policy<Dm>, Dm>{},
+    step_budget_solver solver{augmented_lagrangian_policy<gcmma_policy<Dm>, Dm>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -173,7 +173,7 @@ TEST_CASE("auglag_gcmma_equality_test: equality via AL, inequality via the inner
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-5);
 
-    basic_solver solver{augmented_lagrangian_policy<gcmma_policy<Dm>, Dm>{},
+    step_budget_solver solver{augmented_lagrangian_policy<gcmma_policy<Dm>, Dm>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 

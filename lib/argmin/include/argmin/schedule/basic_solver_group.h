@@ -1,7 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_SCHEDULE_BASIC_SOLVER_GROUP_H
 #define HPP_GUARD_ARGMIN_SCHEDULE_BASIC_SOLVER_GROUP_H
 
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -25,7 +25,7 @@ namespace argmin
 
 // Multi-solver group with scheduling (per CORE-03, CORE-04, D-12).
 //
-// Holds a tuple of basic_solver<Policies, N>... and uses a Schedule to decide
+// Holds a tuple of step_budget_solver<Policies, N>... and uses a Schedule to decide
 // which solver to step next. The compile-time fold-expression requires clause
 // ensures the Problem type satisfies the union of all policy requirements.
 
@@ -43,13 +43,13 @@ public:
                   "expose select(n), reset(), and notify(step_result).");
 
     template <typename P, typename Convergence = default_convergence>
-        requires (std::constructible_from<basic_solver<Policies, N, Problem>, const P&,
+        requires (std::constructible_from<step_budget_solver<Policies, N, Problem>, const P&,
                   const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&> && ...)
     basic_solver_group(const P& problem,
                        const Eigen::VectorX<scalar_type>& x0,
                        const solver_options<Convergence>& opts = {},
                        Schedule schedule = {})
-        : solvers_{basic_solver<Policies, N, Problem>{problem, x0, opts}...}
+        : solvers_{step_budget_solver<Policies, N, Problem>{problem, x0, opts}...}
         , schedule_{std::move(schedule)}
         , max_iterations_{opts.max_iterations}
         , constraint_tolerance_{opts.constraint_tolerance}
@@ -60,7 +60,7 @@ public:
 
     // Per-policy options constructor.
     template <typename P, typename Convergence = default_convergence>
-        requires (std::constructible_from<basic_solver<Policies, N, Problem>, const P&,
+        requires (std::constructible_from<step_budget_solver<Policies, N, Problem>, const P&,
                   const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&,
                   const policy_options_t<Policies, scalar_type>&> && ...)
     basic_solver_group(const P& problem,
@@ -138,7 +138,7 @@ public:
     }
 
     // Reset every solver to a new starting point and restart the schedule.
-    // Mirrors basic_solver::reset: each policy's reset() reseeds its solver,
+    // Mirrors step_budget_solver::reset: each policy's reset() reseeds its solver,
     // retirement flags are cleared, and Schedule::reset() restarts the
     // selection state through init_schedule().
     void reset(const Eigen::VectorX<scalar_type>& x0)
@@ -251,7 +251,7 @@ private:
         const std::tuple<policy_options_t<Policies, scalar_type>...>& policy_opts,
         std::index_sequence<Is...>)
     {
-        return std::tuple{basic_solver<Policies, N, Problem>{
+        return std::tuple{step_budget_solver<Policies, N, Problem>{
             problem, x0, opts, std::get<Is>(policy_opts)}...};
     }
 
@@ -272,7 +272,7 @@ private:
         scalar_type best_cv = std::numeric_limits<scalar_type>::max();
         std::size_t best_idx = 0;
         // User-supplied constraint_tolerance takes precedence; otherwise
-        // fall back to the same feasibility_tolerance default basic_solver
+        // fall back to the same feasibility_tolerance default step_budget_solver
         // uses for its own best-seen comparator (options.h), so a group and
         // a standalone solver judge the same iterate's feasibility
         // identically.
@@ -395,7 +395,7 @@ private:
         (fill(Is, std::get<Is>(solvers_)), ...);
     }
 
-    std::tuple<basic_solver<Policies, N, Problem>...> solvers_;
+    std::tuple<step_budget_solver<Policies, N, Problem>...> solvers_;
     Schedule schedule_;
     std::uint32_t max_iterations_{1000};
     std::optional<double> constraint_tolerance_{};

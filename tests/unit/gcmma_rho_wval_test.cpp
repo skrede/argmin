@@ -15,7 +15,7 @@
 #include "argmin/solver/alternative/gcmma/rho_wval_policy.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/options.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -111,7 +111,7 @@ TEST_CASE("gcmma rho-wval converges on HS024", "[gcmma_rho_wval]")
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{
+    step_budget_solver solver{
         alternative::gcmma::rho_wval_policy<
             hs024<>::problem_dimension>{},
         problem, x0, opts};
@@ -131,7 +131,7 @@ TEST_CASE("gcmma rho-wval converges on HS035", "[gcmma_rho_wval]")
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{
+    step_budget_solver solver{
         alternative::gcmma::rho_wval_policy<
             hs035<>::problem_dimension>{},
         problem, x0, opts};
@@ -151,7 +151,7 @@ TEST_CASE("gcmma rho-wval converges on HS076", "[gcmma_rho_wval]")
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    basic_solver solver{
+    step_budget_solver solver{
         alternative::gcmma::rho_wval_policy<
             hs076<>::problem_dimension>{},
         problem, x0, opts};

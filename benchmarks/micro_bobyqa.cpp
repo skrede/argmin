@@ -7,7 +7,7 @@
 //   perf report --stdio --percent-limit=1.0
 
 #include "argmin/solver/bobyqa_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -120,7 +120,7 @@ timing bench_argmin(Policy policy, const Problem& problem, std::uint32_t reps)
 
     // Warmup.
     {
-        argmin::basic_solver solver{policy, problem, x0, opts};
+        argmin::step_budget_solver solver{policy, problem, x0, opts};
         solver.solve();
     }
 
@@ -129,7 +129,7 @@ timing bench_argmin(Policy policy, const Problem& problem, std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::basic_solver solver{policy, problem, x0, opts};
+        argmin::step_budget_solver solver{policy, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;

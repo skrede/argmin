@@ -241,7 +241,7 @@ struct tr_sqp_policy
             default_max_cg_iterations_multiplier};
 
         // Stall window carried over from the line-search SQP family for
-        // basic_solver convergence-framework parity.
+        // step_budget_solver convergence-framework parity.
         std::uint16_t stall_window{50};
 
         // Active-set multiplier re-estimation stride. A value of 0 is
@@ -982,7 +982,7 @@ struct tr_sqp_policy
         // Section N -- Single-step rejection branch (ratio < eta_1 but
         // radius above the floor). Iterate unchanged; the helper has
         // already shrunk s.trust_radius. The null-step status is
-        // unset; basic_solver's convergence framework reads
+        // unset; step_budget_solver's convergence framework reads
         // is_null_step + the stall window to decide termination.
         //
         // Reference: Nocedal and Wright 2e Section 4.1 Algorithm 4.1

@@ -52,7 +52,7 @@ struct multistart_policy
         // restart-consuming steps; exposing an external stall_window would double-fire against
         // the inner policy's own stall logic, which is already forwarded via options.inner.
         // feasibility_gate is inner-policy territory for the same reason. Silent no-op made
-        // explicit here — see forward_policy_hints in basic_solver.h for the plumbing that
+        // explicit here — see forward_policy_hints in step_budget_solver.h for the plumbing that
         // this SKIP deactivates.
     };
 
@@ -77,7 +77,7 @@ struct multistart_policy
         int dimension{0};
 
         // Mirrors the inner policy's constraint residuals so
-        // basic_solver::constraint_violation() reads the real inner violation
+        // step_budget_solver::constraint_violation() reads the real inner violation
         // for constrained inner policies instead of silently reading zero.
         Eigen::VectorXd c_eq{};
         Eigen::VectorXd c_ineq{};

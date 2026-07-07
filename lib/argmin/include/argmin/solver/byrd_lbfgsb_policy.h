@@ -1,7 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_BYRD_LBFGSB_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_BYRD_LBFGSB_POLICY_H
 
-// Byrd 1995 variant L-BFGS-B solver policy for basic_solver.
+// Byrd 1995 variant L-BFGS-B solver policy for step_budget_solver.
 //
 // Structurally identical to lbfgsb_policy but with different defaults
 // motivated by non-convex landscapes (cartan IK benchmarks):

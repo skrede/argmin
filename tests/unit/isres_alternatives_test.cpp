@@ -8,7 +8,7 @@
 #include "argmin/solver/alternative/isres/nlopt_faithful_policy.h"
 #include "argmin/solver/alternative/isres/original_argmin_policy.h"
 #include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/restarting_policy.h"
 #include "argmin/result/status.h"
 #include "argmin/formulation/concepts.h"
@@ -67,15 +67,15 @@ struct simple_constrained
 
 // ---------------------------------------------------------------------------
 // Concept satisfaction: every alternative variant must satisfy nlp_solver
-// when wrapped in basic_solver. Compile-time check only.
+// when wrapped in step_budget_solver. Compile-time check only.
 // ---------------------------------------------------------------------------
 
 static_assert(nlp_solver<
-    basic_solver<alternative::isres::nlopt_faithful_policy<>>>);
+    step_budget_solver<alternative::isres::nlopt_faithful_policy<>>>);
 static_assert(nlp_solver<
-    basic_solver<alternative::isres::original_argmin_policy<>>>);
+    step_budget_solver<alternative::isres::original_argmin_policy<>>>);
 static_assert(nlp_solver<
-    basic_solver<alternative::isres::runarsson_yao_paper_policy<>>>);
+    step_budget_solver<alternative::isres::runarsson_yao_paper_policy<>>>);
 
 // ---------------------------------------------------------------------------
 // restarting_policy<variant>::rebind transparency: the IPOP-restart
@@ -122,7 +122,7 @@ TEST_CASE("nlopt_faithful: simple_constrained smoke",
     alternative::isres::nlopt_faithful_policy<> policy;
     policy.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     CHECK(std::isfinite(result.objective_value));
@@ -142,7 +142,7 @@ TEST_CASE("original_argmin: simple_constrained smoke",
     alternative::isres::original_argmin_policy<> policy;
     policy.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     CHECK(std::isfinite(result.objective_value));
@@ -162,7 +162,7 @@ TEST_CASE("runarsson_yao_paper: simple_constrained smoke",
     alternative::isres::runarsson_yao_paper_policy<> policy;
     policy.options.seed = 42u;
 
-    basic_solver solver{policy, problem, x0, opts};
+    step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
     CHECK(std::isfinite(result.objective_value));

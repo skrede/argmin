@@ -38,7 +38,7 @@
 //            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
 //            8(3):682-706 Section 3.3 (adaptive penalty heuristic).
 
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -194,7 +194,7 @@ cell_record run_cell(double pf, const Problem& problem,
     policy_t policy;
     policy.options.penalty_factor = pf;
 
-    argmin::basic_solver solver{policy, problem, x0, opts};
+    argmin::step_budget_solver solver{policy, problem, x0, opts};
 
     const auto t0 = std::chrono::steady_clock::now();
     auto result = solver.solve(opts);

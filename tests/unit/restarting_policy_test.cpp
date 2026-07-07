@@ -3,7 +3,7 @@
 // Locks the within-process bit-identity contract that closes the
 // rebuild-rebuild nondeterminism on the `restarting_cmaes` summary
 // row in publish_bench. Two back-to-back invocations of a fresh
-// `basic_solver` from default-constructed decorator options at the
+// `step_budget_solver` from default-constructed decorator options at the
 // SAME inner seed must produce bit-identical `final_objective` and
 // identical `iterations`. A second TEST_CASE pins the seed-plumbing
 // path so a future regression that silently bypasses the inner seed
@@ -17,7 +17,7 @@
 
 #include "argmin/solver/restarting_policy.h"
 #include "argmin/solver/cmaes_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/detail/cmaes_constants.h"
 #include "argmin/formulation/concepts.h"
 
@@ -78,7 +78,7 @@ static_assert(bound_constrained<bounded_ackley>);
 TEST_CASE("restarting_policy bit-identity within process", "[restarting_policy][cmaes]")
 {
     // Decorator-surface within-process determinism preflight. Two fresh
-    // `basic_solver` instances constructed back-to-back inside the same
+    // `step_budget_solver` instances constructed back-to-back inside the same
     // process from the SAME seed on the SAME problem must produce
     // bit-identical `final_objective` and identical iteration counts.
     //
@@ -118,7 +118,7 @@ TEST_CASE("restarting_policy bit-identity within process", "[restarting_policy][
         // this assertion fails.
         restarting_policy<cmaes_policy<>> policy;
 
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         return solver.solve(opts);
     };
 
@@ -171,7 +171,7 @@ TEST_CASE("restarting_policy seed plumbing through restarts", "[restarting_polic
         restarting_policy<cmaes_policy<>> policy;
         policy.options.inner.seed = inner_seed;
 
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         return solver.solve(opts);
     };
 

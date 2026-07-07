@@ -37,7 +37,7 @@
 //            update).
 
 #include "argmin/solver/kraft_slsqp_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 
 #include <Eigen/Core>
 
@@ -156,7 +156,7 @@ TEST_CASE("kraft_slsqp accepts the unit step across a penalty cold-bump without 
     solver_options<> opts;
     opts.max_iterations = 100;
 
-    basic_solver solver{kraft_slsqp_policy<>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<>{}, problem, x0, opts};
     auto sr = solver.step();
 
     // The accepted step is identical pre- and post-fix (x1 = (1, 0.1),

@@ -2,7 +2,7 @@
 // and that all module headers are transitively included.
 
 #include "argmin/argmin.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/test_functions/rosenbrock.h"
 
@@ -26,7 +26,7 @@
         opts.set_gradient_threshold(1e-6);
         opts.max_iterations = 500;
 
-        basic_solver solver{lbfgsb_policy<>{}, problem, x0, opts};
+        step_budget_solver solver{lbfgsb_policy<>{}, problem, x0, opts};
         auto result = solver.solve(opts);
         (void)result;
     }
@@ -38,8 +38,8 @@
         Eigen::VectorXd x0{{-1.2, 1.0}};
         solver_options opts;
 
-        basic_solver<lbfgsb_policy<2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};
-        basic_solver generic{lbfgsb_policy<>{}, problem, x0, opts};
+        step_budget_solver<lbfgsb_policy<2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};
+        step_budget_solver generic{lbfgsb_policy<>{}, problem, x0, opts};
         (void)fast;
         (void)generic;
     }

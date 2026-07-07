@@ -2,7 +2,7 @@
 #include "argmin/solver/multistart_policy.h"
 #include "argmin/solver/bobyqa_policy.h"
 #include "argmin/solver/cobyla_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -190,7 +190,7 @@ TEST_CASE("multistart_policy concept satisfaction", "[multistart]")
     opts.set_step_threshold(1e-12);
 
     using ms_policy = multistart_policy<bobyqa_policy<>>;
-    basic_solver solver{ms_policy{}, problem, x0, opts};
+    step_budget_solver solver{ms_policy{}, problem, x0, opts};
     auto result = solver.solve();
 
     // Booth minimum at (1, 3).
@@ -214,14 +214,14 @@ TEST_CASE("multistart finds better solution than single start", "[multistart]")
     opts.set_step_threshold(1e-12);
 
     // Single-start BOBYQA.
-    basic_solver single{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver single{bobyqa_policy{}, problem, x0, opts};
     auto single_result = single.solve();
 
     // Multi-start BOBYQA.
     using ms_policy = multistart_policy<bobyqa_policy<>>;
     solver_options ms_opts = opts;
     ms_opts.max_iterations = 3000;
-    basic_solver multi{ms_policy{}, problem, x0, ms_opts};
+    step_budget_solver multi{ms_policy{}, problem, x0, ms_opts};
     auto multi_result = multi.solve();
 
     // Multi-start should find a solution at least as good.
@@ -246,7 +246,7 @@ TEST_CASE("multistart respects max_restarts", "[multistart]")
     ms_policy::options_type policy_opts;
     policy_opts.max_restarts = 2;
 
-    basic_solver solver{ms_policy{}, problem, x0, opts, policy_opts};
+    step_budget_solver solver{ms_policy{}, problem, x0, opts, policy_opts};
     auto result = solver.solve();
 
     // Should terminate (not run forever) -- either converged or hit max_iterations.
@@ -293,7 +293,7 @@ TEST_CASE("multistart mirrors inner constraint violation through the decorator",
     solver_options opts;
 
     using ms_policy = multistart_policy<cobyla_policy>;
-    basic_solver solver{ms_policy{}, problem, x0, opts};
+    step_budget_solver solver{ms_policy{}, problem, x0, opts};
 
     // The initial iterate is deeply infeasible (c = 0 + 0 - 10 = -10) and
     // stays infeasible however cobyla's initial-simplex best-point
@@ -320,7 +320,7 @@ TEST_CASE("multistart propagates the inner policy's fixed-N vector type",
             ::state_type<multistart_booth>>().x),
         Eigen::VectorXd>);
 
-    // Runtime exercise of the fixed-N path: basic_solver's CTAD rebinds
+    // Runtime exercise of the fixed-N path: step_budget_solver's CTAD rebinds
     // the un-rebound multistart_policy<bobyqa_policy<>> to N=2 from the
     // problem's compile-time dimension, so the decorator's state actually
     // instantiates with Eigen::Vector<double, 2> end to end.
@@ -335,7 +335,7 @@ TEST_CASE("multistart propagates the inner policy's fixed-N vector type",
     opts.set_step_threshold(1e-12);
 
     using ms_policy = multistart_policy<bobyqa_policy<>>;
-    basic_solver solver{ms_policy{}, problem, x0, opts};
+    step_budget_solver solver{ms_policy{}, problem, x0, opts};
     auto result = solver.solve();
 
     CHECK(result.x[0] == Approx(1.0).margin(0.05));

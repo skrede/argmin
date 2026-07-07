@@ -114,7 +114,7 @@ struct mma_policy
         // (swept). Direct value.
         double dual_bound_scale{1000.0};
 
-        // Stall detection (forwarded by basic_solver into a
+        // Stall detection (forwarded by step_budget_solver into a
         // stall_tolerance_criterion).
         std::optional<double> stall_tolerance_threshold{}; // default: 1e-6
         std::uint16_t stall_window{50};

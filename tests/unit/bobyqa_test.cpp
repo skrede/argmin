@@ -1,6 +1,6 @@
 #include "argmin/detail/quadratic_model.h"
 #include "argmin/solver/bobyqa_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
@@ -189,7 +189,7 @@ TEST_CASE("bobyqa bound-constrained Rosenbrock 2D", "[bobyqa]")
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.x[0] == Approx(1.0).margin(5e-3));
@@ -218,7 +218,7 @@ TEST_CASE("bobyqa tight bounds", "[bobyqa]")
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Solution must be within bounds
@@ -245,7 +245,7 @@ TEST_CASE("bobyqa Booth function", "[bobyqa]")
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Booth minimum at (1, 3)
@@ -268,7 +268,7 @@ TEST_CASE("bobyqa higher dimensional (n=6)", "[bobyqa]")
     opts.set_objective_threshold(1e-8);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Should converge reasonably close to (1,1,...,1)
@@ -298,7 +298,7 @@ TEST_CASE("bobyqa step solve step_n", "[bobyqa]")
 
     SECTION("step returns finite values")
     {
-        basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+        step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
         {
@@ -310,7 +310,7 @@ TEST_CASE("bobyqa step solve step_n", "[bobyqa]")
 
     SECTION("step_n with budget")
     {
-        basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+        step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
         auto result = solver.step_n(50);
         CHECK(std::isfinite(result.objective_value));
         CHECK(result.iterations <= 50);
@@ -318,7 +318,7 @@ TEST_CASE("bobyqa step solve step_n", "[bobyqa]")
 
     SECTION("solve converges")
     {
-        basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+        step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK(result.objective_value < 1e-2);
     }
@@ -340,7 +340,7 @@ TEST_CASE("bobyqa fixed-dimension crash regression", "[bobyqa]")
     opts.max_iterations = 100;
     opts.set_objective_threshold(1e-6);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve();
 
     CHECK(result.status != solver_status::diverged);
@@ -364,7 +364,7 @@ TEST_CASE("bobyqa custom interpolation points", "[bobyqa]")
 
     SECTION("default 2n+1 interpolation points")
     {
-        basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+        step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK(result.objective_value < 1e-3);
     }
@@ -507,7 +507,7 @@ TEST_CASE("bobyqa geometry improvement accuracy", "[bobyqa]")
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.x[0] >= -1e-10);
@@ -531,7 +531,7 @@ TEST_CASE("bobyqa rescue does not break 6D convergence", "[bobyqa]")
     opts.set_objective_threshold(1e-8);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value < 0.5);
@@ -556,7 +556,7 @@ TEST_CASE("bobyqa rho contraction improves accuracy", "[bobyqa]")
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // With progressive rho contraction, the solver drives accuracy
@@ -581,7 +581,7 @@ TEST_CASE("bobyqa HS001 accuracy vs NLopt baseline", "[bobyqa][benchmark]")
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    basic_solver solver{bobyqa_policy<2>{}, hs, x0, opts};
+    step_budget_solver solver{bobyqa_policy<2>{}, hs, x0, opts};
     auto result = solver.solve(opts);
 
     // HS001 is the hard Rosenbrock variant. With guarded rho contraction
@@ -612,7 +612,7 @@ TEST_CASE("bobyqa hs001 eval count regression guard", "[bobyqa]")
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{bobyqa_policy<2>{}, hs, x0, opts};
+    step_budget_solver solver{bobyqa_policy<2>{}, hs, x0, opts};
     auto result = solver.solve(opts);
 
     std::cout << "[HS001 BOBYQA] iterations: " << result.iterations
@@ -639,7 +639,7 @@ TEST_CASE("bobyqa hs002 and hs005 regression guard", "[bobyqa]")
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-12);
 
-        basic_solver solver{bobyqa_policy<2>{}, hs5, x0, opts};
+        step_budget_solver solver{bobyqa_policy<2>{}, hs5, x0, opts};
         auto result = solver.solve(opts);
 
         std::cout << "[HS005 BOBYQA] iterations: " << result.iterations
@@ -669,7 +669,7 @@ TEST_CASE("bobyqa unequal bound ranges", "[bobyqa]")
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-12);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // With 200:1 bound range ratio, rescaling enables convergence
@@ -698,7 +698,7 @@ TEST_CASE("bobyqa rho exhaustion reports converged status", "[bobyqa]")
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    basic_solver solver{bobyqa_policy{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Rho exhaustion must report convergence, not stall
@@ -1049,7 +1049,7 @@ TEST_CASE("bobyqa terminates promptly on a collapsing denominator instead of spi
     counting_nan problem2{.calls = &calls2};
     solver_options opts2;
     opts2.max_iterations = 1000;
-    basic_solver solver{bobyqa_policy<2>{}, problem2, x0, opts2};
+    step_budget_solver solver{bobyqa_policy<2>{}, problem2, x0, opts2};
     auto sr = solver.solve(opts2);
     CHECK(calls2 <= 2 * (2 * 2 + 1));
     CHECK(sr.function_evaluations <= static_cast<std::uint32_t>(2 * (2 * 2 + 1)));
@@ -1296,7 +1296,7 @@ TEST_CASE("bobyqa convergence and eval count match the NLopt oracle", "[bobyqa][
         opts.set_step_threshold(0.0);
         bobyqa_policy<2>::options_type popts;
         popts.final_trust_radius = 1e-8;
-        basic_solver solver{bobyqa_policy<2>{popts}, hs, x0, opts};
+        step_budget_solver solver{bobyqa_policy<2>{popts}, hs, x0, opts};
         return solver.solve(opts);
     };
 
@@ -1344,7 +1344,7 @@ TEST_CASE("bobyqa convergence and eval count match the NLopt oracle", "[bobyqa][
         opts.set_step_threshold(0.0);
         bobyqa_policy<2>::options_type popts;
         popts.final_trust_radius = 1e-8;
-        basic_solver solver{bobyqa_policy<2>{popts}, problem, x0, opts};
+        step_budget_solver solver{bobyqa_policy<2>{popts}, problem, x0, opts};
         auto r = solver.solve(opts);
         CHECK(r.objective_value < 1e-8);
         CHECK(r.x[0] == Approx(oracle.at("booth_xopt")[0]).margin(1e-3));
@@ -1367,7 +1367,7 @@ TEST_CASE("bobyqa convergence and eval count match the NLopt oracle", "[bobyqa][
         bobyqa_policy<2>::options_type popts;
         popts.initial_trust_radius = 10.0;
         popts.final_trust_radius = 1e-8;
-        basic_solver solver{bobyqa_policy<2>{popts}, problem, x0, opts};
+        step_budget_solver solver{bobyqa_policy<2>{popts}, problem, x0, opts};
         auto r = solver.solve(opts);
 
         // The endgame criterion: |f - f*| reaches ~1e-8 (the reference lands at

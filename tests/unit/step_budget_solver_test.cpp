@@ -1,5 +1,5 @@
 #include "mock_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/result/status.h"
@@ -14,7 +14,7 @@
 using Catch::Approx;
 using namespace argmin;
 
-// Dummy problem type -- mock_policy ignores it, but basic_solver needs one.
+// Dummy problem type -- mock_policy ignores it, but step_budget_solver needs one.
 struct quadratic
 {
     static constexpr int problem_dimension = 2;
@@ -43,7 +43,7 @@ struct quadratic_with_gradient
 // becomes feasible and wins on the lower objective. Deliberately has no
 // c_eq/c_ineq state members, so seed_best_cv() reports the unconstrained
 // fallback (0.0) and the constructed Problem is void (single-arg
-// basic_solver<Policy> spelling), so seed_best_f() reports +infinity --
+// step_budget_solver<Policy> spelling), so seed_best_f() reports +infinity --
 // both steps must out-compete that seed on their own terms.
 struct scripted_feasibility_policy
 {
@@ -146,13 +146,13 @@ struct multi_eval_policy
     void reset_clear(state_type& s, const Eigen::VectorXd& x0) { reset(s, x0); }
 };
 
-TEST_CASE("basic_solver step", "[solver]")
+TEST_CASE("step_budget_solver step", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{3.0, 4.0}};
     solver_options opts;
 
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy> solver{prob, x0, opts};
 
     SECTION("single step returns valid step_result")
     {
@@ -169,14 +169,14 @@ TEST_CASE("basic_solver step", "[solver]")
     }
 }
 
-TEST_CASE("basic_solver solve converges", "[solver]")
+TEST_CASE("step_budget_solver solve converges", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{2.0, 2.0}};
     solver_options<> opts;
     std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
 
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::converged);
@@ -185,47 +185,47 @@ TEST_CASE("basic_solver solve converges", "[solver]")
     CHECK(result.x.norm() < 1e-3);
 }
 
-TEST_CASE("basic_solver solve max_iterations", "[solver]")
+TEST_CASE("step_budget_solver solve max_iterations", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{1.0, 1.0}};
     solver_options<> opts;
     opts.max_iterations = 10;
 
-    basic_solver<test::non_converging_policy> solver{prob, x0, opts};
+    step_budget_solver<test::non_converging_policy> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::max_iterations);
     CHECK(result.iterations == 10);
 }
 
-TEST_CASE("basic_solver step_n budget", "[solver]")
+TEST_CASE("step_budget_solver step_n budget", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{10.0, 10.0}};
     solver_options<> opts;
     opts.max_iterations = 1000;
 
-    basic_solver<test::non_converging_policy> solver{prob, x0, opts};
+    step_budget_solver<test::non_converging_policy> solver{prob, x0, opts};
     auto result = solver.step_n(3, opts);
 
     CHECK(result.status == solver_status::budget_exhausted);
     CHECK(result.iterations == 3);
 }
 
-TEST_CASE("basic_solver state access", "[solver]")
+TEST_CASE("step_budget_solver state access", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{5.0, -3.0}};
     solver_options opts;
 
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy> solver{prob, x0, opts};
 
     CHECK(solver.state().x.isApprox(x0));
     CHECK(solver.state().objective_value == Approx(0.5 * x0.squaredNorm()));
 }
 
-TEST_CASE("basic_solver convergence on objective_change", "[solver]")
+TEST_CASE("step_budget_solver convergence on objective_change", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{0.001, 0.001}};
@@ -238,20 +238,20 @@ TEST_CASE("basic_solver convergence on objective_change", "[solver]")
     std::get<step_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-15;
     std::get<objective_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-8;
 
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy> solver{prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status == solver_status::ftol_reached);
 }
 
-TEST_CASE("basic_solver solve_uses_stored_convergence", "[solver]")
+TEST_CASE("step_budget_solver solve_uses_stored_convergence", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{3.0, 4.0}};
     solver_options<> opts;
     std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
 
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy> solver{prob, x0, opts};
     auto result = solver.solve();
 
     CHECK(result.status == solver_status::converged);
@@ -259,14 +259,14 @@ TEST_CASE("basic_solver solve_uses_stored_convergence", "[solver]")
     CHECK(result.gradient_norm < 1e-4);
 }
 
-TEST_CASE("basic_solver step_n_no_opts_uses_stored_convergence", "[solver]")
+TEST_CASE("step_budget_solver step_n_no_opts_uses_stored_convergence", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{3.0, 4.0}};
     solver_options<> opts;
     std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
 
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy> solver{prob, x0, opts};
     auto result = solver.step_n(1000);
 
     CHECK(result.status == solver_status::converged);
@@ -274,7 +274,7 @@ TEST_CASE("basic_solver step_n_no_opts_uses_stored_convergence", "[solver]")
     CHECK(result.gradient_norm < 1e-4);
 }
 
-TEST_CASE("basic_solver step_n(budget, opts) back-copies last_check_results",
+TEST_CASE("step_budget_solver step_n(budget, opts) back-copies last_check_results",
           "[solver]")
 {
     quadratic prob;
@@ -282,7 +282,7 @@ TEST_CASE("basic_solver step_n(budget, opts) back-copies last_check_results",
     solver_options<> opts;
     std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
 
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy> solver{prob, x0, opts};
 
     // Before any step: all entries are nullopt.
     const auto& before = solver.convergence().last_check_results();
@@ -307,7 +307,7 @@ TEST_CASE("basic_solver step_n(budget, opts) back-copies last_check_results",
     CHECK(after[0] == opts.convergence.last_check_results()[0]);
 }
 
-TEST_CASE("basic_solver step_n(budget, opts) back-copy is gated on Convergence type",
+TEST_CASE("step_budget_solver step_n(budget, opts) back-copy is gated on Convergence type",
           "[solver]")
 {
     quadratic prob;
@@ -317,7 +317,7 @@ TEST_CASE("basic_solver step_n(budget, opts) back-copy is gated on Convergence t
     std::get<0>(alias_opts.convergence.criteria).stationarity_threshold = 1.0;
     std::get<1>(alias_opts.convergence.criteria).threshold = 1e-10;
 
-    basic_solver<test::non_converging_policy> solver{prob, x0, solver_options<>{}};
+    step_budget_solver<test::non_converging_policy> solver{prob, x0, solver_options<>{}};
 
     // step_n with non-default Convergence compiles and runs through the
     // same code path, but the if-constexpr guard skips the back-copy into
@@ -335,14 +335,14 @@ TEST_CASE("basic_solver step_n(budget, opts) back-copy is gated on Convergence t
     CHECK(!stored[3].has_value());
 }
 
-TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
+TEST_CASE("step_budget_solver reset preserves convergence ability", "[solver]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{10.0, 10.0}};
     solver_options<> opts;
     std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
 
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy> solver{prob, x0, opts};
 
     SECTION("reset to new x0 and solve again")
     {
@@ -377,12 +377,12 @@ TEST_CASE("basic_solver reset preserves convergence ability", "[solver]")
 // User-Convergence storage without lossy remap.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("basic_solver stores a non-default explicit Convergence and honors it on the defaulted solve() path",
+TEST_CASE("step_budget_solver stores a non-default explicit Convergence and honors it on the defaulted solve() path",
           "[solver]")
 {
     // mock_policy has no rebind<N>, so it cannot participate in bare CTAD;
     // the Convergence template parameter is spelled out explicitly here
-    // (basic_solver<Policy, N, Problem, Convergence>) instead.
+    // (step_budget_solver<Policy, N, Problem, Convergence>) instead.
     using rel_conv = convergence_policy<objective_tolerance_rel_criterion>;
 
     quadratic prob;
@@ -391,7 +391,7 @@ TEST_CASE("basic_solver stores a non-default explicit Convergence and honors it 
     opts.max_iterations = 1000;
     opts.convergence.criteria = {objective_tolerance_rel_criterion{.threshold = 1e-2}};
 
-    basic_solver<test::mock_policy, argmin::dynamic_dimension, void, rel_conv> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy, argmin::dynamic_dimension, void, rel_conv> solver{prob, x0, opts};
 
     // Defaulted call path (no opts argument): must use the solver's own
     // stored rel_conv, not a coerced default_convergence.
@@ -401,7 +401,7 @@ TEST_CASE("basic_solver stores a non-default explicit Convergence and honors it 
     CHECK(result.iterations < 1000);
 }
 
-TEST_CASE("basic_solver CTAD deduces a non-default Convergence and honors it on the defaulted solve() path",
+TEST_CASE("step_budget_solver CTAD deduces a non-default Convergence and honors it on the defaulted solve() path",
           "[solver]")
 {
     // lbfgsb_policy supports rebind<N>, so Convergence flows through the
@@ -415,7 +415,7 @@ TEST_CASE("basic_solver CTAD deduces a non-default Convergence and honors it on 
     opts.max_iterations = 1000;
     std::get<0>(opts.convergence.criteria).threshold = 0.5;
 
-    basic_solver solver{lbfgsb_policy<>{}, prob, x0, opts};
+    step_budget_solver solver{lbfgsb_policy<>{}, prob, x0, opts};
     auto result = solver.solve();
 
     // Stops on the relative step criterion (xtol_reached), not on a
@@ -431,7 +431,7 @@ TEST_CASE("basic_solver CTAD deduces a non-default Convergence and honors it on 
 // call paths (solve() / step_n(budget), no opts argument).
 // ---------------------------------------------------------------------------
 
-TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance on step_n(budget)",
+TEST_CASE("step_budget_solver honors a widened construction-time feasibility_tolerance on step_n(budget)",
           "[solver]")
 {
     quadratic prob;
@@ -440,7 +440,7 @@ TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance
     SECTION("default feasibility_tolerance: the exactly-feasible, higher-objective step wins")
     {
         solver_options<> opts;  // feasibility_tolerance left at its 1e-6 default
-        basic_solver<scripted_feasibility_policy> solver{prob, x0, opts};
+        step_budget_solver<scripted_feasibility_policy> solver{prob, x0, opts};
         auto result = solver.step_n(2);
 
         CHECK(result.objective_value == Approx(10.0));
@@ -452,7 +452,7 @@ TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance
         solver_options<> opts;
         opts.feasibility_tolerance = 1e-3;  // configured at construction
 
-        basic_solver<scripted_feasibility_policy> solver{prob, x0, opts};
+        step_budget_solver<scripted_feasibility_policy> solver{prob, x0, opts};
         auto result = solver.step_n(2);
 
         CHECK(result.objective_value == Approx(5.0));
@@ -460,7 +460,7 @@ TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance
     }
 }
 
-TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance on solve()",
+TEST_CASE("step_budget_solver honors a widened construction-time feasibility_tolerance on solve()",
           "[solver]")
 {
     quadratic prob;
@@ -470,7 +470,7 @@ TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance
     opts.max_iterations = 2;
     opts.feasibility_tolerance = 1e-3;
 
-    basic_solver<scripted_feasibility_policy> solver{prob, x0, opts};
+    step_budget_solver<scripted_feasibility_policy> solver{prob, x0, opts};
     auto result = solver.solve();
 
     CHECK(result.objective_value == Approx(5.0));
@@ -481,7 +481,7 @@ TEST_CASE("basic_solver honors a widened construction-time feasibility_tolerance
 // CTAD rebind preserves configured policy options and accepts lvalue policies.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("basic_solver CTAD rebind preserves configured policy options",
+TEST_CASE("step_budget_solver CTAD rebind preserves configured policy options",
           "[solver][ctad]")
 {
     // quadratic_with_gradient::problem_dimension == 2, so the deduction guide
@@ -498,7 +498,7 @@ TEST_CASE("basic_solver CTAD rebind preserves configured policy options",
         lbfgsb_policy<> configured;
         configured.options.stall_window = 7;  // non-default configured option
 
-        basic_solver solver{configured, prob, x0, opts};
+        step_budget_solver solver{configured, prob, x0, opts};
 
         // The converting ctor really ran: the stored policy is the rebound
         // fixed-dimension type, not the dynamic source type.
@@ -513,7 +513,7 @@ TEST_CASE("basic_solver CTAD rebind preserves configured policy options",
         lbfgsb_policy<> configured;
         configured.options.stall_window = 9;
 
-        basic_solver solver{std::move(configured), prob, x0, opts};
+        step_budget_solver solver{std::move(configured), prob, x0, opts};
 
         CHECK(solver.policy().options.stall_window == 9);
     }
@@ -523,14 +523,14 @@ TEST_CASE("basic_solver CTAD rebind preserves configured policy options",
 // step() consults convergence and updates status; solve() re-entrancy.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("basic_solver step() consults convergence and reports a by-criterion status",
+TEST_CASE("step_budget_solver step() consults convergence and reports a by-criterion status",
           "[solver][step]")
 {
     quadratic_with_gradient prob;
     Eigen::VectorXd x0{{3.0, 4.0}};
     solver_options<> opts;
 
-    basic_solver solver{lbfgsb_policy<>{}, prob, x0, opts};
+    step_budget_solver solver{lbfgsb_policy<>{}, prob, x0, opts};
 
     // No step yet: the solver is running.
     CHECK(solver.status() == solver_status::running);
@@ -552,7 +552,7 @@ TEST_CASE("basic_solver step() consults convergence and reports a by-criterion s
     CHECK(solver.status() == solver_status::converged);
 }
 
-TEST_CASE("basic_solver solve() re-entrancy is a continuation; reset() restarts",
+TEST_CASE("step_budget_solver solve() re-entrancy is a continuation; reset() restarts",
           "[solver][reentrancy]")
 {
     quadratic prob;
@@ -560,7 +560,7 @@ TEST_CASE("basic_solver solve() re-entrancy is a continuation; reset() restarts"
     solver_options<> opts;
     std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
 
-    basic_solver<test::mock_policy> solver{prob, x0, opts};
+    step_budget_solver<test::mock_policy> solver{prob, x0, opts};
 
     auto r1 = solver.solve(opts);
     REQUIRE(r1.status == solver_status::converged);
@@ -585,14 +585,14 @@ TEST_CASE("basic_solver solve() re-entrancy is a continuation; reset() restarts"
 // Truthful telemetry: function_evaluations counts real evaluations.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("basic_solver reports genuine function_evaluations, not an iteration alias",
+TEST_CASE("step_budget_solver reports genuine function_evaluations, not an iteration alias",
           "[solver][telemetry]")
 {
     quadratic prob;
     Eigen::VectorXd x0{{1.0, 1.0}};
     solver_options<> opts;
 
-    basic_solver<multi_eval_policy> solver{prob, x0, opts};
+    step_budget_solver<multi_eval_policy> solver{prob, x0, opts};
     auto result = solver.step_n(5);
 
     CHECK(result.iterations == 5);
@@ -602,7 +602,7 @@ TEST_CASE("basic_solver reports genuine function_evaluations, not an iteration a
     CHECK(result.function_evaluations > result.iterations);
 }
 
-TEST_CASE("basic_solver function_evaluations counts real line-search evaluations",
+TEST_CASE("step_budget_solver function_evaluations counts real line-search evaluations",
           "[solver][telemetry]")
 {
     // Rosenbrock's curved valley forces the strong-Wolfe line search to make
@@ -613,7 +613,7 @@ TEST_CASE("basic_solver function_evaluations counts real line-search evaluations
     solver_options<> opts;
     opts.max_iterations = 200;
 
-    basic_solver solver{lbfgsb_policy<>{}, prob, x0, opts};
+    step_budget_solver solver{lbfgsb_policy<>{}, prob, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.iterations > 0);

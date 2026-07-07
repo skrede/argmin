@@ -1,6 +1,6 @@
 #include "argmin/solver/augmented_lagrangian_policy.h"
 #include "argmin/solver/bobyqa_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 #include "argmin/formulation/concepts.h"
 
@@ -27,7 +27,7 @@ TEST_CASE("augmented lagrangian converges on HS076", "[augmented_lagrangian]")
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-4);
 
-    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -47,7 +47,7 @@ TEST_CASE("augmented lagrangian converges on HS035", "[augmented_lagrangian]")
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-4);
 
-    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -68,7 +68,7 @@ TEST_CASE("augmented lagrangian on HS071 (equality + inequality)",
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-2);
 
-    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -100,7 +100,7 @@ TEST_CASE("augmented lagrangian with BOBYQA inner solver",
     // a cited rationale is the intended escape hatch.
     opts.constraint_tolerance = 5e-2;
 
-    basic_solver solver{augmented_lagrangian_policy<bobyqa_policy<hs035<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<bobyqa_policy<hs035<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -120,7 +120,7 @@ TEST_CASE("augmented lagrangian converges on HS040 (equality only)",
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<>>{}, 
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<>>{}, 
         problem, x0, opts};
     auto result = solver.solve();
 
@@ -144,7 +144,7 @@ TEST_CASE("augmented lagrangian step and solve consistency",
 
     SECTION("step returns finite values")
     {
-        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+        step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
             problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
@@ -157,11 +157,11 @@ TEST_CASE("augmented lagrangian step and solve consistency",
 
     SECTION("solve gives similar result to manual stepping")
     {
-        basic_solver solver1{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+        step_budget_solver solver1{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
             problem, x0, opts};
         auto result1 = solver1.solve(opts);
 
-        basic_solver solver2{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+        step_budget_solver solver2{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
             problem, x0, opts};
         step_result<double> last{};
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -189,7 +189,7 @@ TEST_CASE("augmented lagrangian reports actual gradient norm",
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-4);
 
-    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -215,7 +215,7 @@ TEST_CASE("augmented lagrangian convergence on HS076 with stationarity_threshold
     opts.set_step_threshold(1e-12);
     opts.set_stationarity_threshold(1e-4);
 
-    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -251,7 +251,7 @@ TEST_CASE("augmented lagrangian warm-start converges on HS071",
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver<policy_type, D, hs071<>> solver{problem, x0, opts, policy_opts};
+    step_budget_solver<policy_type, D, hs071<>> solver{problem, x0, opts, policy_opts};
     auto result = solver.solve();
 
     CHECK(result.objective_value == Approx(17.0140173).margin(1e-1));
@@ -280,7 +280,7 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
     sopts.set_objective_threshold(1e-15);
     sopts.set_step_threshold(1e-15);
 
-    basic_solver<policy_type, D, hs071<>> warm_solver{problem, x0, sopts, warm_opts};
+    step_budget_solver<policy_type, D, hs071<>> warm_solver{problem, x0, sopts, warm_opts};
     auto warm_result = warm_solver.solve();
     int warm_iters = warm_result.iterations;
 
@@ -289,7 +289,7 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
     cold_opts.warm_start_inner = false;
     cold_opts.inner_tolerance_alpha = 0.1;
 
-    basic_solver<policy_type, D, hs071<>> cold_solver{problem, x0, sopts, cold_opts};
+    step_budget_solver<policy_type, D, hs071<>> cold_solver{problem, x0, sopts, cold_opts};
     auto cold_result = cold_solver.solve();
     int cold_iters = cold_result.iterations;
 
@@ -330,7 +330,7 @@ TEST_CASE("augmented lagrangian adaptive tolerance converges on HS071",
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver<policy_type, D, hs071<>> solver{problem, x0, opts, policy_opts};
+    step_budget_solver<policy_type, D, hs071<>> solver{problem, x0, opts, policy_opts};
     auto result = solver.solve();
 
     CHECK(result.objective_value == Approx(17.0140173).margin(1e-1));
@@ -358,7 +358,7 @@ TEST_CASE("augmented lagrangian cold-start still works on HS071",
     opts.set_objective_threshold(1e-15);
     opts.set_step_threshold(1e-15);
 
-    basic_solver<policy_type, D, hs071<>> solver{problem, x0, opts, policy_opts};
+    step_budget_solver<policy_type, D, hs071<>> solver{problem, x0, opts, policy_opts};
     auto result = solver.solve();
 
     // Should still converge to the known optimum (regression test for
@@ -386,7 +386,7 @@ TEST_CASE("augmented lagrangian populates kkt_residual",
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-4);
 
-    basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
         problem, x0, opts};
 
     bool populated = false;

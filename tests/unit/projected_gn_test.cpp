@@ -1,6 +1,6 @@
 #include "argmin/solver/projected_gn_policy.h"
 #include "argmin/solver/projected_gradient_gn_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -265,7 +265,7 @@ TEST_CASE("projected_gn_policy: bounded Rosenbrock LS", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.13);
@@ -282,7 +282,7 @@ TEST_CASE("projected_gn_policy: bounded exponential fitting", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.01);
@@ -297,7 +297,7 @@ TEST_CASE("projected_gn_policy: bounded Powell singular", "[projected_gn]")
     opts.max_iterations = 500;
     opts.set_gradient_threshold(1e-8);
 
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-6);
@@ -312,7 +312,7 @@ TEST_CASE("projected_gn_policy: SE(3)-like proxy (TEST-11)", "[projected_gn]")
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-12);
 
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-10);
@@ -336,7 +336,7 @@ TEST_CASE("projected_gn_policy: dogleg mode", "[projected_gn]")
     projected_gn_policy::options_type policy_opts{};
     policy_opts.use_dogleg = true;
 
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts, policy_opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts, policy_opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.13);
@@ -355,7 +355,7 @@ TEST_CASE("projected_gradient_gn_policy: bounded Rosenbrock LS", "[projected_gn]
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    basic_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.13);
@@ -372,7 +372,7 @@ TEST_CASE("projected_gradient_gn_policy: SE(3)-like proxy (TEST-11)", "[projecte
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-12);
 
-    basic_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 1e-10);
@@ -396,7 +396,7 @@ TEST_CASE("projected_gradient_gn_policy: dogleg mode", "[projected_gn]")
     projected_gradient_gn_policy::options_type policy_opts{};
     policy_opts.use_dogleg = true;
 
-    basic_solver solver{projected_gradient_gn_policy{}, problem, x0, opts, policy_opts};
+    step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts, policy_opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.13);
@@ -411,7 +411,7 @@ TEST_CASE("projected_gn_policy: FD Jacobian fallback", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
 
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(solver.state().objective_value < 0.2);
@@ -433,7 +433,7 @@ TEST_CASE("projected_gn_policy populates kkt_residual", "[projected_gn][kkt]")
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-8);
 
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
 
     bool populated = false;
     for(int i = 0; i < 10; ++i)
@@ -466,7 +466,7 @@ TEST_CASE("projected_gradient_gn_policy populates kkt_residual",
 
     SECTION("backtracking mode")
     {
-        basic_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
+        step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts};
 
         bool populated = false;
         for(int i = 0; i < 10; ++i)
@@ -488,7 +488,7 @@ TEST_CASE("projected_gradient_gn_policy populates kkt_residual",
         projected_gradient_gn_policy::options_type policy_opts{};
         policy_opts.use_dogleg = true;
 
-        basic_solver solver{projected_gradient_gn_policy{}, problem, x0, opts,
+        step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts,
                             policy_opts};
 
         bool populated = false;
@@ -516,7 +516,7 @@ TEST_CASE("projected_gn_policy: active set exercised", "[projected_gn]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-10);
 
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // x(0) should be at or very near the upper bound 0.5
@@ -575,7 +575,7 @@ TEST_CASE("projected_gn_policy: exact gain ratio at an active bound",
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-12);
 
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
 
     double prev_f = solver.state().objective_value;
     for(int i = 0; i < 30; ++i)
@@ -617,7 +617,7 @@ TEST_CASE("projected_gradient_gn_policy: exact gain ratio at an active bound",
         projected_gradient_gn_policy::options_type policy_opts{};
         policy_opts.use_dogleg = dogleg;
 
-        basic_solver solver{projected_gradient_gn_policy{}, problem, x0, opts, policy_opts};
+        step_budget_solver solver{projected_gradient_gn_policy{}, problem, x0, opts, policy_opts};
 
         double prev_f = solver.state().objective_value;
         for(int i = 0; i < 40; ++i)
@@ -667,7 +667,7 @@ TEST_CASE("projected_gn_policy: gain_ratio extraction is numerically identical",
     solver_options opts;
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-12);
-    basic_solver solver{projected_gn_policy{}, problem, x0, opts};
+    step_budget_solver solver{projected_gn_policy{}, problem, x0, opts};
 
     double fp = 0.0;
     for(int i = 0; i < 100; ++i)
@@ -695,7 +695,7 @@ TEST_CASE("projected_gradient_gn_policy: gain_ratio extraction is numerically id
         opts.set_gradient_threshold(1e-12);
         projected_gradient_gn_policy::options_type po{};
         po.use_dogleg = dogleg;
-        basic_solver solver{projected_gradient_gn_policy{}, problem, start, opts, po};
+        step_budget_solver solver{projected_gradient_gn_policy{}, problem, start, opts, po};
         double fp = 0.0;
         for(int i = 0; i < 100; ++i)
         {

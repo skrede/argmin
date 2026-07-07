@@ -25,7 +25,7 @@ namespace argmin
 {
 
 // Combined step + wall-clock budget driver -- the like-for-like successor of
-// the original basic_solver semantics, where both an iteration cap and a
+// the original step_budget_solver semantics, where both an iteration cap and a
 // wall-clock deadline are first-class stopping conditions.
 //
 // Mechanically it is the same thin facade over detail::solver_core +

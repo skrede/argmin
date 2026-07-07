@@ -1172,7 +1172,7 @@ struct pwq_reparameterization_policy
         // Derivative-free convergence signalling (same pattern as BOBYQA):
         // - gradient_norm proxy: sigma * max(D) -- collapses when converged
         // - When no improvement, use sigma as proxy for objective_change and
-        //   step_size to prevent basic_solver's ftol/stall checks firing early
+        //   step_size to prevent step_budget_solver's ftol/stall checks firing early
         double grad_proxy = s.sigma * s.D.maxCoeff();
         bool improved = s.objective_value < old_best;
         double obj_change = improved ? (s.objective_value - old_best) : s.sigma;

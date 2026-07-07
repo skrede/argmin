@@ -1,6 +1,6 @@
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/byrd_lbfgsb_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/detail/cauchy_point.h"
 #include "argmin/detail/compact_lbfgs.h"
 #include "argmin/detail/lbfgsb_direction.h"
@@ -113,7 +113,7 @@ TEST_CASE("L-BFGS-B converges on unconstrained Rosenbrock", "[lbfgsb]")
         opts.set_gradient_threshold(1e-6);
         opts.max_iterations = 200;
 
-        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
+        step_budget_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.status == solver_status::converged);
@@ -130,7 +130,7 @@ TEST_CASE("L-BFGS-B converges on unconstrained Rosenbrock", "[lbfgsb]")
         opts.set_gradient_threshold(1e-6);
         opts.max_iterations = 500;
 
-        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
+        step_budget_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.status == solver_status::converged);
@@ -160,7 +160,7 @@ TEST_CASE("L-BFGS-B respects box constraints", "[lbfgsb]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>, bounded_rosenbrock::problem_dimension, bounded_rosenbrock> solver{problem, x0, opts};
+        step_budget_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>, bounded_rosenbrock::problem_dimension, bounded_rosenbrock> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK((result.status == solver_status::converged
@@ -194,7 +194,7 @@ TEST_CASE("L-BFGS-B respects box constraints", "[lbfgsb]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>, bounded_rosenbrock::problem_dimension, bounded_rosenbrock> solver{problem, x0, opts};
+        step_budget_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>, bounded_rosenbrock::problem_dimension, bounded_rosenbrock> solver{problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK((result.status == solver_status::converged
@@ -214,7 +214,7 @@ TEST_CASE("L-BFGS-B step/solve/step_n consistency", "[lbfgsb]")
 
     SECTION("step returns finite values")
     {
-        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
+        step_budget_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
         {
@@ -230,7 +230,7 @@ TEST_CASE("L-BFGS-B step/solve/step_n consistency", "[lbfgsb]")
 
     SECTION("solve converges from scratch")
     {
-        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
+        step_budget_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK(result.status == solver_status::converged);
     }
@@ -527,7 +527,7 @@ TEST_CASE("Byrd L-BFGS-B converges on unconstrained Rosenbrock", "[lbfgsb][byrd]
     opts.set_gradient_threshold(1e-5);
     opts.max_iterations = 500;
 
-    basic_solver<byrd_lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
+    step_budget_solver<byrd_lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK((result.status == solver_status::converged
@@ -700,7 +700,7 @@ TEST_CASE("lbfgsb_policy populates kkt_residual", "[lbfgsb][kkt]")
         opts.max_iterations = 50;
         opts.set_gradient_threshold(1e-8);
 
-        basic_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>,
+        step_budget_solver<lbfgsb_policy<bounded_rosenbrock::problem_dimension>,
                      bounded_rosenbrock::problem_dimension, bounded_rosenbrock>
             solver{problem, x0, opts};
 
@@ -727,7 +727,7 @@ TEST_CASE("lbfgsb_policy populates kkt_residual", "[lbfgsb][kkt]")
         opts.max_iterations = 50;
         opts.set_gradient_threshold(1e-8);
 
-        basic_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>,
+        step_budget_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>,
                      rosenbrock<>::problem_dimension, rosenbrock<>>
             solver{problem, x0, opts};
 
@@ -765,7 +765,7 @@ TEST_CASE("byrd_lbfgsb_policy populates kkt_residual and exposes is_null_step",
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-8);
 
-    basic_solver<byrd_lbfgsb_policy<rosenbrock<>::problem_dimension>,
+    step_budget_solver<byrd_lbfgsb_policy<rosenbrock<>::problem_dimension>,
                  rosenbrock<>::problem_dimension, rosenbrock<>>
         solver{problem, x0, opts};
 
@@ -826,7 +826,7 @@ TEST_CASE("Runtime fast path with loose bounds computes finite alpha_max", "[lbf
 // numerical floor. Pre-fix: the null-step path populated kkt_residual
 // but left policy_status unset, so the solver ran to max_iterations
 // silently. Post-fix: the null-step path sets policy_status =
-// roundoff_limited and basic_solver terminates immediately.
+// roundoff_limited and step_budget_solver terminates immediately.
 //
 // Reference: Byrd, Lu, Nocedal, Zhu 1995 Algorithm CP (GCP breakpoint
 //            exhaustion); N&W 2e Section 3.5 (roundoff limitation in
@@ -843,7 +843,7 @@ TEST_CASE("byrd_lbfgsb brown_badly_scaled terminates roundoff_limited",
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    basic_solver solver{
+    step_budget_solver solver{
         byrd_lbfgsb_policy<brown_badly_scaled<>::problem_dimension>{},
         problem, x0, opts};
     auto result = solver.solve(opts);

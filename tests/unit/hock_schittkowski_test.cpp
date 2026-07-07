@@ -13,7 +13,7 @@
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/ccsa_quadratic_policy.h"
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -42,7 +42,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{nw_sqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         // HS071 with equality + inequality is hard for BFGS-based SQP;
@@ -61,7 +61,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{nw_sqp_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
@@ -78,7 +78,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{nw_sqp_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(1e-2));
@@ -95,7 +95,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{nw_sqp_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1e-2));
@@ -119,7 +119,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         // SLSQP with L-BFGS Hessian on mixed eq/ineq;
@@ -138,7 +138,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{kraft_slsqp_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
@@ -155,7 +155,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{kraft_slsqp_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(1e-2));
@@ -172,7 +172,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{kraft_slsqp_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1e-2));
@@ -196,7 +196,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
+        step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -217,7 +217,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+        step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -238,7 +238,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs024<>::problem_dimension>>{},
+        step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs024<>::problem_dimension>>{},
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -259,7 +259,7 @@ TEST_CASE("augmented lagrangian on hock-schittkowski problems", "[hs][auglag]")
         opts.set_objective_threshold(1e-15);
         opts.set_stationarity_threshold(1e-4);
 
-        basic_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+        step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -284,7 +284,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
     {
         hs076 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -305,7 +305,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
     {
         hs035 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -352,7 +352,7 @@ TEST_CASE("mma on hock-schittkowski HS024", "[hs][mma]")
 
     hs024 problem;
     auto x0 = problem.initial_point();
-    basic_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -385,7 +385,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
     {
         hs076 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -413,7 +413,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
         // crashing, even though it does not converge.
         hs024 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
 
         for(int i = 0; i < 50; ++i)
         {
@@ -427,7 +427,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
     {
         hs035 problem;
         auto x0 = problem.initial_point();
-        basic_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -465,7 +465,7 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{cobyla_policy{}, problem, x0, opts};
+        step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
         auto result = solver.solve();
 
         INFO("HS024 objective: " << result.objective_value);
@@ -485,7 +485,7 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{cobyla_policy{}, problem, x0, opts};
+        step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(0.5));
@@ -502,7 +502,7 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        basic_solver solver{cobyla_policy{}, problem, x0, opts};
+        step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1.0));
@@ -529,7 +529,7 @@ TEST_CASE("isres on hock-schittkowski problems", "[hs][isres]")
         isres_policy<hs024<>::problem_dimension> policy;
         policy.options.seed = 42u;
 
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(-1.0).margin(1.0));
@@ -548,7 +548,7 @@ TEST_CASE("isres on hock-schittkowski problems", "[hs][isres]")
         isres_policy<hs035<>::problem_dimension> policy;
         policy.options.seed = 42u;
 
-        basic_solver solver{policy, problem, x0, opts};
+        step_budget_solver solver{policy, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1.0));

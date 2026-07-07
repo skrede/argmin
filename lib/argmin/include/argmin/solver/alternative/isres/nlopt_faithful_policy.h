@@ -303,7 +303,7 @@ struct nlopt_faithful_policy
         // behavior. If the requested sizing exceeds the caps, poison the
         // state, skip every unsafe resize, and let the first step() return
         // solver_status::invalid_problem (exception-free precondition
-        // failure). Set x/objective to safe defaults so basic_solver can
+        // failure). Set x/objective to safe defaults so step_budget_solver can
         // read the state before that first step().
         using ST = state_type<Problem>;
         if(s.lambda > ST::MaxLambda || s.mu > ST::MaxMu)

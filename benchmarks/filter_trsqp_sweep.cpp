@@ -27,7 +27,7 @@
 //
 //   - filter_envelope_sweep targets the filter_slsqp and filter_nw_sqp
 //     line-search policies (different policy types -- separate
-//     basic_solver instantiations than filter_trsqp_policy);
+//     step_budget_solver instantiations than filter_trsqp_policy);
 //   - filter_envelope_sweep's HS043-centric output schema is
 //     incompatible with the multi-cell x multi-seed x multi-axis
 //     Cartesian JSON consumed by the empirical-default-selection
@@ -53,7 +53,7 @@
 //            Hock and Schittkowski 1981 Lecture Notes in Economics and
 //            Mathematical Systems vol. 187, Springer (HS test suite).
 
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/filter_trsqp_policy.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -346,7 +346,7 @@ cell_result run_one(const sweep_config& cfg,
         }
     }
 
-    argmin::basic_solver solver{policy, problem, x0, opts};
+    argmin::step_budget_solver solver{policy, problem, x0, opts};
 
     const auto t0 = std::chrono::steady_clock::now();
     auto result = solver.solve(opts);

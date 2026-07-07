@@ -12,7 +12,7 @@ namespace argmin
 
 // Metrics from a single solver iteration.
 //
-// basic_solver inspects these after each Policy::step() to decide
+// step_budget_solver inspects these after each Policy::step() to decide
 // convergence, stall detection, and divergence.
 
 template <typename Scalar = double>
@@ -49,7 +49,7 @@ struct step_result
 
     // Objective/merit evaluations performed during this single step, e.g.
     // the trial-point evaluations a line search makes. Defaults to 1 --
-    // every real step evaluates the objective at least once. basic_solver
+    // every real step evaluates the objective at least once. step_budget_solver
     // accumulates this across steps so solve_result::function_evaluations
     // reports the genuine evaluation count instead of aliasing the
     // iteration count. Policies that perform inner evaluation loops (line

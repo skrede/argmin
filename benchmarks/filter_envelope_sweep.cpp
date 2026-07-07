@@ -18,7 +18,7 @@
 //            Fletcher & Leyffer 2002 Section 5 (slack-margin gamma
 //            tuning).
 
-#include "argmin/solver/basic_solver.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -135,7 +135,7 @@ sweep_row run_combo(double gamma_f, double gamma_h)
         policy_opts.gamma_f = gamma_f;
         policy_opts.gamma_h = gamma_h;
 
-        argmin::basic_solver solver{
+        argmin::step_budget_solver solver{
             Policy<argmin::hs043<>::problem_dimension>{},
             problem, x0, opts, policy_opts};
         auto result = solver.solve(opts);
@@ -155,7 +155,7 @@ sweep_row run_combo(double gamma_f, double gamma_h)
         policy_opts.gamma_f = gamma_f;
         policy_opts.gamma_h = gamma_h;
 
-        argmin::basic_solver solver{
+        argmin::step_budget_solver solver{
             Policy<argmin::hs024<>::problem_dimension>{},
             problem, x0, opts, policy_opts};
         auto result = solver.solve(opts);
@@ -180,7 +180,7 @@ sweep_row run_combo(double gamma_f, double gamma_h)
         policy_opts.gamma_f = gamma_f;
         policy_opts.gamma_h = gamma_h;
 
-        argmin::basic_solver solver{
+        argmin::step_budget_solver solver{
             Policy<argmin::hs076<>::problem_dimension>{},
             problem, x0, opts, policy_opts};
         auto result = solver.solve(opts);
