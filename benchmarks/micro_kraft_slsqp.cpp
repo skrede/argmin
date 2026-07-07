@@ -902,22 +902,26 @@ bool probe_regression_hs026()
 }
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Allocation witness for kraft_slsqp. Warms up to absorb lazy first-step
-// allocations, then arms the trace across a steady-state step window and a
-// reset() before reading the sensors. The original un-blinded reading was
-// ~19.9 mallocs/step; the QP-substrate hoists (caller-owned NNLS workspace,
-// persistent LSEI/LSI Householder workspaces, caller-owned QP multipliers)
-// have since brought steady state down to ~7.9/step. The remaining
-// allocations live in policy-local code (line-search trial vectors, the
-// second-order-correction scratch) and are hoisted separately; the witness
-// floor below is a non-blindness lower bound (comfortably below the current
-// count, comfortably above zero) that will be replaced by the zero-alloc
-// gate once the policy-local hoists land.
+// Allocation gate for kraft_slsqp at fixed N. Warms up to absorb lazy
+// first-step allocations, then arms the trace across a steady-state step
+// window AND a reset() before reading the sensors. The reset is inside the
+// armed window so a warm restart is held to the same zero-allocation bar as a
+// steady step.
 //
-// Mode is selected by ARGMIN_ALLOC_GATE_EXPECT (via evaluate_gate): the
-// default expects nonzero (this witness); defining
-// ARGMIN_ALLOC_GATE_EXPECT_ZERO flips the same assertion into the post-hoist
-// zero-allocation gate.
+// Trajectory of the un-blinded reading (armed HS071 at N=4): ~19.9
+// mallocs/step originally, ~7.9 after the QP-substrate hoists (caller-owned
+// NNLS workspace, persistent LSEI/LSI Householder apply-workspaces,
+// caller-owned QP multipliers), ~5.9 after the policy-local reporting-path
+// hoist, and 0 after bounding the LSEI/LSI QR workspace storage to the
+// compile-time dimension (the dynamically-typed Householder-sequence apply
+// was heap-allocating its internal product temporary on every QP solve) plus
+// pre-sizing the second-order-correction QP-result buffer. The gate is
+// demonstrably non-blind: the pre-bound code trips this zero gate at 5.9/step,
+// and the alloc_trace_main.cpp canary independently proves an armed Eigen
+// allocation is counted.
+//
+// Built with ARGMIN_ALLOC_GATE_EXPECT_ZERO so evaluate_gate asserts zero
+// allocations across the armed window.
 int argmin_alloc_trace_probe()
 {
     hs071_fixed problem;
@@ -946,7 +950,7 @@ int argmin_alloc_trace_probe()
     argmin::detail::bench::disarm_alloc_trace();
 
     return argmin::detail::bench::evaluate_gate(
-        "kraft_slsqp", 2 * hot_steps, 5);
+        "kraft_slsqp", 2 * hot_steps, 0);
 }
 #endif
 

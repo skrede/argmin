@@ -458,7 +458,7 @@ if(NLopt_FOUND)
     # a zero-allocation gate. tr_sqp reuses the filter_trsqp driver with a
     # policy-select define so both trust-region policies are covered.
     argmin_add_alloc_gate(micro_kraft_slsqp_alloc_trace
-        micro_kraft_slsqp.cpp sqp_alloc_gate_kraft)
+        micro_kraft_slsqp.cpp sqp_alloc_gate_kraft ARGMIN_ALLOC_GATE_EXPECT_ZERO)
     argmin_add_alloc_gate(micro_nw_sqp_alloc_trace
         micro_nw_sqp.cpp sqp_alloc_gate_nw)
     argmin_add_alloc_gate(micro_filter_slsqp_alloc_trace
