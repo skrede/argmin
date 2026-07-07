@@ -832,7 +832,7 @@ struct nlopt_faithful_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
         const int n_c = s.n_eq + s.n_ineq;
@@ -881,7 +881,7 @@ struct nlopt_faithful_policy
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         reset(s, x0);
     }

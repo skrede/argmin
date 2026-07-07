@@ -1147,7 +1147,7 @@ struct nw_sqp_policy
 
     // Hot start -- preserves BFGS Hessian.
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
         const int m = s.n_eq + s.n_ineq;
@@ -1168,7 +1168,7 @@ struct nw_sqp_policy
     // Cold restart -- clears BFGS Hessian.
     template <typename P>
     void reset_clear(state_type<P>& s,
-                     const Eigen::Vector<double, N>& x0)
+                     Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         reset(s, x0);
         s.hessian.reset();

@@ -289,7 +289,7 @@ struct projected_gn_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    void reset(state_type& s, Eigen::Ref<const Eigen::VectorXd> x0)
     {
         s.lower = s.lower;  // bounds already cached
         s.upper = s.upper;
@@ -309,7 +309,7 @@ struct projected_gn_policy
         s.iteration = 0;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type& s, Eigen::Ref<const Eigen::VectorXd> x0)
     {
         reset(s, x0);
     }

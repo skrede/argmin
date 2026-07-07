@@ -1217,7 +1217,7 @@ struct pwq_reparameterization_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         const int n = x0.size();
         // Refresh strategy parameters and every configuration-derived
@@ -1292,7 +1292,7 @@ struct pwq_reparameterization_policy
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         // reset() re-derives the init-time quantities and anchors the mean
         // at x0; a restart additionally randomizes the mean within the box

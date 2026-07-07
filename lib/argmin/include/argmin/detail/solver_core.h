@@ -442,10 +442,15 @@ public:
     }
 
     // Reset to a new starting point, preserving algorithm state (e.g. L-BFGS
-    // curvature pairs). Delegates to policy.reset().
-    void reset(const Eigen::VectorX<scalar_type>& x0)
+    // curvature pairs). Delegates to policy.reset(), binding the caller buffer
+    // straight into the policy's Eigen::Ref parameter -- a plain vector of the
+    // matching scalar passes through with no conversion temporary (the warm
+    // per-tick path is allocation-free); only a genuine expression argument
+    // materializes, inside Ref's own storage.
+    template <typename Derived>
+    void reset(const Eigen::MatrixBase<Derived>& x0)
     {
-        policy_.reset(state_, Eigen::Vector<scalar_type, N>(x0));
+        policy_.reset(state_, x0);
         iterations_ = 0;
         function_evaluations_ = 0;
         last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
@@ -454,10 +459,11 @@ public:
     }
 
     // Reset to a new starting point, clearing all algorithm state.
-    // Delegates to policy.reset_clear().
-    void reset_clear(const Eigen::VectorX<scalar_type>& x0)
+    // Delegates to policy.reset_clear() with the same pass-through binding.
+    template <typename Derived>
+    void reset_clear(const Eigen::MatrixBase<Derived>& x0)
     {
-        policy_.reset_clear(state_, Eigen::Vector<scalar_type, N>(x0));
+        policy_.reset_clear(state_, x0);
         iterations_ = 0;
         function_evaluations_ = 0;
         last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();

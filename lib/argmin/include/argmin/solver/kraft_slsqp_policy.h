@@ -1067,7 +1067,7 @@ struct kraft_slsqp_policy
 
     // Hot start -- preserves BFGS curvature information.
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         s.x = x0;
         s.objective_value = s.problem->value(x0);
@@ -1090,7 +1090,7 @@ struct kraft_slsqp_policy
 
     // Cold restart -- clears BFGS curvature information (B := I).
     template <typename P>
-    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         reset(s, x0);
         s.hessian.reset();

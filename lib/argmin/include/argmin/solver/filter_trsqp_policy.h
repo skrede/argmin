@@ -1645,7 +1645,7 @@ struct filter_trsqp_policy
     // an unrelated point), the inert BO-internal penalty, and the
     // restoration budget latch.
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
         const int m = s.n_eq + s.n_ineq;
@@ -1698,7 +1698,7 @@ struct filter_trsqp_policy
     // multiplier estimate; the filter reseed is performed by reset().
     template <typename P>
     void reset_clear(state_type<P>& s,
-                     const Eigen::Vector<double, N>& x0)
+                     Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         reset(s, x0);
         s.hessian.reset();

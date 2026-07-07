@@ -1097,13 +1097,13 @@ struct bobyqa_policy
     // Cold restart -- BOBYQA has no warm-start mode since the interpolation
     // set is point-specific.
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         reset_clear(s, x0);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
         s.x_scaled = (s.x.array() / s.scale.array()).matrix();

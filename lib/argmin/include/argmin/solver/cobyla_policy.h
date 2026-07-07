@@ -179,13 +179,13 @@ struct cobyla_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::VectorXd& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::VectorXd> x0)
     {
         reset_clear(s, x0);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const Eigen::VectorXd& x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::VectorXd> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
         s.iteration = 0;

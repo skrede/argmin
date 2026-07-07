@@ -832,7 +832,7 @@ struct augmented_lagrangian_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::Vector<scalar_type, N>& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<scalar_type, N>> x0)
     {
         s.x = x0;
         s.f = s.problem->value(x0);
@@ -856,7 +856,7 @@ struct augmented_lagrangian_policy
 
     template <typename P>
     void reset_clear(state_type<P>& s,
-                     const Eigen::Vector<scalar_type, N>& x0)
+                     Eigen::Ref<const Eigen::Vector<scalar_type, N>> x0)
     {
         reset(s, x0);
         s.lambda_eq.setZero();

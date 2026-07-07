@@ -1295,7 +1295,7 @@ struct filter_nw_sqp_policy
     //            N&W 2e Section 15.4 (filter SQP semantics).
     template <typename Problem>
     void reset(state_type<Problem>& s,
-               const Eigen::Vector<double, N>& x0)
+               Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         s.x = x0;
         s.objective_value = s.problem->value(x0);
@@ -1318,7 +1318,7 @@ struct filter_nw_sqp_policy
     // h_max derived from the new x0), and penalty.
     template <typename Problem>
     void reset_clear(state_type<Problem>& s,
-                     const Eigen::Vector<double, N>& x0)
+                     Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         reset(s, x0);
         s.hessian.reset();

@@ -236,7 +236,7 @@ struct byrd_lbfgsb_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         s.x = x0;
         s.objective_value = s.problem->value(x0);
@@ -245,7 +245,7 @@ struct byrd_lbfgsb_policy
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         reset(s, x0);
         s.B.reset();

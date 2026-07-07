@@ -1048,7 +1048,7 @@ struct no_repair_adaptive_penalty_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         const int n = x0.size();
         // Refresh strategy parameters for the current options.lambda value
@@ -1086,7 +1086,7 @@ struct no_repair_adaptive_penalty_policy
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const Eigen::Vector<double, N>& x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
         reset(s, x0);
     }

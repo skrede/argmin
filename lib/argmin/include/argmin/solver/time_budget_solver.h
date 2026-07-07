@@ -199,10 +199,24 @@ public:
     void abort() { core_.abort(); }
 
     template <typename Derived>
-    void reset(const Eigen::MatrixBase<Derived>& x0) { core_.reset(to_x0(x0)); }
+    void reset(const Eigen::MatrixBase<Derived>& x0)
+    {
+        static_assert(x0_shape_ok<Derived>,
+                      "x0 must be a column vector matching the solver dimension "
+                      "N (an N x 1 Eigen vector for fixed N; any n x 1 vector "
+                      "for dynamic_dimension).");
+        core_.reset(x0);
+    }
 
     template <typename Derived>
-    void reset_clear(const Eigen::MatrixBase<Derived>& x0) { core_.reset_clear(to_x0(x0)); }
+    void reset_clear(const Eigen::MatrixBase<Derived>& x0)
+    {
+        static_assert(x0_shape_ok<Derived>,
+                      "x0 must be a column vector matching the solver dimension "
+                      "N (an N x 1 Eigen vector for fixed N; any n x 1 vector "
+                      "for dynamic_dimension).");
+        core_.reset_clear(x0);
+    }
 
 private:
     solver_options<Convergence> make_default_opts() const

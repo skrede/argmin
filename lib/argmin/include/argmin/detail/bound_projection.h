@@ -16,8 +16,9 @@ namespace argmin::detail
 //
 // Reference: N&W Section 16.6, definition of P(x, l, u).
 
-template <typename Scalar = double, int N = argmin::dynamic_dimension>
-Eigen::Vector<Scalar, N> project(const Eigen::Vector<Scalar, N>& x,
+template <typename Scalar = double, int N = argmin::dynamic_dimension,
+          typename XExpr>
+Eigen::Vector<Scalar, N> project(const Eigen::MatrixBase<XExpr>& x,
                                  const Eigen::Vector<Scalar, N>& lower,
                                  const Eigen::Vector<Scalar, N>& upper)
 {
