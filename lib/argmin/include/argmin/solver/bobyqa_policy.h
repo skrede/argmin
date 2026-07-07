@@ -500,6 +500,13 @@ struct bobyqa_policy
         bool did_eval = false;
         bool terminated = false;
 
+        // The terminal deferred short-step evaluation (ntrits == -1) is the one
+        // point Powell reports outside the factored model, and only when it
+        // strictly improves on the model's best node (bobyqb_ lines 2582-2586).
+        bool deferred_improved = false;
+        double deferred_f = 0.0;
+        Eigen::Vector<double, N> deferred_xabs;
+
         label loc = label::l60;
         int safety = 0;
         const int safety_cap = 200000;
@@ -701,8 +708,17 @@ struct bobyqa_policy
                 if(s.ntrits == -1)
                 {
                     // The deferred short step is evaluated exactly once, at
-                    // end-game (bobyqb_ lines 2582-2586). The incumbent stays
-                    // the model's best node; terminate.
+                    // end-game (bobyqb_ lines 2582-2586). Powell returns this
+                    // freshly evaluated point as the solution when it improves
+                    // on the model's best node (fsave < fval[kopt]); otherwise
+                    // the model incumbent is reported. Stash the improving point
+                    // so the paid evaluation is not wasted.
+                    if(f < s.sys.fval[s.sys.kopt])
+                    {
+                        deferred_improved = true;
+                        deferred_f = f;
+                        deferred_xabs = xabs;
+                    }
                     terminated = true;
                     loc = label::l60;
                     break;
@@ -869,10 +885,22 @@ struct bobyqa_policy
             }
         }
 
-        // Keep the reported incumbent tied to the model's best node.
-        s.x_scaled = s.sys.xbase + s.sys.xopt;
-        s.x = (s.x_scaled.array() * s.scale.array()).matrix();
-        s.objective_value = s.sys.fval[s.sys.kopt];
+        // Keep the reported incumbent tied to the model's best node, except on
+        // the terminal deferred short step that strictly improved: there Powell
+        // returns the freshly evaluated point (the one solution reported outside
+        // the model), so the paid evaluation carries the reported result.
+        if(deferred_improved)
+        {
+            s.x_scaled = deferred_xabs;
+            s.x = (s.x_scaled.array() * s.scale.array()).matrix();
+            s.objective_value = deferred_f;
+        }
+        else
+        {
+            s.x_scaled = s.sys.xbase + s.sys.xopt;
+            s.x = (s.x_scaled.array() * s.scale.array()).matrix();
+            s.objective_value = s.sys.fval[s.sys.kopt];
+        }
 
         ++s.iteration;
         bool improved = s.objective_value < old_incumbent_f;

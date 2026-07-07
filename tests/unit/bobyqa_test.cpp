@@ -864,21 +864,89 @@ TEST_CASE("bobyqa incumbent stays consistent with the factored model", "[bobyqa]
     {
         auto r = pol.step(s);
 
-        // Reported objective is a genuine evaluation of the reported point.
+        // Reported objective is a genuine evaluation of the reported point --
+        // this holds on every step, including the terminal deferred one.
         CHECK(problem.value(s.x) == Approx(s.objective_value).margin(1e-9));
 
-        // The incumbent matches the model's best node fval[kopt].
-        CHECK(s.objective_value == Approx(s.sys.fval[s.sys.kopt]).margin(1e-9));
-
-        // The reported x is the model's best point mapped back to originals.
         Eigen::VectorXd model_best_scaled = s.sys.xbase + s.sys.xopt;
         Eigen::VectorXd model_best_orig =
             (model_best_scaled.array() * s.scale.array()).matrix();
-        CHECK((s.x - model_best_orig).norm() < 1e-9);
 
-        if(r.policy_status && *r.policy_status == solver_status::converged)
+        const bool terminal =
+            r.policy_status && *r.policy_status == solver_status::converged;
+
+        if(terminal)
+        {
+            // On termination Powell may report the improving deferred short
+            // step -- the one point returned outside the factored model. The
+            // principled invariant then relaxes to: the reported incumbent is
+            // EITHER the model's best node, OR a genuine evaluation that is no
+            // worse than the model's best node (never a spurious point).
+            const bool at_model_best =
+                std::abs(s.objective_value - s.sys.fval[s.sys.kopt]) < 1e-9 &&
+                (s.x - model_best_orig).norm() < 1e-9;
+            CHECK((at_model_best ||
+                   s.objective_value <= s.sys.fval[s.sys.kopt] + 1e-12));
             break;
+        }
+
+        // Non-terminal steps: the reported incumbent IS the model's best node,
+        // unchanged -- the deferred carve-out never applies mid-run.
+        CHECK(s.objective_value == Approx(s.sys.fval[s.sys.kopt]).margin(1e-9));
+        CHECK((s.x - model_best_orig).norm() < 1e-9);
     }
+}
+
+// Terminal deferred short-step return.
+//
+// Powell defers a below-threshold Newton step (ntrits == -1) and, at the very
+// end of the run, evaluates it once. When that final paid evaluation strictly
+// improves on the model's best node (bobyqb_ lines 2582-2586, fsave <
+// fval[kopt]) he returns THAT point as the solution rather than the model
+// incumbent -- otherwise the last evaluation is wasted and the returned point
+// is strictly worse. This pins that the improving deferred step is returned and
+// is a genuine evaluation of the reported point.
+TEST_CASE("bobyqa returns the improving deferred short step at end-game", "[bobyqa]")
+{
+    bobyqa_booth problem{
+        .lb = Eigen::Vector<double, 2>{{-10.0, -10.0}},
+        .ub = Eigen::Vector<double, 2>{{10.0, 10.0}},
+    };
+    Eigen::Vector<double, 2> x0{0.0, 0.0};
+    solver_options opts;
+    opts.max_iterations = 20000;
+    opts.set_gradient_threshold(1e-15);
+    opts.set_objective_threshold(0.0);
+    opts.set_step_threshold(0.0);
+    bobyqa_policy<2>::options_type popts;
+    popts.final_trust_radius = 1e-8;
+
+    bobyqa_policy<2> pol{popts};
+    auto s = pol.init(problem, x0, opts);
+
+    bool terminated = false;
+    for(int it = 0; it < 20000; ++it)
+    {
+        auto r = pol.step(s);
+        if(r.policy_status && *r.policy_status == solver_status::converged)
+        {
+            terminated = true;
+
+            // The reported point is a genuine evaluation of that exact point.
+            CHECK(problem.value(s.x) == Approx(s.objective_value).margin(1e-30));
+
+            // The reported value strictly improves on the model's best node --
+            // the deferred evaluation was returned, not discarded.
+            CHECK(s.objective_value < s.sys.fval[s.sys.kopt]);
+
+            // And it is a valid Booth minimizer.
+            CHECK(s.objective_value < 1e-8);
+            CHECK(s.x[0] == Approx(1.0).margin(1e-3));
+            CHECK(s.x[1] == Approx(3.0).margin(1e-3));
+            break;
+        }
+    }
+    CHECK(terminated);
 }
 
 // An objective that records every point at which it is evaluated. Mirrors the
