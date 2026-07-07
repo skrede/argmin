@@ -79,6 +79,14 @@ struct sqp_state_buffers
     Eigen::MatrixXd J_all;
     Eigen::MatrixXd J_all_old;
 
+    // Stacked constraint Jacobian [J_eq; J_ineq] (m x n) for the
+    // Lagrangian-gradient-norm reporting leg. Typed Matrix<Scalar,
+    // Dynamic, N> (n-axis fixed, m-axis dynamic) so the stacked assembly
+    // is heap-free at fixed N; sized once at resize(). Constant per
+    // problem instance, so the reporting leg is allocation-free at steady
+    // state.
+    Eigen::Matrix<Scalar, Eigen::Dynamic, N> lag_A_buf;
+
     // Pre-factored Hessian for kraft_lsq_qp's solve_with_factored_hessian path
     // (Kraft lineage only; N&W lineage leaves these zero-sized).
     Eigen::Matrix<Scalar, N, N> E_buf;
@@ -145,6 +153,8 @@ inline void sqp_state_buffers<Scalar, N>::resize(int n, int n_eq, int n_ineq)
 
     J_all.resize(m, n);
     J_all_old.resize(m, n);
+
+    lag_A_buf.resize(m, n);
 
     E_buf.resize(n, n);
     f_buf.resize(n);

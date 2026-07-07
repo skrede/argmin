@@ -1046,7 +1046,7 @@ struct kraft_slsqp_policy
             }
         }
         double kkt = detail::kkt_residual<double,
-                                          Eigen::Dynamic,
+                                          N,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic>(
             s.g, s.J_eq, s.J_ineq,
@@ -1131,14 +1131,16 @@ private:
     //                 differ across SQP policies; a shared helper would need
     //                 a concept-or-trait abstraction not yet in place.
     template <typename P>
-    static double lagrangian_gradient_norm(const state_type<P>& s)
+    static double lagrangian_gradient_norm(state_type<P>& s)
     {
-        const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
         if(m == 0)
             return s.g.norm();
 
-        Eigen::Matrix<double, Eigen::Dynamic, N> A(m, n);
+        // Stacked Jacobian assembled into the state-resident buffer
+        // (sized once at init/reset) rather than a per-call A(m, n),
+        // keeping the reporting leg allocation-free at steady state.
+        Eigen::Matrix<double, Eigen::Dynamic, N>& A = s.bufs.lag_A_buf;
         if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
         if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
         return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
