@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <vector>
 #include <cstdint>
 
 using Catch::Approx;
@@ -402,4 +403,130 @@ TEST_CASE("augmented lagrangian populates kkt_residual",
             break;
     }
     CHECK(populated);
+}
+
+// Chunk-size invariance. Bounding the per-tick inner work must NOT change the
+// outer trajectory: each step() advances the persisted inner solver by at most
+// inner_chunk iterations, and the per-chunk budget is clamped so a small chunk
+// and a full-budget chunk consume the identical inner iteration sequence and
+// thus drive an identical outer mu / multiplier / iterate schedule. This
+// compares the completed-outer-iteration sequence for inner_chunk=7 against
+// inner_chunk=200 (a single full inner solve per outer step) and requires them
+// identical.
+TEST_CASE("augmented lagrangian outer trajectory is chunk-size invariant",
+          "[augmented_lagrangian][chunking]")
+{
+    using policy_t =
+        augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>,
+                                    hs076<>::problem_dimension>;
+
+    hs076 problem;
+    auto x0 = problem.initial_point();
+
+    solver_options opts;
+    opts.max_iterations = 4000;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+    opts.set_stationarity_threshold(1e-4);
+
+    struct outer_record
+    {
+        Eigen::VectorXd x;
+        double mu;
+        Eigen::VectorXd lambda_eq;
+        Eigen::VectorXd lambda_ineq;
+    };
+
+    auto run = [&](std::uint32_t chunk, int want_outer, bool& saw_partial)
+    {
+        policy_t::options_type popts;
+        popts.inner_chunk = chunk;
+        step_budget_solver solver{policy_t{}, problem, x0, opts, popts};
+
+        std::vector<outer_record> traj;
+        std::uint32_t last_outer = 0;
+        saw_partial = false;
+        for(int i = 0; i < 8000 && static_cast<int>(traj.size()) < want_outer; ++i)
+        {
+            auto sr = solver.step();
+            if(sr.is_null_step)
+                saw_partial = true;
+            const auto& st = solver.state();
+            if(st.outer_iter != last_outer)
+            {
+                last_outer = st.outer_iter;
+                traj.push_back({st.x, st.mu, st.lambda_eq, st.lambda_ineq});
+            }
+            if(sr.policy_status)
+                break;
+        }
+        return traj;
+    };
+
+    bool partial_full = false;
+    bool partial_small = false;
+    auto traj_full  = run(200, 8, partial_full);
+    auto traj_small = run(7,   8, partial_small);
+
+    // The small-chunk run must actually chunk (span an inner solve across
+    // resumed steps), else the invariance claim would be vacuous.
+    CHECK(partial_small);
+
+    REQUIRE(!traj_full.empty());
+    REQUIRE(traj_full.size() == traj_small.size());
+    for(std::size_t k = 0; k < traj_full.size(); ++k)
+    {
+        INFO("outer iteration " << k);
+        CHECK((traj_full[k].x - traj_small[k].x).norm() <= 1e-12);
+        CHECK(std::abs(traj_full[k].mu - traj_small[k].mu) <= 1e-12);
+        CHECK((traj_full[k].lambda_eq - traj_small[k].lambda_eq).norm() <= 1e-12);
+        CHECK((traj_full[k].lambda_ineq - traj_small[k].lambda_ineq).norm() <= 1e-12);
+    }
+}
+
+// Per-call boundedness. A single outer step() must never advance the inner
+// solver by more than inner_chunk iterations. last_inner_advance records the
+// iterations executed by the most recent step(); it is the directly observable
+// per-tick work bound.
+TEST_CASE("augmented lagrangian bounds inner work per step",
+          "[augmented_lagrangian][chunking]")
+{
+    using policy_t =
+        augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>,
+                                    hs076<>::problem_dimension>;
+
+    hs076 problem;
+    auto x0 = problem.initial_point();
+
+    solver_options opts;
+    opts.max_iterations = 2000;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_objective_threshold(1e-15);
+    opts.set_step_threshold(1e-15);
+    opts.set_stationarity_threshold(1e-4);
+
+    constexpr std::uint32_t chunk = 5;
+    policy_t::options_type popts;
+    popts.inner_chunk = chunk;
+    step_budget_solver solver{policy_t{}, problem, x0, opts, popts};
+
+    std::uint32_t max_advance = 0;
+    bool saw_partial = false;
+    for(int i = 0; i < 400; ++i)
+    {
+        auto sr = solver.step();
+        const std::uint32_t adv = solver.state().last_inner_advance;
+        CHECK(adv <= chunk);
+        max_advance = std::max(max_advance, adv);
+        if(sr.is_null_step)
+            saw_partial = true;
+        if(sr.policy_status)
+            break;
+    }
+    // Bounding must actually bite: at least one inner solve exceeded the
+    // per-tick budget and was resumed (a null step), and at least one step
+    // advanced a full chunk.
+    CHECK(saw_partial);
+    CHECK(max_advance == chunk);
 }

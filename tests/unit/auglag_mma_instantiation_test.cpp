@@ -33,6 +33,7 @@
 
 #include <cmath>
 #include <memory>
+#include <cstdint>
 #include <utility>
 
 using namespace argmin;
@@ -137,7 +138,17 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
     {
         step_budget_solver solver{augmented_lagrangian_policy<mma_policy<D>, D>{},
             problem, x0, opts};
-        auto sr = solver.step();
+        // Under bounded-work chunking a single step() may only advance the
+        // inner solve by one chunk (a null step); drive to the first COMPLETED
+        // outer iteration, which is where the constrained inner surfaces its
+        // Lagrangian gradient norm and kkt residual.
+        step_result<double> sr{};
+        for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+        {
+            sr = solver.step();
+            if(!sr.is_null_step)
+                break;
+        }
         CHECK(std::isfinite(sr.objective_value));
         CHECK(std::isfinite(sr.gradient_norm));
         CHECK(sr.kkt_residual.has_value());
@@ -147,7 +158,17 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
     {
         step_budget_solver solver{augmented_lagrangian_policy<gcmma_policy<D>, D>{},
             problem, x0, opts};
-        auto sr = solver.step();
+        // Under bounded-work chunking a single step() may only advance the
+        // inner solve by one chunk (a null step); drive to the first COMPLETED
+        // outer iteration, which is where the constrained inner surfaces its
+        // Lagrangian gradient norm and kkt residual.
+        step_result<double> sr{};
+        for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+        {
+            sr = solver.step();
+            if(!sr.is_null_step)
+                break;
+        }
         CHECK(std::isfinite(sr.objective_value));
         CHECK(std::isfinite(sr.gradient_norm));
         CHECK(sr.kkt_residual.has_value());
@@ -157,7 +178,17 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
     {
         step_budget_solver solver{augmented_lagrangian_policy<ccsa_quadratic_policy<D>, D>{},
             problem, x0, opts};
-        auto sr = solver.step();
+        // Under bounded-work chunking a single step() may only advance the
+        // inner solve by one chunk (a null step); drive to the first COMPLETED
+        // outer iteration, which is where the constrained inner surfaces its
+        // Lagrangian gradient norm and kkt residual.
+        step_result<double> sr{};
+        for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
+        {
+            sr = solver.step();
+            if(!sr.is_null_step)
+                break;
+        }
         CHECK(std::isfinite(sr.objective_value));
         CHECK(std::isfinite(sr.gradient_norm));
         CHECK(sr.kkt_residual.has_value());

@@ -110,6 +110,21 @@ struct augmented_lagrangian_policy
         scalar_type mu_decrease{scalar_type(0.25)};                // Conn-Gould-Toint
         scalar_type mu_min{scalar_type(1e-6)};                     // Conn-Gould-Toint
         std::uint32_t inner_max_iterations{200};
+
+        // Per-tick bound on inner-solver iterations. Each outer step()
+        // advances the persisted inner solver by at most inner_chunk
+        // iterations and then returns, resuming the same inner solve on the
+        // next step() until it reaches its convergence-or-budget terminal --
+        // only then does the outer method-of-multipliers update run. This
+        // bounds per-tick latency for real-time / embedded callers WITHOUT
+        // changing the outer trajectory: the per-chunk budget is clamped so
+        // the inner solve consumes the same iteration sequence and yields the
+        // same best-seen iterate regardless of chunk size, making the outer
+        // mu / multiplier schedule chunk-size-invariant by construction. The
+        // default bounds one tick well below a full inner_max_iterations
+        // solve; set inner_chunk >= inner_max_iterations to recover
+        // single-tick outer iterations (a full inner solve per step()).
+        std::uint32_t inner_chunk{32};
         scalar_type constraint_tolerance{scalar_type(1e-6)};       // K&W 10.9
         scalar_type inner_gradient_tolerance{scalar_type(1e-6)};   // K&W 10.9
         scalar_type feasibility_progress{scalar_type(0.25)};       // N&W 17.4
@@ -178,6 +193,30 @@ struct augmented_lagrangian_policy
         // even when the penalty parameter never moves. Lazily initialized
         // on the first step from the initial penalty.
         std::optional<scalar_type> omega{};
+
+        // Chunked inner-solve state machine (bounded per-tick work).
+        //
+        // While a single outer iteration's inner solve is spread across
+        // several resumed step() calls, inner_active is true and
+        // inner_iters_done tracks the inner solver's accumulated iteration
+        // count. Each chunk's budget is clamped to (inner_max_iterations -
+        // inner_iters_done) so the inner solve consumes EXACTLY the same total
+        // iterations -- and therefore the same iterate sequence and best-seen
+        // solution -- whether the budget is spent in one call or across many.
+        // That clamp is what makes the outer mu / multiplier trajectory
+        // chunk-size-invariant.
+        //
+        // best_inner_{x,f,cv} accumulate the inner driver's feasibility-first
+        // best-seen iterate across chunks so the point handed to the outer
+        // update equals a single full-budget solve's. last_inner_advance is
+        // the iterations executed by the most recent step() (<= inner_chunk),
+        // the directly observable per-tick work bound.
+        bool inner_active = false;
+        std::uint32_t inner_iters_done = 0;
+        std::uint32_t last_inner_advance = 0;
+        scalar_type best_inner_f{};
+        scalar_type best_inner_cv{};
+        Eigen::Vector<scalar_type, N> best_inner_x;
 
         Eigen::Vector<scalar_type, N> lower;
         Eigen::Vector<scalar_type, N> upper;
@@ -522,25 +561,16 @@ struct augmented_lagrangian_policy
         const scalar_type feas_progress = s.opts.feasibility_progress;
         const scalar_type con_tol = s.opts.constraint_tolerance;
 
-        // Evaluate constraints at current x, into the hoisted outer scratch
-        // (pre-sized at init) so step() incurs no per-call allocation here.
-        {
-            const int m = s.n_eq + s.n_ineq;
-            auto& c_all = s.ctx->c_all_outer_buf;
-            if(m > 0)
-                s.problem->constraints(s.x, c_all);
-            s.c_eq = c_all.head(s.n_eq);
-            s.c_ineq = c_all.tail(s.n_ineq);
-        }
-
-        // Build the subproblem on first call, then re-seed its self-
-        // references at the top of every step. The buffer pointers address
-        // node-owned storage (stable across a move); the outer-state pointers
-        // (bounds, multipliers, penalty) address state fields that a
-        // memberwise move relocates, so they must be refreshed against the
-        // live state before the inner solve dereferences them. The subproblem
-        // itself lives in the heap node, so its address -- cached by the
-        // persisted inner solver -- stays valid across the move.
+        // Re-seed the subproblem's self-references at the TOP of every step,
+        // including a resume step in the middle of an inner solve. The
+        // outer-state pointers (bounds, multipliers, penalty) address state
+        // fields that a memberwise move relocates, so they must be refreshed
+        // against the live state before the inner solve dereferences them; the
+        // buffer pointers and the subproblem's own address live in the heap
+        // node and survive a move, but refreshing them is harmless. This is
+        // the move-safety discipline the chunking must preserve unchanged -- a
+        // solver moved between two chunks of the same inner solve resumes on
+        // freshly re-seeded pointers, never stale ones.
         using active_subproblem = typename state_type<P>::active_subproblem;
         constexpr bool lift_equalities_only = state_type<P>::lift_equalities_only;
         auto& ctx = *s.ctx;
@@ -563,24 +593,22 @@ struct augmented_lagrangian_policy
         }
 
         // Adaptive inner stopping tolerance (Conn-Gould-Toint 1991; N&W
-        // Algorithm 17.4). omega_k is carried in state across outer
-        // iterations and updated by the two-branch schedule at the bottom of
-        // step(): it tightens multiplicatively on multiplier updates and is
-        // re-derived from the penalty regime on penalty reductions. Here we
-        // only consume the current omega_k, lazily seeding it from the
-        // initial penalty on the first outer iteration.
+        // Algorithm 17.4). omega_k is seeded once per inner solve and held
+        // fixed across that solve's chunks, so every chunk gates the inner
+        // solver on the same threshold and the inner convergence verdict fires
+        // at the same inner iteration regardless of chunk boundaries. It is
+        // updated by the two-branch schedule at the end of a COMPLETED outer
+        // iteration (below): tightening multiplicatively on multiplier updates
+        // and re-deriving from the penalty regime on penalty reductions.
         //
-        // omega_0 = eta * mu^alpha and, since mu < 1 (penalty term
-        // 1/(2 mu) ||c||^2, mu decreasing), every subsequent update strictly
-        // shrinks omega -- so omega_k -> 0 (floored at inner_grad_tol) even
-        // when the penalty parameter is pinned across multiplier-only outer
-        // iterations. This is the reverse of a schedule that would loosen as
-        // mu shrinks; the inner solve must tighten as the penalty regime
-        // tightens. CGT 1991 §3 prescribes alpha >= 0.9 to couple the inner
-        // and outer iterations meaningfully.
+        // omega_0 = eta * mu^alpha and, since mu < 1, every subsequent update
+        // strictly shrinks omega -- so omega_k -> 0 (floored at
+        // inner_grad_tol) even when the penalty parameter is pinned across
+        // multiplier-only outer iterations. CGT 1991 §3 prescribes alpha >=
+        // 0.9 to couple the inner and outer iterations meaningfully.
         const scalar_type tol_eta = s.opts.inner_tolerance_eta;
         const scalar_type tol_alpha = s.opts.inner_tolerance_alpha;
-        if(!s.omega.has_value())
+        if(!s.inner_active && !s.omega.has_value())
             s.omega = static_cast<scalar_type>(tol_eta * std::pow(s.mu, tol_alpha));
         const scalar_type inner_tol = std::max(*s.omega, inner_grad_tol);
 
@@ -603,59 +631,127 @@ struct augmented_lagrangian_policy
         std::get<step_tolerance_criterion>(inner_opts.convergence.criteria)
             .threshold = scalar_type(1e-15);
 
-        // Warm-start or cold-start inner solver.
-        //
-        // Warm-start is correct only when the augmented Lagrangian has
-        // not changed materially since the last inner solve. CGT 1991
-        // §3 prescribes a fresh inner state after each penalty
-        // reduction because the L-BFGS curvature pairs encode the
-        // inverse Hessian of the *previous* penalty's AL function and
-        // are a stale approximation once mu shrinks. Multiplier-only
-        // updates leave mu fixed and the change is small (lambda shifts
-        // by O(c/mu)), so warm-starting through them is OK.
-        //
-        // Force cold-start when mu changed since the last inner solve;
-        // honor the user's warm_start_inner request only when mu is
-        // stable (the multiplier-only-update branch).
-        const bool warm_start_requested = s.opts.warm_start_inner;
-        const bool mu_changed = s.mu_at_last_inner_solve.has_value()
-                                && *s.mu_at_last_inner_solve != s.mu;
-        const bool warm_start = warm_start_requested && !mu_changed;
-        if(!ctx.inner_solver.has_value())
+        // Start a fresh inner solve when none is in progress. This is where
+        // the current outer iterate's constraints are evaluated, the inner
+        // solver is warm/cold-restarted, and the chunk bookkeeping is armed.
+        // While an inner solve is already in progress (inner_active), all of
+        // this is skipped and step() simply advances the running solve by
+        // another bounded chunk below.
+        if(!s.inner_active)
         {
-            // First use only: construct the persistent inner solver once.
-            // Every subsequent outer iteration reuses this instance via
-            // reset / reset_clear -- the solver is never reconstructed.
-            ctx.inner_solver.emplace(*ctx.sub_storage, s.x, inner_opts);
-        }
-        else if(warm_start)
-        {
-            // Warm restart: preserves compact_lbfgs curvature pairs (S, Y, theta).
-            // Reference: N&W Section 9.2 (compact L-BFGS warm-start rationale).
-            ctx.inner_solver->reset(s.x);
-        }
-        else
-        {
-            // Cold restart WITHOUT reconstruction. A mu change makes the
-            // L-BFGS curvature pairs stale: they encode the inverse Hessian
-            // of the previous penalty's augmented Lagrangian and CGT 1991 §3
-            // prescribes a fresh inner state after each penalty reduction.
-            // reset_clear discards exactly that curvature, delivering the
-            // cold-start semantics on the persisted solver -- the identical
-            // starting state a freshly constructed solver would hold, with no
-            // reconstruction. (The per-solve budget and convergence gates are
-            // supplied by the step_n / solve call below, so they need not be
-            // re-installed here.)
-            ctx.inner_solver->reset_clear(s.x);
-        }
-        s.mu_at_last_inner_solve = s.mu;
+            // Evaluate constraints at the current outer iterate (hoisted
+            // scratch). These feed the constraint_violation reported on the
+            // resume ticks of this inner solve, during which s.x does not move.
+            {
+                const int m = s.n_eq + s.n_ineq;
+                auto& c_all = s.ctx->c_all_outer_buf;
+                if(m > 0)
+                    s.problem->constraints(s.x, c_all);
+                s.c_eq = c_all.head(s.n_eq);
+                s.c_ineq = c_all.tail(s.n_ineq);
+            }
 
-        auto inner_result = ctx.inner_solver->solve(inner_opts);
+            // Warm-start or cold-start the persisted inner solver. Warm-start
+            // is correct only when the augmented Lagrangian has not changed
+            // materially since the last inner solve: CGT 1991 §3 prescribes a
+            // fresh inner state after each penalty reduction because the
+            // L-BFGS curvature pairs encode the inverse Hessian of the
+            // previous penalty's AL and are stale once mu shrinks.
+            // Multiplier-only updates leave mu fixed (lambda shifts by
+            // O(c/mu)), so warm-starting through them is fine. The solver is
+            // constructed once on first use and thereafter reused via reset /
+            // reset_clear -- never reconstructed.
+            const bool warm_start_requested = s.opts.warm_start_inner;
+            const bool mu_changed = s.mu_at_last_inner_solve.has_value()
+                                    && *s.mu_at_last_inner_solve != s.mu;
+            const bool warm_start = warm_start_requested && !mu_changed;
+            if(!ctx.inner_solver.has_value())
+                ctx.inner_solver.emplace(*ctx.sub_storage, s.x, inner_opts);
+            else if(warm_start)
+                ctx.inner_solver->reset(s.x);
+            else
+                ctx.inner_solver->reset_clear(s.x);
+            s.mu_at_last_inner_solve = s.mu;
+
+            // Arm the chunk state machine for this inner solve. The inner
+            // solver's iteration counter was just reset to zero by the
+            // emplace / reset / reset_clear above, so inner_iters_done starts
+            // at zero. The feasibility-first best-seen accumulator starts at
+            // the +inf sentinel so the first chunk's result always wins.
+            s.inner_active = true;
+            s.inner_iters_done = 0;
+            s.best_inner_f = std::numeric_limits<scalar_type>::infinity();
+            s.best_inner_cv = std::numeric_limits<scalar_type>::infinity();
+            s.best_inner_x = s.x;
+        }
+
+        // Advance the inner solve by a bounded chunk. The per-call budget is
+        // clamped to (inner_max - inner_iters_done) so the accumulated inner
+        // iteration count never overshoots inner_max_iterations: a small chunk
+        // lands EXACTLY on the budget rather than overrunning it, which is
+        // what makes the terminal iterate (and therefore the whole outer
+        // trajectory) identical for every chunk size.
+        const std::uint32_t inner_chunk =
+            std::max<std::uint32_t>(1, s.opts.inner_chunk);
+        const std::uint32_t remaining = (s.inner_iters_done < inner_max)
+            ? (inner_max - s.inner_iters_done) : std::uint32_t(0);
+        const std::uint32_t chunk = std::min(inner_chunk, remaining);
+        const std::uint32_t prev_inner = s.inner_iters_done;
+        auto inner_result = ctx.inner_solver->step_n(chunk, inner_opts);
+        s.inner_iters_done = inner_result.iterations;
+        s.last_inner_advance = s.inner_iters_done - prev_inner;
+
+        // Accumulate the feasibility-first best-seen inner iterate across
+        // chunks, folding each chunk's best with detail::run_solve_loop's own
+        // comparator so the extracted solution equals a single full-budget
+        // solve's. The inner driver reports the best over each chunk (seeded
+        // from where the prior chunk left off); folding those recovers the
+        // best over the whole solve. feas_tol matches the inner options'
+        // feasibility floor (the bound-constrained inner reports cv == 0 and
+        // this reduces to a plain objective comparison).
+        {
+            constexpr scalar_type inner_feas_tol = scalar_type(1e-6);
+            if(detail::is_better(inner_result.objective_value,
+                                 inner_result.constraint_violation,
+                                 s.best_inner_f, s.best_inner_cv, inner_feas_tol))
+            {
+                s.best_inner_f = inner_result.objective_value;
+                s.best_inner_cv = inner_result.constraint_violation;
+                s.best_inner_x = inner_result.x;
+            }
+        }
+
+        // budget_exhausted means the chunk ran out before the inner solve
+        // reached convergence or its own iteration budget: more chunks are
+        // needed. Return a bounded null step now and resume on the next call.
+        // The null step reports the (unchanged) current iterate with an
+        // infinite gradient norm and no KKT residual so the outer convergence
+        // gate cannot fire mid-inner-solve. Any other terminal status -- a
+        // convergence verdict, or max_iterations once the clamp lands the
+        // accumulated count on inner_max_iterations -- completes the solve.
+        if(inner_result.status == solver_status::budget_exhausted)
+        {
+            return step_result<scalar_type>{
+                .objective_value = s.f,
+                .gradient_norm = std::numeric_limits<scalar_type>::infinity(),
+                .step_size = scalar_type(0),
+                .objective_change = scalar_type(0),
+                .improved = false,
+                .is_null_step = true,
+                .constraint_violation =
+                    detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
+                .x_norm = s.x.norm(),
+                .kkt_residual = std::nullopt,
+            };
+        }
+
+        // Inner solve complete: close out this outer iteration.
+        s.inner_active = false;
 
         // Extract solution from inner solver
         scalar_type f_old = s.f;
         Eigen::Vector<scalar_type, N> x_old = s.x;
-        s.x = inner_result.x;
+        s.x = s.best_inner_x;
         s.f = s.problem->value(s.x);
         {
             const int m = s.n_eq + s.n_ineq;
@@ -865,20 +961,24 @@ struct augmented_lagrangian_policy
         s.f = s.problem->value(x0);
         {
             const int m = s.n_eq + s.n_ineq;
-            Eigen::VectorX<scalar_type> c_all(m);
+            auto& c_all = s.ctx->c_all_outer_buf;
             if(m > 0)
                 s.problem->constraints(x0, c_all);
             s.c_eq = c_all.head(s.n_eq);
             s.c_ineq = c_all.tail(s.n_ineq);
         }
         s.outer_iter = 0;
+        // Abandon any inner solve that was mid-chunk: the next step() starts a
+        // fresh inner solve at x0. The persisted inner solver is KEPT --
+        // reset() preserves algorithm state (e.g. compact_lbfgs curvature
+        // pairs) and the next step warm-restarts it at x0, so a warm per-tick
+        // reset is reconstruction-free and allocation-free. Subproblem storage
+        // is kept too (its pointers are re-seeded at the top of the next step).
+        s.inner_active = false;
+        s.last_inner_advance = 0;
         // Re-seed the adaptive inner tolerance on the next step from the
         // current penalty regime.
         s.omega.reset();
-        // Destroy inner solver; will be reconstructed next step.
-        // Subproblem storage is kept (its pointers are re-seeded next step).
-        if(s.ctx)
-            s.ctx->inner_solver.reset();
     }
 
     template <typename P>
@@ -890,6 +990,10 @@ struct augmented_lagrangian_policy
         s.lambda_ineq.setZero();
         s.mu = s.opts.mu_init;
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
+        s.mu_at_last_inner_solve.reset();
+        // Full teardown: unlike the state-preserving reset(), reset_clear()
+        // discards ALL algorithm state, so the subproblem view and the inner
+        // solver are dropped and rebuilt from scratch on the next step().
         if(s.ctx)
         {
             s.ctx->sub_storage.reset();

@@ -363,3 +363,37 @@ TEST_CASE("isres survives move-then-step", "[move_asan]")
     construct_move_step(isres_policy<simple_constrained::problem_dimension>{},
                         problem, x0, opts);
 }
+
+// The mid-chunk variant of the augmented_lagrangian self-referential case.
+// With a small inner_chunk the FIRST step() stops before the inner solve
+// completes (a null step), so the subsequent move relocates the solver WHILE
+// an inner solve is in flight. The chunking state machine must re-seed the
+// subproblem's outer-state pointers at the top of the resume step -- a stale
+// sp.pen / problem pointer there would be exactly the heap-use-after-free this
+// double-hop-with-destruction shape turns into a hard ASan failure.
+TEST_CASE("augmented_lagrangian survives a move mid-chunk", "[move_asan]")
+{
+    using policy_t =
+        augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>,
+                                    hs076<>::problem_dimension>;
+
+    hs076<> problem;
+    auto x0 = problem.initial_point();
+    solver_options<> opts;
+
+    typename policy_t::options_type popts;
+    popts.inner_chunk = 3;  // force the first step() to stop mid-inner-solve
+
+    step_budget_solver probe{policy_t{}, problem, x0, opts, popts};
+    using solver_type = decltype(probe);
+
+    auto heap_solver = std::make_unique<solver_type>(std::move(probe));
+    auto sr = heap_solver->step();      // partial chunk: inner solve in flight
+    REQUIRE(sr.is_null_step);
+
+    solver_type survivor{std::move(*heap_solver)};
+    heap_solver.reset();
+
+    survivor.step();                    // resume the SAME inner solve, re-seeded
+    REQUIRE(survivor.state().x.size() == x0.size());
+}
