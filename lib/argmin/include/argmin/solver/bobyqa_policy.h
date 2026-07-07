@@ -589,6 +589,36 @@ struct bobyqa_policy
                             Eigen::Vector<double, N> sl = s.lower_scaled - s.sys.xbase;
                             Eigen::Vector<double, N> su = s.upper_scaled - s.sys.xbase;
                             xnew = s.sys.xopt + d;
+                            // The reference's TRSBOX returns a bound-active
+                            // component bitwise equal to sl/su via
+                            // median(sl, xopt+d, su) (bobyqb_/trsbox_), so its
+                            // xnew[j] == sl[j] tests fire exactly. This port
+                            // reconstructs xnew = xopt + d from the box solver's
+                            // displacement, where (xopt[j] + d[j]) only reproduces
+                            // (lower_scaled[j] - xbase[j]) bitwise when xopt[j] is
+                            // zero; a bound-active coordinate otherwise misses the
+                            // equality by a few ULPs and the curvature backstop is
+                            // silently skipped. Snap to the bound within an
+                            // eps-scale tolerance to recover the reference's
+                            // bound-active detection (this local xnew feeds only
+                            // the test; the evaluated step is rebuilt below).
+                            for(int j = 0; j < n; ++j)
+                            {
+                                double bscale = std::max({1.0, std::abs(sl[j]),
+                                                          std::abs(su[j]),
+                                                          std::abs(xnew[j])});
+                                // An eps-scale relative tolerance (8 ULP against
+                                // the coordinate magnitude); empirically the
+                                // detection is insensitive to this factor across
+                                // several orders of magnitude.
+                                double snap_tol =
+                                    8.0 * std::numeric_limits<double>::epsilon()
+                                    * bscale;
+                                if(std::abs(xnew[j] - sl[j]) <= snap_tol)
+                                    xnew[j] = sl[j];
+                                else if(std::abs(xnew[j] - su[j]) <= snap_tol)
+                                    xnew[j] = su[j];
+                            }
                             for(int j = 0; j < n; ++j)
                             {
                                 double bdtest = bdtol;
