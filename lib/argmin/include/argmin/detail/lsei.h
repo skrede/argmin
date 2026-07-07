@@ -54,6 +54,13 @@ struct lsei_workspace
     Eigen::HouseholderQR<matrix_t> qr_c;
     Eigen::HouseholderQR<matrix_t> qr_e;
 
+    // Persistent apply-workspaces for the Householder-sequence
+    // materializations, so applyThisOnTheLeft does not allocate its
+    // internal scratch per call. hseq_qc sizes to the Q_c column count
+    // (n); hseq_qtf sizes to the Q_e^T-times-vector column count (1).
+    vector_t hseq_qc;
+    vector_t hseq_qtf;
+
     // Buffers used to recover lambda_eq from the gradient projection on
     // the y_1 subspace at the LSEI optimum. Sized to n.
     vector_t lambda_eq_resid;   // E*x - f, then Q_c^T * grad
@@ -85,6 +92,8 @@ struct lsei_workspace
         y.resize(n);
         lambda_eq_resid.resize(n);
         lambda_eq_qgrad.resize(n);
+        hseq_qc.resize(n);
+        hseq_qtf.resize(1);
 
         // Worst-case shape for inner lsi: when m_eq == 0 (pure LSI
         // fallback), lsi sees the original n; otherwise it sees the
@@ -169,8 +178,14 @@ int lsei(
     // ------------------------------------------------------------------
     ws.qr_c.compute(C.transpose());
     if(ws.Qc.rows() != n || ws.Qc.cols() != n) ws.Qc.resize(n, n);
-    ws.Qc = ws.qr_c.householderQ()
-            * decltype(ws.Qc)::Identity(n, n);
+    // Materialize Q_c into the preallocated member without the per-call
+    // n x n temporary that `householderQ() * Identity` constructs (and its
+    // internal apply-workspace allocation): seed Q_c with the identity in
+    // place, then apply the Householder sequence with a persistent
+    // workspace. The reflectors act on the identity exactly as before, so
+    // Q_c is bit-identical; only the two allocations are removed.
+    ws.Qc.setIdentity();
+    ws.qr_c.householderQ().applyThisOnTheLeft(ws.Qc, ws.hseq_qc, true);
 
     // R_c is m_eq x m_eq upper triangular, extracted from qr_c.matrixQR().
     if(ws.R_c_upper.rows() != m_eq || ws.R_c_upper.cols() != m_eq)
@@ -243,7 +258,14 @@ int lsei(
                         .template triangularView<Eigen::Upper>();
 
         if(ws.Qt_f.size() != n) ws.Qt_f.resize(n);
-        ws.Qt_f.noalias() = ws.qr_e.householderQ().transpose() * ws.f_red;
+        // Qt_f = Q_e^T * f_red without the per-call result temporary the
+        // `householderQ().transpose() * f_red` product constructs: seed
+        // Qt_f with f_red, then apply the transposed sequence in place with
+        // a persistent workspace. Same reflector application to the same
+        // data as before -- bit-identical.
+        ws.Qt_f = ws.f_red;
+        ws.qr_e.householderQ().transpose()
+              .applyThisOnTheLeft(ws.Qt_f, ws.hseq_qtf, false);
 
         if(ws.y2_dyn.size() != n2) ws.y2_dyn.resize(n2);
 
@@ -263,7 +285,7 @@ int lsei(
                     return 6;
             }
             ws.y2_dyn = ws.R_e.template triangularView<Eigen::Upper>()
-                              .solve(ws.Qt_f.head(n2).eval());
+                              .solve(ws.Qt_f.head(n2));
         }
         else
         {
@@ -357,7 +379,7 @@ int lsei(
     ws.lambda_eq_resid.noalias() = ws.Qc.transpose() * ws.lambda_eq_qgrad;
 
     lambda_eq = ws.R_c_upper.template triangularView<Eigen::Upper>()
-                            .solve(ws.lambda_eq_resid.head(m_eq).eval());
+                            .solve(ws.lambda_eq_resid.head(m_eq));
 
     return 1;
 }

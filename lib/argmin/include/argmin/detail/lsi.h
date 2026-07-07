@@ -47,6 +47,10 @@ struct lsi_workspace
     vector_t y;
     vector_t ldp_lambda;  // Inequality multipliers from inner LDP solve.
 
+    // Persistent apply-workspace for the Q^T * f Householder-sequence
+    // materialization (sizes to the vector column count, 1).
+    vector_t hseq_y1;
+
     void resize(int n, int m_ineq)
     {
         E_dyn.resize(n, n);
@@ -60,6 +64,7 @@ struct lsi_workspace
         rhs.resize(n);
         y.resize(n);
         ldp_lambda.resize(m_ineq);
+        hseq_y1.resize(1);
     }
 };
 
@@ -150,9 +155,13 @@ int lsi(
     if(ws.R.rows() != n || ws.R.cols() != n) ws.R.resize(n, n);
     ws.R = ws.qr.matrixR().template triangularView<Eigen::Upper>();
 
-    // y1 = Q^T f.
+    // y1 = Q^T f without the per-call result temporary the
+    // `matrixQ().transpose() * f` product constructs: seed y1 with f, then
+    // apply the transposed Householder sequence in place with a persistent
+    // workspace. Same reflector application to the same data -- bit-identical.
     if(ws.y1.size() != n) ws.y1.resize(n);
-    ws.y1.noalias() = ws.qr.matrixQ().transpose() * f;
+    ws.y1 = f;
+    ws.qr.matrixQ().transpose().applyThisOnTheLeft(ws.y1, ws.hseq_y1, false);
 
     // Unconstrained case: solution in transformed coordinates is
     // x' = 0, so x = P * R^{-1} * y1.
