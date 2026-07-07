@@ -24,7 +24,7 @@ namespace argmin
 //   constrained        -- objective + equality/inequality constraints
 //   least_squares      -- objective + residuals + Jacobian
 //
-// All concepts are parameterised on Scalar (defaulting to double) per D-07.
+// All concepts are parameterised on Scalar (defaulting to double).
 // Problem types satisfy concepts by duck-typing -- no base class required.
 
 // Dimension extraction machinery. Every problem type MUST declare
@@ -43,7 +43,7 @@ inline constexpr int problem_dimension_v = P::problem_dimension;
 // static constexpr int constraint_count (total equality + inequality).
 // When present, enables fixed-size constraint vectors and Jacobians
 // throughout the solver pipeline. When absent, constraint dimensions
-// remain dynamic. Reference: D-03.
+// remain dynamic.
 
 template <typename P>
 concept has_constraint_count = requires {
@@ -110,28 +110,42 @@ concept least_squares = objective<P, S> &&
     { p.num_residuals() } -> std::convertible_to<int>;
 };
 
-// NLP solver concept for downstream consumer injection (e.g., ctrlpp).
+// Core stepping contract for downstream consumer injection (e.g., ctrlpp).
 //
-// Checks that a solver provides the full iterative execution model
-// plus constraint violation diagnostics. Designed to be satisfied by
-// basic_solver<Policy> for any constrained policy.
-//
-// Reference: D-07, D-08 from Phase 4 CONTEXT.
+// A steppable solver exposes the passive single-step surface: the scalar and
+// state typedefs, a step() that advances one iteration, const state/status
+// accessors, the two reset entry points, abort(), and constraint-violation
+// diagnostics. It deliberately omits solve()/step_n(): a steppable solver
+// need not own a convergence loop, so a bare step primitive satisfies
+// steppable without pulling in the loop-driving surface.
 template <typename Solver, typename S = double>
-concept nlp_solver = requires(Solver& solver, const Solver& csolver,
-                              const Eigen::VectorX<S>& x0)
+concept steppable = requires(Solver& solver, const Solver& csolver,
+                             const Eigen::VectorX<S>& x0)
 {
     typename Solver::scalar_type;
     typename Solver::state_type;
     { solver.step() } -> std::convertible_to<step_result<S>>;
-    { solver.solve() } -> std::convertible_to<solve_result<S>>;
-    { solver.step_n(int{}) } -> std::convertible_to<solve_result<S>>;
     { csolver.state() };
     { csolver.status() } -> std::convertible_to<solver_status>;
     { solver.reset(x0) };
     { solver.reset_clear(x0) };
     { solver.abort() };
     { csolver.constraint_violation() } -> std::convertible_to<S>;
+};
+
+// NLP solver concept for downstream consumer injection (e.g., ctrlpp).
+//
+// Refines steppable with the loop-owning surface: solve() (drive to
+// convergence) and step_n(budget) (bounded run). Loop-owning drivers -- e.g.
+// basic_solver<Policy> for any constrained policy -- satisfy nlp_solver;
+// passive step primitives that lack a convergence loop satisfy only
+// steppable.
+template <typename Solver, typename S = double>
+concept nlp_solver = steppable<Solver, S> &&
+    requires(Solver& solver)
+{
+    { solver.solve() } -> std::convertible_to<solve_result<S>>;
+    { solver.step_n(int{}) } -> std::convertible_to<solve_result<S>>;
 };
 
 // Harness contract for solver states.

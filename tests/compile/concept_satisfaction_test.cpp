@@ -236,6 +236,10 @@ struct mock_solver_no_cv
 
 static_assert(!argmin::nlp_solver<mock_solver_no_cv>);
 
+// The same mock also fails the core steppable contract: it omits
+// constraint_violation(), which steppable requires.
+static_assert(!argmin::steppable<mock_solver_no_cv>);
+
 // ---------------------------------------------------------------------------
 // Harness contract: solver_policy / solver_state / schedule concepts.
 //
@@ -389,6 +393,25 @@ static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::projected_gradient
 
 static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::multistart_policy<argmin::bobyqa_policy<>>>>);
 static_assert(argmin::nlp_solver<argmin::basic_solver<argmin::restarting_policy<argmin::cmaes_policy<>>>>);
+
+// ---------------------------------------------------------------------------
+// steppable core concept satisfaction
+//
+// basic_solver<Policy> exposes the full loop-owning surface, so it satisfies
+// both the core steppable contract and its nlp_solver refinement. These pin
+// that the split is additive: every nlp_solver is a steppable, across a
+// representative constrained policy, an unconstrained policy, and a
+// derivative-free policy.
+// ---------------------------------------------------------------------------
+
+static_assert(argmin::steppable<argmin::basic_solver<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::steppable<argmin::basic_solver<argmin::lbfgsb_policy<>>>);
+static_assert(argmin::steppable<argmin::basic_solver<argmin::cmaes_policy<>>>);
+
+// nlp_solver refines steppable: satisfying the loop-owning concept implies
+// the core stepping surface holds too.
+static_assert(argmin::steppable<argmin::basic_solver<argmin::nw_sqp_policy<>>>
+              && argmin::nlp_solver<argmin::basic_solver<argmin::nw_sqp_policy<>>>);
 
 // problem_dimension concept verification
 static_assert(argmin::has_problem_dimension<argmin::himmelblau<>>);
