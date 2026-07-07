@@ -291,8 +291,6 @@ struct projected_gn_policy
 
     void reset(state_type& s, Eigen::Ref<const Eigen::VectorXd> x0)
     {
-        s.lower = s.lower;  // bounds already cached
-        s.upper = s.upper;
         s.x = detail::project(x0, s.lower, s.upper);
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, static_cast<int>(x0.size()));
@@ -300,10 +298,19 @@ struct projected_gn_policy
         s.eval_jacobian(s.x, s.J);
         s.objective_value = 0.5 * s.r.squaredNorm();
 
-        // Nielsen init for lambda
-        Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
-        double max_diag = diag.maxCoeff();
-        s.lambda = (max_diag > 0.0) ? 1e-3 * max_diag : 1e-4;
+        // Initialize lambda (Nielsen 1999), honoring the configured
+        // initial_lambda / tau exactly as init() -- read the option fields
+        // directly rather than duplicating the literature default.
+        if(options.initial_lambda > 0.0)
+        {
+            s.lambda = options.initial_lambda;
+        }
+        else
+        {
+            Eigen::VectorXd diag = (s.J.transpose() * s.J).diagonal();
+            double max_diag = diag.maxCoeff();
+            s.lambda = (max_diag > 0.0) ? options.tau * max_diag : 1e-4;
+        }
         s.nu = 2.0;
         s.delta = options.trust_region_radius.value_or(1.0);
         s.iteration = 0;
