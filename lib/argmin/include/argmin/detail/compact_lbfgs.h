@@ -74,6 +74,14 @@ class compact_lbfgs
 
     using dyn_matrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
 
+    // Max-bounded workspace types. The 2k middle system is bounded by
+    // 2 * MaxHistory regardless of N; the nf/n axes are bounded by N (dynamic
+    // when N is dynamic, exactly the subspace_minimization.h precedent).
+    using middle_matrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, 0, 2 * MaxHistory, 2 * MaxHistory>;
+    using middle_vector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1, 0, 2 * MaxHistory, 1>;
+    using middle_panel = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, 0, 2 * MaxHistory, N>;
+    using reduced_matrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, 0, N, N>;
+
 public:
     compact_lbfgs()
     {
@@ -175,56 +183,66 @@ public:
         auto S = S_.leftCols(k);
         auto Y = Y_.leftCols(k);
 
-        // W^T * v (2k x 1). noalias() safe: Wv segments are distinct from
-        // all source operands (S, Y, v).
-        Eigen::Vector<Scalar, 2 * MaxHistory> Wv;
-        Wv.head(k).noalias() = theta_ * (S.transpose() * v);
-        Wv.segment(MaxHistory, k).noalias() = Y.transpose() * v;
+        // W^T * v assembled directly into the hoisted 2k stacked rhs buffer
+        // [theta S^T v; Y^T v]. mrhs_ is middle-dimension max-bounded
+        // (2*MaxHistory), so the resize never touches the heap. noalias() safe:
+        // the head/tail segments are distinct from all source operands.
+        mrhs_.resize(2 * k);
+        mrhs_.head(k).noalias() = theta_ * (S.transpose() * v);
+        mrhs_.tail(k).noalias() = Y.transpose() * v;
 
-        // Solve M * z = W^T * v with the in-contract middle-matrix solver.
-        // rhs is the 2k stacked [theta S^T v; Y^T v].
-        dyn_matrix rhs(2 * k, 1);
-        rhs.topRows(k) = Wv.head(k);
-        rhs.bottomRows(k) = Wv.segment(MaxHistory, k);
-        dyn_matrix z = solve_middle(rhs);
+        // Solve M * z = W^T * v with the hoisted middle-matrix factorization.
+        mz_.resize(2 * k);
+        solve_middle_into(mrhs_, mz_);
 
-        // B*v = theta*v - W*z. noalias() safe: Wz is a fresh variable,
-        // distinct from S, Y, z.
-        Eigen::Vector<Scalar, N> Wz(v.size());
-        Wz.noalias() = theta_ * (S * z.col(0).head(k));
-        Wz.noalias() += Y * z.col(0).tail(k);
-        return (theta_ * v - Wz).eval();
+        // B*v = theta*v - W*z accumulated in the hoisted N-dimension buffer.
+        // noalias() safe: Wz_ is distinct from S, Y, mz_.
+        Wz_.resize(v.size());
+        Wz_.noalias() = theta_ * (S * mz_.head(k));
+        Wz_.noalias() += Y * mz_.tail(k);
+        return (theta_ * v - Wz_).eval();
     }
 
     // Build reduced Hessian Z^T * B * Z for free variable subspace.
     // Z selects rows in free_indices from the identity matrix.
     // B_FF = theta * I_F - W_F * M^{-1} * W_F^T.
     //
-    // LDLT stays dynamic because free-variable count varies per call.
+    // The free-variable count nf varies per call but is bounded by N, and the
+    // 2k middle system is bounded by 2*MaxHistory, so every buffer here is a
+    // max-bounded type (the subspace_minimization free-Hessian precedent): at a
+    // compile-time N the reduced Hessian, the WF panel, and the middle solve
+    // are all stack-resident and the bound-active path allocates nothing.
     // Reference: N&W Section 16.6 (subspace minimization).
-    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> reduced_hessian(
-        const std::vector<int>& free_indices) const
+    reduced_matrix reduced_hessian(const std::vector<int>& free_indices) const
     {
         const int nf = static_cast<int>(free_indices.size());
-        if(nf == 0) return dyn_matrix{};
+        reduced_matrix BFF;
+        if(nf == 0) return BFF;
 
-        if(count_ == 0)
-            return (theta_ * dyn_matrix::Identity(nf, nf)).eval();
+        BFF.resize(nf, nf);
+        BFF.setIdentity();
+        BFF *= theta_;
+        if(count_ == 0) return BFF;
 
         const int k = count_;
 
-        dyn_matrix WF(nf, 2 * k);
+        // Build W_F^T (2k x nf) directly in the middle-panel buffer (rows
+        // bounded by 2*MaxHistory, cols by N). Storing the transpose keeps the
+        // bounded row axis on the 2*MaxHistory side, which stays a valid
+        // column-major max-bounded shape even when N == 1.
+        WFt_.resize(2 * k, nf);
         for(int j = 0; j < nf; ++j)
         {
             int idx = free_indices[j];
-            WF.row(j).head(k) = theta_ * S_.row(idx).head(k);
-            WF.row(j).tail(k) = Y_.row(idx).head(k);
+            WFt_.col(j).head(k) = theta_ * S_.row(idx).head(k).transpose();
+            WFt_.col(j).tail(k) = Y_.row(idx).head(k).transpose();
         }
 
-        dyn_matrix MiWFt = solve_middle(WF.transpose().eval());
+        MiWt_.resize(2 * k, nf);
+        solve_middle_into(WFt_, MiWt_);
 
-        dyn_matrix BFF = theta_ * dyn_matrix::Identity(nf, nf)
-                       - WF * MiWFt;
+        // B_FF = theta*I_F - W_F * M^{-1} * W_F^T = theta*I_F - (W_F^T)^T * MiWt.
+        BFF.noalias() -= WFt_.transpose() * MiWt_;
         return BFF;
     }
 
@@ -257,12 +275,13 @@ public:
         W.leftCols(k).noalias() = theta_ * S;
         W.rightCols(k) = Y;
 
-        // Solve M * Z = W^T => Z = M^{-1} * W^T, size 2k x n, with the
-        // in-contract middle-matrix solver.
-        dyn_matrix Z = solve_middle(W.transpose().eval());
+        // Solve M * Z = W^T => Z = M^{-1} * W^T, size 2k x n, into the hoisted
+        // middle-panel buffer (rows bounded by 2*MaxHistory, cols by N).
+        MiWt_.resize(2 * k, n);
+        solve_middle_into(W.transpose(), MiWt_);
 
         // B = theta*I - W * Z
-        B.noalias() -= W * Z;
+        B.noalias() -= W * MiWt_;
 
         return B;
     }
@@ -321,16 +340,20 @@ public:
     static constexpr int capacity() { return MaxHistory; }
 
 private:
-    // Solve M * z = rhs for the 2k x 2k active middle matrix
+    // Solve M * Z = rhs for the 2k x 2k active middle matrix
     //   M = [[theta S^T S, L], [L^T, -D]],
-    // where rhs is stacked [r1 (k rows); r2 (k rows)] and may carry multiple
-    // columns. M is symmetric indefinite; the strategy is chosen at compile
-    // time by the Factorization template parameter.
+    // writing the solution into the caller-provided max-bounded destination.
+    // rhs is stacked [r1 (k rows); r2 (k rows)] and may carry multiple columns.
+    // M is symmetric indefinite; the strategy is chosen at compile time by the
+    // Factorization template parameter. The partial_piv_lu path reuses the
+    // member M_active_ buffer and the member PartialPivLU factorization so no
+    // heap traffic occurs on the bound-active hot path.
     //
     // Reference: Byrd, Nocedal, Schnabel 1994 (structured middle-matrix
     //            inverse); N&W Section 9.2, eq. 9.15.
-    dyn_matrix solve_middle(
-        const Eigen::Ref<const dyn_matrix>& rhs) const
+    template <typename Rhs, typename Dst>
+    void solve_middle_into(const Eigen::MatrixBase<Rhs>& rhs,
+                           Eigen::MatrixBase<Dst>& dst) const
     {
         const int k = count_;
 
@@ -343,7 +366,6 @@ private:
             // strictly positive by the curvature clamp, so an in-contract
             // Cholesky (LLT) factorizes it. Only a diagonal solve remains for
             // the -D block. This never forms an indefinite factorization.
-            const int c = static_cast<int>(rhs.cols());
             const Eigen::Vector<Scalar, Eigen::Dynamic> Dinv =
                 D_.head(k).cwiseInverse();
             const dyn_matrix L = L_.topLeftCorner(k, k);
@@ -358,24 +380,25 @@ private:
             const dyn_matrix z1 = llt.solve(r1 + L * Dinv_r2);
             const dyn_matrix z2 = Dinv.asDiagonal() * (L.transpose() * z1 - r2);
 
-            dyn_matrix z(2 * k, c);
-            z.topRows(k) = z1;
-            z.bottomRows(k) = z2;
-            return z;
+            dst.topRows(k) = z1;
+            dst.bottomRows(k) = z2;
         }
         else
         {
             // PartialPivLU of the assembled 2k x 2k middle matrix. Row
             // pivoting bounds element growth for a general invertible system
-            // (in contract for the indefinite M, unlike Eigen::LDLT).
-            dyn_matrix M_active(2 * k, 2 * k);
-            M_active.topLeftCorner(k, k) = middle_.topLeftCorner(k, k);
-            M_active.block(0, k, k, k) = middle_.block(0, MaxHistory, k, k);
-            M_active.block(k, 0, k, k) = middle_.block(MaxHistory, 0, k, k);
-            M_active.block(k, k, k, k) = middle_.block(MaxHistory, MaxHistory, k, k);
+            // (in contract for the indefinite M, unlike Eigen::LDLT). The
+            // buffer and the factorization are members: at a compile-time N
+            // (and always for the 2*MaxHistory middle system) the resize and
+            // the factorization stay stack-resident.
+            M_active_.resize(2 * k, 2 * k);
+            M_active_.topLeftCorner(k, k) = middle_.topLeftCorner(k, k);
+            M_active_.block(0, k, k, k) = middle_.block(0, MaxHistory, k, k);
+            M_active_.block(k, 0, k, k) = middle_.block(MaxHistory, 0, k, k);
+            M_active_.block(k, k, k, k) = middle_.block(MaxHistory, MaxHistory, k, k);
 
-            Eigen::PartialPivLU<dyn_matrix> lu(M_active);
-            return lu.solve(rhs);
+            lu_.compute(M_active_);
+            dst = lu_.solve(rhs);
         }
     }
 
@@ -463,6 +486,16 @@ private:
     Eigen::Matrix<Scalar, 2 * MaxHistory, 2 * MaxHistory> middle_{};
     Eigen::Vector<Scalar, MaxHistory> rho_{};
     mutable Eigen::Vector<Scalar, MaxHistory> alpha_{};
+
+    // Hoisted middle-solve workspace (mutable: the products are const methods).
+    mutable middle_matrix M_active_{};
+    mutable Eigen::PartialPivLU<middle_matrix> lu_{};
+    mutable middle_vector mrhs_{};        // multiply(): stacked W^T v
+    mutable middle_vector mz_{};          // multiply(): M^{-1} W^T v
+    mutable Eigen::Vector<Scalar, N> Wz_{};  // multiply(): W * z accumulation
+    mutable middle_panel WFt_{};          // reduced_hessian(): free-variable panel W_F^T
+    mutable middle_panel MiWt_{};         // reduced_/dense_hessian(): M^{-1} W^T
+
     Scalar theta_{Scalar(1)};
     int count_{0};
 };

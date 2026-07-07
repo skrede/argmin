@@ -469,10 +469,14 @@ if(NLopt_FOUND)
         micro_filter_trsqp.cpp sqp_alloc_gate_filter_trsqp)
     argmin_add_alloc_gate(micro_tr_sqp_alloc_trace
         micro_filter_trsqp.cpp sqp_alloc_gate_tr_sqp ARGMIN_ALLOC_TRACE_TR_SQP)
+    # The L-BFGS-B family is allocation-free on BOTH the all-free fast path and
+    # the bound-active GCP/subspace/reduced_hessian path, so both gates run in
+    # zero-allocation mode across both scenarios (the bound-active fixture
+    # carries a path-entry assertion so the zero-mode pass is not vacuous).
     argmin_add_alloc_gate(micro_byrd_lbfgsb_alloc_trace
-        micro_byrd_lbfgsb.cpp alloc_gate_byrd_lbfgsb)
+        micro_byrd_lbfgsb.cpp alloc_gate_byrd_lbfgsb ARGMIN_ALLOC_GATE_EXPECT_ZERO)
     argmin_add_alloc_gate(micro_lbfgsb_alloc_trace
-        micro_lbfgsb.cpp alloc_gate_lbfgsb)
+        micro_lbfgsb.cpp alloc_gate_lbfgsb ARGMIN_ALLOC_GATE_EXPECT_ZERO)
 
     add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
     target_link_libraries(micro_augmented_lagrangian PRIVATE argmin::argmin NLopt::nlopt)
