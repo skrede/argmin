@@ -344,6 +344,11 @@ struct tr_sqp_policy
         Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;
         Eigen::VectorXd w_workspace;
 
+        // Byrd-Omojokun normal-leg / predicted-reduction scratch, sized
+        // on the joint primal (n + n_ineq) and constraint (n_eq + n_ineq)
+        // axes at init / reset. Keeps the composite step allocation-free.
+        detail::byrd_omojokun_workspace<double, Eigen::Dynamic> bo_ws;
+
         double objective_value{};
         // Lagrangian-Hessian approximation on the JOINT (x, s) space;
         // sized n + n_ineq. The compile-time dimension is Eigen::Dynamic
@@ -432,6 +437,7 @@ struct tr_sqp_policy
             s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(m_joint);
             s.w_workspace.resize(m_joint);
         }
+        s.bo_ws.resize(n_joint, m_joint);
 
         // Constraint evaluation. The state holds c_eq / c_ineq /
         // J_eq / J_ineq in the un-reformulated (x-only) shape so the
@@ -754,7 +760,7 @@ struct tr_sqp_policy
             trial_eval,
             s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
             v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
-            s.penalty, options.penalty_factor);
+            s.bo_ws, s.penalty, options.penalty_factor);
 
         // Caller-side augmented-merit ratio test + radius update.
         // The helper updates s.penalty in place per the LNP heuristic
@@ -921,7 +927,7 @@ struct tr_sqp_policy
                     trial_eval,
                     s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
                     v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
-                    s.penalty, options.penalty_factor);
+                    s.bo_ws, s.penalty, options.penalty_factor);
 
                 // Re-run the caller-side acceptance gate against this
                 // retry's raw outputs. The radius input is held at

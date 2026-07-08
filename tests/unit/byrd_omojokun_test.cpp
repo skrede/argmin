@@ -13,6 +13,7 @@
 using Catch::Approx;
 using argmin::detail::byrd_omojokun_composite_step;
 using argmin::detail::byrd_omojokun_step_result;
+using argmin::detail::byrd_omojokun_workspace;
 using argmin::detail::cg_exit_status;
 using argmin::detail::zeta;
 using argmin::detail::tr_eta_1;
@@ -189,6 +190,8 @@ TEST_CASE("byrd_omojokun pure equality quadratic accepts and progresses",
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(1);
     Eigen::VectorXd w_workspace(1);
     Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
@@ -204,6 +207,7 @@ TEST_CASE("byrd_omojokun pure equality quadratic accepts and progresses",
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
         penalty, penalty_factor);
 
     // Normal step must reduce the linearized residual:
@@ -272,6 +276,8 @@ TEST_CASE("byrd_omojokun rank-deficient A triggers Cauchy fallback",
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(2);
     Eigen::VectorXd w_workspace(2);
     Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
@@ -287,6 +293,7 @@ TEST_CASE("byrd_omojokun rank-deficient A triggers Cauchy fallback",
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
         penalty, penalty_factor);
 
     // Helper must not crash and must produce a finite step that
@@ -335,6 +342,8 @@ TEST_CASE("byrd_omojokun Maratos-shape problem rejects unsafe step",
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(1);
     Eigen::VectorXd w_workspace(1);
     Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     const double f_old = -x_linearize[0];  // -1.0
@@ -350,6 +359,7 @@ TEST_CASE("byrd_omojokun Maratos-shape problem rejects unsafe step",
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
         penalty, penalty_factor);
 
     const auto acc = evaluate_acceptance(r, f_old, c_norm_old,
@@ -397,6 +407,8 @@ TEST_CASE("byrd_omojokun ratio > 0.75 at TR boundary expands radius",
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(0);
     Eigen::VectorXd w_workspace(0);
     Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
@@ -412,6 +424,7 @@ TEST_CASE("byrd_omojokun ratio > 0.75 at TR boundary expands radius",
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
         penalty, penalty_factor);
 
     const auto acc = evaluate_acceptance(r, f_old, c_norm_old,
@@ -455,6 +468,8 @@ TEST_CASE("byrd_omojokun interior step holds radius",
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(0);
     Eigen::VectorXd w_workspace(0);
     Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
@@ -470,6 +485,7 @@ TEST_CASE("byrd_omojokun interior step holds radius",
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
         penalty, penalty_factor);
 
     const auto acc = evaluate_acceptance(r, f_old, c_norm_old,
@@ -555,6 +571,8 @@ TEST_CASE("byrd_omojokun_composite_step penalty grows to the LNP "
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(1);
     Eigen::VectorXd w_workspace(1);
     Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
@@ -569,6 +587,7 @@ TEST_CASE("byrd_omojokun_composite_step penalty grows to the LNP "
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
         penalty, penalty_factor);
 
     INFO("p = (" << p_out[0] << ", " << p_out[1]
@@ -612,6 +631,8 @@ TEST_CASE("byrd_omojokun_composite_step penalty stays on a "
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(1);
     Eigen::VectorXd w_workspace(1);
     Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
@@ -626,6 +647,7 @@ TEST_CASE("byrd_omojokun_composite_step penalty stays on a "
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
         penalty, penalty_factor);
 
     INFO("p = (" << p_out[0] << ", " << p_out[1]
@@ -694,6 +716,8 @@ byrd_omojokun_step_result run_nullspace_instance(
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(1);
     Eigen::VectorXd w_workspace(1);
     Eigen::Vector2d v_buf, r_cg_buf, d_cg_buf, Bd_cg_buf;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     trial_eval_quadratic teval{g, B, A, c, 0.0};
@@ -707,6 +731,7 @@ byrd_omojokun_step_result run_nullspace_instance(
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf_out, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out_out,
+        ws,
         penalty, penalty_factor);
     return r;
 }
@@ -808,6 +833,8 @@ TEST_CASE("byrd_omojokun vpred >= 0 across a delta grid (5-D, 2 eq)",
         Eigen::VectorXd w_workspace(2);
         Eigen::Vector<double, 5> v_buf, u_buf, r_cg_buf, d_cg_buf,
             Bd_cg_buf, p_out;
+        byrd_omojokun_workspace<double, 5> ws;
+        ws.resize(5, static_cast<int>(A.rows()));
 
         double penalty = 1.0;
         auto r = byrd_omojokun_composite_step<double, 5>(
@@ -817,6 +844,7 @@ TEST_CASE("byrd_omojokun vpred >= 0 across a delta grid (5-D, 2 eq)",
             teval,
             AAt_workspace, ldlt_workspace, w_workspace,
             v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+            ws,
             penalty, 0.0);
 
         INFO("delta = " << delta << "  vpred = " << r.vpred
@@ -854,6 +882,8 @@ TEST_CASE("byrd_omojokun_composite_step penalty stays at initial "
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(0);
     Eigen::VectorXd w_workspace(0);
     Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
@@ -868,6 +898,7 @@ TEST_CASE("byrd_omojokun_composite_step penalty stays at initial "
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
         penalty, penalty_factor);
 
     INFO("penalty post-step=" << penalty);
@@ -926,6 +957,8 @@ TEST_CASE("byrd_omojokun normal step is confined to the displaced box "
     Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(2);
     Eigen::VectorXd w_workspace(2);
     Eigen::Vector2d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 2> ws;
+    ws.resize(2, static_cast<int>(A.rows()));
 
     hessian_op_2d hop{B};
     trial_eval_quadratic teval{g, B, A, c, /*f_old=*/0.0};
@@ -938,6 +971,7 @@ TEST_CASE("byrd_omojokun normal step is confined to the displaced box "
         teval,
         AAt_workspace, ldlt_workspace, w_workspace,
         v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
         penalty, 0.0);
 
     INFO("v = (" << v_buf[0] << ", " << v_buf[1]

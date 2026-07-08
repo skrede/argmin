@@ -503,6 +503,11 @@ struct filter_trsqp_policy
         Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;
         Eigen::VectorXd w_workspace;
 
+        // Byrd-Omojokun normal-leg / predicted-reduction scratch, sized
+        // on the joint primal (n + n_ineq) and constraint (n_eq + n_ineq)
+        // axes at init / reset. Keeps the composite step allocation-free.
+        detail::byrd_omojokun_workspace<double, Eigen::Dynamic> bo_ws;
+
         // Restoration helper buffers. Allocated only when
         // options.restoration_max_iter > 0 at policy construction time
         // (lazy-init guard keeps zero-restoration callers at the
@@ -631,6 +636,7 @@ struct filter_trsqp_policy
             s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(m_joint);
             s.w_workspace.resize(m_joint);
         }
+        s.bo_ws.resize(n_joint, m_joint);
 
         // Lazy-init restoration helper buffers. Allocated only when
         // restoration is opted in; the zero-default keeps the
@@ -962,7 +968,7 @@ struct filter_trsqp_policy
             trial_eval,
             s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
             v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
-            s.penalty, 0.0);
+            s.bo_ws, s.penalty, 0.0);
 
         // Directional objective-model term grad_f^T p of the PRIMARY
         // composite step, consumed by the switching-condition
@@ -1198,7 +1204,7 @@ struct filter_trsqp_policy
                     trial_eval,
                     s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
                     v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
-                    s.penalty, 0.0);
+                    s.bo_ws, s.penalty, 0.0);
 
                 std::tie(accepted, new_delta) =
                     compute_accept_and_radius(bo_step, delta_pre_step);

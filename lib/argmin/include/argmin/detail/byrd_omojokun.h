@@ -181,6 +181,52 @@ struct byrd_omojokun_step_result
     cg_exit_status tangential_cg_status;
 };
 
+// Caller-owned scratch for the composite step's normal-leg dogleg and
+// the predicted-reduction assembly. The helper is instantiated at a
+// dynamic joint dimension (the slack-augmented primal width is a
+// runtime quantity even when the policy pins a compile-time x-only N),
+// so every one of these would otherwise heap-allocate on each step.
+// Threaded from the policy state so the composite step is allocation-
+// free across the real-time step window. The step-space vectors live on
+// the joint primal axis n_joint; Ag_n / Av / Ap_plus_c live on the
+// constraint axis m_total.
+template <typename Scalar, int N>
+struct byrd_omojokun_workspace
+{
+    Eigen::Vector<Scalar, N> g_n;
+    Eigen::Vector<Scalar, N> v_C;
+    Eigen::Vector<Scalar, N> v_N;
+    Eigen::Vector<Scalar, N> a;
+    Eigen::Vector<Scalar, N> d;
+    Eigen::Vector<Scalar, N> v_clamped;
+    Eigen::Vector<Scalar, N> Bv;
+    Eigen::Vector<Scalar, N> g_t;
+    Eigen::Vector<Scalar, N> lower_t;
+    Eigen::Vector<Scalar, N> upper_t;
+    Eigen::Vector<Scalar, N> Bp;
+    Eigen::VectorXd Ag_n;
+    Eigen::VectorXd Av;
+    Eigen::VectorXd Ap_plus_c;
+
+    void resize(int n_joint, int m_total)
+    {
+        g_n.resize(n_joint);
+        v_C.resize(n_joint);
+        v_N.resize(n_joint);
+        a.resize(n_joint);
+        d.resize(n_joint);
+        v_clamped.resize(n_joint);
+        Bv.resize(n_joint);
+        g_t.resize(n_joint);
+        lower_t.resize(n_joint);
+        upper_t.resize(n_joint);
+        Bp.resize(n_joint);
+        Ag_n.resize(m_total);
+        Av.resize(m_total);
+        Ap_plus_c.resize(m_total);
+    }
+};
+
 // Byrd-Omojokun composite step.
 //
 // Inputs:
@@ -226,6 +272,11 @@ struct byrd_omojokun_step_result
 //   Bd_cg_buf        -- caller-owned Steihaug-CG scratch buffers in
 //                       joint space.
 //   p_out            -- caller-owned composite-step output (v + u).
+//   ws               -- caller-owned byrd_omojokun_workspace holding the
+//                       normal-leg dogleg temporaries and the predicted-
+//                       reduction products (pre-sized to the joint primal
+//                       and constraint axes); keeps the step allocation-
+//                       free at a dynamic joint dimension.
 //   penalty          -- in/out adaptive L2-merit penalty parameter.
 //                       Owned by the caller's policy state so it persists
 //                       across composite-step calls; updated per the
@@ -277,6 +328,7 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     Eigen::Ref<Eigen::Vector<Scalar, N>> d_cg_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>> Bd_cg_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>> p_out,
+    byrd_omojokun_workspace<Scalar, N>& ws,
     Scalar& penalty,
     Scalar penalty_factor)
 {
@@ -328,10 +380,10 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     {
         // Cauchy step: v_C = -alpha_C * g_n where g_n = A^T c and
         //              alpha_C = ||g_n||^2 / ||A g_n||^2.
-        Eigen::Vector<Scalar, N> g_n = A.transpose() * c;
-        Eigen::VectorXd Ag_n = A * g_n;
-        const Scalar gn_sq = g_n.squaredNorm();
-        const Scalar Agn_sq = Ag_n.squaredNorm();
+        ws.g_n.noalias() = A.transpose() * c;
+        ws.Ag_n.noalias() = A * ws.g_n;
+        const Scalar gn_sq = ws.g_n.squaredNorm();
+        const Scalar Agn_sq = ws.Ag_n.squaredNorm();
 
         if(Agn_sq <= std::numeric_limits<Scalar>::epsilon())
         {
@@ -341,15 +393,15 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
         else
         {
             const Scalar alpha_C = gn_sq / Agn_sq;
-            Eigen::Vector<Scalar, N> v_C = -alpha_C * g_n;
-            const Scalar v_C_norm = v_C.norm();
+            ws.v_C.noalias() = -alpha_C * ws.g_n;
+            const Scalar v_C_norm = ws.v_C.norm();
 
             if(v_C_norm >= delta_n)
             {
                 // Cauchy direction truncated to the displaced TR
                 // boundary along -g_n.
                 const Scalar gn_norm = sqrt(gn_sq);
-                v_buf.noalias() = -(delta_n / gn_norm) * g_n;
+                v_buf.noalias() = -(delta_n / gn_norm) * ws.g_n;
             }
             else
             {
@@ -361,20 +413,19 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
                 // heap allocation.
                 w_workspace = c;
                 ldlt_workspace.solveInPlace(w_workspace);
-                Eigen::Vector<Scalar, N> v_N =
-                    -(A.transpose() * w_workspace);
+                ws.v_N.noalias() = -(A.transpose() * w_workspace);
 
-                if(!have_factorization || !v_N.allFinite())
+                if(!have_factorization || !ws.v_N.allFinite())
                 {
                     // Rank-deficient AA^T; LDLT flagged. Fall back
                     // to pure Cauchy truncated to the TR boundary.
                     const Scalar gn_norm = sqrt(gn_sq);
-                    v_buf.noalias() = -(delta_n / gn_norm) * g_n;
+                    v_buf.noalias() = -(delta_n / gn_norm) * ws.g_n;
                     result.normal_step_lsq_fallback = true;
                 }
-                else if(v_N.norm() <= delta_n)
+                else if(ws.v_N.norm() <= delta_n)
                 {
-                    v_buf = v_N;
+                    v_buf = ws.v_N;
                 }
                 else
                 {
@@ -383,11 +434,11 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
                     // delta_n for theta in [0, 1]. Algebra and
                     // discriminant clamp transcribed verbatim from
                     // projected_gn_step.h:199-212 (a / d / disc / theta).
-                    Eigen::Vector<Scalar, N> a = v_C;
-                    Eigen::Vector<Scalar, N> d = v_N - v_C;
-                    const Scalar a_sq = a.squaredNorm();
-                    const Scalar d_sq = d.squaredNorm();
-                    const Scalar a_dot_d = a.dot(d);
+                    ws.a = ws.v_C;
+                    ws.d = ws.v_N - ws.v_C;
+                    const Scalar a_sq = ws.a.squaredNorm();
+                    const Scalar d_sq = ws.d.squaredNorm();
+                    const Scalar a_dot_d = ws.a.dot(ws.d);
                     const Scalar delta_n_sq = delta_n * delta_n;
                     const Scalar disc =
                         a_dot_d * a_dot_d - d_sq * (a_sq - delta_n_sq);
@@ -395,7 +446,7 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
                         disc > Scalar(0) ? disc : Scalar(0);
                     Scalar theta = (-a_dot_d + sqrt(disc_clamped)) / d_sq;
                     theta = std::clamp(theta, Scalar(0), Scalar(1));
-                    v_buf = a + theta * d;
+                    v_buf = ws.a + theta * ws.d;
                 }
             }
         }
@@ -438,21 +489,21 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     // the alternative is an infeasible iterate.
     if(c.norm() != Scalar(0))
     {
-        Eigen::Vector<Scalar, N> v_clamped =
+        ws.v_clamped =
             v_buf.cwiseMax(lower_displaced).cwiseMin(upper_displaced);
-        if((v_clamped - v_buf).squaredNorm() > Scalar(0))
+        if((ws.v_clamped - v_buf).squaredNorm() > Scalar(0))
         {
-            Eigen::VectorXd Av = A * v_clamped;
-            const Scalar Av_sq = Av.squaredNorm();
+            ws.Av.noalias() = A * ws.v_clamped;
+            const Scalar Av_sq = ws.Av.squaredNorm();
             if(Av_sq > Scalar(0))
             {
                 const Scalar t = std::clamp(
-                    -(Av.dot(c)) / Av_sq, Scalar(0), Scalar(1));
-                v_buf = t * v_clamped;
+                    -(ws.Av.dot(c)) / Av_sq, Scalar(0), Scalar(1));
+                v_buf = t * ws.v_clamped;
             }
             else
             {
-                v_buf = v_clamped;
+                v_buf = ws.v_clamped;
             }
         }
     }
@@ -468,9 +519,8 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     // step u is confined to null(A) (N&W 18.49) so it preserves the
     // normal step's linearized-feasibility gain; the projector below
     // reuses the A A^T factorization built at entry.
-    Eigen::Vector<Scalar, N> Bv(v_buf.size());
-    hessian_op(v_buf, Bv);
-    Eigen::Vector<Scalar, N> g_t = g + Bv;
+    hessian_op(v_buf, ws.Bv);
+    ws.g_t.noalias() = g + ws.Bv;
 
     // Tangential radius: because u in null(A) is exactly orthogonal to
     // the normal step v in range(A^T), ||v + u||^2 = ||v||^2 + ||u||^2
@@ -484,8 +534,8 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     const Scalar delta_t =
         remainder > Scalar(0) ? sqrt(remainder) : Scalar(0);
 
-    Eigen::Vector<Scalar, N> lower_t = lower_displaced - v_buf;
-    Eigen::Vector<Scalar, N> upper_t = upper_displaced - v_buf;
+    ws.lower_t = lower_displaced - v_buf;
+    ws.upper_t = upper_displaced - v_buf;
 
     // Null-space projector: z <- z - A^T (A A^T)^{-1} A z, reusing
     // ldlt_workspace and w_workspace. Identity when there are no
@@ -500,9 +550,9 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
 
     int blocking_coord = -1;
     result.tangential_cg_status = detail::steihaug_cg<Scalar, N>(
-        g_t, hessian_op,
+        ws.g_t, hessian_op,
         delta_t, eps,
-        lower_t, upper_t,
+        ws.lower_t, ws.upper_t,
         max_cg_iter,
         u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf,
         project_null, &blocking_coord);
@@ -554,9 +604,9 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
                 blocking_coord = -1;
                 result.tangential_cg_status =
                     detail::steihaug_cg<Scalar, N>(
-                        g_t, hessian_op,
+                        ws.g_t, hessian_op,
                         delta_t, eps,
-                        lower_t, upper_t,
+                        ws.lower_t, ws.upper_t,
                         max_cg_iter,
                         u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf,
                         project_aug, &blocking_coord,
@@ -591,12 +641,12 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     // L2-merit predicted reduction as `predicted + penalty * vpred`
     // when needed; filter-style callers consume the unweighted
     // `predicted` and a separately-computed `h` aggregate.
-    Eigen::Vector<Scalar, N> Bp(p_out.size());
-    hessian_op(p_out, Bp);
-    const Scalar Bp_dot_p = p_out.dot(Bp);
-    Eigen::VectorXd Ap_plus_c = A * p_out + c;
+    hessian_op(p_out, ws.Bp);
+    const Scalar Bp_dot_p = p_out.dot(ws.Bp);
+    ws.Ap_plus_c.noalias() = A * p_out;
+    ws.Ap_plus_c += c;
     const Scalar c_norm_lin = c.norm();
-    const Scalar Ap_plus_c_norm = Ap_plus_c.norm();
+    const Scalar Ap_plus_c_norm = ws.Ap_plus_c.norm();
     const Scalar vpred = c_norm_lin - Ap_plus_c_norm;
     const Scalar predicted =
         -g_obj.dot(p_out) - Scalar{0.5} * Bp_dot_p;
