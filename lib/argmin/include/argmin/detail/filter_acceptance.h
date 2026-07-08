@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -93,6 +94,22 @@ public:
                         Scalar gamma_h = Scalar(1e-5))
         : gamma_f_(gamma_f), gamma_h_(gamma_h) {}
 
+    // Bounded (objective, violation) frontier capacity. add() caps the
+    // frontier at this many entries so its push_back never grows the vector
+    // past the initialize()-time reservation -- steady-state allocation-free
+    // -- and the worst-case entry count is bounded for the real-time claim.
+    //
+    // The value is chosen by an empirical sweep of the filter high-water
+    // count across the constrained Hock-Schittkowski suite on every filter
+    // policy (the line-search and both trust-region modes): dominance pruning
+    // already keeps the frontier small, with a measured worst case of 29
+    // entries. 256 sits at roughly 8x that high-water with round headroom,
+    // so the cap is never reached on the suite and convergence is identical
+    // to an unbounded frontier by measurement; it also matches the historical
+    // reservation, leaving the memory footprint unchanged
+    // (256 * 16 B = 4 KB on x86_64 with double).
+    static constexpr std::size_t capacity = 256;
+
     // Initialize the filter with a maximum constraint violation ceiling
     // and an optional violation floor applied to stored entries.
     //
@@ -102,11 +119,12 @@ public:
     // default preserves the un-floored behavior bit-for-bit for callers
     // that pass only h_max.
     //
-    // Pre-reserves the underlying entry vector to a typical SQP iteration
-    // budget so that hot-path add() calls do not trigger geometric vector
-    // growth (which would allocate). 256 entries cover well past any
-    // realistic SQP iteration count for the line-search filter family;
-    // the extra capacity is small (16 B/entry on x86_64 with double).
+    // Pre-reserves the underlying entry vector to the bounded frontier
+    // capacity so that hot-path add() calls never trigger geometric vector
+    // growth (which would allocate). Combined with the at-capacity policy in
+    // add(), this makes the filter both steady-state allocation-free and
+    // worst-case bounded -- the last unbounded container on the real-time
+    // filter-SQP path. See the capacity constant for the empirical basis.
     //
     // Reference: Wachter & Biegler 2006 Section 4 (theta_max and
     //            theta_min scaling against max{1, theta(x_0)}).
@@ -118,8 +136,8 @@ public:
         if(entries_.capacity() < reserve_to)
             entries_.reserve(reserve_to);
 #else
-        if(entries_.capacity() < 256)
-            entries_.reserve(256);
+        if(entries_.capacity() < capacity)
+            entries_.reserve(capacity);
 #endif
         h_max_ = h_max;
         theta_min_ = theta_min;
@@ -186,33 +204,47 @@ public:
                                       && e.violation >= h_floored;
                            }),
             entries_.end());
+
+        // At-capacity policy: when the pruned frontier is already full, drop
+        // the maximal-violation (loosest) entry before admitting the new one,
+        // so the tight near-feasible guards that discriminate near the
+        // optimum survive. On the swept suite the cap is never reached, so
+        // this is a worst-case safeguard for pathological inputs; under
+        // forced starvation it is the empirically least-disruptive heuristic
+        // (fewer at-capacity events and fewer perturbed cells than either
+        // rejecting the trial or a FIFO ring).
 #ifdef ARGMIN_FILTER_CAPACITY_SWEEP
+        const std::size_t cap = filter_sweep_state().capacity;
+        const int overflow_policy = filter_sweep_state().overflow_policy;
+#else
+        constexpr std::size_t cap = capacity;
+        constexpr int overflow_policy = 1;
+#endif
+        if(entries_.size() >= cap)
         {
-            auto& st = filter_sweep_state();
-            if(entries_.size() >= st.capacity)
+#ifdef ARGMIN_FILTER_CAPACITY_SWEEP
+            ++filter_sweep_state().evictions;
+#endif
+            if(overflow_policy == 0)
             {
-                ++st.evictions;
-                if(st.overflow_policy == 0)
-                    return; // reject the incoming trial: frontier unchanged
-                if(st.overflow_policy == 1)
-                {
-                    // drop the maximal-violation (loosest) frontier entry
-                    auto worst = std::max_element(
-                        entries_.begin(), entries_.end(),
-                        [](const filter_entry<Scalar>& a,
-                           const filter_entry<Scalar>& b) {
-                            return a.violation < b.violation;
-                        });
-                    if(worst != entries_.end())
-                        entries_.erase(worst);
-                }
-                else
-                {
-                    entries_.erase(entries_.begin()); // FIFO ring: drop oldest
-                }
+                return; // reject the incoming trial: frontier unchanged
+            }
+            else if(overflow_policy == 1)
+            {
+                auto worst = std::max_element(
+                    entries_.begin(), entries_.end(),
+                    [](const filter_entry<Scalar>& a,
+                       const filter_entry<Scalar>& b) {
+                        return a.violation < b.violation;
+                    });
+                if(worst != entries_.end())
+                    entries_.erase(worst);
+            }
+            else
+            {
+                entries_.erase(entries_.begin()); // FIFO ring: drop oldest
             }
         }
-#endif
         entries_.push_back({f, h_floored});
 #ifdef ARGMIN_FILTER_CAPACITY_SWEEP
         {
@@ -229,6 +261,11 @@ public:
     {
         return static_cast<std::uint16_t>(entries_.size());
     }
+
+    // Currently reserved backing-store capacity (entries). Exposes the
+    // underlying vector's reservation so a steady-state no-reallocation
+    // invariant can be observed directly, independent of Eigen.
+    std::size_t capacity_reserved() const { return entries_.capacity(); }
 
     // Reset to the freshly-constructed state: entries dropped, the
     // violation ceiling restored to the default-construction value, and
