@@ -208,6 +208,18 @@ struct byrd_omojokun_workspace
     Eigen::VectorXd Av;
     Eigen::VectorXd Ap_plus_c;
 
+
+    // Lin-More tangential free-set restart scratch. The augmented normal
+    // equations grow one unit row per pinned box coordinate; sized to the
+    // worst case m_total + n_joint (every joint coordinate fixed) and used
+    // through top-left blocks so the max-sized LDLT factors a same-shape
+    // system on every restart (no per-restart reallocation).
+    Eigen::MatrixXd A_aug;
+    Eigen::MatrixXd AAt_aug;
+    Eigen::VectorXd w_aug;
+    Eigen::LDLT<Eigen::MatrixXd> ldlt_aug;
+    std::vector<int> fixed;
+
     void resize(int n_joint, int m_total)
     {
         g_n.resize(n_joint);
@@ -224,6 +236,13 @@ struct byrd_omojokun_workspace
         Ag_n.resize(m_total);
         Av.resize(m_total);
         Ap_plus_c.resize(m_total);
+
+        const int m_aug_max = m_total + n_joint;
+        A_aug.resize(m_aug_max, n_joint);
+        AAt_aug.resize(m_aug_max, m_aug_max);
+        w_aug.resize(m_aug_max);
+        ldlt_aug = Eigen::LDLT<Eigen::MatrixXd>(m_aug_max);
+        fixed.reserve(static_cast<std::size_t>(n_joint));
     }
 };
 
@@ -413,7 +432,11 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
                 // heap allocation.
                 w_workspace = c;
                 ldlt_workspace.solveInPlace(w_workspace);
-                ws.v_N.noalias() = -(A.transpose() * w_workspace);
+                // Split the negation off the matrix product: wrapping the
+                // gemv in a unary minus makes Eigen nested-evaluate the
+                // product into a heap temporary; assign then negate in place.
+                ws.v_N.noalias() = A.transpose() * w_workspace;
+                ws.v_N = -ws.v_N;
 
                 if(!have_factorization || !ws.v_N.allFinite())
                 {
@@ -571,35 +594,49 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
         if(m_total > 0)
         {
             const int n = static_cast<int>(g.size());
-            std::vector<int> fixed;
+            const int m_aug_max = static_cast<int>(ws.A_aug.rows());
+
+            // Assemble the full-width augmented Jacobian once: the base
+            // rows carry A, every augmented/padding row starts cleared so
+            // the max-sized A_aug carries only the real constraint rows
+            // (padding rows stay zero and are inert in the projector).
+            ws.fixed.clear();
+            ws.A_aug.topRows(m_total) = A;
+            ws.A_aug.bottomRows(m_aug_max - m_total).setZero();
+
+            const Eigen::Ref<const Eigen::Matrix<Scalar,
+                Eigen::Dynamic, N>> A_aug_ref(ws.A_aug);
+            auto project_aug = [&](auto& vec)
+            {
+                detail::null_space_project<Scalar, N>(
+                    A_aug_ref, ws.ldlt_aug, vec, ws.w_aug,
+                    null_space_refine_passes);
+            };
+
             int restarts = 0;
             while(blocking_coord >= 0 && restarts < n)
             {
-                fixed.push_back(blocking_coord);
+                ws.fixed.push_back(blocking_coord);
                 ++restarts;
 
-                const int m_aug = m_total + static_cast<int>(fixed.size());
-                Eigen::MatrixXd A_aug(m_aug, n);
-                A_aug.topRows(m_total) = A;
-                for(std::size_t f = 0; f < fixed.size(); ++f)
-                {
-                    A_aug.row(m_total + static_cast<int>(f)).setZero();
-                    A_aug(m_total + static_cast<int>(f), fixed[f]) =
-                        Scalar(1);
-                }
+                const int m_aug =
+                    m_total + static_cast<int>(ws.fixed.size());
+                // Pin the newly blocked coordinate with a unit row; earlier
+                // unit rows persist from prior iterations of this loop.
+                ws.A_aug.row(m_aug - 1).setZero();
+                ws.A_aug(m_aug - 1, ws.fixed.back()) = Scalar(1);
 
-                Eigen::MatrixXd AAt_aug = A_aug * A_aug.transpose();
-                Eigen::LDLT<Eigen::MatrixXd> ldlt_aug(AAt_aug);
-                Eigen::VectorXd w_aug(m_aug);
-                const Eigen::Ref<const Eigen::Matrix<Scalar,
-                    Eigen::Dynamic, N>> A_aug_ref(A_aug);
-
-                auto project_aug = [&](auto& vec)
-                {
-                    detail::null_space_project<Scalar, N>(
-                        A_aug_ref, ldlt_aug, vec, w_aug,
-                        null_space_refine_passes);
-                };
+                // Augmented normal equations on the real block, with an
+                // identity pad on the unused rows so the max-sized LDLT
+                // factors a same-shape PD system on every restart (no
+                // reallocation) and the pad stays inert in the projection.
+                ws.AAt_aug.setZero();
+                ws.AAt_aug.topLeftCorner(m_aug, m_aug).noalias() =
+                    ws.A_aug.topRows(m_aug)
+                    * ws.A_aug.topRows(m_aug).transpose();
+                for(int i = m_aug; i < m_aug_max; ++i)
+                    ws.AAt_aug(i, i) = Scalar(1);
+                ws.ldlt_aug.compute(ws.AAt_aug);
 
                 blocking_coord = -1;
                 result.tangential_cg_status =
