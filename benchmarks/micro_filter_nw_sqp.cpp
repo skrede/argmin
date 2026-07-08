@@ -684,10 +684,17 @@ bool probe_regression_hs024_iter_bound()
 }
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Pre-fix allocation witness for filter_nw_sqp (see micro_kraft_slsqp.cpp for
-// the shared rationale). The filter line-search SQP path allocates per step
-// in the current code, so the witness requires the un-blinded gate to observe
-// it across the armed step window and reset().
+// Characterized-residual allocation witness for filter_nw_sqp (see
+// micro_kraft_slsqp.cpp for the shared rationale). filter_nw_sqp shares the dense
+// active-set QP substrate with nw_sqp; hoisting that per-solve workspace onto
+// persistent members drove the fixed-N traffic from 99.60 to 32.00 allocations
+// per step for both. The remaining ~32/step is not bit-identically eliminable: it
+// lives inside Eigen's own dense-decomposition internals -- the QP multiplier
+// solve materializes per-Householder-reflector temporaries every step regardless
+// of any supplied workspace. This gate therefore stays in witness mode, recording
+// that characterized real-time hot-loop residual (floored conservatively below the
+// observed 32.00/step band to prove the sensor is not blind); driving it to true
+// zero is deferred to a dedicated in-house zero-allocation linear-algebra kernel.
 int argmin_alloc_trace_probe()
 {
     hs071_dynamic problem;
@@ -714,7 +721,7 @@ int argmin_alloc_trace_probe()
     argmin::detail::bench::disarm_alloc_trace();
 
     return argmin::detail::bench::evaluate_gate(
-        "filter_nw_sqp", 2 * hot_steps, 1);
+        "filter_nw_sqp", 2 * hot_steps, 24);
 }
 #endif
 
