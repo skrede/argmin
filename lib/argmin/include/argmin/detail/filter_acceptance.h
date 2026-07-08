@@ -27,6 +27,35 @@
 namespace argmin::detail
 {
 
+#ifdef ARGMIN_FILTER_CAPACITY_SWEEP
+// Sweep-only instrumentation: a process-global configuration + high-water
+// record that lets an out-of-tree capacity/drop-policy sweep drive the real
+// filter policies (whose filter_set is a private state member) without any
+// production API surface. Compiled ONLY when ARGMIN_FILTER_CAPACITY_SWEEP is
+// defined (the capacity sweep driver); the shipping library never sees this.
+//
+//   capacity        -- entry cap enforced by filter_set::add(); set huge to
+//                      measure the natural (unbounded) high-water.
+//   overflow_policy  -- 0 reject the incoming trial (do not augment),
+//                       1 drop the maximal-violation entry, 2 FIFO ring
+//                       (drop the oldest entry).
+//   highwater        -- maximum entries_.size() observed since the last reset.
+//   evictions        -- number of at-capacity drops/rejects since reset.
+struct filter_sweep_state_t
+{
+    std::size_t capacity{1u << 30};
+    int overflow_policy{0};
+    std::size_t highwater{0};
+    std::size_t evictions{0};
+};
+
+inline filter_sweep_state_t& filter_sweep_state()
+{
+    static filter_sweep_state_t state;
+    return state;
+}
+#endif
+
 // A single filter entry: an (objective, violation) pair that has been
 // recorded as unacceptable. Trial points dominated by any entry are
 // rejected.
@@ -84,8 +113,14 @@ public:
     void initialize(Scalar h_max, Scalar theta_min = Scalar(0))
     {
         entries_.clear();
+#ifdef ARGMIN_FILTER_CAPACITY_SWEEP
+        const std::size_t reserve_to = filter_sweep_state().capacity;
+        if(entries_.capacity() < reserve_to)
+            entries_.reserve(reserve_to);
+#else
         if(entries_.capacity() < 256)
             entries_.reserve(256);
+#endif
         h_max_ = h_max;
         theta_min_ = theta_min;
     }
@@ -151,7 +186,41 @@ public:
                                       && e.violation >= h_floored;
                            }),
             entries_.end());
+#ifdef ARGMIN_FILTER_CAPACITY_SWEEP
+        {
+            auto& st = filter_sweep_state();
+            if(entries_.size() >= st.capacity)
+            {
+                ++st.evictions;
+                if(st.overflow_policy == 0)
+                    return; // reject the incoming trial: frontier unchanged
+                if(st.overflow_policy == 1)
+                {
+                    // drop the maximal-violation (loosest) frontier entry
+                    auto worst = std::max_element(
+                        entries_.begin(), entries_.end(),
+                        [](const filter_entry<Scalar>& a,
+                           const filter_entry<Scalar>& b) {
+                            return a.violation < b.violation;
+                        });
+                    if(worst != entries_.end())
+                        entries_.erase(worst);
+                }
+                else
+                {
+                    entries_.erase(entries_.begin()); // FIFO ring: drop oldest
+                }
+            }
+        }
+#endif
         entries_.push_back({f, h_floored});
+#ifdef ARGMIN_FILTER_CAPACITY_SWEEP
+        {
+            auto& st = filter_sweep_state();
+            if(entries_.size() > st.highwater)
+                st.highwater = entries_.size();
+        }
+#endif
     }
 
     bool empty() const { return entries_.empty(); }

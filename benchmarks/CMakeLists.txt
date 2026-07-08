@@ -614,6 +614,28 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Filter capacity / at-capacity-policy sweep. Drives the real filter
+# policies (filter_slsqp, filter_trsqp accurate + fast, filter_nw_sqp)
+# on the filter-lineage HS suite to measure the natural filter high-water
+# entry count, then sweeps candidate at-capacity mechanisms (reject /
+# drop-maximal-violation / FIFO ring) across a cap grid to select the
+# bounded-capacity constant + drop heuristic by evidence. Compiles the
+# ARGMIN_FILTER_CAPACITY_SWEEP instrumentation path in
+# detail/filter_acceptance.h. Non-ctest, one-shot.
+add_executable(filter_capacity_sweep filter_capacity_sweep.cpp)
+target_link_libraries(filter_capacity_sweep PRIVATE argmin::argmin)
+target_compile_options(filter_capacity_sweep PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(filter_capacity_sweep PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Filter envelope + switching-condition + initial-trust-radius +
 # restoration sweep harness for filter_trsqp_policy. Drives the policy
 # across the cross product of (gamma_f, gamma_h, reject_mode, kappa, s,
