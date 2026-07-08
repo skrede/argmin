@@ -219,10 +219,26 @@ ARGMIN_FORCE_INLINE step_result<Scalar> null_step_result(
     // residual instead.
     if(lam_eq.size() == J_eq.rows() && mu_ineq.size() == J_ineq.rows())
     {
-        const Eigen::Vector<Scalar, Meq> lam_eq_typed = lam_eq;
-        const Eigen::Vector<Scalar, Mineq> mu_ineq_typed = mu_ineq;
-        r.kkt_residual = kkt_residual<Scalar, N, Meq, Mineq>(
-            g, J_eq, J_ineq, lam_eq_typed, mu_ineq_typed, c_eq, c_ineq);
+        if constexpr(Meq == Eigen::Dynamic && Mineq == Eigen::Dynamic)
+        {
+            // Dynamic multiplier legs: the incoming Refs already match
+            // kkt_residual's Eigen::Ref<const Vector<Scalar, Dynamic>>
+            // parameters, so pass them through with no re-typed VectorXd
+            // copy (that copy would heap-allocate on every null-step
+            // return). Bit-identical to the copy path.
+            r.kkt_residual = kkt_residual<Scalar, N, Meq, Mineq>(
+                g, J_eq, J_ineq, lam_eq, mu_ineq, c_eq, c_ineq);
+        }
+        else
+        {
+            // Fixed-size multiplier legs: materialize into the compile-time
+            // dimension so the Ref binds (a Dynamic Ref cannot bind a
+            // fixed-Meq parameter). Stack storage at fixed size.
+            const Eigen::Vector<Scalar, Meq> lam_eq_typed = lam_eq;
+            const Eigen::Vector<Scalar, Mineq> mu_ineq_typed = mu_ineq;
+            r.kkt_residual = kkt_residual<Scalar, N, Meq, Mineq>(
+                g, J_eq, J_ineq, lam_eq_typed, mu_ineq_typed, c_eq, c_ineq);
+        }
     }
     else
     {

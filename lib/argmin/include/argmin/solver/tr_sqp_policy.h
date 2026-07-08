@@ -604,8 +604,10 @@ struct tr_sqp_policy
         // convergence can fire at solutions with an active box bound
         // (the raw leg equals the unmodeled bound multiplier there).
         auto bound_aware_kkt = [&s]() -> double {
+            // N-typed so the internal Lagrangian-gradient leg is a fixed-N
+            // stack vector, not a per-call heap VectorXd.
             return argmin::detail::kkt_residual<double,
-                                                Eigen::Dynamic,
+                                                N,
                                                 Eigen::Dynamic,
                                                 Eigen::Dynamic>(
                 s.g, s.J_eq, s.J_ineq,
@@ -699,7 +701,11 @@ struct tr_sqp_policy
         // x_trial / s_trial; queries the problem callbacks at x_trial;
         // assembles the joint residual under the slack reformulation
         // sign convention; returns (f_new, ||c_joint_new||_2).
-        auto trial_eval = [&s, n, n_ineq](const Eigen::VectorXd& p)
+        // p is bound as an Eigen::Ref so the composite-step helper can pass
+        // its Ref-typed p_out without materializing a temporary VectorXd
+        // copy on every trial evaluation.
+        auto trial_eval = [&s, n, n_ineq](
+            const Eigen::Ref<const Eigen::VectorXd>& p)
             -> std::pair<double, double>
         {
             Eigen::Vector<double, N> x_trial = s.x + p.head(n);
@@ -1230,23 +1236,23 @@ struct tr_sqp_policy
     template <typename P>
     void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
-        const int n = static_cast<int>(x0.size());
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
 
-        Eigen::VectorXd c_eval(m);
+        // Re-evaluate the constraints / Jacobian into the state-resident
+        // c_all / J_all scratch (pre-sized at init) so a warm reset stays
+        // allocation-free.
         if(m > 0)
-            s.problem->constraints(x0, c_eval);
-        s.c_eq = c_eval.head(s.n_eq);
-        s.c_ineq = c_eval.tail(s.n_ineq);
+            s.problem->constraints(x0, s.bufs.c_all);
+        s.c_eq = s.bufs.c_all.head(s.n_eq);
+        s.c_ineq = s.bufs.c_all.tail(s.n_ineq);
 
-        Eigen::MatrixXd J_eval(m, n);
         if(m > 0)
-            s.problem->constraint_jacobian(x0, J_eval);
-        s.J_eq = J_eval.topRows(s.n_eq);
-        s.J_ineq = J_eval.bottomRows(s.n_ineq);
+            s.problem->constraint_jacobian(x0, s.bufs.J_all);
+        s.J_eq = s.bufs.J_all.topRows(s.n_eq);
+        s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
 
         s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
         s.trust_radius = options.initial_trust_radius;
