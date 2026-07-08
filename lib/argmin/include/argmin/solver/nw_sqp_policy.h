@@ -465,9 +465,9 @@ struct nw_sqp_policy
                 s.J_ineq, s.bufs.b_ineq_workspace,
                 s.bufs.p_lo_buf, s.bufs.p_hi_buf,
                 /*use_bounds=*/true, s.bufs, p0);
-            qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
+            s.qp_solver.solve_into(s.hessian.hessian(), s.g,
                                    s.J_eq, s.bufs.b_eq_workspace, s.J_ineq, s.bufs.b_ineq_workspace,
-                                   s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0, qp_opts);
+                                   s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0, qp_opts, qp);
         }
         else
         {
@@ -475,9 +475,9 @@ struct nw_sqp_policy
                 s.J_ineq, s.bufs.b_ineq_workspace,
                 s.bufs.p_lo_buf, s.bufs.p_hi_buf,
                 /*use_bounds=*/false, s.bufs, p0);
-            qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
+            s.qp_solver.solve_into(s.hessian.hessian(), s.g,
                                    s.J_eq, s.bufs.b_eq_workspace, s.J_ineq, s.bufs.b_ineq_workspace,
-                                   p0, qp_opts);
+                                   p0, qp_opts, qp);
         }
 
         p = qp.x;
@@ -799,10 +799,10 @@ struct nw_sqp_policy
                     s.J_ineq, s.bufs.b_ineq_soc_buf,
                     s.bufs.p_lo_buf, s.bufs.p_hi_buf,
                     /*use_bounds=*/true, s.bufs, p0_soc);
-                qp_soc = s.qp_solver.solve(
+                s.qp_solver.solve_into(
                     s.hessian.hessian(), s.g,
                     s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
-                    s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0_soc, qp_opts);
+                    s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0_soc, qp_opts, qp_soc);
             }
             else
             {
@@ -811,10 +811,10 @@ struct nw_sqp_policy
                     s.J_ineq, s.bufs.b_ineq_soc_buf,
                     s.bufs.p_lo_buf, s.bufs.p_hi_buf,
                     /*use_bounds=*/false, s.bufs, p0_soc);
-                qp_soc = s.qp_solver.solve(
+                s.qp_solver.solve_into(
                     s.hessian.hessian(), s.g,
                     s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
-                    p0_soc, qp_opts);
+                    p0_soc, qp_opts, qp_soc);
             }
 
             if(qp_soc.status == detail::qp_status::optimal)

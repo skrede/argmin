@@ -468,19 +468,35 @@ public:
         , A_W_(max_constraints, n)
         , qr_lambda_(n, n)
         , qr_rr_(n, n)
+        , qr_full_(n, n)
         , llt_reduced_(n)
         , Q_explicit_(n, n)
         , R_(n, max_constraints)
         , ZtGZ_(n, n)
+        , ZtGZ_padded_(n, n)
+        , qr_full_in_(n, n)
+        , AY_pad_(n, n)
+        , iws_pad_(n, n)
         , rhs_(n)
+        , rhs_padded_(n)
+        , residual_(n)
         , p_z_(n)
         , rhs_lam_(n)
         , g_k_(n)
+        , x_(n)
+        , p_sub_(n)
+        , lambda_sub_(max_constraints)
+        , AY_(n, n)
+        , last_lambda_W_(max_constraints)
+        , iws_trial_(max_constraints, n)
+        , iws_qr_(n, n)
         , lambda_full_(max_constraints)
         , A_aug_(max_constraints, n)
         , b_aug_(max_constraints)
     {
         W_.reserve(max_constraints);
+        last_W_.reserve(max_constraints);
+        iws_candidates_.reserve(max_constraints);
     }
 
     active_set_qp_solver() = default;
@@ -517,178 +533,39 @@ public:
         const int n = G.rows();
         const int m_eq = A_eq.rows();
         const int m_ineq = A_ineq.rows();
-        const int m_total = m_eq + m_ineq;
-        const int max_iter = static_cast<int>(opts.max_iterations);
-        const auto tol = static_cast<Scalar>(opts.tolerance);
-
-        if(m_eq > 0)
-        {
-            A_full_.topRows(m_eq) = A_eq;
-            b_full_.head(m_eq) = b_eq;
-        }
-        if(m_ineq > 0)
-        {
-            A_full_.middleRows(m_eq, m_ineq) = A_ineq;
-            b_full_.segment(m_eq, m_ineq) = b_ineq;
-        }
-
-        auto A_view = A_full_.topRows(m_total);
-        auto b_view = b_full_.head(m_total);
-
-        initial_working_set(
-            x0, constraint_matrix(A_view),
-            constraint_vector(b_view), m_eq, tol, W_);
-
-        Eigen::Vector<Scalar, N> x = x0;
-
-        // Phase-1 feasibility projection. The active-set machinery in
-        // solve_equality_subproblem assumes x is feasible w.r.t. the
-        // working-set equalities (m>=n branch returns p=0 unconditionally).
-        // Restore that invariant at entry by projecting any infeasible x0
-        // onto the equality manifold via the minimum-norm correction
-        //   dx = A_eq^T (A_eq A_eq^T)^{-1} (b_eq - A_eq x).
-        // With a thin QR factorization A_eq^T = Q * R (Q is n x m_eq,
-        // R is m_eq x m_eq upper triangular when A_eq has full row rank),
-        // the closed-form min-norm solution is dx = Q * R^{-T} * residual.
-        // Reference: N&W 2e Section 16.1, Algorithm 16.1, pp. 460-463
-        //            (feasibility invariant); N&W 2e Section 10.3 / Lemma 16.5
-        //            (minimum-norm under-determined solution).
-        // No direct production-library precedent: active-set QP literature
-        // assumes feasible x0; this fix internalizes the precondition.
-        if(m_eq > 0)
-        {
-            // Precondition: A_eq must be of shape m_eq x n with m_eq <= n.
-            // The thin QR factorization of A_eq.transpose() packs R into an
-            // (n x m_eq) matrix; topLeftCorner(m_eq, m_eq) is well-defined
-            // only when m_eq <= n. Callers that construct over-determined
-            // problems (m_eq > n) hit UB without this guard.
-            assert(m_eq <= n
-                   && "active_set_qp_solver: m_eq must be <= n for phase-1 feasibility projection");
-
-            const auto residual = (b_eq - A_eq * x).eval();
-            if(residual.cwiseAbs().maxCoeff() > tol)
-            {
-                qr_lambda_.compute(A_eq.transpose());
-                rhs_.head(n).setZero();
-                rhs_.head(m_eq) = qr_lambda_.matrixQR()
-                    .topLeftCorner(m_eq, m_eq)
-                    .template triangularView<Eigen::Upper>()
-                    .transpose()
-                    .solve(residual);
-                rhs_.head(n).applyOnTheLeft(qr_lambda_.householderQ());
-                x += rhs_.head(n);
-            }
-        }
-
-        qr_valid_ = false;
-        givens_update_count_ = 0;
-
-        // Anti-cycling budget: switch to Bland's lowest-index leaving rule
-        // after 2*(n + m) iterations (Bland 1977; N&W Section 13.5).
-        const int bland_threshold = 2 * (n + m_total);
-
-        // Last multipliers computed, with the working set they belong to, so
-        // the max-iteration exit returns genuine duals rather than zeros.
-        constraint_vector last_lambda_W;
-        std::vector<int> last_W;
-
-        for(int iter = 0; iter < max_iter; ++iter)
-        {
-            const bool bland = iter >= bland_threshold;
-            g_k_.head(n).noalias() = G * x + d;
-
-            const int wsize = static_cast<int>(W_.size());
-            for(int k = 0; k < wsize; ++k)
-                A_W_.row(k) = A_full_.row(W_[k]);
-
-            bool reduced_hessian_ok = true;
-            auto [p, lambda_W] = solve_equality_subproblem(
-                G, g_k_.head(n), A_W_.topRows(wsize), n, wsize,
-                &reduced_hessian_ok);
-
-            last_lambda_W = lambda_W;
-            last_W = W_;
-
-            if(!reduced_hessian_ok)
-            {
-                build_full_lambda(lambda_W, W_, m_total, lambda_full_);
-                qp_result<Scalar, N, M> res;
-                res.x = x;
-                res.lambda = lambda_full_.head(m_total);
-                res.status = qp_status::indefinite_hessian;
-                res.iterations = iter;
-                return res;
-            }
-
-            if(p.norm() < tol)
-            {
-                int drop = most_negative_multiplier(lambda_W, W_, m_eq, tol, bland);
-                if(drop == -1)
-                {
-                    build_full_lambda(lambda_W, W_, m_total, lambda_full_);
-                    qp_result<Scalar, N> res;
-                    res.x = x;
-                    res.lambda = lambda_full_.head(m_total);
-                    res.status = qp_status::optimal;
-                    res.iterations = iter;
-                    return res;
-                }
-                // Remove constraint: Givens QR downdate
-                if(qr_valid_ && wsize > 1)
-                {
-                    remove_constraint_qr<Scalar>(
-                        Q_explicit_, R_, drop, wsize);
-                    ++givens_update_count_;
-                }
-                else
-                {
-                    qr_valid_ = false;
-                }
-                W_.erase(W_.begin() + drop);
-            }
-            else
-            {
-                auto [alpha, blocking_idx] = blocking_step_length(
-                    x, Eigen::Vector<Scalar, N>(p),
-                    constraint_matrix(A_view),
-                    constraint_vector(b_view), W_, m_eq);
-                x += alpha * p;
-
-                if(alpha < Scalar(1) && blocking_idx >= 0)
-                {
-                    W_.push_back(blocking_idx);
-                    // Add constraint: Givens QR update
-                    const int new_wsize = static_cast<int>(W_.size());
-                    if(qr_valid_ && new_wsize <= n)
-                    {
-                        Eigen::Matrix<Scalar, Eigen::Dynamic, 1> a_new =
-                            A_full_.row(blocking_idx).head(n).transpose();
-                        add_constraint_qr<Scalar>(
-                            Q_explicit_, R_, a_new, new_wsize);
-                        ++givens_update_count_;
-                    }
-                    else
-                    {
-                        qr_valid_ = false;
-                    }
-                }
-            }
-        }
-
-        // Max-iteration exit: return the last computed multipliers for the
-        // working set they were solved against, not a zero vector.
-        build_full_lambda(last_lambda_W, last_W, m_total, lambda_full_);
+        assemble_constraints(m_eq, m_ineq, A_eq, b_eq, A_ineq, b_ineq);
+        run_active_set(n, m_eq, m_ineq, G, d, x0, opts);
         qp_result<Scalar, N, M> res;
-        res.x = x;
-        res.lambda = lambda_full_.head(m_total);
-        res.status = qp_status::max_iterations;
-        res.iterations = max_iter;
+        write_result(res, n, m_eq + m_ineq);
         return res;
     }
 
+    // Fill-into general overload: writes the solution into a caller-owned
+    // qp_result whose x / lambda storage is reused across calls, so a warm
+    // steady-state solve performs no heap allocation.
+    template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
+    void solve_into(
+        const Eigen::Matrix<Scalar, N, N>& G,
+        const Eigen::Vector<Scalar, N>& d,
+        const Eigen::Matrix<Scalar, Meq, N>& A_eq,
+        const Eigen::Vector<Scalar, Meq>& b_eq,
+        const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
+        const Eigen::Vector<Scalar, Mineq>& b_ineq,
+        const Eigen::Vector<Scalar, N>& x0,
+        const argmin::qp_options& opts,
+        qp_result<Scalar, N, M>& out)
+    {
+        const int n = G.rows();
+        const int m_eq = A_eq.rows();
+        const int m_ineq = A_ineq.rows();
+        assemble_constraints(m_eq, m_ineq, A_eq, b_eq, A_ineq, b_ineq);
+        run_active_set(n, m_eq, m_ineq, G, d, x0, opts);
+        write_result(out, n, m_eq + m_ineq);
+    }
+
     // Box-constraint overload. Folds box bounds into the augmented
-    // inequality block and forwards to the general overload, so it
-    // inherits the phase-1 feasibility projection automatically.
+    // inequality block and forwards to the general path, so it inherits the
+    // phase-1 feasibility projection automatically.
     //
     // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
     template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
@@ -705,33 +582,257 @@ public:
         const argmin::qp_options& opts = {})
     {
         const int n = G.rows();
-        const int m_ineq = A_ineq.rows();
-        const int m_box = 2 * n;
-        const int m_aug = m_ineq + m_box;
+        const int m_eq = A_eq.rows();
+        const int m_aug = assemble_box(n, A_eq, b_eq, A_ineq, b_ineq, lower, upper);
+        run_active_set(n, m_eq, m_aug, G, d, x0, opts);
+        qp_result<Scalar, N, M> res;
+        write_result(res, n, m_eq + m_aug);
+        return res;
+    }
 
-        if(m_ineq > 0)
-        {
-            A_aug_.topRows(m_ineq) = A_ineq;
-            b_aug_.head(m_ineq) = b_ineq;
-        }
-
-        A_aug_.middleRows(m_ineq, n) = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
-        b_aug_.segment(m_ineq, n) = lower;
-
-        A_aug_.middleRows(m_ineq + n, n) = -Eigen::Matrix<Scalar, N, N>::Identity(n, n);
-        b_aug_.segment(m_ineq + n, n) = -upper;
-
-        Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_eq_dyn(A_eq.rows(), n);
-        A_eq_dyn = A_eq;
-        Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_aug_dyn(m_aug, n);
-        A_aug_dyn = A_aug_.topRows(m_aug);
-        Eigen::VectorX<Scalar> b_eq_dyn = b_eq;
-        Eigen::VectorX<Scalar> b_aug_dyn = b_aug_.head(m_aug);
-
-        return solve(G, d, A_eq_dyn, b_eq_dyn, A_aug_dyn, b_aug_dyn, x0, opts);
+    // Fill-into box overload (see the non-box solve_into rationale).
+    template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
+    void solve_into(
+        const Eigen::Matrix<Scalar, N, N>& G,
+        const Eigen::Vector<Scalar, N>& d,
+        const Eigen::Matrix<Scalar, Meq, N>& A_eq,
+        const Eigen::Vector<Scalar, Meq>& b_eq,
+        const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
+        const Eigen::Vector<Scalar, Mineq>& b_ineq,
+        const Eigen::Vector<Scalar, N>& lower,
+        const Eigen::Vector<Scalar, N>& upper,
+        const Eigen::Vector<Scalar, N>& x0,
+        const argmin::qp_options& opts,
+        qp_result<Scalar, N, M>& out)
+    {
+        const int n = G.rows();
+        const int m_eq = A_eq.rows();
+        const int m_aug = assemble_box(n, A_eq, b_eq, A_ineq, b_ineq, lower, upper);
+        run_active_set(n, m_eq, m_aug, G, d, x0, opts);
+        write_result(out, n, m_eq + m_aug);
     }
 
 private:
+    // Assemble [A_eq; A_ineq] / [b_eq; b_ineq] into the member constraint
+    // block. Equalities occupy the first m_eq rows; inequalities follow.
+    template <int Meq, int Mineq>
+    void assemble_constraints(
+        int m_eq, int m_ineq,
+        const Eigen::Matrix<Scalar, Meq, N>& A_eq,
+        const Eigen::Vector<Scalar, Meq>& b_eq,
+        const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
+        const Eigen::Vector<Scalar, Mineq>& b_ineq)
+    {
+        if(m_eq > 0)
+        {
+            A_full_.topRows(m_eq) = A_eq;
+            b_full_.head(m_eq) = b_eq;
+        }
+        if(m_ineq > 0)
+        {
+            A_full_.middleRows(m_eq, m_ineq) = A_ineq;
+            b_full_.segment(m_eq, m_ineq) = b_ineq;
+        }
+    }
+
+    // Assemble the box-augmented inequality system directly into A_full_ /
+    // b_full_ ([A_eq; A_ineq; I; -I] against [b_eq; b_ineq; l; -u]). Returns
+    // the augmented inequality count (m_ineq + 2n). No dynamic temporaries:
+    // the identity blocks are written as nullary expressions.
+    template <int Meq, int Mineq>
+    int assemble_box(
+        int n,
+        const Eigen::Matrix<Scalar, Meq, N>& A_eq,
+        const Eigen::Vector<Scalar, Meq>& b_eq,
+        const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
+        const Eigen::Vector<Scalar, Mineq>& b_ineq,
+        const Eigen::Vector<Scalar, N>& lower,
+        const Eigen::Vector<Scalar, N>& upper)
+    {
+        const int m_eq = A_eq.rows();
+        const int m_ineq = A_ineq.rows();
+        const int m_aug = m_ineq + 2 * n;
+
+        if(m_eq > 0)
+        {
+            A_full_.topRows(m_eq) = A_eq;
+            b_full_.head(m_eq) = b_eq;
+        }
+        if(m_ineq > 0)
+        {
+            A_full_.middleRows(m_eq, m_ineq) = A_ineq;
+            b_full_.segment(m_eq, m_ineq) = b_ineq;
+        }
+        A_full_.middleRows(m_eq + m_ineq, n) =
+            Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+        b_full_.segment(m_eq + m_ineq, n) = lower;
+        A_full_.middleRows(m_eq + m_ineq + n, n) =
+            -Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+        b_full_.segment(m_eq + m_ineq + n, n) = -upper;
+        return m_aug;
+    }
+
+    // Copy the last active-set result into a qp_result. out.x / out.lambda are
+    // resized to (n) / (m_total); when the caller reuses the same result the
+    // assignment reuses storage (allocation-free steady state).
+    void write_result(qp_result<Scalar, N, M>& out, int n, int m_total) const
+    {
+        out.x = x_.head(n);
+        out.lambda = lambda_full_.head(m_total);
+        out.status = status_;
+        out.iterations = iters_;
+        out.relaxation_factor = Scalar(0);
+    }
+
+    // Run the active-set method over the pre-assembled member constraint
+    // block A_full_ / b_full_ (first m_eq rows equality, next m_ineq rows
+    // inequality). Fills the iterate x_, the full multipliers lambda_full_,
+    // and the run status_ / iters_. All working buffers are members, so a
+    // warm steady-state solve is heap-allocation-free.
+    //
+    // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
+    void run_active_set(
+        int n, int m_eq, int m_ineq,
+        const Eigen::Ref<const n_square_matrix>& G,
+        const Eigen::Ref<const n_vector>& d,
+        const Eigen::Ref<const n_vector>& x0,
+        const argmin::qp_options& opts)
+    {
+        const int m_total = m_eq + m_ineq;
+        const int max_iter = static_cast<int>(opts.max_iterations);
+        const auto tol = static_cast<Scalar>(opts.tolerance);
+
+        compute_initial_working_set(x0, m_total, n, m_eq, tol);
+
+        x_.head(n) = x0;
+        auto x = x_.head(n);
+
+        // Phase-1 feasibility projection. The active-set machinery in
+        // solve_equality_subproblem_into assumes x is feasible w.r.t. the
+        // working-set equalities (m>=n branch returns p=0 unconditionally).
+        // Restore that invariant at entry by projecting any infeasible x0
+        // onto the equality manifold via the minimum-norm correction
+        //   dx = A_eq^T (A_eq A_eq^T)^{-1} (b_eq - A_eq x)
+        // with a thin QR factorization of A_eq^T (the equality rows live in
+        // A_full_.topRows(m_eq)). residual_ / rhs_ are members so the test +
+        // projection allocate nothing.
+        // Reference: N&W 2e Section 16.1, Algorithm 16.1, pp. 460-463
+        //            (feasibility invariant); N&W 2e Section 10.3 / Lemma 16.5
+        //            (minimum-norm under-determined solution).
+        if(m_eq > 0)
+        {
+            // Precondition: A_eq must be of shape m_eq x n with m_eq <= n.
+            assert(m_eq <= n
+                   && "active_set_qp_solver: m_eq must be <= n for phase-1 feasibility projection");
+
+            residual_.head(m_eq).noalias() =
+                b_full_.head(m_eq) - A_full_.topRows(m_eq).leftCols(n) * x;
+            if(residual_.head(m_eq).cwiseAbs().maxCoeff() > tol)
+            {
+                qr_lambda_.compute(A_full_.topRows(m_eq).leftCols(n).transpose());
+                rhs_.head(n).setZero();
+                rhs_.head(m_eq) = qr_lambda_.matrixQR()
+                    .topLeftCorner(m_eq, m_eq)
+                    .template triangularView<Eigen::Upper>()
+                    .transpose()
+                    .solve(residual_.head(m_eq));
+                rhs_.head(n).applyOnTheLeft(qr_lambda_.householderQ());
+                x += rhs_.head(n);
+            }
+        }
+
+        qr_valid_ = false;
+        givens_update_count_ = 0;
+
+        // Anti-cycling budget: switch to Bland's lowest-index leaving rule
+        // after 2*(n + m) iterations (Bland 1977; N&W Section 13.5).
+        const int bland_threshold = 2 * (n + m_total);
+
+        for(int iter = 0; iter < max_iter; ++iter)
+        {
+            const bool bland = iter >= bland_threshold;
+            g_k_.head(n).noalias() = G * x + d;
+
+            const int wsize = static_cast<int>(W_.size());
+            for(int k = 0; k < wsize; ++k)
+                A_W_.row(k) = A_full_.row(W_[k]);
+
+            bool reduced_hessian_ok = true;
+            solve_equality_subproblem_into(
+                G, g_k_.head(n), A_W_.topRows(wsize), n, wsize,
+                &reduced_hessian_ok);
+            auto p = p_sub_.head(n);
+
+            // Snapshot the working-set multipliers / indices for the
+            // max-iteration exit (member storage, no allocation).
+            last_lambda_W_.head(wsize) = lambda_sub_.head(wsize);
+            last_W_ = W_;
+
+            if(!reduced_hessian_ok)
+            {
+                build_full_lambda(lambda_sub_, W_, m_total, lambda_full_);
+                status_ = qp_status::indefinite_hessian;
+                iters_ = iter;
+                return;
+            }
+
+            if(p.norm() < tol)
+            {
+                int drop = most_negative_multiplier(lambda_sub_, W_, m_eq, tol, bland);
+                if(drop == -1)
+                {
+                    build_full_lambda(lambda_sub_, W_, m_total, lambda_full_);
+                    status_ = qp_status::optimal;
+                    iters_ = iter;
+                    return;
+                }
+                // Remove constraint: Givens QR downdate
+                if(qr_valid_ && wsize > 1)
+                {
+                    remove_constraint_qr<Scalar>(
+                        Q_explicit_, R_, drop, wsize);
+                    ++givens_update_count_;
+                }
+                else
+                {
+                    qr_valid_ = false;
+                }
+                W_.erase(W_.begin() + drop);
+            }
+            else
+            {
+                auto [alpha, blocking_idx] = blocking_step_length_member(
+                    x, p_sub_.head(n), m_total, n, m_eq);
+                x += alpha * p;
+
+                if(alpha < Scalar(1) && blocking_idx >= 0)
+                {
+                    W_.push_back(blocking_idx);
+                    // Add constraint: Givens QR update
+                    const int new_wsize = static_cast<int>(W_.size());
+                    if(qr_valid_ && new_wsize <= n)
+                    {
+                        rhs_lam_.head(n).noalias() =
+                            A_full_.row(blocking_idx).head(n).transpose();
+                        add_constraint_qr<Scalar>(
+                            Q_explicit_, R_, rhs_lam_.head(n), new_wsize);
+                        ++givens_update_count_;
+                    }
+                    else
+                    {
+                        qr_valid_ = false;
+                    }
+                }
+            }
+        }
+
+        // Max-iteration exit: return the last computed multipliers for the
+        // working set they were solved against, not a zero vector.
+        build_full_lambda(last_lambda_W_, last_W_, m_total, lambda_full_);
+        status_ = qp_status::max_iterations;
+        iters_ = max_iter;
+    }
+
     // Full QR factorization of A_W^T using Householder, then extract
     // explicit Q and R matrices. Called on first iteration and
     // periodically to prevent accumulated Givens drift.
@@ -740,11 +841,18 @@ private:
         int n,
         int m)
     {
-        Eigen::HouseholderQR<qr_matrix> qr(A_W.transpose());
+        // Persistent Householder QR on a fixed n x n input: A_W^T (n x m) is
+        // padded with (n - m) zero columns. A zero column yields an identity
+        // Householder reflector, so Q and the first m columns of R are
+        // bit-identical to factorizing A_W^T alone, while the constant shape
+        // reuses the decomposition storage (no resize realloc).
+        qr_full_in_.setZero(n, n);
+        qr_full_in_.leftCols(m) = A_W.transpose();
+        qr_full_.compute(qr_full_in_);
         Q_explicit_.setIdentity(n, n);
-        Q_explicit_.applyOnTheLeft(qr.householderQ());
+        Q_explicit_.applyOnTheLeft(qr_full_.householderQ());
         R_.topLeftCorner(n, m).setZero();
-        auto R_upper = qr.matrixQR();
+        auto R_upper = qr_full_.matrixQR();
         for(int j = 0; j < m; ++j)
             for(int i = 0; i <= j && i < n; ++i)
                 R_(i, j) = R_upper(i, j);
@@ -760,8 +868,90 @@ private:
     //
     // Reference: N&W Section 16.2, eq. 16.16-16.19.
     //            N&W Algorithm 16.3 (QR update via Givens rotations).
-    std::pair<n_vector, constraint_vector>
-    solve_equality_subproblem(
+    // Determine the initial working set from the (already-assembled) member
+    // constraint block A_full_ / b_full_, writing indices into W_. Uses member
+    // scratch (iws_trial_ / iws_qr_ / iws_candidates_) so no per-solve heap
+    // allocation for the rank-revealing admission scan. Same admission rule as
+    // the free initial_working_set: equalities first, then active inequalities
+    // whose gradient row is independent of the retained basis.
+    void compute_initial_working_set(
+        const Eigen::Ref<const n_vector>& x,
+        int m_total, int n, int m_eq, Scalar tol)
+    {
+        W_.clear();
+        iws_candidates_.clear();
+        for(int i = 0; i < m_eq; ++i)
+            iws_candidates_.push_back(i);
+        for(int i = m_eq; i < m_total; ++i)
+        {
+            Scalar residual = A_full_.row(i).head(n).dot(x) - b_full_[i];
+            if(std::abs(residual) < tol)
+                iws_candidates_.push_back(i);
+        }
+
+        int rank = 0;
+        for(int idx : iws_candidates_)
+        {
+            if(rank >= n) break;
+            iws_trial_.row(rank) = A_full_.row(idx);
+            // Pad the (rank + 1) x n candidate block to a fixed n x n input
+            // with zero rows (which add no rank) so the rank-revealing QR
+            // factorizes a constant shape. The prescribed threshold reproduces
+            // the (rank + 1)-row default (epsilon * diagonalSize), so rank()
+            // returns the same integer as the unpadded decomposition and the
+            // admission decision is unchanged.
+            iws_pad_.setZero(n, n);
+            iws_pad_.topRows(rank + 1) = iws_trial_.topRows(rank + 1);
+            iws_qr_.setThreshold(
+                Eigen::NumTraits<Scalar>::epsilon() * Scalar(rank + 1));
+            iws_qr_.compute(iws_pad_);
+            const int new_rank = static_cast<int>(iws_qr_.rank());
+            if(new_rank > rank)
+            {
+                rank = new_rank;
+                W_.push_back(idx);
+            }
+        }
+    }
+
+    // Blocking step length (N&W eq. 16.29) over the member constraint block.
+    // Reads A_full_ / b_full_ / W_ directly so no per-iteration working-set
+    // matrix copy is materialized. Returns (alpha, blocking index).
+    std::pair<Scalar, int> blocking_step_length_member(
+        const Eigen::Ref<const n_vector>& x_k,
+        const Eigen::Ref<const n_vector>& p_k,
+        int m_total, int n, int n_eq) const
+    {
+        Scalar alpha = Scalar(1);
+        int blocking_idx = -1;
+        for(int i = n_eq; i < m_total; ++i)
+        {
+            bool in_W = false;
+            for(int w : W_)
+                if(w == i) { in_W = true; break; }
+            if(in_W) continue;
+
+            Scalar atp = A_full_.row(i).head(n).dot(p_k);
+            if(atp < Scalar(0))
+            {
+                Scalar slack = A_full_.row(i).head(n).dot(x_k) - b_full_[i];
+                Scalar ratio = -slack / atp;
+                if(ratio < alpha)
+                {
+                    alpha = ratio;
+                    blocking_idx = i;
+                }
+            }
+        }
+        alpha = std::max(alpha, Scalar(0));
+        return {alpha, blocking_idx};
+    }
+
+    // Fill-into equality-subproblem solve. Writes the step into p_sub_.head(n)
+    // and the working-set multipliers into lambda_sub_.head(m); the caller
+    // reads those persistent segments. All intermediate matrices/vectors are
+    // member buffers so no per-active-set-iteration heap allocation occurs.
+    void solve_equality_subproblem_into(
         const Eigen::Ref<const n_square_matrix>& G,
         const Eigen::Ref<const n_vector>& g_k,
         const Eigen::Ref<const constraint_matrix>& A_W,
@@ -776,9 +966,9 @@ private:
             llt_reduced_.compute(G);
             if(reduced_hessian_ok && llt_reduced_.info() != Eigen::Success)
                 *reduced_hessian_ok = false;
-            n_vector p = llt_reduced_.solve(-g_k);
+            p_sub_.head(n) = llt_reduced_.solve(-g_k);
             qr_valid_ = false;
-            return {p, constraint_vector{}};
+            return;
         }
 
         if(m >= n)
@@ -786,10 +976,10 @@ private:
             // Rank-revealing solve: a dependent working-set row would make the
             // unpivoted QR produce NaN multipliers. ColPivHouseholderQR keeps
             // the least-squares multipliers finite on a degenerate vertex.
-            n_vector p = n_vector::Zero(n);
+            p_sub_.head(n).setZero();
             qr_rr_.compute(A_W.transpose());
-            constraint_vector lambda = qr_rr_.solve(g_k);
-            return {p, lambda};
+            lambda_sub_.head(m) = qr_rr_.solve(g_k);
+            return;
         }
 
         // Full refactorization if not valid or periodic drift prevention
@@ -797,25 +987,48 @@ private:
             full_qr_factorize(A_W, n, m);
 
         const int rank = m;
+        const int nz = n - rank;
         auto Y_block = Q_explicit_.leftCols(rank);
-        auto Z_block = Q_explicit_.rightCols(n - rank);
+        auto Z_block = Q_explicit_.rightCols(nz);
 
-        ZtGZ_.topLeftCorner(n - rank, n - rank).noalias() =
+        ZtGZ_.topLeftCorner(nz, nz).noalias() =
             Z_block.transpose() * G * Z_block;
-        llt_reduced_.compute(ZtGZ_.topLeftCorner(n - rank, n - rank));
+        // Factor a fixed n x n block-diagonal system [Z^T G Z, 0; 0, I] so the
+        // reduced-Hessian LLT always computes the same shape (no resize
+        // realloc). The identity trailing block does not couple into the
+        // top-left solve, so the reduced-space direction is bit-identical to
+        // factoring Z^T G Z alone.
+        ZtGZ_padded_.setZero(n, n);
+        ZtGZ_padded_.topLeftCorner(nz, nz) = ZtGZ_.topLeftCorner(nz, nz);
+        if(nz < n)
+            ZtGZ_padded_.bottomRightCorner(n - nz, n - nz).setIdentity();
+        llt_reduced_.compute(ZtGZ_padded_);
         if(reduced_hessian_ok && llt_reduced_.info() != Eigen::Success)
             *reduced_hessian_ok = false;
 
-        rhs_.head(n - rank).noalias() = -(Z_block.transpose() * g_k);
-        p_z_.head(n - rank) = llt_reduced_.solve(rhs_.head(n - rank));
-        n_vector p = Z_block * p_z_.head(n - rank);
+        rhs_.head(nz).noalias() = -(Z_block.transpose() * g_k);
+        rhs_padded_.head(n).setZero();
+        rhs_padded_.head(nz) = rhs_.head(nz);
+        p_z_.head(n) = llt_reduced_.solve(rhs_padded_.head(n));
+        p_sub_.head(n).noalias() = Z_block * p_z_.head(nz);
 
-        auto AY = (A_W * Y_block).eval();
-        rhs_lam_.head(rank).noalias() = Y_block.transpose() * (g_k + G * p);
-        qr_rr_.compute(AY.transpose());
-        constraint_vector lambda = qr_rr_.solve(rhs_lam_.head(rank));
-
-        return {p, lambda};
+        AY_.topLeftCorner(m, rank).noalias() = A_W * Y_block;
+        rhs_lam_.head(rank).noalias() =
+            Y_block.transpose() * (g_k + G * p_sub_.head(n));
+        // Pad AY^T (rank x rank, since rank == m) to a fixed n x n block-
+        // diagonal system [AY^T, 0; 0, I] and solve [rhs_lam; 0]. Column
+        // pivoting decouples across the zero off-diagonal blocks, so the
+        // top-block multiplier solution is bit-identical to solving AY^T alone
+        // while the constant n x n shape reuses the ColPiv storage.
+        AY_pad_.setZero(n, n);
+        AY_pad_.topLeftCorner(rank, m) = AY_.topLeftCorner(m, rank).transpose();
+        if(rank < n)
+            AY_pad_.bottomRightCorner(n - rank, n - rank).setIdentity();
+        rhs_padded_.head(n).setZero();
+        rhs_padded_.head(rank) = rhs_lam_.head(rank);
+        qr_rr_.compute(AY_pad_);
+        p_z_.head(n) = qr_rr_.solve(rhs_padded_.head(n));
+        lambda_sub_.head(rank) = p_z_.head(rank);
     }
 
     int n_{0};
@@ -827,18 +1040,50 @@ private:
 
     Eigen::HouseholderQR<qr_lambda_matrix> qr_lambda_;
     Eigen::ColPivHouseholderQR<qr_lambda_matrix> qr_rr_;
+    Eigen::HouseholderQR<qr_matrix> qr_full_;
     Eigen::LLT<n_square_matrix> llt_reduced_;
     q_matrix Q_explicit_;
     qr_matrix R_;
     bool qr_valid_{false};
     uint16_t givens_update_count_{0};
     n_square_matrix ZtGZ_;
+    n_square_matrix ZtGZ_padded_;
+    // Fixed n x n padded factorization inputs so the Householder / ColPiv
+    // decompositions always compute the same shape (no resize realloc). The
+    // padding is structured (zero columns / rows, identity trailing block) so
+    // the factorization values consumed are bit-identical to the unpadded
+    // problem.
+    n_square_matrix qr_full_in_;
+    n_square_matrix AY_pad_;
+    n_square_matrix iws_pad_;
     n_vector rhs_;
+    n_vector rhs_padded_;
+    n_vector residual_;
     n_vector p_z_;
     n_vector rhs_lam_;
     n_vector g_k_;
+    // Result of the last active-set run (filled by run_active_set); the
+    // solution iterate lives in x_ and the full multipliers in lambda_full_.
+    qp_status status_{qp_status::optimal};
+    int iters_{0};
+    // Persistent iterate + equality-subproblem result buffers so the
+    // active-set loop's per-iteration step / multiplier vectors and the
+    // reduced-space AY product reuse storage instead of heap-allocating.
+    n_vector x_;
+    n_vector p_sub_;
+    constraint_vector lambda_sub_;
+    q_matrix AY_;
 
     std::vector<int> W_;
+    // Snapshot of the multipliers / working set solved against, for the
+    // max-iteration exit; members so the snapshot copy reuses storage.
+    constraint_vector last_lambda_W_;
+    std::vector<int> last_W_;
+    // Working-set-scan scratch (rank-revealing admission), member so the
+    // per-solve initial working set costs no heap allocation.
+    std::vector<int> iws_candidates_;
+    constraint_matrix iws_trial_;
+    Eigen::ColPivHouseholderQR<constraint_matrix> iws_qr_;
     constraint_vector lambda_full_;
 
     constraint_matrix A_aug_;

@@ -526,10 +526,10 @@ struct filter_nw_sqp_policy
                 /*use_bounds=*/true, s.bufs, p0);
             // Adopted from: argmin/solver/nw_sqp_policy.h::step QP-solve site
             //               (in-tree precedent — stateful active_set_qp_solver::solve).
-            qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
+            s.qp_solver.solve_into(s.hessian.hessian(), s.g,
                                    s.J_eq, s.bufs.b_eq_workspace,
                                    s.J_ineq, s.bufs.b_ineq_workspace,
-                                   s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0, qp_opts);
+                                   s.bufs.p_lo_buf, s.bufs.p_hi_buf, p0, qp_opts, qp);
         }
         else
         {
@@ -539,10 +539,10 @@ struct filter_nw_sqp_policy
                 /*use_bounds=*/false, s.bufs, p0);
             // Adopted from: argmin/solver/nw_sqp_policy.h::step QP-multiplier-extract
             //               site (in-tree precedent — stateful active_set_qp_solver::solve, no-bounds overload).
-            qp = s.qp_solver.solve(s.hessian.hessian(), s.g,
+            s.qp_solver.solve_into(s.hessian.hessian(), s.g,
                                    s.J_eq, s.bufs.b_eq_workspace,
                                    s.J_ineq, s.bufs.b_ineq_workspace,
-                                   p0, qp_opts);
+                                   p0, qp_opts, qp);
         }
 
         p = qp.x;
@@ -868,11 +868,11 @@ struct filter_nw_sqp_policy
                     s.J_ineq, s.bufs.b_ineq_soc_buf,
                     s.bufs.p_lo_buf, s.bufs.p_hi_buf,
                     /*use_bounds=*/true, s.bufs, p0_soc);
-                qp_soc = s.qp_solver.solve(s.hessian.hessian(), s.g,
-                                           s.J_eq, s.bufs.b_eq_soc_buf,
-                                           s.J_ineq, s.bufs.b_ineq_soc_buf,
-                                           s.bufs.p_lo_buf, s.bufs.p_hi_buf,
-                                           p0_soc, qp_opts);
+                s.qp_solver.solve_into(s.hessian.hessian(), s.g,
+                                       s.J_eq, s.bufs.b_eq_soc_buf,
+                                       s.J_ineq, s.bufs.b_ineq_soc_buf,
+                                       s.bufs.p_lo_buf, s.bufs.p_hi_buf,
+                                       p0_soc, qp_opts, qp_soc);
             }
             else
             {
@@ -884,10 +884,10 @@ struct filter_nw_sqp_policy
                     s.J_ineq, s.bufs.b_ineq_soc_buf,
                     s.bufs.p_lo_buf, s.bufs.p_hi_buf,
                     /*use_bounds=*/false, s.bufs, p0_soc);
-                qp_soc = s.qp_solver.solve(s.hessian.hessian(), s.g,
-                                           s.J_eq, s.bufs.b_eq_soc_buf,
-                                           s.J_ineq, s.bufs.b_ineq_soc_buf,
-                                           p0_soc, qp_opts);
+                s.qp_solver.solve_into(s.hessian.hessian(), s.g,
+                                       s.J_eq, s.bufs.b_eq_soc_buf,
+                                       s.J_ineq, s.bufs.b_ineq_soc_buf,
+                                       p0_soc, qp_opts, qp_soc);
             }
 
             if(qp_soc.status == detail::qp_status::optimal)
