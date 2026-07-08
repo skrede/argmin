@@ -467,9 +467,11 @@ if(NLopt_FOUND)
     argmin_add_alloc_gate(micro_filter_nw_sqp_alloc_trace
         micro_filter_nw_sqp.cpp sqp_alloc_gate_filter_nw)
     argmin_add_alloc_gate(micro_filter_trsqp_alloc_trace
-        micro_filter_trsqp.cpp sqp_alloc_gate_filter_trsqp)
+        micro_filter_trsqp.cpp sqp_alloc_gate_filter_trsqp
+        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
     argmin_add_alloc_gate(micro_tr_sqp_alloc_trace
-        micro_filter_trsqp.cpp sqp_alloc_gate_tr_sqp ARGMIN_ALLOC_TRACE_TR_SQP)
+        micro_filter_trsqp.cpp sqp_alloc_gate_tr_sqp ARGMIN_ALLOC_TRACE_TR_SQP
+        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
     # The L-BFGS-B family is allocation-free on BOTH the all-free fast path and
     # the bound-active GCP/subspace/reduced_hessian path, so both gates run in
     # zero-allocation mode across both scenarios (the bound-active fixture
