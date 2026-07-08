@@ -462,7 +462,8 @@ if(NLopt_FOUND)
     argmin_add_alloc_gate(micro_nw_sqp_alloc_trace
         micro_nw_sqp.cpp sqp_alloc_gate_nw)
     argmin_add_alloc_gate(micro_filter_slsqp_alloc_trace
-        micro_filter_slsqp.cpp sqp_alloc_gate_filter_slsqp)
+        micro_filter_slsqp.cpp sqp_alloc_gate_filter_slsqp
+        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
     argmin_add_alloc_gate(micro_filter_nw_sqp_alloc_trace
         micro_filter_nw_sqp.cpp sqp_alloc_gate_filter_nw)
     argmin_add_alloc_gate(micro_filter_trsqp_alloc_trace
