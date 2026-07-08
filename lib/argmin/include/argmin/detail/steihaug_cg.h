@@ -125,7 +125,10 @@ ARGMIN_FORCE_INLINE cg_exit_status steihaug_cg(
     // projector keeps its already-reached box-face value.
     if(warm_start)
     {
-        r_buf.noalias() = g + hessian_op(p_out);
+        // hessian_op writes B * p_out into the caller-owned Bd_buf (not
+        // yet consumed by the CG loop), avoiding a return-by-value temporary.
+        hessian_op(p_out, Bd_buf);
+        r_buf.noalias() = g + Bd_buf;
     }
     else
     {
@@ -195,7 +198,7 @@ ARGMIN_FORCE_INLINE cg_exit_status steihaug_cg(
 
     for(std::size_t k = 0; k < max_iter; ++k)
     {
-        Bd_buf = hessian_op(d_buf);
+        hessian_op(d_buf, Bd_buf);
         const Scalar kappa = d_buf.dot(Bd_buf);
 
         const Scalar tau_tr = tau_to_boundary(p_out, d_buf);

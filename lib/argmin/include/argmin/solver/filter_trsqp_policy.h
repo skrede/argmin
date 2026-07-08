@@ -869,8 +869,9 @@ struct filter_trsqp_policy
             * static_cast<std::size_t>(n_total);
 
         // Section G -- Hessian-vector-product closure.
-        auto hessian_op = [&s](const Eigen::VectorXd& v) -> Eigen::VectorXd {
-            return s.hessian.multiply(v);
+        auto hessian_op = [&s](const Eigen::Ref<const Eigen::VectorXd>& v,
+                               Eigen::Ref<Eigen::VectorXd> out) {
+            s.hessian.multiply(v, out);
         };
 
         // Section H -- Trial-evaluation closure. Materializes z + p as

@@ -641,8 +641,9 @@ struct tr_sqp_policy
         // Lagrangian Hessian approximation lives in s.hessian (sized
         // n + n_ineq at init); the helper consumes it as a generic
         // callable so steihaug_cg / byrd_omojokun stay BFGS-blind.
-        auto hessian_op = [&s](const Eigen::VectorXd& v) -> Eigen::VectorXd {
-            return s.hessian.multiply(v);
+        auto hessian_op = [&s](const Eigen::Ref<const Eigen::VectorXd>& v,
+                               Eigen::Ref<Eigen::VectorXd> out) {
+            s.hessian.multiply(v, out);
         };
 
         // Section H -- Trial-evaluation closure. Materializes z + p as

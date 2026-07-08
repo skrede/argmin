@@ -27,15 +27,15 @@ namespace
 
 constexpr double kInf = std::numeric_limits<double>::infinity();
 
-// Dense 2-D Hessian-op closure: returns (B * v).eval() as the Hessian-
-// vector product. Matches the steihaug_cg test pattern.
+// Dense 2-D Hessian-op closure: writes B * v into the caller-provided
+// output Ref (the output-parameter convention byrd_omojokun consumes).
 struct hessian_op_2d
 {
     Eigen::Matrix2d B;
-    Eigen::Vector2d operator()(
-        const Eigen::Ref<const Eigen::Vector2d>& v) const
+    void operator()(const Eigen::Ref<const Eigen::Vector2d>& v,
+                    Eigen::Ref<Eigen::Vector2d> out) const
     {
-        return (B * v).eval();
+        out.noalias() = B * v;
     }
 };
 
@@ -775,10 +775,10 @@ TEST_CASE("byrd_omojokun vpred >= 0 across a delta grid (5-D, 2 eq)",
     struct hop5
     {
         Eigen::Matrix<double, 5, 5> B;
-        Eigen::Vector<double, 5> operator()(
-            const Eigen::Ref<const Eigen::Vector<double, 5>>& v) const
+        void operator()(const Eigen::Ref<const Eigen::Vector<double, 5>>& v,
+                        Eigen::Ref<Eigen::Vector<double, 5>> out) const
         {
-            return (B * v).eval();
+            out.noalias() = B * v;
         }
     } hop{B};
 

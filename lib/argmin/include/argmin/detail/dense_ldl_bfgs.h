@@ -229,6 +229,19 @@ public:
         return out;
     }
 
+    // Output-parameter form of B * v: writes the product into a
+    // caller-provided Eigen::Ref (which must already have length n)
+    // without constructing a return-by-value Vector. This is the
+    // allocation-free hot-path entry consumed by the Steihaug-CG
+    // Hessian-vector-product closure: at a dynamic dimension the
+    // by-value overload heap-allocates its return on every inner CG
+    // iteration, whereas this form reuses the caller's Bd buffer.
+    void multiply(const Eigen::Ref<const Eigen::Vector<Scalar, N>>& v,
+                  Eigen::Ref<Eigen::Vector<Scalar, N>> out) const
+    {
+        multiply_in_place_(v, out);
+    }
+
     // Write the upper-triangular Cholesky-like factor E = sqrt(D) * L^T
     // into E_out and the QP RHS f = -D^{-1/2} * L^{-1} * g into f_out.
     //
@@ -314,10 +327,13 @@ private:
 
     // out = B * v using the three-pass L * D * L^T multiply (matches
     // NLopt slsqpb_ at L260-L320).
-    void multiply_in_place_(const Eigen::Vector<Scalar, N>& v,
-                            Eigen::Vector<Scalar, N>& out) const
+    void multiply_in_place_(const Eigen::Ref<const Eigen::Vector<Scalar, N>>& v,
+                            Eigen::Ref<Eigen::Vector<Scalar, N>> out) const
     {
-        if(out.size() != n_) out.resize(n_);
+        // Callers own the output storage and pre-size it to n (the
+        // by-value overload constructs out(n_); the hot-path overload
+        // threads a state-resident buffer). A Ref cannot resize, so the
+        // sizing contract is the caller's.
 
         // Pass 1: out = L^T * v. out[i] = v[i] + sum_{j > i} L[j, i] * v[j].
         for(int i = 0; i < n_; ++i)

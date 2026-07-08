@@ -195,9 +195,13 @@ struct byrd_omojokun_step_result
 //                       reduction and the LNP penalty gate: both are
 //                       f-model quantities because the caller's actual
 //                       reduction is measured on f.
-//   hessian_op       -- Hessian-vector-product callable; must accept a
-//                       const Eigen::Ref to a step vector and return an
-//                       Eigen::Vector of the same dimension.
+//   hessian_op       -- Hessian-vector-product callable invoked as
+//                       hessian_op(v, out): it writes B * v into the
+//                       caller-provided Eigen::Ref output `out` (already
+//                       sized to the step dimension). The output-parameter
+//                       form keeps the inner Steihaug-CG loop and the
+//                       normal-/composite-leg products allocation-free at
+//                       a dynamic dimension (no return-by-value temporary).
 //   A                -- joint constraint Jacobian (m_total x n_joint).
 //   c                -- joint constraint residual at z_k (m_total).
 //   delta            -- current trust-region radius.
@@ -464,7 +468,8 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     // step u is confined to null(A) (N&W 18.49) so it preserves the
     // normal step's linearized-feasibility gain; the projector below
     // reuses the A A^T factorization built at entry.
-    Eigen::Vector<Scalar, N> Bv = hessian_op(v_buf);
+    Eigen::Vector<Scalar, N> Bv(v_buf.size());
+    hessian_op(v_buf, Bv);
     Eigen::Vector<Scalar, N> g_t = g + Bv;
 
     // Tangential radius: because u in null(A) is exactly orthogonal to
@@ -586,7 +591,8 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
     // L2-merit predicted reduction as `predicted + penalty * vpred`
     // when needed; filter-style callers consume the unweighted
     // `predicted` and a separately-computed `h` aggregate.
-    Eigen::Vector<Scalar, N> Bp = hessian_op(p_out);
+    Eigen::Vector<Scalar, N> Bp(p_out.size());
+    hessian_op(p_out, Bp);
     const Scalar Bp_dot_p = p_out.dot(Bp);
     Eigen::VectorXd Ap_plus_c = A * p_out + c;
     const Scalar c_norm_lin = c.norm();

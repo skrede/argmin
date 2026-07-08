@@ -17,16 +17,17 @@ namespace
 
 constexpr double kInf = std::numeric_limits<double>::infinity();
 
-// Helper: build a closure that multiplies by a dense Eigen matrix B
-// and returns a freshly-allocated Eigen::Vector. The hessian-op
-// signature accepts a const Eigen::Ref to the search direction.
+// Helper: build a closure that multiplies by a dense Eigen matrix B,
+// writing the product into the caller-provided output Ref. The
+// hessian-op signature is the output-parameter form steihaug_cg
+// consumes (no return-by-value temporary on the inner CG iteration).
 struct dense_hessian_op
 {
     Eigen::Matrix2d B;
-    Eigen::Vector2d operator()(
-        const Eigen::Ref<const Eigen::Vector2d>& v) const
+    void operator()(const Eigen::Ref<const Eigen::Vector2d>& v,
+                    Eigen::Ref<Eigen::Vector2d> out) const
     {
-        return (B * v).eval();
+        out.noalias() = B * v;
     }
 };
 
