@@ -105,6 +105,44 @@ solver.solve(opts);        // run to convergence / max_iterations
 
 This matters when the optimiser is one stage of a larger loop — IK with a frame budget, MPC ticks bounded by the control period, or any setting that cannot afford a blocking `solve()`.
 
+## Embeddability and real-time use
+
+argmin is a passive kernel that owns no thread, scheduler, timer, or loop — the caller owns
+scheduling. The budget is a compile-time property of the driver you pick, over a shared
+steppable policy kernel:
+
+- `step_budget_solver` — iteration cap + convergence, **does not include `<chrono>`**, so it
+  is wall-clock-free by construction.
+- `time_budget_solver` / `step_and_time_budget_solver` — add a wall-clock deadline (the only
+  drivers that read a clock).
+- `stepper` — the purest primitive: no internal loop; the caller's executor owns the budget
+  and calls `step()` plus a converged-query. Best fit for a deadline-scheduled control loop.
+
+**Allocation-freedom at fixed `N`.** Under the allocation-counting gate (a global
+`operator new`/`delete` counter plus `malloc` interposition, armed on the warm-started
+steady-state step), the following policies are certified allocation-free at a fixed
+compile-time dimension in **zero mode** (the gate fails the build if a single allocation
+fires on an armed step): `kraft_slsqp`, `filter_slsqp`, `tr_sqp`, `filter_trsqp`, `lbfgsb`,
+`byrd_lbfgsb`, `augmented_lagrangian`, `projected_gn`, and `projected_gradient_gn`. The SQP
+gates certify the warm-started pre-convergence operating regime; two characterized
+off-hot-loop residuals (post-convergence feasibility restoration; box/inequality free-set
+restart) are documented in the matrix.
+
+**Not yet allocation-free** (their gates stay in witness mode, so no zero-allocation claim is
+made): `nw_sqp` and `filter_nw_sqp` carry a ~32 allocations/step residual that lives inside
+Eigen's own dense-decomposition internals (per-step in the hot loop), and `lm` measures
+~9 allocations/step at HEAD. The remaining derivative-free and stochastic policies (`bobyqa`,
+`cobyla`, `cmaes`, `isres`, `mma`, `gcmma`, `ccsa_quadratic`) are not RT-claimed.
+
+**Exception-free / RTTI-free.** The library has zero `throw` sites and uses no
+`dynamic_cast`/`typeid`. A dedicated CI job builds and *runs* an instantiation probe under
+`-fno-exceptions -fno-rtti` at the C++20 floor, so a surviving throw on any RT-claimed policy
+path fails the build rather than passing a header parse.
+
+The full per-solver breakdown — allocation-free, bounded-iterations, wall-clock-free,
+exceptions-off-clean, deterministic(seeded), each cell citing its proving artifact — is in
+[docs/rt-safety-matrix.md](docs/rt-safety-matrix.md).
+
 ## Project layout
 
 ```
