@@ -508,6 +508,30 @@ struct filter_trsqp_policy
         // axes at init / reset. Keeps the composite step allocation-free.
         detail::byrd_omojokun_workspace<double, Eigen::Dynamic> bo_ws;
 
+        // Per-step joint-space scratch, hoisted out of step() and sized
+        // once on the joint primal (n_total = n + n_ineq) and constraint
+        // (m_total = n_eq + n_ineq) axes at init. The joint width is a
+        // runtime quantity even when N pins the x-only dimension, so
+        // these would otherwise heap-allocate on every step; hoisting
+        // them makes the real-time step window allocation-free.
+        Eigen::MatrixXd step_A_joint;         // m_total x n_total
+        Eigen::VectorXd step_c_joint;         // m_total
+        Eigen::VectorXd step_lower_joint;     // n_total
+        Eigen::VectorXd step_upper_joint;     // n_total
+        Eigen::VectorXd step_z_k;             // n_total
+        Eigen::VectorXd step_g_obj_joint;     // n_total
+        Eigen::VectorXd step_v_buf;           // n_total
+        Eigen::VectorXd step_u_buf;           // n_total
+        Eigen::VectorXd step_r_cg_buf;        // n_total
+        Eigen::VectorXd step_d_cg_buf;        // n_total
+        Eigen::VectorXd step_Bd_cg_buf;       // n_total
+        Eigen::VectorXd step_p_out;           // n_total
+        Eigen::VectorXd trial_s_buf;          // n_ineq
+        Eigen::VectorXd trial_c_joint_buf;    // m_total
+        Eigen::VectorXd soc_c_all_buf;        // m_total
+        Eigen::VectorXd soc_c_trial_joint;    // m_total
+        Eigen::VectorXd soc_c_joint;          // m_total
+
         // Restoration helper buffers. Allocated only when
         // options.restoration_max_iter > 0 at policy construction time
         // (lazy-init guard keeps zero-restoration callers at the
@@ -637,6 +661,25 @@ struct filter_trsqp_policy
             s.w_workspace.resize(m_joint);
         }
         s.bo_ws.resize(n_joint, m_joint);
+
+        // Per-step joint-space scratch sized once here (see state_type).
+        s.step_A_joint.setZero(m_joint, n_joint);
+        s.step_c_joint.resize(m_joint);
+        s.step_lower_joint.resize(n_joint);
+        s.step_upper_joint.resize(n_joint);
+        s.step_z_k.resize(n_joint);
+        s.step_g_obj_joint.resize(n_joint);
+        s.step_v_buf.resize(n_joint);
+        s.step_u_buf.resize(n_joint);
+        s.step_r_cg_buf.resize(n_joint);
+        s.step_d_cg_buf.resize(n_joint);
+        s.step_Bd_cg_buf.resize(n_joint);
+        s.step_p_out.resize(n_joint);
+        s.trial_s_buf.resize(s.n_ineq);
+        s.trial_c_joint_buf.resize(m_joint);
+        s.soc_c_all_buf.resize(m_joint);
+        s.soc_c_trial_joint.resize(m_joint);
+        s.soc_c_joint.resize(m_joint);
 
         // Lazy-init restoration helper buffers. Allocated only when
         // restoration is opted in; the zero-default keeps the
@@ -818,8 +861,10 @@ struct filter_trsqp_policy
         //
         // Reference:
         //  scipy/optimize/_trustregion_constr/canonical_constraint.py.
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> A_joint;
-        Eigen::VectorXd c_joint;
+        // State-resident joint Jacobian / residual scratch (sized at
+        // init); re-zeroed each step without reallocation.
+        auto& A_joint = s.step_A_joint;
+        auto& c_joint = s.step_c_joint;
         A_joint.setZero(m_total, n_total);
         c_joint.resize(m_total);
         if(s.n_eq > 0)
@@ -838,8 +883,8 @@ struct filter_trsqp_policy
         // Steihaug-CG projects on the displaced box at each inner
         // iteration, and the box-projected stationarity measure in
         // Section E reads the same displaced box.
-        Eigen::VectorXd lower_joint(n_total);
-        Eigen::VectorXd upper_joint(n_total);
+        auto& lower_joint = s.step_lower_joint;
+        auto& upper_joint = s.step_upper_joint;
         lower_joint.head(n) = (s.lower - s.x).template cast<double>();
         upper_joint.head(n) = (s.upper - s.x).template cast<double>();
         if(n_ineq > 0)
@@ -893,23 +938,21 @@ struct filter_trsqp_policy
             -> std::pair<double, double>
         {
             Eigen::Vector<double, N> x_trial = s.x + p.head(n);
-            Eigen::VectorXd s_trial(n_ineq);
             if(n_ineq > 0)
-                s_trial = s.s_slack + p.tail(n_ineq);
+                s.trial_s_buf.noalias() = s.s_slack + p.tail(n_ineq);
 
             const double f_new = s.problem->value(x_trial);
 
             if(s.n_eq + n_ineq > 0)
                 s.problem->constraints(x_trial, s.bufs.c_trial_buf);
 
-            Eigen::VectorXd c_joint_new(s.n_eq + n_ineq);
             if(s.n_eq > 0)
-                c_joint_new.head(s.n_eq)
+                s.trial_c_joint_buf.head(s.n_eq)
                     = s.bufs.c_trial_buf.head(s.n_eq);
             if(n_ineq > 0)
-                c_joint_new.tail(n_ineq)
-                    = -s.bufs.c_trial_buf.tail(n_ineq) + s_trial;
-            return {f_new, c_joint_new.norm()};
+                s.trial_c_joint_buf.tail(n_ineq)
+                    = -s.bufs.c_trial_buf.tail(n_ineq) + s.trial_s_buf;
+            return {f_new, s.trial_c_joint_buf.norm()};
         };
 
         // Section I -- Baseline scalars (the f_old leg of the
@@ -919,7 +962,7 @@ struct filter_trsqp_policy
         const double f_old = s.objective_value;
 
         // Section J -- Per-step workspaces in joint primal space.
-        Eigen::VectorXd z_k(n_total);
+        auto& z_k = s.step_z_k;
         z_k.head(n) = s.x;
         if(n_ineq > 0)
             z_k.tail(n_ineq) = s.s_slack;
@@ -931,17 +974,17 @@ struct filter_trsqp_policy
         // rho rule and the W-B eq. (14) f-model reduction consumed by
         // the switching-condition classification. The joint LAGRANGIAN
         // gradient (Section B) keeps driving the quadratic step model.
-        Eigen::VectorXd g_obj_joint(n_total);
+        auto& g_obj_joint = s.step_g_obj_joint;
         g_obj_joint.head(n) = s.g;
         if(n_ineq > 0)
             g_obj_joint.tail(n_ineq).setZero();
 
-        Eigen::VectorXd v_buf(n_total);
-        Eigen::VectorXd u_buf(n_total);
-        Eigen::VectorXd r_cg_buf(n_total);
-        Eigen::VectorXd d_cg_buf(n_total);
-        Eigen::VectorXd Bd_cg_buf(n_total);
-        Eigen::VectorXd p_out(n_total);
+        auto& v_buf = s.step_v_buf;
+        auto& u_buf = s.step_u_buf;
+        auto& r_cg_buf = s.step_r_cg_buf;
+        auto& d_cg_buf = s.step_d_cg_buf;
+        auto& Bd_cg_buf = s.step_Bd_cg_buf;
+        auto& p_out = s.step_p_out;
 
         // Section K -- Byrd-Omojokun composite step. The helper returns
         // raw decision inputs and we apply the filter dispatch locally
@@ -1160,10 +1203,10 @@ struct filter_trsqp_policy
            && compute_h_trial() >= h_current)
         {
             Eigen::Vector<double, N> x_trial(n);
-            Eigen::VectorXd s_trial(n_ineq);
-            Eigen::VectorXd c_all_trial(m_total);
-            Eigen::VectorXd c_trial_joint(m_total);
-            Eigen::VectorXd c_joint_soc(m_total);
+            auto& s_trial = s.trial_s_buf;
+            auto& c_all_trial = s.soc_c_all_buf;
+            auto& c_trial_joint = s.soc_c_trial_joint;
+            auto& c_joint_soc = s.soc_c_joint;
 
             // Filter-measure violation of the most recent trial,
             // driving the kappa_soc contraction test across retries.
