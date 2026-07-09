@@ -68,13 +68,13 @@ the one per-step residual.
 |---|---|---|---|---|---|---|
 | `kraft_slsqp` | **yes** | yes | yes | yes | yes | `sqp_alloc_gate_kraft` (zero mode, 0.00/step); `argmin_no_exceptions_probe`; no RNG |
 | `filter_slsqp` | **yes** [^restore] | yes | yes | yes | yes | `sqp_alloc_gate_filter_slsqp` (zero mode, 0.00/step); `argmin_no_exceptions_probe`; no RNG |
-| `nw_sqp` | **no** [^nw] | yes | yes | yes | yes | `sqp_alloc_gate_nw` (**witness mode**, ~32.00/step steady state); `argmin_no_exceptions_probe`; no RNG |
-| `filter_nw_sqp` | **no** [^nw] [^restore] | yes | yes | yes | yes | `sqp_alloc_gate_filter_nw` (**witness mode**, ~32.00/step steady state); `argmin_no_exceptions_probe`; no RNG |
+| `nw_sqp` | **no** [^nw] | yes | yes | yes | yes | `sqp_alloc_gate_nw` (**witness mode**, 4.00/step steady state); `argmin_no_exceptions_probe`; no RNG |
+| `filter_nw_sqp` | **no** [^nw] [^restore] | yes | yes | yes | yes | `sqp_alloc_gate_filter_nw` (**witness mode**, 4.00/step steady state); `argmin_no_exceptions_probe`; no RNG |
 | `tr_sqp` | **yes** [^nullspace] | yes | yes | yes | yes | `sqp_alloc_gate_tr_sqp` (zero mode, 0.00/step, on an equality-constrained fixture); `argmin_no_exceptions_probe`; no RNG |
 | `filter_trsqp` | **yes** [^restore] [^nullspace] | yes | yes | yes | yes | `sqp_alloc_gate_filter_trsqp` (zero mode, 0.00/step, on an equality-constrained fixture); `argmin_no_exceptions_probe`; no RNG |
 | `lbfgsb` | **yes** | yes | yes | yes | yes | `alloc_gate_lbfgsb` (zero mode, incl. the bound-active generalized-Cauchy-point/subspace branch); `argmin_no_exceptions_probe`; no RNG |
 | `byrd_lbfgsb` | **yes** | yes | yes | yes | yes | `alloc_gate_byrd_lbfgsb` (zero mode, bound-active path); `argmin_no_exceptions_probe`; no RNG |
-| `lm` | **no** | yes | yes | yes | yes | `alloc_gate_lm` (**witness mode**, 9.10/step measured at HEAD; not hoisted, gate not flipped to zero mode); `argmin_no_exceptions_probe`; no RNG |
+| `lm` | **no** | yes | yes | yes | yes | `alloc_gate_lm` (**witness mode**, 2.00/step measured at HEAD; not hoisted, gate not flipped to zero mode); `argmin_no_exceptions_probe`; no RNG |
 | `projected_gn` | **yes** | yes | yes | yes | yes | `alloc_gate_projected_gn` (zero mode, active-bound fixture); `argmin_no_exceptions_probe`; no RNG |
 | `projected_gradient_gn` | **yes** | yes | yes | yes* | yes | `alloc_gate_projected_gradient_gn` (zero mode, active-bound fixture); throw-free library-wide (not individually instantiated by the probe); no RNG |
 | `augmented_lagrangian` | **yes** | yes | yes | yes | yes | `alloc_gate_augmented_lagrangian` (zero mode; bounded resumable inner solve, mu-change + warm-reset armed); `argmin_no_exceptions_probe`; no RNG |
@@ -118,13 +118,13 @@ instantiation probe links and runs. The probe covers the RT-claimed set (`lbfgsb
 [^nw]: **Eigen-internal dense-decomposition solve temporaries (`nw` line-search families).** The
     `nw_sqp` / `filter_nw_sqp` pair is **not allocation-free at fixed `N`**. A bit-identical
     workspace hoist of the shared dense active-set QP substrate drove the fixed-`N` witness from
-    99.60 to ~32.00 allocations/step (full suite bit-identical), but the residual ~32/step is
+    99.60 to 4.00 allocations/step (full suite bit-identical), but the residual 4.00/step is
     **irreducible bit-identically**: it lives inside Eigen's own dense-decomposition internals
     (`ColPivHouseholderQR::solve` and `householderQ().applyOnTheLeft` allocate per-Householder-
     reflector temporaries every step in the QP multiplier solve, regardless of any supplied
     workspace). Unlike the two footnotes above — which are conditional, off-hot-loop residuals —
     this one is a **per-step residual in the certified pre-convergence window**. Both gates are
-    held in **witness mode** at ~32/step (not zero mode); a hand-rolled multiplier solve reached
+    held in **witness mode** at 4.00/step (not zero mode); a hand-rolled multiplier solve reached
     ~21/step but broke last-ULP identity and was not adopted (no numerics were changed). Closing
     this is the charter of a dedicated, separate in-house zero-allocation linear-algebra-kernel
     effort (replicate the dense-decomposition multiplier solve and the shared rank-deficient

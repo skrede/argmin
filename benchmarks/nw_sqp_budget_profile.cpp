@@ -1,9 +1,17 @@
 #include "bench_print.h"
 #include "argmin/solver/options.h"
 #include "argmin/solver/nw_sqp_policy.h"
+
+#if __has_include("argmin/solver/step_budget_solver.h")
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/time_budget_solver.h"
 #include "argmin/solver/time_budget_options.h"
+#define ARGMIN_NW_PROFILE_HAS_BUDGET_DRIVERS 1
+#else
+#include "argmin/solver/basic_solver.h"
+#define ARGMIN_NW_PROFILE_HAS_BUDGET_DRIVERS 0
+#endif
+
 #include "argmin/test_functions/problem_class.h"
 
 #include <Eigen/Core>
@@ -278,7 +286,9 @@ struct profile_row
     case argmin::solver_status::objective_stalled: return "objective_stalled";
     case argmin::solver_status::time_limit_reached: return "time_limit_reached";
     case argmin::solver_status::aborted: return "aborted";
+#if ARGMIN_NW_PROFILE_HAS_BUDGET_DRIVERS
     case argmin::solver_status::invalid_problem: return "invalid_problem";
+#endif
     }
     return "unknown";
 }
@@ -440,10 +450,17 @@ template <typename Problem>
     argmin::nw_sqp_policy<Problem::problem_dimension> policy;
     policy.options.multiplier_reest_every_k = 1;
 
+#if ARGMIN_NW_PROFILE_HAS_BUDGET_DRIVERS
     using solver_type =
         argmin::step_budget_solver<argmin::nw_sqp_policy<Problem::problem_dimension>,
                                    Problem::problem_dimension,
                                    Problem>;
+#else
+    using solver_type =
+        argmin::basic_solver<argmin::nw_sqp_policy<Problem::problem_dimension>,
+                             Problem::problem_dimension,
+                             Problem>;
+#endif
     auto solver = std::make_unique<solver_type>(policy, problem, x0, core_opts);
     const auto start = std::chrono::steady_clock::now();
     const auto result = solver->solve();
@@ -471,19 +488,32 @@ template <typename Problem>
 {
     Problem problem;
     auto x0 = problem.initial_point();
+    argmin::nw_sqp_policy<Problem::problem_dimension> policy;
+    policy.options.multiplier_reest_every_k = 1;
+
+#if ARGMIN_NW_PROFILE_HAS_BUDGET_DRIVERS
     argmin::time_budget_options<> time_opts;
     time_opts.core = make_core_options<Problem>(opts);
     time_opts.core.max_iterations = opts.step_iterations * 100;
     time_opts.max_time = std::chrono::milliseconds(opts.time_budget_ms);
     time_opts.time_poll_stride = 1;
 
-    argmin::nw_sqp_policy<Problem::problem_dimension> policy;
-    policy.options.multiplier_reest_every_k = 1;
-
     using solver_type =
         argmin::time_budget_solver<argmin::nw_sqp_policy<Problem::problem_dimension>,
                                    Problem::problem_dimension,
                                    Problem>;
+#else
+    auto time_opts = make_core_options<Problem>(opts);
+    time_opts.max_iterations = opts.step_iterations * 100;
+    if constexpr(requires(argmin::solver_options<>& candidate)
+                 { candidate.max_time = std::chrono::milliseconds{}; })
+        time_opts.max_time = std::chrono::milliseconds(opts.time_budget_ms);
+
+    using solver_type =
+        argmin::basic_solver<argmin::nw_sqp_policy<Problem::problem_dimension>,
+                             Problem::problem_dimension,
+                             Problem>;
+#endif
     auto solver = std::make_unique<solver_type>(policy, problem, x0, time_opts);
     const auto start = std::chrono::steady_clock::now();
     const auto result = solver->solve();

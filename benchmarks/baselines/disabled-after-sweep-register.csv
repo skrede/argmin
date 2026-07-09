@@ -1,0 +1,9 @@
+# Register for defaults or inclusions that were disabled pending corrected sweeps.
+# Every data row carries a reproducible witness and provenance id.
+item,grid_id,selected_value,old_value,correctness_witness,provenance_id,selected_numeric,action,notes
+soc,penalty_factor_x_soc_max_iterations,penalty_factor=0.3;soc_max_iterations=0,penalty_factor=0.3;soc_max_iterations=0,reference gates pass and closure count improved from 7 to 11,final-soc-budget-sweep-2026-07-09,false,reproduced,trust-region defaults unchanged
+penalty_factor,penalty_factor,0.3,0.3,selected factor passed every reference objective feasibility and status gate,final-penalty-factor-sweep-2026-07-09,true,reproduced,trust-region default unchanged
+fast_mode_retirement,line_search_sqp_mode,retire_line_search_fast,retire_line_search_fast,publish summary has zero line-search fast rows and keeps trust-region fast rows,publish_seed_42,false,reproduced,line-search fast mode remains retired
+multiplier_reest_every_k,multiplier_reest_every_k,1,1,each multiplier sweep row emits correctness_ok from objective feasibility and status gates,multiplier-reest-sweep-local,true,reproduced,line-search SQP default unchanged
+filter_default_grids,filter_envelope_and_filter_trsqp,filter_slsqp=1e-3/1e-3;filter_nw_sqp=1e-3/1e-3;filter_trsqp=null,filter_slsqp=1e-5/1e-5;filter_nw_sqp=1e-5/1e-5;filter_trsqp=current,filter envelope selections passed guards and filter-TRSQP emitted no all-pass selected default,final-filter-envelope-sweep-2026-07-09;final-filter-trsqp-sweep-2026-07-09,false,updated,line-search filter envelope defaults updated
+nlopt_cobyla,publication_summary,included,disabled,one-seed publication summary contains 27 nlopt_cobyla rows,publish_seed_42,false,already_applied,COBYLA inclusion remains capability-gated

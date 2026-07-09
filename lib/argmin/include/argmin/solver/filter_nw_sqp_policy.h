@@ -64,8 +64,9 @@ namespace argmin
 //                 measurements showed `fast` lost wall-time AND iteration
 //                 count against `accurate` on every measured cell across
 //                 the entire line-search SQP family. The strictly-worse
-//                 mode has been removed; the surviving defaults below are
-//                 the former `accurate` values.
+//                 mode has been removed. Solver tolerances remain the former
+//                 `accurate` values; the filter envelope margins are the
+//                 corrected HS-suite sweep winner.
 //
 // Reference: Wachter & Biegler 2006 Section 2.3 (filter envelope
 //            semantics, eq. 6); Fletcher & Leyffer 2002 Section 2.2
@@ -78,8 +79,8 @@ struct filter_nw_sqp_policy
     template <int M>
     using rebind = filter_nw_sqp_policy<M>;
 
-    static constexpr double default_filter_gamma_f = 1e-5;
-    static constexpr double default_filter_gamma_h = 1e-5;
+    static constexpr double default_filter_gamma_f = 1e-3;
+    static constexpr double default_filter_gamma_h = 1e-3;
     static constexpr double default_gradient_tolerance = 1e-8;
     static constexpr double default_step_tolerance_rel = 1e-12;
     static constexpr double default_feasibility_tolerance = 1e-6;
