@@ -51,7 +51,7 @@
 #include <cstring>
 #include <limits>
 #include <numbers>
-#include <print>
+#include "bench_print.h"
 #include <string_view>
 #include <vector>
 
@@ -492,9 +492,9 @@ timing bench_nlopt(const Problem& problem, std::uint32_t reps,
                     std::vector<double>(problem.num_inequality(), 1e-6));
             std::vector<double> x(x0.data(), x0.data() + n);
 
-            const auto t0 = std::chrono::high_resolution_clock::now();
+            const auto t0 = std::chrono::steady_clock::now();
             try { opt.optimize(x, last_fval); } catch(...) {}
-            const auto t1 = std::chrono::high_resolution_clock::now();
+            const auto t1 = std::chrono::steady_clock::now();
 
             samples.push_back(
                 std::chrono::duration<double, std::micro>(t1 - t0).count());
@@ -551,10 +551,10 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps,
         policy.options.seed = seed_value;
         for(std::uint32_t r = 0; r < reps; ++r)
         {
-            const auto t0 = std::chrono::high_resolution_clock::now();
+            const auto t0 = std::chrono::steady_clock::now();
             argmin::step_budget_solver solver{policy, problem, x0, opts};
             const auto result = solver.solve();
-            const auto t1 = std::chrono::high_resolution_clock::now();
+            const auto t1 = std::chrono::steady_clock::now();
 
             last_fval = result.objective_value;
             last_iters = result.iterations;
@@ -576,7 +576,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps,
 
 void print_header()
 {
-    std::println("  {:>26s}  {:>10s}  {:>10s}  {:>8s}  {:>14s}  {:>8s}  {:>8s}",
+    argmin::bench::println("  {:>26s}  {:>10s}  {:>10s}  {:>8s}  {:>14s}  {:>8s}  {:>8s}",
                  "solver", "wall_us", "stddev_us", "evals",
                  "objective", "iters", "z_us");
 }
@@ -586,7 +586,7 @@ void print_row(std::string_view solver, const timing& t,
 {
     const double sd = std::max(nlopt_control.stddev_wall_us, 1e-12);
     const double z = (t.mean_wall_us - nlopt_control.mean_wall_us) / sd;
-    std::println("  {:>26s}  {:10.2f}  {:10.2f}  {:8d}  {:14.6e}  {:8d}  {:+8.2f}",
+    argmin::bench::println("  {:>26s}  {:10.2f}  {:10.2f}  {:8d}  {:14.6e}  {:8d}  {:+8.2f}",
                  solver,
                  t.mean_wall_us, t.stddev_wall_us,
                  t.evals, t.objective, t.iterations, z);
@@ -647,23 +647,23 @@ int main(int argc, char** argv)
         if(parse_uint_arg(arg, "--seed-start", seed_start)) continue;
     }
 
-    std::println("ISRES multi-variant micro-benchmark");
-    std::println("  reps           = {}", reps);
-    std::println("  seed_count     = {}", seed_count);
-    std::println("  seed_start     = {}", seed_start);
-    std::println("  trials/cell    = {} (reps x seeds)", reps * seed_count);
-    std::println("");
-    std::println("  Variants per problem (5 rows):");
-    std::println("    1. isres (production alias) -> alternative::isres::nlopt_faithful_policy");
-    std::println("    2. nlopt_faithful           -> alternative::isres::nlopt_faithful_policy");
-    std::println("    3. original_argmin         -> alternative::isres::original_argmin_policy (frozen baseline)");
-    std::println("    4. runarsson_yao_paper      -> alternative::isres::runarsson_yao_paper_policy");
-    std::println("    5. nlopt_isres              -> NLopt 2.10.0 GN_ISRES (control; z-score reference)");
+    argmin::bench::println("ISRES multi-variant micro-benchmark");
+    argmin::bench::println("  reps           = {}", reps);
+    argmin::bench::println("  seed_count     = {}", seed_count);
+    argmin::bench::println("  seed_start     = {}", seed_start);
+    argmin::bench::println("  trials/cell    = {} (reps x seeds)", reps * seed_count);
+    argmin::bench::println("");
+    argmin::bench::println("  Variants per problem (5 rows):");
+    argmin::bench::println("    1. isres (production alias) -> alternative::isres::nlopt_faithful_policy");
+    argmin::bench::println("    2. nlopt_faithful           -> alternative::isres::nlopt_faithful_policy");
+    argmin::bench::println("    3. original_argmin         -> alternative::isres::original_argmin_policy (frozen baseline)");
+    argmin::bench::println("    4. runarsson_yao_paper      -> alternative::isres::runarsson_yao_paper_policy");
+    argmin::bench::println("    5. nlopt_isres              -> NLopt 2.10.0 GN_ISRES (control; z-score reference)");
 
     auto print_problem = [&]<typename Problem>(std::string_view name,
                                                const Problem& problem)
     {
-        std::println("\n=== {} ===", name);
+        argmin::bench::println("\n=== {} ===", name);
         print_header();
 
         const auto nlopt_t = bench_nlopt(problem, reps, seed_start, seed_count);

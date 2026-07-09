@@ -27,7 +27,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <print>
+#include "bench_print.h"
 
 namespace
 {
@@ -121,7 +121,7 @@ timing bench_argmin(std::uint32_t reps)
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -131,7 +131,7 @@ timing bench_argmin(std::uint32_t reps)
         fval = result.objective_value;
         iters = result.iterations;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, iters};
 }
@@ -152,7 +152,7 @@ timing bench_nlopt(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -168,7 +168,7 @@ timing bench_nlopt(std::uint32_t reps)
         opt.optimize(x, fval);
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, evals};
 }
@@ -189,7 +189,7 @@ timing bench_argmin_bounded(std::uint32_t reps)
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -199,7 +199,7 @@ timing bench_argmin_bounded(std::uint32_t reps)
         fval = result.objective_value;
         iters = result.iterations;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, iters};
 }
@@ -220,7 +220,7 @@ timing bench_nlopt_bounded(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -236,7 +236,7 @@ timing bench_nlopt_bounded(std::uint32_t reps)
         opt.optimize(x, fval);
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, evals};
 }
@@ -272,25 +272,25 @@ bool probe_kkt_residual()
 
     if(!last.kkt_residual.has_value())
     {
-        std::println(stderr, "FAIL: kkt_residual not populated (byrd_lbfgsb)");
+        argmin::bench::println(stderr, "FAIL: kkt_residual not populated (byrd_lbfgsb)");
         return false;
     }
     if(last.kkt_residual.value() < 0.0)
     {
-        std::println(stderr, "FAIL: kkt_residual is negative: {}",
+        argmin::bench::println(stderr, "FAIL: kkt_residual is negative: {}",
                      last.kkt_residual.value());
         return false;
     }
-    std::println("  byrd_lbfgsb bounded Rosenbrock kkt_residual: {:.6e} "
+    argmin::bench::println("  byrd_lbfgsb bounded Rosenbrock kkt_residual: {:.6e} "
                  "(gradient_norm: {:.6e})",
                  last.kkt_residual.value(), last.gradient_norm);
     return true;
 }
 
-// Phase 31.1 regression probe: byrd_lbfgsb on brown_badly_scaled must
-// terminate with solver_status::roundoff_limited in under 30 iters
-// (D-D1). Pre-fix: null-step path populated kkt_residual but left
-// policy_status unset, leading to silent runs to max_iterations.
+// Regression probe: byrd_lbfgsb on brown_badly_scaled must terminate with
+// solver_status::roundoff_limited in under 30 iters. The broken null-step
+// path populated kkt_residual but left policy_status unset, leading to silent
+// runs to max_iterations.
 //
 // Reference: Byrd, Lu, Nocedal, Zhu 1995 Algorithm CP; N&W 2e
 //            Section 3.5 (roundoff limitation in line search).
@@ -326,12 +326,12 @@ bool probe_regression_brown_badly_scaled()
         std::abs(last.objective_value - 6.627535934050483e-28) < 1e-27;
     const bool ok = status_ok && iter_ok && objective_ok;
     if(!ok)
-        std::println(stderr,
+        argmin::bench::println(stderr,
                      "FAIL: byrd_lbfgsb brown_badly_scaled status={} iters={} f={:.6e}",
                      static_cast<int>(policy_status),
                      iters,
                      last.objective_value);
-    std::println("  byrd_lbfgsb brown_badly_scaled: iters={} status={} f={:.6e}",
+    argmin::bench::println("  byrd_lbfgsb brown_badly_scaled: iters={} status={} f={:.6e}",
                  iters,
                  static_cast<int>(policy_status),
                  last.objective_value);
@@ -517,13 +517,13 @@ int argmin_alloc_trace_probe()
 
         if(bound_active_steps == 0)
         {
-            std::println(stderr,
+            argmin::bench::println(stderr,
                 "  [alloc-gate] byrd_lbfgsb_bound_active FAIL: fixture never "
                 "entered the bound-active branch (path-entry assertion) -- a "
                 "zero-mode gate would certify the claim vacuously");
             return 1;
         }
-        std::println("  [alloc-gate] byrd_lbfgsb_bound_active path-entry: {}/{} "
+        argmin::bench::println("  [alloc-gate] byrd_lbfgsb_bound_active path-entry: {}/{} "
                      "armed steps had an active bound",
                      bound_active_steps, 2 * hot_steps);
 
@@ -545,30 +545,30 @@ int main()
     if(!probe_regression_brown_badly_scaled())
         return 1;
 
-    std::println("Rosenbrock 2D (wide bounds [-5,5]^2, all-free fast path), "
+    argmin::bench::println("Rosenbrock 2D (wide bounds [-5,5]^2, all-free fast path), "
                  "{} repetitions each\n", reps);
 
     auto na = bench_argmin(reps);
     auto nl = bench_nlopt(reps);
 
-    std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "argmin", na.wall_us, na.evals, na.objective);
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "nlopt", nl.wall_us, nl.evals, nl.objective);
-    std::println("\n  ratio (argmin/nlopt): {:.1f}x", na.wall_us / nl.wall_us);
+    argmin::bench::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
+    argmin::bench::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "argmin", na.wall_us, na.evals, na.objective);
+    argmin::bench::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "nlopt", nl.wall_us, nl.evals, nl.objective);
+    argmin::bench::println("\n  ratio (argmin/nlopt): {:.1f}x", na.wall_us / nl.wall_us);
 
-    std::println("\nBounded Rosenbrock 2D (tight bounds [-1,1]^2, multi-breakpoint GCP branch), "
+    argmin::bench::println("\nBounded Rosenbrock 2D (tight bounds [-1,1]^2, multi-breakpoint GCP branch), "
                  "{} repetitions each\n", reps);
 
     auto nab = bench_argmin_bounded(reps);
     auto nlb = bench_nlopt_bounded(reps);
 
-    std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "argmin", nab.wall_us, nab.evals, nab.objective);
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "nlopt", nlb.wall_us, nlb.evals, nlb.objective);
-    std::println("\n  ratio (argmin/nlopt): {:.1f}x", nab.wall_us / nlb.wall_us);
+    argmin::bench::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
+    argmin::bench::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "argmin", nab.wall_us, nab.evals, nab.objective);
+    argmin::bench::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", "nlopt", nlb.wall_us, nlb.evals, nlb.objective);
+    argmin::bench::println("\n  ratio (argmin/nlopt): {:.1f}x", nab.wall_us / nlb.wall_us);
 
-    std::println("\nNow profile with:");
-    std::println("  perf record -F 99999 -g -- ./micro_byrd_lbfgsb");
-    std::println("  perf report --stdio --percent-limit=1.0");
+    argmin::bench::println("\nNow profile with:");
+    argmin::bench::println("  perf record -F 99999 -g -- ./micro_byrd_lbfgsb");
+    argmin::bench::println("  perf report --stdio --percent-limit=1.0");
 }
 #endif

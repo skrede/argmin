@@ -20,7 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <print>
+#include "bench_print.h"
 
 namespace
 {
@@ -192,7 +192,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -202,7 +202,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
         fval = result.objective_value;
         iters = result.iterations;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, iters};
 }
@@ -225,7 +225,7 @@ timing bench_nlopt_hs024(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -244,7 +244,7 @@ timing bench_nlopt_hs024(std::uint32_t reps)
         opt.optimize(x, fval);
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, evals};
 }
@@ -267,7 +267,7 @@ timing bench_nlopt_hs076(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -286,14 +286,14 @@ timing bench_nlopt_hs076(std::uint32_t reps)
         opt.optimize(x, fval);
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, evals};
 }
 
 void print_row(std::string_view solver, const timing& t)
 {
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
+    argmin::bench::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
 }
 
 }
@@ -301,28 +301,28 @@ void print_row(std::string_view solver, const timing& t)
 int main()
 {
     constexpr std::uint32_t reps = 200;
-    std::println("COBYLA micro-benchmark, {} repetitions each\n", reps);
-    std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
+    argmin::bench::println("COBYLA micro-benchmark, {} repetitions each\n", reps);
+    argmin::bench::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
 
     // HS024
     {
-        std::println("\n--- HS024 (inequality, n=2, f*=-1) ---");
+        argmin::bench::println("\n--- HS024 (inequality, n=2, f*=-1) ---");
         auto nab  = bench_argmin(hs024_dynamic{}, reps);
         auto nlop = bench_nlopt_hs024(reps);
         print_row("argmin", nab);
         print_row("nlopt", nlop);
-        std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
             nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
     }
 
     // HS076
     {
-        std::println("\n--- HS076 (inequality + box, n=4, f*=-4.68) ---");
+        argmin::bench::println("\n--- HS076 (inequality + box, n=4, f*=-4.68) ---");
         auto nab  = bench_argmin(hs076_dynamic{}, reps);
         auto nlop = bench_nlopt_hs076(reps);
         print_row("argmin", nab);
         print_row("nlopt", nlop);
-        std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
             nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
     }
 }

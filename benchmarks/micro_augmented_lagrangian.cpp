@@ -25,7 +25,7 @@
 #include <exception>
 #include <limits>
 #include <optional>
-#include <print>
+#include "bench_print.h"
 
 namespace
 {
@@ -310,7 +310,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -320,7 +320,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
         fval = result.objective_value;
         iters = result.iterations;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, iters};
 }
@@ -345,7 +345,7 @@ std::optional<timing> bench_nlopt_hs039(std::uint32_t reps)
             opt.optimize(x, fval);
         }
 
-        auto t0 = std::chrono::high_resolution_clock::now();
+        auto t0 = std::chrono::steady_clock::now();
         double fval = 0.0;
         std::uint32_t evals = 0;
         for(std::uint32_t r = 0; r < reps; ++r)
@@ -364,13 +364,13 @@ std::optional<timing> bench_nlopt_hs039(std::uint32_t reps)
             opt.optimize(x, fval);
             evals = static_cast<std::uint32_t>(opt.get_numevals());
         }
-        auto t1 = std::chrono::high_resolution_clock::now();
+        auto t1 = std::chrono::steady_clock::now();
         double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
         return timing{us, fval, evals};
     }
     catch(const std::exception& e)
     {
-        std::println("  nlopt AUGLAG HS039 failed: {}", e.what());
+        argmin::bench::println("  nlopt AUGLAG HS039 failed: {}", e.what());
         return std::nullopt;
     }
 }
@@ -397,7 +397,7 @@ std::optional<timing> bench_nlopt_hs071(std::uint32_t reps)
             opt.optimize(x, fval);
         }
 
-        auto t0 = std::chrono::high_resolution_clock::now();
+        auto t0 = std::chrono::steady_clock::now();
         double fval = 0.0;
         std::uint32_t evals = 0;
         for(std::uint32_t r = 0; r < reps; ++r)
@@ -418,13 +418,13 @@ std::optional<timing> bench_nlopt_hs071(std::uint32_t reps)
             opt.optimize(x, fval);
             evals = static_cast<std::uint32_t>(opt.get_numevals());
         }
-        auto t1 = std::chrono::high_resolution_clock::now();
+        auto t1 = std::chrono::steady_clock::now();
         double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
         return timing{us, fval, evals};
     }
     catch(const std::exception& e)
     {
-        std::println("  nlopt AUGLAG HS071 failed: {}", e.what());
+        argmin::bench::println("  nlopt AUGLAG HS071 failed: {}", e.what());
         return std::nullopt;
     }
 }
@@ -452,7 +452,7 @@ std::optional<timing> bench_nlopt_hs076(std::uint32_t reps)
             opt.optimize(x, fval);
         }
 
-        auto t0 = std::chrono::high_resolution_clock::now();
+        auto t0 = std::chrono::steady_clock::now();
         double fval = 0.0;
         std::uint32_t evals = 0;
         for(std::uint32_t r = 0; r < reps; ++r)
@@ -474,20 +474,20 @@ std::optional<timing> bench_nlopt_hs076(std::uint32_t reps)
             opt.optimize(x, fval);
             evals = static_cast<std::uint32_t>(opt.get_numevals());
         }
-        auto t1 = std::chrono::high_resolution_clock::now();
+        auto t1 = std::chrono::steady_clock::now();
         double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
         return timing{us, fval, evals};
     }
     catch(const std::exception& e)
     {
-        std::println("  nlopt AUGLAG HS076 failed: {}", e.what());
+        argmin::bench::println("  nlopt AUGLAG HS076 failed: {}", e.what());
         return std::nullopt;
     }
 }
 
 void print_row(std::string_view solver, const timing& t)
 {
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
+    argmin::bench::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
 }
 
 // kkt_residual regression probe.
@@ -522,25 +522,23 @@ bool probe_kkt_residual()
 
     if(!last.kkt_residual.has_value())
     {
-        std::println("FAIL: kkt_residual not populated (augmented_lagrangian)");
+        argmin::bench::println("FAIL: kkt_residual not populated (augmented_lagrangian)");
         return false;
     }
     if(last.kkt_residual.value() < 0.0)
     {
-        std::println("FAIL: kkt_residual is negative: {}",
+        argmin::bench::println("FAIL: kkt_residual is negative: {}",
                      last.kkt_residual.value());
         return false;
     }
-    std::println("  augmented_lagrangian HS039 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
+    argmin::bench::println("  augmented_lagrangian HS039 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
                  last.kkt_residual.value(), last.gradient_norm);
     return true;
 }
 
-// Phase 31.1 regression probe: augmented_lagrangian on HS039 must
-// reach f < 1e-5. The policy is not itself a regression driver in
-// Phase 31.1 (the Full E-measure rewrite at its kkt call site is
-// the D-C3 feasibility_gate removal, not a convergence path), so
-// this probe asserts stability rather than a tightened iter bound.
+// Regression probe: augmented_lagrangian on HS039 must reach f < 1e-5. The
+// policy is not itself a convergence regression driver here, so this probe
+// asserts stability rather than a tightened iter bound.
 //
 // Reference: N&W 2e Definition 12.1.
 bool probe_regression_hs039()
@@ -569,10 +567,10 @@ bool probe_regression_hs039()
     const double kkt = last.kkt_residual.value_or(-1.0);
     const bool ok = last.objective_value < -0.999;  // f* = -1
     if(!ok)
-        std::println(stderr,
+        argmin::bench::println(stderr,
                      "FAIL: augmented_lagrangian HS039 f={:.6e} kkt={:.6e}",
                      last.objective_value, kkt);
-    std::println("  augmented_lagrangian HS039: f={:.6e} kkt={:.6e}",
+    argmin::bench::println("  augmented_lagrangian HS039: f={:.6e} kkt={:.6e}",
                  last.objective_value, kkt);
     return ok;
 }
@@ -658,47 +656,47 @@ int main()
     if(!probe_regression_hs039())
         return 1;
 
-    std::println("Augmented Lagrangian micro-benchmark, {} repetitions each\n", reps);
-    std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
+    argmin::bench::println("Augmented Lagrangian micro-benchmark, {} repetitions each\n", reps);
+    argmin::bench::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
 
     // HS039
     {
-        std::println("\n--- HS039 (equality, n=4, f*=-1) ---");
+        argmin::bench::println("\n--- HS039 (equality, n=4, f*=-1) ---");
         auto nab  = bench_argmin(hs039_dynamic{}, reps);
         auto nlop = bench_nlopt_hs039(reps);
         print_row("argmin", nab);
         if(nlop)
         {
             print_row("nlopt", *nlop);
-            std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
+            argmin::bench::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
                 nab.wall_us / nlop->wall_us, double(nab.evals) / nlop->evals);
         }
     }
 
     // HS071
     {
-        std::println("\n--- HS071 (mixed, n=4, f*~17.014) ---");
+        argmin::bench::println("\n--- HS071 (mixed, n=4, f*~17.014) ---");
         auto nab  = bench_argmin(hs071_dynamic{}, reps);
         auto nlop = bench_nlopt_hs071(reps);
         print_row("argmin", nab);
         if(nlop)
         {
             print_row("nlopt", *nlop);
-            std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
+            argmin::bench::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
                 nab.wall_us / nlop->wall_us, double(nab.evals) / nlop->evals);
         }
     }
 
     // HS076
     {
-        std::println("\n--- HS076 (inequality + box, n=4, f*=-4.68) ---");
+        argmin::bench::println("\n--- HS076 (inequality + box, n=4, f*=-4.68) ---");
         auto nab  = bench_argmin(hs076_dynamic{}, reps);
         auto nlop = bench_nlopt_hs076(reps);
         print_row("argmin", nab);
         if(nlop)
         {
             print_row("nlopt", *nlop);
-            std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
+            argmin::bench::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
                 nab.wall_us / nlop->wall_us, double(nab.evals) / nlop->evals);
         }
     }

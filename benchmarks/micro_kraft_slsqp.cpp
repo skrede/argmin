@@ -11,6 +11,8 @@
 #include "argmin/detail/bench/alloc_counter.h"
 #endif
 
+#include "bench_micro_gate.h"
+
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
@@ -23,7 +25,6 @@
 #include <nlopt.hpp>
 
 #include <array>
-#include <print>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -379,9 +380,11 @@ struct timing
 {
     double wall_us;
     double objective;
+    double constraint_violation;
     std::uint32_t evals;
     double per_step_us;
     double line_search_calls_per_step;  // kraft_slsqp only; 0 for others
+    const char* unit;
 };
 
 timing bench_argmin(std::uint32_t reps)
@@ -401,28 +404,30 @@ timing bench_argmin(std::uint32_t reps)
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
-            std::println("WARNING: kraft_slsqp did not converge correctly, f={:.6e}",
+            argmin::bench::println("WARNING: kraft_slsqp did not converge correctly, f={:.6e}",
                          result.objective_value);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         argmin::step_budget_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
+        cv = result.constraint_violation;
         iters = static_cast<std::uint32_t>(result.iterations);
         total_ls_calls += solver.state().line_search_calls;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * iters);
     double ls_per_step = static_cast<double>(total_ls_calls) / (reps * iters);
-    return {per_solve, fval, iters, per_step, ls_per_step};
+    return {per_solve, fval, cv, iters, per_step, ls_per_step, "steps"};
 }
 
 timing bench_argmin_fixed(std::uint32_t reps)
@@ -442,28 +447,30 @@ timing bench_argmin_fixed(std::uint32_t reps)
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
-            std::println("WARNING: kraft_slsqp<4> did not converge correctly, f={:.6e}",
+            argmin::bench::println("WARNING: kraft_slsqp<4> did not converge correctly, f={:.6e}",
                          result.objective_value);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
+        cv = result.constraint_violation;
         iters = static_cast<std::uint32_t>(result.iterations);
         total_ls_calls += solver.state().line_search_calls;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * iters);
     double ls_per_step = static_cast<double>(total_ls_calls) / (reps * iters);
-    return {per_solve, fval, iters, per_step, ls_per_step};
+    return {per_solve, fval, cv, iters, per_step, ls_per_step, "steps"};
 }
 
 timing bench_argmin_nw_sqp(std::uint32_t reps)
@@ -483,25 +490,27 @@ timing bench_argmin_nw_sqp(std::uint32_t reps)
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
-            std::println("WARNING: nw_sqp did not converge correctly, f={:.6e}",
+            argmin::bench::println("WARNING: nw_sqp did not converge correctly, f={:.6e}",
                          result.objective_value);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         argmin::step_budget_solver solver{argmin::nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
+        cv = result.constraint_violation;
         iters = static_cast<std::uint32_t>(result.iterations);
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * iters);
-    return {per_solve, fval, iters, per_step, 0.0};
+    return {per_solve, fval, cv, iters, per_step, 0.0, "steps"};
 }
 
 timing bench_argmin_filter_slsqp(std::uint32_t reps)
@@ -520,25 +529,27 @@ timing bench_argmin_filter_slsqp(std::uint32_t reps)
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
-            std::println("WARNING: filter_slsqp diverged, f={:.6e}",
+            argmin::bench::println("WARNING: filter_slsqp diverged, f={:.6e}",
                          result.objective_value);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         argmin::step_budget_solver solver{argmin::filter_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
+        cv = result.constraint_violation;
         iters = static_cast<std::uint32_t>(result.iterations);
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * iters);
-    return {per_solve, fval, iters, per_step, 0.0};
+    return {per_solve, fval, cv, iters, per_step, 0.0, "steps"};
 }
 
 timing bench_argmin_filter_nw_sqp(std::uint32_t reps)
@@ -557,25 +568,27 @@ timing bench_argmin_filter_nw_sqp(std::uint32_t reps)
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
-            std::println("WARNING: filter_nw_sqp diverged, f={:.6e}",
+            argmin::bench::println("WARNING: filter_nw_sqp diverged, f={:.6e}",
                          result.objective_value);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         argmin::step_budget_solver solver{argmin::filter_nw_sqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
+        cv = result.constraint_violation;
         iters = static_cast<std::uint32_t>(result.iterations);
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * iters);
-    return {per_solve, fval, iters, per_step, 0.0};
+    return {per_solve, fval, cv, iters, per_step, 0.0, "steps"};
 }
 
 timing bench_nlopt(std::uint32_t reps)
@@ -598,8 +611,9 @@ timing bench_nlopt(std::uint32_t reps)
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         nlopt::opt opt(nlopt::LD_SLSQP, 4);
@@ -613,14 +627,17 @@ timing bench_nlopt(std::uint32_t reps)
         opt.set_xtol_rel(1e-10);
         std::vector<double> x = {1.0, 5.0, 5.0, 1.0};
         opt.optimize(x, fval);
+        hs071 problem;
+        cv = argmin::bench::constraint_violation(
+            problem, Eigen::Map<const Eigen::VectorXd>(x.data(), 4));
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * evals);
-    return {per_solve, fval, evals, per_step, 0.0};
+    return {per_solve, fval, cv, evals, per_step, 0.0, "evals"};
 }
 
 // Synthetic 6-DoF NLopt callbacks. Shared constants with the argmin
@@ -681,28 +698,30 @@ timing bench_argmin_6dof(std::uint32_t reps)
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
-            std::println("WARNING: kraft_slsqp synthetic 6-DoF diverged, f={:.6e}",
+            argmin::bench::println("WARNING: kraft_slsqp synthetic 6-DoF diverged, f={:.6e}",
                          result.objective_value);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         argmin::step_budget_solver solver{argmin::kraft_slsqp_policy{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
+        cv = result.constraint_violation;
         iters = static_cast<std::uint32_t>(result.iterations);
         total_ls_calls += solver.state().line_search_calls;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * iters);
     double ls_per_step = static_cast<double>(total_ls_calls) / (reps * iters);
-    return {per_solve, fval, iters, per_step, ls_per_step};
+    return {per_solve, fval, cv, iters, per_step, ls_per_step, "steps"};
 }
 
 timing bench_argmin_6dof_fixed(std::uint32_t reps)
@@ -721,28 +740,30 @@ timing bench_argmin_6dof_fixed(std::uint32_t reps)
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
-            std::println("WARNING: kraft_slsqp<6> synthetic 6-DoF diverged, f={:.6e}",
+            argmin::bench::println("WARNING: kraft_slsqp<6> synthetic 6-DoF diverged, f={:.6e}",
                          result.objective_value);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
+        cv = result.constraint_violation;
         iters = static_cast<std::uint32_t>(result.iterations);
         total_ls_calls += solver.state().line_search_calls;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * iters);
     double ls_per_step = static_cast<double>(total_ls_calls) / (reps * iters);
-    return {per_solve, fval, iters, per_step, ls_per_step};
+    return {per_solve, fval, cv, iters, per_step, ls_per_step, "steps"};
 }
 
 timing bench_nlopt_6dof(std::uint32_t reps)
@@ -764,8 +785,9 @@ timing bench_nlopt_6dof(std::uint32_t reps)
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         nlopt::opt opt(nlopt::LD_SLSQP, 6);
@@ -779,14 +801,17 @@ timing bench_nlopt_6dof(std::uint32_t reps)
         opt.set_xtol_rel(1e-10);
         std::vector<double> x(6, 0.0);
         opt.optimize(x, fval);
+        synthetic_6dof problem;
+        cv = argmin::bench::constraint_violation(
+            problem, Eigen::Map<const Eigen::VectorXd>(x.data(), 6));
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     double per_solve = total_us / reps;
     double per_step = total_us / (reps * evals);
-    return {per_solve, fval, evals, per_step, 0.0};
+    return {per_solve, fval, cv, evals, per_step, 0.0, "evals"};
 }
 
 // Pretty-print helper: the four default_convergence criteria in order.
@@ -802,15 +827,15 @@ void print_last_check_results(
         "step_tolerance",
         "stall_tolerance"
     };
-    std::println("  {} last_check_results:", label);
+    argmin::bench::println("  {} last_check_results:", label);
     for(std::size_t i = 0; i < results.size(); ++i)
     {
         if(results[i])
-            std::println("    [{}] {:<20s} fired -> status code {}",
+            argmin::bench::println("    [{}] {:<20s} fired -> status code {}",
                          i, criterion_names[i],
                          static_cast<int>(*results[i]));
         else
-            std::println("    [{}] {:<20s} -", i, criterion_names[i]);
+            argmin::bench::println("    [{}] {:<20s} -", i, criterion_names[i]);
     }
 }
 
@@ -848,25 +873,25 @@ bool probe_kkt_residual()
 
     if(!last.kkt_residual.has_value())
     {
-        std::println("FAIL: kkt_residual not populated (kraft_slsqp)");
+        argmin::bench::println("FAIL: kkt_residual not populated (kraft_slsqp)");
         return false;
     }
     if(last.kkt_residual.value() < 0.0)
     {
-        std::println("FAIL: kkt_residual is negative: {}",
+        argmin::bench::println("FAIL: kkt_residual is negative: {}",
                      last.kkt_residual.value());
         return false;
     }
-    std::println("  kraft_slsqp HS071 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
+    argmin::bench::println("  kraft_slsqp HS071 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
                  last.kkt_residual.value(), last.gradient_norm);
     return true;
 }
 
-// Phase 31.1 regression probe: kraft_slsqp on HS026 must reach
-// f < 1e-5 once the Full E-measure (N&W 2e Definition 12.1) blocks
-// the premature ftol that post-phase31 let fire at iter 12.
+// Regression probe: kraft_slsqp on HS026 must reach f < 1e-5 once the
+// Full E-measure (N&W 2e Definition 12.1) blocks a historical premature
+// ftol at iter 12.
 //
-// Reference: N&W 2e Definition 12.1; post-phase30 baseline 20 iters.
+// Reference: N&W 2e Definition 12.1; historical baseline 20 iters.
 bool probe_regression_hs026()
 {
     argmin::hs026<> p;
@@ -891,10 +916,10 @@ bool probe_regression_hs026()
     const double kkt = last.kkt_residual.value_or(-1.0);
     const bool ok = last.objective_value < 1e-5;
     if(!ok)
-        std::println(stderr,
+        argmin::bench::println(stderr,
                      "FAIL: kraft_slsqp HS026 f={:.6e} kkt={:.6e}",
                      last.objective_value, kkt);
-    std::println("  kraft_slsqp HS026: f={:.6e} kkt={:.6e}",
+    argmin::bench::println("  kraft_slsqp HS026: f={:.6e} kkt={:.6e}",
                  last.objective_value, kkt);
     return ok;
 }
@@ -964,7 +989,7 @@ int main()
     if(!probe_regression_hs026())
         return 1;
 
-    std::println("HS071 (n=4, m_eq=1, m_ineq=1), {} repetitions each\n", reps);
+    argmin::bench::println("HS071 (n=4, m_eq=1, m_ineq=1), {} repetitions each\n", reps);
 
     auto kraft = bench_argmin(reps);
     auto kraft_fixed = bench_argmin_fixed(reps);
@@ -973,46 +998,70 @@ int main()
     auto filter_nw = bench_argmin_filter_nw_sqp(reps);
     auto nl = bench_nlopt(reps);
 
-    std::println("  {:>14s}  {:>12s}  {:>12s}  {:>10s}  {:>12s}",
-                 "solver", "solve (us)", "step (us)", "iters", "objective");
-    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "kraft_slsqp<-1>", kraft.wall_us, kraft.per_step_us, kraft.evals, kraft.objective);
-    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "kraft_slsqp<4>", kraft_fixed.wall_us, kraft_fixed.per_step_us, kraft_fixed.evals, kraft_fixed.objective);
-    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "nw_sqp", nw.wall_us, nw.per_step_us, nw.evals, nw.objective);
-    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "filter_slsqp", filter_slsqp.wall_us, filter_slsqp.per_step_us, filter_slsqp.evals, filter_slsqp.objective);
-    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "filter_nw_sqp", filter_nw.wall_us, filter_nw.per_step_us, filter_nw.evals, filter_nw.objective);
-    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "nlopt", nl.wall_us, nl.per_step_us, nl.evals, nl.objective);
-    std::println("\n  per-solve ratio kraft_slsqp<-1>/nlopt: {:.2f}x", kraft.wall_us / nl.wall_us);
-    std::println("  per-step  ratio kraft_slsqp<-1>/nlopt: {:.2f}x", kraft.per_step_us / nl.per_step_us);
-    std::println("  per-solve ratio kraft_slsqp<4>/nlopt:  {:.2f}x", kraft_fixed.wall_us / nl.wall_us);
-    std::println("  per-step  ratio kraft_slsqp<4>/nlopt:  {:.2f}x", kraft_fixed.per_step_us / nl.per_step_us);
-    std::println("  per-step  kraft_slsqp<-1>/<4>:         {:.2f}x  (dynamic overhead on n=4)",
-                 kraft.per_step_us / kraft_fixed.per_step_us);
-    std::println("  per-solve ratio nw_sqp/nlopt:          {:.2f}x", nw.wall_us / nl.wall_us);
-    std::println("  per-step  ratio nw_sqp/nlopt:          {:.2f}x", nw.per_step_us / nl.per_step_us);
-    std::println("  per-solve ratio filter_slsqp/nlopt:    {:.2f}x", filter_slsqp.wall_us / nl.wall_us);
-    std::println("  per-step  ratio filter_slsqp/nlopt:    {:.2f}x", filter_slsqp.per_step_us / nl.per_step_us);
-    std::println("  per-solve ratio filter_nw_sqp/nlopt:   {:.2f}x", filter_nw.wall_us / nl.wall_us);
-    std::println("  per-step  ratio filter_nw_sqp/nlopt:   {:.2f}x", filter_nw.per_step_us / nl.per_step_us);
+    auto obs = [](std::string_view name, const timing& t) {
+        return argmin::bench::micro_observation{name, t.objective, t.constraint_violation};
+    };
+    auto print_timing_row = [](std::string_view name, const timing& t) {
+        argmin::bench::println("  {:>14s}  {:12.2f}  {:12.2f}  {:>8s}  {:10d}  {:.6e}  {:.6e}",
+                               name,
+                               t.wall_us,
+                               t.per_step_us,
+                               t.unit,
+                               t.evals,
+                               t.objective,
+                               t.constraint_violation);
+    };
 
-    std::println("\n  kraft_slsqp<-1> phi_ls calls per step: {:.3f}",
-                 kraft.line_search_calls_per_step);
-    std::println("  kraft_slsqp<4>  phi_ls calls per step: {:.3f}",
-                 kraft_fixed.line_search_calls_per_step);
-    std::println("  (average number of merit-function evaluations per kraft_slsqp_policy::step()");
-    std::println("   invocation, averaged over {} reps x {} iters. Armijo success on first try = 1.0;",
-                 reps, kraft.evals);
-    std::println("   2.0 means one backtrack on average; 3.0 means two backtracks.)");
+    constexpr argmin::bench::micro_gate hs071_gate{17.0140173, 1e-6, 1e-6};
+    bool hs071_ok = true;
+    hs071_ok = argmin::bench::comparison_passes(
+        "HS071 kraft_slsqp<-1>/nlopt", obs("kraft_slsqp<-1>", kraft), obs("nlopt", nl), hs071_gate) && hs071_ok;
+    hs071_ok = argmin::bench::comparison_passes(
+        "HS071 kraft_slsqp<4>/nlopt", obs("kraft_slsqp<4>", kraft_fixed), obs("nlopt", nl), hs071_gate) && hs071_ok;
+    hs071_ok = argmin::bench::comparison_passes(
+        "HS071 nw_sqp/nlopt", obs("nw_sqp", nw), obs("nlopt", nl), hs071_gate) && hs071_ok;
+    hs071_ok = argmin::bench::comparison_passes(
+        "HS071 filter_slsqp/nlopt", obs("filter_slsqp", filter_slsqp), obs("nlopt", nl), hs071_gate) && hs071_ok;
+    hs071_ok = argmin::bench::comparison_passes(
+        "HS071 filter_nw_sqp/nlopt", obs("filter_nw_sqp", filter_nw), obs("nlopt", nl), hs071_gate) && hs071_ok;
+
+    if(hs071_ok)
+    {
+        argmin::bench::println("  {:>14s}  {:>12s}  {:>12s}  {:>8s}  {:>10s}  {:>12s}  {:>12s}",
+                               "solver", "solve_us", "unit_us", "unit", "units", "objective", "cv");
+        print_timing_row("kraft_slsqp<-1>", kraft);
+        print_timing_row("kraft_slsqp<4>", kraft_fixed);
+        print_timing_row("nw_sqp", nw);
+        print_timing_row("filter_slsqp", filter_slsqp);
+        print_timing_row("filter_nw_sqp", filter_nw);
+        print_timing_row("nlopt", nl);
+        argmin::bench::println("\n  per-solve ratio kraft_slsqp<-1>/nlopt: {:.2f}x", kraft.wall_us / nl.wall_us);
+        argmin::bench::println("  per-unit  ratio kraft_slsqp<-1>/nlopt: {:.2f}x", kraft.per_step_us / nl.per_step_us);
+        argmin::bench::println("  per-solve ratio kraft_slsqp<4>/nlopt:  {:.2f}x", kraft_fixed.wall_us / nl.wall_us);
+        argmin::bench::println("  per-unit  ratio kraft_slsqp<4>/nlopt:  {:.2f}x", kraft_fixed.per_step_us / nl.per_step_us);
+        argmin::bench::println("  per-step  kraft_slsqp<-1>/<4>:         {:.2f}x  (dynamic overhead on n=4)",
+                               kraft.per_step_us / kraft_fixed.per_step_us);
+        argmin::bench::println("  per-solve ratio nw_sqp/nlopt:          {:.2f}x", nw.wall_us / nl.wall_us);
+        argmin::bench::println("  per-unit  ratio nw_sqp/nlopt:          {:.2f}x", nw.per_step_us / nl.per_step_us);
+        argmin::bench::println("  per-solve ratio filter_slsqp/nlopt:    {:.2f}x", filter_slsqp.wall_us / nl.wall_us);
+        argmin::bench::println("  per-unit  ratio filter_slsqp/nlopt:    {:.2f}x", filter_slsqp.per_step_us / nl.per_step_us);
+        argmin::bench::println("  per-solve ratio filter_nw_sqp/nlopt:   {:.2f}x", filter_nw.wall_us / nl.wall_us);
+        argmin::bench::println("  per-unit  ratio filter_nw_sqp/nlopt:   {:.2f}x", filter_nw.per_step_us / nl.per_step_us);
+
+        argmin::bench::println("\n  kraft_slsqp<-1> phi_ls calls per step: {:.3f}",
+                               kraft.line_search_calls_per_step);
+        argmin::bench::println("  kraft_slsqp<4>  phi_ls calls per step: {:.3f}",
+                               kraft_fixed.line_search_calls_per_step);
+        argmin::bench::println("  (average number of merit-function evaluations per kraft_slsqp_policy::step()");
+        argmin::bench::println("   invocation, averaged over {} reps x {} iters. Armijo success on first try = 1.0;",
+                               reps, kraft.evals);
+        argmin::bench::println("   2.0 means one backtrack on average; 3.0 means two backtracks.)");
+    }
 
     // HS071 per-criterion convergence telemetry. One extra solve per
     // variant outside the timing loop so it never pollutes the per-step
     // measurement. Reach path: solver.convergence().last_check_results().
-    std::println("");
+    argmin::bench::println("");
     {
         hs071 problem;
         Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
@@ -1041,38 +1090,45 @@ int main()
     }
 
     // Synthetic 6-DoF benchmarks.
-    std::println("\nSynthetic 6-DoF (n=6, m_eq=2, m_ineq=0, kappa(M)~1e4), {} repetitions each\n",
+    argmin::bench::println("\nSynthetic 6-DoF (n=6, m_eq=2, m_ineq=0, kappa(M)~1e4), {} repetitions each\n",
                  reps);
     auto kraft6 = bench_argmin_6dof(reps);
     auto kraft6f = bench_argmin_6dof_fixed(reps);
     auto nl6 = bench_nlopt_6dof(reps);
 
-    std::println("  {:>14s}  {:>12s}  {:>12s}  {:>10s}  {:>12s}",
-                 "solver", "solve (us)", "step (us)", "iters", "objective");
-    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "kraft_slsqp<-1>", kraft6.wall_us, kraft6.per_step_us,
-                 kraft6.evals, kraft6.objective);
-    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "kraft_slsqp<6>", kraft6f.wall_us, kraft6f.per_step_us,
-                 kraft6f.evals, kraft6f.objective);
-    std::println("  {:>14s}  {:12.2f}  {:12.2f}  {:10d}  {:.6e}",
-                 "nlopt", nl6.wall_us, nl6.per_step_us, nl6.evals, nl6.objective);
-    std::println("\n  per-solve ratio kraft_slsqp<-1>/nlopt: {:.2f}x",
-                 kraft6.wall_us / nl6.wall_us);
-    std::println("  per-step  ratio kraft_slsqp<-1>/nlopt: {:.2f}x",
-                 kraft6.per_step_us / nl6.per_step_us);
-    std::println("  per-solve ratio kraft_slsqp<6>/nlopt:  {:.2f}x",
-                 kraft6f.wall_us / nl6.wall_us);
-    std::println("  per-step  ratio kraft_slsqp<6>/nlopt:  {:.2f}x",
-                 kraft6f.per_step_us / nl6.per_step_us);
-    std::println("  per-step  kraft_slsqp<-1>/<6>:         {:.2f}x  (dynamic overhead on n=6)",
-                 kraft6.per_step_us / kraft6f.per_step_us);
-    std::println("\n  kraft_slsqp<-1> 6-DoF phi_ls calls per step: {:.3f}",
-                 kraft6.line_search_calls_per_step);
-    std::println("  kraft_slsqp<6>  6-DoF phi_ls calls per step: {:.3f}",
-                 kraft6f.line_search_calls_per_step);
+    constexpr argmin::bench::micro_gate synthetic_gate{0.0, 1e-8, 1e-6};
+    bool synthetic_ok = true;
+    synthetic_ok = argmin::bench::comparison_passes(
+        "synthetic 6-DoF kraft_slsqp<-1>/nlopt",
+        obs("kraft_slsqp<-1>", kraft6), obs("nlopt", nl6), synthetic_gate) && synthetic_ok;
+    synthetic_ok = argmin::bench::comparison_passes(
+        "synthetic 6-DoF kraft_slsqp<6>/nlopt",
+        obs("kraft_slsqp<6>", kraft6f), obs("nlopt", nl6), synthetic_gate) && synthetic_ok;
 
-    std::println("");
+    if(synthetic_ok)
+    {
+        argmin::bench::println("  {:>14s}  {:>12s}  {:>12s}  {:>8s}  {:>10s}  {:>12s}  {:>12s}",
+                               "solver", "solve_us", "unit_us", "unit", "units", "objective", "cv");
+        print_timing_row("kraft_slsqp<-1>", kraft6);
+        print_timing_row("kraft_slsqp<6>", kraft6f);
+        print_timing_row("nlopt", nl6);
+        argmin::bench::println("\n  per-solve ratio kraft_slsqp<-1>/nlopt: {:.2f}x",
+                               kraft6.wall_us / nl6.wall_us);
+        argmin::bench::println("  per-unit  ratio kraft_slsqp<-1>/nlopt: {:.2f}x",
+                               kraft6.per_step_us / nl6.per_step_us);
+        argmin::bench::println("  per-solve ratio kraft_slsqp<6>/nlopt:  {:.2f}x",
+                               kraft6f.wall_us / nl6.wall_us);
+        argmin::bench::println("  per-unit  ratio kraft_slsqp<6>/nlopt:  {:.2f}x",
+                               kraft6f.per_step_us / nl6.per_step_us);
+        argmin::bench::println("  per-step  kraft_slsqp<-1>/<6>:         {:.2f}x  (dynamic overhead on n=6)",
+                               kraft6.per_step_us / kraft6f.per_step_us);
+        argmin::bench::println("\n  kraft_slsqp<-1> 6-DoF phi_ls calls per step: {:.3f}",
+                               kraft6.line_search_calls_per_step);
+        argmin::bench::println("  kraft_slsqp<6>  6-DoF phi_ls calls per step: {:.3f}",
+                               kraft6f.line_search_calls_per_step);
+    }
+
+    argmin::bench::println("");
     {
         synthetic_6dof problem;
         Eigen::VectorXd x0 = Eigen::VectorXd::Zero(6);
@@ -1100,8 +1156,8 @@ int main()
                                  solver.convergence().last_check_results());
     }
 
-    std::println("\nNow profile with:");
-    std::println("  perf record -F 99999 -g -- ./micro_kraft_slsqp");
-    std::println("  perf report --stdio --percent-limit=1.0");
+    argmin::bench::println("\nNow profile with:");
+    argmin::bench::println("  perf record -F 99999 -g -- ./micro_kraft_slsqp");
+    argmin::bench::println("  perf report --stdio --percent-limit=1.0");
 }
 #endif

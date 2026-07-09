@@ -20,8 +20,8 @@
 // The 5-leg breakdown lives in kkt_residual_breakdown() below. It is
 // deliberately a local free function (NOT exported to
 // lib/argmin/include/argmin/detail/) -- this file is deletable once
-// the Phase 31.2 convergence fix and its bench snapshot land. The
-// canonical kkt_residual helper in detail/kkt_residual.h is separate.
+// the convergence fix and its bench snapshot land. The canonical
+// kkt_residual helper in detail/kkt_residual.h is separate.
 //
 // Reference: Nocedal & Wright, "Numerical Optimization" 2nd ed. (2006),
 //            Definition 12.1 (KKT conditions: stationarity + primal
@@ -70,7 +70,7 @@
 #include <cstdint>
 #include <optional>
 #include <cmath>
-#include <print>
+#include "bench_print.h"
 #include <string_view>
 #include <type_traits>
 
@@ -181,8 +181,8 @@ int first_fired(const std::array<std::optional<argmin::solver_status>, K>& resul
 // so every case block stays consistent.
 void print_header(std::string_view case_label)
 {
-    std::println("# case: {}", case_label);
-    std::println("iter,f,c_eq_norm,c_ineq_violation,stationarity_leg,"
+    argmin::bench::println("# case: {}", case_label);
+    argmin::bench::println("iter,f,c_eq_norm,c_ineq_violation,stationarity_leg,"
                  "complementarity_leg,dual_feasibility_leg,primal_eq_leg,"
                  "primal_ineq_leg,kkt_current,gradient_norm,x_norm,"
                  "step_size,feasibility_gate_effective,fired_criterion,"
@@ -207,7 +207,7 @@ void print_row(std::uint32_t iter,
                double feasibility_gate_effective,
                int fired_criterion, int policy_status_code)
 {
-    std::println("{},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},"
+    argmin::bench::println("{},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},"
                  "{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{},{},"
                  "{:.6e},{:.6e},{:.6e},{:.6e}",
                  iter, f, c_eq_norm, c_ineq_violation,
@@ -411,9 +411,9 @@ void run_sqp_case(std::string_view case_label, Problem problem, Policy policy)
         }
     }
 
-    std::println("# terminated: status={} iter={}",
+    argmin::bench::println("# terminated: status={} iter={}",
                  final_status_code, final_iter);
-    std::println("");
+    argmin::bench::println("");
 }
 
 // -----------------------------------------------------------------
@@ -435,11 +435,11 @@ void run_byrd_brown_case()
     Problem problem;
     auto x0 = problem.initial_point();
     argmin::solver_options opts;
-    // The post-Phase-31 regression runs to max_iterations silently;
-    // cap at 10000 to reproduce the snapshot behaviour. Reading 10000
-    // rows per-iter is overkill -- subsample by emitting only every
-    // 250th row plus the last. CSV interpretation still covers the
-    // whole trajectory via the subsampled view.
+    // The broken regression runs to max_iterations silently; cap at
+    // 10000 to reproduce the snapshot behavior. Reading 10000 rows
+    // per-iter is overkill -- subsample by emitting only every 250th
+    // row plus the last. CSV interpretation still covers the whole
+    // trajectory via the subsampled view.
     opts.max_iterations = 10000;
     opts.set_gradient_threshold(1e-12);
     opts.set_objective_threshold(1e-14);
@@ -518,20 +518,18 @@ void run_byrd_brown_case()
         }
     }
 
-    std::println("# terminated: status={} iter={}",
+    argmin::bench::println("# terminated: status={} iter={}",
                  final_status_code, final_iter);
-    std::println("");
+    argmin::bench::println("");
 }
 
 }
 
 // -----------------------------------------------------------------
-// Phase 31.2 Plan 01 diagnostic matrix: 24 cases over
-// {hs006, hs007, hs024, hs026, hs043, hs071} x
-// {kraft_slsqp, nw_sqp, filter_slsqp, filter_nw_sqp}. Each
-// run_sqp_case emits per-iter rows with the full 20-column CSV
-// (original 16 legs + 4 new lagrangian-gradient decomposition
-// columns) so the DIAGNOSIS author can grep by policy x problem.
+// Diagnostic matrix: 24 cases over {hs006, hs007, hs024, hs026, hs043,
+// hs071} x {kraft_slsqp, nw_sqp, filter_slsqp, filter_nw_sqp}. Each
+// run_sqp_case emits per-iter rows with the full 20-column CSV so the
+// diagnostic author can grep by policy x problem.
 //
 // The byrd_lbfgsb brown_badly_scaled case is retained at the end
 // as it remains the only non-SQP reference trajectory in this

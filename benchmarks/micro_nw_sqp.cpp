@@ -10,6 +10,8 @@
 #include "argmin/detail/bench/alloc_counter.h"
 #endif
 
+#include "bench_micro_gate.h"
+
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -18,11 +20,10 @@
 
 #include <nlopt.hpp>
 
-#include <chrono>
 #include <cmath>
-#include <cstdint>
+#include <chrono>
 #include <limits>
-#include <print>
+#include <cstdint>
 
 namespace
 {
@@ -31,7 +32,9 @@ struct timing
 {
     double wall_us;
     double objective;
+    double constraint_violation;
     std::uint32_t evals;
+    const char* unit;
 };
 
 // Dynamic-dimension HS039 wrapper (equality, n=4).
@@ -220,19 +223,21 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
         argmin::step_budget_solver solver{argmin::nw_sqp_policy<>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
+        cv = result.constraint_violation;
         iters = result.iterations;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
-    return {us, fval, iters};
+    return {us, fval, cv, iters, "steps"};
 }
 
 timing bench_nlopt_hs039(std::uint32_t reps)
@@ -250,8 +255,9 @@ timing bench_nlopt_hs039(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
@@ -264,11 +270,14 @@ timing bench_nlopt_hs039(std::uint32_t reps)
         opt.set_xtol_rel(1e-12);
         std::vector<double> x = {2.0, 2.0, 2.0, 2.0};
         opt.optimize(x, fval);
+        hs039_dynamic problem;
+        cv = argmin::bench::constraint_violation(
+            problem, Eigen::Map<const Eigen::VectorXd>(x.data(), 4));
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
-    return {us, fval, evals};
+    return {us, fval, cv, evals, "evals"};
 }
 
 timing bench_nlopt_hs071(std::uint32_t reps)
@@ -288,8 +297,9 @@ timing bench_nlopt_hs071(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
+    double cv = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
@@ -304,16 +314,26 @@ timing bench_nlopt_hs071(std::uint32_t reps)
         opt.set_xtol_rel(1e-12);
         std::vector<double> x = {1.0, 5.0, 5.0, 1.0};
         opt.optimize(x, fval);
+        hs071_dynamic problem;
+        cv = argmin::bench::constraint_violation(
+            problem, Eigen::Map<const Eigen::VectorXd>(x.data(), 4));
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
-    return {us, fval, evals};
+    return {us, fval, cv, evals, "evals"};
 }
 
 void print_row(std::string_view solver, const timing& t)
 {
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
+    argmin::bench::println("  {:>12s}  {:10.2f}  {:>8s}  {:10d}  {:10.2f}  {:.6e}  {:.6e}",
+                           solver,
+                           t.wall_us,
+                           t.unit,
+                           t.evals,
+                           argmin::bench::per_unit_us(t.wall_us, t.evals),
+                           t.objective,
+                           t.constraint_violation);
 }
 
 // kkt_residual regression probe.
@@ -346,25 +366,25 @@ bool probe_kkt_residual()
 
     if(!last.kkt_residual.has_value())
     {
-        std::println("FAIL: kkt_residual not populated (nw_sqp)");
+        argmin::bench::println("FAIL: kkt_residual not populated (nw_sqp)");
         return false;
     }
     if(last.kkt_residual.value() < 0.0)
     {
-        std::println("FAIL: kkt_residual is negative: {}",
+        argmin::bench::println("FAIL: kkt_residual is negative: {}",
                      last.kkt_residual.value());
         return false;
     }
-    std::println("  nw_sqp HS039 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
+    argmin::bench::println("  nw_sqp HS039 kkt_residual: {:.6e} (gradient_norm: {:.6e})",
                  last.kkt_residual.value(), last.gradient_norm);
     return true;
 }
 
-// Phase 31.1 regression probe: nw_sqp on HS026 must reach f < 1e-5
-// after the Full E-measure (N&W 2e Definition 12.1) blocks the
-// premature ftol that post-phase31 let fire at iter 12.
+// Regression probe: nw_sqp on HS026 must reach f < 1e-5 after the
+// Full E-measure (N&W 2e Definition 12.1) blocks a historical
+// premature ftol at iter 12.
 //
-// Reference: N&W 2e Definition 12.1; post-phase30 baseline 20 iters.
+// Reference: N&W 2e Definition 12.1; historical baseline 20 iters.
 bool probe_regression_hs026()
 {
     argmin::hs026<> p;
@@ -389,10 +409,10 @@ bool probe_regression_hs026()
     const double kkt = last.kkt_residual.value_or(-1.0);
     const bool ok = last.objective_value < 1e-5;
     if(!ok)
-        std::println(stderr,
+        argmin::bench::println(stderr,
                      "FAIL: nw_sqp HS026 f={:.6e} kkt={:.6e}",
                      last.objective_value, kkt);
-    std::println("  nw_sqp HS026: f={:.6e} kkt={:.6e}",
+    argmin::bench::println("  nw_sqp HS026: f={:.6e} kkt={:.6e}",
                  last.objective_value, kkt);
     return ok;
 }
@@ -424,10 +444,10 @@ bool probe_regression_hs007_iter_bound()
     const bool ok = result.iterations <= 12
         && result.objective_value < -1.7320;
     if(!ok)
-        std::println(stderr,
+        argmin::bench::println(stderr,
                      "FAIL: nw_sqp HS007 iters={} f={:.6e} (expected <= 12 @ f < -1.7320)",
                      result.iterations, result.objective_value);
-    std::println("  nw_sqp HS007: iters={} f={:.6e}",
+    argmin::bench::println("  nw_sqp HS007: iters={} f={:.6e}",
                  result.iterations, result.objective_value);
     return ok;
 }
@@ -435,27 +455,23 @@ bool probe_regression_hs007_iter_bound()
 }
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Characterized-residual allocation witness for nw_sqp (see micro_kraft_slsqp.cpp
-// for the shared rationale). Hoisting the dense active-set QP per-solve workspace
-// onto persistent members drove the fixed-N traffic from 99.60 to 32.00
-// allocations per step. The remaining ~32/step is not bit-identically eliminable:
-// it lives inside Eigen's own dense-decomposition internals -- the QP multiplier
-// solve materializes per-Householder-reflector temporaries every step regardless
-// of any supplied workspace. This gate therefore stays in witness mode, recording
-// that characterized real-time hot-loop residual (floored conservatively below the
-// observed 32.00/step band to prove the sensor is not blind); driving it to true
-// zero is deferred to a dedicated in-house zero-allocation linear-algebra kernel.
+// Characterized-residual allocation witness for nw_sqp. The probe uses a
+// fixed-N HS071 fixture and fixed policy instantiation; it remains in witness
+// mode because the current implementation still has Eigen-internal dense-
+// decomposition traffic in the QP multiplier solve.
 int argmin_alloc_trace_probe()
 {
-    hs071_dynamic problem;
-    Eigen::VectorXd x0{{1.0, 5.0, 5.0, 1.0}};
+    argmin::hs071<> problem;
+    auto x0 = problem.initial_point();
     argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
 
-    argmin::step_budget_solver solver{argmin::nw_sqp_policy{}, problem, x0, opts};
+    argmin::step_budget_solver solver{
+        argmin::nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
+        problem, x0, opts};
 
     solver.step();
     solver.step();
@@ -471,7 +487,7 @@ int argmin_alloc_trace_probe()
     argmin::detail::bench::disarm_alloc_trace();
 
     return argmin::detail::bench::evaluate_gate(
-        "nw_sqp", 2 * hot_steps, 24);
+        "nw_sqp", 2 * hot_steps, 1);
 }
 #endif
 
@@ -488,29 +504,46 @@ int main()
     if(!probe_regression_hs007_iter_bound())
         return 1;
 
-    std::println("NW-SQP micro-benchmark, {} repetitions each\n", reps);
-    std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
+    argmin::bench::println("NW-SQP micro-benchmark, {} repetitions each\n", reps);
+    argmin::bench::println("  {:>12s}  {:>10s}  {:>8s}  {:>10s}  {:>10s}  {:>12s}  {:>12s}",
+                           "solver", "solve_us", "unit", "units", "unit_us", "objective", "cv");
 
     // HS039
     {
-        std::println("\n--- HS039 (equality, n=4, f*=-1) ---");
+        argmin::bench::println("\n--- HS039 (equality, n=4, f*=-1) ---");
         auto nab  = bench_argmin(hs039_dynamic{}, reps);
         auto nlop = bench_nlopt_hs039(reps);
-        print_row("argmin", nab);
-        print_row("nlopt", nlop);
-        std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
-            nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
+        constexpr argmin::bench::micro_gate gate{-1.0, 1e-6, 1e-6};
+        if(argmin::bench::comparison_passes(
+               "HS039",
+               {"argmin", nab.objective, nab.constraint_violation},
+               {"nlopt", nlop.objective, nlop.constraint_violation},
+               gate))
+        {
+            print_row("argmin", nab);
+            print_row("nlopt", nlop);
+            argmin::bench::println("  per-solve ratio argmin/nlopt: {:.1f}x",
+                                   nab.wall_us / nlop.wall_us);
+        }
     }
 
     // HS071
     {
-        std::println("\n--- HS071 (mixed, n=4, f*~17.014) ---");
+        argmin::bench::println("\n--- HS071 (mixed, n=4, f*~17.014) ---");
         auto nab  = bench_argmin(hs071_dynamic{}, reps);
         auto nlop = bench_nlopt_hs071(reps);
-        print_row("argmin", nab);
-        print_row("nlopt", nlop);
-        std::println("  ratio argmin/nlopt: {:.1f}x wall, {:.1f}x evals",
-            nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
+        constexpr argmin::bench::micro_gate gate{17.0140173, 1e-6, 1e-6};
+        if(argmin::bench::comparison_passes(
+               "HS071",
+               {"argmin", nab.objective, nab.constraint_violation},
+               {"nlopt", nlop.objective, nlop.constraint_violation},
+               gate))
+        {
+            print_row("argmin", nab);
+            print_row("nlopt", nlop);
+            argmin::bench::println("  per-solve ratio argmin/nlopt: {:.1f}x",
+                                   nab.wall_us / nlop.wall_us);
+        }
     }
 }
 #endif

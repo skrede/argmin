@@ -20,7 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
-#include <print>
+#include "bench_print.h"
 
 namespace
 {
@@ -89,7 +89,7 @@ timing bench_argmin_active_set(std::uint32_t reps)
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -99,7 +99,7 @@ timing bench_argmin_active_set(std::uint32_t reps)
         fval = result.objective_value;
         iters = result.iterations;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, iters};
 }
@@ -125,7 +125,7 @@ timing bench_nlopt_bobyqa(std::uint32_t reps)
         run_nlopt(x, fval, opt);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -141,7 +141,7 @@ timing bench_nlopt_bobyqa(std::uint32_t reps)
         run_nlopt(x, fval, opt);
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, evals};
 }
@@ -175,16 +175,16 @@ bool probe_kkt_residual()
 
     if(!last.kkt_residual.has_value())
     {
-        std::println(stderr, "FAIL: kkt_residual not populated (projected_gn)");
+        argmin::bench::println(stderr, "FAIL: kkt_residual not populated (projected_gn)");
         return false;
     }
     if(last.kkt_residual.value() < 0.0)
     {
-        std::println(stderr, "FAIL: kkt_residual is negative: {}",
+        argmin::bench::println(stderr, "FAIL: kkt_residual is negative: {}",
                      last.kkt_residual.value());
         return false;
     }
-    std::println("  projected_gn bounded Rosenbrock LS kkt_residual: {:.6e} "
+    argmin::bench::println("  projected_gn bounded Rosenbrock LS kkt_residual: {:.6e} "
                  "(gradient_norm: {:.6e})",
                  last.kkt_residual.value(), last.gradient_norm);
     return true;
@@ -295,21 +295,21 @@ int main()
     if(!probe_kkt_residual())
         return 1;
 
-    std::println("Bounded Rosenbrock 2D LS, {} repetitions each\n", reps);
+    argmin::bench::println("Bounded Rosenbrock 2D LS, {} repetitions each\n", reps);
 
     auto na_as = bench_argmin_active_set(reps);
     auto nl = bench_nlopt_bobyqa(reps);
 
-    std::println("  {:>20s}  {:>10s}  {:>10s}  {:>12s}",
+    argmin::bench::println("  {:>20s}  {:>10s}  {:>10s}  {:>12s}",
                  "solver", "wall (us)", "evals", "objective");
-    std::println("  {:>20s}  {:10.2f}  {:10d}  {:.6e}",
+    argmin::bench::println("  {:>20s}  {:10.2f}  {:10d}  {:.6e}",
                  "projected_gn", na_as.wall_us, na_as.evals, na_as.objective);
-    std::println("  {:>20s}  {:10.2f}  {:10d}  {:.6e}",
+    argmin::bench::println("  {:>20s}  {:10.2f}  {:10d}  {:.6e}",
                  "nlopt_bobyqa", nl.wall_us, nl.evals, nl.objective);
-    std::println("\n  ratio (projected_gn / nlopt):          {:.2f}x", na_as.wall_us / nl.wall_us);
+    argmin::bench::println("\n  ratio (projected_gn / nlopt):          {:.2f}x", na_as.wall_us / nl.wall_us);
 
-    std::println("\nNow profile with:");
-    std::println("  perf record -F 99999 -g -- ./micro_projected_gn");
-    std::println("  perf report --stdio --percent-limit=1.0");
+    argmin::bench::println("\nNow profile with:");
+    argmin::bench::println("  perf record -F 99999 -g -- ./micro_projected_gn");
+    argmin::bench::println("  perf report --stdio --percent-limit=1.0");
 }
 #endif

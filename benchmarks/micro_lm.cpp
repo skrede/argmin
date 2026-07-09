@@ -18,16 +18,17 @@
 #include "argmin/detail/bench/alloc_counter.h"
 #endif
 
+#include "bench_micro_gate.h"
+
 #include "argmin/solver/lm_policy.h"
 #include "argmin/solver/step_budget_solver.h"
 
 #include <Eigen/Core>
 
-#include <chrono>
 #include <cmath>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <print>
 
 namespace
 {
@@ -66,11 +67,44 @@ struct rosenbrock_ls
     }
 };
 
+struct rosenbrock_ls_fixed
+{
+    static constexpr int problem_dimension = 2;
+
+    int dimension() const { return 2; }
+    int num_residuals() const { return 2; }
+
+    double value(const Eigen::Vector<double, 2>& x) const
+    {
+        double r0 = 1.0 - x(0);
+        double r1 = std::sqrt(5.0) * (x(1) - x(0) * x(0));
+        return 0.5 * (r0 * r0 + r1 * r1);
+    }
+
+    void residuals(const Eigen::Vector<double, 2>& x,
+                   Eigen::VectorXd& r) const
+    {
+        r(0) = 1.0 - x(0);
+        r(1) = std::sqrt(5.0) * (x(1) - x(0) * x(0));
+    }
+
+    void jacobian(const Eigen::Vector<double, 2>& x,
+                  Eigen::MatrixXd& J) const
+    {
+        J(0, 0) = -1.0;
+        J(0, 1) = 0.0;
+        J(1, 0) = -2.0 * std::sqrt(5.0) * x(0);
+        J(1, 1) = std::sqrt(5.0);
+    }
+};
+
 struct timing
 {
     double wall_us;
     double objective;
+    double constraint_violation;
     std::uint32_t evals;
+    const char* unit;
 };
 
 timing bench_argmin(std::uint32_t reps)
@@ -89,7 +123,7 @@ timing bench_argmin(std::uint32_t reps)
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -99,9 +133,9 @@ timing bench_argmin(std::uint32_t reps)
         fval = result.objective_value;
         iters = result.iterations;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
-    return {us, fval, iters};
+    return {us, fval, 0.0, iters, "steps"};
 }
 
 // kkt_residual regression probe.
@@ -136,16 +170,16 @@ bool probe_kkt_residual()
 
     if(!last.kkt_residual.has_value())
     {
-        std::println(stderr, "FAIL: kkt_residual not populated (lm)");
+        argmin::bench::println(stderr, "FAIL: kkt_residual not populated (lm)");
         return false;
     }
     if(last.kkt_residual.value() < 0.0)
     {
-        std::println(stderr, "FAIL: kkt_residual is negative: {}",
+        argmin::bench::println(stderr, "FAIL: kkt_residual is negative: {}",
                      last.kkt_residual.value());
         return false;
     }
-    std::println("  lm Rosenbrock LS kkt_residual: {:.6e} "
+    argmin::bench::println("  lm Rosenbrock LS kkt_residual: {:.6e} "
                  "(gradient_norm: {:.6e})",
                  last.kkt_residual.value(), last.gradient_norm);
     return true;
@@ -161,16 +195,16 @@ bool probe_kkt_residual()
 // here; when it lands, flipping to the zero-alloc gate is the acceptance.
 int argmin_alloc_trace_probe()
 {
-    rosenbrock_ls problem;
-    Eigen::VectorXd x0{{-1.0, 1.0}};
-    const Eigen::VectorXd x0_reset = x0;
+    rosenbrock_ls_fixed problem;
+    Eigen::Vector<double, 2> x0{-1.0, 1.0};
+    const Eigen::Vector<double, 2> x0_reset = x0;
     argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-12);
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    argmin::step_budget_solver solver{argmin::lm_policy{}, problem, x0, opts};
+    argmin::step_budget_solver solver{argmin::lm_policy<2>{}, problem, x0, opts};
 
     solver.step();
     solver.step();
@@ -197,18 +231,30 @@ int main()
     if(!probe_kkt_residual())
         return 1;
 
-    std::println("\nRosenbrock 2D LS (unconstrained, analytic Jacobian), "
+    argmin::bench::println("\nRosenbrock 2D LS (unconstrained, analytic Jacobian), "
                  "{} repetitions each\n", reps);
 
     auto na = bench_argmin(reps);
 
-    std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}",
-                 "solver", "wall (us)", "iters", "objective");
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}",
-                 "argmin_lm", na.wall_us, na.evals, na.objective);
+    argmin::bench::println("  {:>12s}  {:>10s}  {:>8s}  {:>10s}  {:>10s}  {:>12s}  {:>12s}",
+                           "solver", "solve_us", "unit", "units", "unit_us", "objective", "cv");
+    constexpr argmin::bench::micro_gate gate{0.0, 1e-10, 0.0};
+    const argmin::bench::micro_observation obs{
+        "argmin_lm", na.objective, na.constraint_violation};
+    if(argmin::bench::observation_passes(obs, gate))
+        argmin::bench::println("  {:>12s}  {:10.2f}  {:>8s}  {:10d}  {:10.2f}  {:.6e}  {:.6e}",
+                               "argmin_lm",
+                               na.wall_us,
+                               na.unit,
+                               na.evals,
+                               argmin::bench::per_unit_us(na.wall_us, na.evals),
+                               na.objective,
+                               na.constraint_violation);
+    else
+        argmin::bench::print_gated_comparison("Rosenbrock LS", obs, obs, gate);
 
-    std::println("\nNow profile with:");
-    std::println("  perf record -F 99999 -g -- ./micro_lm");
-    std::println("  perf report --stdio --percent-limit=1.0");
+    argmin::bench::println("\nNow profile with:");
+    argmin::bench::println("  perf record -F 99999 -g -- ./micro_lm");
+    argmin::bench::println("  perf report --stdio --percent-limit=1.0");
 }
 #endif

@@ -60,7 +60,7 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
-#include <print>
+#include "bench_print.h"
 #include <vector>
 
 namespace
@@ -207,7 +207,7 @@ timing bench_argmin(Policy policy, const Problem& problem,
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -217,7 +217,7 @@ timing bench_argmin(Policy policy, const Problem& problem,
         fval = result.objective_value;
         iters = result.iterations;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, iters};
 }
@@ -274,19 +274,19 @@ timing bench_libcmaes_cma(int n, libcmaes::FitFunc obj,
         run_one(fval, evals);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
         run_one(fval, evals);
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, evals};
 }
 
 void print_row(std::string_view solver, const timing& t)
 {
-    std::println("  {:>16s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
+    argmin::bench::println("  {:>16s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
 }
 
 }
@@ -294,12 +294,12 @@ void print_row(std::string_view solver, const timing& t)
 int main()
 {
     constexpr std::uint32_t reps = 100;
-    std::println("CMA-ES micro-benchmark, {} repetitions each\n", reps);
-    std::println("  {:>16s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
+    argmin::bench::println("CMA-ES micro-benchmark, {} repetitions each\n", reps);
+    argmin::bench::println("  {:>16s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
 
     // Rastrigin 2D
     {
-        std::println("\n--- Rastrigin 2D (global minimum at 0, multimodal) ---");
+        argmin::bench::println("\n--- Rastrigin 2D (global minimum at 0, multimodal) ---");
         argmin::rastrigin<double, 2> fixed_prob;
         argmin::rastrigin<double>    dyn_prob{.n = 2};
         auto fixed = bench_argmin(argmin::cmaes_policy<2>{}, fixed_prob, reps, 10000);
@@ -309,9 +309,9 @@ int main()
         print_row("argmin<2>", fixed);
         print_row("argmin<>", dyn);
         print_row("libcmaes_cmaes", libc);
-        std::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
-        std::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
             dyn.wall_us / libc.wall_us, double(dyn.evals) / libc.evals);
     }
 
@@ -324,7 +324,7 @@ int main()
     // re-run on any future commit.
     // Reference: 34.2-03-AB-RESULT.md verdict doc.
     {
-        std::println("\n--- Rastrigin 2D boundary-handling variant A/B ---");
+        argmin::bench::println("\n--- Rastrigin 2D boundary-handling variant A/B ---");
         argmin::rastrigin<double> dyn_prob{.n = 2};
         auto repair_l2 = bench_argmin(
             argmin::alternative::cmaes::repair_l2_penalty_policy<>{},
@@ -347,7 +347,7 @@ int main()
     // symmetric and the optimum is at the origin -- a non-boundary-
     // active landscape; expected: variants tie within noise).
     {
-        std::println("\n--- Ackley 2D boundary-handling variant A/B ---");
+        argmin::bench::println("\n--- Ackley 2D boundary-handling variant A/B ---");
         argmin::ackley<double> dyn_prob{.n = 2};
         auto repair_l2 = bench_argmin(
             argmin::alternative::cmaes::repair_l2_penalty_policy<>{},
@@ -365,7 +365,7 @@ int main()
 
     // Rastrigin 5D
     {
-        std::println("\n--- Rastrigin 5D (global minimum at 0, multimodal) ---");
+        argmin::bench::println("\n--- Rastrigin 5D (global minimum at 0, multimodal) ---");
         argmin::rastrigin<double, 5> fixed_prob;
         argmin::rastrigin<double>    dyn_prob{.n = 5};
         std::vector<double> x0(5, 2.5), lb(5, -5.12), ub(5, 5.12);
@@ -375,15 +375,15 @@ int main()
         print_row("argmin<5>", fixed);
         print_row("argmin<>", dyn);
         print_row("libcmaes_cmaes", libc);
-        std::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
-        std::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
             dyn.wall_us / libc.wall_us, double(dyn.evals) / libc.evals);
     }
 
     // Rosenbrock 2D (bounded, unimodal -- tests CMA-ES on smooth landscape)
     {
-        std::println("\n--- Rosenbrock 2D bounded [-5,5]^2 ---");
+        argmin::bench::println("\n--- Rosenbrock 2D bounded [-5,5]^2 ---");
         bounded_rosenbrock<2>       fixed_prob;
         bounded_rosenbrock_dynamic  dyn_prob;
         auto fixed = bench_argmin(argmin::cmaes_policy<2>{}, fixed_prob, reps, 10000);
@@ -393,9 +393,9 @@ int main()
         print_row("argmin<2>", fixed);
         print_row("argmin<>", dyn);
         print_row("libcmaes_cmaes", libc);
-        std::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio fixed/libcmaes: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / libc.wall_us, double(fixed.evals) / libc.evals);
-        std::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio dyn/libcmaes:   {:.1f}x wall, {:.1f}x evals",
             dyn.wall_us / libc.wall_us, double(dyn.evals) / libc.evals);
     }
 
@@ -411,7 +411,7 @@ int main()
     // introduces an extra value() call outside the offspring loop or
     // reintroduces per-step bench-side multiplication.
     {
-        std::println("\n--- Ackley 2D IPOP f_evals upper-bound check ---");
+        argmin::bench::println("\n--- Ackley 2D IPOP f_evals upper-bound check ---");
         argmin::ackley<double, 2> ackley_prob;
         argmin::bench::eval_counts counts;
         argmin::bench::counting_problem<argmin::ackley<double, 2>>
@@ -440,7 +440,7 @@ int main()
             + 2ull * static_cast<std::uint64_t>(max_pop) * observed_iters
             + 16ull;
 
-        std::println("  iters: {}, f_evals: {}, bound: {}, objective: {:.6e}",
+        argmin::bench::println("  iters: {}, f_evals: {}, bound: {}, objective: {:.6e}",
             observed_iters,
             static_cast<std::uint64_t>(counts.f),
             f_evals_bound,
@@ -467,7 +467,7 @@ int main()
     // exit through a different §B.3 criterion (e.g., turning off the
     // history-window machinery) will fail this assertion.
     {
-        std::println("\n--- Smooth quadratic 2D TolFun-bound exit ---");
+        argmin::bench::println("\n--- Smooth quadratic 2D TolFun-bound exit ---");
 
         smooth_quadratic_2d prob;
 
@@ -488,7 +488,7 @@ int main()
             argmin::cmaes_policy<2>{}, prob, x0, opts, cmaes_opts};
         auto result = solver.solve();
 
-        std::println("  iters: {}, status: {}, objective: {:.6e}",
+        argmin::bench::println("  iters: {}, status: {}, objective: {:.6e}",
             result.iterations,
             static_cast<int>(result.status),
             result.objective_value);
@@ -503,8 +503,8 @@ int main()
         }
     }
 
-    std::println("\nProfile with:");
-    std::println("  perf stat ./micro_cmaes");
-    std::println("  perf record -F 99999 -g -- ./micro_cmaes");
-    std::println("  perf report --stdio --percent-limit=1.0");
+    argmin::bench::println("\nProfile with:");
+    argmin::bench::println("  perf stat ./micro_cmaes");
+    argmin::bench::println("  perf record -F 99999 -g -- ./micro_cmaes");
+    argmin::bench::println("  perf report --stdio --percent-limit=1.0");
 }

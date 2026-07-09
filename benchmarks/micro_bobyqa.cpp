@@ -18,7 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <print>
+#include "bench_print.h"
 
 namespace
 {
@@ -124,7 +124,7 @@ timing bench_argmin(Policy policy, const Problem& problem, std::uint32_t reps)
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -134,7 +134,7 @@ timing bench_argmin(Policy policy, const Problem& problem, std::uint32_t reps)
         fval = result.objective_value;
         iters = result.iterations;
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, iters};
 }
@@ -155,7 +155,7 @@ timing bench_nlopt_hs001(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -171,7 +171,7 @@ timing bench_nlopt_hs001(std::uint32_t reps)
         opt.optimize(x, fval);
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, evals};
 }
@@ -192,7 +192,7 @@ timing bench_nlopt_hs005(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t evals = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -208,14 +208,14 @@ timing bench_nlopt_hs005(std::uint32_t reps)
         opt.optimize(x, fval);
         evals = static_cast<std::uint32_t>(opt.get_numevals());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, evals};
 }
 
 void print_row(std::string_view solver, const timing& t)
 {
-    std::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
+    argmin::bench::println("  {:>12s}  {:10.2f}  {:10d}  {:.6e}", solver, t.wall_us, t.evals, t.objective);
 }
 
 }
@@ -223,41 +223,41 @@ void print_row(std::string_view solver, const timing& t)
 int main()
 {
     constexpr std::uint32_t reps = 1000;
-    std::println("BOBYQA micro-benchmark, {} repetitions each\n", reps);
-    std::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
+    argmin::bench::println("BOBYQA micro-benchmark, {} repetitions each\n", reps);
+    argmin::bench::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
 
     // HS001
     {
-        std::println("\n--- HS001 (Rosenbrock variant, x1 >= -1.5) ---");
+        argmin::bench::println("\n--- HS001 (Rosenbrock variant, x1 >= -1.5) ---");
         auto fixed = bench_argmin(argmin::bobyqa_policy<2>{}, argmin::hs001<double>{}, reps);
         auto dyn   = bench_argmin(argmin::bobyqa_policy<>{},  hs001_dynamic{}, reps);
         auto nlopt = bench_nlopt_hs001(reps);
         print_row("argmin<2>", fixed);
         print_row("argmin<>", dyn);
         print_row("nlopt", nlopt);
-        std::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);
-        std::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
             dyn.wall_us / nlopt.wall_us, double(dyn.evals) / nlopt.evals);
     }
 
     // HS005
     {
-        std::println("\n--- HS005 (trigonometric, tight bounds) ---");
+        argmin::bench::println("\n--- HS005 (trigonometric, tight bounds) ---");
         auto fixed = bench_argmin(argmin::bobyqa_policy<2>{}, argmin::hs005<double>{}, reps);
         auto dyn   = bench_argmin(argmin::bobyqa_policy<>{},  hs005_dynamic{}, reps);
         auto nlopt = bench_nlopt_hs005(reps);
         print_row("argmin<2>", fixed);
         print_row("argmin<>", dyn);
         print_row("nlopt", nlopt);
-        std::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio fixed/nlopt: {:.1f}x wall, {:.1f}x evals",
             fixed.wall_us / nlopt.wall_us, double(fixed.evals) / nlopt.evals);
-        std::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
+        argmin::bench::println("  ratio dyn/nlopt:   {:.1f}x wall, {:.1f}x evals",
             dyn.wall_us / nlopt.wall_us, double(dyn.evals) / nlopt.evals);
     }
 
-    std::println("\nProfile with:");
-    std::println("  perf stat ./micro_bobyqa");
-    std::println("  perf record -F 99999 -g -- ./micro_bobyqa");
-    std::println("  perf report --stdio --percent-limit=1.0");
+    argmin::bench::println("\nProfile with:");
+    argmin::bench::println("  perf stat ./micro_bobyqa");
+    argmin::bench::println("  perf record -F 99999 -g -- ./micro_bobyqa");
+    argmin::bench::println("  perf report --stdio --percent-limit=1.0");
 }

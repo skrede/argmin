@@ -30,7 +30,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <print>
+#include "bench_print.h"
 
 namespace
 {
@@ -388,7 +388,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
         solver.solve();
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     std::uint32_t outer_g = 0;
     std::uint32_t f_evals = 0;
@@ -401,7 +401,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
         outer_g = static_cast<std::uint32_t>(counts.g);
         f_evals = static_cast<std::uint32_t>(counts.f);
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     std::uint32_t inner = f_evals > outer_g ? f_evals - outer_g : 0;
     return {us, fval, outer_g, f_evals, inner};
@@ -425,7 +425,7 @@ timing bench_nlopt_hs024(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     nlopt_counts nl{};
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -444,7 +444,7 @@ timing bench_nlopt_hs024(std::uint32_t reps)
         std::vector<double> x = {1.0, 0.5};
         opt.optimize(x, fval);
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, nl.outer, nl.outer + nl.inner, nl.inner};
 }
@@ -465,7 +465,7 @@ timing bench_nlopt_hs043(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     nlopt_counts nl{};
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -482,7 +482,7 @@ timing bench_nlopt_hs043(std::uint32_t reps)
         std::vector<double> x = {0.0, 0.0, 0.0, 0.0};
         opt.optimize(x, fval);
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, nl.outer, nl.outer + nl.inner, nl.inner};
 }
@@ -505,7 +505,7 @@ timing bench_nlopt_hs076(std::uint32_t reps)
         opt.optimize(x, fval);
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     double fval = 0.0;
     nlopt_counts nl{};
     for(std::uint32_t r = 0; r < reps; ++r)
@@ -524,7 +524,7 @@ timing bench_nlopt_hs076(std::uint32_t reps)
         std::vector<double> x = {0.5, 0.5, 0.5, 0.5};
         opt.optimize(x, fval);
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, nl.outer, nl.outer + nl.inner, nl.inner};
 }
@@ -532,7 +532,7 @@ timing bench_nlopt_hs076(std::uint32_t reps)
 void print_row(std::string_view solver, const timing& t)
 {
     double per_iter = t.iters > 0 ? double(t.inner) / t.iters : 0.0;
-    std::println("  {:>12s}  {:10.2f}  {:8d}  {:8d}  {:8d}  {:>5.2f}  {:.6e}",
+    argmin::bench::println("  {:>12s}  {:10.2f}  {:8d}  {:8d}  {:8d}  {:>5.2f}  {:.6e}",
         solver, t.wall_us, t.iters, t.f_evals, t.inner, per_iter, t.objective);
 }
 
@@ -541,12 +541,12 @@ void print_row(std::string_view solver, const timing& t)
 int main()
 {
     constexpr std::uint32_t reps = 20;
-    std::println("MMA micro-benchmark, {} repetitions each\n", reps);
-    std::println("  iters  = outer iters (argmin counts.g | nlopt grad-bearing obj calls)");
-    std::println("  f_evals = total obj-callback count");
-    std::println("  inner  = f_evals - iters (conservativity-loop trials)");
-    std::println("  in/it  = inner / iters (avg conservativity trials per outer)");
-    std::println("  {:>12s}  {:>10s}  {:>8s}  {:>8s}  {:>8s}  {:>5s}  {:>12s}",
+    argmin::bench::println("MMA micro-benchmark, {} repetitions each\n", reps);
+    argmin::bench::println("  iters  = outer iters (argmin counts.g | nlopt grad-bearing obj calls)");
+    argmin::bench::println("  f_evals = total obj-callback count");
+    argmin::bench::println("  inner  = f_evals - iters (conservativity-loop trials)");
+    argmin::bench::println("  in/it  = inner / iters (avg conservativity trials per outer)");
+    argmin::bench::println("  {:>12s}  {:>10s}  {:>8s}  {:>8s}  {:>8s}  {:>5s}  {:>12s}",
         "solver", "wall (us)", "iters", "f_evals", "inner", "in/it", "objective");
 
     // 7-way comparison per problem:
@@ -560,7 +560,7 @@ int main()
     //     - nlopt_ccsaq     (NLopt's LD_CCSAQ)
     auto print_problem = [&](std::string_view name, auto problem_factory,
                              auto nlopt_runner) {
-        std::println("\n=== {} ===", name);
+        argmin::bench::println("\n=== {} ===", name);
         print_row("mma",
             bench_argmin<argmin::mma_policy<>>(problem_factory(), reps));
         print_row("ccsa_quadratic",

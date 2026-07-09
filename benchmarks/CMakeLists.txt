@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.28)
 project(argmin_benchmarks LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(CTest)
 
 # Google Benchmark via FetchContent (for parametric sweep harness on (policy, mode, k)).
 include(FetchContent)
@@ -601,6 +603,24 @@ endif()
 # outside the NLopt_FOUND block. Registered under the alloc-gate label.
 argmin_add_alloc_gate(micro_lm_alloc_trace micro_lm.cpp alloc_gate_lm)
 
+# NW-SQP step-budget versus time-budget profiling harness. This target emits
+# raw CSV rows with revision and harness provenance fields; it is intentionally
+# separate from publication benchmark summaries.
+add_executable(nw_sqp_budget_profile nw_sqp_budget_profile.cpp)
+target_link_libraries(nw_sqp_budget_profile PRIVATE argmin::argmin)
+target_compile_definitions(nw_sqp_budget_profile PRIVATE
+    EIGEN_STACK_ALLOCATION_LIMIT=1048576
+)
+target_compile_options(nw_sqp_budget_profile PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native -fno-math-errno -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(nw_sqp_budget_profile PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Active-set QP micro-benchmark (argmin-only, no external dependencies).
 add_executable(micro_active_set_qp micro_active_set_qp.cpp)
 target_link_libraries(micro_active_set_qp PRIVATE argmin::argmin)
@@ -859,8 +879,8 @@ endif()
 
 # Standalone regression gate. Consumes publish_summary.csv and a checked-in
 # per-cell baseline (benchmarks/baselines/v0.3.1-regression.csv); exits
-# non-zero on any expected:pass cell breaching a numeric bound or any
-# expected:shouldfail cell unexpectedly converging. C++23 std-only --
+# non-zero on any pass cell breaching a numeric bound or any expected-fail
+# cell unexpectedly converging. C++20 std-only --
 # no Eigen, no argmin, no Catch2, no NLopt; pure CSV bound comparison.
 # Invoked post-bench from run_publish_bench.sh.
 add_executable(regression_check regression_check.cpp)
@@ -875,8 +895,7 @@ target_compile_options(regression_check PRIVATE
 # under the build's binary paths and a temporary output root inside the
 # build tree; the script propagates regression_check's exit code so any
 # bound breach fails the test cell. Registered only when testing is
-# enabled in the active build configuration (i.e., the build dir was
-# configured with both ARGMIN_BUILD_TESTS=ON and ARGMIN_BUILD_BENCHMARKS=ON).
+# enabled in the active benchmark build configuration.
 if(CMAKE_TESTING_ENABLED)
     add_test(
         NAME publish_bench_regression_gate

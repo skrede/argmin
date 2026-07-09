@@ -39,7 +39,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
-#include <print>
+#include "bench_print.h"
 #include <string>
 #include <string_view>
 #include <vector>
@@ -96,9 +96,9 @@ void print_summary(const std::vector<argmin::bench::benchmark_result>& results,
                    std::chrono::microseconds elapsed)
 {
     auto secs = static_cast<double>(elapsed.count()) / 1e6;
-    std::println("--- Benchmark Summary ---");
-    std::println("Total solver/problem pairs: {}", results.size());
-    std::println("Elapsed: {:.3f} s", secs);
+    argmin::bench::println("--- Benchmark Summary ---");
+    argmin::bench::println("Total solver/problem pairs: {}", results.size());
+    argmin::bench::println("Elapsed: {:.3f} s", secs);
 }
 
 constexpr int max_iterations = 10000;
@@ -119,7 +119,7 @@ int main(int argc, char** argv)
     std::vector<argmin::bench::benchmark_result> results;
     std::vector<std::vector<argmin::bench::trace_entry>> traces;
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
 
     // Run argmin solvers on all registered problems.
     argmin::bench::for_each_problem([&](std::string_view name, auto&& prob) {
@@ -153,7 +153,7 @@ int main(int argc, char** argv)
     argmin::bench::run_optim_benchmarks(results, traces, config);
 #endif
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
 
     // Write main results CSV.
@@ -182,7 +182,7 @@ int main(int argc, char** argv)
     // Compare-trace mode: rerun each pair without traces and report overhead.
     if(cfg.compare_trace)
     {
-        std::println("\n--- Trace Overhead Comparison ---");
+        argmin::bench::println("\n--- Trace Overhead Comparison ---");
         std::vector<argmin::bench::benchmark_result> no_trace_results;
         std::vector<std::vector<argmin::bench::trace_entry>> no_trace_traces;
 
@@ -197,7 +197,7 @@ int main(int argc, char** argv)
             if(results[i].library != "argmin")
                 continue;
             auto delta = results[i].wall_time_us - no_trace_results[i].wall_time_us;
-            std::println("  {}/{}: {:+d} us overhead",
+            argmin::bench::println("  {}/{}: {:+d} us overhead",
                          results[i].solver, results[i].problem, delta);
         }
 
