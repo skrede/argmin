@@ -3,9 +3,9 @@
 
 #include "argmin/test_functions/problem_class.h"
 
-#include <cstdint>
 #include <format>
 #include <string>
+#include <cstdint>
 #include <string_view>
 
 namespace argmin::bench
@@ -31,25 +31,36 @@ struct benchmark_result
     double accuracy{};
     double constraint_violation{};
     std::string_view status;
+    std::string row_disposition{"included"};
+    std::string cap_status{"none"};
+    std::string exclusion_reason;
+    std::int64_t solve_wall_time_us{};
+    std::int64_t end_to_end_wall_time_us{};
+    std::string provenance_id;
 };
 
 [[nodiscard]] inline auto csv_header() -> std::string_view
 {
     return "solver,library,problem,class,dimension,seed,mode,solver_iters,"
            "f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,"
-           "known_optimum,accuracy,constraint_violation,status";
+           "known_optimum,accuracy,constraint_violation,status,row_disposition,"
+           "cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,"
+           "provenance_id";
 }
 
 [[nodiscard]] inline auto csv_row(const benchmark_result& r) -> std::string
 {
-    return std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{:.15e},{:.15e},{:.15e},{:.15e},{}",
+    return std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{:.15e},{:.15e},{:.15e},{:.15e},{},{},{},{},{},{},{}",
                        r.solver, r.library, r.problem,
                        to_string(r.pclass), r.dimension,
                        r.seed, r.mode, r.solver_iters,
                        r.f_evals, r.g_evals, r.c_evals, r.J_evals,
                        r.wall_time_us,
                        r.final_objective, r.known_optimum,
-                       r.accuracy, r.constraint_violation, r.status);
+                       r.accuracy, r.constraint_violation, r.status,
+                       r.row_disposition, r.cap_status, r.exclusion_reason,
+                       r.solve_wall_time_us, r.end_to_end_wall_time_us,
+                       r.provenance_id);
 }
 
 }

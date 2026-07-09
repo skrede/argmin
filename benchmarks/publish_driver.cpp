@@ -10,8 +10,8 @@
 //   ./publish_bench --seed-start <N> --seed-count <N> --output-dir <path>
 
 #include "trace_entry.h"
-#include "bench_config.h"
 #include "bench_argmin.h"
+#include "bench_config.h"
 #include "benchmark_result.h"
 #include "problem_registry.h"
 
@@ -42,13 +42,12 @@
 #endif
 
 #include <chrono>
-#include <print>
 #include <format>
 #include <string>
 #include <vector>
+#include <cstdint>
 #include <fstream>
 #include <charconv>
-#include <cstdint>
 #include <iostream>
 #include <filesystem>
 #include <string_view>
@@ -164,6 +163,26 @@ void write_trace_file(const std::filesystem::path& path,
     }
 }
 
+void apply_summary_contract(argmin::bench::benchmark_result& r,
+                            const argmin::bench::bench_config& config,
+                            std::string_view provenance_id)
+{
+    if(r.solve_wall_time_us == 0)
+        r.solve_wall_time_us = r.wall_time_us;
+    if(r.end_to_end_wall_time_us == 0)
+        r.end_to_end_wall_time_us = r.wall_time_us;
+    if(r.provenance_id.empty())
+        r.provenance_id = provenance_id;
+    if(r.row_disposition.empty())
+        r.row_disposition = "included";
+    if(r.cap_status.empty() || r.cap_status == "none")
+    {
+        r.cap_status = (config.max_f_evals > 0 && r.f_evals >= config.max_f_evals)
+            ? "f_eval"
+            : "none";
+    }
+}
+
 }
 
 int main(int argc, char** argv)
@@ -190,6 +209,7 @@ int main(int argc, char** argv)
     {
         std::uint64_t seed = static_cast<std::uint64_t>(cli.seed_start + si);
         auto cfg = argmin::bench::bench_config::publication(seed);
+        const std::string provenance_id = std::format("publish_seed_{}", seed);
 
         std::vector<argmin::bench::benchmark_result>         results;
         std::vector<std::vector<argmin::bench::trace_entry>> traces;
@@ -228,6 +248,7 @@ int main(int argc, char** argv)
 
         for(std::size_t i = 0; i < results.size(); ++i)
         {
+            apply_summary_contract(results[i], cfg, provenance_id);
             summary_out << argmin::bench::csv_row(results[i]) << '\n';
 
             if(i < traces.size() && !traces[i].empty())
@@ -239,12 +260,13 @@ int main(int argc, char** argv)
             }
         }
 
-        std::println("seed {}: emitted {} summary rows", seed, results.size());
+        std::cout << std::format("seed {}: emitted {} summary rows\n",
+                                 seed, results.size());
     }
 
     summary_out.close();
-    std::println("done: wrote {} + {}/",
-                 (out_dir / "publish_summary.csv").string(),
-                 traces_dir.string());
+    std::cout << std::format("done: wrote {} + {}/\n",
+                             (out_dir / "publish_summary.csv").string(),
+                             traces_dir.string());
     return 0;
 }

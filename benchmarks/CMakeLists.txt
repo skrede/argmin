@@ -75,6 +75,9 @@ add_executable(publish_bench
     publish_driver.cpp
 )
 target_link_libraries(publish_bench PRIVATE argmin::argmin benchmark::benchmark)
+set_target_properties(publish_bench PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON)
 
 target_compile_options(publish_bench PRIVATE
     $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
@@ -86,6 +89,23 @@ target_compile_options(publish_bench PRIVATE
 if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(publish_bench PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
+add_executable(benchmark_methodology_contract_test
+    methodology_contract_test.cpp
+)
+target_link_libraries(benchmark_methodology_contract_test PRIVATE argmin::argmin)
+set_target_properties(benchmark_methodology_contract_test PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON)
+if(CMAKE_TESTING_ENABLED)
+    add_test(
+        NAME benchmark_methodology_contract_test
+        COMMAND benchmark_methodology_contract_test
+    )
+    set_tests_properties(benchmark_methodology_contract_test PROPERTIES
+        LABELS "bench;contract"
+    )
 endif()
 
 # Strided active-set multiplier-reest sweep harness. Parametric on

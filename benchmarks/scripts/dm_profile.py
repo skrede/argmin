@@ -29,7 +29,8 @@ function evaluations) at which
 is achieved (Dolan and More, "Benchmarking Optimization Software with
 Performance Profiles", Mathematical Programming 91(2), 2002, Section 2).
 ``t_tau`` is set to positive infinity if the tolerance is never reached on
-the trace.
+the trace. Constrained and bound-constrained rows additionally require finite
+trace feasibility no larger than the publication feasibility threshold.
 
 Across the seed sweep the per-(solver, problem, tau, metric) values are
 reduced to the median (matching the configured median-of-N protocol used by
@@ -58,8 +59,7 @@ dropped) and to the named per-step solver subset
 ``{kraft_slsqp_accurate, tr_sqp_accurate, tr_sqp_fast, nlopt_slsqp}``
 (reduced from five entries after the line-search SQP family was
 empirically collapsed to single-mode; tr_sqp retains both modes);
-see ``.planning/research/FEATURES.md`` section 6 for the honest-position
-statement on per-step performance comparisons.
+the cohort is intentionally limited to paired per-problem measurements.
 
 Reference: E. D. Dolan and J. J. More, "Benchmarking Optimization Software
 with Performance Profiles", Mathematical Programming 91(2):201-213, 2002.
@@ -68,7 +68,9 @@ with Performance Profiles", Mathematical Programming 91(2):201-213, 2002.
 from __future__ import annotations
 
 import sys
+import math
 import argparse
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -81,6 +83,7 @@ import matplotlib.pyplot as plt
 
 TAU_GRID = (1e-4, 1e-6, 1e-8, 1e-10, 1e-12)
 METRICS = ("wall_us", "f_evals")
+EPS_FEAS_DEFAULT = 1e-8
 
 # PROBLEM_CLASSES is discovered at runtime from publish_summary.csv -- do not
 # hardcode. The underlying problem_class enum is a bitmask combining seven
@@ -101,15 +104,12 @@ METRICS = ("wall_us", "f_evals")
 HS_SUITE_EXCLUDE_TOKEN = "application"
 
 
-# Per-step Dolan-More cohort governance: argmin's honest-position
-# (.planning/research/FEATURES.md section 6, "Per-Step Performance Comparison
-# Table") is that argmin has paired per-HS-problem-microseconds-per-step
-# numbers only against NLopt at argmin's problem sizes (n <= 50). Ipopt,
-# KNITRO, SNOPT, and scipy SLSQP publish CUTEst-aggregate figures that are
-# not in the same comparison frame as argmin's per-HS-problem-us/step
-# measurements; including them in the per-step Dolan-More cohort silently
-# inflates the comparison. The PROHIBITED_IN_PER_STEP set is enforced as a
-# hard assertion at script entry; the assertion is non-bypassable.
+# Per-step Dolan-More cohort governance: argmin has paired
+# per-HS-problem-microseconds-per-step numbers only against NLopt at argmin's
+# problem sizes. Ipopt, KNITRO, SNOPT, and scipy SLSQP publish aggregate
+# figures that are not in the same comparison frame as argmin's per-HS
+# measurements. The PROHIBITED_IN_PER_STEP set is enforced as a hard assertion
+# at script entry; the assertion is non-bypassable.
 PER_STEP_VALID_SOLVERS = frozenset({
     # argmin internal solvers (paired publish_bench measurements). The
     # line-search SQP family is single-mode after the empirical _fast
@@ -155,12 +155,10 @@ def _assert_no_prohibited_solvers(summary: pd.DataFrame) -> None:
     """Refuse to build a per-step Dolan-More profile when the plot cohort
     contains a CUTEst-aggregate-only solver.
 
-    See ``.planning/research/FEATURES.md`` section 6 (Per-Step Performance
-    Comparison Table) for the full honest-position statement. The guard runs
-    against the post-cohort-filter dataframe -- i.e., whatever rows are about
-    to be plotted. In default mode the named-subset cohort excludes every
-    prohibited solver by construction and the guard is a no-op. In
-    ``--no-cohort-filter`` diagnostic mode the cohort widens to every solver
+    The guard runs against the post-cohort-filter dataframe -- i.e., whatever
+    rows are about to be plotted. In default mode the named-subset cohort
+    excludes every prohibited solver by construction and the guard is a no-op.
+    In ``--no-cohort-filter`` diagnostic mode the cohort widens to every solver
     present in the HS-suite-filtered input; if a prohibited solver is in that
     widened cohort the guard exits 2 so a stray ipopt / knitro / snopt /
     scipy_slsqp row cannot reach a published profile.
@@ -182,8 +180,7 @@ def _assert_no_prohibited_solvers(summary: pd.DataFrame) -> None:
         "comparison frame as argmin's publish_bench cells. Ipopt, KNITRO, "
         "SNOPT, and scipy SLSQP publish CUTEst-aggregate figures that are "
         "not reportable alongside per-HS comparisons.\n"
-        "See .planning/research/FEATURES.md section 6 for the full "
-        "honest-position statement.\n")
+        "Use a paired per-problem comparator cohort for this profile.\n")
     sys.exit(2)
 
 
@@ -240,21 +237,46 @@ def _safe_tau_token(tau: float) -> str:
     return f"{tau:.0e}".replace("-", "m").replace("+", "")
 
 
+def _is_constrained_class(problem_class: str) -> bool:
+    cls = str(problem_class)
+    return cls not in ("unconstrained", "global")
+
+
+def _clamp_work_units(value: float) -> float:
+    if not math.isfinite(value):
+        return float("inf")
+    return max(1.0, value)
+
+
 def compute_t_tau(trace_df: pd.DataFrame,
                   f_star: float,
                   tau: float,
-                  metric: str) -> float:
-    """First-hit metric value at which ``|f_best - f_star| <= tau * max(1, |f_star|)``.
+                  metric: str,
+                  *,
+                  constrained: bool = False,
+                  eps_feas: float = EPS_FEAS_DEFAULT) -> float:
+    """First-hit metric value for objective accuracy and optional feasibility.
 
     Returns ``float("inf")`` when the tolerance is never met on this trace.
     """
 
+    required_columns = {"f_best", metric}
+    if constrained:
+        required_columns.add("cv")
+    missing = sorted(required_columns.difference(trace_df.columns))
+    if missing:
+        raise ValueError(f"trace missing required columns: {missing}")
+
     threshold = tau * max(1.0, abs(f_star))
     diffs = (trace_df["f_best"] - f_star).abs()
-    hits = trace_df[diffs <= threshold]
+    hit_mask = diffs <= threshold
+    if constrained:
+        cv = pd.to_numeric(trace_df["cv"], errors="coerce")
+        hit_mask = hit_mask & np.isfinite(cv) & (cv <= eps_feas)
+    hits = trace_df[hit_mask]
     if hits.empty:
         return float("inf")
-    return float(hits[metric].iloc[0])
+    return _clamp_work_units(float(hits[metric].iloc[0]))
 
 
 def performance_profile(t_tau_matrix: pd.DataFrame,
@@ -266,7 +288,7 @@ def performance_profile(t_tau_matrix: pd.DataFrame,
     is the empirical CDF over ``log2(r(s, p))`` for solver ``s``.
     """
 
-    row_min = t_tau_matrix.min(axis=1, skipna=True)
+    row_min = t_tau_matrix.min(axis=1, skipna=True).map(_clamp_work_units)
     r = t_tau_matrix.div(row_min, axis=0)
     log2_r = np.log2(r.replace([np.inf, -np.inf], np.nan))
 
@@ -335,23 +357,45 @@ def _load_summary(run_dir: Path) -> pd.DataFrame:
     summary_path = run_dir / "publish_summary.csv"
     if not summary_path.is_file():
         raise FileNotFoundError(f"missing summary CSV: {summary_path}")
-    return pd.read_csv(summary_path)
+    summary = pd.read_csv(summary_path)
+    _require_columns(summary, {
+        "solver", "problem", "seed", "class", "known_optimum",
+        "row_disposition",
+    }, summary_path)
+    return summary
+
+
+def _require_columns(df: pd.DataFrame,
+                     columns: set[str],
+                     path: Path | str) -> None:
+    missing = sorted(columns.difference(df.columns))
+    if missing:
+        raise ValueError(f"{path} missing required columns: {missing}")
 
 
 def _collect_t_tau_rows(run_dir: Path,
                         summary: pd.DataFrame,
-                        tau_grid: tuple[float, ...]) -> pd.DataFrame:
+                        tau_grid: tuple[float, ...],
+                        eps_feas: float) -> pd.DataFrame:
     """Walk every trace file and emit one row per (trace, tau, metric)."""
 
     traces_dir = run_dir / "traces"
     if not traces_dir.is_dir():
         raise FileNotFoundError(f"missing traces directory: {traces_dir}")
 
-    f_star_by_problem = (
-        summary.groupby("problem")["known_optimum"].first().to_dict())
     known_pairs: set[tuple[str, str]] = set(
         zip(summary["solver"].astype(str),
             summary["problem"].astype(str)))
+    summary_by_key: dict[tuple[str, str, int], dict[str, object]] = {}
+    for record in summary.to_dict("records"):
+        disposition = str(record.get("row_disposition", ""))
+        if disposition and disposition != "included":
+            continue
+        summary_by_key[(
+            str(record["solver"]),
+            str(record["problem"]),
+            int(record["seed"]),
+        )] = record
 
     rows: list[dict[str, object]] = []
     for trace_path in sorted(traces_dir.glob("*.csv")):
@@ -373,12 +417,14 @@ def _collect_t_tau_rows(run_dir: Path,
             continue
 
         solver, problem = pair
-        if problem not in f_star_by_problem:
-            print(f"dm_profile: no known_optimum for {problem}; skipping {trace_path.name}",
+        summary_row = summary_by_key.get((solver, problem, seed))
+        if summary_row is None:
+            print(f"dm_profile: no included summary row for {trace_path.name}; skipping",
                   file=sys.stderr)
             continue
 
-        f_star = float(f_star_by_problem[problem])
+        f_star = float(summary_row["known_optimum"])
+        constrained = _is_constrained_class(str(summary_row["class"]))
         try:
             tdf = pd.read_csv(trace_path)
         except Exception as exc:
@@ -392,7 +438,9 @@ def _collect_t_tau_rows(run_dir: Path,
             for metric in METRICS:
                 if metric not in tdf.columns:
                     continue
-                t_tau = compute_t_tau(tdf, f_star, tau, metric)
+                t_tau = compute_t_tau(tdf, f_star, tau, metric,
+                                      constrained=constrained,
+                                      eps_feas=eps_feas)
                 rows.append({
                     "solver": solver,
                     "problem": problem,
@@ -402,6 +450,84 @@ def _collect_t_tau_rows(run_dir: Path,
                     "t_tau": t_tau,
                 })
     return pd.DataFrame(rows)
+
+
+def _write_self_test_csv(run_dir: Path) -> None:
+    traces_dir = run_dir / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "publish_summary.csv").write_text(
+        "solver,library,problem,class,dimension,seed,mode,solver_iters,"
+        "f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,"
+        "known_optimum,accuracy,constraint_violation,status,row_disposition,"
+        "cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,"
+        "provenance_id\n"
+        "solver_a,argmin,constrained,inequality,1,42,publication,1,"
+        "1,0,0,0,1,0.0,0.0,0.0,1e-9,converged,included,"
+        "none,,1,1,selftest\n"
+        "solver_a,argmin,unconstrained,unconstrained,1,42,publication,1,"
+        "1,0,0,0,1,0.0,0.0,0.0,0.0,converged,included,"
+        "none,,1,1,selftest\n")
+    (traces_dir / "solver_a_constrained_seed42.csv").write_text(
+        "iter,f_evals,g_evals,c_evals,J_evals,wall_us,"
+        "f_current,f_best,accuracy,cv,step_norm,kkt_residual\n"
+        "0,0,0,0,0,0,0.0,0.0,0.0,1e-5,0.0,0.0\n"
+        "1,0,0,0,0,0,0.0,0.0,0.0,nan,0.0,0.0\n")
+    (traces_dir / "solver_a_unconstrained_seed42.csv").write_text(
+        "iter,f_evals,g_evals,c_evals,J_evals,wall_us,"
+        "f_current,f_best,accuracy,cv,step_norm,kkt_residual\n"
+        "0,0,0,0,0,0,0.0,0.0,0.0,nan,0.0,0.0\n")
+
+
+def _run_self_test() -> int:
+    failures: list[str] = []
+    constrained = pd.DataFrame({
+        "f_best": [0.0, 0.0, 0.0],
+        "cv": [1e-5, float("nan"), 1e-9],
+        "f_evals": [0, 0, 2],
+        "wall_us": [0, 0, 2],
+    })
+    if math.isfinite(compute_t_tau(constrained.iloc[:1], 0.0, 1e-8, "f_evals",
+                                   constrained=True, eps_feas=1e-8)):
+        failures.append("objective-accurate infeasible constrained trace hit")
+    if math.isfinite(compute_t_tau(constrained.iloc[1:2], 0.0, 1e-8, "f_evals",
+                                   constrained=True, eps_feas=1e-8)):
+        failures.append("non-finite constrained feasibility hit")
+    clamped = compute_t_tau(constrained.iloc[2:3], 0.0, 1e-8, "f_evals",
+                            constrained=True, eps_feas=1e-8)
+    if clamped < 1.0:
+        failures.append("finite constrained work unit was not clamped")
+
+    unconstrained = pd.DataFrame({
+        "f_best": [0.0],
+        "f_evals": [0],
+        "wall_us": [0],
+    })
+    if compute_t_tau(unconstrained, 0.0, 1e-8, "f_evals",
+                     constrained=False, eps_feas=1e-8) != 1.0:
+        failures.append("unconstrained objective hit failed or was not clamped")
+
+    with tempfile.TemporaryDirectory(prefix="argmin-dm-selftest-") as tmp:
+        run_dir = Path(tmp)
+        _write_self_test_csv(run_dir)
+        summary = _load_summary(run_dir)
+        rows = _collect_t_tau_rows(run_dir, summary, (1e-8,), EPS_FEAS_DEFAULT)
+        constrained_rows = rows[
+            (rows["problem"] == "constrained")
+            & (rows["metric"] == "f_evals")]
+        if constrained_rows.empty or math.isfinite(float(constrained_rows["t_tau"].iloc[0])):
+            failures.append("fixture constrained infeasible trace produced a hit")
+        unconstrained_rows = rows[
+            (rows["problem"] == "unconstrained")
+            & (rows["metric"] == "f_evals")]
+        if unconstrained_rows.empty or float(unconstrained_rows["t_tau"].iloc[0]) != 1.0:
+            failures.append("fixture unconstrained trace did not hit at clamped unit")
+
+    for failure in failures:
+        print(f"dm_profile self-test: FAIL: {failure}", file=sys.stderr)
+    if failures:
+        return 1
+    print("dm_profile self-test: PASS", file=sys.stderr)
+    return 0
 
 
 def _emit_profiles(t_tau_med: pd.DataFrame,
@@ -471,13 +597,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=("Compute Dolan-More performance profiles from a "
                      "publish_bench run and emit PNG + SVG + markdown."))
-    parser.add_argument("--run-dir", required=True, type=Path,
+    parser.add_argument("--run-dir", type=Path,
                         help="Directory containing publish_summary.csv and traces/.")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="Output directory (default: {run_dir}/profiles).")
     parser.add_argument("--tau-grid", nargs="+", type=float,
                         default=list(TAU_GRID),
                         help="Tolerance grid (default: 1e-4 1e-6 1e-8 1e-10 1e-12).")
+    parser.add_argument("--eps-feas", type=float, default=EPS_FEAS_DEFAULT,
+                        help="Absolute feasibility threshold for constrained trace hits.")
     parser.add_argument("--solvers", nargs="+", default=None,
                         help="Restrict to this solver list (default: all).")
     parser.add_argument("--classes", nargs="+", default=None,
@@ -491,9 +619,15 @@ def main() -> int:
                               "profile cohort filter and plot every solver "
                               "present in publish_summary.csv. The HS-suite "
                               "class filter and the prohibited-solver "
-                              "assertion (see FEATURES.md section 6) remain "
-                              "in force."))
+                              "assertion remain in force."))
+    parser.add_argument("--self-test", action="store_true",
+                        help="Run built-in feasibility and zero-work checks.")
     args = parser.parse_args()
+
+    if args.self_test:
+        return _run_self_test()
+    if args.run_dir is None:
+        parser.error("--run-dir is required unless --self-test is used")
 
     run_dir: Path = args.run_dir
     output_dir: Path = args.output_dir if args.output_dir is not None else run_dir / "profiles"
@@ -536,7 +670,8 @@ def main() -> int:
           f"{list(problem_classes)}",
           file=sys.stderr)
 
-    t_tau_long = _collect_t_tau_rows(run_dir, summary, tuple(args.tau_grid))
+    t_tau_long = _collect_t_tau_rows(run_dir, summary, tuple(args.tau_grid),
+                                     args.eps_feas)
     if t_tau_long.empty:
         print("dm_profile: no usable trace rows; nothing to emit",
               file=sys.stderr)

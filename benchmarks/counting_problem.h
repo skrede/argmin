@@ -26,10 +26,12 @@
 // the wrapper. Standard C++ lifetime idiom; the wrapper does not own
 // either object.
 
-#include "argmin/test_functions/problem_class.h"
 #include "argmin/formulation/concepts.h"
+#include "argmin/test_functions/problem_class.h"
 
 #include <Eigen/Core>
+
+#include <string_view>
 
 namespace argmin::bench
 {
@@ -42,8 +44,32 @@ struct eval_counts
     int g{0};
     int c{0};
     int J{0};
+    int max_f_evals{0};
+    bool f_eval_cap_exceeded{false};
 
-    void reset() { f = g = c = J = 0; }
+    void reset()
+    {
+        f = g = c = J = 0;
+        f_eval_cap_exceeded = false;
+    }
+
+    void set_max_f_evals(int cap)
+    {
+        max_f_evals = cap;
+        f_eval_cap_exceeded = max_f_evals > 0 && f > max_f_evals;
+    }
+
+    [[nodiscard]] auto cap_status() const -> std::string_view
+    {
+        return f_eval_cap_exceeded ? std::string_view{"f_eval"} : std::string_view{"none"};
+    }
+
+    void observe_f_eval()
+    {
+        ++f;
+        if(max_f_evals > 0 && f > max_f_evals)
+            f_eval_cap_exceeded = true;
+    }
 };
 
 // Template wrapper around any argmin problem struct. Forwards every
@@ -68,7 +94,7 @@ struct counting_problem
     template <typename Vec>
     [[nodiscard]] auto value(const Vec& x) const
     {
-        ++counts->f;
+        counts->observe_f_eval();
         return inner->value(x);
     }
 

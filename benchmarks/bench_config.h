@@ -11,6 +11,7 @@
 // returns the tightened tolerance / longer budget / per-iter trace
 // configuration consumed by the second `publish_bench` binary.
 
+#include <cmath>
 #include <cstdint>
 
 namespace argmin::bench
@@ -23,6 +24,7 @@ struct bench_config
     mode the_mode{mode::library_defaults};
     double ftol_rel{1e-12};
     double xtol_rel{1e-12};
+    double eps_feas{1e-8};
     int max_iter{10000};
     int max_f_evals{10000};
     double max_wall_time_s{600.0};
@@ -49,6 +51,7 @@ struct bench_config
             .the_mode = mode::publication,
             .ftol_rel = 1e-16,
             .xtol_rel = 1e-16,
+            .eps_feas = 1e-8,
             .max_iter = 10000,
             .max_f_evals = 10000,
             .max_wall_time_s = 10.0,
@@ -59,6 +62,12 @@ struct bench_config
         };
     }
 };
+
+[[nodiscard]] inline auto publication_feasible(double cv,
+                                               const bench_config& config) -> bool
+{
+    return std::isfinite(cv) && cv <= config.eps_feas;
+}
 
 }
 
