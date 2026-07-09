@@ -106,9 +106,10 @@ void check_hs_gradient_and_jacobian()
 
 TEMPLATE_TEST_CASE("hs_gradient_fd: analytic derivatives match Ridders numerical reference",
                     "[hs_gradient_fd]",
-                    hs001<>, hs002<>, hs005<>, hs006<>, hs007<>, hs024<>, hs026<>, hs028<>,
-                    hs035<>, hs039<>, hs040<>, hs043<>, hs048<>, hs050<>, hs051<>, hs071<>,
-                    hs076<>)
+                    hs001<>, hs002<>, hs005<>, hs006<>, hs007<>, hs021<>, hs023<>, hs024<>,
+                    hs026<>, hs027<>, hs028<>, hs029<>, hs030<>, hs031<>, hs034<>, hs035<>,
+                    hs036<>, hs037<>, hs038<>, hs039<>, hs040<>, hs043<>, hs044<>, hs048<>,
+                    hs050<>, hs051<>, hs052<>, hs071<>, hs076<>)
 {
     check_hs_gradient_and_jacobian<TestType>();
 }

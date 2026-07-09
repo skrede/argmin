@@ -52,30 +52,36 @@ void for_each_problem(Fn&& fn)
     fn("variably_dimensioned_5", argmin::variably_dimensioned<>{.n = 5});
     fn("extended_rosenbrock_4", argmin::extended_rosenbrock<>{.n = 4});
 
-    // Bound-constrained
+    // Hock-Schittkowski constrained and bound-constrained problems
     fn("hs001", argmin::hs001<>{});
     fn("hs002", argmin::hs002<>{});
     fn("hs005", argmin::hs005<>{});
-
-    // Inequality-constrained
-    fn("hs024", argmin::hs024<>{});
-    fn("hs035", argmin::hs035<>{});
-    fn("hs043", argmin::hs043<>{});
-    fn("hs076", argmin::hs076<>{});
-
-    // Equality-constrained
     fn("hs006", argmin::hs006<>{});
     fn("hs007", argmin::hs007<>{});
+    fn("hs021", argmin::hs021<>{});
+    fn("hs023", argmin::hs023<>{});
+    fn("hs024", argmin::hs024<>{});
     fn("hs026", argmin::hs026<>{});
+    fn("hs027", argmin::hs027<>{});
     fn("hs028", argmin::hs028<>{});
+    fn("hs029", argmin::hs029<>{});
+    fn("hs030", argmin::hs030<>{});
+    fn("hs031", argmin::hs031<>{});
+    fn("hs034", argmin::hs034<>{});
+    fn("hs035", argmin::hs035<>{});
+    fn("hs036", argmin::hs036<>{});
+    fn("hs037", argmin::hs037<>{});
+    fn("hs038", argmin::hs038<>{});
     fn("hs039", argmin::hs039<>{});
     fn("hs040", argmin::hs040<>{});
+    fn("hs043", argmin::hs043<>{});
+    fn("hs044", argmin::hs044<>{});
     fn("hs048", argmin::hs048<>{});
     fn("hs050", argmin::hs050<>{});
     fn("hs051", argmin::hs051<>{});
-
-    // Mixed (equality + inequality + bounds)
+    fn("hs052", argmin::hs052<>{});
     fn("hs071", argmin::hs071<>{});
+    fn("hs076", argmin::hs076<>{});
 
     // Global (variable dimension)
     fn("ackley_2", argmin::ackley<>{.n = 2});

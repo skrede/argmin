@@ -1,4 +1,4 @@
-// Comprehensive Hock-Schittkowski convergence test suite (TEST-03).
+// Comprehensive Hock-Schittkowski convergence test suite.
 //
 // Validates all constrained solvers on the HS benchmark problems.
 // Each (solver, problem) pair verifies objective convergence and
@@ -25,6 +25,178 @@
 
 using Catch::Approx;
 using namespace argmin;
+
+namespace
+{
+
+[[nodiscard]] Eigen::Vector<double, hs021<>::problem_dimension> reference_point(const hs021<>&)
+{
+    Eigen::Vector<double, hs021<>::problem_dimension> x;
+    x << 2.0, 0.0;
+    return x;
+}
+
+[[nodiscard]] Eigen::Vector<double, hs023<>::problem_dimension> reference_point(const hs023<>&)
+{
+    return Eigen::Vector<double, hs023<>::problem_dimension>::Ones();
+}
+
+[[nodiscard]] Eigen::Vector<double, hs027<>::problem_dimension> reference_point(const hs027<>&)
+{
+    Eigen::Vector<double, hs027<>::problem_dimension> x;
+    x << -1.0, 1.0, 0.0;
+    return x;
+}
+
+[[nodiscard]] Eigen::Vector<double, hs029<>::problem_dimension> reference_point(const hs029<>&)
+{
+    Eigen::Vector<double, hs029<>::problem_dimension> x;
+    x << 4.0, 2.0 * std::sqrt(2.0), 2.0;
+    return x;
+}
+
+[[nodiscard]] Eigen::Vector<double, hs030<>::problem_dimension> reference_point(const hs030<>&)
+{
+    Eigen::Vector<double, hs030<>::problem_dimension> x;
+    x << 1.0, 0.0, 0.0;
+    return x;
+}
+
+[[nodiscard]] Eigen::Vector<double, hs031<>::problem_dimension> reference_point(const hs031<>&)
+{
+    Eigen::Vector<double, hs031<>::problem_dimension> x;
+    x << 1.0 / std::sqrt(3.0), std::sqrt(3.0), 0.0;
+    return x;
+}
+
+[[nodiscard]] Eigen::Vector<double, hs034<>::problem_dimension> reference_point(const hs034<>&)
+{
+    Eigen::Vector<double, hs034<>::problem_dimension> x;
+    x << std::log(std::log(10.0)), std::log(10.0), 10.0;
+    return x;
+}
+
+[[nodiscard]] Eigen::Vector<double, hs036<>::problem_dimension> reference_point(const hs036<>&)
+{
+    Eigen::Vector<double, hs036<>::problem_dimension> x;
+    x << 20.0, 11.0, 15.0;
+    return x;
+}
+
+[[nodiscard]] Eigen::Vector<double, hs037<>::problem_dimension> reference_point(const hs037<>&)
+{
+    Eigen::Vector<double, hs037<>::problem_dimension> x;
+    x << 24.0, 12.0, 12.0;
+    return x;
+}
+
+[[nodiscard]] Eigen::Vector<double, hs038<>::problem_dimension> reference_point(const hs038<>&)
+{
+    return Eigen::Vector<double, hs038<>::problem_dimension>::Ones();
+}
+
+[[nodiscard]] Eigen::Vector<double, hs044<>::problem_dimension> reference_point(const hs044<>&)
+{
+    Eigen::Vector<double, hs044<>::problem_dimension> x;
+    x << 0.0, 3.0, 0.0, 4.0;
+    return x;
+}
+
+[[nodiscard]] Eigen::Vector<double, hs052<>::problem_dimension> reference_point(const hs052<>&)
+{
+    Eigen::Vector<double, hs052<>::problem_dimension> x;
+    x << -33.0 / 349.0, 11.0 / 349.0, 180.0 / 349.0, -158.0 / 349.0, 11.0 / 349.0;
+    return x;
+}
+
+template <typename Problem>
+void check_reference_point()
+{
+    constexpr double value_tol = 1e-8;
+    constexpr double feasibility_tol = 1e-9;
+    constexpr int M = Problem::constraint_count;
+
+    Problem problem;
+    const Eigen::Vector<double, Problem::problem_dimension> x = reference_point(problem);
+
+    CHECK(problem.value(x) == Approx(problem.optimal_value()).margin(value_tol));
+
+    const auto lb = problem.lower_bounds();
+    const auto ub = problem.upper_bounds();
+    for(int i = 0; i < x.size(); ++i)
+    {
+        if(std::isfinite(lb[i]))
+            CHECK(x[i] >= lb[i] - feasibility_tol);
+        if(std::isfinite(ub[i]))
+            CHECK(x[i] <= ub[i] + feasibility_tol);
+    }
+
+    if constexpr(M > 0)
+    {
+        Eigen::VectorXd c(M);
+        problem.constraints(x, c);
+
+        for(int i = 0; i < problem.num_equality(); ++i)
+            CHECK(std::abs(c[i]) <= feasibility_tol);
+
+        for(int i = problem.num_equality(); i < M; ++i)
+            CHECK(c[i] >= -feasibility_tol);
+    }
+}
+
+}
+
+TEST_CASE("curated hock-schittkowski reference points are feasible and optimal", "[hs]")
+{
+    SECTION("HS021")
+    {
+        check_reference_point<hs021<>>();
+    }
+    SECTION("HS023")
+    {
+        check_reference_point<hs023<>>();
+    }
+    SECTION("HS027")
+    {
+        check_reference_point<hs027<>>();
+    }
+    SECTION("HS029")
+    {
+        check_reference_point<hs029<>>();
+    }
+    SECTION("HS030")
+    {
+        check_reference_point<hs030<>>();
+    }
+    SECTION("HS031")
+    {
+        check_reference_point<hs031<>>();
+    }
+    SECTION("HS034")
+    {
+        check_reference_point<hs034<>>();
+    }
+    SECTION("HS036")
+    {
+        check_reference_point<hs036<>>();
+    }
+    SECTION("HS037")
+    {
+        check_reference_point<hs037<>>();
+    }
+    SECTION("HS038")
+    {
+        check_reference_point<hs038<>>();
+    }
+    SECTION("HS044")
+    {
+        check_reference_point<hs044<>>();
+    }
+    SECTION("HS052")
+    {
+        check_reference_point<hs052<>>();
+    }
+}
 
 // ---------------------------------------------------------------------------
 // nw_sqp on HS problems
@@ -452,10 +624,10 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
 {
     SECTION("HS024")
     {
-        // Phase 33 hotfix baseline: f = -0.652 with cv = 0 (truthful
-        // post-parmu-adaptation result). Pre-fix this passed at
+        // Historical hotfix baseline: f = -0.652 with cv = 0 (truthful
+        // post-parmu-adaptation result). Before the fix this passed at
         // f = -0.30 silently. Tightened bar locks the gain; gap to
-        // f* = -1.0 closes with the v0.3.x faithfulness rewrite.
+        // f* = -1.0 closes with the solver faithfulness rewrite.
         // Rationale duplicated at tests/unit/cobyla_test.cpp HS024.
         hs024 problem;
         auto x0 = problem.initial_point();

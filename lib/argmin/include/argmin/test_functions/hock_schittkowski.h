@@ -339,6 +339,150 @@ struct hs007
     }
 };
 
+// HS021: 2D, 0 equality, 1 inequality, box bounds.
+//
+// min  0.01*x0^2 + x1^2 - 100
+// s.t. c0 = 10*x0 - x1 - 10 >= 0
+//      2 <= x0 <= 50, -50 <= x1 <= 50
+//
+// x0 = (-1, -1), f* = -99.96 at (2, 0).
+//
+// Reference: H&S Problem 21.
+template <typename Scalar = double>
+struct hs021
+{
+    static constexpr int problem_dimension = 2;
+    static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 1;
+
+    [[nodiscard]] int dimension() const { return 2; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 1; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        return Scalar(0.01) * x[0] * x[0] + x[1] * x[1] - Scalar(100);
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        g[0] = Scalar(0.02) * x[0];
+        g[1] = Scalar(2) * x[1];
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = Scalar(10) * x[0] - x[1] - Scalar(10);
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
+    {
+        J(0, 0) = Scalar(10);
+        J(0, 1) = Scalar(-1);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> lb;
+        lb << Scalar(2), Scalar(-50);
+        return lb;
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> ub;
+        ub << Scalar(50), Scalar(50);
+        return ub;
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, Scalar(-1));
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(-99.96); }
+};
+
+// HS023: 2D, 0 equality, 5 inequality, box bounds.
+//
+// min  x0^2 + x1^2
+// s.t. c0 = x0 + x1 - 1 >= 0
+//      c1 = x0^2 + x1^2 - 1 >= 0
+//      c2 = 9*x0^2 + x1^2 - 9 >= 0
+//      c3 = x0^2 - x1 >= 0
+//      c4 = x1^2 - x0 >= 0
+//      -50 <= xi <= 50
+//
+// x0 = (3, 1), f* = 2 at (1, 1).
+//
+// Reference: H&S Problem 23.
+template <typename Scalar = double>
+struct hs023
+{
+    static constexpr int problem_dimension = 2;
+    static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 5;
+
+    [[nodiscard]] int dimension() const { return 2; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 5; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        return x[0] * x[0] + x[1] * x[1];
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        g[0] = Scalar(2) * x[0];
+        g[1] = Scalar(2) * x[1];
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = x[0] + x[1] - Scalar(1);
+        c[1] = x[0] * x[0] + x[1] * x[1] - Scalar(1);
+        c[2] = Scalar(9) * x[0] * x[0] + x[1] * x[1] - Scalar(9);
+        c[3] = x[0] * x[0] - x[1];
+        c[4] = x[1] * x[1] - x[0];
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
+    {
+        J(0, 0) = Scalar(1);
+        J(0, 1) = Scalar(1);
+        J(1, 0) = Scalar(2) * x[0];
+        J(1, 1) = Scalar(2) * x[1];
+        J(2, 0) = Scalar(18) * x[0];
+        J(2, 1) = Scalar(2) * x[1];
+        J(3, 0) = Scalar(2) * x[0];
+        J(3, 1) = Scalar(-1);
+        J(4, 0) = Scalar(-1);
+        J(4, 1) = Scalar(2) * x[1];
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, Scalar(-50));
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(2, Scalar(50));
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> x0;
+        x0 << Scalar(3), Scalar(1);
+        return x0;
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(2); }
+};
+
 // HS024: 2D, 0 equality, 3 inequality, x >= 0.
 //
 // min  1/(27*sqrt(3)) * ((x0 - 3)^2 - 9) * x1^3
@@ -493,6 +637,73 @@ struct hs026
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 };
 
+// HS027: 3D, 1 equality constraint.
+//
+// min  0.01*(1 - x0)^2 + (x1 - x0^2)^2
+// s.t. x0 + x2^2 + 1 = 0
+//
+// x0 = (2, 2, 2), f* = 0.04 at (-1, 1, 0).
+//
+// Reference: H&S Problem 27.
+template <typename Scalar = double>
+struct hs027
+{
+    static constexpr int problem_dimension = 3;
+    static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 1;
+
+    [[nodiscard]] int dimension() const { return 3; }
+    [[nodiscard]] int num_equality() const { return 1; }
+    [[nodiscard]] int num_inequality() const { return 0; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        Scalar t0 = Scalar(1) - x[0];
+        Scalar t1 = x[1] - x[0] * x[0];
+        return Scalar(0.01) * t0 * t0 + t1 * t1;
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        Scalar t1 = x[1] - x[0] * x[0];
+        g[0] = Scalar(-0.02) * (Scalar(1) - x[0]) - Scalar(4) * x[0] * t1;
+        g[1] = Scalar(2) * t1;
+        g[2] = Scalar(0);
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = x[0] + x[2] * x[2] + Scalar(1);
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
+    {
+        J(0, 0) = Scalar(1);
+        J(0, 1) = Scalar(0);
+        J(0, 2) = Scalar(2) * x[2];
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, -inf);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, inf);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, Scalar(2));
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(0.04); }
+};
+
 // HS028: 3D, 1 equality constraint.
 //
 // min  (x0 + x1)^2 + (x1 + x2)^2
@@ -561,6 +772,282 @@ struct hs028
     }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
+};
+
+// HS029: 3D, 0 equality, 1 inequality.
+//
+// min  -x0*x1*x2
+// s.t. c0 = 48 - x0^2 - 2*x1^2 - 4*x2^2 >= 0
+//
+// x0 = (1, 1, 1), f* = -16*sqrt(2) at (4, 2*sqrt(2), 2).
+//
+// Reference: H&S Problem 29.
+template <typename Scalar = double>
+struct hs029
+{
+    static constexpr int problem_dimension = 3;
+    static constexpr problem_class pclass = problem_class::inequality;
+    static constexpr int constraint_count = 1;
+
+    [[nodiscard]] int dimension() const { return 3; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 1; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        return -x[0] * x[1] * x[2];
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        g[0] = -x[1] * x[2];
+        g[1] = -x[0] * x[2];
+        g[2] = -x[0] * x[1];
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = Scalar(48) - x[0] * x[0] - Scalar(2) * x[1] * x[1]
+               - Scalar(4) * x[2] * x[2];
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
+    {
+        J(0, 0) = Scalar(-2) * x[0];
+        J(0, 1) = Scalar(-4) * x[1];
+        J(0, 2) = Scalar(-8) * x[2];
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, -inf);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, inf);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Ones(3);
+    }
+
+    [[nodiscard]] Scalar optimal_value() const
+    {
+        using std::sqrt;
+        return Scalar(-16) * sqrt(Scalar(2));
+    }
+};
+
+// HS030: 3D, 0 equality, 1 inequality, box bounds.
+//
+// min  x0^2 + x1^2 + x2^2
+// s.t. c0 = x0^2 + x1^2 - 1 >= 0
+//      1 <= x0 <= 10, -10 <= x1,x2 <= 10
+//
+// x0 = (1, 1, 1), f* = 1 at (1, 0, 0).
+//
+// Reference: H&S Problem 30.
+template <typename Scalar = double>
+struct hs030
+{
+    static constexpr int problem_dimension = 3;
+    static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 1;
+
+    [[nodiscard]] int dimension() const { return 3; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 1; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        return x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        g[0] = Scalar(2) * x[0];
+        g[1] = Scalar(2) * x[1];
+        g[2] = Scalar(2) * x[2];
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = x[0] * x[0] + x[1] * x[1] - Scalar(1);
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
+    {
+        J(0, 0) = Scalar(2) * x[0];
+        J(0, 1) = Scalar(2) * x[1];
+        J(0, 2) = Scalar(0);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> lb;
+        lb << Scalar(1), Scalar(-10), Scalar(-10);
+        return lb;
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, Scalar(10));
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Ones(3);
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(1); }
+};
+
+// HS031: 3D, 0 equality, 1 inequality, box bounds.
+//
+// min  9*x0^2 + x1^2 + 9*x2^2
+// s.t. c0 = x0*x1 - 1 >= 0
+//      -10 <= x0 <= 10, 1 <= x1 <= 10, -10 <= x2 <= 1
+//
+// x0 = (1, 1, 1), f* = 6 at (1/sqrt(3), sqrt(3), 0).
+//
+// Reference: H&S Problem 31.
+template <typename Scalar = double>
+struct hs031
+{
+    static constexpr int problem_dimension = 3;
+    static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 1;
+
+    [[nodiscard]] int dimension() const { return 3; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 1; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        return Scalar(9) * x[0] * x[0] + x[1] * x[1] + Scalar(9) * x[2] * x[2];
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        g[0] = Scalar(18) * x[0];
+        g[1] = Scalar(2) * x[1];
+        g[2] = Scalar(18) * x[2];
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = x[0] * x[1] - Scalar(1);
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
+    {
+        J(0, 0) = x[1];
+        J(0, 1) = x[0];
+        J(0, 2) = Scalar(0);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> lb;
+        lb << Scalar(-10), Scalar(1), Scalar(-10);
+        return lb;
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> ub;
+        ub << Scalar(10), Scalar(10), Scalar(1);
+        return ub;
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Ones(3);
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(6); }
+};
+
+// HS034: 3D, 0 equality, 2 inequality, x >= 0 with upper bounds.
+//
+// min  -x0
+// s.t. c0 = x1 - exp(x0) >= 0
+//      c1 = x2 - exp(x1) >= 0
+//      0 <= x0,x1 <= 100, 0 <= x2 <= 10
+//
+// x0 = (0, 1.05, 2.9), f* = -log(log(10)).
+//
+// Reference: H&S Problem 34.
+template <typename Scalar = double>
+struct hs034
+{
+    static constexpr int problem_dimension = 3;
+    static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 2;
+
+    [[nodiscard]] int dimension() const { return 3; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 2; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const { return -x[0]; }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& /*x*/,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        g[0] = Scalar(-1);
+        g[1] = Scalar(0);
+        g[2] = Scalar(0);
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        using std::exp;
+        c[0] = x[1] - exp(x[0]);
+        c[1] = x[2] - exp(x[1]);
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& x, auto& J) const
+    {
+        using std::exp;
+        J(0, 0) = -exp(x[0]);
+        J(0, 1) = Scalar(1);
+        J(0, 2) = Scalar(0);
+        J(1, 0) = Scalar(0);
+        J(1, 1) = -exp(x[1]);
+        J(1, 2) = Scalar(1);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(3);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> ub;
+        ub << Scalar(100), Scalar(100), Scalar(10);
+        return ub;
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> x0;
+        x0 << Scalar(0), Scalar(1.05), Scalar(2.9);
+        return x0;
+    }
+
+    [[nodiscard]] Scalar optimal_value() const
+    {
+        using std::log;
+        return -log(log(Scalar(10)));
+    }
 };
 
 // HS035: 3D, 0 equality, 1 inequality, x >= 0.
@@ -633,6 +1120,199 @@ struct hs035
     {
         return Scalar(1) / Scalar(9);
     }
+};
+
+// HS036: 3D, 0 equality, 1 inequality, x >= 0 with upper bounds.
+//
+// min  -x0*x1*x2
+// s.t. c0 = 72 - x0 - 2*x1 - 2*x2 >= 0
+//      0 <= x0 <= 20, 0 <= x1 <= 11, 0 <= x2 <= 42
+//
+// x0 = (10, 10, 10), f* = -3300 at (20, 11, 15).
+//
+// Reference: H&S Problem 36.
+template <typename Scalar = double>
+struct hs036
+{
+    static constexpr int problem_dimension = 3;
+    static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 1;
+
+    [[nodiscard]] int dimension() const { return 3; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 1; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const { return -x[0] * x[1] * x[2]; }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        g[0] = -x[1] * x[2];
+        g[1] = -x[0] * x[2];
+        g[2] = -x[0] * x[1];
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = Scalar(72) - x[0] - Scalar(2) * x[1] - Scalar(2) * x[2];
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
+    {
+        J(0, 0) = Scalar(-1);
+        J(0, 1) = Scalar(-2);
+        J(0, 2) = Scalar(-2);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(3);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> ub;
+        ub << Scalar(20), Scalar(11), Scalar(42);
+        return ub;
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, Scalar(10));
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(-3300); }
+};
+
+// HS037: 3D, 0 equality, 2 inequality, x >= 0 with upper bounds.
+//
+// min  -x0*x1*x2
+// s.t. c0 = 72 - x0 - 2*x1 - 2*x2 >= 0
+//      c1 = x0 + 2*x1 + 2*x2 >= 0
+//      0 <= xi <= 42
+//
+// x0 = (10, 10, 10), f* = -3456 at (24, 12, 12).
+//
+// Reference: H&S Problem 37.
+template <typename Scalar = double>
+struct hs037
+{
+    static constexpr int problem_dimension = 3;
+    static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 2;
+
+    [[nodiscard]] int dimension() const { return 3; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 2; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const { return -x[0] * x[1] * x[2]; }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        g[0] = -x[1] * x[2];
+        g[1] = -x[0] * x[2];
+        g[2] = -x[0] * x[1];
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = Scalar(72) - x[0] - Scalar(2) * x[1] - Scalar(2) * x[2];
+        c[1] = x[0] + Scalar(2) * x[1] + Scalar(2) * x[2];
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
+    {
+        J(0, 0) = Scalar(-1);
+        J(0, 1) = Scalar(-2);
+        J(0, 2) = Scalar(-2);
+        J(1, 0) = Scalar(1);
+        J(1, 1) = Scalar(2);
+        J(1, 2) = Scalar(2);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(3);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, Scalar(42));
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(3, Scalar(10));
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(-3456); }
+};
+
+// HS038: 4D, bound-constrained Colville function.
+//
+// min  100*(x1 - x0^2)^2 + (x0 - 1)^2
+//      + 90*(x3 - x2^2)^2 + (x2 - 1)^2
+//      + 10.1*((x1 - 1)^2 + (x3 - 1)^2)
+//      + 19.8*(x1 - 1)*(x3 - 1)
+//      -10 <= xi <= 10
+//
+// x0 = (-3, -1, -3, -1), f* = 0 at (1, 1, 1, 1).
+//
+// Reference: H&S Problem 38.
+template <typename Scalar = double>
+struct hs038
+{
+    static constexpr int problem_dimension = 4;
+    static constexpr problem_class pclass = problem_class::bound_constrained;
+    static constexpr int constraint_count = 0;
+
+    [[nodiscard]] int dimension() const { return 4; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 0; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        Scalar t01 = x[1] - x[0] * x[0];
+        Scalar t23 = x[3] - x[2] * x[2];
+        Scalar d0 = x[0] - Scalar(1);
+        Scalar d1 = x[1] - Scalar(1);
+        Scalar d2 = x[2] - Scalar(1);
+        Scalar d3 = x[3] - Scalar(1);
+        return Scalar(100) * t01 * t01 + d0 * d0 + Scalar(90) * t23 * t23
+               + d2 * d2 + Scalar(10.1) * (d1 * d1 + d3 * d3)
+               + Scalar(19.8) * d1 * d3;
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        Scalar t01 = x[1] - x[0] * x[0];
+        Scalar t23 = x[3] - x[2] * x[2];
+        g[0] = Scalar(-400) * x[0] * t01 + Scalar(2) * (x[0] - Scalar(1));
+        g[1] = Scalar(200) * t01 + Scalar(20.2) * (x[1] - Scalar(1)) + Scalar(19.8) * (x[3] - Scalar(1));
+        g[2] = Scalar(-360) * x[2] * t23 + Scalar(2) * (x[2] - Scalar(1));
+        g[3] = Scalar(180) * t23 + Scalar(20.2) * (x[3] - Scalar(1)) + Scalar(19.8) * (x[1] - Scalar(1));
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, Scalar(-10));
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, Scalar(10));
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        Eigen::Vector<Scalar, problem_dimension> x0;
+        x0 << Scalar(-3), Scalar(-1), Scalar(-3), Scalar(-1);
+        return x0;
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
 };
 
 // HS039: 4D, 2 equality constraints.
@@ -870,6 +1550,103 @@ struct hs043
     }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(-44); }
+};
+
+// HS044: 4D, 0 equality, 6 inequality, x >= 0.
+//
+// min  x0 - x1 - x2 - x0*x2 + x0*x3 - x1*x3 + x1*x2
+// s.t. c0 = 8 - x0 - 2*x1 >= 0
+//      c1 = 12 - 4*x0 - x1 >= 0
+//      c2 = 12 - 3*x0 - 4*x1 >= 0
+//      c3 = 8 - 2*x2 - x3 >= 0
+//      c4 = 8 - x2 - 2*x3 >= 0
+//      c5 = 5 - x2 - x3 >= 0
+//      xi >= 0
+//
+// x0 = (0, 0, 0, 0), f* = -15 at (0, 3, 0, 4).
+//
+// Reference: H&S Problem 44.
+template <typename Scalar = double>
+struct hs044
+{
+    static constexpr int problem_dimension = 4;
+    static constexpr problem_class pclass = problem_class::inequality | problem_class::bound_constrained;
+    static constexpr int constraint_count = 6;
+
+    [[nodiscard]] int dimension() const { return 4; }
+    [[nodiscard]] int num_equality() const { return 0; }
+    [[nodiscard]] int num_inequality() const { return 6; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        return x[0] - x[1] - x[2] - x[0] * x[2] + x[0] * x[3]
+               - x[1] * x[3] + x[1] * x[2];
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        g[0] = Scalar(1) - x[2] + x[3];
+        g[1] = Scalar(-1) - x[3] + x[2];
+        g[2] = Scalar(-1) - x[0] + x[1];
+        g[3] = x[0] - x[1];
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = Scalar(8) - x[0] - Scalar(2) * x[1];
+        c[1] = Scalar(12) - Scalar(4) * x[0] - x[1];
+        c[2] = Scalar(12) - Scalar(3) * x[0] - Scalar(4) * x[1];
+        c[3] = Scalar(8) - Scalar(2) * x[2] - x[3];
+        c[4] = Scalar(8) - x[2] - Scalar(2) * x[3];
+        c[5] = Scalar(5) - x[2] - x[3];
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
+    {
+        J(0, 0) = Scalar(-1);
+        J(0, 1) = Scalar(-2);
+        J(0, 2) = Scalar(0);
+        J(0, 3) = Scalar(0);
+        J(1, 0) = Scalar(-4);
+        J(1, 1) = Scalar(-1);
+        J(1, 2) = Scalar(0);
+        J(1, 3) = Scalar(0);
+        J(2, 0) = Scalar(-3);
+        J(2, 1) = Scalar(-4);
+        J(2, 2) = Scalar(0);
+        J(2, 3) = Scalar(0);
+        J(3, 0) = Scalar(0);
+        J(3, 1) = Scalar(0);
+        J(3, 2) = Scalar(-2);
+        J(3, 3) = Scalar(-1);
+        J(4, 0) = Scalar(0);
+        J(4, 1) = Scalar(0);
+        J(4, 2) = Scalar(-1);
+        J(4, 3) = Scalar(-2);
+        J(5, 0) = Scalar(0);
+        J(5, 1) = Scalar(0);
+        J(5, 2) = Scalar(-1);
+        J(5, 3) = Scalar(-1);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(4);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(4, inf);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Zero(4);
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(-15); }
 };
 
 // HS048: 5D, 2 equality constraints.
@@ -1120,6 +1897,87 @@ struct hs051
     }
 
     [[nodiscard]] Scalar optimal_value() const { return Scalar(0); }
+};
+
+// HS052: 5D, 3 equality constraints.
+//
+// min  (4*x0 - x1)^2 + (x1 + x2 - 2)^2 + (x3 - 1)^2 + (x4 - 1)^2
+// s.t. x0 + 3*x1 = 0
+//      x2 + x3 - 2*x4 = 0
+//      x1 - x4 = 0
+//
+// x0 = (2, 2, 2, 2, 2), f* = 1859/349.
+//
+// Reference: H&S Problem 52.
+template <typename Scalar = double>
+struct hs052
+{
+    static constexpr int problem_dimension = 5;
+    static constexpr problem_class pclass = problem_class::equality;
+    static constexpr int constraint_count = 3;
+
+    [[nodiscard]] int dimension() const { return 5; }
+    [[nodiscard]] int num_equality() const { return 3; }
+    [[nodiscard]] int num_inequality() const { return 0; }
+
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, problem_dimension>& x) const
+    {
+        Scalar t0 = Scalar(4) * x[0] - x[1];
+        Scalar t1 = x[1] + x[2] - Scalar(2);
+        Scalar t2 = x[3] - Scalar(1);
+        Scalar t3 = x[4] - Scalar(1);
+        return t0 * t0 + t1 * t1 + t2 * t2 + t3 * t3;
+    }
+
+    void gradient(const Eigen::Vector<Scalar, problem_dimension>& x,
+                  Eigen::Vector<Scalar, problem_dimension>& g) const
+    {
+        Scalar t0 = Scalar(4) * x[0] - x[1];
+        Scalar t1 = x[1] + x[2] - Scalar(2);
+        g[0] = Scalar(8) * t0;
+        g[1] = Scalar(-2) * t0 + Scalar(2) * t1;
+        g[2] = Scalar(2) * t1;
+        g[3] = Scalar(2) * (x[3] - Scalar(1));
+        g[4] = Scalar(2) * (x[4] - Scalar(1));
+    }
+
+    void constraints(const Eigen::Vector<Scalar, problem_dimension>& x, auto& c) const
+    {
+        c[0] = x[0] + Scalar(3) * x[1];
+        c[1] = x[2] + x[3] - Scalar(2) * x[4];
+        c[2] = x[1] - x[4];
+    }
+
+    void constraint_jacobian(const Eigen::Vector<Scalar, problem_dimension>& /*x*/, auto& J) const
+    {
+        J.setZero();
+        J(0, 0) = Scalar(1);
+        J(0, 1) = Scalar(3);
+        J(1, 2) = Scalar(1);
+        J(1, 3) = Scalar(1);
+        J(1, 4) = Scalar(-2);
+        J(2, 1) = Scalar(1);
+        J(2, 4) = Scalar(-1);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> lower_bounds() const
+    {
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(5, -inf);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> upper_bounds() const
+    {
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(5, inf);
+    }
+
+    [[nodiscard]] Eigen::Vector<Scalar, problem_dimension> initial_point() const
+    {
+        return Eigen::Vector<Scalar, problem_dimension>::Constant(5, Scalar(2));
+    }
+
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(1859) / Scalar(349); }
 };
 
 // HS071: 4D, 1 equality, 1 inequality, box [1, 5].
