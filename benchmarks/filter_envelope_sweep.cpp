@@ -19,8 +19,8 @@
 //            tuning).
 
 #include "argmin/solver/step_budget_solver.h"
-#include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
+#include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
@@ -31,6 +31,14 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <iostream>
+#include <string_view>
 
 namespace
 {
@@ -53,6 +61,26 @@ struct sweep_row
     double hs076_cv{};
     std::uint32_t hs076_iters{};
 };
+
+struct policy_sweep_result
+{
+    std::string policy;
+    std::vector<sweep_row> rows;
+    bool have_candidate{};
+    sweep_row selected{};
+    std::string correctness_witness;
+};
+
+std::string fmt_num(double v)
+{
+    if(!std::isfinite(v))
+    {
+        return std::isnan(v) ? "\"nan\"" : (v < 0.0 ? "\"-inf\"" : "\"inf\"");
+    }
+    std::ostringstream os;
+    os << std::setprecision(17) << v;
+    return os.str();
+}
 
 // Tag selector to dispatch policy-specific solver-option shapes; the
 // two filter policies use slightly different convergence thresholds in
@@ -198,7 +226,7 @@ sweep_row run_combo(double gamma_f, double gamma_h)
 }
 
 template <template <int> class Policy>
-void run_policy_sweep(const char* policy_name)
+policy_sweep_result run_policy_sweep(const char* policy_name)
 {
     std::printf("\n=== %s envelope sweep ===\n", policy_name);
     std::printf("%-9s %-9s %-12s %-11s %-6s %-9s %-9s %-12s %-11s %-6s %-12s %-11s %-6s\n",
@@ -255,16 +283,157 @@ void run_policy_sweep(const char* policy_name)
     else
     {
         std::printf(
-            "\nSELECTED %s default: NONE (no combo passed both regression guards) -- fallback gamma_f=1e-5, gamma_h=1e-5\n",
+            "\nSELECTED %s default: NONE (no combo passed both regression "
+            "guards) -- fallback gamma_f=1e-5, gamma_h=1e-5\n",
             policy_name);
     }
+
+    policy_sweep_result result;
+    result.policy = policy_name;
+    result.rows = std::move(rows);
+    result.have_candidate = have_candidate;
+    result.selected = best;
+    result.correctness_witness =
+        have_candidate
+            ? "selected filter envelope passed HS024 and HS076 objective, "
+              "feasibility, iteration, and status guards before optimizing HS043"
+            : "no filter envelope candidate passed both objective, feasibility, "
+              "iteration, and status guards";
+    return result;
 }
 
-}
-
-int main()
+void write_json(const std::vector<policy_sweep_result>& results,
+                std::string_view output_path,
+                std::string_view provenance_id)
 {
-    run_policy_sweep<argmin::filter_slsqp_policy>("filter_slsqp");
-    run_policy_sweep<argmin::filter_nw_sqp_policy>("filter_nw_sqp");
+    std::ofstream out{std::string{output_path}};
+    if(!out)
+    {
+        std::cerr << "filter_envelope_sweep: cannot open " << output_path
+                  << " for writing\n";
+        std::exit(2);
+    }
+
+    out << "{\n";
+    out << "  \"provenance_id\": \"" << provenance_id << "\",\n";
+    out << "  \"grid\": {\n";
+    out << "    \"gamma_f\": [";
+    for(std::size_t i = 0; i < gamma_grid.size(); ++i)
+    {
+        if(i) out << ", ";
+        out << fmt_num(gamma_grid[i]);
+    }
+    out << "],\n";
+    out << "    \"gamma_h\": [";
+    for(std::size_t i = 0; i < gamma_grid.size(); ++i)
+    {
+        if(i) out << ", ";
+        out << fmt_num(gamma_grid[i]);
+    }
+    out << "]\n";
+    out << "  },\n";
+
+    out << "  \"policies\": [\n";
+    for(std::size_t p = 0; p < results.size(); ++p)
+    {
+        const auto& result = results[p];
+        out << "    {\n";
+        out << "      \"policy\": \"" << result.policy << "\",\n";
+        out << "      \"rows\": [\n";
+        for(std::size_t i = 0; i < result.rows.size(); ++i)
+        {
+            const auto& r = result.rows[i];
+            out << "        {"
+                << "\"gamma_f\": " << fmt_num(r.gamma_f)
+                << ", \"gamma_h\": " << fmt_num(r.gamma_h)
+                << ", \"hs043_f\": " << fmt_num(r.hs043_f)
+                << ", \"hs043_cv\": " << fmt_num(r.hs043_cv)
+                << ", \"hs043_iters\": " << r.hs043_iters
+                << ", \"hs024_passes\": " << (r.hs024_passes ? "true" : "false")
+                << ", \"hs076_passes\": " << (r.hs076_passes ? "true" : "false")
+                << ", \"hs024_f\": " << fmt_num(r.hs024_f)
+                << ", \"hs024_cv\": " << fmt_num(r.hs024_cv)
+                << ", \"hs024_iters\": " << r.hs024_iters
+                << ", \"hs076_f\": " << fmt_num(r.hs076_f)
+                << ", \"hs076_cv\": " << fmt_num(r.hs076_cv)
+                << ", \"hs076_iters\": " << r.hs076_iters
+                << "}";
+            if(i + 1 < result.rows.size()) out << ",";
+            out << "\n";
+        }
+        out << "      ],\n";
+        out << "      \"selected_default\": {\n";
+        out << "        \"item\": \"filter_envelope\",\n";
+        out << "        \"grid_id\": \"gamma_f_x_gamma_h\",\n";
+        out << "        \"policy\": \"" << result.policy << "\",\n";
+        out << "        \"selected_value\": ";
+        if(result.have_candidate)
+        {
+            out << "{\"gamma_f\": " << fmt_num(result.selected.gamma_f)
+                << ", \"gamma_h\": " << fmt_num(result.selected.gamma_h) << "}";
+        }
+        else
+        {
+            out << "null";
+        }
+        out << ",\n";
+        out << "        \"correctness_witness\": \""
+            << result.correctness_witness << "\",\n";
+        out << "        \"provenance_id\": \"" << provenance_id << "\"\n";
+        out << "      }\n";
+        out << "    }";
+        if(p + 1 < results.size()) out << ",";
+        out << "\n";
+    }
+    out << "  ]\n";
+    out << "}\n";
+}
+
+}
+
+int main(int argc, char** argv)
+{
+    std::string output_path;
+    std::string provenance_id = "filter-envelope-sweep-local";
+
+    for(int i = 1; i < argc; ++i)
+    {
+        std::string_view a{argv[i]};
+        if(a == "--quick")
+        {
+            // The envelope grid is already smoke-sized.
+        }
+        else if(a == "--output" && i + 1 < argc)
+        {
+            output_path = argv[++i];
+        }
+        else if(a == "--provenance-id" && i + 1 < argc)
+        {
+            provenance_id = argv[++i];
+        }
+        else if(a == "--help" || a == "-h")
+        {
+            std::cout << "filter_envelope_sweep: filter_slsqp/filter_nw_sqp "
+                         "gamma_f x gamma_h sweep.\n"
+                         "  --quick             run the smoke-sized grid\n"
+                         "  --output PATH       JSON output path\n"
+                         "  --provenance-id S   evidence record identifier\n";
+            return 0;
+        }
+        else
+        {
+            std::cerr << "filter_envelope_sweep: unknown arg " << a << "\n";
+            return 2;
+        }
+    }
+
+    std::vector<policy_sweep_result> results;
+    results.push_back(run_policy_sweep<argmin::filter_slsqp_policy>("filter_slsqp"));
+    results.push_back(run_policy_sweep<argmin::filter_nw_sqp_policy>("filter_nw_sqp"));
+    if(!output_path.empty())
+    {
+        write_json(results, output_path, provenance_id);
+        std::cout << "\nJSON written to: " << output_path << "\n";
+    }
     return 0;
 }

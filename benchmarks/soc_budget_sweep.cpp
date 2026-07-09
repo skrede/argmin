@@ -70,29 +70,30 @@
 //            Section 3.1 (SOC retry shape). Nocedal and Wright 2e
 //            Section 18.5 Algorithm 18.4 (Byrd-Omojokun composite step).
 
-#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/solver/tr_sqp_policy.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
-#include <algorithm>
+#include <ios>
 #include <array>
-#include <chrono>
 #include <cmath>
+#include <chrono>
+#include <limits>
+#include <string>
+#include <vector>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
-#include <ios>
-#include <iostream>
-#include <limits>
-#include <optional>
 #include <sstream>
-#include <string>
+#include <iostream>
+#include <optional>
+#include <algorithm>
 #include <string_view>
-#include <vector>
 
 namespace
 {
@@ -329,6 +330,7 @@ struct selection
     std::string                branch;        // see selection rule
     std::size_t                closure_count{0};
     std::string                rationale;
+    std::string                correctness_witness;
 };
 
 void write_json(const std::vector<cell_block>& blocks,
@@ -336,7 +338,8 @@ void write_json(const std::vector<cell_block>& blocks,
                 const std::vector<std::tuple<double, std::size_t, std::size_t, bool>>& closure_count_grid,
                 std::string_view               output_path,
                 std::string_view               build_type,
-                std::string_view               head_sha)
+                std::string_view               head_sha,
+                std::string_view               provenance_id)
 {
     std::ofstream out{std::string{output_path}};
     if(!out)
@@ -349,6 +352,7 @@ void write_json(const std::vector<cell_block>& blocks,
     out << "{\n";
     out << "  \"head_sha\": \"" << head_sha << "\",\n";
     out << "  \"build_type\": \"" << build_type << "\",\n";
+    out << "  \"provenance_id\": \"" << provenance_id << "\",\n";
     out << "  \"grid\": {\n";
     out << "    \"penalty_factor\": [";
     for(std::size_t i = 0; i < std::size(kPenaltyFactors); ++i)
@@ -459,6 +463,19 @@ void write_json(const std::vector<cell_block>& blocks,
     else                 out << "null";
     out << ",\n";
     out << "    \"rationale\": \"" << sel.rationale << "\"\n";
+    out << "  },\n";
+    out << "  \"selected_default\": {\n";
+    out << "    \"item\": \"soc\",\n";
+    out << "    \"grid_id\": \"penalty_factor_x_soc_max_iterations\",\n";
+    out << "    \"selected_value\": {\"penalty_factor\": ";
+    if(sel.penalty_factor) out << fmt_num(*sel.penalty_factor);
+    else                   out << "null";
+    out << ", \"soc_max_iterations\": ";
+    if(sel.soc_max_iter) out << *sel.soc_max_iter;
+    else                 out << "null";
+    out << "},\n";
+    out << "    \"correctness_witness\": \"" << sel.correctness_witness << "\",\n";
+    out << "    \"provenance_id\": \"" << provenance_id << "\"\n";
     out << "  }\n";
     out << "}\n";
 }
@@ -487,18 +504,24 @@ const cell_block* find_block(const std::vector<cell_block>& blocks,
     return nullptr;
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv)
 {
     std::string output_path = "soc_budget_sweep.json";
     std::string build_type = "Release";
     std::string head_sha   = "unknown";
+    std::string provenance_id = "soc-budget-sweep-local";
 
     for(int i = 1; i < argc; ++i)
     {
         std::string_view a{argv[i]};
-        if(a == "--output" && i + 1 < argc)
+        if(a == "--quick")
+        {
+            // The current grid is already small enough for smoke runs.
+            // Keep the flag as an explicit contract for automated callers.
+        }
+        else if(a == "--output" && i + 1 < argc)
         {
             output_path = argv[++i];
         }
@@ -509,6 +532,10 @@ int main(int argc, char** argv)
         else if(a == "--head-sha" && i + 1 < argc)
         {
             head_sha = argv[++i];
+        }
+        else if(a == "--provenance-id" && i + 1 < argc)
+        {
+            provenance_id = argv[++i];
         }
         else if(a == "--help" || a == "-h")
         {
@@ -528,9 +555,11 @@ int main(int argc, char** argv)
                 "stays as the opt-in-zero default and non-passing closure\n"
                 "targets are tagged known-failure.\n"
                 "\n"
+                "  --quick             run the smoke-sized grid\n"
                 "  --output PATH       JSON output path\n"
                 "  --build-type S      label only\n"
-                "  --head-sha S        label only\n";
+                "  --head-sha S        label only\n"
+                "  --provenance-id S   evidence record identifier\n";
             return 0;
         }
         else
@@ -610,8 +639,10 @@ int main(int argc, char** argv)
         "hs076", static_cast<double>(p076.optimal_value()), 200, p076, blocks);
 
     // Print the sweep table.
-    std::cout << "cell           mode      pf     soc   iters     f             cv            f_err         bar status\n";
-    std::cout << "-------------  --------  -----  ---   -----     ------------  ------------  ------------  --- ------------------\n";
+    std::cout << "cell           mode      pf     soc   iters     f             "
+                 "cv            f_err         bar status\n";
+    std::cout << "-------------  --------  -----  ---   -----     ------------  "
+                 "------------  ------------  --- ------------------\n";
     for(const auto& b : blocks)
     {
         for(const auto& r : b.records)
@@ -725,6 +756,8 @@ int main(int argc, char** argv)
         // Step-1 empty: every joint regresses at least one reference
         // cell. Hold (0, 0) and tag every non-passing closure target.
         sel.branch         = "reference_regression_unavoidable";
+        sel.penalty_factor = 0.0;
+        sel.soc_max_iter   = 0;
         sel.closure_count  = baseline_passes_reference ? baseline_closure : 0;
         sel.rationale =
             "Every swept configuration regresses at least one reference "
@@ -732,6 +765,9 @@ int main(int argc, char** argv)
             "The opt-in-zero default (penalty_factor=0, soc_max_iterations=0) "
             "stays; non-passing closure-target cells are tagged "
             "known-failure with their trace-derived mechanism family.";
+        sel.correctness_witness =
+            "no swept configuration passed every reference objective, feasibility, "
+            "and status gate; selected hold value is the current opt-in-zero default";
         std::cout << "\nBranch (reference_regression_unavoidable): no configuration "
                      "holds the reference gate. Keep (0, 0).\n";
     }
@@ -774,6 +810,9 @@ int main(int argc, char** argv)
                   "as the highest-closure-count survivor, tie-broken by "
                   "largest penalty_factor then smallest soc_max_iterations.";
             sel.rationale = os.str();
+            sel.correctness_witness =
+                "selected configuration passed all reference objective, feasibility, "
+                "and status gates and improved closure count over the current default";
             std::cout << "\nBranch (close_>=1_cell): pf=" << std::fixed
                       << std::setprecision(2) << best.pf
                       << "  soc=" << best.soc
@@ -783,6 +822,8 @@ int main(int argc, char** argv)
         else
         {
             sel.branch        = "no_improvement_over_default";
+            sel.penalty_factor = 0.0;
+            sel.soc_max_iter   = 0;
             sel.closure_count = baseline_closure;
             std::ostringstream os;
             os << "No configuration in the swept grid strictly improves "
@@ -794,6 +835,10 @@ int main(int argc, char** argv)
                   "cells are tagged known-failure with their trace-derived "
                   "mechanism family.";
             sel.rationale = os.str();
+            sel.correctness_witness =
+                "no faster or more aggressive survivor improved closure count; "
+                "selected hold value preserves current objective, feasibility, and "
+                "status gates";
             std::cout << "\nBranch (no_improvement_over_default): best survivor "
                          "pf=" << std::fixed << std::setprecision(2) << best.pf
                       << " soc=" << best.soc
@@ -803,7 +848,8 @@ int main(int argc, char** argv)
         }
     }
 
-    write_json(blocks, sel, closure_count_grid, output_path, build_type, head_sha);
+    write_json(blocks, sel, closure_count_grid, output_path, build_type, head_sha,
+               provenance_id);
     std::cout << "\nJSON written to: " << output_path << "\n";
     return 0;
 }

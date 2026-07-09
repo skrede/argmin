@@ -7,7 +7,7 @@
 //   - sqp_mode:                 {accurate, fast}
 //   - filter envelope:          (gamma_f, gamma_h) -- asymmetric
 //   - filter reject mode:       {tr_shrink, switching_condition}
-//   - switching condition:      kappa, s
+//   - switching condition:      kappa/eta_phi, s_phi
 //   - initial trust radius:     delta0
 //   - feasibility restoration:  restoration_max_iter (compile-time-guarded;
 //                               the harness builds against the policy
@@ -53,27 +53,26 @@
 //            Hock and Schittkowski 1981 Lecture Notes in Economics and
 //            Mathematical Systems vol. 187, Springer (HS test suite).
 
+#include "argmin/solver/sqp_mode.h"
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/filter_trsqp_policy.h"
-#include "argmin/solver/sqp_mode.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
-#include <chrono>
+#include <ios>
 #include <cmath>
+#include <chrono>
+#include <string>
+#include <vector>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
-#include <ios>
+#include <sstream>
+#include <variant>
 #include <iostream>
 #include <optional>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <variant>
-#include <vector>
 #include <algorithm>
 #include <string_view>
 
@@ -318,12 +317,12 @@ cell_result run_one(const sweep_config& cfg,
     auto opts = make_solver_opts<policy_type>(max_iterations);
 
     policy_type policy;
-    policy.options.gamma_f                = cfg.gamma_f;
-    policy.options.gamma_h                = cfg.gamma_h;
-    policy.options.reject_mode            = static_cast<rm_t>(cfg.reject_mode);
-    policy.options.filter_switching_kappa = cfg.kappa;
-    policy.options.filter_switching_s     = cfg.s;
-    policy.options.initial_trust_radius   = cfg.delta0;
+    policy.options.gamma_f                  = cfg.gamma_f;
+    policy.options.gamma_h                  = cfg.gamma_h;
+    policy.options.reject_mode              = static_cast<rm_t>(cfg.reject_mode);
+    policy.options.filter_switching_eta_phi = cfg.kappa;
+    policy.options.filter_switching_s_phi   = cfg.s;
+    policy.options.initial_trust_radius     = cfg.delta0;
 
     // Compile-time-guarded restoration option writes. The policy
     // currently has no restoration_* fields; if a future revision adds
@@ -338,11 +337,17 @@ cell_result run_one(const sweep_config& cfg,
     {
         if(cfg.restoration_max_iter != 0)
         {
-            throw std::runtime_error(
-                "restoration_max_iter sweep requires the restoration "
-                "prototype; rebuild against the policy header carrying "
-                "restoration_max_iter, restoration_lambda_init, and "
-                "restoration_feasibility_tolerance.");
+            cell_result out;
+            out.problem     = std::string{problem_name};
+            out.seed        = seed;
+            out.status      = "restoration_unavailable";
+            out.f_final     = f_star;
+            out.cv_final    = std::numeric_limits<double>::infinity();
+            out.f_err       = std::numeric_limits<double>::infinity();
+            out.outer_iters = 0;
+            out.wall_us     = 0.0;
+            out.within_strict_bar = false;
+            return out;
         }
     }
 
@@ -532,6 +537,8 @@ struct sweep_invocation
     std::string              output_md{};
     std::string              build_type{"unknown"};
     std::string              head_sha{"unknown"};
+    std::string              provenance_id{"filter-trsqp-sweep-local"};
+    bool                     quick{false};
 };
 
 // Lowercase a cell name in-place ("HS024" -> "hs024"). Callers must
@@ -567,8 +574,8 @@ void print_help()
         "  --gamma-f-grid LIST        per-axis override of --gamma-grid for gamma_f\n"
         "  --gamma-h-grid LIST        per-axis override of --gamma-grid for gamma_h\n"
         "  --reject-modes LIST        default: tr_shrink,switching_condition\n"
-        "  --kappa-grid LIST          default: 1e-4 (Wachter-Biegler 2005 Table 1)\n"
-        "  --s-grid LIST              default: 2.3   (Wachter-Biegler 2005 Table 1)\n"
+        "  --kappa-grid LIST          eta_phi axis, default: 1e-4\n"
+        "  --s-grid LIST              s_phi axis, default: 2.3\n"
         "  --delta0-grid LIST         default: 1.0   (Nocedal & Wright Section 4.1)\n"
         "  --restoration-iters-grid LIST  default: 0 (restoration disabled)\n"
         "  --seeds LIST               default: 42,43,44,45,46,47,48,49,50,51,52\n"
@@ -584,14 +591,16 @@ void print_help()
         "                                                  not_run_budget_exceeded)\n"
         "\n"
         "Output:\n"
+        "  --quick                    run a smoke-sized standard sweep\n"
         "  --output PATH              JSON destination (required)\n"
         "  --output-md PATH           Markdown analysis (optional)\n"
         "  --build-type STRING        build label only\n"
         "  --head-sha STRING          HEAD SHA label only\n"
+        "  --provenance-id STRING     evidence record identifier\n"
         "  --help                     this message\n";
 }
 
-} // namespace
+}
 
 int main(int argc, char** argv)
 {
@@ -634,6 +643,10 @@ int main(int argc, char** argv)
         {
             print_help();
             return 0;
+        }
+        else if(a == "--quick")
+        {
+            inv.quick = true;
         }
         else if(a == "--sweep-kind")
         {
@@ -745,11 +758,38 @@ int main(int argc, char** argv)
         {
             inv.head_sha = std::string{next("--head-sha")};
         }
+        else if(a == "--provenance-id")
+        {
+            inv.provenance_id = std::string{next("--provenance-id")};
+        }
         else
         {
             std::cerr << "filter_trsqp_sweep: unknown arg " << a << "\n";
             return 2;
         }
+    }
+
+    if(inv.quick)
+    {
+        if(!sweep_kind_seen)
+            inv.sweep_kind = sweep_kind_e::standard;
+        inv.cells = {"hs043", "hs076"};
+        inv.modes = {sqp_mode::accurate, sqp_mode::fast};
+        inv.gamma_f_grid = {1e-5, 1e-6};
+        inv.gamma_h_grid = {1e-5, 1e-6};
+        {
+            using rm_t = reject_mode_t<sqp_mode::accurate>;
+            inv.reject_modes = {static_cast<std::uint8_t>(rm_t::tr_shrink),
+                                static_cast<std::uint8_t>(rm_t::switching_condition)};
+        }
+        inv.kappa_grid = {1e-4};
+        inv.s_grid = {2.3};
+        inv.delta0_grid = {1.0};
+        inv.restoration_iters_grid = {0};
+        inv.seeds = {42};
+        inv.per_config_wall_cap_sec = 15.0;
+        inv.per_cell_wall_budget_sec = 120.0;
+        sweep_kind_seen = true;
     }
 
     if(!sweep_kind_seen)
@@ -889,25 +929,7 @@ int main(int argc, char** argv)
                 }
 
                 const std::uint32_t mx = default_max_iterations_for(cell);
-                cell_result r;
-                try
-                {
-                    r = dispatch_cell(cfg, cell, seed, mx);
-                }
-                catch(const std::exception& ex)
-                {
-                    r.problem           = cell;
-                    r.seed              = seed;
-                    r.status            = "exception";
-                    r.f_final           = 0.0;
-                    r.cv_final          = 0.0;
-                    r.f_err             = 0.0;
-                    r.outer_iters       = 0;
-                    r.wall_us           = 0.0;
-                    r.within_strict_bar = false;
-                    std::cerr << "filter_trsqp_sweep: exception on "
-                              << cell << " (" << ex.what() << ")\n";
-                }
+                cell_result r = dispatch_cell(cfg, cell, seed, mx);
 
                 wall_us_by_cell[ci] += r.wall_us;
 
@@ -948,6 +970,68 @@ int main(int argc, char** argv)
         blocks.push_back(std::move(block));
     }
 
+    struct selected_config
+    {
+        std::optional<std::size_t> block_index;
+        std::size_t pass_count{};
+        std::size_t total_count{};
+        double wall_sum{};
+        std::string witness;
+    };
+
+    selected_config selected;
+    selected.wall_sum = std::numeric_limits<double>::infinity();
+    for(std::size_t i = 0; i < blocks.size(); ++i)
+    {
+        const auto& blk = blocks[i];
+        std::size_t pass_count = 0;
+        double wall_sum = 0.0;
+        for(const auto& r : blk.results)
+        {
+            if(r.within_strict_bar)
+                ++pass_count;
+            wall_sum += r.wall_us;
+        }
+        const bool all_pass = !blk.results.empty() && pass_count == blk.results.size();
+        if(all_pass && (!selected.block_index || wall_sum < selected.wall_sum))
+        {
+            selected.block_index = i;
+            selected.pass_count = pass_count;
+            selected.total_count = blk.results.size();
+            selected.wall_sum = wall_sum;
+        }
+    }
+    if(selected.block_index)
+    {
+        selected.witness =
+            "selected configuration passed every objective, feasibility, status, "
+            "and iteration gate in the exercised filter-TRSQP grid";
+    }
+    else
+    {
+        std::size_t best_pass_count = 0;
+        std::size_t best_total_count = 0;
+        for(const auto& blk : blocks)
+        {
+            std::size_t pass_count = 0;
+            for(const auto& r : blk.results)
+            {
+                if(r.within_strict_bar)
+                    ++pass_count;
+            }
+            if(pass_count > best_pass_count)
+            {
+                best_pass_count = pass_count;
+                best_total_count = blk.results.size();
+            }
+        }
+        selected.pass_count = best_pass_count;
+        selected.total_count = best_total_count;
+        selected.witness =
+            "no configuration passed every objective, feasibility, status, and "
+            "iteration gate; no selected default is emitted";
+    }
+
     // Write JSON (single source of truth).
     {
         std::ofstream out{inv.output_json};
@@ -962,6 +1046,7 @@ int main(int argc, char** argv)
         out << "  \"sweep_kind\": \"" << sweep_kind_name(inv.sweep_kind) << "\",\n";
         out << "  \"head_sha\": \"" << inv.head_sha << "\",\n";
         out << "  \"build_type\": \"" << inv.build_type << "\",\n";
+        out << "  \"provenance_id\": \"" << inv.provenance_id << "\",\n";
 
         // Axes echo.
         out << "  \"axes\": {\n";
@@ -1019,6 +1104,32 @@ int main(int argc, char** argv)
 
         out << "  \"per_config_wall_cap_sec\": " << fmt_num(inv.per_config_wall_cap_sec) << ",\n";
         out << "  \"per_cell_wall_budget_sec\": " << fmt_num(inv.per_cell_wall_budget_sec) << ",\n";
+        out << "  \"selected_default\": {\n";
+        out << "    \"item\": \"filter_trsqp\",\n";
+        out << "    \"grid_id\": \"gamma_f_x_gamma_h_x_reject_mode_x_kappa_x_s_x_delta0_x_restoration_x_mode\",\n";
+        out << "    \"selected_value\": ";
+        if(selected.block_index)
+        {
+            const auto& cfg = blocks[*selected.block_index].config;
+            out << "{\"gamma_f\": " << fmt_num(cfg.gamma_f)
+                << ", \"gamma_h\": " << fmt_num(cfg.gamma_h)
+                << ", \"reject_mode\": \"" << reject_mode_name(cfg.reject_mode) << "\""
+                << ", \"kappa\": " << fmt_num(cfg.kappa)
+                << ", \"s\": " << fmt_num(cfg.s)
+                << ", \"delta0\": " << fmt_num(cfg.delta0)
+                << ", \"restoration_max_iter\": " << cfg.restoration_max_iter
+                << ", \"sqp_mode\": \"" << mode_name(cfg.mode) << "\"}";
+        }
+        else
+        {
+            out << "null";
+        }
+        out << ",\n";
+        out << "    \"correctness_witness\": \"" << selected.witness << "\",\n";
+        out << "    \"pass_count\": " << selected.pass_count << ",\n";
+        out << "    \"total_count\": " << selected.total_count << ",\n";
+        out << "    \"provenance_id\": \"" << inv.provenance_id << "\"\n";
+        out << "  },\n";
 
         // Config blocks.
         out << "  \"configs\": [\n";
@@ -1098,8 +1209,10 @@ int main(int argc, char** argv)
             for(sqp_mode m : inv.modes)
             {
                 md << "## " << cell << " (" << mode_name(m) << ")\n\n";
-                md << "| gamma_f | gamma_h | reject_mode | kappa | s | delta0 | rmax | bar_count/seeds | median_iters | median_wall_us |\n";
-                md << "|---------|---------|-------------|-------|---|--------|------|------------------|--------------|----------------|\n";
+                md << "| gamma_f | gamma_h | reject_mode | kappa | s | delta0 | "
+                      "rmax | bar_count/seeds | median_iters | median_wall_us |\n";
+                md << "|---------|---------|-------------|-------|---|--------|"
+                      "------|------------------|--------------|----------------|\n";
 
                 std::vector<row> rows;
                 for(const auto& blk : blocks)

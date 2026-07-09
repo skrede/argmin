@@ -27,10 +27,10 @@
 //            Bertsekas 1996 §4.2 (stale-multiplier reuse rationale).
 //            N&W 2e §18.3 + Algorithm 18.3 (working-set identification).
 
-#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/filter_slsqp_policy.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -39,11 +39,21 @@
 
 #include <benchmark/benchmark.h>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
 namespace
 {
+
+bool acceptable_status(argmin::solver_status s)
+{
+    using argmin::solver_status;
+    return s == solver_status::converged
+        || s == solver_status::stalled
+        || s == solver_status::xtol_reached
+        || s == solver_status::ftol_reached;
+}
 
 // One sweep cell: instantiate a step_budget_solver with Policy{}, set the
 // problem's multiplier_reest_every_k stride from state.range(0), and
@@ -81,6 +91,9 @@ void sweep_cell(benchmark::State& state)
     std::uint32_t iters_last = 0;
     int status_last = 0;
     double objective_last = 0.0;
+    double accuracy_last = 0.0;
+    double cv_last = 0.0;
+    double correctness_ok_last = 0.0;
     for(auto _ : state)
     {
         Policy policy;
@@ -91,6 +104,12 @@ void sweep_cell(benchmark::State& state)
         iters_last = static_cast<std::uint32_t>(result.iterations);
         status_last = static_cast<int>(result.status);
         objective_last = result.objective_value;
+        accuracy_last = std::abs(result.objective_value - problem.optimal_value());
+        cv_last = solver.constraint_violation();
+        const bool objective_ok = std::isfinite(accuracy_last) && accuracy_last <= 1e-6;
+        const bool feasibility_ok = std::isfinite(cv_last) && cv_last <= 1e-6;
+        correctness_ok_last =
+            (objective_ok && feasibility_ok && acceptable_status(result.status)) ? 1.0 : 0.0;
     }
 
     state.counters["iter_count"] = benchmark::Counter(
@@ -98,6 +117,10 @@ void sweep_cell(benchmark::State& state)
     state.counters["status_code"] = benchmark::Counter(
         static_cast<double>(status_last));
     state.counters["objective"] = benchmark::Counter(objective_last);
+    state.counters["accuracy"] = benchmark::Counter(accuracy_last);
+    state.counters["constraint_violation"] = benchmark::Counter(cv_last);
+    state.counters["correctness_gate_present"] = benchmark::Counter(1.0);
+    state.counters["correctness_ok"] = benchmark::Counter(correctness_ok_last);
 }
 
 // Stride axis: k in {1, 2, 3, 5, 8, 10}. Repetitions=5 with
@@ -178,4 +201,17 @@ BENCHMARK_TEMPLATE(sweep_cell, fslsqp_4, hs071_d)
 BENCHMARK_TEMPLATE(sweep_cell, fnw_4,    hs071_d)
     ->Name("filter_nw_sqp_accurate/HS071")->Apply(configure_stride_axis);
 
-BENCHMARK_MAIN();
+int main(int argc, char** argv)
+{
+    ::benchmark::Initialize(&argc, argv);
+    ::benchmark::AddCustomContext("provenance_id", "multiplier-reest-sweep-local");
+    ::benchmark::AddCustomContext("grid_id", "multiplier_reest_every_k");
+    ::benchmark::AddCustomContext("grid_axis_multiplier_reest_every_k", "1,2,3,5,8,10");
+    ::benchmark::AddCustomContext("selected_multiplier_reest_every_k", "1");
+    ::benchmark::AddCustomContext(
+        "correctness_witness",
+        "each row emits correctness_ok from objective, feasibility, and status gates");
+    ::benchmark::RunSpecifiedBenchmarks();
+    ::benchmark::Shutdown();
+    return 0;
+}

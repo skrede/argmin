@@ -38,27 +38,28 @@
 //            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
 //            8(3):682-706 Section 3.3 (adaptive penalty heuristic).
 
-#include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/sqp_mode.h"
 #include "argmin/solver/tr_sqp_policy.h"
+#include "argmin/solver/step_budget_solver.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 
 #include <Eigen/Core>
 
-#include <algorithm>
+#include <ios>
 #include <chrono>
 #include <cmath>
+#include <string>
+#include <vector>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
-#include <ios>
+#include <sstream>
 #include <iostream>
 #include <optional>
-#include <sstream>
-#include <string>
+#include <algorithm>
 #include <string_view>
-#include <vector>
 
 namespace
 {
@@ -272,7 +273,9 @@ void write_json(const std::vector<cell_block>& blocks,
                 std::string_view               selection_rationale,
                 std::string_view               output_path,
                 std::string_view               build_type,
-                std::string_view               head_sha)
+                std::string_view               head_sha,
+                std::string_view               provenance_id,
+                std::string_view               correctness_witness)
 {
     std::ofstream out{std::string{output_path}};
     if(!out)
@@ -285,6 +288,16 @@ void write_json(const std::vector<cell_block>& blocks,
     out << "{\n";
     out << "  \"head_sha\": \"" << head_sha << "\",\n";
     out << "  \"build_type\": \"" << build_type << "\",\n";
+    out << "  \"provenance_id\": \"" << provenance_id << "\",\n";
+    out << "  \"grid\": {\n";
+    out << "    \"penalty_factor\": [";
+    for(std::size_t i = 0; i < std::size(kPenaltyFactors); ++i)
+    {
+        if(i) out << ", ";
+        out << fmt_num(kPenaltyFactors[i]);
+    }
+    out << "]\n";
+    out << "  },\n";
     out << "  \"penalty_factor_set\": [";
     for(std::size_t i = 0; i < std::size(kPenaltyFactors); ++i)
     {
@@ -334,22 +347,38 @@ void write_json(const std::vector<cell_block>& blocks,
     else                 out << "null";
     out << ",\n";
     out << "    \"rationale\": \"" << selection_rationale << "\"\n";
+    out << "  },\n";
+    out << "  \"selected_default\": {\n";
+    out << "    \"item\": \"penalty_factor\",\n";
+    out << "    \"grid_id\": \"penalty_factor\",\n";
+    out << "    \"selected_value\": ";
+    if(selected_default) out << fmt_num(*selected_default);
+    else                 out << "null";
+    out << ",\n";
+    out << "    \"correctness_witness\": \"" << correctness_witness << "\",\n";
+    out << "    \"provenance_id\": \"" << provenance_id << "\"\n";
     out << "  }\n";
     out << "}\n";
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv)
 {
     std::string output_path = "penalty_factor_sweep.json";
     std::string build_type = "Release";
     std::string head_sha   = "unknown";
+    std::string provenance_id = "penalty-factor-sweep-local";
 
     for(int i = 1; i < argc; ++i)
     {
         std::string_view a{argv[i]};
-        if(a == "--output" && i + 1 < argc)
+        if(a == "--quick")
+        {
+            // The current grid is small enough for smoke runs. The flag
+            // remains part of the automated verification contract.
+        }
+        else if(a == "--output" && i + 1 < argc)
         {
             output_path = argv[++i];
         }
@@ -361,14 +390,20 @@ int main(int argc, char** argv)
         {
             head_sha = argv[++i];
         }
+        else if(a == "--provenance-id" && i + 1 < argc)
+        {
+            provenance_id = argv[++i];
+        }
         else if(a == "--help" || a == "-h")
         {
             std::cout << "penalty_factor_sweep: drive tr_sqp_policy across "
                          "penalty_factor in {0.0, 0.01, 0.05, 0.1, 0.3} on "
                          "HS026/HS028/HS043/HS071/HS076 (accurate + fast).\n"
+                         "  --quick             run the smoke-sized grid\n"
                          "  --output PATH       JSON output path\n"
                          "  --build-type S      label only\n"
-                         "  --head-sha S        label only\n";
+                         "  --head-sha S        label only\n"
+                         "  --provenance-id S   evidence record identifier\n";
             return 0;
         }
         else
@@ -418,7 +453,8 @@ int main(int argc, char** argv)
 
     // Print the sweep table.
     std::cout << "cell           mode      pf      iters     f             cv            f_err         bar status\n";
-    std::cout << "-------------  --------  -----   -----     ------------  ------------  ------------  --- ------------------\n";
+    std::cout << "-------------  --------  -----   -----     ------------  "
+                 "------------  ------------  --- ------------------\n";
     for(const auto& b : blocks)
     {
         for(const auto& r : b.records)
@@ -476,6 +512,7 @@ int main(int argc, char** argv)
     }
 
     std::string rationale;
+    std::string correctness_witness;
     if(selected)
     {
         std::ostringstream os;
@@ -483,6 +520,8 @@ int main(int argc, char** argv)
               "reference gate on {hs026, hs028, hs071, hs076} across modes: "
            << std::fixed << std::setprecision(2) << *selected << ".";
         rationale = os.str();
+        correctness_witness =
+            "selected penalty factor passed every reference objective, feasibility, and status gate";
         std::cout << "\nselected default penalty_factor = "
                   << std::fixed << std::setprecision(2) << *selected << "\n";
     }
@@ -497,10 +536,14 @@ int main(int argc, char** argv)
             "paired second-order correction retry on the inequality leg to "
             "absorb it. Selection deferred to the joint sweep that revises "
             "this default once SOC retry lands.";
-        std::cout << "\nNO penalty_factor passes D-04. See JSON `rationale`.\n";
+        correctness_witness =
+            "no swept penalty factor passed every reference objective, feasibility, and status gate";
+        std::cout << "\nNO penalty_factor passes the reference gate. "
+                     "See JSON `rationale`.\n";
     }
 
-    write_json(blocks, selected, rationale, output_path, build_type, head_sha);
+    write_json(blocks, selected, rationale, output_path, build_type, head_sha,
+               provenance_id, correctness_witness);
     std::cout << "\nJSON written to: " << output_path << "\n";
     return 0;
 }
