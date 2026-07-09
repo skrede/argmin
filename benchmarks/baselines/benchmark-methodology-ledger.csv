@@ -1,0 +1,4 @@
+# Ledger for benchmark numeric values moved by methodology repairs or re-sweeps.
+# Add one row for each changed baseline, profile, or register number.
+# Keep correctness_witness and provenance_id non-empty for every data row.
+metric,solver,problem,mode,old_value,new_value,methodology_change,correctness_witness,provenance_id,commit_kind,notes

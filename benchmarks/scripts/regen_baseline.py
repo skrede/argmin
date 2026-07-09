@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
-"""Regenerate a canonical regression baseline from a publish_summary.csv.
+"""Regenerate or migrate the benchmark regression baseline.
 
-Aggregates per-seed publish_summary rows into per-(solver, problem, mode)
-cells; computes the per-cell bounds with a 1.30 pad over the per-step wall
-median and the outer-iter maximum; assigns the row disposition per the
-status-aware accept-as-pass rule (every-seed-stalled AND accuracy<1e-12 AND
-cv<1e-8 -> pass; original-disposition rules otherwise); preserves the
-existing curated cohort + the (kraft_slsqp_accurate, hs026) override; and
-emits the new baseline with a header comment block documenting the rule
-and the NMPC informational-known_optimum convention.
-
-Not a planning-tool reference site -- the baseline is a code-tree artifact.
+The active baseline schema uses explicit row dispositions:
+``pass``, ``expected_fail``, and ``excluded``. New publication baselines
+require a provenance sidecar whose build type is Release. Legacy baselines
+can be migrated in place without moving measured numeric bounds.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 
-# Solver cohort retained from the prior curated baseline.
 COHORT_SOLVERS = {
     "bobyqa",
     "byrd_lbfgsb",
@@ -39,9 +35,51 @@ COHORT_SOLVERS = {
     "tr_sqp_fast",
 }
 
+DISPOSITION_PASS = "pass"
+DISPOSITION_EXPECTED_FAIL = "expected_fail"
+DISPOSITION_EXCLUDED = "excluded"
+DISPOSITIONS = {
+    DISPOSITION_PASS,
+    DISPOSITION_EXPECTED_FAIL,
+    DISPOSITION_EXCLUDED,
+}
 
-# Solver-name -> bench-config dispatch mode. "default" for solvers without
-# a per-suffix fast/accurate split.
+BASELINE_FIELDS = [
+    "solver",
+    "problem",
+    "mode",
+    "max_us_per_step",
+    "min_accuracy_log10",
+    "max_outer_iters",
+    "max_cv_log10",
+    "disposition",
+    "provenance_id",
+    "wall_gate_policy",
+    "exclusion_reason",
+]
+
+NUMERIC_BASELINE_FIELDS = [
+    "max_us_per_step",
+    "min_accuracy_log10",
+    "max_outer_iters",
+    "max_cv_log10",
+]
+
+LEDGER_FIELDS = [
+    "metric",
+    "solver",
+    "problem",
+    "mode",
+    "old_value",
+    "new_value",
+    "methodology_change",
+    "correctness_witness",
+    "provenance_id",
+    "commit_kind",
+    "notes",
+]
+
+
 def solver_dispatch_mode(solver: str) -> str:
     if solver.endswith("_fast"):
         return "fast"
@@ -50,90 +88,49 @@ def solver_dispatch_mode(solver: str) -> str:
     return "default"
 
 
-# Per-mode tolerance floors lifted verbatim from the prior baseline header.
-# fast -> min_accuracy_log10=-4.0, max_cv_log10=-4.0
-# accurate -> min_accuracy_log10=-8.0, max_cv_log10=-6.0
-# default -> min_accuracy_log10=-8.0, max_cv_log10=-6.0
 def mode_tolerances(mode: str) -> tuple[float, float]:
     if mode == "fast":
         return (-4.0, -4.0)
     return (-8.0, -6.0)
 
 
-# Manual override: (kraft_slsqp_accurate, hs026, accurate) max_outer_iters
-# hardcoded at 200 as the LSEI re-attempt gate cell (preserved across
-# regenerations from the prior curated baseline).
 MANUAL_ITERS_OVERRIDE: dict[tuple[str, str, str], int] = {
     ("kraft_slsqp_accurate", "hs026", "accurate"): 200,
 }
 
 
-# Tag cells that are documented known-failures in the test suite, hence
-# expected=shouldfail in the baseline regardless of empirical convergence
-# at any seed (the test suite [!shouldfail] tag is the contract).
 KNOWN_FAILURE_CELLS = {
     ("tr_sqp_accurate", "hs024", "accurate"),
-    ("tr_sqp_fast",     "hs024", "fast"),
+    ("tr_sqp_fast", "hs024", "fast"),
     ("tr_sqp_accurate", "hs035", "accurate"),
-    ("tr_sqp_fast",     "hs035", "fast"),
+    ("tr_sqp_fast", "hs035", "fast"),
     ("tr_sqp_accurate", "hs039", "accurate"),
-    ("tr_sqp_fast",     "hs039", "fast"),
+    ("tr_sqp_fast", "hs039", "fast"),
     ("tr_sqp_accurate", "hs040", "accurate"),
-    ("tr_sqp_fast",     "hs040", "fast"),
+    ("tr_sqp_fast", "hs040", "fast"),
     ("tr_sqp_accurate", "hs043", "accurate"),
-    ("tr_sqp_fast",     "hs043", "fast"),
+    ("tr_sqp_fast", "hs043", "fast"),
     ("tr_sqp_accurate", "hs050", "accurate"),
-    ("tr_sqp_fast",     "hs050", "fast"),
-    # Filter trust-region SQP shouldfail set per the test-side disposition
-    # documented in tests/unit/filter_trsqp_test.cpp (the [!shouldfail] tag
-    # in that test file is the contract; mechanism citations live in that
-    # file's comment blocks). Mechanism families: L2-merit structural
-    # rejection on HS024 (Fletcher-Leyffer-Toint 2002 sec.4); composite-step
-    # divergence on HS043 / HS076 at locked defaults (Lalee-Nocedal-Plantenga
-    # 1998 restoration disposition); strict-bar exemption on HS071/accurate
-    # (Maratos failure mode under fast-mode dispatch closes; accurate mode
-    # does not at locked envelope).
+    ("tr_sqp_fast", "hs050", "fast"),
     ("filter_trsqp_accurate", "hs024", "accurate"),
-    ("filter_trsqp_fast",     "hs024", "fast"),
+    ("filter_trsqp_fast", "hs024", "fast"),
     ("filter_trsqp_accurate", "hs043", "accurate"),
-    ("filter_trsqp_fast",     "hs043", "fast"),
+    ("filter_trsqp_fast", "hs043", "fast"),
     ("filter_trsqp_accurate", "hs071", "accurate"),
     ("filter_trsqp_accurate", "hs076", "accurate"),
-    ("filter_trsqp_fast",     "hs076", "fast"),
+    ("filter_trsqp_fast", "hs076", "fast"),
 }
 
 
 HEADER_COMMENT_BLOCK = """\
 # Regression baseline keyed by (solver, problem, mode).
-# Derived from an 11-seed publish_bench sweep with pad = 1.30 over
-# the per-step wall median and the outer-iter maximum. tolerance
-# columns set per mode: fast -> min_accuracy_log10=-4.0 max_cv_log10=-4.0;
-# accurate -> min_accuracy_log10=-8.0 max_cv_log10=-6.0.
-# (kraft_slsqp_accurate, hs026, accurate) max_outer_iters hardcoded at 200
-# as the LSEI re-attempt gate cell.
-# constraint_violation column is present in publish_summary at this HEAD;
-# the max_cv_log10 column gates against the empirical per-seed cv maxima.
-# expected=shouldfail rows mark cells with a documented algorithmic-design
-# limit (TR-SQP family: HS024, HS035, HS039, HS040, HS043, HS050 on both
-# fast and accurate modes). expected=skip rows mark cells with
-# path-dependent convergence (per-seed status divergence) outside the
-# published gate.
-# Status-aware accept-as-pass rule: rows whose every seed reports
-# status=stalled AND accuracy<1e-12 AND cv<1e-8 are promoted in-memory
-# from expected=skip to expected=pass by regression_check and gated
-# against the bounds below. This catches cells that stall at
-# machine precision on strictly-feasible minimizers (|f - f*| at
-# 1e-13..1e-16, cv at 1e-14..1e-16). The (accuracy_cutoff, cv_cutoff)
-# pair is empirically selected by a narrow threshold sweep.
-# nmpc_lqr_* rows: known_optimum is informational. The fixture returns 0 from
-# optimal_value(); the bench publishes accuracy as |f - 0| and cv as the
-# dynamics-equality residual under the single-shooting formulation. The numeric
-# accuracy value on a converged trajectory equals the terminal LQR cost itself
-# (not a deficit against a true minimizer; the closed-form LQR optimum requires
-# a Riccati / DARE solve at fixed problem data that is intentionally not part of
-# this fixture). Treat nmpc_lqr_* rows as expected-skip with respect to the
-# accuracy-against-known_optimum bar; the dynamics-feasibility is reported in
-# the cv column at machine precision and is the relevant convergence signal.
+# Numeric bounds are historical gate values. The disposition column controls
+# how each row participates in the gate:
+# pass: status, accuracy, feasibility, iteration, and wall bounds are enforced.
+# expected_fail: correctness-only fix detection is enforced; wall time is ignored.
+# excluded: the cell is outside the active cohort and must include a reason.
+# wall_gate_policy describes whether the wall gate is enforced locally or made
+# advisory by the caller through REGRESSION_CHECK_DISABLE_WALL_GATE.
 """
 
 
@@ -153,26 +150,80 @@ def median(xs: list[float]) -> float:
     return 0.5 * (s[n // 2 - 1] + s[n // 2])
 
 
-def load_curated_cells(prior_baseline: Path) -> set[tuple[str, str, str]]:
-    """Extract the (solver, problem, mode) cell set from the prior baseline.
+def require_fields(row: dict[str, str], fields: list[str], context: str) -> None:
+    missing = [field for field in fields if field not in row]
+    if missing:
+        raise ValueError(f"{context}: missing required column(s): {', '.join(missing)}")
 
-    The regen preserves the curated cohort: only cells that were in the
-    prior baseline land in the new one. Adding cells is a deliberate
-    decision; the regen script does not silently widen the cohort.
-    """
-    out: set[tuple[str, str, str]] = set()
-    with prior_baseline.open("r") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split(",")
-            if parts and parts[0] == "solver":
-                continue
-            if len(parts) < 3:
-                continue
-            out.add((parts[0], parts[1], parts[2]))
+
+def parse_float(value: str, context: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{context}: invalid numeric value {value!r}") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"{context}: non-finite numeric value {value!r}")
+    return parsed
+
+
+def parse_int(value: str, context: str) -> int:
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{context}: invalid integer value {value!r}") from exc
+
+
+def read_csv_rows(path: Path) -> list[dict[str, str]]:
+    with path.open("r", newline="") as f:
+        data_lines = [line for line in f if line.strip() and not line.startswith("#")]
+    if not data_lines:
+        raise ValueError(f"{path}: no CSV header")
+    reader = csv.DictReader(data_lines)
+    return [dict(row) for row in reader]
+
+
+def legacy_disposition(value: str) -> str:
+    if value in DISPOSITIONS:
+        return value
+    if value == "shouldfail" or value == "skip":
+        return DISPOSITION_EXPECTED_FAIL
+    raise ValueError(f"invalid legacy disposition {value!r}")
+
+
+def load_baseline_rows(path: Path,
+                       default_provenance_id: str = "historical-baseline",
+                       default_wall_policy: str = "enforced") -> list[dict[str, str]]:
+    rows = read_csv_rows(path)
+    out: list[dict[str, str]] = []
+    for row in rows:
+        require_fields(row, ["solver", "problem", "mode", *NUMERIC_BASELINE_FIELDS],
+                       str(path))
+        source_disp = row.get("disposition", row.get("expected", ""))
+        disposition = legacy_disposition(source_disp)
+        migrated = {
+            "solver": row["solver"],
+            "problem": row["problem"],
+            "mode": row["mode"],
+            "max_us_per_step": row["max_us_per_step"],
+            "min_accuracy_log10": row["min_accuracy_log10"],
+            "max_outer_iters": row["max_outer_iters"],
+            "max_cv_log10": row["max_cv_log10"],
+            "disposition": disposition,
+            "provenance_id": row.get("provenance_id") or default_provenance_id,
+            "wall_gate_policy": row.get("wall_gate_policy") or default_wall_policy,
+            "exclusion_reason": row.get("exclusion_reason") or "",
+        }
+        for field in NUMERIC_BASELINE_FIELDS:
+            parse_float(migrated[field], f"{path}:{row['solver']}:{row['problem']}")
+        if disposition == DISPOSITION_EXCLUDED and not migrated["exclusion_reason"]:
+            migrated["exclusion_reason"] = "historical non-cohort cell"
+        out.append(migrated)
     return out
+
+
+def load_curated_cells(prior_baseline: Path) -> set[tuple[str, str, str]]:
+    rows = load_baseline_rows(prior_baseline)
+    return {(row["solver"], row["problem"], row["mode"]) for row in rows}
 
 
 def expand_cohort_for_new_solvers(
@@ -180,29 +231,17 @@ def expand_cohort_for_new_solvers(
     ref_solver: str,
     new_solvers: list[str],
 ) -> set[tuple[str, str, str]]:
-    """Augment the curated cell set with new solvers using a reference solver's
-    cell list as the template.
-
-    When a new policy is added between baseline regenerations, the prior
-    baseline has zero rows for that policy and load_curated_cells therefore
-    omits every (new_solver, problem, mode) tuple, causing the regen to
-    silently drop those rows. This helper takes the (problem, mode) pairs
-    that ref_solver covers in the curated set and emits matching tuples
-    for each new_solver under the new_solver's own dispatch mode.
-
-    The cohort widening is explicit (called by name in main()), not silent.
-    """
     ref_cells = [(p, m) for (s, p, m) in curated if s == ref_solver]
     if not ref_cells:
         print(f"regen_baseline: WARN: reference solver {ref_solver!r} not "
-              f"present in curated cohort; cohort expansion is a no-op",
+              "present in curated cohort; expansion is a no-op",
               file=sys.stderr)
         return set(curated)
     out = set(curated)
     added = 0
     for new_solver in new_solvers:
         dispatch_mode = solver_dispatch_mode(new_solver)
-        for (problem, _ref_mode) in ref_cells:
+        for problem, _ref_mode in ref_cells:
             tup = (new_solver, problem, dispatch_mode)
             if tup not in out:
                 out.add(tup)
@@ -213,35 +252,138 @@ def expand_cohort_for_new_solvers(
     return out
 
 
-def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("--summary", required=True, type=Path,
-                   help="path to publish_summary.csv")
-    p.add_argument("--prior-baseline", required=True, type=Path,
-                   help="path to the prior baseline CSV (curated cell set "
-                        "lifted from here)")
-    p.add_argument("--output", required=True, type=Path,
-                   help="path to new baseline CSV")
-    p.add_argument("--accuracy-cutoff", type=float, default=1e-12,
-                   help="status-aware promote-to-pass accuracy threshold")
-    p.add_argument("--cv-cutoff", type=float, default=1e-8,
-                   help="status-aware promote-to-pass cv threshold")
-    args = p.parse_args()
+def load_release_provenance(path: Path) -> dict[str, str] | None:
+    try:
+        with path.open("r") as f:
+            data = json.load(f)
+    except OSError as exc:
+        print(f"regen_baseline: cannot read provenance sidecar {path}: {exc}",
+              file=sys.stderr)
+        return None
+    except json.JSONDecodeError as exc:
+        print(f"regen_baseline: invalid provenance JSON {path}: {exc}",
+              file=sys.stderr)
+        return None
 
+    build_data = data.get("build", {})
+    build_type = (
+        data.get("build_type")
+        or data.get("cmake_build_type")
+        or (build_data.get("type") if isinstance(build_data, dict) else None)
+    )
+    if build_type != "Release":
+        print("regen_baseline: publication baseline requires Release provenance "
+              f"(got {build_type!r})",
+              file=sys.stderr)
+        return None
+
+    provenance_id = str(data.get("provenance_id") or data.get("run_id") or path.stem)
+    wall_gate_policy = str(data.get("wall_gate_policy") or "enforced")
+    return {
+        "provenance_id": provenance_id,
+        "wall_gate_policy": wall_gate_policy,
+    }
+
+
+def write_baseline(path: Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as f:
+        f.write(HEADER_COMMENT_BLOCK)
+        writer = csv.DictWriter(f, fieldnames=BASELINE_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in BASELINE_FIELDS})
+
+
+def migrate_existing_baseline(prior_baseline: Path, output: Path) -> int:
+    try:
+        rows = load_baseline_rows(prior_baseline)
+    except ValueError as exc:
+        print(f"regen_baseline: {exc}", file=sys.stderr)
+        return 1
+    write_baseline(output, rows)
+    print(f"regen_baseline: migrated {len(rows)} rows -> {output}", file=sys.stderr)
+    return 0
+
+
+def aggregate_summary(args: argparse.Namespace,
+                      curated_cells: set[tuple[str, str, str]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    with args.summary.open("r", newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    if not rows:
+        raise ValueError(f"no rows in {args.summary}")
+
+    required = [
+        "solver",
+        "problem",
+        "solver_iters",
+        "wall_time_us",
+        "accuracy",
+        "constraint_violation",
+        "status",
+        "row_disposition",
+        "exclusion_reason",
+        "provenance_id",
+    ]
+    for row in rows:
+        require_fields(row, required, str(args.summary))
+
+    by_cell: dict[tuple[str, str, str], dict[str, Any]] = defaultdict(
+        lambda: {
+            "per_step_us": [],
+            "iters": [],
+            "acc": [],
+            "cv": [],
+            "status": [],
+            "excluded": False,
+            "exclusion_reason": "",
+            "provenance_id": "",
+        }
+    )
+    for r in rows:
+        solver = r["solver"]
+        problem = r["problem"]
+        if solver not in COHORT_SOLVERS:
+            continue
+        mode = solver_dispatch_mode(solver)
+        key = (solver, problem, mode)
+        if key not in curated_cells:
+            continue
+
+        cell = by_cell[key]
+        row_disposition = r["row_disposition"]
+        if row_disposition == "excluded":
+            cell["excluded"] = True
+            cell["exclusion_reason"] = r["exclusion_reason"] or "adapter capability"
+            cell["provenance_id"] = r["provenance_id"]
+            continue
+        if row_disposition != "included":
+            raise ValueError(f"{args.summary}: invalid row_disposition {row_disposition!r}")
+
+        context = f"{args.summary}:{solver}:{problem}"
+        iters = parse_int(r["solver_iters"], context)
+        wall_us = parse_int(r["wall_time_us"], context)
+        acc = parse_float(r["accuracy"], context)
+        cv = parse_float(r["constraint_violation"], context)
+        denom = iters if iters > 0 else 1
+        cell["per_step_us"].append(wall_us / denom)
+        cell["iters"].append(iters)
+        cell["acc"].append(acc)
+        cell["cv"].append(cv)
+        cell["status"].append(r["status"])
+        cell["provenance_id"] = r["provenance_id"]
+    return by_cell
+
+
+def generated_rows(args: argparse.Namespace,
+                   provenance: dict[str, str]) -> list[dict[str, str]]:
     curated_cells = load_curated_cells(args.prior_baseline)
     print(f"regen_baseline: curated cohort size = {len(curated_cells)} cells",
           file=sys.stderr)
 
-    # If a new policy in COHORT_SOLVERS is not present in the prior baseline,
-    # the curated set excludes its rows. Detect any such policies and expand
-    # the cohort using filter_nw_sqp_accurate as the reference (its cell list
-    # is the canonical SQP-family coverage spanning the HS suite plus the
-    # NMPC fixtures). This widening is intentional and explicit (logged to
-    # stderr) -- the policies-eligible-for-expansion list is the source of
-    # truth, not an implicit cohort widen.
     prior_solvers = {s for (s, _p, _m) in curated_cells}
-    missing_new_solvers = [s for s in sorted(COHORT_SOLVERS)
-                           if s not in prior_solvers]
+    missing_new_solvers = [s for s in sorted(COHORT_SOLVERS) if s not in prior_solvers]
     if missing_new_solvers:
         curated_cells = expand_cohort_for_new_solvers(
             curated_cells,
@@ -249,160 +391,351 @@ def main() -> int:
             new_solvers=missing_new_solvers,
         )
 
-    # Load summary, aggregate per (solver, problem, dispatch_mode).
-    with args.summary.open("r", newline="") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-
-    if not rows:
-        print(f"regen_baseline: no rows in {args.summary}", file=sys.stderr)
-        return 1
-
-    # cv column may not be present (older publish_summary). We require it
-    # for the status-aware rule.
-    if "constraint_violation" not in rows[0]:
-        print("WARN: constraint_violation column missing from publish_summary; "
-              "status-aware promotion will short-circuit (no rows promoted).",
-              file=sys.stderr)
-
-    by_cell: dict[tuple[str, str, str], dict] = defaultdict(
-        lambda: {"per_step_us": [], "iters": [], "acc": [], "cv": [], "status": []})
-    for r in rows:
-        solver = r["solver"]
-        problem = r["problem"]
-        if solver not in COHORT_SOLVERS:
-            continue
-        mode = solver_dispatch_mode(solver)
-        if (solver, problem, mode) not in curated_cells:
-            continue
-        try:
-            iters = int(r["solver_iters"])
-            wall_us = int(r["wall_time_us"])
-            acc = float(r["accuracy"])
-            cv = float(r.get("constraint_violation", "nan"))
-        except (KeyError, ValueError):
-            continue
-        denom = iters if iters > 0 else 1
-        per_step = wall_us / denom
-        cell = by_cell[(solver, problem, mode)]
-        cell["per_step_us"].append(per_step)
-        cell["iters"].append(iters)
-        cell["acc"].append(acc)
-        cell["cv"].append(cv)
-        cell["status"].append(r["status"])
-
-    rows_out: list[tuple] = []
+    by_cell = aggregate_summary(args, curated_cells)
+    rows_out: list[dict[str, str]] = []
     for (solver, problem, mode), cell in sorted(by_cell.items()):
-        statuses = cell["status"]
-        accs = cell["acc"]
-        cvs = cell["cv"]
-        iters = cell["iters"]
-        per_step_us = cell["per_step_us"]
+        min_acc_log10, max_cv_log10 = mode_tolerances(mode)
+        if cell["excluded"]:
+            rows_out.append({
+                "solver": solver,
+                "problem": problem,
+                "mode": mode,
+                "max_us_per_step": "0",
+                "min_accuracy_log10": f"{min_acc_log10:.1f}",
+                "max_outer_iters": "0",
+                "max_cv_log10": f"{max_cv_log10:.1f}",
+                "disposition": DISPOSITION_EXCLUDED,
+                "provenance_id": cell["provenance_id"] or provenance["provenance_id"],
+                "wall_gate_policy": provenance["wall_gate_policy"],
+                "exclusion_reason": cell["exclusion_reason"] or "adapter capability",
+            })
+            continue
 
-        # Bounds: pad = 1.30 over per-step median and outer-iter max,
-        # round up to integer.
-        per_step_med = median(per_step_us)
-        bound_us = max(1, int(math.ceil(per_step_med * 1.30)))
-        max_iters_empirical = max(iters)
+        if not cell["per_step_us"]:
+            continue
+
+        bound_us = max(1, int(math.ceil(median(cell["per_step_us"]) * 1.30)))
+        max_iters_empirical = max(cell["iters"])
         bound_iters = max(1, int(math.ceil(max_iters_empirical * 1.30)))
         manual_iters = MANUAL_ITERS_OVERRIDE.get((solver, problem, mode))
         if manual_iters is not None:
             bound_iters = manual_iters
 
-        min_acc_log10, max_cv_log10 = mode_tolerances(mode)
-
-        # Disposition.
+        statuses = cell["status"]
+        accs = cell["acc"]
+        cvs = cell["cv"]
         all_converged = all(s == "converged" for s in statuses)
-        all_stalled = all(s == "stalled" for s in statuses)
-        every_acc_below = all(0.0 < a < args.accuracy_cutoff for a in accs)
-        every_cv_below = (all(not math.isnan(c) for c in cvs) and
-                          all(c < args.cv_cutoff for c in cvs))
+        empirical_acc_log10 = safe_log10(max(accs))
+        empirical_cv_log10 = safe_log10(max(cvs))
 
         if (solver, problem, mode) in KNOWN_FAILURE_CELLS:
-            # Test suite tags these as [!shouldfail]; the baseline gate
-            # asserts the cell fails at least one convergence check.
-            disposition = "shouldfail"
-            # For shouldfail rows we need the bounds to reflect the
-            # per-mode tolerance floors (so that any future convergence
-            # tightens the gate properly), but the actual values do not
-            # gate -- regression_check only fires UNEXPECTED_PASS when
-            # every seed converged AND every numeric gate held.
-            comment_line = (
-                f"# shouldfail: cell tagged [!shouldfail] in tr_sqp_test.cpp "
-                f"per the trace-derived mechanism family; expected to fail "
-                f"at least one convergence gate at default options."
-            )
-        elif all_converged:
-            # Strict pass: every seed converged. Bounds derived from the
-            # per-seed worst-case accuracy (we tighten min_acc_log10 to
-            # the floor of the per-seed log10 max only when that is
-            # tighter than the mode floor; otherwise we keep the mode
-            # floor as the relaxed gate).
-            disposition = "pass"
-            empirical_acc_log10 = safe_log10(max(accs))
-            if empirical_acc_log10 < min_acc_log10:
-                # Empirical accuracy is BETTER than mode floor (smaller
-                # log10). The gate stays at the mode floor (the looser
-                # bound) so per-seed noise within the floor does not
-                # breach.
-                pass
-            else:
-                # Empirical accuracy exceeds the mode floor: this means
-                # the cell does not actually pass the strict accuracy
-                # gate. Mark skip with the diagnostic comment.
-                disposition = "skip"
-                comment_line = (
-                    f"# skip: empirical max accuracy log10={empirical_acc_log10:.3f} "
-                    f"exceeds the per-mode bound {min_acc_log10:.1f} for "
-                    f"({solver}, {problem}, {mode}); known_optimum is "
-                    f"informational, not the true f*."
-                )
-            if disposition == "pass":
-                comment_line = None
-        elif all_stalled and every_acc_below and every_cv_below:
-            # Status-aware promote-to-pass: every seed stalled at
-            # machine precision on the feasible manifold. The rule
-            # bakes in the gate at the per-mode floor; regression_check
-            # applies the same promotion at runtime and checks the
-            # bounds.
-            disposition = "pass"
-            comment_line = None
+            disposition = DISPOSITION_EXPECTED_FAIL
+        elif (all_converged
+              and empirical_acc_log10 <= min_acc_log10
+              and empirical_cv_log10 <= max_cv_log10):
+            disposition = DISPOSITION_PASS
         else:
-            # Skip: path-dependent convergence or non-machine-precision
-            # stall.
-            disposition = "skip"
-            status_set = sorted(set(statuses))
-            comment_line = (
-                f"# skip: every seed status in {status_set} for "
-                f"({solver}, {problem}, {mode}); no converged seed to derive "
-                f"a pass bound."
-            )
+            disposition = DISPOSITION_EXPECTED_FAIL
 
-        rows_out.append((
-            solver, problem, mode, bound_us, min_acc_log10,
-            bound_iters, max_cv_log10, disposition, comment_line))
+        rows_out.append({
+            "solver": solver,
+            "problem": problem,
+            "mode": mode,
+            "max_us_per_step": str(bound_us),
+            "min_accuracy_log10": f"{min_acc_log10:.1f}",
+            "max_outer_iters": str(bound_iters),
+            "max_cv_log10": f"{max_cv_log10:.1f}",
+            "disposition": disposition,
+            "provenance_id": provenance["provenance_id"],
+            "wall_gate_policy": provenance["wall_gate_policy"],
+            "exclusion_reason": "",
+        })
+    return rows_out
 
-    # Emit.
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w") as f:
-        f.write(HEADER_COMMENT_BLOCK)
-        f.write("solver,problem,mode,max_us_per_step,min_accuracy_log10,"
-                "max_outer_iters,max_cv_log10,expected\n")
-        for (solver, problem, mode, bound_us, min_acc_log10,
-             bound_iters, max_cv_log10, disposition, comment) in rows_out:
-            if comment is not None:
-                f.write(comment + "\n")
-            f.write(f"{solver},{problem},{mode},{bound_us},{min_acc_log10:.1f},"
-                    f"{bound_iters},{max_cv_log10:.1f},{disposition}\n")
 
-    n_pass = sum(1 for r in rows_out if r[7] == "pass")
-    n_skip = sum(1 for r in rows_out if r[7] == "skip")
-    n_shouldfail = sum(1 for r in rows_out if r[7] == "shouldfail")
-    print(f"regen_baseline: {len(rows_out)} cells -> {args.output}", file=sys.stderr)
-    print(f"  pass:       {n_pass}", file=sys.stderr)
-    print(f"  skip:       {n_skip}", file=sys.stderr)
-    print(f"  shouldfail: {n_shouldfail}", file=sys.stderr)
+def generate_baseline(args: argparse.Namespace) -> int:
+    provenance = load_release_provenance(args.provenance) if args.provenance else None
+    if provenance is None:
+        return 1
+    try:
+        rows = generated_rows(args, provenance)
+    except (OSError, ValueError) as exc:
+        print(f"regen_baseline: {exc}", file=sys.stderr)
+        return 1
+    write_baseline(args.output, rows)
+    counts = {name: sum(1 for row in rows if row["disposition"] == name)
+              for name in sorted(DISPOSITIONS)}
+    print(f"regen_baseline: {len(rows)} cells -> {args.output}", file=sys.stderr)
+    for name, count in counts.items():
+        print(f"  {name}: {count}", file=sys.stderr)
     return 0
+
+
+def ledger_rows(path: Path) -> list[dict[str, str]]:
+    rows = read_csv_rows(path)
+    for row in rows:
+        require_fields(row, LEDGER_FIELDS, str(path))
+    return rows
+
+
+def ledger_has_row(rows: list[dict[str, str]],
+                   metric: str,
+                   solver: str,
+                   problem: str,
+                   mode: str,
+                   old_value: str,
+                   new_value: str) -> bool:
+    for row in rows:
+        if (row["metric"] == metric
+            and row["solver"] == solver
+            and row["problem"] == problem
+            and row["mode"] == mode
+            and row["old_value"] == old_value
+            and row["new_value"] == new_value
+            and row["provenance_id"]
+            and row["correctness_witness"]):
+            return True
+    return False
+
+
+def baseline_moves(prior: Path, current: Path) -> list[tuple[str, str, str, str, str, str]]:
+    before = {
+        (row["solver"], row["problem"], row["mode"]): row
+        for row in load_baseline_rows(prior)
+    }
+    after = {
+        (row["solver"], row["problem"], row["mode"]): row
+        for row in load_baseline_rows(current)
+    }
+    moves: list[tuple[str, str, str, str, str, str]] = []
+    for key, old_row in before.items():
+        new_row = after.get(key)
+        if new_row is None:
+            continue
+        solver, problem, mode = key
+        for metric in NUMERIC_BASELINE_FIELDS:
+            old_value = old_row[metric]
+            new_value = new_row[metric]
+            if parse_float(old_value, f"{prior}:{metric}") != parse_float(new_value, f"{current}:{metric}"):
+                moves.append((metric, solver, problem, mode, old_value, new_value))
+    return moves
+
+
+def moved_rows_from_file(path: Path) -> list[tuple[str, str, str, str, str, str]]:
+    rows = read_csv_rows(path)
+    moves: list[tuple[str, str, str, str, str, str]] = []
+    for row in rows:
+        require_fields(row, ["metric", "solver", "problem", "mode", "old_value", "new_value"],
+                       str(path))
+        if row["old_value"] != row["new_value"]:
+            moves.append((
+                row["metric"],
+                row["solver"],
+                row["problem"],
+                row["mode"],
+                row["old_value"],
+                row["new_value"],
+            ))
+    return moves
+
+
+def validate_ledger_completeness(args: argparse.Namespace) -> int:
+    try:
+        ledger = ledger_rows(args.ledger)
+        moves = baseline_moves(args.prior_baseline, args.current_baseline)
+        for profile in args.profile_output or []:
+            moves.extend(moved_rows_from_file(profile))
+        for register in args.disabled_register or []:
+            moves.extend(moved_rows_from_file(register))
+    except (OSError, ValueError) as exc:
+        print(f"regen_baseline: {exc}", file=sys.stderr)
+        return 1
+
+    missing = []
+    for metric, solver, problem, mode, old_value, new_value in moves:
+        if not ledger_has_row(ledger, metric, solver, problem, mode,
+                              old_value, new_value):
+            missing.append((metric, solver, problem, mode, old_value, new_value))
+
+    if missing:
+        for metric, solver, problem, mode, old_value, new_value in missing:
+            print("MISSING_LEDGER: "
+                  f"metric={metric} solver={solver} problem={problem} "
+                  f"mode={mode} old_value={old_value} new_value={new_value}",
+                  file=sys.stderr)
+        return 1
+    print(f"regen_baseline: ledger covers {len(moves)} moved value(s)",
+          file=sys.stderr)
+    return 0
+
+
+def write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+SELF_TEST_SUMMARY = """\
+solver,library,problem,class,dimension,seed,mode,solver_iters,f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,known_optimum,accuracy,constraint_violation,status,row_disposition,cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,provenance_id
+bobyqa,argmin,problem_a,inequality,2,42,publication,2,2,0,0,0,20,0.0,0.0,1e-10,1e-10,converged,included,none,,20,20,selftest-run
+"""
+
+SELF_TEST_PRIOR = """\
+solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,expected
+bobyqa,problem_a,default,10,-8.0,10,-8.0,pass
+"""
+
+
+def run_self_test() -> int:
+    with tempfile.TemporaryDirectory(prefix="argmin-regen-baseline-") as tmp_s:
+        tmp = Path(tmp_s)
+        summary = tmp / "summary.csv"
+        prior = tmp / "prior.csv"
+        provenance = tmp / "provenance.json"
+        output = tmp / "baseline.csv"
+        write_text(summary, SELF_TEST_SUMMARY)
+        write_text(prior, SELF_TEST_PRIOR)
+        write_text(provenance, json.dumps({
+            "build_type": "Release",
+            "provenance_id": "selftest-release",
+            "wall_gate_policy": "enforced",
+        }))
+        args = argparse.Namespace(
+            summary=summary,
+            prior_baseline=prior,
+            output=output,
+            provenance=provenance,
+        )
+        if generate_baseline(args) != 0:
+            return 1
+        rows = load_baseline_rows(output)
+        if len(rows) != 1:
+            print("regen_baseline self-test: expected one output row", file=sys.stderr)
+            return 1
+        row = rows[0]
+        if row["disposition"] not in DISPOSITIONS or not row["provenance_id"]:
+            print("regen_baseline self-test: invalid disposition or provenance",
+                  file=sys.stderr)
+            return 1
+    return 0
+
+
+def run_release_guard_self_test() -> int:
+    with tempfile.TemporaryDirectory(prefix="argmin-regen-guard-") as tmp_s:
+        tmp = Path(tmp_s)
+        summary = tmp / "summary.csv"
+        prior = tmp / "prior.csv"
+        provenance = tmp / "provenance.json"
+        output = tmp / "baseline.csv"
+        write_text(summary, SELF_TEST_SUMMARY)
+        write_text(prior, SELF_TEST_PRIOR)
+        write_text(provenance, json.dumps({
+            "build_type": "Debug",
+            "provenance_id": "selftest-debug",
+        }))
+        args = argparse.Namespace(
+            summary=summary,
+            prior_baseline=prior,
+            output=output,
+            provenance=provenance,
+        )
+        if generate_baseline(args) == 0:
+            print("regen_baseline release-guard self-test: Debug provenance passed",
+                  file=sys.stderr)
+            return 1
+    return 0
+
+
+def run_ledger_self_test() -> int:
+    with tempfile.TemporaryDirectory(prefix="argmin-ledger-") as tmp_s:
+        tmp = Path(tmp_s)
+        prior = tmp / "prior.csv"
+        current = tmp / "current.csv"
+        ledger = tmp / "ledger.csv"
+        profile = tmp / "profile.csv"
+        write_text(prior, """\
+solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,disposition,provenance_id,wall_gate_policy,exclusion_reason
+solver_a,problem_a,default,10,-8.0,10,-8.0,pass,old,enforced,
+""")
+        write_text(current, """\
+solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,disposition,provenance_id,wall_gate_policy,exclusion_reason
+solver_a,problem_a,default,11,-8.0,10,-8.0,pass,new,enforced,
+""")
+        write_text(ledger, ",".join(LEDGER_FIELDS) + "\n")
+        write_text(profile, """\
+metric,solver,problem,mode,old_value,new_value
+t_tau,solver_a,problem_a,default,5,6
+""")
+        args = argparse.Namespace(
+            prior_baseline=prior,
+            current_baseline=current,
+            ledger=ledger,
+            profile_output=[profile],
+            disabled_register=[],
+        )
+        if validate_ledger_completeness(args) == 0:
+            print("regen_baseline ledger self-test: missing row passed",
+                  file=sys.stderr)
+            return 1
+        write_text(ledger, ",".join(LEDGER_FIELDS) + "\n"
+                   "max_us_per_step,solver_a,problem_a,default,10,11,"
+                   "methodology,correctness,new,methodology-repair,\n"
+                   "t_tau,solver_a,problem_a,default,5,6,"
+                   "methodology,correctness,new,methodology-repair,\n")
+        if validate_ledger_completeness(args) != 0:
+            print("regen_baseline ledger self-test: complete ledger failed",
+                  file=sys.stderr)
+            return 1
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--summary", type=Path)
+    p.add_argument("--prior-baseline", type=Path)
+    p.add_argument("--current-baseline", type=Path)
+    p.add_argument("--output", type=Path)
+    p.add_argument("--provenance", type=Path)
+    p.add_argument("--ledger", type=Path)
+    p.add_argument("--profile-output", action="append", type=Path)
+    p.add_argument("--disabled-register", action="append", type=Path)
+    p.add_argument("--accuracy-cutoff", type=float, default=1e-12)
+    p.add_argument("--cv-cutoff", type=float, default=1e-8)
+    p.add_argument("--migrate-existing-baseline", action="store_true")
+    p.add_argument("--validate-ledger-completeness", action="store_true")
+    p.add_argument("--self-test", action="store_true")
+    p.add_argument("--self-test-release-guard", action="store_true")
+    p.add_argument("--self-test-ledger-completeness", action="store_true")
+    args = p.parse_args()
+
+    if args.self_test:
+        return run_self_test()
+    if args.self_test_release_guard:
+        return run_release_guard_self_test()
+    if args.self_test_ledger_completeness:
+        return run_ledger_self_test()
+
+    if args.migrate_existing_baseline:
+        if args.prior_baseline is None or args.output is None:
+            print("regen_baseline: --prior-baseline and --output are required for migration",
+                  file=sys.stderr)
+            return 1
+        return migrate_existing_baseline(args.prior_baseline, args.output)
+
+    if args.validate_ledger_completeness:
+        if args.prior_baseline is None or args.current_baseline is None or args.ledger is None:
+            print("regen_baseline: --prior-baseline, --current-baseline, and --ledger "
+                  "are required for ledger validation",
+                  file=sys.stderr)
+            return 1
+        return validate_ledger_completeness(args)
+
+    if (args.summary is None or args.prior_baseline is None
+        or args.output is None or args.provenance is None):
+        print("regen_baseline: --summary, --prior-baseline, --output, and "
+              "--provenance are required",
+              file=sys.stderr)
+        return 1
+    return generate_baseline(args)
 
 
 if __name__ == "__main__":

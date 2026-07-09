@@ -7,9 +7,9 @@ sweep:
 Runs regression_check across the 3x3 grid
 (accuracy_cutoff in {1e-10, 1e-12, 1e-14}) x (cv_cutoff in {1e-6, 1e-8, 1e-10}),
 reads the PROMOTE: stderr lines emitted under
-ARGMIN_REGRESSION_CHECK_PROMOTE_LOG=1, and aggregates the per-pair promoted
-set + boundary diffs. Emits a JSON record + markdown writeup at the paths
-specified by --output-json and --output-md.
+ARGMIN_REGRESSION_CHECK_PROMOTE_LOG=1, and aggregates the per-pair
+expected-failure cells that satisfy correctness gates. Emits a JSON record
+and markdown writeup at the paths specified by --output-json and --output-md.
 
 Feasibility mode sweeps a single publication eps_feas grid against the same
 trace-first first-hit logic used by dm_profile.py and emits a JSON provenance
@@ -429,7 +429,7 @@ def main() -> int:
 
     # Markdown.
     lines = []
-    lines.append(f"# Threshold-pair sweep for regression_check status-aware promote-to-pass\n")
+    lines.append("# Threshold-pair sweep for regression_check expected-fail fixes\n")
     lines.append(f"**HEAD:** `{args.head_sha}`\n")
     lines.append(f"**Summary input:** `{args.summary}`\n")
     lines.append(f"**Baseline input:** `{args.baseline}`\n")
@@ -478,8 +478,8 @@ def main() -> int:
     lines.append("")
     lines.append(f"**Pair:** (accuracy_cutoff={chosen_acc:.0e}, "
                  f"cv_cutoff={chosen_cv:.0e})")
-    lines.append(f"**Count:** {chosen_entry['promoted_count']} rows promoted "
-                 f"from skip to pass.")
+    lines.append(f"**Count:** {chosen_entry['promoted_count']} expected-fail rows "
+                 "passed the correctness gates.")
     lines.append("")
     if chosen_entry["rows"]:
         lines.append("| solver | problem | mode | max_accuracy | max_cv |")
