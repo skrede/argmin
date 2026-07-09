@@ -6,11 +6,11 @@
 
 Header-only nonlinear optimization library with a C++20 language floor (using C++23 features, such as `std::expected`, when the toolchain provides them). Every solver is a policy that plugs into `basic_solver<Policy>` and exposes a uniform `step()` / `solve()` / `step_n(budget)` interface. Algorithms are textbook-cited (Kochenderfer & Wheeler 2e, Nocedal & Wright 2e, plus original papers).
 
-The library is built around three properties that matter when the optimiser sits inside a larger system: compile-time dimensions that propagate into Eigen types, header-only distribution with no compiled artifacts, and step-level execution control suitable for control loops, IK chains, or MPC ticks.
+The library is built around three properties that matter when the optimizer sits inside a larger system: compile-time dimensions that propagate into Eigen types, header-only distribution with no compiled artifacts, and step-level execution control suitable for control loops, IK chains, or MPC ticks.
 
 ## Status
 
-**Public preview.** API surface and policy lineup are stabilising; expect breaking changes through the v0.2.x line. Test suite is 368 cases / 2852 assertions. A cross-library benchmark harness lives under `benchmarks/` and is documented separately.
+**Public preview.** API surface and policy lineup are stabilizing; expect breaking changes through the v0.2.x line. Test suite is 368 cases / 2852 assertions. A cross-library benchmark harness lives under `benchmarks/` and is documented separately.
 
 What is solid:
 - L-BFGS-B (`lbfgsb`, `byrd_lbfgsb`) — unconstrained and box-constrained smooth problems
@@ -103,7 +103,7 @@ solver.step_n(budget);     // bounded run
 solver.solve(opts);        // run to convergence / max_iterations
 ```
 
-This matters when the optimiser is one stage of a larger loop — IK with a frame budget, MPC ticks bounded by the control period, or any setting that cannot afford a blocking `solve()`.
+This matters when the optimizer is one stage of a larger loop — IK with a frame budget, MPC ticks bounded by the control period, or any setting that cannot afford a blocking `solve()`.
 
 ## Embeddability and real-time use
 
@@ -165,6 +165,10 @@ ctest --test-dir build/dev
 cmake --preset bench          # argmin_bench + publish_bench
 cmake --build build/bench --target argmin_bench publish_bench
 ```
+
+Publication benchmark methodology, provenance requirements, and baseline
+eligibility rules are documented in
+[docs/benchmarking/publish-bench.md](docs/benchmarking/publish-bench.md).
 
 ## Citations
 
