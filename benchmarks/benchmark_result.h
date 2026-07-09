@@ -37,6 +37,18 @@ struct benchmark_result
     std::int64_t solve_wall_time_us{};
     std::int64_t end_to_end_wall_time_us{};
     std::string provenance_id;
+
+    // Returned decision vector and, when the solver state carries them,
+    // the constraint multipliers at the final iterate. Both are
+    // semicolon-delimited packed float fields serialized into the
+    // returned-point sidecar (publish_returned_points.csv), NOT into the
+    // fixed-width publication summary schema -- the vector length varies by
+    // problem, so it cannot occupy fixed summary columns. multipliers is
+    // empty when the policy state does not expose them; the independent
+    // validator then recovers a least-squares multiplier estimate from the
+    // analytic constraint gradients.
+    std::string returned_point;
+    std::string multipliers;
 };
 
 [[nodiscard]] inline auto csv_header() -> std::string_view

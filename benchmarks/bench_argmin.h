@@ -50,6 +50,7 @@
 #include <cstdio>
 #include <chrono>
 #include <cmath>
+#include <format>
 #include <limits>
 #include <cstdint>
 #include <stdexcept>
@@ -94,6 +95,24 @@ using rebind_policy_t = typename rebind_policy<Policy, N>::type;
     case solver_status::running:           return "running";
     }
     return "unknown";
+}
+
+// Serialize a decision/multiplier vector into the semicolon-delimited
+// packed-float field the returned-point sidecar consumes. Full 15-digit
+// precision mirrors the summary's {:.15e} objective/accuracy formatting so
+// the independent validator recomputes feasibility from the same bits the
+// solver actually returned.
+template <typename Vector>
+[[nodiscard]] inline auto pack_vector(const Vector& v) -> std::string
+{
+    std::string out;
+    for(Eigen::Index i = 0; i < v.size(); ++i)
+    {
+        if(i != 0)
+            out.push_back(';');
+        out += std::format("{:.15e}", static_cast<double>(v[i]));
+    }
+    return out;
 }
 
 [[nodiscard]] inline auto cap_status_string(std::string_view status,
@@ -321,6 +340,7 @@ auto run_argmin_solver(std::string_view solver_name,
             .cap_status = detail::cap_status_string(status, counts, config),
             .solve_wall_time_us = wall_us,
             .end_to_end_wall_time_us = wall_us,
+            .returned_point = detail::pack_vector(solver.state().x),
         };
     }
     else
@@ -366,6 +386,7 @@ auto run_argmin_solver(std::string_view solver_name,
             .cap_status = detail::cap_status_string(status, counts, config),
             .solve_wall_time_us = wall_us,
             .end_to_end_wall_time_us = wall_us,
+            .returned_point = detail::pack_vector(solver.state().x),
         };
     }
 }

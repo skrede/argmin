@@ -205,6 +205,23 @@ int main(int argc, char** argv)
     }
     summary_out << argmin::bench::csv_header() << '\n';
 
+    // Returned-point sidecar, written next to the summary and keyed by the
+    // same (solver, problem, mode, seed) tuple. The returned decision vector
+    // (and multipliers, when the policy state carries them) is a committed
+    // artifact so the independent validator recomputes feasibility from the
+    // point the solver actually returned rather than trusting the adapter's
+    // self-reported constraint_violation. The vector length varies by
+    // problem, so it lives here rather than in the fixed-width summary schema.
+    std::ofstream returned_points_out(out_dir / "publish_returned_points.csv");
+    if(!returned_points_out)
+    {
+        std::cerr << "publish_bench: failed to open returned-point sidecar at '"
+                  << (out_dir / "publish_returned_points.csv").string() << "'\n";
+        return 1;
+    }
+    returned_points_out << "solver,problem,mode,seed,returned_point,multipliers"
+                        << '\n';
+
     for(int si = 0; si < cli.seed_count; ++si)
     {
         std::uint64_t seed = static_cast<std::uint64_t>(cli.seed_start + si);
@@ -251,6 +268,12 @@ int main(int argc, char** argv)
             apply_summary_contract(results[i], cfg, provenance_id);
             summary_out << argmin::bench::csv_row(results[i]) << '\n';
 
+            returned_points_out << std::format(
+                "{},{},{},{},{},{}\n",
+                results[i].solver, results[i].problem, results[i].mode,
+                results[i].seed, results[i].returned_point,
+                results[i].multipliers);
+
             if(i < traces.size() && !traces[i].empty())
             {
                 auto trace_path = traces_dir / std::format(
@@ -265,8 +288,10 @@ int main(int argc, char** argv)
     }
 
     summary_out.close();
-    std::cout << std::format("done: wrote {} + {}/\n",
+    returned_points_out.close();
+    std::cout << std::format("done: wrote {} + {} + {}/\n",
                              (out_dir / "publish_summary.csv").string(),
+                             (out_dir / "publish_returned_points.csv").string(),
                              traces_dir.string());
     return 0;
 }
