@@ -891,6 +891,32 @@ target_compile_options(regression_check PRIVATE
     >
 )
 
+# oracle_check -- independent analytic correctness validator. Links argmin
+# (header-only) + Eigen + the analytic test functions to recompute feasibility
+# (closed-form cells) and a KKT residual (control cells) at the returned point,
+# emitting an independent per-cell verdict. Built -fno-exceptions -fno-rtti to
+# hold the library's exception-free / RTTI-free contract on the gate path.
+add_executable(oracle_check oracle_check.cpp)
+target_link_libraries(oracle_check PRIVATE argmin::argmin)
+set_target_properties(oracle_check PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON)
+target_compile_options(oracle_check PRIVATE
+    -fno-exceptions
+    -fno-rtti
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(CMAKE_TESTING_ENABLED)
+    add_test(NAME oracle_check_calibrate COMMAND oracle_check --calibrate)
+    set_tests_properties(oracle_check_calibrate PROPERTIES
+        LABELS "regression;bench"
+    )
+endif()
+
 # Fast-CI regression gate. Drives run_publish_bench.sh at SEED_COUNT=3
 # under the build's binary paths and a temporary output root inside the
 # build tree; the script propagates regression_check's exit code so any
