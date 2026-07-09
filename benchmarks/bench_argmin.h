@@ -53,6 +53,7 @@
 #include <limits>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -95,6 +96,19 @@ using rebind_policy_t = typename rebind_policy<Policy, N>::type;
     return "unknown";
 }
 
+[[nodiscard]] inline auto cap_status_string(std::string_view status,
+                                            const eval_counts& counts,
+                                            const bench_config& config) -> std::string
+{
+    if(status == "time_limit_reached")
+        return "wall";
+    if(status == "budget_exhausted" || status == "maxeval_reached")
+        return "f_eval";
+    if(config.max_f_evals > 0 && counts.f >= config.max_f_evals)
+        return "f_eval";
+    return std::string{counts.cap_status()};
+}
+
 }
 
 // Run a single argmin solver policy on a problem, collecting result and
@@ -125,6 +139,7 @@ auto run_argmin_solver(std::string_view solver_name,
     // solver_iters continues to come from the policy's native iter count
     // for diagnostic parity with per-library expectations.
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     static constexpr int N = problem_dimension_v<Problem>;
@@ -200,7 +215,7 @@ auto run_argmin_solver(std::string_view solver_name,
         step_budget_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
-        auto t0 = std::chrono::high_resolution_clock::now();
+        auto t0 = std::chrono::steady_clock::now();
 
         int iters = 0;
         solver_status final_status = solver_status::running;
@@ -214,7 +229,7 @@ auto run_argmin_solver(std::string_view solver_name,
             const double f_current = static_cast<double>(sr.objective_value);
             f_best_running = std::min(f_best_running, f_current);
 
-            const auto t_now = std::chrono::high_resolution_clock::now();
+            const auto t_now = std::chrono::steady_clock::now();
             const auto wall_us_now = std::chrono::duration_cast<std::chrono::microseconds>(
                 t_now - t0).count();
 
@@ -254,7 +269,7 @@ auto run_argmin_solver(std::string_view solver_name,
         if(final_status == solver_status::running)
             final_status = solver_status::max_iterations;
 
-        auto t1 = std::chrono::high_resolution_clock::now();
+        auto t1 = std::chrono::steady_clock::now();
         auto wall_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 
         trace.resize(static_cast<std::size_t>(iters));
@@ -281,6 +296,7 @@ auto run_argmin_solver(std::string_view solver_name,
             ? 0.0
             : trace.back().cv;
 
+        const auto status = detail::status_string(final_status);
         return benchmark_result{
             .solver = solver_name,
             .library = "argmin",
@@ -301,7 +317,10 @@ auto run_argmin_solver(std::string_view solver_name,
             .known_optimum = prob.optimal_value(),
             .accuracy = std::abs(final_obj_safe - prob.optimal_value()),
             .constraint_violation = final_cv,
-            .status = detail::status_string(final_status),
+            .status = status,
+            .cap_status = detail::cap_status_string(status, counts, config),
+            .solve_wall_time_us = wall_us,
+            .end_to_end_wall_time_us = wall_us,
         };
     }
     else
@@ -314,14 +333,15 @@ auto run_argmin_solver(std::string_view solver_name,
         step_budget_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
-        auto t0 = std::chrono::high_resolution_clock::now();
+        auto t0 = std::chrono::steady_clock::now();
         auto result = solver.solve(opts);
-        auto t1 = std::chrono::high_resolution_clock::now();
+        auto t1 = std::chrono::steady_clock::now();
 
         auto wall_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 
         benchmark::DoNotOptimize(result);
 
+        const auto status = detail::status_string(result.status);
         return benchmark_result{
             .solver = solver_name,
             .library = "argmin",
@@ -342,7 +362,10 @@ auto run_argmin_solver(std::string_view solver_name,
             .known_optimum = prob.optimal_value(),
             .accuracy = std::abs(result.objective_value - prob.optimal_value()),
             .constraint_violation = static_cast<double>(result.constraint_violation),
-            .status = detail::status_string(result.status),
+            .status = status,
+            .cap_status = detail::cap_status_string(status, counts, config),
+            .solve_wall_time_us = wall_us,
+            .end_to_end_wall_time_us = wall_us,
         };
     }
 }

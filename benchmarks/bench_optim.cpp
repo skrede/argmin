@@ -39,6 +39,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -47,6 +48,50 @@ namespace argmin::bench
 
 namespace detail
 {
+
+template <typename Problem, typename Vec>
+[[nodiscard]] auto constraint_violation_at(const Problem& prob,
+                                           const Vec& x) -> double
+{
+    double violation = 0.0;
+    if constexpr(bound_constrained<Problem>)
+    {
+        const auto lb = prob.lower_bounds();
+        const auto ub = prob.upper_bounds();
+        for(int i = 0; i < prob.dimension(); ++i)
+        {
+            if(std::isfinite(lb[i]))
+                violation = std::max(violation, static_cast<double>(lb[i] - x[i]));
+            if(std::isfinite(ub[i]))
+                violation = std::max(violation, static_cast<double>(x[i] - ub[i]));
+        }
+    }
+    if constexpr(constrained<Problem>)
+    {
+        const int n_eq = prob.num_equality();
+        const int n_ineq = prob.num_inequality();
+        Eigen::VectorXd c(n_eq + n_ineq);
+        prob.constraints(x, c);
+        for(int i = 0; i < n_eq; ++i)
+            violation = std::max(violation, std::abs(static_cast<double>(c[i])));
+        for(int i = 0; i < n_ineq; ++i)
+            violation = std::max(violation, std::max(0.0, -static_cast<double>(c[n_eq + i])));
+    }
+    return violation;
+}
+
+[[nodiscard]] inline auto cap_status_string(std::string_view status,
+                                            const eval_counts& counts,
+                                            const bench_config& config) -> std::string
+{
+    if(status == "maxtime_reached")
+        return "wall";
+    if(status == "maxeval_reached")
+        return "f_eval";
+    if(config.max_f_evals > 0 && counts.f >= config.max_f_evals)
+        return "f_eval";
+    return std::string{counts.cap_status()};
+}
 
 // Build an algo_settings_t respecting the bench_config tolerance regime
 // without forcing any particular algorithm-specific knob.
@@ -159,6 +204,7 @@ struct optim_run_inputs
     ::argmin::problem_class pclass;
     double known_optimum;
     double final_objective;
+    double constraint_violation;
     bool ok;
     std::int64_t wall_us;
     size_t opt_iter;
@@ -189,7 +235,11 @@ template <typename Problem>
         .final_objective = in.final_objective,
         .known_optimum = in.known_optimum,
         .accuracy = std::abs(in.final_objective - in.known_optimum),
+        .constraint_violation = in.constraint_violation,
         .status = status_string(in.ok),
+        .cap_status = cap_status_string(status_string(in.ok), counts, config),
+        .solve_wall_time_us = in.wall_us,
+        .end_to_end_wall_time_us = in.wall_us,
     };
 }
 
@@ -204,6 +254,7 @@ auto run_optim_algo(std::string_view solver_name,
                     AlgoFn algo) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     auto x0 = prob.initial_point();
@@ -230,14 +281,15 @@ auto run_optim_algo(std::string_view solver_name,
         settings.upper_bounds = ub_dyn;
     }
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     bool ok = algo(x, optim_objective<Problem>, &wrapped, settings);
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     Eigen::Vector<double, Problem::problem_dimension> xv(x);
     double f_final = prob.value(xv);   // intentionally bypasses counts.
+    const double final_cv = constraint_violation_at(prob, xv);
 
     optim_run_inputs in{
         .solver_name = solver_name,
@@ -246,6 +298,7 @@ auto run_optim_algo(std::string_view solver_name,
         .pclass = prob.pclass,
         .known_optimum = prob.optimal_value(),
         .final_objective = f_final,
+        .constraint_violation = final_cv,
         .ok = ok,
         .wall_us = wall_us,
         .opt_iter = settings.opt_iter,
@@ -260,23 +313,25 @@ auto run_optim_sumt(std::string_view problem_name,
                     const bench_config& config) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     auto x0 = prob.initial_point();
     Eigen::VectorXd x = x0;
     auto settings = make_optim_settings(config);
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     bool ok = optim::sumt(x,
                           optim_objective<Problem>, &wrapped,
                           optim_constraints<Problem>, &wrapped,
                           settings);
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     Eigen::Vector<double, Problem::problem_dimension> xv(x);
     double f_final = prob.value(xv);
+    const double final_cv = constraint_violation_at(prob, xv);
 
     optim_run_inputs in{
         .solver_name = "optim_sumt",
@@ -285,6 +340,7 @@ auto run_optim_sumt(std::string_view problem_name,
         .pclass = prob.pclass,
         .known_optimum = prob.optimal_value(),
         .final_objective = f_final,
+        .constraint_violation = final_cv,
         .ok = ok,
         .wall_us = wall_us,
         .opt_iter = settings.opt_iter,

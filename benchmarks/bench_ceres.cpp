@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -88,6 +89,17 @@ private:
     }
 }
 
+[[nodiscard]] inline auto cap_status_string(std::string_view status,
+                                            const eval_counts& counts,
+                                            const bench_config& config) -> std::string
+{
+    if(status == "maxtime_reached")
+        return "wall";
+    if(config.max_f_evals > 0 && counts.f >= config.max_f_evals)
+        return "f_eval";
+    return std::string{counts.cap_status()};
+}
+
 // Per-iter trace callback (Pattern 4 in 32.8-RESEARCH.md). Registered on
 // GradientProblemSolver::Options::callbacks alongside
 // update_state_every_iteration=true (Pitfall 4) so the IterationSummary
@@ -113,7 +125,7 @@ struct ceres_trace_callback : public ceres::IterationCallback
     ceres::CallbackReturnType operator()(const ceres::IterationSummary& s) override
     {
         const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+            std::chrono::steady_clock::now().time_since_epoch()).count();
         f_best_running = std::min(f_best_running, s.cost);
 
         trace->push_back(trace_entry{
@@ -143,6 +155,7 @@ auto run_ceres_solver(std::string_view problem_name,
                       std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     auto x0 = prob.initial_point();
@@ -183,7 +196,7 @@ auto run_ceres_solver(std::string_view problem_name,
     // is captured immediately before ceres::Solve so per-iter wall_us
     // excludes adapter / GradientProblem construction and matches the
     // summary wall_time_us baseline (the t0 captured below).
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     const auto t0_us_for_trace = std::chrono::duration_cast<std::chrono::microseconds>(
         t0.time_since_epoch()).count();
     ceres_trace_callback cb(&local_trace, &counts, t0_us_for_trace,
@@ -192,12 +205,13 @@ auto run_ceres_solver(std::string_view problem_name,
         options.callbacks.push_back(&cb);
 
     ceres::Solve(options, gradient_problem, x.data(), &summary);
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
 
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     double known_opt = prob.optimal_value();
+    const auto status = ceres_status_string(summary.termination_type);
 
     return benchmark_result{
         .solver = "ceres_lbfgs",
@@ -218,7 +232,11 @@ auto run_ceres_solver(std::string_view problem_name,
         .final_objective = summary.final_cost,
         .known_optimum = known_opt,
         .accuracy = std::abs(summary.final_cost - known_opt),
-        .status = ceres_status_string(summary.termination_type),
+        .constraint_violation = 0.0,
+        .status = status,
+        .cap_status = cap_status_string(status, counts, config),
+        .solve_wall_time_us = wall_us,
+        .end_to_end_wall_time_us = wall_us,
     };
 }
 
@@ -243,11 +261,9 @@ void run_ceres_benchmarks(std::vector<benchmark_result>& results,
     // Ceres only does unconstrained -- use for_each_problem_of_class.
     for_each_problem_of_class(problem_class::unconstrained,
         [&](std::string_view name, auto&& prob) {
-            using P = std::remove_cvref_t<decltype(prob)>;
-            P p{};
             std::vector<trace_entry> local_trace;
             results.push_back(
-                detail::run_ceres_solver(name, p, max_iterations, config,
+                detail::run_ceres_solver(name, prob, max_iterations, config,
                                          local_trace));
             traces.push_back(std::move(local_trace));
         });

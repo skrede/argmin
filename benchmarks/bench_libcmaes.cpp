@@ -35,6 +35,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -43,6 +44,39 @@ namespace argmin::bench
 
 namespace detail
 {
+
+template <typename Problem, typename Vec>
+[[nodiscard]] auto constraint_violation_at(const Problem& prob,
+                                           const Vec& x) -> double
+{
+    double violation = 0.0;
+    if constexpr(bound_constrained<Problem>)
+    {
+        const auto lb = prob.lower_bounds();
+        const auto ub = prob.upper_bounds();
+        for(int i = 0; i < prob.dimension(); ++i)
+        {
+            if(std::isfinite(lb[i]))
+                violation = std::max(violation, static_cast<double>(lb[i] - x[i]));
+            if(std::isfinite(ub[i]))
+                violation = std::max(violation, static_cast<double>(x[i] - ub[i]));
+        }
+    }
+    return violation;
+}
+
+[[nodiscard]] inline auto cap_status_string(std::string_view status,
+                                            const eval_counts& counts,
+                                            const bench_config& config) -> std::string
+{
+    if(status == "maxtime_reached")
+        return "wall";
+    if(status == "maxeval_reached")
+        return "f_eval";
+    if(config.max_f_evals > 0 && counts.f >= config.max_f_evals)
+        return "f_eval";
+    return std::string{counts.cap_status()};
+}
 
 using libcmaes_genopheno =
     libcmaes::GenoPheno<libcmaes::pwqBoundStrategy>;
@@ -91,7 +125,7 @@ auto make_trace_objective(libcmaes_trace_wrapper<Problem>& tw)
         tw.f_best_running = std::min(tw.f_best_running, f);
 
         const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+            std::chrono::steady_clock::now().time_since_epoch()).count();
 
         tw.trace->push_back(trace_entry{
             .iter         = tw.iter_count++,
@@ -103,7 +137,7 @@ auto make_trace_objective(libcmaes_trace_wrapper<Problem>& tw)
             .f_current    = f,
             .f_best       = tw.f_best_running,
             .accuracy     = std::abs(f - tw.f_star),
-            .cv           = std::numeric_limits<double>::quiet_NaN(),
+            .cv           = constraint_violation_at(*tw.prob->inner, xv),
             .step_norm    = std::numeric_limits<double>::quiet_NaN(),
             .kkt_residual = std::numeric_limits<double>::quiet_NaN(),
         });
@@ -132,7 +166,7 @@ auto make_trace_objective(libcmaes_trace_wrapper<Problem>& tw)
     case  8:  return "diverged";             // CONDITIONCOV
     case  9:  return "diverged";             // NOEFFECTAXIS
     case 10:  return "diverged";             // NOEFFECTCOOR
-    case 11:  return "max_iterations";       // MAXFEVALS
+    case 11:  return "maxeval_reached";      // MAXFEVALS
     case 12:  return "max_iterations";       // MAXITER
     case 13:  return "diverged";             // FTARGET / unused
     default:  return run_status < 0 ? "failed" : "converged";
@@ -152,6 +186,7 @@ auto run_libcmaes_solver(int algo,
                          std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     const int n = prob.dimension();
@@ -203,9 +238,9 @@ auto run_libcmaes_solver(int algo,
         : make_objective(wrapped);
 
     tw.t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
 
     libcmaes::CMASolutions sols;
     std::string_view status_str;
@@ -221,11 +256,19 @@ auto run_libcmaes_solver(int algo,
         status_str = "failed";
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     const double known_opt = prob.optimal_value();
+    double final_cv = std::numeric_limits<double>::quiet_NaN();
+    if(sols.best_candidate().get_x().size() == static_cast<std::size_t>(n))
+    {
+        const auto& x_best = sols.best_candidate().get_x();
+        Eigen::Map<const Eigen::VectorXd> final_x_map(
+            x_best.data(), static_cast<Eigen::Index>(x_best.size()));
+        final_cv = constraint_violation_at(prob, final_x_map);
+    }
 
     return benchmark_result{
         .solver = solver_name,
@@ -246,7 +289,11 @@ auto run_libcmaes_solver(int algo,
         .final_objective = minf,
         .known_optimum = known_opt,
         .accuracy = std::abs(minf - known_opt),
+        .constraint_violation = final_cv,
         .status = status_str,
+        .cap_status = cap_status_string(status_str, counts, config),
+        .solve_wall_time_us = wall_us,
+        .end_to_end_wall_time_us = wall_us,
     };
 }
 

@@ -30,6 +30,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -61,6 +62,87 @@ struct nlopt_trace_wrapper
     double                     f_best_running{std::numeric_limits<double>::infinity()};
     int                        iter_count{0};
 };
+
+template <typename Problem, typename Vec>
+[[nodiscard]] auto constraint_violation_at(const Problem& prob,
+                                           const Vec& x) -> double
+{
+    double violation = 0.0;
+    if constexpr(bound_constrained<Problem>)
+    {
+        const auto lb = prob.lower_bounds();
+        const auto ub = prob.upper_bounds();
+        for(int i = 0; i < prob.dimension(); ++i)
+        {
+            if(std::isfinite(lb[i]))
+                violation = std::max(violation, static_cast<double>(lb[i] - x[i]));
+            if(std::isfinite(ub[i]))
+                violation = std::max(violation, static_cast<double>(x[i] - ub[i]));
+        }
+    }
+    if constexpr(constrained<Problem>)
+    {
+        const int n_eq = prob.num_equality();
+        const int n_ineq = prob.num_inequality();
+        Eigen::VectorXd c(n_eq + n_ineq);
+        prob.constraints(x, c);
+        for(int i = 0; i < n_eq; ++i)
+            violation = std::max(violation, std::abs(static_cast<double>(c[i])));
+        for(int i = 0; i < n_ineq; ++i)
+            violation = std::max(violation, std::max(0.0, -static_cast<double>(c[n_eq + i])));
+    }
+    return violation;
+}
+
+[[nodiscard]] inline auto cap_status_string(std::string_view status,
+                                            const eval_counts& counts,
+                                            const bench_config& config) -> std::string
+{
+    if(status == "maxtime_reached")
+        return "wall";
+    if(status == "maxeval_reached")
+        return "f_eval";
+    if(config.max_f_evals > 0 && counts.f >= config.max_f_evals)
+        return "f_eval";
+    return std::string{counts.cap_status()};
+}
+
+template <typename Problem>
+[[nodiscard]] auto excluded_result(std::string_view solver_name,
+                                   std::string_view problem_name,
+                                   const Problem& prob,
+                                   const bench_config& config,
+                                   std::string_view reason) -> benchmark_result
+{
+    return benchmark_result{
+        .solver = solver_name,
+        .library = "nlopt",
+        .problem = problem_name,
+        .pclass = prob.pclass,
+        .dimension = prob.dimension(),
+        .seed = config.seed,
+        .mode = (config.the_mode == bench_config::mode::publication)
+                    ? std::string_view{"publication"}
+                    : std::string_view{"library_defaults"},
+        .solver_iters = 0,
+        .f_evals = 0,
+        .g_evals = 0,
+        .c_evals = 0,
+        .J_evals = 0,
+        .wall_time_us = 0,
+        .final_objective = std::numeric_limits<double>::quiet_NaN(),
+        .known_optimum = prob.optimal_value(),
+        .accuracy = std::numeric_limits<double>::quiet_NaN(),
+        .constraint_violation = std::numeric_limits<double>::quiet_NaN(),
+        .status = "excluded",
+        .row_disposition = "excluded",
+        .cap_status = "none",
+        .exclusion_reason = std::string{reason},
+        .solve_wall_time_us = 0,
+        .end_to_end_wall_time_us = 0,
+        .provenance_id = "adapter-capability",
+    };
+}
 
 // Wraps any argmin problem as an NLopt objective callback.
 // Problem must provide value() and gradient().
@@ -110,7 +192,7 @@ double nlopt_trace_objective(unsigned n, const double* x, double* grad, void* da
     w->f_best_running = std::min(w->f_best_running, f);
 
     const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
     w->trace->push_back(trace_entry{
         .iter         = w->iter_count++,
@@ -122,7 +204,7 @@ double nlopt_trace_objective(unsigned n, const double* x, double* grad, void* da
         .f_current    = f,
         .f_best       = w->f_best_running,
         .accuracy     = std::abs(f - w->f_star),
-        .cv           = std::numeric_limits<double>::quiet_NaN(),
+        .cv           = constraint_violation_at(*w->prob->inner, xv),
         .step_norm    = std::numeric_limits<double>::quiet_NaN(),
         .kkt_residual = std::numeric_limits<double>::quiet_NaN(),
     });
@@ -201,7 +283,7 @@ void nlopt_eq_mconstraint(unsigned m, double* result,
     case nlopt::STOPVAL_REACHED:  return "stopval_reached";
     case nlopt::FTOL_REACHED:     return "ftol_reached";
     case nlopt::XTOL_REACHED:     return "xtol_reached";
-    case nlopt::MAXEVAL_REACHED:  return "max_iterations";
+    case nlopt::MAXEVAL_REACHED:  return "maxeval_reached";
     case nlopt::MAXTIME_REACHED:  return "maxtime_reached";
     case nlopt::ROUNDOFF_LIMITED: return "roundoff_limited";
     default:                      return "failed";
@@ -223,6 +305,7 @@ auto run_nlopt_solver(nlopt::algorithm algo,
                       std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     auto n = static_cast<unsigned>(prob.dimension());
@@ -297,10 +380,10 @@ auto run_nlopt_solver(nlopt::algorithm algo,
     // Patch the trace baseline immediately before solve so per-iter wall_us
     // matches the summary's t0 reference frame (both exclude setup overhead).
     tw.t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
     // Solve with timing.
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
 
     nlopt::result res{};
     std::string_view status_str;
@@ -320,11 +403,14 @@ auto run_nlopt_solver(nlopt::algorithm algo,
         status_str = "failed";
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     double known_opt = prob.optimal_value();
+    Eigen::Map<const Eigen::VectorXd> final_x_map(x.data(), static_cast<Eigen::Index>(x.size()));
+    Eigen::Vector<double, Problem::problem_dimension> final_x(final_x_map);
+    const double final_cv = constraint_violation_at(prob, final_x);
 
     return benchmark_result{
         .solver = solver_name,
@@ -345,7 +431,11 @@ auto run_nlopt_solver(nlopt::algorithm algo,
         .final_objective = minf,
         .known_optimum = known_opt,
         .accuracy = std::abs(minf - known_opt),
+        .constraint_violation = final_cv,
         .status = status_str,
+        .cap_status = cap_status_string(status_str, counts, config),
+        .solve_wall_time_us = wall_us,
+        .end_to_end_wall_time_us = wall_us,
     };
 }
 
@@ -358,6 +448,7 @@ auto run_nlopt_auglag(std::string_view problem_name,
                       std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     auto n = static_cast<unsigned>(prob.dimension());
@@ -422,9 +513,9 @@ auto run_nlopt_auglag(std::string_view problem_name,
     double minf{};
 
     tw.t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
 
     std::string_view status_str;
     try
@@ -443,11 +534,14 @@ auto run_nlopt_auglag(std::string_view problem_name,
         status_str = "failed";
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     double known_opt = prob.optimal_value();
+    Eigen::Map<const Eigen::VectorXd> final_x_map(x.data(), static_cast<Eigen::Index>(x.size()));
+    Eigen::Vector<double, Problem::problem_dimension> final_x(final_x_map);
+    const double final_cv = constraint_violation_at(prob, final_x);
 
     return benchmark_result{
         .solver = "nlopt_auglag",
@@ -468,7 +562,11 @@ auto run_nlopt_auglag(std::string_view problem_name,
         .final_objective = minf,
         .known_optimum = known_opt,
         .accuracy = std::abs(minf - known_opt),
+        .constraint_violation = final_cv,
         .status = status_str,
+        .cap_status = cap_status_string(status_str, counts, config),
+        .solve_wall_time_us = wall_us,
+        .end_to_end_wall_time_us = wall_us,
     };
 }
 
@@ -487,6 +585,7 @@ auto run_nlopt_isres(std::string_view problem_name,
                      std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     auto n = static_cast<unsigned>(prob.dimension());
@@ -554,9 +653,9 @@ auto run_nlopt_isres(std::string_view problem_name,
     double minf{};
 
     tw.t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
 
     nlopt::result res{};
     std::string_view status_str;
@@ -576,11 +675,14 @@ auto run_nlopt_isres(std::string_view problem_name,
         status_str = "failed";
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     double known_opt = prob.optimal_value();
+    Eigen::Map<const Eigen::VectorXd> final_x_map(x.data(), static_cast<Eigen::Index>(x.size()));
+    Eigen::Vector<double, Problem::problem_dimension> final_x(final_x_map);
+    const double final_cv = constraint_violation_at(prob, final_x);
 
     return benchmark_result{
         .solver = "nlopt_isres",
@@ -601,7 +703,11 @@ auto run_nlopt_isres(std::string_view problem_name,
         .final_objective = minf,
         .known_optimum = known_opt,
         .accuracy = std::abs(minf - known_opt),
+        .constraint_violation = final_cv,
         .status = status_str,
+        .cap_status = cap_status_string(status_str, counts, config),
+        .solve_wall_time_us = wall_us,
+        .end_to_end_wall_time_us = wall_us,
     };
 }
 
@@ -680,8 +786,25 @@ void run_nlopt_benchmarks(std::vector<benchmark_result>& results,
                 return detail::run_nlopt_auglag(name, p, max_evals, config, t);
             });
 
-        // COBYLA: derivative-free constrained (no gradient needed).
-        // Disabled: dominates perf profiles (~98% CPU), masking argmin data.
+        // COBYLA: derivative-free constrained (no gradient needed). It is
+        // admitted only when the problem surface has explicit bounds so the
+        // publication row has the same capability contract as the other
+        // constrained NLopt rows; otherwise emit an excluded provenance row.
+        if constexpr((is_ineq || is_eq || is_mixed) && !is_global)
+        {
+            if constexpr(bound_constrained<P>)
+                run_emitting([&](std::vector<trace_entry>& t) {
+                    return detail::run_nlopt_solver(
+                        nlopt::LN_COBYLA, "nlopt_cobyla", name, p, max_evals, config, t);
+                });
+            else
+            {
+                results.push_back(detail::excluded_result(
+                    "nlopt_cobyla", name, p, config,
+                    "requires bounds for publication constrained cohort"));
+                traces.push_back(std::vector<trace_entry>{});
+            }
+        }
 
         // Global: CRS2 and ISRES (require bounds).
         if constexpr(is_global && bound_constrained<P>)

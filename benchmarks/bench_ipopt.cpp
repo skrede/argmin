@@ -49,6 +49,50 @@ namespace argmin::bench
 namespace detail
 {
 
+template <typename Problem, typename Vec>
+[[nodiscard]] auto constraint_violation_at(const Problem& prob,
+                                           const Vec& x) -> double
+{
+    double violation = 0.0;
+    if constexpr(bound_constrained<Problem>)
+    {
+        const auto lb = prob.lower_bounds();
+        const auto ub = prob.upper_bounds();
+        for(int i = 0; i < prob.dimension(); ++i)
+        {
+            if(std::isfinite(lb[i]))
+                violation = std::max(violation, static_cast<double>(lb[i] - x[i]));
+            if(std::isfinite(ub[i]))
+                violation = std::max(violation, static_cast<double>(x[i] - ub[i]));
+        }
+    }
+    if constexpr(constrained<Problem>)
+    {
+        const int n_eq = prob.num_equality();
+        const int n_ineq = prob.num_inequality();
+        Eigen::VectorXd c(n_eq + n_ineq);
+        prob.constraints(x, c);
+        for(int i = 0; i < n_eq; ++i)
+            violation = std::max(violation, std::abs(static_cast<double>(c[i])));
+        for(int i = 0; i < n_ineq; ++i)
+            violation = std::max(violation, std::max(0.0, -static_cast<double>(c[n_eq + i])));
+    }
+    return violation;
+}
+
+[[nodiscard]] inline auto cap_status_string(std::string_view status,
+                                            const eval_counts& counts,
+                                            const bench_config& config) -> std::string
+{
+    if(status == "maxtime_reached")
+        return "wall";
+    if(status == "maxeval_reached")
+        return "f_eval";
+    if(config.max_f_evals > 0 && counts.f >= config.max_f_evals)
+        return "f_eval";
+    return std::string{counts.cap_status()};
+}
+
 // TNLP adapter wrapping any argmin constrained problem.
 // Problem must satisfy the differentiable + constrained concepts (or
 // bound_constrained for bound-only subset).
@@ -266,7 +310,7 @@ public:
         f_best_running_ = std::min(f_best_running_, obj_value);
 
         const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+            std::chrono::steady_clock::now().time_since_epoch()).count();
 
         trace_out_->push_back(trace_entry{
             .iter         = static_cast<int>(iter),
@@ -358,6 +402,7 @@ auto run_ipopt_solver(std::string_view problem_name,
                       std::vector<trace_entry>& local_trace) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
     using wrapped_t = counting_problem<Problem>;
 
@@ -412,6 +457,9 @@ auto run_ipopt_solver(std::string_view problem_name,
             .known_optimum = prob.optimal_value(),
             .accuracy = std::numeric_limits<double>::quiet_NaN(),
             .status = "failed",
+            .cap_status = "none",
+            .solve_wall_time_us = 0,
+            .end_to_end_wall_time_us = 0,
         };
     }
 
@@ -422,7 +470,7 @@ auto run_ipopt_solver(std::string_view problem_name,
     // `t0_us` baseline is captured immediately before OptimizeTNLP() so
     // per-iter wall_us excludes IpoptApplicationFactory + Initialize setup,
     // matching the summary wall_time_us baseline (the t0 captured here).
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     if(config.trace_enabled)
     {
         const auto t0_us = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -430,12 +478,21 @@ auto run_ipopt_solver(std::string_view problem_name,
         tnlp->enable_trace(&local_trace, t0_us, prob.optimal_value());
     }
     auto app_status = app->OptimizeTNLP(tnlp);
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     double known_opt = prob.optimal_value();
     double final_obj = tnlp->objective();
+    double final_cv = std::numeric_limits<double>::quiet_NaN();
+    const auto& solution = tnlp->solution();
+    if(!solution.empty())
+    {
+        Eigen::Map<const Eigen::VectorXd> final_x_map(
+            solution.data(), static_cast<Eigen::Index>(solution.size()));
+        Eigen::Vector<double, Problem::problem_dimension> final_x(final_x_map);
+        final_cv = constraint_violation_at(prob, final_x);
+    }
 
     // Map Ipopt::ApplicationReturnStatus -> status_string when the TNLP
     // wasn't finalized (e.g. initialization failure short-circuited).
@@ -506,7 +563,11 @@ auto run_ipopt_solver(std::string_view problem_name,
         .final_objective = final_obj,
         .known_optimum = known_opt,
         .accuracy = std::abs(final_obj - known_opt),
+        .constraint_violation = final_cv,
         .status = status_str,
+        .cap_status = cap_status_string(status_str, counts, config),
+        .solve_wall_time_us = wall_us,
+        .end_to_end_wall_time_us = wall_us,
     };
 }
 

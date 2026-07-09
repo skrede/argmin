@@ -31,8 +31,11 @@
 #include <dlib/matrix.h>
 #include <dlib/optimization.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -41,6 +44,39 @@ namespace argmin::bench
 
 namespace detail
 {
+
+template <typename Problem, typename Vec>
+[[nodiscard]] auto constraint_violation_at(const Problem& prob,
+                                           const Vec& x) -> double
+{
+    double violation = 0.0;
+    if constexpr(bound_constrained<Problem>)
+    {
+        const auto lb = prob.lower_bounds();
+        const auto ub = prob.upper_bounds();
+        for(int i = 0; i < prob.dimension(); ++i)
+        {
+            if(std::isfinite(lb[i]))
+                violation = std::max(violation, static_cast<double>(lb[i] - x[i]));
+            if(std::isfinite(ub[i]))
+                violation = std::max(violation, static_cast<double>(x[i] - ub[i]));
+        }
+    }
+    return violation;
+}
+
+[[nodiscard]] inline auto cap_status_string(std::string_view status,
+                                            const eval_counts& counts,
+                                            const bench_config& config) -> std::string
+{
+    if(status == "maxtime_reached")
+        return "wall";
+    if(status == "maxeval_reached")
+        return "f_eval";
+    if(config.max_f_evals > 0 && counts.f >= config.max_f_evals)
+        return "f_eval";
+    return std::string{counts.cap_status()};
+}
 
 // Forwarding objective functor -- routes dlib callbacks through a
 // counting_problem<P> wrapper so the {f,g}_evals counters in the bench
@@ -117,6 +153,7 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
                         const bench_config& config) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     dlib_objective<Problem> obj{&wrapped};
@@ -127,7 +164,7 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
     auto ub = to_dlib(prob.upper_bounds());
     clamp_to_box(x0, lb, ub);
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
 
     std::string_view status_str = "converged";
     try
@@ -142,13 +179,15 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
         status_str = "failed";
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     double final_obj = prob.value(
         Eigen::Map<const Eigen::VectorXd>(x0.begin(), x0.size()));
     double known_opt = prob.optimal_value();
+    Eigen::Map<const Eigen::VectorXd> final_x_map(x0.begin(), x0.size());
+    const double final_cv = constraint_violation_at(prob, final_x_map);
 
     return benchmark_result{
         .solver = "dlib_lbfgs_box",
@@ -169,7 +208,11 @@ auto run_dlib_lbfgs_box(std::string_view problem_name,
         .final_objective = final_obj,
         .known_optimum = known_opt,
         .accuracy = std::abs(final_obj - known_opt),
+        .constraint_violation = final_cv,
         .status = status_str,
+        .cap_status = cap_status_string(status_str, counts, config),
+        .solve_wall_time_us = wall_us,
+        .end_to_end_wall_time_us = wall_us,
     };
 }
 
@@ -193,6 +236,7 @@ auto run_dlib_bobyqa(std::string_view problem_name,
                      const bench_config& config) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     dlib_objective<Problem> obj{&wrapped};
@@ -209,7 +253,7 @@ auto run_dlib_bobyqa(std::string_view problem_name,
     double rhobeg = 1.0;
     double rhoend = config.ftol_rel;
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
 
     double minf{};
     std::string_view status_str = "converged";
@@ -224,14 +268,16 @@ auto run_dlib_bobyqa(std::string_view problem_name,
         // dlib throws on max-evals reached or other failures.
         minf = prob.value(
             Eigen::Map<const Eigen::VectorXd>(x0.begin(), x0.size()));
-        status_str = "max_iterations";
+        status_str = "maxeval_reached";
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     double known_opt = prob.optimal_value();
+    Eigen::Map<const Eigen::VectorXd> final_x_map(x0.begin(), x0.size());
+    const double final_cv = constraint_violation_at(prob, final_x_map);
 
     return benchmark_result{
         .solver = "dlib_bobyqa",
@@ -252,7 +298,11 @@ auto run_dlib_bobyqa(std::string_view problem_name,
         .final_objective = minf,
         .known_optimum = known_opt,
         .accuracy = std::abs(minf - known_opt),
+        .constraint_violation = final_cv,
         .status = status_str,
+        .cap_status = cap_status_string(status_str, counts, config),
+        .solve_wall_time_us = wall_us,
+        .end_to_end_wall_time_us = wall_us,
     };
 }
 
@@ -270,6 +320,7 @@ auto run_dlib_global(std::string_view problem_name,
                      const bench_config& config) -> benchmark_result
 {
     eval_counts counts;
+    counts.set_max_f_evals(config.max_f_evals);
     counting_problem<Problem> wrapped{prob, counts};
 
     dlib_objective<Problem> obj{&wrapped};
@@ -277,10 +328,12 @@ auto run_dlib_global(std::string_view problem_name,
     auto lb = to_dlib(prob.lower_bounds());
     auto ub = to_dlib(prob.upper_bounds());
 
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
 
     std::string_view status_str = "converged";
     dlib::function_evaluation result;
+    double final_obj = std::numeric_limits<double>::quiet_NaN();
+    double final_cv = std::numeric_limits<double>::quiet_NaN();
     try
     {
         const auto wall_budget = std::chrono::duration_cast<
@@ -290,18 +343,20 @@ auto run_dlib_global(std::string_view problem_name,
             obj, lb, ub,
             dlib::max_function_calls(config.max_f_evals),
             wall_budget);
+        final_obj = result.y;
+        Eigen::Map<const Eigen::VectorXd> final_x_map(result.x.begin(), result.x.size());
+        final_cv = constraint_violation_at(prob, final_x_map);
     }
     catch(const std::exception&)
     {
         status_str = "failed";
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::steady_clock::now();
     auto wall_us = std::chrono::duration_cast<
         std::chrono::microseconds>(t1 - t0).count();
 
     double known_opt = prob.optimal_value();
-    double final_obj = result.y;
 
     return benchmark_result{
         .solver = "dlib_global",
@@ -322,7 +377,11 @@ auto run_dlib_global(std::string_view problem_name,
         .final_objective = final_obj,
         .known_optimum = known_opt,
         .accuracy = std::abs(final_obj - known_opt),
+        .constraint_violation = final_cv,
         .status = status_str,
+        .cap_status = cap_status_string(status_str, counts, config),
+        .solve_wall_time_us = wall_us,
+        .end_to_end_wall_time_us = wall_us,
     };
 }
 
