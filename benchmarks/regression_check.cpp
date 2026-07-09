@@ -189,6 +189,36 @@ struct baseline_indices
     return ec == std::errc{} && ptr == last && std::isfinite(out);
 }
 
+[[nodiscard]] auto parse_summary_metric(std::string_view s, double& out) -> bool
+{
+    std::string tmp = trim(s);
+    if(tmp.empty()) return false;
+    auto* first = tmp.data();
+    auto* last  = tmp.data() + tmp.size();
+    auto [ptr, ec] = std::from_chars(first, last, out);
+    if(ec == std::errc{} && ptr == last)
+    {
+        if(std::isnan(out))
+        {
+            out = std::numeric_limits<double>::infinity();
+            return true;
+        }
+        if(out < 0.0) return false;
+        return true;
+    }
+    if(tmp == "inf" || tmp == "+inf" || tmp == "infinity" || tmp == "+infinity")
+    {
+        out = std::numeric_limits<double>::infinity();
+        return true;
+    }
+    if(tmp == "nan" || tmp == "+nan" || tmp == "-nan")
+    {
+        out = std::numeric_limits<double>::infinity();
+        return true;
+    }
+    return false;
+}
+
 [[nodiscard]] auto parse_int(std::string_view s, std::int64_t& out) -> bool
 {
     std::string tmp = trim(s);
@@ -452,8 +482,8 @@ struct baseline_indices
         double cv = 0.0;
         if(!parse_int(row[*idx_iters], iters)
            || !parse_int(row[*idx_wall], wall_us)
-           || !parse_finite_double(row[*idx_acc], acc)
-           || !parse_finite_double(row[*idx_cv], cv))
+           || !parse_summary_metric(row[*idx_acc], acc)
+           || !parse_summary_metric(row[*idx_cv], cv))
         {
             std::cerr << "regression_check: invalid numeric field in summary"
                       << " row for solver=" << row[*idx_solver]
@@ -792,6 +822,20 @@ struct baseline_indices
     {
         std::cerr << "regression_check self-test: expected_fail correctness"
                   << " promotion did not exit 3\n";
+        return 1;
+    }
+
+    if(!write_text(summary_path, summary_fixture("solver_inf", "problem_inf",
+                                                 "10", "inf", "0.0",
+                                                 "failed", "included",
+                                                 "none"))
+       || !write_text(baseline_path, baseline_fixture("solver_inf", "problem_inf",
+                                                      "1", "expected_fail")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 0)
+    {
+        std::cerr << "regression_check self-test: expected_fail infinite"
+                  << " accuracy row was not accepted as a failed cell\n";
         return 1;
     }
 

@@ -99,29 +99,6 @@ MANUAL_ITERS_OVERRIDE: dict[tuple[str, str, str], int] = {
 }
 
 
-KNOWN_FAILURE_CELLS = {
-    ("tr_sqp_accurate", "hs024", "accurate"),
-    ("tr_sqp_fast", "hs024", "fast"),
-    ("tr_sqp_accurate", "hs035", "accurate"),
-    ("tr_sqp_fast", "hs035", "fast"),
-    ("tr_sqp_accurate", "hs039", "accurate"),
-    ("tr_sqp_fast", "hs039", "fast"),
-    ("tr_sqp_accurate", "hs040", "accurate"),
-    ("tr_sqp_fast", "hs040", "fast"),
-    ("tr_sqp_accurate", "hs043", "accurate"),
-    ("tr_sqp_fast", "hs043", "fast"),
-    ("tr_sqp_accurate", "hs050", "accurate"),
-    ("tr_sqp_fast", "hs050", "fast"),
-    ("filter_trsqp_accurate", "hs024", "accurate"),
-    ("filter_trsqp_fast", "hs024", "fast"),
-    ("filter_trsqp_accurate", "hs043", "accurate"),
-    ("filter_trsqp_fast", "hs043", "fast"),
-    ("filter_trsqp_accurate", "hs071", "accurate"),
-    ("filter_trsqp_accurate", "hs076", "accurate"),
-    ("filter_trsqp_fast", "hs076", "fast"),
-}
-
-
 HEADER_COMMENT_BLOCK = """\
 # Regression baseline keyed by (solver, problem, mode).
 # Numeric bounds are historical gate values. The disposition column controls
@@ -163,6 +140,18 @@ def parse_float(value: str, context: str) -> float:
         raise ValueError(f"{context}: invalid numeric value {value!r}") from exc
     if not math.isfinite(parsed):
         raise ValueError(f"{context}: non-finite numeric value {value!r}")
+    return parsed
+
+
+def parse_summary_metric(value: str, context: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{context}: invalid summary metric {value!r}") from exc
+    if math.isnan(parsed):
+        return math.inf
+    if parsed < 0.0:
+        raise ValueError(f"{context}: negative summary metric {value!r}")
     return parsed
 
 
@@ -364,8 +353,8 @@ def aggregate_summary(args: argparse.Namespace,
         context = f"{args.summary}:{solver}:{problem}"
         iters = parse_int(r["solver_iters"], context)
         wall_us = parse_int(r["wall_time_us"], context)
-        acc = parse_float(r["accuracy"], context)
-        cv = parse_float(r["constraint_violation"], context)
+        acc = parse_summary_metric(r["accuracy"], context)
+        cv = parse_summary_metric(r["constraint_violation"], context)
         denom = iters if iters > 0 else 1
         cell["per_step_us"].append(wall_us / denom)
         cell["iters"].append(iters)
@@ -428,11 +417,9 @@ def generated_rows(args: argparse.Namespace,
         empirical_acc_log10 = safe_log10(max(accs))
         empirical_cv_log10 = safe_log10(max(cvs))
 
-        if (solver, problem, mode) in KNOWN_FAILURE_CELLS:
-            disposition = DISPOSITION_EXPECTED_FAIL
-        elif (all_converged
-              and empirical_acc_log10 <= min_acc_log10
-              and empirical_cv_log10 <= max_cv_log10):
+        if (all_converged
+            and empirical_acc_log10 <= min_acc_log10
+            and empirical_cv_log10 <= max_cv_log10):
             disposition = DISPOSITION_PASS
         else:
             disposition = DISPOSITION_EXPECTED_FAIL
@@ -493,7 +480,8 @@ def ledger_has_row(rows: list[dict[str, str]],
             and row["old_value"] == old_value
             and row["new_value"] == new_value
             and row["provenance_id"]
-            and row["correctness_witness"]):
+            and row["correctness_witness"]
+            and row["commit_kind"]):
             return True
     return False
 
@@ -539,6 +527,31 @@ def moved_rows_from_file(path: Path) -> list[tuple[str, str, str, str, str, str]
     return moves
 
 
+def disabled_register_moves(path: Path) -> list[tuple[str, str, str, str, str, str]]:
+    rows = read_csv_rows(path)
+    moves: list[tuple[str, str, str, str, str, str]] = []
+    for row in rows:
+        require_fields(row, [
+            "item",
+            "grid_id",
+            "selected_value",
+            "old_value",
+            "correctness_witness",
+            "provenance_id",
+            "action",
+        ], str(path))
+        if row["selected_value"] != row["old_value"]:
+            moves.append((
+                row["item"],
+                row["grid_id"],
+                "disabled_register",
+                row["action"],
+                row["old_value"],
+                row["selected_value"],
+            ))
+    return moves
+
+
 def validate_ledger_completeness(args: argparse.Namespace) -> int:
     try:
         ledger = ledger_rows(args.ledger)
@@ -546,7 +559,7 @@ def validate_ledger_completeness(args: argparse.Namespace) -> int:
         for profile in args.profile_output or []:
             moves.extend(moved_rows_from_file(profile))
         for register in args.disabled_register or []:
-            moves.extend(moved_rows_from_file(register))
+            moves.extend(disabled_register_moves(register))
     except (OSError, ValueError) as exc:
         print(f"regen_baseline: {exc}", file=sys.stderr)
         return 1
@@ -577,11 +590,13 @@ def write_text(path: Path, text: str) -> None:
 SELF_TEST_SUMMARY = """\
 solver,library,problem,class,dimension,seed,mode,solver_iters,f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,known_optimum,accuracy,constraint_violation,status,row_disposition,cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,provenance_id
 bobyqa,argmin,problem_a,inequality,2,42,publication,2,2,0,0,0,20,0.0,0.0,1e-10,1e-10,converged,included,none,,20,20,selftest-run
+bobyqa,argmin,problem_b,inequality,2,42,publication,0,0,0,0,0,8,inf,0.0,inf,5e-1,failed,included,none,,8,8,selftest-run
 """
 
 SELF_TEST_PRIOR = """\
 solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,expected
 bobyqa,problem_a,default,10,-8.0,10,-8.0,pass
+bobyqa,problem_b,default,10,-8.0,10,-8.0,pass
 """
 
 
@@ -608,8 +623,8 @@ def run_self_test() -> int:
         if generate_baseline(args) != 0:
             return 1
         rows = load_baseline_rows(output)
-        if len(rows) != 1:
-            print("regen_baseline self-test: expected one output row", file=sys.stderr)
+        if len(rows) != 2:
+            print("regen_baseline self-test: expected two output rows", file=sys.stderr)
             return 1
         row = rows[0]
         if row["disposition"] not in DISPOSITIONS or not row["provenance_id"]:
@@ -652,6 +667,7 @@ def run_ledger_self_test() -> int:
         current = tmp / "current.csv"
         ledger = tmp / "ledger.csv"
         profile = tmp / "profile.csv"
+        register = tmp / "register.csv"
         write_text(prior, """\
 solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,disposition,provenance_id,wall_gate_policy,exclusion_reason
 solver_a,problem_a,default,10,-8.0,10,-8.0,pass,old,enforced,
@@ -665,12 +681,16 @@ solver_a,problem_a,default,11,-8.0,10,-8.0,pass,new,enforced,
 metric,solver,problem,mode,old_value,new_value
 t_tau,solver_a,problem_a,default,5,6
 """)
+        write_text(register, """\
+item,grid_id,selected_value,old_value,correctness_witness,provenance_id,selected_numeric,action,notes
+default_x,grid_a,2,1,witness,new,true,updated,
+""")
         args = argparse.Namespace(
             prior_baseline=prior,
             current_baseline=current,
             ledger=ledger,
             profile_output=[profile],
-            disabled_register=[],
+            disabled_register=[register],
         )
         if validate_ledger_completeness(args) == 0:
             print("regen_baseline ledger self-test: missing row passed",
@@ -680,6 +700,8 @@ t_tau,solver_a,problem_a,default,5,6
                    "max_us_per_step,solver_a,problem_a,default,10,11,"
                    "methodology,correctness,new,methodology-repair,\n"
                    "t_tau,solver_a,problem_a,default,5,6,"
+                   "methodology,correctness,new,methodology-repair,\n"
+                   "default_x,grid_a,disabled_register,updated,1,2,"
                    "methodology,correctness,new,methodology-repair,\n")
         if validate_ledger_completeness(args) != 0:
             print("regen_baseline ledger self-test: complete ledger failed",
