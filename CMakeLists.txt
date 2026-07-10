@@ -37,6 +37,12 @@ include(FetchContent)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+# MSVC caps the number of sections per object file; the heavily-templated
+# instantiation TUs (unit tests, no-exceptions probe) exceed it without this.
+if(MSVC)
+    add_compile_options(/bigobj)
+endif()
+
 add_subdirectory(lib)
 
 if(ARGMIN_BUILD_EXAMPLES)

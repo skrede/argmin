@@ -585,7 +585,7 @@ TEMPLATE_TEST_CASE_SIG(
             {
                 // tr_sqp_fast: counter may or may not fire on the HS026
                 // trajectory; only assert observability.
-                CHECK(skip_total >= std::size_t{0});
+                SUCCEED("tr_sqp_fast skip_total observed: " << skip_total);
             }
             else
             {

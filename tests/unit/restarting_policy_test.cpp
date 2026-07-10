@@ -28,6 +28,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 
 using namespace argmin;
 
@@ -53,7 +54,7 @@ struct bounded_ackley
     {
         const double a = 20.0;
         const double b = 0.2;
-        const double c = 2.0 * M_PI;
+        const double c = 2.0 * std::numbers::pi;
         double sum_sq = 0.0;
         double sum_cos = 0.0;
         for(int i = 0; i < n; ++i)
