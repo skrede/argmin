@@ -890,6 +890,20 @@ target_compile_options(regression_check PRIVATE
         -fno-trapping-math
     >
 )
+if(CMAKE_TESTING_ENABLED)
+    add_test(NAME regression_check_self_test
+             COMMAND regression_check --self-test)
+    set_tests_properties(regression_check_self_test PROPERTIES
+        LABELS "regression;bench")
+    add_test(NAME regression_check_prohibited_self_test
+             COMMAND regression_check --self-test-prohibited-solvers)
+    set_tests_properties(regression_check_prohibited_self_test PROPERTIES
+        LABELS "regression;bench")
+    add_test(NAME regression_check_instructions_self_test
+             COMMAND regression_check --self-test-instructions)
+    set_tests_properties(regression_check_instructions_self_test PROPERTIES
+        LABELS "regression;bench")
+endif()
 
 # oracle_check -- independent analytic correctness validator. Links argmin
 # (header-only) + Eigen + the analytic test functions to recompute feasibility

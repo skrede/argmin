@@ -56,6 +56,8 @@ BASELINE_FIELDS = [
     "provenance_id",
     "wall_gate_policy",
     "exclusion_reason",
+    "baseline_instr_per_iter",
+    "instr_ceiling",
 ]
 
 NUMERIC_BASELINE_FIELDS = [
@@ -103,6 +105,38 @@ ORACLE_PASS_VALUES = {ORACLE_PASS_TOKEN, ORACLE_FAIL_TOKEN}
 
 DISPOSITION_LEDGER_METRIC = "disposition"
 
+# Real-time-critical solver families: the SQP families ctrlpp drives for NMPC.
+# They alone carry an absolute instructions/iter ceiling in the baseline; the
+# population-based and derivative-free solvers get the ratio gate only, because
+# their per-iteration cost varies by design (evaluations/iter scale with the
+# population or simplex). The regression gate holds the same set.
+REALTIME_CRITICAL_FAMILIES = {
+    "nw_sqp",
+    "filter_nw_sqp",
+    "kraft_slsqp",
+    "filter_slsqp",
+}
+
+# Absolute instructions/iter ceiling for a real-time-critical cell, as a margin
+# above the measured worst-seed instructions/iter on the current tree. The
+# measured seed-to-seed spread on the gated cohort is ~2%, so a 1.25x margin
+# clears same-host noise and modest cross-host instruction-count drift while
+# staying a genuine upper bound (a per-iteration cost regression on the padded
+# factorization class is multiples above the measured cost, not percent).
+INSTR_CEILING_MARGIN = 1.25
+
+
+def solver_family(solver: str) -> str:
+    if solver.endswith("_fast"):
+        return solver[:-len("_fast")]
+    if solver.endswith("_accurate"):
+        return solver[:-len("_accurate")]
+    return solver
+
+
+def is_realtime_critical_solver(solver: str) -> bool:
+    return solver_family(solver) in REALTIME_CRITICAL_FAMILIES
+
 
 def solver_dispatch_mode(solver: str) -> str:
     if solver.endswith("_fast"):
@@ -132,6 +166,12 @@ HEADER_COMMENT_BLOCK = """\
 # excluded: the cell is outside the active cohort and must include a reason.
 # wall_gate_policy describes whether the wall gate is enforced locally or made
 # advisory by the caller through REGRESSION_CHECK_DISABLE_WALL_GATE.
+# baseline_instr_per_iter is the committed reference userspace instructions/iter
+# for the cell; the gate breaches when the measured instructions/iter exceeds it
+# times the ratio factor (an upper bound applied to every gated cell).
+# instr_ceiling is an absolute instructions/iter upper bound, populated only for
+# the real-time-critical SQP families (nw_sqp, filter_nw_sqp, kraft_slsqp,
+# filter_slsqp); it is empty for the population-based and derivative-free rows.
 """
 
 
@@ -219,6 +259,8 @@ def load_baseline_rows(path: Path,
             "provenance_id": row.get("provenance_id") or default_provenance_id,
             "wall_gate_policy": row.get("wall_gate_policy") or default_wall_policy,
             "exclusion_reason": row.get("exclusion_reason") or "",
+            "baseline_instr_per_iter": row.get("baseline_instr_per_iter") or "",
+            "instr_ceiling": row.get("instr_ceiling") or "",
         }
         for field in NUMERIC_BASELINE_FIELDS:
             parse_float(migrated[field], f"{path}:{row['solver']}:{row['problem']}")
@@ -392,6 +434,7 @@ def aggregate_summary(args: argparse.Namespace,
         "row_disposition",
         "exclusion_reason",
         "provenance_id",
+        "instructions",
     ]
     for row in rows:
         require_fields(row, required, str(args.summary))
@@ -404,6 +447,7 @@ def aggregate_summary(args: argparse.Namespace,
             "cv": [],
             "status": [],
             "seeds": [],
+            "instr_per_iter": [],
             "excluded": False,
             "exclusion_reason": "",
             "provenance_id": "",
@@ -434,6 +478,7 @@ def aggregate_summary(args: argparse.Namespace,
         wall_us = parse_int(r["wall_time_us"], context)
         acc = parse_summary_metric(r["accuracy"], context)
         cv = parse_summary_metric(r["constraint_violation"], context)
+        instructions = parse_int(r["instructions"], context)
         denom = iters if iters > 0 else 1
         cell["per_step_us"].append(wall_us / denom)
         cell["iters"].append(iters)
@@ -441,6 +486,12 @@ def aggregate_summary(args: argparse.Namespace,
         cell["cv"].append(cv)
         cell["status"].append(r["status"])
         cell["seeds"].append(r["seed"])
+        # A non-positive instructions value is the counter-unavailable sentinel;
+        # excluding it here keeps a run without perf counters from committing a
+        # zero/negative reference. A cell left with no measured instructions/iter
+        # simply carries an empty reference (the gate then does not arm on it).
+        if instructions > 0:
+            cell["instr_per_iter"].append(instructions / denom)
         cell["provenance_id"] = r["provenance_id"]
     return by_cell
 
@@ -478,6 +529,8 @@ def generated_rows(args: argparse.Namespace,
                 "provenance_id": cell["provenance_id"] or provenance["provenance_id"],
                 "wall_gate_policy": provenance["wall_gate_policy"],
                 "exclusion_reason": cell["exclusion_reason"] or "adapter capability",
+                "baseline_instr_per_iter": "",
+                "instr_ceiling": "",
             })
             continue
 
@@ -502,6 +555,22 @@ def generated_rows(args: argparse.Namespace,
             f"{args.summary}:{solver}:{problem}:{mode}",
         )
 
+        # Committed reference instructions/iter (median across seeds) plus, for
+        # the real-time-critical families, an absolute ceiling a margin above
+        # the measured worst-seed cost. A cell with no measured instructions/iter
+        # (counter unavailable on the whole run) carries an empty reference so
+        # the gate does not arm on a fabricated number.
+        ipi_samples = cell["instr_per_iter"]
+        if ipi_samples:
+            baseline_ipi = str(int(round(median(ipi_samples))))
+            if is_realtime_critical_solver(solver):
+                ceiling = str(int(math.ceil(max(ipi_samples) * INSTR_CEILING_MARGIN)))
+            else:
+                ceiling = ""
+        else:
+            baseline_ipi = ""
+            ceiling = ""
+
         rows_out.append({
             "solver": solver,
             "problem": problem,
@@ -514,6 +583,8 @@ def generated_rows(args: argparse.Namespace,
             "provenance_id": provenance["provenance_id"],
             "wall_gate_policy": provenance["wall_gate_policy"],
             "exclusion_reason": "",
+            "baseline_instr_per_iter": baseline_ipi,
+            "instr_ceiling": ceiling,
         })
     return rows_out
 
@@ -679,9 +750,9 @@ def write_text(path: Path, text: str) -> None:
 
 
 SELF_TEST_SUMMARY = """\
-solver,library,problem,class,dimension,seed,mode,solver_iters,f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,known_optimum,accuracy,constraint_violation,status,row_disposition,cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,provenance_id
-bobyqa,argmin,problem_a,inequality,2,42,publication,2,2,0,0,0,20,0.0,0.0,1e-10,1e-10,converged,included,none,,20,20,selftest-run
-bobyqa,argmin,problem_b,inequality,2,42,publication,0,0,0,0,0,8,inf,0.0,inf,5e-1,failed,included,none,,8,8,selftest-run
+solver,library,problem,class,dimension,seed,mode,solver_iters,f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,known_optimum,accuracy,constraint_violation,status,row_disposition,cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,provenance_id,instructions
+bobyqa,argmin,problem_a,inequality,2,42,publication,2,2,0,0,0,20,0.0,0.0,1e-10,1e-10,converged,included,none,,20,20,selftest-run,200
+bobyqa,argmin,problem_b,inequality,2,42,publication,0,0,0,0,0,8,inf,0.0,inf,5e-1,failed,included,none,,8,8,selftest-run,800
 """
 
 SELF_TEST_PRIOR = """\
@@ -747,6 +818,17 @@ def run_self_test() -> int:
                 print("regen_baseline self-test: invalid disposition or provenance",
                       file=sys.stderr)
                 return 1
+
+        # The instruction reference is emitted (median instructions/iter), and a
+        # non-real-time family carries no absolute ceiling.
+        if by_key[("bobyqa", "problem_a")]["baseline_instr_per_iter"] != "100":
+            print("regen_baseline self-test: baseline_instr_per_iter not the "
+                  "median instructions/iter", file=sys.stderr)
+            return 1
+        if by_key[("bobyqa", "problem_a")]["instr_ceiling"] != "":
+            print("regen_baseline self-test: non-real-time cell carries an "
+                  "absolute instruction ceiling", file=sys.stderr)
+            return 1
 
         # A verdict missing a measured cell must fail closed, never silently
         # fall back to the old self-derived disposition.

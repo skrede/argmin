@@ -45,6 +45,30 @@ constexpr std::array<std::string_view, 3> kProhibitedPerStepSolvers{
     "ipopt_sr1",
 };
 
+// Sentinel for an optional baseline column that is absent from the schema.
+constexpr std::size_t kNoColumn = static_cast<std::size_t>(-1);
+
+// Real-time-critical solver families: the SQP families ctrlpp drives for
+// NMPC. They alone carry an absolute instructions/iter ceiling (an absolute
+// bound needs a real per-iteration budget behind it). Population-based and
+// derivative-free solvers get the ratio gate only, since their per-iteration
+// cost varies by design (evaluations/iter scale with the population/simplex).
+constexpr std::array<std::string_view, 4> kRealtimeCriticalFamilies{
+    "nw_sqp",
+    "filter_nw_sqp",
+    "kraft_slsqp",
+    "filter_slsqp",
+};
+
+// Upper-bound ratio factor for the per-iteration instruction-cost gate.
+// A cell breaches when its measured instructions/iter exceeds the committed
+// baseline instructions/iter times this factor. Calibrated empirically from
+// the seed-to-seed spread of measured instructions/iter on the current tree
+// (see the plan summary for the measured spread and the margin above it);
+// instructions/iter is deterministic, so the spread is small and the factor
+// is a tight upper bound rather than the wall-time gate's loose envelope.
+constexpr double kInstrRegressionFactor = 1.50;
+
 struct csv_table
 {
     std::vector<std::string>              header;
@@ -77,6 +101,7 @@ struct aggregate_row
     std::vector<double>       cv_seeds;
     std::vector<std::string>  status_seeds;
     std::vector<std::string>  cap_status_seeds;
+    std::vector<std::int64_t> instructions_seeds;
 };
 
 struct baseline_indices
@@ -92,6 +117,10 @@ struct baseline_indices
     std::size_t provenance_id{};
     std::size_t wall_gate_policy{};
     std::size_t exclusion_reason{};
+    // Optional instruction-cost columns; kNoColumn when the baseline schema
+    // predates the per-iteration cost gate (e.g. the legacy pinned baseline).
+    std::size_t baseline_instr_per_iter{kNoColumn};
+    std::size_t instr_ceiling{kNoColumn};
 };
 
 [[nodiscard]] auto trim(std::string_view s) -> std::string
@@ -241,6 +270,38 @@ struct baseline_indices
     return "default";
 }
 
+[[nodiscard]] auto solver_family(std::string_view solver) -> std::string
+{
+    constexpr std::string_view fast_sfx = "_fast";
+    constexpr std::string_view acc_sfx  = "_accurate";
+    if(solver.size() >= fast_sfx.size()
+       && solver.substr(solver.size() - fast_sfx.size()) == fast_sfx)
+        return std::string{solver.substr(0, solver.size() - fast_sfx.size())};
+    if(solver.size() >= acc_sfx.size()
+       && solver.substr(solver.size() - acc_sfx.size()) == acc_sfx)
+        return std::string{solver.substr(0, solver.size() - acc_sfx.size())};
+    return std::string{solver};
+}
+
+[[nodiscard]] auto is_realtime_critical_solver(std::string_view solver) -> bool
+{
+    const auto family = solver_family(solver);
+    return std::find(kRealtimeCriticalFamilies.begin(),
+                     kRealtimeCriticalFamilies.end(),
+                     family)
+           != kRealtimeCriticalFamilies.end();
+}
+
+// Access an optional baseline field, returning empty when the column is
+// absent from the schema or from this particular (possibly shorter) row.
+[[nodiscard]] auto optional_field(const std::vector<std::string>& row,
+                                  std::size_t                     idx) -> std::string
+{
+    if(idx == kNoColumn || idx >= row.size())
+        return {};
+    return row[idx];
+}
+
 [[nodiscard]] auto parse_disposition(std::string_view s) -> baseline_disposition
 {
     if(s == "pass") return baseline_disposition::pass;
@@ -347,6 +408,12 @@ struct baseline_indices
        || !disp || !prov || !wall || !excl)
         return false;
 
+    // Optional per-iteration instruction-cost columns. Absent in the legacy
+    // pinned baseline; when present they arm the ratio (all cells) and ceiling
+    // (real-time-critical families) gate.
+    auto instr_ipi = column_index(baseline.header, "baseline_instr_per_iter");
+    auto instr_cap = column_index(baseline.header, "instr_ceiling");
+
     out = baseline_indices{
         .solver = *solver,
         .problem = *prob,
@@ -359,6 +426,8 @@ struct baseline_indices
         .provenance_id = *prov,
         .wall_gate_policy = *wall,
         .exclusion_reason = *excl,
+        .baseline_instr_per_iter = instr_ipi.value_or(kNoColumn),
+        .instr_ceiling = instr_cap.value_or(kNoColumn),
     };
     return true;
 }
@@ -451,13 +520,14 @@ struct baseline_indices
     auto idx_status  = require_column(summary.header, "status", summary_path);
     auto idx_disp    = require_column(summary.header, "row_disposition", summary_path);
     auto idx_cap     = require_column(summary.header, "cap_status", summary_path);
+    auto idx_instr   = require_column(summary.header, "instructions", summary_path);
     if(!idx_solver || !idx_problem || !idx_iters || !idx_wall || !idx_acc
-       || !idx_cv || !idx_status || !idx_disp || !idx_cap)
+       || !idx_cv || !idx_status || !idx_disp || !idx_cap || !idx_instr)
         return false;
 
     const std::size_t max_idx = std::max({
         *idx_solver, *idx_problem, *idx_iters, *idx_wall, *idx_acc,
-        *idx_cv, *idx_status, *idx_disp, *idx_cap,
+        *idx_cv, *idx_status, *idx_disp, *idx_cap, *idx_instr,
     });
 
     for(const auto& row : summary.rows)
@@ -477,10 +547,15 @@ struct baseline_indices
 
         std::int64_t iters = 0;
         std::int64_t wall_us = 0;
+        std::int64_t instructions = 0;
         double acc = 0.0;
         double cv = 0.0;
+        // instructions may legitimately be the unavailable sentinel (-1); it is
+        // parsed but NOT range-checked here so it reaches the gate, which fails
+        // loud on a non-positive count for a cell the instruction gate covers.
         if(!parse_int(row[*idx_iters], iters)
            || !parse_int(row[*idx_wall], wall_us)
+           || !parse_int(row[*idx_instr], instructions)
            || !parse_summary_metric(row[*idx_acc], acc)
            || !parse_summary_metric(row[*idx_cv], cv))
         {
@@ -511,6 +586,7 @@ struct baseline_indices
         agg.cv_seeds.push_back(cv);
         agg.status_seeds.emplace_back(row[*idx_status]);
         agg.cap_status_seeds.emplace_back(row[*idx_cap]);
+        agg.instructions_seeds.push_back(instructions);
     }
     return true;
 }
@@ -674,6 +750,85 @@ struct baseline_indices
             continue;
         }
 
+        // Per-iteration instruction-cost gate. Active for a cell only when the
+        // baseline carries a committed instructions/iter reference (the legacy
+        // pinned baseline omits the column). Ratio-to-baseline is an upper
+        // bound applied to every gated cohort cell; the absolute ceiling is an
+        // upper bound applied only to the real-time-critical SQP families. A
+        // summary instruction count that could not arm (<= 0) fails loud here
+        // rather than reading as a free pass -- the deterministic metric is
+        // only trustworthy when the counter actually armed.
+        const std::string baseline_ipi_field =
+            optional_field(row, b.baseline_instr_per_iter);
+        if(!baseline_ipi_field.empty())
+        {
+            double baseline_ipi = 0.0;
+            if(!parse_finite_double(baseline_ipi_field, baseline_ipi)
+               || baseline_ipi <= 0.0)
+            {
+                std::cerr << "regression_check: invalid baseline_instr_per_iter '"
+                          << baseline_ipi_field << "' for solver=" << solver
+                          << " problem=" << problem << " mode=" << mode << '\n';
+                return 1;
+            }
+
+            bool any_unavailable = false;
+            std::vector<double> ipi_seeds;
+            for(std::size_t k = 0; k < agg.instructions_seeds.size(); ++k)
+            {
+                const std::int64_t instr = agg.instructions_seeds[k];
+                if(instr <= 0)
+                {
+                    any_unavailable = true;
+                    continue;
+                }
+                const std::int64_t iters_k = k < agg.solver_iters_seeds.size()
+                                                 ? agg.solver_iters_seeds[k]
+                                                 : 1;
+                const std::int64_t denom = iters_k > 0 ? iters_k : 1;
+                ipi_seeds.push_back(static_cast<double>(instr)
+                                    / static_cast<double>(denom));
+            }
+
+            if(any_unavailable || ipi_seeds.empty())
+            {
+                emit_breach(solver, problem, mode, "instructions_unavailable",
+                            "counter-not-armed-or-zero",
+                            "positive-instruction-count");
+            }
+            else
+            {
+                const double measured_ipi = median(ipi_seeds);
+                const double ratio_bound = baseline_ipi * kInstrRegressionFactor;
+                if(measured_ipi > ratio_bound)
+                    emit_numeric_breach(solver, problem, mode,
+                                        "instr_per_iter_ratio",
+                                        measured_ipi, ratio_bound);
+
+                if(is_realtime_critical_solver(solver))
+                {
+                    const std::string ceiling_field =
+                        optional_field(row, b.instr_ceiling);
+                    double ceiling = 0.0;
+                    if(ceiling_field.empty()
+                       || !parse_finite_double(ceiling_field, ceiling)
+                       || ceiling <= 0.0)
+                    {
+                        std::cerr << "regression_check: real-time-critical solver"
+                                  << " requires a positive instr_ceiling; got '"
+                                  << ceiling_field << "' for solver=" << solver
+                                  << " problem=" << problem
+                                  << " mode=" << mode << '\n';
+                        return 1;
+                    }
+                    if(measured_ipi > ceiling)
+                        emit_numeric_breach(solver, problem, mode,
+                                            "instr_per_iter_ceiling",
+                                            measured_ipi, ceiling);
+                }
+            }
+        }
+
         const double measured_per_step = median(agg.per_step_us);
         const auto measured_max_iters = max_int(agg.solver_iters_seeds);
         const double measured_max_acc = max_double(agg.accuracy_seeds);
@@ -786,14 +941,17 @@ struct baseline_indices
                                    std::string_view cv,
                                    std::string_view status,
                                    std::string_view row_disposition,
-                                   std::string_view cap_status) -> std::string
+                                   std::string_view cap_status,
+                                   std::string_view instructions = "1000") -> std::string
 {
     std::string out =
         "solver,library,problem,class,dimension,seed,mode,solver_iters,"
         "f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,"
         "known_optimum,accuracy,constraint_violation,status,row_disposition,"
         "cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,"
-        "provenance_id\n";
+        "provenance_id,instructions\n";
+    // solver_iters is fixed at 1, so instructions/iter equals the instructions
+    // value verbatim -- the instruction-gate self-tests rely on that identity.
     out += std::string{solver} + ",argmin," + std::string{problem}
          + ",inequality,2,42,publication,1,1,0,0,0,"
          + std::string{wall_us}
@@ -802,7 +960,8 @@ struct baseline_indices
          + "," + std::string{status}
          + "," + std::string{row_disposition}
          + "," + std::string{cap_status}
-         + ",,1," + std::string{wall_us} + ",selftest\n";
+         + ",,1," + std::string{wall_us} + ",selftest,"
+         + std::string{instructions} + "\n";
     return out;
 }
 
@@ -821,6 +980,132 @@ struct baseline_indices
          + ",-8.0,10,-8.0," + std::string{disposition}
          + ",selftest,enforced," + std::string{reason} + "\n";
     return out;
+}
+
+// Baseline fixture carrying the optional instruction-cost columns so the
+// per-iteration gate is armed. instr_ceiling may be empty for a non-RT cell.
+[[nodiscard]] auto instr_baseline_fixture(std::string_view solver,
+                                          std::string_view problem,
+                                          std::string_view disposition,
+                                          std::string_view baseline_instr_per_iter,
+                                          std::string_view instr_ceiling) -> std::string
+{
+    // The gate derives a summary cell's mode from the solver name, so the
+    // baseline row must use the same dispatch mode or the cell will not match.
+    const std::string mode = solver_dispatch_mode(solver);
+    std::string out =
+        "solver,problem,mode,max_us_per_step,min_accuracy_log10,"
+        "max_outer_iters,max_cv_log10,disposition,provenance_id,"
+        "wall_gate_policy,exclusion_reason,baseline_instr_per_iter,instr_ceiling\n";
+    out += std::string{solver} + "," + std::string{problem}
+         + "," + mode + ",1000000,-8.0,1000,-8.0," + std::string{disposition}
+         + ",selftest,enforced,," + std::string{baseline_instr_per_iter}
+         + "," + std::string{instr_ceiling} + "\n";
+    return out;
+}
+
+// Exercise the per-iteration instruction-cost gate: ratio (all cells),
+// absolute ceiling (real-time-critical families only), and the fail-loud
+// path when the counter could not arm. Each case asserts both the breach and
+// its clean counterpart, so the gate discriminates rather than merely
+// confirms a green. The baseline correctness bounds are generous and the
+// summary disposition is expected_fail with a failing accuracy, so the only
+// gate that can fire is the instruction gate under test.
+[[nodiscard]] auto run_instructions_self_test() -> int
+{
+    const auto tmp = std::filesystem::temp_directory_path();
+    const auto summary_path = tmp / "argmin-regression-instr-summary.csv";
+    const auto baseline_path = tmp / "argmin-regression-instr-baseline.csv";
+    const gate_options opts{};
+
+    // A non-real-time solver whose instructions/iter equals the committed
+    // baseline (ratio 1.0) clears the ratio gate.
+    if(!write_text(summary_path, summary_fixture("bobyqa", "problem_i",
+                                                 "1", "1e-4", "1e-4",
+                                                 "max_iterations", "included",
+                                                 "none", "1000"))
+       || !write_text(baseline_path, instr_baseline_fixture(
+                          "bobyqa", "problem_i", "expected_fail", "1000", "")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 0)
+    {
+        std::cerr << "regression_check instructions self-test: at-baseline"
+                  << " instructions/iter was not accepted\n";
+        return 1;
+    }
+
+    // The same cell with instructions/iter far above baseline*factor breaches
+    // the ratio gate (exit 2), independent of the exact calibrated factor.
+    if(!write_text(summary_path, summary_fixture("bobyqa", "problem_i",
+                                                 "1", "1e-4", "1e-4",
+                                                 "max_iterations", "included",
+                                                 "none", "100000")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 2)
+    {
+        std::cerr << "regression_check instructions self-test: ratio breach"
+                  << " did not exit 2\n";
+        return 1;
+    }
+
+    // An unavailable instruction count (the -1 sentinel) fails loud rather
+    // than reading as a free pass.
+    if(!write_text(summary_path, summary_fixture("bobyqa", "problem_i",
+                                                 "1", "1e-4", "1e-4",
+                                                 "max_iterations", "included",
+                                                 "none", "-1")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 2)
+    {
+        std::cerr << "regression_check instructions self-test: unavailable"
+                  << " counter (-1) did not fail loud\n";
+        return 1;
+    }
+
+    // A real-time-critical family under its ratio bound but above its absolute
+    // ceiling breaches the ceiling gate (exit 2).
+    if(!write_text(summary_path, summary_fixture("nw_sqp_accurate", "problem_i",
+                                                 "1", "1e-4", "1e-4",
+                                                 "max_iterations", "included",
+                                                 "none", "1000"))
+       || !write_text(baseline_path, instr_baseline_fixture(
+                          "nw_sqp_accurate", "problem_i", "expected_fail",
+                          "100000", "500")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 2)
+    {
+        std::cerr << "regression_check instructions self-test: real-time-family"
+                  << " ceiling breach did not exit 2\n";
+        return 1;
+    }
+
+    // The same real-time cell under both its ratio bound and its ceiling is
+    // clean.
+    if(!write_text(baseline_path, instr_baseline_fixture(
+                       "nw_sqp_accurate", "problem_i", "expected_fail",
+                       "100000", "5000")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 0)
+    {
+        std::cerr << "regression_check instructions self-test: real-time cell"
+                  << " within ratio and ceiling was not accepted\n";
+        return 1;
+    }
+
+    // A real-time-critical family with an armed ratio column but no ceiling is
+    // a configuration error (an absolute ceiling is mandatory for this family).
+    if(!write_text(baseline_path, instr_baseline_fixture(
+                       "nw_sqp_accurate", "problem_i", "expected_fail",
+                       "100000", "")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 1)
+    {
+        std::cerr << "regression_check instructions self-test: real-time family"
+                  << " missing its mandatory ceiling was not rejected\n";
+        return 1;
+    }
+
+    return 0;
 }
 
 [[nodiscard]] auto run_self_test() -> int
@@ -952,7 +1237,8 @@ void print_usage(std::ostream& os)
           "\n"
           "Self-tests:\n"
           "  regression_check --self-test\n"
-          "  regression_check --self-test-prohibited-solvers\n";
+          "  regression_check --self-test-prohibited-solvers\n"
+          "  regression_check --self-test-instructions\n";
 }
 
 }
@@ -962,6 +1248,7 @@ int main(int argc, char** argv)
     gate_options opts{};
     bool self_test = false;
     bool prohibited_self_test = false;
+    bool instructions_self_test = false;
     bool baseline_self_test = false;
     std::vector<std::string_view> positional;
 
@@ -992,6 +1279,11 @@ int main(int argc, char** argv)
         if(arg == "--self-test-prohibited-solvers")
         {
             prohibited_self_test = true;
+            continue;
+        }
+        if(arg == "--self-test-instructions")
+        {
+            instructions_self_test = true;
             continue;
         }
         if(arg == "--self-test-baseline")
@@ -1031,6 +1323,8 @@ int main(int argc, char** argv)
         return run_self_test();
     if(prohibited_self_test)
         return run_prohibited_solver_self_test();
+    if(instructions_self_test)
+        return run_instructions_self_test();
 
     if(positional.size() != 2)
     {
