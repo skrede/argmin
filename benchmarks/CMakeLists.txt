@@ -915,6 +915,10 @@ if(CMAKE_TESTING_ENABLED)
     set_tests_properties(oracle_check_calibrate PROPERTIES
         LABELS "regression;bench"
     )
+    add_test(NAME oracle_check_self_test COMMAND oracle_check --self-test)
+    set_tests_properties(oracle_check_self_test PROPERTIES
+        LABELS "regression;bench"
+    )
 endif()
 
 # Fast-CI regression gate. Drives run_publish_bench.sh at SEED_COUNT=3

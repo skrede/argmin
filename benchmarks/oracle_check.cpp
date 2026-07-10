@@ -683,6 +683,122 @@ template <int H>
     return 0;
 }
 
+// ---- Fault-injection self-test (proves the oracle bites) -----------------
+
+[[nodiscard]] auto write_text(const std::filesystem::path& p,
+                              std::string_view              content) -> bool
+{
+    std::ofstream o(p);
+    if(!o) return false;
+    o << content;
+    return static_cast<bool>(o);
+}
+
+// Count the cells the oracle flagged as a breach (oracle_pass == "fail") in a
+// verdict CSV. Returns -1 on a read/parse failure.
+[[nodiscard]] auto count_oracle_failures(const std::filesystem::path& verdict_path)
+    -> int
+{
+    csv_table vt;
+    std::string err;
+    if(!read_csv(verdict_path, vt, err)) return -1;
+    auto ci_pass = column_index(vt.header, "oracle_pass");
+    if(!ci_pass) return -1;
+    int fails = 0;
+    for(const auto& r : vt.rows)
+    {
+        if(r.size() <= *ci_pass) continue;
+        if(r[*ci_pass] == "fail") ++fails;
+    }
+    return fails;
+}
+
+// Synthesize in-memory fixtures for a known cell (HS006: optimum (1,1),
+// f* = 0, single equality c0 = 10*(x1 - x0^2)) and prove that:
+//   * a returned point perturbed off the optimum (objective breach) and an
+//     infeasible point (feasibility breach recomputed from the constraint,
+//     NOT read from any self-reported column) are BOTH flagged as breaches
+//     and drive the failure count non-zero, and
+//   * the true optimum is clean and drives the failure count to zero.
+// This is the falsification proof: the independent witness reports a breach
+// on a genuinely wrong point and stays quiet on a correct one.
+[[nodiscard]] auto run_self_test() -> int
+{
+    const auto tmp     = std::filesystem::temp_directory_path();
+    const auto summary = tmp / "argmin-oracle-selftest-summary.csv";
+    const auto sidecar = tmp / "argmin-oracle-selftest-sidecar.csv";
+    const auto verdict = tmp / "argmin-oracle-selftest-verdict.csv";
+
+    constexpr std::string_view header_summary =
+        "solver,problem,mode,seed,library\n";
+    constexpr std::string_view header_sidecar =
+        "solver,problem,mode,seed,returned_point,multipliers\n";
+
+    // Wrong-point fixture: an objective-breach point (1.1, 1.21) -- feasible
+    // (x1 = x0^2) but f = 0.01 above the accuracy cutoff -- and an infeasible
+    // point (1, 1.5) -- f = 0 but c0 = 5 above the cv cutoff.
+    const std::string wrong_summary =
+        std::string{header_summary} +
+        "wrong_obj,hs006,publication,42,argmin\n"
+        "wrong_feas,hs006,publication,42,argmin\n";
+    const std::string wrong_sidecar =
+        std::string{header_sidecar} +
+        "wrong_obj,hs006,publication,42,"
+        "1.100000000000000e+00;1.210000000000000e+00,\n"
+        "wrong_feas,hs006,publication,42,"
+        "1.000000000000000e+00;1.500000000000000e+00,\n";
+
+    if(!write_text(summary, wrong_summary) || !write_text(sidecar, wrong_sidecar))
+    {
+        std::cerr << "oracle_check self-test: failed to write wrong-point fixture\n";
+        return 1;
+    }
+    if(run_oracle(summary, sidecar, verdict, kAccuracyCutoff, kCvCutoff) != 0)
+    {
+        std::cerr << "oracle_check self-test: oracle run failed on wrong fixture\n";
+        return 1;
+    }
+    const int wrong_fails = count_oracle_failures(verdict);
+    if(wrong_fails != 2)
+    {
+        std::cerr << "oracle_check self-test: oracle did NOT bite -- expected 2"
+                     " breaches on the perturbed/infeasible points, got "
+                  << wrong_fails << '\n';
+        return 1;
+    }
+
+    // Honest-path fixture: the true optimum (1,1) must be clean.
+    const std::string truth_summary =
+        std::string{header_summary} + "truth,hs006,publication,42,argmin\n";
+    const std::string truth_sidecar =
+        std::string{header_sidecar} +
+        "truth,hs006,publication,42,"
+        "1.000000000000000e+00;1.000000000000000e+00,\n";
+
+    if(!write_text(summary, truth_summary) || !write_text(sidecar, truth_sidecar))
+    {
+        std::cerr << "oracle_check self-test: failed to write truth fixture\n";
+        return 1;
+    }
+    if(run_oracle(summary, sidecar, verdict, kAccuracyCutoff, kCvCutoff) != 0)
+    {
+        std::cerr << "oracle_check self-test: oracle run failed on truth fixture\n";
+        return 1;
+    }
+    const int truth_fails = count_oracle_failures(verdict);
+    if(truth_fails != 0)
+    {
+        std::cerr << "oracle_check self-test: false alarm -- the true optimum"
+                     " was flagged as a breach ("
+                  << truth_fails << " failure(s))\n";
+        return 1;
+    }
+
+    std::cout << "oracle_check self-test: PASS -- oracle bites on perturbed and"
+                 " infeasible points and stays quiet on the true optimum\n";
+    return 0;
+}
+
 void print_usage(std::ostream& os)
 {
     os << "Usage: oracle_check <publish_summary.csv> "
@@ -748,10 +864,7 @@ int main(int argc, char** argv)
     if(calibrate)
         return run_calibrate();
     if(self_test)
-    {
-        std::cerr << "oracle_check: --self-test not yet wired\n";
-        return 1;
-    }
+        return run_self_test();
 
     if(positional.size() != 3)
     {
