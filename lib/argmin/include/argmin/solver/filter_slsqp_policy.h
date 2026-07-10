@@ -81,8 +81,8 @@ struct filter_slsqp_policy
     template <int M>
     using rebind = filter_slsqp_policy<M>;
 
-    static constexpr double default_filter_gamma_f = 1e-3;
-    static constexpr double default_filter_gamma_h = 1e-3;
+    static constexpr double default_filter_gamma_f = 1e-5;
+    static constexpr double default_filter_gamma_h = 1e-5;
     static constexpr double default_gradient_tolerance = 1e-8;
     static constexpr double default_step_tolerance_rel = 1e-12;
     static constexpr double default_feasibility_tolerance = 1e-6;
