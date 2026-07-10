@@ -51,7 +51,7 @@ using Catch::Approx;
 
 TEST_CASE("rosenbrock", "[test_functions]")
 {
-    argmin::rosenbrock fn{.a = 1.0, .b = 5.0, .n = 2};
+    argmin::rosenbrock<> fn{.a = 1.0, .b = 5.0, .n = 2};
     Eigen::VectorXd x_star{{1.0, 1.0}};
     Eigen::VectorXd g(2);
 
@@ -74,7 +74,7 @@ TEST_CASE("rosenbrock", "[test_functions]")
 
     SECTION("n-dimensional (n=4)")
     {
-        argmin::rosenbrock fn4{.a = 1.0, .b = 5.0, .n = 4};
+        argmin::rosenbrock<> fn4{.a = 1.0, .b = 5.0, .n = 4};
         Eigen::VectorXd x4{{1.0, 1.0, 1.0, 1.0}};
         CHECK(fn4.value(x4) == Approx(0.0).margin(1e-10));
         CHECK(fn4.dimension() == 4);
@@ -158,7 +158,7 @@ TEST_CASE("himmelblau", "[test_functions]")
 
 TEST_CASE("rastrigin", "[test_functions]")
 {
-    argmin::rastrigin fn{.n = 2};
+    argmin::rastrigin<> fn{.n = 2};
     Eigen::VectorXd x_star{{0.0, 0.0}};
     Eigen::VectorXd g(2);
 

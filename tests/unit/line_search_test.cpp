@@ -41,7 +41,7 @@ TEST_CASE("armijo on quadratic", "[line_search][armijo]")
 
 TEST_CASE("armijo on Rosenbrock", "[line_search][armijo]")
 {
-    rosenbrock fn{.a = 1.0, .b = 5.0, .n = 2};
+    rosenbrock<> fn{.a = 1.0, .b = 5.0, .n = 2};
     Eigen::VectorXd x{{-1.0, 1.0}};
 
     Eigen::VectorXd g(2);
@@ -135,7 +135,7 @@ TEST_CASE("strong_wolfe on quadratic", "[line_search][strong_wolfe]")
 
 TEST_CASE("strong_wolfe on Rosenbrock", "[line_search][strong_wolfe]")
 {
-    rosenbrock fn{.a = 1.0, .b = 5.0, .n = 2};
+    rosenbrock<> fn{.a = 1.0, .b = 5.0, .n = 2};
     Eigen::VectorXd x{{-1.0, 1.0}};
 
     Eigen::VectorXd g(2);
