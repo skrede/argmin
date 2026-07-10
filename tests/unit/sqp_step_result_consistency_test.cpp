@@ -709,7 +709,7 @@ TEMPLATE_TEST_CASE(
         // Kraft rows do not consume the field (documented no-op), so
         // k=0 and k=1 both leave the QP-native KKT-leg unchanged and
         // the equivalence holds trivially.
-        if constexpr(requires { typename Policy::options_type{}.multiplier_reest_every_k; })
+        if constexpr(requires(typename Policy::options_type o) { o.multiplier_reest_every_k; })
         {
             using Problem = hs028<>;
             using PolicyN = typename Policy::template rebind<
