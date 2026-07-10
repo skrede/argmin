@@ -14,7 +14,7 @@
 //     Constrained Evolutionary Optimization," IEEE Trans. Systems,
 //     Man, and Cybernetics, Part C, 35(2):233-243.
 //   Kochenderfer, M. J., and Wheeler, T. A., "Algorithms for
-//     Optimization", 2e, MIT Press 2019, Section 8.6 (Evolution
+//     Optimization", 2e, MIT Press 2025, Section 8.6 (Evolution
 //     Strategies).
 
 #include "argmin/solver/alternative/isres/nlopt_faithful_policy.h"

@@ -256,18 +256,18 @@ struct stall_tolerance_criterion
 
         auto effective_window = std::min(window, max_window);
 
-        // Svanberg 1987 Theorem 5.1 Cauchy-sequence convergence precondition
-        // requires finite-iteration termination detection.  The
-        // best_seen_feasible metric is robust against the oscillation mode
-        // documented in in-tree diagnosis traces (HS043 objective oscillates
-        // with amplitude ~2.75 at move_limit=0.9 while the best-seen iterate
-        // is reached at outer iter ~4 and never improved), because the best-
-        // seen metric is monotone-non-increasing by construction.  Policies
-        // that don't opt in fall through to the combined
-        // (objective + constraint_violation) metric byte-for-byte.
+        // The best_seen_feasible termination metric is robust against the
+        // oscillation mode documented in in-tree diagnosis traces (HS043
+        // objective oscillates with amplitude ~2.75 at move_limit=0.9 while
+        // the best-seen iterate is reached at outer iter ~4 and never
+        // improved), because the best-seen metric is monotone-non-increasing
+        // by construction.  Policies that don't opt in fall through to the
+        // combined (objective + constraint_violation) metric byte-for-byte.
         //
-        // Reference: Svanberg 1987, "The method of moving asymptotes", IJNME
-        //            24:359-373, Theorem 5.1 (Cauchy-sequence convergence).
+        // This is a library termination heuristic for the separable-
+        // approximation family; the globally convergent conservative-convex
+        // approximation framework it accompanies is Svanberg 2002 (SIAM J.
+        // Optim. 12(2)).
         double metric;
         if(track_best_seen_feasible)
         {
