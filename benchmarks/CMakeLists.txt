@@ -895,7 +895,7 @@ if(ARGMIN_BENCH_IPOPT)
 endif()
 
 # Standalone regression gate. Consumes publish_summary.csv and a checked-in
-# per-cell baseline (benchmarks/baselines/v0.3.1-regression.csv); exits
+# per-cell baseline (benchmarks/baselines/publication-regression.csv); exits
 # non-zero on any pass cell breaching a numeric bound or any expected-fail
 # cell unexpectedly converging. C++20 std-only --
 # no Eigen, no argmin, no Catch2, no NLopt; pure CSV bound comparison.

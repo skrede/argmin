@@ -322,7 +322,6 @@ int main()
     // the empirical winner (see solver/alternative/cmaes/README.md).
     // These per-variant cells stay here so the comparison can be
     // re-run on any future commit.
-    // Reference: 34.2-03-AB-RESULT.md verdict doc.
     {
         argmin::bench::println("\n--- Rastrigin 2D boundary-handling variant A/B ---");
         argmin::rastrigin<double> dyn_prob{.n = 2};
