@@ -4,13 +4,13 @@
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
 ![Status](https://img.shields.io/badge/status-public%20preview-orange.svg)
 
-Header-only nonlinear optimization library with a C++20 language floor (using C++23 features, such as `std::expected`, when the toolchain provides them). Every solver is a policy that plugs into `basic_solver<Policy>` and exposes a uniform `step()` / `solve()` / `step_n(budget)` interface. Algorithms are textbook-cited (Kochenderfer & Wheeler 2e, Nocedal & Wright 2e, plus original papers).
+Header-only nonlinear optimization library with a C++20 language floor (using C++23 features, such as `std::expected`, when the toolchain provides them). Every solver is a policy that plugs into `step_budget_solver<Policy>` and exposes a uniform `step()` / `solve()` / `step_n(budget)` interface. Algorithms are textbook-cited (Kochenderfer & Wheeler 2e, Nocedal & Wright 2e, plus original papers).
 
 The library is built around three properties that matter when the optimizer sits inside a larger system: compile-time dimensions that propagate into Eigen types, header-only distribution with no compiled artifacts, and step-level execution control suitable for control loops, IK chains, or MPC ticks.
 
 ## Status
 
-**Public preview.** API surface and policy lineup are stabilizing; expect breaking changes through the v0.2.x line. Test suite is 368 cases / 2852 assertions. A cross-library benchmark harness lives under `benchmarks/` and is documented separately.
+**Public preview.** API surface and policy lineup are stabilizing; expect breaking changes through the v0.3.x line. Test suite is 719 cases / 10846 assertions. A cross-library benchmark harness lives under `benchmarks/` and is documented separately.
 
 What is solid:
 - L-BFGS-B (`lbfgsb`, `byrd_lbfgsb`) — unconstrained and box-constrained smooth problems
@@ -82,7 +82,7 @@ int main()
     opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 500;
 
-    basic_solver solver{lbfgsb_policy<>{}, problem, x0, opts};
+    step_budget_solver solver{lbfgsb_policy<>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     std::cout << "status: " << static_cast<int>(result.status) << '\n'
@@ -95,7 +95,7 @@ Bring your own problem by satisfying the `differentiable` concept (and `bound_co
 
 ## Step-level execution
 
-`basic_solver` exposes the same algorithms in three execution modes:
+`step_budget_solver` exposes the same algorithms in three execution modes:
 
 ```cpp
 solver.step();             // single iteration
@@ -129,9 +129,11 @@ off-hot-loop residuals (post-convergence feasibility restoration; box/inequality
 restart) are documented in the matrix.
 
 **Not yet allocation-free** (their gates stay in witness mode, so no zero-allocation claim is
-made): `nw_sqp` and `filter_nw_sqp` carry a ~32 allocations/step residual that lives inside
-Eigen's own dense-decomposition internals (per-step in the hot loop), and `lm` measures
-~9 allocations/step at HEAD. The remaining derivative-free and stochastic policies (`bobyqa`,
+made): `nw_sqp` and `filter_nw_sqp` carry a ~32 allocations/step residual on the hot loop, and
+`lm` measures ~9 allocations/step at HEAD. The nw-family residual is not zero-mode this cycle,
+but it is reachable via a bounded-dimension plumbing fix (deferred solver work) rather than
+being walled off by the linear-algebra backend — bounded, fixed-shape dense factorizations are
+themselves allocation-free. The remaining derivative-free and stochastic policies (`bobyqa`,
 `cobyla`, `cmaes`, `isres`, `mma`, `gcmma`, `ccsa_quadratic`) are not RT-claimed.
 
 **Exception-free / RTTI-free.** The library has zero `throw` sites and uses no
@@ -174,7 +176,7 @@ eligibility rules are documented in
 
 Every algorithm header cites its source. Primary references:
 
-- Kochenderfer & Wheeler, *Algorithms for Optimization*, 2nd ed. (MIT Press, 2024)
+- Kochenderfer & Wheeler, *Algorithms for Optimization*, 2nd ed. (MIT Press, 2025)
 - Nocedal & Wright, *Numerical Optimization*, 2nd ed. (Springer, 2006)
 - Powell, *The BOBYQA algorithm for bound constrained optimization without derivatives* (DAMTP 2009/NA06)
 - Svanberg, *A class of globally convergent optimization methods based on conservative convex separable approximations* (SIAM J. Optim. 12(2), 2002)

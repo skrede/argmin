@@ -69,8 +69,8 @@ Every policy template takes an `N` parameter that propagates to inner Eigen type
 
 ```cpp
 // Fully-spelled fixed-dimension form (Problem given, so state_type resolves).
-basic_solver<lbfgsb_policy<2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};
+step_budget_solver<lbfgsb_policy<2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};
 // CTAD deduces N and Problem from the arguments; the policy is rebound to the
 // problem's dimension automatically.
-basic_solver generic{lbfgsb_policy<>{}, problem, x0, opts};
+step_budget_solver generic{lbfgsb_policy<>{}, problem, x0, opts};
 ```
