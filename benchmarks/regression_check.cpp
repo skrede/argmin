@@ -17,7 +17,6 @@
 //                    [--self-test-baseline]
 
 #include <map>
-#include <set>
 #include <array>
 #include <cmath>
 #include <tuple>
@@ -516,6 +515,14 @@ struct baseline_indices
     return true;
 }
 
+[[nodiscard]] auto is_prohibited_per_step_solver(std::string_view solver) -> bool
+{
+    return std::find(kProhibitedPerStepSolvers.begin(),
+                     kProhibitedPerStepSolvers.end(),
+                     solver)
+           != kProhibitedPerStepSolvers.end();
+}
+
 [[nodiscard]] auto run_gate(const std::filesystem::path& summary_path,
                             const std::filesystem::path& baseline_path,
                             const gate_options&          opts) -> int
@@ -576,6 +583,18 @@ struct baseline_indices
     std::map<cell_key, bool> matched;
     for(const auto& kv : aggregates)
         matched[kv.first] = false;
+
+    // A prohibited solver must never contribute per-step timing rows to the
+    // published summary. This is a live gate check against the emitted data:
+    // if such a solver appears with per-step measurements, reject it here
+    // rather than asserting the prohibition constant against a copy of itself.
+    for(const auto& [key, agg] : aggregates)
+    {
+        const auto& [solver, problem, mode] = key;
+        if(is_prohibited_per_step_solver(solver) && !agg.per_step_us.empty())
+            emit_breach(solver, problem, mode, "prohibited_per_step_solver",
+                        "per-step-timed", "absent");
+    }
 
     for(const auto& row : baseline.rows)
     {
@@ -883,43 +902,42 @@ struct baseline_indices
 
 [[nodiscard]] auto run_prohibited_solver_self_test() -> int
 {
-    const std::array<std::string_view, 14> emitted_solver_names{
-        "bobyqa",
-        "cmaes",
-        "isres",
-        "ipopt",
-        "ipopt_monotone",
-        "ipopt_sr1",
-        "nlopt_slsqp",
-        "kraft_slsqp_accurate",
-        "nw_sqp_accurate",
-        "filter_slsqp_accurate",
-        "filter_nw_sqp_accurate",
-        "tr_sqp_fast",
-        "tr_sqp_accurate",
-        "filter_trsqp_fast",
-    };
+    const auto tmp = std::filesystem::temp_directory_path();
+    const auto summary_path = tmp / "argmin-regression-prohibited-summary.csv";
+    const auto baseline_path = tmp / "argmin-regression-prohibited-baseline.csv";
+    const gate_options opts{};
 
-    std::set<std::string_view> emitted_prohibited;
-    for(auto solver : emitted_solver_names)
+    // A prohibited solver that emits a per-step-timed summary row must be
+    // rejected by run_gate. The baseline bounds are deliberately generous so
+    // the only breach is the prohibition itself (gate exits 2 on breach).
+    if(!write_text(summary_path, summary_fixture("ipopt", "problem_p",
+                                                 "100", "1e-13", "1e-10",
+                                                 "converged", "included",
+                                                 "none"))
+       || !write_text(baseline_path, baseline_fixture("ipopt", "problem_p",
+                                                      "1000", "pass")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 2)
     {
-        if(solver.size() >= 5 && solver.substr(0, 5) == "ipopt")
-            emitted_prohibited.insert(solver);
+        std::cerr << "regression_check prohibited self-test: prohibited solver"
+                  << " emitting per-step timing was not rejected by the gate\n";
+        return 1;
     }
 
-    std::set<std::string_view> configured{
-        kProhibitedPerStepSolvers.begin(),
-        kProhibitedPerStepSolvers.end(),
-    };
-
-    if(configured != emitted_prohibited)
+    // A permitted solver with the identical row shape must NOT be tripped by
+    // the prohibition, so the check discriminates rather than merely confirms.
+    // bobyqa dispatches in default mode, matching the fixture's baseline mode.
+    if(!write_text(summary_path, summary_fixture("bobyqa", "problem_p",
+                                                 "100", "1e-13", "1e-10",
+                                                 "converged", "included",
+                                                 "none"))
+       || !write_text(baseline_path, baseline_fixture("bobyqa", "problem_p",
+                                                      "1000", "pass")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 0)
     {
-        std::cerr << "regression_check: PROHIBITED solver set mismatch\n";
-        std::cerr << "configured:";
-        for(auto solver : configured) std::cerr << ' ' << solver;
-        std::cerr << "\nemitted:";
-        for(auto solver : emitted_prohibited) std::cerr << ' ' << solver;
-        std::cerr << '\n';
+        std::cerr << "regression_check prohibited self-test: permitted solver"
+                  << " was wrongly rejected by the per-step prohibition\n";
         return 1;
     }
     return 0;
