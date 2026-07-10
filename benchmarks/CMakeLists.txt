@@ -267,6 +267,16 @@ endif()
 
 # Optional comparison library hooks (NLopt LD_SLSQP and similar).
 
+# Publication-gate mode. When enabled, a benchmark configure certifies a
+# publication run and therefore requires the informative cross-solver
+# comparison library (NLopt) to be present: a publication run that silently
+# dropped the cross-solver column would ship incomplete evidence. This is a
+# configuration-level completeness requirement only -- the cross-solver rows
+# stay informative and never decide any cell's pass/fail. A dev build leaves
+# this OFF and configures without the cross-solver library.
+option(ARGMIN_PUBLICATION_GATE
+    "Require the informative cross-solver library for a publication run" OFF)
+
 option(ARGMIN_BENCH_NLOPT "Build NLopt comparison benchmarks" ON)
 if(ARGMIN_BENCH_NLOPT)
     find_package(NLopt CONFIG QUIET)
@@ -278,6 +288,13 @@ if(ARGMIN_BENCH_NLOPT)
         target_sources(publish_bench PRIVATE bench_nlopt.cpp)
         target_link_libraries(publish_bench PRIVATE NLopt::nlopt)
         target_compile_definitions(publish_bench PRIVATE ARGMIN_HAS_NLOPT)
+    elseif(ARGMIN_PUBLICATION_GATE)
+        message(FATAL_ERROR
+            "ARGMIN_PUBLICATION_GATE is ON but the cross-solver comparison "
+            "library (NLopt) was not found. A publication run must not drop "
+            "the informative cross-solver column silently. Install NLopt (a "
+            "CONFIG package) or configure without ARGMIN_PUBLICATION_GATE for "
+            "a dev build.")
     else()
         message(STATUS "NLopt not found, skipping NLopt benchmarks")
     endif()
@@ -935,32 +952,36 @@ if(CMAKE_TESTING_ENABLED)
     )
 endif()
 
-# Fast-CI regression gate. Drives run_publish_bench.sh at SEED_COUNT=3
-# under the build's binary paths and a temporary output root inside the
-# build tree; the script propagates regression_check's exit code so any
-# bound breach fails the test cell. Registered only when testing is
-# enabled in the active benchmark build configuration.
+# Fast-CI regression gate. Drives run_publish_bench.sh under the build's
+# binary paths and a temporary output root inside the build tree; the script
+# propagates regression_check's exit code so any bound breach fails the test
+# cell. The wall gate is enforced here (no disable of any form): the
+# deterministic instructions/iter gate carries the per-iteration cost signal,
+# and the seed count is set high enough that per-step wall variance does not
+# flake the wall bound. The independent oracle is deliberately NOT chained
+# into this fast test (RUN_ORACLE_CHECK=0): oracle enforcement re-validates
+# the returned point over the full seed set in the publication path
+# (run_publish_bench.sh with its default seed sweep), whereas this fast test
+# asserts the deterministic per-iteration and regression gates. Registered
+# only when testing is enabled in the active benchmark build configuration.
 if(CMAKE_TESTING_ENABLED)
     add_test(
         NAME publish_bench_regression_gate
         COMMAND
             ${CMAKE_COMMAND} -E env
                 "SEED_START=42"
-                "SEED_COUNT=3"
+                "SEED_COUNT=5"
                 "OUT_ROOT=${CMAKE_BINARY_DIR}/regression_gate_runs"
                 "BENCH_BINARY=$<TARGET_FILE:publish_bench>"
                 "REGRESSION_CHECK_BINARY=$<TARGET_FILE:regression_check>"
-                "REGRESSION_BASELINE=${CMAKE_SOURCE_DIR}/benchmarks/baselines/v0.3.1-regression.csv"
-                # Per-step wall variance dominates at SEED_COUNT=3; the
-                # outer-iter, accuracy, status, and cv gates stay active.
-                # Full 11-seed sweep via run_publish_bench.sh enforces the
-                # wall gate.
-                "REGRESSION_CHECK_DISABLE_WALL_GATE=1"
+                "RUN_ORACLE_CHECK=0"
+                "RUN_DM_PROFILE=0"
+                "REGRESSION_BASELINE=${CMAKE_SOURCE_DIR}/benchmarks/baselines/publication-regression.csv"
                 bash "${CMAKE_SOURCE_DIR}/benchmarks/scripts/run_publish_bench.sh"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
     set_tests_properties(publish_bench_regression_gate PROPERTIES
-        TIMEOUT 600
+        TIMEOUT 900
         LABELS "regression;bench"
     )
 endif()
