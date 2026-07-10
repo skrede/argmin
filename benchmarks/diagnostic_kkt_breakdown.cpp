@@ -100,8 +100,8 @@ struct kkt_leg_breakdown
 // Diagnostic-only 5-leg composition of the first-order KKT error,
 // returning each leg unreduced. Mirrors the existing 6-arg
 // detail::kkt_residual (stationarity + complementarity) plus the
-// three missing legs (primal_eq, primal_ineq, dual_feas) that Plan 02
-// will fold into the canonical helper. L-infinity norm throughout so
+// three missing legs (primal_eq, primal_ineq, dual_feas) that remain
+// to be folded into the canonical helper. L-infinity norm throughout so
 // the legs compose with a plain std::max in the caller.
 //
 // Templated on every argument so fixed-size solver state vectors
@@ -241,7 +241,7 @@ void print_row(std::uint32_t iter,
 //
 // No mu_ineq.cwiseMax(0.0) projection is applied on the re-estimated
 // stack -- the diagnostic purpose is to observe the raw LS fit so
-// Plan 03's needed dual-feasibility projection is measurable as a
+// the needed dual-feasibility projection is measurable as a
 // dedicated signal (any negative mu_ineq entries show up in the
 // re-estimated stack before downstream clamp).
 //

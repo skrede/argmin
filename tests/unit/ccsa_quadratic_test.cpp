@@ -78,7 +78,7 @@ TEST_CASE("mma converges on HS076", "[mma]")
 // solver.solve(opts) + result.iterations <= max_iterations -- the
 // solve() return reflects the best-seen iterate per the NLopt
 // nlopt_optimize convention, and the iter check is satisfied as long
-// as the iter cap is not exceeded.  This mirrors Plan 01's GCMMA
+// as the iter cap is not exceeded.  This mirrors the GCMMA
 // HS076 iter-budget gate (see "gcmma converges on HS076 with iter-
 // budget cap" below).
 //

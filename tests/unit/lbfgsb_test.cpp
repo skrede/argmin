@@ -848,7 +848,7 @@ TEST_CASE("byrd_lbfgsb brown_badly_scaled terminates roundoff_limited",
         problem, x0, opts};
     auto result = solver.solve(opts);
 
-    // Baseline: 13 iters, acc 6.628e-28 (post-phase30, stalled status).
+    // Baseline: 13 iters, acc 6.628e-28 (stalled status).
     CHECK(result.status == solver_status::roundoff_limited);
     CHECK(result.iterations < 30);
     CHECK(std::abs(result.objective_value - 6.627535934050483e-28) < 1e-27);

@@ -155,7 +155,7 @@ struct bounded_powell_singular_ls
     }
 };
 
-// SE(3)-like 6D proxy problem for IK testing (TEST-11).
+// SE(3)-like 6D proxy problem for IK testing.
 // Diagonal weighted residuals: r(i) = w(i) * (x(i) - x*(i)).
 // Joint-limit-like box bounds: rotation in [-pi, pi], translation in [-1, 1].
 // Optimum at x* (interior of bounds), f* = 0.
@@ -305,7 +305,7 @@ TEST_CASE("projected_gn_policy: bounded Powell singular", "[projected_gn]")
     CHECK(solver.state().objective_value < 1e-6);
 }
 
-TEST_CASE("projected_gn_policy: SE(3)-like proxy (TEST-11)", "[projected_gn]")
+TEST_CASE("projected_gn_policy: SE(3)-like proxy", "[projected_gn]")
 {
     se3_proxy_ls problem;
     Eigen::VectorXd x0 = Eigen::VectorXd::Zero(6);
@@ -365,7 +365,7 @@ TEST_CASE("projected_gradient_gn_policy: bounded Rosenbrock LS", "[projected_gn]
     CHECK(result.x(1) == Approx(0.25).margin(1e-2));
 }
 
-TEST_CASE("projected_gradient_gn_policy: SE(3)-like proxy (TEST-11)", "[projected_gn]")
+TEST_CASE("projected_gradient_gn_policy: SE(3)-like proxy", "[projected_gn]")
 {
     se3_proxy_ls problem;
     Eigen::VectorXd x0 = Eigen::VectorXd::Zero(6);

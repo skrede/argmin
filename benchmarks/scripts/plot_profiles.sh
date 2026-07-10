@@ -118,7 +118,7 @@ GNUPLOT_EOF
 generate_profile "$CSV" "$OUTDIR/performance_profile.pdf" \
     "Performance Profile (f-evals)"
 
-# Per-class breakdown profiles (RPT-03).
+# Per-class breakdown profiles.
 for CLASS in unconstrained bound_constrained inequality equality global; do
     class_csv=$(mktemp)
     head -1 "$CSV" > "$class_csv"

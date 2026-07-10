@@ -13,7 +13,7 @@
 // compare argmin_cmaes against same-class same-algorithm. Reference:
 // Hansen (2023) arXiv:1604.00772; Auger & Hansen (2005) IPOP-CMA-ES.
 //
-// Vanilla-weights default (Plan 02 of phase 34.2): the rank-mu
+// Vanilla-weights default: the rank-mu
 // accumulator now runs i = 0..mu-1 (positive weights only) per Hansen
 // 2023 §B.1 eq (49)-(50) and libcmaes covarianceupdate.cc:67-75. Every
 // per-step number on every cell below changed shape under this fix --
@@ -23,7 +23,7 @@
 // instead of lambda. Per the project's 10000-rep micro_cmaes bench-noise
 // floor convention this resolves <5% per-step changes.
 //
-// Sampling variant default (Plan 05 of phase 34.2): production
+// Sampling variant default: production
 // detail/cmaes_sampling.h forwards to detail::alternative::marsaglia
 // (Marsaglia & Bray 1964 polar method on top of xoshiro256+; thread_local
 // pair cache). Empirical winner of the perf-record A/B on this harness:

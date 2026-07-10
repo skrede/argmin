@@ -426,16 +426,15 @@ TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
     // Reference: NLopt LD_SLSQP converges in ~6 iterations to 1e-10.
     // argmin's kraft_slsqp reaches the same iteration-count order
     // (~8 iters on the benchmark, ~50 iters to reach the tight
-    // margin) with the Kraft LSQ/LSEI QP solver and dense BFGS
-    // introduced in plan 24.1-02. The tight 1e-4 margin that NLopt
+    // margin) with the Kraft LSQ/LSEI QP solver and dense BFGS.
+    // The tight 1e-4 margin that NLopt
     // achieves is deferred; this test locks in the current
     // argmin baseline: HS071 must not diverge and must stay near
     // the optimum with a modest feasibility violation.
     //
-    // Plan 24.1-02 requirement KRAFT-QP-03 (HS071 without feasibility
-    // restoration). The gap to NLopt's tight 1e-10 precision is
-    // tracked for a follow-up plan that will tighten the BFGS
-    // restart heuristic against NLopt slsqp.c lines 1571+.
+    // HS071 without feasibility restoration. The gap to NLopt's tight
+    // 1e-10 precision is tracked as a follow-up that will tighten the
+    // BFGS restart heuristic against NLopt slsqp.c lines 1571+.
     hs071<> problem;
     auto x0 = problem.initial_point();
     solver_options opts;
@@ -490,8 +489,8 @@ TEST_CASE("kraft_slsqp populates kkt_residual", "[kraft_slsqp][kkt]")
 
 // HS006 regression guard.
 //
-// Baseline (post-phase30): 7 iters, acc 9.24e-08. Post-phase31
-// regressed to 6 iters, acc 2.16e-06. The Full E-measure fix keeps
+// An earlier baseline reached 7 iters, acc 9.24e-08; a later ftol
+// regression dropped it to 6 iters, acc 2.16e-06. The Full E-measure fix keeps
 // ftol from firing prematurely; the healthy trajectory lands at
 // f < 1e-5 in [6, 8] iters.
 //
@@ -513,8 +512,8 @@ TEST_CASE("kraft_slsqp HS006 accuracy guard",
 
     // Baseline harness: 9 iters under 1e-15 thresholds; bench
     // defaults land similar or tighter. Full E-measure blocks
-    // premature ftol that post-phase31 let fire at iter 6.
-    // Measured post-31.1 accuracy: 9.24e-08. Threshold 1e-6 is ~10x
+    // premature ftol that the earlier regression let fire at iter 6.
+    // Measured accuracy: 9.24e-08. Threshold 1e-6 is ~10x
     // the measured value -- tight enough to catch a ~10x degradation
     // while tolerating normal floating-point noise.
     CHECK(result.objective_value < 1e-6);

@@ -177,7 +177,7 @@ TEST_CASE("filter_nw_sqp populates kkt_residual and exposes is_null_step",
 // clamps active mu_ineq to >= 0, and the null-step branch populates
 // kkt_residual so the composite convergence test can fire at the optimum.
 //
-// Reference baseline (post-phase30): 13 iters @ f = -1.0. Regression target:
+// Reference baseline: 13 iters @ f = -1.0. Regression target:
 // iterations within 1 of baseline.
 //
 // Reference: N&W 2e Section 18.3 + Algorithm 18.3 (working-set);

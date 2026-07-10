@@ -27,7 +27,7 @@ struct gradient_tolerance_criterion
     // tolerance, widely adopted as the conventional first-order
     // stationarity gate (e.g. scipy.optimize.fmin_l_bfgs_b default
     // pgtol=1e-5). Empirically swept against the Rosenbrock/HS regression
-    // suite (see plan summary): fires well after L-BFGS-B reaches
+    // suite: fires well after L-BFGS-B reaches
     // machine-zero on Rosenbrock and does not trip prematurely on the HS
     // suite's constrained problems.
     double threshold{1e-5};
@@ -66,7 +66,7 @@ struct objective_tolerance_criterion
     // the MINPACK default-tolerance convention (More, Garbow, Hillstrom
     // 1980, "User Guide for MINPACK-1," ANL-80-74) of sqrt(machine
     // epsilon)-to-eps^(2/3) for double precision (eps ~ 2.22e-16).
-    // Empirically swept (see plan summary) against Rosenbrock/HS.
+    // Empirically swept against Rosenbrock/HS.
     double threshold{1e-10};
     // Direct-value literature default: 1e-8 matches N&W 2e Definition
     // 12.1's typical first-order KKT stationarity gate.
@@ -105,8 +105,8 @@ struct step_tolerance_criterion
     // of sqrt(machine epsilon) (~1.49e-8 for double precision) used by
     // MINPACK / Dennis and Schnabel-style step-length stopping tests
     // (More, Garbow, Hillstrom 1980, "User Guide for MINPACK-1,"
-    // ANL-80-74; N&W 2e Section 2.2). Empirically swept (see plan
-    // summary) against Rosenbrock/HS.
+    // ANL-80-74; N&W 2e Section 2.2). Empirically swept against
+    // Rosenbrock/HS.
     double threshold{1e-8};
     double feasibility_tolerance{1e-6};
 

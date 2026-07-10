@@ -1,4 +1,4 @@
-// Comprehensive cross-solver convergence test suite (TEST-02).
+// Comprehensive cross-solver convergence test suite.
 //
 // Validates all 9 v0.1.0 solver policies on appropriate test functions.
 // Each solver is tested on at least 3 problems with class-appropriate

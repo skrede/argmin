@@ -240,7 +240,7 @@ TEST_CASE("filter_slsqp populates kkt_residual and exposes is_null_step",
 // kkt_residual so the composite convergence check can terminate on
 // iterates where the QP returns zero direction at the optimum.
 //
-// Reference baseline (post-phase30): 13 iters @ f = -1.0. Regression
+// Reference baseline: 13 iters @ f = -1.0. Regression
 // target: iterations within 1.
 //
 // Note: this test does NOT set a gradient_norm tolerance. The policy

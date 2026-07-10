@@ -381,8 +381,8 @@ TEST_CASE("nw_sqp HS039 equality constraints", "[sqp]")
 
 // HS007 regression guard.
 //
-// Baseline (post-phase30): 7 iters, acc 1.19e-06. Post-phase31
-// regressed to 6 iters, acc 1.70e-04 (143x worse). The Full E-measure
+// An earlier baseline reached 7 iters, acc 1.19e-06; a later ftol
+// regression dropped it to 6 iters, acc 1.70e-04 (143x worse). The Full E-measure
 // fix keeps ftol from firing at the pre-convergence iterate.
 //
 // Reference: N&W 2e Definition 12.1 full E-measure closure.
@@ -402,8 +402,8 @@ TEST_CASE("nw_sqp HS007 accuracy guard",
     auto result = solver.solve(opts);
 
     // HS007 optimum: f* = -sqrt(3) ~ -1.7320508. Full E-measure
-    // blocks premature ftol that post-phase31 let fire at iter 6.
-    // Measured post-31.1: f = -1.73205... (|f - f*| = 1.18e-06).
+    // blocks premature ftol that the earlier regression let fire at iter 6.
+    // Measured: f = -1.73205... (|f - f*| = 1.18e-06).
     // Threshold -1.7320 permits at most |f - f*| ~= 5e-05 -- ~40x
     // the measured accuracy, tight enough to detect a ~10-40x
     // degradation while tolerating floating-point noise. The old
@@ -415,8 +415,8 @@ TEST_CASE("nw_sqp HS007 accuracy guard",
 
 // HS026 regression guard.
 //
-// Baseline (post-phase30): 20 iters, acc 2.90e-07. Post-phase31
-// regressed to 12 iters, acc 1.57e-04 (542x worse). The Full E-measure
+// An earlier baseline reached 20 iters, acc 2.90e-07; a later ftol
+// regression dropped it to 12 iters, acc 1.57e-04 (542x worse). The Full E-measure
 // fix restores the pre-regression iteration count (+/- 1).
 //
 // Reference: N&W 2e Definition 12.1 full E-measure closure.
@@ -436,10 +436,10 @@ TEST_CASE("nw_sqp HS026 accuracy guard",
     auto result = solver.solve(opts);
 
     // HS026 optimum: f* = 0 at (1, 1, 1). Full E-measure blocks
-    // the premature ftol at iter 12 that post-phase31 let fire;
+    // the premature ftol at iter 12 that the earlier regression let fire;
     // solver now converges correctly, iter count matches the
     // harness trajectory of 31 iters under these thresholds.
-    // Measured post-31.1 accuracy: 2.90e-07. Threshold 1e-6 is ~3x
+    // Measured accuracy: 2.90e-07. Threshold 1e-6 is ~3x
     // the measured value -- tight enough to detect a ~10x degradation
     // while tolerating floating-point noise.
     //
