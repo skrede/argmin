@@ -17,7 +17,7 @@
 //            Mathematical Systems vol. 187, Springer.
 //
 // argmin variant: parameterized over the six-policy type list via
-//                 Catch2 TEMPLATE_TEST_CASE_SIG. The single-mode
+//                 Catch2 TEMPLATE_TEST_CASE. The single-mode
 //                 line-search SQP family (kraft_slsqp, nw_sqp,
 //                 filter_slsqp, filter_nw_sqp) supplies four type rows;
 //                 the dual-mode trust-region SQP family (tr_sqp,
@@ -143,10 +143,9 @@ struct sqrt_nan_emitter
 
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "SQP step_result consistency across SQP family (line-search + trust-region)",
     "[sqp][consistency][mode]",
-    ((typename Policy), Policy),
     kraft_slsqp_policy_accurate<dynamic_dimension>,
     nw_sqp_policy_accurate<dynamic_dimension>,
     filter_slsqp_policy_accurate<dynamic_dimension>,
@@ -156,6 +155,7 @@ TEMPLATE_TEST_CASE_SIG(
     filter_trsqp_policy_accurate<dynamic_dimension>,
     filter_trsqp_policy_fast<dynamic_dimension>)
 {
+    using Policy = TestType;
     SECTION("HS007 Lagrangian gradient vanishes at constrained optimum")
     {
         // Reference: Hock & Schittkowski (1981), Problem 7.

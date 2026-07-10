@@ -390,13 +390,13 @@ TEST_CASE("tr_sqp accepted step produces an exactly-zero slack block in the "
     CHECK(s.joint_yk_buf.tail(1)[0] == 0.0);
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "kkt-gated convergence fires at a solution with an active box bound",
     "[sqp_common_joint][tr_sqp][filter_trsqp]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<2>,
     filter_trsqp_policy_accurate<2>)
 {
+    using Policy = TestType;
     // Convergence-path check for the bound-aware composite residual:
     // on bound_active_problem the solver reaches x* = (1, 0) with the
     // upper bound on x_0 active and bound multiplier zeta = 1. The

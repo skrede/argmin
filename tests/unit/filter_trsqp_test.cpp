@@ -106,13 +106,13 @@ using namespace argmin;
 //            8(3):682-706 Section 3.3 (augmented merit update).
 //
 // Hock and Schittkowski 1981 problem 24.
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS024 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs024<>::problem_dimension>,
     filter_trsqp_policy_fast<hs024<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs024<> problem;
@@ -143,13 +143,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS026 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs026<>::problem_dimension>,
     filter_trsqp_policy_fast<hs026<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs026<> problem;
@@ -178,13 +178,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS028 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs028<>::problem_dimension>,
     filter_trsqp_policy_fast<hs028<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs028<> problem;
@@ -226,13 +226,13 @@ TEMPLATE_TEST_CASE_SIG(
 //            8(3):682-706 Section 3.1 (v-optimal restoration);
 //            Wachter and Biegler 2006 Math. Programming 106:25-57
 //            Section 3.3 (restoration phase entry condition).
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS035 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs035<>::problem_dimension>,
     filter_trsqp_policy_fast<hs035<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs035<> problem;
@@ -263,13 +263,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS039 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs039<>::problem_dimension>,
     filter_trsqp_policy_fast<hs039<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs039<> problem;
@@ -300,13 +300,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS040 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs040<>::problem_dimension>,
     filter_trsqp_policy_fast<hs040<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs040<> problem;
@@ -372,12 +372,12 @@ TEMPLATE_TEST_CASE_SIG(
 //            the restoration leg when ||c|| has been driven to zero).
 //
 // Hock and Schittkowski 1981 problem 43.
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS043 (accurate mode)",
     "[sqp][filter_trsqp][regression][mode][!mayfail]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs043<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs043<> problem;
@@ -405,12 +405,12 @@ TEMPLATE_TEST_CASE_SIG(
 
 // HS043 fast mode converges to the relaxed 5e-2 relative bar at the
 // locked filter defaults (terminal f_err ~ 8.6e-3, zero violation).
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS043 (fast mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_fast<hs043<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs043<> problem;
@@ -467,12 +467,12 @@ TEMPLATE_TEST_CASE_SIG(
 //            8(3):682-706 Section 3.1 (v-optimal restoration);
 //            Wachter and Biegler 2006 Math. Programming 106:25-57
 //            Section 3.3 (restoration phase configuration).
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS050 (accurate mode)",
     "[sqp][filter_trsqp][regression][mode][!mayfail]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs050<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs050<> problem;
@@ -492,12 +492,12 @@ TEMPLATE_TEST_CASE_SIG(
     CHECK(solver.constraint_violation() < 1e-4);
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS050 (fast mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_fast<hs050<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs050<> problem;
@@ -531,12 +531,12 @@ TEMPLATE_TEST_CASE_SIG(
 //            (Byrd-Omojokun composite step trust-radius schedule).
 //
 // Hock and Schittkowski 1981 problem 71.
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS071 (accurate mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs071<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs071<> problem;
@@ -574,12 +574,12 @@ TEMPLATE_TEST_CASE_SIG(
 //            Section 3.3 (restoration phase configuration);
 //            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
 //            8(3):682-706 Section 3.1 (v-optimal restoration).
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS071 (fast mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_fast<hs071<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs071<> problem;
@@ -619,13 +619,13 @@ TEMPLATE_TEST_CASE_SIG(
 //            constraint scale).
 //
 // Hock and Schittkowski 1981 problem 76.
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "filter_trsqp HS076 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    ((typename Policy), Policy),
     filter_trsqp_policy_accurate<hs076<>::problem_dimension>,
     filter_trsqp_policy_fast<hs076<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs076<> problem;

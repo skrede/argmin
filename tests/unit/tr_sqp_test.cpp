@@ -70,13 +70,13 @@ double solve_wall_seconds(const Problem& problem, const Eigen::VectorXd& x0,
 
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS071 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs071<>::problem_dimension>,
     tr_sqp_policy_fast<hs071<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs071<> problem;
@@ -111,13 +111,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS026 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs026<>::problem_dimension>,
     tr_sqp_policy_fast<hs026<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs026<> problem;
@@ -160,13 +160,13 @@ TEMPLATE_TEST_CASE_SIG(
 //            Plantenga 1998 Section 3.3 (adaptive penalty growth);
 //            Nocedal and Wright 2e Section 18.5 (Byrd-Omojokun
 //            composite step).
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS043 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs043<>::problem_dimension>,
     tr_sqp_policy_fast<hs043<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs043<> problem;
@@ -214,13 +214,13 @@ TEMPLATE_TEST_CASE_SIG(
 //            composite step); Lalee, Nocedal, Plantenga 1998 SIAM J.
 //            Optim. 8(3):682-706 Section 3.3 (augmented merit +
 //            penalty update).
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS024 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs024<>::problem_dimension>,
     tr_sqp_policy_fast<hs024<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs024<> problem;
@@ -278,13 +278,13 @@ TEMPLATE_TEST_CASE_SIG(
 //            (v-optimal restoration) and Section 3.3 (augmented merit
 //            penalty update).
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS035 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs035<>::problem_dimension>,
     tr_sqp_policy_fast<hs035<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs035<> problem;
@@ -315,13 +315,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS039 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs039<>::problem_dimension>,
     tr_sqp_policy_fast<hs039<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs039<> problem;
@@ -352,13 +352,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS040 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs040<>::problem_dimension>,
     tr_sqp_policy_fast<hs040<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs040<> problem;
@@ -389,13 +389,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS050 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs050<>::problem_dimension>,
     tr_sqp_policy_fast<hs050<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs050<> problem;
@@ -423,13 +423,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS028 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs028<>::problem_dimension>,
     tr_sqp_policy_fast<hs028<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs028<> problem;
@@ -467,13 +467,13 @@ TEMPLATE_TEST_CASE_SIG(
     }
 }
 
-TEMPLATE_TEST_CASE_SIG(
+TEMPLATE_TEST_CASE(
     "tr_sqp HS076 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    ((typename Policy), Policy),
     tr_sqp_policy_accurate<hs076<>::problem_dimension>,
     tr_sqp_policy_fast<hs076<>::problem_dimension>)
 {
+    using Policy = TestType;
     using policy_t = Policy;
 
     hs076<> problem;
