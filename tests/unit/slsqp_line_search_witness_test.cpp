@@ -1,10 +1,11 @@
 // Independent single-step correctness witnesses for the line-search SLSQP
 // globalization gates. Each TEST_CASE is a hand-derived assertion of the
-// CORRECT post-fix behavior, tagged [!shouldfail] because the defect it
-// targets is still present: the case registers as an expected failure against
-// the current code and the corresponding fix removes the tag. These witnesses
-// are the verification anchors; the Hock-Schittkowski acceptance matrix is a
-// re-baseline recording step, never a verification step.
+// CORRECT post-fix behavior. Each case shipped RED against the pre-fix
+// substrate under a [!shouldfail] disposition; the fixes landed, the
+// instruments fired green, and the cases now assert the corrected behavior as
+// positive witnesses. These witnesses are the verification anchors; the
+// Hock-Schittkowski acceptance matrix is a re-baseline recording step, never a
+// verification step.
 //
 // Reference: Wachter & Biegler 2006 "On the implementation of an interior-point
 //            filter line-search algorithm", Algorithm A and Section 2.4;
@@ -142,8 +143,9 @@ double violation_at(const maratos_problem& p, const Eigen::VectorXd& x)
 // f-descent test and never the filter / h_max ceiling. The correct behavior
 // rejects it (filter acceptability AND h <= h_max must hold in addition to
 // Armijo), so the accepted iterate keeps its constraint violation at or below
-// the ceiling h_max = 1e4. Pinned [!shouldfail]: the pre-fix code accepts the
-// bypass and the post-step violation is 1e5 >> 1e4.
+// the ceiling h_max = 1e4. Pre-fix the f-type Armijo-only branch accepted the
+// bypass and the post-step violation was 1e5 >> 1e4; the fix landed and the
+// case now asserts the post-fix rejection as a positive witness.
 TEST_CASE("filter_slsqp rejects a marginal-f, exploding-h unit step",
           "[filter_slsqp][witness]")
 {
@@ -158,7 +160,7 @@ TEST_CASE("filter_slsqp rejects a marginal-f, exploding-h unit step",
     // Caller-set filter ceiling h_max = 1e4 * max(1, h_0) with h_0 = 0.
     // The correct gate rejects any trial whose violation exceeds this ceiling,
     // so an accepted step can never carry violation 1e5. Pre-fix the f-type
-    // Armijo-only branch accepts the bypass trial and this fails.
+    // Armijo-only branch accepted the bypass trial and this check failed.
     CHECK(sr.constraint_violation < 1.0e4);
 }
 

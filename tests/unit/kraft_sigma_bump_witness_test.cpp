@@ -1,9 +1,9 @@
 // Independent single-step correctness witness for the kraft_slsqp Armijo
 // merit baseline across the penalty cold-bump. The TEST_CASE is a
-// hand-derived assertion of the CORRECT post-fix behavior, tagged
-// [!shouldfail] because the defect it targets is still present: the case
-// registers as an expected failure against the current code and the
-// corresponding fix removes the tag.
+// hand-derived assertion of the CORRECT post-fix behavior. It shipped RED
+// against the pre-fix substrate under a [!shouldfail] disposition; the fix
+// landed, the instrument fired green, and the case now asserts the corrected
+// behavior as a positive witness.
 //
 // Defect mechanics: kraft_slsqp computes the Armijo baseline merit_0 with
 // the pre-bump penalty sigma, then bump_sigma_for_descent raises sigma and
@@ -138,8 +138,9 @@ struct sigma_bump_problem
 // retry and forcing a spurious BFGS reset -- after which the retry pass,
 // with a consistent baseline, accepts the very same unit step. The correct
 // behavior re-baselines merit_0 across the bump and accepts alpha = 1 on
-// the first pass with no reset. Pinned [!shouldfail]: pre-fix
-// bfgs_reset_count is 1.
+// the first pass with no reset. Pre-fix bfgs_reset_count was 1; the fix
+// landed and the case now asserts the post-fix zero-reset behavior as a
+// positive witness.
 TEST_CASE("kraft_slsqp accepts the unit step across a penalty cold-bump without a spurious BFGS reset",
           "[kraft_slsqp][sigma_bump][witness]")
 {

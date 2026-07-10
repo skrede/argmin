@@ -138,24 +138,23 @@ TEST_CASE("mma converges on HS076 with iter-budget cap", "[mma]")
 //            NLopt mma.c:265-376 (Steven G. Johnson 2008-2012
 //            implementation).
 //
-// [!shouldfail]: the `< -0.7` descent guard is currently missed
-// (best_feasible lands at approximately -0.204) after the compact
+// This cell shipped under a [!shouldfail] disposition after the compact
 // L-BFGS middle-matrix solve moved from an out-of-contract LDLT of the
 // indefinite middle matrix to an in-contract PartialPivLU.  The new
-// factorization is strictly MORE accurate on the solves this very run
-// produces: an instrumented replay against a long-double FullPivLU
-// reference over 8457 middle solves found zero solves where
-// PartialPivLU fails while LDLT succeeds, versus 618 solves where LDLT
-// alone degrades (relative error up to 3.7e-1) while PartialPivLU stays
-// at rounding level.  The regression is therefore not a substrate
-// defect: the MMA outer loop on HS024 is chaotic at rounding level --
-// relative perturbations of x0 between 1e-15 and 1e-10 flip
-// best_feasible among approximately -0.20, -0.58, and -1.0 under the
-// identical substrate.  The prior pass rode a lucky rounding trajectory
-// of the out-of-contract factorization.  Robustifying the CCSA/MMA
-// accept-reject machinery against rounding-level trajectory divergence
-// belongs to the upcoming Svanberg MMA/GCMMA reference-faithfulness
-// work; this tag flips (unexpected pass) when that lands.
+// factorization is strictly MORE accurate on the solves this run produces:
+// an instrumented replay against a long-double FullPivLU reference over 8457
+// middle solves found zero solves where PartialPivLU fails while LDLT
+// succeeds, versus 618 solves where LDLT alone degrades (relative error up
+// to 3.7e-1) while PartialPivLU stays at rounding level.  The former miss
+// was therefore not a substrate defect: the MMA outer loop on HS024 was
+// chaotic at rounding level -- relative perturbations of x0 between 1e-15
+// and 1e-10 flipped best_feasible among approximately -0.20, -0.58, and
+// -1.0 under the identical substrate, so the `< -0.7` guard was missed on
+// the unlucky trajectories (the pre-elastic pass rode a lucky rounding
+// trajectory of the out-of-contract factorization).  The bounded-dual
+// elastics landed, stabilizing the trajectory to the exact optimum f* = -1
+// (see the assertion comment below); the tag was removed and the case now
+// asserts the corrected descent as a positive witness.
 TEST_CASE("mma converges on HS024", "[mma]")
 {
     hs024 problem;
