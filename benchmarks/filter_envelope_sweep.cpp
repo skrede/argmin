@@ -1,19 +1,25 @@
-// HS043 envelope sweep for filter_slsqp + filter_nw_sqp policies.
+// Filter-envelope (gamma_f, gamma_h) sweep for filter_slsqp + filter_nw_sqp.
 //
-// Sweeps the asymmetric (gamma_f, gamma_h) envelope across a 4x4
-// grid {1e-3, 1e-4, 1e-5, 1e-6}^2 on HS043 (the canonical
-// strictly-feasible-descent over-rejection cell). Each combo is
-// replayed against HS024 (LS-failure-prone) and HS076 (multi-
-// constraint inequality) regression guards; combos that fail either
-// guard are excluded from the candidate set. The selected default
-// per policy minimises |objective - (-44.0)| on HS043 subject to
-// passing both guards.
+// Sweeps the asymmetric (gamma_f, gamma_h) envelope across a 4x4 grid
+// {1e-3, 1e-4, 1e-5, 1e-6}^2 and evaluates every combo against the
+// publication bar (objective distance to the analytic optimum within
+// 1e-8, feasibility within 1e-6) over the full filter-lineage cohort:
+// HS006, HS007, HS024, HS026, HS028, HS035, HS039, HS040, HS043, HS048,
+// HS050, HS051, HS071, HS076. Feasibility is recomputed analytically at
+// the returned point (constraint residual at x*), never taken from the
+// solver's self-reported constraint_violation.
 //
-// Output: per-policy table of (gamma_f, gamma_h, hs043_f, hs043_cv,
-// hs043_iters, hs024_passes, hs076_passes), followed by the
-// SELECTED line.
+// A combo "clears the bar" only if every cohort cell meets both the
+// objective and feasibility tolerance. The shipped default follows a
+// burden-of-proof rule: keep gamma_f = gamma_h = 1e-3 only if it clears
+// the bar across the whole cohort; otherwise revert to 1e-5.
 //
-// Reference: Hock & Schittkowski 1981, Problems 24, 43, 76;
+// Output: per-policy per-combo pass table plus the SELECTED line, and an
+// optional provenance JSON carrying the evaluated cohort list, a
+// committed minimum cell count, the per-cell results, the selected value,
+// and the publication-bar correctness witness.
+//
+// Reference: Hock & Schittkowski 1981 (the HS test cohort);
 //            Wachter & Biegler 2006 Section 2.3 (filter envelope);
 //            Fletcher & Leyffer 2002 Section 5 (slack-margin gamma
 //            tuning).
@@ -38,6 +44,7 @@
 #include <iomanip>
 #include <sstream>
 #include <iostream>
+#include <algorithm>
 #include <string_view>
 
 namespace
@@ -45,29 +52,50 @@ namespace
 
 constexpr std::array<double, 4> gamma_grid{1e-3, 1e-4, 1e-5, 1e-6};
 
-struct sweep_row
+// Publication bar (Phase-context locked): objective distance to the
+// analytic optimum and recomputed feasibility residual at the returned
+// point must both fall within these tolerances.
+constexpr double publication_obj_tol = 1e-8;
+constexpr double publication_cv_tol = 1e-6;
+
+// The enumerated filter-lineage cohort. Recorded explicitly (with a
+// committed minimum cell count) so a future shrink to a smaller subset is
+// detectable in the provenance record.
+constexpr std::array<std::string_view, 14> cohort_names{
+    "hs006", "hs007", "hs024", "hs026", "hs028", "hs035", "hs039",
+    "hs040", "hs043", "hs048", "hs050", "hs051", "hs071", "hs076"};
+constexpr std::size_t committed_min_cell_count = cohort_names.size();
+
+struct cell_result
+{
+    std::string name;
+    double f{};
+    double f_star{};
+    double obj_dist{};
+    double cv{};
+    std::uint32_t iters{};
+    bool passes{};
+};
+
+struct combo_result
 {
     double gamma_f{};
     double gamma_h{};
-    double hs043_f{};
-    double hs043_cv{};
-    std::uint32_t hs043_iters{};
-    bool hs024_passes{};
-    bool hs076_passes{};
-    double hs024_f{};
-    double hs024_cv{};
-    std::uint32_t hs024_iters{};
-    double hs076_f{};
-    double hs076_cv{};
-    std::uint32_t hs076_iters{};
+    std::vector<cell_result> cells;
+    bool clears_bar{};
+    std::size_t cells_passed{};
 };
 
 struct policy_sweep_result
 {
     std::string policy;
-    std::vector<sweep_row> rows;
-    bool have_candidate{};
-    sweep_row selected{};
+    std::vector<combo_result> combos;
+    bool keep_1e3{};
+    double selected_gamma_f{};
+    double selected_gamma_h{};
+    std::size_t cohort_size{};
+    std::size_t combo_1e3_passed{};
+    std::size_t combo_1e5_passed{};
     std::string correctness_witness;
 };
 
@@ -82,12 +110,11 @@ std::string fmt_num(double v)
     return os.str();
 }
 
-// Tag selector to dispatch policy-specific solver-option shapes; the
-// two filter policies use slightly different convergence thresholds in
-// their existing unit tests (e.g. filter_slsqp HS024 omits the
-// gradient threshold to avoid premature termination from the
-// least-squares lambda zeroing out ||grad f - A^T lambda||, while
-// filter_nw_sqp HS024 sets it to 1e-8).
+// Tag selector to dispatch policy-specific solver-option shapes; the two
+// filter policies use slightly different convergence thresholds (the
+// filter_slsqp lineage omits the gradient threshold to avoid premature
+// termination from the least-squares lambda zeroing out
+// ||grad f - A^T lambda||, while filter_nw_sqp sets one).
 struct slsqp_tag {};
 struct nw_sqp_tag {};
 
@@ -95,210 +122,194 @@ template <template <int> class Policy> struct policy_tag;
 template <> struct policy_tag<argmin::filter_slsqp_policy>  { using type = slsqp_tag;  };
 template <> struct policy_tag<argmin::filter_nw_sqp_policy> { using type = nw_sqp_tag; };
 
-// HS043 options aligned to per-policy unit-test shape.
-inline argmin::solver_options<> hs043_opts(slsqp_tag)
+// Convergence-favorable options per policy: a generous iteration budget
+// and tight thresholds so each combo gets its best shot at the bar (the
+// question is whether an envelope CAN reach the bar, not how quickly).
+inline argmin::solver_options<> cohort_opts(slsqp_tag)
 {
     argmin::solver_options<> opts;
     opts.max_iterations = 500;
     opts.set_step_threshold(1e-12);
-    opts.set_objective_threshold(1e-10);
+    opts.set_objective_threshold(1e-12);
     return opts;
 }
-inline argmin::solver_options<> hs043_opts(nw_sqp_tag)
+inline argmin::solver_options<> cohort_opts(nw_sqp_tag)
 {
     argmin::solver_options<> opts;
     opts.max_iterations = 500;
-    opts.set_gradient_threshold(1e-4);
-    opts.set_step_threshold(1e-12);
-    opts.set_objective_threshold(1e-15);
-    return opts;
-}
-
-// HS024 options aligned to per-policy unit-test shape.
-inline argmin::solver_options<> hs024_opts(slsqp_tag)
-{
-    argmin::solver_options<> opts;
-    opts.max_iterations = 50;
-    opts.set_objective_threshold(1e-12);
-    opts.set_step_threshold(1e-12);
-    return opts;
-}
-inline argmin::solver_options<> hs024_opts(nw_sqp_tag)
-{
-    argmin::solver_options<> opts;
-    opts.max_iterations = 50;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-12);
-    opts.set_step_threshold(1e-12);
-    return opts;
-}
-
-// HS076 options aligned to per-policy unit-test shape (both policies
-// use identical shape on this cell).
-inline argmin::solver_options<> hs076_opts()
-{
-    argmin::solver_options<> opts;
-    opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-6);
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
     return opts;
 }
 
-template <template <int> class Policy>
-sweep_row run_combo(double gamma_f, double gamma_h)
+// Independent feasibility witness: recompute the constraint residual at
+// the returned point. Equality rows come first (residual |c_eq|);
+// inequality rows follow the c_ineq >= 0 convention (residual
+// max(0, -c_ineq)). This does NOT consult the solver's self-reported
+// constraint_violation.
+template <typename Problem, typename Vec>
+double feasibility_at(const Problem& prob, const Vec& x)
+{
+    constexpr int M = Problem::constraint_count;
+    Eigen::Vector<double, M> c;
+    prob.constraints(x, c);
+    const int neq = prob.num_equality();
+    double viol = 0.0;
+    for(int i = 0; i < M; ++i)
+    {
+        const double ci = c[i];
+        if(i < neq)
+            viol = std::max(viol, std::abs(ci));
+        else
+            viol = std::max(viol, std::max(0.0, -ci));
+    }
+    return viol;
+}
+
+template <template <int> class Policy, typename Problem>
+cell_result run_cell(std::string_view name, double gamma_f, double gamma_h)
 {
     using tag = typename policy_tag<Policy>::type;
-    sweep_row row{};
-    row.gamma_f = gamma_f;
-    row.gamma_h = gamma_h;
+    constexpr int N = Problem::problem_dimension;
 
-    // HS043 primary cell.
-    {
-        argmin::hs043<> problem;
-        auto x0 = problem.initial_point();
-        auto opts = hs043_opts(tag{});
+    Problem problem;
+    auto x0 = problem.initial_point();
+    auto opts = cohort_opts(tag{});
 
-        typename Policy<argmin::hs043<>::problem_dimension>::options_type policy_opts;
-        policy_opts.gamma_f = gamma_f;
-        policy_opts.gamma_h = gamma_h;
+    typename Policy<N>::options_type policy_opts;
+    policy_opts.gamma_f = gamma_f;
+    policy_opts.gamma_h = gamma_h;
 
-        argmin::step_budget_solver solver{
-            Policy<argmin::hs043<>::problem_dimension>{},
-            problem, x0, opts, policy_opts};
-        auto result = solver.solve(opts);
-        row.hs043_f = result.objective_value;
-        row.hs043_cv = result.constraint_violation;
-        row.hs043_iters = result.iterations;
-    }
+    argmin::step_budget_solver solver{Policy<N>{}, problem, x0, opts, policy_opts};
+    auto result = solver.solve(opts);
 
-    // HS024 regression guard. Bar: f == Approx(-1.0).margin(1e-6),
-    // iters <= 14, cv < 1e-6 (existing test).
-    {
-        argmin::hs024<> problem;
-        auto x0 = problem.initial_point();
-        auto opts = hs024_opts(tag{});
+    cell_result cr{};
+    cr.name = std::string{name};
+    cr.f = result.objective_value;
+    cr.f_star = problem.optimal_value();
+    cr.obj_dist = std::abs(cr.f - cr.f_star);
+    cr.cv = feasibility_at(problem, result.x);
+    cr.iters = result.iterations;
+    cr.passes = (cr.obj_dist < publication_obj_tol) && (cr.cv < publication_cv_tol);
+    return cr;
+}
 
-        typename Policy<argmin::hs024<>::problem_dimension>::options_type policy_opts;
-        policy_opts.gamma_f = gamma_f;
-        policy_opts.gamma_h = gamma_h;
+template <template <int> class Policy>
+combo_result run_combo(double gf, double gh)
+{
+    combo_result combo{};
+    combo.gamma_f = gf;
+    combo.gamma_h = gh;
+    combo.cells.reserve(cohort_names.size());
 
-        argmin::step_budget_solver solver{
-            Policy<argmin::hs024<>::problem_dimension>{},
-            problem, x0, opts, policy_opts};
-        auto result = solver.solve(opts);
+    combo.cells.push_back(run_cell<Policy, argmin::hs006<>>("hs006", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs007<>>("hs007", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs024<>>("hs024", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs026<>>("hs026", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs028<>>("hs028", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs035<>>("hs035", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs039<>>("hs039", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs040<>>("hs040", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs043<>>("hs043", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs048<>>("hs048", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs050<>>("hs050", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs051<>>("hs051", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs071<>>("hs071", gf, gh));
+    combo.cells.push_back(run_cell<Policy, argmin::hs076<>>("hs076", gf, gh));
 
-        const bool f_ok = std::abs(result.objective_value - (-1.0)) < 1e-6;
-        const bool cv_ok = result.constraint_violation < 1e-6;
-        const bool iters_ok = result.iterations <= 14u;
-        row.hs024_passes = f_ok && cv_ok && iters_ok;
-        row.hs024_f = result.objective_value;
-        row.hs024_cv = result.constraint_violation;
-        row.hs024_iters = result.iterations;
-    }
+    combo.cells_passed = static_cast<std::size_t>(
+        std::count_if(combo.cells.begin(), combo.cells.end(),
+                      [](const cell_result& c) { return c.passes; }));
+    combo.clears_bar = combo.cells_passed == combo.cells.size();
+    return combo;
+}
 
-    // HS076 regression guard. Bar: f == Approx(-4.68).margin(0.1),
-    // cv < 1e-4, iters <= 200 (existing test).
-    {
-        argmin::hs076<> problem;
-        auto x0 = problem.initial_point();
-        auto opts = hs076_opts();
-
-        typename Policy<argmin::hs076<>::problem_dimension>::options_type policy_opts;
-        policy_opts.gamma_f = gamma_f;
-        policy_opts.gamma_h = gamma_h;
-
-        argmin::step_budget_solver solver{
-            Policy<argmin::hs076<>::problem_dimension>{},
-            problem, x0, opts, policy_opts};
-        auto result = solver.solve(opts);
-
-        const bool f_ok = std::abs(result.objective_value - (-4.68)) < 0.1;
-        const bool cv_ok = result.constraint_violation < 1e-4;
-        const bool iters_ok = result.iterations <= 200u;
-        row.hs076_passes = f_ok && cv_ok && iters_ok;
-        row.hs076_f = result.objective_value;
-        row.hs076_cv = result.constraint_violation;
-        row.hs076_iters = result.iterations;
-    }
-
-    return row;
+bool is_value(double a, double b)
+{
+    return std::abs(a - b) <= std::abs(b) * 1e-12;
 }
 
 template <template <int> class Policy>
 policy_sweep_result run_policy_sweep(const char* policy_name)
 {
-    std::printf("\n=== %s envelope sweep ===\n", policy_name);
-    std::printf("%-9s %-9s %-12s %-11s %-6s %-9s %-9s %-12s %-11s %-6s %-12s %-11s %-6s\n",
-                "gamma_f", "gamma_h",
-                "hs043_f", "hs043_cv", "iters",
-                "hs024_pass", "hs076_pass",
-                "hs024_f", "hs024_cv", "iters",
-                "hs076_f", "hs076_cv", "iters");
+    std::printf("\n=== %s envelope sweep (publication bar: |f-f*| < %.0e, cv < %.0e) ===\n",
+                policy_name, publication_obj_tol, publication_cv_tol);
+    std::printf("cohort: %zu cells\n", cohort_names.size());
 
-    std::vector<sweep_row> rows;
-    rows.reserve(16);
+    std::vector<combo_result> combos;
+    combos.reserve(gamma_grid.size() * gamma_grid.size());
     for(double gf : gamma_grid)
         for(double gh : gamma_grid)
-            rows.push_back(run_combo<Policy>(gf, gh));
+            combos.push_back(run_combo<Policy>(gf, gh));
 
-    for(const auto& r : rows)
+    std::printf("%-9s %-9s %-11s %-10s  %s\n",
+                "gamma_f", "gamma_h", "cells_pass", "clears", "failing_cells(obj_dist,cv)");
+    for(const auto& c : combos)
     {
-        std::printf(
-            "%-9.0e %-9.0e %-12.6f %-11.4e %-6u %-9d %-9d %-12.6f %-11.4e %-6u %-12.6f %-11.4e %-6u\n",
-            r.gamma_f, r.gamma_h,
-            r.hs043_f, r.hs043_cv, r.hs043_iters,
-            r.hs024_passes ? 1 : 0,
-            r.hs076_passes ? 1 : 0,
-            r.hs024_f, r.hs024_cv, r.hs024_iters,
-            r.hs076_f, r.hs076_cv, r.hs076_iters);
-    }
-
-    // Selection: minimise |hs043_f - (-44.0)| over combos passing both
-    // regression guards. Tie-break on lower hs043_cv.
-    sweep_row best{};
-    double best_dist = std::numeric_limits<double>::infinity();
-    bool have_candidate = false;
-    for(const auto& r : rows)
-    {
-        if(!r.hs024_passes || !r.hs076_passes)
-            continue;
-        const double dist = std::abs(r.hs043_f - (-44.0));
-        if(!have_candidate || dist < best_dist
-           || (dist == best_dist && r.hs043_cv < best.hs043_cv))
+        std::string fails;
+        for(const auto& cell : c.cells)
         {
-            best_dist = dist;
-            best = r;
-            have_candidate = true;
+            if(!cell.passes)
+            {
+                std::ostringstream os;
+                os << " " << cell.name << "(" << std::setprecision(3)
+                   << cell.obj_dist << "," << cell.cv << ")";
+                fails += os.str();
+            }
         }
+        std::printf("%-9.0e %-9.0e %-11s %-10s %s\n",
+                    c.gamma_f, c.gamma_h,
+                    (std::to_string(c.cells_passed) + "/"
+                     + std::to_string(c.cells.size())).c_str(),
+                    c.clears_bar ? "yes" : "no",
+                    fails.empty() ? " (none)" : fails.c_str());
     }
 
-    if(have_candidate)
+    // Burden-of-proof selection: keep 1e-3 only if the (1e-3, 1e-3) combo
+    // clears the bar across the whole cohort; otherwise revert to 1e-5.
+    const combo_result* combo_1e3 = nullptr;
+    const combo_result* combo_1e5 = nullptr;
+    for(const auto& c : combos)
     {
-        std::printf(
-            "\nSELECTED %s default: gamma_f=%.0e, gamma_h=%.0e (HS043 f=%.6f, cv=%.4e, iters=%u)\n",
-            policy_name, best.gamma_f, best.gamma_h,
-            best.hs043_f, best.hs043_cv, best.hs043_iters);
-    }
-    else
-    {
-        std::printf(
-            "\nSELECTED %s default: NONE (no combo passed both regression "
-            "guards) -- fallback gamma_f=1e-5, gamma_h=1e-5\n",
-            policy_name);
+        if(is_value(c.gamma_f, 1e-3) && is_value(c.gamma_h, 1e-3)) combo_1e3 = &c;
+        if(is_value(c.gamma_f, 1e-5) && is_value(c.gamma_h, 1e-5)) combo_1e5 = &c;
     }
 
     policy_sweep_result result;
     result.policy = policy_name;
-    result.rows = std::move(rows);
-    result.have_candidate = have_candidate;
-    result.selected = best;
-    result.correctness_witness =
-        have_candidate
-            ? "selected filter envelope passed HS024 and HS076 objective, "
-              "feasibility, iteration, and status guards before optimizing HS043"
-            : "no filter envelope candidate passed both objective, feasibility, "
-              "iteration, and status guards";
+    result.combos = std::move(combos);
+    result.cohort_size = cohort_names.size();
+    result.combo_1e3_passed = combo_1e3 ? combo_1e3->cells_passed : 0;
+    result.combo_1e5_passed = combo_1e5 ? combo_1e5->cells_passed : 0;
+    result.keep_1e3 = combo_1e3 && combo_1e3->clears_bar;
+    result.selected_gamma_f = result.keep_1e3 ? 1e-3 : 1e-5;
+    result.selected_gamma_h = result.keep_1e3 ? 1e-3 : 1e-5;
+
+    std::ostringstream witness;
+    if(result.keep_1e3)
+    {
+        witness << "gamma_f = gamma_h = 1e-3 cleared the publication bar "
+                   "(|f-f*| < 1e-8 and recomputed feasibility < 1e-6) across all "
+                << result.cohort_size << " filter-lineage cohort cells";
+    }
+    else
+    {
+        witness << "gamma_f = gamma_h = 1e-3 cleared only "
+                << result.combo_1e3_passed << "/" << result.cohort_size
+                << " cohort cells at the publication bar; reverted to 1e-5 "
+                   "(which cleared " << result.combo_1e5_passed << "/"
+                << result.cohort_size << ") per the burden-of-proof rule";
+    }
+    result.correctness_witness = witness.str();
+
+    std::printf(
+        "\nSELECTED %s default: gamma_f=%.0e, gamma_h=%.0e (%s)\n"
+        "  witness: %s\n",
+        policy_name, result.selected_gamma_f, result.selected_gamma_h,
+        result.keep_1e3 ? "kept 1e-3" : "reverted to 1e-5",
+        result.correctness_witness.c_str());
+
     return result;
 }
 
@@ -316,6 +327,17 @@ void write_json(const std::vector<policy_sweep_result>& results,
 
     out << "{\n";
     out << "  \"provenance_id\": \"" << provenance_id << "\",\n";
+    out << "  \"publication_bar\": {\"obj_tol\": " << fmt_num(publication_obj_tol)
+        << ", \"cv_tol\": " << fmt_num(publication_cv_tol) << "},\n";
+    out << "  \"cohort\": [";
+    for(std::size_t i = 0; i < cohort_names.size(); ++i)
+    {
+        if(i) out << ", ";
+        out << "\"" << cohort_names[i] << "\"";
+    }
+    out << "],\n";
+    out << "  \"cohort_size\": " << cohort_names.size() << ",\n";
+    out << "  \"committed_min_cell_count\": " << committed_min_cell_count << ",\n";
     out << "  \"grid\": {\n";
     out << "    \"gamma_f\": [";
     for(std::size_t i = 0; i < gamma_grid.size(); ++i)
@@ -339,26 +361,30 @@ void write_json(const std::vector<policy_sweep_result>& results,
         const auto& result = results[p];
         out << "    {\n";
         out << "      \"policy\": \"" << result.policy << "\",\n";
-        out << "      \"rows\": [\n";
-        for(std::size_t i = 0; i < result.rows.size(); ++i)
+        out << "      \"combos\": [\n";
+        for(std::size_t i = 0; i < result.combos.size(); ++i)
         {
-            const auto& r = result.rows[i];
-            out << "        {"
-                << "\"gamma_f\": " << fmt_num(r.gamma_f)
-                << ", \"gamma_h\": " << fmt_num(r.gamma_h)
-                << ", \"hs043_f\": " << fmt_num(r.hs043_f)
-                << ", \"hs043_cv\": " << fmt_num(r.hs043_cv)
-                << ", \"hs043_iters\": " << r.hs043_iters
-                << ", \"hs024_passes\": " << (r.hs024_passes ? "true" : "false")
-                << ", \"hs076_passes\": " << (r.hs076_passes ? "true" : "false")
-                << ", \"hs024_f\": " << fmt_num(r.hs024_f)
-                << ", \"hs024_cv\": " << fmt_num(r.hs024_cv)
-                << ", \"hs024_iters\": " << r.hs024_iters
-                << ", \"hs076_f\": " << fmt_num(r.hs076_f)
-                << ", \"hs076_cv\": " << fmt_num(r.hs076_cv)
-                << ", \"hs076_iters\": " << r.hs076_iters
-                << "}";
-            if(i + 1 < result.rows.size()) out << ",";
+            const auto& combo = result.combos[i];
+            out << "        {\"gamma_f\": " << fmt_num(combo.gamma_f)
+                << ", \"gamma_h\": " << fmt_num(combo.gamma_h)
+                << ", \"clears_bar\": " << (combo.clears_bar ? "true" : "false")
+                << ", \"cells_passed\": " << combo.cells_passed
+                << ", \"cells\": [";
+            for(std::size_t j = 0; j < combo.cells.size(); ++j)
+            {
+                const auto& cell = combo.cells[j];
+                out << "{\"name\": \"" << cell.name << "\""
+                    << ", \"f\": " << fmt_num(cell.f)
+                    << ", \"f_star\": " << fmt_num(cell.f_star)
+                    << ", \"obj_dist\": " << fmt_num(cell.obj_dist)
+                    << ", \"cv\": " << fmt_num(cell.cv)
+                    << ", \"iters\": " << cell.iters
+                    << ", \"passes\": " << (cell.passes ? "true" : "false")
+                    << "}";
+                if(j + 1 < combo.cells.size()) out << ", ";
+            }
+            out << "]}";
+            if(i + 1 < result.combos.size()) out << ",";
             out << "\n";
         }
         out << "      ],\n";
@@ -366,17 +392,14 @@ void write_json(const std::vector<policy_sweep_result>& results,
         out << "        \"item\": \"filter_envelope\",\n";
         out << "        \"grid_id\": \"gamma_f_x_gamma_h\",\n";
         out << "        \"policy\": \"" << result.policy << "\",\n";
-        out << "        \"selected_value\": ";
-        if(result.have_candidate)
-        {
-            out << "{\"gamma_f\": " << fmt_num(result.selected.gamma_f)
-                << ", \"gamma_h\": " << fmt_num(result.selected.gamma_h) << "}";
-        }
-        else
-        {
-            out << "null";
-        }
-        out << ",\n";
+        out << "        \"selected_value\": {\"gamma_f\": "
+            << fmt_num(result.selected_gamma_f) << ", \"gamma_h\": "
+            << fmt_num(result.selected_gamma_h) << "},\n";
+        out << "        \"kept_1e3\": " << (result.keep_1e3 ? "true" : "false") << ",\n";
+        out << "        \"combo_1e3_cells_passed\": " << result.combo_1e3_passed << ",\n";
+        out << "        \"combo_1e5_cells_passed\": " << result.combo_1e5_passed << ",\n";
+        out << "        \"cohort_size\": " << result.cohort_size << ",\n";
+        out << "        \"committed_min_cell_count\": " << committed_min_cell_count << ",\n";
         out << "        \"correctness_witness\": \""
             << result.correctness_witness << "\",\n";
         out << "        \"provenance_id\": \"" << provenance_id << "\"\n";
@@ -414,7 +437,7 @@ int main(int argc, char** argv)
         else if(a == "--help" || a == "-h")
         {
             std::cout << "filter_envelope_sweep: filter_slsqp/filter_nw_sqp "
-                         "gamma_f x gamma_h sweep.\n"
+                         "gamma_f x gamma_h sweep at the publication bar.\n"
                          "  --quick             run the smoke-sized grid\n"
                          "  --output PATH       JSON output path\n"
                          "  --provenance-id S   evidence record identifier\n";
