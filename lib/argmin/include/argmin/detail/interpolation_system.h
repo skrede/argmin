@@ -111,7 +111,7 @@ struct interpolation_system
 template <typename Scalar, int N>
 Scalar hq_element(const interpolation_system<Scalar, N>& sys, int32_t i, int32_t j)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     return sys.hq[hq_index(i, j, n)];
 }
 
@@ -143,7 +143,7 @@ interpolation_system<Scalar, N> bootstrap_interpolation_system(
     const Eigen::Vector<Scalar, N>& upper,
     EvalFn&& eval_fn)
 {
-    const int32_t n = x0.size();
+    const int32_t n = static_cast<int32_t>(x0.size());
     const int32_t m = 2 * n + 1;
     const int32_t nptm = m - n - 1; // = n for default NPT=2n+1
 
@@ -324,7 +324,7 @@ Scalar evaluate_interpolation_model(
     const interpolation_system<Scalar, N>& sys,
     const Eigen::Vector<Scalar, N>& d)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
 
     // Linear term: gopt^T d.
@@ -366,7 +366,7 @@ Eigen::Vector<Scalar, N> model_gradient_at(
     const interpolation_system<Scalar, N>& sys,
     const Eigen::Vector<Scalar, N>& d)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
 
     Eigen::Vector<Scalar, N> grad = sys.gopt;
@@ -428,7 +428,7 @@ vlag_beta_result<Scalar, N> compute_vlag_beta(
     const interpolation_system<Scalar, N>& sys,
     const Eigen::Vector<Scalar, N>& d)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
     const int32_t nptm = m - n - 1;
 
@@ -525,7 +525,7 @@ void update_bmat_zmat(
     Scalar denom,
     int32_t knew)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
     const int32_t nptm = m - n - 1;
 
@@ -637,7 +637,7 @@ Eigen::Vector<Scalar, interpolation_system<Scalar, N>::MaxM> compute_lagrange_at
     const interpolation_system<Scalar, N>& sys,
     const Eigen::Vector<Scalar, N>& x_query)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
     const int32_t nptm = m - n - 1;
 
@@ -702,7 +702,7 @@ Eigen::Vector<Scalar, N> lagrange_gradient_bmat(
     const interpolation_system<Scalar, N>& sys,
     int32_t knew)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
     const int32_t nptm = m - n - 1;
 
@@ -763,7 +763,7 @@ void update_model_on_replacement(
     int32_t knew,
     const Eigen::Vector<Scalar, N>& d)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
     const int32_t nptm = m - n - 1;
 
@@ -895,7 +895,7 @@ void update_model_on_replacement(
 template <typename Scalar, int N>
 void shift_xbase(interpolation_system<Scalar, N>& sys)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
     const int32_t nptm = m - n - 1;
 

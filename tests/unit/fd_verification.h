@@ -49,19 +49,20 @@ template <typename F>
                                        double con = 1.4, double safe = 2.0) -> double
 {
     const double con2 = con * con;
-    std::vector<std::vector<double>> a(n_tab, std::vector<double>(n_tab, 0.0));
+    std::vector<std::vector<double>> a(static_cast<std::size_t>(n_tab),
+                                       std::vector<double>(static_cast<std::size_t>(n_tab), 0.0));
 
     double hh = h0;
     a[0][0] = (f(hh) - f(-hh)) / (2.0 * hh);
     double err = std::numeric_limits<double>::max();
     double ans = a[0][0];
 
-    for(int i = 1; i < n_tab; ++i)
+    for(std::size_t i = 1; i < static_cast<std::size_t>(n_tab); ++i)
     {
         hh /= con;
         a[0][i] = (f(hh) - f(-hh)) / (2.0 * hh);
         double fac = con2;
-        for(int j = 1; j <= i; ++j)
+        for(std::size_t j = 1; j <= i; ++j)
         {
             a[j][i] = (a[j - 1][i] * fac - a[j - 1][i - 1]) / (fac - 1.0);
             fac *= con2;

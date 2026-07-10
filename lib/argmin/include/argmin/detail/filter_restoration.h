@@ -61,10 +61,10 @@ template <typename Scalar, int N, typename Problem>
 restoration_result<Scalar, N> restore_l1(
     const Problem& problem,
     const Eigen::Vector<Scalar, N>& x0,
-    const Eigen::Vector<Scalar, N>& gradient,
+    const Eigen::Vector<Scalar, N>& /*gradient*/,
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper,
-    Scalar sigma_restore = Scalar(1e4),
+    Scalar /*sigma_restore*/ = Scalar(1e4),
     std::uint16_t max_steps = 10,
     Scalar stall_ratio = Scalar(0.99),
     std::uint16_t stall_window = 5)

@@ -281,7 +281,6 @@ TEST_CASE("byrd_omojokun rank-deficient A triggers Cauchy fallback",
 
     hessian_op_2d hop{B};
     const double f_old = 0.0;
-    const double c_norm_old = c.norm();
     trial_eval_quadratic teval{g, B, A, c, f_old};
 
     double penalty = 1.0;

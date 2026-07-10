@@ -61,7 +61,7 @@ bool all_variables_free(const Eigen::Vector<Scalar, N>& x,
 {
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
     constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-    const int n = x.size();
+    const int n = static_cast<int>(x.size());
 
     for(int i = 0; i < n; ++i)
     {

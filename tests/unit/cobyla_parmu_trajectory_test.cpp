@@ -48,6 +48,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -114,7 +115,7 @@ void accumulate(int max_steps, int& joint_steps, int& parmu_grew_on_joint,
     Problem problem;
     Eigen::VectorXd x0 = problem.initial_point();
     solver_options opts;
-    opts.max_iterations = max_steps;
+    opts.max_iterations = static_cast<std::uint32_t>(max_steps);
 
     cobyla_policy pol;
     auto s = pol.init(problem, x0, opts);

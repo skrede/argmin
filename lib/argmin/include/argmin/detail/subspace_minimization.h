@@ -59,7 +59,7 @@ public:
         Bd_ = B.multiply((x_cauchy - x).eval());
         r_F_.resize(nf);
         for(int j = 0; j < nf; ++j)
-            r_F_[j] = g[free_indices[j]] + Bd_[free_indices[j]];
+            r_F_[j] = g[free_indices[static_cast<std::size_t>(j)]] + Bd_[free_indices[static_cast<std::size_t>(j)]];
 
         // Build reduced Hessian B_FF
         B_FF_ = B.reduced_hessian(free_indices);
@@ -80,7 +80,7 @@ public:
         // Assemble full step: x_new = x_cauchy + d (d_i = 0 for fixed variables)
         x_new_ = x_cauchy;
         for(int j = 0; j < nf; ++j)
-            x_new_[free_indices[j]] += d_hat_[j];
+            x_new_[free_indices[static_cast<std::size_t>(j)]] += d_hat_[j];
 
         x_new_ = project(x_new_, lower, upper);
 
@@ -114,7 +114,7 @@ Eigen::Vector<Scalar, N> subspace_minimize(
     const std::vector<int>& free_indices,
     const compact_lbfgs<Scalar, N, M>& B)
 {
-    subspace_minimizer<Scalar, N> sm(x.size());
+    subspace_minimizer<Scalar, N> sm(static_cast<int>(x.size()));
     return sm.solve(x, x_cauchy, g, lower, upper, free_indices, B);
 }
 

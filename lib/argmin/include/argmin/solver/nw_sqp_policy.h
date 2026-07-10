@@ -1149,7 +1149,6 @@ struct nw_sqp_policy
     template <typename P>
     void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
-        const int n = static_cast<int>(x0.size());
         const int m = s.n_eq + s.n_ineq;
         // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so
         // a dynamic-N warm reset does not materialize a heap temporary when the

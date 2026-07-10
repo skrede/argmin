@@ -56,7 +56,7 @@ template <typename Scalar, int N>
 Eigen::Matrix<Scalar, N, N> build_explicit_hessian(
     const detail::interpolation_system<Scalar, N>& sys)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
 
     Eigen::Matrix<Scalar, N, N> H;
@@ -189,7 +189,7 @@ struct bobyqa_policy
                                          const Eigen::Vector<double, N>& lower_scaled,
                                          const Eigen::Vector<double, N>& upper_scaled)
     {
-        const int n = lower_scaled.size();
+        const int n = static_cast<int>(lower_scaled.size());
         for(int i = 0; i < n; ++i)
         {
             double range_i = upper_scaled[i] - lower_scaled[i];
@@ -206,7 +206,7 @@ struct bobyqa_policy
                                     const Eigen::Vector<double, N>& lower_scaled,
                                     const Eigen::Vector<double, N>& upper_scaled)
     {
-        const int n = x_scaled.size();
+        const int n = static_cast<int>(x_scaled.size());
         for(int i = 0; i < n; ++i)
         {
             if(std::isfinite(lower_scaled[i]))
@@ -230,7 +230,7 @@ struct bobyqa_policy
         requires objective<Problem> && bound_constrained<Problem>
     state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& opts)
+                    const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
         state_type<Problem> s;
@@ -403,7 +403,7 @@ struct bobyqa_policy
         const Sys& sys, const VlagVec& vlag, double beta, double delta,
         const Eigen::Vector<double, N>& ref_point)
     {
-        const int nn = sys.xbase.size();
+        const int nn = static_cast<int>(sys.xbase.size());
         const int mm = sys.m_points;
         const int nptm = mm - nn - 1;
         const double delsq = delta * delta;
@@ -458,7 +458,7 @@ struct bobyqa_policy
         Sys& sys, const Eigen::Vector<double, N>& sl,
         const Eigen::Vector<double, N>& su, int& itest)
     {
-        const int n = sys.xbase.size();
+        const int n = static_cast<int>(sys.xbase.size());
         const int mm = sys.m_points;
         const int nptm = mm - n - 1;
 
@@ -560,7 +560,7 @@ struct bobyqa_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        const int n = s.x.size();
+        const int n = static_cast<int>(s.x.size());
         const int nptm = s.m - n - 1;
         const double old_incumbent_f = s.objective_value;
 

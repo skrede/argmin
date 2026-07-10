@@ -65,7 +65,6 @@ bool cobyla_trstlp(int n, int m,
 {
     // 1-indexed working storage (index 0 unused) so the transcription follows
     // Powell's reference line for line.
-    const int mp = m + 1;
 
     // z is an n x n orthogonal matrix (columns 1..n).
     Eigen::Matrix<Scalar, argmin::dynamic_dimension, argmin::dynamic_dimension> z(n + 1, n + 1);

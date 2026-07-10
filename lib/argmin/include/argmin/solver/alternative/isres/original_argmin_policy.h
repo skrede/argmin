@@ -141,11 +141,9 @@ struct original_argmin_policy
     template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& opts)
+                    const Eigen::Vector<double, N>& /*x0*/,
+                    const solver_options<Convergence>& /*opts*/)
     {
-        constexpr int MC = state_type<Problem>::M;
-
         const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
@@ -257,9 +255,7 @@ struct original_argmin_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        constexpr int MC = state_type<P>::M;
-
-        const int n = s.x.size();
+        const int n = static_cast<int>(s.x.size());
         const int n_c = s.n_eq + s.n_ineq;
         double old_best = s.objective_value;
 
@@ -412,9 +408,7 @@ struct original_argmin_policy
     template <typename P>
     void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
-        constexpr int MC = state_type<P>::M;
-
-        const int n = x0.size();
+        const int n = static_cast<int>(x0.size());
 
         // Re-initialize population uniformly
         s.population = detail::initialize_population<N>(

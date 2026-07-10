@@ -58,7 +58,7 @@ Eigen::Vector<Scalar, N> solve_trust_region_box(
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper)
 {
-    const int n = g.size();
+    const int n = static_cast<int>(g.size());
     const Scalar eps = std::numeric_limits<Scalar>::epsilon();
 
     Eigen::Vector<Scalar, N> d = Eigen::Vector<Scalar, N>::Zero(n);
@@ -390,7 +390,7 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
                        const Eigen::VectorXd& lagrange_values_at_xnew,
                        Scalar delta)
 {
-    const int m = Y.cols();
+    const int m = static_cast<int>(Y.cols());
     const Scalar delsq = delta * delta;
 
     // Find the best point (lowest f) -- never replace it
@@ -458,7 +458,7 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
 template <typename Scalar = double, int N = argmin::dynamic_dimension, int P = argmin::dynamic_dimension>
 int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
                        const Eigen::Vector<Scalar, P>& f_values,
-                       const Eigen::Vector<Scalar, N>& x_new,
+                       const Eigen::Vector<Scalar, N>& /*x_new*/,
                        Scalar f_new,
                        const Eigen::Vector<Scalar, N>& x_k)
 {
@@ -528,7 +528,7 @@ std::pair<Scalar, Scalar> altmov_clip_step_bounds(
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper)
 {
-    const int n = x_opt.size();
+    const int n = static_cast<int>(x_opt.size());
     Scalar distsq = direction.squaredNorm();
     Scalar subd = adelt / std::sqrt(std::max(distsq, std::numeric_limits<Scalar>::epsilon()));
     Scalar slbd = -subd;
@@ -570,7 +570,7 @@ std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_line_search(
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     const int32_t m = sys.m_points;
     Scalar best_score = Scalar(-1);
     Eigen::Vector<Scalar, N> best_point = sys.xopt;
@@ -614,7 +614,7 @@ std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_cauchy_step(
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper)
 {
-    const int32_t n = sys.xbase.size();
+    const int32_t n = static_cast<int32_t>(sys.xbase.size());
     Scalar best_score = Scalar(0);
     Eigen::Vector<Scalar, N> best_point = sys.xopt;
 
@@ -811,7 +811,7 @@ Eigen::Vector<Scalar, N> lagrange_gradient(
 // https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L1017
 template <typename Scalar = double, int N = argmin::dynamic_dimension>
 std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_cauchy_step(
-    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
+    const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& /*Y*/,
     const Eigen::Vector<Scalar, N>& x_opt,
     int knew,
     Scalar adelt,

@@ -178,7 +178,7 @@ public:
         const Eigen::Vector<Scalar, N>& upper,
         Rng& rng)
     {
-        const int n = parent.size();
+        const int n = static_cast<int>(parent.size());
         std::normal_distribution<Scalar> normal(Scalar(0), Scalar(1));
 
         Scalar global_noise = tau * normal(rng);

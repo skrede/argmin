@@ -62,7 +62,7 @@ void check_hs_gradient_and_jacobian()
 
     Problem p;
     const Eigen::Vector<double, N> x0 = p.initial_point();
-    const Eigen::Vector<double, N> d = perturbation<double, N>(x0.size());
+    const Eigen::Vector<double, N> d = perturbation<double, N>(static_cast<int>(x0.size()));
 
     const std::array<Eigen::Vector<double, N>, 3> points{
         x0, Eigen::Vector<double, N>(x0 + d), Eigen::Vector<double, N>(x0 - d)};

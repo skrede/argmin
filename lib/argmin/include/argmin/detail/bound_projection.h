@@ -38,9 +38,9 @@ Scalar compute_alpha_max(const Eigen::Vector<Scalar, N>& x,
                           const Eigen::Vector<Scalar, N>& upper)
 {
     Scalar alpha = std::numeric_limits<Scalar>::infinity();
-    const int n = x.size();
+    const Eigen::Index n = x.size();
 
-    for(int i = 0; i < n; ++i)
+    for(Eigen::Index i = 0; i < n; ++i)
     {
         if(d[i] > Scalar(0) && upper[i] < std::numeric_limits<Scalar>::infinity())
             alpha = std::min(alpha, (upper[i] - x[i]) / d[i]);

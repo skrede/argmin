@@ -30,7 +30,6 @@ namespace
 struct convex_eq
 {
     static constexpr int problem_dimension = 2;
-    static constexpr int constraint_count = 1;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -84,7 +83,6 @@ struct convex_eq
 struct convex_eq_ineq
 {
     static constexpr int problem_dimension = 2;
-    static constexpr int constraint_count = 2;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 1; }

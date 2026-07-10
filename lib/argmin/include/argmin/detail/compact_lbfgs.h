@@ -115,7 +115,7 @@ public:
         // from near-orthogonal pairs (common at bound constraints).
         Scalar sTy_effective = std::max(sTy, eps * sTs);
 
-        const int n = s.size();
+        const Eigen::Index n = s.size();
 
         // Lazy row-dimension initialization on first push (when N is dynamic)
         if(count_ == 0 && S_.rows() == 0)
@@ -233,7 +233,7 @@ public:
         WFt_.resize(2 * k, nf);
         for(int j = 0; j < nf; ++j)
         {
-            int idx = free_indices[j];
+            int idx = free_indices[static_cast<std::size_t>(j)];
             WFt_.col(j).head(k) = theta_ * S_.row(idx).head(k).transpose();
             WFt_.col(j).tail(k) = Y_.row(idx).head(k).transpose();
         }

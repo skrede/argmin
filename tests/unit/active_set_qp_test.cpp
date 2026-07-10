@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <cstddef>
 
 using Catch::Approx;
 using namespace argmin;
@@ -410,7 +411,7 @@ TEST_CASE("initial_working_set admits only linearly independent rows",
     REQUIRE_FALSE(W.empty());
     Eigen::MatrixXd A_W(static_cast<int>(W.size()), 2);
     for(int k = 0; k < static_cast<int>(W.size()); ++k)
-        A_W.row(k) = A.row(W[k]);
+        A_W.row(k) = A.row(W[static_cast<std::size_t>(k)]);
     const int rank = static_cast<int>(A_W.colPivHouseholderQr().rank());
     CHECK(rank == static_cast<int>(W.size()));  // no linearly dependent row admitted
 }

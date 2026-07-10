@@ -85,7 +85,7 @@ std::vector<int> initial_working_set(
     const int n = static_cast<int>(A_full.cols());
 
     std::vector<int> candidates;
-    candidates.reserve(m);
+    candidates.reserve(static_cast<std::size_t>(m));
     for(int i = 0; i < n_eq; ++i)
         candidates.push_back(i);
     for(int i = n_eq; i < m; ++i)
@@ -135,8 +135,8 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp
     const Eigen::Matrix<Scalar, Mw, N>& A_W,
     bool* reduced_hessian_ok = nullptr)
 {
-    const int n = G.rows();
-    const int m = A_W.rows();
+    const int n = static_cast<int>(G.rows());
+    const int m = static_cast<int>(A_W.rows());
     if(reduced_hessian_ok) *reduced_hessian_ok = true;
 
     // No active constraints: unconstrained sub-step
@@ -287,11 +287,11 @@ int most_negative_multiplier(
         int best_global = std::numeric_limits<int>::max();
         for(int k = 0; k < wsize; ++k)
         {
-            if(working_set[k] < n_eq) continue;
+            if(working_set[static_cast<std::size_t>(k)] < n_eq) continue;
             if(k < lambda_W.size() && lambda_W[k] < -tolerance
-               && working_set[k] < best_global)
+               && working_set[static_cast<std::size_t>(k)] < best_global)
             {
-                best_global = working_set[k];
+                best_global = working_set[static_cast<std::size_t>(k)];
                 drop_idx = k;
             }
         }
@@ -302,7 +302,7 @@ int most_negative_multiplier(
     int drop_idx = -1;
     for(int k = 0; k < wsize; ++k)
     {
-        if(working_set[k] < n_eq) continue;
+        if(working_set[static_cast<std::size_t>(k)] < n_eq) continue;
         if(k < lambda_W.size() && lambda_W[k] < min_val)
         {
             min_val = lambda_W[k];
@@ -318,11 +318,11 @@ Eigen::Matrix<Scalar, Eigen::Dynamic, N> extract_working_rows(
     const Eigen::Matrix<Scalar, M, N>& A_full,
     const std::vector<int>& working_set)
 {
-    const int n = A_full.cols();
+    const int n = static_cast<int>(A_full.cols());
     const int wsize = static_cast<int>(working_set.size());
     Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_W(wsize, n);
     for(int k = 0; k < wsize; ++k)
-        A_W.row(k) = A_full.row(working_set[k]);
+        A_W.row(k) = A_full.row(working_set[static_cast<std::size_t>(k)]);
     return A_W;
 }
 
@@ -337,7 +337,7 @@ Eigen::Vector<Scalar, M> build_full_lambda(
     Eigen::Vector<Scalar, M> lambda = Eigen::Vector<Scalar, M>::Zero(total_constraints);
     const int wsize = static_cast<int>(working_set.size());
     for(int k = 0; k < wsize && k < lambda_W.size(); ++k)
-        lambda[working_set[k]] = lambda_W[k];
+        lambda[working_set[static_cast<std::size_t>(k)]] = lambda_W[k];
     return lambda;
 }
 
@@ -352,7 +352,7 @@ void build_full_lambda(
     lambda_full.setZero(total_constraints);
     const int wsize = static_cast<int>(working_set.size());
     for(int k = 0; k < wsize && k < lambda_W.size(); ++k)
-        lambda_full[working_set[k]] = lambda_W[k];
+        lambda_full[working_set[static_cast<std::size_t>(k)]] = lambda_W[k];
 }
 
 // In-place initial_working_set: writes into pre-allocated output vector.
@@ -494,9 +494,9 @@ public:
         , A_aug_(max_constraints, n)
         , b_aug_(max_constraints)
     {
-        W_.reserve(max_constraints);
-        last_W_.reserve(max_constraints);
-        iws_candidates_.reserve(max_constraints);
+        W_.reserve(static_cast<std::size_t>(max_constraints));
+        last_W_.reserve(static_cast<std::size_t>(max_constraints));
+        iws_candidates_.reserve(static_cast<std::size_t>(max_constraints));
     }
 
     active_set_qp_solver() = default;
@@ -530,9 +530,9 @@ public:
         const Eigen::Vector<Scalar, N>& x0,
         const argmin::qp_options& opts = {})
     {
-        const int n = G.rows();
-        const int m_eq = A_eq.rows();
-        const int m_ineq = A_ineq.rows();
+        const int n = static_cast<int>(G.rows());
+        const int m_eq = static_cast<int>(A_eq.rows());
+        const int m_ineq = static_cast<int>(A_ineq.rows());
         assemble_constraints(m_eq, m_ineq, A_eq, b_eq, A_ineq, b_ineq);
         run_active_set(n, m_eq, m_ineq, G, d, x0, opts);
         qp_result<Scalar, N, M> res;
@@ -555,9 +555,9 @@ public:
         const argmin::qp_options& opts,
         qp_result<Scalar, N, M>& out)
     {
-        const int n = G.rows();
-        const int m_eq = A_eq.rows();
-        const int m_ineq = A_ineq.rows();
+        const int n = static_cast<int>(G.rows());
+        const int m_eq = static_cast<int>(A_eq.rows());
+        const int m_ineq = static_cast<int>(A_ineq.rows());
         assemble_constraints(m_eq, m_ineq, A_eq, b_eq, A_ineq, b_ineq);
         run_active_set(n, m_eq, m_ineq, G, d, x0, opts);
         write_result(out, n, m_eq + m_ineq);
@@ -581,8 +581,8 @@ public:
         const Eigen::Vector<Scalar, N>& x0,
         const argmin::qp_options& opts = {})
     {
-        const int n = G.rows();
-        const int m_eq = A_eq.rows();
+        const int n = static_cast<int>(G.rows());
+        const int m_eq = static_cast<int>(A_eq.rows());
         const int m_aug = assemble_box(n, A_eq, b_eq, A_ineq, b_ineq, lower, upper);
         run_active_set(n, m_eq, m_aug, G, d, x0, opts);
         qp_result<Scalar, N, M> res;
@@ -605,8 +605,8 @@ public:
         const argmin::qp_options& opts,
         qp_result<Scalar, N, M>& out)
     {
-        const int n = G.rows();
-        const int m_eq = A_eq.rows();
+        const int n = static_cast<int>(G.rows());
+        const int m_eq = static_cast<int>(A_eq.rows());
         const int m_aug = assemble_box(n, A_eq, b_eq, A_ineq, b_ineq, lower, upper);
         run_active_set(n, m_eq, m_aug, G, d, x0, opts);
         write_result(out, n, m_eq + m_aug);
@@ -649,8 +649,8 @@ private:
         const Eigen::Vector<Scalar, N>& lower,
         const Eigen::Vector<Scalar, N>& upper)
     {
-        const int m_eq = A_eq.rows();
-        const int m_ineq = A_ineq.rows();
+        const int m_eq = static_cast<int>(A_eq.rows());
+        const int m_ineq = static_cast<int>(A_ineq.rows());
         const int m_aug = m_ineq + 2 * n;
 
         if(m_eq > 0)
@@ -755,7 +755,7 @@ private:
 
             const int wsize = static_cast<int>(W_.size());
             for(int k = 0; k < wsize; ++k)
-                A_W_.row(k) = A_full_.row(W_[k]);
+                A_W_.row(k) = A_full_.row(W_[static_cast<std::size_t>(k)]);
 
             bool reduced_hessian_ok = true;
             solve_equality_subproblem_into(
@@ -1112,9 +1112,9 @@ qp_result<Scalar, N> solve_qp(
     const Eigen::Vector<Scalar, N>& x0,
     const argmin::qp_options& opts = {})
 {
-    const int n = G.rows();
-    const int m_eq = A_eq.rows();
-    const int m_ineq = A_ineq.rows();
+    const int n = static_cast<int>(G.rows());
+    const int m_eq = static_cast<int>(A_eq.rows());
+    const int m_ineq = static_cast<int>(A_ineq.rows());
     const int m_total = m_eq + m_ineq;
     const int max_iter = static_cast<int>(opts.max_iterations);
     const auto tol = static_cast<Scalar>(opts.tolerance);
@@ -1234,8 +1234,8 @@ qp_result<Scalar, N> solve_qp(
     const Eigen::Vector<Scalar, N>& x0,
     const argmin::qp_options& opts = {})
 {
-    const int n = G.rows();
-    const int m_ineq = A_ineq.rows();
+    const int n = static_cast<int>(G.rows());
+    const int m_ineq = static_cast<int>(A_ineq.rows());
     const int m_box = 2 * n;
 
     // Build augmented inequality system: [A_ineq; I; -I] x >= [b_ineq; l; -u]

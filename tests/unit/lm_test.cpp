@@ -147,7 +147,7 @@ TEST_CASE("lm_policy: exponential fitting", "[lm]")
     opts.set_gradient_threshold(1e-10);
 
     step_budget_solver solver{lm_policy{}, problem, x0, opts};
-    auto result = solver.solve(opts);
+    [[maybe_unused]] auto result = solver.solve(opts);
 
     // Data is approximate exponential, so residual won't be zero
     CHECK(solver.state().objective_value < 0.01);

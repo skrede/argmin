@@ -10,6 +10,7 @@
 #include <vector>
 #include <cmath>
 #include <limits>
+#include <cstddef>
 #include <algorithm>
 
 using Catch::Approx;
@@ -46,8 +47,9 @@ VectorXd reference_Bv(const std::vector<VectorXd>& ss,
     std::vector<int> acc;
     for(int i = 0; i < static_cast<int>(ss.size()); ++i)
     {
-        if(ss[i].squaredNorm() < epsd * epsd) continue;
-        if(ss[i].dot(ys[i]) <= 0.0) continue;
+        const auto ui = static_cast<std::size_t>(i);
+        if(ss[ui].squaredNorm() < epsd * epsd) continue;
+        if(ss[ui].dot(ys[ui]) <= 0.0) continue;
         acc.push_back(i);
     }
     const int k = static_cast<int>(acc.size());
@@ -57,16 +59,22 @@ VectorXd reference_Bv(const std::vector<VectorXd>& ss,
     VecL Dc(k);
     for(int c = 0; c < k; ++c)
     {
-        const int i = acc[c];
-        for(int r = 0; r < n; ++r) { S(r, c) = ss[i](r); Y(r, c) = ys[i](r); }
-        const double floor_i = epsd * ss[i].squaredNorm();
-        Dc(c) = static_cast<ld>(std::max(ss[i].dot(ys[i]), floor_i));
+        const int i = acc[static_cast<std::size_t>(c)];
+        const auto ui = static_cast<std::size_t>(i);
+        for(int r = 0; r < n; ++r)
+        {
+            S(r, c) = static_cast<ld>(ss[ui](r));
+            Y(r, c) = static_cast<ld>(ys[ui](r));
+        }
+        const double floor_i = epsd * ss[ui].squaredNorm();
+        Dc(c) = static_cast<ld>(std::max(ss[ui].dot(ys[ui]), floor_i));
     }
     const int last = acc.back();
-    const double floor_l = epsd * ss[last].squaredNorm();
-    const double sTy_eff_l = std::max(ss[last].dot(ys[last]), floor_l);
+    const auto ulast = static_cast<std::size_t>(last);
+    const double floor_l = epsd * ss[ulast].squaredNorm();
+    const double sTy_eff_l = std::max(ss[ulast].dot(ys[ulast]), floor_l);
     const ld theta = static_cast<ld>(
-        std::clamp(ys[last].squaredNorm() / sTy_eff_l, 1e-10, 1e10));
+        std::clamp(ys[ulast].squaredNorm() / sTy_eff_l, 1e-10, 1e10));
 
     MatL STS = S.transpose() * S;
     MatL StY = S.transpose() * Y;
@@ -85,7 +93,7 @@ VectorXd reference_Bv(const std::vector<VectorXd>& ss,
     W.rightCols(k) = Y;
 
     VecL vl(n);
-    for(int r = 0; r < n; ++r) vl(r) = v(r);
+    for(int r = 0; r < n; ++r) vl(r) = static_cast<ld>(v(r));
     VecL z = M.fullPivLu().solve(W.transpose() * vl);
     VecL Bv = theta * vl - W * z;
 
@@ -133,7 +141,8 @@ TEST_CASE("compact_lbfgs B*v matches a high-precision reference on a "
     const int n = 4;
 
     compact_lbfgs<double, Eigen::Dynamic, 7> lbfgs;  // default: PartialPivLU
-    for(int i = 0; i < 3; ++i) lbfgs.push(ss[i], ys[i]);
+    for(int i = 0; i < 3; ++i)
+        lbfgs.push(ss[static_cast<std::size_t>(i)], ys[static_cast<std::size_t>(i)]);
 
     for(const auto& v : basket(n))
     {
@@ -158,7 +167,8 @@ TEST_CASE("compact_lbfgs clamps the stored curvature consistently",
     make_sequence(ss, ys);
 
     compact_lbfgs<double, Eigen::Dynamic, 7> lbfgs;
-    for(int i = 0; i < 3; ++i) lbfgs.push(ss[i], ys[i]);
+    for(int i = 0; i < 3; ++i)
+        lbfgs.push(ss[static_cast<std::size_t>(i)], ys[static_cast<std::size_t>(i)]);
 
     const double eps = std::numeric_limits<double>::epsilon();
     // The tiny pair is s2 = e_2, so its floor is eps*1. No stored curvature
@@ -208,7 +218,12 @@ TEST_CASE("compact_lbfgs PartialPivLU beats the BNS Schur route on "
 
     compact_lbfgs<double, Eigen::Dynamic, 7, lbfgs_middle_solve::partial_piv_lu> plu;
     compact_lbfgs<double, Eigen::Dynamic, 7, lbfgs_middle_solve::bns> bns;
-    for(int i = 0; i < 3; ++i) { plu.push(ss[i], ys[i]); bns.push(ss[i], ys[i]); }
+    for(int i = 0; i < 3; ++i)
+    {
+        const auto ui = static_cast<std::size_t>(i);
+        plu.push(ss[ui], ys[ui]);
+        bns.push(ss[ui], ys[ui]);
+    }
 
     double plu_rel = 0.0, bns_rel = 0.0;
     for(const auto& v : basket(n))

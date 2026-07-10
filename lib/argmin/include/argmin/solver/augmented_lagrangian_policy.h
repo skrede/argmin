@@ -254,12 +254,12 @@ struct augmented_lagrangian_policy
 
             [[nodiscard]] int dimension() const { return dim; }
 
-            [[nodiscard]] scalar_type value(const Eigen::Vector<scalar_type, N>& x) const
+            [[nodiscard]] scalar_type value(const Eigen::Vector<scalar_type, N>& xin) const
             {
-                scalar_type fval = outer->value(x);
+                scalar_type fval = outer->value(xin);
                 const int m = neq + nineq;
                 if(m > 0)
-                    outer->constraints(x, *c_all_buf);
+                    outer->constraints(xin, *c_all_buf);
                 return detail::augmented_lagrangian_value(
                     fval,
                     c_all_buf->head(neq),
@@ -267,24 +267,24 @@ struct augmented_lagrangian_policy
                     *lam_eq, *lam_ineq, *pen);
             }
 
-            void gradient(const Eigen::Vector<scalar_type, N>& x,
+            void gradient(const Eigen::Vector<scalar_type, N>& xin,
                           Eigen::Vector<scalar_type, N>& g) const
             {
                 constexpr int PD = P::problem_dimension;
                 if constexpr(N == PD)
                 {
-                    outer->gradient(x, g);
+                    outer->gradient(xin, g);
                 }
                 else
                 {
-                    outer->gradient(Eigen::Vector<scalar_type, N>(x), *g_tmp_buf);
+                    outer->gradient(Eigen::Vector<scalar_type, N>(xin), *g_tmp_buf);
                     g = *g_tmp_buf;
                 }
                 const int m = neq + nineq;
                 if(m > 0)
                 {
-                    outer->constraints(x, *c_all_buf);
-                    outer->constraint_jacobian(x, *J_all_buf);
+                    outer->constraints(xin, *c_all_buf);
+                    outer->constraint_jacobian(xin, *J_all_buf);
                 }
                 // In-place mat-vec gradient. topRows / bottomRows /
                 // head / tail are passed as Eigen expressions the helper
@@ -338,11 +338,11 @@ struct augmented_lagrangian_policy
 
             [[nodiscard]] int dimension() const { return dim; }
 
-            [[nodiscard]] scalar_type value(const Eigen::Vector<scalar_type, N>& x) const
+            [[nodiscard]] scalar_type value(const Eigen::Vector<scalar_type, N>& xin) const
             {
-                scalar_type fval = outer->value(x);
+                scalar_type fval = outer->value(xin);
                 if(neq + nineq > 0)
-                    outer->constraints(x, *c_all_buf);
+                    outer->constraints(xin, *c_all_buf);
                 // Augment ONLY the equalities. The empty inequality block
                 // (tail(0)) zeroes the inequality contribution: the helper's
                 // inequality loop runs over c_ineq.size() == 0 iterations and
@@ -354,23 +354,23 @@ struct augmented_lagrangian_policy
                     *lam_eq, *lam_ineq, *pen);
             }
 
-            void gradient(const Eigen::Vector<scalar_type, N>& x,
+            void gradient(const Eigen::Vector<scalar_type, N>& xin,
                           Eigen::Vector<scalar_type, N>& g) const
             {
                 constexpr int PD = P::problem_dimension;
                 if constexpr(N == PD)
                 {
-                    outer->gradient(x, g);
+                    outer->gradient(xin, g);
                 }
                 else
                 {
-                    outer->gradient(Eigen::Vector<scalar_type, N>(x), *g_tmp_buf);
+                    outer->gradient(Eigen::Vector<scalar_type, N>(xin), *g_tmp_buf);
                     g = *g_tmp_buf;
                 }
                 if(neq > 0)
                 {
-                    outer->constraints(x, *c_all_buf);
-                    outer->constraint_jacobian(x, *J_all_buf);
+                    outer->constraints(xin, *c_all_buf);
+                    outer->constraint_jacobian(xin, *J_all_buf);
                 }
                 // Only the equality rows contribute; the empty inequality
                 // block leaves J_ineq unread (guarded by c_ineq.size() > 0)
@@ -389,19 +389,19 @@ struct augmented_lagrangian_policy
             // feasible). outer->constraints writes neq + nineq entries with
             // the equalities first, so the inequalities are the trailing
             // nineq entries.
-            void constraints(const Eigen::Vector<scalar_type, N>& x,
+            void constraints(const Eigen::Vector<scalar_type, N>& xin,
                              Eigen::VectorX<scalar_type>& c) const
             {
                 if(neq + nineq > 0)
-                    outer->constraints(x, *c_all_buf);
+                    outer->constraints(xin, *c_all_buf);
                 c = c_all_buf->tail(nineq);
             }
 
-            void constraint_jacobian(const Eigen::Vector<scalar_type, N>& x,
+            void constraint_jacobian(const Eigen::Vector<scalar_type, N>& xin,
                                      Eigen::MatrixX<scalar_type>& J) const
             {
                 if(neq + nineq > 0)
-                    outer->constraint_jacobian(x, *J_all_buf);
+                    outer->constraint_jacobian(xin, *J_all_buf);
                 J = J_all_buf->bottomRows(nineq);
             }
 

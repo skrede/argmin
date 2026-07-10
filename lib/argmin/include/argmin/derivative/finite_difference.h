@@ -32,7 +32,7 @@ void fd_gradient(const Problem& p,
                  const Eigen::Vector<Scalar, N>& x,
                  Eigen::Vector<Scalar, N>& g)
 {
-    const int n = x.size();
+    const int n = static_cast<int>(x.size());
     g.resize(n);
     const Scalar cbrt_eps = std::cbrt(std::numeric_limits<Scalar>::epsilon());
     Eigen::Vector<Scalar, N> x_perturbed = x;
@@ -70,7 +70,7 @@ void fd_jacobian(const VectorFunction& f,
                  Eigen::MatrixX<Scalar>& J,
                  int num_outputs)
 {
-    const int n = x.size();
+    const int n = static_cast<int>(x.size());
     J.resize(num_outputs, n);
     const Scalar cbrt_eps = std::cbrt(std::numeric_limits<Scalar>::epsilon());
     Eigen::Vector<Scalar, N> x_perturbed = x;

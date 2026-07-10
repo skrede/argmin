@@ -82,38 +82,6 @@ struct equality_constrained_quadratic
     }
 };
 
-// min Rosenbrock(x)  s.t. x0^2 + x1^2 <= 2
-// Reformulate: c(x) = 2 - x0^2 - x1^2 >= 0
-// Solution: (1, 1) is inside the circle (1+1=2, boundary), so x*=(1,1).
-struct inequality_constrained_rosenbrock
-{
-    argmin::rosenbrock<> inner{.n = 2};
-
-    static constexpr int problem_dimension = argmin::dynamic_dimension;
-
-    int dimension() const { return 2; }
-    double value(const Eigen::VectorXd& x) const { return inner.value(x); }
-    void gradient(const Eigen::VectorXd& x, Eigen::VectorXd& g) const
-    {
-        inner.gradient(x, g);
-    }
-
-    int num_equality() const { return 0; }
-    int num_inequality() const { return 1; }
-
-    void constraints(const Eigen::VectorXd& x, Eigen::VectorXd& c) const
-    {
-        c.resize(1);
-        c[0] = 2.0 - x[0] * x[0] - x[1] * x[1];
-    }
-
-    void constraint_jacobian(const Eigen::VectorXd& /*x*/,
-                             Eigen::MatrixXd& J) const
-    {
-        // Actually depends on x, fix:
-    }
-};
-
 // Proper version with x-dependent Jacobian
 struct inequality_rosenbrock
 {

@@ -781,8 +781,9 @@ TEST_CASE("byrd_lbfgsb_policy populates kkt_residual and exposes is_null_step",
         }
         // Touch the is_null_step field so the designated-initializer
         // surface stays compile-time exercised.
-        if(sr.is_null_step || !sr.is_null_step)
-            saw_any_null_step_reading = true;
+        const bool null_step_flag = sr.is_null_step;
+        (void)null_step_flag;
+        saw_any_null_step_reading = true;
         if(sr.policy_status)
             break;
     }

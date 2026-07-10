@@ -191,10 +191,10 @@ ref_fk_result ref_forward_kinematics(
     {
         // Frame after the fixed (alpha, a) prefix; joint i's z-axis
         // rotation acts here.
-        const mat4 pre = cum * rot_x(table[i].alpha) * trans_x(table[i].a);
-        out.z_axis[i] = pre.block<3, 1>(0, 2);
-        out.p_pre[i] = pre.block<3, 1>(0, 3);
-        cum = pre * rot_z(theta[i] + table[i].theta_offset) * trans_z(table[i].d);
+        const mat4 pre = cum * rot_x(table[static_cast<std::size_t>(i)].alpha) * trans_x(table[static_cast<std::size_t>(i)].a);
+        out.z_axis[static_cast<std::size_t>(i)] = pre.block<3, 1>(0, 2);
+        out.p_pre[static_cast<std::size_t>(i)] = pre.block<3, 1>(0, 3);
+        cum = pre * rot_z(theta[i] + table[static_cast<std::size_t>(i)].theta_offset) * trans_z(table[static_cast<std::size_t>(i)].d);
     }
     out.T_ee = cum;
     return out;
@@ -252,7 +252,7 @@ TEST_CASE("ik_pose_batch geometric Jacobian matches a finite-difference Jacobian
 
     for(const auto& theta : test_configs())
     {
-        prob_t::forward_kinematics(theta, cumulative, pre_joint);
+        (void)prob_t::forward_kinematics(theta, cumulative, pre_joint);
         const Eigen::Matrix<double, 3, NJ> J_header =
             prob_t::position_jacobian(cumulative, pre_joint);
 
@@ -262,7 +262,7 @@ TEST_CASE("ik_pose_batch geometric Jacobian matches a finite-difference Jacobian
         const vec3 p_ee = ref.T_ee.block<3, 1>(0, 3);
         Eigen::Matrix<double, 3, NJ> J_cross;
         for(int i = 0; i < NJ; ++i)
-            J_cross.col(i) = ref.z_axis[i].cross(p_ee - ref.p_pre[i]);
+            J_cross.col(i) = ref.z_axis[static_cast<std::size_t>(i)].cross(p_ee - ref.p_pre[static_cast<std::size_t>(i)]);
         REQUIRE((J_header - J_cross).cwiseAbs().maxCoeff() < 1e-11);
 
         // Independent finite-difference Jacobian of p_ee wrt theta.
@@ -303,8 +303,8 @@ TEST_CASE("ik_pose_batch domain check fires under a seeded DH / axis perturbatio
     mat4 cum = mat4::Identity();
     for(int i = 0; i < NJ; ++i)
     {
-        cum = cum * rot_x(table[i].alpha) * trans_x(table[i].a)
-                  * rot_z(theta[i] + table[i].theta_offset) * trans_z(table[i].d);
+        cum = cum * rot_x(table[static_cast<std::size_t>(i)].alpha) * trans_x(table[static_cast<std::size_t>(i)].a)
+                  * rot_z(theta[i] + table[static_cast<std::size_t>(i)].theta_offset) * trans_z(table[static_cast<std::size_t>(i)].d);
     }
     const vec3 p_perturbed = cum.block<3, 1>(0, 3);
     REQUIRE((p_header - p_perturbed).cwiseAbs().maxCoeff() > 1e-4);
@@ -318,7 +318,7 @@ TEST_CASE("ik_pose_batch domain check fires under a seeded DH / axis perturbatio
     const vec3 p_ee = ref.T_ee.block<3, 1>(0, 3);
     Eigen::Matrix<double, 3, NJ> J_bad;
     for(int i = 0; i < NJ; ++i)
-        J_bad.col(i) = ref.z_axis[i].cross(p_ee - ref.p_pre[i]);
+        J_bad.col(i) = ref.z_axis[static_cast<std::size_t>(i)].cross(p_ee - ref.p_pre[static_cast<std::size_t>(i)]);
     // Flip the sign of the largest-norm column so the seeded error is
     // guaranteed observable (a near-singular column would otherwise mask
     // a sign flip).

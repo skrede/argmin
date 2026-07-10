@@ -99,9 +99,10 @@ struct ik_pose_batch
         for(int k = 0; k < K; ++k)
         {
             const Scalar angle = Scalar(2) * pi * Scalar(k) / Scalar(K);
-            p_targets[k][0] = radius * std::cos(angle);
-            p_targets[k][1] = radius * std::sin(angle);
-            p_targets[k][2] = z_target;
+            const auto uk = static_cast<std::size_t>(k);
+            p_targets[uk][0] = radius * std::cos(angle);
+            p_targets[uk][1] = radius * std::sin(angle);
+            p_targets[uk][2] = z_target;
         }
         return p_targets;
     }
@@ -175,10 +176,11 @@ struct ik_pose_batch
         cumulative[0].setIdentity();
         for(int i = 0; i < NJoints; ++i)
         {
-            const auto F_i = dh_fixed_prefix(table[i]);
-            pre_joint[i] = cumulative[i] * F_i;
-            const auto R_i = dh_theta_suffix(table[i], theta[i]);
-            cumulative[i + 1] = pre_joint[i] * R_i;
+            const auto ui = static_cast<std::size_t>(i);
+            const auto F_i = dh_fixed_prefix(table[ui]);
+            pre_joint[ui] = cumulative[ui] * F_i;
+            const auto R_i = dh_theta_suffix(table[ui], theta[i]);
+            cumulative[ui + 1] = pre_joint[ui] * R_i;
         }
         return cumulative[NJoints];
     }
@@ -197,10 +199,11 @@ struct ik_pose_batch
         Eigen::Matrix<Scalar, 3, NJoints> J;
         for(int i = 0; i < NJoints; ++i)
         {
+            const auto ui = static_cast<std::size_t>(i);
             const Eigen::Matrix<Scalar, 3, 1> z_axis =
-                pre_joint[i].template block<3, 1>(0, 2);
+                pre_joint[ui].template block<3, 1>(0, 2);
             const Eigen::Matrix<Scalar, 3, 1> p_pre =
-                pre_joint[i].template block<3, 1>(0, 3);
+                pre_joint[ui].template block<3, 1>(0, 3);
             const Eigen::Matrix<Scalar, 3, 1> delta = p_ee - p_pre;
             J(0, i) = z_axis[1] * delta[2] - z_axis[2] * delta[1];
             J(1, i) = z_axis[2] * delta[0] - z_axis[0] * delta[2];
@@ -230,7 +233,8 @@ struct ik_pose_batch
             const auto T_ee = forward_kinematics(theta_k, cumulative, pre_joint);
             const Eigen::Matrix<Scalar, 3, 1> p_ee =
                 T_ee.template block<3, 1>(0, 3);
-            const Eigen::Matrix<Scalar, 3, 1> r = p_ee - p_targets[k];
+            const Eigen::Matrix<Scalar, 3, 1> r =
+                p_ee - p_targets[static_cast<std::size_t>(k)];
             acc += r.squaredNorm();
         }
         return acc;
@@ -252,7 +256,8 @@ struct ik_pose_batch
             (void)forward_kinematics(theta_k, cumulative, pre_joint);
             const Eigen::Matrix<Scalar, 3, 1> p_ee =
                 cumulative[NJoints].template block<3, 1>(0, 3);
-            const Eigen::Matrix<Scalar, 3, 1> r = p_ee - p_targets[k];
+            const Eigen::Matrix<Scalar, 3, 1> r =
+                p_ee - p_targets[static_cast<std::size_t>(k)];
             const auto J = position_jacobian(cumulative, pre_joint);
             // d(||r||^2) / d(theta_k) = 2 * J^T * r.
             const Eigen::Matrix<Scalar, NJoints, 1> grad_k =

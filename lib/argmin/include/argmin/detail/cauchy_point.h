@@ -34,21 +34,21 @@ void classify_indices(const Eigen::Vector<Scalar, N>& x_cauchy,
                       const Eigen::Vector<Scalar, N>& upper,
                       cauchy_result<Scalar, N>& result)
 {
-    const int n = x_cauchy.size();
+    const Eigen::Index n = x_cauchy.size();
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
 
     result.x_cauchy = x_cauchy;
     result.free_indices.clear();
     result.active_indices.clear();
 
-    for(int i = 0; i < n; ++i)
+    for(Eigen::Index i = 0; i < n; ++i)
     {
         bool at_lower = x_cauchy[i] <= lower[i] + eps * (Scalar(1) + std::abs(lower[i]));
         bool at_upper = x_cauchy[i] >= upper[i] - eps * (Scalar(1) + std::abs(upper[i]));
         if(at_lower || at_upper)
-            result.active_indices.push_back(i);
+            result.active_indices.push_back(static_cast<int>(i));
         else
-            result.free_indices.push_back(i);
+            result.free_indices.push_back(static_cast<int>(i));
     }
 }
 
@@ -59,8 +59,8 @@ cauchy_result<Scalar, N> classify_indices(const Eigen::Vector<Scalar, N>& x_cauc
                                           const Eigen::Vector<Scalar, N>& upper)
 {
     cauchy_result<Scalar, N> result;
-    result.free_indices.reserve(x_cauchy.size());
-    result.active_indices.reserve(x_cauchy.size());
+    result.free_indices.reserve(static_cast<std::size_t>(x_cauchy.size()));
+    result.active_indices.reserve(static_cast<std::size_t>(x_cauchy.size()));
     classify_indices<Scalar, N>(x_cauchy, lower, upper, result);
     return result;
 }
@@ -83,9 +83,9 @@ public:
         , z_(n)
         , x_cauchy_(n)
     {
-        bps_.reserve(n);
-        result_.free_indices.reserve(n);
-        result_.active_indices.reserve(n);
+        bps_.reserve(static_cast<std::size_t>(n));
+        result_.free_indices.reserve(static_cast<std::size_t>(n));
+        result_.active_indices.reserve(static_cast<std::size_t>(n));
         result_.x_cauchy.resize(n);
     }
 
@@ -101,13 +101,13 @@ public:
         const Eigen::Vector<Scalar, N>& upper,
         const auto& B)
     {
-        const int n = x.size();
+        const Eigen::Index n = x.size();
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
 
         // Step 1: compute breakpoints (N&W eq. 16.46)
         bps_.clear();
 
-        for(int i = 0; i < n; ++i)
+        for(Eigen::Index i = 0; i < n; ++i)
         {
             Scalar ti;
             if(g[i] < Scalar(0) && upper[i] < inf)
@@ -118,7 +118,7 @@ public:
                 continue;
 
             if(ti > Scalar(0))
-                bps_.push_back({i, ti});
+                bps_.push_back({static_cast<int>(i), ti});
         }
 
         // Unconstrained fallback: no finite breakpoints, all variables free.
@@ -137,7 +137,7 @@ public:
 
             result_.x_cauchy.noalias() = x + t_star * d_;
             result_.free_indices.clear();
-            result_.free_indices.resize(n);
+            result_.free_indices.resize(static_cast<std::size_t>(n));
             std::iota(result_.free_indices.begin(), result_.free_indices.end(), 0);
             result_.active_indices.clear();
 
@@ -151,7 +151,7 @@ public:
         // Step 3: walk the piecewise-linear path, tracking f'(t) and f''(t)
         d_.noalias() = -g;
 
-        for(int i = 0; i < n; ++i)
+        for(Eigen::Index i = 0; i < n; ++i)
         {
             if(x[i] <= lower[i] && g[i] > Scalar(0))
                 d_[i] = Scalar(0);
@@ -309,7 +309,7 @@ cauchy_result<Scalar, N> cauchy_point(
     const Eigen::Vector<Scalar, N>& upper,
     const compact_lbfgs<Scalar, N, M>& B)
 {
-    cauchy_point_solver<Scalar, N> solver(x.size());
+    cauchy_point_solver<Scalar, N> solver(static_cast<int>(x.size()));
     const auto& result = solver.solve(x, g, lower, upper, B);
     return result;
 }

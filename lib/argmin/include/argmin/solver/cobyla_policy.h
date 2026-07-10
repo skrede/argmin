@@ -146,7 +146,6 @@ struct cobyla_policy
         ++s.iteration;
         sync_from_engine(s);
 
-        const double obj_change = s.objective_value - old_f;
         const bool improved = s.objective_value < old_f;
 
         std::optional<solver_status> policy_status{};

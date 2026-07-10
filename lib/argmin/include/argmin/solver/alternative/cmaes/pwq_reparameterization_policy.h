@@ -293,7 +293,7 @@ struct pwq_reparameterization_policy
     template <typename Problem, typename Convergence = default_convergence>
     state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& opts)
+                    const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
         state_type<Problem> s;
@@ -552,7 +552,7 @@ struct pwq_reparameterization_policy
             };
         }
 
-        const int n = s.mean.size();
+        const int n = static_cast<int>(s.mean.size());
         const int lambda = s.params.lambda;
         const int mu = s.params.mu;
         double old_best = s.objective_value;
@@ -628,7 +628,8 @@ struct pwq_reparameterization_policy
         Eigen::Vector<double, N> mean_old = s.mean;
         Eigen::Vector<double, N> mean_new = Eigen::Vector<double, N>::Zero(n);
         for(int i = 0; i < mu; ++i)
-            mean_new += s.params.weights[i] * offspring.col(idx[i]);
+            mean_new += s.params.weights[i]
+                      * offspring.col(idx[static_cast<std::size_t>(i)]);
 
         // 5. delta_w = (mean_new - mean_old) / sigma
         Eigen::Vector<double, N> delta_w = ((mean_new - mean_old) / s.sigma).eval();
@@ -668,7 +669,8 @@ struct pwq_reparameterization_policy
         // was sized to current lambda in init() / on IPOP growth above.
         auto deltas = s.deltas_buf.leftCols(lambda);
         for(int i = 0; i < lambda; ++i)
-            deltas.col(i) = (offspring.col(idx[i]) - mean_old) / sampling_sigma;
+            deltas.col(i) = (offspring.col(idx[static_cast<std::size_t>(i)])
+                             - mean_old) / sampling_sigma;
 
         // 11. Update covariance
         detail::update_covariance(s.C, s.p_c, h_sigma,
@@ -1218,7 +1220,7 @@ struct pwq_reparameterization_policy
     template <typename P>
     void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
-        const int n = x0.size();
+        const int n = static_cast<int>(x0.size());
         // Refresh strategy parameters and every configuration-derived
         // quantity exactly as init() does, so a reset run is identical to a
         // fresh run on the same configured problem. Mirrors the in-policy

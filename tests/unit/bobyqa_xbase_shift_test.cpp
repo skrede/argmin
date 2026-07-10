@@ -65,7 +65,7 @@ void push_incumbent(interpolation_system<double>& sys,
                     const Eigen::VectorXd& d,
                     const std::function<double(const Eigen::VectorXd&)>& eval)
 {
-    const int n = sys.xbase.size();
+    const int n = static_cast<int>(sys.xbase.size());
     const int m = sys.m_points;
     const int nptm = m - n - 1;
     int knew = (sys.kopt == 0) ? 1 : 0;

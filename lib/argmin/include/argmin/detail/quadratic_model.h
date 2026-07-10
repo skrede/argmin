@@ -74,7 +74,7 @@ Eigen::VectorX<Scalar> build_polynomial_basis(
     const Eigen::Vector<Scalar, N>& s,
     int p)
 {
-    const int n = s.size();
+    const int n = static_cast<int>(s.size());
     Eigen::VectorX<Scalar> phi(p);
 
     phi[0] = Scalar(1);
@@ -128,8 +128,8 @@ quadratic_model<Scalar, N> build_model(
     const Eigen::Vector<Scalar, P>& f_values,
     const Eigen::Vector<Scalar, N>& x_base)
 {
-    const int n = Y.rows();
-    const int m = Y.cols();
+    const int n = static_cast<int>(Y.rows());
+    const int m = static_cast<int>(Y.cols());
 
     // Number of polynomial basis terms: 1 + n + n*(n+1)/2
     const int p = 1 + n + n * (n + 1) / 2;
@@ -192,19 +192,17 @@ quadratic_model<Scalar, N> build_model(
 
         // w = V^T * phi(x_base), then scale by Sigma^{-1}, then multiply by U
         Eigen::VectorXd w = V.transpose() * phi_xbase.template cast<double>();
-        int rank = 0;
         for(int i = 0; i < sv.size(); ++i)
         {
             if(sv[i] > thr)
             {
                 w[i] /= sv[i];
-                ++rank;
             }
             else
                 w[i] = 0.0;
         }
         // Zero out components beyond singular value count
-        for(int i = sv.size(); i < w.size(); ++i)
+        for(int i = static_cast<int>(sv.size()); i < w.size(); ++i)
             w[i] = 0.0;
 
         model.lagrange_values = U.template cast<double>() * w.head(m);
@@ -219,7 +217,7 @@ quadratic_model<Scalar, N> build_model(
         const auto& U = svd.matrixU();
         const auto& V = svd.matrixV();
         const auto& sv = svd.singularValues();
-        const int rank = svd.rank();
+        const int rank = static_cast<int>(svd.rank());
 
         // pinv_Phi = V * diag(1/sigma_i) * U^T  (transposed to m x p)
         Eigen::MatrixX<Scalar> Sigma_inv = Eigen::MatrixX<Scalar>::Zero(rank, rank);
@@ -241,12 +239,12 @@ quadratic_model<Scalar, N> build_model(
 template <typename Scalar = double, int N = argmin::dynamic_dimension, int P = argmin::dynamic_dimension>
 Eigen::VectorXd compute_lagrange_at_point(
     const Eigen::Matrix<Scalar, N, P>& Y,
-    const Eigen::Vector<Scalar, P>& f_values,
+    const Eigen::Vector<Scalar, P>& /*f_values*/,
     const Eigen::Vector<Scalar, N>& x_base,
     const Eigen::Vector<Scalar, N>& x_query)
 {
-    const int n = Y.rows();
-    const int m = Y.cols();
+    const int n = static_cast<int>(Y.rows());
+    const int m = static_cast<int>(Y.cols());
     const int p = 1 + n + n * (n + 1) / 2;
 
     static constexpr int Pcoeff = (N == argmin::dynamic_dimension)
@@ -306,7 +304,7 @@ Eigen::VectorXd compute_lagrange_at_point(
         else
             w[i] = 0.0;
     }
-    for(int i = sv.size(); i < w.size(); ++i)
+    for(int i = static_cast<int>(sv.size()); i < w.size(); ++i)
         w[i] = 0.0;
 
     return U.template cast<double>() * w.head(m);
@@ -340,7 +338,7 @@ Eigen::VectorX<Scalar> compute_lagrange_incremental(
     const Eigen::Vector<Scalar, N>& x_base,
     const Eigen::Vector<Scalar, N>& x_query)
 {
-    const int n = x_query.size();
+    const int n = static_cast<int>(x_query.size());
     const int p = polynomial_basis_dimension(n);
     const int m = model.m_points;
 
@@ -364,7 +362,7 @@ void extract_model_from_pseudoinverse(
     const Eigen::VectorX<Scalar>& f_values)
 {
     const int m = model.m_points;
-    const int n = model.g.size();
+    const int n = static_cast<int>(model.g.size());
 
     // theta = Phi^+ * f = pinv_Phi^T * f
     Eigen::VectorX<Scalar> theta = model.pinv_Phi.topRows(m).transpose() * f_values;
@@ -410,7 +408,7 @@ Eigen::VectorX<Scalar> update_model_incremental(
     int replaced_index,
     const Eigen::Vector<Scalar, N>& x_base)
 {
-    const int n = x_new.size();
+    const int n = static_cast<int>(x_new.size());
     const int p = polynomial_basis_dimension(n);
     const int m = model.m_points;
     const int t = replaced_index;

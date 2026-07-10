@@ -60,7 +60,7 @@ double chi_square_statistic(const std::array<int, K_BINS>& counts, int n)
     for(int k = 0; k < K_BINS; ++k)
     {
         const double e = normal_bin_prob(k) * static_cast<double>(n);
-        const double diff = static_cast<double>(counts[k]) - e;
+        const double diff = static_cast<double>(counts[static_cast<std::size_t>(k)]) - e;
         chi2 += diff * diff / e;
     }
     return chi2;
@@ -79,7 +79,7 @@ TEST_CASE("cmaes_sampling: marsaglia_polar passes chi-square goodness-of-fit",
     {
         const double z = argmin::detail::alternative::marsaglia::marsaglia_normal<double>(rng);
         const int bin = bin_index(z);
-        if(bin >= 0) ++counts[bin];
+        if(bin >= 0) ++counts[static_cast<std::size_t>(bin)];
         else ++outliers;
     }
 

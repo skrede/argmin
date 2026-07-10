@@ -94,7 +94,7 @@ auto sample_offspring(
     -> Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0,
         N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxLambda>
 {
-    const int n = mean.size();
+    const int n = static_cast<int>(mean.size());
 
     Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0,
         N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxLambda>

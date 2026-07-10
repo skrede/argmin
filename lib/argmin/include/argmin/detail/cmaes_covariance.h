@@ -81,7 +81,7 @@ void update_covariance(Eigen::Matrix<Scalar, N, N>& C,
                        int mu,
                        bool& covariance_dirty)
 {
-    const int n = C.rows();
+    const int n = static_cast<int>(C.rows());
 
     // Diagonal decay factor (vanilla CMA-ES; positive-weight sum = 1.0).
     //

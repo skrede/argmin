@@ -283,7 +283,7 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
 
     step_budget_solver<policy_type, D, hs071<>> warm_solver{problem, x0, sopts, warm_opts};
     auto warm_result = warm_solver.solve();
-    int warm_iters = warm_result.iterations;
+    std::uint32_t warm_iters = warm_result.iterations;
 
     // Cold-start run
     policy_type::options_type cold_opts;
@@ -292,7 +292,7 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
 
     step_budget_solver<policy_type, D, hs071<>> cold_solver{problem, x0, sopts, cold_opts};
     auto cold_result = cold_solver.solve();
-    int cold_iters = cold_result.iterations;
+    std::uint32_t cold_iters = cold_result.iterations;
 
     INFO("warm iters: " << warm_iters);
     INFO("cold iters: " << cold_iters);

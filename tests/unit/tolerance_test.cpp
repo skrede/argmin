@@ -26,7 +26,6 @@ namespace
 
 struct quadratic
 {
-    static constexpr int problem_dimension = 2;
     int dimension() const { return 2; }
     double value(const Eigen::Vector<double, 2>& x) const { return 0.5 * x.squaredNorm(); }
 };

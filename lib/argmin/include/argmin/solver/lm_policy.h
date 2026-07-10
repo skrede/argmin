@@ -93,7 +93,7 @@ struct lm_policy
     {
         state_type<Problem> s;
         s.problem = &problem;
-        const int n = x0.size();
+        const int n = static_cast<int>(x0.size());
 
         s.x = x0;
         s.num_residuals = problem.num_residuals();
@@ -138,7 +138,7 @@ struct lm_policy
     template <typename P>
     step_result<double> step(state_type<P>& s)
     {
-        const int n = s.x.size();
+        const int n = static_cast<int>(s.x.size());
         const double diag_min = options.diagonal_min_clamp.value_or(1e-8);
         const double lam_min = options.lambda_min.value_or(1e-20);
         const double lam_max = options.lambda_max.value_or(1e20);

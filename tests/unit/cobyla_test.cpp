@@ -19,6 +19,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <cstddef>
 #include <fstream>
 #include <sstream>
 
@@ -192,7 +193,7 @@ void check_cobyla_optimum(const char* name, double f_oracle,
     CHECK(result.objective_value == Approx(0.0).margin(1e-6));
     CHECK(std::abs(result.objective_value - f_oracle) < 1e-6);
     for(int i = 0; i < static_cast<int>(x_oracle.size()); ++i)
-        CHECK(result.x(i) == Approx(x_oracle[i]).margin(1e-3));
+        CHECK(result.x(i) == Approx(x_oracle[static_cast<std::size_t>(i)]).margin(1e-3));
     CHECK(solver.constraint_violation() < 1e-6);
 }
 

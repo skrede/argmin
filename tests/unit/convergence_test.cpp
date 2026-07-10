@@ -486,7 +486,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             rosenbrock_ls problem;
             Eigen::VectorXd x0{{-1.0, 1.0}};
             step_budget_solver solver{lm_policy{}, problem, x0, opts};
-            auto result = solver.solve(opts);
+            [[maybe_unused]] auto result = solver.solve(opts);
             CHECK(solver.state().objective_value < 1e-8);
         }
 
@@ -495,7 +495,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             exponential_fitting problem;
             Eigen::VectorXd x0{{1.0, -0.5}};
             step_budget_solver solver{lm_policy{}, problem, x0, opts};
-            auto result = solver.solve(opts);
+            [[maybe_unused]] auto result = solver.solve(opts);
             CHECK(solver.state().objective_value < 0.01);
         }
 
@@ -504,7 +504,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
             powell_singular problem;
             Eigen::VectorXd x0{{3.0, -1.0, 0.0, 1.0}};
             step_budget_solver solver{lm_policy{}, problem, x0, opts};
-            auto result = solver.solve(opts);
+            [[maybe_unused]] auto result = solver.solve(opts);
             CHECK(solver.state().objective_value < 1e-6);
         }
     }
@@ -816,7 +816,7 @@ TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]"
 
         CHECK(result.iterations < 100);
         CHECK(manual_iters < 100);
-        CHECK(result.iterations == manual_iters);
+        CHECK(result.iterations == static_cast<std::uint32_t>(manual_iters));
         CHECK(result.objective_value < 1e-8);
         CHECK(last.objective_value < 1e-8);
     }

@@ -563,8 +563,6 @@ namespace
 struct maratos_circle
 {
     static constexpr int problem_dimension = 2;
-    static constexpr problem_class pclass = problem_class::equality;
-    static constexpr int constraint_count = 1;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 1; }
@@ -602,8 +600,6 @@ struct maratos_circle
 struct steep_objective_linear_eq
 {
     static constexpr int problem_dimension = 2;
-    static constexpr problem_class pclass = problem_class::equality;
-    static constexpr int constraint_count = 1;
 
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_equality() const { return 1; }

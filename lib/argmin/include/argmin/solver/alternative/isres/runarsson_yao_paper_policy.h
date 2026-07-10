@@ -207,7 +207,7 @@ struct runarsson_yao_paper_policy
     template <typename Problem, typename Convergence = default_convergence>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<double, N>& /*x0*/,
                              const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
@@ -371,7 +371,8 @@ struct runarsson_yao_paper_policy
         //     (rank-0 = best, rank-1 = second-best, ...) at start-of-
         //     generation. NLopt instead snapshots physical slots [0, mu).
         for(int j = 0; j < mu; ++j)
-            s.x0_snapshot_buf.col(j) = s.population.col(s.indices_buf[j]);
+            s.x0_snapshot_buf.col(j) =
+                s.population.col(s.indices_buf[static_cast<std::size_t>(j)]);
 
         // (3) PAPER DELTA #2: BEST-anchored DE recombination.
         //         x_new = x_1 + paper_gamma * (x_i - x_1)

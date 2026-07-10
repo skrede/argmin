@@ -101,7 +101,7 @@ struct lbfgsb_policy
     template <typename Problem, typename Convergence = default_convergence>
     state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& x0,
-                    const solver_options<Convergence>& opts)
+                    const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
         state_type<Problem> s;

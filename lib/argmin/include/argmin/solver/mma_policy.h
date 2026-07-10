@@ -304,7 +304,6 @@ struct mma_policy
         const double s_max_f = s.opts.asymptote_max_fraction.value_or(10.0);
         const double move_lim = s.opts.move_limit_fraction.value_or(0.1);
         const double raai = s.opts.raai;
-        const double s_init_un = s.opts.asymptote_init_unbounded.value_or(1.0);
 
         constexpr double inf = std::numeric_limits<double>::infinity();
 

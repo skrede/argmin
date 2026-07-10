@@ -424,7 +424,6 @@ struct kraft_slsqp_policy
         // before returning. step_budget_solver::step_n does not mutate state.x
         // between policy.step() calls, so no top-of-step re-evaluation is
         // needed.
-        const int n = s.n;
 
         // BFGS-reset retry loop on line-search exhaustion (NLopt
         // slsqp.c:1890-1895 ireset parity). Wraps factor -> QP solve ->
