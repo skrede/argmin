@@ -282,6 +282,9 @@ time_budget_solver(Policy, const Problem&, const Eigen::MatrixBase<Derived>&)
 
 template <typename Policy, typename Problem, typename Derived, typename Convergence,
           typename PolicyOpts>
+    requires has_options_type<typename Policy::template rebind<problem_dimension_v<Problem>>>
+          && std::same_as<std::remove_cvref_t<PolicyOpts>,
+                 typename Policy::template rebind<problem_dimension_v<Problem>>::options_type>
 time_budget_solver(Policy, const Problem&,
                    const Eigen::MatrixBase<Derived>&,
                    const time_budget_options<Convergence>&, const PolicyOpts&)

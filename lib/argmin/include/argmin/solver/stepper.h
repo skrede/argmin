@@ -247,6 +247,9 @@ stepper(Policy, const Problem&, const Eigen::MatrixBase<Derived>&)
 // Policy + Problem + x0 + opts + policy_opts
 template <typename Policy, typename Problem, typename Derived, typename Convergence,
           typename PolicyOpts>
+    requires has_options_type<typename Policy::template rebind<problem_dimension_v<Problem>>>
+          && std::same_as<std::remove_cvref_t<PolicyOpts>,
+                 typename Policy::template rebind<problem_dimension_v<Problem>>::options_type>
 stepper(Policy, const Problem&,
         const Eigen::MatrixBase<Derived>&,
         const solver_options<Convergence>&, const PolicyOpts&)
