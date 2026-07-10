@@ -12,6 +12,7 @@
 #include "benchmark_result.h"
 #include "trace_entry.h"
 #include "problem_registry.h"
+#include "perf_instruction_counter.h"
 
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/convergence.h"
@@ -113,6 +114,24 @@ template <typename Vector>
         out += std::format("{:.15e}", static_cast<double>(v[i]));
     }
     return out;
+}
+
+// Emit a single loud warning per process when the userspace instruction
+// counter cannot arm. Every affected row still carries instructions_unavailable
+// (-1) so the downstream gate fails loud on the missing measurement; this note
+// makes the cause visible once without flooding stderr across the thousands of
+// (solver, problem, seed) cells a publication run emits.
+inline void warn_instruction_counter_unavailable_once()
+{
+    static bool warned = false;
+    if(warned)
+        return;
+    warned = true;
+    std::fprintf(stderr,
+                 "bench: WARNING: userspace instruction counter could not arm "
+                 "(perf_event_open denied); instructions column marked "
+                 "unavailable (-1). A publication gate run requires "
+                 "perf_event_paranoid <= 2.\n");
 }
 
 [[nodiscard]] inline auto cap_status_string(std::string_view status,
@@ -234,6 +253,10 @@ auto run_argmin_solver(std::string_view solver_name,
         step_budget_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
+        // Arm the userspace instruction counter immediately before the timed
+        // solve loop and read it immediately after, so the count spans only
+        // the solve region (solver construction is excluded).
+        perf_instruction_counter instr_counter;
         auto t0 = std::chrono::steady_clock::now();
 
         int iters = 0;
@@ -289,6 +312,9 @@ auto run_argmin_solver(std::string_view solver_name,
             final_status = solver_status::max_iterations;
 
         auto t1 = std::chrono::steady_clock::now();
+        const std::int64_t instructions = instr_counter.read();
+        if(!instr_counter.armed())
+            detail::warn_instruction_counter_unavailable_once();
         auto wall_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 
         trace.resize(static_cast<std::size_t>(iters));
@@ -341,6 +367,7 @@ auto run_argmin_solver(std::string_view solver_name,
             .solve_wall_time_us = wall_us,
             .end_to_end_wall_time_us = wall_us,
             .returned_point = detail::pack_vector(solver.state().x),
+            .instructions = instructions,
         };
     }
     else
@@ -353,9 +380,15 @@ auto run_argmin_solver(std::string_view solver_name,
         step_budget_solver<rebound_policy, N, wrapped_t> solver(wrapped, x0, opts,
                                     std::forward<PolicyOpts>(policy_opts)...);
 
+        // Instruction counter spans only solver.solve(); solver construction
+        // is excluded, mirroring the traced path.
+        perf_instruction_counter instr_counter;
         auto t0 = std::chrono::steady_clock::now();
         auto result = solver.solve(opts);
         auto t1 = std::chrono::steady_clock::now();
+        const std::int64_t instructions = instr_counter.read();
+        if(!instr_counter.armed())
+            detail::warn_instruction_counter_unavailable_once();
 
         auto wall_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 
@@ -387,6 +420,7 @@ auto run_argmin_solver(std::string_view solver_name,
             .solve_wall_time_us = wall_us,
             .end_to_end_wall_time_us = wall_us,
             .returned_point = detail::pack_vector(solver.state().x),
+            .instructions = instructions,
         };
     }
 }

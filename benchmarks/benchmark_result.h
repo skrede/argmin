@@ -49,6 +49,15 @@ struct benchmark_result
     // analytic constraint gradients.
     std::string returned_point;
     std::string multipliers;
+
+    // Userspace retired-instruction count over the timed solve region, from a
+    // perf_event_open counter with kernel counting excluded. A strictly
+    // positive value is a real measurement; instructions_unavailable (-1)
+    // marks a run where the counter could not arm. Left at 0 for adapters
+    // that do not instrument the solve (informative cross-solver rows); those
+    // rows are never gated, so a 0 there is not a free pass. instructions/iter
+    // is derived downstream as instructions / solver_iters.
+    std::int64_t instructions{};
 };
 
 [[nodiscard]] inline auto csv_header() -> std::string_view
@@ -57,12 +66,12 @@ struct benchmark_result
            "f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,"
            "known_optimum,accuracy,constraint_violation,status,row_disposition,"
            "cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,"
-           "provenance_id";
+           "provenance_id,instructions";
 }
 
 [[nodiscard]] inline auto csv_row(const benchmark_result& r) -> std::string
 {
-    return std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{:.15e},{:.15e},{:.15e},{:.15e},{},{},{},{},{},{},{}",
+    return std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{:.15e},{:.15e},{:.15e},{:.15e},{},{},{},{},{},{},{},{}",
                        r.solver, r.library, r.problem,
                        to_string(r.pclass), r.dimension,
                        r.seed, r.mode, r.solver_iters,
@@ -72,7 +81,7 @@ struct benchmark_result
                        r.accuracy, r.constraint_violation, r.status,
                        r.row_disposition, r.cap_status, r.exclusion_reason,
                        r.solve_wall_time_us, r.end_to_end_wall_time_us,
-                       r.provenance_id);
+                       r.provenance_id, r.instructions);
 }
 
 }

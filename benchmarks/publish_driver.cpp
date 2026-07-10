@@ -203,6 +203,14 @@ int main(int argc, char** argv)
                   << (out_dir / "publish_summary.csv").string() << "'\n";
         return 1;
     }
+    // The summary schema carries an instructions column measured by a
+    // userspace perf_event_open counter over each timed solve region; the
+    // per-iteration cost gate consumes instructions / solver_iters. A
+    // publication gate run therefore requires the counter to arm
+    // (perf_event_paranoid <= 2). Where it cannot arm the adapter writes the
+    // instructions_unavailable sentinel (-1) and warns once on stderr rather
+    // than a silent zero, so the downstream gate fails loud instead of reading
+    // a missing measurement as a free pass.
     summary_out << argmin::bench::csv_header() << '\n';
 
     // Returned-point sidecar, written next to the summary and keyed by the
