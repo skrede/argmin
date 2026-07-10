@@ -1,6 +1,6 @@
 // kthohr/optim comparison benchmarks for argmin benchmark suite.
 //
-// Per D-01: native API adapter, no common interface. Wires kthohr/optim
+// Native API adapter, no common interface. Wires kthohr/optim
 // gradient-based and derivative-free algorithms through the
 // problem_registry iteration. Every problem callback routes through a
 // counting_problem<P> wrapper; the bench summary reads back the four

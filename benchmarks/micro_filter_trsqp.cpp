@@ -526,7 +526,7 @@ bool probe_regression_hs026()
 }
 
 // HS028 regression probe: filter_trsqp on HS028 must close at
-// f* = 0. HS028 is the canonical D-04 reference cell for the filter
+// f* = 0. HS028 is the canonical reference cell for the filter
 // family; closure on both modes confirms the composite-step +
 // switching-condition reject path (accurate) and the tr_shrink reject
 // path (fast) are both well-behaved on equality-only LP-feasible
@@ -778,7 +778,7 @@ int main(int argc, char** argv)
     argmin::bench::println("Filter TR-SQP micro-benchmark, {} repetitions each\n", reps);
     argmin::bench::println("  {:>12s}  {:>10s}  {:>10s}  {:>12s}", "solver", "wall (us)", "evals", "objective");
 
-    // HS028 -- canonical D-04 reference cell; closes on both modes.
+    // HS028 -- canonical reference cell; closes on both modes.
     {
         argmin::bench::println("\n--- HS028 (equality, n=3, f*=0) [accurate] ---");
         auto nab  = bench_argmin<argmin::sqp_mode::accurate>(

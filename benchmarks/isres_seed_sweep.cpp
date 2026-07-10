@@ -300,7 +300,7 @@ int main(int argc, char** argv)
         rows.push_back(std::move(r));
     }
 
-    // Selection rule (per the plan + CONTEXT.md D-08):
+    // Selection rule:
     //   LOWEST seed in 1..100 where `objective_value < 1.0`.
     //   The 3-run robustness tiebreak is performed by the caller
     //   (re-running the binary thrice on the selected seed) — ISRES

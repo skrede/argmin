@@ -67,3 +67,7 @@ GEMINI.md
 **/*Testing*/
 **/*results*.csv
 
+
+# Python bytecode cache
+__pycache__/
+*.pyc

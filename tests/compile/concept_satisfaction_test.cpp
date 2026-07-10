@@ -63,7 +63,7 @@ static_assert(argmin::objective<argmin::ackley<>>);
 static_assert(argmin::differentiable<argmin::ackley<>>);
 
 // ---------------------------------------------------------------------------
-// Float scalar support (D-07)
+// Float scalar support
 // ---------------------------------------------------------------------------
 
 static_assert(argmin::objective<argmin::rosenbrock<float>, float>);

@@ -488,7 +488,7 @@ TEST_CASE("kraft_slsqp populates kkt_residual", "[kraft_slsqp][kkt]")
     CHECK(populated);
 }
 
-// HS006 regression guard locking the Phase 31.1 closure.
+// HS006 regression guard.
 //
 // Baseline (post-phase30): 7 iters, acc 9.24e-08. Post-phase31
 // regressed to 6 iters, acc 2.16e-06. The Full E-measure fix keeps

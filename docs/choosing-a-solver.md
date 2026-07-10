@@ -33,11 +33,11 @@ Be aware of these before adopting a solver into a downstream pipeline:
 
 Both N&W-flavour SQP variants can accept an iter-0 step that satisfies the *linearised* inequality but nonlinearly violates it by a large margin, then park at that infeasible point with `status = max_iterations` and a final objective lower than the feasible optimum. Reproduces on HS071 (`f = 13.45` returned vs `f* = 17.014`).
 
-**Workaround:** use `kraft_slsqp` or `filter_slsqp` for the same problem class. Both reach `f* ± 1e-8`. The N&W variants exist primarily as references for ongoing comparison work and should not be used for production solves at this time. Tracked as `SEED-015`.
+**Workaround:** use `kraft_slsqp` or `filter_slsqp` for the same problem class. Both reach `f* ± 1e-8`. The N&W variants exist primarily as references for ongoing comparison work and should not be used for production solves at this time.
 
 ### COBYLA on linear-equality reformulations of unconstrained QPs
 
-Phase 33 hotfixed COBYLA's adaptive `parmu` parameter, closing the silent-wrong-optimum bug on HS024. However, several other Powell-faithfulness gaps remain (rho contraction, simplex denormalisation, axis-aligned geometry steps, lax conditioning threshold). On HS048 / HS050 / HS051 — unconstrained quadratics posed with linear equality constraints — COBYLA returns `f` orders of magnitude away from the true optimum (`f = 84 / 7516 / 7.7` against `f* = 0`).
+COBYLA's adaptive `parmu` parameter was hotfixed, closing the silent-wrong-optimum bug on HS024. However, several other Powell-faithfulness gaps remain (rho contraction, simplex denormalisation, axis-aligned geometry steps, lax conditioning threshold). On HS048 / HS050 / HS051 — unconstrained quadratics posed with linear equality constraints — COBYLA returns `f` orders of magnitude away from the true optimum (`f = 84 / 7516 / 7.7` against `f* = 0`).
 
 **Workaround:** for problems with explicit equality constraints, prefer `kraft_slsqp`, `filter_slsqp`, or `augmented_lagrangian` wrapping `bobyqa`. A Powell-faithfulness rewrite of COBYLA is scheduled for v0.3.x.
 
@@ -49,7 +49,7 @@ Phase 33 hotfixed COBYLA's adaptive `parmu` parameter, closing the silent-wrong-
 
 ### MMA / GCMMA conjoined-gate FAILs
 
-MMA and GCMMA reach the correct objective on the cells they were designed for (HS076 within 1e-3 of the published reference value), but fail the conjoined "objective AND iteration-count" gate on HS043 and a handful of related cells when the iteration budget is tightened against the published reference budget. This is a convergence-speed issue, not a wrong-answer issue — the solvers reach the right objective; they just take more iterations than the reference. Ongoing, tracked under `SEED-009` (cv-aware descent rejection).
+MMA and GCMMA reach the correct objective on the cells they were designed for (HS076 within 1e-3 of the published reference value), but fail the conjoined "objective AND iteration-count" gate on HS043 and a handful of related cells when the iteration budget is tightened against the published reference budget. This is a convergence-speed issue, not a wrong-answer issue — the solvers reach the right objective; they just take more iterations than the reference. Ongoing (cv-aware descent rejection).
 
 ## How to choose between near-equivalent options
 

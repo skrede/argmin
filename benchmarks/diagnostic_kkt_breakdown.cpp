@@ -237,7 +237,7 @@ void print_row(std::uint32_t iter,
 // lagrangian_gradient_delta = ||grad_f - A_full^T lambda_reest||_inf
 // measures the residual stationarity leg *after* re-estimation --
 // if this is small while stationarity_leg is large, the stale-multiplier
-// hypothesis (D-4) is confirmed.
+// hypothesis is confirmed.
 //
 // No mu_ineq.cwiseMax(0.0) projection is applied on the re-estimated
 // stack -- the diagnostic purpose is to observe the raw LS fit so
@@ -281,7 +281,7 @@ kkt_leg_breakdown compute_lagrangian_breakdown(
     // filter_slsqp already re-estimates into s.lambda at :540-554, so
     // for that policy the QP / reest columns should coincide; for the
     // other three SQP policies s.lambda carries the QP-derived stack
-    // directly (D-4 insertion target).
+    // directly (insertion target).
     Eigen::VectorXd lambda_policy = Eigen::VectorXd::Zero(m);
     if(s.lambda.size() >= m)
         lambda_policy = s.lambda.head(m);
@@ -424,7 +424,7 @@ void run_sqp_case(std::string_view case_label, Problem problem, Policy policy)
 // which is what kkt_residual_bound already returns in last.kkt_residual.
 // The row is still emitted so the null-step termination gap is visible
 // -- final_status=-1 and fired_criterion=-1 for every iteration is the
-// regression signal per CONTEXT.md §D.
+// regression signal.
 // -----------------------------------------------------------------
 
 void run_byrd_brown_case()
@@ -533,8 +533,8 @@ void run_byrd_brown_case()
 //
 // The byrd_lbfgsb brown_badly_scaled case is retained at the end
 // as it remains the only non-SQP reference trajectory in this
-// harness (unrelated to D-4 / D-1, kept for context after phase
-// 31.1 surfaced the roundoff_limited regression there).
+// harness (kept for context after an earlier harness surfaced
+// the roundoff_limited regression there).
 // -----------------------------------------------------------------
 
 int main()
@@ -603,7 +603,7 @@ int main()
                  argmin::filter_nw_sqp_policy<Hs071::problem_dimension>{});
 
     // Retained non-SQP reference trajectory (unrelated to the
-    // 24-case D-4/D-1 matrix above; preserved from the 31.1 harness
+    // 24-case matrix above; preserved from the earlier harness
     // for continuity of the brown_badly_scaled roundoff_limited
     // investigation).
     run_byrd_brown_case();

@@ -2,7 +2,7 @@
 //
 // Validates all 9 v0.1.0 solver policies on appropriate test functions.
 // Each solver is tested on at least 3 problems with class-appropriate
-// tolerances per D-09:
+// tolerances:
 //   - Gradient-based (L-BFGS-B, SQP, LM): f within 1e-8 of f*
 //   - Global/derivative-free (CMA-ES, BOBYQA): f within 1e-4
 //   - Constrained (AugLag, MMA, GCMMA): f within 1e-4, violation < 1e-4
@@ -770,7 +770,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
 }
 
 // ---------------------------------------------------------------------------
-// Solver group: heterogeneous racing (SC-5, D-11, D-12)
+// Solver group: heterogeneous racing
 // ---------------------------------------------------------------------------
 
 TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]")

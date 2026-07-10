@@ -281,7 +281,7 @@ public:
         x_final_.assign(x, x + n);
     }
 
-    // Per-iter trace hook (Pattern 3 in 32.8-RESEARCH.md). Wired by the
+    // Per-iter trace hook. Wired by the
     // run_ipopt_solver wrapper before OptimizeTNLP() is invoked; trace_out_
     // points at a per-problem local_trace owned by the caller. Maps the
     // IPOPT-native composite (obj_value, inf_pr, d_norm, max(inf_pr, inf_du))

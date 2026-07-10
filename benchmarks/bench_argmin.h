@@ -219,8 +219,8 @@ auto run_argmin_solver(std::string_view solver_name,
         // norm, so a loose gradient_tolerance fires prematurely on
         // non-optimum iterates where ||grad_f|| drops but primal
         // feasibility has not converged. Policy-level gradient_norm
-        // semantics is the subject of seeds SEED-003 / SEED-004 queued
-        // for Phase 36 (SQP) / Phase 37 (auglag). Until then the
+        // semantics is a queued follow-on for the SQP and auglag
+        // policies. Until then the
         // composite kkt_residual alone gates the constrained regime.
         //
         // The relaxed objective/step gates (1e-6) are correctness-driven
@@ -236,8 +236,8 @@ auto run_argmin_solver(std::string_view solver_name,
 
     if(collect_trace)
     {
-        // Step loop with trace collection (per D-09); rows populate the
-        // D-C3 12-column publication schema. f_best is a running-min over
+        // Step loop with trace collection; rows populate the
+        // 12-column publication schema. f_best is a running-min over
         // f_current; accuracy is |f_current - prob.optimal_value()|;
         // step_norm pulls from step_result.step_size (the policy-native
         // step length); kkt_residual pulls from step_result.kkt_residual

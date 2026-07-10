@@ -339,7 +339,7 @@ TEST_CASE("nw_sqp HS071 mixed constraints", "[sqp]")
     // hock_schittkowski_test.cpp) until the underlying merit issue is
     // addressed.
     //
-    // Tracked: SEED-015 (nw_sqp HS071 L1 merit infeasibility).
+    // Known limitation: nw_sqp HS071 L1-merit infeasibility.
     //
     // Reference: H&S Problem 71; N&W Section 16.5 (active-set QP);
     //            N&W Section 18.3 (Maratos effect); N&W Section 15.3
@@ -379,7 +379,7 @@ TEST_CASE("nw_sqp HS039 equality constraints", "[sqp]")
     CHECK(solver.constraint_violation() < 1e-4);
 }
 
-// HS007 regression guard locking the Phase 31.1 closure.
+// HS007 regression guard.
 //
 // Baseline (post-phase30): 7 iters, acc 1.19e-06. Post-phase31
 // regressed to 6 iters, acc 1.70e-04 (143x worse). The Full E-measure
@@ -413,7 +413,7 @@ TEST_CASE("nw_sqp HS007 accuracy guard",
     CHECK(result.iterations <= 12);
 }
 
-// HS026 regression guard locking the Phase 31.1 closure.
+// HS026 regression guard.
 //
 // Baseline (post-phase30): 20 iters, acc 2.90e-07. Post-phase31
 // regressed to 12 iters, acc 1.57e-04 (542x worse). The Full E-measure

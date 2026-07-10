@@ -1,7 +1,7 @@
 // Tests for relative tolerances, time stopping, policy status propagation,
 // and solver group failure retirement.
 //
-// Validates STOP-01 through STOP-05, D-16, D-17, D-18.
+// Validates the stopping conditions and tolerance-priority ordering.
 //
 // Reference: N&W 2e Section 2.2 (convergence criteria),
 //            K&W 2e Section 2.3 (stopping conditions).
@@ -132,7 +132,7 @@ TEST_CASE("policy diverged propagates to step_budget_solver", "[tolerance]")
     CHECK(result.iterations == 5);
 }
 
-// -- Test 15: policy_status checked before convergence (D-16 priority) --
+// -- Test 15: policy_status checked before convergence (priority) --
 
 TEST_CASE("policy_status checked before convergence criteria", "[tolerance]")
 {

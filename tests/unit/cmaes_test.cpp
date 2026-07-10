@@ -1069,8 +1069,8 @@ TEST_CASE("cmaes_policy: ipop decomposition_skip_k recompute", "[cmaes]")
 
 TEST_CASE("cmaes_policy: ipop bit-identity within process", "[cmaes]")
 {
-    // SEED-014 (restarting_cmaes rebuild nondeterminism) closure preflight
-    // for the inner `cmaes` row (CONTEXT D-08 corrigendum: this row =
+    // restarting_cmaes rebuild-nondeterminism closure preflight
+    // for the inner `cmaes` row (corrigendum: this row =
     // cmaes_policy<> with restart_strategy::ipop, NOT the restarting_policy
     // decorator). Two back-to-back runs from the SAME solver_options.seed
     // on the SAME problem with FRESH step_budget_solver instances must produce
@@ -1199,7 +1199,7 @@ TEST_CASE("cmaes_policy: weights tail is zero in vanilla default", "[cmaes]")
     }
 }
 
-// Phase 34 G12 caller-facing-unpenalized contract: for any
+// G12 caller-facing-unpenalized contract: for any
 // boundary-handling variant, state.objective_value MUST equal
 // problem.value(state.x) at termination -- the caller can re-evaluate
 // the objective at the policy's reported iterate and read back the
@@ -1211,7 +1211,7 @@ TEST_CASE("cmaes_policy: weights tail is zero in vanilla default", "[cmaes]")
 //   - no_repair_adaptive_penalty: state.x is the clipped repaired
 //     point; unpenalized = problem.value(state.x).
 //
-// Reference: Phase 34 G12 (caller-facing-unpenalized contract).
+// Reference: G12 caller-facing-unpenalized contract.
 TEST_CASE("alternative::cmaes::repair_l2_penalty_policy: caller-facing "
           "objective is feasible", "[cmaes]")
 {

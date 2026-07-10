@@ -66,14 +66,14 @@ TEST_CASE("mma converges on HS076", "[mma]")
 // 346 iters / 0.5 ms / -4.6818).  This guard locks the post-port
 // recovery within the 2x NLopt iter budget.
 //
-// D-07 budget cap: 692 iters (2x NLopt 346).  The hard <=2x assertion
-// matches the locked phase-success gate; soft (2x, 3x] outcomes are
-// routed through the SEED-008 priority field by the verifier per the
+// Budget cap: 692 iters (2x NLopt 346).  The hard <=2x assertion
+// matches the locked success gate; soft (2x, 3x] outcomes are
+// tracked as a follow-on item per the
 // outcome-band specification.
 //
 // Note on the gate form: ccsa_quadratic_policy::step does NOT populate
 // step_result::policy_status (no early-exit-on-near-optimum mechanism
-// is implemented in the policy itself; the (a) leg of SEED-008
+// is implemented in the policy itself; a follow-on item
 // addresses this).  The gate is therefore expressed via
 // solver.solve(opts) + result.iterations <= max_iterations -- the
 // solve() return reflects the best-seen iterate per the NLopt
@@ -90,7 +90,7 @@ TEST_CASE("mma converges on HS076 with iter-budget cap", "[mma]")
     Eigen::VectorXd x0 = problem.initial_point();
     solver_options opts;
     opts.set_gradient_threshold(1e-5);
-    opts.max_iterations = 692;                  // 2x NLopt LD_MMA 346 per D-07
+    opts.max_iterations = 692;                  // 2x NLopt LD_MMA 346
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
@@ -101,10 +101,10 @@ TEST_CASE("mma converges on HS076 with iter-budget cap", "[mma]")
     // (matches the existing HS076 margin convention at line 53).
     CHECK(result.objective_value == Approx(problem.optimal_value()).margin(0.012));
     CHECK(result.constraint_violation <= 1e-3);
-    // Iter-budget gate (D-07 hard <=2x NLopt; soft (2x, 3x] band
-    // routed through SEED-008 by the verifier per D-08).  Does NOT
-    // assert result.status != max_iterations -- that is the (a) leg
-    // of SEED-008 (early-exit-on-near-optimum) which is out of scope
+    // Iter-budget gate (hard <=2x NLopt; soft (2x, 3x] band
+    // tracked as a follow-on).  Does NOT
+    // assert result.status != max_iterations -- that is the
+    // early-exit-on-near-optimum follow-on, which is out of scope
     // for path (i)+(iv).
     CHECK(result.iterations <= opts.max_iterations);
 }
@@ -214,7 +214,7 @@ TEST_CASE("mma converges on HS024", "[mma]")
 // chosen rho_init = 0.1 default).  The `< -41.5` guard locks the
 // as-shipped post-port descent quality.  Closing the residual gap to
 // f* = -44 is the (a)+(b) follow-on bundle (convergence-criterion
-// gating + early-phase descent enforcement) tracked by SEED-008.
+// gating + early-phase descent enforcement) is a follow-on.
 //
 // Reference: Svanberg 2002 SIAM J. Optim. 12(2):555-573, Section 4.2
 //            (inner conservativity loop closes part of the descent
@@ -248,7 +248,7 @@ TEST_CASE("mma converges on HS043", "[mma]")
     // `< -40.0` (the reciprocal-plateau ceiling without the inner
     // conservativity loop).  The original target of `< -43.5` is
     // unreachable at the as-shipped rho_init = 0.1 default and is
-    // tracked under the SEED-008 (a)+(b) follow-on bundle.
+    // tracked as a follow-on bundle.
     CHECK(best_feasible < -41.5);
 }
 
@@ -266,19 +266,19 @@ TEST_CASE("mma converges on HS043", "[mma]")
 // approximately -41.87 within 546 iters at the as-shipped rho_init
 // = 0.1 default.
 //
-// D-07 budget cap: 546 iters (2x NLopt 273).  Soft (2x, 3x] outcomes
-// route through SEED-008 per D-08; hard <=2x gate is the locked
-// phase-success threshold.
+// Budget cap: 546 iters (2x NLopt 273).  Soft (2x, 3x] outcomes
+// are tracked as a follow-on; hard <=2x gate is the locked
+// success threshold.
 //
 // Note on the gate form and bound: as in the HS076 iter-budget case
 // above, ccsa_quadratic_policy::step does NOT populate step_result::policy_status
-// (early-exit-on-near-optimum is the (a) leg of SEED-008).  The gate
+// (early-exit-on-near-optimum is a follow-on item).  The gate
 // is therefore expressed via solver.solve(opts) + result.iterations
 // <= max_iterations.  The objective bound mirrors the as-shipped
 // reachable value documented on the no-budget HS043 case above
 // (`< -41.5`); the original `< -43.5` paper-margin target is
 // unreachable at the as-shipped rho_init = 0.1 default and tracked
-// under SEED-008.
+// as a follow-on.
 //
 // Reference: Svanberg 2002 Section 4.2; NLopt mma.c:265-389.
 TEST_CASE("mma converges on HS043 with iter-budget cap", "[mma]")
@@ -287,7 +287,7 @@ TEST_CASE("mma converges on HS043 with iter-budget cap", "[mma]")
     Eigen::VectorXd x0 = problem.initial_point();
     solver_options opts;
     opts.set_gradient_threshold(1e-5);
-    opts.max_iterations = 546;                  // 2x NLopt LD_MMA 273 per D-07
+    opts.max_iterations = 546;                  // 2x NLopt LD_MMA 273
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
@@ -299,10 +299,10 @@ TEST_CASE("mma converges on HS043 with iter-budget cap", "[mma]")
     // documented on the no-budget HS043 case.
     CHECK(result.objective_value < -41.5);
     CHECK(result.constraint_violation <= 1e-3);
-    // Iter-budget gate (D-07 hard <=2x NLopt; soft (2x, 3x] band
-    // routed through SEED-008 by the verifier per D-08).  Does NOT
-    // assert result.status != max_iterations -- that is the (a) leg
-    // of SEED-008 (early-exit-on-near-optimum) which is out of scope
+    // Iter-budget gate (hard <=2x NLopt; soft (2x, 3x] band
+    // tracked as a follow-on).  Does NOT
+    // assert result.status != max_iterations -- that is the
+    // early-exit-on-near-optimum follow-on, which is out of scope
     // for path (i)+(iv).
     CHECK(result.iterations <= opts.max_iterations);
 }
@@ -531,8 +531,7 @@ TEST_CASE("gcmma converges on HS076 with iter-budget cap", "[mma][gcmma]")
     // path (iv) and the iter-budget cap is the gate (a max_iterations
     // status with best_feasible at f* is still a pass per the
     // NLopt-best-seen convention -- the policy just doesn't know when
-    // to stop, which the (a)+(b) follow-on addresses; see
-    // .planning/seeds/SEED-008-mma-gcmma-early-destabilization.md).
+    // to stop, which the follow-on addresses).
     CHECK(result.objective_value == Approx(problem.optimal_value()).margin(0.05));
     CHECK(result.constraint_violation <= 1e-3);
     CHECK(result.iterations <= opts.max_iterations);

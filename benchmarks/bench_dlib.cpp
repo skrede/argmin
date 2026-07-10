@@ -1,7 +1,7 @@
 // dlib comparison benchmarks for argmin benchmark suite.
 //
 // Each dlib solver is benchmarked on applicable problems using dlib's native
-// API (per D-01: no common adapter interface). Results are collected as
+// API (no common adapter interface). Results are collected as
 // benchmark_result structs with library = "dlib".
 //
 // Per Research pitfall 3: dlib BOBYQA and L-BFGS have different tuning than
@@ -10,7 +10,7 @@
 // Per Research open question 2: dlib does NOT expose f-eval counts, so we
 // wrap objectives with a counting functor.
 //
-// Solver mapping (per D-04):
+// Solver mapping:
 //   Bound-constrained:       find_min_box_constrained (LBFGS) -> "dlib_lbfgs_box"
 //   Bound-constrained (DFO): find_min_bobyqa          -> "dlib_bobyqa"
 //   Global:                  find_min_global            -> "dlib_global"

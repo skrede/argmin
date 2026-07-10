@@ -1,13 +1,13 @@
 // Ceres Solver comparison benchmarks for argmin benchmark suite.
 //
 // Each Ceres solver is benchmarked on applicable problems using Ceres' native
-// API (per D-01: no common adapter interface). Results are collected as
+// API (no common adapter interface). Results are collected as
 // benchmark_result structs with library = "ceres".
 //
 // Per Research pitfall 2: Ceres has NO constrained optimization. Only
 // benchmark on unconstrained problems via GradientProblem + GradientProblemSolver.
 //
-// Solver mapping (per D-04):
+// Solver mapping:
 //   Unconstrained: ceres::LBFGS -> "ceres_lbfgs"
 
 #include "bench_ceres.h"
@@ -100,9 +100,9 @@ private:
     return std::string{counts.cap_status()};
 }
 
-// Per-iter trace callback (Pattern 4 in 32.8-RESEARCH.md). Registered on
+// Per-iter trace callback. Registered on
 // GradientProblemSolver::Options::callbacks alongside
-// update_state_every_iteration=true (Pitfall 4) so the IterationSummary
+// update_state_every_iteration=true so the IterationSummary
 // reflects the accepted iterate's cost rather than the trial point. cv is
 // always 0 because Ceres has no constrained surface; kkt_residual is NaN
 // per the D-C3 capability footnote.
@@ -180,7 +180,7 @@ auto run_ceres_solver(std::string_view problem_name,
     options.gradient_tolerance = 1e-10;
     options.max_solver_time_in_seconds = config.max_wall_time_s;
     options.logging_type = ceres::SILENT;
-    // Pitfall 4 (32.8-RESEARCH.md): without this flag the IterationSummary
+    // Without this flag the IterationSummary
     // received by the callback reflects the line-search trial point instead
     // of the accepted iterate. Set unconditionally; behavior only changes
     // when callbacks are also registered, which library_defaults does not do.
@@ -190,7 +190,7 @@ auto run_ceres_solver(std::string_view problem_name,
 
     ceres::GradientProblemSolver::Summary summary;
 
-    // Per-iter trace registration (Pattern 4 in 32.8-RESEARCH.md). Stack
+    // Per-iter trace registration. Stack
     // lifetime extends across Solve(); the callback is unregistered when
     // options goes out of scope after the call returns. The `t0_us` baseline
     // is captured immediately before ceres::Solve so per-iter wall_us

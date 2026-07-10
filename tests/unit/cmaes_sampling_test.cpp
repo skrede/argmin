@@ -1,7 +1,7 @@
 // CMA-ES production Gaussian sampler (Marsaglia polar) -- chi-square
 // goodness-of-fit and seeded-reproducibility tests.
 //
-// The chi-square outcome is INFORMATIONAL per CONTEXT D-06; surfacing
+// The chi-square outcome is INFORMATIONAL; surfacing
 // distribution-shape regressions in future code changes (e.g., a typo
 // in lookup-table indices). At first introduction here the
 // implementation is required to be correct, so the CHECK lines are

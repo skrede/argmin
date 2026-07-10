@@ -1,10 +1,10 @@
 // NLopt comparison benchmarks for argmin benchmark suite.
 //
 // Each NLopt solver is benchmarked on applicable problems using NLopt's native
-// C++ API (per D-01: no common adapter interface). Results are collected as
+// C++ API (no common adapter interface). Results are collected as
 // benchmark_result structs with library = "nlopt".
 //
-// Solver mapping (per D-04):
+// Solver mapping:
 //   Unconstrained:         NLOPT_LD_LBFGS    -> "nlopt_lbfgs"
 //   Bound-constrained:     NLOPT_LN_BOBYQA   -> "nlopt_bobyqa"
 //   Inequality-constrained: NLOPT_LD_SLSQP   -> "nlopt_slsqp"
@@ -43,7 +43,7 @@ namespace detail
 // Trace wrapper bundling the counting_problem<P> with a destination trace
 // vector and the timing baseline so the publication-mode objective callback
 // can append per-invocation trace rows while still bumping the four
-// problem-level eval counters (Pattern 5 in 32.8-RESEARCH.md).
+// problem-level eval counters.
 //
 // NLopt has no native per-iter callback hook; the objective callback fires
 // once per (value, gradient) invocation pair, so "iter" in the NLopt trace

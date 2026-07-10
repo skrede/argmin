@@ -821,7 +821,7 @@ TEST_CASE("Runtime fast path with loose bounds computes finite alpha_max", "[lbf
     CHECK(dir->d.norm() > 0.0);
 }
 
-// brown_badly_scaled is the Phase 31.1 byrd_lbfgsb regression: GCP
+// brown_badly_scaled is the byrd_lbfgsb regression: GCP
 // breakpoint exhaustion on a problem with ||proj_grad||_inf ~ 5e-08 at
 // numerical floor. Pre-fix: the null-step path populated kkt_residual
 // but left policy_status unset, so the solver ran to max_iterations
