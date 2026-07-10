@@ -157,6 +157,18 @@ MANUAL_ITERS_OVERRIDE: dict[tuple[str, str, str], int] = {
 }
 
 
+# Curated Hock-Schittkowski fixtures that were measured but never carried a
+# baseline row, so they tripped the "cell not in baseline (informational)"
+# warning instead of being gated. They are folded into the cohort here so every
+# measured cohort cell for these problems is gated with an oracle-sourced
+# disposition. A problem is only added for a solver/mode that actually measured
+# it (the summary aggregation drops any expanded cell with no measurement).
+CURATED_FIXTURE_PROBLEMS = [
+    "hs021", "hs023", "hs027", "hs029", "hs030", "hs031",
+    "hs034", "hs036", "hs037", "hs038", "hs044", "hs052",
+]
+
+
 HEADER_COMMENT_BLOCK = """\
 # Regression baseline keyed by (solver, problem, mode).
 # Numeric bounds are historical gate values. The disposition column controls
@@ -297,6 +309,31 @@ def expand_cohort_for_new_solvers(
                 added += 1
     print(f"regen_baseline: cohort expansion added {added} new cells "
           f"(ref_solver={ref_solver}, new_solvers={new_solvers})",
+          file=sys.stderr)
+    return out
+
+
+def expand_cohort_for_new_problems(
+    curated: set[tuple[str, str, str]],
+    new_problems: list[str],
+) -> set[tuple[str, str, str]]:
+    """Fold measured-but-ungated fixture problems into the curated cohort.
+
+    Adds ``(solver, problem, dispatch_mode)`` for every cohort solver and each
+    new problem. The summary aggregation only emits a cell that has an actual
+    measurement, so an expanded combination a solver never ran produces no row.
+    """
+    out = set(curated)
+    added = 0
+    for solver in sorted(COHORT_SOLVERS):
+        dispatch_mode = solver_dispatch_mode(solver)
+        for problem in new_problems:
+            tup = (solver, problem, dispatch_mode)
+            if tup not in out:
+                out.add(tup)
+                added += 1
+    print(f"regen_baseline: cohort expansion added {added} new fixture cells "
+          f"(problems={new_problems})",
           file=sys.stderr)
     return out
 
@@ -510,6 +547,15 @@ def generated_rows(args: argparse.Namespace,
             curated_cells,
             ref_solver="filter_nw_sqp_accurate",
             new_solvers=missing_new_solvers,
+        )
+
+    prior_problems = {p for (_s, p, _m) in curated_cells}
+    missing_fixture_problems = [p for p in CURATED_FIXTURE_PROBLEMS
+                                if p not in prior_problems]
+    if missing_fixture_problems:
+        curated_cells = expand_cohort_for_new_problems(
+            curated_cells,
+            new_problems=missing_fixture_problems,
         )
 
     by_cell = aggregate_summary(args, curated_cells)
@@ -744,6 +790,60 @@ def validate_ledger_completeness(args: argparse.Namespace) -> int:
     return 0
 
 
+def assert_dispositions_from_oracle(args: argparse.Namespace) -> int:
+    """Assert every committed baseline disposition equals the oracle verdict.
+
+    Re-derives each non-excluded cell's disposition from the independent oracle
+    verdict under the pinned seed-aggregation rule and compares it to the
+    committed disposition. A mismatch means a self-derived (or stale)
+    disposition survived in the shipped baseline; the check fails closed. This
+    is the whole-cohort invariant that no disposition remains a product of the
+    self-referential 1.3x derivation.
+    """
+    try:
+        committed = load_baseline_rows(args.current_baseline)
+        verdict = load_oracle_verdict(args.oracle_verdict)
+        curated_cells = {(r["solver"], r["problem"], r["mode"]) for r in committed}
+        by_cell = aggregate_summary(args, curated_cells)
+    except (OSError, ValueError) as exc:
+        print(f"regen_baseline: {exc}", file=sys.stderr)
+        return 1
+
+    mismatches: list[str] = []
+    checked = 0
+    for row in committed:
+        key = (row["solver"], row["problem"], row["mode"])
+        committed_disp = row["disposition"]
+        if committed_disp == DISPOSITION_EXCLUDED:
+            continue
+        cell = by_cell.get(key)
+        if cell is None or not cell["seeds"]:
+            mismatches.append(
+                f"DISPOSITION_UNMEASURED: cell {key} is committed "
+                f"{committed_disp!r} but has no measurement to witness it")
+            continue
+        try:
+            expected = oracle_disposition(
+                verdict, key, cell["seeds"], f"{args.current_baseline}:{key}")
+        except ValueError as exc:
+            mismatches.append(f"DISPOSITION_NO_VERDICT: {exc}")
+            continue
+        checked += 1
+        if expected != committed_disp:
+            mismatches.append(
+                f"DISPOSITION_MISMATCH: cell {key} committed {committed_disp!r} "
+                f"but the oracle verdict aggregates to {expected!r}")
+
+    if mismatches:
+        for line in mismatches:
+            print(line, file=sys.stderr)
+        return 1
+    print(f"regen_baseline: all {checked} committed dispositions equal the "
+          "independent oracle verdict (no self-derived disposition survives)",
+          file=sys.stderr)
+    return 0
+
+
 def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
@@ -960,6 +1060,7 @@ def main() -> int:
     p.add_argument("--cv-cutoff", type=float, default=1e-8)
     p.add_argument("--migrate-existing-baseline", action="store_true")
     p.add_argument("--validate-ledger-completeness", action="store_true")
+    p.add_argument("--assert-dispositions-from-oracle", action="store_true")
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--self-test-release-guard", action="store_true")
     p.add_argument("--self-test-ledger-completeness", action="store_true")
@@ -986,6 +1087,15 @@ def main() -> int:
                   file=sys.stderr)
             return 1
         return validate_ledger_completeness(args)
+
+    if args.assert_dispositions_from_oracle:
+        if (args.current_baseline is None or args.oracle_verdict is None
+                or args.summary is None):
+            print("regen_baseline: --current-baseline, --oracle-verdict, and "
+                  "--summary are required to assert dispositions from the oracle",
+                  file=sys.stderr)
+            return 1
+        return assert_dispositions_from_oracle(args)
 
     if (args.summary is None or args.prior_baseline is None
         or args.output is None or args.provenance is None
