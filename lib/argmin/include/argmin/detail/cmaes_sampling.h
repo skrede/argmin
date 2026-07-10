@@ -73,7 +73,7 @@ auto sample_offspring(
 // Penalty = sum of squared repair distances. Orthogonal to the
 // Gaussian-transform fork; remains in this header for the
 // repair_l2_penalty_policy callsite.
-// Reference: Hansen boundary handling tutorial (D-03).
+// Reference: Hansen boundary handling tutorial.
 template <typename Scalar = double, int N = argmin::dynamic_dimension>
 Scalar repair_and_penalize(Eigen::Vector<Scalar, N>& x,
                            const Eigen::Vector<Scalar, N>& lower,

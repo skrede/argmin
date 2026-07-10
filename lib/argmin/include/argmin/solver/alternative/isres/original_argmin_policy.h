@@ -94,14 +94,13 @@ struct original_argmin_policy
 
         // RNG: xoshiro256+ matches cmaes (consistent across the global
         // / stochastic policies). std::mt19937 was 2.5 KB of state;
-        // xoshiro256 is 32 B. Static-audit I8.
+        // xoshiro256 is 32 B.
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
         double best_ever_value{std::numeric_limits<double>::infinity()};
         // Track the least-infeasibility witness across the run so the
         // pre-feasible best update can compare against the rolling
         // best instead of the just-overwritten s.violations[0].
-        // Static-audit I4.
         double best_ever_violation{std::numeric_limits<double>::infinity()};
 
         Eigen::VectorXd c_eq;
@@ -117,8 +116,8 @@ struct original_argmin_policy
 
         std::optional<detail::isres_operator_workspace<double, N>> mutation_workspace;
 
-        // Per-step buffers (static-audit I5/I6/I7). Hoisted to state so
-        // step() does not heap-resize them every generation. Sized to
+        // Per-step buffers hoisted to state so step() does not
+        // heap-resize them every generation. Sized to
         // current lambda in init(); persistent across steps.
         Eigen::Matrix<double, N, Eigen::Dynamic> offspring_buf;
         Eigen::MatrixXd new_sigmas_buf;
@@ -170,7 +169,7 @@ struct original_argmin_policy
         s.alpha = options.pull_to_best_weight.value_or(0.2);
         s.rates = detail::compute_es_rates(n);
 
-        // Seed RNG (xoshiro256+ per static-audit I8; consistent with cmaes_policy).
+        // Seed RNG (xoshiro256+; consistent with cmaes_policy).
         const std::uint64_t seed = options.seed.value_or(
             static_cast<std::uint64_t>(std::random_device{}()));
         s.rng.emplace(seed);
@@ -178,7 +177,7 @@ struct original_argmin_policy
         // Pre-allocate mutation workspace
         s.mutation_workspace.emplace(n);
 
-        // Pre-allocate per-step buffers (static-audit I5/I6/I7).
+        // Pre-allocate per-step buffers.
         s.offspring_buf.resize(n, s.lambda);
         s.new_sigmas_buf.resize(n, s.lambda);
         s.offspring_fitnesses_buf.resize(s.lambda);
@@ -238,7 +237,7 @@ struct original_argmin_policy
         s.best_ever_value = s.objective_value;
         // Initial best-ever-violation is the violation at the chosen
         // best init point. Used by the pre-feasible best-update path
-        // in step() (static-audit I4).
+        // in step().
         s.best_ever_violation = s.violations[best_idx];
 
         // Store constraint values at best point
@@ -266,7 +265,7 @@ struct original_argmin_policy
 
         // 1. Generate offspring via mutation + differential variation.
         // Buffers live on s; mutation operator is unchanged in this
-        // commit (the I1/I2/I3 operator rewrite is a follow-up).
+        // commit (the operator rewrite is a follow-up).
         for(int j = 0; j < s.lambda; ++j)
         {
             // Select parent from current population (top mu by rank)
@@ -324,7 +323,7 @@ struct original_argmin_policy
         }
 
         // Fill remaining slots by copying parents cyclically.
-        // (Note: static-audit I10 flags this fill as dead code -- the
+        // (Note: this fill is dead code -- the
         // mutation step at line 1 above reads via `parent_idx = j % mu`,
         // which only touches columns [0, mu). Slots [mu, lambda) are
         // structurally unread between step() invocations. Kept for
@@ -365,12 +364,12 @@ struct original_argmin_policy
             // witness. Pre-fix this branch compared `s.violations[0]`,
             // but s.violations[0] was overwritten by the just-selected
             // top-ranked offspring at the population-update loop above
-            // (static-audit I4 -- comparing best-ranked to itself,
-            // never updates). Now compare against the rolling
+            // (comparing best-ranked to itself never updates).
+            // Now compare against the rolling
             // s.best_ever_violation which is preserved across steps.
             //
             // Pre-fix the predicate also used `||` between violation-
-            // decrease and fitness-decrease (static-audit I14), which
+            // decrease and fitness-decrease, which
             // admitted offspring with worse feasibility but better
             // fitness, masking the least-violating witness. Use `&&`
             // so we only update on a Pareto improvement (both lower

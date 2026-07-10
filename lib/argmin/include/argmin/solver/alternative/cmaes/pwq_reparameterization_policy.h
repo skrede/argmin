@@ -21,7 +21,7 @@
 //   - The map's smoothness/inverse-stability properties depend on
 //     correct buffer-endpoint setup.
 //
-// Degenerate-bounds guard (T-34.2-03-03 mitigation): on coords with
+// Degenerate-bounds guard: on coords with
 // `width = ub[i] - lb[i] <= 0` the per-coord pwq parameters are set
 // such that the transform reduces to a clip into the singleton (or
 // degenerate) interval. This avoids divide-by-zero in the quadratic
@@ -172,7 +172,7 @@ struct pwq_reparameterization_policy
         // population.
         bool invalid_problem{false};
 
-        // Per-step buffers (static-audit G10). Pre-allocated to MaxPop
+        // Per-step buffers. Pre-allocated to MaxPop
         // so step() does not heap-resize them on the hot path. lambda
         // (current popsize) may be smaller than MaxPop on early
         // generations / pre-IPOP-doubling runs; the working size is
@@ -212,7 +212,7 @@ struct pwq_reparameterization_policy
             // Per-coord degeneracy mask: true when ub[i] - lb[i] <= 0.
             // Degenerate coords skip the quadratic / wrap branches and
             // clip-to-singleton instead (see geno_to_pheno).
-            // Reference: T-34.2-03-03 mitigation.
+            // Reference: degenerate-bounds mitigation.
             Eigen::Matrix<int, N, 1> degenerate;
         };
         pwq_params pwq;
@@ -235,7 +235,7 @@ struct pwq_reparameterization_policy
         const int n = static_cast<int>(x.size());
         for(int i = 0; i < n; ++i)
         {
-            // Degenerate-bounds guard (T-34.2-03-03 mitigation): clip
+            // Degenerate-bounds guard: clip
             // into the singleton interval; no quadratic / wrap branch.
             if(pwq.degenerate[i])
             {
@@ -321,7 +321,7 @@ struct pwq_reparameterization_policy
             //   xlow     = lb - 2*al - tmpdiff2
             //   xup      = ub + 2*au + tmpdiff2
             //   r        = 2 * (tmpdiff1 + al + au)    (wrap period)
-            // T-34.2-03-03 mitigation: degenerate coords (width <= 0)
+            // Degenerate-bounds mitigation: degenerate coords (width <= 0)
             // get al = au = 0 and degenerate=true; geno_to_pheno then
             // clips into the singleton without entering the quadratic
             // or wrap branches.
@@ -409,7 +409,7 @@ struct pwq_reparameterization_policy
         // requested population.
         s.invalid_problem = (s.params.lambda > state_type<Problem>::MaxPop);
 
-        // Pre-allocate per-step buffers (static-audit G10). Sized to
+        // Pre-allocate per-step buffers. Sized to
         // current lambda; step() uses .head(lambda) / .leftCols(lambda)
         // to track the working size, and re-resizes only on IPOP
         // doublings. The compile-time MaxPop cap on the matrix
@@ -574,9 +574,8 @@ struct pwq_reparameterization_policy
         // at the repaired point. The unpenalized value is what the
         // caller should see as `s.objective_value` -- the penalized
         // value is meaningless for cross-library benchmark comparison.
-        // Static-audit G12.
         //
-        // Buffers live on s (state-owned, static-audit G10). On the
+        // Buffers live on s (state-owned). On the
         // first IPOP doubling lambda may exceed the buffers' current
         // size; resize on demand (one-time alloc per lambda growth).
         if(static_cast<int>(s.fitnesses_buf.size()) < lambda)
@@ -665,7 +664,7 @@ struct pwq_reparameterization_policy
                 * delta_w;
 
         // 10. Compute deltas for covariance update (state-owned buffer
-        // per static-audit G10). Working width is `lambda`; deltas_buf
+        //). Working width is `lambda`; deltas_buf
         // was sized to current lambda in init() / on IPOP growth above.
         auto deltas = s.deltas_buf.leftCols(lambda);
         for(int i = 0; i < lambda; ++i)
@@ -699,7 +698,7 @@ struct pwq_reparameterization_policy
         // best-ranked offspring is the candidate. For pwq, fitnesses[i]
         // and unpenalized[i] are both `problem.value(g(geno_i))` (no
         // penalty); s.objective_value is the unpenalized value at the
-        // PHENO point. The Phase 34 G12 caller-facing-unpenalized
+        // PHENO point. The G12 caller-facing-unpenalized
         // contract (state.objective_value == problem.value(state.x))
         // is preserved by writing s.x = pheno_buf.col(best_offspring),
         // i.e. the pheno coords -- the caller can re-evaluate
@@ -793,14 +792,14 @@ struct pwq_reparameterization_policy
         // History tracking runs unconditionally so the §B.3 EXIT criteria
         // (TolFun, EqualFunValues) can read it regardless of restart_strategy.
         // The penalized fitness is the search's progress signal (the
-        // unpenalized value is what we expose to callers as s.objective_value;
-        // see static-audit G12). median_fitness_history is only consumed by
+        // unpenalized value is what we expose to callers as
+        // s.objective_value). median_fitness_history is only consumed by
         // the IPOP-mode Stagnation detector but is cheap to maintain and
         // simplifies the gating below.
         s.best_fitness_history.push_back(fitnesses[best_offspring]);
         {
             // Compute median fitness of this generation. Reuses the
-            // state-owned buffer (static-audit G10); nth_element mutates it
+            // state-owned buffer; nth_element mutates it
             // in place, but the values are read-only after the median
             // extraction so the next-generation overwrite is fine.
             auto& gen_fitnesses = s.gen_fitnesses_buf;

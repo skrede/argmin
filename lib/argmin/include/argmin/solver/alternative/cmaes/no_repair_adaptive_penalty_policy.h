@@ -11,7 +11,7 @@
 // CMA-ES sees the unrepaired x (preserves the search-distribution
 // gradient signal at the boundary). The objective is also evaluated at
 // the unrepaired x for the search; a SECOND evaluation at the repaired
-// (clipped) point is recorded into `unpenalized` so the Phase 34 G12
+// (clipped) point is recorded into `unpenalized` so the G12
 // caller-facing-unpenalized contract holds:
 //   state.objective_value == problem.value(state.x)
 // with state.x stored as the repaired (in-box) point of the best
@@ -167,7 +167,7 @@ struct no_repair_adaptive_penalty_policy
         // population.
         bool invalid_problem{false};
 
-        // Per-step buffers (static-audit G10). Pre-allocated to MaxPop
+        // Per-step buffers. Pre-allocated to MaxPop
         // so step() does not heap-resize them on the hot path. lambda
         // (current popsize) may be smaller than MaxPop on early
         // generations / pre-IPOP-doubling runs; the working size is
@@ -278,7 +278,7 @@ struct no_repair_adaptive_penalty_policy
         // requested population.
         s.invalid_problem = (s.params.lambda > state_type<Problem>::MaxPop);
 
-        // Pre-allocate per-step buffers (static-audit G10). Sized to
+        // Pre-allocate per-step buffers. Sized to
         // current lambda; step() uses .head(lambda) / .leftCols(lambda)
         // to track the working size, and re-resizes only on IPOP
         // doublings. The compile-time MaxPop cap on the matrix
@@ -406,9 +406,8 @@ struct no_repair_adaptive_penalty_policy
         // at the repaired point. The unpenalized value is what the
         // caller should see as `s.objective_value` -- the penalized
         // value is meaningless for cross-library benchmark comparison.
-        // Static-audit G12.
         //
-        // Buffers live on s (state-owned, static-audit G10). On the
+        // Buffers live on s (state-owned). On the
         // first IPOP doubling lambda may exceed the buffers' current
         // size; resize on demand (one-time alloc per lambda growth).
         if(static_cast<int>(s.fitnesses_buf.size()) < lambda)
@@ -429,8 +428,8 @@ struct no_repair_adaptive_penalty_policy
         // evaluated TWICE per offspring on bounded cells:
         //   - at the unrepaired x_i for the search signal (`fitnesses`)
         //   - at the repaired (clipped) x_i for the caller-facing
-        //     unpenalized value (`unpenalized`); preserves the Phase 34
-        //     G12 contract state.objective_value <= problem.value(state.x)
+        //     unpenalized value (`unpenalized`); preserves the G12
+        //     contract state.objective_value <= problem.value(state.x)
         //     when state.x is set to the repaired best-of-generation.
         // The penalty term is sum_i adaptive_weights[i] * (x_i - clip_i)^2.
         // Reference: Hansen (2009) §3.
@@ -506,7 +505,7 @@ struct no_repair_adaptive_penalty_policy
                 * delta_w;
 
         // 10. Compute deltas for covariance update (state-owned buffer
-        // per static-audit G10). Working width is `lambda`; deltas_buf
+        //). Working width is `lambda`; deltas_buf
         // was sized to current lambda in init() / on IPOP growth above.
         auto deltas = s.deltas_buf.leftCols(lambda);
         for(int i = 0; i < lambda; ++i)
@@ -563,8 +562,8 @@ struct no_repair_adaptive_penalty_policy
         // the best offspring and s.objective_value is
         // problem.value(repaired_x). Storing repaired x means
         // problem.value(state.x) == state.objective_value (the user's
-        // objective is feasible-evaluated), preserving the Phase 34
-        // G12 caller-facing-unpenalized contract.
+        // objective is feasible-evaluated), preserving the G12
+        // caller-facing-unpenalized contract.
         const int best_offspring = idx[0];
         double gen_best_f = unpenalized[best_offspring];
         if(gen_best_f < s.objective_value)
@@ -654,14 +653,14 @@ struct no_repair_adaptive_penalty_policy
         // History tracking runs unconditionally so the §B.3 EXIT criteria
         // (TolFun, EqualFunValues) can read it regardless of restart_strategy.
         // The penalized fitness is the search's progress signal (the
-        // unpenalized value is what we expose to callers as s.objective_value;
-        // see static-audit G12). median_fitness_history is only consumed by
+        // unpenalized value is what we expose to callers as
+        // s.objective_value). median_fitness_history is only consumed by
         // the IPOP-mode Stagnation detector but is cheap to maintain and
         // simplifies the gating below.
         s.best_fitness_history.push_back(fitnesses[best_offspring]);
         {
             // Compute median fitness of this generation. Reuses the
-            // state-owned buffer (static-audit G10); nth_element mutates it
+            // state-owned buffer; nth_element mutates it
             // in place, but the values are read-only after the median
             // extraction so the next-generation overwrite is fine.
             auto& gen_fitnesses = s.gen_fitnesses_buf;

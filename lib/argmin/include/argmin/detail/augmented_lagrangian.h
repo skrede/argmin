@@ -35,7 +35,7 @@ namespace argmin::detail
 //
 // All Eigen-vector parameters are template-deduced expression types so
 // the policy can pass head() / tail() segments of a maintained buffer
-// without materializing temporaries (static-audit AL4/AL5).
+// without materializing temporaries.
 template <typename Scalar,
           typename CeqExpr, typename CineqExpr,
           typename LeqExpr, typename LineqExpr>
@@ -79,10 +79,10 @@ Scalar augmented_lagrangian_value(
 //   g -= J_ineq^T * effective
 //
 // Both contributions are single mat-vec products instead of the prior
-// row-by-row accumulation (static-audit AL9). All Eigen parameters are
+// row-by-row accumulation. All Eigen parameters are
 // template-deduced expression types so the policy can pass topRows /
 // bottomRows / head / tail segments of maintained buffers without
-// materializing temporaries (static-audit AL4 / AL5).
+// materializing temporaries.
 //
 // J_eq is (m_eq x n); J_ineq is (m_ineq x n).
 template <typename Scalar, int N,

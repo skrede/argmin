@@ -121,7 +121,7 @@ public:
                 bps_.push_back({i, ti});
         }
 
-        // Unconstrained fallback (D-04): no finite breakpoints, all variables free.
+        // Unconstrained fallback: no finite breakpoints, all variables free.
         if(bps_.empty())
         {
             d_.noalias() = -g;

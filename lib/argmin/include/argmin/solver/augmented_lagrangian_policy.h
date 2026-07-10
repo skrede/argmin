@@ -286,7 +286,7 @@ struct augmented_lagrangian_policy
                     outer->constraints(x, *c_all_buf);
                     outer->constraint_jacobian(x, *J_all_buf);
                 }
-                // In-place mat-vec gradient (AL9). topRows / bottomRows /
+                // In-place mat-vec gradient. topRows / bottomRows /
                 // head / tail are passed as Eigen expressions the helper
                 // consumes via DenseBase deduction; the multiplier-shift
                 // vectors are formed in the caller-owned shift workspaces so

@@ -12,7 +12,7 @@
 //
 // When the problem satisfies only differentiable (no bounds), all bounds
 // default to +/-infinity and the algorithm reduces to standard L-BFGS
-// with projected steps (D-04).
+// with projected steps.
 //
 // Reference: Byrd, Lu, Nocedal, Zhu (1995) "A Limited Memory Algorithm
 //            for Bound Constrained Optimization", SIAM J. Sci. Comput.
@@ -267,7 +267,7 @@ struct lbfgsb_policy
         };
     }
 
-    // Hot start -- preserves curvature pairs (D-05).
+    // Hot start -- preserves curvature pairs.
     template <typename P>
     void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {
@@ -278,7 +278,7 @@ struct lbfgsb_policy
         // B (compact_lbfgs) is NOT reset -- preserves curvature pairs
     }
 
-    // Cold restart -- clears curvature history (D-05).
+    // Cold restart -- clears curvature history.
     template <typename P>
     void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
     {

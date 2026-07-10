@@ -23,7 +23,7 @@
 namespace argmin
 {
 
-// Multi-solver group with scheduling (per CORE-03, CORE-04, D-12).
+// Multi-solver group with scheduling.
 //
 // Holds a tuple of step_budget_solver<Policies, N>... and uses a Schedule to decide
 // which solver to step next. The compile-time fold-expression requires clause

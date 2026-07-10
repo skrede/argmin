@@ -157,7 +157,7 @@ struct repair_l2_penalty_policy
         // population.
         bool invalid_problem{false};
 
-        // Per-step buffers (static-audit G10). Pre-allocated to MaxPop
+        // Per-step buffers. Pre-allocated to MaxPop
         // so step() does not heap-resize them on the hot path. lambda
         // (current popsize) may be smaller than MaxPop on early
         // generations / pre-IPOP-doubling runs; the working size is
@@ -256,7 +256,7 @@ struct repair_l2_penalty_policy
         // requested population.
         s.invalid_problem = (s.params.lambda > state_type<Problem>::MaxPop);
 
-        // Pre-allocate per-step buffers (static-audit G10). Sized to
+        // Pre-allocate per-step buffers. Sized to
         // current lambda; step() uses .head(lambda) / .leftCols(lambda)
         // to track the working size, and re-resizes only on IPOP
         // doublings. The compile-time MaxPop cap on the matrix
@@ -384,9 +384,8 @@ struct repair_l2_penalty_policy
         // at the repaired point. The unpenalized value is what the
         // caller should see as `s.objective_value` -- the penalized
         // value is meaningless for cross-library benchmark comparison.
-        // Static-audit G12.
         //
-        // Buffers live on s (state-owned, static-audit G10). On the
+        // Buffers live on s (state-owned). On the
         // first IPOP doubling lambda may exceed the buffers' current
         // size; resize on demand (one-time alloc per lambda growth).
         if(static_cast<int>(s.fitnesses_buf.size()) < lambda)
@@ -459,7 +458,7 @@ struct repair_l2_penalty_policy
                 * delta_w;
 
         // 10. Compute deltas for covariance update (state-owned buffer
-        // per static-audit G10). Working width is `lambda`; deltas_buf
+        //). Working width is `lambda`; deltas_buf
         // was sized to current lambda in init() / on IPOP growth above.
         auto deltas = s.deltas_buf.leftCols(lambda);
         for(int i = 0; i < lambda; ++i)
@@ -494,13 +493,12 @@ struct repair_l2_penalty_policy
         // candidate. We rank by `fitnesses` but record the unpenalized
         // `problem.value(repaired_xi)` in `s.objective_value` so a
         // cross-library benchmark reads a comparable feasible-objective
-        // value rather than a repair-penalty-inflated number. Static-
-        // audit G12.
+        // value rather than a repair-penalty-inflated number.
         //
         // Pre-fix step() also evaluated `s.problem->value(s.mean)` every
         // generation and replaced s.x / objective_value if the mean came
         // in lower; that added ~1 eval per gen (~16% inflation at popsize
-        // 6) for no algorithmic reason. Static-audit G6 (removed in the
+        // 6) for no algorithmic reason (removed in the
         // commit immediately preceding this one).
         const int best_offspring = idx[0];
         double gen_best_f = unpenalized[best_offspring];
@@ -591,14 +589,14 @@ struct repair_l2_penalty_policy
         // History tracking runs unconditionally so the §B.3 EXIT criteria
         // (TolFun, EqualFunValues) can read it regardless of restart_strategy.
         // The penalized fitness is the search's progress signal (the
-        // unpenalized value is what we expose to callers as s.objective_value;
-        // see static-audit G12). median_fitness_history is only consumed by
+        // unpenalized value is what we expose to callers as
+        // s.objective_value). median_fitness_history is only consumed by
         // the IPOP-mode Stagnation detector but is cheap to maintain and
         // simplifies the gating below.
         s.best_fitness_history.push_back(fitnesses[best_offspring]);
         {
             // Compute median fitness of this generation. Reuses the
-            // state-owned buffer (static-audit G10); nth_element mutates it
+            // state-owned buffer; nth_element mutates it
             // in place, but the values are read-only after the median
             // extraction so the next-generation overwrite is fine.
             auto& gen_fitnesses = s.gen_fitnesses_buf;

@@ -15,7 +15,7 @@
 //
 // Verdict source: 5-seed publish_bench median over the bounded global
 // cells (rastrigin_2/10, griewank_2, schwefel_2, ackley_2/10). On the
-// binding D-08 cell schwefel_2, pwq is the only variant that ever
+// binding cell schwefel_2, pwq is the only variant that ever
 // reaches the libcmaes_ipop optimum (2.5e-05) at fixed seed; on
 // griewank_2 pwq has the lowest 5-seed median; on the rastrigin /
 // ackley cells the variants are within noise. By sum of log10 median
