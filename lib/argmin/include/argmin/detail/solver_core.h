@@ -623,10 +623,6 @@ public:
         // stall_tolerance_threshold (none today) leave the flag in its
         // defaulted false state; the criterion then uses the combined
         // (objective + constraint_violation) metric byte-for-byte.
-        //
-        // Reference: Svanberg 1987, "The method of moving asymptotes",
-        //            IJNME 24:359-373, Theorem 5.1 (Cauchy-sequence
-        //            convergence precondition).
         if constexpr(requires { policy_opts.stall_tolerance_threshold; })
         {
             using criteria_tuple = decltype(stored_convergence_.criteria);
