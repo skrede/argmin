@@ -77,7 +77,31 @@ LEDGER_FIELDS = [
     "provenance_id",
     "commit_kind",
     "notes",
+    "disposition",
+    "disposition_change",
 ]
+
+# Independent oracle verdict schema. The verdict is produced by the analytic
+# oracle validator and is the disposition source of truth: a cell's committed
+# disposition is derived from these per-seed pass/fail verdicts, never from the
+# same run the gate then checks.
+VERDICT_FIELDS = [
+    "solver",
+    "problem",
+    "mode",
+    "seed",
+    "oracle_pass",
+    "objective_distance",
+    "feasibility_residual",
+    "kkt_residual",
+    "witness",
+]
+
+ORACLE_PASS_TOKEN = "pass"
+ORACLE_FAIL_TOKEN = "fail"
+ORACLE_PASS_VALUES = {ORACLE_PASS_TOKEN, ORACLE_FAIL_TOKEN}
+
+DISPOSITION_LEDGER_METRIC = "disposition"
 
 
 def solver_dispatch_mode(solver: str) -> str:
@@ -109,12 +133,6 @@ HEADER_COMMENT_BLOCK = """\
 # wall_gate_policy describes whether the wall gate is enforced locally or made
 # advisory by the caller through REGRESSION_CHECK_DISABLE_WALL_GATE.
 """
-
-
-def safe_log10(x: float) -> float:
-    if x <= 0.0:
-        return -math.inf
-    return math.log10(x)
 
 
 def median(xs: list[float]) -> float:
@@ -274,6 +292,65 @@ def load_release_provenance(path: Path) -> dict[str, str] | None:
     }
 
 
+def load_oracle_verdict(path: Path) -> dict[tuple[str, str, str], dict[str, str]]:
+    """Load the independent oracle verdict, keyed by baseline cell.
+
+    Returns a mapping ``(solver, problem, dispatch_mode) -> {seed: oracle_pass}``.
+    The verdict's own ``mode`` column records the publication run mode and is not
+    the cell-join axis; the cell mode is derived from the solver name so the
+    per-seed verdict aligns with the ``(solver, problem, mode)`` baseline cell key
+    that the gate later enforces.
+    """
+    rows = read_csv_rows(path)
+    if not rows:
+        raise ValueError(f"{path}: no oracle verdict rows")
+    by_cell: dict[tuple[str, str, str], dict[str, str]] = defaultdict(dict)
+    for row in rows:
+        require_fields(row, VERDICT_FIELDS, str(path))
+        solver = row["solver"]
+        problem = row["problem"]
+        seed = row["seed"]
+        oracle_pass = row["oracle_pass"]
+        if oracle_pass not in ORACLE_PASS_VALUES:
+            raise ValueError(
+                f"{path}: invalid oracle_pass {oracle_pass!r} for "
+                f"solver={solver} problem={problem} seed={seed}")
+        cell = (solver, problem, solver_dispatch_mode(solver))
+        seeds = by_cell[cell]
+        if seed in seeds and seeds[seed] != oracle_pass:
+            raise ValueError(
+                f"{path}: conflicting oracle_pass for solver={solver} "
+                f"problem={problem} seed={seed}: "
+                f"{seeds[seed]!r} vs {oracle_pass!r}")
+        seeds[seed] = oracle_pass
+    return dict(by_cell)
+
+
+def oracle_disposition(verdict: dict[tuple[str, str, str], dict[str, str]],
+                       key: tuple[str, str, str],
+                       cell_seeds: list[str],
+                       context: str) -> str:
+    """Resolve a cell disposition from the independent oracle verdict.
+
+    Applies the pinned seed-aggregation rule: the cell is ``pass`` iff every
+    seed of that cell cleared the oracle, otherwise ``expected_fail``. A cell
+    with no verdict, or a cell missing any of its measured seeds, fails closed
+    (raises) rather than silently falling back to a self-derived disposition.
+    """
+    seeds = verdict.get(key)
+    if seeds is None:
+        raise ValueError(
+            f"{context}: no oracle verdict for cell {key}; refusing to "
+            "fall back to self-derived disposition")
+    missing = sorted(s for s in set(cell_seeds) if s not in seeds)
+    if missing:
+        raise ValueError(
+            f"{context}: oracle verdict for cell {key} is missing "
+            f"seed(s) {', '.join(missing)}; failing closed")
+    all_pass = all(seeds[s] == ORACLE_PASS_TOKEN for s in cell_seeds)
+    return DISPOSITION_PASS if all_pass else DISPOSITION_EXPECTED_FAIL
+
+
 def write_baseline(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
@@ -306,6 +383,7 @@ def aggregate_summary(args: argparse.Namespace,
     required = [
         "solver",
         "problem",
+        "seed",
         "solver_iters",
         "wall_time_us",
         "accuracy",
@@ -325,6 +403,7 @@ def aggregate_summary(args: argparse.Namespace,
             "acc": [],
             "cv": [],
             "status": [],
+            "seeds": [],
             "excluded": False,
             "exclusion_reason": "",
             "provenance_id": "",
@@ -361,12 +440,14 @@ def aggregate_summary(args: argparse.Namespace,
         cell["acc"].append(acc)
         cell["cv"].append(cv)
         cell["status"].append(r["status"])
+        cell["seeds"].append(r["seed"])
         cell["provenance_id"] = r["provenance_id"]
     return by_cell
 
 
 def generated_rows(args: argparse.Namespace,
-                   provenance: dict[str, str]) -> list[dict[str, str]]:
+                   provenance: dict[str, str],
+                   verdict: dict[tuple[str, str, str], dict[str, str]]) -> list[dict[str, str]]:
     curated_cells = load_curated_cells(args.prior_baseline)
     print(f"regen_baseline: curated cohort size = {len(curated_cells)} cells",
           file=sys.stderr)
@@ -403,6 +484,10 @@ def generated_rows(args: argparse.Namespace,
         if not cell["per_step_us"]:
             continue
 
+        # Numeric bounds stay measured advisory envelope numbers, but they no
+        # longer decide pass/expected_fail. The disposition comes from the
+        # independent oracle verdict (per-seed pass/fail aggregated per cell),
+        # not from this run's own converged-status/accuracy/cv.
         bound_us = max(1, int(math.ceil(median(cell["per_step_us"]) * 1.30)))
         max_iters_empirical = max(cell["iters"])
         bound_iters = max(1, int(math.ceil(max_iters_empirical * 1.30)))
@@ -410,19 +495,12 @@ def generated_rows(args: argparse.Namespace,
         if manual_iters is not None:
             bound_iters = manual_iters
 
-        statuses = cell["status"]
-        accs = cell["acc"]
-        cvs = cell["cv"]
-        all_converged = all(s == "converged" for s in statuses)
-        empirical_acc_log10 = safe_log10(max(accs))
-        empirical_cv_log10 = safe_log10(max(cvs))
-
-        if (all_converged
-            and empirical_acc_log10 <= min_acc_log10
-            and empirical_cv_log10 <= max_cv_log10):
-            disposition = DISPOSITION_PASS
-        else:
-            disposition = DISPOSITION_EXPECTED_FAIL
+        disposition = oracle_disposition(
+            verdict,
+            (solver, problem, mode),
+            cell["seeds"],
+            f"{args.summary}:{solver}:{problem}:{mode}",
+        )
 
         rows_out.append({
             "solver": solver,
@@ -444,8 +522,13 @@ def generate_baseline(args: argparse.Namespace) -> int:
     provenance = load_release_provenance(args.provenance) if args.provenance else None
     if provenance is None:
         return 1
+    if getattr(args, "oracle_verdict", None) is None:
+        print("regen_baseline: --oracle-verdict is required to source "
+              "dispositions from the independent oracle", file=sys.stderr)
+        return 1
     try:
-        rows = generated_rows(args, provenance)
+        verdict = load_oracle_verdict(args.oracle_verdict)
+        rows = generated_rows(args, provenance, verdict)
     except (OSError, ValueError) as exc:
         print(f"regen_baseline: {exc}", file=sys.stderr)
         return 1
@@ -506,6 +589,14 @@ def baseline_moves(prior: Path, current: Path) -> list[tuple[str, str, str, str,
             new_value = new_row[metric]
             if parse_float(old_value, f"{prior}:{metric}") != parse_float(new_value, f"{current}:{metric}"):
                 moves.append((metric, solver, problem, mode, old_value, new_value))
+        # Disposition flips (pass<->expected_fail) were previously invisible
+        # because only numeric fields were diffed. Surface them as a move so the
+        # ledger-completeness check requires an explicit reconciliation row.
+        old_disp = old_row["disposition"]
+        new_disp = new_row["disposition"]
+        if old_disp != new_disp:
+            moves.append((DISPOSITION_LEDGER_METRIC, solver, problem, mode,
+                          old_disp, new_disp))
     return moves
 
 
@@ -600,15 +691,29 @@ bobyqa,problem_b,default,10,-8.0,10,-8.0,pass
 """
 
 
+SELF_TEST_VERDICT = """\
+solver,problem,mode,seed,oracle_pass,objective_distance,feasibility_residual,kkt_residual,witness
+bobyqa,problem_a,publication,42,pass,1e-12,0.0,0.0,feasibility-at-x*
+bobyqa,problem_b,publication,42,fail,5e-1,5e-1,0.0,feasibility-at-x*
+"""
+
+SELF_TEST_VERDICT_MISSING_CELL = """\
+solver,problem,mode,seed,oracle_pass,objective_distance,feasibility_residual,kkt_residual,witness
+bobyqa,problem_a,publication,42,pass,1e-12,0.0,0.0,feasibility-at-x*
+"""
+
+
 def run_self_test() -> int:
     with tempfile.TemporaryDirectory(prefix="argmin-regen-baseline-") as tmp_s:
         tmp = Path(tmp_s)
         summary = tmp / "summary.csv"
         prior = tmp / "prior.csv"
         provenance = tmp / "provenance.json"
+        verdict = tmp / "verdict.csv"
         output = tmp / "baseline.csv"
         write_text(summary, SELF_TEST_SUMMARY)
         write_text(prior, SELF_TEST_PRIOR)
+        write_text(verdict, SELF_TEST_VERDICT)
         write_text(provenance, json.dumps({
             "build_type": "Release",
             "provenance_id": "selftest-release",
@@ -619,6 +724,7 @@ def run_self_test() -> int:
             prior_baseline=prior,
             output=output,
             provenance=provenance,
+            oracle_verdict=verdict,
         )
         if generate_baseline(args) != 0:
             return 1
@@ -626,9 +732,34 @@ def run_self_test() -> int:
         if len(rows) != 2:
             print("regen_baseline self-test: expected two output rows", file=sys.stderr)
             return 1
-        row = rows[0]
-        if row["disposition"] not in DISPOSITIONS or not row["provenance_id"]:
-            print("regen_baseline self-test: invalid disposition or provenance",
+        by_key = {(r["solver"], r["problem"]): r for r in rows}
+        # Disposition must track the oracle verdict, not the checked run.
+        if by_key[("bobyqa", "problem_a")]["disposition"] != DISPOSITION_PASS:
+            print("regen_baseline self-test: oracle-pass cell not marked pass",
+                  file=sys.stderr)
+            return 1
+        if by_key[("bobyqa", "problem_b")]["disposition"] != DISPOSITION_EXPECTED_FAIL:
+            print("regen_baseline self-test: oracle-fail cell not marked "
+                  "expected_fail", file=sys.stderr)
+            return 1
+        for row in rows:
+            if row["disposition"] not in DISPOSITIONS or not row["provenance_id"]:
+                print("regen_baseline self-test: invalid disposition or provenance",
+                      file=sys.stderr)
+                return 1
+
+        # A verdict missing a measured cell must fail closed, never silently
+        # fall back to the old self-derived disposition.
+        write_text(verdict, SELF_TEST_VERDICT_MISSING_CELL)
+        if generate_baseline(args) == 0:
+            print("regen_baseline self-test: missing-cell verdict did not fail "
+                  "closed", file=sys.stderr)
+            return 1
+
+        # An absent verdict file must also fail closed.
+        verdict.unlink()
+        if generate_baseline(args) == 0:
+            print("regen_baseline self-test: absent verdict did not fail closed",
                   file=sys.stderr)
             return 1
     return 0
@@ -668,13 +799,16 @@ def run_ledger_self_test() -> int:
         ledger = tmp / "ledger.csv"
         profile = tmp / "profile.csv"
         register = tmp / "register.csv"
+        # The current baseline both moves a numeric bound (10 -> 11) and flips
+        # the disposition (pass -> expected_fail). The disposition flip must be
+        # a ledger-visible move, not only the numeric bound.
         write_text(prior, """\
 solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,disposition,provenance_id,wall_gate_policy,exclusion_reason
 solver_a,problem_a,default,10,-8.0,10,-8.0,pass,old,enforced,
 """)
         write_text(current, """\
 solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,disposition,provenance_id,wall_gate_policy,exclusion_reason
-solver_a,problem_a,default,11,-8.0,10,-8.0,pass,new,enforced,
+solver_a,problem_a,default,11,-8.0,10,-8.0,expected_fail,new,enforced,
 """)
         write_text(ledger, ",".join(LEDGER_FIELDS) + "\n")
         write_text(profile, """\
@@ -696,13 +830,32 @@ default_x,grid_a,2,1,witness,new,true,updated,
             print("regen_baseline ledger self-test: missing row passed",
                   file=sys.stderr)
             return 1
+
+        # A ledger that reconciles the numeric moves but omits the disposition
+        # flip must still fail: the flip is a first-class move now.
         write_text(ledger, ",".join(LEDGER_FIELDS) + "\n"
                    "max_us_per_step,solver_a,problem_a,default,10,11,"
-                   "methodology,correctness,new,methodology-repair,\n"
+                   "methodology,correctness,new,methodology-repair,,,\n"
                    "t_tau,solver_a,problem_a,default,5,6,"
-                   "methodology,correctness,new,methodology-repair,\n"
+                   "methodology,correctness,new,methodology-repair,,,\n"
                    "default_x,grid_a,disabled_register,updated,1,2,"
-                   "methodology,correctness,new,methodology-repair,\n")
+                   "methodology,correctness,new,methodology-repair,,,\n")
+        if validate_ledger_completeness(args) == 0:
+            print("regen_baseline ledger self-test: disposition flip was not "
+                  "required by the completeness check", file=sys.stderr)
+            return 1
+
+        # With the disposition flip reconciled, the ledger is complete.
+        write_text(ledger, ",".join(LEDGER_FIELDS) + "\n"
+                   "max_us_per_step,solver_a,problem_a,default,10,11,"
+                   "methodology,correctness,new,methodology-repair,,,\n"
+                   "t_tau,solver_a,problem_a,default,5,6,"
+                   "methodology,correctness,new,methodology-repair,,,\n"
+                   "default_x,grid_a,disabled_register,updated,1,2,"
+                   "methodology,correctness,new,methodology-repair,,,\n"
+                   "disposition,solver_a,problem_a,default,pass,expected_fail,"
+                   "methodology,oracle-verdict,new,methodology-repair,"
+                   "expected_fail,pass->expected_fail\n")
         if validate_ledger_completeness(args) != 0:
             print("regen_baseline ledger self-test: complete ledger failed",
                   file=sys.stderr)
@@ -717,6 +870,7 @@ def main() -> int:
     p.add_argument("--current-baseline", type=Path)
     p.add_argument("--output", type=Path)
     p.add_argument("--provenance", type=Path)
+    p.add_argument("--oracle-verdict", type=Path)
     p.add_argument("--ledger", type=Path)
     p.add_argument("--profile-output", action="append", type=Path)
     p.add_argument("--disabled-register", action="append", type=Path)
@@ -752,9 +906,10 @@ def main() -> int:
         return validate_ledger_completeness(args)
 
     if (args.summary is None or args.prior_baseline is None
-        or args.output is None or args.provenance is None):
-        print("regen_baseline: --summary, --prior-baseline, --output, and "
-              "--provenance are required",
+        or args.output is None or args.provenance is None
+        or args.oracle_verdict is None):
+        print("regen_baseline: --summary, --prior-baseline, --output, "
+              "--provenance, and --oracle-verdict are required",
               file=sys.stderr)
         return 1
     return generate_baseline(args)
