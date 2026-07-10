@@ -62,6 +62,13 @@ REGRESSION_CHECK_BINARY="${REGRESSION_CHECK_BINARY:-build/bench/benchmarks/regre
 REGRESSION_BASELINE="${REGRESSION_BASELINE:-benchmarks/baselines/publication-regression.csv}"
 RUN_ORACLE_CHECK="${RUN_ORACLE_CHECK:-1}"
 ORACLE_CHECK_BINARY="${ORACLE_CHECK_BINARY:-build/bench/benchmarks/oracle_check}"
+# Oracle pass bar for the closed-form cells: the publication accuracy/cv bar
+# (1e-8 / 1e-6). The committed baseline dispositions are derived at this same
+# bar, so the recurring gate re-validates each pass cell against the exact
+# criterion its disposition was sourced from. Control cells use the calibrated
+# KKT bound, independent of these cutoffs.
+ORACLE_ACCURACY_CUTOFF="${ORACLE_ACCURACY_CUTOFF:-1e-8}"
+ORACLE_CV_CUTOFF="${ORACLE_CV_CUTOFF:-1e-6}"
 EXPECT_BASELINE_ELIGIBLE="${EXPECT_BASELINE_ELIGIBLE:-0}"
 REQUIRE_RELEASE_PUBLICATION="${REQUIRE_RELEASE_PUBLICATION:-0}"
 BUILD_TYPE_OVERRIDE_FOR_TEST="${BUILD_TYPE_OVERRIDE_FOR_TEST:-}"
@@ -363,6 +370,42 @@ echo
     --output-dir "${OUT_DIR}" \
     2>&1 | tee "${OUT_DIR}/run.log"
 
+# Independent oracle first: recompute feasibility/KKT at each returned point
+# and write the per-cell verdict. regression_check then witnesses pass-cell
+# correctness from this verdict (a committed pass cell breaches on an
+# oracle_pass=fail or a missing verdict) instead of the solver's self-reported
+# status/accuracy, so an infeasible returned point with a green self-report
+# still trips the gate. The verdict is produced at the publication accuracy/cv
+# bar, the same bar the committed dispositions are derived at.
+if [ "${RUN_ORACLE_CHECK}" = "1" ]; then
+    if [ ! -x "${ORACLE_CHECK_BINARY}" ]; then
+        echo "error: ORACLE_CHECK_BINARY=${ORACLE_CHECK_BINARY} not found or not executable" >&2
+        echo "hint: cmake --build build/bench --target oracle_check" >&2
+        exit 1
+    fi
+    if [ ! -f "${OUT_DIR}/publish_returned_points.csv" ]; then
+        echo "error: returned-points sidecar ${OUT_DIR}/publish_returned_points.csv not found" >&2
+        echo "the oracle re-validates the returned point; a run without the sidecar cannot be certified" >&2
+        exit 1
+    fi
+    echo
+    echo "run_publish_bench: oracle_check on ${OUT_DIR}/publish_summary.csv + publish_returned_points.csv"
+    set +e
+    "${ORACLE_CHECK_BINARY}" \
+        "${OUT_DIR}/publish_summary.csv" \
+        "${OUT_DIR}/publish_returned_points.csv" \
+        "${OUT_DIR}/oracle_verdict.csv" \
+        --accuracy-cutoff "${ORACLE_ACCURACY_CUTOFF}" \
+        --cv-cutoff "${ORACLE_CV_CUTOFF}" \
+        2>&1 | tee "${OUT_DIR}/oracle_check.log"
+    oracle_rc="${PIPESTATUS[0]}"
+    set -e
+    if [ "${oracle_rc}" -ne 0 ]; then
+        echo "run_publish_bench: oracle_check exited rc=${oracle_rc} (structural fail-closed)" >&2
+        exit "${oracle_rc}"
+    fi
+fi
+
 if [ "${RUN_REGRESSION_CHECK}" = "1" ]; then
     if [ ! -x "${REGRESSION_CHECK_BINARY}" ]; then
         echo "error: REGRESSION_CHECK_BINARY=${REGRESSION_CHECK_BINARY} not found or not executable" >&2
@@ -376,89 +419,27 @@ if [ "${RUN_REGRESSION_CHECK}" = "1" ]; then
     echo
     echo "run_publish_bench: regression_check on ${OUT_DIR}/publish_summary.csv vs ${REGRESSION_BASELINE}"
     set +e
-    "${REGRESSION_CHECK_BINARY}" \
-        "${OUT_DIR}/publish_summary.csv" \
-        "${REGRESSION_BASELINE}" \
-        2>&1 | tee "${OUT_DIR}/regression_check.log"
+    if [ "${RUN_ORACLE_CHECK}" = "1" ]; then
+        # Oracle-witnessed pass correctness: a committed pass cell breaches on an
+        # oracle_pass=fail or a missing verdict, never on self-reported status.
+        "${REGRESSION_CHECK_BINARY}" \
+            "${OUT_DIR}/publish_summary.csv" \
+            "${REGRESSION_BASELINE}" \
+            --oracle-verdict "${OUT_DIR}/oracle_verdict.csv" \
+            2>&1 | tee "${OUT_DIR}/regression_check.log"
+    else
+        # Legacy self-reported-status correctness gate (no verdict supplied).
+        "${REGRESSION_CHECK_BINARY}" \
+            "${OUT_DIR}/publish_summary.csv" \
+            "${REGRESSION_BASELINE}" \
+            2>&1 | tee "${OUT_DIR}/regression_check.log"
+    fi
     rc="${PIPESTATUS[0]}"
     set -e
     if [ "${rc}" -ne 0 ]; then
         echo "run_publish_bench: regression_check exited rc=${rc}" >&2
         exit "${rc}"
     fi
-fi
-
-if [ "${RUN_ORACLE_CHECK}" = "1" ]; then
-    if [ ! -x "${ORACLE_CHECK_BINARY}" ]; then
-        echo "error: ORACLE_CHECK_BINARY=${ORACLE_CHECK_BINARY} not found or not executable" >&2
-        echo "hint: cmake --build build/bench --target oracle_check" >&2
-        exit 1
-    fi
-    if [ ! -f "${OUT_DIR}/publish_returned_points.csv" ]; then
-        echo "error: returned-points sidecar ${OUT_DIR}/publish_returned_points.csv not found" >&2
-        echo "the oracle gate re-validates the returned point; a run without the sidecar cannot be certified" >&2
-        exit 1
-    fi
-    if [ ! -f "${REGRESSION_BASELINE}" ]; then
-        echo "error: REGRESSION_BASELINE=${REGRESSION_BASELINE} not found; the oracle gate re-validates every committed pass cell against the baseline" >&2
-        exit 1
-    fi
-    echo
-    echo "run_publish_bench: oracle_check on ${OUT_DIR}/publish_summary.csv + publish_returned_points.csv"
-    set +e
-    "${ORACLE_CHECK_BINARY}" \
-        "${OUT_DIR}/publish_summary.csv" \
-        "${OUT_DIR}/publish_returned_points.csv" \
-        "${OUT_DIR}/oracle_verdict.csv" \
-        2>&1 | tee "${OUT_DIR}/oracle_check.log"
-    oracle_rc="${PIPESTATUS[0]}"
-    set -e
-    if [ "${oracle_rc}" -ne 0 ]; then
-        echo "run_publish_bench: oracle_check exited rc=${oracle_rc} (structural fail-closed)" >&2
-        exit "${oracle_rc}"
-    fi
-    # The validator emits the per-cell verdict but does not itself gate on a
-    # breach. The recurring gate rejects the run when a cell that the committed
-    # baseline holds as a pass (a cell expected to reach the optimum) gets an
-    # independent oracle_pass=fail verdict, or is missing its verdict entirely.
-    # Feasibility/KKT here are recomputed at the returned point, never read from
-    # the solver-self-reported column, so an infeasible returned point with a
-    # green self-reported accuracy/cv still trips the gate. Cells the baseline
-    # holds as expected_fail are permitted to miss the strict oracle bar (that
-    # is precisely why they are expected_fail); the regression gate owns the
-    # opposite direction (an expected_fail cell that unexpectedly converges).
-    # The cell key joins on (solver, problem): a solver has a single dispatch
-    # mode, so the baseline's mode column is determined by the solver name.
-    oracle_breaches="$(awk -F, '
-        FNR==NR {
-            if ($1 ~ /^#/) next
-            if ($1 == "solver") next
-            if ($8 == "pass") passcell[$1 SUBSEP $2] = 1
-            next
-        }
-        {
-            if ($1 == "solver") next
-            key = $1 SUBSEP $2
-            if (key in passcell) {
-                seen[key] = 1
-                if ($5 == "fail") failed[key] = 1
-            }
-        }
-        END {
-            for (k in passcell) {
-                split(k, a, SUBSEP)
-                if (!(k in seen))       print "  missing_verdict: " a[1] "," a[2]
-                else if (k in failed)   print "  oracle_fail: " a[1] "," a[2]
-            }
-        }
-    ' "${REGRESSION_BASELINE}" "${OUT_DIR}/oracle_verdict.csv")"
-    if [ -n "${oracle_breaches}" ]; then
-        oracle_breach_count="$(printf '%s\n' "${oracle_breaches}" | grep -c .)"
-        echo "run_publish_bench: oracle gate FAILED: ${oracle_breach_count} committed pass cell(s) breached the independent oracle" >&2
-        printf '%s\n' "${oracle_breaches}" >&2
-        exit 2
-    fi
-    echo "run_publish_bench: oracle gate passed (every committed pass cell clears the independent oracle)"
 fi
 
 if [ "${RUN_DM_PROFILE}" = "1" ]; then

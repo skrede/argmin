@@ -920,6 +920,10 @@ if(CMAKE_TESTING_ENABLED)
              COMMAND regression_check --self-test-instructions)
     set_tests_properties(regression_check_instructions_self_test PROPERTIES
         LABELS "regression;bench")
+    add_test(NAME regression_check_oracle_witness_self_test
+             COMMAND regression_check --self-test-oracle-witness)
+    set_tests_properties(regression_check_oracle_witness_self_test PROPERTIES
+        LABELS "regression;bench")
 endif()
 
 # oracle_check -- independent analytic correctness validator. Links argmin
@@ -958,12 +962,11 @@ endif()
 # cell. The wall gate is enforced here (no disable of any form): the
 # deterministic instructions/iter gate carries the per-iteration cost signal,
 # and the seed count is set high enough that per-step wall variance does not
-# flake the wall bound. The independent oracle is deliberately NOT chained
-# into this fast test (RUN_ORACLE_CHECK=0): oracle enforcement re-validates
-# the returned point over the full seed set in the publication path
-# (run_publish_bench.sh with its default seed sweep), whereas this fast test
-# asserts the deterministic per-iteration and regression gates. Registered
-# only when testing is enabled in the active benchmark build configuration.
+# flake the wall bound. The independent oracle runs here too (it must: the
+# committed publication baseline holds many optimal-but-stalled cells as pass,
+# whose correctness is witnessed by the oracle verdict rather than the solver's
+# self-reported status, so regression_check needs the verdict to gate them).
+# Registered only when testing is enabled in the active benchmark build.
 if(CMAKE_TESTING_ENABLED)
     add_test(
         NAME publish_bench_regression_gate
@@ -974,7 +977,7 @@ if(CMAKE_TESTING_ENABLED)
                 "OUT_ROOT=${CMAKE_BINARY_DIR}/regression_gate_runs"
                 "BENCH_BINARY=$<TARGET_FILE:publish_bench>"
                 "REGRESSION_CHECK_BINARY=$<TARGET_FILE:regression_check>"
-                "RUN_ORACLE_CHECK=0"
+                "ORACLE_CHECK_BINARY=$<TARGET_FILE:oracle_check>"
                 "RUN_DM_PROFILE=0"
                 "REGRESSION_BASELINE=${CMAKE_SOURCE_DIR}/benchmarks/baselines/publication-regression.csv"
                 bash "${CMAKE_SOURCE_DIR}/benchmarks/scripts/run_publish_bench.sh"

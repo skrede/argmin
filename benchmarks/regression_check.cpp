@@ -39,10 +39,22 @@ namespace
 constexpr double kAccuracyCutoff = 1e-12;
 constexpr double kCvCutoff       = 1e-8;
 
-constexpr std::array<std::string_view, 3> kProhibitedPerStepSolvers{
+// Libraries whose per-step timing is legitimate in the published summary.
+// "argmin" is the gated per-iteration methodology (its per-step / instruction
+// cost is the subject of the RT gate). The informative external comparators
+// contribute per-step timing as reference data -- a black-box comparator's
+// measured wall time over its reported iterations is a valid reference, not a
+// methodology error. Any OTHER (unrecognized) library that injects per-step
+// timing into the summary is rejected. This scopes the prohibition so it never
+// trips the informative comparators, whose per-step timing is legitimate.
+constexpr std::array<std::string_view, 7> kPerStepPermittedLibraries{
+    "argmin",
+    "nlopt",
     "ipopt",
-    "ipopt_monotone",
-    "ipopt_sr1",
+    "dlib",
+    "ceres",
+    "libcmaes",
+    "optim",
 };
 
 // Sentinel for an optional baseline column that is absent from the schema.
@@ -81,6 +93,13 @@ struct gate_options
     double cv_cutoff{kCvCutoff};
     bool disable_wall_gate{false};
     bool promote_log_enabled{false};
+    // Optional path to the independent oracle verdict (oracle_verdict.csv).
+    // When supplied, a pass cell's CORRECTNESS is witnessed by the oracle's
+    // recomputed feasibility/KKT at the returned point (oracle_pass), not by
+    // the solver's self-reported status/accuracy. When empty, the legacy
+    // self-reported-status/accuracy correctness gate applies unchanged (the
+    // prior-release baseline path, which ships no verdict).
+    std::string oracle_verdict_path;
 };
 
 using cell_key = std::tuple<std::string, std::string, std::string>;
@@ -95,6 +114,7 @@ enum class baseline_disposition : std::uint8_t
 
 struct aggregate_row
 {
+    std::string               library;
     std::vector<double>       per_step_us;
     std::vector<std::int64_t> solver_iters_seeds;
     std::vector<double>       accuracy_seeds;
@@ -512,6 +532,7 @@ struct baseline_indices
     }
 
     auto idx_solver  = require_column(summary.header, "solver", summary_path);
+    auto idx_library = require_column(summary.header, "library", summary_path);
     auto idx_problem = require_column(summary.header, "problem", summary_path);
     auto idx_iters   = require_column(summary.header, "solver_iters", summary_path);
     auto idx_wall    = require_column(summary.header, "wall_time_us", summary_path);
@@ -521,12 +542,12 @@ struct baseline_indices
     auto idx_disp    = require_column(summary.header, "row_disposition", summary_path);
     auto idx_cap     = require_column(summary.header, "cap_status", summary_path);
     auto idx_instr   = require_column(summary.header, "instructions", summary_path);
-    if(!idx_solver || !idx_problem || !idx_iters || !idx_wall || !idx_acc
-       || !idx_cv || !idx_status || !idx_disp || !idx_cap || !idx_instr)
+    if(!idx_solver || !idx_library || !idx_problem || !idx_iters || !idx_wall
+       || !idx_acc || !idx_cv || !idx_status || !idx_disp || !idx_cap || !idx_instr)
         return false;
 
     const std::size_t max_idx = std::max({
-        *idx_solver, *idx_problem, *idx_iters, *idx_wall, *idx_acc,
+        *idx_solver, *idx_library, *idx_problem, *idx_iters, *idx_wall, *idx_acc,
         *idx_cv, *idx_status, *idx_disp, *idx_cap, *idx_instr,
     });
 
@@ -580,6 +601,8 @@ struct baseline_indices
                                  / static_cast<double>(denom);
 
         auto& agg = aggregates[std::make_tuple(solver, problem, mode)];
+        if(agg.library.empty())
+            agg.library = row[*idx_library];
         agg.per_step_us.push_back(per_step_us);
         agg.solver_iters_seeds.push_back(iters);
         agg.accuracy_seeds.push_back(acc);
@@ -591,12 +614,55 @@ struct baseline_indices
     return true;
 }
 
-[[nodiscard]] auto is_prohibited_per_step_solver(std::string_view solver) -> bool
+[[nodiscard]] auto per_step_timing_permitted(std::string_view library) -> bool
 {
-    return std::find(kProhibitedPerStepSolvers.begin(),
-                     kProhibitedPerStepSolvers.end(),
-                     solver)
-           != kProhibitedPerStepSolvers.end();
+    return std::find(kPerStepPermittedLibraries.begin(),
+                     kPerStepPermittedLibraries.end(),
+                     library)
+           != kPerStepPermittedLibraries.end();
+}
+
+// Independent oracle verdict, keyed by (solver, problem). A cell is
+// oracle-pass iff every seed's oracle_pass is "pass". Cells absent from the
+// map have no verdict (the gate fails a pass cell closed on a missing verdict).
+using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
+
+[[nodiscard]] auto load_oracle_verdict(const std::filesystem::path& path,
+                                       oracle_verdict_map&          out) -> bool
+{
+    csv_table verdict;
+    std::string err;
+    if(!read_csv(path, verdict, err))
+    {
+        std::cerr << "regression_check: " << err << '\n';
+        return false;
+    }
+    auto idx_solver  = require_column(verdict.header, "solver", path);
+    auto idx_problem = require_column(verdict.header, "problem", path);
+    auto idx_pass    = require_column(verdict.header, "oracle_pass", path);
+    if(!idx_solver || !idx_problem || !idx_pass)
+        return false;
+    const std::size_t max_idx = std::max({*idx_solver, *idx_problem, *idx_pass});
+    for(const auto& row : verdict.rows)
+    {
+        if(!row_has_columns(row, max_idx, path))
+            return false;
+        const std::string_view value = row[*idx_pass];
+        if(value != "pass" && value != "fail")
+        {
+            std::cerr << "regression_check: invalid oracle_pass '" << value
+                      << "' in " << path.string() << '\n';
+            return false;
+        }
+        const bool seed_pass = (value == "pass");
+        auto key = std::make_pair(row[*idx_solver], row[*idx_problem]);
+        auto it = out.find(key);
+        if(it == out.end())
+            out.emplace(std::move(key), seed_pass);
+        else
+            it->second = it->second && seed_pass;  // pass iff every seed passes
+    }
+    return true;
 }
 
 [[nodiscard]] auto run_gate(const std::filesystem::path& summary_path,
@@ -606,6 +672,18 @@ struct baseline_indices
     std::map<cell_key, aggregate_row> aggregates;
     if(!load_summary_aggregates(summary_path, aggregates))
         return 1;
+
+    // Independent oracle verdict (optional). When supplied, it witnesses pass
+    // cell correctness in place of the solver's self-reported status/accuracy.
+    oracle_verdict_map oracle;
+    const bool has_oracle = !opts.oracle_verdict_path.empty();
+    if(has_oracle)
+    {
+        if(!load_oracle_verdict(opts.oracle_verdict_path, oracle))
+            return 1;
+        std::cerr << "regression_check: oracle-witnessed pass correctness"
+                  << " (verdict " << opts.oracle_verdict_path << ")\n";
+    }
 
     csv_table baseline;
     std::string err;
@@ -660,16 +738,20 @@ struct baseline_indices
     for(const auto& kv : aggregates)
         matched[kv.first] = false;
 
-    // A prohibited solver must never contribute per-step timing rows to the
-    // published summary. This is a live gate check against the emitted data:
-    // if such a solver appears with per-step measurements, reject it here
-    // rather than asserting the prohibition constant against a copy of itself.
+    // Per-step timing in the published summary is permitted only from a
+    // recognized source: argmin's own solvers (the gated per-iteration
+    // methodology) and the informative external comparators (whose per-step
+    // reference timing is legitimate). A per-step-timed row from any other
+    // (unrecognized) library is rejected here as a methodology error. This is a
+    // live check against the emitted data, not a constant compared to a copy of
+    // itself, and it deliberately does not trip the informative comparators.
     for(const auto& [key, agg] : aggregates)
     {
         const auto& [solver, problem, mode] = key;
-        if(is_prohibited_per_step_solver(solver) && !agg.per_step_us.empty())
-            emit_breach(solver, problem, mode, "prohibited_per_step_solver",
-                        "per-step-timed", "absent");
+        if(!per_step_timing_permitted(agg.library) && !agg.per_step_us.empty())
+            emit_breach(solver, problem, mode, "unsanctioned_per_step_library",
+                        agg.library.empty() ? "unknown-library" : agg.library,
+                        "argmin-or-informative-comparator");
     }
 
     for(const auto& row : baseline.rows)
@@ -847,8 +929,18 @@ struct baseline_indices
             && measured_max_acc < opts.accuracy_cutoff
             && measured_max_cv < opts.cv_cutoff;
 
+        // Independent oracle verdict for this cell (joined by solver+problem;
+        // a solver has a single dispatch mode, so the baseline mode is
+        // determined by the solver name).
+        const auto oracle_it = has_oracle
+            ? oracle.find({solver, problem})
+            : oracle.end();
+        const bool cell_has_verdict = has_oracle && oracle_it != oracle.end();
+        const bool oracle_pass = cell_has_verdict && oracle_it->second;
+
         if(disposition == baseline_disposition::pass)
         {
+            // Envelope bounds apply regardless of the correctness witness.
             if(!pass_us && !opts.disable_wall_gate)
                 emit_numeric_breach(solver, problem, mode, "max_us_per_step",
                                     measured_per_step, max_us);
@@ -856,27 +948,54 @@ struct baseline_indices
                 emit_numeric_breach(solver, problem, mode, "max_outer_iters",
                                     static_cast<double>(measured_max_iters),
                                     static_cast<double>(max_iters));
-            if(!pass_acc)
-                emit_numeric_breach(solver, problem, mode, "min_accuracy_log10",
-                                    measured_acc_log10, min_acc_log10);
-            if(!pass_cv)
-                emit_numeric_breach(solver, problem, mode, "max_cv_log10",
-                                    measured_cv_log10, max_cv_log10);
-            if(!status_pass)
+            if(has_oracle)
             {
-                std::cerr << "CONVERGED_TO_STALLED: solver=" << solver
-                          << " problem=" << problem
-                          << " mode=" << mode
-                          << " status=" << status_summary(agg)
-                          << " cap_status=" << cap_summary(agg) << '\n';
-                emit_breach(solver, problem, mode, "status",
-                            "nonconverged-or-cap-exhausted",
-                            "converged-without-cap");
+                // Correctness is witnessed by the independent oracle
+                // (feasibility/KKT recomputed at the returned point), NOT the
+                // solver's self-reported status or the accuracy column (which
+                // is meaningless for the no-closed-form control cells). A pass
+                // cell breaches if its oracle verdict is fail, or is missing
+                // entirely (fail-closed).
+                if(!cell_has_verdict)
+                    emit_breach(solver, problem, mode, "oracle_verdict_missing",
+                                "no-verdict", "oracle-pass-at-x*");
+                else if(!oracle_pass)
+                    emit_breach(solver, problem, mode, "oracle_correctness",
+                                "oracle-fail-at-x*", "oracle-pass-at-x*");
+            }
+            else
+            {
+                // Legacy path (no verdict supplied, e.g. the prior-release
+                // baseline): self-reported accuracy/cv/status correctness gate,
+                // unchanged.
+                if(!pass_acc)
+                    emit_numeric_breach(solver, problem, mode, "min_accuracy_log10",
+                                        measured_acc_log10, min_acc_log10);
+                if(!pass_cv)
+                    emit_numeric_breach(solver, problem, mode, "max_cv_log10",
+                                        measured_cv_log10, max_cv_log10);
+                if(!status_pass)
+                {
+                    std::cerr << "CONVERGED_TO_STALLED: solver=" << solver
+                              << " problem=" << problem
+                              << " mode=" << mode
+                              << " status=" << status_summary(agg)
+                              << " cap_status=" << cap_summary(agg) << '\n';
+                    emit_breach(solver, problem, mode, "status",
+                                "nonconverged-or-cap-exhausted",
+                                "converged-without-cap");
+                }
             }
         }
         else if(disposition == baseline_disposition::expected_fail)
         {
-            if(expected_fail_correctness_pass)
+            // An expected_fail cell that now clears the correctness witness is
+            // a fix to surface. Under the oracle it is the oracle verdict; on
+            // the legacy path it is the self-reported status/accuracy/cv.
+            const bool correctness_pass = has_oracle
+                ? oracle_pass
+                : expected_fail_correctness_pass;
+            if(correctness_pass)
             {
                 if(opts.promote_log_enabled)
                 {
@@ -942,7 +1061,8 @@ struct baseline_indices
                                    std::string_view status,
                                    std::string_view row_disposition,
                                    std::string_view cap_status,
-                                   std::string_view instructions = "1000") -> std::string
+                                   std::string_view instructions = "1000",
+                                   std::string_view library = "argmin") -> std::string
 {
     std::string out =
         "solver,library,problem,class,dimension,seed,mode,solver_iters,"
@@ -952,7 +1072,8 @@ struct baseline_indices
         "provenance_id,instructions\n";
     // solver_iters is fixed at 1, so instructions/iter equals the instructions
     // value verbatim -- the instruction-gate self-tests rely on that identity.
-    out += std::string{solver} + ",argmin," + std::string{problem}
+    out += std::string{solver} + "," + std::string{library} + ","
+         + std::string{problem}
          + ",inequality,2,42,publication,1,1,0,0,0,"
          + std::string{wall_us}
          + ",0.0,0.0," + std::string{accuracy}
@@ -1192,37 +1313,134 @@ struct baseline_indices
     const auto baseline_path = tmp / "argmin-regression-prohibited-baseline.csv";
     const gate_options opts{};
 
-    // A prohibited solver that emits a per-step-timed summary row must be
+    // A row from an unrecognized library that injects per-step timing must be
     // rejected by run_gate. The baseline bounds are deliberately generous so
-    // the only breach is the prohibition itself (gate exits 2 on breach).
-    if(!write_text(summary_path, summary_fixture("ipopt", "problem_p",
+    // the only breach is the per-step prohibition itself (gate exits 2).
+    if(!write_text(summary_path, summary_fixture("rogue_solver", "problem_p",
                                                  "100", "1e-13", "1e-10",
                                                  "converged", "included",
-                                                 "none"))
-       || !write_text(baseline_path, baseline_fixture("ipopt", "problem_p",
+                                                 "none", "1000",
+                                                 "unregistered_lib"))
+       || !write_text(baseline_path, baseline_fixture("rogue_solver", "problem_p",
                                                       "1000", "pass")))
         return 1;
     if(run_gate(summary_path, baseline_path, opts) != 2)
     {
-        std::cerr << "regression_check prohibited self-test: prohibited solver"
-                  << " emitting per-step timing was not rejected by the gate\n";
+        std::cerr << "regression_check prohibited self-test: per-step timing from"
+                  << " an unrecognized library was not rejected by the gate\n";
         return 1;
     }
 
-    // A permitted solver with the identical row shape must NOT be tripped by
-    // the prohibition, so the check discriminates rather than merely confirms.
-    // bobyqa dispatches in default mode, matching the fixture's baseline mode.
+    // An informative external comparator (ipopt) emitting the identical
+    // per-step-timed row is legitimate reference data and must NOT be tripped:
+    // the check discriminates by library rather than merely confirming.
+    if(!write_text(summary_path, summary_fixture("ipopt", "problem_p",
+                                                 "100", "1e-13", "1e-10",
+                                                 "converged", "included",
+                                                 "none", "1000", "ipopt"))
+       || !write_text(baseline_path, baseline_fixture("ipopt", "problem_p",
+                                                      "1000", "pass")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 0)
+    {
+        std::cerr << "regression_check prohibited self-test: informative"
+                  << " comparator per-step timing was wrongly rejected\n";
+        return 1;
+    }
+
+    // An argmin solver's per-step timing (the gated methodology) is likewise
+    // legitimate and must not be tripped.
     if(!write_text(summary_path, summary_fixture("bobyqa", "problem_p",
                                                  "100", "1e-13", "1e-10",
                                                  "converged", "included",
-                                                 "none"))
+                                                 "none", "1000", "argmin"))
        || !write_text(baseline_path, baseline_fixture("bobyqa", "problem_p",
                                                       "1000", "pass")))
         return 1;
     if(run_gate(summary_path, baseline_path, opts) != 0)
     {
-        std::cerr << "regression_check prohibited self-test: permitted solver"
-                  << " was wrongly rejected by the per-step prohibition\n";
+        std::cerr << "regression_check prohibited self-test: argmin per-step"
+                  << " timing was wrongly rejected by the per-step prohibition\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Oracle-witnessed pass-correctness self-test (Option X). Proves the gate
+// takes a pass cell's correctness from the independent oracle verdict, not the
+// solver's self-reported status/accuracy, and falls back to the self-reported
+// gate when no verdict is supplied.
+[[nodiscard]] auto run_oracle_witness_self_test() -> int
+{
+    const auto tmp = std::filesystem::temp_directory_path();
+    const auto summary_path = tmp / "argmin-regression-oracle-summary.csv";
+    const auto baseline_path = tmp / "argmin-regression-oracle-baseline.csv";
+    const auto verdict_path = tmp / "argmin-regression-oracle-verdict.csv";
+
+    auto verdict_fixture = [](std::string_view oracle_pass) {
+        return std::string{
+            "solver,problem,mode,seed,oracle_pass,objective_distance,"
+            "feasibility_residual,kkt_residual,witness\n"}
+            + "filter_slsqp,problem_p,publication,42,"
+            + std::string{oracle_pass}
+            + ",1e-16,1e-15,,feasibility-at-x*\n";
+    };
+    // A pass cell whose solver self-reports STALLED but whose returned point is
+    // optimal (oracle_pass=pass) must be CLEAN under the verdict -- the whole
+    // point of Option X. The baseline marks it pass with generous bounds.
+    if(!write_text(summary_path, summary_fixture("filter_slsqp",
+                                                 "problem_p", "100", "1e-16",
+                                                 "1e-15", "stalled", "included",
+                                                 "none"))
+       || !write_text(baseline_path,
+                      baseline_fixture("filter_slsqp", "problem_p",
+                                       "1000", "pass")))
+        return 1;
+
+    gate_options with_verdict{};
+    with_verdict.oracle_verdict_path = verdict_path.string();
+
+    if(!write_text(verdict_path, verdict_fixture("pass")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, with_verdict) != 0)
+    {
+        std::cerr << "regression_check oracle self-test: stalled-but-optimal"
+                  << " pass cell was not clean under an oracle_pass verdict\n";
+        return 1;
+    }
+
+    // Same pass cell, oracle_pass=fail -> breach (exit 2): the independent
+    // witness catches an infeasible/wrong returned point.
+    if(!write_text(verdict_path, verdict_fixture("fail")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, with_verdict) != 2)
+    {
+        std::cerr << "regression_check oracle self-test: oracle_pass=fail pass"
+                  << " cell was not rejected\n";
+        return 1;
+    }
+
+    // A pass cell missing from the verdict -> fail-closed breach (exit 2).
+    if(!write_text(verdict_path,
+                   "solver,problem,mode,seed,oracle_pass,objective_distance,"
+                   "feasibility_residual,kkt_residual,witness\n"
+                   "some_other_solver,other,publication,42,pass,0,0,,w\n"))
+        return 1;
+    if(run_gate(summary_path, baseline_path, with_verdict) != 2)
+    {
+        std::cerr << "regression_check oracle self-test: pass cell with a"
+                  << " missing verdict did not fail closed\n";
+        return 1;
+    }
+
+    // Legacy fallback (no verdict): the same stalled pass cell is gated on the
+    // self-reported status and breaches (exit 2) -- proving the verdict is what
+    // flips it to clean above, and the legacy path is unchanged.
+    const gate_options legacy{};
+    if(run_gate(summary_path, baseline_path, legacy) != 2)
+    {
+        std::cerr << "regression_check oracle self-test: legacy fallback did not"
+                  << " gate the stalled pass cell on self-reported status\n";
         return 1;
     }
     return 0;
@@ -1231,14 +1449,20 @@ struct baseline_indices
 void print_usage(std::ostream& os)
 {
     os << "Usage: regression_check <publish_summary.csv> <regression_baseline.csv>\n"
+          "                        [--oracle-verdict oracle_verdict.csv]\n"
           "                        [--accuracy-cutoff DOUBLE]\n"
           "                        [--cv-cutoff DOUBLE]\n"
           "                        [--self-test-baseline]\n"
           "\n"
+          "When --oracle-verdict is supplied, a pass cell's correctness is\n"
+          "witnessed by the independent oracle (feasibility/KKT at the returned\n"
+          "point); without it, the legacy self-reported-status gate applies.\n"
+          "\n"
           "Self-tests:\n"
           "  regression_check --self-test\n"
           "  regression_check --self-test-prohibited-solvers\n"
-          "  regression_check --self-test-instructions\n";
+          "  regression_check --self-test-instructions\n"
+          "  regression_check --self-test-oracle-witness\n";
 }
 
 }
@@ -1250,6 +1474,7 @@ int main(int argc, char** argv)
     bool prohibited_self_test = false;
     bool instructions_self_test = false;
     bool baseline_self_test = false;
+    bool oracle_witness_self_test = false;
     std::vector<std::string_view> positional;
 
     const char* disable_wall_env = std::getenv("REGRESSION_CHECK_DISABLE_WALL_GATE");
@@ -1291,6 +1516,16 @@ int main(int argc, char** argv)
             baseline_self_test = true;
             continue;
         }
+        if(arg == "--self-test-oracle-witness")
+        {
+            oracle_witness_self_test = true;
+            continue;
+        }
+        if(arg == "--oracle-verdict" && i + 1 < argc)
+        {
+            opts.oracle_verdict_path = argv[++i];
+            continue;
+        }
         if(arg == "--accuracy-cutoff" && i + 1 < argc)
         {
             if(!parse_finite_double(argv[++i], opts.accuracy_cutoff))
@@ -1325,6 +1560,8 @@ int main(int argc, char** argv)
         return run_prohibited_solver_self_test();
     if(instructions_self_test)
         return run_instructions_self_test();
+    if(oracle_witness_self_test)
+        return run_oracle_witness_self_test();
 
     if(positional.size() != 2)
     {
