@@ -1987,7 +1987,7 @@ struct hs052
 //      x0*x1*x2*x3 >= 25                       (inequality, argmin form)
 //      1 <= xi <= 5
 //
-// x0 = (1, 5, 5, 1), f* = 17.0140173
+// x0 = (1, 5, 5, 1), f* = 17.014017289134664
 //
 // Reference: H&S Problem 71.
 template <typename Scalar = double>
@@ -2055,7 +2055,7 @@ struct hs071
         return x0;
     }
 
-    [[nodiscard]] Scalar optimal_value() const { return Scalar(17.0140173); }
+    [[nodiscard]] Scalar optimal_value() const { return Scalar(17.014017289134664); }
 };
 
 // HS076: 4D, 0 equality, 3 inequality, x >= 0.
