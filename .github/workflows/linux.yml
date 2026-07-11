@@ -96,19 +96,9 @@ jobs:
             cc: clang-18
             cxx: clang++-18
             flags: "-fsanitize=address,undefined -fno-omit-frame-pointer"
-          - name: msan
-            cc: clang-18
-            cxx: clang++-18
-            flags: "-fsanitize=memory -fno-omit-frame-pointer -fsanitize-memory-track-origins=2"
 
     runs-on: ubuntu-24.04
     name: sanitize (${{ matrix.name }})
-    # msan flags use-of-uninitialized-value deep inside the uninstrumented
-    # standard library and Catch2 runtime -- a known MemorySanitizer
-    # limitation that requires a fully msan-instrumented libc++, not an
-    # argmin defect. Keep the job for signal but do not let it gate the
-    # pipeline. asan-ubsan remains a hard gate.
-    continue-on-error: ${{ matrix.name == 'msan' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -128,6 +118,83 @@ jobs:
         run: cmake --build build
 
       - name: Test
+        run: cd build && ctest --output-on-failure
+
+  # MemorySanitizer requires the ENTIRE program -- including the C++ standard
+  # library -- to be instrumented. Stock libstdc++ is not, which produces
+  # false use-of-uninitialized reports deep inside std:: containers (e.g. in
+  # Catch2's registry during static init). We build libc++/libc++abi/libunwind
+  # with -fsanitize=memory and link against it so the reports are real signal.
+  sanitize-msan:
+    runs-on: ubuntu-24.04
+    name: sanitize (msan, instrumented libc++)
+    # Non-gating until observed green at least once; then flip to false so it
+    # becomes a hard gate. Do not merge as gating blind.
+    continue-on-error: true
+
+    env:
+      LLVM_VER: "18.1.8"          # track the clang used below (clang-18)
+      CC: clang-18
+      CXX: clang++-18
+      LIBCXX_MSAN: ${{ github.workspace }}/libcxx-msan
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 ninja-build cmake xz-utils
+
+      # The instrumented libc++ is expensive to build (~10 min) but fully
+      # deterministic for a fixed LLVM version + compiler, so cache it.
+      - name: Cache instrumented libc++
+        id: cache-libcxx
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.LIBCXX_MSAN }}
+          key: libcxx-msan-llvm${{ env.LLVM_VER }}-clang18-ubuntu24-v1
+
+      - name: Build instrumented libc++
+        if: steps.cache-libcxx.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VER}/llvm-project-${LLVM_VER}.src.tar.xz"
+          tar xf "llvm-project-${LLVM_VER}.src.tar.xz"
+          cmake -G Ninja \
+            -S "llvm-project-${LLVM_VER}.src/runtimes" \
+            -B build-libcxx-msan \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
+            -DLLVM_USE_SANITIZER=MemoryWithOrigins \
+            -DLIBCXX_INCLUDE_TESTS=OFF \
+            -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
+            -DCMAKE_INSTALL_PREFIX="${LIBCXX_MSAN}"
+          ninja -C build-libcxx-msan cxx cxxabi unwind
+          ninja -C build-libcxx-msan install-cxx install-cxxabi install-unwind
+
+      - name: Configure
+        run: |
+          MSAN="-fsanitize=memory -fsanitize-memory-track-origins=2 -fno-omit-frame-pointer -g"
+          # Point compile + link at OUR instrumented libc++, and set rpath so
+          # the test binary loads it at runtime (test discovery runs the
+          # binary -- that is the step that crashes with stock libstdc++).
+          CXX_FLAGS="$MSAN -stdlib=libc++ -nostdinc++ -isystem ${LIBCXX_MSAN}/include/c++/v1"
+          LINK_FLAGS="$MSAN -stdlib=libc++ -L${LIBCXX_MSAN}/lib -Wl,-rpath,${LIBCXX_MSAN}/lib -lc++abi"
+          cmake . -B build -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="$CXX_FLAGS" \
+            -DCMAKE_EXE_LINKER_FLAGS="$LINK_FLAGS" \
+            -DARGMIN_BUILD_TESTS=ON \
+            -DARGMIN_CMAKE_FETCH_DEPS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        env:
+          MSAN_OPTIONS: "abort_on_error=1"
         run: cd build && ctest --output-on-failure
 
   warnings:
