@@ -1047,6 +1047,126 @@ TEST_CASE("SOC residual assembly subtracts the linearized constraint "
     CHECK(c_soc[1] == c_z[1]);
 }
 
+// ─── Free-set restart invariant pin ────────────────────────────────
+//
+// Reference: Lin and More 1999 (SIAM J. Optim. 9(4)) and Nocedal and
+//            Wright 2e Section 16.7 (free-set / active-set CG: a pinned
+//            coordinate is held EXACTLY at its box face, so the reduced
+//            subproblem recovers descent on the remaining free set).
+//
+// Face-blocked instance with genuine interior descent available. Joint
+// dim 3, one equality pinning the first coordinate:
+//   A = [1, 0, 0],  c = (0)   => the iterate is feasible, normal step
+//                                 v = 0, and null(A) = span{e2, e3}.
+//   box: coordinate 1 (a slack) sits EXACTLY at its displaced lower
+//        bound 0; coordinates 0 and 2 are unbounded.
+//   g_t = g = (0, 2, -3),  B = I,  delta = 10.
+//
+// The primary projected CG forms the single search direction
+//   d0 = -project_null(g_t) = (0, -2, 3):
+// coordinate 1 (d = -2 < 0) is at its lower face, so tau_to_face blocks
+// the WHOLE direction at tau = 0 (the descent available on coordinate 2,
+// d = +3, is coupled into the same d0 and cannot be taken alone). The CG
+// exits boundary with a zero step and reports blocking coordinate 1, so
+// the Lin-More free-set restart pins it and re-solves on the free set
+// {coordinate 2}, where the isolated direction (0, 0, 3) yields the real
+// descent u = (0, 0, 3): composite step p = (0, 0, 3) with predicted
+// reduction -g^T p - 0.5 p^T B p = 9 - 4.5 = 4.5 > 0.
+//
+// The invariant this pins: from a face-blocked configuration with real
+// interior descent available, the composite step is nonzero and the
+// predicted reduction is strictly positive -- the restart recovers the
+// interior descent instead of sterilizing.
+//
+// Mechanism the pin guards: the restart pins the blocking coordinate
+// only through the approximate null-space projector, which leaves
+// roundoff-scale leakage in the pinned component. A leakage-negative
+// component on a coordinate at its face re-blocks the reduced CG at
+// tau = 0, so every restart is sterile, the composite step collapses to
+// zero, and the predicted reduction is zero. Holding the pinned
+// coordinate at its face value EXACTLY removes that channel.
+//
+// Honest caveat on the pre-fix outcome: whether the leakage sign is
+// adverse is a roundoff coin flip controlled by the optimization
+// environment (FMA contraction, inlining), so this fixture's pre-fix
+// outcome is platform/flag-dependent -- it is an invariant pin, not a
+// deterministic red witness. The end-to-end system-Eigen Release cell
+// that halts a full solve short of the optimum is the recorded
+// deterministic pre-fix witness.
+TEST_CASE("byrd_omojokun free-set restart recovers interior descent "
+          "from a face-blocked configuration",
+          "[kernel-pin][byrd_omojokun][restart]")
+{
+    Eigen::Vector3d g;
+    g << 0.0, 2.0, -3.0;
+    Eigen::Matrix3d B = Eigen::Matrix3d::Identity();
+
+    struct hop3
+    {
+        Eigen::Matrix3d B;
+        void operator()(const Eigen::Ref<const Eigen::Vector3d>& v,
+                        Eigen::Ref<Eigen::Vector3d> out) const
+        {
+            out.noalias() = B * v;
+        }
+    } hop{B};
+
+    Eigen::MatrixXd A(1, 3);
+    A << 1.0, 0.0, 0.0;
+    Eigen::VectorXd c(1);
+    c << 0.0;  // feasible: normal step is zero
+
+    struct teval3
+    {
+        Eigen::Vector3d g;
+        Eigen::Matrix3d B;
+        Eigen::MatrixXd A;
+        Eigen::VectorXd c;
+        std::pair<double, double> operator()(
+            const Eigen::Ref<const Eigen::Vector3d>& p) const
+        {
+            return {g.dot(p) + 0.5 * p.dot(B * p), (A * p + c).norm()};
+        }
+    } teval{g, B, A, c};
+
+    const double delta_in = 10.0;
+    const double eps = 1e-10;
+
+    Eigen::Vector3d z_k = Eigen::Vector3d::Zero();
+    Eigen::Vector3d lower_displaced;
+    lower_displaced << -kInf, 0.0, -kInf;  // coordinate 1 at its face
+    Eigen::Vector3d upper_displaced;
+    upper_displaced << kInf, kInf, kInf;
+
+    Eigen::MatrixXd AAt_workspace(1, 1);
+    Eigen::LDLT<Eigen::MatrixXd> ldlt_workspace(1);
+    Eigen::VectorXd w_workspace(1);
+    Eigen::Vector3d v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out;
+    byrd_omojokun_workspace<double, 3> ws;
+    ws.resize(3, static_cast<int>(A.rows()));
+
+    double penalty = 1.0;
+    auto r = byrd_omojokun_composite_step<double, 3>(
+        z_k, g, /*g_obj=*/g, hop, A, c,
+        delta_in, eps, /*max_cg_iter=*/20,
+        lower_displaced, upper_displaced,
+        teval,
+        AAt_workspace, ldlt_workspace, w_workspace,
+        v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
+        ws,
+        penalty, /*penalty_factor=*/0.0);
+
+    INFO("p = (" << p_out[0] << ", " << p_out[1] << ", " << p_out[2]
+         << ")  ||p|| = " << p_out.norm()
+         << "  predicted = " << r.predicted);
+    // Slack coordinate stays feasible (held at or above its face).
+    CHECK(p_out[1] >= 0.0);
+    // Invariant: the restart recovers the interior descent -- the
+    // composite step is nonzero and the model forecasts real progress.
+    CHECK(p_out.norm() > 1e-8);
+    CHECK(r.predicted > 0.0);
+}
+
 // ─── pred <= 0 rejection pin (caller-side acceptance gate) ─────────
 //
 // Reference: Nocedal and Wright 2e Section 4.1 Algorithm 4.1 -- the
