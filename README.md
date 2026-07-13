@@ -3,6 +3,7 @@
 ![Linux](https://github.com/skrede/argmin/actions/workflows/linux.yml/badge.svg)
 ![macOS](https://github.com/skrede/argmin/actions/workflows/macos.yml/badge.svg)
 ![Windows](https://github.com/skrede/argmin/actions/workflows/windows.yml/badge.svg)
+[![codecov](https://codecov.io/gh/skrede/argmin/branch/master/graph/badge.svg)](https://codecov.io/gh/skrede/argmin)
 ![License](https://img.shields.io/badge/license-Apache_2.0-blue.svg)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
 ![Status](https://img.shields.io/badge/status-public%20preview-orange.svg)
