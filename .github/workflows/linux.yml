@@ -49,14 +49,14 @@ jobs:
         run: |
           if [ "${{ matrix.coverage }}" = "true" ]; then
             cmake . -B build -DCMAKE_BUILD_TYPE=Debug \
-              -DCMAKE_CXX_FLAGS="-Werror --coverage" \
+              -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination --coverage" \
               -DCMAKE_C_FLAGS="--coverage" \
               -DARGMIN_BUILD_TESTS=ON \
               -DARGMIN_BUILD_EXAMPLES=OFF \
               -DARGMIN_CMAKE_FETCH_DEPS=ON
           else
             cmake . -B build -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_CXX_FLAGS="-Werror" \
+              -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination" \
               -DARGMIN_BUILD_TESTS=ON \
               -DARGMIN_BUILD_EXAMPLES=OFF \
               -DARGMIN_CMAKE_FETCH_DEPS=ON
@@ -217,14 +217,12 @@ jobs:
     runs-on: ubuntu-24.04
     name: warnings (${{ matrix.build_type }})
 
-    # Advisory cell: ARGMIN_WARNING_FLAGS is now wired onto the
-    # header-compiling test target and surfaced here with -Werror in
-    # both Debug and Release so the flagged headers are visible. The
-    # header fixes themselves are production-code changes out of scope
-    # for the verification-instruments work, so this cell does not gate
-    # the pipeline yet. Flip continue-on-error to false once the
-    # flagged headers are cleaned up.
-    continue-on-error: true
+    # Gating: ARGMIN_WARNING_FLAGS is wired onto the header-compiling test
+    # target and surfaced here with -Werror in both Debug and Release. The
+    # headers build clean under it (the only failure had been a spurious
+    # clang-18 avx10 driver warning on some runners, now suppressed), so
+    # this is a hard gate -- a newly introduced warning fails the build.
+    continue-on-error: false
 
     steps:
       - uses: actions/checkout@v4
@@ -234,8 +232,14 @@ jobs:
           CC: clang-18
           CXX: clang++-18
         run: |
+          # -Wno-invalid-feature-combination: clang-18 spuriously emits a
+          # driver-level -Winvalid-feature-combination (avx10.1-256 ->
+          # avx10.1-512) on some GitHub runner CPUs, with no -march set. Under
+          # -Werror that fails the build on third-party (Catch2) sources for a
+          # toolchain artifact unrelated to our code; suppress just that one.
+          # gcc ignores the flag, so it is safe in the shared -Werror configs.
           cmake . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DCMAKE_CXX_FLAGS="-Werror" \
+            -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination" \
             -DARGMIN_BUILD_TESTS=ON \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
@@ -345,7 +349,7 @@ jobs:
         run: |
           cmake . -B build -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }} \
-            -DCMAKE_CXX_FLAGS="-Werror" \
+            -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination" \
             -DARGMIN_BUILD_TESTS=ON \
             -DARGMIN_BUILD_EXAMPLES=OFF \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
