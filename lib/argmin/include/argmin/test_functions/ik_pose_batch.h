@@ -70,13 +70,13 @@ struct ik_pose_batch
     // singularities at the chosen home/target configurations). Link
     // lengths and offsets are dimensionless; the workspace spans a
     // sphere of radius ~ sum(|a_i|) + sum(|d_i|) about the base.
-    [[nodiscard]] static std::array<dh_row, NJoints> dh_table() noexcept
+    [[nodiscard]] static std::array<dh_row, static_cast<std::size_t>(NJoints)> dh_table() noexcept
     {
         static_assert(NJoints == 6,
                       "ik_pose_batch currently ships a 6-DOF DH table; "
                       "templating on NJoints is reserved for future "
                       "kinematic shapes.");
-        std::array<dh_row, NJoints> table{};
+        std::array<dh_row, static_cast<std::size_t>(NJoints)> table{};
         constexpr Scalar pi = std::numbers::pi_v<Scalar>;
         table[0] = dh_row{Scalar(0),    pi / Scalar(2),  Scalar(1.0),  Scalar(0)};
         table[1] = dh_row{Scalar(1.0),  Scalar(0),       Scalar(0),    Scalar(0)};
@@ -90,9 +90,9 @@ struct ik_pose_batch
     // K target positions, distributed on a circle in the xy plane at
     // z = 0.8 with radius 1.2 about the base. All inside the reachable
     // workspace (sum of link lengths is approximately 2.8).
-    [[nodiscard]] static std::array<Eigen::Matrix<Scalar, 3, 1>, K> targets() noexcept
+    [[nodiscard]] static std::array<Eigen::Matrix<Scalar, 3, 1>, static_cast<std::size_t>(K)> targets() noexcept
     {
-        std::array<Eigen::Matrix<Scalar, 3, 1>, K> p_targets{};
+        std::array<Eigen::Matrix<Scalar, 3, 1>, static_cast<std::size_t>(K)> p_targets{};
         constexpr Scalar pi = std::numbers::pi_v<Scalar>;
         constexpr Scalar radius = Scalar(1.2);
         constexpr Scalar z_target = Scalar(0.8);
@@ -169,8 +169,8 @@ struct ik_pose_batch
     // Returns the end-effector transform cumulative[NJoints].
     [[nodiscard]] static Eigen::Matrix<Scalar, 4, 4> forward_kinematics(
         const Eigen::Matrix<Scalar, NJoints, 1>& theta,
-        std::array<Eigen::Matrix<Scalar, 4, 4>, NJoints + 1>& cumulative,
-        std::array<Eigen::Matrix<Scalar, 4, 4>, NJoints>& pre_joint) noexcept
+        std::array<Eigen::Matrix<Scalar, 4, 4>, static_cast<std::size_t>(NJoints) + 1>& cumulative,
+        std::array<Eigen::Matrix<Scalar, 4, 4>, static_cast<std::size_t>(NJoints)>& pre_joint) noexcept
     {
         const auto table = dh_table();
         cumulative[0].setIdentity();
@@ -191,8 +191,8 @@ struct ik_pose_batch
     // pre_joint[i] frame; that axis and origin feed the cross product
     //   J_p.col(i) = z_axis_i x (p_ee - p_pre_i).
     [[nodiscard]] static Eigen::Matrix<Scalar, 3, NJoints> position_jacobian(
-        const std::array<Eigen::Matrix<Scalar, 4, 4>, NJoints + 1>& cumulative,
-        const std::array<Eigen::Matrix<Scalar, 4, 4>, NJoints>& pre_joint) noexcept
+        const std::array<Eigen::Matrix<Scalar, 4, 4>, static_cast<std::size_t>(NJoints) + 1>& cumulative,
+        const std::array<Eigen::Matrix<Scalar, 4, 4>, static_cast<std::size_t>(NJoints)>& pre_joint) noexcept
     {
         const Eigen::Matrix<Scalar, 3, 1> p_ee =
             cumulative[NJoints].template block<3, 1>(0, 3);
@@ -222,8 +222,8 @@ struct ik_pose_batch
     {
         const auto p_targets = targets();
         Scalar acc = Scalar(0);
-        std::array<Eigen::Matrix<Scalar, 4, 4>, NJoints + 1> cumulative;
-        std::array<Eigen::Matrix<Scalar, 4, 4>, NJoints> pre_joint;
+        std::array<Eigen::Matrix<Scalar, 4, 4>, static_cast<std::size_t>(NJoints) + 1> cumulative;
+        std::array<Eigen::Matrix<Scalar, 4, 4>, static_cast<std::size_t>(NJoints)> pre_joint;
         Eigen::Matrix<Scalar, NJoints, 1> theta_k;
         for(int k = 0; k < K; ++k)
         {
@@ -245,8 +245,8 @@ struct ik_pose_batch
     {
         const auto p_targets = targets();
         g.setZero();
-        std::array<Eigen::Matrix<Scalar, 4, 4>, NJoints + 1> cumulative;
-        std::array<Eigen::Matrix<Scalar, 4, 4>, NJoints> pre_joint;
+        std::array<Eigen::Matrix<Scalar, 4, 4>, static_cast<std::size_t>(NJoints) + 1> cumulative;
+        std::array<Eigen::Matrix<Scalar, 4, 4>, static_cast<std::size_t>(NJoints)> pre_joint;
         Eigen::Matrix<Scalar, NJoints, 1> theta_k;
         for(int k = 0; k < K; ++k)
         {

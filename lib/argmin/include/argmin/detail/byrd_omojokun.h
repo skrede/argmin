@@ -611,6 +611,18 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
                 detail::null_space_project<Scalar, N>(
                     A_aug_ref, ws.ldlt_aug, vec, ws.w_aug,
                     null_space_refine_passes);
+                // Hold the pinned coordinates at their box-face value
+                // EXACTLY. The free-set semantics define a pinned
+                // coordinate as exactly fixed, but the approximate
+                // null-space projection leaves roundoff-scale leakage in
+                // the pinned components. A leakage-negative component on a
+                // coordinate sitting exactly at its face re-blocks the CG
+                // at tau = 0, sterilizing every restart; an exact zero can
+                // never re-block (IEEE -0.0 < 0 is false), so each restart
+                // removes one genuinely-blocking coordinate and the loop
+                // terminates in a bounded number of productive restarts.
+                for(const int fi : ws.fixed)
+                    vec[fi] = Scalar(0);
             };
 
             int restarts = 0;

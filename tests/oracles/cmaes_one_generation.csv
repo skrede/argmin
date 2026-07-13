@@ -1,18 +1,28 @@
 # cmaes_one_generation.csv -- golden values for the CMA-ES single-generation pin.
 #
-# generator: offspring rows recorded from argmin detail::sample_offspring
-#            (xoshiro256+ seeded via splitmix64, Marsaglia polar Gaussian), seed = 42.
+# generator: The offspring rows are NOT captured from the library sampler. They
+#            are produced by an independent offline replay of the engine and the
+#            draw path in exact arithmetic: splitmix64 seeding + xoshiro256+
+#            stepping in exact 64-bit integer arithmetic, the portable
+#            odd-numerator canonical uniform on (-1, 1), and the Marsaglia polar
+#            transform with log(s) evaluated by a correctly-rounded >= 200-bit
+#            reference and rounded to double. The committed offspring are thus
+#            the platform-neutral center of the libm envelope, independent of any
+#            one C++ standard library. Seed = 42.
 #            All downstream quantities (ranking, mean, p_sigma, p_c, sigma, C) are
 #            hand-derived from Hansen (2016), "The CMA Evolution Strategy: A Tutorial",
-#            arXiv:1604.00772, eqs. 41-47, applied to the recorded offspring, and
+#            arXiv:1604.00772, eqs. 41-47, applied to those offspring, and
 #            cross-checked with an independent numpy replay of the same equations.
 #            Update ordering follows pycma purecma.tell: the covariance C is adapted
 #            using the SAMPLING sigma (rank-mu vectors y_i = (x_i - mean_old)/sigma_old),
 #            and sigma is adapted after C.
-# version:  offspring stream is a function of the argmin sampler implementation at the
-#           pinned seed; if the Gaussian sampler or the seeding changes, re-record the
-#           offspring rows and re-derive the downstream values per the recipe in
-#           tests/unit/cmaes_generation_pin_test.cpp.
+# version:  The draw stream is deterministic across platforms by construction --
+#           every step of the uniform mapping is exact in IEEE-754 binary64, so the
+#           only residual cross-platform variation is the libm log, bounded to a few
+#           ULP. If the sampler mapping or the seeding changes, re-derive the
+#           offspring rows and the downstream values with the independent replay
+#           described in tests/unit/cmaes_generation_pin_test.cpp -- never capture
+#           them from the code under test.
 # config:   n = 2, lambda = 6, mu = 3, sigma0 = 0.5, mean0 = x0 = (0, 0), C0 = I,
 #           B0 = I, D0 = 1, p_sigma0 = p_c0 = 0, generation 0, unbounded problem,
 #           objective f(x) = (x1 - 0.5)^2 + 2 (x2 + 0.25)^2.
@@ -28,16 +38,16 @@ lambda,6
 mu,3
 sigma0,5.00000000000000000e-01
 mean0,0.00000000000000000e+00,0.00000000000000000e+00
-offspring_0,-2.77390633301685008e-01,-1.26954286910769376e-01
-offspring_1,-1.92479946914932920e-01,-8.51617304235024325e-02
-offspring_2,-8.73245692233028531e-02,-5.78012039226471902e-02
-offspring_3,5.63395809270107240e-01,3.61117487110326069e-02
-offspring_4,-2.58281463864960648e-01,2.85792152301258262e-01
+offspring_0,-2.77390633301685396e-01,-1.26954286910769543e-01
+offspring_1,-1.92479946914933059e-01,-8.51617304235024741e-02
+offspring_2,-8.73245692233021731e-02,-5.78012039226467322e-02
+offspring_3,5.63395809270107017e-01,3.61117487110325791e-02
+offspring_4,-2.58281463864960315e-01,2.85792152301258151e-01
 offspring_5,2.00331757798091564e-01,4.47397271750868408e-01
 ranking,3,2,1,0,5,4
 h_sigma,1
-mean,3.18969181244784850e-01,-1.19369382281686587e-04
-p_sigma,7.56558001351354870e-01,-2.83130366793250213e-04
-p_c,8.42141420981740829e-01,-3.15158664621163233e-04
-sigma,4.42383271126181643e-01
-C,9.45093267645248147e-01,3.58830437084157843e-03,3.58830437084157843e-03,7.87869403163156901e-01
+mean,3.18969181244784905e-01,-1.19369382281575565e-04
+p_sigma,7.56558001351355092e-01,-2.83130366792986861e-04
+p_c,8.42141420981740940e-01,-3.15158664620870119e-04
+sigma,4.42383271126181699e-01
+C,9.45093267645248036e-01,3.58830437084160835e-03,3.58830437084160835e-03,7.87869403163156901e-01

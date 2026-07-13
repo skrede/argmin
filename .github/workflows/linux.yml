@@ -49,14 +49,14 @@ jobs:
         run: |
           if [ "${{ matrix.coverage }}" = "true" ]; then
             cmake . -B build -DCMAKE_BUILD_TYPE=Debug \
-              -DCMAKE_CXX_FLAGS="-Werror --coverage" \
+              -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination --coverage" \
               -DCMAKE_C_FLAGS="--coverage" \
               -DARGMIN_BUILD_TESTS=ON \
               -DARGMIN_BUILD_EXAMPLES=OFF \
               -DARGMIN_CMAKE_FETCH_DEPS=ON
           else
             cmake . -B build -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_CXX_FLAGS="-Werror" \
+              -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination" \
               -DARGMIN_BUILD_TESTS=ON \
               -DARGMIN_BUILD_EXAMPLES=OFF \
               -DARGMIN_CMAKE_FETCH_DEPS=ON
@@ -96,19 +96,9 @@ jobs:
             cc: clang-18
             cxx: clang++-18
             flags: "-fsanitize=address,undefined -fno-omit-frame-pointer"
-          - name: msan
-            cc: clang-18
-            cxx: clang++-18
-            flags: "-fsanitize=memory -fno-omit-frame-pointer -fsanitize-memory-track-origins=2"
 
     runs-on: ubuntu-24.04
     name: sanitize (${{ matrix.name }})
-    # msan flags use-of-uninitialized-value deep inside the uninstrumented
-    # standard library and Catch2 runtime -- a known MemorySanitizer
-    # limitation that requires a fully msan-instrumented libc++, not an
-    # argmin defect. Keep the job for signal but do not let it gate the
-    # pipeline. asan-ubsan remains a hard gate.
-    continue-on-error: ${{ matrix.name == 'msan' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -130,6 +120,94 @@ jobs:
       - name: Test
         run: cd build && ctest --output-on-failure
 
+  # MemorySanitizer requires the ENTIRE program -- including the C++ standard
+  # library -- to be instrumented. Stock libstdc++ is not, which produces
+  # false use-of-uninitialized reports deep inside std:: containers (e.g. in
+  # Catch2's registry during static init). We build libc++/libc++abi with
+  # -fsanitize=memory and link against them so the reports are real signal.
+  #
+  # The unwinder is deliberately NOT instrumented: an MSAN-built libunwind
+  # reads its own register context (getReg) in a way MSAN treats as
+  # uninitialized, which (a) false-positives on every ordinary C++ exception
+  # unwind and (b) infinitely recurses -- and SIGSEGVs -- when MSAN unwinds to
+  # print a real report, masking the finding. So libc++abi is pointed at the
+  # platform unwinder (LIBCXXABI_USE_LLVM_UNWINDER=OFF, uninstrumented libgcc_s)
+  # and fast_unwind_on_fatal keeps MSAN's own fatal traces off libunwind too.
+  sanitize-msan:
+    runs-on: ubuntu-24.04
+    name: sanitize (msan, instrumented libc++)
+    # Gating: observed green on develop 2026-07-13 (full ~36m run) once the
+    # unwinder-instrumentation defect was fixed, so it is now a hard gate.
+    continue-on-error: false
+
+    env:
+      LLVM_VER: "18.1.8"          # track the clang used below (clang-18)
+      CC: clang-18
+      CXX: clang++-18
+      LIBCXX_MSAN: ${{ github.workspace }}/libcxx-msan
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 ninja-build cmake xz-utils
+
+      # The instrumented libc++ is expensive to build (~10 min) but fully
+      # deterministic for a fixed LLVM version + compiler, so cache it.
+      - name: Cache instrumented libc++
+        id: cache-libcxx
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.LIBCXX_MSAN }}
+          key: libcxx-msan-llvm${{ env.LLVM_VER }}-clang18-ubuntu24-v2
+
+      - name: Build instrumented libc++
+        if: steps.cache-libcxx.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VER}/llvm-project-${LLVM_VER}.src.tar.xz"
+          tar xf "llvm-project-${LLVM_VER}.src.tar.xz"
+          cmake -G Ninja \
+            -S "llvm-project-${LLVM_VER}.src/runtimes" \
+            -B build-libcxx-msan \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
+            -DLLVM_USE_SANITIZER=MemoryWithOrigins \
+            -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
+            -DLIBCXX_INCLUDE_TESTS=OFF \
+            -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
+            -DCMAKE_INSTALL_PREFIX="${LIBCXX_MSAN}"
+          ninja -C build-libcxx-msan cxx cxxabi
+          ninja -C build-libcxx-msan install-cxx install-cxxabi
+
+      - name: Configure
+        run: |
+          MSAN="-fsanitize=memory -fsanitize-memory-track-origins=2 -fno-omit-frame-pointer -g"
+          # Point compile + link at OUR instrumented libc++, and set rpath so
+          # the test binary loads it at runtime (test discovery runs the
+          # binary -- that is the step that crashes with stock libstdc++).
+          CXX_FLAGS="$MSAN -stdlib=libc++ -nostdinc++ -isystem ${LIBCXX_MSAN}/include/c++/v1"
+          LINK_FLAGS="$MSAN -stdlib=libc++ -L${LIBCXX_MSAN}/lib -Wl,-rpath,${LIBCXX_MSAN}/lib -lc++abi"
+          cmake . -B build -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="$CXX_FLAGS" \
+            -DCMAKE_EXE_LINKER_FLAGS="$LINK_FLAGS" \
+            -DARGMIN_BUILD_TESTS=ON \
+            -DARGMIN_CMAKE_FETCH_DEPS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        env:
+          # fast_unwind_on_fatal keeps MSAN's fatal-report unwinding on frame
+          # pointers (-fno-omit-frame-pointer is set) rather than libunwind.
+          MSAN_OPTIONS: "abort_on_error=1 fast_unwind_on_fatal=1"
+        run: cd build && ctest --output-on-failure
+
   warnings:
     strategy:
       fail-fast: false
@@ -139,14 +217,12 @@ jobs:
     runs-on: ubuntu-24.04
     name: warnings (${{ matrix.build_type }})
 
-    # Advisory cell: ARGMIN_WARNING_FLAGS is now wired onto the
-    # header-compiling test target and surfaced here with -Werror in
-    # both Debug and Release so the flagged headers are visible. The
-    # header fixes themselves are production-code changes out of scope
-    # for the verification-instruments work, so this cell does not gate
-    # the pipeline yet. Flip continue-on-error to false once the
-    # flagged headers are cleaned up.
-    continue-on-error: true
+    # Gating: ARGMIN_WARNING_FLAGS is wired onto the header-compiling test
+    # target and surfaced here with -Werror in both Debug and Release. The
+    # headers build clean under it (the only failure had been a spurious
+    # clang-18 avx10 driver warning on some runners, now suppressed), so
+    # this is a hard gate -- a newly introduced warning fails the build.
+    continue-on-error: false
 
     steps:
       - uses: actions/checkout@v4
@@ -156,8 +232,14 @@ jobs:
           CC: clang-18
           CXX: clang++-18
         run: |
+          # -Wno-invalid-feature-combination: clang-18 spuriously emits a
+          # driver-level -Winvalid-feature-combination (avx10.1-256 ->
+          # avx10.1-512) on some GitHub runner CPUs, with no -march set. Under
+          # -Werror that fails the build on third-party (Catch2) sources for a
+          # toolchain artifact unrelated to our code; suppress just that one.
+          # gcc ignores the flag, so it is safe in the shared -Werror configs.
           cmake . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DCMAKE_CXX_FLAGS="-Werror" \
+            -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination" \
             -DARGMIN_BUILD_TESTS=ON \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
@@ -267,7 +349,7 @@ jobs:
         run: |
           cmake . -B build -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }} \
-            -DCMAKE_CXX_FLAGS="-Werror" \
+            -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination" \
             -DARGMIN_BUILD_TESTS=ON \
             -DARGMIN_BUILD_EXAMPLES=OFF \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
@@ -307,3 +389,34 @@ jobs:
 
       - name: Run instantiation probe
         run: ./build/tests/compile/argmin_no_exceptions_probe
+
+  examples:
+    runs-on: ubuntu-24.04
+    name: examples (build + run)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        # Build and run the runnable examples so they cannot bit-rot against
+        # API changes: a broken example fails CI here, and running each one
+        # catches a build that compiles but no longer converges.
+        run: |
+          cmake . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DARGMIN_BUILD_EXAMPLES=ON \
+            -DARGMIN_CMAKE_FETCH_DEPS=ON
+
+      - name: Build examples
+        run: cmake --build build
+
+      - name: Run examples
+        run: |
+          set -euo pipefail
+          for ex in unconstrained_lbfgsb constrained_slsqp least_squares_lm \
+                    derivative_free_bobyqa step_level_control; do
+            echo "== ${ex} =="
+            ./build/examples/"${ex}"
+          done

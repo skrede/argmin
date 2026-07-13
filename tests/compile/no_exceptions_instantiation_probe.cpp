@@ -55,7 +55,10 @@ void exercise(Policy policy, const Problem& problem, const Vec& x0)
 
     argmin::step_budget_solver solver{std::move(policy), problem, x0, opts};
     const auto sr = solver.step();
-    g_sink += sr.objective_value;
+    // Simple assignment (not compound) so the volatile sink stays observable
+    // without tripping C++20's deprecated-volatile rule (P1152) on older
+    // compilers; the read and write are both visible side effects.
+    g_sink = g_sink + sr.objective_value;
     solver.reset(x0);
 }
 

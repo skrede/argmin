@@ -232,6 +232,17 @@ struct ccsa_quadratic_policy
                 s.c_ineq = c_tmp;
                 s.J_ineq = J_tmp;
             }
+            else
+            {
+                // solver_core::seed_best_cv() reads c_ineq at construction
+                // (this state carries a c_eq member, so the primal-
+                // feasibility probe there is enabled) -- before step() can
+                // short-circuit the rejected problem. Leave it defined
+                // rather than intentionally-unpopulated so that read is not
+                // of uninitialized memory; the value is discarded once the
+                // solver returns invalid_problem.
+                s.c_ineq.setZero();
+            }
         }
 
         s.c_dual_ref.resize(m_ineq);
@@ -273,8 +284,9 @@ struct ccsa_quadratic_policy
         s.rhoc.resize(m_ineq);
         s.rhoc.setConstant(ri);
 
-        // Initial feasibility assessment. Skipped for a rejected problem
-        // whose inequality buffer was intentionally left unpopulated.
+        // Initial feasibility assessment. Skipped for a rejected problem:
+        // its inequality buffer is zero-seeded but semantically undefined,
+        // and the problem is about to be rejected at the first step().
         s.feasible = true;
         s.infeasibility = 0.0;
         for(int i = 0; i < m_ineq && !s.invalid_problem; ++i)

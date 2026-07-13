@@ -418,7 +418,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
     {
         SECTION("Rastrigin 5D")
         {
-            rastrigin problem{.n = 5};
+            rastrigin<> problem{.n = 5};
             Eigen::VectorXd x0 = Eigen::VectorXd::Constant(5, 2.0);
             solver_options opts;
             opts.max_iterations = 5000;
@@ -455,7 +455,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
 
         SECTION("Ackley 5D")
         {
-            ackley problem{.n = 5};
+            ackley<> problem{.n = 5};
             Eigen::VectorXd x0 = Eigen::VectorXd::Constant(5, 1.0);
             solver_options opts;
             opts.max_iterations = 5000;

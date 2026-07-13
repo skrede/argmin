@@ -81,7 +81,7 @@ TEST_CASE("fallback_schedule", "[scheduling]")
 
     SECTION("stays with solver 0 on improvement")
     {
-        step_result good{.improved = true};
+        step_result<> good{.improved = true};
         sched.notify(good);
         sched.notify(good);
         sched.notify(good);
@@ -90,7 +90,7 @@ TEST_CASE("fallback_schedule", "[scheduling]")
 
     SECTION("switches after stall_threshold non-improving steps")
     {
-        step_result bad{.improved = false};
+        step_result<> bad{.improved = false};
         sched.notify(bad);
         sched.notify(bad);
         CHECK(sched.select(2) == 0);
@@ -100,8 +100,8 @@ TEST_CASE("fallback_schedule", "[scheduling]")
 
     SECTION("resets stall counter on improvement")
     {
-        step_result bad{.improved = false};
-        step_result good{.improved = true};
+        step_result<> bad{.improved = false};
+        step_result<> good{.improved = true};
         sched.notify(bad);
         sched.notify(bad);
         sched.notify(good);
@@ -113,7 +113,7 @@ TEST_CASE("fallback_schedule", "[scheduling]")
     SECTION("cycles back to first solver")
     {
         sched.set_num_solvers(2);
-        step_result bad{.improved = false};
+        step_result<> bad{.improved = false};
         for(int i = 0; i < 3; ++i) sched.notify(bad);
         CHECK(sched.select(2) == 1);
         for(int i = 0; i < 3; ++i) sched.notify(bad);

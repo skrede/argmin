@@ -28,7 +28,7 @@ TEST_CASE("expected carries a value", "[expected]")
 
 TEST_CASE("expected carries an error", "[expected]")
 {
-    expected<int, std::string> e = unexpected<std::string>(std::string("boom"));
+    expected<int, std::string> e = argmin::unexpected<std::string>(std::string("boom"));
 
     REQUIRE_FALSE(static_cast<bool>(e));
     REQUIRE_FALSE(e.has_value());
@@ -38,7 +38,7 @@ TEST_CASE("expected carries an error", "[expected]")
 TEST_CASE("expected value_or returns the fallback on error", "[expected]")
 {
     expected<int, std::string> good = 7;
-    expected<int, std::string> bad = unexpected<std::string>(std::string("bad"));
+    expected<int, std::string> bad = argmin::unexpected<std::string>(std::string("bad"));
 
     REQUIRE(good.value_or(-1) == 7);
     REQUIRE(bad.value_or(-1) == -1);
@@ -73,7 +73,7 @@ TEST_CASE("expected<void, E> models a payload-free result", "[expected]")
     REQUIRE(ok.has_value());
     REQUIRE(static_cast<bool>(ok));
 
-    expected<void, std::string> err = unexpected<std::string>(std::string("void-err"));
+    expected<void, std::string> err = argmin::unexpected<std::string>(std::string("void-err"));
     REQUIRE_FALSE(err.has_value());
     REQUIRE(err.error() == "void-err");
 

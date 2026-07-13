@@ -10,7 +10,7 @@ using namespace argmin;
 
 TEST_CASE("fd_gradient on Rosenbrock", "[finite_difference]")
 {
-    rosenbrock fn{.a = 1.0, .b = 5.0, .n = 2};
+    rosenbrock<> fn{.a = 1.0, .b = 5.0, .n = 2};
     Eigen::VectorXd g_fd(2);
     Eigen::VectorXd g_analytical(2);
 

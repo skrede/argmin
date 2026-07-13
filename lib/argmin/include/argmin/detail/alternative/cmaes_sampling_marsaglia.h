@@ -40,10 +40,39 @@
 
 #include <cmath>
 #include <random>
+#include <cstdint>
 #include <utility>
 
 namespace argmin::detail::alternative::marsaglia
 {
+
+// Portable canonical uniform on (-1, 1) drawn from the engine's raw
+// 64-bit word. Every arithmetic step is exact in IEEE-754 binary64, so
+// the value is bit-identical on every conforming platform -- no
+// implementation-defined standard-library distribution and no libm call
+// participate:
+//   m = ((x >> 12) << 1) | 1 is an odd integer in [1, 2^53 - 1]. It has
+//     at most 53 significant bits and is therefore represented exactly
+//     in a double.
+//   t = m * 2^-53 lies in (0, 1) on a lattice symmetric about 1/2; the
+//     multiply by the power-of-two 0x1.0p-53 only shifts the exponent,
+//     so it is exact.
+//   2 * t rescales by another power of two (exact); the final subtract of
+//     1 is exact for t in [1/2, 1) by Sterbenz's lemma, and for t < 1/2
+//     the result 2t - 1 still fits in 53 significant bits, so it is exact
+//     as well.
+// The top 52 engine bits are used because xoshiro256+ carries a slight
+// linear bias in its lowest 3 bits. Because m is odd it is never 2^52,
+// so t is never exactly 1/2 and the result u is never exactly 0: the
+// lattice sits in the OPEN interval (-1, 1), is symmetric, and has mean
+// exactly 0. This makes the u != 0 / s > 0 disc guard structural.
+template <typename RNG>
+inline auto canonical_uniform_pm1(RNG& rng) -> double
+{
+    const std::uint64_t x = rng();
+    const double t = static_cast<double>(((x >> 12) << 1) | UINT64_C(1)) * 0x1.0p-53;
+    return t * 2.0 - 1.0;
+}
 
 // One Marsaglia polar pair: two independent N(0,1) draws from two
 // uniforms on (-1, 1) accepted into the unit disc.
@@ -51,11 +80,10 @@ namespace argmin::detail::alternative::marsaglia
 template <typename Scalar = double, typename RNG>
 auto marsaglia_polar(RNG& rng) -> std::pair<Scalar, Scalar>
 {
-    std::uniform_real_distribution<Scalar> uni(Scalar(-1), Scalar(1));
     while(true)
     {
-        const Scalar u = uni(rng);
-        const Scalar v = uni(rng);
+        const Scalar u = static_cast<Scalar>(canonical_uniform_pm1(rng));
+        const Scalar v = static_cast<Scalar>(canonical_uniform_pm1(rng));
         const Scalar s = u * u + v * v;
         if(s > Scalar(0) && s < Scalar(1))
         {

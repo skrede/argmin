@@ -43,11 +43,13 @@
 //                 ill-posed there. Two [!mayfail] cells (HS043 and
 //                 HS050 / accurate) each isolate a strict bar that is
 //                 floating-point-reassociation sensitive on the chaotic
-//                 composite-step trajectory: HS043 straddles its 1e-2
-//                 relative bar (Debug just misses, release just clears)
-//                 and HS050 clears its 1e-6 absolute bar deeply under
-//                 both presets with the tail tolerated; each carries a
-//                 mechanism-citation comment block above its test case.
+//                 composite-step trajectory: HS043 clears its 1e-2
+//                 relative bar locally at f_err ~ 8.66e-3 but stays in
+//                 the reassociation-sensitive band above the 5e-3
+//                 half-bar, and HS050 clears its 1e-6 absolute bar
+//                 deeply under both presets with the tail tolerated;
+//                 each carries a mechanism-citation comment block above
+//                 its test case.
 //                 The remaining cells assert the strict publication
 //                 bars. The cells
 //                 exercise the
@@ -337,30 +339,36 @@ TEMPLATE_TEST_CASE(
     }
 }
 
-// HS043 splits by mode at the locked filter defaults, and the accurate
-// cell additionally straddles its strict bar by build mode. Fast mode
+// HS043 splits by mode at the locked filter defaults. Fast mode
 // converges to the strict relative-error bar cleanly. Accurate mode
-// reaches a zero-violation terminal iterate whose objective sits right
-// at the tighter 1e-2 relative bar: under the dev (Debug) preset it
-// lands just above (f_err ~ 1.7e-2 > 1e-2), while under the release
-// preset (-O3 -march=native -fno-math-errno plus LTO) the floating-point
-// reassociation on the composite-step trajectory nudges it just below
-// (f_err ~ 6.9e-3 < 1e-2). The accurate cell therefore carries a
-// [!mayfail] disposition: the build-mode-dependent tail is tolerated
-// rather than asserted as an always-miss.
+// reaches a zero-violation terminal iterate whose objective sits close
+// to the tighter 1e-2 relative bar. Once the trust-region restart
+// projector holds pinned coordinates exactly, the accurate trajectory
+// converges consistently to f_err ~ 8.66e-3 in every local cell (Debug
+// and Release, both the FetchContent Eigen 3.4.0 and the system Eigen
+// 3.4.1 legs; the exact pinning removed the earlier build-mode
+// divergence between Debug and Release outcomes). That value clears the
+// 1e-2 bar by only ~1.3e-3 and sits above the 5e-3 half-bar, i.e. inside
+// the reassociation-sensitive band. The accurate cell therefore retains
+// its [!mayfail] disposition as an architecture-straddle hedge: a cell
+// that clears by this narrow a margin on x86/glibc can still graze the
+// bar under a different floating-point reassociation (arm64 default FMA
+// contraction, MSVC), so tolerating the tail is the honest disposition
+// rather than asserting an always-clear.
 //
 // Mechanism: at the locked per-mode defaults (gamma_f = gamma_h =
 // 1e-2, tr_shrink, delta0 = 1, restoration_max_iter = 10) the
 // already-feasible-iterate gate on the Levenberg-Marquardt
 // restoration helper correctly skips restoration once ||c|| is zero,
-// so the accurate trajectory holds near its terminal objective rather
-// than descending the last relative-error decade; whether that terminal
-// objective lands just above or just below the strict bar is decided by
-// build-level floating-point reassociation. A per-mode default revision,
-// or a reject-path policy that dispatches restoration on objective
-// stagnation in addition to the Delta-collapse gate, would close the gap
-// deterministically in a future release. The fast bar (5e-2) absorbs the
-// same terminal gap cleanly, so the fast cell ships untagged.
+// so the accurate trajectory holds at its terminal objective rather
+// than descending the last relative-error decade; how much clearance
+// that terminal objective keeps over the strict bar is sensitive to
+// floating-point reassociation across architectures. A per-mode default
+// revision, or a reject-path policy that dispatches restoration on
+// objective stagnation in addition to the Delta-collapse gate, would
+// close the gap deterministically in a future release. The fast bar
+// (5e-2) absorbs the same terminal gap cleanly, so the fast cell ships
+// untagged.
 //
 // Reference: Fletcher and Leyffer 2002 SIAM J. Optim. 13(1):44-59
 //            Section 2.1 (filter dominance vs L2-merit ratio test);
@@ -391,10 +399,10 @@ TEMPLATE_TEST_CASE(
     step_budget_solver solver{policy_t{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
-    // HS043 optimum: f* = -44 at (0, 1, 2, -1). The accurate cell sits
-    // right at the strict 1e-2 relative bar and crosses it by build mode
-    // (Debug just misses, release just clears); [!mayfail] tolerates
-    // either outcome.
+    // HS043 optimum: f* = -44 at (0, 1, 2, -1). The accurate cell
+    // converges to f_err ~ 8.66e-3 in every local cell, clearing the
+    // strict 1e-2 relative bar by ~1.3e-3 but staying above the 5e-3
+    // half-bar; [!mayfail] hedges the architecture-straddle tail.
     const double f_star = problem.optimal_value();
     const double f_err  = std::abs(result.objective_value - f_star)
                           / std::abs(f_star);
