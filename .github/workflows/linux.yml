@@ -385,3 +385,34 @@ jobs:
 
       - name: Run instantiation probe
         run: ./build/tests/compile/argmin_no_exceptions_probe
+
+  examples:
+    runs-on: ubuntu-24.04
+    name: examples (build + run)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        # Build and run the runnable examples so they cannot bit-rot against
+        # API changes: a broken example fails CI here, and running each one
+        # catches a build that compiles but no longer converges.
+        run: |
+          cmake . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DARGMIN_BUILD_EXAMPLES=ON \
+            -DARGMIN_CMAKE_FETCH_DEPS=ON
+
+      - name: Build examples
+        run: cmake --build build
+
+      - name: Run examples
+        run: |
+          set -euo pipefail
+          for ex in unconstrained_lbfgsb constrained_slsqp least_squares_lm \
+                    derivative_free_bobyqa step_level_control; do
+            echo "== ${ex} =="
+            ./build/examples/"${ex}"
+          done
