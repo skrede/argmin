@@ -123,8 +123,16 @@ jobs:
   # MemorySanitizer requires the ENTIRE program -- including the C++ standard
   # library -- to be instrumented. Stock libstdc++ is not, which produces
   # false use-of-uninitialized reports deep inside std:: containers (e.g. in
-  # Catch2's registry during static init). We build libc++/libc++abi/libunwind
-  # with -fsanitize=memory and link against it so the reports are real signal.
+  # Catch2's registry during static init). We build libc++/libc++abi with
+  # -fsanitize=memory and link against them so the reports are real signal.
+  #
+  # The unwinder is deliberately NOT instrumented: an MSAN-built libunwind
+  # reads its own register context (getReg) in a way MSAN treats as
+  # uninitialized, which (a) false-positives on every ordinary C++ exception
+  # unwind and (b) infinitely recurses -- and SIGSEGVs -- when MSAN unwinds to
+  # print a real report, masking the finding. So libc++abi is pointed at the
+  # platform unwinder (LIBCXXABI_USE_LLVM_UNWINDER=OFF, uninstrumented libgcc_s)
+  # and fast_unwind_on_fatal keeps MSAN's own fatal traces off libunwind too.
   sanitize-msan:
     runs-on: ubuntu-24.04
     name: sanitize (msan, instrumented libc++)
@@ -153,7 +161,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.LIBCXX_MSAN }}
-          key: libcxx-msan-llvm${{ env.LLVM_VER }}-clang18-ubuntu24-v1
+          key: libcxx-msan-llvm${{ env.LLVM_VER }}-clang18-ubuntu24-v2
 
       - name: Build instrumented libc++
         if: steps.cache-libcxx.outputs.cache-hit != 'true'
@@ -167,13 +175,14 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=clang-18 \
             -DCMAKE_CXX_COMPILER=clang++-18 \
-            -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
+            -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
             -DLLVM_USE_SANITIZER=MemoryWithOrigins \
+            -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
             -DLIBCXX_INCLUDE_TESTS=OFF \
             -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
             -DCMAKE_INSTALL_PREFIX="${LIBCXX_MSAN}"
-          ninja -C build-libcxx-msan cxx cxxabi unwind
-          ninja -C build-libcxx-msan install-cxx install-cxxabi install-unwind
+          ninja -C build-libcxx-msan cxx cxxabi
+          ninja -C build-libcxx-msan install-cxx install-cxxabi
 
       - name: Configure
         run: |
@@ -194,7 +203,9 @@ jobs:
 
       - name: Test
         env:
-          MSAN_OPTIONS: "abort_on_error=1"
+          # fast_unwind_on_fatal keeps MSAN's fatal-report unwinding on frame
+          # pointers (-fno-omit-frame-pointer is set) rather than libunwind.
+          MSAN_OPTIONS: "abort_on_error=1 fast_unwind_on_fatal=1"
         run: cd build && ctest --output-on-failure
 
   warnings:
