@@ -136,9 +136,9 @@ jobs:
   sanitize-msan:
     runs-on: ubuntu-24.04
     name: sanitize (msan, instrumented libc++)
-    # Non-gating until observed green at least once; then flip to false so it
-    # becomes a hard gate. Do not merge as gating blind.
-    continue-on-error: true
+    # Gating: observed green on develop 2026-07-13 (full ~36m run) once the
+    # unwinder-instrumentation defect was fixed, so it is now a hard gate.
+    continue-on-error: false
 
     env:
       LLVM_VER: "18.1.8"          # track the clang used below (clang-18)
