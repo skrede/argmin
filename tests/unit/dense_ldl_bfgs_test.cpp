@@ -204,7 +204,7 @@ TEST_CASE("dense_ldl_bfgs factor_to_E_and_f matches Cholesky-derived E, f",
 
 TEST_CASE("dense_ldl_bfgs sequence of pushes preserves SPD", "[dense_ldl_bfgs]")
 {
-    // Stress test: 100 random PD pushes; B must remain SPD throughout.
+    // Stress test: 100 well-conditioned PD pushes; B must remain SPD throughout.
     constexpr int n = 6;
     dense_ldl_bfgs<double, n> bfgs(n);
 
@@ -218,7 +218,17 @@ TEST_CASE("dense_ldl_bfgs sequence of pushes preserves SPD", "[dense_ldl_bfgs]")
             s[i] = uniform_pm1_(rng);
             y[i] = uniform_pm1_(rng);
         }
-        if(s.dot(y) <= 0.0) y = -y;
+        // Enforce a healthy positive-curvature margin s^T y >= ||s||^2 rather
+        // than merely s^T y > 0. Barely-positive curvature drives B to
+        // numerical singularity over 100 pushes (measured min eigenvalue
+        // ~ 1e-16), so whether Eigen::LLT still accepts it as SPD rides on
+        // platform floating-point rounding -- the actual source of the
+        // cross-platform flakiness, not the RNG. A unit margin keeps B
+        // well-conditioned (min eigenvalue ~ 0.1, condition ~ 30): robustly
+        // SPD everywhere while still exercising 100 genuine rank-two updates.
+        const double ss = s.squaredNorm();
+        const double sy = s.dot(y);
+        if(sy < ss) y += (ss - sy) / ss * s;
         bfgs.push(s, y);
     }
 
