@@ -23,6 +23,24 @@ Eigen::Matrix<double, N, N> chol_upper_(const Eigen::Matrix<double, N, N>& B)
     return llt.matrixL().transpose();
 }
 
+// Portable pseudo-random double in (-1, 1) from one raw mt19937 draw.
+// std::normal_distribution / std::uniform_real_distribution produce
+// implementation-defined sequences (libc++ and libstdc++ disagree for the
+// same engine and seed), so a fixed-seed stress test built on them asserts
+// on a standard-library-specific stream -- and silently changes the random
+// curvature pairs, and thus the conditioning of B, when the test is built
+// against a different libc++/libstdc++. Deriving the value from the
+// engine's raw output keeps the sequence identical across standard
+// libraries. The magnitude (order 1) matches the former N(0, 1) draws
+// closely enough to keep the generated B well-conditioned.
+double uniform_pm1_(std::mt19937& rng)
+{
+    // Top 26 bits of the 32-bit draw -> [0, 1), then mapped to (-1, 1).
+    const double u = static_cast<double>(rng() >> 6)
+                   / static_cast<double>(1u << 26);
+    return 2.0 * u - 1.0;
+}
+
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +160,6 @@ TEST_CASE("dense_ldl_bfgs factor_to_E_and_f matches Cholesky-derived E, f",
     dense_ldl_bfgs<double, n> bfgs(n);
 
     std::mt19937 rng(42);
-    std::normal_distribution<double> nd(0.0, 1.0);
 
     // Generate a few well-conditioned PD curvature pairs.
     for(int k = 0; k < 5; ++k)
@@ -150,8 +167,8 @@ TEST_CASE("dense_ldl_bfgs factor_to_E_and_f matches Cholesky-derived E, f",
         Eigen::Vector<double, n> s, y;
         for(int i = 0; i < n; ++i)
         {
-            s[i] = nd(rng);
-            y[i] = nd(rng);
+            s[i] = uniform_pm1_(rng);
+            y[i] = uniform_pm1_(rng);
         }
         // Force s^T y > 0 with margin.
         if(s.dot(y) <= 0.5 * s.squaredNorm())
@@ -192,15 +209,14 @@ TEST_CASE("dense_ldl_bfgs sequence of pushes preserves SPD", "[dense_ldl_bfgs]")
     dense_ldl_bfgs<double, n> bfgs(n);
 
     std::mt19937 rng(7);
-    std::normal_distribution<double> nd(0.0, 1.0);
 
     for(int k = 0; k < 100; ++k)
     {
         Eigen::Vector<double, n> s, y;
         for(int i = 0; i < n; ++i)
         {
-            s[i] = nd(rng);
-            y[i] = nd(rng);
+            s[i] = uniform_pm1_(rng);
+            y[i] = uniform_pm1_(rng);
         }
         if(s.dot(y) <= 0.0) y = -y;
         bfgs.push(s, y);
