@@ -22,6 +22,7 @@
 
 #include "argmin/solver/lm_policy.h"
 #include "argmin/solver/step_budget_solver.h"
+#include "argmin/test_functions/small_dense.h"
 
 #include <Eigen/Core>
 
@@ -95,6 +96,11 @@ struct rosenbrock_ls_fixed
         J(0, 1) = 0.0;
         J(1, 0) = -2.0 * std::sqrt(5.0) * x(0);
         J(1, 1) = std::sqrt(5.0);
+    }
+
+    Eigen::Vector<double, 2> initial_point() const
+    {
+        return Eigen::Vector<double, 2>{-1.0, 1.0};
     }
 };
 
@@ -188,38 +194,91 @@ bool probe_kkt_residual()
 }
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Levenberg-Marquardt allocates a fresh trial-residual vector per step in the
-// current code (the residual buffers stay dynamically sized), so this is a
-// witness target now: the un-blinded gate must observe at least 1 allocation
-// per step. The workspace hoist that makes it allocation-free is out of scope
-// here; when it lands, flipping to the zero-alloc gate is the acceptance.
-int argmin_alloc_trace_probe()
+namespace
 {
-    rosenbrock_ls_fixed problem;
-    Eigen::Vector<double, 2> x0{-1.0, 1.0};
-    const Eigen::Vector<double, 2> x0_reset = x0;
+
+// Steady-state allocation measurement for a fixed-N Levenberg-Marquardt solve
+// loop. Warmup boundary: a full warmup solve() warms every one-time / lazy
+// allocation; reset(x0) returns to the start OUTSIDE any armed region; a short
+// unarmed transient re-enters the descent; only then does the armed window
+// measure the pure per-step traffic. reset() never sits inside the armed
+// window. If the policy signals termination inside the window it is not a
+// steady state and the probe fails rather than reporting a vacuous zero.
+template <typename Policy, typename Problem>
+int measure_steady(const char* label, Policy policy, const Problem& problem,
+                   std::size_t min_per_step)
+{
+    auto x0 = problem.initial_point();
     argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-12);
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    argmin::step_budget_solver solver{argmin::lm_policy<2>{}, problem, x0, opts};
+    argmin::step_budget_solver solver{policy, problem, x0, opts};
 
+    solver.solve();
+    solver.reset(x0);
     solver.step();
     solver.step();
 
     constexpr std::size_t hot_steps = 10;
     argmin::detail::bench::reset_alloc_count();
     argmin::detail::bench::arm_alloc_trace();
+    bool terminated = false;
     for(std::size_t i = 0; i < hot_steps; ++i)
-        solver.step();
-    solver.reset(x0_reset);
-    for(std::size_t i = 0; i < hot_steps; ++i)
-        solver.step();
+    {
+        const auto r = solver.step();
+        if(r.policy_status.has_value())
+            terminated = true;
+    }
     argmin::detail::bench::disarm_alloc_trace();
 
-    return argmin::detail::bench::evaluate_gate("lm", 2 * hot_steps, 1);
+    if(terminated)
+    {
+        argmin::bench::println(stderr,
+            "  [alloc-gate] {} FAIL: policy signaled termination inside the "
+            "armed window -- not a pre-convergence steady state", label);
+        return 1;
+    }
+    return argmin::detail::bench::evaluate_gate(label, hot_steps, min_per_step);
+}
+
+// Construction-window record (informational, never gates).
+template <typename Policy, typename Problem>
+void record_construction(const char* label, Policy policy, const Problem& problem)
+{
+    auto x0 = problem.initial_point();
+    argmin::solver_options opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-12);
+    opts.set_objective_threshold(1e-14);
+    opts.set_step_threshold(1e-14);
+
+    argmin::detail::bench::reset_alloc_count();
+    argmin::detail::bench::arm_alloc_trace();
+    argmin::step_budget_solver solver{policy, problem, x0, opts};
+    solver.step();
+    argmin::detail::bench::disarm_alloc_trace();
+
+    std::printf("  [alloc-gate] %-18s construction+first_step alloc=%zu\n",
+                label, argmin::detail::bench::read_alloc_count());
+}
+
+}
+
+// Steady-state allocation record for Levenberg-Marquardt on the 2D Rosenbrock
+// least-squares fixture and the 12D extended-Rosenbrock least-squares fixture.
+int argmin_alloc_trace_probe()
+{
+    record_construction("lm rosenbrock2", argmin::lm_policy<2>{}, rosenbrock_ls_fixed{});
+
+    int rc = 0;
+    rc |= measure_steady("lm rosenbrock2", argmin::lm_policy<2>{},
+        rosenbrock_ls_fixed{}, 2);
+    rc |= measure_steady("lm sd_ls012", argmin::lm_policy<argmin::sd_ls012<>::problem_dimension>{},
+        argmin::sd_ls012<>{}, 2);
+    return rc;
 }
 #endif
 
