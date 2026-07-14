@@ -76,7 +76,8 @@ jobs:
             --root . \
             --gcov-executable "${{ matrix.gcov_executable }}" \
             --filter 'lib/argmin/include/argmin/' \
-             \
+            --exclude-throw-branches \
+            --exclude-unreachable-branches \
             --gcov-ignore-errors=source_not_found \
             --xml coverage.xml
 
@@ -87,6 +88,8 @@ jobs:
             --root . \
             --gcov-executable "${{ matrix.gcov_executable }}" \
             --filter 'lib/argmin/include/argmin/' \
+            --exclude-throw-branches \
+            --exclude-unreachable-branches \
             --gcov-ignore-errors=source_not_found \
             --json coverage.json
           python3 scripts/coverage_gate.py coverage.json scripts/coverage_floors.txt

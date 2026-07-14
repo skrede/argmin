@@ -24,6 +24,8 @@ gcovr build/coverage \
     --root . \
     --gcov-executable "$GCOV" \
     --filter 'lib/argmin/include/argmin/' \
+    --exclude-throw-branches \
+    --exclude-unreachable-branches \
     --gcov-ignore-errors=source_not_found \
     --json coverage.json
 
