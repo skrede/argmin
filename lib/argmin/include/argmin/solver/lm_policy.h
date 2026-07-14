@@ -72,6 +72,10 @@ struct lm_policy
         double nu{2.0};              // lambda multiplier on rejection
         Eigen::VectorXd r;           // current residuals (m-dimensional, stays dynamic)
         Eigen::MatrixXd J;           // current Jacobian (m x n, stays dynamic for concept compat)
+        // Per-step work buffers, sized once in init and reused so a warm
+        // steady-state step performs no heap allocation.
+        Eigen::VectorXd r_trial;     // trial-point residuals (m-dimensional)
+        Eigen::VectorXd Jh;          // J * h product for the gain ratio (m-dimensional)
         double initial_objective{};  // for divergence detection
         std::uint32_t iteration{0};
         int num_residuals{};
@@ -101,6 +105,8 @@ struct lm_policy
         // Evaluate initial residuals and Jacobian
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, n);
+        s.r_trial.resize(s.num_residuals);
+        s.Jh.resize(s.num_residuals);
         s.problem->residuals(x0, s.r);
         if constexpr(requires(const Problem& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
                          p.jacobian(xx, JJ);
@@ -162,8 +168,9 @@ struct lm_policy
         // Trial point
         Eigen::Vector<double, N> x_trial = (s.x + h).eval();
 
-        // Evaluate trial residuals
-        Eigen::VectorXd r_trial(s.num_residuals); // residual dimension, stays dynamic
+        // Evaluate trial residuals into the state-resident buffer
+        // (residual dimension, stays dynamic; storage reused per step).
+        Eigen::VectorXd& r_trial = s.r_trial;
         s.problem->residuals(x_trial, r_trial);
         double f_trial = 0.5 * r_trial.squaredNorm();
 
@@ -173,7 +180,10 @@ struct lm_policy
         // predicted reduction signals a degenerate or garbage solve rather than
         // a real model decrease -- in that case the trial must NOT be accepted.
         double actual = s.objective_value - f_trial;
-        double predicted = -(h.dot(g) + 0.5 * (s.J * h).squaredNorm());
+        // J * h lands in the state-resident buffer instead of a per-step
+        // product temporary; same kernel, reused storage.
+        s.Jh.noalias() = s.J * h;
+        double predicted = -(h.dot(g) + 0.5 * s.Jh.squaredNorm());
 
         // Guarded gain ratio (detail::gain_ratio): requires a strictly positive
         // predicted reduction and a finite actual reduction before dividing,
