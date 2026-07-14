@@ -204,6 +204,11 @@ struct filter_nw_sqp_policy
     template <typename P = void>
     struct state_type
     {
+        static constexpr int M = [] {
+            if constexpr(has_constraint_count<P>) return constraint_count_v<P>;
+            else return dynamic_dimension;
+        }();
+
         const P* problem{nullptr};
         Eigen::Vector<double, N> x;
         Eigen::Vector<double, N> g;
@@ -252,7 +257,12 @@ struct filter_nw_sqp_policy
         //                 closes the per-step ColPivHouseholderQR allocation
         //                 site that filter_nw_sqp's prior solve_qp free-
         //                 function path carried.
-        detail::active_set_qp_solver<double, N> qp_solver;
+        // Constraint bound M threaded from the problem's compile-time
+        // constraint count so the per-step qp_result multiplier storage
+        // and the working-set rank-scan QR get inline max-bounded storage
+        // (allocation-free steady-state solves). Falls back to the dynamic
+        // sentinel for problems without a static constraint_count.
+        detail::active_set_qp_solver<double, N, M> qp_solver;
         Eigen::MatrixXd AAt_workspace;
         Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;
         Eigen::VectorXd w_workspace;
@@ -345,7 +355,7 @@ struct filter_nw_sqp_policy
         s.hessian = detail::dense_ldl_bfgs<double, N>(s.n);
         // Pre-allocate QP solver workspace: equality + inequality + 2n box bounds.
         const int max_constraints = s.n_eq + s.n_ineq + 2 * s.n;
-        s.qp_solver = detail::active_set_qp_solver<double, N>(s.n, max_constraints);
+        s.qp_solver = decltype(s.qp_solver)(s.n, max_constraints);
         s.sigma = 1.0;
         s.iteration = 0;
 
@@ -449,7 +459,7 @@ struct filter_nw_sqp_policy
         const bool has_bounds = has_finite_box(s.lower, s.upper);
         const qp_options& qp_opts = options.qp;
 
-        detail::qp_result<double, N> qp;
+        typename decltype(s.qp_solver)::result_type qp;
         Eigen::Vector<double, N>& p = s.bufs.p_buf;
         Eigen::VectorXd& lambda_new = s.bufs.lam_buf;
         lambda_new.setZero(m);
@@ -855,7 +865,7 @@ struct filter_nw_sqp_policy
             //
             // Adopted from: argmin/detail/sqp_common.h
             //               soc_seed_projection.
-            detail::qp_result<double, N> qp_soc;
+            typename decltype(s.qp_solver)::result_type qp_soc;
             if(has_bounds)
             {
                 // p_lo_buf / p_hi_buf already hold s.lower - s.x /

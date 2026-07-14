@@ -107,9 +107,9 @@ Scalar update_penalty(Scalar sigma,
 //                 risk of per-constraint smoothing on already-stable
 //                 hs026 / hs039 trajectories. Per-constraint mu_j
 //                 is an empirically-gated future extension.
-template <typename Scalar, int M = argmin::dynamic_dimension>
+template <typename Scalar, int M = argmin::dynamic_dimension, int MaxM = M>
 Scalar calibrate_initial_penalty(Scalar sigma_in,
-                                 const Eigen::Vector<Scalar, M>& lambda_qp,
+                                 const Eigen::Matrix<Scalar, M, 1, 0, MaxM, 1>& lambda_qp,
                                  Scalar safety = Scalar(1.0))
 {
     if(lambda_qp.size() == 0)

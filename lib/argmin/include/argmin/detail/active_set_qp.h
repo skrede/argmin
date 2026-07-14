@@ -35,11 +35,17 @@ namespace argmin::detail
 
 enum class qp_status { optimal, infeasible, max_iterations, indefinite_hessian };
 
-template <typename Scalar = double, int N = argmin::dynamic_dimension, int M = argmin::dynamic_dimension>
+// MaxM bounds the multiplier storage without fixing its runtime length:
+// box-constrained solves return m_eq + m_ineq + 2n multipliers (bound rows
+// included), so a solver with compile-time constraint bounds sizes lambda
+// at runtime up to MaxM = max_total_constraints with inline storage. The
+// default MaxM = M keeps the plain fixed / dynamic shapes unchanged.
+template <typename Scalar = double, int N = argmin::dynamic_dimension,
+          int M = argmin::dynamic_dimension, int MaxM = M>
 struct qp_result
 {
     Eigen::Vector<Scalar, N> x;
-    Eigen::Vector<Scalar, M> lambda;
+    Eigen::Matrix<Scalar, M, 1, 0, MaxM, 1> lambda;
     qp_status status{qp_status::optimal};
     int iterations{0};
 
@@ -412,18 +418,36 @@ void initial_working_set(
 //   N — problem dimension (compile-time or dynamic_dimension)
 //   M — constraint count excluding box bounds (compile-time or dynamic_dimension)
 //
-// When both N and M are compile-time, max_total_constraints = M + 2*N
-// (M constraints + N lower + N upper bounds) and all workspace uses
-// stack-allocated max-bounded Eigen types.
+// When both N and M are compile-time, the result multipliers (result_type,
+// bounded by max_total_constraints = M + 2*N) and the rank-scan QR get
+// inline max-bounded storage, so a warm steady-state solve performs no
+// heap allocation. The arithmetic workspace stays heap-backed Dynamic on
+// purpose: max-bounded compute types change Eigen's kernel selection and
+// are not bit-identical to the dynamic kernels (see max_total_constraints).
 //
 // Reference: N&W Algorithm 16.1, pp. 460-463 (active-set method for convex QP)
 //            N&W Section 16.2, eq. 16.16-16.19 (null-space method)
 template <typename Scalar = double, int N = argmin::dynamic_dimension, int M = argmin::dynamic_dimension>
 class active_set_qp_solver
 {
+    // Compile-time bound on the total constraint count (M general
+    // constraints + N lower + N upper box rows). Used ONLY for the result
+    // multiplier storage (result_type below), never for the compute
+    // workspace: giving the workspace matrices compile-time max dimensions
+    // changes Eigen's kernel selection (the product and traversal choices
+    // key on MaxRows/MaxCols), which was measured to drift the solve
+    // trajectory bits on mid-size problems. The result multipliers see only
+    // copies and order-independent max reductions, so bounding them cannot
+    // perturb the solve. Bounds past Eigen's stack-allocation limit keep
+    // the heap-backed dynamic result storage.
+    static constexpr bool bounds_fit_inline =
+        M != argmin::dynamic_dimension && N != argmin::dynamic_dimension
+        && static_cast<long long>(M + 2 * N)
+                   * static_cast<long long>(sizeof(Scalar))
+               <= EIGEN_STACK_ALLOCATION_LIMIT;
+
     static constexpr int max_total_constraints =
-        (M == argmin::dynamic_dimension || N == argmin::dynamic_dimension)
-            ? Eigen::Dynamic : M + 2 * N;
+        bounds_fit_inline ? M + 2 * N : Eigen::Dynamic;
 
     // Max-bounded matrix type: rows up to MaxR, cols up to MaxC.
     template <int Rows, int Cols, int MaxR, int MaxC>
@@ -433,11 +457,17 @@ class active_set_qp_solver
     template <int Size, int MaxN>
     using bounded_vector = Eigen::Matrix<Scalar, Size, 1, 0, MaxN, 1>;
 
-    // Constraint-row matrix: Dynamic rows up to max_total_constraints, N cols.
-    using constraint_matrix = bounded_matrix<Eigen::Dynamic, N, max_total_constraints, N>;
+    // Constraint-axis workspace types deliberately keep Dynamic max
+    // dimensions even when M is compile-time (see max_total_constraints):
+    // these matrices feed real arithmetic, and Eigen's kernel selection on
+    // max-bounded types is not bit-identical to the dynamic kernels. Their
+    // storage is pre-allocated once at construction, so the dynamic shape
+    // costs no steady-state allocation.
+    // Constraint-row matrix: Dynamic rows, N cols.
+    using constraint_matrix = bounded_matrix<Eigen::Dynamic, N, Eigen::Dynamic, N>;
 
-    // Constraint-length vector: Dynamic size up to max_total_constraints.
-    using constraint_vector = bounded_vector<Eigen::Dynamic, max_total_constraints>;
+    // Constraint-length vector: Dynamic size.
+    using constraint_vector = bounded_vector<Eigen::Dynamic, Eigen::Dynamic>;
 
     // N-dimension square matrix (max-bounded).
     using n_square_matrix = bounded_matrix<Eigen::Dynamic, Eigen::Dynamic, N, N>;
@@ -446,11 +476,19 @@ class active_set_qp_solver
     using n_vector = bounded_vector<Eigen::Dynamic, N>;
 
     // QR input for A_W^T: always N rows, variable cols. Fixed-row when N is compile-time.
-    using qr_matrix = bounded_matrix<N, Eigen::Dynamic, N, max_total_constraints>;
+    using qr_matrix = bounded_matrix<N, Eigen::Dynamic, N, Eigen::Dynamic>;
 
     // QR input for multiplier solves: variable rows (up to N), variable cols.
     // Must be dynamic-row because (A_W * Y)^T has rank rows where rank <= N.
-    using qr_lambda_matrix = bounded_matrix<Eigen::Dynamic, Eigen::Dynamic, N, max_total_constraints>;
+    using qr_lambda_matrix = bounded_matrix<Eigen::Dynamic, Eigen::Dynamic, N, Eigen::Dynamic>;
+
+    // Rank-scan QR input: the working-set admission scan factorizes only
+    // the fixed n x n padded block iws_pad_, so this type carries the N
+    // max bound on both axes. With N compile-time the decomposition's
+    // internal temporaries live in inline storage (no per-scan heap
+    // allocation). The only consumed output is the integer rank(), so the
+    // max bound cannot perturb the solve trajectory.
+    using iws_qr_matrix = bounded_matrix<Eigen::Dynamic, N, N, N>;
 
     // Q matrix: N x N (max-bounded).
     using q_matrix = bounded_matrix<Eigen::Dynamic, Eigen::Dynamic, N, N>;
@@ -460,6 +498,14 @@ class active_set_qp_solver
     static constexpr uint16_t refactorization_interval{20};
 
 public:
+    // Result type matching this solver's compile-time bounds. The lambda
+    // member stays runtime-sized (box-constrained solves return
+    // m_eq + m_ineq + 2n multipliers, others m_eq + m_ineq) but is
+    // max-bounded by max_total_constraints, so when the bounds are
+    // compile-time a per-call result local costs no heap allocation.
+    using result_type =
+        qp_result<Scalar, N, argmin::dynamic_dimension, max_total_constraints>;
+
     explicit active_set_qp_solver(int n, int max_constraints)
         : n_(n)
         , max_m_(max_constraints)
@@ -520,7 +566,7 @@ public:
     //
     // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
     template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
-    qp_result<Scalar, N, M> solve(
+    result_type solve(
         const Eigen::Matrix<Scalar, N, N>& G,
         const Eigen::Vector<Scalar, N>& d,
         const Eigen::Matrix<Scalar, Meq, N>& A_eq,
@@ -535,7 +581,7 @@ public:
         const int m_ineq = static_cast<int>(A_ineq.rows());
         assemble_constraints(m_eq, m_ineq, A_eq, b_eq, A_ineq, b_ineq);
         run_active_set(n, m_eq, m_ineq, G, d, x0, opts);
-        qp_result<Scalar, N, M> res;
+        result_type res;
         write_result(res, n, m_eq + m_ineq);
         return res;
     }
@@ -553,7 +599,7 @@ public:
         const Eigen::Vector<Scalar, Mineq>& b_ineq,
         const Eigen::Vector<Scalar, N>& x0,
         const argmin::qp_options& opts,
-        qp_result<Scalar, N, M>& out)
+        result_type& out)
     {
         const int n = static_cast<int>(G.rows());
         const int m_eq = static_cast<int>(A_eq.rows());
@@ -569,7 +615,7 @@ public:
     //
     // Reference: N&W Section 16.1, Algorithm 16.1, pp. 460-463.
     template <int Meq = argmin::dynamic_dimension, int Mineq = argmin::dynamic_dimension>
-    qp_result<Scalar, N, M> solve(
+    result_type solve(
         const Eigen::Matrix<Scalar, N, N>& G,
         const Eigen::Vector<Scalar, N>& d,
         const Eigen::Matrix<Scalar, Meq, N>& A_eq,
@@ -585,7 +631,7 @@ public:
         const int m_eq = static_cast<int>(A_eq.rows());
         const int m_aug = assemble_box(n, A_eq, b_eq, A_ineq, b_ineq, lower, upper);
         run_active_set(n, m_eq, m_aug, G, d, x0, opts);
-        qp_result<Scalar, N, M> res;
+        result_type res;
         write_result(res, n, m_eq + m_aug);
         return res;
     }
@@ -603,7 +649,7 @@ public:
         const Eigen::Vector<Scalar, N>& upper,
         const Eigen::Vector<Scalar, N>& x0,
         const argmin::qp_options& opts,
-        qp_result<Scalar, N, M>& out)
+        result_type& out)
     {
         const int n = static_cast<int>(G.rows());
         const int m_eq = static_cast<int>(A_eq.rows());
@@ -675,7 +721,7 @@ private:
     // Copy the last active-set result into a qp_result. out.x / out.lambda are
     // resized to (n) / (m_total); when the caller reuses the same result the
     // assignment reuses storage (allocation-free steady state).
-    void write_result(qp_result<Scalar, N, M>& out, int n, int m_total) const
+    void write_result(result_type& out, int n, int m_total) const
     {
         out.x = x_.head(n);
         out.lambda = lambda_full_.head(m_total);
@@ -1083,7 +1129,7 @@ private:
     // per-solve initial working set costs no heap allocation.
     std::vector<int> iws_candidates_;
     constraint_matrix iws_trial_;
-    Eigen::ColPivHouseholderQR<constraint_matrix> iws_qr_;
+    Eigen::ColPivHouseholderQR<iws_qr_matrix> iws_qr_;
     constraint_vector lambda_full_;
 
     constraint_matrix A_aug_;

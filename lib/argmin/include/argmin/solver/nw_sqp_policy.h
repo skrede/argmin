@@ -227,7 +227,12 @@ struct nw_sqp_policy
         double sigma{1.0};
         // Canonical BFGS operator. References: Shanno 1978 (N&W eq. 6.20); N&W Section 7.2 (L-BFGS); Kraft 1988 DFVLR-FB 88-28 Section 2.2.3.
         detail::dense_ldl_bfgs<double, N> hessian;
-        detail::active_set_qp_solver<double, N> qp_solver;
+        // Constraint bound M threaded from the problem's compile-time
+        // constraint count so the per-step qp_result multiplier storage
+        // and the working-set rank-scan QR get inline max-bounded storage
+        // (allocation-free steady-state solves). Falls back to the dynamic
+        // sentinel for problems without a static constraint_count.
+        detail::active_set_qp_solver<double, N, M> qp_solver;
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
@@ -310,7 +315,7 @@ struct nw_sqp_policy
         s.hessian = detail::dense_ldl_bfgs<double, N>(n);
         // Pre-allocate QP solver workspace: equality + inequality + 2n box bounds
         int max_constraints = s.n_eq + s.n_ineq + 2 * n;
-        s.qp_solver = detail::active_set_qp_solver<double, N>(n, max_constraints);
+        s.qp_solver = decltype(s.qp_solver)(n, max_constraints);
         s.sigma = 1.0;
         s.iteration = 0;
 
@@ -395,7 +400,7 @@ struct nw_sqp_policy
         // re-fire on each retry (max-monotone and therefore idempotent
         // but wasteful and obscures intent). detail::update_penalty
         // below is similarly monotone-up.
-        detail::qp_result<double, N> qp;
+        typename decltype(s.qp_solver)::result_type qp;
         Eigen::Vector<double, N>& p = s.bufs.p_buf;
         Eigen::VectorXd& lambda_new = s.bufs.lam_buf;
         lambda_new.setZero(m);
@@ -788,7 +793,7 @@ struct nw_sqp_policy
             //
             // Adopted from: argmin/detail/sqp_common.h
             //               soc_seed_projection.
-            detail::qp_result<double, N> qp_soc;
+            typename decltype(s.qp_solver)::result_type qp_soc;
             if(has_finite_bounds)
             {
                 // p_lo_buf / p_hi_buf already populated from the main QP
