@@ -16,13 +16,13 @@
 # solver / detail minimum; branch coverage is the ratchet target.
 
 global_line          = 91.0
-global_branch        = 47.0
+global_branch        = 48.0
 
 solver_line          = 90.0
-solver_branch        = 49.0
+solver_branch        = 50.0
 
 detail_line          = 90.0
-detail_branch        = 44.0
+detail_branch        = 45.0
 
 derivative_line      = 99.0
 derivative_branch    = 51.0
