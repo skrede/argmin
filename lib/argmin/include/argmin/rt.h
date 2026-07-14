@@ -28,42 +28,12 @@
 namespace argmin
 {
 
-// A representative instantiation pins the concept boundary this umbrella
-// promises: the step-budget driver owns a convergence loop and satisfies the
-// loop-owning nlp_solver refinement, while the passive stepper satisfies only
-// the core steppable single-step surface. If a future edit accidentally gave
-// the stepper a solve()/step_n() loop (or stripped one from the driver), one of
-// these fires at the aggregation site rather than silently downstream.
-namespace detail
-{
-struct rt_probe_policy
-{
-    using scalar_type = double;
-    struct state_type { Eigen::VectorXd x; };
-
-    template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem&, const Eigen::VectorXd& x0,
-                    const solver_options<Convergence>&)
-    {
-        return state_type{.x = x0};
-    }
-
-    step_result<double> step(state_type&) { return {}; }
-    void reset(state_type& s, const Eigen::VectorXd& x0) { s.x = x0; }
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0) { s.x = x0; }
-};
-
-static_assert(steppable<step_budget_solver<rt_probe_policy>>,
-              "step_budget_solver must satisfy steppable");
-static_assert(nlp_solver<step_budget_solver<rt_probe_policy>>,
-              "step_budget_solver owns a convergence loop and must satisfy "
-              "nlp_solver");
-static_assert(steppable<stepper<rt_probe_policy>>,
-              "stepper must satisfy the passive steppable surface");
-static_assert(!nlp_solver<stepper<rt_probe_policy>>,
-              "stepper is a passive step primitive and must NOT satisfy the "
-              "loop-owning nlp_solver refinement");
-}
+// The concept boundary this umbrella promises -- the step-budget driver owns a
+// convergence loop and satisfies the loop-owning nlp_solver refinement, while
+// the passive stepper satisfies only the core steppable single-step surface --
+// is pinned by definition-site static_asserts inside step_budget_solver.h and
+// stepper.h themselves. Those hold for every caller, so this umbrella need only
+// re-export the surface; the guarantee travels with the types, not this header.
 
 }
 

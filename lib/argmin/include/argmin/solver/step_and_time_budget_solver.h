@@ -4,6 +4,7 @@
 #include "argmin/types.h"
 #include "argmin/detail/solve_loop.h"
 #include "argmin/detail/solver_core.h"
+#include "argmin/detail/runner_concept_probe.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
 #include "argmin/result/timed_solve_result.h"
@@ -288,6 +289,13 @@ step_and_time_budget_solver(Policy, const Problem&,
                                    problem_dimension_v<Problem>,
                                    Problem,
                                    Convergence>;
+
+// Definition-site conformance: the combined step-and-time-budgeted driver owns
+// a convergence loop and must satisfy nlp_solver, pinned here against a minimal
+// witness policy rather than at a downstream consumer's first instantiation.
+static_assert(nlp_solver<step_and_time_budget_solver<detail::runner_concept_probe_policy>>,
+              "step_and_time_budget_solver owns a convergence loop and must "
+              "satisfy nlp_solver (which refines steppable)");
 
 }
 

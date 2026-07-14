@@ -3,6 +3,7 @@
 
 #include "argmin/types.h"
 #include "argmin/detail/solver_core.h"
+#include "argmin/detail/runner_concept_probe.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/status.h"
 #include "argmin/solver/convergence.h"
@@ -257,6 +258,15 @@ stepper(Policy, const Problem&,
                problem_dimension_v<Problem>,
                Problem,
                Convergence>;
+
+// Definition-site conformance: the passive step primitive must satisfy the
+// steppable single-step surface but deliberately NOT the loop-owning nlp_solver
+// refinement -- an accidental future solve()/step_n() loop would flip the
+// negative and fail the library's own build here.
+static_assert(steppable<stepper<detail::runner_concept_probe_policy>>
+                  && !nlp_solver<stepper<detail::runner_concept_probe_policy>>,
+              "stepper must satisfy steppable but not the loop-owning nlp_solver "
+              "refinement");
 
 }
 
