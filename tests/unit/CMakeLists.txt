@@ -72,6 +72,7 @@ add_executable(argmin_unit_tests
     isres_best_track_test.cpp
     halton_distinctness_test.cpp
     mma_coefficient_pin_test.cpp
+    solver_bit_identity_pin_test.cpp
     options_test.cpp
     slsqp_line_search_witness_test.cpp
     nw_sqp_soc_witness_test.cpp
