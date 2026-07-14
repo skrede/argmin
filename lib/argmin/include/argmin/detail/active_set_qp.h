@@ -898,7 +898,10 @@ private:
         Q_explicit_.setIdentity(n, n);
         Q_explicit_.applyOnTheLeft(qr_full_.householderQ());
         R_.topLeftCorner(n, m).setZero();
-        auto R_upper = qr_full_.matrixQR();
+        // Reference, not a copy: matrixQR() returns the decomposition's
+        // internal matrix by const reference; a by-value auto here
+        // materialized a full n x n heap copy every refactorization.
+        const auto& R_upper = qr_full_.matrixQR();
         for(int j = 0; j < m; ++j)
             for(int i = 0; i <= j && i < n; ++i)
                 R_(i, j) = R_upper(i, j);
