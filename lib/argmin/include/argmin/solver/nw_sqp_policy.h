@@ -1118,8 +1118,11 @@ struct nw_sqp_policy
             s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
             s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
         }
+        // Static-N instantiation: with N compile-time the stationarity
+        // work vector lives in inline storage (no per-step heap
+        // allocation); the constraint axes stay dynamic.
         double kkt = detail::kkt_residual<double,
-                                          Eigen::Dynamic,
+                                          N,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic>(
             s.g, s.J_eq, s.J_ineq,

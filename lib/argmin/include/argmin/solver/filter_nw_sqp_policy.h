@@ -996,8 +996,9 @@ struct filter_nw_sqp_policy
                                                                       Eigen::Dynamic>(
                         s.g, s.J_eq, s.J_ineq, s.c_ineq, s.bufs.kkt_ws,
                         s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+                    // Static-N instantiation (see the post-step KKT leg).
                     kkt_rest = detail::kkt_residual<double,
-                                                    Eigen::Dynamic,
+                                                    N,
                                                     Eigen::Dynamic,
                                                     Eigen::Dynamic>(
                         s.g, s.J_eq, s.J_ineq,
@@ -1067,8 +1068,9 @@ struct filter_nw_sqp_policy
                                                                   Eigen::Dynamic>(
                     s.g, s.J_eq, s.J_ineq, s.c_ineq, s.bufs.kkt_ws,
                     s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+                // Static-N instantiation (see the post-step KKT leg).
                 kkt_cap = detail::kkt_residual<double,
-                                               Eigen::Dynamic,
+                                               N,
                                                Eigen::Dynamic,
                                                Eigen::Dynamic>(
                     s.g, s.J_eq, s.J_ineq,
@@ -1258,8 +1260,11 @@ struct filter_nw_sqp_policy
             s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
             s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
         }
+        // Static-N instantiation: with N compile-time the stationarity
+        // work vector lives in inline storage (no per-step heap
+        // allocation); the constraint axes stay dynamic.
         double kkt = detail::kkt_residual<double,
-                                          Eigen::Dynamic,
+                                          N,
                                           Eigen::Dynamic,
                                           Eigen::Dynamic>(
             s.g, s.J_eq, s.J_ineq,
