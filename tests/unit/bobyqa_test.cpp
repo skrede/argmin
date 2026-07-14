@@ -596,11 +596,11 @@ TEST_CASE("bobyqa HS001 accuracy vs NLopt baseline", "[bobyqa][benchmark]")
 
 TEST_CASE("bobyqa hs001 eval count regression guard", "[bobyqa]")
 {
-    // HS001: With BMAT/ZMAT factored interpolation system and ALTMOV
-    // geometry improvement, argmin achieves ~540 iterations vs NLopt's 358.
-    // The remaining gap is due to differences in step acceptance logic.
-    // Previous baselines: 3417 (original), 2509 (rho contraction), now ~540
-    // with BMAT/ZMAT + ALTMOV.
+    // HS001: with the BMAT/ZMAT factored interpolation system, ALTMOV geometry
+    // improvement, and the stall fix in step acceptance, argmin now reaches the
+    // optimum in ~163 evaluations vs NLopt's 358 -- comfortably ahead.
+    // Earlier baselines, for context: 3417 (original), 2509 (rho contraction),
+    // 540 (BMAT/ZMAT + ALTMOV), now ~163.
     //
     // Reference: Hock & Schittkowski, Problem 1.
     argmin::hs001<double> hs;
@@ -618,10 +618,11 @@ TEST_CASE("bobyqa hs001 eval count regression guard", "[bobyqa]")
     std::cout << "[HS001 BOBYQA] iterations: " << result.iterations
               << "  f: " << result.objective_value << std::endl;
 
-    // With BMAT/ZMAT and ALTMOV active, eval count is ~540 (within 2x of
-    // NLopt's 358). Guard against regression from both the 540 baseline
-    // and the plan target of 750.
-    CHECK(result.iterations < 750);
+    // Guard against regression from the measured ~163-evaluation baseline. The
+    // headroom absorbs cross-toolchain floating-point-association drift in the
+    // deterministic step-acceptance path without masking a real regression (the
+    // prior 540 baseline would trip this bar).
+    CHECK(result.iterations < 220);
     CHECK(result.objective_value < 0.01);
 }
 

@@ -29,3 +29,19 @@ target_compile_options(argmin_no_exceptions_probe PRIVATE
     -fno-exceptions
     -fno-rtti)
 add_test(NAME argmin_no_exceptions_probe COMMAND argmin_no_exceptions_probe)
+
+# Wall-clock-freedom probe: a TU that includes only the step-budget / stepper
+# surfaces. Building it confirms those headers are self-contained; the scan test
+# then proves no <chrono> reaches their transitive include graph.
+add_executable(runner_chrono_freedom_probe runner_chrono_freedom_test.cpp)
+target_link_libraries(runner_chrono_freedom_probe PRIVATE argmin::argmin)
+target_compile_options(runner_chrono_freedom_probe PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
+add_test(NAME runner_chrono_freedom_compiles COMMAND runner_chrono_freedom_probe)
+
+add_test(NAME runner_chrono_freedom_scan
+    COMMAND ${CMAKE_COMMAND}
+        -DCXX=${CMAKE_CXX_COMPILER}
+        -DSTD=c++20
+        -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/runner_chrono_freedom_test.cpp
+        "-DINCS=$<TARGET_PROPERTY:argmin::argmin,INTERFACE_INCLUDE_DIRECTORIES>;$<TARGET_PROPERTY:Eigen3::Eigen,INTERFACE_INCLUDE_DIRECTORIES>"
+        -P ${CMAKE_SOURCE_DIR}/cmake/chrono_freedom_scan.cmake)

@@ -8,6 +8,9 @@
 
 #include "argmin/formulation/concepts.h"
 #include "argmin/solver/step_budget_solver.h"
+#include "argmin/solver/time_budget_solver.h"
+#include "argmin/solver/step_and_time_budget_solver.h"
+#include "argmin/solver/stepper.h"
 #include "argmin/solver/options.h"
 #include "argmin/schedule/round_robin_schedule.h"
 #include "argmin/schedule/fallback_schedule.h"
@@ -412,6 +415,42 @@ static_assert(argmin::steppable<argmin::step_budget_solver<argmin::cmaes_policy<
 // the core stepping surface holds too.
 static_assert(argmin::steppable<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>
               && argmin::nlp_solver<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>);
+
+// ---------------------------------------------------------------------------
+// Runner conformance across the whole budget-driver split.
+//
+// Each runner's concept membership is pinned here at the library's own build,
+// not deferred to a downstream consumer's first instantiation. The three
+// budget-owning drivers (step / time / step-and-time) each refine steppable to
+// nlp_solver; stepper is the passive single-step surface that satisfies
+// steppable but deliberately NOT nlp_solver -- it exposes no drive-to-convergence
+// or bounded-run loop, so an accidental future addition of one would flip the
+// negative assert and fail the build. The witnesses span the policy archetypes:
+// a gradient-based SQP, a derivative-free method, and a stochastic method,
+// exercising the structurally distinct composition paths through the runner.
+// The runner headers are policy-generic by design, so a concrete witness lives
+// here rather than forcing a policy dependency into each header.
+// ---------------------------------------------------------------------------
+
+// time_budget_solver owns a wall-clock-budgeted loop: nlp_solver.
+static_assert(argmin::nlp_solver<argmin::time_budget_solver<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::time_budget_solver<argmin::bobyqa_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::time_budget_solver<argmin::cmaes_policy<>>>);
+static_assert(argmin::steppable<argmin::time_budget_solver<argmin::nw_sqp_policy<>>>);
+
+// step_and_time_budget_solver owns a combined step+time-budgeted loop: nlp_solver.
+static_assert(argmin::nlp_solver<argmin::step_and_time_budget_solver<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_and_time_budget_solver<argmin::bobyqa_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_and_time_budget_solver<argmin::cmaes_policy<>>>);
+static_assert(argmin::steppable<argmin::step_and_time_budget_solver<argmin::nw_sqp_policy<>>>);
+
+// stepper is the passive step primitive: steppable but NOT nlp_solver.
+static_assert(argmin::steppable<argmin::stepper<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::steppable<argmin::stepper<argmin::bobyqa_policy<>>>);
+static_assert(argmin::steppable<argmin::stepper<argmin::cmaes_policy<>>>);
+static_assert(!argmin::nlp_solver<argmin::stepper<argmin::nw_sqp_policy<>>>);
+static_assert(!argmin::nlp_solver<argmin::stepper<argmin::bobyqa_policy<>>>);
+static_assert(!argmin::nlp_solver<argmin::stepper<argmin::cmaes_policy<>>>);
 
 // problem_dimension concept verification
 static_assert(argmin::has_problem_dimension<argmin::himmelblau<>>);
