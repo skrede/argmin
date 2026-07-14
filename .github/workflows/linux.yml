@@ -26,6 +26,7 @@ jobs:
             cxx: g++-14
             coverage: true
             gcov_executable: gcov-14
+            coverage_gate: true
           - compiler: clang-18
             cc: clang-18
             cxx: clang++-18
@@ -40,7 +41,7 @@ jobs:
 
       - name: Install gcovr
         if: matrix.coverage
-        run: pip install gcovr
+        run: pip install gcovr==8.6
 
       - name: Configure
         env:
@@ -78,6 +79,17 @@ jobs:
              \
             --gcov-ignore-errors=source_not_found \
             --xml coverage.xml
+
+      - name: Coverage gate
+        if: matrix.coverage_gate
+        run: |
+          gcovr build \
+            --root . \
+            --gcov-executable "${{ matrix.gcov_executable }}" \
+            --filter 'lib/argmin/include/argmin/' \
+            --gcov-ignore-errors=source_not_found \
+            --json coverage.json
+          python3 scripts/coverage_gate.py coverage.json scripts/coverage_floors.txt
 
       - name: Upload to Codecov
         if: matrix.coverage

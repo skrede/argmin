@@ -1,0 +1,37 @@
+# Coverage floors for the argmin header tree, enforced by scripts/coverage_gate.py.
+#
+# Each floor is the minimum acceptable coverage percentage. The gate fails the
+# build if a measured value drops below its floor. Floors are seeded just below
+# the measured baseline and only ever ratchet UP: raise a floor when coverage
+# improves, never lower it. This makes any regression fail loudly while letting
+# genuine improvement stick.
+#
+# line% is per-source-line (a line covered if hit in any instantiation);
+# branch% is per-source-branch. The custom gate merges template instantiations
+# so the percentage reflects source coverage, not instantiation count.
+#
+# The authoritative measurement is the gcc-14 / gcov-14 leg pinned in CI
+# (gcovr==8.6); these seeds were taken with a local gcov and are re-confirmed
+# and ratcheted on that leg. Line floors already clear the 90 / 88 / 88 global /
+# solver / detail minimum; branch coverage is the ratchet target.
+
+global_line          = 91.0
+global_branch        = 47.0
+
+solver_line          = 90.0
+solver_branch        = 49.0
+
+detail_line          = 90.0
+detail_branch        = 44.0
+
+derivative_line      = 99.0
+derivative_branch    = 51.0
+
+line_search_line     = 94.0
+line_search_branch   = 77.0
+
+schedule_line        = 97.0
+schedule_branch      = 67.0
+
+test_functions_line  = 99.0
+test_functions_branch = 55.0
