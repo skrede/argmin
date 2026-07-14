@@ -537,10 +537,12 @@ void record_construction(const char* label, Policy policy, const Problem& proble
 
 }
 
-// Steady-state allocation record for nw_sqp across the fixed-N fixture family,
+// Steady-state allocation gate for nw_sqp across the fixed-N fixture family,
 // spanning unconstrained (sd006) through mixed-constrained near-ceiling
 // (sd024). Each window measures the real per-step number with reset() kept
-// outside the armed region; the committed floor is the measured witness.
+// outside the armed region; every window is held to zero allocations per
+// steady-state step (zero mode in the gate build, min_per_step 0 in a plain
+// build).
 int argmin_alloc_trace_probe()
 {
     record_construction("nw_sqp hs071",
@@ -549,16 +551,16 @@ int argmin_alloc_trace_probe()
     int rc = 0;
     rc |= measure_steady("nw_sqp hs071",
         argmin::nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{}, 4);
+        argmin::hs071<>{}, 0);
     rc |= measure_steady("nw_sqp sd006",
         argmin::nw_sqp_policy<argmin::sd006<>::problem_dimension>{},
-        argmin::sd006<>{}, 1);
+        argmin::sd006<>{}, 0);
     rc |= measure_steady("nw_sqp sd012",
         argmin::nw_sqp_policy<argmin::sd012<>::problem_dimension>{},
-        argmin::sd012<>{}, 3);
+        argmin::sd012<>{}, 0);
     rc |= measure_steady("nw_sqp sd024",
         argmin::nw_sqp_policy<argmin::sd024<>::problem_dimension>{},
-        argmin::sd024<>{}, 3);
+        argmin::sd024<>{}, 0);
     return rc;
 }
 #endif

@@ -491,20 +491,22 @@ if(NLopt_FOUND)
     # Allocation-gate targets for every real-time-claimed policy plus their
     # reset() paths. Each pairs a micro_* driver's argmin_alloc_trace_probe()
     # with the shared alloc_trace_main.cpp (see argmin_add_alloc_gate above).
-    # The known-allocating constrained solvers run as pre-fix witnesses: the
-    # gate must observe the reviewer-measured per-step allocation traffic,
-    # proving it is no longer blind. The already-clean L-BFGS-B family runs as
-    # a zero-allocation gate. tr_sqp reuses the filter_trsqp driver with a
-    # policy-select define so both trust-region policies are covered.
+    # Every real-time-path gate runs in zero-allocation mode
+    # (ARGMIN_ALLOC_GATE_EXPECT_ZERO): a single armed steady-state heap
+    # allocation is red. The shared alloc_trace_main canary keeps the gate
+    # provably non-blind (an armed Eigen allocation must be observed).
+    # tr_sqp reuses the filter_trsqp driver with a policy-select define so
+    # both trust-region policies are covered.
     argmin_add_alloc_gate(micro_kraft_slsqp_alloc_trace
         micro_kraft_slsqp.cpp sqp_alloc_gate_kraft ARGMIN_ALLOC_GATE_EXPECT_ZERO)
     argmin_add_alloc_gate(micro_nw_sqp_alloc_trace
-        micro_nw_sqp.cpp sqp_alloc_gate_nw)
+        micro_nw_sqp.cpp sqp_alloc_gate_nw ARGMIN_ALLOC_GATE_EXPECT_ZERO)
     argmin_add_alloc_gate(micro_filter_slsqp_alloc_trace
         micro_filter_slsqp.cpp sqp_alloc_gate_filter_slsqp
         ARGMIN_ALLOC_GATE_EXPECT_ZERO)
     argmin_add_alloc_gate(micro_filter_nw_sqp_alloc_trace
-        micro_filter_nw_sqp.cpp sqp_alloc_gate_filter_nw)
+        micro_filter_nw_sqp.cpp sqp_alloc_gate_filter_nw
+        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
     argmin_add_alloc_gate(micro_filter_trsqp_alloc_trace
         micro_filter_trsqp.cpp sqp_alloc_gate_filter_trsqp
         ARGMIN_ALLOC_GATE_EXPECT_ZERO)
@@ -618,7 +620,8 @@ endif()
 
 # Levenberg-Marquardt allocation gate. Independent of NLopt, so it lives
 # outside the NLopt_FOUND block. Registered under the alloc-gate label.
-argmin_add_alloc_gate(micro_lm_alloc_trace micro_lm.cpp alloc_gate_lm)
+argmin_add_alloc_gate(micro_lm_alloc_trace micro_lm.cpp alloc_gate_lm
+    ARGMIN_ALLOC_GATE_EXPECT_ZERO)
 
 # NW-SQP step-budget versus time-budget profiling harness. This target emits
 # raw CSV rows with revision and harness provenance fields; it is intentionally

@@ -275,9 +275,9 @@ int argmin_alloc_trace_probe()
 
     int rc = 0;
     rc |= measure_steady("lm rosenbrock2", argmin::lm_policy<2>{},
-        rosenbrock_ls_fixed{}, 2);
+        rosenbrock_ls_fixed{}, 0);
     rc |= measure_steady("lm sd_ls012", argmin::lm_policy<argmin::sd_ls012<>::problem_dimension>{},
-        argmin::sd_ls012<>{}, 2);
+        argmin::sd_ls012<>{}, 0);
     return rc;
 }
 #endif

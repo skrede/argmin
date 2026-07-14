@@ -833,13 +833,13 @@ int argmin_alloc_trace_probe()
     int rc = 0;
     rc |= measure_steady("filter_nw hs071",
         argmin::filter_nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{}, 4);
+        argmin::hs071<>{}, 0);
     rc |= measure_steady("filter_nw sd012",
         argmin::filter_nw_sqp_policy<argmin::sd012<>::problem_dimension>{},
-        argmin::sd012<>{}, 3);
+        argmin::sd012<>{}, 0);
     rc |= measure_steady("filter_nw sd024",
         argmin::filter_nw_sqp_policy<argmin::sd024<>::problem_dimension>{},
-        argmin::sd024<>{}, 3);
+        argmin::sd024<>{}, 0);
 
     record_idle("filter_nw idle",
         argmin::filter_nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
