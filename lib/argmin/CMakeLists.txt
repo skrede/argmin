@@ -13,6 +13,8 @@ if(ARGMIN_CMAKE_FETCH_DEPS)
     target_include_directories(eigen_headers SYSTEM INTERFACE
         "${eigen3_SOURCE_DIR}"
     )
+    set(ARGMIN_EIGEN_INCLUDE_DIRS "${eigen3_SOURCE_DIR}" CACHE INTERNAL
+        "Eigen include dirs, for tooling that needs them outside a target link")
 else()
     find_package(Eigen3 CONFIG REQUIRED)
     if(Eigen3_VERSION VERSION_LESS "3.4")
@@ -29,6 +31,8 @@ else()
     set_target_properties(${_eigen_target} PROPERTIES
         INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_eigen_inc}"
     )
+    set(ARGMIN_EIGEN_INCLUDE_DIRS "${_eigen_inc}" CACHE INTERNAL
+        "Eigen include dirs, for tooling that needs them outside a target link")
 endif()
 
 set(INCLUDE_DIRECTORY include)
