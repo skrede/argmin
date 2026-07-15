@@ -14,6 +14,7 @@ add_executable(argmin_unit_tests
     gcmma_raa_augmented_test.cpp
     isres_test.cpp
     isres_alternatives_test.cpp
+    isres_determinism_test.cpp
     cobyla_test.cpp
     bobyqa_test.cpp
     bobyqa_bounds_test.cpp

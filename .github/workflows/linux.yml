@@ -268,10 +268,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Every allocation gate except the Levenberg-Marquardt one is registered
+      # alongside the cross-solver comparison benchmarks, and its driver
+      # includes the comparison library's C++ header unconditionally. Without
+      # the library present the whole group silently disappears from the
+      # configure and only one gate registers, which strips the allocation-free
+      # evidence down to a twelfth of what it claims to cover while leaving the
+      # job green. Install it so the gate set is complete.
+      - name: Install the cross-solver comparison library
+        run: sudo apt-get update && sudo apt-get install -y libnlopt-cxx-dev
+
       - name: Configure
         env:
           CC: clang-18
           CXX: clang++-18
+          # The C++ development package depends on the C one, so two CMake
+          # package configs land, both named NLoptConfig.cmake: one under
+          # cmake/nlopt exporting NLopt::nlopt, one under cmake/nlopt_cxx
+          # exporting NLopt::nlopt_cxx. A bare config search matches the glob
+          # for both and settles on the C++ one, whose target name is not the
+          # one the benchmark targets link. Point the search at the C config
+          # explicitly. Only C-implemented algorithms are used here, so the C
+          # library is the correct link target and the C++ header that sits
+          # beside it is a header-only wrapper over that same API.
+          NLopt_DIR: /usr/lib/x86_64-linux-gnu/cmake/nlopt
         # The libcmaes comparator runs its own find_package(Eigen3), which
         # fails under FetchContent'd Eigen (no Eigen3Config.cmake is
         # exported). It is an optional external CMA-ES baseline, not part of
@@ -284,11 +304,26 @@ jobs:
             -DARGMIN_BENCH_LIBCMAES=OFF \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
+      # A missing comparison library degrades the configure silently: the gates
+      # simply do not register and the ctest step below still passes on the
+      # ones that remain. Assert the count so that degradation fails here
+      # instead of being reported as a green allocation-free claim. The literal
+      # is deliberate -- adding or removing a gate should force a visible edit.
+      - name: Verify the full allocation-gate set registered
+        run: |
+          cd build
+          count=$(ctest -N -L alloc-gate | grep -c 'Test #')
+          echo "allocation gates registered: $count"
+          test "$count" -eq 12 || { echo "expected 12 allocation gates, found $count"; exit 1; }
+
       - name: Build
         run: cmake --build build
 
+      # ctest treats a label selection that matches nothing as success, so
+      # without --no-tests=error this step would pass if the labels it names
+      # were renamed or deleted -- the job would go green having run nothing.
       - name: Run alloc-gate, oracle-pin, and fast regression instruments
-        run: cd build && ctest --output-on-failure -L "alloc-gate|oracle-pin|regression-fast"
+        run: cd build && ctest --output-on-failure --no-tests=error -L "alloc-gate|oracle-pin|regression-fast"
 
   install-test:
     runs-on: ubuntu-24.04

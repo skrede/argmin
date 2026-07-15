@@ -383,20 +383,6 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
-    add_executable(micro_cmaes micro_cmaes.cpp)
-    target_link_libraries(micro_cmaes PRIVATE argmin::argmin)
-    target_compile_options(micro_cmaes PRIVATE
-        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-            -march=native
-            -fno-math-errno
-            -fno-trapping-math
-        >
-    )
-    if(ARGMIN_LTO_SUPPORTED)
-        set_target_properties(micro_cmaes PROPERTIES
-            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-    endif()
-
     add_executable(micro_kraft_slsqp micro_kraft_slsqp.cpp)
     target_link_libraries(micro_kraft_slsqp PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_kraft_slsqp PRIVATE
@@ -866,10 +852,25 @@ file(WRITE "${TARGET}" "${_content}")
 
         # micro_cmaes uses libcmaes CMAES_DEFAULT as its same-class
         # comparator; keep ABI alignment via the same -march=native
-        # already wired on cmaes above.
-        if(TARGET micro_cmaes)
-            target_link_libraries(micro_cmaes PRIVATE libcmaes::cmaes)
-            target_compile_definitions(micro_cmaes PRIVATE ARGMIN_HAS_LIBCMAES)
+        # already wired on cmaes above. Its source includes the libcmaes
+        # headers unconditionally, so the target is defined here, where that
+        # dependency is known to be satisfied, rather than beside the
+        # NLopt-based comparison benchmarks -- it uses no NLopt, and being
+        # grouped with them meant it was built whenever NLopt happened to be
+        # present, including in configurations that had libcmaes switched off.
+        add_executable(micro_cmaes micro_cmaes.cpp)
+        target_link_libraries(micro_cmaes PRIVATE argmin::argmin libcmaes::cmaes)
+        target_compile_definitions(micro_cmaes PRIVATE ARGMIN_HAS_LIBCMAES)
+        target_compile_options(micro_cmaes PRIVATE
+            $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+                -march=native
+                -fno-math-errno
+                -fno-trapping-math
+            >
+        )
+        if(ARGMIN_LTO_SUPPORTED)
+            set_target_properties(micro_cmaes PROPERTIES
+                INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
         endif()
     else()
         message(STATUS "libcmaes requires ARGMIN_CMAKE_FETCH_DEPS=ON; skipping libcmaes benchmarks")
