@@ -190,6 +190,15 @@ inline std::size_t read_eigen_malloc_count() noexcept { return 0; }
 inline std::size_t read_c_alloc_count() noexcept { return 0; }
 inline std::size_t read_alloc_count() noexcept { return 0; }
 
+// No-op twin of the traced evaluate_gate, so measurement code (the on-device
+// probe workload, the host micro drivers) compiles unchanged when built
+// without ARGMIN_BENCH_TRACE_ALLOC. With no sensor there is nothing to
+// evaluate, so the gate trivially passes.
+inline int evaluate_gate(const char*, std::size_t, std::size_t) noexcept
+{
+    return 0;
+}
+
 }
 
 #endif

@@ -405,6 +405,52 @@ jobs:
       - name: Run instantiation probe
         run: ./build/tests/compile/argmin_no_exceptions_probe
 
+  arm-no-exceptions-link:
+    runs-on: ubuntu-24.04
+    name: arm cross-compile-link (newlib-nano, -fno-exceptions)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Bare-metal Cortex-M7 cross toolchain + newlib(-nano). The Ubuntu
+      # gcc-arm-none-eabi package bundles the nano.specs/nosys.specs multilibs
+      # the link gate needs. CI pins this package's GCC (14.x on 24.04); the
+      # flag set is version-stable against the authoring host's 16.1.0.
+      - name: Install arm-none-eabi toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+
+      # The standalone firmware/ project, link-gate-only: no linker script,
+      # no startup, no CMSIS -- just cross-compile-and-link the four
+      # RT-claimed solver policies under -fno-exceptions -fno-rtti with
+      # --specs=nano.specs --specs=nosys.specs for Cortex-M7 hard-float. This
+      # isolates the newlib-nano -fno-exceptions link behavior (missing
+      # __cxa_* / _Unwind_* symbols under a reduced multilib) from every
+      # firmware-image concern. Build-only, no hardware.
+      - name: Configure firmware link gate
+        run: |
+          cmake -S firmware -B build-arm-gate \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/firmware/cmake/toolchain-arm-none-eabi.cmake" \
+            -DFIRMWARE_LINK_GATE_ONLY=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build link gate
+        run: cmake --build build-arm-gate --target argmin_arm_link_gate
+
+      # A clean newlib-nano -fno-exceptions link resolves every C++ runtime
+      # symbol: the final ELF must have zero undefined symbols. Any undefined
+      # __cxa_*/_Unwind_* here is the exact multilib gap this gate exists to
+      # catch on every commit.
+      - name: Assert zero undefined symbols
+        run: |
+          elf=build-arm-gate/argmin_arm_link_gate.elf
+          test -f "$elf" || { echo "link gate ELF not produced"; exit 1; }
+          undef=$(arm-none-eabi-nm --undefined-only "$elf")
+          if [ -n "$undef" ]; then
+            echo "FAIL: link gate has undefined symbols:"; echo "$undef"; exit 1
+          fi
+          echo "PASS: newlib-nano -fno-exceptions link resolved every symbol"
+          arm-none-eabi-size "$elf"
+
   examples:
     runs-on: ubuntu-24.04
     name: examples (build + run)
