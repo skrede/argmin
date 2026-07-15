@@ -50,10 +50,11 @@ Verified at build time (no hardware): valid ELF, **zero undefined symbols**,
 exactly one `_sbrk` (our strong override, not the nosys stub), fits 2 MB flash
 (≈ 375 KB text+rodata) and 128 KB DTCM: `.data`+`.bss` = 832 B plus the
 `._user_heap_stack` reserve of 88 KB (24 KB bounded heap + 64 KB stack) =
-88.8 KB used, ≈ 39 KB headroom. `EIGEN_STACK_ALLOCATION_LIMIT` pinned at 8192
-as a per-temporary cap (largest single Eigen temporary ≤ 4096 B at these fixed
-`N`); Eigen's stack path requires `EIGEN_ALLOCA` to be defined explicitly on
-this target — see [docs/embedded.md](../docs/embedded.md).
+88.8 KB used, ≈ 39 KB headroom. `EIGEN_STACK_ALLOCATION_LIMIT` pinned at 8192 as
+a per-temporary cap, against the temporaries measured on the instrumented path
+(79 B + 223 B per inner QP iteration at `N = 4`). Eigen's stack path requires
+`EIGEN_ALLOCA` to be defined explicitly on this target — see
+[docs/embedded.md](../docs/embedded.md).
 
 ### Operator capture (board in hand)
 

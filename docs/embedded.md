@@ -129,9 +129,16 @@ stack reserve  >=  static call-chain high-water (-fstack-usage)
 Do **not** set the limit to the size of the whole reserve (a 64 KiB limit
 inside a 64 KiB stack budgets for overflow). At the fixed-`N` regime the
 RT claims live in (`N < 49`, see the scope section of the
-[Real-Time Safety Matrix](rt-safety-matrix.md)), the largest single measured
-temporary is well under 4 KiB, so a limit of 8192 with a 64 KiB reserve
-leaves an order-of-magnitude margin.
+[Real-Time Safety Matrix](rt-safety-matrix.md)), the temporaries measured so far
+are small — 79 B and 223 B per inner QP iteration at `N = 4` — so the 8192 pin
+on the NUCLEO image leaves a wide margin against a 64 KiB reserve.
+
+Two honest limits on that statement: those sizes come from instrumenting one
+call path (the Kraft-LSEI triangular solve), not all four RT-claimed policies,
+and the pin itself has not been swept while the alloca path was actually live —
+the earlier sweep ran with `EIGEN_ALLOCA` undefined, where the limit is dead
+code and no sweep can move anything. Treat 8192 as a budgeted default, not a
+measured optimum, and re-sweep if you change `N`, the policy set, or the target.
 
 ## Status
 
