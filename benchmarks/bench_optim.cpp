@@ -218,7 +218,7 @@ template <typename Problem>
 {
     return benchmark_result{
         .solver = in.solver_name,
-        .library = "kthohr_optim",
+        .library = "optim",
         .problem = in.problem_name,
         .pclass = in.pclass,
         .dimension = in.dimension,
