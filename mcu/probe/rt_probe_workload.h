@@ -47,6 +47,27 @@
 #include <cstdint>
 #include <cmath>
 
+// The zero-allocation-per-step claim these windows measure depends on Eigen
+// routing its internal kernel temporaries (product/solve blocking buffers,
+// Householder-sequence applies) to the stack. Eigen only enables that path when
+// EIGEN_ALLOCA is defined, and its auto-detection
+//   EIGEN_OS_LINUX || EIGEN_OS_MAC || (defined alloca)
+// finds nothing on a newlib target built at strict -std=c++20: __STRICT_ANSI__
+// hides newlib's alloca macro. The resulting failure is silent -- every such
+// temporary becomes a per-call heap allocation, with no diagnostic and no
+// effect from EIGEN_STACK_ALLOCATION_LIMIT (which is not consulted on that
+// branch). It measured as kraft_slsqp at 2.80 allocs/step on the NUCLEO while
+// the host, immune via its OS branch, read 0.00.
+//
+// No board runs in CI, so this compile-time guard is the only mechanical check
+// that the flag is still in force: it fails the board-free cross-compile-link
+// gate, which does run per-commit. ARGMIN_EIGEN_MCU_DEFS supplies the define
+// for every consumer of this header; see docs/embedded.md for the mechanism and
+// the stack-budgeting rule that bounds the temporaries it puts back on the stack.
+#ifndef EIGEN_ALLOCA
+#error "EIGEN_ALLOCA is not defined: Eigen will heap-allocate its internal kernel temporaries on every call, silently breaking the zero-allocation-per-step contract this probe measures. Define EIGEN_ALLOCA=__builtin_alloca (see docs/embedded.md)."
+#endif
+
 namespace argmin::mcu
 {
 
