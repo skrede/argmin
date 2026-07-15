@@ -1,0 +1,703 @@
+{
+  "tables": [
+    {
+      "id": "drivers",
+      "columns": [
+        "allocation-free?",
+        "bounded-iterations?",
+        "wall-clock-free?",
+        "exceptions-off-clean?",
+        "deterministic(seeded)?"
+      ],
+      "rows": [
+        {
+          "module": "step_budget_solver",
+          "cells": {
+            "allocation-free?": {"verdict": "per-policy"},
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the outer loop honors max_iterations, an option default rather than a static limit"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "runner_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "runner_chrono_freedom_compiles"}
+              ]
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives every policy through this driver"}
+              ]
+            },
+            "deterministic(seeded)?": {"verdict": "per-policy"}
+          }
+        },
+        {
+          "module": "stepper",
+          "cells": {
+            "allocation-free?": {"verdict": "per-policy"},
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the caller owns the budget; one bounded step per call, with no internal loop"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "runner_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "runner_chrono_freedom_compiles"}
+              ]
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this driver"
+            },
+            "deterministic(seeded)?": {"verdict": "per-policy"}
+          }
+        },
+        {
+          "module": "time_budget_solver",
+          "cells": {
+            "allocation-free?": {"verdict": "per-policy"},
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the stored max_iterations remains a hard safety cap; the deadline can only terminate earlier"
+            },
+            "wall-clock-free?": {
+              "verdict": "no",
+              "qualifier": "adds a steady_clock deadline; owns the wall-time reporting"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this driver"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "no",
+              "qualifier": "the termination point is wall-clock-dependent"
+            }
+          }
+        },
+        {
+          "module": "step_and_time_budget_solver",
+          "cells": {
+            "allocation-free?": {"verdict": "per-policy"},
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the stored max_iterations remains a hard safety cap; the deadline can only terminate earlier"
+            },
+            "wall-clock-free?": {
+              "verdict": "no",
+              "qualifier": "both caps; whichever fires first"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this driver"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "no",
+              "qualifier": "the termination point is wall-clock-dependent"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "policies",
+      "columns": [
+        "allocation-free?",
+        "bounded-iterations?",
+        "wall-clock-free?",
+        "exceptions-off-clean?",
+        "deterministic(seeded)?"
+      ],
+      "rows": [
+        {
+          "module": "kraft_slsqp",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "sqp_alloc_gate_kraft", "note": "zero mode, 0.00/step"}]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "filter_slsqp",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "sqp_alloc_gate_filter_slsqp", "note": "zero mode, 0.00/step"}],
+              "footnotes": ["restore"]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "nw_sqp",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "sqp_alloc_gate_nw", "note": "zero mode, 0.00/step, fixed-N steady state"}]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "filter_nw_sqp",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "sqp_alloc_gate_filter_nw", "note": "zero mode, 0.00/step, fixed-N steady state"}],
+              "footnotes": ["restore"]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "tr_sqp",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "sqp_alloc_gate_tr_sqp", "note": "zero mode, 0.00/step, on an equality-constrained fixture"}],
+              "footnotes": ["nullspace"]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "filter_trsqp",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "sqp_alloc_gate_filter_trsqp", "note": "zero mode, 0.00/step, on an equality-constrained fixture"}],
+              "footnotes": ["restore", "nullspace"]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "lbfgsb",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "alloc_gate_lbfgsb", "note": "zero mode, including the bound-active generalized-Cauchy-point/subspace branch"}]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "byrd_lbfgsb",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "alloc_gate_byrd_lbfgsb", "note": "zero mode, bound-active path"}]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "lm",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "alloc_gate_lm", "note": "zero mode, 0.00/step, fixed-N steady state"}]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "projected_gn",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "alloc_gate_projected_gn", "note": "zero mode, active-bound fixture"}]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "projected_gn_policy: trajectory is run-to-run deterministic on a fixed target", "note": "run-to-run and post-reset bit-exactness"}]
+            }
+          }
+        },
+        {
+          "module": "projected_gradient_gn",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "alloc_gate_projected_gradient_gn", "note": "zero mode, active-bound fixture"}]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "augmented_lagrangian",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "alloc_gate_augmented_lagrangian", "note": "zero mode; bounded resumable inner solve, mu-change and warm-reset armed"}]
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "bobyqa",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "not-claimed",
+              "qualifier": "no alloc gate; the derivative-free quadratic-model rebuild allocates"
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "cobyla",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "not-claimed",
+              "qualifier": "no alloc gate"
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "cmaes",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "not-claimed",
+              "qualifier": "no alloc gate; stochastic population sampling allocates"
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [{"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "throw sites converted to status returns"}]
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "cmaes: one hand-derived generation pins mean, p_sigma, p_c, and sigma"},
+                {"kind": "ctest_test", "name": "cmaes: one hand-derived generation pins the rank-mu covariance C"},
+                {"kind": "ctest_test", "name": "cmaes_sampling: marsaglia_normal is bit-identical across identically-seeded odd-consumption sequences"}
+              ]
+            }
+          }
+        },
+        {
+          "module": "isres",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "not-claimed",
+              "qualifier": "no alloc gate; stochastic"
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "isres_policy: a fixed seed is bit-for-bit deterministic within one process", "note": "same process, same seed"},
+                {"kind": "ctest_test", "name": "isres_policy: determinism is seed-specific, not accidental"},
+                {"kind": "ctest_test", "name": "isres_policy: the reset path is deterministic from the same seed"}
+              ]
+            }
+          }
+        },
+        {
+          "module": "mma",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "not-claimed",
+              "qualifier": "no alloc gate; the separable-approximation subproblem allocates"
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "gcmma",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "not-claimed",
+              "qualifier": "no alloc gate"
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        },
+        {
+          "module": "ccsa_quadratic",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "not-claimed",
+              "qualifier": "no alloc gate"
+            },
+            "bounded-iterations?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
