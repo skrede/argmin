@@ -57,9 +57,16 @@ set(ARGMIN_M7_LINK_ARCH
 # Eigen bare-metal macros common to every firmware TU (research 61-RESEARCH-nucleo §6).
 # Cortex-M7 has no NEON and FPv5 is scalar-only: no vector ISA to align for, so
 # EIGEN_MAX_ALIGN_BYTES=8 (natural double) removes the aligned-allocation path.
+# EIGEN_ALLOCA must be explicit on newlib targets: Eigen's auto-detection
+# (EIGEN_OS_LINUX || EIGEN_OS_MAC || defined alloca) finds nothing at strict
+# -std=c++20 (this project sets CMAKE_CXX_EXTENSIONS OFF), and without it every
+# internal Eigen kernel temporary heap-allocates per call instead of alloca'ing
+# -- measured as kraft_slsqp at 2.80 allocs/step on the NUCLEO while 0.00 on
+# host. See docs/embedded.md for the mechanism and stack-budgeting rule.
 set(ARGMIN_EIGEN_MCU_DEFS
     EIGEN_DONT_VECTORIZE
-    EIGEN_MAX_ALIGN_BYTES=8)
+    EIGEN_MAX_ALIGN_BYTES=8
+    EIGEN_ALLOCA=__builtin_alloca)
 
 # --- MCU-02: board-free -fno-exceptions -fno-rtti cross-compile-link gate ----
 #

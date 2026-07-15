@@ -9,7 +9,7 @@ Two honest, non-interchangeable proofs on two differently-shaped targets:
 
 | Target | Claim | Environment | Instrument | Report | Status |
 |---|---|---|---|---|---|
-| **NUCLEO-H753ZI** | *rigorous* | bare-metal Cortex-M7, **no RTOS**, newlib-nano | `_sbrk` high-water + `--wrap` malloc + `operator new` | semihosting | build + link + instrument here; **allocs/step = operator capture** |
+| **NUCLEO-H753ZI** | *rigorous* | bare-metal Cortex-M7, **no RTOS**, newlib-nano | `_sbrk` high-water + `--wrap` malloc + `operator new` | USART3 → ST-Link VCP | **measured on hardware: 0.00 allocs/step on all four policies, canary PASS** (`nucleo_h753zi/onchip-result.md`) |
 | **ESP32 / ESP-IDF** | *accessible* | FreeRTOS present, IDF allocator in the loop | `heap_trace` / `heap_caps` | second UART | **measured on hardware: 0.00 allocs/step, canary PASS** (`esp32_probe/onchip-result.md`) |
 
 The ESP32 proof runs under FreeRTOS with IDF's allocator in the loop — a real
@@ -48,34 +48,45 @@ cmake --build build-arm-nucleo            # -> nucleo_h753zi/nucleo_h753zi_probe
 
 Verified at build time (no hardware): valid ELF, **zero undefined symbols**,
 exactly one `_sbrk` (our strong override, not the nosys stub), fits 2 MB flash
-and 128 KB DTCM (`.data`+`.bss` ≈ 18 KB; 64 KB stack reserve; 1 KB bounded
-heap). `EIGEN_STACK_ALLOCATION_LIMIT` swept and pinned at 8192 (largest single
-Eigen fixed temporary ≤ 4096 B at these fixed N).
+(≈ 375 KB text+rodata) and 128 KB DTCM: `.data`+`.bss` = 832 B plus the
+`._user_heap_stack` reserve of 88 KB (24 KB bounded heap + 64 KB stack) =
+88.8 KB used, ≈ 39 KB headroom. `EIGEN_STACK_ALLOCATION_LIMIT` pinned at 8192
+as a per-temporary cap (largest single Eigen temporary ≤ 4096 B at these fixed
+`N`); Eigen's stack path requires `EIGEN_ALLOCA` to be defined explicitly on
+this target — see [docs/embedded.md](../docs/embedded.md).
 
 ### Operator capture (board in hand)
 
 The allocs/step number is an operator step — no NUCLEO hardware / QEMU on the
-build host. With a NUCLEO-H753ZI attached over the on-board ST-Link:
+build host. The image reports over **USART3 → the on-board ST-Link VCP**
+(`/dev/ttyACM0`, 115200 8N1); no semihosting, OpenOCD, or gdb is involved
+(`nosys.specs` + `usart3_console.cpp`). Flashing is drag-drop to the ST-Link
+mass-storage drive, which programs the target and resets it.
+
+The report is printed **once at boot** and the firmware then idles: opening the
+serial port does not re-trigger it (verified — a port open with no flash yields
+no output). So the capture must already be running when the flash-induced reset
+happens:
 
 ```sh
-# terminal 1 — semihosting-enabled debug server
-openocd -f board/st_nucleo_h753zi.cfg \
-  -c "init; arm semihosting enable; reset run"
+arm-none-eabi-objcopy -O binary \
+  build-arm-nucleo/nucleo_h753zi/nucleo_h753zi_probe.elf /tmp/probe.bin
 
-# terminal 2 — flash + run (or use the gdb 'load' path)
-arm-none-eabi-gdb build-arm-nucleo/nucleo_h753zi/nucleo_h753zi_probe.elf \
-  -ex "target extended-remote :3333" -ex "load" -ex "continue"
+stty -F /dev/ttyACM0 115200 raw -echo -echoe -echok
+timeout 90 cat /dev/ttyACM0 > /tmp/nucleo_capture.log &   # start BEFORE flashing
+sleep 1
+cp /tmp/probe.bin /run/media/$USER/NOD_H753ZI/ && sync    # programs + resets
 ```
 
-Expected console output (semihosting):
+The report lands within ~5 s of the copy. Expected console output:
 
 ```
 [argmin] NUCLEO-H753ZI on-device allocation proof
 [argmin] blindness canary PASS (deliberate allocation observed)
-  [alloc-gate] kraft_slsqp hs071   ... per_step=0.00 ... PASS (zero-alloc gate)
-  [alloc-gate] nw_sqp hs071        ... per_step=0.00 ... PASS (zero-alloc gate)
+  [alloc-gate] kraft_slsqp hs071  ... per_step=0.00 ... PASS (zero-alloc gate)
+  [alloc-gate] nw_sqp hs071       ... per_step=0.00 ... PASS (zero-alloc gate)
   [alloc-gate] filter_nw_sqp hs071 ... per_step=0.00 ... PASS (zero-alloc gate)
-  [alloc-gate] lm rosenbrock_ls    ... per_step=0.00 ... PASS (zero-alloc gate)
+  [alloc-gate] lm rosenbrock_ls   ... per_step=0.00 ... PASS (zero-alloc gate)
 [argmin] _sbrk one-time setup high-water = <bytes> bytes (<n> calls)
 [argmin] RT-window gate result: PASS (0 allocs/step on all windows)
 ```
@@ -84,10 +95,12 @@ The blindness canary line is load-bearing: a reported `per_step=0.00` is only
 meaningful because the canary proved the sensor observes a deliberate
 allocation. Record the console transcript as the operator bench artifact.
 
-If semihosting hangs at the first `printf` (a reported `nano.specs`+`rdimon`
-init-ordering issue), the UART fallback is a small change: replace
-`--specs=rdimon.specs` with a hand-written `_write` pushing bytes out a USART
-data register (no HAL), keeping `nano.specs`/`nosys.specs` for the rest.
+Because the report is boot-once, a capture that opens the port *after* the
+reset reads an empty stream, and a capture taken without a confirmed flash can
+show a *stale* resident image's report. When a capture is meant to prove a
+change, flash both arms and check that the console actually differs (the
+`_sbrk` high-water line is a convenient image fingerprint) — the
+`EIGEN_ALLOCA` A/B in `nucleo_h753zi/onchip-result.md` is the worked example.
 
 ## 3. ESP32 accessible proof (`esp32_probe/`, build here, flash + measure = operator step)
 

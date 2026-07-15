@@ -19,8 +19,17 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
 # eigen_assert are defined in probe_main.cpp itself (before the first Eigen
 # include), so the portable Eigen-native allocation sensor works exactly as on
 # host; do NOT define EIGEN_NO_MALLOC here (it would hard-abort instead).
+# EIGEN_ALLOCA is explicit so the stack path for Eigen's internal kernel
+# temporaries does not hinge on the -std=gnu++20 dialect making newlib's
+# alloca macro visible (at strict -std=c++20 Eigen would silently heap-allocate
+# them per call -- the measured NUCLEO kraft_slsqp 2.80/step failure mode).
+# The limit is a per-temporary cap: 8192 against the probe task's 40 KiB stack
+# (probe_main.cpp) keeps the worst case budgeted; oversized temporaries fall
+# back to the heap where the alloc gate reports them. See docs/embedded.md.
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     ARGMIN_BENCH_TRACE_ALLOC=1
     ARGMIN_ALLOC_GATE_EXPECT_ZERO
     EIGEN_DONT_VECTORIZE
-    EIGEN_MAX_ALIGN_BYTES=8)
+    EIGEN_MAX_ALIGN_BYTES=8
+    EIGEN_ALLOCA=__builtin_alloca
+    EIGEN_STACK_ALLOCATION_LIMIT=8192)

@@ -34,16 +34,22 @@ set(CMSIS_STARTUP  "${cmsis_device_h7_SOURCE_DIR}/Source/Templates/gcc/startup_s
 set(CMSIS_SYSTEM   "${cmsis_device_h7_SOURCE_DIR}/Source/Templates/system_stm32h7xx.c")
 
 # Eigen stack-temporary ceiling: dynamic temporaries above this fall back from
-# alloca (stack) to the heap at runtime. Set to 64 KiB (host-like, and well
-# within the DTCM stack budget below) rather than an over-tight value. NOTE:
-# raising this does NOT explain kraft_slsqp's on-device per-step allocation --
-# sweeping it 8192 -> 65536 left the binary byte-identical and kraft still
-# heap-allocated 2.80x/step on the NUCLEO. kraft's residual is a genuine
-# arm-none-eabi/newlib-specific allocation in its Kraft-LSEI QP substrate
-# (Phase 55 drove it to 0.00/step on host only; not reproducible on host even
-# with these exact flags), tracked as a follow-up finding -- see
-# nucleo_h753zi/onchip-result.md. The other three RT policies are 0.00/step.
-set(MCU_EIGEN_STACK_LIMIT 65536 CACHE STRING
+# alloca (stack) to the heap at runtime (where the alloc gate reports them as
+# an honest red -- detectable, not a crash). The ceiling only exists because
+# ARGMIN_EIGEN_MCU_DEFS defines EIGEN_ALLOCA explicitly: at strict -std=c++20
+# (CMAKE_CXX_EXTENSIONS OFF) newlib hides its alloca macro and Eigen's
+# auto-detection finds nothing, making every internal kernel temporary a heap
+# malloc and this limit dead code. That misconfiguration was the measured
+# kraft_slsqp 2.80 allocs/step on the NUCLEO (two triangular-solve blocking
+# buffers per inner QP iteration, 79+223 B at N=4; 0.00 on host because
+# __linux__ short-circuits the check) and why sweeping the limit left the
+# binary byte-identical -- see nucleo_h753zi/onchip-result.md.
+#
+# Budget: the limit is a per-temporary cap, not a total. 8192 against the
+# 64 KiB stack reserve (stm32h753zi_flash.ld) leaves an order-of-magnitude
+# margin over the largest single fixed-N temporary (<= 4096 B); do not raise
+# it toward the reserve size. Rule: docs/embedded.md.
+set(MCU_EIGEN_STACK_LIMIT 8192 CACHE STRING
     "EIGEN_STACK_ALLOCATION_LIMIT for the fixed-N MCU probe (bytes)")
 
 add_executable(nucleo_h753zi_probe
