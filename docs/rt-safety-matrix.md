@@ -117,6 +117,18 @@ gated. The off-hot-loop post-convergence restoration idle window improved from 5
 allocations per 10 idle steps as a side effect of the shared active-set QP substrate plumbing;
 it remains informational and ungated (see the restoration footnote).
 
+The matrix is certified on host. Carrying the zero-alloc claim onto a
+cross-compiled bare-metal target additionally requires Eigen's stack-temporary
+path to be enabled explicitly (`-DEIGEN_ALLOCA=__builtin_alloca`): on newlib
+targets built at strict `-std=c++20`, Eigen silently routes its internal
+kernel temporaries to the heap instead of the stack, which is measurable as
+per-step allocations (`kraft_slsqp` measured 2.80/step on the bare-metal
+NUCLEO-H753ZI without the flag, against 0.00/step with it — on-device A/B, and
+0.00/step on host and ESP32 throughout). With the flag, all four RT-claimed
+policies measure 0.00 allocs/step on real bare-metal hardware
+(`mcu/nucleo_h753zi/onchip-result.md`). Mechanism, attribution, and the
+stack-budgeting rule: [Embedded Cross-Compiling](embedded.md).
+
 ## Footnotes on the allocation-free cells
 
 [^restore]: **Post-convergence feasibility restoration (filter families).** The filter zero-mode

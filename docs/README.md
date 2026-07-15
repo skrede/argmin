@@ -8,6 +8,7 @@
 
 - [Choosing a Solver](choosing-a-solver.md) -- a problem-class-to-policy map: which policy fits an unconstrained, constrained, least-squares, derivative-free, or global problem.
 - [Real-Time Safety Matrix](rt-safety-matrix.md) -- the per-solver breakdown of allocation-freedom, bounded iterations, wall-clock-freedom, exceptions-off cleanliness, and seeded determinism, each cell citing its proving artifact.
+- [Embedded Cross-Compiling](embedded.md) -- carrying the zero-allocation contract onto bare-metal targets: the Eigen stack-temporary flags (`EIGEN_ALLOCA`, `EIGEN_STACK_ALLOCATION_LIMIT`), the newlib strict-dialect trap, and the stack-budgeting rule.
 - [Publication Benchmarking](benchmarking/publish-bench.md) -- methodology, provenance requirements, and baseline eligibility rules for the publication-grade benchmark harness.
 
 ## Examples
