@@ -17,7 +17,9 @@
 #   cmake --build build-arm-nucleo
 
 cmake_minimum_required(VERSION 3.28)
-project(argmin_firmware CXX)
+# C is needed for the CMSIS system_stm32h7xx.c (SystemInit / ExitRun0Mode);
+# ASM is enabled in the image subdir for the gcc startup .s.
+project(argmin_firmware C CXX)
 
 # When ON, define only the board-free -fno-exceptions link gate (the per-commit
 # CI target): no CMSIS FetchContent, no linker script, no startup. This keeps
