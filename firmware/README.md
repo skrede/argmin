@@ -88,3 +88,40 @@ If semihosting hangs at the first `printf` (a reported `nano.specs`+`rdimon`
 init-ordering issue), the UART fallback is a small change: replace
 `--specs=rdimon.specs` with a hand-written `_write` pushing bytes out a USART
 data register (no HAL), keeping `nano.specs`/`nosys.specs` for the rest.
+
+## 3. ESP32 accessible proof (`esp32_probe/`, build here, flash + measure = operator step)
+
+The *accessible* claim: the same four-policy fixed-N probe under ESP-IDF /
+FreeRTOS with IDF's allocator in the loop — a real embeddability result but a
+**softer** zero-heap statement than the bare-metal NUCLEO proof. Requires
+ESP-IDF v6 (present at `/opt/esp-idf`).
+
+```sh
+. /opt/esp-idf/export.sh
+idf.py -C firmware/esp32_probe set-target esp32
+idf.py -C firmware/esp32_probe build            # -> build/argmin_esp32_probe.bin
+```
+
+Verified at build time (no hardware): cross-compiles + links to a flashable
+`.bin` for `xtensa` with C++ exceptions and RTTI off (ESP-IDF v6 defaults).
+Two independent sensors, mirroring the host design: the portable Eigen-native
+counter (`EIGEN_RUNTIME_NO_MALLOC` + counting `eigen_assert`) gives the
+per-step `0.00`/step result inside each armed window; ESP-IDF `heap_trace`
+(standalone) is the whole-heap cross-check and blindness canary.
+
+### Operator capture (board in hand)
+
+```sh
+idf.py -C firmware/esp32_probe -p /dev/ttyUSB0 flash monitor
+```
+
+Console (UART0) shows the canary + per-window `per_step=0.00` lines; the
+telemetry summary also goes out **UART1** (TX=GPIO17, RX=GPIO16 at 115200).
+
+**Board check before wiring:** GPIO16/17 are free on **ESP32-WROOM** but are
+the PSRAM CLK/CS lines on **ESP32-WROVER** — confirm the module (silkscreen or
+the boot-log PSRAM line); on a WROVER pick another free GPIO pair
+(`kTelemetryTx`/`kTelemetryRx` in `main/probe_main.cpp`, a config-constant
+change). The `double` solvers are soft-float on the classic ESP32 (single-
+precision HW FPU) — that affects wall-time only, not the allocation count.
+

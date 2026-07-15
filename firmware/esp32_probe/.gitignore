@@ -1,0 +1,8 @@
+# ESP-IDF generated / machine-specific artifacts (regenerated from
+# sdkconfig.defaults by idf.py). Only the sources and sdkconfig.defaults are
+# tracked.
+/build/
+/sdkconfig
+/sdkconfig.old
+/dependencies.lock
+/managed_components/
