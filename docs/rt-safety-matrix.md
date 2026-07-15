@@ -61,20 +61,20 @@ uniform across driver choices.
 
 Every "yes" in the `allocation-free?` column below names a zero-mode gate. The SQP zero-mode
 gates certify the **warm-started pre-convergence RT operating regime** (bounded per-tick
-steps, never idling); see the footnotes for the two characterized off-hot-loop residuals and
-the one per-step residual.
+steps, never idling); see the footnotes for the two characterized off-hot-loop residuals, and
+"Scope of the allocation-free claim" below for the dense fixed-`N` regime these gates hold in.
 
 | module | allocation-free? | bounded-iterations? | wall-clock-free? | exceptions-off-clean? | deterministic(seeded)? | evidence |
 |---|---|---|---|---|---|---|
 | `kraft_slsqp` | **yes** | yes | yes | yes | yes | `sqp_alloc_gate_kraft` (zero mode, 0.00/step); `argmin_no_exceptions_probe`; no RNG |
 | `filter_slsqp` | **yes** [^restore] | yes | yes | yes | yes | `sqp_alloc_gate_filter_slsqp` (zero mode, 0.00/step); `argmin_no_exceptions_probe`; no RNG |
-| `nw_sqp` | **no** [^nw] | yes | yes | yes | yes | `sqp_alloc_gate_nw` (**witness mode**, 4.00/step steady state); `argmin_no_exceptions_probe`; no RNG |
-| `filter_nw_sqp` | **no** [^nw] [^restore] | yes | yes | yes | yes | `sqp_alloc_gate_filter_nw` (**witness mode**, 4.00/step steady state); `argmin_no_exceptions_probe`; no RNG |
+| `nw_sqp` | **yes** | yes | yes | yes | yes | `sqp_alloc_gate_nw` (zero mode, 0.00/step, fixed-`N` steady state); `argmin_no_exceptions_probe`; no RNG |
+| `filter_nw_sqp` | **yes** [^restore] | yes | yes | yes | yes | `sqp_alloc_gate_filter_nw` (zero mode, 0.00/step, fixed-`N` steady state); `argmin_no_exceptions_probe`; no RNG |
 | `tr_sqp` | **yes** [^nullspace] | yes | yes | yes | yes | `sqp_alloc_gate_tr_sqp` (zero mode, 0.00/step, on an equality-constrained fixture); `argmin_no_exceptions_probe`; no RNG |
 | `filter_trsqp` | **yes** [^restore] [^nullspace] | yes | yes | yes | yes | `sqp_alloc_gate_filter_trsqp` (zero mode, 0.00/step, on an equality-constrained fixture); `argmin_no_exceptions_probe`; no RNG |
 | `lbfgsb` | **yes** | yes | yes | yes | yes | `alloc_gate_lbfgsb` (zero mode, incl. the bound-active generalized-Cauchy-point/subspace branch); `argmin_no_exceptions_probe`; no RNG |
 | `byrd_lbfgsb` | **yes** | yes | yes | yes | yes | `alloc_gate_byrd_lbfgsb` (zero mode, bound-active path); `argmin_no_exceptions_probe`; no RNG |
-| `lm` | **no** | yes | yes | yes | yes | `alloc_gate_lm` (**witness mode**, 2.00/step measured at HEAD; not hoisted, gate not flipped to zero mode); `argmin_no_exceptions_probe`; no RNG |
+| `lm` | **yes** | yes | yes | yes | yes | `alloc_gate_lm` (zero mode, 0.00/step, fixed-`N` steady state); `argmin_no_exceptions_probe`; no RNG |
 | `projected_gn` | **yes** | yes | yes | yes | yes | `alloc_gate_projected_gn` (zero mode, active-bound fixture); `argmin_no_exceptions_probe`; no RNG |
 | `projected_gradient_gn` | **yes** | yes | yes | yes* | yes | `alloc_gate_projected_gradient_gn` (zero mode, active-bound fixture); throw-free library-wide (not individually instantiated by the probe); no RNG |
 | `augmented_lagrangian` | **yes** | yes | yes | yes | yes | `alloc_gate_augmented_lagrangian` (zero mode; bounded resumable inner solve, mu-change + warm-reset armed); `argmin_no_exceptions_probe`; no RNG |
@@ -92,6 +92,30 @@ these policies are throw-free but are not among the set the `-fno-exceptions -fn
 instantiation probe links and runs. The probe covers the RT-claimed set (`lbfgsb`,
 `byrd_lbfgsb`, `cmaes`, `kraft_slsqp`, `filter_slsqp`, `nw_sqp`, `filter_nw_sqp`, `tr_sqp`,
 `filter_trsqp`, `augmented_lagrangian`, `lm`, `projected_gn`).
+
+## Scope of the allocation-free claim
+
+The zero-mode `allocation-free?` guarantees above hold in the **dense unblocked-Householder
+regime**: a fixed compile-time dimension `N < 49`. Eigen's `HouseholderSequence` switches from
+its unblocked per-reflector apply (which reuses caller-supplied storage and allocates nothing)
+to a blocked apply that allocates a block-reflector workspace once the sequence length exceeds
+its block size of 48 — `enum { BlockSize = 48 }` in `Eigen/src/Householder/HouseholderSequence.h`,
+gating the blocked branch on `m_length > BlockSize`; at `N = 49` the blocked path is the first
+to allocate. This is exactly the regime where a small-dense fixed-`N` solver is the right tool:
+dense O(N³) work at `N ≥ 49` belongs on a sparse/dynamic path, so **no allocation-free claim is
+made or advertised for `N ≥ 49`**.
+
+Per-algo level reached (measured at the pinned Release config; the alloc-gate evidence certifies
+it): the three separately-gated real-time-path solvers — `nw_sqp`, `filter_nw_sqp`, and `lm` —
+each reach **steady-state 0.00 allocations/step, gated red-on-regression** (four, three, and two
+armed windows respectively); restoration is covered through the `filter_nw` gate. None reaches
+the stricter **zero-after-construction**: a one-time setup cost survives at construction plus the
+first step — **75** allocations for `nw_sqp`, **76** for `filter_nw_sqp`, **5** for `lm` (the
+QP-solver workspace built at construction plus per-state buffer resizes, warmed by the harness
+before any armed steady window). These one-time allocations are documented and deferred, not
+gated. The off-hot-loop post-convergence restoration idle window improved from 56 to 3
+allocations per 10 idle steps as a side effect of the shared active-set QP substrate plumbing;
+it remains informational and ungated (see the restoration footnote).
 
 ## Footnotes on the allocation-free cells
 
@@ -114,20 +138,3 @@ instantiation probe links and runs. The probe covers the RT-claimed set (`lbfgsb
     projection. Removing this in place would require a numerics-changing ridge (it flips
     box-active suite cells), so it is a characterized shared-subsystem residual pending an
     allocation-free rewrite of the shared projection helper.
-
-[^nw]: **Eigen-internal dense-decomposition solve temporaries (`nw` line-search families).** The
-    `nw_sqp` / `filter_nw_sqp` pair is **not allocation-free at fixed `N`**. A bit-identical
-    workspace hoist of the shared dense active-set QP substrate drove the fixed-`N` witness from
-    99.60 to 4.00 allocations/step (full suite bit-identical), but the residual 4.00/step is
-    **irreducible bit-identically**: it lives inside Eigen's own dense-decomposition internals
-    (`ColPivHouseholderQR::solve` and `householderQ().applyOnTheLeft` allocate per-Householder-
-    reflector temporaries every step in the QP multiplier solve, regardless of any supplied
-    workspace). Unlike the two footnotes above — which are conditional, off-hot-loop residuals —
-    this one is a **per-step residual in the certified pre-convergence window**. Both gates are
-    held in **witness mode** at 4.00/step (not zero mode); a hand-rolled multiplier solve reached
-    ~21/step but broke last-ULP identity and was not adopted (no numerics were changed). Closing
-    this is the charter of a dedicated, separate in-house zero-allocation linear-algebra-kernel
-    effort (replicate the dense-decomposition multiplier solve and the shared rank-deficient
-    projection as hardened zero-allocation kernels, adopt them in the SQP family first, with
-    match-or-beat-Eigen throughput as the acceptance bar). Only when that kernel lands and the
-    `nw` hot loop reads true zero do these two gates flip to zero mode.
