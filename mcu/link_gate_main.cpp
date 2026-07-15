@@ -20,5 +20,5 @@
 
 int main()
 {
-    return argmin::firmware::run_all_rt_policies() & 0xff;
+    return argmin::mcu::run_all_rt_policies() & 0xff;
 }

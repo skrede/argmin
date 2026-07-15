@@ -2,12 +2,12 @@ idf_component_register(SRCS "probe_main.cpp"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES esp_driver_uart heap)
 
-# argmin headers + Eigen + the firmware/ root (for probe/rt_probe_workload.h),
+# argmin headers + Eigen + the mcu/ root (for probe/rt_probe_workload.h),
 # bridged from the top-level project CMakeLists via CACHE variables.
 target_include_directories(${COMPONENT_LIB} SYSTEM PRIVATE
     "${ARGMIN_PROBE_INCLUDE_DIR}"
     "${ARGMIN_PROBE_EIGEN_SOURCE_DIR}"
-    "${ARGMIN_PROBE_FIRMWARE_DIR}")
+    "${ARGMIN_PROBE_MCU_DIR}")
 
 # ESP-IDF v6 defaults C++ to -std=gnu++26; GCC honors the LAST -std=, so this
 # per-component override (appended after IDF's global flag) wins. PRIVATE so it

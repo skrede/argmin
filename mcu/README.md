@@ -1,4 +1,4 @@
-# firmware/ — on-device embeddability proofs
+# mcu/ — on-device embeddability proofs
 
 A standalone sibling project (its own `project()`, configured with a cross
 toolchain) that proves the header-only argmin solver is embeddable and
@@ -28,9 +28,9 @@ newlib-nano `-fno-exceptions -fno-rtti`, no board code. Run by the
 `arm-no-exceptions-link` CI job; locally:
 
 ```sh
-cmake -S firmware -B build-arm-gate \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/firmware/cmake/toolchain-arm-none-eabi.cmake" \
-  -DFIRMWARE_LINK_GATE_ONLY=ON
+cmake -S mcu -B build-arm-gate \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/mcu/cmake/toolchain-arm-none-eabi.cmake" \
+  -DMCU_LINK_GATE_ONLY=ON
 cmake --build build-arm-gate
 arm-none-eabi-nm --undefined-only build-arm-gate/argmin_arm_link_gate.elf   # must be empty
 ```
@@ -41,8 +41,8 @@ Requires an `arm-none-eabi` GCC (14.x in CI; 16.1.0 verified locally). Fetches
 CMSIS-Core 6 + `cmsis-device-h7` (no HAL/CubeMX/RTOS).
 
 ```sh
-cmake -S firmware -B build-arm-nucleo \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/firmware/cmake/toolchain-arm-none-eabi.cmake"
+cmake -S mcu -B build-arm-nucleo \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/mcu/cmake/toolchain-arm-none-eabi.cmake"
 cmake --build build-arm-nucleo            # -> nucleo_h753zi/nucleo_h753zi_probe.elf (+ .map)
 ```
 
@@ -98,8 +98,8 @@ ESP-IDF v6 (present at `/opt/esp-idf`).
 
 ```sh
 . /opt/esp-idf/export.sh
-idf.py -C firmware/esp32_probe set-target esp32
-idf.py -C firmware/esp32_probe build            # -> build/argmin_esp32_probe.bin
+idf.py -C mcu/esp32_probe set-target esp32
+idf.py -C mcu/esp32_probe build            # -> build/argmin_esp32_probe.bin
 ```
 
 Verified at build time (no hardware): cross-compiles + links to a flashable
@@ -112,7 +112,7 @@ per-step `0.00`/step result inside each armed window; ESP-IDF `heap_trace`
 ### Operator capture (board in hand)
 
 ```sh
-idf.py -C firmware/esp32_probe -p /dev/ttyUSB0 flash monitor
+idf.py -C mcu/esp32_probe -p /dev/ttyUSB0 flash monitor
 ```
 
 Console (UART0) shows the canary + per-window `per_step=0.00` lines; the

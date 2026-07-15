@@ -30,11 +30,17 @@ _estack = ORIGIN(DTCM) + LENGTH(DTCM);
 
 /* Minimum sizes reserved and checked below. The heap is intentionally small:
  * the only heap allocation expected is the mandatory blindness canary. */
-_Min_Heap_Size  = 0x400;    /* 1 KiB: bounds the heap; _sbrk fails past _eheap */
-_Min_Stack_Size = 0x10000;  /* 64 KiB main stack reserve: comfortably exceeds
-                               the measured worst-case ~19888-byte solve()
-                               call frame (61-02 task 6) plus call depth, and
-                               still fits DTCM (data+bss+heap+stack << 128 KiB). */
+_Min_Heap_Size  = 0x6000;   /* 24 KiB: the RT claim is zero allocs PER STEP, not
+                               zero total heap -- each policy's one-time setup
+                               legitimately uses the heap (measured on-device
+                               peak: 13136 bytes across the four policies).
+                               _sbrk still fails past _eheap as a runaway guard;
+                               the high-water reports the real peak. */
+_Min_Stack_Size = 0x10000;  /* 64 KiB main stack reserve: must hold both the
+                               ~19888-byte worst-case solve() call frame AND
+                               kraft_slsqp's large Eigen stack temporary (kept
+                               off the heap by EIGEN_STACK_ALLOCATION_LIMIT).
+                               DTCM budget: 24K heap + 64K stack + bss << 128K. */
 
 SECTIONS
 {

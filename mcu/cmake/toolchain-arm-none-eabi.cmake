@@ -1,7 +1,7 @@
 # CMake toolchain file for bare-metal Cortex-M7 (NUCLEO-H753ZI) cross-compile.
 #
-# Used by the standalone firmware/ project() for both the minimal
-# -fno-exceptions link gate (FIRMWARE_LINK_GATE_ONLY=ON, no BSP) and the full
+# Used by the standalone mcu/ project() for both the minimal
+# -fno-exceptions link gate (MCU_LINK_GATE_ONLY=ON, no BSP) and the full
 # NUCLEO image. It never touches the host build of the library or its tests.
 #
 # The compilers are not FetchContent-able; CI pins a documented arm-none-eabi

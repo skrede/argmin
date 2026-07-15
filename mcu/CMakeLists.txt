@@ -1,4 +1,4 @@
-# Standalone firmware/ sibling project for the on-device embeddability proof.
+# Standalone mcu/ sibling project for the on-device embeddability proof.
 #
 # This is its OWN project() below the include boundary: it consumes the argmin
 # headers via an include path only and is NEVER added to the header-only
@@ -6,25 +6,25 @@
 # CMake; it is configured separately with the arm-none-eabi toolchain file:
 #
 #   # minimal -fno-exceptions cross-compile-link CI gate (no board, no BSP):
-#   cmake -S firmware -B build-arm-gate \
-#     -DCMAKE_TOOLCHAIN_FILE=firmware/cmake/toolchain-arm-none-eabi.cmake \
-#     -DFIRMWARE_LINK_GATE_ONLY=ON
+#   cmake -S mcu -B build-arm-gate \
+#     -DCMAKE_TOOLCHAIN_FILE=mcu/cmake/toolchain-arm-none-eabi.cmake \
+#     -DMCU_LINK_GATE_ONLY=ON
 #   cmake --build build-arm-gate
 #
 #   # full flashable NUCLEO-H753ZI image (CMSIS + linker script + instrument):
-#   cmake -S firmware -B build-arm-nucleo \
-#     -DCMAKE_TOOLCHAIN_FILE=firmware/cmake/toolchain-arm-none-eabi.cmake
+#   cmake -S mcu -B build-arm-nucleo \
+#     -DCMAKE_TOOLCHAIN_FILE=mcu/cmake/toolchain-arm-none-eabi.cmake
 #   cmake --build build-arm-nucleo
 
 cmake_minimum_required(VERSION 3.28)
 # C is needed for the CMSIS system_stm32h7xx.c (SystemInit / ExitRun0Mode);
 # ASM is enabled in the image subdir for the gcc startup .s.
-project(argmin_firmware C CXX)
+project(argmin_mcu C CXX)
 
 # When ON, define only the board-free -fno-exceptions link gate (the per-commit
 # CI target): no CMSIS FetchContent, no linker script, no startup. This keeps
 # board-specific dependencies and their flake out of the per-commit gate.
-option(FIRMWARE_LINK_GATE_ONLY
+option(MCU_LINK_GATE_ONLY
     "Build only the board-free -fno-exceptions arm cross-compile-link gate" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -81,7 +81,7 @@ target_link_options(argmin_arm_link_gate PRIVATE
 set_target_properties(argmin_arm_link_gate PROPERTIES SUFFIX ".elf")
 
 # --- MCU-01/03/04: full flashable NUCLEO-H753ZI image ------------------------
-if(NOT FIRMWARE_LINK_GATE_ONLY
+if(NOT MCU_LINK_GATE_ONLY
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/nucleo_h753zi/CMakeLists.txt")
     add_subdirectory(nucleo_h753zi)
 endif()

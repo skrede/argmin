@@ -419,7 +419,7 @@ jobs:
       - name: Install arm-none-eabi toolchain
         run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
 
-      # The standalone firmware/ project, link-gate-only: no linker script,
+      # The standalone mcu/ project, link-gate-only: no linker script,
       # no startup, no CMSIS -- just cross-compile-and-link the four
       # RT-claimed solver policies under -fno-exceptions -fno-rtti with
       # --specs=nano.specs --specs=nosys.specs for Cortex-M7 hard-float. This
@@ -428,9 +428,9 @@ jobs:
       # firmware-image concern. Build-only, no hardware.
       - name: Configure firmware link gate
         run: |
-          cmake -S firmware -B build-arm-gate \
-            -DCMAKE_TOOLCHAIN_FILE="$PWD/firmware/cmake/toolchain-arm-none-eabi.cmake" \
-            -DFIRMWARE_LINK_GATE_ONLY=ON \
+          cmake -S mcu -B build-arm-gate \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/mcu/cmake/toolchain-arm-none-eabi.cmake" \
+            -DMCU_LINK_GATE_ONLY=ON \
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build link gate

@@ -29,10 +29,9 @@
 #include <cstdio>
 #include <cstddef>
 
-extern "C" void initialise_monitor_handles(void);
-
-namespace argmin::firmware
+namespace argmin::mcu
 {
+void usart3_console_init() noexcept;
 int run_alloc_sensor_canary() noexcept;
 std::size_t sbrk_high_water_bytes() noexcept;
 std::size_t sbrk_call_count() noexcept;
@@ -40,11 +39,11 @@ std::size_t sbrk_call_count() noexcept;
 
 int main()
 {
-    initialise_monitor_handles();
+    argmin::mcu::usart3_console_init();
 
     std::printf("[argmin] NUCLEO-H753ZI on-device allocation proof\n");
 
-    if(argmin::firmware::run_alloc_sensor_canary() != 0)
+    if(argmin::mcu::run_alloc_sensor_canary() != 0)
     {
         std::fprintf(stderr,
             "[argmin] BLINDNESS CANARY FAILED: sensor did not observe a "
@@ -53,12 +52,12 @@ int main()
     }
     std::printf("[argmin] blindness canary PASS (deliberate allocation observed)\n");
 
-    const int rc = argmin::firmware::run_all_rt_policies();
+    const int rc = argmin::mcu::run_all_rt_policies();
 
-    std::printf("[argmin] _sbrk one-time setup high-water = %zu bytes "
-                "(%zu calls)\n",
-                argmin::firmware::sbrk_high_water_bytes(),
-                argmin::firmware::sbrk_call_count());
+    std::printf("[argmin] _sbrk one-time setup high-water = %lu bytes "
+                "(%lu calls)\n",
+                static_cast<unsigned long>(argmin::mcu::sbrk_high_water_bytes()),
+                static_cast<unsigned long>(argmin::mcu::sbrk_call_count()));
     std::printf("[argmin] RT-window gate result: %s\n",
                 rc == 0 ? "PASS (0 allocs/step on all windows)"
                         : "FAIL (see per-window lines above)");

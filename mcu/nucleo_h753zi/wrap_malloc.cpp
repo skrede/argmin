@@ -129,7 +129,7 @@ void  operator delete[](void* p) noexcept    { __real_free(p); }
 void  operator delete(void* p, std::size_t) noexcept   { __real_free(p); }
 void  operator delete[](void* p, std::size_t) noexcept { __real_free(p); }
 
-namespace argmin::firmware
+namespace argmin::mcu
 {
 
 // Secondary-sensor accessors for the report.

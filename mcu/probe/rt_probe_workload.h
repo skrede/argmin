@@ -1,5 +1,5 @@
-#ifndef HPP_GUARD_ARGMIN_FIRMWARE_PROBE_RT_PROBE_WORKLOAD_H
-#define HPP_GUARD_ARGMIN_FIRMWARE_PROBE_RT_PROBE_WORKLOAD_H
+#ifndef HPP_GUARD_ARGMIN_MCU_PROBE_RT_PROBE_WORKLOAD_H
+#define HPP_GUARD_ARGMIN_MCU_PROBE_RT_PROBE_WORKLOAD_H
 
 // Shared fixed-N real-time probe workload for the on-device allocation proof.
 //
@@ -47,7 +47,7 @@
 #include <cstdint>
 #include <cmath>
 
-namespace argmin::firmware
+namespace argmin::mcu
 {
 
 // Fixed-2 least-squares Rosenbrock for lm_policy, with an initial_point() so it

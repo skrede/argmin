@@ -113,7 +113,7 @@ void probe_task(void*)
     // workload (the evaluate_gate lines); this heap_trace total additionally
     // shows the one-time setup allocations and proves the heap sensor is live.
     heap_trace_start(HEAP_TRACE_ALL);
-    const int rc = argmin::firmware::run_all_rt_policies();
+    const int rc = argmin::mcu::run_all_rt_policies();
     heap_trace_stop();
 
     heap_trace_summary_t s;

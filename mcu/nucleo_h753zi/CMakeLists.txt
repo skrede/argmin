@@ -2,7 +2,7 @@
 # hand-written linker script, the _sbrk allocation instrument, and the
 # four-policy fixed-N solve() probe with a semihosting report (MCU-01/03/04).
 #
-# Built only in the default firmware mode (FIRMWARE_LINK_GATE_ONLY=OFF). The
+# Built only in the default firmware mode (MCU_LINK_GATE_ONLY=OFF). The
 # on-device allocs/step number is an operator capture (see README.md); this
 # CMake verifies the image cross-compiles and links to a valid .elf that fits
 # the part.
@@ -33,27 +33,30 @@ set(CMSIS_DEV_INC  "${cmsis_device_h7_SOURCE_DIR}/Include")
 set(CMSIS_STARTUP  "${cmsis_device_h7_SOURCE_DIR}/Source/Templates/gcc/startup_stm32h753xx.s")
 set(CMSIS_SYSTEM   "${cmsis_device_h7_SOURCE_DIR}/Source/Templates/system_stm32h7xx.c")
 
-# Eigen fixed-N stack-temporary ceiling. Default (128 KiB) is the entire DTCM
-# budget; swept against the real build (61-02 task 6): the largest single Eigen
-# fixed-size stack temporary at these fixed N is <= 4096 bytes (both 8192 and
-# 4096 compile clean), so 8192 is a 2x-margin pin that still catches a gross
-# large-temporary regression while sitting 16x below Eigen's default. (Note the
-# measured worst-case total call frame is ~19888 bytes -- that is a function
-# frame, not a single Eigen temporary, so it does not gate this limit; the
-# linker stack reserve below covers it.) Overridable to re-pin without edits.
-set(FIRMWARE_EIGEN_STACK_LIMIT 8192 CACHE STRING
+# Eigen stack-temporary ceiling: dynamic temporaries above this fall back from
+# alloca (stack) to the heap at runtime. Set to 64 KiB (host-like, and well
+# within the DTCM stack budget below) rather than an over-tight value. NOTE:
+# raising this does NOT explain kraft_slsqp's on-device per-step allocation --
+# sweeping it 8192 -> 65536 left the binary byte-identical and kraft still
+# heap-allocated 2.80x/step on the NUCLEO. kraft's residual is a genuine
+# arm-none-eabi/newlib-specific allocation in its Kraft-LSEI QP substrate
+# (Phase 55 drove it to 0.00/step on host only; not reproducible on host even
+# with these exact flags), tracked as a follow-up finding -- see
+# nucleo_h753zi/onchip-result.md. The other three RT policies are 0.00/step.
+set(MCU_EIGEN_STACK_LIMIT 65536 CACHE STRING
     "EIGEN_STACK_ALLOCATION_LIMIT for the fixed-N MCU probe (bytes)")
 
 add_executable(nucleo_h753zi_probe
     nucleo_main.cpp
     wrap_malloc.cpp
+    usart3_console.cpp
     "${CMSIS_SYSTEM}"
     "${CMSIS_STARTUP}")
 
 target_include_directories(nucleo_h753zi_probe SYSTEM PRIVATE
     "${ARGMIN_INCLUDE_DIR}"
     "${eigen3_SOURCE_DIR}"
-    "${CMAKE_SOURCE_DIR}"        # firmware/ root, for "probe/rt_probe_workload.h"
+    "${CMAKE_SOURCE_DIR}"        # mcu/ root, for "probe/rt_probe_workload.h"
     "${CMSIS_CORE_INC}"
     "${CMSIS_DEV_INC}")
 
@@ -62,7 +65,7 @@ target_compile_definitions(nucleo_h753zi_probe PRIVATE
     ARGMIN_BENCH_TRACE_ALLOC=1
     ARGMIN_ALLOC_GATE_EXPECT_ZERO
     ${ARGMIN_EIGEN_MCU_DEFS}
-    EIGEN_STACK_ALLOCATION_LIMIT=${FIRMWARE_EIGEN_STACK_LIMIT})
+    EIGEN_STACK_ALLOCATION_LIMIT=${MCU_EIGEN_STACK_LIMIT})
 
 target_compile_options(nucleo_h753zi_probe PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-O2 -fno-exceptions -fno-rtti -Wno-psabi>
@@ -73,7 +76,10 @@ target_link_options(nucleo_h753zi_probe PRIVATE
     ${ARGMIN_M7_LINK_ARCH}
     -T "${CMAKE_CURRENT_SOURCE_DIR}/stm32h753zi_flash.ld"
     -nostartfiles
-    --specs=nano.specs --specs=rdimon.specs
+    --specs=nano.specs --specs=nosys.specs
+    # newlib-nano trims printf: pull in the float-capable variant so the report
+    # renders %zu / %.2f (allocs/step) instead of literal "zu".
+    -u _printf_float
     # Intercept the malloc family so the on-target sensor counts every
     # allocation event (wrap_malloc.cpp), mirroring the host strong-symbol gate.
     -Wl,--wrap=malloc,--wrap=free,--wrap=calloc,--wrap=realloc

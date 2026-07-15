@@ -132,16 +132,21 @@ inline int evaluate_gate(const char* label, std::size_t armed_steps,
         ? static_cast<double>(observed) / static_cast<double>(armed_steps)
         : static_cast<double>(observed);
 
-    std::printf("  [alloc-gate] %-18s eigen_malloc=%zu c_alloc=%zu "
-                "armed_steps=%zu per_step=%.2f\n",
-                label, eigen_c, c_alloc, armed_steps, per_step);
+    // %lu with an explicit unsigned-long cast rather than %zu: some embedded
+    // libcs (e.g. newlib-nano) do not implement the %z length modifier, and
+    // this prints identically on a hosted libc.
+    std::printf("  [alloc-gate] %-18s eigen_malloc=%lu c_alloc=%lu "
+                "armed_steps=%lu per_step=%.2f\n",
+                label, static_cast<unsigned long>(eigen_c),
+                static_cast<unsigned long>(c_alloc),
+                static_cast<unsigned long>(armed_steps), per_step);
 
 #ifdef ARGMIN_ALLOC_GATE_EXPECT_ZERO
     if(observed != 0)
     {
         std::fprintf(stderr,
-            "  [alloc-gate] %s FAIL: zero-alloc gate saw %zu allocations\n",
-            label, observed);
+            "  [alloc-gate] %s FAIL: zero-alloc gate saw %lu allocations\n",
+            label, static_cast<unsigned long>(observed));
         return 1;
     }
     std::printf("  [alloc-gate] %s PASS (zero-alloc gate)\n", label);
@@ -153,7 +158,7 @@ inline int evaluate_gate(const char* label, std::size_t armed_steps,
         {
             std::fprintf(stderr,
                 "  [alloc-gate] %s FAIL: policy expected allocation-free, "
-                "saw %zu\n", label, observed);
+                "saw %lu\n", label, static_cast<unsigned long>(observed));
             return 1;
         }
         std::printf("  [alloc-gate] %s PASS (allocation-free)\n", label);
@@ -162,13 +167,14 @@ inline int evaluate_gate(const char* label, std::size_t armed_steps,
     if(per_step < static_cast<double>(min_per_step))
     {
         std::fprintf(stderr,
-            "  [alloc-gate] %s FAIL: pre-fix witness expected >= %zu/step, "
+            "  [alloc-gate] %s FAIL: pre-fix witness expected >= %lu/step, "
             "saw %.2f/step -- gate may be blind\n",
-            label, min_per_step, per_step);
+            label, static_cast<unsigned long>(min_per_step), per_step);
         return 1;
     }
     std::printf("  [alloc-gate] %s PASS (pre-fix witness %.2f/step >= "
-                "%zu/step)\n", label, per_step, min_per_step);
+                "%lu/step)\n", label, per_step,
+                static_cast<unsigned long>(min_per_step));
     return 0;
 #endif
 }

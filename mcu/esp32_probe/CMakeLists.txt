@@ -3,13 +3,13 @@
 # This is the D-01 accessible claim: the fixed-N four-policy solve() probe runs
 # under ESP-IDF with FreeRTOS present and IDF's allocator in the loop -- a real
 # embeddability result but a SOFTER zero-heap statement than the bare-metal
-# NUCLEO proof (firmware/nucleo_h753zi/). It is never presented as bare-metal.
+# NUCLEO proof (mcu/nucleo_h753zi/). It is never presented as bare-metal.
 #
 # Build (operator or CI-with-IDF):
 #   . /opt/esp-idf/export.sh
-#   idf.py -C firmware/esp32_probe set-target esp32
-#   idf.py -C firmware/esp32_probe build       # -> build/argmin_esp32_probe.bin
-#   idf.py -C firmware/esp32_probe flash monitor
+#   idf.py -C mcu/esp32_probe set-target esp32
+#   idf.py -C mcu/esp32_probe build       # -> build/argmin_esp32_probe.bin
+#   idf.py -C mcu/esp32_probe flash monitor
 #
 # Eigen FetchContent MUST run here, BEFORE the IDF project.cmake include:
 # ESP-IDF pre-scans every component's CMakeLists in cmake -P script mode to
@@ -36,8 +36,8 @@ set(ARGMIN_PROBE_EIGEN_SOURCE_DIR "${eigen3_SOURCE_DIR}" CACHE PATH
 # library never includes the firmware -- MCU-01 boundary).
 set(ARGMIN_PROBE_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../lib/argmin/include"
     CACHE PATH "argmin header include dir")
-set(ARGMIN_PROBE_FIRMWARE_DIR "${CMAKE_CURRENT_LIST_DIR}/.."
-    CACHE PATH "firmware/ root, for probe/rt_probe_workload.h")
+set(ARGMIN_PROBE_MCU_DIR "${CMAKE_CURRENT_LIST_DIR}/.."
+    CACHE PATH "mcu/ root, for probe/rt_probe_workload.h")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
