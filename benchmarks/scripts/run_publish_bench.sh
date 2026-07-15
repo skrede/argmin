@@ -364,10 +364,16 @@ echo "build_type: ${BUILD_TYPE}"
 echo "wall_gate_policy: ${WALL_GATE_POLICY}"
 echo
 
+ARGMIN_ONLY_FLAG=()
+if [ "${ARGMIN_ONLY:-0}" = "1" ]; then
+    ARGMIN_ONLY_FLAG=(--argmin-only)
+fi
+
 "${BENCH_BINARY}" \
     --seed-start "${SEED_START}" \
     --seed-count "${SEED_COUNT}" \
     --output-dir "${OUT_DIR}" \
+    "${ARGMIN_ONLY_FLAG[@]}" \
     2>&1 | tee "${OUT_DIR}/run.log"
 
 # Independent oracle first: recompute feasibility/KKT at each returned point

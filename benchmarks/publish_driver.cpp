@@ -61,6 +61,7 @@ struct cli_args
     int seed_count{11};
     std::string output_dir;
     bool have_output_dir{false};
+    bool argmin_only{false};
 };
 
 constexpr std::string_view trace_csv_header =
@@ -78,6 +79,9 @@ void print_usage(std::ostream& os)
        << "  --output-dir <path>    Directory to write summary CSV + traces/ subdir (required).\n"
        << "  --seed-start <N>       First seed in the contiguous sweep (default 42).\n"
        << "  --seed-count <N>       Number of consecutive seeds to run (default 11).\n"
+       << "  --argmin-only          Skip the external comparator libraries; run only the\n"
+          "                         argmin solvers (the regression baseline is argmin-only,\n"
+          "                         so this gates every baseline cell at a fraction of the cost).\n"
        << "  --help                 Print this message and exit.\n";
 }
 
@@ -119,6 +123,10 @@ auto parse_args(int argc, char** argv, cli_args& cli) -> int
         {
             cli.output_dir = argv[++i];
             cli.have_output_dir = true;
+        }
+        else if(arg == "--argmin-only")
+        {
+            cli.argmin_only = true;
         }
         else
         {
@@ -251,25 +259,34 @@ int main(int argc, char** argv)
                 cfg, seed);
         });
 
-        #ifdef ARGMIN_HAS_NLOPT
-        nlopt::srand(static_cast<unsigned long>(seed));
-        argmin::bench::run_nlopt_benchmarks(results, traces, cfg);
-        #endif
-        #ifdef ARGMIN_HAS_IPOPT
-        argmin::bench::run_ipopt_benchmarks(results, traces, cfg);
-        #endif
-        #ifdef ARGMIN_HAS_CERES
-        argmin::bench::run_ceres_benchmarks(results, traces, cfg);
-        #endif
-        #ifdef ARGMIN_HAS_DLIB
-        argmin::bench::run_dlib_benchmarks(results, traces, cfg);
-        #endif
-        #ifdef ARGMIN_HAS_OPTIM
-        argmin::bench::run_optim_benchmarks(results, traces, cfg);
-        #endif
-        #ifdef ARGMIN_HAS_LIBCMAES
-        argmin::bench::run_libcmaes_benchmarks(results, traces, cfg);
-        #endif
+        // External comparator libraries. The regression baseline is
+        // argmin-only, so --argmin-only skips these entirely — the fast
+        // regression gate still witnesses every baseline cell, at a fraction
+        // of the wall cost that running five external solvers per problem
+        // would add. The full comparator sweep remains the default (and is
+        // what the publication/weekly wall-regression run uses).
+        if(!cli.argmin_only)
+        {
+            #ifdef ARGMIN_HAS_NLOPT
+            nlopt::srand(static_cast<unsigned long>(seed));
+            argmin::bench::run_nlopt_benchmarks(results, traces, cfg);
+            #endif
+            #ifdef ARGMIN_HAS_IPOPT
+            argmin::bench::run_ipopt_benchmarks(results, traces, cfg);
+            #endif
+            #ifdef ARGMIN_HAS_CERES
+            argmin::bench::run_ceres_benchmarks(results, traces, cfg);
+            #endif
+            #ifdef ARGMIN_HAS_DLIB
+            argmin::bench::run_dlib_benchmarks(results, traces, cfg);
+            #endif
+            #ifdef ARGMIN_HAS_OPTIM
+            argmin::bench::run_optim_benchmarks(results, traces, cfg);
+            #endif
+            #ifdef ARGMIN_HAS_LIBCMAES
+            argmin::bench::run_libcmaes_benchmarks(results, traces, cfg);
+            #endif
+        }
 
         for(std::size_t i = 0; i < results.size(); ++i)
         {

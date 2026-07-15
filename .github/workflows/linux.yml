@@ -287,8 +287,8 @@ jobs:
       - name: Build
         run: cmake --build build
 
-      - name: Run alloc-gate and oracle-pin instruments
-        run: cd build && ctest --output-on-failure -L "alloc-gate|oracle-pin"
+      - name: Run alloc-gate, oracle-pin, and fast regression instruments
+        run: cd build && ctest --output-on-failure -L "alloc-gate|oracle-pin|regression-fast"
 
   install-test:
     runs-on: ubuntu-24.04
