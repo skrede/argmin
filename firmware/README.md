@@ -10,7 +10,7 @@ Two honest, non-interchangeable proofs on two differently-shaped targets:
 | Target | Claim | Environment | Instrument | Report | Status |
 |---|---|---|---|---|---|
 | **NUCLEO-H753ZI** | *rigorous* | bare-metal Cortex-M7, **no RTOS**, newlib-nano | `_sbrk` high-water + `--wrap` malloc + `operator new` | semihosting | build + link + instrument here; **allocs/step = operator capture** |
-| **ESP32 / ESP-IDF** | *accessible* | FreeRTOS present, IDF allocator in the loop | `heap_trace` / `heap_caps` | second UART | see `esp32/` |
+| **ESP32 / ESP-IDF** | *accessible* | FreeRTOS present, IDF allocator in the loop | `heap_trace` / `heap_caps` | second UART | **measured on hardware: 0.00 allocs/step, canary PASS** (`esp32_probe/onchip-result.md`) |
 
 The ESP32 proof runs under FreeRTOS with IDF's allocator in the loop — a real
 embeddability result but a **softer** zero-heap statement than the bare-metal
