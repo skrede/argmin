@@ -31,14 +31,14 @@
 # Every other line is reached by real tests, so there is nothing to review for
 # exclusion gaming.
 
-global_line          = 91.0
-global_branch        = 67.0
+global_line          = 93.0
+global_branch        = 72.0
 
 solver_line          = 90.0
 solver_branch        = 71.0
 
-detail_line          = 90.0
-detail_branch        = 62.0
+detail_line          = 94.0
+detail_branch        = 68.0
 
 derivative_line      = 99.0
 derivative_branch    = 90.0

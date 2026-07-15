@@ -27,6 +27,11 @@ add_executable(argmin_unit_tests
     budget_driver_test.cpp
     runner_options_matrix_test.cpp
     robustness/abort_test.cpp
+    robustness/restoration_terminal_test.cpp
+    robustness/filter_restoration_test.cpp
+    robustness/multistart_restart_test.cpp
+    robustness/mma_subproblem_dual_test.cpp
+    robustness/kraft_recovery_test.cpp
     scheduling_test.cpp
     convergence_test.cpp
     line_search_test.cpp
@@ -139,6 +144,19 @@ catch_discover_tests(argmin_unit_tests
     TEST_SPEC "[oracle-pin]"
     TEST_PREFIX "oracle-pin:"
     PROPERTIES LABELS "oracle-pin"
+)
+
+# Dedicated ctest selection for the behavioral failure-mode suite. The
+# [robustness]-tagged cases drive the reject / error / NaN-guard paths
+# (cooperative abort, restoration terminals, filter-restoration legs,
+# multi-start restart, the CCSA dual solve, and the QP augmentation
+# recovery). This second discovery pass re-registers those cases under a
+# "robustness:" name prefix so `ctest -R robustness` (and the label
+# "robustness") select the suite; a plain ctest runs them once as usual.
+catch_discover_tests(argmin_unit_tests
+    TEST_SPEC "[robustness]"
+    TEST_PREFIX "robustness:"
+    PROPERTIES LABELS "robustness"
 )
 
 # Oracle CSV plumbing (wave-2 instruments, populated by a later plan).
