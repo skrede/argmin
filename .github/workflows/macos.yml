@@ -43,6 +43,16 @@ jobs:
       - name: Test
         run: cd build && ctest --output-on-failure
 
+      # The cross-path determinism test reports its spread magnitude through a
+      # Catch2 WARN, which ctest discards for a passing test under
+      # --output-on-failure. Invoking the test binary directly lets that line
+      # reach the log on every green run, so the magnitude is re-measured rather
+      # than inherited from prose. Runs once per Xcode leg, giving one arm64
+      # reading per toolchain.
+      - name: Record cross-path spread magnitude (arm64)
+        run: |
+          ./build/tests/unit/argmin_unit_tests "projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory"
+
   install-test:
     runs-on: macos-14
     steps:
