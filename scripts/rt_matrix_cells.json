@@ -63,8 +63,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this driver"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this driver through step(), solve()/reset() on a constrained and an unconstrained policy"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {"verdict": "per-policy"}
           }
@@ -84,8 +88,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this driver"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this driver through step(), solve()/reset() on a constrained and an unconstrained policy"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {
               "verdict": "no",
@@ -108,8 +116,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this driver"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this driver through step(), solve()/reset() on a constrained and an unconstrained policy"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {
               "verdict": "no",
@@ -630,8 +642,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this policy through the step-budget driver's init/step/reset"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
@@ -716,8 +732,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this policy through the step-budget driver's init/step/reset"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
@@ -755,8 +775,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this policy through the step-budget driver's init/step/reset"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
@@ -833,8 +857,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this policy through the step-budget driver's init/step/reset"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
@@ -873,8 +901,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this policy through the step-budget driver's init/step/reset"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
@@ -912,8 +944,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this policy through the step-budget driver's init/step/reset"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
@@ -951,8 +987,12 @@
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "the probe drives this policy through the step-budget driver's init/step/reset"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "deterministic(seeded)?": {
               "verdict": "yes",

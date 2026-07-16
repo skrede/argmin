@@ -454,10 +454,11 @@ jobs:
           CXX: g++-14
         # The probe target is built and linked with -fno-exceptions
         # -fno-rtti at the C++20 floor (flags are applied to the target in
-        # tests/compile/CMakeLists.txt); a surviving throw in any
-        # instantiated solver-policy path fails this build. The probe is a
-        # linked, executed binary -- header parsing alone would pass with
-        # live throw sites, so the exceptions-off guarantee is exercised.
+        # tests/compile/CMakeLists.txt); a surviving throw or dynamic_cast on
+        # any instantiated solver-policy or driver path fails this build. The
+        # probe is a linked, executed binary -- header parsing alone would
+        # pass with live throw sites, since neither construct is diagnosed in
+        # an uninstantiated template, so the guarantee is exercised.
         run: |
           cmake . -B build -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=20 \
