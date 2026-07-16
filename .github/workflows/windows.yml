@@ -35,6 +35,17 @@ jobs:
       - name: Test
         run: cd build && ctest -C Release --output-on-failure --timeout 30
 
+      # ctest suppresses a passing test's stdout, so the spread magnitude the
+      # cross-path test reports is invisible under --output-on-failure. Surface
+      # it on every green run, so the bounded aggregate check is pinned against
+      # a number measured on every architecture it has to hold on.
+      #
+      # -V rather than a direct binary run: this generator is multi-config, so
+      # the executable's directory depends on the configuration layout. -V
+      # defeats the passing-test suppression without pinning that path.
+      - name: Record cross-path spread magnitude (x86_64)
+        run: cd build && ctest -C Release -V -R "reproduces the dynamic-N trajectory"
+
   install-test:
     runs-on: windows-2022
     steps:

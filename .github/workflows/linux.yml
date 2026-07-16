@@ -69,6 +69,14 @@ jobs:
       - name: Test
         run: cd build && ctest --output-on-failure
 
+      # ctest suppresses a passing test's stdout, so the spread magnitude the
+      # cross-path test reports is invisible under --output-on-failure. Run the
+      # binary directly so every green run records the number, on every
+      # architecture the bounded aggregate check has to hold on.
+      - name: Record cross-path spread magnitude (x86_64)
+        run: |
+          ./build/tests/unit/argmin_unit_tests "projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory"
+
       - name: Generate coverage
         if: matrix.coverage
         run: |
