@@ -976,9 +976,21 @@ option(ARGMIN_BENCH_WEEKLY_REGRESSION_GATE
 #
 # Tier 1 (default, per-commit): `publish_bench_regression_gate` runs one seed
 # with --argmin-only (skipping the five external comparators the baseline never
-# gates) and the wall bound advisory. It still witnesses every baseline cell via
-# the deterministic instructions/iter gate and the oracle verdict, at a fraction
-# of the cost. This is the tier CI's benchmark job runs (label regression-fast).
+# gates) and the wall bound advisory, at a fraction of the cost. It witnesses
+# every baseline cell's CORRECTNESS through the independent oracle verdict --
+# that check needs no hardware counter and gates on every host.
+#
+# The instructions/iter comparison is gated only where the counter can arm. It
+# reads a userspace perf_event_open counter, which the kernel permits only at
+# perf_event_paranoid <= 2; a shared GitHub-hosted runner denies it outright. So
+# this tier sets REGRESSION_CHECK_ALLOW_UNARMED_INSTRUCTION_COUNTER=1: where the
+# counter cannot arm, the instruction cost is reported UNMEASURED (and counted in
+# the log) instead of breaching. That is deliberately not a pass -- the gate
+# declines to answer what it cannot measure. Where the counter DOES arm (a local
+# or self-hosted host at paranoid <= 2) this tier gates the ratio and the
+# real-time ceiling in full, unrelaxed. A publication run leaves the variable
+# unset, so a disarmed counter fails loud rather than publishing an unmeasured
+# instruction-cost claim.
 #
 # Tier 2 (opt-in, controlled bench host): `publish_bench_wall_regression_weekly`
 # runs the full multi-seed comparator sweep with the wall bound enforced. The
@@ -1001,6 +1013,7 @@ if(CMAKE_TESTING_ENABLED)
                 "SEED_COUNT=1"
                 "ARGMIN_ONLY=1"
                 "REGRESSION_CHECK_DISABLE_WALL_GATE=1"
+                "REGRESSION_CHECK_ALLOW_UNARMED_INSTRUCTION_COUNTER=1"
                 "OUT_ROOT=${CMAKE_BINARY_DIR}/regression_gate_runs"
                 "BENCH_BINARY=$<TARGET_FILE:publish_bench>"
                 "REGRESSION_CHECK_BINARY=$<TARGET_FILE:regression_check>"

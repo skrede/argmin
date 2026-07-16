@@ -93,6 +93,18 @@ struct gate_options
     double cv_cutoff{kCvCutoff};
     bool disable_wall_gate{false};
     bool promote_log_enabled{false};
+    // Narrow relaxation for a host whose kernel forbids the userspace
+    // instruction counter (perf_event_paranoid > 2, as on a shared CI runner).
+    // It changes exactly one verdict: a cell whose counter could not arm is
+    // reported UNMEASURED instead of breaching -- the gate declines to answer
+    // what it cannot measure, rather than reporting a pass it did not observe.
+    // It relaxes nothing else. Correctness (status/oracle/accuracy/feasibility)
+    // is gated identically, and a cell whose counter DID arm is still gated on
+    // ratio and ceiling in full, so the instruction gate keeps its teeth on
+    // every host where it can see. Default (off) is the publication behavior: a
+    // disarmed counter is a breach, because a published instruction-cost claim
+    // must not rest on a metric nobody measured.
+    bool allow_unarmed_instr_counter{false};
     // Optional path to the independent oracle verdict (oracle_verdict.csv).
     // When supplied, a pass cell's CORRECTNESS is witnessed by the oracle's
     // recomputed feasibility/KKT at the returned point (oracle_pass), not by
@@ -707,6 +719,7 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
     int unexpected_pass_count = 0;
     int excluded_count = 0;
     int warn_missing_baseline = 0;
+    int instr_unmeasured_count = 0;
 
     auto emit_breach = [&](std::string_view solver, std::string_view problem,
                            std::string_view mode, std::string_view metric,
@@ -874,9 +887,27 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
 
             if(any_unavailable || ipi_seeds.empty())
             {
-                emit_breach(solver, problem, mode, "instructions_unavailable",
-                            "counter-not-armed-or-zero",
-                            "positive-instruction-count");
+                // Disarmed counter. By default this is a breach (a publication
+                // run must measure what it claims). Under the explicit
+                // unarmed-counter relaxation the cell is instead recorded
+                // UNMEASURED: the gate says it could not see this metric here,
+                // which is not the same as saying the metric is within bounds.
+                // The count is reported at the end so a run can never quietly
+                // present an unmeasured instruction cost as a gated one.
+                if(opts.allow_unarmed_instr_counter)
+                {
+                    std::cerr << "UNMEASURED: solver=" << solver
+                              << " problem=" << problem
+                              << " mode=" << mode
+                              << " metric=instr_per_iter"
+                              << " reason=counter-not-armed"
+                              << " (not gated in this run)\n";
+                    ++instr_unmeasured_count;
+                }
+                else
+                    emit_breach(solver, problem, mode, "instructions_unavailable",
+                                "counter-not-armed-or-zero",
+                                "positive-instruction-count");
             }
             else
             {
@@ -1022,6 +1053,15 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
                   << " mode=" << mode << '\n';
         ++warn_missing_baseline;
     }
+
+    // Reported unconditionally, including on an otherwise clean run, so the
+    // log states plainly which cells the instruction gate did not gate. A
+    // reader must never have to infer coverage from the absence of a breach.
+    if(instr_unmeasured_count > 0)
+        std::cerr << "regression_check: " << instr_unmeasured_count
+                  << " cell(s) UNMEASURED for instructions/iter (counter not"
+                  << " armed); instruction cost is NOT gated for those cells."
+                  << " Correctness remains gated for every cell.\n";
 
     if(excluded_count > 0)
         std::cerr << "regression_check: " << excluded_count
@@ -1180,6 +1220,36 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
     {
         std::cerr << "regression_check instructions self-test: unavailable"
                   << " counter (-1) did not fail loud\n";
+        return 1;
+    }
+
+    // Under the explicit unarmed-counter relaxation, that same unmeasurable
+    // cell is UNMEASURED rather than a breach -- the gate declines to answer
+    // what it could not measure.
+    gate_options unarmed_allowed{};
+    unarmed_allowed.allow_unarmed_instr_counter = true;
+    if(run_gate(summary_path, baseline_path, unarmed_allowed) != 0)
+    {
+        std::cerr << "regression_check instructions self-test: unavailable"
+                  << " counter was not reported UNMEASURED under the"
+                  << " unarmed-counter relaxation\n";
+        return 1;
+    }
+
+    // The relaxation is not a bypass. A cell whose counter DID arm is still
+    // gated in full under it: the same ratio regression that breaches by
+    // default must still breach with the relaxation set. Without this the
+    // relaxation would make the instruction gate vacuous rather than partial.
+    if(!write_text(summary_path, summary_fixture("bobyqa", "problem_i",
+                                                 "1", "1e-4", "1e-4",
+                                                 "max_iterations", "included",
+                                                 "none", "100000")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, unarmed_allowed) != 2)
+    {
+        std::cerr << "regression_check instructions self-test: the"
+                  << " unarmed-counter relaxation suppressed a ratio breach on"
+                  << " an armed counter; the relaxation is a bypass\n";
         return 1;
     }
 
@@ -1420,6 +1490,23 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
         return 1;
     }
 
+    // The same oracle_pass=fail cell must still breach under the
+    // unarmed-counter relaxation. That relaxation exists so a host without a
+    // hardware counter can still gate correctness; if it also suppressed an
+    // oracle-witnessed correctness failure, the gate such a host runs would be
+    // incapable of failing -- exactly the vacuous check the relaxation must
+    // not become. This pins correctness as gated independently of whether the
+    // instruction counter can arm.
+    gate_options with_verdict_unarmed{with_verdict};
+    with_verdict_unarmed.allow_unarmed_instr_counter = true;
+    if(run_gate(summary_path, baseline_path, with_verdict_unarmed) != 2)
+    {
+        std::cerr << "regression_check oracle self-test: oracle_pass=fail pass"
+                  << " cell was not rejected under the unarmed-counter"
+                  << " relaxation; correctness gating is not counter-independent\n";
+        return 1;
+    }
+
     // A pass cell missing from the verdict -> fail-closed breach (exit 2).
     if(!write_text(verdict_path,
                    "solver,problem,mode,seed,oracle_pass,objective_distance,"
@@ -1458,6 +1545,18 @@ void print_usage(std::ostream& os)
           "witnessed by the independent oracle (feasibility/KKT at the returned\n"
           "point); without it, the legacy self-reported-status gate applies.\n"
           "\n"
+          "Environment:\n"
+          "  REGRESSION_CHECK_DISABLE_WALL_GATE=1\n"
+          "      Make the max_us_per_step bound advisory (a shared host cannot\n"
+          "      hold wall time still enough to gate it).\n"
+          "  REGRESSION_CHECK_ALLOW_UNARMED_INSTRUCTION_COUNTER=1\n"
+          "      Report a cell whose userspace instruction counter could not\n"
+          "      arm as UNMEASURED instead of breaching. For a host whose kernel\n"
+          "      forbids perf_event_open (perf_event_paranoid > 2). Leave unset\n"
+          "      for a publication run: there, a disarmed counter must fail loud.\n"
+          "      It relaxes only that verdict -- correctness is gated unchanged,\n"
+          "      and cells whose counter arms are still gated in full.\n"
+          "\n"
           "Self-tests:\n"
           "  regression_check --self-test\n"
           "  regression_check --self-test-prohibited-solvers\n"
@@ -1483,6 +1582,21 @@ int main(int argc, char** argv)
     if(opts.disable_wall_gate)
         std::cerr << "INFO: REGRESSION_CHECK_DISABLE_WALL_GATE=1;"
                   << " max_us_per_step gate disabled\n";
+
+    // Opt out of the disarmed-counter breach only. Set by a caller that knows
+    // its host forbids perf_event_open (a shared CI runner); a publication or
+    // controlled-host run leaves it unset so a disarmed counter still fails
+    // loud. This is not a gate bypass: correctness is unaffected, and an armed
+    // counter is still gated in full.
+    const char* allow_unarmed_env =
+        std::getenv("REGRESSION_CHECK_ALLOW_UNARMED_INSTRUCTION_COUNTER");
+    opts.allow_unarmed_instr_counter =
+        allow_unarmed_env != nullptr && std::string_view{allow_unarmed_env} == "1";
+    if(opts.allow_unarmed_instr_counter)
+        std::cerr << "INFO: REGRESSION_CHECK_ALLOW_UNARMED_INSTRUCTION_COUNTER=1;"
+                  << " a disarmed instruction counter reports UNMEASURED instead"
+                  << " of breaching. Correctness gating is unchanged; cells whose"
+                  << " counter arms are still gated on ratio and ceiling.\n";
 
     const char* promote_log_env = std::getenv("ARGMIN_REGRESSION_CHECK_PROMOTE_LOG");
     opts.promote_log_enabled =

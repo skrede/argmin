@@ -330,7 +330,14 @@ jobs:
       # ctest treats a label selection that matches nothing as success, so
       # without --no-tests=error this step would pass if the labels it names
       # were renamed or deleted -- the job would go green having run nothing.
-      - name: Run alloc-gate, oracle-pin, and fast regression instruments
+      # The fast regression gate enforces oracle-witnessed correctness on every
+      # baseline cell here. It does NOT gate instruction counts on this runner:
+      # the userspace instruction counter needs perf_event_paranoid <= 2 and a
+      # shared GitHub-hosted runner denies perf_event_open, so those cells are
+      # reported UNMEASURED in the log rather than passed. Instruction-cost
+      # ratios are gated where the counter arms -- a controlled host, and the
+      # weekly regression-weekly tier.
+      - name: Run alloc-gate, oracle-pin, and fast regression instruments (correctness gated; instruction counts not gated here)
         run: cd build && ctest --output-on-failure --no-tests=error -L "alloc-gate|oracle-pin|regression-fast"
 
       # The real-time safety matrix and the determinism page cite a named test,

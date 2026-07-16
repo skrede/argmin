@@ -231,6 +231,22 @@ compute_wall_gate_policy() {
     fi
 }
 
+# Whether this run gated the per-iteration instruction cost on every cell, or
+# only on the cells whose userspace counter could arm. "armed_cells_only" means
+# the caller declared the host cannot arm the counter (a shared CI runner), so
+# unmeasurable cells were reported UNMEASURED rather than breaching. A
+# publication baseline requires "enforced": an instruction-cost claim must not
+# rest on cells nobody measured.
+compute_instr_gate_policy() {
+    if [ "${RUN_REGRESSION_CHECK}" != "1" ]; then
+        printf '%s\n' "not_run"
+    elif [ "${REGRESSION_CHECK_ALLOW_UNARMED_INSTRUCTION_COUNTER:-0}" = "1" ]; then
+        printf '%s\n' "armed_cells_only"
+    else
+        printf '%s\n' "enforced"
+    fi
+}
+
 write_provenance() {
     {
         printf '{\n'
@@ -277,6 +293,7 @@ write_provenance() {
         printf '    "turbo_policy": '; json_string "${TURBO_POLICY}"; printf '\n'
         printf '  },\n'
         printf '  "wall_gate_policy": '; json_string "${WALL_GATE_POLICY}"; printf ',\n'
+        printf '  "instr_gate_policy": '; json_string "${INSTR_GATE_POLICY}"; printf ',\n'
         printf '  "run_regression_check": '; json_string "${RUN_REGRESSION_CHECK}"; printf ',\n'
         printf '  "run_dm_profile": '; json_string "${RUN_DM_PROFILE}"; printf ',\n'
         printf '  "baseline_valid": '; json_bool "${BASELINE_VALID}"; printf ',\n'
@@ -331,6 +348,7 @@ AFFINITY_POLICY="$(affinity_policy)"
 GOVERNOR_POLICY="$(governor_policy)"
 TURBO_POLICY="$(turbo_policy)"
 WALL_GATE_POLICY="$(compute_wall_gate_policy)"
+INSTR_GATE_POLICY="$(compute_instr_gate_policy)"
 BASELINE_VALID="false"
 BASELINE_INVALID_REASON="not requested for publication baseline generation"
 
@@ -343,6 +361,9 @@ if [ "${EXPECT_BASELINE_ELIGIBLE}" = "1" ]; then
     elif [ "${WALL_GATE_POLICY}" != "enforced" ]; then
         BASELINE_VALID="false"
         BASELINE_INVALID_REASON="wall_gate_policy is ${WALL_GATE_POLICY}, expected enforced"
+    elif [ "${INSTR_GATE_POLICY}" != "enforced" ]; then
+        BASELINE_VALID="false"
+        BASELINE_INVALID_REASON="instr_gate_policy is ${INSTR_GATE_POLICY}, expected enforced"
     fi
 fi
 
@@ -362,6 +383,7 @@ echo "seeds: ${SEED_START}..$((SEED_START + SEED_COUNT - 1))"
 echo "binary: ${BENCH_BINARY}"
 echo "build_type: ${BUILD_TYPE}"
 echo "wall_gate_policy: ${WALL_GATE_POLICY}"
+echo "instr_gate_policy: ${INSTR_GATE_POLICY}"
 echo
 
 ARGMIN_ONLY_FLAG=()
