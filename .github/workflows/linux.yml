@@ -325,6 +325,29 @@ jobs:
       - name: Run alloc-gate, oracle-pin, and fast regression instruments
         run: cd build && ctest --output-on-failure --no-tests=error -L "alloc-gate|oracle-pin|regression-fast"
 
+      # The real-time safety matrix and the determinism page cite a named test,
+      # label, or job for every claim they gate. This resolves each of those
+      # names against live state and fails when one no longer exists -- so
+      # renaming or deleting a cited artifact turns this job red instead of
+      # leaving a document citing something nobody can run.
+      #
+      # It runs here, rather than in the lightweight documentation workflow,
+      # because resolving names needs a tree configured with benchmarks on, with
+      # the comparison library present, and built: without the build, test
+      # registration reports placeholder case names and every citation would
+      # look dangling at once. That is most of a build, and this job is already
+      # exactly that tree. There is no blind spot in placing it here -- a rename
+      # is a code change, never a documentation-only edit, so it always triggers
+      # this workflow.
+      #
+      # Deliberately after the ctest step above, so that a gate which genuinely
+      # fails is reported as a failing test rather than as a name that could not
+      # be resolved.
+      - name: Resolve the cited real-time evidence against the built tree
+        run: |
+          python3 scripts/rt_matrix.py resolve scripts/rt_matrix_cells.json build .github/workflows
+          python3 scripts/rt_matrix.py resolve scripts/rt_matrix_tiers.json build .github/workflows
+
   install-test:
     runs-on: ubuntu-24.04
 

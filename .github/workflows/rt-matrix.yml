@@ -1,0 +1,82 @@
+name: RT matrix
+
+# The real-time safety matrix and the determinism page publish tables that are
+# rendered from checked-in data files. This workflow fails when a published
+# table and its data file disagree -- that is, when someone hand-edits a
+# generated region instead of editing the data and re-rendering.
+#
+# It exists separately from the build workflows for one reason. Every other
+# workflow here carries `paths-ignore: ['**.md', 'docs/**', ...]`, deliberately,
+# so that a typo in a document does not spend an hour running eleven build jobs
+# including the sanitizers. That is the right trade for those workflows and it is
+# not being changed. But it means a hand-edit of a published table triggers no
+# continuous integration at all -- so a drift check living in any of them would
+# be structurally blind to the exact edit it exists to catch. This workflow is
+# the one that watches documents, and it is cheap enough to afford it: Python
+# only, no CMake, no compiler, seconds to run.
+#
+# The trigger is an allow-list, not `paths-ignore`. A denylist fails open: it
+# silently stops watching any input added later, and nobody finds out until a
+# claim has already drifted. An allow-list fails closed -- a new input is
+# unwatched until someone lists it, and the generator's input surface is globbed
+# rather than enumerated so that a new data file is watched the day it lands.
+
+on:
+  push:
+    branches: [master, develop]
+    paths:
+      # The published documents whose generated regions are checked.
+      - 'docs/rt-safety-matrix.md'
+      - 'docs/determinism.md'
+      # The generator, its data files, and the negative control. Globbed, so a
+      # data file added later is watched without anyone remembering this list.
+      - 'scripts/rt_matrix*'
+      # The build files that register the gates, labels, and tests the tables
+      # cite. Resolving those names needs a built tree, so it runs in the Linux
+      # workflow rather than here; these are watched so a change to what the
+      # documents cite always re-runs the documentation check too.
+      - 'benchmarks/CMakeLists.txt'
+      - 'tests/unit/CMakeLists.txt'
+      - 'tests/compile/CMakeLists.txt'
+      # The workflow directory, so this workflow watches itself and the job
+      # names the documents cite as evidence.
+      - '.github/workflows/**'
+  pull_request:
+    branches: [master, develop]
+    paths:
+      - 'docs/rt-safety-matrix.md'
+      - 'docs/determinism.md'
+      - 'scripts/rt_matrix*'
+      - 'benchmarks/CMakeLists.txt'
+      - 'tests/unit/CMakeLists.txt'
+      - 'tests/compile/CMakeLists.txt'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+# Read-only, deliberately. A drift check needs nothing more, and a workflow that
+# could commit a corrected table would defeat its own purpose entirely: drift
+# would silently heal itself instead of going red, and the published claim would
+# quietly become whatever the last edit said it was.
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-24.04
+    name: rt matrix drift + negative control
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fails when a published table does not match what the data file renders.
+      - name: Check the published tables match their data files
+        run: |
+          python3 scripts/rt_matrix.py check scripts/rt_matrix_cells.json docs/rt-safety-matrix.md
+          python3 scripts/rt_matrix.py check scripts/rt_matrix_tiers.json docs/determinism.md
+
+      # The step above is only evidence if it can go red. This mutates a cell on
+      # a copy and asserts the check catches it and names the row -- every run,
+      # not once. A control that ran once in the past is an inherited
+      # measurement; a control that runs every time is a live property.
+      - name: Prove the drift check can fail
+        run: ./scripts/rt_matrix_negative_control.sh
