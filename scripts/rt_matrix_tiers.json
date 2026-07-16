@@ -1,0 +1,77 @@
+{
+  "schema": "determinism-tiers",
+  "tables": [
+    {
+      "id": "tiers",
+      "columns": [
+        "guaranteed?"
+      ],
+      "rows": [
+        {
+          "module": "run-to-run and post-`reset()` bit-exactness",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "on every platform, on both dimension axes, and across `reset()`",
+              "evidence": [
+                {"kind": "ctest_test", "name": "projected_gn_policy: trajectory is run-to-run deterministic on a fixed target", "note": "exact ==, not a tolerance"},
+                {"kind": "ci_job", "name": "gcc-14"},
+                {"kind": "ci_job", "name": "clang-18"},
+                {"kind": "ci_job", "name": "build (Xcode 15.4)"},
+                {"kind": "ci_job", "name": "build (Xcode 16.2)"},
+                {"kind": "ci_job", "name": "build", "note": "the Windows workflow"}
+              ]
+            }
+          }
+        },
+        {
+          "module": "cross-instantiation algorithmic-decision identity",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "identical accept, reject, and termination decisions, pinned as exact step-count equality",
+              "evidence": [
+                {"kind": "ctest_test", "name": "projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory", "note": "the step-count REQUIRE"},
+                {"kind": "ci_job", "name": "gcc-14"},
+                {"kind": "ci_job", "name": "clang-18"},
+                {"kind": "ci_job", "name": "build (Xcode 15.4)"},
+                {"kind": "ci_job", "name": "build (Xcode 16.2)"},
+                {"kind": "ci_job", "name": "build", "note": "the Windows workflow"}
+              ]
+            }
+          }
+        },
+        {
+          "module": "cross-instantiation numeric agreement",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "within the per-element tolerance stated below, wherever the test runs; not a comparison between architectures",
+              "evidence": [
+                {"kind": "ctest_test", "name": "projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory", "note": "the per-element tolerance check"},
+                {"kind": "ci_job", "name": "gcc-14"},
+                {"kind": "ci_job", "name": "clang-18"},
+                {"kind": "ci_job", "name": "build (Xcode 15.4)"},
+                {"kind": "ci_job", "name": "build (Xcode 16.2)"},
+                {"kind": "ci_job", "name": "build", "note": "the Windows workflow"}
+              ]
+            }
+          }
+        },
+        {
+          "module": "cross-architecture or cross-instantiation bit-identity",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "not-claimed",
+              "qualifier": "a deliberate anti-feature, not a gap",
+              "rationale": "none, and there will not be one: this is the claim the tiers above exist to not make, and its cost is stated below"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

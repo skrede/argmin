@@ -44,9 +44,11 @@ and has not frozen its schema, so the column set is agreed rather than final.
   instantiation probe additionally links-and-runs the RT-claimed policies so a surviving
   throw fails the build rather than passing a header parse.
 - **deterministic(seeded)?** — identical inputs (and, for the stochastic policies, an
-  identical seed) reproduce the same trajectory bit-for-bit. The SQP / L-BFGS-B / LM /
-  Gauss-Newton / MMA families carry no RNG; the CMA-ES and ISRES families take an injectable,
-  seed-deterministic RNG.
+  identical seed) reproduce the same trajectory bit-for-bit *on a fixed target*. The SQP /
+  L-BFGS-B / LM / Gauss-Newton / MMA families carry no RNG; the CMA-ES and ISRES families take
+  an injectable, seed-deterministic RNG. This column is a per-policy property; what is and is
+  not guaranteed once you cross an architecture or an instantiation boundary is a different
+  question, and it is answered by the tiered claim in [Determinism](determinism.md).
 - **evidence** — for a gated cell, the named artifact proving the "yes"; for an argued cell,
   the reasoning it rests on, published next to the claim rather than left implicit. Alloc
   gates run under the ctest label `alloc-gate` (CI job *labeled instruments (alloc-gate,

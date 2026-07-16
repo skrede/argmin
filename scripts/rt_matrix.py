@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Render the real-time safety matrix tables from a checked-in cell data file.
+"""Render claim tables from a checked-in data file, and resolve what they cite.
 
-Reads a JSON file declaring, for every driver and policy, what each real-time
-column claims and what proves it, and rewrites the marker-delimited table
-regions of the matrix document from it. Everything outside the markers -- the
-column legend, the scope argument, the footnote bodies -- is hand-written prose
-and is never touched: that analysis is what makes the document trustworthy and
-no script can derive it.
+Reads a JSON file declaring, for every row, what each claim column asserts and
+what proves it, and rewrites the marker-delimited table regions of a document
+from it. Everything outside the markers -- the column legend, the scope
+argument, the footnote bodies, the per-tier prose -- is hand-written and is
+never touched: that analysis is what makes a document trustworthy and no script
+can derive it.
+
+Two documents publish through this renderer, under the two schemas below: the
+real-time safety matrix, one row per module, and the tiered determinism claim,
+one row per property. They share a schema validator and a resolver on purpose.
+The determinism claim is the most citable guarantee the library makes, and a
+claim published without traceable evidence is exactly the asserted prose the
+matrix stopped being; there is no second, weaker path for it.
 
 Why a data file plus a renderer rather than hand-maintained prose:
 a "yes" in this table is a real-time guarantee that a downstream worst-case
@@ -32,9 +39,9 @@ quarter and render it as gated forever. That is what the resolve mode below is
 for.
 
 Usage:
-    rt_matrix.py render  <cells.json> <doc.md>   # rewrite the marked regions in place
-    rt_matrix.py check   <cells.json> <doc.md>   # render to memory, diff against the doc
-    rt_matrix.py resolve <cells.json> <build_dir> <workflows_dir>
+    rt_matrix.py render  <data.json> <doc.md>   # rewrite the marked regions in place
+    rt_matrix.py check   <data.json> <doc.md>   # render to memory, diff against the doc
+    rt_matrix.py resolve <data.json> <build_dir> <workflows_dir>
 
 Exit codes:
     0   the document matches the render / the render succeeded / every name resolves
@@ -105,13 +112,14 @@ registers. Cite a job whose configuration actually registers the test.
 
 Data file format:
     {
+      "schema": "rt-claims",                    # selects the row label and claim columns
       "tables": [
         {
           "id": "policies",                     # must match a marker pair in the doc
-          "columns": [ ...the ratified claim columns, in order... ],
+          "columns": [ ...the schema's claim columns, in order... ],
           "rows": [
             {
-              "module": "kraft_slsqp",
+              "module": "kraft_slsqp",          # the row label, whatever the schema calls it
               "cells": {
                 "allocation-free?": {
                   "verdict": "yes",             # yes | no | per-policy | not-claimed
@@ -121,7 +129,8 @@ Data file format:
                      "name": "sqp_alloc_gate_kraft",
                      "note": "zero mode, 0.00/step"}   # optional
                   ],
-                  "rationale": "...",           # required iff class is argued, non-empty
+                  "rationale": "...",           # required iff class is argued; optional on a
+                                                # non-claim; forbidden otherwise
                   "qualifier": "...",           # optional, renders inside the cell
                   "footnotes": ["restore"]      # optional, renders as [^restore]
                 }
@@ -131,6 +140,11 @@ Data file format:
         }
       ]
     }
+
+The schema is a closed set, declared here rather than in the data file, so a
+document cannot quietly add, drop, or rename a claim column: the ratified matrix
+column set stays ratified, and a tier table cannot borrow the matrix's schema to
+render something the matrix does not publish.
 
 Row order is the data file's order and is never sorted, so the same data file
 always renders byte-identically.
@@ -166,20 +180,47 @@ COLUMNS = [
     "deterministic(seeded)?",
 ]
 
-VERDICT_TEXT = {
-    "no": "no",
-    "per-policy": "per policy",
-    "not-claimed": "not RT-claimed",
-}
+# The tiered determinism claim asks one question of each property, so it has one
+# claim column. The property itself is the row label, and it is prose rather than
+# an identifier, so it is not rendered as code.
+TIER_COLUMNS = ["guaranteed?"]
 
 CLASS_TEXT = {
     "gated": "**yes** *(gated)*",
     "argued": "yes *(argued)*",
 }
 
+SCHEMAS = {
+    "rt-claims": {
+        "label": "module",
+        "label_code": True,
+        "columns": COLUMNS,
+        "verdict_text": {
+            "no": "no",
+            "per-policy": "per policy",
+            "not-claimed": "not RT-claimed",
+        },
+    },
+    "determinism-tiers": {
+        "label": "claim",
+        "label_code": False,
+        "columns": TIER_COLUMNS,
+        "verdict_text": {
+            "no": "no",
+            "per-policy": "per policy",
+            # A tier that is not claimed is not a weak claim, and it must not
+            # read as one next to three claims that are gated. It is bold for
+            # the same reason a gated yes is: the reader's eye must land on the
+            # distinction, not on the absence.
+            "not-claimed": "**not claimed**",
+        },
+    },
+}
+
 _BEGIN = "<!-- BEGIN GENERATED: {} -->"
 _END = "<!-- END GENERATED: {} -->"
 _MODULE_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|")
+_LABEL_RE = re.compile(r"^\|\s*([^|]+?)\s*\|")
 
 
 class SchemaError(Exception):
@@ -200,6 +241,10 @@ def _load(path):
         raise SchemaError([f"{path} is not valid JSON: {exc}"])
 
 
+def _schema(data):
+    return SCHEMAS[data["schema"]]
+
+
 def _validate(data):
     problems = []
 
@@ -210,6 +255,11 @@ def _validate(data):
         raise SchemaError(["top level must be an object with a 'tables' list"])
     if not data["tables"]:
         raise SchemaError(["'tables' is empty; there is nothing to render"])
+    if data.get("schema") not in SCHEMAS:
+        raise SchemaError([f"top level must declare a 'schema' from {sorted(SCHEMAS)}; "
+                           f"got {data.get('schema')!r}"])
+    schema = _schema(data)
+    columns = schema["columns"]
 
     seen_ids = []
     for t_index, table in enumerate(data["tables"]):
@@ -226,8 +276,9 @@ def _validate(data):
             bad(f"{where}: duplicate table id")
         seen_ids.append(tid)
 
-        if table.get("columns") != COLUMNS:
-            bad(f"{where}: 'columns' must be exactly the ratified set, in order: {COLUMNS}")
+        if table.get("columns") != columns:
+            bad(f"{where}: 'columns' must be exactly the '{data['schema']}' set, "
+                f"in order: {columns}")
         if not isinstance(table.get("rows"), list) or not table["rows"]:
             bad(f"{where}: 'rows' must be a non-empty list")
             continue
@@ -244,13 +295,13 @@ def _validate(data):
             if not isinstance(cells, dict):
                 bad(f"{where}/{module}: missing a 'cells' object")
                 continue
-            missing = [c for c in COLUMNS if c not in cells]
-            extra = [c for c in cells if c not in COLUMNS]
+            missing = [c for c in columns if c not in cells]
+            extra = [c for c in cells if c not in columns]
             if missing:
                 bad(f"{where}/{module}: missing claim columns {missing}")
             if extra:
                 bad(f"{where}/{module}: unknown claim columns {extra}")
-            for col in COLUMNS:
+            for col in columns:
                 if col in cells:
                     _validate_cell(cells[col], f"{where}/{module}/{col}", bad)
 
@@ -316,8 +367,19 @@ def _validate_cell(cell, where, bad):
     else:
         if cell.get("evidence") is not None:
             bad(f"{where}: only a gated claim carries evidence")
-        if cell.get("rationale") is not None:
-            bad(f"{where}: only an argued claim carries a rationale")
+        rationale = cell.get("rationale")
+        if rationale is not None:
+            # A non-claim is the one verdict a reader is entitled to a reason
+            # for: "we do not guarantee this" invites "why not", and a claim
+            # deliberately not made is indistinguishable from one nobody got
+            # around to unless the file says which it is. It publishes in the
+            # same column as a gated claim's artifacts, because that column
+            # answers the same question -- why believe this cell. A 'no' and a
+            # 'per-policy' are measured verdicts and carry no reason here.
+            if verdict != "not-claimed":
+                bad(f"{where}: only an argued claim or a non-claim carries a rationale")
+            elif not isinstance(rationale, str) or not rationale.strip():
+                bad(f"{where}: a non-claim's rationale must be a non-empty string")
 
     qualifier = cell.get("qualifier")
     if qualifier is not None and (not isinstance(qualifier, str) or not qualifier.strip()):
@@ -333,12 +395,12 @@ def _validate_cell(cell, where, bad):
                     bad(f"{where}: a footnote reference must be a non-empty string")
 
 
-def _cell_text(cell):
+def _cell_text(cell, schema):
     verdict = cell["verdict"]
     if verdict == "yes":
         text = CLASS_TEXT[cell["class"]]
     else:
-        text = VERDICT_TEXT[verdict]
+        text = schema["verdict_text"][verdict]
     qualifier = cell.get("qualifier")
     if qualifier:
         text += f" ({qualifier})"
@@ -347,9 +409,9 @@ def _cell_text(cell):
     return text
 
 
-def _evidence_text(row):
+def _evidence_text(row, columns):
     parts = []
-    for col in COLUMNS:
+    for col in columns:
         cell = row["cells"][col]
         cls = cell.get("class")
         if cls == "gated":
@@ -360,6 +422,8 @@ def _evidence_text(row):
                 parts.append(name)
         elif cls == "argued":
             parts.append(cell["rationale"])
+        elif cell["verdict"] == "not-claimed" and cell.get("rationale"):
+            parts.append(cell["rationale"])
     unique = []
     for part in parts:
         if part not in unique:
@@ -367,14 +431,16 @@ def _evidence_text(row):
     return "; ".join(unique) if unique else "none named"
 
 
-def _render_table(table):
-    header = "| module | " + " | ".join(COLUMNS) + " | evidence |"
-    rule = "|" + "---|" * (len(COLUMNS) + 2)
+def _render_table(table, schema):
+    columns = schema["columns"]
+    header = "| " + schema["label"] + " | " + " | ".join(columns) + " | evidence |"
+    rule = "|" + "---|" * (len(columns) + 2)
     lines = [header, rule]
     for row in table["rows"]:
-        cells = [_cell_text(row["cells"][col]) for col in COLUMNS]
-        lines.append("| `" + row["module"] + "` | " + " | ".join(cells)
-                     + " | " + _evidence_text(row) + " |")
+        cells = [_cell_text(row["cells"][col], schema) for col in columns]
+        label = f"`{row['module']}`" if schema["label_code"] else row["module"]
+        lines.append("| " + label + " | " + " | ".join(cells)
+                     + " | " + _evidence_text(row, columns) + " |")
     return lines
 
 
@@ -392,26 +458,27 @@ def _region_bounds(doc_lines, region):
     return i, j
 
 
-def _module_of(line):
-    match = _MODULE_RE.match(line)
+def _module_of(line, schema):
+    match = (_MODULE_RE if schema["label_code"] else _LABEL_RE).match(line)
     return match.group(1) if match else None
 
 
-def _differing_modules(actual, rendered):
+def _differing_modules(actual, rendered, schema):
     modules = []
     matcher = difflib.SequenceMatcher(None, actual, rendered)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
         for line in list(actual[i1:i2]) + list(rendered[j1:j2]):
-            module = _module_of(line)
+            module = _module_of(line, schema)
             if module and module not in modules:
                 modules.append(module)
     return modules
 
 
 def _regions(data):
-    return [(table["id"], _render_table(table)) for table in data["tables"]]
+    schema = _schema(data)
+    return [(table["id"], _render_table(table, schema)) for table in data["tables"]]
 
 
 def render(data, doc_path):
@@ -441,7 +508,7 @@ def check(data, doc_path):
         return 0
 
     for region, actual, rendered in drifted:
-        modules = _differing_modules(actual, rendered)
+        modules = _differing_modules(actual, rendered, _schema(data))
         where = ", ".join(f"`{m}`" for m in modules) if modules else "(table structure)"
         print(f"RT MATRIX DRIFT: table '{region}' does not match the data file.",
               file=sys.stderr)
@@ -809,9 +876,14 @@ def _assert_labels_visible(build_dir, args, labels, where):
 
 
 def _gated_cells(data):
+    """Every gated cell, one at a time, identified by its own table, row, and
+    column. Nothing is deduplicated across rows: two rows may legitimately cite
+    the same test -- two determinism tiers do -- and each row's citation must be
+    resolved on its own, or one row's evidence would silently stand in for
+    another's and a rename would go red in only one of the two places it lies."""
     for table in data["tables"]:
         for row in table["rows"]:
-            for column in COLUMNS:
+            for column in _schema(data)["columns"]:
                 cell = row["cells"][column]
                 if cell.get("class") == "gated":
                     yield table["id"], row["module"], column, cell
@@ -906,9 +978,9 @@ def resolve(data, build_dir, workflows_dir):
 
 def main(argv):
     mode = argv[1] if len(argv) > 1 else None
-    usage = ("usage: rt_matrix.py render  <cells.json> <doc.md>\n"
-             "       rt_matrix.py check   <cells.json> <doc.md>\n"
-             "       rt_matrix.py resolve <cells.json> <build_dir> <workflows_dir>")
+    usage = ("usage: rt_matrix.py render  <data.json> <doc.md>\n"
+             "       rt_matrix.py check   <data.json> <doc.md>\n"
+             "       rt_matrix.py resolve <data.json> <build_dir> <workflows_dir>")
     if mode in ("render", "check"):
         if len(argv) != 4:
             print(usage, file=sys.stderr)
@@ -921,9 +993,9 @@ def main(argv):
         print(usage, file=sys.stderr)
         return 2
 
-    cells_path = argv[2]
+    data_path = argv[2]
     try:
-        data = _load(cells_path)
+        data = _load(data_path)
         _validate(data)
         if mode == "render":
             return render(data, argv[3])
@@ -931,7 +1003,7 @@ def main(argv):
             return check(data, argv[3])
         return resolve(data, argv[3], argv[4])
     except SchemaError as exc:
-        print(f"RT MATRIX SCHEMA ERROR: {cells_path} cannot be rendered:", file=sys.stderr)
+        print(f"RT MATRIX SCHEMA ERROR: {data_path} cannot be rendered:", file=sys.stderr)
         for problem in exc.problems:
             print(f"  {problem}", file=sys.stderr)
         return 2

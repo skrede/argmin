@@ -1,4 +1,5 @@
 {
+  "schema": "rt-claims",
   "tables": [
     {
       "id": "drivers",
