@@ -21,7 +21,7 @@ names the test that goes red when the tier stops being true.
 |---|---|---|
 | run-to-run and post-`reset()` bit-exactness | **yes** *(gated)* (on every platform, on both dimension axes, and across `reset()`) | projected_gn_policy: trajectory is run-to-run deterministic on a fixed target (exact ==, not a tolerance); gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (the Windows workflow) |
 | cross-instantiation algorithmic-decision identity | **yes** *(gated)* (identical accept, reject, and termination decisions, pinned as exact step-count equality) | projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory (the step-count REQUIRE); gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (the Windows workflow) |
-| cross-instantiation numeric agreement | **yes** *(gated)* (within the per-element tolerance stated below, wherever the test runs; not a comparison between architectures) | projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory (the per-element tolerance check); gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (the Windows workflow) |
+| cross-instantiation numeric agreement | **yes** *(gated)* (within the per-element tolerance stated below and under a swept aggregate spread bound, wherever the test runs; not a comparison between architectures) | projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory (the per-element tolerance check and the aggregate spread bound); gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (the Windows workflow) |
 | cross-architecture or cross-instantiation bit-identity | **not claimed** (a deliberate anti-feature, not a gap) | none, and there will not be one: this is the claim the tiers above exist to not make, and its cost is stated below |
 <!-- END GENERATED: tiers -->
 
@@ -105,10 +105,20 @@ read one into it.
 
 The architecture is nevertheless why this tier is a tolerance rather than an
 equality: contraction behavior is architecture-dependent, so how far the two
-instantiations drift apart depends on where you run them. Today only the
-per-element bound is enforced. The aggregate spread across a whole trajectory is
-reported on every run but is not yet bounded, so drift that stays under the
-per-element tolerance fails nothing.
+instantiations drift apart depends on where you run them. On the platforms this
+test runs on, the trajectory-wide maximum spread `max |dyn − fix|` has been
+measured at `2.05887e-10` on arm64 (both Xcode legs of continuous integration,
+identical), and exactly `0` on both x86_64 legs and on x86_64 Windows — the
+spread is arm64-specific, attributable to FMA contraction. That magnitude is
+recorded on every run, and it is now bounded: alongside the per-element check,
+the aggregate maximum is pinned under `1.5e-9`, a single portable constant
+placed roughly a factor of seven above the worst measured spread and a factor of
+seven below the `1e-8` per-element wall. Drift toward that wall therefore trips
+the aggregate bound loudly first, rather than accumulating silently under the
+per-element tolerance. The relative aggregate is left unbounded on purpose: it is
+structurally confined to `[0, 2]` regardless of correctness, so a bound on it
+would be either vacuous or brittle; it is retained as a near-zero diagnostic
+only.
 
 ## The anti-feature: bit-identity across architectures and instantiations
 

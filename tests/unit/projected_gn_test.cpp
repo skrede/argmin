@@ -877,12 +877,19 @@ TEST_CASE("projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory
     // (fixed-size unrolled vs dynamic-loop Eigen kernels). Instruction-level
     // rounding -- FMA contraction on arm64 -- legitimately perturbs the two
     // trajectories at the 1-ULP level from the first step, and the singular
-    // nonlinearity amplifies it geometrically. Measured cross-path spread:
-    // max |dyn - fix| = 2.1e-10 on Apple arm64, 4.1e-10 under a local
-    // fp-contract flip. The hybrid tolerance below (absolute leg for the
-    // near-zero terminal regime, relative leg for the O(1) early quantities)
-    // is ~50x the measured worst case and >= 6 orders below any algorithmic-
-    // drift signal (a diverging branch decision moves quantities at 1e-3+).
+    // nonlinearity amplifies it geometrically. The cross-path spread is captured
+    // on every run (see the report at the end of this case) and has been
+    // measured on continuous integration: max |dyn - fix| = 2.05887e-10 on
+    // arm64 (both Xcode legs, identical), and exactly 0 on both x86_64 legs
+    // (gcc-14 and clang-18) and on x86_64 Windows. The spread is arm64-specific
+    // and attributable to FMA contraction, which is precisely why cross-
+    // architecture bit-identity is a deliberate anti-feature rather than a gap.
+    // The per-element hybrid tolerance below (absolute leg for the near-zero
+    // terminal regime, relative leg for the O(1) early quantities) is ~49x the
+    // measured worst case (1e-8 / 2.05887e-10) and >= 6 orders below any
+    // algorithmic-drift signal (a diverging branch decision moves quantities at
+    // 1e-3+). A separate aggregate bound, below, guards the trajectory-wide
+    // maximum against creep toward that per-element wall.
     static constexpr std::array<const char*, 6> quantity_names{
         "objective_value", "step_size", "gradient_norm", "x0", "x1", "x2"};
 
@@ -909,10 +916,42 @@ TEST_CASE("projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory
         }
     }
 
+    // Bound the aggregate spread, not only each element. The per-element check
+    // above accepts anything under 1e-8; the trajectory-wide maximum is the
+    // quantity that reveals creep toward that wall before it arrives, so it is
+    // pinned to a single portable constant.
+    //
+    // The constant is swept, not guessed. Worst spread measured across every
+    // platform this test runs on: 2.05887e-10 (arm64 continuous integration,
+    // both Xcode legs); exactly 0 on both x86_64 legs (gcc-14, clang-18) and on
+    // x86_64 Windows. One portable bound is used rather than a per-architecture
+    // #ifdef, because the variation source under the Release flag set
+    // (-march=native -fno-math-errno -fno-trapping-math) is the runner's CPU
+    // model within an architecture, which no architecture #ifdef can see.
+    //
+    // The bound sits at the geometric mean of the worst measurement and the
+    // 1e-8 per-element wall: sqrt(2.05887e-10 * 1e-8) ~= 1.43e-9, rounded up to
+    // 1.5e-9. That places it ~7.3x above the worst measured spread -- headroom
+    // absorbing CPU-model variation within an architecture, so it flakes on
+    // neither the x86_64/Windows legs (which read 0) nor arm64 -- and ~6.7x
+    // below the 1e-8 wall, so drift toward the wall trips this bound loudly
+    // first, under --output-on-failure, before any per-element check fails.
+    //
+    // Only the absolute aggregate is bounded. The relative aggregate is
+    // deliberately not: max_rel_dev = abs_dev / max(|a|,|b|) is structurally
+    // confined to [0, 2] no matter how wrong the code becomes, so any bound on
+    // it is either vacuous (>= 2) or brittle (its measured value is exactly 1,
+    // the near-zero terminal element where fixed-N yields 0). It is kept in the
+    // report below as a near-zero diagnostic only.
+    constexpr double aggregate_abs_dev_bound = 1.5e-9;
+    INFO("aggregate cross-path spread max |dyn - fix| = "
+         << max_abs_dev << " must stay under " << aggregate_abs_dev_bound);
+    CHECK(max_abs_dev < aggregate_abs_dev_bound);
+
     // Emit the observed spread unconditionally -- WARN prints regardless of
     // pass or fail -- so every run (including green ones) records the actual
-    // cross-path deviation and the first post-fix arm64 run doubles as the
-    // tolerance-confirmation measurement.
+    // cross-path deviation and the standing arm64 capture step reads the
+    // magnitude from this line.
     WARN("cross-path trajectory spread over "
          << dyn_trace.size() << " steps x 6 quantities: max |dyn - fix| = "
          << max_abs_dev << " (abs), " << max_rel_dev << " (rel)");
