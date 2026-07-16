@@ -26,18 +26,82 @@ unrepresentable rather than merely discouraged:
 So a claim can be weakened, but it cannot be made silently. The renderer refuses
 to emit a document from a data file that tries.
 
+The schema makes a dishonest cell unrenderable, but it cannot tell whether the
+artifact a cell names still exists -- a data file could cite a gate deleted last
+quarter and render it as gated forever. That is what the resolve mode below is
+for.
+
 Usage:
-    rt_matrix.py render <cells.json> <doc.md>   # rewrite the marked regions in place
-    rt_matrix.py check  <cells.json> <doc.md>   # render to memory, diff against the doc
+    rt_matrix.py render  <cells.json> <doc.md>   # rewrite the marked regions in place
+    rt_matrix.py check   <cells.json> <doc.md>   # render to memory, diff against the doc
+    rt_matrix.py resolve <cells.json> <build_dir> <workflows_dir>
 
 Exit codes:
-    0   the document matches the render / the render succeeded
-    1   drift: a marked region disagrees with what the data file renders
-    2   usage error, malformed JSON, or a schema violation
+    0   the document matches the render / the render succeeded / every name resolves
+    1   drift: a marked region disagrees with what the data file renders, or
+        an evidence name does not resolve against live state
+    2   usage error, malformed JSON, a schema violation, or the build tree
+        cannot answer the question that was asked of it
 
 Exit 1 and exit 2 are deliberately distinct: "the document has drifted" and "the
 data file is unrenderable" are different failures with different fixes, and a
-caller that conflates them cannot tell a stale document from a broken one.
+caller that conflates them cannot tell a stale document from a broken one. The
+resolve mode leans on the same split even harder -- see below.
+
+The resolve mode
+----------------
+Resolves every 'evidence' name in the data file against live state:
+
+    ctest_test    the name appears in 'ctest -N' for <build_dir>
+    ctest_label   the label appears in 'ctest --print-labels' for <build_dir>
+    ci_job        the name matches a job 'name:' in a workflow under <workflows_dir>
+
+and then cross-checks reachability: for every gated cell, at least one cited test
+must be *selected by the ctest invocation of at least one cited job*. Existence is
+not execution. A name resolving proves an artifact exists; it does not prove that
+anything runs it. Twelve allocation gates existed and were cited while eleven of
+them never registered in continuous integration -- resolution alone would have
+called that green. So a gated cell whose named test no cited job selects fails.
+The honest remedies are to fix the job or to render the cell as argued; rendering
+it gated is not one of them.
+
+Why the preconditions are asserted rather than assumed
+------------------------------------------------------
+The answer this mode gives is a property of *how the tree was configured*, not of
+the source. Run against a tree configured without benchmarks, it would report the
+allocation gates as dangling -- a false red. Run on a developer host with every
+optional dependency present, it would report all of them fine while continuous
+integration runs a fraction -- a false green. Same script, opposite verdicts, same
+data file.
+
+So the mode asserts what it needs and refuses to answer otherwise:
+
+    - <build_dir> must be a configured tree (it must have a CTestTestfile.cmake),
+    - the test binary must be *built*: test registration runs the binary at build
+      time to enumerate its cases, so on a configured-not-built tree every case
+      name is a '_NOT_BUILT-<hash>' placeholder, which would otherwise present as
+      every case citation dangling,
+    - a label a cited job selects by must be registered in the tree, when the tree
+      can be seen to be configured in a way that would not register it.
+
+All of these exit 2, never 1. The difference between "this name does not exist"
+and "I cannot see this name from here" is the difference between a gate and a coin
+flip: a false red trains readers to ignore the check, and a false green defeats its
+purpose. Conflating them is how a validator becomes decorative.
+
+The same discipline governs everything this mode does not understand. Job names
+are templated, and only '${{ matrix.<key> }}' is expanded -- against the job's own
+declared matrix list, so the substituted value is one the job can actually produce.
+Any other expression in a job name, and any ctest option in a cited job whose
+effect on test selection is not known here, exits 2 naming what was not understood.
+There is deliberately no wildcard fallback: a pattern that turned the placeholder
+into '.+' would happily resolve a job name that cannot exist, and a validator
+trusted to be strict that silently is not is worse than none at all.
+
+Known approximation, stated rather than hidden: a job's selection is evaluated
+against <build_dir>, not against a tree configured the way that job configures it.
+A job that runs a bare ctest therefore appears to select everything <build_dir>
+registers. Cite a job whose configuration actually registers the test.
 
 Data file format:
     {
@@ -72,14 +136,24 @@ Row order is the data file's order and is never sorted, so the same data file
 always renders byte-identically.
 """
 
+import os
 import re
 import sys
 import json
+import shlex
+import shutil
 import difflib
+import subprocess
 
 VERDICTS = ("yes", "no", "per-policy", "not-claimed")
 CLASSES = ("gated", "argued")
 EVIDENCE_KINDS = ("ctest_test", "ctest_label", "ci_job")
+
+# Test discovery runs several prefixed passes over the same executable, so a
+# tagged case registers twice -- once bare, once under a prefix. Cited names are
+# the bare case strings, so a prefixed registration is folded back onto its bare
+# name rather than presented as a near-miss.
+DISCOVERY_PREFIXES = ("oracle-pin: ", "robustness: ", "asan-move: ")
 
 # The claim columns ratified with the downstream stack, in order. Rows publish
 # against this set, so a table that adds or drops one stops being drop-in and is
@@ -384,20 +458,486 @@ def check(data, doc_path):
     return 1
 
 
+class CannotSee(Exception):
+    """The tree cannot answer the question asked of it; guessing is refused."""
+
+    def __init__(self, problems):
+        super().__init__("; ".join(problems))
+        self.problems = problems
+
+
+_TEST_LINE_RE = re.compile(r"^\s*Test\s+#\d+:\s*(.+?)\s*$")
+
+
+def _ctest(build_dir, args):
+    """Run ctest with a list argv. Never shell=True: no data-file string is ever
+    interpolated into a command line -- cited names are compared, not executed."""
+    if shutil.which("ctest") is None:
+        raise CannotSee(["ctest is not on PATH; cannot resolve names"])
+    argv = ["ctest", "--test-dir", build_dir] + list(args)
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, shell=False)
+    except OSError as exc:
+        raise CannotSee([f"cannot run ctest in {build_dir}: {exc}"])
+    return proc.stdout
+
+
+def _ctest_names(build_dir, selectors=()):
+    names = []
+    for line in _ctest(build_dir, ["-N"] + list(selectors)).split("\n"):
+        match = _TEST_LINE_RE.match(line)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def _ctest_labels(build_dir):
+    labels, started = [], False
+    for line in _ctest(build_dir, ["--print-labels"]).split("\n"):
+        if line.strip() == "All Labels:":
+            started = True
+            continue
+        if started and line.strip():
+            labels.append(line.strip())
+    return labels
+
+
+def _fold_prefixes(names):
+    folded = set()
+    for name in names:
+        folded.add(name)
+        for prefix in DISCOVERY_PREFIXES:
+            if name.startswith(prefix):
+                folded.add(name[len(prefix):])
+    return folded
+
+
+def _cache_value(build_dir, key):
+    path = os.path.join(build_dir, "CMakeCache.txt")
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if line.startswith(key + ":"):
+                    return line.split("=", 1)[1].strip() if "=" in line else None
+    except OSError:
+        return None
+    return None
+
+
+def _assert_can_see(build_dir):
+    """Assert the preconditions of an answer, or refuse to give one."""
+    if not os.path.isdir(build_dir):
+        raise CannotSee([f"no configured build tree at {build_dir}; cannot resolve names"])
+    if not os.path.isfile(os.path.join(build_dir, "CTestTestfile.cmake")):
+        raise CannotSee([f"{build_dir} is not a configured build tree "
+                         f"(it has no CTestTestfile.cmake); cannot resolve names"])
+    names = _ctest_names(build_dir)
+    if not names:
+        raise CannotSee([f"the configured tree at {build_dir} registers no tests at all; "
+                         f"cannot resolve names"])
+    unbuilt = sorted(n for n in names if "_NOT_BUILT-" in n)
+    if unbuilt:
+        raise CannotSee([f"the test binary is not built in {build_dir} (test registration "
+                         f"reports the placeholder '{unbuilt[0]}'); case names cannot be "
+                         f"enumerated, so no citation can be resolved from here"])
+    return names
+
+
+# ---------------------------------------------------------------------------
+# Workflow inspection. No YAML parser is available -- the generator is
+# stdlib-only by deliberate choice -- so this is textual, bounded, and loud
+# about anything it does not understand.
+
+_JOB_RE = re.compile(r"^  ([A-Za-z0-9_.-]+):\s*$")
+_JOB_NAME_RE = re.compile(r"^    name:\s*(\S.*?)\s*$")
+_EXPR_RE = re.compile(r"\$\{\{([^}]*)\}\}")
+_MATRIX_KEY_RE = re.compile(r"^matrix\.([A-Za-z0-9_-]+)$")
+_KEY_RE = re.compile(r"^-?\s*([A-Za-z0-9_-]+):\s*(.*)$")
+_RUN_RE = re.compile(r"^(\s*)run:\s*(.*)$")
+
+
+def _scalar(text):
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        text = text[1:-1]
+    return text
+
+
+def _job_blocks(text):
+    lines = text.split("\n")
+    start = None
+    for index, line in enumerate(lines):
+        if line.rstrip() == "jobs:":
+            start = index
+            break
+    if start is None:
+        return []
+    blocks, current = [], None
+    for line in lines[start + 1:]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            break
+        match = _JOB_RE.match(line)
+        if indent == 2 and match:
+            current = (match.group(1), [])
+            blocks.append(current)
+        elif current is not None:
+            current[1].append(line)
+    return blocks
+
+
+def _matrix_values(block_lines):
+    """strategy.matrix key -> declared values, from a plain list, a block list,
+    or the keys of include entries. Values come from the declaration, so nothing
+    outside it can ever be produced."""
+    values, in_matrix, matrix_indent = {}, False, None
+    pending_key, pending_indent = None, None
+
+    def record(key, value):
+        values.setdefault(key, [])
+        if value not in values[key]:
+            values[key].append(value)
+
+    for line in block_lines:
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        stripped = line.strip()
+        if stripped == "matrix:":
+            in_matrix, matrix_indent = True, indent
+            continue
+        if in_matrix and indent <= matrix_indent:
+            in_matrix = False
+        if not in_matrix:
+            continue
+        if pending_key is not None and indent > pending_indent and stripped.startswith("- ") \
+                and ":" not in stripped:
+            record(pending_key, _scalar(stripped[2:]))
+            continue
+        pending_key = None
+        match = _KEY_RE.match(stripped)
+        if not match:
+            continue
+        key, rest = match.group(1), match.group(2).strip()
+        if key in ("include", "exclude"):
+            continue
+        if rest.startswith("[") and rest.endswith("]"):
+            for item in rest[1:-1].split(","):
+                if item.strip():
+                    record(key, _scalar(item))
+        elif rest:
+            record(key, _scalar(rest))
+        else:
+            pending_key, pending_indent = key, indent
+    return values
+
+
+def _expand_job_name(name, matrix, where):
+    exprs, seen = [], set()
+    for raw in _EXPR_RE.findall(name):
+        if raw not in seen:
+            seen.add(raw)
+            exprs.append(raw)
+    results = [name]
+    for raw in exprs:
+        key_match = _MATRIX_KEY_RE.match(raw.strip())
+        if not key_match:
+            raise CannotSee([f"{where}: the job name uses the expression "
+                             f"'${{{{{raw}}}}}', which this resolver does not expand; "
+                             f"it will not guess a job name it cannot derive"])
+        key = key_match.group(1)
+        if key not in matrix:
+            raise CannotSee([f"{where}: the job name uses '${{{{ matrix.{key} }}}}' but the "
+                             f"job declares no matrix key '{key}'; cannot expand it"])
+        token = "${{" + raw + "}}"
+        results = [text.replace(token, value) for text in results for value in matrix[key]]
+    return results
+
+
+def _run_scripts(block_lines):
+    scripts, index = [], 0
+    while index < len(block_lines):
+        match = _RUN_RE.match(block_lines[index])
+        if not match:
+            index += 1
+            continue
+        indent, rest = len(match.group(1)), match.group(2).strip()
+        if rest in ("|", ">", "|-", ">-", "|+", ">+"):
+            body, cursor = [], index + 1
+            while cursor < len(block_lines):
+                line = block_lines[cursor]
+                if line.strip() and len(line) - len(line.lstrip()) <= indent:
+                    break
+                body.append(line.strip())
+                cursor += 1
+            scripts.append("\n".join(body))
+            index = cursor
+            continue
+        if rest:
+            scripts.append(rest)
+        index += 1
+    return scripts
+
+
+def _collect_jobs(workflows_dir):
+    """job name (expanded) -> list of run scripts."""
+    if not os.path.isdir(workflows_dir):
+        raise CannotSee([f"no workflow directory at {workflows_dir}; cannot resolve job names"])
+    jobs = {}
+    for entry in sorted(os.listdir(workflows_dir)):
+        if not entry.endswith((".yml", ".yaml")):
+            continue
+        path = os.path.join(workflows_dir, entry)
+        try:
+            with open(path) as fh:
+                text = fh.read()
+        except OSError as exc:
+            raise CannotSee([f"cannot read {path}: {exc}"])
+        for job_id, block in _job_blocks(text):
+            declared = None
+            for line in block:
+                match = _JOB_NAME_RE.match(line)
+                if match:
+                    declared = _scalar(match.group(1))
+                    break
+            # A job with no explicit name is displayed under its identifier.
+            names = [job_id] if declared is None else _expand_job_name(
+                declared, _matrix_values(block), f"{entry}: job '{job_id}'")
+            for name in names:
+                jobs.setdefault(name, []).extend(_run_scripts(block))
+    return jobs
+
+
+# ---------------------------------------------------------------------------
+# ctest selection. Only the forms this repository actually uses are parsed;
+# anything else is named and refused rather than assumed to be reachable.
+
+_SELECTOR_FLAGS = {"-R": "regex", "--tests-regex": "regex",
+                   "-L": "label", "--label-regex": "label"}
+_LIST_ONLY_FLAGS = {"-N", "--show-only"}
+_BENIGN_NOARG = {"--output-on-failure", "-V", "--verbose", "-VV", "--extra-verbose",
+                 "--progress", "--stop-on-failure", "--force-new-ctest-process",
+                 "--schedule-random", "--quiet", "-Q"}
+_BENIGN_ONEARG = {"--test-dir", "-j", "--parallel", "-C", "--build-config", "--timeout",
+                  "--repeat", "--output-junit", "--test-output-size-passed",
+                  "--test-output-size-failed", "--output-log"}
+_BENIGN_EQUALS = {"--no-tests", "--repeat", "--parallel", "--timeout", "--output-junit"}
+
+
+def _ctest_selectors(script, where):
+    """Selector argument lists for each ctest invocation in a shell script that
+    actually runs tests. Listing invocations (-N) are skipped: they enumerate,
+    they do not execute, and this check is about execution."""
+    selections = []
+    for line in script.split("\n"):
+        if "ctest" not in line:
+            continue
+        try:
+            tokens = shlex.split(line, comments=True)
+        except ValueError as exc:
+            raise CannotSee([f"{where}: cannot read the command line {line!r} ({exc}); "
+                             f"cannot tell what it selects"])
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            index += 1
+            if not (token == "ctest" or token.endswith("$(ctest") or token.endswith("`ctest")):
+                continue
+            args, listing_only = [], False
+            while index < len(tokens):
+                token = tokens[index]
+                if token in ("&&", "||", ";", "|"):
+                    break
+                index += 1
+                if token in _LIST_ONLY_FLAGS:
+                    listing_only = True
+                elif token in _SELECTOR_FLAGS:
+                    if index >= len(tokens):
+                        raise CannotSee([f"{where}: the ctest option {token} has no value"])
+                    args.extend([token, tokens[index]])
+                    index += 1
+                elif token in _BENIGN_NOARG:
+                    pass
+                elif token in _BENIGN_ONEARG:
+                    index += 1
+                elif token.startswith("--") and "=" in token \
+                        and token.split("=", 1)[0] in _BENIGN_EQUALS:
+                    pass
+                elif re.fullmatch(r"-j\d+", token):
+                    pass
+                elif token.startswith("-"):
+                    raise CannotSee([f"{where}: the ctest option '{token}' is not one this "
+                                     f"resolver knows the selection effect of; refusing to "
+                                     f"assume it leaves the cited tests reachable"])
+                else:
+                    raise CannotSee([f"{where}: the ctest argument '{token}' is not one this "
+                                     f"resolver understands; refusing to assume it leaves "
+                                     f"the cited tests reachable"])
+            if not listing_only:
+                selections.append(args)
+    return selections
+
+
+def _selected(build_dir, args, cache):
+    key = tuple(args)
+    if key not in cache:
+        cache[key] = _fold_prefixes(_ctest_names(build_dir, args))
+    return cache[key]
+
+
+def _assert_labels_visible(build_dir, args, labels, where):
+    """A label a cited job selects by must be registered here. When the tree is
+    visibly configured in a way that would not register it, that is a limit of
+    this vantage point, not a missing name."""
+    for index, token in enumerate(args):
+        if _SELECTOR_FLAGS.get(token) != "label":
+            continue
+        parts = args[index + 1].split("|")
+        if not all(re.fullmatch(r"[A-Za-z0-9_-]+", part) for part in parts):
+            continue  # a real regex, not an alternation of literals; do not decompose it
+        for part in parts:
+            if part in labels:
+                continue
+            if _cache_value(build_dir, "ARGMIN_BUILD_BENCHMARKS") == "OFF":
+                raise CannotSee([
+                    f"{where}: selects by the ctest label '{part}', which is not registered "
+                    f"in {build_dir} because that tree is configured without benchmarks, so "
+                    f"the allocation gates do not register; cannot resolve their names from "
+                    f"here"])
+
+
+def _gated_cells(data):
+    for table in data["tables"]:
+        for row in table["rows"]:
+            for column in COLUMNS:
+                cell = row["cells"][column]
+                if cell.get("class") == "gated":
+                    yield table["id"], row["module"], column, cell
+
+
+def _job_selectors(data, jobs, build_dir, labels):
+    """Parse every cited job's ctest invocations, and assert this tree can see
+    what they select. This runs *before* any name is resolved, and that ordering
+    is the whole point: a tree configured without the gates would otherwise report
+    their names as dangling -- a false red indistinguishable from a real deletion.
+    Anything not understood, or not visible from here, stops the run at exit 2."""
+    selectors = {}
+    for table_id, module, column, cell in _gated_cells(data):
+        for item in cell["evidence"]:
+            job = item["name"]
+            if item["kind"] != "ci_job" or job in selectors or job not in jobs:
+                continue
+            where = f"job '{job}'"
+            selectors[job] = []
+            for script in jobs[job]:
+                for args in _ctest_selectors(script, where):
+                    _assert_labels_visible(build_dir, args, labels, where)
+                    selectors[job].append(args)
+    return selectors
+
+
+def resolve(data, build_dir, workflows_dir):
+    names = _assert_can_see(build_dir)
+    tests = _fold_prefixes(names)
+    labels = set(_ctest_labels(build_dir))
+    jobs = _collect_jobs(workflows_dir)
+    selectors = _job_selectors(data, jobs, build_dir, labels)
+
+    failures = []
+    counts = {"ctest_test": 0, "ctest_label": 0, "ci_job": 0}
+    cache = {}
+
+    for table_id, module, column, cell in _gated_cells(data):
+        where = f"table '{table_id}', module `{module}`, column '{column}'"
+
+        cited_tests, cited_jobs = [], []
+        for item in cell["evidence"]:
+            kind, name = item["kind"], item["name"]
+            counts[kind] += 1
+            if kind == "ctest_test":
+                cited_tests.append(name)
+                if name not in tests:
+                    failures.append(f"{where}: cites the test '{name}', which no test "
+                                    f"registered in {build_dir} is named")
+            elif kind == "ctest_label":
+                if name not in labels:
+                    failures.append(f"{where}: cites the ctest label '{name}', which no test "
+                                    f"registered in {build_dir} carries")
+            else:
+                cited_jobs.append(name)
+                if name not in jobs:
+                    failures.append(f"{where}: cites the continuous-integration job '{name}', "
+                                    f"which no workflow defines")
+
+        if not cited_tests:
+            raise CannotSee([f"{where}: is gated but names no test, so there is no way to "
+                             f"check that anything runs it"])
+        if not cited_jobs:
+            failures.append(f"{where}: cites {cited_tests[0]!r} but names no "
+                            f"continuous-integration job that runs it; a test that exists "
+                            f"but never runs proves nothing")
+            continue
+        if any(failure.startswith(where) for failure in failures):
+            continue
+
+        reachable = set()
+        for job in cited_jobs:
+            for args in selectors[job]:
+                reachable |= _selected(build_dir, args, cache)
+        if not any(name in reachable for name in cited_tests):
+            failures.append(
+                f"{where}: the named test(s) {', '.join(repr(n) for n in cited_tests)} exist, "
+                f"but no cited job ({', '.join(cited_jobs)}) selects any of them -- existence "
+                f"is not execution. Fix the job, or render the cell as argued")
+
+    if failures:
+        for failure in failures:
+            print(f"RT MATRIX EVIDENCE FAILED: {failure}", file=sys.stderr)
+        return 1
+
+    width = max(len(kind) for kind in counts)
+    for kind in ("ctest_test", "ctest_label", "ci_job"):
+        print(f"  {kind.ljust(width)}  {counts[kind]:3d} resolved")
+    print("rt matrix evidence resolved")
+    return 0
+
+
 def main(argv):
-    if len(argv) != 4 or argv[1] not in ("render", "check"):
-        print("usage: rt_matrix.py render <cells.json> <doc.md>\n"
-              "       rt_matrix.py check  <cells.json> <doc.md>", file=sys.stderr)
+    mode = argv[1] if len(argv) > 1 else None
+    usage = ("usage: rt_matrix.py render  <cells.json> <doc.md>\n"
+             "       rt_matrix.py check   <cells.json> <doc.md>\n"
+             "       rt_matrix.py resolve <cells.json> <build_dir> <workflows_dir>")
+    if mode in ("render", "check"):
+        if len(argv) != 4:
+            print(usage, file=sys.stderr)
+            return 2
+    elif mode == "resolve":
+        if len(argv) != 5:
+            print(usage, file=sys.stderr)
+            return 2
+    else:
+        print(usage, file=sys.stderr)
         return 2
-    mode, cells_path, doc_path = argv[1], argv[2], argv[3]
+
+    cells_path = argv[2]
     try:
         data = _load(cells_path)
         _validate(data)
         if mode == "render":
-            return render(data, doc_path)
-        return check(data, doc_path)
+            return render(data, argv[3])
+        if mode == "check":
+            return check(data, argv[3])
+        return resolve(data, argv[3], argv[4])
     except SchemaError as exc:
         print(f"RT MATRIX SCHEMA ERROR: {cells_path} cannot be rendered:", file=sys.stderr)
+        for problem in exc.problems:
+            print(f"  {problem}", file=sys.stderr)
+        return 2
+    except CannotSee as exc:
+        print("RT MATRIX CANNOT RESOLVE: the build state cannot answer this; "
+              "refusing to report a verdict:", file=sys.stderr)
         for problem in exc.problems:
             print(f"  {problem}", file=sys.stderr)
         return 2
