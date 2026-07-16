@@ -6,10 +6,14 @@
 # defined guard macro, so it holds across libstdc++, libc++, and MSVC STL.
 #
 # Invoked via add_test with -P. Required -D arguments:
-#   CXX  - the C++ compiler command
-#   SRC  - the probe source file
-#   INCS - ';'-separated include directories (argmin + its usage requirements)
-#   STD  - the C++ standard flag value (e.g. c++20)
+#   CXX   - the C++ compiler command
+#   SRC   - the probe source file
+#   INCS  - ';'-separated include directories (argmin + its usage requirements)
+#   STD   - the C++ standard flag value (e.g. c++20)
+#   SCOPE - human-readable name of the surface the probe covers, used in the
+#           failure message. The scan is scope-agnostic: it proves the property
+#           for whatever translation unit it is pointed at, so the caller names
+#           what that unit includes rather than this file assuming it.
 
 set(inc_flags "")
 foreach(dir IN LISTS INCS)
@@ -36,11 +40,10 @@ foreach(tok IN LISTS tokens)
     get_filename_component(base "${tok}" NAME)
     if(base STREQUAL "chrono")
         message(FATAL_ERROR
-            "chrono-freedom scan FAILED: <chrono> reached the step-budget / "
-            "stepper include graph via '${tok}'. These real-time surfaces must "
-            "not depend on the wall clock; only the time-budget drivers may "
-            "include <chrono>.")
+            "chrono-freedom scan FAILED: <chrono> reached the ${SCOPE} include "
+            "graph via '${tok}'. These real-time surfaces must not depend on "
+            "the wall clock; only the time-budget drivers may include <chrono>.")
     endif()
 endforeach()
 
-message(STATUS "chrono-freedom scan: OK -- no <chrono> in the step-budget / stepper include graph")
+message(STATUS "chrono-freedom scan: OK -- no <chrono> in the ${SCOPE} include graph")

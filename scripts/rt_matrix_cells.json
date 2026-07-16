@@ -147,8 +147,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -185,8 +190,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -222,8 +232,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -260,8 +275,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -298,8 +318,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -336,8 +361,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -373,8 +403,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -410,8 +445,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -447,8 +487,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -484,8 +529,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -525,8 +575,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -558,8 +613,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -591,8 +651,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -620,8 +685,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -649,8 +719,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -688,8 +763,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -723,8 +803,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -752,8 +837,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",
@@ -781,8 +871,13 @@
             },
             "wall-clock-free?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_chrono_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "exceptions-off-clean?": {
               "verdict": "yes",

@@ -58,6 +58,29 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
             -DCXX=${CMAKE_CXX_COMPILER}
             -DSTD=c++20
             -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/runner_chrono_freedom_test.cpp
+            "-DSCOPE=step-budget / stepper"
+            "-DINCS=$<TARGET_PROPERTY:argmin::argmin,INTERFACE_INCLUDE_DIRECTORIES>;${ARGMIN_EIGEN_INCLUDE_DIRS}"
+            -P ${CMAKE_SOURCE_DIR}/cmake/chrono_freedom_scan.cmake)
+endif()
+
+# Wall-clock-freedom probe for the policies. The runner probe above answers for
+# the two drivers only, by design, which left every policy's wall-clock claim
+# resting on source reading rather than on a check. This TU includes every
+# policy header so the same dependency scan answers for the policy graph too.
+add_executable(policy_chrono_freedom_probe policy_chrono_freedom_test.cpp)
+target_link_libraries(policy_chrono_freedom_probe PRIVATE argmin::argmin)
+target_compile_options(policy_chrono_freedom_probe PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
+add_test(NAME policy_chrono_freedom_compiles COMMAND policy_chrono_freedom_probe)
+
+# Same MSVC caveat as the runner scan: the -M dependency dump is a GCC/Clang
+# facility, so the scan registers there and the compile probe runs everywhere.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_test(NAME policy_chrono_freedom_scan
+        COMMAND ${CMAKE_COMMAND}
+            -DCXX=${CMAKE_CXX_COMPILER}
+            -DSTD=c++20
+            -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/policy_chrono_freedom_test.cpp
+            "-DSCOPE=solver-policy"
             "-DINCS=$<TARGET_PROPERTY:argmin::argmin,INTERFACE_INCLUDE_DIRECTORIES>;${ARGMIN_EIGEN_INCLUDE_DIRS}"
             -P ${CMAKE_SOURCE_DIR}/cmake/chrono_freedom_scan.cmake)
 endif()
