@@ -166,8 +166,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -209,8 +214,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -251,8 +261,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -294,8 +309,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -337,8 +357,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -380,8 +405,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -422,8 +452,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -464,8 +499,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -506,8 +546,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -590,8 +635,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -632,8 +682,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -666,8 +721,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -701,7 +761,7 @@
             "deterministic(seeded)?": {
               "verdict": "yes",
               "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "rationale": "the policy jitters degenerate geometry steps with a self-contained generator seeded from the problem dimensions, so identical inputs do reproduce -- but the claim rests on that seeding rather than on the absence of an RNG, which is why the no-RNG scan excludes it"
             }
           }
         },
@@ -818,8 +878,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -852,8 +917,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -886,8 +956,13 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy carries no RNG, so identical inputs drive an identical trajectory"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "policy_rng_freedom_scan", "note": "GCC/Clang only"},
+                {"kind": "ctest_test", "name": "policy_rng_freedom_compiles"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         }

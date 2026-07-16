@@ -84,3 +84,27 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
             "-DINCS=$<TARGET_PROPERTY:argmin::argmin,INTERFACE_INCLUDE_DIRECTORIES>;${ARGMIN_EIGEN_INCLUDE_DIRS}"
             -P ${CMAKE_SOURCE_DIR}/cmake/chrono_freedom_scan.cmake)
 endif()
+
+# Random-number-freedom probe: a TU including every policy whose determinism
+# claim rests on carrying no RNG. Building it confirms the headers are self-
+# contained; the scan test then proves no <random> reaches the graph and that no
+# argmin header in it names an RNG facility.
+add_executable(policy_rng_freedom_probe policy_rng_freedom_test.cpp)
+target_link_libraries(policy_rng_freedom_probe PRIVATE argmin::argmin)
+target_compile_options(policy_rng_freedom_probe PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
+add_test(NAME policy_rng_freedom_compiles COMMAND policy_rng_freedom_probe)
+
+# GCC/Clang for the -M dump, as above. OWNED is the argmin include root: the
+# token half of the scan reads only argmin's own headers, since a third-party
+# dependency's internals are not what these cells claim.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_test(NAME policy_rng_freedom_scan
+        COMMAND ${CMAKE_COMMAND}
+            -DCXX=${CMAKE_CXX_COMPILER}
+            -DSTD=c++20
+            -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/policy_rng_freedom_test.cpp
+            "-DSCOPE=solver-policy"
+            -DOWNED=${CMAKE_SOURCE_DIR}/lib/argmin/include
+            "-DINCS=$<TARGET_PROPERTY:argmin::argmin,INTERFACE_INCLUDE_DIRECTORIES>;${ARGMIN_EIGEN_INCLUDE_DIRS}"
+            -P ${CMAKE_SOURCE_DIR}/cmake/rng_freedom_scan.cmake)
+endif()
