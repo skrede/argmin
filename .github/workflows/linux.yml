@@ -330,14 +330,19 @@ jobs:
       # ctest treats a label selection that matches nothing as success, so
       # without --no-tests=error this step would pass if the labels it names
       # were renamed or deleted -- the job would go green having run nothing.
-      # The fast regression gate enforces oracle-witnessed correctness on every
-      # baseline cell here. It does NOT gate instruction counts on this runner:
-      # the userspace instruction counter needs perf_event_paranoid <= 2 and a
-      # shared GitHub-hosted runner denies perf_event_open, so those cells are
-      # reported UNMEASURED in the log rather than passed. Instruction-cost
-      # ratios are gated where the counter arms -- a controlled host, and the
-      # weekly regression-weekly tier.
-      - name: Run alloc-gate, oracle-pin, and fast regression instruments (correctness gated; instruction counts not gated here)
+      # The fast regression gate here is a CORRECTNESS gate. It enforces
+      # oracle-witnessed correctness (oracle verdict, final accuracy, feasibility,
+      # solver status) on every baseline cell -- all toolchain-invariant. It does
+      # NOT gate the performance CEILINGS: neither the iteration count
+      # (max_outer_iters) nor the instruction cost (instructions/iter). Those are
+      # decision-identity properties WITHIN a toolchain, not across toolchains --
+      # this runner builds with clang against a gcc-calibrated baseline, so a
+      # different iteration or instruction count is toolchain skew, not a
+      # regression. They are reported NOT-GATED in the log (numbers shown) and
+      # gate on the controlled host, whose compiler matches the baseline's, plus
+      # the weekly regression-weekly tier. Green here means CORRECTNESS verified;
+      # it does NOT mean iteration counts or instruction costs were verified.
+      - name: Run alloc-gate, oracle-pin, and fast regression instruments (correctness gated; iteration + instruction ceilings NOT gated here)
         run: cd build && ctest --output-on-failure --no-tests=error -L "alloc-gate|oracle-pin|regression-fast"
 
       # The real-time safety matrix and the determinism page cite a named test,

@@ -928,6 +928,10 @@ if(CMAKE_TESTING_ENABLED)
              COMMAND regression_check --self-test-oracle-witness)
     set_tests_properties(regression_check_oracle_witness_self_test PROPERTIES
         LABELS "regression;bench")
+    add_test(NAME regression_check_perf_ceiling_relax_self_test
+             COMMAND regression_check --self-test-perf-ceiling-relax)
+    set_tests_properties(regression_check_perf_ceiling_relax_self_test PROPERTIES
+        LABELS "regression;bench")
 endif()
 
 # oracle_check -- independent analytic correctness validator. Links argmin
@@ -980,17 +984,27 @@ option(ARGMIN_BENCH_WEEKLY_REGRESSION_GATE
 # every baseline cell's CORRECTNESS through the independent oracle verdict --
 # that check needs no hardware counter and gates on every host.
 #
-# The instructions/iter comparison is gated only where the counter can arm. It
-# reads a userspace perf_event_open counter, which the kernel permits only at
-# perf_event_paranoid <= 2; a shared GitHub-hosted runner denies it outright. So
-# this tier sets REGRESSION_CHECK_ALLOW_UNARMED_INSTRUCTION_COUNTER=1: where the
-# counter cannot arm, the instruction cost is reported UNMEASURED (and counted in
-# the log) instead of breaching. That is deliberately not a pass -- the gate
-# declines to answer what it cannot measure. Where the counter DOES arm (a local
-# or self-hosted host at paranoid <= 2) this tier gates the ratio and the
-# real-time ceiling in full, unrelaxed. A publication run leaves the variable
-# unset, so a disarmed counter fails loud rather than publishing an unmeasured
-# instruction-cost claim.
+# This tier is a CORRECTNESS gate. It gates only what is toolchain-invariant:
+# the oracle verdict, final accuracy, feasibility, and solver status. The
+# performance CEILINGS -- the iteration count (max_outer_iters) and the
+# instruction cost (instructions/iter, ratio and absolute ceiling) -- are
+# decision-identity properties WITHIN a toolchain, not across toolchains: the
+# checked-in baseline is calibrated on one compiler, and a per-commit run built
+# with another (CI runs clang against a gcc-calibrated baseline) legitimately
+# lands a different iteration or instruction count without any regression. So
+# this tier sets REGRESSION_CHECK_RELAX_PERF_CEILINGS=1: those ceilings report
+# NOT-GATED (their numbers still printed and counted in the log) instead of
+# breaching. They gate on the controlled host, where the baseline's own
+# toolchain runs.
+#
+# It also sets REGRESSION_CHECK_ALLOW_UNARMED_INSTRUCTION_COUNTER=1 so the
+# instr_gate_policy provenance honestly records "armed_cells_only": the
+# instruction counter reads a userspace perf_event_open counter, which the
+# kernel permits only at perf_event_paranoid <= 2, and a shared GitHub-hosted
+# runner denies it outright. A publication run leaves both variables unset, so
+# every ceiling gates and a disarmed counter fails loud rather than publishing
+# an unmeasured or toolchain-skewed claim; the perf_gate_policy provenance is
+# then "enforced", the only value a publication baseline accepts.
 #
 # Tier 2 (opt-in, controlled bench host): `publish_bench_wall_regression_weekly`
 # runs the full multi-seed comparator sweep with the wall bound enforced. The
@@ -1014,6 +1028,7 @@ if(CMAKE_TESTING_ENABLED)
                 "ARGMIN_ONLY=1"
                 "REGRESSION_CHECK_DISABLE_WALL_GATE=1"
                 "REGRESSION_CHECK_ALLOW_UNARMED_INSTRUCTION_COUNTER=1"
+                "REGRESSION_CHECK_RELAX_PERF_CEILINGS=1"
                 "OUT_ROOT=${CMAKE_BINARY_DIR}/regression_gate_runs"
                 "BENCH_BINARY=$<TARGET_FILE:publish_bench>"
                 "REGRESSION_CHECK_BINARY=$<TARGET_FILE:regression_check>"

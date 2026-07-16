@@ -247,6 +247,24 @@ compute_instr_gate_policy() {
     fi
 }
 
+# Whether this run gated the performance CEILINGS -- the iteration count and the
+# instruction cost -- on every cell, or reported them NOT-GATED. "ceilings_relaxed"
+# means the caller declared the ceilings are not comparable on this host: the
+# baseline is calibrated on one toolchain, and the iteration and instruction
+# counts are decision-identity properties within a toolchain, not across
+# toolchains (a shared CI runner runs a different compiler than the baseline). A
+# publication baseline requires "enforced": a published performance ceiling must
+# be gated against a run on the baseline's own toolchain, not merely reported.
+compute_perf_gate_policy() {
+    if [ "${RUN_REGRESSION_CHECK}" != "1" ]; then
+        printf '%s\n' "not_run"
+    elif [ "${REGRESSION_CHECK_RELAX_PERF_CEILINGS:-0}" = "1" ]; then
+        printf '%s\n' "ceilings_relaxed"
+    else
+        printf '%s\n' "enforced"
+    fi
+}
+
 write_provenance() {
     {
         printf '{\n'
@@ -294,6 +312,7 @@ write_provenance() {
         printf '  },\n'
         printf '  "wall_gate_policy": '; json_string "${WALL_GATE_POLICY}"; printf ',\n'
         printf '  "instr_gate_policy": '; json_string "${INSTR_GATE_POLICY}"; printf ',\n'
+        printf '  "perf_gate_policy": '; json_string "${PERF_GATE_POLICY}"; printf ',\n'
         printf '  "run_regression_check": '; json_string "${RUN_REGRESSION_CHECK}"; printf ',\n'
         printf '  "run_dm_profile": '; json_string "${RUN_DM_PROFILE}"; printf ',\n'
         printf '  "baseline_valid": '; json_bool "${BASELINE_VALID}"; printf ',\n'
@@ -349,6 +368,7 @@ GOVERNOR_POLICY="$(governor_policy)"
 TURBO_POLICY="$(turbo_policy)"
 WALL_GATE_POLICY="$(compute_wall_gate_policy)"
 INSTR_GATE_POLICY="$(compute_instr_gate_policy)"
+PERF_GATE_POLICY="$(compute_perf_gate_policy)"
 BASELINE_VALID="false"
 BASELINE_INVALID_REASON="not requested for publication baseline generation"
 
@@ -364,6 +384,9 @@ if [ "${EXPECT_BASELINE_ELIGIBLE}" = "1" ]; then
     elif [ "${INSTR_GATE_POLICY}" != "enforced" ]; then
         BASELINE_VALID="false"
         BASELINE_INVALID_REASON="instr_gate_policy is ${INSTR_GATE_POLICY}, expected enforced"
+    elif [ "${PERF_GATE_POLICY}" != "enforced" ]; then
+        BASELINE_VALID="false"
+        BASELINE_INVALID_REASON="perf_gate_policy is ${PERF_GATE_POLICY}, expected enforced"
     fi
 fi
 
@@ -384,6 +407,7 @@ echo "binary: ${BENCH_BINARY}"
 echo "build_type: ${BUILD_TYPE}"
 echo "wall_gate_policy: ${WALL_GATE_POLICY}"
 echo "instr_gate_policy: ${INSTR_GATE_POLICY}"
+echo "perf_gate_policy: ${PERF_GATE_POLICY}"
 echo
 
 ARGMIN_ONLY_FLAG=()

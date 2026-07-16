@@ -105,6 +105,22 @@ struct gate_options
     // disarmed counter is a breach, because a published instruction-cost claim
     // must not rest on a metric nobody measured.
     bool allow_unarmed_instr_counter{false};
+    // Correctness-gate mode for a shared runner (a per-commit CI tier). The
+    // performance CEILINGS -- the iteration count (max_outer_iters) and the
+    // instruction cost (ratio and absolute ceiling) -- are decision-identity
+    // properties WITHIN a single toolchain, not across toolchains: a baseline
+    // calibrated on one compiler gates a run built with another against a bound
+    // only the first compiler's codegen holds. This relaxation reports those
+    // ceilings NOT-GATED instead of breaching, exactly as the unarmed-counter
+    // relaxation already does for the instruction counter, so a shared runner
+    // gates only what IS toolchain-invariant: correctness (oracle verdict,
+    // accuracy, feasibility, status). It is the same idea generalized from the
+    // instruction counter to every performance ceiling. It relaxes NOTHING on
+    // the correctness path, and a run with it set is not a publication baseline
+    // (the perf_gate_policy provenance records the relaxation, fail-closed).
+    // Default (off) is the controlled-host publication behavior: every ceiling
+    // gates in full, exactly as before.
+    bool relax_perf_ceilings{false};
     // Optional path to the independent oracle verdict (oracle_verdict.csv).
     // When supplied, a pass cell's CORRECTNESS is witnessed by the oracle's
     // recomputed feasibility/KKT at the returned point (oracle_pass), not by
@@ -720,6 +736,7 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
     int excluded_count = 0;
     int warn_missing_baseline = 0;
     int instr_unmeasured_count = 0;
+    int perf_ceiling_notgated_count = 0;
 
     auto emit_breach = [&](std::string_view solver, std::string_view problem,
                            std::string_view mode, std::string_view metric,
@@ -745,6 +762,41 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
                   << " measured=" << measured
                   << " bound=" << bound << '\n';
         ++breach_count;
+    };
+
+    // A performance ceiling that is not gated on this tier (correctness-gate
+    // mode). It prints the measured value and its bound so the log still shows
+    // the numbers, but records no breach -- the ceiling is a toolchain-sensitive
+    // publication property held on the controlled host, not here. Shaped like
+    // the UNMEASURED instruction line so a reader reads it the same way.
+    auto emit_perf_not_gated = [&](std::string_view solver, std::string_view problem,
+                                   std::string_view mode, std::string_view metric,
+                                   std::string_view measured, std::string_view bound)
+    {
+        std::cerr << "NOT-GATED: solver=" << solver
+                  << " problem=" << problem
+                  << " mode=" << mode
+                  << " metric=" << metric
+                  << " measured=" << measured
+                  << " bound=" << bound
+                  << " reason=performance-ceiling-toolchain-sensitive"
+                  << " (not gated in correctness-gate mode)\n";
+        ++perf_ceiling_notgated_count;
+    };
+
+    auto emit_perf_not_gated_numeric = [&](std::string_view solver, std::string_view problem,
+                                           std::string_view mode, std::string_view metric,
+                                           double measured, double bound)
+    {
+        std::cerr << "NOT-GATED: solver=" << solver
+                  << " problem=" << problem
+                  << " mode=" << mode
+                  << " metric=" << metric
+                  << " measured=" << measured
+                  << " bound=" << bound
+                  << " reason=performance-ceiling-toolchain-sensitive"
+                  << " (not gated in correctness-gate mode)\n";
+        ++perf_ceiling_notgated_count;
     };
 
     std::map<cell_key, bool> matched;
@@ -885,7 +937,25 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
                                     / static_cast<double>(denom));
             }
 
-            if(any_unavailable || ipi_seeds.empty())
+            if(opts.relax_perf_ceilings)
+            {
+                // Correctness-gate mode: the instruction cost is a performance
+                // ceiling, and instructions/iter is toolchain-sensitive (compiler
+                // codegen changes the count). It is reported NOT-GATED here, its
+                // number shown, and gated on the controlled host instead. The
+                // baseline instr columns were already parsed and validated above,
+                // so a malformed baseline still fails loud; only the comparison is
+                // withheld. This subsumes the unarmed-counter case: a disarmed
+                // counter under this mode is likewise reported, never a breach.
+                if(any_unavailable || ipi_seeds.empty())
+                    emit_perf_not_gated(solver, problem, mode, "instr_per_iter",
+                                        "counter-not-armed", "n/a");
+                else
+                    emit_perf_not_gated_numeric(solver, problem, mode,
+                                                "instr_per_iter", median(ipi_seeds),
+                                                baseline_ipi * kInstrRegressionFactor);
+            }
+            else if(any_unavailable || ipi_seeds.empty())
             {
                 // Disarmed counter. By default this is a breach (a publication
                 // run must measure what it claims). Under the explicit
@@ -976,9 +1046,23 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
                 emit_numeric_breach(solver, problem, mode, "max_us_per_step",
                                     measured_per_step, max_us);
             if(!pass_iters)
-                emit_numeric_breach(solver, problem, mode, "max_outer_iters",
-                                    static_cast<double>(measured_max_iters),
-                                    static_cast<double>(max_iters));
+            {
+                // The iteration count is a performance ceiling. Within a single
+                // toolchain it is a decision-identity property; across toolchains
+                // it is not (compilers order floating-point contractions
+                // differently, moving a near-tie step count). In correctness-gate
+                // mode it is reported NOT-GATED and held on the controlled host;
+                // otherwise it gates in full.
+                if(opts.relax_perf_ceilings)
+                    emit_perf_not_gated_numeric(solver, problem, mode,
+                                                "max_outer_iters",
+                                                static_cast<double>(measured_max_iters),
+                                                static_cast<double>(max_iters));
+                else
+                    emit_numeric_breach(solver, problem, mode, "max_outer_iters",
+                                        static_cast<double>(measured_max_iters),
+                                        static_cast<double>(max_iters));
+            }
             if(has_oracle)
             {
                 // Correctness is witnessed by the independent oracle
@@ -1063,6 +1147,18 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
                   << " armed); instruction cost is NOT gated for those cells."
                   << " Correctness remains gated for every cell.\n";
 
+    // Reported unconditionally on the correctness-gate tier so the log states
+    // plainly that the iteration and instruction ceilings were not gated here.
+    // A reader must never mistake this tier's green for "iteration counts
+    // verified": those ceilings are toolchain-sensitive and gate on the
+    // controlled host, while correctness is gated on every cell here.
+    if(perf_ceiling_notgated_count > 0)
+        std::cerr << "regression_check: " << perf_ceiling_notgated_count
+                  << " performance-ceiling cell(s) NOT GATED (iteration and/or"
+                  << " instruction ceilings are toolchain-sensitive and gate on"
+                  << " the controlled host, not on this tier). Correctness"
+                  << " remains gated for every cell.\n";
+
     if(excluded_count > 0)
         std::cerr << "regression_check: " << excluded_count
                   << " excluded baseline cell(s)\n";
@@ -1102,7 +1198,8 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
                                    std::string_view row_disposition,
                                    std::string_view cap_status,
                                    std::string_view instructions = "1000",
-                                   std::string_view library = "argmin") -> std::string
+                                   std::string_view library = "argmin",
+                                   std::string_view solver_iters = "1") -> std::string
 {
     std::string out =
         "solver,library,problem,class,dimension,seed,mode,solver_iters,"
@@ -1110,11 +1207,14 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
         "known_optimum,accuracy,constraint_violation,status,row_disposition,"
         "cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,"
         "provenance_id,instructions\n";
-    // solver_iters is fixed at 1, so instructions/iter equals the instructions
+    // solver_iters defaults to 1, so instructions/iter equals the instructions
     // value verbatim -- the instruction-gate self-tests rely on that identity.
+    // The iteration-ceiling self-tests override it to exercise the max_outer_iters
+    // bound.
     out += std::string{solver} + "," + std::string{library} + ","
          + std::string{problem}
-         + ",inequality,2,42,publication,1,1,0,0,0,"
+         + ",inequality,2,42,publication," + std::string{solver_iters}
+         + ",1,0,0,0,"
          + std::string{wall_us}
          + ",0.0,0.0," + std::string{accuracy}
          + "," + std::string{cv}
@@ -1533,6 +1633,164 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
     return 0;
 }
 
+// Correctness-gate mode self-test. Proves the performance-ceiling relaxation
+// relaxes ONLY the performance ceilings (iteration count, instruction ratio,
+// instruction ceiling) and NEVER correctness. Every relaxed case is paired
+// with the same cell carrying a correctness defect, which must still breach
+// under the relaxation -- so a future change that let the relaxation suppress
+// correctness turns this test red. This is the non-vacuity pin for the mode.
+[[nodiscard]] auto run_perf_ceiling_relax_self_test() -> int
+{
+    const auto tmp = std::filesystem::temp_directory_path();
+    const auto summary_path = tmp / "argmin-regression-perfrelax-summary.csv";
+    const auto baseline_path = tmp / "argmin-regression-perfrelax-baseline.csv";
+    const auto verdict_path = tmp / "argmin-regression-perfrelax-verdict.csv";
+
+    const gate_options strict{};
+    gate_options relaxed{};
+    relaxed.relax_perf_ceilings = true;
+
+    // A correct pass cell whose iteration count (50) is far above the baseline
+    // ceiling (10). The wall/accuracy/cv/status bounds are all satisfied, so the
+    // only bound it breaches is max_outer_iters. baseline_fixture sets
+    // max_outer_iters=10; solver_iters=50 makes the cell breach it.
+    const auto correct_iter_blowup =
+        summary_fixture("solver_a", "problem_a", "100", "1e-13", "1e-10",
+                        "converged", "included", "none", "1000", "argmin", "50");
+    if(!write_text(summary_path, correct_iter_blowup)
+       || !write_text(baseline_path,
+                      baseline_fixture("solver_a", "problem_a",
+                                       "1000000", "pass")))
+        return 1;
+
+    // Strict (controlled-host) mode gates the iteration ceiling: exit 2.
+    if(run_gate(summary_path, baseline_path, strict) != 2)
+    {
+        std::cerr << "regression_check perf-relax self-test: strict mode did not"
+                  << " gate the iteration-ceiling blowup\n";
+        return 1;
+    }
+    // Correctness-gate mode reports the iteration ceiling NOT-GATED; the cell is
+    // otherwise correct, so the run is clean: exit 0.
+    if(run_gate(summary_path, baseline_path, relaxed) != 0)
+    {
+        std::cerr << "regression_check perf-relax self-test: correctness-gate mode"
+                  << " did not relax the iteration-ceiling blowup on a correct"
+                  << " cell\n";
+        return 1;
+    }
+
+    // Non-vacuity pin (legacy correctness path): the same iteration blowup on a
+    // cell whose solver self-reports STALLED must still breach under the
+    // relaxation. The iteration ceiling is not gated, but the status IS -- so
+    // exit 2, naming the correctness metric (status). If the relaxation ever
+    // suppressed correctness this returns 0 and the test goes red.
+    const auto stalled_iter_blowup =
+        summary_fixture("solver_a", "problem_a", "100", "1e-13", "1e-10",
+                        "stalled", "included", "none", "1000", "argmin", "50");
+    if(!write_text(summary_path, stalled_iter_blowup))
+        return 1;
+    if(run_gate(summary_path, baseline_path, relaxed) != 2)
+    {
+        std::cerr << "regression_check perf-relax self-test: correctness-gate mode"
+                  << " suppressed a self-reported-status correctness breach; the"
+                  << " relaxation is not correctness-preserving\n";
+        return 1;
+    }
+
+    // Non-vacuity pin (oracle correctness path): a correct-status cell with the
+    // iteration blowup, witnessed by an oracle_pass=fail verdict, must still
+    // breach under the relaxation (oracle_correctness), naming the correctness
+    // metric. Proves correctness gating is independent of the ceiling relaxation
+    // on the oracle path as well.
+    const auto oracle_iter_blowup =
+        summary_fixture("filter_slsqp", "problem_p", "100", "1e-16", "1e-15",
+                        "converged", "included", "none", "1000", "argmin", "50");
+    if(!write_text(summary_path, oracle_iter_blowup)
+       || !write_text(baseline_path,
+                      baseline_fixture("filter_slsqp", "problem_p",
+                                       "1000000", "pass"))
+       || !write_text(verdict_path,
+                      "solver,problem,mode,seed,oracle_pass,objective_distance,"
+                      "feasibility_residual,kkt_residual,witness\n"
+                      "filter_slsqp,problem_p,publication,42,fail,1e-2,1e-1,,w\n"))
+        return 1;
+    gate_options relaxed_oracle{relaxed};
+    relaxed_oracle.oracle_verdict_path = verdict_path.string();
+    if(run_gate(summary_path, baseline_path, relaxed_oracle) != 2)
+    {
+        std::cerr << "regression_check perf-relax self-test: correctness-gate mode"
+                  << " suppressed an oracle-witnessed correctness breach; the"
+                  << " relaxation is not correctness-preserving\n";
+        return 1;
+    }
+    // The same cell with an oracle_pass=pass verdict and the iteration blowup is
+    // clean under the relaxation: correctness holds, the ceiling is not gated.
+    if(!write_text(verdict_path,
+                   "solver,problem,mode,seed,oracle_pass,objective_distance,"
+                   "feasibility_residual,kkt_residual,witness\n"
+                   "filter_slsqp,problem_p,publication,42,pass,1e-16,1e-15,,w\n"))
+        return 1;
+    if(run_gate(summary_path, baseline_path, relaxed_oracle) != 0)
+    {
+        std::cerr << "regression_check perf-relax self-test: correctness-gate mode"
+                  << " did not relax the iteration ceiling on an oracle-correct"
+                  << " cell\n";
+        return 1;
+    }
+
+    // The relaxation also covers the instruction ceilings. A real-time-critical
+    // family whose instructions/iter breaches its absolute ceiling breaches in
+    // strict mode (exit 2) and reports NOT-GATED under the relaxation (exit 0).
+    // The disposition is expected_fail with a failing accuracy, so no other gate
+    // can fire -- isolating the instruction ceiling.
+    if(!write_text(summary_path, summary_fixture("nw_sqp_accurate", "problem_i",
+                                                 "1", "1e-4", "1e-4",
+                                                 "max_iterations", "included",
+                                                 "none", "1000"))
+       || !write_text(baseline_path, instr_baseline_fixture(
+                          "nw_sqp_accurate", "problem_i", "expected_fail",
+                          "100000", "500")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, strict) != 2)
+    {
+        std::cerr << "regression_check perf-relax self-test: strict mode did not"
+                  << " gate the instruction ceiling\n";
+        return 1;
+    }
+    if(run_gate(summary_path, baseline_path, relaxed) != 0)
+    {
+        std::cerr << "regression_check perf-relax self-test: correctness-gate mode"
+                  << " did not relax the instruction ceiling\n";
+        return 1;
+    }
+
+    // The relaxation also covers the instruction ratio. A cell far above
+    // baseline*factor breaches in strict mode and reports NOT-GATED under the
+    // relaxation.
+    if(!write_text(summary_path, summary_fixture("bobyqa", "problem_i",
+                                                 "1", "1e-4", "1e-4",
+                                                 "max_iterations", "included",
+                                                 "none", "100000"))
+       || !write_text(baseline_path, instr_baseline_fixture(
+                          "bobyqa", "problem_i", "expected_fail", "1000", "")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, strict) != 2)
+    {
+        std::cerr << "regression_check perf-relax self-test: strict mode did not"
+                  << " gate the instruction ratio\n";
+        return 1;
+    }
+    if(run_gate(summary_path, baseline_path, relaxed) != 0)
+    {
+        std::cerr << "regression_check perf-relax self-test: correctness-gate mode"
+                  << " did not relax the instruction ratio\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 void print_usage(std::ostream& os)
 {
     os << "Usage: regression_check <publish_summary.csv> <regression_baseline.csv>\n"
@@ -1556,12 +1814,23 @@ void print_usage(std::ostream& os)
           "      for a publication run: there, a disarmed counter must fail loud.\n"
           "      It relaxes only that verdict -- correctness is gated unchanged,\n"
           "      and cells whose counter arms are still gated in full.\n"
+          "  REGRESSION_CHECK_RELAX_PERF_CEILINGS=1\n"
+          "      Correctness-gate mode for a shared runner. The performance\n"
+          "      ceilings (max_outer_iters and instructions/iter, ratio and\n"
+          "      absolute) report NOT-GATED instead of breaching: they are\n"
+          "      decision-identity properties within a toolchain, not across\n"
+          "      toolchains, so a baseline calibrated on one compiler cannot gate\n"
+          "      a run built with another. Correctness (oracle/accuracy/\n"
+          "      feasibility/status) is gated unchanged on every cell. Leave\n"
+          "      unset on the controlled host: there, every ceiling gates. A run\n"
+          "      with it set is not a publication baseline.\n"
           "\n"
           "Self-tests:\n"
           "  regression_check --self-test\n"
           "  regression_check --self-test-prohibited-solvers\n"
           "  regression_check --self-test-instructions\n"
-          "  regression_check --self-test-oracle-witness\n";
+          "  regression_check --self-test-oracle-witness\n"
+          "  regression_check --self-test-perf-ceiling-relax\n";
 }
 
 }
@@ -1574,6 +1843,7 @@ int main(int argc, char** argv)
     bool instructions_self_test = false;
     bool baseline_self_test = false;
     bool oracle_witness_self_test = false;
+    bool perf_ceiling_relax_self_test = false;
     std::vector<std::string_view> positional;
 
     const char* disable_wall_env = std::getenv("REGRESSION_CHECK_DISABLE_WALL_GATE");
@@ -1597,6 +1867,27 @@ int main(int argc, char** argv)
                   << " a disarmed instruction counter reports UNMEASURED instead"
                   << " of breaching. Correctness gating is unchanged; cells whose"
                   << " counter arms are still gated on ratio and ceiling.\n";
+
+    // Correctness-gate mode for a shared runner (a per-commit CI tier). Set by a
+    // caller that knows the performance ceilings are not comparable on its host:
+    // the baseline is calibrated on one toolchain, and the iteration count and
+    // instruction cost are decision-identity properties within a toolchain, not
+    // across toolchains. A controlled-host or publication run leaves it unset so
+    // every ceiling gates in full. This is not a gate bypass: correctness
+    // (oracle verdict, accuracy, feasibility, status) is gated identically, and
+    // a run with it set is not a publication baseline (perf_gate_policy records
+    // the relaxation, fail-closed).
+    const char* relax_perf_env =
+        std::getenv("REGRESSION_CHECK_RELAX_PERF_CEILINGS");
+    opts.relax_perf_ceilings =
+        relax_perf_env != nullptr && std::string_view{relax_perf_env} == "1";
+    if(opts.relax_perf_ceilings)
+        std::cerr << "INFO: REGRESSION_CHECK_RELAX_PERF_CEILINGS=1; the"
+                  << " performance ceilings (max_outer_iters and instructions/"
+                  << "iter) report NOT-GATED instead of breaching -- they are"
+                  << " toolchain-sensitive and gate on the controlled host."
+                  << " Correctness (oracle/accuracy/feasibility/status) is gated"
+                  << " unchanged on every cell.\n";
 
     const char* promote_log_env = std::getenv("ARGMIN_REGRESSION_CHECK_PROMOTE_LOG");
     opts.promote_log_enabled =
@@ -1633,6 +1924,11 @@ int main(int argc, char** argv)
         if(arg == "--self-test-oracle-witness")
         {
             oracle_witness_self_test = true;
+            continue;
+        }
+        if(arg == "--self-test-perf-ceiling-relax")
+        {
+            perf_ceiling_relax_self_test = true;
             continue;
         }
         if(arg == "--oracle-verdict" && i + 1 < argc)
@@ -1676,6 +1972,8 @@ int main(int argc, char** argv)
         return run_instructions_self_test();
     if(oracle_witness_self_test)
         return run_oracle_witness_self_test();
+    if(perf_ceiling_relax_self_test)
+        return run_perf_ceiling_relax_self_test();
 
     if(positional.size() != 2)
     {
