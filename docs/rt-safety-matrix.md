@@ -1,16 +1,18 @@
 # RT-safety matrix
 
 This page states, per shipped solver and driver, what real-time (RT) guarantees
-argmin makes and — for every "yes" — names the test or CI artifact that proves it.
-The discipline is deliberate: a "yes" without a proving artifact would export a false
-guarantee to a downstream worst-case-execution-time budget. Cells that are honest "no"
-are what make the rest of the table trustworthy.
+argmin makes and — for every "yes" — either names the test or CI artifact that proves it or
+marks the claim as argued from reasoning with nothing standing behind it. The discipline is
+deliberate: a "yes" whose strength a reader cannot see would export a false guarantee to a
+downstream worst-case-execution-time budget. The honest "no" cells, and the "yes" cells
+marked argued, are what make the rest of the table trustworthy.
 
 argmin is a passive RT kernel: it owns no thread, scheduler, timer, or loop. The caller
 owns scheduling. Every property below is a *local* property argmin achieves on its own,
 with no dependency on any consumer. The stack-wide contract this table feeds lives in
 the ctrlpp/plexus real-time coordination charter (`STACK-RT-SAFETY-CONTRACT.md`); publish
-argmin rows against the same frozen schema.
+argmin rows against the same ratified column set. That contract is still a living document
+and has not frozen its schema, so the column set is agreed rather than final.
 
 ## What each column means
 
@@ -21,10 +23,17 @@ argmin rows against the same frozen schema.
   in **zero mode** (fails the build if a single allocation fires on an armed step); a "no"
   citing a **witness-mode** gate reports the measured steady-state count without asserting
   zero. Allocation-freedom is a property of the *policy at fixed `N`*, not of the driver.
-- **bounded-iterations?** — the solve terminates in a finite, statically bounded iteration
-  count. The outer loop honors `max_iterations`; every inner leaf loop carries a documented
-  cap (line search ≤ 40 evaluations, NNLS ≤ 3n, Steihaug-CG ≤ 2·(n+m), feasibility
-  restoration ≤ 10 steps).
+- **bounded-iterations?** — the solve terminates in a finite iteration count: every loop,
+  outer and inner, carries a cap, so no path can spin unboundedly. The outer loop honors
+  `max_iterations`; each inner leaf loop carries a documented cap (line search ≤ 40
+  evaluations, NNLS ≤ 3n, Steihaug-CG ≤ 2·(n+m), feasibility restoration ≤ 10 steps). Those
+  bounds are *configured*, not static: the NNLS `3n` cap is hard-coded, but the other three
+  are option defaults a caller may raise, and a caller that raises one raises its own
+  worst-case bound with it. This is still a usable real-time property — a real-time
+  integrator pins its options at the configuration it ships, and at that configuration each
+  default cap is a real bound. It is a property of the configuration rather than of the type,
+  and no test asserts that the caps bind, which is why the column renders as argued
+  throughout rather than gated.
 - **wall-clock-free?** — the `step()` path reads no wall clock. This falls out of the
   **driver type**: `step_budget_solver` and `stepper` never include `<chrono>`, so a
   translation unit that budgets purely by iterations cannot transitively acquire the clock.
@@ -38,10 +47,32 @@ argmin rows against the same frozen schema.
   identical seed) reproduce the same trajectory bit-for-bit. The SQP / L-BFGS-B / LM /
   Gauss-Newton / MMA families carry no RNG; the CMA-ES and ISRES families take an injectable,
   seed-deterministic RNG.
-- **evidence** — the named artifact proving each "yes". Alloc gates run under the ctest label
-  `alloc-gate` (CI job *labeled instruments (alloc-gate, oracle-pin)*). The exceptions-off
-  probe is `argmin_no_exceptions_probe` (CI job *exceptions-off (instantiation probe)*). The
-  standards matrix builds and tests at C++20 and C++23 (CI jobs *c++20 / c++23 (build + ctest)*).
+- **evidence** — for a gated cell, the named artifact proving the "yes"; for an argued cell,
+  the reasoning it rests on, published next to the claim rather than left implicit. Alloc
+  gates run under the ctest label `alloc-gate` (CI job *labeled instruments (alloc-gate,
+  oracle-pin)*). The exceptions-off probe is `argmin_no_exceptions_probe`, which also runs
+  under the standards matrix; that matrix builds and tests at C++20 and C++23 as two separate
+  legs (CI jobs *c++20 (build + ctest)* and *c++23 (build + ctest)*).
+
+### Gated and argued
+
+Every "yes" in the tables below carries its evidence class, and the distinction is the point
+of the table rather than a caveat on it:
+
+- **yes** *(gated)* — a named check stands behind the claim and turns red if the claim stops
+  being true. The artifact is named in the evidence column, it exists, and a named CI job
+  runs it.
+- yes *(argued)* — the claim rests on reasoning with no artifact behind it. It is a claim the
+  maintainers believe and have stated their grounds for, but nothing fails if it silently
+  becomes false.
+
+An argued cell is an honest claim, not a hidden one, and it is not a "no". But a reader
+budgeting worst-case execution time should treat the two differently: a gated cell is a
+property this repository defends on every commit, while an argued cell is a property you may
+wish to re-verify against your own configuration. Roughly two-thirds of the "yes" cells below
+are argued — most visibly the entire `bounded-iterations?` column, and the
+`exceptions-off-clean?` cells for the policies the instantiation probe does not link. Those
+cells never had artifacts; naming that is what the class is for.
 
 ## Drivers
 
@@ -50,12 +81,20 @@ cells are inherited from whichever policy is plugged in (see the policy rows). A
 satisfy the behavioral solving concepts, so solver groups and benchmark adapters stay
 uniform across driver choices.
 
+Both tables below are rendered from the checked-in cell data file
+`scripts/rt_matrix_cells.json` by `scripts/rt_matrix.py`. A hand edit between the generated
+markers is overwritten by the next render, so a correction to a claim, its class, or its
+evidence belongs in the data file. Everything outside the markers — the column legend, the
+scope argument below, and the footnotes — is hand-written analysis and is never generated.
+
+<!-- BEGIN GENERATED: drivers -->
 | module | allocation-free? | bounded-iterations? | wall-clock-free? | exceptions-off-clean? | deterministic(seeded)? | evidence |
 |---|---|---|---|---|---|---|
-| `step_budget_solver` | per policy | yes | **yes (by construction)** | yes | per policy | `rt.h` re-exports it and pins that no transitively-included header pulls `<chrono>`; the concept probe asserts it satisfies the loop-owning solving concept |
-| `stepper` | per policy | yes (caller owns the budget; one bounded step per call, no internal loop) | **yes (by construction)** | yes | per policy | `rt.h` concept probe asserts `stepper` satisfies the passive steppable concept but *not* the loop-owning refinement; no `<chrono>` in its include closure |
-| `time_budget_solver` | per policy | yes | **no** (adds a `steady_clock` deadline; owns `solve_result` wall-time reporting) | yes | no (termination point is wall-clock-dependent) | the only driver pulling `<chrono>`; excluded from the `rt.h` umbrella |
-| `step_and_time_budget_solver` | per policy | yes | **no** (both caps; whichever fires first) | yes | no (termination point is wall-clock-dependent) | excluded from the `rt.h` umbrella |
+| `step_budget_solver` | per policy | yes *(argued)* | **yes** *(gated)* | **yes** *(gated)* | per policy | the outer loop honors max_iterations, an option default rather than a static limit; runner_chrono_freedom_scan (GCC/Clang only); runner_chrono_freedom_compiles; c++20 (build + ctest); c++23 (build + ctest); argmin_no_exceptions_probe (the probe drives every policy through this driver) |
+| `stepper` | per policy | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | per policy | the caller owns the budget; one bounded step per call, with no internal loop; runner_chrono_freedom_scan (GCC/Clang only); runner_chrono_freedom_compiles; c++20 (build + ctest); c++23 (build + ctest); throw-free and RTTI-free library-wide, but the instantiation probe does not link this driver |
+| `time_budget_solver` | per policy | yes *(argued)* | no (adds a steady_clock deadline; owns the wall-time reporting) | yes *(argued)* | no (the termination point is wall-clock-dependent) | the stored max_iterations remains a hard safety cap; the deadline can only terminate earlier; throw-free and RTTI-free library-wide, but the instantiation probe does not link this driver |
+| `step_and_time_budget_solver` | per policy | yes *(argued)* | no (both caps; whichever fires first) | yes *(argued)* | no (the termination point is wall-clock-dependent) | the stored max_iterations remains a hard safety cap; the deadline can only terminate earlier; throw-free and RTTI-free library-wide, but the instantiation probe does not link this driver |
+<!-- END GENERATED: drivers -->
 
 ## Policies
 
@@ -64,34 +103,29 @@ gates certify the **warm-started pre-convergence RT operating regime** (bounded 
 steps, never idling); see the footnotes for the two characterized off-hot-loop residuals, and
 "Scope of the allocation-free claim" below for the dense fixed-`N` regime these gates hold in.
 
+<!-- BEGIN GENERATED: policies -->
 | module | allocation-free? | bounded-iterations? | wall-clock-free? | exceptions-off-clean? | deterministic(seeded)? | evidence |
 |---|---|---|---|---|---|---|
-| `kraft_slsqp` | **yes** | yes | yes | yes | yes | `sqp_alloc_gate_kraft` (zero mode, 0.00/step); `argmin_no_exceptions_probe`; no RNG |
-| `filter_slsqp` | **yes** [^restore] | yes | yes | yes | yes | `sqp_alloc_gate_filter_slsqp` (zero mode, 0.00/step); `argmin_no_exceptions_probe`; no RNG |
-| `nw_sqp` | **yes** | yes | yes | yes | yes | `sqp_alloc_gate_nw` (zero mode, 0.00/step, fixed-`N` steady state); `argmin_no_exceptions_probe`; no RNG |
-| `filter_nw_sqp` | **yes** [^restore] | yes | yes | yes | yes | `sqp_alloc_gate_filter_nw` (zero mode, 0.00/step, fixed-`N` steady state); `argmin_no_exceptions_probe`; no RNG |
-| `tr_sqp` | **yes** [^nullspace] | yes | yes | yes | yes | `sqp_alloc_gate_tr_sqp` (zero mode, 0.00/step, on an equality-constrained fixture); `argmin_no_exceptions_probe`; no RNG |
-| `filter_trsqp` | **yes** [^restore] [^nullspace] | yes | yes | yes | yes | `sqp_alloc_gate_filter_trsqp` (zero mode, 0.00/step, on an equality-constrained fixture); `argmin_no_exceptions_probe`; no RNG |
-| `lbfgsb` | **yes** | yes | yes | yes | yes | `alloc_gate_lbfgsb` (zero mode, incl. the bound-active generalized-Cauchy-point/subspace branch); `argmin_no_exceptions_probe`; no RNG |
-| `byrd_lbfgsb` | **yes** | yes | yes | yes | yes | `alloc_gate_byrd_lbfgsb` (zero mode, bound-active path); `argmin_no_exceptions_probe`; no RNG |
-| `lm` | **yes** | yes | yes | yes | yes | `alloc_gate_lm` (zero mode, 0.00/step, fixed-`N` steady state); `argmin_no_exceptions_probe`; no RNG |
-| `projected_gn` | **yes** | yes | yes | yes | yes | `alloc_gate_projected_gn` (zero mode, active-bound fixture); `argmin_no_exceptions_probe`; no RNG |
-| `projected_gradient_gn` | **yes** | yes | yes | yes* | yes | `alloc_gate_projected_gradient_gn` (zero mode, active-bound fixture); throw-free library-wide (not individually instantiated by the probe); no RNG |
-| `augmented_lagrangian` | **yes** | yes | yes | yes | yes | `alloc_gate_augmented_lagrangian` (zero mode; bounded resumable inner solve, mu-change + warm-reset armed); `argmin_no_exceptions_probe`; no RNG |
-| `bobyqa` | **no** | yes | yes | yes* | yes | no alloc gate (derivative-free quadratic-model rebuild allocates; not RT-claimed); throw-free library-wide; no RNG |
-| `cobyla` | **no** | yes | yes | yes* | yes | no alloc gate (not RT-claimed); throw-free library-wide; no RNG |
-| `cmaes` | **no** | yes | yes | yes | yes (seeded) | no alloc gate (stochastic population sampling allocates; not RT-claimed); `argmin_no_exceptions_probe` (throw sites converted to status returns); seed determinism: `cmaes` generation-pin + sampler bit-identity tests |
-| `isres` | **no** | yes | yes | yes* | yes (seeded) | no alloc gate (stochastic; not RT-claimed); throw-free library-wide; seeded stochastic-ranking ES tests |
-| `mma` | **no** | yes | yes | yes* | yes | no alloc gate (separable-approximation subproblem allocates; not RT-claimed); throw-free library-wide; no RNG |
-| `gcmma` | **no** | yes | yes | yes* | yes | no alloc gate (not RT-claimed); throw-free library-wide; no RNG |
-| `ccsa_quadratic` | **no** | yes | yes | yes* | yes | no alloc gate (not RT-claimed); throw-free library-wide; no RNG |
-
-\* `exceptions-off-clean?` marked `yes*` is a library-wide property (the library has zero
-`throw` sites and no RTTI, and the standards-matrix CI compiles the policy at C++20 and C++23):
-these policies are throw-free but are not among the set the `-fno-exceptions -fno-rtti`
-instantiation probe links and runs. The probe covers the RT-claimed set (`lbfgsb`,
-`byrd_lbfgsb`, `cmaes`, `kraft_slsqp`, `filter_slsqp`, `nw_sqp`, `filter_nw_sqp`, `tr_sqp`,
-`filter_trsqp`, `augmented_lagrangian`, `lm`, `projected_gn`).
+| `kraft_slsqp` | **yes** *(gated)* | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | sqp_alloc_gate_kraft (zero mode, 0.00/step); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `filter_slsqp` | **yes** *(gated)* [^restore] | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | sqp_alloc_gate_filter_slsqp (zero mode, 0.00/step); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `nw_sqp` | **yes** *(gated)* | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | sqp_alloc_gate_nw (zero mode, 0.00/step, fixed-N steady state); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `filter_nw_sqp` | **yes** *(gated)* [^restore] | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | sqp_alloc_gate_filter_nw (zero mode, 0.00/step, fixed-N steady state); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `tr_sqp` | **yes** *(gated)* [^nullspace] | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | sqp_alloc_gate_tr_sqp (zero mode, 0.00/step, on an equality-constrained fixture); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `filter_trsqp` | **yes** *(gated)* [^restore] [^nullspace] | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | sqp_alloc_gate_filter_trsqp (zero mode, 0.00/step, on an equality-constrained fixture); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `lbfgsb` | **yes** *(gated)* | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | alloc_gate_lbfgsb (zero mode, including the bound-active generalized-Cauchy-point/subspace branch); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `byrd_lbfgsb` | **yes** *(gated)* | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | alloc_gate_byrd_lbfgsb (zero mode, bound-active path); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `lm` | **yes** *(gated)* | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | alloc_gate_lm (zero mode, 0.00/step, fixed-N steady state); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `projected_gn` | **yes** *(gated)* | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | **yes** *(gated)* | alloc_gate_projected_gn (zero mode, active-bound fixture); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); projected_gn_policy: trajectory is run-to-run deterministic on a fixed target (run-to-run and post-reset bit-exactness) |
+| `projected_gradient_gn` | **yes** *(gated)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | alloc_gate_projected_gradient_gn (zero mode, active-bound fixture); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy; the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `augmented_lagrangian` | **yes** *(gated)* | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | yes *(argued)* | alloc_gate_augmented_lagrangian (zero mode; bounded resumable inner solve, mu-change and warm-reset armed); labeled instruments (alloc-gate, oracle-pin); every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe; c++20 (build + ctest); c++23 (build + ctest); the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `bobyqa` | not RT-claimed (no alloc gate; the derivative-free quadratic-model rebuild allocates) | yes *(argued)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy; the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `cobyla` | not RT-claimed (no alloc gate) | yes *(argued)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy; the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `cmaes` | not RT-claimed (no alloc gate; stochastic population sampling allocates) | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | **yes** *(gated)* | every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; argmin_no_exceptions_probe (throw sites converted to status returns); c++20 (build + ctest); c++23 (build + ctest); cmaes: one hand-derived generation pins mean, p_sigma, p_c, and sigma; cmaes: one hand-derived generation pins the rank-mu covariance C; cmaes_sampling: marsaglia_normal is bit-identical across identically-seeded odd-consumption sequences |
+| `isres` | not RT-claimed (no alloc gate; stochastic) | yes *(argued)* | yes *(argued)* | yes *(argued)* | **yes** *(gated)* | every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy; isres_policy: a fixed seed is bit-for-bit deterministic within one process (same process, same seed); isres_policy: determinism is seed-specific, not accidental; isres_policy: the reset path is deterministic from the same seed; c++20 (build + ctest); c++23 (build + ctest) |
+| `mma` | not RT-claimed (no alloc gate; the separable-approximation subproblem allocates) | yes *(argued)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy; the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `gcmma` | not RT-claimed (no alloc gate) | yes *(argued)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy; the policy carries no RNG, so identical inputs drive an identical trajectory |
+| `ccsa_quadratic` | not RT-claimed (no alloc gate) | yes *(argued)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | every loop is iteration-capped, but the binding caps are option defaults rather than static limits; the policy reads no clock, but the include scan is scoped to the driver headers and does not cover it; throw-free and RTTI-free library-wide, but the instantiation probe does not link this policy; the policy carries no RNG, so identical inputs drive an identical trajectory |
+<!-- END GENERATED: policies -->
 
 ## Scope of the allocation-free claim
 
