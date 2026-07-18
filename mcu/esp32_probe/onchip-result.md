@@ -6,7 +6,7 @@ flashed over USB (`/dev/ttyUSB1`). Console on UART0 (CP2102), telemetry on
 UART1 → GPIO17 → FT232 (`/dev/ttyUSB0`). No SD card / external programmer —
 USB only.
 
-This is the D-01 *accessible* proof: FreeRTOS present, IDF allocator in the
+This is the *accessible* proof: FreeRTOS present, IDF allocator in the
 loop — a softer zero-heap statement than the bare-metal NUCLEO proof.
 
 ## Console (UART0)
@@ -35,7 +35,7 @@ argmin ESP32: RT-window gate PASS(0/step); whole-run heap total_allocations=274 
 
 - **0.00 allocs/step** on all four RT-claimed policies (`kraft_slsqp`,
   `nw_sqp`, `filter_nw_sqp`, `lm`) in the armed steady-state windows —
-  reproduces the Phase 60 host contract on real hardware.
+  reproduces the host contract on real hardware.
 - **Blindness canary PASS**: a deliberate `heap_caps_malloc(64)` in an armed
   window was observed, so the reported zeros are meaningful (not a blind
   sensor). Both sensors agree: the Eigen-native per-step counter
