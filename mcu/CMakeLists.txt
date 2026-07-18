@@ -2,7 +2,7 @@
 #
 # This is its OWN project() below the include boundary: it consumes the argmin
 # headers via an include path only and is NEVER added to the header-only
-# library's include path (MCU-01). It is not built by the top-level argmin
+# library's include path. It is not built by the top-level argmin
 # CMake; it is configured separately with the arm-none-eabi toolchain file:
 #
 #   # minimal -fno-exceptions cross-compile-link CI gate (no board, no BSP):
@@ -54,7 +54,7 @@ FetchContent_MakeAvailable(Eigen3)
 set(ARGMIN_M7_LINK_ARCH
     -mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb)
 
-# Eigen bare-metal macros common to every firmware TU (research 61-RESEARCH-nucleo §6).
+# Eigen bare-metal macros common to every firmware TU.
 # Cortex-M7 has no NEON and FPv5 is scalar-only: no vector ISA to align for, so
 # EIGEN_MAX_ALIGN_BYTES=8 (natural double) removes the aligned-allocation path.
 # EIGEN_ALLOCA must be explicit on newlib targets: Eigen's auto-detection
@@ -68,7 +68,7 @@ set(ARGMIN_EIGEN_MCU_DEFS
     EIGEN_MAX_ALIGN_BYTES=8
     EIGEN_ALLOCA=__builtin_alloca)
 
-# --- MCU-02: board-free -fno-exceptions -fno-rtti cross-compile-link gate ----
+# --- Board-free -fno-exceptions -fno-rtti cross-compile-link gate ------------
 #
 # Reuses the shared four-policy RT workload (probe/rt_probe_workload.h). Built
 # WITHOUT ARGMIN_BENCH_TRACE_ALLOC, so it is a pure instantiation + execution
@@ -87,7 +87,7 @@ target_link_options(argmin_arm_link_gate PRIVATE
     -Wl,-Map=argmin_arm_link_gate.map)
 set_target_properties(argmin_arm_link_gate PROPERTIES SUFFIX ".elf")
 
-# --- MCU-01/03/04: full flashable NUCLEO-H753ZI image ------------------------
+# --- Full flashable NUCLEO-H753ZI image -------------------------------------
 if(NOT MCU_LINK_GATE_ONLY
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/nucleo_h753zi/CMakeLists.txt")
     add_subdirectory(nucleo_h753zi)

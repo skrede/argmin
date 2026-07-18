@@ -14,9 +14,8 @@
 # Eigen FetchContent MUST run here, BEFORE the IDF project.cmake include:
 # ESP-IDF pre-scans every component's CMakeLists in cmake -P script mode to
 # harvest REQUIRES, and FetchContent_Declare calls define_property(), which is
-# not scriptable -- doing the fetch inside main/CMakeLists.txt fails configure
-# (verified in 61-RESEARCH-esp32.md §1). The source dir is bridged into the
-# component via a CACHE variable.
+# not scriptable -- doing the fetch inside main/CMakeLists.txt fails configure.
+# The source dir is bridged into the component via a CACHE variable.
 
 cmake_minimum_required(VERSION 3.22)
 
@@ -33,7 +32,7 @@ set(ARGMIN_PROBE_EIGEN_SOURCE_DIR "${eigen3_SOURCE_DIR}" CACHE PATH
     "Eigen source dir, bridged into the main component")
 
 # argmin headers, consumed header-only (the firmware includes the library; the
-# library never includes the firmware -- MCU-01 boundary).
+# library never includes the firmware).
 set(ARGMIN_PROBE_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../lib/argmin/include"
     CACHE PATH "argmin header include dir")
 set(ARGMIN_PROBE_MCU_DIR "${CMAKE_CURRENT_LIST_DIR}/.."

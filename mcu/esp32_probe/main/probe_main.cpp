@@ -1,4 +1,4 @@
-// ESP32 accessible-proof driver (MCU-04, ESP path).
+// ESP32 accessible-proof driver.
 //
 // Runs the shared fixed-N four-policy RT probe (probe/rt_probe_workload.h)
 // under ESP-IDF / FreeRTOS and measures allocations two independent ways,
@@ -94,7 +94,7 @@ int heap_sensor_canary()
 void probe_task(void*)
 {
     // Warm up first-use allocators (first stdio/float printf allocates a libc
-    // lock that would otherwise show as spurious trace noise -- 61-RESEARCH §2).
+    // lock that would otherwise show as spurious trace noise).
     std::printf("[argmin] ESP32 accessible allocation proof (RTOS-present)\n");
     std::printf("[argmin] warmup float %.2f\n", 0.0);
 

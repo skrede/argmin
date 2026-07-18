@@ -1,4 +1,4 @@
-// NUCLEO-H753ZI on-device allocation proof driver (MCU-04).
+// NUCLEO-H753ZI on-device allocation proof driver.
 //
 // Bare-metal, no RTOS. CMSIS startup runs SystemInit + C++ static ctors, then
 // calls main(). This TU:

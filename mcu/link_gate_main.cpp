@@ -8,7 +8,7 @@
 // surviving throw in any instantiated path, or an unresolved newlib-nano C++
 // runtime symbol (__cxa_* / _Unwind_*) under this exact multilib, fails the
 // link -- which is precisely the newlib-nano -fno-exceptions link behavior
-// MCU-02 gates, isolated from every firmware-image concern (no linker script,
+// this gate exercises, isolated from every firmware-image concern (no linker script,
 // no startup, no CMSIS; nosys.specs supplies the weak _sbrk/_write stubs).
 //
 // ARGMIN_BENCH_TRACE_ALLOC is intentionally NOT defined here: alloc_counter.h's

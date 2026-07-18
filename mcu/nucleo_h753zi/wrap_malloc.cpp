@@ -1,4 +1,4 @@
-// On-target allocation sensor for the NUCLEO-H753ZI proof (MCU-03).
+// On-target allocation sensor for the NUCLEO-H753ZI proof.
 //
 // Backs alloc_counter.h's arm/reset/read surface on bare-metal newlib the way
 // benchmarks/alloc_trace_main.cpp backs it on glibc: it owns the single

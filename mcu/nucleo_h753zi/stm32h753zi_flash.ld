@@ -1,7 +1,7 @@
 /* Hand-written linker script for STM32H753ZI (NUCLEO-H753ZI), single-core
  * Cortex-M7. CMSIS's cmsis-device-h7 pack ships ST linker templates only for
  * the dual-core H745/747/755/757 parts, so a hand-written script is the only
- * option for the single-core H753 (see 61-RESEARCH-nucleo.md §2).
+ * option for the single-core H753.
  *
  * Layout choice for an RT-determinism, allocation-free proof: place
  * .data/.bss/stack and the small bounded heap in DTCM (zero-wait-state,

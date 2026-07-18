@@ -1,7 +1,7 @@
 # Standalone heap tracing: heap_trace_* implementations are conditionally
 # compiled and the final link fails without this (headers are always visible).
 # heap_trace_start(HEAP_TRACE_ALL) + heap_trace_summary().total_allocations
-# back the arm/read allocation-count sensor (61-RESEARCH-esp32.md §2).
+# back the arm/read allocation-count sensor.
 CONFIG_HEAP_TRACING_STANDALONE=y
 
 # The fixed-N solver probe runs on a dedicated task (probe_main.cpp), so the

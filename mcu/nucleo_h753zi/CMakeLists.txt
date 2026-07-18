@@ -1,6 +1,6 @@
 # Full flashable NUCLEO-H753ZI image: CMSIS-only bare-metal (no HAL/RTOS),
 # hand-written linker script, the _sbrk allocation instrument, and the
-# four-policy fixed-N solve() probe with a semihosting report (MCU-01/03/04).
+# four-policy fixed-N solve() probe with a semihosting report.
 #
 # Built only in the default firmware mode (MCU_LINK_GATE_ONLY=OFF). The
 # on-device allocs/step number is an operator capture (see README.md); this
@@ -11,9 +11,9 @@ enable_language(ASM)
 
 # --- CMSIS-Core 6.x + STM32H7 device pack (headers + gcc startup + system) ---
 # Mirrors the Eigen FetchContent convention: header/asm trees, no CMakeLists to
-# suppress. Re-check the releases pages before bumping these tags
-# (61-RESEARCH-nucleo.md §1). Only CMSIS/Core/Include is put on the include
-# path, so no RTOS/DSP/NN code is pulled in.
+# suppress. Re-check the releases pages before bumping these tags. Only
+# CMSIS/Core/Include is put on the include path, so no RTOS/DSP/NN code is
+# pulled in.
 FetchContent_Declare(cmsis_core
     GIT_REPOSITORY https://github.com/ARM-software/CMSIS_6.git
     GIT_TAG v6.3.0

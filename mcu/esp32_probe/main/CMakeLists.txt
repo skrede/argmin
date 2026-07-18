@@ -11,7 +11,7 @@ target_include_directories(${COMPONENT_LIB} SYSTEM PRIVATE
 
 # ESP-IDF v6 defaults C++ to -std=gnu++26; GCC honors the LAST -std=, so this
 # per-component override (appended after IDF's global flag) wins. PRIVATE so it
-# never leaks into IDF's generated C TUs (61-RESEARCH-esp32.md §1).
+# never leaks into IDF's generated C TUs.
 target_compile_options(${COMPONENT_LIB} PRIVATE
     -std=gnu++20 -Wno-psabi)
 
