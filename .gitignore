@@ -71,3 +71,8 @@ GEMINI.md
 # Python bytecode cache
 __pycache__/
 *.pyc
+
+# Node/npm (tooling installed at the repo root, never part of the library)
+node_modules/
+package.json
+package-lock.json
