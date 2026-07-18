@@ -77,6 +77,27 @@ jobs:
         run: |
           ./build/tests/unit/argmin_unit_tests "projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory"
 
+      # Temporary manual-dispatch capture of the bit-identity golden of record on
+      # this exact gcc-14 Debug leg (running_target() = gcc-14;x86_64;DEBUG), so
+      # the committed golden matches the leg that will assert it. Removed once the
+      # golden lands. Gated to workflow_dispatch, so normal push CI is unaffected.
+      - name: Capture bit-identity golden (gcc-14 Debug)
+        if: github.event_name == 'workflow_dispatch' && matrix.compiler == 'gcc-14'
+        env:
+          ARGMIN_BIT_IDENTITY_CAPTURE: ${{ github.workspace }}/bit_identity_golden_capture.csv
+        run: |
+          ./build/tests/unit/argmin_unit_tests "real-time-path solver trajectories are bit-identical to the same-target golden"
+          echo "---- captured golden ----"
+          cat "${{ github.workspace }}/bit_identity_golden_capture.csv"
+
+      - name: Upload bit-identity golden artifact
+        if: github.event_name == 'workflow_dispatch' && matrix.compiler == 'gcc-14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bit-identity-golden-gcc14-debug
+          path: ${{ github.workspace }}/bit_identity_golden_capture.csv
+          if-no-files-found: error
+
       - name: Generate coverage
         if: matrix.coverage
         run: |
