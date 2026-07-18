@@ -129,16 +129,63 @@ stack reserve  >=  static call-chain high-water (-fstack-usage)
 Do **not** set the limit to the size of the whole reserve (a 64 KiB limit
 inside a 64 KiB stack budgets for overflow). At the fixed-`N` regime the
 RT claims live in (`N < 49`, see the scope section of the
-[Real-Time Safety Matrix](rt-safety-matrix.md)), the temporaries measured so far
-are small — 79 B and 223 B per inner QP iteration at `N = 4` — so the 8192 pin
-on the NUCLEO image leaves a wide margin against a 64 KiB reserve.
+[Real-Time Safety Matrix](rt-safety-matrix.md)), the measured temporaries are
+small. Instrumenting `EIGEN_ALLOCA` on host across **all four** RT-claimed
+policies (`mcu/probe/measure_temporaries_main.cpp`) gives the largest single
+*dynamic* (alloca) temporary per policy:
 
-Two honest limits on that statement: those sizes come from instrumenting one
-call path (the Kraft-LSEI triangular solve), not all four RT-claimed policies,
-and the pin itself has not been swept while the alloca path was actually live —
-the earlier sweep ran with `EIGEN_ALLOCA` undefined, where the limit is dead
-code and no sweep can move anything. Treat 8192 as a budgeted default, not a
-measured optimum, and re-sweep if you change `N`, the policy set, or the target.
+| Policy (fixed N) | Largest single dynamic temporary |
+|---|---|
+| `kraft_slsqp` (hs071, N=4) | 223 B — LSEI triangular solve, `argmin/detail/lsi.h` (79 B + 223 B live as a pair per inner QP iteration) |
+| `nw_sqp` (hs071, N=4) | 0 B — no alloca temporary at this N |
+| `filter_nw_sqp` (hs071, N=4) | 0 B |
+| `lm` (rosenbrock_ls, N=2) | 0 B |
+
+So the dynamic `L_max` is **223 B**. The limit *also* gates **fixed-size** Eigen
+stack objects at compile time — `static_assert(Size*sizeof(T) <=
+EIGEN_STACK_ALLOCATION_LIMIT)` in `DenseStorage.h` — and the largest here is a
+**512 B** 8×8 `TriangularMatrixMatrix` panel buffer. That sets a hard compile
+floor: a limit below 512 B fails to build. The 8192 pin clears both binding
+constraints — 16× the 512 B compile floor and ~36.7× the 223 B dynamic max.
+
+The pin was **swept while live** (`EIGEN_ALLOCA` defined) on arm-gcc 15.2.Rel1
+and recorded in [`mcu/nucleo_h753zi/sweep-result.md`](../mcu/nucleo_h753zi/sweep-result.md):
+the three buildable rungs (512 / 1024 / 8192) produce **distinct** binaries — the
+limit appears as the immediate in ~77 runtime `cmp r0, #LIMIT` alloca-vs-heap
+decisions — while a rung below the 512 B floor (256) fails to compile with a
+limit-derived `static_assert`. That two-axis result is the falsifiable positive
+control that the knob is live; it replaces the earlier **vacuous** sweep, which
+ran with `EIGEN_ALLOCA` undefined (limit dead code, byte-identical binary, no
+sweep able to move anything).
+
+### Composed stack budget for this image
+
+The `-fstack-usage` `.su` data (arm-gcc 15.2, pin 8192) gives a deepest single
+frame of **19,968 B** (`measure_steady_window` instantiated for `kraft_slsqp`).
+The four RT windows run **sequentially with no nesting**, so their frames do not
+sum across windows. `-fstack-usage` is per-frame and does **not** account for
+`alloca`, so it is a floor — add the measured alloca live-set and a margin:
+
+```
+budget_floor = 19,968 B   deepest .su frame (kraft measure_steady_window)
+             +    302 B   k x L_max_alloca  (k = 2 temporaries live at once:
+                          kraft's 79 B + 223 B triangular-solve pair)
+             +  ISR / margin
+            ~= 20.3 KiB  <<  65,536 B  (_Min_Stack_Size, stm32h753zi_flash.ld:39)
+```
+
+That leaves ~45 KiB (≈ 69 %) of the 64 KiB reserve free — an order of magnitude
+of headroom. Note the alloca contribution is `k x L_max_alloca` (the *measured*
+live-set), **not** `k x EIGEN_STACK_ALLOCATION_LIMIT`: the pin is a cap the
+temporaries never approach. For a rigorous root-to-leaf worst case (instead of a
+single-frame floor), aggregate the `.su` frames along the deepest call path with
+GCC 15's `-fcallgraph-info=su,da` or a community aggregator (`avstack.pl`,
+`puncover`) and add the same `k x L_max_alloca` + margin; the sequential-window
+structure keeps the result dominated by one window's path, still far under
+65,536 B.
+
+Treat 8192 as a budgeted pin justified by the measured maxima above (not a tight
+optimum); re-sweep if you change `N`, the policy set, or the target.
 
 ## Status
 

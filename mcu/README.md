@@ -50,10 +50,18 @@ Verified at build time (no hardware): valid ELF, **zero undefined symbols**,
 exactly one `_sbrk` (our strong override, not the nosys stub), fits 2 MB flash
 (≈ 375 KB text+rodata) and 128 KB DTCM: `.data`+`.bss` = 832 B plus the
 `._user_heap_stack` reserve of 88 KB (24 KB bounded heap + 64 KB stack) =
-88.8 KB used, ≈ 39 KB headroom. `EIGEN_STACK_ALLOCATION_LIMIT` pinned at 8192 as
-a per-temporary cap, against the temporaries measured on the instrumented path
-(79 B + 223 B per inner QP iteration at `N = 4`). Eigen's stack path requires
-`EIGEN_ALLOCA` to be defined explicitly on this target — see
+88.8 KB used, ≈ 39 KB headroom. `EIGEN_STACK_ALLOCATION_LIMIT` pinned at 8192,
+justified by the measured maxima (not a tight optimum). The largest single
+*dynamic* (alloca) temporary was instrumented on host across **all four** RT
+policies: `kraft_slsqp` **223 B** (LSEI triangular solve, 79 B + 223 B per inner
+QP iteration at `N = 4`), and `nw_sqp` / `filter_nw_sqp` / `lm` **0 B** (no
+alloca temporary at their fixed N). The limit also gates fixed-size Eigen stack
+objects at compile time, whose largest here is a **512 B** panel buffer — a hard
+compile floor. 8192 clears both (16× the 512 B floor, ~36.7× the 223 B dynamic
+max) and was **swept while live** on arm-gcc 15.2.Rel1
+([nucleo_h753zi/sweep-result.md](nucleo_h753zi/sweep-result.md): 512/1024/8192
+build to distinct binaries, 256 fails the limit static_assert). Eigen's stack
+path requires `EIGEN_ALLOCA` to be defined explicitly on this target — see
 [docs/embedded.md](../docs/embedded.md).
 
 ### Operator capture (board in hand)

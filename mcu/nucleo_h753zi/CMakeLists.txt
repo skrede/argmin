@@ -45,10 +45,19 @@ set(CMSIS_SYSTEM   "${cmsis_device_h7_SOURCE_DIR}/Source/Templates/system_stm32h
 # __linux__ short-circuits the check) and why sweeping the limit left the
 # binary byte-identical -- see nucleo_h753zi/onchip-result.md.
 #
-# Budget: the limit is a per-temporary cap, not a total. 8192 against the
-# 64 KiB stack reserve (stm32h753zi_flash.ld) leaves an order-of-magnitude
-# margin over the largest single fixed-N temporary (<= 4096 B); do not raise
-# it toward the reserve size. Rule: docs/embedded.md.
+# Budget: the limit gates two object classes, both measured (sweep-result.md,
+# 2026-07-18, arm-gcc 15.2.Rel1). (1) Runtime dynamic temporaries via the
+# alloca-vs-heap ternary in ei_declare_aligned_stack_constructed_variable --
+# largest is 223 B (kraft's lsi.h triangular solve; nw_sqp/filter_nw_sqp/lm
+# request none at these fixed N). (2) Fixed-size Eigen stack objects via a
+# compile-time static_assert(Size*sizeof(T) <= LIMIT) in DenseStorage.h --
+# largest is 512 B (the 8x8 TriangularMatrixMatrix panel buffer), which sets a
+# hard COMPILE FLOOR: any limit < 512 fails to build (verified: 256 -> static
+# assert (512 <= 256)). 8192 clears both -- 16x the 512 B compile floor and
+# ~36.7x the 223 B dynamic max -- so the margin swamps codegen/toolchain deltas.
+# The live sweep (512/1024/8192 produce distinct binaries; 256 fails to compile)
+# proves the knob is not dead code. Do not raise it toward the reserve size, and
+# do not re-tune it tight. Rule + full sweep: docs/embedded.md, sweep-result.md.
 set(MCU_EIGEN_STACK_LIMIT 8192 CACHE STRING
     "EIGEN_STACK_ALLOCATION_LIMIT for the fixed-N MCU probe (bytes)")
 
