@@ -161,4 +161,75 @@ int run_alloc_sensor_canary() noexcept
     return observed != 0 ? 0 : 1;
 }
 
+// Force ONE Eigen internal kernel temporary strictly above the pinned
+// EIGEN_STACK_ALLOCATION_LIMIT (8192 B) and observe the alloca->heap fallback
+// fire in an armed window, converting "did not overflow at these N" into "the
+// guardrail demonstrably works". Sibling of run_alloc_sensor_canary:
+// same arm -> deliberate op -> disarm -> read -> assert-nonzero shape.
+//
+// A 36x36 lower-triangular in-place solve routes its internal blocking
+// temporary through Eigen's ei_declare_aligned_stack_constructed_variable
+// ternary (Memory.h:755):
+//   (sizeof(T)*SIZE <= EIGEN_STACK_ALLOCATION_LIMIT) ? alloca : aligned_malloc
+// The temporary is a 36x36 double panel = 36*36*8 = 10368 B. Because
+// 10368 > 8192, the ternary takes the aligned_malloc (heap) branch -- a real
+// heap event the --wrap malloc + operator-new + eigen_assert sensors all
+// register while armed. Host-verified with the EIGEN_ALLOCA recording shim:
+// raw sizeof(T)*SIZE = 10368 B (the value the <= LIMIT test
+// compares), comfortably over 8192 B, so the fallback is deterministic. On this
+// arm64 host and the arm-none-eabi target EIGEN_CPUID is undefined, so Eigen's
+// cache-blocking uses the same non-x86 defaults -> the host sizing is
+// target-faithful.
+//
+// The operand matrices live in static (BSS) storage mapped in place, so the
+// ONLY heap traffic inside the armed window is the ~10.4 KiB fallback transient
+// -- well under the 24 KiB _Min_Heap_Size (stm32h753zi_flash.ld) and freed back
+// before run_all_rt_policies (the limit is NOT raised). The probe runs as its
+// own arm/reset/disarm window, fully outside the four RT windows'
+// arm/reset/disarm regions (nucleo_main.cpp calls it between the canary and
+// run_all_rt_policies), so it cannot perturb their 0.00/step counts.
+//
+// Returns 0 iff the guardrail fired (nonzero alloc observed), 1 otherwise (a
+// zero here would mean the over-limit temporary was NOT sent to the heap --
+// i.e. the guardrail is broken). observed_allocs receives the count.
+namespace
+{
+constexpr int kOverflowN   = 36;   // 36*36*sizeof(double) = 10368 B > 8192 B
+constexpr int kOverflowRhs = 8;
+double g_overflow_a[kOverflowN * kOverflowN];
+double g_overflow_b[kOverflowN * kOverflowRhs];
+}
+
+std::size_t overflow_probe_forced_bytes() noexcept
+{
+    return static_cast<std::size_t>(kOverflowN) * kOverflowN * sizeof(double);
+}
+
+int run_overflow_guardrail_probe(std::size_t& observed_allocs) noexcept
+{
+    Eigen::Map<Eigen::MatrixXd> A(g_overflow_a, kOverflowN, kOverflowN);
+    Eigen::Map<Eigen::MatrixXd> B(g_overflow_b, kOverflowN, kOverflowRhs);
+
+    // Setup OUTSIDE the armed window: a well-conditioned lower-triangular system
+    // (diagonal shifted strictly positive) so the solve is finite. Writing into
+    // the mapped BSS buffers allocates nothing.
+    A.setRandom();
+    A.diagonal().array() += static_cast<double>(kOverflowN);
+    B.setRandom();
+
+    argmin::detail::bench::reset_alloc_count();
+    argmin::detail::bench::arm_alloc_trace();
+
+    // The single deliberate over-limit op: its 10368 B kernel temporary must
+    // fall back to the heap (> 8192 B limit) and be observed by the sensor.
+    A.triangularView<Eigen::Lower>().solveInPlace(B);
+    volatile double sink = B(0, 0);
+    (void)sink;
+
+    argmin::detail::bench::disarm_alloc_trace();
+    observed_allocs = argmin::detail::bench::read_alloc_count();
+
+    return observed_allocs != 0 ? 0 : 1;
+}
+
 }

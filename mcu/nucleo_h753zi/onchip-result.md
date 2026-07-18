@@ -1,16 +1,31 @@
 # NUCLEO-H753ZI on-chip allocation result (operator bench artifact)
 
-Captured 2026-07-15 on a physical NUCLEO-H753ZI (bare-metal Cortex-M7 @ 64 MHz
-HSI, no RTOS, newlib-nano), app flashed over the on-board ST-Link by drag-drop
-to the `NOD_H753ZI` mass-storage drive. Report streamed over USART3 → the
-ST-Link VCP (`/dev/ttyACM0`) — no semihosting/OpenOCD. This is the D-02
-*rigorous* bare-metal proof.
+Re-captured 2026-07-18 on a physical NUCLEO-H753ZI (bare-metal Cortex-M7 @ 64 MHz
+HSI, no RTOS, newlib-nano), with the over-limit guardrail probe added. The pinned image
+(`EIGEN_STACK_ALLOCATION_LIMIT=8192`, `EIGEN_ALLOCA=__builtin_alloca`) was flashed
+over the on-board ST-Link by drag-drop to the `NOD_H753ZI` mass-storage drive,
+then re-run via the physical **NRST (B2) button** so the report streams cleanly.
+The report is streamed over USART3 → the ST-Link VCP; on this macOS host the VCP
+enumerates as `/dev/cu.usbmodem212203` at **115200 baud** (BSD `stty -f`,
+fd-held single reader) — no semihosting/OpenOCD.
 
-## Console (USART3 / ST-Link VCP)
+**Toolchain:** Arm GNU Toolchain **15.2.Rel1** (`arm-none-eabi-gcc`
+15.2.1 20251203). The capture certifies this toolchain's codegen.
+
+**Capture-method note.** The firmware report is boot-once. Mass-storage (DND)
+programming momentarily re-enumerates the ST-Link CDC, which invalidates a live
+reader's fd mid-stream and garbles the transcript on reopen; `st-flash
+--connect-under-reset reset` connects but leaves the core halted (no output). The
+clean method is the **physical NRST**: it resets only the target STM32, leaving
+the ST-Link USB/CDC enumerated, so a single held `cat` captures a pristine
+boot-once stream.
+
+## Console (USART3 / ST-Link VCP, physical NRST, 115200 baud)
 
 ```
 [argmin] NUCLEO-H753ZI on-device allocation proof
 [argmin] blindness canary PASS (deliberate allocation observed)
+[overflow-probe] forced 10368 B temporary > 8192 B limit: heap fallback observed (1 allocs) PASS
   [alloc-gate] kraft_slsqp hs071  eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
   [alloc-gate] kraft_slsqp hs071 PASS (zero-alloc gate)
   [alloc-gate] nw_sqp hs071       eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
@@ -19,7 +34,7 @@ ST-Link VCP (`/dev/ttyACM0`) — no semihosting/OpenOCD. This is the D-02
   [alloc-gate] filter_nw_sqp hs071 PASS (zero-alloc gate)
   [alloc-gate] lm rosenbrock_ls   eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
   [alloc-gate] lm rosenbrock_ls PASS (zero-alloc gate)
-[argmin] _sbrk one-time setup high-water = 12672 bytes (95 calls)
+[argmin] _sbrk one-time setup high-water = 12688 bytes (15 calls)
 [argmin] RT-window gate result: PASS (0 allocs/step on all windows)
 ```
 
@@ -27,22 +42,43 @@ ST-Link VCP (`/dev/ttyACM0`) — no semihosting/OpenOCD. This is the D-02
 
 - **All four RT-claimed policies (`kraft_slsqp`, `nw_sqp`, `filter_nw_sqp`,
   `lm`): 0.00 allocs/step** in the armed steady-state windows — the RT claim
-  holds on real bare-metal hardware, reproducing the Phase 60 host contract.
-  Both sensors agree (Eigen-native + `_sbrk`/`--wrap`).
+  holds on real bare-metal hardware with the pinned 8192 B limit, reproducing the
+  host contract. Both sensors agree (Eigen-native + `_sbrk`/`--wrap`).
 - **Blindness canary PASS**: a deliberate `malloc(64)` + `Eigen::VectorXd(37)`
   in an armed window was observed, so the zeros are meaningful, not blind.
-- `_sbrk` one-time setup high-water = **12,672 bytes** (95 calls) across the
-  four policies (informational; the RT claim is zero-*per-step*, not
-  zero-total-heap).
+- **Over-limit guardrail probe PASS**: a single armed probe window
+  (`run_overflow_guardrail_probe`, run between the canary and the four RT windows,
+  fully outside their arm/reset/disarm regions) forced a 36×36 lower-triangular
+  solve whose internal kernel temporary is **10368 B (36·36·8) > 8192 B**. Eigen's
+  `ei_declare_aligned_stack_constructed_variable` ternary therefore took the
+  `aligned_malloc` (heap) branch — **1 heap alloc observed** in that window. This
+  converts "did not overflow at these N" into "the guardrail demonstrably fires"
+  when a temporary exceeds the pinned limit. The four RT windows remained **0.00**
+  — the probe did **not** perturb them (its operands live in static BSS via `Map`,
+  so the only armed-window heap traffic is the ~10.4 KiB fallback transient, freed
+  back before the RT windows; the limit was not raised).
 
-This result required `EIGEN_ALLOCA` to be defined explicitly for the
-cross-build; the history below records the failure it fixed and the controlled
-experiment that attributes it. Flags and the stack-budgeting rule:
-`docs/embedded.md`.
+### Fresh-image fingerprint (proves this is the newly-flashed image)
+
+`_sbrk` one-time setup high-water = **12,688 bytes / 15 calls** for the image with
+the overflow probe. This is a distinct, self-consistent fingerprint of the
+freshly-flashed image — **not** the stale pre-probe baseline (12,672 B / 95 calls)
+and **not** the pre-`EIGEN_ALLOCA`-fix broken image (13,136 B / 97 calls):
+
+- **Bytes (12,688 vs 12,672, +16 B):** the byte high-water is still set by the RT
+  policies' one-time setup peak (which frees back); the probe's 10,368 B
+  transient is smaller than that peak, so it barely moves the high-water.
+- **Calls (15 vs 95):** the overflow probe runs first and grows the newlib heap arena
+  to ~10–12 KiB in a handful of `_sbrk` extensions, then frees the transient back
+  to the free list. The subsequent RT-policy one-time allocations are then
+  satisfied from that already-grown arena **without new `_sbrk` calls**, collapsing
+  the call count from 95 to 15. The byte high-water is unchanged because the true
+  simultaneous peak is still the RT setup. This is the expected, reasoned
+  consequence of adding the probe window ahead of the RT windows.
 
 ## History: `kraft_slsqp` at 2.80/step, root-caused to a missing `EIGEN_ALLOCA`
 
-The first capture on this board (same day, before the flag fix) read:
+The first capture on this board (2026-07-15, before the flag fix) read:
 
 ```
   [alloc-gate] kraft_slsqp hs071   eigen_malloc=28 c_alloc=28 armed_steps=10 per_step=2.80
@@ -100,3 +136,6 @@ Fix: `EIGEN_ALLOCA=__builtin_alloca` is defined explicitly in
 `ARGMIN_EIGEN_MCU_DEFS`, with `EIGEN_STACK_ALLOCATION_LIMIT` re-pinned to 8192
 as a budgeted per-temporary cap against the 64 KiB stack reserve in
 `stm32h753zi_flash.ld` (which was already provisioned for these temporaries).
+The 2026-07-18 re-capture above re-certifies 0.00/step on all four RT
+windows at the pinned limit and additionally proves the guardrail fires when a
+temporary exceeds it.

@@ -33,6 +33,8 @@ namespace argmin::mcu
 {
 void usart3_console_init() noexcept;
 int run_alloc_sensor_canary() noexcept;
+int run_overflow_guardrail_probe(std::size_t& observed_allocs) noexcept;
+std::size_t overflow_probe_forced_bytes() noexcept;
 std::size_t sbrk_high_water_bytes() noexcept;
 std::size_t sbrk_call_count() noexcept;
 }
@@ -51,6 +53,27 @@ int main()
         for(;;) { /* halt: an unreliable sensor must not report a green proof */ }
     }
     std::printf("[argmin] blindness canary PASS (deliberate allocation observed)\n");
+
+    // Over-limit guardrail probe: its own armed window, fully OUTSIDE the
+    // four RT windows below, forcing an Eigen kernel temporary above the pinned
+    // 8192 B EIGEN_STACK_ALLOCATION_LIMIT so the alloca->heap fallback fires.
+    // This proves the guardrail works (a nonzero alloc in THIS window), while
+    // the RT windows must remain 0.00/step (the probe does not perturb them).
+    std::size_t overflow_allocs = 0;
+    if(argmin::mcu::run_overflow_guardrail_probe(overflow_allocs) != 0)
+    {
+        std::fprintf(stderr,
+            "[overflow-probe] FAILED: forced %lu B temporary > 8192 B limit but "
+            "NO heap fallback observed -- guardrail did not fire\n",
+            static_cast<unsigned long>(
+                argmin::mcu::overflow_probe_forced_bytes()));
+        for(;;) { /* halt: a non-firing guardrail must not report a green proof */ }
+    }
+    std::printf("[overflow-probe] forced %lu B temporary > 8192 B limit: heap "
+                "fallback observed (%lu allocs) PASS\n",
+                static_cast<unsigned long>(
+                    argmin::mcu::overflow_probe_forced_bytes()),
+                static_cast<unsigned long>(overflow_allocs));
 
     const int rc = argmin::mcu::run_all_rt_policies();
 
