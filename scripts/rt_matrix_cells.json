@@ -16,9 +16,8 @@
           "cells": {
             "allocation-free?": {"verdict": "per-policy"},
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "the outer loop honors max_iterations, an option default rather than a static limit"
+              "verdict": "excluded",
+              "rationale": "the driver bound is the caller's budget / max_iterations option default -- a uniform runner property, not a per-solver intrinsic cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -47,9 +46,8 @@
           "cells": {
             "allocation-free?": {"verdict": "per-policy"},
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "the caller owns the budget; one bounded step per call, with no internal loop"
+              "verdict": "excluded",
+              "rationale": "the driver bound is the caller's budget / max_iterations option default -- a uniform runner property, not a per-solver intrinsic cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -78,9 +76,8 @@
           "cells": {
             "allocation-free?": {"verdict": "per-policy"},
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "the stored max_iterations remains a hard safety cap; the deadline can only terminate earlier"
+              "verdict": "excluded",
+              "rationale": "the driver bound is the caller's budget / max_iterations option default -- a uniform runner property, not a per-solver intrinsic cap"
             },
             "wall-clock-free?": {
               "verdict": "no",
@@ -106,9 +103,8 @@
           "cells": {
             "allocation-free?": {"verdict": "per-policy"},
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "the stored max_iterations remains a hard safety cap; the deadline can only terminate earlier"
+              "verdict": "excluded",
+              "rationale": "the driver bound is the caller's budget / max_iterations option default -- a uniform runner property, not a per-solver intrinsic cap"
             },
             "wall-clock-free?": {
               "verdict": "no",
@@ -154,8 +150,14 @@
             },
             "bounded-iterations?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "line search exhaustion surfaces a null step rather than a silent accept"},
+                {"kind": "ctest_test", "name": "nnls exhaustion returns mode 3 rather than a silent accept"},
+                {"kind": "ctest_test", "name": "restoration exhaustion returns max_iter_reached rather than a silent accept"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -202,8 +204,14 @@
             },
             "bounded-iterations?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "line search exhaustion surfaces a null step rather than a silent accept"},
+                {"kind": "ctest_test", "name": "nnls exhaustion returns mode 3 rather than a silent accept"},
+                {"kind": "ctest_test", "name": "restoration exhaustion returns max_iter_reached rather than a silent accept"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -249,8 +257,13 @@
             },
             "bounded-iterations?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "line search exhaustion surfaces a null step rather than a silent accept"},
+                {"kind": "ctest_test", "name": "nnls exhaustion returns mode 3 rather than a silent accept"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -297,8 +310,13 @@
             },
             "bounded-iterations?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "line search exhaustion surfaces a null step rather than a silent accept"},
+                {"kind": "ctest_test", "name": "restoration exhaustion returns max_iter_reached rather than a silent accept"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -345,8 +363,13 @@
             },
             "bounded-iterations?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "steihaug-cg exhaustion returns max_iterations rather than a silent accept"},
+                {"kind": "ctest_test", "name": "restoration exhaustion returns max_iter_reached rather than a silent accept", "note": "the restoration inner leaf caps at 10 steps"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -393,8 +416,13 @@
             },
             "bounded-iterations?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "steihaug-cg exhaustion returns max_iterations rather than a silent accept"},
+                {"kind": "ctest_test", "name": "restoration exhaustion returns max_iter_reached rather than a silent accept", "note": "the restoration inner leaf caps at 10 steps"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -440,8 +468,12 @@
             },
             "bounded-iterations?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "line search exhaustion surfaces a null step rather than a silent accept"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -487,8 +519,12 @@
             },
             "bounded-iterations?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "line search exhaustion surfaces a null step rather than a silent accept"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -533,9 +569,8 @@
               ]
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "no inner iterative leaf; per-step work is a single bounded factorization; the outer count is the uniform caller-budget property, not an intrinsic cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -580,9 +615,8 @@
               ]
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "single projected trust-region step per iteration; no inner iterative leaf; the outer count is the caller budget"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -627,8 +661,12 @@
             },
             "bounded-iterations?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "line search exhaustion surfaces a null step rather than a silent accept"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -673,9 +711,8 @@
               ]
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "the outer bound is delegated to an inner solver's caller-set budget"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -716,9 +753,8 @@
               "qualifier": "no alloc gate; the derivative-free quadratic-model rebuild allocates"
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "not an RT-claimed bounded-iterations guarantee; the only outer bound is a caller-set maxfun/maxiter budget, not an intrinsic leaf cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -759,9 +795,8 @@
               "qualifier": "no alloc gate"
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "not an RT-claimed bounded-iterations guarantee; the only outer bound is a caller-set maxfun/maxiter budget, not an intrinsic leaf cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -784,8 +819,12 @@
             },
             "deterministic(seeded)?": {
               "verdict": "yes",
-              "class": "argued",
-              "rationale": "the policy jitters degenerate geometry steps with a self-contained generator seeded from the problem dimensions, so identical inputs do reproduce -- but the claim rests on that seeding rather than on the absence of an RNG, which is why the no-RNG scan excludes it"
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "cobyla reset re-seeds the generator so the post-reset run is identical"},
+                {"kind": "ci_job", "name": "c++20 (build + ctest)"},
+                {"kind": "ci_job", "name": "c++23 (build + ctest)"}
+              ]
             }
           }
         },
@@ -797,9 +836,8 @@
               "qualifier": "no alloc gate; stochastic population sampling allocates"
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "not an RT-claimed bounded-iterations guarantee; the only outer bound is a caller-set maxfun/maxiter budget, not an intrinsic leaf cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -841,9 +879,8 @@
               "qualifier": "no alloc gate; stochastic"
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "not an RT-claimed bounded-iterations guarantee; the only outer bound is a caller-set maxfun/maxiter budget, not an intrinsic leaf cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -885,9 +922,8 @@
               "qualifier": "no alloc gate; the separable-approximation subproblem allocates"
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "not an RT-claimed bounded-iterations guarantee; the only outer bound is a caller-set maxfun/maxiter budget, not an intrinsic leaf cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -928,9 +964,8 @@
               "qualifier": "no alloc gate"
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "not an RT-claimed bounded-iterations guarantee; the only outer bound is a caller-set maxfun/maxiter budget, not an intrinsic leaf cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",
@@ -971,9 +1006,8 @@
               "qualifier": "no alloc gate"
             },
             "bounded-iterations?": {
-              "verdict": "yes",
-              "class": "argued",
-              "rationale": "every loop is iteration-capped, but the binding caps are option defaults rather than static limits"
+              "verdict": "excluded",
+              "rationale": "not an RT-claimed bounded-iterations guarantee; the only outer bound is a caller-set maxfun/maxiter budget, not an intrinsic leaf cap"
             },
             "wall-clock-free?": {
               "verdict": "yes",

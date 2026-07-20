@@ -21,10 +21,11 @@
 #   5. the checker carries no bypass hook       -- nothing proven here was proven
 #                                                 by a gate weakened to allow it
 #
-# The mutations flip a rendered evidence class or corrupt a cited evidence name,
-# always inside the generator's markers. Never trailing whitespace and never a
-# region outside the markers: the checker does not compare either, so a control
-# built on them would pass for the wrong reason and prove nothing at all.
+# The mutations flip a rendered evidence class, promote a non-"yes" reasoned
+# exclusion to a yes-adjacent string, or corrupt a cited evidence name, always
+# inside the generator's markers. Never trailing whitespace and never a region
+# outside the markers: the checker does not compare either, so a control built on
+# them would pass for the wrong reason and prove nothing at all.
 #
 # Property 3 is deliberately not a grep over all of stderr. The checker prints a
 # unified diff, which quotes the mutated line verbatim -- so the row name appears
@@ -222,6 +223,14 @@ prove_mutation_fails "$TIERS_DATA" "$TIERS_DOC" "tiers" "cross-instantiation num
 prove_mutation_fails "$MATRIX_DATA" "$MATRIX_DOC" "policies" "projected_gn" \
     'alloc_gate_projected_gn' 'alloc_gate_projected_gn_renamed_away' \
     "safety matrix: a cited gate name corrupted in place"
+
+# A reasoned exclusion is a non-"yes" verdict with no gate behind it. The edit a
+# reader would most want caught is one that hand-promotes it to a yes-adjacent
+# string -- exporting an intrinsic bound the policy does not have. The render path
+# for the new verdict must be defended like a downgraded class or a corrupted name.
+prove_mutation_fails "$MATRIX_DATA" "$MATRIX_DOC" "policies" "lm" \
+    'not intrinsically bounded *(reasoned exclusion)*' '**yes** *(gated)*' \
+    "safety matrix: a reasoned-exclusion cell hand-promoted to a yes"
 
 prove_mutation_fails "$TIERS_DATA" "$TIERS_DOC" "tiers" "cross-instantiation numeric agreement" \
     'fixed-N path reproduces the dynamic-N trajectory' \

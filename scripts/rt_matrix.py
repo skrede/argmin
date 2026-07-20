@@ -159,7 +159,7 @@ import shutil
 import difflib
 import subprocess
 
-VERDICTS = ("yes", "no", "per-policy", "not-claimed")
+VERDICTS = ("yes", "no", "per-policy", "not-claimed", "excluded")
 CLASSES = ("gated", "argued")
 EVIDENCE_KINDS = ("ctest_test", "ctest_label", "ci_job")
 
@@ -199,6 +199,12 @@ SCHEMAS = {
             "no": "no",
             "per-policy": "per policy",
             "not-claimed": "not RT-claimed",
+            # A non-yes verdict, deliberately not a class on a yes: a cell whose
+            # iteration count is bounded only by a caller-set budget or single-step
+            # structure has no intrinsic cap to gate, so rendering it as any yes
+            # form would mint a prose-only yes the schema exists to forbid. Being
+            # non-yes exempts it from the every-yes-needs-a-gate rule.
+            "excluded": "not intrinsically bounded *(reasoned exclusion)*",
         },
     },
     "determinism-tiers": {
@@ -368,16 +374,22 @@ def _validate_cell(cell, where, bad):
         if cell.get("evidence") is not None:
             bad(f"{where}: only a gated claim carries evidence")
         rationale = cell.get("rationale")
-        if rationale is not None:
-            # A non-claim is the one verdict a reader is entitled to a reason
-            # for: "we do not guarantee this" invites "why not", and a claim
+        if verdict == "excluded":
+            # A reasoned exclusion is only honest if it names its reason: the cell
+            # publishes "not intrinsically bounded" and the reader is owed why. The
+            # reason renders in the evidence column, the same place a gated claim's
+            # artifacts do, because that column answers why believe this cell.
+            if not isinstance(rationale, str) or not rationale.strip():
+                bad(f"{where}: a reasoned exclusion must carry a written rationale")
+        elif rationale is not None:
+            # A non-claim is the one remaining verdict a reader is entitled to a
+            # reason for: "we do not guarantee this" invites "why not", and a claim
             # deliberately not made is indistinguishable from one nobody got
-            # around to unless the file says which it is. It publishes in the
-            # same column as a gated claim's artifacts, because that column
-            # answers the same question -- why believe this cell. A 'no' and a
-            # 'per-policy' are measured verdicts and carry no reason here.
+            # around to unless the file says which it is. A 'no' and a 'per-policy'
+            # are measured verdicts and carry no reason here.
             if verdict != "not-claimed":
-                bad(f"{where}: only an argued claim or a non-claim carries a rationale")
+                bad(f"{where}: only an argued claim, a reasoned exclusion, or a "
+                    f"non-claim carries a rationale")
             elif not isinstance(rationale, str) or not rationale.strip():
                 bad(f"{where}: a non-claim's rationale must be a non-empty string")
 
@@ -422,7 +434,7 @@ def _evidence_text(row, columns):
                 parts.append(name)
         elif cls == "argued":
             parts.append(cell["rationale"])
-        elif cell["verdict"] == "not-claimed" and cell.get("rationale"):
+        elif cell["verdict"] in ("not-claimed", "excluded") and cell.get("rationale"):
             parts.append(cell["rationale"])
     unique = []
     for part in parts:
