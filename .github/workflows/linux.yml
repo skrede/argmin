@@ -322,7 +322,7 @@ jobs:
           cd build
           count=$(ctest -N -L alloc-gate | grep -c 'Test #')
           echo "allocation gates registered: $count"
-          test "$count" -eq 12 || { echo "expected 12 allocation gates, found $count"; exit 1; }
+          test "$count" -eq 13 || { echo "expected 13 allocation gates, found $count"; exit 1; }
 
       - name: Build
         run: cmake --build build
