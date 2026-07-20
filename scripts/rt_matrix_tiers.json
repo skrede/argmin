@@ -20,7 +20,7 @@
                 {"kind": "ci_job", "name": "clang-18"},
                 {"kind": "ci_job", "name": "build (Xcode 15.4)"},
                 {"kind": "ci_job", "name": "build (Xcode 16.2)"},
-                {"kind": "ci_job", "name": "build", "note": "the Windows workflow"}
+                {"kind": "ci_job", "name": "build (Windows)"}
               ]
             }
           }
@@ -38,7 +38,7 @@
                 {"kind": "ci_job", "name": "clang-18"},
                 {"kind": "ci_job", "name": "build (Xcode 15.4)"},
                 {"kind": "ci_job", "name": "build (Xcode 16.2)"},
-                {"kind": "ci_job", "name": "build", "note": "the Windows workflow"}
+                {"kind": "ci_job", "name": "build (Windows)"}
               ]
             }
           }
@@ -56,7 +56,7 @@
                 {"kind": "ci_job", "name": "clang-18"},
                 {"kind": "ci_job", "name": "build (Xcode 15.4)"},
                 {"kind": "ci_job", "name": "build (Xcode 16.2)"},
-                {"kind": "ci_job", "name": "build", "note": "the Windows workflow"}
+                {"kind": "ci_job", "name": "build (Windows)"}
               ]
             }
           }
