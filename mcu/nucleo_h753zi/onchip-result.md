@@ -1,24 +1,28 @@
 # NUCLEO-H753ZI on-chip allocation result (operator bench artifact)
 
-Re-captured 2026-07-18 on a physical NUCLEO-H753ZI (bare-metal Cortex-M7 @ 64 MHz
+Re-captured 2026-07-20 on a physical NUCLEO-H753ZI (bare-metal Cortex-M7 @ 64 MHz
 HSI, no RTOS, newlib-nano), with the over-limit guardrail probe added. The pinned image
 (`EIGEN_STACK_ALLOCATION_LIMIT=8192`, `EIGEN_ALLOCA=__builtin_alloca`) was flashed
 over the on-board ST-Link by drag-drop to the `NOD_H753ZI` mass-storage drive,
-then re-run via the physical **NRST (B2) button** so the report streams cleanly.
+which programs the flash and resets the target so the boot-once report streams.
 The report is streamed over USART3 → the ST-Link VCP; on this macOS host the VCP
-enumerates as `/dev/cu.usbmodem212203` at **115200 baud** (BSD `stty -f`,
-fd-held single reader) — no semihosting/OpenOCD.
+enumerates as `/dev/cu.usbmodem112203` at **115200 baud** (BSD `stty -f`) — no
+semihosting/OpenOCD.
 
 **Toolchain:** Arm GNU Toolchain **15.2.Rel1** (`arm-none-eabi-gcc`
 15.2.1 20251203). The capture certifies this toolchain's codegen.
 
 **Capture-method note.** The firmware report is boot-once. Mass-storage (DND)
 programming momentarily re-enumerates the ST-Link CDC, which invalidates a live
-reader's fd mid-stream and garbles the transcript on reopen; `st-flash
---connect-under-reset reset` connects but leaves the core halted (no output). The
-clean method is the **physical NRST**: it resets only the target STM32, leaving
-the ST-Link USB/CDC enumerated, so a single held `cat` captures a pristine
-boot-once stream.
+reader's fd mid-stream, so a single `cat` opened before the copy is torn down
+during programming. The headless clean method is to **re-attach the reader after
+the CDC comes back**: start a reader before the copy (best effort), copy the
+`.bin` (which programs and resets the target), then re-open `cat` on the
+re-enumerated VCP as soon as it reappears — the target boots and streams the
+report ~5 s after the copy, so the freshly-attached reader catches a pristine
+boot-once stream. (A `st-flash --connect-under-reset reset` connects but leaves
+the core halted with no output; the physical **NRST (B2)** button is the
+equivalent manual reset when an operator is present.)
 
 ## Console (USART3 / ST-Link VCP, physical NRST, 115200 baud)
 
