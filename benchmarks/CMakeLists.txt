@@ -609,6 +609,15 @@ endif()
 argmin_add_alloc_gate(micro_lm_alloc_trace micro_lm.cpp alloc_gate_lm
     ARGMIN_ALLOC_GATE_EXPECT_ZERO)
 
+# Bounded-(N,M) NW-SQP allocation gate: a fixed-N constrained solve whose
+# runtime constraint count sits below its declared compile-time cap. The trace
+# translation unit is NLopt-free (nlopt.hpp is excluded under
+# ARGMIN_BENCH_TRACE_ALLOC), so this argmin-only gate registers outside the
+# NLopt_FOUND block and runs regardless of NLopt availability.
+argmin_add_alloc_gate(micro_nw_sqp_bounded_alloc_trace
+    micro_nw_sqp.cpp sqp_alloc_gate_nw_bounded_m
+    ARGMIN_ALLOC_TRACE_BOUNDED_M ARGMIN_ALLOC_GATE_EXPECT_ZERO)
+
 # NW-SQP step-budget versus time-budget profiling harness. This target emits
 # raw CSV rows with revision and harness provenance fields; it is intentionally
 # separate from publication benchmark summaries.
