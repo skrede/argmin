@@ -40,10 +40,17 @@ template <has_problem_dimension P>
 inline constexpr int problem_dimension_v = P::problem_dimension;
 
 // Constraint count extraction. Constrained problem types MAY declare
-// static constexpr int constraint_count (total equality + inequality).
-// When present, enables fixed-size constraint vectors and Jacobians
-// throughout the solver pipeline. When absent, constraint dimensions
-// remain dynamic.
+// static constexpr int constraint_count. It is an OPTIONAL compile-time
+// UPPER BOUND on the total constraint count (equality + inequality + box
+// rows) as seen by the QP result-multiplier storage; the runtime count may
+// be smaller, and the supported contract is runtime_m <= constraint_count.
+// It is only an upper bound because it sizes just the qp_result multiplier
+// storage (max-capacity, runtime-length), never the compute workspace. The
+// resulting zero-allocation-at-bounded-(N,M) guarantee holds for the
+// active_set_qp_solver-backed families (nw_sqp, filter_nw_sqp); the other
+// SQP families derive the bound but do not consume it for their multiplier
+// storage and gain no zero-alloc benefit from it. When absent, constraint
+// dimensions remain dynamic.
 
 template <typename P>
 concept has_constraint_count = requires {
