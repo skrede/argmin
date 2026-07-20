@@ -118,8 +118,11 @@ struct step_result
         // restored a feasible iterate and the policy resumed composite
         // step) and the fall-through trust-radius-collapse null-step
         // emit path (when restoration ran but did not converge). Zero
-        // for any policy that does not invoke restoration, including
-        // filter_trsqp at its default restoration_max_iter = 0.
+        // for any policy that does not invoke restoration, and for
+        // filter_trsqp steps that never enter the restoration hook -- the
+        // hook fires only under trust-radius collapse with a filter reject,
+        // so the counter stays zero on ordinary steps even though
+        // restoration is enabled by default (restoration_max_iter = 10).
         //
         // Reference: Nocedal and Wright 2e Section 10.3 (Levenberg-
         //            Marquardt for least-squares);

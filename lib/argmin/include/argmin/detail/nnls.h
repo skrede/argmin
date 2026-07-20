@@ -56,6 +56,8 @@ struct nnls_result
     int iterations{};
 };
 
+inline constexpr int nnls_max_iter_factor = 3;
+
 // Caller-owned maintained-factorization workspace for nnls().
 //
 // Holds the six grow-only buffers the incremental-QR NNLS iteration needs
@@ -119,7 +121,8 @@ nnls_result<Scalar> nnls(
     Eigen::Vector<Scalar, N>& x,
     Eigen::Vector<Scalar, N>& w,
     nnls_workspace<Scalar>& ws,
-    int m, int n)
+    int m, int n,
+    int max_iter_override = -1)
 {
     using std::abs;
     using std::sqrt;
@@ -132,7 +135,9 @@ nnls_result<Scalar> nnls(
     }
 
     constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
-    const int max_iter = 3 * n;
+    const int max_iter = (max_iter_override >= 0)
+                             ? max_iter_override
+                             : nnls_max_iter_factor * n;
 
     // Matrix-scaled tolerance (Lawson-Hanson / scipy.optimize.nnls
     // convention). The dual w_j = (A^T r)_j and the primal components x_j

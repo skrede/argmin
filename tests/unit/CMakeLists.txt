@@ -75,6 +75,8 @@ add_executable(argmin_unit_tests
     cmaes_generation_pin_test.cpp
     cobyla_parmu_trajectory_test.cpp
     cmaes_reset_parity_test.cpp
+    cobyla_determinism_test.cpp
+    leaf_cap_binding_test.cpp
     isres_best_track_test.cpp
     halton_distinctness_test.cpp
     mma_coefficient_pin_test.cpp
