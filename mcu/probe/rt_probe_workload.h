@@ -68,6 +68,102 @@
 #error "EIGEN_ALLOCA is not defined: Eigen will heap-allocate its internal kernel temporaries on every call, silently breaking the zero-allocation-per-step contract this probe measures. Define EIGEN_ALLOCA=__builtin_alloca (see docs/embedded.md)."
 #endif
 
+// Pass/fail verdict over the sensor primitives, owned here because this probe
+// is its sole consumer: the library ships the allocation sensor mechanism
+// (arm/reset/read, the eigen_assert hook, the max-of-two-sensors combinator)
+// and never the assertion. The witness-band machinery travels with the gate.
+//
+// min_per_step encodes the reviewer-measured pre-hoist witness band: a policy
+// expected to allocate must be seen to allocate at least this many times per
+// armed step, proving the sensor is not blind. A value of 0 marks a policy
+// expected to already be allocation-free, held to the zero-allocation gate
+// immediately. Defining ARGMIN_ALLOC_GATE_EXPECT_ZERO flips every probe to the
+// zero-allocation gate -- the post-hoist acceptance mode.
+#ifdef ARGMIN_BENCH_TRACE_ALLOC
+
+#include <cstdio>
+#include <cstddef>
+#include <algorithm>
+
+namespace argmin::detail::bench
+{
+
+inline int evaluate_gate(const char* label, std::size_t armed_steps,
+                         std::size_t min_per_step) noexcept
+{
+    const std::size_t eigen_c = read_eigen_malloc_count();
+    const std::size_t c_alloc = read_c_alloc_count();
+    const std::size_t observed = std::max(eigen_c, c_alloc);
+    const double per_step = armed_steps
+        ? static_cast<double>(observed) / static_cast<double>(armed_steps)
+        : static_cast<double>(observed);
+
+    // %lu with an explicit unsigned-long cast rather than %zu: some embedded
+    // libcs (e.g. newlib-nano) do not implement the %z length modifier, and
+    // this prints identically on a hosted libc.
+    std::printf("  [alloc-gate] %-18s eigen_malloc=%lu c_alloc=%lu "
+                "armed_steps=%lu per_step=%.2f\n",
+                label, static_cast<unsigned long>(eigen_c),
+                static_cast<unsigned long>(c_alloc),
+                static_cast<unsigned long>(armed_steps), per_step);
+
+#ifdef ARGMIN_ALLOC_GATE_EXPECT_ZERO
+    if(observed != 0)
+    {
+        std::fprintf(stderr,
+            "  [alloc-gate] %s FAIL: zero-alloc gate saw %lu allocations\n",
+            label, static_cast<unsigned long>(observed));
+        return 1;
+    }
+    std::printf("  [alloc-gate] %s PASS (zero-alloc gate)\n", label);
+    return 0;
+#else
+    if(min_per_step == 0)
+    {
+        if(observed != 0)
+        {
+            std::fprintf(stderr,
+                "  [alloc-gate] %s FAIL: policy expected allocation-free, "
+                "saw %lu\n", label, static_cast<unsigned long>(observed));
+            return 1;
+        }
+        std::printf("  [alloc-gate] %s PASS (allocation-free)\n", label);
+        return 0;
+    }
+    if(per_step < static_cast<double>(min_per_step))
+    {
+        std::fprintf(stderr,
+            "  [alloc-gate] %s FAIL: pre-fix witness expected >= %lu/step, "
+            "saw %.2f/step -- gate may be blind\n",
+            label, static_cast<unsigned long>(min_per_step), per_step);
+        return 1;
+    }
+    std::printf("  [alloc-gate] %s PASS (pre-fix witness %.2f/step >= "
+                "%lu/step)\n", label, per_step,
+                static_cast<unsigned long>(min_per_step));
+    return 0;
+#endif
+}
+
+}
+
+#else
+
+namespace argmin::detail::bench
+{
+
+// No-op twin, so the -fno-exceptions link gate (built without
+// ARGMIN_BENCH_TRACE_ALLOC) compiles unchanged. With no sensor there is
+// nothing to evaluate, so the gate trivially passes.
+inline int evaluate_gate(const char*, std::size_t, std::size_t) noexcept
+{
+    return 0;
+}
+
+}
+
+#endif
+
 namespace argmin::mcu
 {
 
