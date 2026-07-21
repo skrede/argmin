@@ -14,19 +14,45 @@ enable_language(ASM)
 # suppress. Re-check the releases pages before bumping these tags. Only
 # CMSIS/Core/Include is put on the include path, so no RTOS/DSP/NN code is
 # pulled in.
-FetchContent_Declare(cmsis_core
-    GIT_REPOSITORY https://github.com/ARM-software/CMSIS_6.git
-    GIT_TAG v6.3.0
-    GIT_SHALLOW TRUE
-    EXCLUDE_FROM_ALL
-    SOURCE_SUBDIR this-directory-does-not-exist)
-FetchContent_Declare(cmsis_device_h7
-    GIT_REPOSITORY https://github.com/STMicroelectronics/cmsis-device-h7.git
-    GIT_TAG v1.10.7
-    GIT_SHALLOW TRUE
-    EXCLUDE_FROM_ALL
-    SOURCE_SUBDIR this-directory-does-not-exist)
-FetchContent_MakeAvailable(cmsis_core cmsis_device_h7)
+#
+# Fetch is the default, but an integrator porting this proof onto their own
+# board almost always already has a CMSIS core + device pack from their SDK
+# (STM32Cube, vendor HAL, Zephyr, PlatformIO). Set ARGMIN_MCU_CMSIS_CORE_DIR
+# and/or ARGMIN_MCU_CMSIS_DEVICE_DIR to those source roots to bypass the clone
+# and use the provisioned pack instead. Each is independent.
+set(ARGMIN_MCU_CMSIS_CORE_DIR "" CACHE PATH
+    "Pre-provisioned CMSIS-Core source root; when set, skips the cmsis_core FetchContent")
+set(ARGMIN_MCU_CMSIS_DEVICE_DIR "" CACHE PATH
+    "Pre-provisioned STM32H7 CMSIS device source root; when set, skips the cmsis_device_h7 FetchContent")
+
+set(_cmsis_to_fetch "")
+if(ARGMIN_MCU_CMSIS_CORE_DIR)
+    set(cmsis_core_SOURCE_DIR "${ARGMIN_MCU_CMSIS_CORE_DIR}")
+    message(STATUS "argmin_mcu: using provided CMSIS-Core at ${cmsis_core_SOURCE_DIR} (fetch skipped)")
+else()
+    FetchContent_Declare(cmsis_core
+        GIT_REPOSITORY https://github.com/ARM-software/CMSIS_6.git
+        GIT_TAG v6.3.0
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL
+        SOURCE_SUBDIR this-directory-does-not-exist)
+    list(APPEND _cmsis_to_fetch cmsis_core)
+endif()
+if(ARGMIN_MCU_CMSIS_DEVICE_DIR)
+    set(cmsis_device_h7_SOURCE_DIR "${ARGMIN_MCU_CMSIS_DEVICE_DIR}")
+    message(STATUS "argmin_mcu: using provided CMSIS device pack at ${cmsis_device_h7_SOURCE_DIR} (fetch skipped)")
+else()
+    FetchContent_Declare(cmsis_device_h7
+        GIT_REPOSITORY https://github.com/STMicroelectronics/cmsis-device-h7.git
+        GIT_TAG v1.10.7
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL
+        SOURCE_SUBDIR this-directory-does-not-exist)
+    list(APPEND _cmsis_to_fetch cmsis_device_h7)
+endif()
+if(_cmsis_to_fetch)
+    FetchContent_MakeAvailable(${_cmsis_to_fetch})
+endif()
 
 set(CMSIS_CORE_INC "${cmsis_core_SOURCE_DIR}/CMSIS/Core/Include")
 set(CMSIS_DEV_INC  "${cmsis_device_h7_SOURCE_DIR}/Include")
