@@ -6,10 +6,6 @@
 //
 // Reference: Nocedal & Wright, Chapter 18, Sections 18.1-18.6.
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/diagnostics/alloc_counter.h"
-#include "argmin/detail/diagnostics/steady_state_driver.h"
-#endif
 
 #include "bench_micro_gate.h"
 
@@ -20,9 +16,7 @@
 
 #include <Eigen/Core>
 
-#ifndef ARGMIN_BENCH_TRACE_ALLOC
 #include <nlopt.hpp>
-#endif
 
 #include <cmath>
 #include <chrono>
@@ -151,7 +145,6 @@ struct hs071_dynamic
     }
 };
 
-#ifndef ARGMIN_BENCH_TRACE_ALLOC
 // NLopt callbacks for HS039.
 double nlopt_hs039_obj(unsigned, const double* x, double* grad, void*)
 {
@@ -211,7 +204,6 @@ double nlopt_hs071_ineq(unsigned, const double* x, double* grad, void*)
     }
     return 25.0 - x[0] * x[1] * x[2] * x[3];
 }
-#endif
 
 template <typename Problem>
 timing bench_argmin(const Problem& problem, std::uint32_t reps)
@@ -246,7 +238,6 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
     return {us, fval, cv, iters, "steps"};
 }
 
-#ifndef ARGMIN_BENCH_TRACE_ALLOC
 timing bench_nlopt_hs039(std::uint32_t reps)
 {
     {
@@ -330,7 +321,6 @@ timing bench_nlopt_hs071(std::uint32_t reps)
     double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
     return {us, fval, cv, evals, "evals"};
 }
-#endif
 
 void print_row(std::string_view solver, const timing& t)
 {
@@ -462,240 +452,7 @@ bool probe_regression_hs007_iter_bound()
 
 }
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-namespace
-{
 
-// Steady-state allocation gate: run the shared returns-data driver over a
-// fixed-N nw_sqp solve loop, then fail the bench (non-zero) if the armed
-// window terminated early or observed any allocation.
-template <typename Policy, typename Problem>
-int gate_steady(const char* label, Policy policy, const Problem& problem)
-{
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
-
-    const auto r = argmin::detail::bench::measure_steady(policy, problem, opts, 10);
-
-    std::printf("  [alloc-gate] %-18s eigen_malloc=%lu c_alloc=%lu "
-                "armed_steps=%lu\n",
-                label, static_cast<unsigned long>(r.eigen_malloc),
-                static_cast<unsigned long>(r.c_alloc),
-                static_cast<unsigned long>(r.armed_steps));
-
-    if(r.terminated_early)
-    {
-        std::fprintf(stderr,
-            "  [alloc-gate] %-18s FAIL: policy signaled termination inside "
-            "the armed window -- not a pre-convergence steady state\n", label);
-        return 1;
-    }
-    if(r.eigen_malloc != 0 || r.c_alloc != 0)
-    {
-        std::fprintf(stderr,
-            "  [alloc-gate] %-18s FAIL: expected allocation-free, saw "
-            "eigen_malloc=%lu c_alloc=%lu\n", label,
-            static_cast<unsigned long>(r.eigen_malloc),
-            static_cast<unsigned long>(r.c_alloc));
-        return 1;
-    }
-    std::printf("  [alloc-gate] %-18s PASS (allocation-free)\n", label);
-    return 0;
-}
-
-// Construction-window record (informational, never gates): arm before the
-// solver is constructed and disarm after the first step, capturing the
-// one-time setup allocation count that feeds the zero-after-construction
-// characterization.
-template <typename Policy, typename Problem>
-void record_construction(const char* label, Policy policy, const Problem& problem)
-{
-    auto x0 = problem.initial_point();
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
-
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    argmin::step_budget_solver solver{policy, problem, x0, opts};
-    solver.step();
-    argmin::detail::bench::disarm_alloc_trace();
-
-    std::printf("  [alloc-gate] %-18s construction+first_step alloc=%zu\n",
-                label, argmin::detail::bench::read_alloc_count());
-}
-
-// 12-D chained Rosenbrock with 2 equality + 4 inequality rows (6 runtime
-// constraints) and box bounds, but a declared constraint_count of 12 -- the
-// runtime constraint count sits strictly below the compile-time cap, so the
-// qp_result multiplier storage is inline-max-bounded while carrying fewer
-// active rows than its capacity. (cap + 2N)*8 = (12 + 24)*8 = 288 bytes, far
-// inside the EIGEN_STACK_ALLOCATION_LIMIT inline regime. The constrained
-// optimum is the all-ones point (feasible, objective 0). Math mirrors sd012;
-// only the declared cap differs, so this exercises the runtime-m < cap path
-// the sd012/sd024 gates (runtime-m == cap) never reach.
-struct undercap_rosenbrock
-{
-    static constexpr int problem_dimension = 12;
-    static constexpr int constraint_count = 12;
-
-    [[nodiscard]] int dimension() const { return problem_dimension; }
-    [[nodiscard]] int num_equality() const { return 2; }
-    [[nodiscard]] int num_inequality() const { return 4; }
-
-    [[nodiscard]] double value(const Eigen::Vector<double, problem_dimension>& x) const
-    {
-        double f = 0.0;
-        for(int i = 0; i + 1 < problem_dimension; ++i)
-        {
-            const double a = x[i + 1] - x[i] * x[i];
-            const double b = 1.0 - x[i];
-            f += 100.0 * a * a + b * b;
-        }
-        return f;
-    }
-
-    void gradient(const Eigen::Vector<double, problem_dimension>& x,
-                  Eigen::Vector<double, problem_dimension>& g) const
-    {
-        g.setZero();
-        for(int i = 0; i + 1 < problem_dimension; ++i)
-        {
-            const double a = x[i + 1] - x[i] * x[i];
-            g[i] += -400.0 * a * x[i] - 2.0 * (1.0 - x[i]);
-            g[i + 1] += 200.0 * a;
-        }
-    }
-
-    void constraints(const Eigen::Vector<double, problem_dimension>& x, auto& c) const
-    {
-        c[0] = x[0] + x[1] + x[2] + x[3] + x[4] + x[5] - 6.0;
-        c[1] = x[6] + x[7] + x[8] + x[9] + x[10] + x[11] - 6.0;
-        c[2] = 4.0 - x[0];
-        c[3] = 4.0 - x[6];
-        c[4] = x[3] + 3.0;
-        c[5] = x[9] + 3.0;
-    }
-
-    void constraint_jacobian(const Eigen::Vector<double, problem_dimension>&, auto& J) const
-    {
-        J.setZero();
-        for(int i = 0; i < 6; ++i)
-            J(0, i) = 1.0;
-        for(int i = 6; i < 12; ++i)
-            J(1, i) = 1.0;
-        J(2, 0) = -1.0;
-        J(3, 6) = -1.0;
-        J(4, 3) = 1.0;
-        J(5, 9) = 1.0;
-    }
-
-    [[nodiscard]] Eigen::Vector<double, problem_dimension> lower_bounds() const
-    {
-        return Eigen::Vector<double, problem_dimension>::Constant(problem_dimension, -5.0);
-    }
-
-    [[nodiscard]] Eigen::Vector<double, problem_dimension> upper_bounds() const
-    {
-        return Eigen::Vector<double, problem_dimension>::Constant(problem_dimension, 5.0);
-    }
-
-    [[nodiscard]] Eigen::Vector<double, problem_dimension> initial_point() const
-    {
-        Eigen::Vector<double, problem_dimension> x0;
-        for(int i = 0; i < problem_dimension; ++i)
-            x0[i] = (i % 2 == 0) ? -1.2 : 1.0;
-        return x0;
-    }
-
-    [[nodiscard]] double optimal_value() const { return 0.0; }
-};
-
-// Fresh un-armed solve witnessing that the under-cap fixture converges to its
-// known optimum, so the gate proves runtime-m < cap is numerically correct and
-// not merely allocation-free. Returns 0 on success, 1 on a missed optimum.
-int witness_undercap_optimum()
-{
-    undercap_rosenbrock problem;
-    auto x0 = problem.initial_point();
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
-
-    argmin::step_budget_solver solver{
-        argmin::nw_sqp_policy<undercap_rosenbrock::problem_dimension>{},
-        problem, x0, opts};
-    const auto result = solver.solve();
-
-    const double f_gap = std::abs(result.objective_value - problem.optimal_value());
-    if(f_gap > 1e-6 || result.constraint_violation > 1e-6)
-    {
-        std::fprintf(stderr,
-            "  [alloc-gate] nw_sqp bounded_m FAIL: under-cap solve missed the "
-            "optimum (f=%.6e gap=%.6e cv=%.6e)\n",
-            result.objective_value, f_gap, result.constraint_violation);
-        return 1;
-    }
-    std::printf("  [alloc-gate] nw_sqp bounded_m witness: f=%.6e cv=%.6e "
-                "(optimum reached)\n",
-                result.objective_value, result.constraint_violation);
-    return 0;
-}
-
-}
-
-// Steady-state allocation gate for nw_sqp across the fixed-N fixture family,
-// spanning unconstrained (sd006) through mixed-constrained near-ceiling
-// (sd024). Each window measures the real per-step number with reset() kept
-// outside the armed region; every window is held to zero allocations per
-// steady-state step (zero mode in the gate build, min_per_step 0 in a plain
-// build).
-int argmin_alloc_trace_probe()
-{
-#ifdef ARGMIN_ALLOC_TRACE_BOUNDED_M
-    // Runtime-m-below-cap steady-state gate: the declared constraint cap (12)
-    // exceeds the runtime constraint count (6), so this exercises the inline
-    // max-bounded multiplier storage carrying fewer active rows than capacity.
-    record_construction("nw_sqp bounded_m",
-        argmin::nw_sqp_policy<undercap_rosenbrock::problem_dimension>{},
-        undercap_rosenbrock{});
-
-    int rc = 0;
-    rc |= gate_steady("nw_sqp bounded_m",
-        argmin::nw_sqp_policy<undercap_rosenbrock::problem_dimension>{},
-        undercap_rosenbrock{});
-    rc |= witness_undercap_optimum();
-    return rc;
-#else
-    record_construction("nw_sqp hs071",
-        argmin::nw_sqp_policy<argmin::hs071<>::problem_dimension>{}, argmin::hs071<>{});
-
-    int rc = 0;
-    rc |= gate_steady("nw_sqp hs071",
-        argmin::nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{});
-    rc |= gate_steady("nw_sqp sd006",
-        argmin::nw_sqp_policy<argmin::sd006<>::problem_dimension>{},
-        argmin::sd006<>{});
-    rc |= gate_steady("nw_sqp sd012",
-        argmin::nw_sqp_policy<argmin::sd012<>::problem_dimension>{},
-        argmin::sd012<>{});
-    rc |= gate_steady("nw_sqp sd024",
-        argmin::nw_sqp_policy<argmin::sd024<>::problem_dimension>{},
-        argmin::sd024<>{});
-    return rc;
-#endif
-}
-#endif
-
-#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main()
 {
 
@@ -750,4 +507,3 @@ int main()
         }
     }
 }
-#endif

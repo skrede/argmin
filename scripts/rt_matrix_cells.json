@@ -144,7 +144,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_kraft", "note": "zero mode, 0.00/step"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_kraft", "note": "zero-allocation assertion over the armed steady-state window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -197,7 +197,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_slsqp", "note": "zero mode, 0.00/step"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_slsqp", "note": "zero-allocation assertion over the warm-started armed window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ],
               "footnotes": ["restore"]
@@ -251,7 +251,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_nw", "note": "zero mode, 0.00/step, fixed-N steady state"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_nw", "note": "zero-allocation assertion over the fixed-N steady-state window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -303,7 +303,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_nw", "note": "zero mode, 0.00/step, fixed-N steady state"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_nw", "note": "zero-allocation assertion over the fixed-N steady-state window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ],
               "footnotes": ["restore"]
@@ -356,7 +356,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_tr_sqp", "note": "zero mode, 0.00/step, on an equality-constrained fixture"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_tr_sqp", "note": "zero-allocation assertion on an equality-constrained fixture"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ],
               "footnotes": ["nullspace"]
@@ -409,7 +409,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_trsqp", "note": "zero mode, 0.00/step, on an equality-constrained fixture"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_trsqp", "note": "zero-allocation assertion on an equality-constrained fixture"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ],
               "footnotes": ["restore", "nullspace"]
@@ -462,7 +462,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_lbfgsb", "note": "zero mode, including the bound-active generalized-Cauchy-point/subspace branch"},
+                {"kind": "ctest_test", "name": "alloc_gate_lbfgsb", "note": "zero-allocation assertion including the bound-active generalized-Cauchy-point/subspace branch"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -513,7 +513,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_byrd_lbfgsb", "note": "zero mode, bound-active path"},
+                {"kind": "ctest_test", "name": "alloc_gate_byrd_lbfgsb", "note": "zero-allocation assertion on the bound-active path"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -564,7 +564,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_lm", "note": "zero mode, 0.00/step, fixed-N steady state"},
+                {"kind": "ctest_test", "name": "alloc_gate_lm", "note": "zero-allocation assertion over the fixed-N steady-state window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -610,7 +610,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_projected_gn", "note": "zero mode, active-bound fixture"},
+                {"kind": "ctest_test", "name": "alloc_gate_projected_gn", "note": "zero-allocation assertion on an active-bound fixture"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -655,7 +655,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_projected_gradient_gn", "note": "zero mode, active-bound fixture"},
+                {"kind": "ctest_test", "name": "alloc_gate_projected_gradient_gn", "note": "zero-allocation assertion on an active-bound fixture"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -706,7 +706,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_augmented_lagrangian", "note": "zero mode; bounded resumable inner solve, mu-change and warm-reset armed"},
+                {"kind": "ctest_test", "name": "alloc_gate_augmented_lagrangian", "note": "zero-allocation assertion; bounded resumable inner solve, mu-change and warm-reset armed"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },

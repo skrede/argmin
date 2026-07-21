@@ -18,9 +18,6 @@
 //            Byrd 1987, "Robust trust region methods for constrained
 //            optimization", talk SIAM Conf. on Optimization.
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/diagnostics/alloc_counter.h"
-#endif
 
 #include "argmin/solver/filter_trsqp_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
@@ -580,153 +577,7 @@ bool probe_regression_hs028()
 
 }
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Compile-time N=3 HS026 fixture for the fixed-N trust-region allocation
-// gate. HS026 is a NONLINEAR-equality problem (no bounds, no inequality), so
-// it drives the composite-step machinery that the gate certifies at zero --
-// the dogleg normal step against a curved Jacobian, the multi-iteration
-// Steihaug-CG tangential leg, the active-set equality-multiplier
-// re-estimation, and the second-order-correction retry -- WITHOUT engaging the
-// box-face tangential free-set restart. That restart is deliberately excluded:
-// see the residual note on argmin_alloc_trace_probe below.
-struct hs026_fixed_gate
-{
-    static constexpr int problem_dimension = 3;
 
-    [[nodiscard]] int dimension() const { return 3; }
-    [[nodiscard]] int num_equality() const { return 1; }
-    [[nodiscard]] int num_inequality() const { return 0; }
-
-    [[nodiscard]] double value(const Eigen::Vector<double, 3>& x) const
-    {
-        const double d01 = x[0] - x[1];
-        const double d12 = x[1] - x[2];
-        return d01 * d01 + d12 * d12 * d12 * d12;
-    }
-
-    void gradient(const Eigen::Vector<double, 3>& x,
-                  Eigen::Vector<double, 3>& g) const
-    {
-        const double d01 = x[0] - x[1];
-        const double d12 = x[1] - x[2];
-        g[0] = 2.0 * d01;
-        g[1] = -2.0 * d01 + 4.0 * d12 * d12 * d12;
-        g[2] = -4.0 * d12 * d12 * d12;
-    }
-
-    void constraints(const Eigen::Vector<double, 3>& x, Eigen::VectorXd& c) const
-    {
-        c.resize(1);
-        c[0] = (1.0 + x[1] * x[1]) * x[0] + x[2] * x[2] * x[2] * x[2] - 3.0;
-    }
-
-    void constraint_jacobian(const Eigen::Vector<double, 3>& x,
-                             Eigen::MatrixXd& J) const
-    {
-        J.resize(1, 3);
-        J(0, 0) = 1.0 + x[1] * x[1];
-        J(0, 1) = 2.0 * x[1] * x[0];
-        J(0, 2) = 4.0 * x[2] * x[2] * x[2];
-    }
-};
-
-// Allocation gate for the trust-region SQP pair at fixed N over the real-time
-// operating regime: warm-started, bounded composite steps per control tick
-// that make genuine progress and never idle at the optimum. Each tick
-// warm-resets to the start point (held to the same zero-allocation bar) and
-// takes a bounded run of progress steps; the armed window spans several such
-// ticks for an extended (>= 40 armed step) bounded-steady-state confirmation.
-// Because the count is asserted EXACTLY zero across every armed step, this is
-// the settling proof the "never settles" HEAD behavior demanded: a
-// per-step-varying residual would surface as a nonzero spike somewhere in the
-// window. Defining ARGMIN_ALLOC_TRACE_TR_SQP selects the bare tr_sqp_policy so
-// the same driver covers both trust-region policies in lockstep.
-//
-// Two paths are deliberately OUTSIDE the certified pre-convergence window,
-// each a characterized residual in a shared subsystem left unchanged by this
-// hoist:
-//
-//   1. Post-convergence feasibility restoration. filter_trsqp shares
-//      detail::restore_l1 with the other filter families; once the composite
-//      step collapses to a zero step at a converged iterate whose L1 violation
-//      sits marginally above the 1e-8 restoration trigger (an -O3
-//      -march=native FMA/vectorization rounding artifact -- an -O2 build stays
-//      below the trigger and never restores), the zero-step branch invokes
-//      feasibility restoration, which allocates its local work vectors. The
-//      warm-reset window stays strictly pre-convergence, so it never idles
-//      into restoration.
-//
-//   2. Box-face tangential free-set restart. On BOUND- or INEQUALITY-
-//      constrained problems the box-projected Steihaug-CG can pin coordinates
-//      at their faces (Lin-More variant B); when the pinned set exhausts the
-//      reduced free dimension the augmented normal equations go rank-deficient
-//      and the projection routes through detail::null_space_project's pivoted-
-//      QR fallback, which allocates. That helper is shared by the whole SQP
-//      family; making its rank-deficient branch allocation-free is a
-//      shared-subsystem change (and a tiny ridge that keeps the max-sized LDLT
-//      definite perturbs the HS076 / HS043 box-active trajectories, so it is
-//      not a numerics-free hoist). The equality-only HS026 fixture has no box
-//      faces and never engages this path, so the composite-step RT hot loop it
-//      exercises is certified at exactly zero; the bound/inequality free-set-
-//      restart allocation is the characterized residual, documented for the
-//      RT-safety matrix.
-//
-// Trajectory of the un-blinded fixed-N reading (this HS026 window): the
-// pre-hoist trust-region code allocates in the tens per step (the reviewer
-// measured 29-55 mallocs/step, never settling); the substrate + policy hoists
-// bring it to exactly 0. The gate is demonstrably non-blind: the
-// alloc_trace_main.cpp canary independently proves an armed Eigen allocation
-// is counted.
-//
-// Built with ARGMIN_ALLOC_GATE_EXPECT_ZERO so evaluate_gate asserts zero
-// allocations across the armed window.
-int argmin_alloc_trace_probe()
-{
-    hs026_fixed_gate problem;
-    Eigen::Vector<double, 3> x0{-2.6, 2.0, 2.0};
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
-
-#ifdef ARGMIN_ALLOC_TRACE_TR_SQP
-    using policy_t = argmin::tr_sqp_policy<3, argmin::sqp_mode::accurate>;
-    const char* const label = "tr_sqp";
-#else
-    using policy_t = argmin::filter_trsqp_policy_accurate<3>;
-    const char* const label = "filter_trsqp";
-#endif
-
-    argmin::step_budget_solver solver{policy_t{}, problem, x0, opts};
-
-    // Warmup absorbs lazy first-push BFGS / buffer-sizing allocations.
-    solver.step();
-    solver.step();
-
-    // Bounded warm-started progress steps per tick keep the window strictly
-    // ahead of the zero-step restoration onset while exercising the full
-    // dogleg / CG / SOC / multiplier path every step; the armed window spans
-    // several ticks (>= 40 armed steps) for the bounded-steady-state proof.
-    constexpr std::size_t progress_steps = 7;
-    constexpr std::size_t ticks = 6;
-
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    for(std::size_t t = 0; t < ticks; ++t)
-    {
-        solver.reset(x0);
-        for(std::size_t i = 0; i < progress_steps; ++i)
-            solver.step();
-    }
-    argmin::detail::bench::disarm_alloc_trace();
-
-    return argmin::detail::bench::evaluate_gate(
-        label, ticks * progress_steps, /*min_per_step=*/0);
-}
-#endif
-
-#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main(int argc, char** argv)
 {
 
@@ -837,4 +688,3 @@ int main(int argc, char** argv)
             nab.wall_us / nlop.wall_us, double(nab.evals) / nlop.evals);
     }
 }
-#endif

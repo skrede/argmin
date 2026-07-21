@@ -124,6 +124,44 @@ target_compile_options(argmin_warm_start_boundary_test
     PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
 catch_discover_tests(argmin_warm_start_boundary_test)
 
+# Zero-allocation correctness gates for the real-time-claimed policies. One
+# dedicated executable holds every gate as its own TEST_CASE; catch_discover_tests
+# exposes each as an independent ctest entry. The target defines BOTH
+# ARGMIN_BENCH_TRACE_ALLOC=1 (arming the diagnostics header's LIVE sensor branch)
+# and EIGEN_RUNTIME_NO_MALLOC (routing Eigen's runtime malloc gate into the
+# counting hook) -- replicating the define set the retired benchmarks/ alloc-gate
+# factory carried. Without ARGMIN_BENCH_TRACE_ALLOC the header compiles to its
+# no-op twin and every gate passes vacuously; the alloc_sensor_liveness_canary
+# case is the runtime proof the LIVE branch is selected. These are argmin-only
+# gates that need no comparison library, so they run under the plain `dev` preset.
+add_executable(argmin_alloc_gate_test
+    alloc_gate_test.cpp
+    alloc_sensor_counters.cpp
+)
+# Sensor B (the glibc __libc_* strong-symbol overrides) links only on Linux; the
+# CMake platform guard is the sole gate (no __linux__ #ifdef inside the source).
+# Elsewhere read_alloc_count() degrades to the always-live Eigen sensor.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(argmin_alloc_gate_test PRIVATE alloc_sensor_b_linux.cpp)
+endif()
+target_link_libraries(argmin_alloc_gate_test
+    PRIVATE
+        argmin::argmin
+        Catch2::Catch2WithMain
+)
+target_compile_definitions(argmin_alloc_gate_test
+    PRIVATE ARGMIN_BENCH_TRACE_ALLOC=1 EIGEN_RUNTIME_NO_MALLOC)
+target_compile_options(argmin_alloc_gate_test
+    PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
+# The 13 gate cases carry the [alloc-gate] tag and the ctest `alloc-gate` label;
+# the liveness canary carries [canary] and is registered without the label so the
+# labeled count stays exactly the number of gates.
+catch_discover_tests(argmin_alloc_gate_test
+    TEST_SPEC "[alloc-gate]"
+    PROPERTIES LABELS "alloc-gate")
+catch_discover_tests(argmin_alloc_gate_test
+    TEST_SPEC "[canary]")
+
 # Dedicated ctest label for the move-and-step ASan instrument so the
 # sanitize CI job can select it explicitly (`ctest -L asan-move`) even
 # though the whole suite already runs under -fsanitize=address. This is

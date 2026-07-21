@@ -25,35 +25,6 @@ endif()
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ARGMIN_LTO_SUPPORTED)
 
-# Allocation-gate target factory. Each gate target pairs a micro_* driver with
-# the shared alloc_trace_main.cpp, which owns the counting eigen_assert, the
-# atomic counters, the strong-symbol C-allocator interposition, and main().
-# Targets build in the shipping Release config (-O3 via the Release flags plus
-# -march=native) with EIGEN_RUNTIME_NO_MALLOC so Eigen's runtime malloc gate
-# routes into the report-and-continue counter rather than aborting. This gate
-# is the load-bearing embeddability instrument: it observes Eigen's
-# aligned_malloc traffic, which the retired global-operator-new counter could
-# not see. LTO is intentionally left off here so cross-TU optimization cannot
-# reason around the interposed allocator or the report-and-continue gate.
-function(argmin_add_alloc_gate _target _source _test_name)
-    add_executable(${_target} ${_source} alloc_trace_main.cpp)
-    target_link_libraries(${_target} PRIVATE argmin::argmin)
-    if(NLopt_FOUND)
-        target_link_libraries(${_target} PRIVATE NLopt::nlopt)
-    endif()
-    target_compile_definitions(${_target} PRIVATE
-        ARGMIN_BENCH_TRACE_ALLOC=1
-        EIGEN_RUNTIME_NO_MALLOC
-        ${ARGN})
-    target_compile_options(${_target} PRIVATE
-        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-            -march=native -fno-math-errno -fno-trapping-math
-        >
-    )
-    add_test(NAME ${_test_name} COMMAND ${_target})
-    set_tests_properties(${_test_name} PROPERTIES LABELS "alloc-gate")
-endfunction()
-
 # Main benchmark executable (always builds).
 add_executable(argmin_bench
     benchmark_driver.cpp
@@ -474,61 +445,6 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
-    # Allocation-gate targets for every real-time-claimed policy plus their
-    # reset() paths. Each pairs a micro_* driver's argmin_alloc_trace_probe()
-    # with the shared alloc_trace_main.cpp (see argmin_add_alloc_gate above).
-    # Every real-time-path gate runs in zero-allocation mode
-    # (ARGMIN_ALLOC_GATE_EXPECT_ZERO): a single armed steady-state heap
-    # allocation is red. The shared alloc_trace_main canary keeps the gate
-    # provably non-blind (an armed Eigen allocation must be observed).
-    # tr_sqp reuses the filter_trsqp driver with a policy-select define so
-    # both trust-region policies are covered.
-    argmin_add_alloc_gate(micro_kraft_slsqp_alloc_trace
-        micro_kraft_slsqp.cpp sqp_alloc_gate_kraft ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_nw_sqp_alloc_trace
-        micro_nw_sqp.cpp sqp_alloc_gate_nw ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_filter_slsqp_alloc_trace
-        micro_filter_slsqp.cpp sqp_alloc_gate_filter_slsqp
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_filter_nw_sqp_alloc_trace
-        micro_filter_nw_sqp.cpp sqp_alloc_gate_filter_nw
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_filter_trsqp_alloc_trace
-        micro_filter_trsqp.cpp sqp_alloc_gate_filter_trsqp
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_tr_sqp_alloc_trace
-        micro_filter_trsqp.cpp sqp_alloc_gate_tr_sqp ARGMIN_ALLOC_TRACE_TR_SQP
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    # The L-BFGS-B family is allocation-free on BOTH the all-free fast path and
-    # the bound-active GCP/subspace/reduced_hessian path, so both gates run in
-    # zero-allocation mode across both scenarios (the bound-active fixture
-    # carries a path-entry assertion so the zero-mode pass is not vacuous).
-    argmin_add_alloc_gate(micro_byrd_lbfgsb_alloc_trace
-        micro_byrd_lbfgsb.cpp alloc_gate_byrd_lbfgsb ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_lbfgsb_alloc_trace
-        micro_lbfgsb.cpp alloc_gate_lbfgsb ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-
-    # augmented_lagrangian outer method-of-multipliers path is allocation-free
-    # at fixed N in steady state, INCLUDING the penalty-reduction path (a
-    # reset_clear on the persisted inner solver, not a reconstruction), so the
-    # gate runs in zero-allocation mode. The probe asserts a mu reduction
-    # occurred inside the armed window so the zero-mode pass is not vacuous.
-    argmin_add_alloc_gate(micro_augmented_lagrangian_alloc_trace
-        micro_augmented_lagrangian.cpp alloc_gate_augmented_lagrangian
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-
-    # Projected Gauss-Newton family. Both probes drive a fixed-2 bounded linear
-    # least-squares fixture whose first coordinate pins at its upper bound, so
-    # the active-set / projection path is entered (asserted in the probe) with a
-    # stable free set across the armed window. After the per-call scratch hoist
-    # both run in zero-allocation mode.
-    argmin_add_alloc_gate(micro_projected_gn_alloc_trace
-        micro_projected_gn.cpp alloc_gate_projected_gn
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_projected_gradient_gn_alloc_trace
-        micro_projected_gradient_gn.cpp alloc_gate_projected_gradient_gn
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-
     add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
     target_link_libraries(micro_augmented_lagrangian PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_augmented_lagrangian PRIVATE
@@ -603,20 +519,6 @@ if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(micro_lm PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
-
-# Levenberg-Marquardt allocation gate. Independent of NLopt, so it lives
-# outside the NLopt_FOUND block. Registered under the alloc-gate label.
-argmin_add_alloc_gate(micro_lm_alloc_trace micro_lm.cpp alloc_gate_lm
-    ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-
-# Bounded-(N,M) NW-SQP allocation gate: a fixed-N constrained solve whose
-# runtime constraint count sits below its declared compile-time cap. The trace
-# translation unit is NLopt-free (nlopt.hpp is excluded under
-# ARGMIN_BENCH_TRACE_ALLOC), so this argmin-only gate registers outside the
-# NLopt_FOUND block and runs regardless of NLopt availability.
-argmin_add_alloc_gate(micro_nw_sqp_bounded_alloc_trace
-    micro_nw_sqp.cpp sqp_alloc_gate_nw_bounded_m
-    ARGMIN_ALLOC_TRACE_BOUNDED_M ARGMIN_ALLOC_GATE_EXPECT_ZERO)
 
 # NW-SQP step-budget versus time-budget profiling harness. This target emits
 # raw CSV rows with revision and harness provenance fields; it is intentionally
