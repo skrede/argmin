@@ -7,7 +7,7 @@
 // least-squares structure while BOBYQA is general.
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 #endif
 
 #include "argmin/solver/projected_gradient_gn_policy.h"

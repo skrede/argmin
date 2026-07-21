@@ -8,7 +8,7 @@
 // here as a header-only inline-template smoke test that confirms the
 // helper bodies link cleanly without policy adoption.
 //
-// Also exercises the no-op path of detail/bench/alloc_counter.h
+// Also exercises the no-op path of detail/diagnostics/alloc_counter.h
 // (without ARGMIN_BENCH_TRACE_ALLOC defined the API is a sized-zero
 // counter).
 
@@ -16,7 +16,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/sqp_common.h"
 #include "argmin/detail/merit_function.h"
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 
 #include <Eigen/Core>
 #include <Eigen/Cholesky>

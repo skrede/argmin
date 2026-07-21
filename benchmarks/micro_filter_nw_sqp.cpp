@@ -9,7 +9,8 @@
 //            N&W Chapter 18 (dense BFGS SQP).
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
+#include "argmin/detail/diagnostics/steady_state_driver.h"
 #endif
 
 #include "bench_micro_gate.h"
@@ -711,52 +712,44 @@ bool probe_regression_hs024_iter_bound()
 namespace
 {
 
-// Steady-state allocation measurement for a fixed-N filter_nw_sqp solve loop.
-//
-// Warmup boundary: a full warmup solve() warms every one-time / lazy
-// allocation; reset(x0) returns to the start OUTSIDE any armed region; a short
-// unarmed transient re-enters steady descent; only then does the armed window
-// measure the pure per-step traffic. reset() never sits inside the armed
-// window. If the policy signals termination inside the window it is not a
-// steady state and the probe fails rather than reporting a vacuous zero.
+// Steady-state allocation gate: run the shared returns-data driver over a
+// fixed-N filter_nw_sqp solve loop, then fail the bench (non-zero) if the armed
+// window terminated early or observed any allocation.
 template <typename Policy, typename Problem>
-int measure_steady(const char* label, Policy policy, const Problem& problem,
-                   std::size_t min_per_step)
+int gate_steady(const char* label, Policy policy, const Problem& problem)
 {
-    auto x0 = problem.initial_point();
     argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
 
-    argmin::step_budget_solver solver{policy, problem, x0, opts};
+    const auto r = argmin::detail::bench::measure_steady(policy, problem, opts, 10);
 
-    solver.solve();
-    solver.reset(x0);
-    solver.step();
-    solver.step();
+    std::printf("  [alloc-gate] %-18s eigen_malloc=%lu c_alloc=%lu "
+                "armed_steps=%lu\n",
+                label, static_cast<unsigned long>(r.eigen_malloc),
+                static_cast<unsigned long>(r.c_alloc),
+                static_cast<unsigned long>(r.armed_steps));
 
-    constexpr std::size_t hot_steps = 10;
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    bool terminated = false;
-    for(std::size_t i = 0; i < hot_steps; ++i)
-    {
-        const auto r = solver.step();
-        if(r.policy_status.has_value())
-            terminated = true;
-    }
-    argmin::detail::bench::disarm_alloc_trace();
-
-    if(terminated)
+    if(r.terminated_early)
     {
         std::fprintf(stderr,
             "  [alloc-gate] %-18s FAIL: policy signaled termination inside "
             "the armed window -- not a pre-convergence steady state\n", label);
         return 1;
     }
-    return argmin::detail::bench::evaluate_gate(label, hot_steps, min_per_step);
+    if(r.eigen_malloc != 0 || r.c_alloc != 0)
+    {
+        std::fprintf(stderr,
+            "  [alloc-gate] %-18s FAIL: expected allocation-free, saw "
+            "eigen_malloc=%lu c_alloc=%lu\n", label,
+            static_cast<unsigned long>(r.eigen_malloc),
+            static_cast<unsigned long>(r.c_alloc));
+        return 1;
+    }
+    std::printf("  [alloc-gate] %-18s PASS (allocation-free)\n", label);
+    return 0;
 }
 
 // Construction-window record (informational, never gates).
@@ -831,15 +824,15 @@ int argmin_alloc_trace_probe()
         argmin::hs071<>{});
 
     int rc = 0;
-    rc |= measure_steady("filter_nw hs071",
+    rc |= gate_steady("filter_nw hs071",
         argmin::filter_nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{}, 0);
-    rc |= measure_steady("filter_nw sd012",
+        argmin::hs071<>{});
+    rc |= gate_steady("filter_nw sd012",
         argmin::filter_nw_sqp_policy<argmin::sd012<>::problem_dimension>{},
-        argmin::sd012<>{}, 0);
-    rc |= measure_steady("filter_nw sd024",
+        argmin::sd012<>{});
+    rc |= gate_steady("filter_nw sd024",
         argmin::filter_nw_sqp_policy<argmin::sd024<>::problem_dimension>{},
-        argmin::sd024<>{}, 0);
+        argmin::sd024<>{});
 
     record_idle("filter_nw idle",
         argmin::filter_nw_sqp_policy<argmin::hs071<>::problem_dimension>{},

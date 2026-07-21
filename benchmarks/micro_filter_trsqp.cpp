@@ -19,7 +19,7 @@
 //            optimization", talk SIAM Conf. on Optimization.
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 #endif
 
 #include "argmin/solver/filter_trsqp_policy.h"

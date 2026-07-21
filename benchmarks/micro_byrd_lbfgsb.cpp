@@ -12,7 +12,7 @@
 //            16(5), pp. 1190-1208.
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 #endif
 
 #include "argmin/solver/byrd_lbfgsb_policy.h"

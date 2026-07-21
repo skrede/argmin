@@ -8,7 +8,7 @@
 //            and Mathematical Systems, Vol. 187, Springer.
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 #endif
 
 #include "bench_micro_gate.h"

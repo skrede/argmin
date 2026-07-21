@@ -31,7 +31,7 @@
 #define eigen_assert(x) \
     do { if(!(x)) ::argmin::detail::bench::on_eigen_malloc(); } while(0)
 
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 
 #include <Eigen/Core>
 

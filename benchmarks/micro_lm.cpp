@@ -15,7 +15,8 @@
 //            N&W Section 10.2-10.3 (nonlinear least-squares).
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
+#include "argmin/detail/diagnostics/steady_state_driver.h"
 #endif
 
 #include "bench_micro_gate.h"
@@ -197,51 +198,44 @@ bool probe_kkt_residual()
 namespace
 {
 
-// Steady-state allocation measurement for a fixed-N Levenberg-Marquardt solve
-// loop. Warmup boundary: a full warmup solve() warms every one-time / lazy
-// allocation; reset(x0) returns to the start OUTSIDE any armed region; a short
-// unarmed transient re-enters the descent; only then does the armed window
-// measure the pure per-step traffic. reset() never sits inside the armed
-// window. If the policy signals termination inside the window it is not a
-// steady state and the probe fails rather than reporting a vacuous zero.
+// Steady-state allocation gate: run the shared returns-data driver over a
+// fixed-N Levenberg-Marquardt solve loop, then fail the bench (non-zero) if the
+// armed window terminated early or observed any allocation.
 template <typename Policy, typename Problem>
-int measure_steady(const char* label, Policy policy, const Problem& problem,
-                   std::size_t min_per_step)
+int gate_steady(const char* label, Policy policy, const Problem& problem)
 {
-    auto x0 = problem.initial_point();
     argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-12);
     opts.set_objective_threshold(1e-14);
     opts.set_step_threshold(1e-14);
 
-    argmin::step_budget_solver solver{policy, problem, x0, opts};
+    const auto r = argmin::detail::bench::measure_steady(policy, problem, opts, 10);
 
-    solver.solve();
-    solver.reset(x0);
-    solver.step();
-    solver.step();
+    std::printf("  [alloc-gate] %-18s eigen_malloc=%lu c_alloc=%lu "
+                "armed_steps=%lu\n",
+                label, static_cast<unsigned long>(r.eigen_malloc),
+                static_cast<unsigned long>(r.c_alloc),
+                static_cast<unsigned long>(r.armed_steps));
 
-    constexpr std::size_t hot_steps = 10;
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    bool terminated = false;
-    for(std::size_t i = 0; i < hot_steps; ++i)
-    {
-        const auto r = solver.step();
-        if(r.policy_status.has_value())
-            terminated = true;
-    }
-    argmin::detail::bench::disarm_alloc_trace();
-
-    if(terminated)
+    if(r.terminated_early)
     {
         argmin::bench::println(stderr,
             "  [alloc-gate] {} FAIL: policy signaled termination inside the "
             "armed window -- not a pre-convergence steady state", label);
         return 1;
     }
-    return argmin::detail::bench::evaluate_gate(label, hot_steps, min_per_step);
+    if(r.eigen_malloc != 0 || r.c_alloc != 0)
+    {
+        std::fprintf(stderr,
+            "  [alloc-gate] %-18s FAIL: expected allocation-free, saw "
+            "eigen_malloc=%lu c_alloc=%lu\n", label,
+            static_cast<unsigned long>(r.eigen_malloc),
+            static_cast<unsigned long>(r.c_alloc));
+        return 1;
+    }
+    std::printf("  [alloc-gate] %-18s PASS (allocation-free)\n", label);
+    return 0;
 }
 
 // Construction-window record (informational, never gates).
@@ -274,10 +268,10 @@ int argmin_alloc_trace_probe()
     record_construction("lm rosenbrock2", argmin::lm_policy<2>{}, rosenbrock_ls_fixed{});
 
     int rc = 0;
-    rc |= measure_steady("lm rosenbrock2", argmin::lm_policy<2>{},
-        rosenbrock_ls_fixed{}, 0);
-    rc |= measure_steady("lm sd_ls012", argmin::lm_policy<argmin::sd_ls012<>::problem_dimension>{},
-        argmin::sd_ls012<>{}, 0);
+    rc |= gate_steady("lm rosenbrock2", argmin::lm_policy<2>{},
+        rosenbrock_ls_fixed{});
+    rc |= gate_steady("lm sd_ls012", argmin::lm_policy<argmin::sd_ls012<>::problem_dimension>{},
+        argmin::sd_ls012<>{});
     return rc;
 }
 #endif

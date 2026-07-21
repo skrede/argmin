@@ -7,7 +7,8 @@
 // Reference: Nocedal & Wright, Chapter 18, Sections 18.1-18.6.
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
+#include "argmin/detail/diagnostics/steady_state_driver.h"
 #endif
 
 #include "bench_micro_gate.h"
@@ -465,56 +466,44 @@ bool probe_regression_hs007_iter_bound()
 namespace
 {
 
-// Steady-state allocation measurement for a fixed-N nw_sqp solve loop.
-//
-// Warmup boundary: a full warmup solve() walks the whole descent trajectory
-// unarmed, warming every one-time / lazy allocation (the QP-solver workspace
-// built at construction and the per-state buffer resizes). reset(x0) then
-// returns to the start OUTSIDE any armed region, a short unarmed transient
-// re-enters the steady descent, and only then does the armed window measure
-// the pure per-step traffic. reset() never sits inside the armed window, so a
-// reset-time allocation can never be miscounted as per-step. The window is
-// asserted to be pre-convergence: if the policy signals termination inside it,
-// the window is not steady state and the probe fails rather than reporting a
-// vacuous zero.
+// Steady-state allocation gate: run the shared returns-data driver over a
+// fixed-N nw_sqp solve loop, then fail the bench (non-zero) if the armed
+// window terminated early or observed any allocation.
 template <typename Policy, typename Problem>
-int measure_steady(const char* label, Policy policy, const Problem& problem,
-                   std::size_t min_per_step)
+int gate_steady(const char* label, Policy policy, const Problem& problem)
 {
-    auto x0 = problem.initial_point();
     argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
 
-    argmin::step_budget_solver solver{policy, problem, x0, opts};
+    const auto r = argmin::detail::bench::measure_steady(policy, problem, opts, 10);
 
-    solver.solve();
-    solver.reset(x0);
-    solver.step();
-    solver.step();
+    std::printf("  [alloc-gate] %-18s eigen_malloc=%lu c_alloc=%lu "
+                "armed_steps=%lu\n",
+                label, static_cast<unsigned long>(r.eigen_malloc),
+                static_cast<unsigned long>(r.c_alloc),
+                static_cast<unsigned long>(r.armed_steps));
 
-    constexpr std::size_t hot_steps = 10;
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    bool terminated = false;
-    for(std::size_t i = 0; i < hot_steps; ++i)
-    {
-        const auto r = solver.step();
-        if(r.policy_status.has_value())
-            terminated = true;
-    }
-    argmin::detail::bench::disarm_alloc_trace();
-
-    if(terminated)
+    if(r.terminated_early)
     {
         std::fprintf(stderr,
             "  [alloc-gate] %-18s FAIL: policy signaled termination inside "
             "the armed window -- not a pre-convergence steady state\n", label);
         return 1;
     }
-    return argmin::detail::bench::evaluate_gate(label, hot_steps, min_per_step);
+    if(r.eigen_malloc != 0 || r.c_alloc != 0)
+    {
+        std::fprintf(stderr,
+            "  [alloc-gate] %-18s FAIL: expected allocation-free, saw "
+            "eigen_malloc=%lu c_alloc=%lu\n", label,
+            static_cast<unsigned long>(r.eigen_malloc),
+            static_cast<unsigned long>(r.c_alloc));
+        return 1;
+    }
+    std::printf("  [alloc-gate] %-18s PASS (allocation-free)\n", label);
+    return 0;
 }
 
 // Construction-window record (informational, never gates): arm before the
@@ -679,9 +668,9 @@ int argmin_alloc_trace_probe()
         undercap_rosenbrock{});
 
     int rc = 0;
-    rc |= measure_steady("nw_sqp bounded_m",
+    rc |= gate_steady("nw_sqp bounded_m",
         argmin::nw_sqp_policy<undercap_rosenbrock::problem_dimension>{},
-        undercap_rosenbrock{}, 0);
+        undercap_rosenbrock{});
     rc |= witness_undercap_optimum();
     return rc;
 #else
@@ -689,18 +678,18 @@ int argmin_alloc_trace_probe()
         argmin::nw_sqp_policy<argmin::hs071<>::problem_dimension>{}, argmin::hs071<>{});
 
     int rc = 0;
-    rc |= measure_steady("nw_sqp hs071",
+    rc |= gate_steady("nw_sqp hs071",
         argmin::nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{}, 0);
-    rc |= measure_steady("nw_sqp sd006",
+        argmin::hs071<>{});
+    rc |= gate_steady("nw_sqp sd006",
         argmin::nw_sqp_policy<argmin::sd006<>::problem_dimension>{},
-        argmin::sd006<>{}, 0);
-    rc |= measure_steady("nw_sqp sd012",
+        argmin::sd006<>{});
+    rc |= gate_steady("nw_sqp sd012",
         argmin::nw_sqp_policy<argmin::sd012<>::problem_dimension>{},
-        argmin::sd012<>{}, 0);
-    rc |= measure_steady("nw_sqp sd024",
+        argmin::sd012<>{});
+    rc |= gate_steady("nw_sqp sd024",
         argmin::nw_sqp_policy<argmin::sd024<>::problem_dimension>{},
-        argmin::sd024<>{}, 0);
+        argmin::sd024<>{});
     return rc;
 #endif
 }

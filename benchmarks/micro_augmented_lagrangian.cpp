@@ -8,7 +8,7 @@
 //            N&W Section 17.4, Algorithm 17.4.
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 #endif
 
 #include "argmin/solver/augmented_lagrangian_policy.h"

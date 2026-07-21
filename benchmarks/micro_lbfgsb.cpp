@@ -8,7 +8,7 @@
 // Or via CMake target (added below).
 
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 #endif
 
 #include "argmin/solver/lbfgsb_policy.h"

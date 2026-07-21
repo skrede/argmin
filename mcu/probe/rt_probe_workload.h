@@ -31,7 +31,7 @@
 // Eigen-native sensor is armed; this header includes alloc_counter.h again
 // (guarded, no-op) purely to name the bench API.
 
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 
 #include "argmin/solver/lm_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
