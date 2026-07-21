@@ -39,6 +39,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Deletability invariant: nothing under tests/ or lib/ may #include a
+      # benchmark-tree header or CMake-depend on the benchmark tree, so deleting
+      # benchmarks/ can never break the test or library build. The reverse
+      # direction -- the publication gate in benchmarks/ invoking the re-homed
+      # regression_check target under tests/ -- is allowed and is not flagged.
+      # The check matches real edges (includes, CMake target/dir dependencies),
+      # not prose comments that merely name a benchmark file for context.
+      - name: Enforce no tests|lib -> benchmarks dependency edge
+        if: matrix.compiler == 'gcc-14'
+        run: |
+          if grep -rnE '#[[:space:]]*include[[:space:]]*[<"][^>"]*benchmarks/' \
+               tests lib --include='*.h' --include='*.hpp' --include='*.cpp'; then
+            echo "error: a tests/ or lib/ source includes a benchmark-tree header"
+            exit 1
+          fi
+          if grep -rnE '(add_subdirectory|target_link_libraries|target_sources|target_include_directories)[^#]*benchmarks' \
+               tests lib --include=CMakeLists.txt; then
+            echo "error: a tests/ or lib/ CMakeLists depends on the benchmark tree"
+            exit 1
+          fi
+          echo "no tests|lib -> benchmarks edge"
+
       - name: Install gcovr
         if: matrix.coverage
         run: pip install gcovr==8.6
@@ -53,12 +75,14 @@ jobs:
               -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination --coverage" \
               -DCMAKE_C_FLAGS="--coverage" \
               -DARGMIN_BUILD_TESTS=ON \
+              -DARGMIN_BUILD_BENCHMARKS=OFF \
               -DARGMIN_BUILD_EXAMPLES=OFF \
               -DARGMIN_CMAKE_FETCH_DEPS=ON
           else
             cmake . -B build -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination" \
               -DARGMIN_BUILD_TESTS=ON \
+              -DARGMIN_BUILD_BENCHMARKS=OFF \
               -DARGMIN_BUILD_EXAMPLES=OFF \
               -DARGMIN_CMAKE_FETCH_DEPS=ON
           fi
@@ -68,6 +92,15 @@ jobs:
 
       - name: Test
         run: cd build && ctest --output-on-failure
+
+      # Deletability enforcement. The allocation gates were re-homed out of the
+      # benchmark tree into tests/, so they must register and run with the
+      # benchmarks disabled (this leg builds -DARGMIN_BUILD_BENCHMARKS=OFF). A
+      # label selection that matches nothing is a ctest success, so
+      # --no-tests=error turns a silently dropped gate or a lost `alloc-gate`
+      # label into a failure here instead of a vacuously green allocation claim.
+      - name: Enforce the allocation gates run without benchmarks
+        run: cd build && ctest --output-on-failure --no-tests=error -L alloc-gate
 
       # ctest suppresses a passing test's stdout, so the spread magnitude the
       # cross-path test reports is invisible under --output-on-failure. Run the

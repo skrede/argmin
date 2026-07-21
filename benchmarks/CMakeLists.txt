@@ -809,41 +809,13 @@ if(ARGMIN_BENCH_IPOPT)
     endif()
 endif()
 
-# Standalone regression gate. Consumes publish_summary.csv and a checked-in
-# per-cell baseline (benchmarks/baselines/publication-regression.csv); exits
-# non-zero on any pass cell breaching a numeric bound or any expected-fail
-# cell unexpectedly converging. C++20 std-only --
-# no Eigen, no argmin, no Catch2, no NLopt; pure CSV bound comparison.
-# Invoked post-bench from run_publish_bench.sh.
-add_executable(regression_check regression_check.cpp)
-target_compile_options(regression_check PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-        -fno-math-errno
-        -fno-trapping-math
-    >
-)
-if(CMAKE_TESTING_ENABLED)
-    add_test(NAME regression_check_self_test
-             COMMAND regression_check --self-test)
-    set_tests_properties(regression_check_self_test PROPERTIES
-        LABELS "regression;bench")
-    add_test(NAME regression_check_prohibited_self_test
-             COMMAND regression_check --self-test-prohibited-solvers)
-    set_tests_properties(regression_check_prohibited_self_test PROPERTIES
-        LABELS "regression;bench")
-    add_test(NAME regression_check_instructions_self_test
-             COMMAND regression_check --self-test-instructions)
-    set_tests_properties(regression_check_instructions_self_test PROPERTIES
-        LABELS "regression;bench")
-    add_test(NAME regression_check_oracle_witness_self_test
-             COMMAND regression_check --self-test-oracle-witness)
-    set_tests_properties(regression_check_oracle_witness_self_test PROPERTIES
-        LABELS "regression;bench")
-    add_test(NAME regression_check_perf_ceiling_relax_self_test
-             COMMAND regression_check --self-test-perf-ceiling-relax)
-    set_tests_properties(regression_check_perf_ceiling_relax_self_test PROPERTIES
-        LABELS "regression;bench")
-endif()
+# The standalone regression gate (regression_check) and its self-tests are the
+# toolchain-invariant, argmin-only gate LOGIC, so they live under tests/ (see
+# tests/regression/CMakeLists.txt) and survive a benchmarks/ deletion. The
+# publication gate below still invokes that same target when benchmarks are
+# built. oracle_check stays here: it drives the shared problem_registry and
+# re-validates the returned-point sidecar publish_bench emits, so it is
+# intrinsically part of the benchmark composition.
 
 # oracle_check -- independent analytic correctness validator. Links argmin
 # (header-only) + Eigen + the analytic test functions to recompute feasibility
@@ -928,8 +900,11 @@ option(ARGMIN_BENCH_WEEKLY_REGRESSION_GATE
 # so it never fires in a default ctest run; a controlled weekly bench run (operator
 # box or self-hosted runner) sets that flag (label regression-weekly).
 #
-# Registered only when testing is enabled in the active benchmark build.
-if(CMAKE_TESTING_ENABLED)
+# Registered only when testing is enabled in the active benchmark build. The
+# gate invokes regression_check, which now lives under tests/, so it also
+# requires that target to exist (ARGMIN_BUILD_TESTS on alongside benchmarks --
+# the configuration the publication/labeled-instruments CI leg uses).
+if(CMAKE_TESTING_ENABLED AND TARGET regression_check)
     add_test(
         NAME publish_bench_regression_gate
         COMMAND
