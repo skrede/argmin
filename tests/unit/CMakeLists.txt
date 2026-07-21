@@ -162,6 +162,18 @@ catch_discover_tests(argmin_alloc_gate_test
 catch_discover_tests(argmin_alloc_gate_test
     TEST_SPEC "[canary]")
 
+# Sensor B overrides malloc/free with __libc_* forwards, which bypasses and
+# fights the sanitizer's own allocator -- the binary segfaults at Catch2 test
+# discovery under -fsanitize={address,memory}. And an allocation count taken
+# under a sanitizer-replaced allocator is not a valid measurement regardless.
+# So the gate is excluded from sanitizer builds (the main argmin_unit_tests
+# suite, including the [move_asan] cases, still runs under -fsanitize). Both
+# sanitize CI legs carry -fsanitize on CMAKE_CXX_FLAGS, which is the sole gate.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _argmin_alloc_gate_sanitizer)
+if(NOT _argmin_alloc_gate_sanitizer EQUAL -1)
+    set_target_properties(argmin_alloc_gate_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif()
+
 # Dedicated ctest label for the move-and-step ASan instrument so the
 # sanitize CI job can select it explicitly (`ctest -L asan-move`) even
 # though the whole suite already runs under -fsanitize=address. This is

@@ -125,6 +125,7 @@ jobs:
             --filter 'lib/argmin/include/argmin/' \
             --exclude-throw-branches \
             --exclude-unreachable-branches \
+            --exclude 'detail/diagnostics/alloc_counter\.h' \
             --gcov-ignore-errors=source_not_found \
             --xml coverage.xml
 
@@ -137,6 +138,7 @@ jobs:
             --filter 'lib/argmin/include/argmin/' \
             --exclude-throw-branches \
             --exclude-unreachable-branches \
+            --exclude 'detail/diagnostics/alloc_counter\.h' \
             --gcov-ignore-errors=source_not_found \
             --json coverage.json
           python3 scripts/coverage_gate.py coverage.json scripts/coverage_floors.txt
@@ -337,20 +339,22 @@ jobs:
             -DARGMIN_BENCH_LIBCMAES=OFF \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
+      - name: Build
+        run: cmake --build build
+
       # The gates are argmin-only correctness cases in the tests tree, so the
       # count is NLopt-independent. Assert it anyway so a silently dropped case
       # or `alloc-gate` label fails here instead of being reported as a green
       # allocation-free claim. The literal is deliberate -- adding or removing a
-      # gate should force a visible edit.
+      # gate should force a visible edit. catch_discover_tests registers the
+      # gates at build time, so this must run after the build (a pre-build
+      # `ctest -N` would find zero).
       - name: Verify the full allocation-gate set registered
         run: |
           cd build
           count=$(ctest -N -L alloc-gate | grep -c 'Test #')
           echo "allocation gates registered: $count"
           test "$count" -eq 13 || { echo "expected 13 allocation gates, found $count"; exit 1; }
-
-      - name: Build
-        run: cmake --build build
 
       # ctest treats a label selection that matches nothing as success, so
       # without --no-tests=error this step would pass if the labels it names
