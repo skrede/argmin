@@ -54,11 +54,17 @@ jobs:
             echo "error: a tests/ or lib/ source includes a benchmark-tree header"
             exit 1
           fi
-          if grep -rnE '(add_subdirectory|target_link_libraries|target_sources|target_include_directories)[^#]*benchmarks' \
-               tests lib --include=CMakeLists.txt; then
-            echo "error: a tests/ or lib/ CMakeLists depends on the benchmark tree"
-            exit 1
-          fi
+          # target_link_libraries(...) et al. are routinely written across
+          # multiple physical lines, so match on the logical command (comments
+          # stripped, newlines folded) rather than per line -- a line-based grep
+          # would pass an idiomatic multi-line re-coupling green.
+          while IFS= read -r cml; do
+            if sed 's/#.*$//' "$cml" | tr '\n' ' ' \
+                 | grep -qE '(add_subdirectory|target_link_libraries|target_sources|target_include_directories)[[:space:]]*\([^)]*benchmarks'; then
+              echo "error: $cml depends on the benchmark tree"
+              exit 1
+            fi
+          done < <(find tests lib -name CMakeLists.txt)
           echo "no tests|lib -> benchmarks edge"
 
       - name: Install gcovr

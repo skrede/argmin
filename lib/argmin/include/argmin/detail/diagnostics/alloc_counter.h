@@ -17,7 +17,9 @@
 //      that TU.
 //
 //   2. A C-allocator counter fed by the strong-symbol malloc / posix_memalign
-//      overrides in alloc_trace_main.cpp. That sensor is process-wide and
+//      overrides a linking consumer provides (tests/unit/alloc_sensor_counters.cpp
+//      and alloc_sensor_b_linux.cpp on host, mcu/nucleo_h753zi/wrap_malloc.cpp on
+//      target). That sensor is process-wide and
 //      catches heap traffic the Eigen gate cannot see (std::vector free-sets,
 //      decorator std::function storage, and any aligned_malloc that reaches
 //      the C allocator without tripping the eigen_assert path).
@@ -34,8 +36,9 @@
 namespace argmin::detail::bench
 {
 
-// Storage lives in alloc_trace_main.cpp so a single definition backs every
-// alloc-trace translation unit linked into the target.
+// Storage is defined by exactly one linked consumer TU (tests/unit/alloc_sensor_counters.cpp
+// on host, mcu/nucleo_h753zi/wrap_malloc.cpp on target) so a single definition
+// backs every alloc-trace translation unit linked into the target.
 extern std::atomic<std::size_t> g_eigen_malloc_count;
 extern std::atomic<std::size_t> g_c_alloc_count;
 extern std::atomic<bool> g_alloc_trace_armed;
@@ -52,9 +55,9 @@ inline void on_eigen_malloc() noexcept
 
 // Route Eigen's runtime malloc gate into on_eigen_malloc. Defined here so a
 // consuming TU only needs to include this header (ahead of any Eigen header)
-// to arm the Eigen-native sensor. alloc_trace_main.cpp defines the same macro
-// itself before its first Eigen include; the guard keeps the two definitions
-// from clashing.
+// to arm the Eigen-native sensor. A consumer that defines its own eigen_assert
+// before its first Eigen include is respected; the #ifndef guard keeps the two
+// definitions from clashing.
 #ifndef eigen_assert
 #define eigen_assert(x) \
     do { if(!(x)) ::argmin::detail::bench::on_eigen_malloc(); } while(0)

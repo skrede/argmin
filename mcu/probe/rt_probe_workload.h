@@ -19,7 +19,7 @@
 //     then live and report the on-device allocs/step.
 //
 // The four RT-claimed policies exercised here mirror the host micro alloc-gate
-// suite (measure_steady in benchmarks/micro_nw_sqp.cpp): a full warmup solve()
+// suite (the steady-state driver in argmin/detail/diagnostics/steady_state_driver.h): a full warmup solve()
 // walks the descent trajectory unarmed so every one-time / lazy allocation is
 // warm, reset() returns to the start OUTSIDE any armed window, a short unarmed
 // transient re-enters steady descent, and only then does the armed window
@@ -168,7 +168,7 @@ namespace argmin::mcu
 {
 
 // Fixed-2 least-squares Rosenbrock for lm_policy, with an initial_point() so it
-// drives the same measure_steady() warmup path as the constrained fixtures.
+// drives the same steady-state warmup path as the constrained fixtures.
 struct fixed_rosenbrock_ls
 {
     static constexpr int problem_dimension = 2;
@@ -204,7 +204,7 @@ struct fixed_rosenbrock_ls
 };
 
 // One steady-state window for a single fixed-N policy on one problem. Mirrors
-// benchmarks/micro_nw_sqp.cpp::measure_steady. Returns a process-style rc
+// the host steady-state driver (argmin/detail/diagnostics/steady_state_driver.h). Returns a process-style rc
 // (0 pass). min_per_step is 0 for the RT-claimed policies (held to the
 // zero-allocation gate immediately). label feeds the on-device report line.
 template <typename Policy, typename Problem>
