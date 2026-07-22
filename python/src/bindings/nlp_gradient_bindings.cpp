@@ -74,7 +74,10 @@ std::string describe_driver_options(const driver_options& opts)
 
 void bind_line_search_options(nb::module_& m)
 {
-    nb::class_<line_search_options>(m, "LineSearchOptions")
+    nb::class_<line_search_options>(m, "LineSearchOptions",
+                                   "Read-only view of the line-search parameters a policy is "
+                                   "configured with: the two Wolfe constants, the backtracking "
+                                   "factor, the maximum step and the evaluation cap.")
         .def(nb::init<>())
         .def_ro("c1", &line_search_options::c1)
         .def_ro("c2", &line_search_options::c2)
@@ -86,7 +89,12 @@ void bind_line_search_options(nb::module_& m)
 
 void bind_driver_options(nb::module_& m)
 {
-    nb::class_<driver_options>(m, "SolverOptions")
+    nb::class_<driver_options>(m, "SolverOptions",
+                              "Read-only view of the driver configuration shared by every "
+                              "bound nonlinear method: the iteration budget, the feasibility "
+                              "tolerances and the convergence thresholds. Construct one to "
+                              "read the library defaults; pass values as keyword arguments "
+                              "to a solver to change them.")
         .def(nb::init<>())
         .def_ro("max_iterations", &driver_options::max_iterations)
         .def_ro("constraint_tolerance", &driver_options::constraint_tolerance)
@@ -116,11 +124,14 @@ void bind_driver_options(nb::module_& m)
 
 void bind_lbfgsb_options(nb::module_& m)
 {
-    nb::enum_<lbfgsb_line_search>(m, "LbfgsbLineSearch")
+    nb::enum_<lbfgsb_line_search>(m, "LbfgsbLineSearch",
+                                 "Which line search the quasi-Newton method uses.")
         .value("strong_wolfe", lbfgsb_line_search::strong_wolfe)
         .value("armijo", lbfgsb_line_search::armijo);
 
-    nb::class_<lbfgsb_options>(m, "LbfgsbOptions")
+    nb::class_<lbfgsb_options>(m, "LbfgsbOptions",
+                              "Read-only view of the bound-constrained quasi-Newton policy's "
+                              "own configuration.")
         .def(nb::init<>())
         .def_ro("line_search", &lbfgsb_options::line_search)
         .def_ro("line_search_type", &lbfgsb_options::line_search_type)
@@ -138,7 +149,9 @@ void bind_lbfgsb_options(nb::module_& m)
 
 void bind_qp_subproblem_options(nb::module_& m)
 {
-    nb::class_<qp_options>(m, "QpSubproblemOptions")
+    nb::class_<qp_options>(m, "QpSubproblemOptions",
+                          "Read-only view of the quadratic subproblem parameters carried by "
+                          "the sequential quadratic programming policy.")
         .def(nb::init<>())
         .def_ro("max_iterations", &qp_options::max_iterations)
         .def_ro("tolerance", &qp_options::tolerance)
@@ -152,7 +165,9 @@ void bind_qp_subproblem_options(nb::module_& m)
 
 void bind_slsqp_options(nb::module_& m)
 {
-    nb::class_<slsqp_options>(m, "SlsqpOptions")
+    nb::class_<slsqp_options>(m, "SlsqpOptions",
+                             "Read-only view of the sequential least-squares quadratic "
+                             "programming policy's own configuration.")
         .def(nb::init<>())
         .def_ro("initial_penalty", &slsqp_options::initial_penalty)
         .def_ro("line_search", &slsqp_options::line_search)
@@ -175,7 +190,11 @@ void bind_slsqp_options(nb::module_& m)
 
 void bind_lbfgsb_solver(nb::module_& m)
 {
-    nb::class_<lbfgsb_wrapper>(m, "LbfgsbSolver", nb::type_slots(wrapper_slots<lbfgsb_wrapper>))
+    nb::class_<lbfgsb_wrapper>(
+        m, "LbfgsbSolver", nb::type_slots(wrapper_slots<lbfgsb_wrapper>),
+        "Bound-constrained limited-memory quasi-Newton method. Supply an objective and a "
+        "starting point; a gradient is optional and falls back to the library's own "
+        "finite differences. The solver owns the callables it was given.")
         .def(
             "__init__",
             [](lbfgsb_wrapper* self, nb::object objective, const vector<double>& x0,
@@ -246,7 +265,10 @@ void bind_lbfgsb_solver(nb::module_& m)
 
 void bind_slsqp_solver(nb::module_& m)
 {
-    nb::class_<slsqp_wrapper>(m, "SlsqpSolver", nb::type_slots(wrapper_slots<slsqp_wrapper>))
+    nb::class_<slsqp_wrapper>(
+        m, "SlsqpSolver", nb::type_slots(wrapper_slots<slsqp_wrapper>),
+        "Sequential least-squares quadratic programming for a constrained problem. Needs "
+        "the constraint vector and its Jacobian, plus the equality and inequality counts.")
         .def(
             "__init__",
             [](slsqp_wrapper* self, nb::object objective, const vector<double>& x0,

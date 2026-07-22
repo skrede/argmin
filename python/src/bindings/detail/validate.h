@@ -166,6 +166,17 @@ inline void check_positive_dimension(int value, std::string_view name)
                        std::string(name) + " must be positive, got " + format_number(value));
 }
 
+// A quadratic program with no constraint rows is a legitimate unconstrained
+// problem the solvers pose and solve, so a constraint count is checked against
+// zero rather than against one.
+inline void check_non_negative_dimension(int value, std::string_view name)
+{
+    if(value >= 0)
+        return;
+    raise_argmin_error(error_kind::dimension_mismatch,
+                       std::string(name) + " must be non-negative, got " + format_number(value));
+}
+
 inline void check_finite(double value, std::string_view name)
 {
     if(std::isfinite(value))

@@ -84,7 +84,10 @@ void translate_argmin_error(const std::exception_ptr& raised, void*)
 
 void register_error_channel(nb::module_& m)
 {
-    nb::enum_<error_kind>(m, "ErrorKind")
+    nb::enum_<error_kind>(m, "ErrorKind",
+                     "The machine-readable category carried by ArgminError.kind. Mirrors the "
+                     "library's own precondition-failure channel value for value, and adds the "
+                     "three categories that exist only at the interpreter boundary.")
         .value("dimension_mismatch", error_kind::dimension_mismatch)
         .value("invalid_bounds", error_kind::invalid_bounds)
         .value("non_finite_input", error_kind::non_finite_input)
@@ -96,7 +99,11 @@ void register_error_channel(nb::module_& m)
         .value("invalid_state", error_kind::invalid_state);
 
     if(python_error_type == nullptr)
-        python_error_type = PyErr_NewException("argmin.ArgminError", PyExc_RuntimeError, nullptr);
+        python_error_type = PyErr_NewExceptionWithDoc(
+            "argmin.ArgminError",
+            "Raised when an argument or a precondition is violated. Carries a .kind "
+            "attribute naming the category. Solve outcomes never arrive this way.",
+            PyExc_RuntimeError, nullptr);
     m.attr("ArgminError") = nb::borrow<nb::object>(python_error_type);
 
     nb::register_exception_translator(translate_argmin_error, nullptr);
@@ -104,14 +111,18 @@ void register_error_channel(nb::module_& m)
 
 void register_status_enums(nb::module_& m)
 {
-    nb::enum_<qp_solve_status>(m, "QpStatus")
+    nb::enum_<qp_solve_status>(m, "QpStatus",
+                              "How a quadratic-program solve ended. An iteration cap or an "
+                              "infeasibility certificate is an answer, not an error, so it "
+                              "arrives here rather than as a raised exception.")
         .value("solved", qp_solve_status::solved)
         .value("solved_inaccurate", qp_solve_status::solved_inaccurate)
         .value("max_iterations", qp_solve_status::max_iterations)
         .value("primal_infeasible", qp_solve_status::primal_infeasible)
         .value("dual_infeasible", qp_solve_status::dual_infeasible);
 
-    nb::enum_<solver_status>(m, "SolverStatus")
+    nb::enum_<solver_status>(m, "SolverStatus",
+                            "How a nonlinear solve ended, or that it is still running.")
         .value("running", solver_status::running)
         .value("converged", solver_status::converged)
         .value("max_iterations", solver_status::max_iterations)
@@ -131,7 +142,11 @@ void register_status_enums(nb::module_& m)
 
 void register_qp_result(nb::module_& m)
 {
-    nb::class_<qp_result_type>(m, "QpResult")
+    nb::class_<qp_result_type>(m, "QpResult",
+                              "The outcome of a quadratic-program solve: the primal and dual "
+                              "iterates, the terminal status, the residuals and the objective "
+                              "value. The arrays own their data and outlive the solver that "
+                              "produced them.")
         .def(
             "__init__",
             [](qp_result_type* self, const vector<double>& x, const vector<double>& y,
@@ -177,7 +192,10 @@ void register_qp_result(nb::module_& m)
 
 void register_solve_result(nb::module_& m)
 {
-    nb::class_<solve_result_type>(m, "SolveResult")
+    nb::class_<solve_result_type>(m, "SolveResult",
+                                 "The outcome of a nonlinear solve: the iterate, the terminal "
+                                 "status, the iteration and evaluation counts, the objective "
+                                 "value, the gradient norm and the constraint violation.")
         .def(
             "__init__",
             [](solve_result_type* self, solver_status status, int iterations,

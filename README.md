@@ -114,6 +114,7 @@ Bring your own problem by satisfying the `differentiable` concept (and `bound_co
 - [Documentation Index](docs/README.md) -- guides and references.
 - [Choosing a Solver](docs/choosing-a-solver.md) -- a problem-class-to-policy map.
 - [Real-Time Safety Matrix](docs/rt-safety-matrix.md) -- per-solver allocation-freedom, bounded iterations, and determinism.
+- [Python Bindings](docs/python-bindings.md) -- the bound surface, how to build and test it, and what it deliberately does not provide.
 - [Examples](examples/) -- runnable programs for each problem class.
 
 ## Contributing

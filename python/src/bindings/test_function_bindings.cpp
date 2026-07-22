@@ -169,7 +169,12 @@ result_type solve_constrained_native(const native_constrained& problem, std::str
 
 void bind_rosenbrock(nb::module_& m)
 {
-    nb::class_<native_rosenbrock>(m, "Rosenbrock")
+    nb::class_<native_rosenbrock>(
+        m, "Rosenbrock",
+        "The Rosenbrock valley compiled into the extension at any dimension of at least "
+        "two, with an optional box. Its value and gradient are callable from the "
+        "interpreter, and solve_native() runs a solve with no interpreter callback in the "
+        "loop, which is what makes a parity comparison against the boundary possible.")
         .def(
             "__init__",
             [](native_rosenbrock* self, int n, const std::optional<vector<double>>& lower_bounds,
@@ -254,7 +259,10 @@ void bind_rosenbrock(nb::module_& m)
 
 void bind_constrained_problem(nb::module_& m)
 {
-    nb::class_<native_constrained>(m, "ConstrainedTestProblem")
+    nb::class_<native_constrained>(
+        m, "ConstrainedTestProblem",
+        "A two-variable equality-constrained problem compiled into the extension, with the "
+        "same callback-free solve_native() entry point as the Rosenbrock valley.")
         .def(nb::init<>(),
              "Hock and Schittkowski problem six: minimize (1 - x0)^2 subject to the equality "
              "10 (x1 - x0^2) = 0, with the solution at the all-ones point and an optimal value "

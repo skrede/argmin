@@ -59,9 +59,9 @@ std::string describe_options(std::string_view name, const Options& opts)
 // initializer, and there is no second copy of a tolerance to drift out of step
 // with the solver that reads it.
 template <typename Options>
-void bind_options(nb::module_& m, const char* name)
+void bind_options(nb::module_& m, const char* name, const char* doc)
 {
-    nb::class_<Options>(m, name)
+    nb::class_<Options>(m, name, doc)
         .def(nb::init<>())
         .def_rw("rho", &Options::rho)
         .def_rw("sigma", &Options::sigma)
@@ -327,17 +327,17 @@ private:
 };
 
 template <typename Solver>
-void bind_dense_solver(nb::module_& m, const char* name)
+void bind_dense_solver(nb::module_& m, const char* name, const char* doc)
 {
     using facade = dense_qp_facade<Solver>;
 
-    nb::class_<facade>(m, name)
+    nb::class_<facade>(m, name, doc)
         .def(
             "__init__",
             [](facade* self, int n, int m_rows)
             {
                 check_positive_dimension(n, "n");
-                check_positive_dimension(m_rows, "m");
+                check_non_negative_dimension(m_rows, "m");
                 new(self) facade(n, m_rows);
             },
             nb::arg("n"), nb::arg("m"))
@@ -359,7 +359,12 @@ void bind_dense_solver(nb::module_& m, const char* name)
 
 void bind_sparse_solver(nb::module_& m)
 {
-    nb::class_<sparse_qp_facade>(m, "SparseAdmmQpSolver")
+    nb::class_<sparse_qp_facade>(
+        m, "SparseAdmmQpSolver",
+        "Operator-splitting solver for a sparse quadratic program. Matrices arrive in "
+        "compressed sparse column form; any other layout is rejected rather than "
+        "silently converted. The problem is posed by solve() and may then be updated "
+        "through resolve() without refactorizing.")
         .def(nb::init<>())
         .def("solve", &sparse_qp_facade::solve, nb::arg("P"), nb::arg("q"), nb::arg("A"),
              nb::arg("l"), nb::arg("u"), nb::arg("options") = sparse_qp_options())
@@ -375,11 +380,25 @@ void bind_sparse_solver(nb::module_& m)
 
 void register_qp(nb::module_& m)
 {
-    bind_options<dense_qp_options>(m, "DenseQpOptions");
-    bind_options<sparse_qp_options>(m, "SparseQpOptions");
+    bind_options<dense_qp_options>(
+        m, "DenseQpOptions",
+        "Configuration for the dense quadratic-program solvers. The exposed defaults are "
+        "the library's own; every field is readable and writable.");
+    bind_options<sparse_qp_options>(
+        m, "SparseQpOptions",
+        "Configuration for the sparse quadratic-program solver, with the same fields and "
+        "the same library defaults as the dense form.");
 
-    bind_dense_solver<dense_admm_qp_solver<double>>(m, "DenseAdmmQpSolver");
-    bind_dense_solver<dense_active_set_qp_solver<double>>(m, "DenseActiveSetQpSolver");
+    bind_dense_solver<dense_admm_qp_solver<double>>(
+        m, "DenseAdmmQpSolver",
+        "Operator-splitting solver for a dense quadratic program, constructed for a fixed "
+        "decision length and a maximum constraint-row count. A constraint count of zero is "
+        "the unconstrained program.");
+    bind_dense_solver<dense_active_set_qp_solver<double>>(
+        m, "DenseActiveSetQpSolver",
+        "Active-set solver for a dense quadratic program. It requires a feasible starting "
+        "point: seed one with warm_start() before solving a problem whose equality rows the "
+        "origin does not satisfy.");
     bind_sparse_solver(m);
 }
 

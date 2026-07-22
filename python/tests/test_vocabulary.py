@@ -84,3 +84,50 @@ def test_reprs_round_trip_their_numbers(argmin):
         for name, rendered in fields.items():
             assert float(rendered) == getattr(result, name)
         assert fields["objective_value"] == repr(result.objective_value)
+
+
+POLICY_ENUMS = {
+    "LbfgsbLineSearch": (
+        "solver/lbfgsb_policy.h",
+        "lbfgsb_line_search",
+        "LbfgsbOptions",
+        "line_search_type",
+    ),
+    "CmaesRestart": (
+        "solver/alternative/cmaes/pwq_reparameterization_policy.h",
+        "restart_strategy",
+        "CmaesOptions",
+        "restart",
+    ),
+}
+
+
+def committed_enumerators(repository_root, header, enumeration):
+    text = (
+        repository_root / "lib" / "argmin" / "include" / "argmin" / header
+    ).read_text()
+    tail = text.split(f"enum class {enumeration}", 1)[1]
+    # The declaration may name an underlying type before the body opens, so the
+    # body starts at the first brace rather than at the split point.
+    body = tail[tail.index("{") + 1 : tail.index("}")]
+    body = re.sub(r"//[^\n]*", "", body)
+    return [
+        enumerator.split("=")[0].strip()
+        for enumerator in body.split(",")
+        if enumerator.strip()
+    ]
+
+
+def test_the_policy_enumerations_cover_their_committed_enumerators(argmin, repository_root):
+    for bound_name, (header, enumeration, _, _) in POLICY_ENUMS.items():
+        committed = committed_enumerators(repository_root, header, enumeration)
+        assert committed, (bound_name, header)
+        members = getattr(argmin, bound_name).__members__
+        assert sorted(members) == sorted(committed), (bound_name, sorted(members), committed)
+
+
+def test_a_policy_enumeration_is_the_type_its_option_field_reports(argmin, repository_root):
+    for bound_name, (_, _, options_name, field) in POLICY_ENUMS.items():
+        value = getattr(getattr(argmin, options_name)(), field)
+        assert isinstance(value, getattr(argmin, bound_name))
+        assert value.name in getattr(argmin, bound_name).__members__

@@ -545,6 +545,43 @@ jobs:
           echo "PASS: newlib-nano -fno-exceptions link resolved every symbol"
           arm-none-eabi-size "$elf"
 
+  python-bindings:
+    runs-on: ubuntu-24.04
+    name: python bindings (build + pytest)
+
+    # The extension is gated behind an option that defaults off, so no other job
+    # in this workflow builds it and none of them would notice it breaking. This
+    # is the only job that will.
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner image does not ship the generator this job's preset names,
+      # and every other leg here configures without a preset, so nothing else
+      # installs it. Without this step the configure step below fails outright.
+      - name: Install the build generator
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Creates the repository-local environment and installs the exactly
+      # pinned, binary-only dependency set into it and nowhere else.
+      - name: Bootstrap the interpreter environment
+        run: python3 scripts/bootstrap_python_env.py
+
+      - name: Configure
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: cmake --preset python-bindings
+
+      - name: Build
+        run: cmake --build build/python -j2
+
+      - name: Test
+        run: ctest --test-dir build/python --output-on-failure
+
   examples:
     runs-on: ubuntu-24.04
     name: examples (build + run)

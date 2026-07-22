@@ -50,7 +50,9 @@ std::string describe_optional(const std::optional<double>& value)
 
 void bind_trust_region_options(nb::module_& m)
 {
-    nb::class_<trust_region_options>(m, "TrustRegionOptions")
+    nb::class_<trust_region_options>(m, "TrustRegionOptions",
+                                    "Read-only view of the trust-region acceptance and radius "
+                                    "update parameters.")
         .def(nb::init<>())
         .def_ro("eta_good", &trust_region_options::eta_good)
         .def_ro("eta_poor", &trust_region_options::eta_poor)
@@ -72,7 +74,9 @@ void bind_trust_region_options(nb::module_& m)
 
 void bind_bobyqa_options(nb::module_& m)
 {
-    nb::class_<bobyqa_options>(m, "BobyqaOptions")
+    nb::class_<bobyqa_options>(m, "BobyqaOptions",
+                              "Read-only view of the bound-constrained interpolation "
+                              "policy's own configuration.")
         .def(nb::init<>())
         .def_ro("initial_trust_radius", &bobyqa_options::initial_trust_radius)
         .def_ro("final_trust_radius", &bobyqa_options::final_trust_radius)
@@ -92,7 +96,9 @@ void bind_bobyqa_options(nb::module_& m)
 
 void bind_cobyla_options(nb::module_& m)
 {
-    nb::class_<cobyla_options>(m, "CobylaOptions")
+    nb::class_<cobyla_options>(m, "CobylaOptions",
+                              "Read-only view of the constrained linear-approximation "
+                              "policy's own configuration.")
         .def(nb::init<>())
         .def_ro("initial_trust_radius", &cobyla_options::initial_trust_radius)
         .def_ro("final_trust_radius", &cobyla_options::final_trust_radius)
@@ -111,7 +117,10 @@ void bind_cobyla_options(nb::module_& m)
 
 void bind_cmaes_options(nb::module_& m)
 {
-    nb::class_<cmaes_options>(m, "CmaesDetectionOptions")
+    nb::class_<cmaes_options>(m, "CmaesDetectionOptions",
+                             "Read-only view of the evolution strategy's degeneracy detection "
+                             "thresholds: step-size collapse, covariance conditioning and the "
+                             "two flatness tolerances.")
         .def(nb::init<>())
         .def_ro("sigma_collapse_threshold", &cmaes_options::sigma_collapse_threshold)
         .def_ro("condition_number_limit", &cmaes_options::condition_number_limit)
@@ -129,11 +138,16 @@ void bind_cmaes_options(nb::module_& m)
                         + ", step_size_tolerance=" + format_number(opts.step_size_tolerance) + ")";
              });
 
-    nb::enum_<cmaes_restart>(m, "CmaesRestart")
+    nb::enum_<cmaes_restart>(m, "CmaesRestart",
+                            "Whether the evolution strategy restarts with an increasing "
+                            "population after an exit criterion fires.")
         .value("none", cmaes_restart::none)
         .value("ipop", cmaes_restart::ipop);
 
-    nb::class_<cmaes_policy_options>(m, "CmaesOptions")
+    nb::class_<cmaes_policy_options>(m, "CmaesOptions",
+                                    "Read-only view of the covariance-adaptation evolution "
+                                    "strategy's own configuration, including the seed that "
+                                    "makes a run reproducible.")
         .def(nb::init<>())
         .def_ro("population_size", &cmaes_policy_options::lambda)
         .def_ro("initial_sigma", &cmaes_policy_options::initial_sigma)
@@ -157,7 +171,10 @@ void bind_cmaes_options(nb::module_& m)
 
 void bind_bobyqa_solver(nb::module_& m)
 {
-    nb::class_<bobyqa_wrapper>(m, "BobyqaSolver", nb::type_slots(wrapper_slots<bobyqa_wrapper>))
+    nb::class_<bobyqa_wrapper>(
+        m, "BobyqaSolver", nb::type_slots(wrapper_slots<bobyqa_wrapper>),
+        "Bound-constrained derivative-free trust-region interpolation method. Takes an "
+        "objective only; no gradient is used or requested.")
         .def(
             "__init__",
             [](bobyqa_wrapper* self, nb::object objective, const vector<double>& x0,
@@ -234,7 +251,11 @@ void bind_bobyqa_solver(nb::module_& m)
 
 void bind_cobyla_solver(nb::module_& m)
 {
-    nb::class_<cobyla_wrapper>(m, "CobylaSolver", nb::type_slots(wrapper_slots<cobyla_wrapper>))
+    nb::class_<cobyla_wrapper>(
+        m, "CobylaSolver", nb::type_slots(wrapper_slots<cobyla_wrapper>),
+        "Derivative-free constrained optimization by linear approximations. Takes an "
+        "objective, a constraint vector and the two constraint counts; box bounds are "
+        "rewritten into explicit constraints by the method itself.")
         .def(
             "__init__",
             [](cobyla_wrapper* self, nb::object objective, const vector<double>& x0,
@@ -322,7 +343,10 @@ void bind_cobyla_solver(nb::module_& m)
 
 void bind_cmaes_solver(nb::module_& m)
 {
-    nb::class_<cmaes_wrapper>(m, "CmaesSolver", nb::type_slots(wrapper_slots<cmaes_wrapper>))
+    nb::class_<cmaes_wrapper>(
+        m, "CmaesSolver", nb::type_slots(wrapper_slots<cmaes_wrapper>),
+        "Covariance-matrix-adaptation evolution strategy. Stochastic: pass a seed to make "
+        "a run reproducible, and read it back from the policy options snapshot.")
         .def(
             "__init__",
             [](cmaes_wrapper* self, nb::object objective, const vector<double>& x0,

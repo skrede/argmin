@@ -149,11 +149,36 @@ def test_a_request_beyond_the_constructed_capacity_is_rejected(argmin, kind, axi
 
 
 @pytest.mark.parametrize("kind", DENSE)
-@pytest.mark.parametrize("dimensions", [(0, 3), (-1, 3), (2, 0), (2, -4)])
+@pytest.mark.parametrize("dimensions", [(0, 3), (-1, 3), (2, -4)])
 def test_a_non_positive_constructor_dimension_is_rejected(argmin, kind, dimensions):
     with pytest.raises(argmin.ArgminError) as raised:
         make_solver(argmin, kind, *dimensions)
     assert raised.value.kind == expect(argmin, "dimension_mismatch")
+
+
+# A zero *variable* count is meaningless; a zero *constraint* count is the
+# unconstrained quadratic program, which every solver here poses and solves, so
+# rejecting it would make the binding narrower than the surface it wraps.
+@pytest.mark.parametrize("kind", ALL)
+def test_a_zero_constraint_count_solves_the_unconstrained_program(argmin, kind):
+    P = np.array([[2.0, 0.0], [0.0, 2.0]])
+    q = np.array([-2.0, -4.0])
+    A = np.zeros((0, 2))
+    empty = np.zeros(0)
+
+    if kind == "sparse_admm":
+        solver = argmin.SparseAdmmQpSolver()
+    else:
+        solver = getattr(
+            argmin, "DenseAdmmQpSolver" if kind == "dense_admm" else "DenseActiveSetQpSolver"
+        )(2, 0)
+
+    result = call_solve(solver, kind, P, q, A, empty, empty)
+
+    assert result.status == argmin.QpStatus.solved
+    # The stationarity condition P x + q = 0 has the closed-form solution
+    # x = -P^-1 q = (1, 2) with no constraint to displace it.
+    assert np.allclose(result.x, [1.0, 2.0], atol=1e-6)
 
 
 @pytest.mark.parametrize("kind", ALL)
