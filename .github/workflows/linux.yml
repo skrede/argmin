@@ -39,33 +39,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Deletability invariant: nothing under tests/ or lib/ may #include a
-      # benchmark-tree header or CMake-depend on the benchmark tree, so deleting
-      # benchmarks/ can never break the test or library build. The reverse
-      # direction -- the publication gate in benchmarks/ invoking the re-homed
-      # regression_check target under tests/ -- is allowed and is not flagged.
-      # The check matches real edges (includes, CMake target/dir dependencies),
-      # not prose comments that merely name a benchmark file for context.
-      - name: Enforce no tests|lib -> benchmarks dependency edge
+      # The check body lives in the script so that its negative control can run
+      # the same code that gates here; a check nobody has ever seen fail is not
+      # a check.
+      - name: Enforce no tests|lib -> benchmarks|python dependency edge
         if: matrix.compiler == 'gcc-14'
         run: |
-          if grep -rnE '#[[:space:]]*include[[:space:]]*[<"][^>"]*benchmarks/' \
-               tests lib --include='*.h' --include='*.hpp' --include='*.cpp'; then
-            echo "error: a tests/ or lib/ source includes a benchmark-tree header"
-            exit 1
-          fi
-          # target_link_libraries(...) et al. are routinely written across
-          # multiple physical lines, so match on the logical command (comments
-          # stripped, newlines folded) rather than per line -- a line-based grep
-          # would pass an idiomatic multi-line re-coupling green.
-          while IFS= read -r cml; do
-            if sed 's/#.*$//' "$cml" | tr '\n' ' ' \
-                 | grep -qE '(add_subdirectory|target_link_libraries|target_sources|target_include_directories)[[:space:]]*\([^)]*benchmarks'; then
-              echo "error: $cml depends on the benchmark tree"
-              exit 1
-            fi
-          done < <(find tests lib -name CMakeLists.txt)
-          echo "no tests|lib -> benchmarks edge"
+          bash scripts/dependency_edge_check.sh
+          bash scripts/dependency_edge_negative_control.sh
 
       - name: Install gcovr
         if: matrix.coverage
