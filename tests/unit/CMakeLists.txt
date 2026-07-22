@@ -89,6 +89,7 @@ add_executable(argmin_unit_tests
     kraft_sigma_bump_witness_test.cpp
     merit_function_test.cpp
     substrate_scale_witness_test.cpp
+    sparse_kkt_witness_test.cpp
     expected_test.cpp
 )
 
