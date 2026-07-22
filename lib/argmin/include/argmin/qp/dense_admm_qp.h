@@ -212,6 +212,13 @@ public:
         z_.setZero();
     }
 
+    // Read-only view of the Ruiz equilibration factors frozen at pose time. A
+    // vectors-only resolve() reuses them verbatim (it never re-equilibrates),
+    // so a caller can assert they are unchanged across a resolve.
+    Scalar scaling_cost() const { return c_; }
+    const vector<Scalar, N>& scaling_primal() const { return D_; }
+    const vector<Scalar>& scaling_dual() const { return E_; }
+
 private:
     static constexpr double rho_min_ = 1e-6;
     static constexpr double rho_max_ = 1e6;

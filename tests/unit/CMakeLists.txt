@@ -42,6 +42,7 @@ add_executable(argmin_unit_tests
     kraft_slsqp_test.cpp
     kraft_lsq_qp_test.cpp
     kraft_lsq_qp_recovery_test.cpp
+    dense_admm_qp_test.cpp
     step_budget_solver_test.cpp
     stepper_test.cpp
     active_set_qp_test.cpp
