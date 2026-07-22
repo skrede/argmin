@@ -10,4 +10,5 @@ NB_MODULE(_argmin, m)
     m.attr("__version__") = ARGMIN_PYTHON_VERSION_STRING;
 
     argmin::python::register_vocabulary(m);
+    argmin::python::register_qp(m);
 }

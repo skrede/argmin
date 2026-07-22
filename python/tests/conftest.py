@@ -5,6 +5,12 @@ import pytest
 REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "slow: a timing measurement, deselectable locally with -m 'not slow'"
+    )
+
+
 @pytest.fixture(scope="session")
 def repository_root() -> pathlib.Path:
     return REPOSITORY_ROOT

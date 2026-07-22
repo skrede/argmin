@@ -57,6 +57,40 @@ inline void check_square(Eigen::Ref<const matrix<double>> values, std::string_vi
                            + ", expected a square matrix");
 }
 
+inline void check_square_shape(int rows, int cols, std::string_view name)
+{
+    if(rows == cols)
+        return;
+    raise_argmin_error(error_kind::dimension_mismatch,
+                       std::string(name) + " has shape " + format_shape(rows, cols)
+                           + ", expected a square matrix");
+}
+
+inline void check_matrix_columns(int actual, int expected, std::string_view name)
+{
+    if(actual == expected)
+        return;
+    raise_argmin_error(error_kind::dimension_mismatch,
+                       std::string(name) + " has " + format_number(actual)
+                           + " columns, expected " + format_number(expected));
+}
+
+// Separate from check_all_finite because an infinite bound is how a one-sided
+// constraint is spelled, while a bound that is not a number silently defeats
+// every ordering comparison downstream.
+inline void check_no_nan(Eigen::Ref<const vector<double>> values, std::string_view name)
+{
+    for(int index = 0; index < static_cast<int>(values.size()); ++index)
+    {
+        if(!std::isnan(values[index]))
+            continue;
+        raise_argmin_error(error_kind::non_finite_input,
+                           std::string(name) + " is not a number at index "
+                               + format_number(index) + " of length "
+                               + format_number(static_cast<int>(values.size())));
+    }
+}
+
 template <typename Derived>
 inline void check_all_finite(const Eigen::DenseBase<Derived>& values, std::string_view name)
 {
