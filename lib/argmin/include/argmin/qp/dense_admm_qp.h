@@ -16,9 +16,10 @@
 // infeasibility certificates are evaluated on UNSCALED residuals. The
 // adaptive-rho schedule triggers on a fixed iteration interval, never on a
 // measured duration, so the solver reads no clock. A delta-regularized
-// reduced-KKT polish (active set from dual signs, Eigen::PartialPivLU with
-// iterative refinement, accept-if-better) lifts the accepted iterate toward
-// ~1e-10.
+// reduced-KKT polish (active set from dual signs that clear a relative
+// threshold, Eigen::PartialPivLU with iterative refinement, accepted only when
+// both residuals improve and the objective does not worsen) lifts the accepted
+// iterate toward ~1e-10.
 //
 // Allocation contract: every buffer and decomposition object is a member sized
 // at construction; no allocation occurs inside resolve() after construction at
@@ -225,6 +226,7 @@ private:
     static constexpr double eq_boost_ = 1e3;
     static constexpr double eq_tol_ = 1e-9;
     static constexpr int inaccurate_factor_ = 10;
+    static constexpr double polish_active_tol_ = 1e-12;
 
     std::optional<qp_error>
     validate_full(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
@@ -630,11 +632,15 @@ private:
         Scalar ds = Scalar(0);
         residual_norms(x_unscaled_, y_unscaled_, z_unscaled_, rpn, rdn, ps, ds);
 
+        // residual_norms leaves P*x in Px_buf_.
+        const Scalar iterate_objective = Scalar(0.5) * x_unscaled_.head(n_).dot(Px_buf_.head(n_))
+                                         + q_.head(n_).dot(x_unscaled_.head(n_));
+
         bool polished = false;
         if(o.polish
            && (status_ == qp_solve_status::solved || status_ == qp_solve_status::solved_inaccurate))
         {
-            if(try_polish(o, rpn, rdn))
+            if(try_polish(o, rpn, rdn, iterate_objective))
             {
                 polished = true;
                 x_unscaled_.head(n_) = px_x_.head(n_);
@@ -684,15 +690,28 @@ private:
     // from the identity trailing block; a padded-vs-unpadded equivalence test
     // guards this, and if it ever fails the fallback is a fixed shape at exactly
     // (n + m) with every row present and the inactive rows delta-slacked.
-    bool try_polish(const dense_qp_options& o, Scalar cur_rp, Scalar cur_rd)
+    //
+    // Two departures from the reference implementation's accept rule, both
+    // forced by the same observed failure: an inactive row whose multiplier is
+    // pure round-off (|y_i| ~ 1e-17 against a dual norm of order one) has an
+    // arbitrary sign, and reading that sign pins the row to a bound it is
+    // nowhere near. The resulting point is still primal feasible and still
+    // solves its own reduced KKT system exactly, so BOTH residuals improve and
+    // a residual-only accept test takes it -- returning a grossly suboptimal
+    // answer labeled solved. So a multiplier must clear a relative threshold
+    // before it is read as a bound assignment, and the polished pair is
+    // additionally required not to worsen the objective.
+    bool try_polish(const dense_qp_options& o, Scalar cur_rp, Scalar cur_rd, Scalar cur_obj)
     {
         active_lower_.clear();
         active_upper_.clear();
+        const Scalar y_inf = m_ > 0 ? y_unscaled_.head(m_).cwiseAbs().maxCoeff() : Scalar(0);
+        const Scalar active_tol = Scalar(polish_active_tol_) * std::max(Scalar(1), y_inf);
         for(int i = 0; i < m_; ++i)
         {
-            if(y_unscaled_[i] < Scalar(0))
+            if(y_unscaled_[i] < -active_tol)
                 active_lower_.push_back(i);
-            else if(y_unscaled_[i] > Scalar(0))
+            else if(y_unscaled_[i] > active_tol)
                 active_upper_.push_back(i);
         }
         const int nl = static_cast<int>(active_lower_.size());
@@ -767,7 +786,19 @@ private:
         Scalar ps = Scalar(0);
         Scalar ds = Scalar(0);
         residual_norms(px_x_, px_y_, mtmp2_, rpn, rdn, ps, ds);
-        return rdn < cur_rd && (m_ == 0 || rpn < cur_rp);
+        const Scalar polished_objective =
+            Scalar(0.5) * px_x_.head(n_).dot(Px_buf_.head(n_)) + q_.head(n_).dot(px_x_.head(n_));
+        // The iterate is accepted while still slightly infeasible, and an
+        // infeasible point can undercut the optimal objective. The multipliers
+        // price that violation, so the amount of objective an accepted iterate
+        // can hide is of the order of the convergence tolerance scaled by the
+        // dual magnitude -- anything beyond that is a broken polish, not
+        // rounding.
+        const Scalar tol = std::max(static_cast<Scalar>(o.eps_abs),
+                                    static_cast<Scalar>(o.eps_rel) * std::abs(cur_obj));
+        const Scalar slack = tol * (Scalar(1) + y_inf);
+        return rdn < cur_rd && (m_ == 0 || rpn < cur_rp)
+               && polished_objective <= cur_obj + slack;
     }
 
     int n_cap_{0};

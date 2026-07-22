@@ -7,6 +7,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
+#include <cstdio>
 #include <random>
 #include <limits>
 #include <vector>
@@ -130,6 +132,55 @@ std::vector<osqp_problem> convex_family()
             p.A(m - 1, j) = nd(rng);
         p.l[m - 1] = -2.0 * ud(rng);
         p.u[m - 1] = 2.0 * ud(rng);
+        out.push_back(std::move(p));
+    }
+    return out;
+}
+
+double relative_gap(double a, double b)
+{
+    return std::abs(a - b) / std::max(1.0, std::abs(b));
+}
+
+// A seeded family carrying a genuine equality row alongside boxes that are
+// mostly inactive -- the same construction, seed and trial shape the sparse
+// suite uses, so both suites exercise one family. It is the shape that exposes
+// the polish's active-set frailty: the equality row's multiplier is large,
+// every inactive box multiplier is pure round-off, and a round-off sign read as
+// a bound assignment pins an interior variable to a bound.
+std::vector<osqp_problem> equality_family(int trials)
+{
+    std::vector<osqp_problem> out;
+    std::mt19937 rng(20260722);
+    std::normal_distribution<double> nd(0.0, 1.0);
+    std::uniform_real_distribution<double> ud(0.3, 1.5);
+    for(int trial = 0; trial < trials; ++trial)
+    {
+        const int n = 3 + (trial % 4);
+        Eigen::MatrixXd M(n, n);
+        for(int i = 0; i < n; ++i)
+            for(int j = 0; j < n; ++j)
+                M(i, j) = nd(rng);
+        osqp_problem p;
+        p.P = M.transpose() * M + 0.5 * Eigen::MatrixXd::Identity(n, n);
+        p.q.resize(n);
+        for(int i = 0; i < n; ++i)
+            p.q[i] = 3.0 * nd(rng);
+        const int m = n + 1;
+        p.A = Eigen::MatrixXd::Zero(m, n);
+        p.l.resize(m);
+        p.u.resize(m);
+        for(int i = 0; i < n; ++i)
+        {
+            p.A(i, i) = 1.0;
+            const double b = ud(rng);
+            p.l[i] = -b;
+            p.u[i] = b;
+        }
+        for(int j = 0; j < n; ++j)
+            p.A(m - 1, j) = 1.0;
+        p.l[m - 1] = 0.5;
+        p.u[m - 1] = 0.5;
         out.push_back(std::move(p));
     }
     return out;
@@ -354,4 +405,96 @@ TEST_CASE("dense_admm_qp polish is invariant to the padding amount", "[qp_parity
         CHECK(rp->polished);
         CHECK((rt->x - rp->x).cwiseAbs().maxCoeff() <= pad_tol);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Polish accept-rule gate on the equality-constrained family. The convex family
+// above carries no equality row, so it never produces a large multiplier beside
+// round-off ones and never exercised this path; the polished answer here is
+// gated directly against the independent active-set oracle rather than against
+// another operator-splitting solver.
+//
+// This is a regression gate for a real and severe failure, not a theoretical
+// nicety. Selecting the active set from the strict sign of the dual -- the
+// reference implementation's rule -- reads the arbitrary sign of a round-off
+// multiplier as a bound assignment and pins an interior variable to a bound.
+// The resulting point is primal feasible and solves its own reduced system
+// exactly, so both residuals improve and a residual-only accept test takes it:
+// a grossly suboptimal answer, labeled solved. Over a 400-member seeded
+// superset that regressed the objective against the solver's own unpolished
+// iterate on 17 problems, by up to 3.12 relative. With the relative activity
+// threshold on the multipliers and the tolerance-scaled objective guard in
+// place nothing on that superset regresses and the polish is still accepted on
+// every member -- the guards reject broken polishes, not all of them. Over the
+// 60 members exercised here the pre-fix rule polished 48 with a worst objective
+// gap against the oracle of 3.018; with the guards in place the polish is
+// accepted on all 60, the worst objective gap against the oracle is 5.16e-14
+// and the worst regression against the solver's own unpolished iterate is
+// 8.78e-7, so the committed 1e-4 bound keeps ten orders of headroom on the
+// first and two on the second.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp polish agrees with the active-set oracle on equality-constrained rows",
+          "[qp_polish_guard]")
+{
+    constexpr double oracle_tol = 1e-4;
+
+    dense_qp_options with_polish;
+    dense_qp_options without_polish;
+    without_polish.polish = false;
+
+    int accepted = 0;
+    int members = 0;
+    double worst_oracle_gap = 0.0;
+    double worst_regression = 0.0;
+    for(const auto& p : equality_family(60))
+    {
+        const int n = static_cast<int>(p.P.rows());
+        const int m = static_cast<int>(p.A.rows());
+
+        Eigen::MatrixXd A_eq(1, n);
+        A_eq.row(0) = p.A.row(m - 1);
+        Eigen::VectorXd b_eq(1);
+        b_eq[0] = p.l[m - 1];
+        const Eigen::MatrixXd A_in(0, n);
+        const Eigen::VectorXd b_in(0);
+        detail::kraft_lsq_qp_solver<double> oracle;
+        oracle.resize(n, 1, 0, n, n);
+        auto ref = oracle.solve(p.P, p.q, A_eq, b_eq, A_in, b_in, p.l.head(n), p.u.head(n));
+        const double reference_objective = 0.5 * ref.x.dot(p.P * ref.x) + p.q.dot(ref.x);
+
+        dense_admm_qp_solver<double> polished_solver(n, m);
+        auto rp = polished_solver.solve(p.P, p.q, p.A, p.l, p.u, with_polish);
+        REQUIRE(rp);
+        dense_admm_qp_solver<double> raw_solver(n, m);
+        auto rr = raw_solver.solve(p.P, p.q, p.A, p.l, p.u, without_polish);
+        REQUIRE(rr);
+        if(rr->status != qp_solve_status::solved)
+            continue;
+
+        ++members;
+        if(rp->polished)
+            ++accepted;
+
+        const double oracle_gap = relative_gap(rp->objective_value, reference_objective);
+        worst_oracle_gap = std::max(worst_oracle_gap, oracle_gap);
+        CHECK(oracle_gap <= oracle_tol);
+
+        const double regression = (rp->objective_value - rr->objective_value)
+                                  / std::max(1.0, std::abs(reference_objective));
+        worst_regression = std::max(worst_regression, regression);
+        CHECK(regression <= oracle_tol);
+
+        // Feasibility at the solver's own convergence tolerance, which is what
+        // an accepted iterate is entitled to; the polished point is normally
+        // exact on its active rows.
+        const Eigen::VectorXd ax = p.A * rp->x;
+        CHECK((ax - p.l).minCoeff() >= -1e-5);
+        CHECK((p.u - ax).minCoeff() >= -1e-5);
+    }
+
+    REQUIRE(members > 0);
+    CHECK(accepted * 2 > members);
+    std::printf("[dense polish guard] %d/%d members polished, worst objective gap against the "
+                "active-set oracle %.3e, worst regression %.3e\n",
+                accepted, members, worst_oracle_gap, worst_regression);
 }
