@@ -352,7 +352,11 @@ private:
             out.status = qp_solve_status::primal_infeasible;
             break;
         case detail::qp_status::indefinite_hessian:
-            out.status = qp_solve_status::primal_infeasible;
+            // Unreachable: run() maps this to qp_error::invalid_problem before
+            // scattering. The case is kept so the switch stays exhaustive, and
+            // maps to the status an indefinite P actually implies -- unbounded
+            // below on the feasible set -- rather than a primal claim.
+            out.status = qp_solve_status::dual_infeasible;
             break;
         }
         out.iterations = held_res_.iterations;

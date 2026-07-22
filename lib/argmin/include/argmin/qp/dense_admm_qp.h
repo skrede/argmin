@@ -706,13 +706,13 @@ private:
         K_red_.topLeftCorner(n_, n_) = P_;
         for(int k = 0; k < nl; ++k)
         {
-            const int i = active_lower_[k];
+            const int i = active_lower_[static_cast<std::size_t>(k)];
             K_red_.block(n_ + k, 0, 1, n_) = A_.row(i).head(n_);
             K_red_.block(0, n_ + k, n_, 1) = A_.row(i).head(n_).transpose();
         }
         for(int k = 0; k < nu; ++k)
         {
-            const int i = active_upper_[k];
+            const int i = active_upper_[static_cast<std::size_t>(k)];
             K_red_.block(n_ + nl + k, 0, 1, n_) = A_.row(i).head(n_);
             K_red_.block(0, n_ + nl + k, n_, 1) = A_.row(i).head(n_).transpose();
         }
@@ -722,9 +722,9 @@ private:
         rhs_red_.head(pad).setZero();
         rhs_red_.head(n_) = -q_.head(n_);
         for(int k = 0; k < nl; ++k)
-            rhs_red_[n_ + k] = l_[active_lower_[k]];
+            rhs_red_[n_ + k] = l_[active_lower_[static_cast<std::size_t>(k)]];
         for(int k = 0; k < nu; ++k)
-            rhs_red_[n_ + nl + k] = u_[active_upper_[k]];
+            rhs_red_[n_ + nl + k] = u_[active_upper_[static_cast<std::size_t>(k)]];
 
         K_red_reg_.topLeftCorner(pad, pad) = K_red_.topLeftCorner(pad, pad);
         for(int j = 0; j < n_; ++j)
@@ -747,9 +747,9 @@ private:
         {
             px_y_.head(m_).setZero();
             for(int k = 0; k < nl; ++k)
-                px_y_[active_lower_[k]] = sol_red_[n_ + k];
+                px_y_[active_lower_[static_cast<std::size_t>(k)]] = sol_red_[n_ + k];
             for(int k = 0; k < nu; ++k)
-                px_y_[active_upper_[k]] = sol_red_[n_ + nl + k];
+                px_y_[active_upper_[static_cast<std::size_t>(k)]] = sol_red_[n_ + nl + k];
         }
 
         if(m_ > 0)
