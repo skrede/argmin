@@ -10,7 +10,9 @@ def project_version(repository_root: pathlib.Path) -> str:
 
 
 def test_package_imports(argmin):
-    assert argmin.__all__ == ["__version__"]
+    assert "__version__" in argmin.__all__
+    for name in argmin.__all__:
+        assert hasattr(argmin, name), f"{name} is exported but not importable"
 
 
 def test_version_matches_the_build(argmin, repository_root):

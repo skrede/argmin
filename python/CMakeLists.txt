@@ -69,6 +69,7 @@ nanobind_add_module(
     _argmin
     NB_STATIC
     src/_argmin.cpp
+    src/bindings/vocabulary_bindings.cpp
 )
 
 argmin_python_consume_as_system(nanobind-static)
