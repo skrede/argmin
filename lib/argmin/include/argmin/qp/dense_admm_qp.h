@@ -197,12 +197,18 @@ public:
         return std::nullopt;
     }
 
-    void warm_start(const vector<Scalar, N>& x, const vector<Scalar>& y)
+    // Rejects rather than clamps: a seed shorter than the primal capacity would
+    // read past its end, and one longer than the dual capacity would write past
+    // ws_y_'s. Both are silent in a release build.
+    std::optional<qp_error> warm_start(const vector<Scalar, N>& x, const vector<Scalar>& y)
     {
+        if(x.size() < n_cap_ || static_cast<int>(y.size()) > m_cap_)
+            return qp_error::dimension_mismatch;
         ws_x_.head(n_cap_) = x.head(n_cap_);
         if(y.size() > 0)
             ws_y_.head(static_cast<int>(y.size())) = y;
         has_warm_ = true;
+        return std::nullopt;
     }
 
     void reset()
