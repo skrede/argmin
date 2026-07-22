@@ -455,6 +455,26 @@ public:
     }
 };
 
+// Each adapter must satisfy exactly the tier its policy needs and no more.
+// Concept satisfaction here is duck-typed, so an adapter that grows a member
+// silently starts advertising a capability the caller never supplied -- an
+// unconstrained problem claiming constraints, say. The negative half is the
+// load-bearing one; the positive half only records intent.
+static_assert(argmin::differentiable<value_problem>);
+static_assert(!argmin::bound_constrained<value_problem>);
+
+static_assert(argmin::differentiable<gradient_problem>);
+static_assert(!argmin::bound_constrained<gradient_problem>);
+static_assert(!argmin::constrained_values<gradient_problem>);
+
+static_assert(argmin::bound_constrained<bounded_problem>);
+static_assert(!argmin::constrained_values<bounded_problem>);
+
+static_assert(argmin::constrained_values<constrained_values_problem>);
+static_assert(!argmin::constrained<constrained_values_problem>);
+
+static_assert(argmin::constrained<constrained_problem>);
+
 }
 
 #endif
