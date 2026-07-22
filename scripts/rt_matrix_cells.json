@@ -1041,6 +1041,78 @@
           }
         }
       ]
+    },
+    {
+      "id": "qp-solvers",
+      "columns": [
+        "allocation-free?",
+        "bounded-iterations?",
+        "wall-clock-free?",
+        "exceptions-off-clean?",
+        "deterministic(seeded)?"
+      ],
+      "rows": [
+        {
+          "module": "dense_admm_qp (fixed N)",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "qp_alloc_gate_dense_admm", "note": "zero-allocation assertion over the warm-started resolve hot loop"},
+                {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
+              ]
+            },
+            "bounded-iterations?": {
+              "verdict": "excluded",
+              "rationale": "the ADMM outer loop and the fixed reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the resolve path; not yet covered by the policy chrono-freedom probe, so argued rather than gated"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "outcomes travel on expected/optional status returns; no throw, dynamic_cast, or typeid on the solve/resolve path; not driven by the no-exceptions probe, so argued rather than gated"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "carries no RNG; the ADMM recursion, Ruiz equilibration, and reduced-KKT polish are deterministic functions of the inputs"
+            }
+          }
+        },
+        {
+          "module": "dense_admm_qp (dynamic N)",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "no",
+              "qualifier": "host-tier: the dynamic-N instantiation sizes its workspace at construction and the Eigen dynamic decompositions allocate; no zero-alloc gate, not RT-claimed"
+            },
+            "bounded-iterations?": {
+              "verdict": "excluded",
+              "rationale": "the ADMM outer loop and the fixed reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the resolve path; not yet covered by the policy chrono-freedom probe, so argued rather than gated"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "outcomes travel on expected/optional status returns; no throw, dynamic_cast, or typeid on the solve/resolve path; not driven by the no-exceptions probe, so argued rather than gated"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "carries no RNG; the ADMM recursion, Ruiz equilibration, and reduced-KKT polish are deterministic functions of the inputs"
+            }
+          }
+        }
+      ]
     }
   ]
 }

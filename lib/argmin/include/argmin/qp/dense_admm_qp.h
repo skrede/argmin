@@ -384,7 +384,13 @@ private:
             if(m_ > 0)
             {
                 y_.head(m_) = c_ * ws_y_.head(m_).cwiseQuotient(E_.head(m_));
-                z_.head(m_) = (A_scaled_.topRows(m_) * x_.head(n_))
+                // The A*x product is evaluated into a scratch member first: a
+                // matrix-vector product nested inside a coefficient-wise
+                // cwiseMax/cwiseMin chain forces Eigen to heap-allocate the
+                // intermediate, which would break the resolve() allocation
+                // contract at fixed N.
+                mtmp_.head(m_).noalias() = A_scaled_.topRows(m_) * x_.head(n_);
+                z_.head(m_) = mtmp_.head(m_)
                                   .cwiseMax(l_scaled_.head(m_))
                                   .cwiseMin(u_scaled_.head(m_));
             }
@@ -635,7 +641,11 @@ private:
                 if(m_ > 0)
                 {
                     y_unscaled_.head(m_) = px_y_.head(m_);
-                    z_unscaled_.head(m_) = (A_.topRows(m_) * x_unscaled_.head(n_))
+                    // Scratch the A*x product before the box projection; see the
+                    // note in seed_iterates on the cwise-chain allocation. Ax_buf_
+                    // is overwritten by the residual_norms call below.
+                    Ax_buf_.head(m_).noalias() = A_.topRows(m_) * x_unscaled_.head(n_);
+                    z_unscaled_.head(m_) = Ax_buf_.head(m_)
                                                .cwiseMax(l_.head(m_))
                                                .cwiseMin(u_.head(m_));
                 }
@@ -743,9 +753,15 @@ private:
         }
 
         if(m_ > 0)
-            mtmp2_.head(m_) = (A_.topRows(m_) * px_x_.head(n_))
+        {
+            // Scratch the A*x product before the box projection; see the note in
+            // seed_iterates on the cwise-chain allocation. Ax_buf_ is overwritten
+            // by the residual_norms call below.
+            Ax_buf_.head(m_).noalias() = A_.topRows(m_) * px_x_.head(n_);
+            mtmp2_.head(m_) = Ax_buf_.head(m_)
                                   .cwiseMax(l_.head(m_))
                                   .cwiseMin(u_.head(m_));
+        }
         Scalar rpn = Scalar(0);
         Scalar rdn = Scalar(0);
         Scalar ps = Scalar(0);

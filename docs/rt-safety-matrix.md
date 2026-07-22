@@ -184,6 +184,35 @@ steps, never idling); see the footnotes for the two characterized off-hot-loop r
 | `ccsa_quadratic` | not RT-claimed (no alloc gate) | not intrinsically bounded *(reasoned exclusion)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | not an RT-claimed bounded-iterations guarantee; the only outer bound is a caller-set maxfun/maxiter budget, not an intrinsic leaf cap; policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; c++20 (build + ctest); c++23 (build + ctest); argmin_no_exceptions_probe (the probe drives this policy through the step-budget driver's init/step/reset); policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
 <!-- END GENERATED: policies -->
 
+## QP solvers
+
+The dense operator-splitting QP solver is neither a policy plugged into a driver nor a driver
+itself, so it carries its own table. The two rows are the same solver at its two instantiations,
+and the honest distinction between them is the whole point. At a fixed compile-time dimension `N`
+every buffer and decomposition is a member sized at construction, so the vectors-only
+warm-started `resolve()` control-step path allocates nothing after setup — and that claim is
+gated, not asserted, by the `qp_alloc_gate_dense_admm` zero-mode gate. At `N = Dynamic` the same
+solver sizes its workspace from runtime dimensions and Eigen's dynamic decompositions allocate;
+it is a host-tier convenience with no zero-allocation claim, and the row says so.
+
+The `wall-clock-free?`, `exceptions-off-clean?`, and `deterministic(seeded)?` cells are argued
+rather than gated: those properties hold by construction — the adaptive-`rho` schedule triggers
+on an iteration interval rather than a measured duration, outcomes travel on `expected`/`optional`
+status returns, and the solver carries no RNG — but the chrono-freedom, no-exceptions, and
+RNG-freedom probes do not yet drive this solver, so the claims rest on reasoning with nothing
+standing behind them. `bounded-iterations?` is a reasoned exclusion for the same reason it is on
+`lm` and the drivers: the ADMM outer loop and the fixed polish refinement are bounded only by a
+caller-set budget, not an intrinsic leaf cap. This table is rendered from
+`scripts/rt_matrix_cells.json` by `scripts/rt_matrix.py`; a hand edit between the markers is
+overwritten by the next render.
+
+<!-- BEGIN GENERATED: qp-solvers -->
+| module | allocation-free? | bounded-iterations? | wall-clock-free? | exceptions-off-clean? | deterministic(seeded)? | evidence |
+|---|---|---|---|---|---|---|
+| `dense_admm_qp (fixed N)` | **yes** *(gated)* | not intrinsically bounded *(reasoned exclusion)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | qp_alloc_gate_dense_admm (zero-allocation assertion over the warm-started resolve hot loop); labeled instruments (alloc-gate, oracle-pin); the ADMM outer loop and the fixed reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate; the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the resolve path; not yet covered by the policy chrono-freedom probe, so argued rather than gated; outcomes travel on expected/optional status returns; no throw, dynamic_cast, or typeid on the solve/resolve path; not driven by the no-exceptions probe, so argued rather than gated; carries no RNG; the ADMM recursion, Ruiz equilibration, and reduced-KKT polish are deterministic functions of the inputs |
+| `dense_admm_qp (dynamic N)` | no (host-tier: the dynamic-N instantiation sizes its workspace at construction and the Eigen dynamic decompositions allocate; no zero-alloc gate, not RT-claimed) | not intrinsically bounded *(reasoned exclusion)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | the ADMM outer loop and the fixed reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate; the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the resolve path; not yet covered by the policy chrono-freedom probe, so argued rather than gated; outcomes travel on expected/optional status returns; no throw, dynamic_cast, or typeid on the solve/resolve path; not driven by the no-exceptions probe, so argued rather than gated; carries no RNG; the ADMM recursion, Ruiz equilibration, and reduced-KKT polish are deterministic functions of the inputs |
+<!-- END GENERATED: qp-solvers -->
+
 ## Scope of the allocation-free claim
 
 The zero-mode `allocation-free?` guarantees above hold in the **dense unblocked-Householder

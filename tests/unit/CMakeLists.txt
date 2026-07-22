@@ -166,7 +166,7 @@ target_compile_options(argmin_alloc_gate_test
 # Both sanitize CI legs carry -fsanitize on CMAKE_CXX_FLAGS, the sole gate.
 string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _argmin_alloc_gate_sanitizer)
 if(_argmin_alloc_gate_sanitizer EQUAL -1)
-    # The 13 gate cases carry the [alloc-gate] tag and the ctest `alloc-gate`
+    # The 14 gate cases carry the [alloc-gate] tag and the ctest `alloc-gate`
     # label; the liveness canary carries [canary] and is registered without the
     # label so the labeled count stays exactly the number of gates.
     catch_discover_tests(argmin_alloc_gate_test

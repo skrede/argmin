@@ -37,6 +37,8 @@
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/detail/lbfgsb_direction.h"
 
+#include "argmin/qp/dense_admm_qp.h"
+
 #include "argmin/test_functions/hock_schittkowski.h"
 #include "argmin/test_functions/small_dense.h"
 
@@ -502,6 +504,100 @@ TEST_CASE("alloc_gate_projected_gn", "[alloc-gate]")
 
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);
+}
+
+// dense_admm_qp at fixed N: the vectors-only warm resolve is the control-step
+// hot path. A cold solve plus two warm resolves absorb the one-time setup and
+// any lazy first-use allocation before the armed window; each armed step then
+// re-solves through resolve_into with a small (q, l, u) perturbation, so the
+// window is a real warm-started re-solve rather than a cached no-op. The
+// path-entry witness (at least one polished step) and a separate unarmed solve
+// hitting its analytic optimum keep the zero-allocation pass non-vacuous.
+TEST_CASE("qp_alloc_gate_dense_admm", "[alloc-gate]")
+{
+    constexpr int N = 3;
+    const int m = N + 1;
+
+    Eigen::Matrix<double, N, N> P;
+    P << 2.0, 0.3, 0.1,
+         0.3, 2.0, 0.2,
+         0.1, 0.2, 2.0;
+    Eigen::Vector<double, N> q{1.0, -1.5, 0.5};
+
+    Eigen::Matrix<double, Eigen::Dynamic, N> A(m, N);
+    A.setZero();
+    A(0, 0) = 1.0;
+    A(1, 1) = 1.0;
+    A(2, 2) = 1.0;
+    A(3, 0) = 1.0;
+    A(3, 1) = 1.0;
+    A(3, 2) = 1.0;
+    Eigen::VectorXd l(m);
+    Eigen::VectorXd u(m);
+    l << -0.2, -0.2, -0.2, -0.1;
+    u << 0.2, 0.2, 0.2, 0.1;
+
+    argmin::dense_admm_qp_solver<double, N> solver(N, m);
+    REQUIRE(solver.solve(P, q, A, l, u));
+
+    Eigen::Vector<double, N> q_w = q;
+    Eigen::VectorXd l_w = l;
+    Eigen::VectorXd u_w = u;
+    argmin::qp_result<double, N> out;
+    REQUIRE_FALSE(solver.resolve_into(q_w, l_w, u_w, out).has_value());
+    REQUIRE_FALSE(solver.resolve_into(q_w, l_w, u_w, out).has_value());
+
+    constexpr std::size_t hot_steps = 12;
+    std::size_t polished_steps = 0;
+    bool every_step_iterated = true;
+    const auto counts = run_armed([&] {
+        for(std::size_t i = 0; i < hot_steps; ++i)
+        {
+            const double s = 1e-3 * static_cast<double>(i + 1);
+            q_w = q * (1.0 + s);
+            l_w = l * (1.0 - 0.5 * s);
+            u_w = u * (1.0 + 0.5 * s);
+            const bool ok = !solver.resolve_into(q_w, l_w, u_w, out).has_value();
+            if(!ok || out.iterations <= 0)
+                every_step_iterated = false;
+            if(out.polished)
+                ++polished_steps;
+        }
+    });
+
+    // Path-entry witnesses: every armed step is a real re-solve (iterations > 0)
+    // and at least one warm step reached the polished reduced-KKT refinement, so
+    // a zero-mode gate cannot certify the hot loop vacuously.
+    CHECK(every_step_iterated);
+    CHECK(polished_steps > 0);
+    CHECK(counts.eigen == 0);
+    CHECK(counts.c == 0);
+
+    // Unarmed numeric witness: an all-inactive-constraint instance whose
+    // analytic optimum is the unconstrained minimizer x* = -P^{-1} q, here -q at
+    // P = I. A pass proves the zero-allocation loop above ran a solver that
+    // actually reaches a known optimum.
+    Eigen::Matrix<double, N, N> Pw = Eigen::Matrix<double, N, N>::Identity();
+    Eigen::Vector<double, N> qw{0.3, -0.4, 0.1};
+    Eigen::Matrix<double, Eigen::Dynamic, N> Aw(m, N);
+    Aw.setZero();
+    Aw(0, 0) = 1.0;
+    Aw(1, 1) = 1.0;
+    Aw(2, 2) = 1.0;
+    Aw(3, 0) = 1.0;
+    Aw(3, 1) = 1.0;
+    Aw(3, 2) = 1.0;
+    Eigen::VectorXd lw(m);
+    Eigen::VectorXd uw(m);
+    lw << -10.0, -10.0, -10.0, -10.0;
+    uw << 10.0, 10.0, 10.0, 10.0;
+
+    argmin::dense_admm_qp_solver<double, N> witness(N, m);
+    const auto wr = witness.solve(Pw, qw, Aw, lw, uw);
+    REQUIRE(wr);
+    CHECK(wr->status == argmin::qp_solve_status::solved);
+    const Eigen::Vector<double, N> x_star = -qw;
+    CHECK((wr->x - x_star).cwiseAbs().maxCoeff() <= 1e-6);
 }
 
 // Projected-gradient GN backtracking path against an active bound.
