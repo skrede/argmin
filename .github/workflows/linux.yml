@@ -354,7 +354,10 @@ jobs:
       - name: Verify the full allocation-gate set registered
         run: |
           cd build
-          count=$(ctest -N -L alloc-gate | grep -c 'Test #')
+          # ctest right-aligns the test index, so a literal 'Test #' misses any
+          # entry whose index is narrower than the widest one on the run. The
+          # guard exists to catch a dropped gate; it must not miscount silently.
+          count=$(ctest -N -L alloc-gate | grep -cE '^ *Test +#')
           echo "allocation gates registered: $count"
           test "$count" -eq 14 || { echo "expected 14 allocation gates, found $count"; exit 1; }
 
