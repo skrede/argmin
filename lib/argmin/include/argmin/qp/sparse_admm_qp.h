@@ -27,8 +27,9 @@
 // UNSCALED residuals. The adaptive-rho schedule triggers on a fixed iteration
 // interval, never on a measured duration, so the solver reads no clock. A
 // delta-regularized reduced-KKT polish sized to the active set (active set from
-// dual signs, iterative refinement against the unregularized system,
-// accept-if-better) lifts the accepted iterate.
+// dual signs that clear a relative threshold, iterative refinement against the
+// unregularized system, accepted only when both residuals improve and the
+// objective does not worsen) lifts the accepted iterate.
 //
 // Contract: the factorization is computed once at pose; resolve() performs no
 // factorization and no pattern work. Per-call heap traffic is deliberately NOT
@@ -167,12 +168,24 @@ public:
     const vector<Scalar>& scaling_primal() const { return D_; }
     const vector<Scalar>& scaling_dual() const { return E_; }
 
+    // Lifetime counts of the linear-algebra work actually performed, so the
+    // factor-once-at-pose contract is observable rather than merely documented:
+    // across a resolve() the iteration counts must not move except for the
+    // numeric refactorization an accepted adaptive-rho update performs. The
+    // polish is counted separately because it analyzes a freshly shaped reduced
+    // system on every call by construction, which is a different claim.
+    std::size_t iteration_analyses() const { return kkt_.symbolic_analyses(); }
+    std::size_t iteration_factorizations() const { return kkt_.numeric_factorizations(); }
+    std::size_t polish_analyses() const { return polish_kkt_.symbolic_analyses(); }
+    std::size_t polish_factorizations() const { return polish_kkt_.numeric_factorizations(); }
+
 private:
     static constexpr double rho_min_ = 1e-6;
     static constexpr double rho_max_ = 1e6;
     static constexpr double eq_boost_ = 1e3;
     static constexpr double eq_tol_ = 1e-9;
     static constexpr int inaccurate_factor_ = 10;
+    static constexpr double polish_active_tol_ = 1e-12;
 
     // The single site at which symbolic analysis is performed. Pose reaches it
     // for the iteration KKT and the polish reaches it for its own reduced KKT;
@@ -651,11 +664,15 @@ private:
         Scalar ds = Scalar(0);
         residual_norms(x_unscaled_, y_unscaled_, z_unscaled_, rpn, rdn, ps, ds);
 
+        ntmp_.noalias() = P_ * x_unscaled_;
+        const Scalar iterate_objective =
+            Scalar(0.5) * x_unscaled_.dot(ntmp_) + q_.dot(x_unscaled_);
+
         bool polished = false;
         if(o.polish
            && (status_ == qp_solve_status::solved || status_ == qp_solve_status::solved_inaccurate))
         {
-            if(try_polish(o, rpn, rdn))
+            if(try_polish(o, rpn, rdn, iterate_objective))
             {
                 polished = true;
                 x_unscaled_ = px_x_;
@@ -695,16 +712,30 @@ private:
     // The active set comes from the unscaled dual signs and the reduced system
     // is sized to it, so the pattern differs per call and is analyzed per call.
     // A factorization failure is a rejection of the polish, not an error.
-    bool try_polish(const sparse_qp_options& o, Scalar cur_rp, Scalar cur_rd)
+    //
+    // Two departures from the reference implementation's accept rule, both
+    // forced by the same observed failure: an inactive row whose multiplier is
+    // pure round-off (|y_i| ~ 1e-17 against a dual norm of order one) has an
+    // arbitrary sign, and reading that sign pins the row to a bound it is
+    // nowhere near. The resulting point is still primal feasible and still
+    // solves its own reduced KKT system exactly, so BOTH residuals improve and
+    // a residual-only accept test takes it -- returning a grossly suboptimal
+    // answer labeled solved. So a multiplier must clear a relative threshold
+    // before it is read as a bound assignment, and the polished pair is
+    // additionally required not to worsen the objective.
+    bool try_polish(const sparse_qp_options& o, Scalar cur_rp, Scalar cur_rd, Scalar cur_obj)
     {
         active_lower_.clear();
         active_upper_.clear();
         std::fill(act_row_.begin(), act_row_.end(), -1);
+        const Scalar y_inf = m_ > 0 ? y_unscaled_.cwiseAbs().maxCoeff() : Scalar(0);
+        const Scalar active_tol =
+            Scalar(polish_active_tol_) * std::max(Scalar(1), y_inf);
         for(int i = 0; i < m_; ++i)
         {
-            if(y_unscaled_[i] < Scalar(0))
+            if(y_unscaled_[i] < -active_tol)
                 active_lower_.push_back(i);
-            else if(y_unscaled_[i] > Scalar(0))
+            else if(y_unscaled_[i] > active_tol)
                 active_upper_.push_back(i);
         }
         const int nl = static_cast<int>(active_lower_.size());
@@ -786,7 +817,19 @@ private:
         Scalar ps = Scalar(0);
         Scalar ds = Scalar(0);
         residual_norms(px_x_, px_y_, mtmp2_, rpn, rdn, ps, ds);
-        return rdn < cur_rd && (m_ == 0 || rpn < cur_rp);
+        ntmp_.noalias() = P_ * px_x_;
+        const Scalar polished_objective = Scalar(0.5) * px_x_.dot(ntmp_) + q_.dot(px_x_);
+        // The iterate is accepted while still slightly infeasible, and an
+        // infeasible point can undercut the optimal objective. The multipliers
+        // price that violation, so the amount of objective an accepted iterate
+        // can hide is of the order of the convergence tolerance scaled by the
+        // dual magnitude -- anything beyond that is a broken polish, not
+        // rounding.
+        const Scalar tol = std::max(static_cast<Scalar>(o.eps_abs),
+                                    static_cast<Scalar>(o.eps_rel) * std::abs(cur_obj));
+        const Scalar slack = tol * (Scalar(1) + y_inf);
+        return rdn < cur_rd && (m_ == 0 || rpn < cur_rp)
+               && polished_objective <= cur_obj + slack;
     }
 
     int n_{0};

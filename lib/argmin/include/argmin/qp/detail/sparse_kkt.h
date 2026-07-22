@@ -115,6 +115,7 @@ public:
                 return false;
         }
 
+        ++symbolic_analyses_;
         ldlt_.analyzePattern(K_);
         if(ldlt_.info() != Eigen::Success)
             return false;
@@ -138,6 +139,7 @@ public:
         for(std::size_t i = 0; i < rho_inv.size(); ++i)
             values[diag_slot_[i]] = -rho_inv[i];
 
+        ++numeric_factorizations_;
         ldlt_.factorize(K_);
         factorized_ = ldlt_.info() == Eigen::Success;
         return factorized_;
@@ -154,6 +156,12 @@ public:
     // way to assert that the indefinite path was exercised.
     auto diagonal_factor() const { return ldlt_.vectorD(); }
 
+    // Monotone across re-poses and never reset: the factor-once contract of the
+    // owning solver is a statement about work performed over a lifetime, and a
+    // counter that a re-pose zeroed could not express it.
+    std::size_t symbolic_analyses() const { return symbolic_analyses_; }
+    std::size_t numeric_factorizations() const { return numeric_factorizations_; }
+
     int rows() const { return n_ + m_; }
     int primal_size() const { return n_; }
     int dual_size() const { return m_; }
@@ -164,6 +172,8 @@ private:
     sparse_type K_;
     factorization_type ldlt_;
     std::vector<int> diag_slot_;
+    std::size_t symbolic_analyses_{0};
+    std::size_t numeric_factorizations_{0};
     int n_{0};
     int m_{0};
     bool analyzed_{false};
