@@ -571,7 +571,11 @@ private:
             else if(d < Scalar(0))
                 sup += l_[i] * d;
         }
-        return sup < Scalar(0);
+        // Scaled rather than a bare sign test: when dy lands in the null space
+        // of A^T -- which redundant rows produce -- sup is a round-off quantity
+        // whose sign is arbitrary, and a bare test would certify a feasible
+        // problem as infeasible.
+        return sup < -static_cast<Scalar>(o.eps_prim_inf) * dy_inf;
     }
 
     bool check_dual_infeasible(const dense_qp_options& o)
@@ -583,7 +587,7 @@ private:
         ntmp2_.head(n_).noalias() = P_ * ntmp_.head(n_);
         if(ntmp2_.head(n_).cwiseAbs().maxCoeff() > static_cast<Scalar>(o.eps_dual_inf) * dx_inf)
             return false;
-        if(q_.head(n_).dot(ntmp_.head(n_)) >= Scalar(0))
+        if(q_.head(n_).dot(ntmp_.head(n_)) > -static_cast<Scalar>(o.eps_dual_inf) * dx_inf)
             return false;
         if(m_ > 0)
         {
