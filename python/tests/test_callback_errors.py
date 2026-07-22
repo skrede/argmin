@@ -103,7 +103,7 @@ def test_bound_accessor_raising_surfaces_at_construction():
             rosenbrock,
             np.array([-1.2, 1.0]),
             gradient=rosenbrock_gradient,
-            lower=lambda: raise_boom(),
+            lower_bounds=lambda: raise_boom(),
         )
 
 

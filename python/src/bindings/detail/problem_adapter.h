@@ -407,6 +407,21 @@ public:
 
     int num_equality() const { return callbacks().num_equality; }
     int num_inequality() const { return callbacks().num_inequality; }
+
+    // The derivative-free constrained policy paired with this tier constrains
+    // its problem parameter on bound_constrained as well, so the tier carries
+    // bounds even though nothing about a constraint-value formulation requires
+    // them; a caller who supplies none gets the infinite fill the policy
+    // already treats as unbounded.
+    vector<double> lower_bounds() const
+    {
+        return invoke_bound(callbacks().lower_bounds, lower_is_callable(), lower_cache(), "lower");
+    }
+
+    vector<double> upper_bounds() const
+    {
+        return invoke_bound(callbacks().upper_bounds, upper_is_callable(), upper_cache(), "upper");
+    }
 };
 
 class constrained_problem : public callback_boundary

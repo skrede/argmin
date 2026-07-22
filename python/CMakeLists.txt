@@ -72,6 +72,8 @@ nanobind_add_module(
     src/bindings/vocabulary_bindings.cpp
     src/bindings/qp_bindings.cpp
     src/bindings/nlp_gradient_bindings.cpp
+    src/bindings/nlp_derivative_free_bindings.cpp
+    src/bindings/test_function_bindings.cpp
 )
 
 argmin_python_consume_as_system(nanobind-static)

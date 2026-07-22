@@ -12,4 +12,6 @@ NB_MODULE(_argmin, m)
     argmin::python::register_vocabulary(m);
     argmin::python::register_qp(m);
     argmin::python::register_nlp_gradient(m);
+    argmin::python::register_nlp_derivative_free(m);
+    argmin::python::register_test_functions(m);
 }
