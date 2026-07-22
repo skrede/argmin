@@ -20,6 +20,7 @@
 #include <array>
 #include <cmath>
 #include <tuple>
+#include <cerrno>
 #include <limits>
 #include <string>
 #include <vector>
@@ -255,44 +256,37 @@ struct baseline_indices
     return idx;
 }
 
+// libc++ (notably the msan-instrumented build) ships no floating-point
+// std::from_chars overload, so double parsing routes through strtod. strtod
+// consumes optional leading whitespace, sign, and inf/nan spellings on its own;
+// requiring full consumption plus an ERANGE reject reproduces the from_chars
+// contract. Integer from_chars is present and still used by parse_int below.
+[[nodiscard]] auto scan_double(const std::string& tmp, double& out) -> bool
+{
+    if(tmp.empty()) return false;
+    errno     = 0;
+    char* end = nullptr;
+    out       = std::strtod(tmp.c_str(), &end);
+    if(errno == ERANGE) return false;
+    return end == tmp.c_str() + tmp.size();
+}
+
 [[nodiscard]] auto parse_finite_double(std::string_view s, double& out) -> bool
 {
     std::string tmp = trim(s);
-    if(tmp.empty()) return false;
-    auto* first = tmp.data();
-    auto* last  = tmp.data() + tmp.size();
-    auto [ptr, ec] = std::from_chars(first, last, out);
-    return ec == std::errc{} && ptr == last && std::isfinite(out);
+    return scan_double(tmp, out) && std::isfinite(out);
 }
 
 [[nodiscard]] auto parse_summary_metric(std::string_view s, double& out) -> bool
 {
     std::string tmp = trim(s);
-    if(tmp.empty()) return false;
-    auto* first = tmp.data();
-    auto* last  = tmp.data() + tmp.size();
-    auto [ptr, ec] = std::from_chars(first, last, out);
-    if(ec == std::errc{} && ptr == last)
-    {
-        if(std::isnan(out))
-        {
-            out = std::numeric_limits<double>::infinity();
-            return true;
-        }
-        if(out < 0.0) return false;
-        return true;
-    }
-    if(tmp == "inf" || tmp == "+inf" || tmp == "infinity" || tmp == "+infinity")
+    if(!scan_double(tmp, out)) return false;
+    if(std::isnan(out))
     {
         out = std::numeric_limits<double>::infinity();
         return true;
     }
-    if(tmp == "nan" || tmp == "+nan" || tmp == "-nan")
-    {
-        out = std::numeric_limits<double>::infinity();
-        return true;
-    }
-    return false;
+    return out >= 0.0;
 }
 
 [[nodiscard]] auto parse_int(std::string_view s, std::int64_t& out) -> bool

@@ -153,24 +153,26 @@ target_compile_definitions(argmin_alloc_gate_test
     PRIVATE ARGMIN_BENCH_TRACE_ALLOC=1 EIGEN_RUNTIME_NO_MALLOC)
 target_compile_options(argmin_alloc_gate_test
     PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
-# The 13 gate cases carry the [alloc-gate] tag and the ctest `alloc-gate` label;
-# the liveness canary carries [canary] and is registered without the label so the
-# labeled count stays exactly the number of gates.
-catch_discover_tests(argmin_alloc_gate_test
-    TEST_SPEC "[alloc-gate]"
-    PROPERTIES LABELS "alloc-gate")
-catch_discover_tests(argmin_alloc_gate_test
-    TEST_SPEC "[canary]")
-
 # Sensor B overrides malloc/free with __libc_* forwards, which bypasses and
 # fights the sanitizer's own allocator -- the binary segfaults at Catch2 test
 # discovery under -fsanitize={address,memory}. And an allocation count taken
 # under a sanitizer-replaced allocator is not a valid measurement regardless.
-# So the gate is excluded from sanitizer builds (the main argmin_unit_tests
-# suite, including the [move_asan] cases, still runs under -fsanitize). Both
-# sanitize CI legs carry -fsanitize on CMAKE_CXX_FLAGS, which is the sole gate.
+# So under a sanitizer build the gate is neither built nor discovered (the main
+# argmin_unit_tests suite, including the [move_asan] cases, still runs under
+# -fsanitize). Discovery is guarded alongside EXCLUDE_FROM_ALL: catch_discover
+# on an unbuilt target otherwise registers _NOT_BUILT "Not Run" ctest failures.
+# Both sanitize CI legs carry -fsanitize on CMAKE_CXX_FLAGS, the sole gate.
 string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _argmin_alloc_gate_sanitizer)
-if(NOT _argmin_alloc_gate_sanitizer EQUAL -1)
+if(_argmin_alloc_gate_sanitizer EQUAL -1)
+    # The 13 gate cases carry the [alloc-gate] tag and the ctest `alloc-gate`
+    # label; the liveness canary carries [canary] and is registered without the
+    # label so the labeled count stays exactly the number of gates.
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[alloc-gate]"
+        PROPERTIES LABELS "alloc-gate")
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[canary]")
+else()
     set_target_properties(argmin_alloc_gate_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
 endif()
 

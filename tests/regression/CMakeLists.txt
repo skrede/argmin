@@ -7,11 +7,12 @@
 # survive a deletion of that tree; the live publication gate still invokes this
 # same target when the benchmarks are built.
 #
-# Linux-only, via a CMake platform guard rather than a source ifdef: the parser
-# relies on std::from_chars for doubles, which libstdc++ implements but Apple
-# Clang's libc++ does not, and the publication/regression pipeline runs only on
-# the Linux bench host and in Linux CI. Guarding here keeps the macOS and MSVC
-# test builds green while leaving the gate fully live where it actually runs.
+# Linux-only, via a CMake platform guard rather than a source ifdef: the
+# publication/regression pipeline runs only on the Linux bench host and in Linux
+# CI, so the gate is built only where it is invoked. The double parser uses
+# strtod, not the floating-point std::from_chars overload, so it builds under
+# any standard library -- including the msan-instrumented libc++ on the Linux
+# sanitizer leg, whose libc++ (like Apple Clang's) deletes that overload.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(regression_check regression_check.cpp)
     target_compile_options(regression_check PRIVATE
