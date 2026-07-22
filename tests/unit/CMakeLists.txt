@@ -45,6 +45,7 @@ add_executable(argmin_unit_tests
     dense_admm_qp_test.cpp
     sparse_admm_qp_test.cpp
     sparse_control_qp_test.cpp
+    sparse_qp_reference_test.cpp
     maros_meszaros_dense_test.cpp
     step_budget_solver_test.cpp
     stepper_test.cpp

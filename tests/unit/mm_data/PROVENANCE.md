@@ -63,6 +63,29 @@ surviving the selection rule is emitted as an additional header, and
 the runner registers whatever headers the converter produced via
 `mm_problems.inc`.
 
+## Why the converter is unchanged now that a sparse solver exists
+
+The selection rule above is deliberately derived from the dense fixed-size
+ceiling — `n ≤ 128` exists because a condensed-KKT member must fit Eigen's stack
+allocation limit, and `n · m ≤ 100000` exists because the emitted `A` is a dense
+aggregate. Neither bound describes what a sparse solver could accept, and the
+rule is not claimed to.
+
+Extending the converter to emit sparse data would not unblock anything. The
+blocker on the public reference collection is *redistribution licensing*, not
+file format, and that blocker is identical regardless of the format converted
+to. A sparse emitter would still have nothing license-clean to read.
+
+The regeneration path is therefore unchanged: should a mirror carrying a
+confirmed, compatible redistribution license become available, `mm_to_header.py`
+and its selection rule are where that work starts.
+
+The structured sparse validation data is not converted at all. It is generated
+in-tree by `tests/unit/sparse_control_qp_family.h` — a spring-coupled
+double-integrator family with banded equality dynamics over a runtime horizon —
+so a reader looking for committed sparse fixture files under `tests/` will not
+find any, and none are meant to exist.
+
 ## Recorded date
 
 Committed subset authored and converted: 2026-07-22.

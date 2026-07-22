@@ -1111,6 +1111,34 @@
               "rationale": "carries no RNG; the ADMM recursion, Ruiz equilibration, and reduced-KKT polish are deterministic functions of the inputs"
             }
           }
+        },
+        {
+          "module": "sparse_admm_qp",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "no",
+              "qualifier": "host-tier: the solver sizes all of its storage from the data at pose, and the sparse factorization and solve paths allocate; no zero-alloc gate exists and it is not RT-claimed. What IS claimed is narrower: the KKT is factored once at pose, and the vectors-only resolve performs no factorization and no pattern work. Per-call heap traffic is not bounded and not claimed"
+            },
+            "bounded-iterations?": {
+              "verdict": "excluded",
+              "rationale": "the ADMM outer loop and the reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the solve or resolve path -- the claim holds only while that trigger stays iteration-based; not covered by the policy chrono-freedom probe, so argued rather than gated"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "outcomes travel on expected/optional return channels; no throw, dynamic_cast, or typeid on the solve or resolve path -- the claim holds only while that error channel stays in place. Eigen's sparse containers can still throw on an allocation failure, which is why this is argued and host-tier rather than gated"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "carries no RNG; the Ruiz equilibration, the ADMM recursion, the AMD fill-reducing ordering of the simplicial LDL^T, and the polish are deterministic functions of the inputs"
+            }
+          }
         }
       ]
     }

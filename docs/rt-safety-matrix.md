@@ -186,23 +186,36 @@ steps, never idling); see the footnotes for the two characterized off-hot-loop r
 
 ## QP solvers
 
-The dense operator-splitting QP solver is neither a policy plugged into a driver nor a driver
-itself, so it carries its own table. The two rows are the same solver at its two instantiations,
-and the honest distinction between them is the whole point. At a fixed compile-time dimension `N`
-every buffer and decomposition is a member sized at construction, so the vectors-only
-warm-started `resolve()` control-step path allocates nothing after setup — and that claim is
-gated, not asserted, by the `qp_alloc_gate_dense_admm` zero-mode gate. At `N = Dynamic` the same
-solver sizes its workspace from runtime dimensions and Eigen's dynamic decompositions allocate;
-it is a host-tier convenience with no zero-allocation claim, and the row says so.
+The operator-splitting QP solvers are neither policies plugged into a driver nor drivers
+themselves, so they carry their own table. The first two rows are the dense solver at its two
+instantiations, and the honest distinction between them is the whole point. At a fixed
+compile-time dimension `N` every buffer and decomposition is a member sized at construction, so
+the vectors-only warm-started `resolve()` control-step path allocates nothing after setup — and
+that claim is gated, not asserted, by the `qp_alloc_gate_dense_admm` zero-mode gate. At
+`N = Dynamic` the same solver sizes its workspace from runtime dimensions and Eigen's dynamic
+decompositions allocate; it is a host-tier convenience with no zero-allocation claim, and the row
+says so.
+
+The third row is the sparse solver, and it is an honest `no` throughout the allocation column: it
+sizes all of its storage from the data at pose, and both the sparse factorization and the sparse
+solve allocate. No allocation gate exists for it and none is planned; it is host-tier and is not
+claimed real-time safe. The only structural claim it makes is narrower — the KKT is factored once
+at pose and the vectors-only `resolve()` performs no factorization and no pattern work — and that
+claim says nothing about per-call heap traffic, which is neither bounded nor claimed.
 
 The `wall-clock-free?`, `exceptions-off-clean?`, and `deterministic(seeded)?` cells are argued
 rather than gated: those properties hold by construction — the adaptive-`rho` schedule triggers
 on an iteration interval rather than a measured duration, outcomes travel on `expected`/`optional`
-status returns, and the solver carries no RNG — but the chrono-freedom, no-exceptions, and
-RNG-freedom probes do not yet drive this solver, so the claims rest on reasoning with nothing
-standing behind them. `bounded-iterations?` is a reasoned exclusion for the same reason it is on
-`lm` and the drivers: the ADMM outer loop and the fixed polish refinement are bounded only by a
-caller-set budget, not an intrinsic leaf cap. This table is rendered from
+status returns, and the solvers carry no RNG — but the chrono-freedom, no-exceptions, and
+RNG-freedom probes do not yet drive these solvers, so the claims rest on reasoning with nothing
+standing behind them. On the sparse row the two argued rationales name the implementation
+properties they depend on — the iteration-interval `rho` trigger and the `expected`/`optional`
+error channel — so a change to either makes the published cell visibly wrong; and the
+exceptions cell records that Eigen's sparse containers can still throw on an allocation failure,
+which is part of why it is argued and host-tier rather than gated. `bounded-iterations?` is a
+reasoned exclusion for the same reason it is on `lm` and the drivers: the ADMM outer loop and the
+polish refinement are bounded only by a caller-set budget, not an intrinsic leaf cap. This table
+is rendered from
 `scripts/rt_matrix_cells.json` by `scripts/rt_matrix.py`; a hand edit between the markers is
 overwritten by the next render.
 
@@ -211,6 +224,7 @@ overwritten by the next render.
 |---|---|---|---|---|---|---|
 | `dense_admm_qp (fixed N)` | **yes** *(gated)* | not intrinsically bounded *(reasoned exclusion)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | qp_alloc_gate_dense_admm (zero-allocation assertion over the warm-started resolve hot loop); labeled instruments (alloc-gate, oracle-pin); the ADMM outer loop and the fixed reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate; the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the resolve path; not yet covered by the policy chrono-freedom probe, so argued rather than gated; outcomes travel on expected/optional status returns; no throw, dynamic_cast, or typeid on the solve/resolve path; not driven by the no-exceptions probe, so argued rather than gated; carries no RNG; the ADMM recursion, Ruiz equilibration, and reduced-KKT polish are deterministic functions of the inputs |
 | `dense_admm_qp (dynamic N)` | no (host-tier: the dynamic-N instantiation sizes its workspace at construction and the Eigen dynamic decompositions allocate; no zero-alloc gate, not RT-claimed) | not intrinsically bounded *(reasoned exclusion)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | the ADMM outer loop and the fixed reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate; the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the resolve path; not yet covered by the policy chrono-freedom probe, so argued rather than gated; outcomes travel on expected/optional status returns; no throw, dynamic_cast, or typeid on the solve/resolve path; not driven by the no-exceptions probe, so argued rather than gated; carries no RNG; the ADMM recursion, Ruiz equilibration, and reduced-KKT polish are deterministic functions of the inputs |
+| `sparse_admm_qp` | no (host-tier: the solver sizes all of its storage from the data at pose, and the sparse factorization and solve paths allocate; no zero-alloc gate exists and it is not RT-claimed. What IS claimed is narrower: the KKT is factored once at pose, and the vectors-only resolve performs no factorization and no pattern work. Per-call heap traffic is not bounded and not claimed) | not intrinsically bounded *(reasoned exclusion)* | yes *(argued)* | yes *(argued)* | yes *(argued)* | the ADMM outer loop and the reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate; the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the solve or resolve path -- the claim holds only while that trigger stays iteration-based; not covered by the policy chrono-freedom probe, so argued rather than gated; outcomes travel on expected/optional return channels; no throw, dynamic_cast, or typeid on the solve or resolve path -- the claim holds only while that error channel stays in place. Eigen's sparse containers can still throw on an allocation failure, which is why this is argued and host-tier rather than gated; carries no RNG; the Ruiz equilibration, the ADMM recursion, the AMD fill-reducing ordering of the simplicial LDL^T, and the polish are deterministic functions of the inputs |
 <!-- END GENERATED: qp-solvers -->
 
 ## Scope of the allocation-free claim
