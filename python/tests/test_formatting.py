@@ -1,5 +1,6 @@
 import re
 import locale
+import subprocess
 
 import numpy as np
 import pytest
@@ -15,9 +16,28 @@ DECIMAL_COMMA_CANDIDATES = (
     "es_ES.UTF-8",
     "it_IT.UTF-8",
     "pt_BR.UTF-8",
+    "nb_NO.UTF-8",
+    "nb_NO.utf8",
     "de_DE",
     "fr_FR",
 )
+
+
+def installed_locales() -> tuple[str, ...]:
+    """Every locale the platform will actually accept, best effort.
+
+    The curated list above is a fast path, not an inventory: a host that has
+    exactly one decimal-comma locale outside the list would skip this whole
+    family and report green, which is how the guarded crash class goes
+    untested. Asking the platform closes that hole wherever it can be asked.
+    """
+    try:
+        listing = subprocess.run(
+            ["locale", "-a"], capture_output=True, text=True, timeout=10, check=True
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ()
+    return tuple(line.strip() for line in listing.stdout.splitlines() if line.strip())
 
 NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 DIGIT_COMMA_DIGIT = re.compile(r"\d,\d")
@@ -26,7 +46,7 @@ DIGIT_COMMA_DIGIT = re.compile(r"\d,\d")
 @pytest.fixture
 def decimal_comma_locale():
     previous = locale.setlocale(locale.LC_ALL)
-    for candidate in DECIMAL_COMMA_CANDIDATES:
+    for candidate in DECIMAL_COMMA_CANDIDATES + installed_locales():
         try:
             locale.setlocale(locale.LC_ALL, candidate)
         except locale.Error:
