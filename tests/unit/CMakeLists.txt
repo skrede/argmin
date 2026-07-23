@@ -42,6 +42,7 @@ add_executable(argmin_unit_tests
     kraft_slsqp_test.cpp
     kraft_lsq_qp_test.cpp
     kraft_lsq_qp_recovery_test.cpp
+    polish_accept_test.cpp
     dense_admm_qp_test.cpp
     sparse_admm_qp_test.cpp
     sparse_control_qp_test.cpp

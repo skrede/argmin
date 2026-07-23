@@ -38,6 +38,7 @@
 //            the solved-inaccurate report uses a relaxed tolerance at factor
 //            K = 10, OSQP's convention on the iteration cap.
 
+#include "argmin/qp/detail/polish_accept.h"
 #include "argmin/qp/qp_types.h"
 #include "argmin/options/dense_qp_options.h"
 #include "argmin/expected.h"
@@ -807,8 +808,8 @@ private:
         const Scalar tol = std::max(static_cast<Scalar>(o.eps_abs),
                                     static_cast<Scalar>(o.eps_rel) * std::abs(cur_obj));
         const Scalar slack = tol * (Scalar(1) + y_inf);
-        return rdn < cur_rd && (m_ == 0 || rpn < cur_rp)
-               && polished_objective <= cur_obj + slack;
+        return detail::polish_is_accepted(rpn, rdn, cur_rp, cur_rd,
+                                          polished_objective, cur_obj, slack, m_ > 0);
     }
 
     int n_cap_{0};
