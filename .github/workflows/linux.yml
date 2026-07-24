@@ -340,7 +340,7 @@ jobs:
           # guard exists to catch a dropped gate; it must not miscount silently.
           count=$(ctest -N -L alloc-gate | grep -cE '^ *Test +#')
           echo "allocation gates registered: $count"
-          test "$count" -eq 14 || { echo "expected 14 allocation gates, found $count"; exit 1; }
+          test "$count" -eq 15 || { echo "expected 15 allocation gates, found $count"; exit 1; }
 
       # ctest treats a label selection that matches nothing as success, so
       # without --no-tests=error this step would pass if the labels it names

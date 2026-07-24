@@ -31,10 +31,14 @@
 // unregularized system, accepted only when both residuals improve and the
 // objective does not worsen) lifts the accepted iterate.
 //
-// Contract: the factorization is computed once at pose; resolve() performs no
-// factorization and no pattern work. Per-call heap traffic is deliberately NOT
-// bounded and NOT claimed -- the sparse solve path builds temporaries -- so this
-// is a host-tier solver and nothing here may be read as a real-time guarantee.
+// Contract: the factorization is computed once at pose, and pose allocates its
+// storage -- a one-time real-time setup cost. resolve() performs no
+// factorization and no pattern work, and, given a warm pose and polish off, its
+// vectors-only iteration performs no heap allocation; that property is held by a
+// labeled allocation gate. Polish re-analyzes a freshly shaped reduced KKT and
+// allocates per call, so a real-time deployment runs with polish off. The
+// allocation-free property is the resolve iteration only -- never the whole
+// solver, and never pose or polish -- so this is a host-tier solver.
 //
 // Reference: Stellato, Banjac, Goulart, Bemporad, Boyd (2020), "OSQP: An
 //            operator splitting solver for quadratic programs," Math. Prog.

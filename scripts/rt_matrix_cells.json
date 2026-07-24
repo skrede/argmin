@@ -1116,8 +1116,13 @@
           "module": "sparse_admm_qp",
           "cells": {
             "allocation-free?": {
-              "verdict": "no",
-              "qualifier": "host-tier: the solver sizes all of its storage from the data at pose, and the sparse factorization and solve paths allocate; no zero-alloc gate exists and it is not RT-claimed. What IS claimed is narrower: the KKT is factored once at pose, and the vectors-only resolve performs no factorization and no pattern work. Per-call heap traffic is not bounded and not claimed"
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "resolve hot loop only, given a warm pose and polish off: the KKT is factored once at pose and the vectors-only resolve iteration performs no factorization, no pattern work, and no heap allocation; pose allocates its storage one-time and polish re-analyzes a freshly shaped reduced KKT and allocates per call, so both are outside the claim; host-tier",
+              "evidence": [
+                {"kind": "ctest_test", "name": "qp_alloc_gate_sparse_admm_resolve", "note": "zero-allocation assertion over the warm-started resolve hot loop with polish and adaptive-rho off"},
+                {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
+              ]
             },
             "bounded-iterations?": {
               "verdict": "excluded",

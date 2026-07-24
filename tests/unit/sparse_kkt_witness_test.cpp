@@ -8,6 +8,7 @@
 #include <random>
 #include <vector>
 #include <cstddef>
+#include <cstring>
 
 using namespace argmin;
 
@@ -194,4 +195,116 @@ TEST_CASE("sparse_kkt refactorizes on a rho update without re-analyzing", "[qp][
     CHECK(std::vector<int>(kkt.matrix().innerIndexPtr(),
                            kkt.matrix().innerIndexPtr() + nonzeros)
           == inner);
+}
+
+namespace
+{
+
+// Distinct pseudo-random right-hand sides, one per seed, so the bit-identity
+// comparison below is exercised over several independent vectors rather than a
+// single fixed one.
+Eigen::VectorXd rhs_for(int size, unsigned seed)
+{
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<double> draw(-1.0, 1.0);
+
+    Eigen::VectorXd rhs(size);
+    for(int i = 0; i < size; ++i)
+        rhs(i) = draw(rng);
+    return rhs;
+}
+
+// True only when the two vectors are byte-for-byte identical -- the strongest
+// form of the equality contract, distinguishing even signed zeros.
+bool bit_identical(const Eigen::VectorXd& a, const Eigen::VectorXd& b)
+{
+    return a.size() == b.size()
+           && std::memcmp(a.data(), b.data(),
+                          static_cast<std::size_t>(a.size()) * sizeof(double))
+                  == 0;
+}
+
+}
+
+// The manual permuted solve reuses Eigen's own factor APIs step for step, so its
+// result must equal a stock SimplicialLDLT::solve on the same matrix bit for bit.
+// The reference is an INDEPENDENT factorization of kkt.matrix() (the same lower
+// triangle, the same AMD ordering, no pivoting), so factoring it reproduces the
+// member factor's bits exactly and no old code path has to be kept alive.
+//
+// Exact byte equality is the expected outcome on every supported toolchain,
+// because both paths run the same Eigen inner kernels (triangular solves,
+// diagonal reciprocal, permutation scatter) in the same order; a genuine
+// same-build mismatch is a bug to investigate first -- an aliased permutation, a
+// division where the reference multiplies by a reciprocal, or a stale diagonal
+// cache -- not a reason to weaken this assertion. A relative-parity floor near
+// 1e-12 is the documented contract floor reserved only for a toolchain that
+// provably cannot reproduce Eigen's bits; it is deliberately not activated here.
+TEST_CASE("sparse_kkt manual solve is bit-identical to a reference factorization",
+          "[qp][sparse_kkt]")
+{
+    constexpr int horizon = 20;
+    const control_system s = make_double_integrator_system(horizon);
+    const std::vector<double> rho_inv = make_rho_inv(s);
+
+    detail::sparse_kkt<double> kkt;
+    REQUIRE(kkt.analyze(s.P, s.A, sigma, rho_inv));
+    REQUIRE(kkt.refactorize(rho_inv));
+
+    detail::sparse_kkt<double>::factorization_type reference;
+    reference.analyzePattern(kkt.matrix());
+    reference.factorize(kkt.matrix());
+    REQUIRE(reference.info() == Eigen::Success);
+
+    for(unsigned seed = 1; seed <= 5; ++seed)
+    {
+        const Eigen::VectorXd rhs = rhs_for(kkt.rows(), seed);
+
+        Eigen::VectorXd out;
+        kkt.solve_into(rhs, out);
+        const Eigen::VectorXd expected = reference.solve(rhs);
+
+        CHECK(bit_identical(out, expected));
+    }
+}
+
+// Guards the reciprocal-diagonal cache: a rho update recomputes D, and a
+// solve_into that read a stale cache would silently scale by the pre-update
+// diagonal. Re-factoring the independent reference on the updated matrix and
+// re-asserting exact equality fails loudly if refactorize() forgot to refresh
+// the cache -- an error a bit-identity test on a freshly posed KKT alone could
+// not catch.
+TEST_CASE("sparse_kkt manual solve stays bit-identical across a rho refactorize",
+          "[qp][sparse_kkt]")
+{
+    constexpr int horizon = 20;
+    const control_system s = make_double_integrator_system(horizon);
+    const std::vector<double> rho_inv = make_rho_inv(s);
+
+    detail::sparse_kkt<double> kkt;
+    REQUIRE(kkt.analyze(s.P, s.A, sigma, rho_inv));
+    REQUIRE(kkt.refactorize(rho_inv));
+
+    const Eigen::VectorXd rhs = rhs_for(kkt.rows(), 7u);
+
+    Eigen::VectorXd before;
+    kkt.solve_into(rhs, before);
+    detail::sparse_kkt<double>::factorization_type ref_before;
+    ref_before.analyzePattern(kkt.matrix());
+    ref_before.factorize(kkt.matrix());
+    REQUIRE(ref_before.info() == Eigen::Success);
+    CHECK(bit_identical(before, Eigen::VectorXd(ref_before.solve(rhs))));
+
+    std::vector<double> updated(rho_inv);
+    for(double& v : updated)
+        v *= 1e3;
+    REQUIRE(kkt.refactorize(updated));
+
+    Eigen::VectorXd after;
+    kkt.solve_into(rhs, after);
+    detail::sparse_kkt<double>::factorization_type ref_after;
+    ref_after.analyzePattern(kkt.matrix());
+    ref_after.factorize(kkt.matrix());
+    REQUIRE(ref_after.info() == Eigen::Success);
+    CHECK(bit_identical(after, Eigen::VectorXd(ref_after.solve(rhs))));
 }

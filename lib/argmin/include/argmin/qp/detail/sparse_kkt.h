@@ -122,6 +122,16 @@ public:
 
         n_ = n;
         m_ = m;
+
+        // Size the resolve-path scratch once, here, where n_ + m_ is first
+        // known. Both buffers live for the analysis and are never resized on the
+        // resolve path, so solve_into allocates nothing: work_ carries the
+        // permuted intermediate through the five solve steps, and dinv_ caches
+        // the reciprocal of the factor diagonal D (value-refreshed in
+        // refactorize(), whenever the numeric factorization changes).
+        work_.resize(n + m);
+        dinv_.resize(n + m);
+
         analyzed_ = true;
         return true;
     }
@@ -142,12 +152,48 @@ public:
         ++numeric_factorizations_;
         ldlt_.factorize(K_);
         factorized_ = ldlt_.info() == Eigen::Success;
+        if(factorized_)
+        {
+            // A rho update recomputes the factor diagonal D, so the cached
+            // reciprocal must be refreshed here or a subsequent solve_into would
+            // silently scale by the pre-update diagonal. vectorD() returns D by
+            // value (one Eigen copy); refactorize() is off the resolve claim and
+            // already allocates inside Eigen's factorize, so materializing D once
+            // to invert it is acceptable.
+            dinv_ = ldlt_.vectorD().cwiseInverse();
+        }
         return factorized_;
     }
 
+    // Manual permuted LDL^T solve into pre-sized member scratch, faithful to
+    // Eigen's internal SimplicialCholeskyBase::_solve_impl and differing only in
+    // that every step targets a reused buffer instead of an allocating temporary:
+    //   work = P * rhs; L y = work; work *= 1/D; L^T z = work; out = Pinv * work.
+    // The final un-permute writes into out (a distinct buffer), which keeps it on
+    // Eigen's non-aliased scatter branch; an in-place aliased permutation would
+    // heap-allocate a mask every call. The reciprocal diagonal is read from the
+    // dinv_ cache rather than recomputed, because vectorD() would copy D by value
+    // on each call. Given a warm factorization this allocates nothing.
     void solve_into(const argmin::vector<Scalar>& rhs, argmin::vector<Scalar>& out) const
     {
-        out = ldlt_.solve(rhs);
+        // Required: sizing out is a no-op on the warm resolve path (out already
+        // has rows() entries) but is the only place the polish path's reduced
+        // solution vectors are sized.
+        out.resize(rows());
+        if(ldlt_.info() != Eigen::Success)
+            return;
+
+        // Guard the triangular solves for a degenerate fully-diagonal factor
+        // (L == I, no stored off-diagonal), mirroring _solve_impl's own guard.
+        const bool has_off_diagonal = ldlt_.matrixL().nestedExpression().nonZeros() > 0;
+
+        work_ = ldlt_.permutationP() * rhs;
+        if(has_off_diagonal)
+            ldlt_.matrixL().solveInPlace(work_);
+        work_.array() *= dinv_.array();
+        if(has_off_diagonal)
+            ldlt_.matrixU().solveInPlace(work_);
+        out = ldlt_.permutationPinv() * work_;
     }
 
     const sparse_type& matrix() const { return K_; }
@@ -172,6 +218,10 @@ private:
     sparse_type K_;
     factorization_type ldlt_;
     std::vector<int> diag_slot_;
+    // Resolve-path scratch, sized in analyze() and (dinv_) value-refreshed in
+    // refactorize(); mutable so solve_into stays const for its const callers.
+    mutable argmin::vector<Scalar> work_;
+    mutable argmin::vector<Scalar> dinv_;
     std::size_t symbolic_analyses_{0};
     std::size_t numeric_factorizations_{0};
     int n_{0};

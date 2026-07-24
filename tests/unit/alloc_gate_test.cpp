@@ -38,6 +38,7 @@
 #include "argmin/detail/lbfgsb_direction.h"
 
 #include "argmin/qp/dense_admm_qp.h"
+#include "argmin/qp/sparse_admm_qp.h"
 
 #include "argmin/test_functions/hock_schittkowski.h"
 #include "argmin/test_functions/small_dense.h"
@@ -597,6 +598,119 @@ TEST_CASE("qp_alloc_gate_dense_admm", "[alloc-gate]")
     REQUIRE(wr);
     CHECK(wr->status == argmin::qp_solve_status::solved);
     const Eigen::Vector<double, N> x_star = -qw;
+    CHECK((wr->x - x_star).cwiseAbs().maxCoeff() <= 1e-6);
+}
+
+namespace
+{
+
+Eigen::SparseMatrix<double> sparse_from_triplets(int rows, int cols,
+                                                 const std::vector<Eigen::Triplet<double>>& t)
+{
+    Eigen::SparseMatrix<double> m(rows, cols);
+    m.setFromTriplets(t.begin(), t.end());
+    m.makeCompressed();
+    return m;
+}
+
+}
+
+// sparse_admm_qp: the vectors-only warm resolve is the control-step hot path,
+// and this gate is the claim that -- given a warm pose and polish off -- it is
+// allocation-free. The KKT is factored once at pose (a cold solve, outside the
+// armed window, where allocation is in contract); two unarmed warm resolves then
+// absorb any lazy first-use sizing before the armed window. Each armed step
+// re-solves through resolve_into with a small (q, l, u) perturbation, so the
+// window is a real warm-started re-solve. polish is off (asserted below) because
+// polish re-analyzes a freshly shaped reduced KKT and allocates per call, and
+// adaptive_rho is off because an accepted rho update refactorizes -- a
+// pose-class factorization event, outside the resolve claim. The path-entry
+// witnesses (every step iterates, no step polishes) and a separate unarmed solve
+// reaching its analytic optimum keep the zero-allocation pass non-vacuous.
+TEST_CASE("qp_alloc_gate_sparse_admm_resolve", "[alloc-gate]")
+{
+    constexpr int n = 3;
+    constexpr int m = n + 1;
+
+    std::vector<Eigen::Triplet<double>> p_entries{
+        {0, 0, 2.0}, {1, 1, 2.0}, {2, 2, 2.0},
+        {0, 1, 0.3}, {1, 0, 0.3}, {0, 2, 0.1}, {2, 0, 0.1}, {1, 2, 0.2}, {2, 1, 0.2}};
+    const Eigen::SparseMatrix<double> P = sparse_from_triplets(n, n, p_entries);
+
+    std::vector<Eigen::Triplet<double>> a_entries{
+        {0, 0, 1.0}, {1, 1, 1.0}, {2, 2, 1.0}, {3, 0, 1.0}, {3, 1, 1.0}, {3, 2, 1.0}};
+    const Eigen::SparseMatrix<double> A = sparse_from_triplets(m, n, a_entries);
+
+    Eigen::VectorXd q(n);
+    q << 1.0, -1.5, 0.5;
+    Eigen::VectorXd l(m);
+    Eigen::VectorXd u(m);
+    l << -0.2, -0.2, -0.2, -0.1;
+    u << 0.2, 0.2, 0.2, 0.1;
+
+    // The claim scope: resolve is allocation-free given a warm pose and polish
+    // off. adaptive_rho is disabled to keep any refactorization -- a pose-class
+    // allocation event -- out of the armed resolve window.
+    argmin::sparse_qp_options opts;
+    opts.polish = false;
+    opts.adaptive_rho = false;
+    REQUIRE_FALSE(opts.polish);
+
+    argmin::sparse_admm_qp_solver<double> solver;
+    argmin::qp_result<double> out;
+    REQUIRE_FALSE(solver.solve_into(P, q, A, l, u, out, opts).has_value());
+
+    Eigen::VectorXd q_w = q;
+    Eigen::VectorXd l_w = l;
+    Eigen::VectorXd u_w = u;
+    REQUIRE_FALSE(solver.resolve_into(q_w, l_w, u_w, out, opts).has_value());
+    REQUIRE_FALSE(solver.resolve_into(q_w, l_w, u_w, out, opts).has_value());
+
+    constexpr std::size_t hot_steps = 12;
+    bool every_step_iterated = true;
+    bool any_step_polished = false;
+    const auto counts = run_armed([&] {
+        for(std::size_t i = 0; i < hot_steps; ++i)
+        {
+            const double s = 1e-3 * static_cast<double>(i + 1);
+            q_w = q * (1.0 + s);
+            l_w = l * (1.0 - 0.5 * s);
+            u_w = u * (1.0 + 0.5 * s);
+            const bool ok = !solver.resolve_into(q_w, l_w, u_w, out, opts).has_value();
+            if(!ok || out.iterations <= 0)
+                every_step_iterated = false;
+            if(out.polished)
+                any_step_polished = true;
+        }
+    });
+
+    // Path-entry witnesses: every armed step is a real re-solve (iterations > 0)
+    // and, with polish off, no step reached the polishing path -- so a zero-mode
+    // gate cannot certify the hot loop vacuously.
+    CHECK(every_step_iterated);
+    CHECK_FALSE(any_step_polished);
+    CHECK(counts.eigen == 0);
+    CHECK(counts.c == 0);
+
+    // Unarmed numeric witness: an all-inactive-constraint instance whose analytic
+    // optimum is the unconstrained minimizer x* = -P^{-1} q, here -q at P = I. A
+    // pass proves the zero-allocation loop above ran a solver that actually
+    // reaches a known optimum.
+    std::vector<Eigen::Triplet<double>> pw_entries{{0, 0, 1.0}, {1, 1, 1.0}, {2, 2, 1.0}};
+    const Eigen::SparseMatrix<double> Pw = sparse_from_triplets(n, n, pw_entries);
+    const Eigen::SparseMatrix<double> Aw = A;
+    Eigen::VectorXd qw(n);
+    qw << 0.3, -0.4, 0.1;
+    Eigen::VectorXd lw(m);
+    Eigen::VectorXd uw(m);
+    lw << -10.0, -10.0, -10.0, -10.0;
+    uw << 10.0, 10.0, 10.0, 10.0;
+
+    argmin::sparse_admm_qp_solver<double> witness;
+    const auto wr = witness.solve(Pw, qw, Aw, lw, uw, opts);
+    REQUIRE(wr);
+    CHECK(wr->status == argmin::qp_solve_status::solved);
+    const Eigen::VectorXd x_star = -qw;
     CHECK((wr->x - x_star).cwiseAbs().maxCoeff() <= 1e-6);
 }
 
