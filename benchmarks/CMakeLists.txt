@@ -553,6 +553,25 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
+# Sparse ADMM QP polish micro-benchmark (argmin-only, informative). Isolates the
+# reduced-KKT polish per-step cost on the control-shaped MPC family; reuses the
+# structured LMPC generator that lives with the unit tests.
+add_executable(micro_sparse_admm_polish micro_sparse_admm_polish.cpp)
+target_link_libraries(micro_sparse_admm_polish PRIVATE argmin::argmin)
+target_include_directories(micro_sparse_admm_polish PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tests/unit)
+target_compile_options(micro_sparse_admm_polish PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(micro_sparse_admm_polish PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
 # Filter envelope sweep harness (argmin-only). Sweeps the asymmetric
 # (gamma_f, gamma_h) envelope on HS043 with HS024 + HS076 regression
 # guards across both filter_slsqp and filter_nw_sqp; prints a
