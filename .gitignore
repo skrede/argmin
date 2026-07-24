@@ -50,6 +50,7 @@ ui_*.h
 .idea/
 cmake-build-*
 **/build*/
+.venv/
 **/.userfiles/
 
 **/*.pb.h

@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_ARGMIN_H
 #define HPP_GUARD_ARGMIN_ARGMIN_H
 
+#include "argmin/qp.h"
 #include "argmin/types.h"
 #include "argmin/result.h"
 #include "argmin/solver.h"

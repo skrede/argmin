@@ -41,6 +41,7 @@ if(ARGMIN_BUILD_TESTS)
 
     add_subdirectory(unit)
     add_subdirectory(compile)
+    add_subdirectory(regression)
 
     if(NOT ARGMIN_CMAKE_FETCH_DEPS)
         add_subdirectory(integration)

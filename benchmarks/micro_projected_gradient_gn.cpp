@@ -6,9 +6,6 @@
 // The comparison is inherently asymmetric: projected gradient GN exploits
 // least-squares structure while BOBYQA is general.
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
-#endif
 
 #include "argmin/solver/projected_gradient_gn_policy.h"
 #include "argmin/solver/step_budget_solver.h"
@@ -195,87 +192,7 @@ bool probe_kkt_residual()
 
 }
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-namespace
-{
 
-// Fixed-2 bounded linear least-squares (see micro_projected_gn for the
-// rationale): the first coordinate pins at its upper bound 0.5, so the
-// projected-gradient backtracking line search operates against an active
-// bound on every step.
-struct bounded_linear_ls_fixed2
-{
-    static constexpr int problem_dimension = 2;
-
-    int dimension() const { return 2; }
-    int num_residuals() const { return 2; }
-
-    static Eigen::Vector2d bvec() { return Eigen::Vector2d{2.0, 0.25}; }
-
-    double value(const Eigen::Vector<double, 2>& x) const
-    {
-        return 0.5 * (x - bvec()).squaredNorm();
-    }
-    void residuals(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& r) const
-    {
-        r = x - bvec();
-    }
-    void jacobian(const Eigen::Vector<double, 2>& /*x*/, Eigen::MatrixXd& J) const
-    {
-        J = Eigen::Matrix2d::Identity();
-    }
-    Eigen::VectorXd lower_bounds() const { return Eigen::VectorXd{{-2.0, -2.0}}; }
-    Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd{{0.5, 2.0}}; }
-};
-
-}
-
-// Allocation witness/gate for the projected-gradient GN backtracking path.
-// Warms up, asserts a bound is active (projection engaged), then arms the trace
-// across a steady-state window plus a reset(). The pre-hoist per-step trial
-// residual and J*d temporaries read as a nonzero witness; after the workspace
-// hoist the armed window is allocation-free at fixed N.
-int argmin_alloc_trace_probe()
-{
-    bounded_linear_ls_fixed2 problem;
-    Eigen::Vector<double, 2> x0{-1.0, -1.0};
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-12);
-
-    argmin::step_budget_solver solver{argmin::projected_gradient_gn_policy<2>{},
-                                      problem, x0, opts};
-
-    // Warmup absorbs the one-time workspace sizing.
-    solver.step();
-    solver.step();
-
-    // Path-entry assertion: the first coordinate is pinned at its upper bound,
-    // so the projected-gradient line search runs against an active bound.
-    if(solver.state().x(0) < 0.5 - 1e-9)
-    {
-        std::fprintf(stderr,
-            "FAIL: projected_gradient_gn projection path not entered (x0=%.6e)\n",
-            solver.state().x(0));
-        return 1;
-    }
-
-    constexpr std::size_t hot_steps = 10;
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    for(std::size_t i = 0; i < hot_steps; ++i)
-        solver.step();
-    solver.reset(x0);
-    for(std::size_t i = 0; i < hot_steps; ++i)
-        solver.step();
-    argmin::detail::bench::disarm_alloc_trace();
-
-    return argmin::detail::bench::evaluate_gate("projected_gradient_gn",
-                                                2 * hot_steps, 1);
-}
-#endif
-
-#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main()
 {
     constexpr std::uint32_t reps = 10000;
@@ -300,4 +217,3 @@ int main()
     argmin::bench::println("  perf record -F 99999 -g -- ./micro_projected_gradient_gn");
     argmin::bench::println("  perf report --stdio --percent-limit=1.0");
 }
-#endif

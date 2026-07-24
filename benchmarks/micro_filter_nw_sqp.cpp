@@ -8,9 +8,6 @@
 //            penalty function", Math. Program. 91:239-269;
 //            N&W Chapter 18 (dense BFGS SQP).
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
-#endif
 
 #include "bench_micro_gate.h"
 
@@ -707,148 +704,7 @@ bool probe_regression_hs024_iter_bound()
 
 }
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-namespace
-{
 
-// Steady-state allocation measurement for a fixed-N filter_nw_sqp solve loop.
-//
-// Warmup boundary: a full warmup solve() warms every one-time / lazy
-// allocation; reset(x0) returns to the start OUTSIDE any armed region; a short
-// unarmed transient re-enters steady descent; only then does the armed window
-// measure the pure per-step traffic. reset() never sits inside the armed
-// window. If the policy signals termination inside the window it is not a
-// steady state and the probe fails rather than reporting a vacuous zero.
-template <typename Policy, typename Problem>
-int measure_steady(const char* label, Policy policy, const Problem& problem,
-                   std::size_t min_per_step)
-{
-    auto x0 = problem.initial_point();
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
-
-    argmin::step_budget_solver solver{policy, problem, x0, opts};
-
-    solver.solve();
-    solver.reset(x0);
-    solver.step();
-    solver.step();
-
-    constexpr std::size_t hot_steps = 10;
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    bool terminated = false;
-    for(std::size_t i = 0; i < hot_steps; ++i)
-    {
-        const auto r = solver.step();
-        if(r.policy_status.has_value())
-            terminated = true;
-    }
-    argmin::detail::bench::disarm_alloc_trace();
-
-    if(terminated)
-    {
-        std::fprintf(stderr,
-            "  [alloc-gate] %-18s FAIL: policy signaled termination inside "
-            "the armed window -- not a pre-convergence steady state\n", label);
-        return 1;
-    }
-    return argmin::detail::bench::evaluate_gate(label, hot_steps, min_per_step);
-}
-
-// Construction-window record (informational, never gates).
-template <typename Policy, typename Problem>
-void record_construction(const char* label, Policy policy, const Problem& problem)
-{
-    auto x0 = problem.initial_point();
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
-
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    argmin::step_budget_solver solver{policy, problem, x0, opts};
-    solver.step();
-    argmin::detail::bench::disarm_alloc_trace();
-
-    std::printf("  [alloc-gate] %-18s construction+first_step alloc=%zu\n",
-                label, argmin::detail::bench::read_alloc_count());
-}
-
-// Post-convergence idle-step record (informational, never gates). The shared
-// feasibility restoration allocates its local work vectors, but on a fixed-N
-// fixture it engages only as a post-convergence idle-step artifact. This
-// window solves to convergence unarmed, then arms and takes idle steps,
-// recording the observed allocation count and any step that reports a
-// restoration inner-iteration count. It never gates: whether restoration
-// engages on a given fixture / build is exactly the evidence recorded for the
-// restoration-gate design decision.
-template <typename Policy, typename Problem>
-void record_idle(const char* label, Policy policy, const Problem& problem)
-{
-    auto x0 = problem.initial_point();
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
-
-    argmin::step_budget_solver solver{policy, problem, x0, opts};
-    solver.solve();
-
-    constexpr std::size_t idle_steps = 10;
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    std::size_t restoration_steps = 0;
-    for(std::size_t i = 0; i < idle_steps; ++i)
-    {
-        const auto r = solver.step();
-        if(r.diagnostics.restoration_iters_used > 0)
-            ++restoration_steps;
-    }
-    argmin::detail::bench::disarm_alloc_trace();
-
-    std::printf("  [alloc-gate] %-18s idle_steps=%zu alloc=%zu "
-                "restoration_steps=%zu\n",
-                label, idle_steps, argmin::detail::bench::read_alloc_count(),
-                restoration_steps);
-}
-
-}
-
-// Steady-state allocation record for filter_nw_sqp across the fixed-N fixture
-// family, plus a post-convergence idle-step record that characterizes the
-// shared feasibility restoration for the restoration-gate design decision.
-int argmin_alloc_trace_probe()
-{
-    record_construction("filter_nw hs071",
-        argmin::filter_nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{});
-
-    int rc = 0;
-    rc |= measure_steady("filter_nw hs071",
-        argmin::filter_nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{}, 0);
-    rc |= measure_steady("filter_nw sd012",
-        argmin::filter_nw_sqp_policy<argmin::sd012<>::problem_dimension>{},
-        argmin::sd012<>{}, 0);
-    rc |= measure_steady("filter_nw sd024",
-        argmin::filter_nw_sqp_policy<argmin::sd024<>::problem_dimension>{},
-        argmin::sd024<>{}, 0);
-
-    record_idle("filter_nw idle",
-        argmin::filter_nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
-        argmin::hs071<>{});
-    return rc;
-}
-#endif
-
-#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main(int argc, char** argv)
 {
 
@@ -955,4 +811,3 @@ int main(int argc, char** argv)
         }
     }
 }
-#endif

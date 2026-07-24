@@ -1,9 +1,9 @@
 // On-target allocation sensor for the NUCLEO-H753ZI proof.
 //
 // Backs alloc_counter.h's arm/reset/read surface on bare-metal newlib the way
-// benchmarks/alloc_trace_main.cpp backs it on glibc: it owns the single
-// definition of the atomic counters and provides strong-symbol allocation
-// observers. Two independent sensors, mirroring the host design:
+// tests/unit/alloc_sensor_counters.cpp (with alloc_sensor_b_linux.cpp) backs it
+// on glibc: it owns the single definition of the atomic counters and provides
+// strong-symbol allocation observers. Two independent sensors, mirroring the host design:
 //
 //   1. malloc-family + operator new counters (PRIMARY per-step event count).
 //      Every allocation event while the trace is armed increments
@@ -25,13 +25,14 @@
 //
 // The mandatory blindness canary (run_alloc_sensor_canary) proves the sensor
 // is live: a deliberate allocation inside an armed window MUST register, else
-// a reported zero is meaningless. This mirrors alloc_trace_main.cpp's canary.
+// a reported zero is meaningless. This mirrors the host sensor's liveness
+// canary (tests/unit/alloc_gate_test.cpp).
 
 #define EIGEN_RUNTIME_NO_MALLOC
 #define eigen_assert(x) \
     do { if(!(x)) ::argmin::detail::bench::on_eigen_malloc(); } while(0)
 
-#include "argmin/detail/bench/alloc_counter.h"
+#include "argmin/detail/diagnostics/alloc_counter.h"
 
 #include <Eigen/Core>
 

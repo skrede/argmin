@@ -20,14 +20,28 @@
 cmake_minimum_required(VERSION 3.22)
 
 include(FetchContent)
-FetchContent_Declare(
-    Eigen3
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG 3.4.0
-    GIT_SHALLOW TRUE
-    SOURCE_SUBDIR this-directory-does-not-exist
-)
-FetchContent_MakeAvailable(Eigen3)
+
+# Fetch is the default, but an integrator with their own Eigen (a vendored tree,
+# an air-gapped mirror, a different pinned version) sets ARGMIN_MCU_EIGEN_DIR to
+# that source root to bypass the network clone. Skipping the fetch also skips
+# the non-scriptable FetchContent_Declare/define_property call, which the
+# ESP-IDF component pre-scan cannot run -- so a provided dir is strictly safer
+# under the IDF script-mode harvest, not just faster.
+set(ARGMIN_MCU_EIGEN_DIR "" CACHE PATH
+    "Pre-provisioned Eigen source root; when set, the probe skips the Eigen FetchContent")
+if(ARGMIN_MCU_EIGEN_DIR)
+    set(eigen3_SOURCE_DIR "${ARGMIN_MCU_EIGEN_DIR}")
+    message(STATUS "argmin_esp32_probe: using provided Eigen at ${eigen3_SOURCE_DIR} (fetch skipped)")
+else()
+    FetchContent_Declare(
+        Eigen3
+        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+        GIT_TAG 3.4.0
+        GIT_SHALLOW TRUE
+        SOURCE_SUBDIR this-directory-does-not-exist
+    )
+    FetchContent_MakeAvailable(Eigen3)
+endif()
 set(ARGMIN_PROBE_EIGEN_SOURCE_DIR "${eigen3_SOURCE_DIR}" CACHE PATH
     "Eigen source dir, bridged into the main component")
 

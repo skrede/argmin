@@ -38,15 +38,27 @@ include(FetchContent)
 set(ARGMIN_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/argmin/include")
 
 # Eigen, pinned to the same tag the library uses (lib/argmin/CMakeLists.txt).
-FetchContent_Declare(
-    Eigen3
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG 3.4.0
-    GIT_SHALLOW TRUE
-    EXCLUDE_FROM_ALL
-    SOURCE_SUBDIR this-directory-does-not-exist
-)
-FetchContent_MakeAvailable(Eigen3)
+# Fetch is the default so a bare `cmake -S mcu` needs no setup and the arm link
+# gate stays hermetic, but an integrator with their own Eigen (a vendored tree,
+# an air-gapped mirror, a different pinned version) sets ARGMIN_MCU_EIGEN_DIR to
+# that source root to bypass the network clone entirely. CMake's native
+# FETCHCONTENT_SOURCE_DIR_EIGEN3 / FETCHCONTENT_FULLY_DISCONNECTED also work.
+set(ARGMIN_MCU_EIGEN_DIR "" CACHE PATH
+    "Pre-provisioned Eigen source root; when set, mcu/ skips the Eigen FetchContent")
+if(ARGMIN_MCU_EIGEN_DIR)
+    set(eigen3_SOURCE_DIR "${ARGMIN_MCU_EIGEN_DIR}")
+    message(STATUS "argmin_mcu: using provided Eigen at ${eigen3_SOURCE_DIR} (fetch skipped)")
+else()
+    FetchContent_Declare(
+        Eigen3
+        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+        GIT_TAG 3.4.0
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL
+        SOURCE_SUBDIR this-directory-does-not-exist
+    )
+    FetchContent_MakeAvailable(Eigen3)
+endif()
 
 # Cortex-M7 hard-float arch flags. The toolchain file already applies these at
 # compile time (CMAKE_CXX_FLAGS_INIT); the gcc driver also needs them on the

@@ -1,5 +1,5 @@
-#ifndef HPP_GUARD_ARGMIN_DETAIL_BENCH_ALLOC_COUNTER_H
-#define HPP_GUARD_ARGMIN_DETAIL_BENCH_ALLOC_COUNTER_H
+#ifndef HPP_GUARD_ARGMIN_DETAIL_DIAGNOSTICS_ALLOC_COUNTER_H
+#define HPP_GUARD_ARGMIN_DETAIL_DIAGNOSTICS_ALLOC_COUNTER_H
 
 // Allocation-tracing gate for the micro-benchmark real-time hot loops.
 //
@@ -17,7 +17,9 @@
 //      that TU.
 //
 //   2. A C-allocator counter fed by the strong-symbol malloc / posix_memalign
-//      overrides in alloc_trace_main.cpp. That sensor is process-wide and
+//      overrides a linking consumer provides (tests/unit/alloc_sensor_counters.cpp
+//      and alloc_sensor_b_linux.cpp on host, mcu/nucleo_h753zi/wrap_malloc.cpp on
+//      target). That sensor is process-wide and
 //      catches heap traffic the Eigen gate cannot see (std::vector free-sets,
 //      decorator std::function storage, and any aligned_malloc that reaches
 //      the C allocator without tripping the eigen_assert path).
@@ -28,15 +30,15 @@
 #ifdef ARGMIN_BENCH_TRACE_ALLOC
 
 #include <atomic>
-#include <cstdio>
 #include <cstddef>
 #include <algorithm>
 
 namespace argmin::detail::bench
 {
 
-// Storage lives in alloc_trace_main.cpp so a single definition backs every
-// alloc-trace translation unit linked into the target.
+// Storage is defined by exactly one linked consumer TU (tests/unit/alloc_sensor_counters.cpp
+// on host, mcu/nucleo_h753zi/wrap_malloc.cpp on target) so a single definition
+// backs every alloc-trace translation unit linked into the target.
 extern std::atomic<std::size_t> g_eigen_malloc_count;
 extern std::atomic<std::size_t> g_c_alloc_count;
 extern std::atomic<bool> g_alloc_trace_armed;
@@ -53,9 +55,9 @@ inline void on_eigen_malloc() noexcept
 
 // Route Eigen's runtime malloc gate into on_eigen_malloc. Defined here so a
 // consuming TU only needs to include this header (ahead of any Eigen header)
-// to arm the Eigen-native sensor. alloc_trace_main.cpp defines the same macro
-// itself before its first Eigen include; the guard keeps the two definitions
-// from clashing.
+// to arm the Eigen-native sensor. A consumer that defines its own eigen_assert
+// before its first Eigen include is respected; the #ifndef guard keeps the two
+// definitions from clashing.
 #ifndef eigen_assert
 #define eigen_assert(x) \
     do { if(!(x)) ::argmin::detail::bench::on_eigen_malloc(); } while(0)
@@ -108,77 +110,6 @@ inline std::size_t read_alloc_count() noexcept
     return std::max(read_eigen_malloc_count(), read_c_alloc_count());
 }
 
-// Evaluate the gate for one policy probe and return a process exit code
-// (0 pass, 1 fail).
-//
-// min_per_step encodes the reviewer-measured pre-hoist witness band: a policy
-// expected to allocate must be seen to allocate at least this many times per
-// armed step, proving the sensor is not blind. A value of 0 marks a policy
-// expected to already be allocation-free, which is held to the
-// zero-allocation gate immediately.
-//
-// Defining ARGMIN_ALLOC_GATE_EXPECT_ZERO flips every probe to the
-// zero-allocation gate -- the post-hoist acceptance mode. The default leaves
-// ARGMIN_ALLOC_GATE_EXPECT as the pre-fix witness, keeping the known
-// allocating policies demonstrably observed while proving the instrument
-// fires against the current code.
-inline int evaluate_gate(const char* label, std::size_t armed_steps,
-                         std::size_t min_per_step) noexcept
-{
-    const std::size_t eigen_c = read_eigen_malloc_count();
-    const std::size_t c_alloc = read_c_alloc_count();
-    const std::size_t observed = std::max(eigen_c, c_alloc);
-    const double per_step = armed_steps
-        ? static_cast<double>(observed) / static_cast<double>(armed_steps)
-        : static_cast<double>(observed);
-
-    // %lu with an explicit unsigned-long cast rather than %zu: some embedded
-    // libcs (e.g. newlib-nano) do not implement the %z length modifier, and
-    // this prints identically on a hosted libc.
-    std::printf("  [alloc-gate] %-18s eigen_malloc=%lu c_alloc=%lu "
-                "armed_steps=%lu per_step=%.2f\n",
-                label, static_cast<unsigned long>(eigen_c),
-                static_cast<unsigned long>(c_alloc),
-                static_cast<unsigned long>(armed_steps), per_step);
-
-#ifdef ARGMIN_ALLOC_GATE_EXPECT_ZERO
-    if(observed != 0)
-    {
-        std::fprintf(stderr,
-            "  [alloc-gate] %s FAIL: zero-alloc gate saw %lu allocations\n",
-            label, static_cast<unsigned long>(observed));
-        return 1;
-    }
-    std::printf("  [alloc-gate] %s PASS (zero-alloc gate)\n", label);
-    return 0;
-#else
-    if(min_per_step == 0)
-    {
-        if(observed != 0)
-        {
-            std::fprintf(stderr,
-                "  [alloc-gate] %s FAIL: policy expected allocation-free, "
-                "saw %lu\n", label, static_cast<unsigned long>(observed));
-            return 1;
-        }
-        std::printf("  [alloc-gate] %s PASS (allocation-free)\n", label);
-        return 0;
-    }
-    if(per_step < static_cast<double>(min_per_step))
-    {
-        std::fprintf(stderr,
-            "  [alloc-gate] %s FAIL: pre-fix witness expected >= %lu/step, "
-            "saw %.2f/step -- gate may be blind\n",
-            label, static_cast<unsigned long>(min_per_step), per_step);
-        return 1;
-    }
-    std::printf("  [alloc-gate] %s PASS (pre-fix witness %.2f/step >= "
-                "%lu/step)\n", label, per_step,
-                static_cast<unsigned long>(min_per_step));
-    return 0;
-#endif
-}
-
 }
 
 #else
@@ -195,15 +126,6 @@ inline void reset_alloc_count() noexcept {}
 inline std::size_t read_eigen_malloc_count() noexcept { return 0; }
 inline std::size_t read_c_alloc_count() noexcept { return 0; }
 inline std::size_t read_alloc_count() noexcept { return 0; }
-
-// No-op twin of the traced evaluate_gate, so measurement code (the on-device
-// probe workload, the host micro drivers) compiles unchanged when built
-// without ARGMIN_BENCH_TRACE_ALLOC. With no sensor there is nothing to
-// evaluate, so the gate trivially passes.
-inline int evaluate_gate(const char*, std::size_t, std::size_t) noexcept
-{
-    return 0;
-}
 
 }
 

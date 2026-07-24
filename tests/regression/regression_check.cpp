@@ -20,6 +20,7 @@
 #include <array>
 #include <cmath>
 #include <tuple>
+#include <cerrno>
 #include <limits>
 #include <string>
 #include <vector>
@@ -255,44 +256,37 @@ struct baseline_indices
     return idx;
 }
 
+// libc++ (notably the msan-instrumented build) ships no floating-point
+// std::from_chars overload, so double parsing routes through strtod. strtod
+// consumes optional leading whitespace, sign, and inf/nan spellings on its own;
+// requiring full consumption plus an ERANGE reject reproduces the from_chars
+// contract. Integer from_chars is present and still used by parse_int below.
+[[nodiscard]] auto scan_double(const std::string& tmp, double& out) -> bool
+{
+    if(tmp.empty()) return false;
+    errno     = 0;
+    char* end = nullptr;
+    out       = std::strtod(tmp.c_str(), &end);
+    if(errno == ERANGE) return false;
+    return end == tmp.c_str() + tmp.size();
+}
+
 [[nodiscard]] auto parse_finite_double(std::string_view s, double& out) -> bool
 {
     std::string tmp = trim(s);
-    if(tmp.empty()) return false;
-    auto* first = tmp.data();
-    auto* last  = tmp.data() + tmp.size();
-    auto [ptr, ec] = std::from_chars(first, last, out);
-    return ec == std::errc{} && ptr == last && std::isfinite(out);
+    return scan_double(tmp, out) && std::isfinite(out);
 }
 
 [[nodiscard]] auto parse_summary_metric(std::string_view s, double& out) -> bool
 {
     std::string tmp = trim(s);
-    if(tmp.empty()) return false;
-    auto* first = tmp.data();
-    auto* last  = tmp.data() + tmp.size();
-    auto [ptr, ec] = std::from_chars(first, last, out);
-    if(ec == std::errc{} && ptr == last)
-    {
-        if(std::isnan(out))
-        {
-            out = std::numeric_limits<double>::infinity();
-            return true;
-        }
-        if(out < 0.0) return false;
-        return true;
-    }
-    if(tmp == "inf" || tmp == "+inf" || tmp == "infinity" || tmp == "+infinity")
+    if(!scan_double(tmp, out)) return false;
+    if(std::isnan(out))
     {
         out = std::numeric_limits<double>::infinity();
         return true;
     }
-    if(tmp == "nan" || tmp == "+nan" || tmp == "-nan")
-    {
-        out = std::numeric_limits<double>::infinity();
-        return true;
-    }
-    return false;
+    return out >= 0.0;
 }
 
 [[nodiscard]] auto parse_int(std::string_view s, std::int64_t& out) -> bool
@@ -870,6 +864,14 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
                           << " mode=" << mode << '\n';
                 return 1;
             }
+            // An excluded row still provides coverage for its summary cell: the
+            // cell is deliberately not correctness-gated, but it is not "missing
+            // from the baseline" either. Mark it matched so the coverage lock
+            // (uncovered measured argmin cell => breach) does not misfire on a
+            // cell that carries an explicit excluded coverage row.
+            if(auto m = matched.find(cell_key{solver, problem, mode});
+               m != matched.end())
+                m->second = true;
             std::cerr << "EXCLUDED: solver=" << solver
                       << " problem=" << problem
                       << " mode=" << mode
@@ -1132,10 +1134,36 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
     {
         if(was_matched) continue;
         const auto& [solver, problem, mode] = key;
-        std::cerr << "WARN: cell not in baseline: solver=" << solver
-                  << " problem=" << problem
-                  << " mode=" << mode << '\n';
-        ++warn_missing_baseline;
+        // A measured summary cell with no baseline row. For argmin's own cells
+        // this is a coverage breach: the measured-cell set and the baseline are
+        // bidirectionally locked, so a cell the bench measures must carry a
+        // committed row (the reverse -- a baseline row with no summary cell --
+        // already breaches above). For an external comparator the baseline holds
+        // no rows by design (it is argmin-only), so an uncovered comparator cell
+        // stays informational; scoping the breach to argmin keeps the weekly
+        // full-comparator tier from self-destructing on every comparator cell.
+        const auto agg_it = aggregates.find(key);
+        const std::string_view library =
+            agg_it != aggregates.end()
+                ? std::string_view{agg_it->second.library}
+                : std::string_view{};
+        if(library == "argmin")
+        {
+            std::cerr << "BREACH: measured argmin cell not in baseline: solver="
+                      << solver << " problem=" << problem
+                      << " mode=" << mode << '\n';
+            ++breach_count;
+        }
+        else
+        {
+            std::cerr << "WARN: cell not in baseline: solver=" << solver
+                      << " problem=" << problem
+                      << " mode=" << mode
+                      << " library=" << (library.empty() ? "unknown" : library)
+                      << " (comparator; argmin-only baseline holds no row by"
+                      << " design)\n";
+            ++warn_missing_baseline;
+        }
     }
 
     // Reported unconditionally, including on an otherwise clean run, so the
@@ -1176,7 +1204,10 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
     }
     if(warn_missing_baseline > 0)
         std::cerr << "regression_check: " << warn_missing_baseline
-                  << " summary cell(s) not in baseline (informational)\n";
+                  << " comparator summary cell(s) not in baseline"
+                  << " (informational; the baseline is argmin-only, so external"
+                  << " comparators carry no rows). Uncovered argmin cells breach"
+                  << " (exit 2).\n";
     return 0;
 }
 
@@ -1471,6 +1502,62 @@ using oracle_verdict_map = std::map<std::pair<std::string, std::string>, bool>;
     {
         std::cerr << "regression_check self-test: malformed baseline header"
                   << " did not fail closed\n";
+        return 1;
+    }
+
+    // Coverage lock, both directions. A measured argmin summary cell with no
+    // baseline row is a breach (exit 2): the measured-cell set and the baseline
+    // are bidirectionally locked. An external-comparator cell with no baseline
+    // row stays informational (exit 0), because the baseline is argmin-only by
+    // design -- without this scope the weekly full-comparator tier would breach
+    // on every comparator cell. Both directions are asserted so the scope
+    // discriminates rather than merely confirms a breach.
+    const std::string empty_baseline =
+        "solver,problem,mode,max_us_per_step,min_accuracy_log10,"
+        "max_outer_iters,max_cv_log10,disposition,provenance_id,"
+        "wall_gate_policy,exclusion_reason\n";
+    if(!write_text(summary_path, summary_fixture("uncovered_argmin", "problem_u",
+                                                 "10", "1e-10", "1e-10",
+                                                 "converged", "included",
+                                                 "none", "1000", "argmin"))
+       || !write_text(baseline_path, empty_baseline))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 2)
+    {
+        std::cerr << "regression_check self-test: an uncovered measured argmin"
+                  << " cell did not breach (exit 2)\n";
+        return 1;
+    }
+    if(!write_text(summary_path, summary_fixture("nlopt_lbfgs", "problem_u",
+                                                 "10", "1e-10", "1e-10",
+                                                 "converged", "included",
+                                                 "none", "1000", "nlopt"))
+       || !write_text(baseline_path, empty_baseline))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 0)
+    {
+        std::cerr << "regression_check self-test: an uncovered comparator cell"
+                  << " breached instead of staying informational (exit 0)\n";
+        return 1;
+    }
+
+    // A measured (included) argmin cell whose baseline row is excluded is
+    // covered, not uncovered: the excluded row is an explicit coverage decision
+    // (a seed-variant cell that carries no per-seed correctness gate), so it must
+    // not trip the uncovered-argmin breach. Exit 0.
+    if(!write_text(summary_path, summary_fixture("cmaes", "problem_sv",
+                                                 "10", "1e-10", "1e-10",
+                                                 "converged", "included",
+                                                 "none", "1000", "argmin"))
+       || !write_text(baseline_path, baseline_fixture("cmaes", "problem_sv",
+                                                      "0", "excluded",
+                                                      "seed-variant")))
+        return 1;
+    if(run_gate(summary_path, baseline_path, opts) != 0)
+    {
+        std::cerr << "regression_check self-test: an included argmin cell with an"
+                  << " excluded baseline coverage row was not treated as covered"
+                  << " (exit 0)\n";
         return 1;
     }
     return 0;

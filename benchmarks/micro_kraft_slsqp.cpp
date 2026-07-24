@@ -7,9 +7,6 @@
 //            Nonlinear Programming Codes", Lecture Notes in Economics
 //            and Mathematical Systems, Vol. 187, Springer.
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
-#endif
 
 #include "bench_micro_gate.h"
 
@@ -926,60 +923,7 @@ bool probe_regression_hs026()
 
 }
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Allocation gate for kraft_slsqp at fixed N. Warms up to absorb lazy
-// first-step allocations, then arms the trace across a steady-state step
-// window AND a reset() before reading the sensors. The reset is inside the
-// armed window so a warm restart is held to the same zero-allocation bar as a
-// steady step.
-//
-// Trajectory of the un-blinded reading (armed HS071 at N=4): ~19.9
-// mallocs/step originally, ~7.9 after the QP-substrate hoists (caller-owned
-// NNLS workspace, persistent LSEI/LSI Householder apply-workspaces,
-// caller-owned QP multipliers), ~5.9 after the policy-local reporting-path
-// hoist, and 0 after bounding the LSEI/LSI QR workspace storage to the
-// compile-time dimension (the dynamically-typed Householder-sequence apply
-// was heap-allocating its internal product temporary on every QP solve) plus
-// pre-sizing the second-order-correction QP-result buffer. The gate is
-// demonstrably non-blind: the pre-bound code trips this zero gate at 5.9/step,
-// and the alloc_trace_main.cpp canary independently proves an armed Eigen
-// allocation is counted.
-//
-// Built with ARGMIN_ALLOC_GATE_EXPECT_ZERO so evaluate_gate asserts zero
-// allocations across the armed window.
-int argmin_alloc_trace_probe()
-{
-    hs071_fixed problem;
-    Eigen::Vector<double, 4> x0{1.0, 5.0, 5.0, 1.0};
-    argmin::solver_options opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
 
-    argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{},
-                                problem, x0, opts};
-
-    // Warmup absorbs lazy first-push BFGS allocations.
-    solver.step();
-    solver.step();
-
-    constexpr std::size_t hot_steps = 10;
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    for(std::size_t i = 0; i < hot_steps; ++i)
-        solver.step();
-    solver.reset(x0);
-    for(std::size_t i = 0; i < hot_steps; ++i)
-        solver.step();
-    argmin::detail::bench::disarm_alloc_trace();
-
-    return argmin::detail::bench::evaluate_gate(
-        "kraft_slsqp", 2 * hot_steps, 0);
-}
-#endif
-
-#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main()
 {
     constexpr std::uint32_t reps = 10000;
@@ -1160,4 +1104,3 @@ int main()
     argmin::bench::println("  perf record -F 99999 -g -- ./micro_kraft_slsqp");
     argmin::bench::println("  perf report --stdio --percent-limit=1.0");
 }
-#endif

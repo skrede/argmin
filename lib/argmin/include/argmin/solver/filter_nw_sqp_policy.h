@@ -50,6 +50,7 @@
 #include <Eigen/Cholesky>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -313,6 +314,11 @@ struct filter_nw_sqp_policy
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
         const int m = s.n_eq + s.n_ineq;
+
+        // Contract: runtime_m <= state_type<Problem>::M when the cap is static -- a smaller runtime count is supported, but exceeding the declared cap overflows the inline result-multiplier storage.
+        if constexpr(state_type<Problem>::M != argmin::dynamic_dimension)
+            assert(m <= state_type<Problem>::M
+                   && "runtime constraint count exceeds the problem's declared constraint_count cap");
 
         s.x = x0;
         s.g.setZero(s.n);

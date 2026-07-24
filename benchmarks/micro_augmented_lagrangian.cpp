@@ -7,9 +7,6 @@
 // Reference: K&W Section 10.9, Algorithm 10.2;
 //            N&W Section 17.4, Algorithm 17.4.
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-#include "argmin/detail/bench/alloc_counter.h"
-#endif
 
 #include "argmin/solver/augmented_lagrangian_policy.h"
 #include "argmin/solver/step_budget_solver.h"
@@ -577,76 +574,7 @@ bool probe_regression_hs039()
 
 }
 
-#ifdef ARGMIN_BENCH_TRACE_ALLOC
-// Allocation gate for augmented_lagrangian at fixed N. The wrapped inner
-// L-BFGS-B is already allocation-free; this exercises the OUTER method-of-
-// multipliers path -- the chunked inner-solve resume, the outer constraint /
-// Jacobian evaluations, the Lagrangian-gradient + KKT reporting, and the
-// multiplier / penalty update -- across a steady-state window that includes at
-// least one penalty (mu) reduction. The mu reduction is the former inner-solver
-// RECONSTRUCTION path (now a reset_clear on the persisted solver): arming
-// across it proves that path is allocation-free, not merely the multiplier-
-// only branch. A warm reset() sits inside the armed window too (it must not
-// reconstruct the inner solver). The warm-up absorbs the one-time inner-solver
-// construction and the first-penalty lazy work before the sensors are armed.
-int argmin_alloc_trace_probe()
-{
-    argmin::hs071<> problem;
-    Eigen::Vector<double, 4> x0 = problem.initial_point();
 
-    argmin::solver_options opts;
-    opts.max_iterations = 400;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-15);
-    opts.set_step_threshold(1e-15);
-
-    using policy_t = argmin::augmented_lagrangian_policy<
-        argmin::lbfgsb_policy<4>, 4>;
-    policy_t::options_type popts;  // default inner_chunk
-
-    argmin::step_budget_solver solver{policy_t{}, problem, x0, opts, popts};
-
-    // Warm-up: construct the inner solver and clear first-penalty lazy work.
-    for(int i = 0; i < 6; ++i)
-        solver.step();
-
-    constexpr std::size_t hot_steps = 40;
-    bool mu_changed_in_window = false;
-
-    argmin::detail::bench::reset_alloc_count();
-    argmin::detail::bench::arm_alloc_trace();
-    for(std::size_t i = 0; i < hot_steps; ++i)
-    {
-        const double mu_before = solver.state().mu;
-        solver.step();
-        if(solver.state().mu != mu_before)
-            mu_changed_in_window = true;
-    }
-    solver.reset(x0);  // warm reset INSIDE the armed window (no reconstruction)
-    for(std::size_t i = 0; i < hot_steps; ++i)
-    {
-        const double mu_before = solver.state().mu;
-        solver.step();
-        if(solver.state().mu != mu_before)
-            mu_changed_in_window = true;
-    }
-    argmin::detail::bench::disarm_alloc_trace();
-
-    if(!mu_changed_in_window)
-    {
-        std::fprintf(stderr,
-            "  [alloc-gate] augmented_lagrangian FAIL: no penalty (mu) "
-            "reduction occurred inside the armed window -- the scenario did "
-            "not exercise the former reconstruction path\n");
-        return 1;
-    }
-
-    return argmin::detail::bench::evaluate_gate(
-        "augmented_lagrangian", 2 * hot_steps, 1);
-}
-#endif
-
-#ifndef ARGMIN_BENCH_TRACE_ALLOC
 int main()
 {
     constexpr std::uint32_t reps = 200;
@@ -701,4 +629,3 @@ int main()
         }
     }
 }
-#endif

@@ -144,7 +144,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_kraft", "note": "zero mode, 0.00/step"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_kraft", "note": "zero-allocation assertion over the armed steady-state window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -197,7 +197,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_slsqp", "note": "zero mode, 0.00/step"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_slsqp", "note": "zero-allocation assertion over the warm-started armed window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ],
               "footnotes": ["restore"]
@@ -251,7 +251,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_nw", "note": "zero mode, 0.00/step, fixed-N steady state"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_nw", "note": "zero-allocation assertion over the fixed-N steady-state window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -303,7 +303,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_nw", "note": "zero mode, 0.00/step, fixed-N steady state"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_nw", "note": "zero-allocation assertion over the fixed-N steady-state window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ],
               "footnotes": ["restore"]
@@ -356,7 +356,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_tr_sqp", "note": "zero mode, 0.00/step, on an equality-constrained fixture"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_tr_sqp", "note": "zero-allocation assertion on an equality-constrained fixture"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ],
               "footnotes": ["nullspace"]
@@ -409,7 +409,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_trsqp", "note": "zero mode, 0.00/step, on an equality-constrained fixture"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_trsqp", "note": "zero-allocation assertion on an equality-constrained fixture"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ],
               "footnotes": ["restore", "nullspace"]
@@ -462,7 +462,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_lbfgsb", "note": "zero mode, including the bound-active generalized-Cauchy-point/subspace branch"},
+                {"kind": "ctest_test", "name": "alloc_gate_lbfgsb", "note": "zero-allocation assertion including the bound-active generalized-Cauchy-point/subspace branch"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -513,7 +513,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_byrd_lbfgsb", "note": "zero mode, bound-active path"},
+                {"kind": "ctest_test", "name": "alloc_gate_byrd_lbfgsb", "note": "zero-allocation assertion on the bound-active path"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -564,7 +564,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_lm", "note": "zero mode, 0.00/step, fixed-N steady state"},
+                {"kind": "ctest_test", "name": "alloc_gate_lm", "note": "zero-allocation assertion over the fixed-N steady-state window"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -610,7 +610,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_projected_gn", "note": "zero mode, active-bound fixture"},
+                {"kind": "ctest_test", "name": "alloc_gate_projected_gn", "note": "zero-allocation assertion on an active-bound fixture"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -655,7 +655,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_projected_gradient_gn", "note": "zero mode, active-bound fixture"},
+                {"kind": "ctest_test", "name": "alloc_gate_projected_gradient_gn", "note": "zero-allocation assertion on an active-bound fixture"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -706,7 +706,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "alloc_gate_augmented_lagrangian", "note": "zero mode; bounded resumable inner solve, mu-change and warm-reset armed"},
+                {"kind": "ctest_test", "name": "alloc_gate_augmented_lagrangian", "note": "zero-allocation assertion; bounded resumable inner solve, mu-change and warm-reset armed"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -1037,6 +1037,111 @@
                 {"kind": "ci_job", "name": "c++20 (build + ctest)"},
                 {"kind": "ci_job", "name": "c++23 (build + ctest)"}
               ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "qp-solvers",
+      "columns": [
+        "allocation-free?",
+        "bounded-iterations?",
+        "wall-clock-free?",
+        "exceptions-off-clean?",
+        "deterministic(seeded)?"
+      ],
+      "rows": [
+        {
+          "module": "dense_admm_qp (fixed N)",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "evidence": [
+                {"kind": "ctest_test", "name": "qp_alloc_gate_dense_admm", "note": "zero-allocation assertion over the warm-started resolve hot loop"},
+                {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
+              ]
+            },
+            "bounded-iterations?": {
+              "verdict": "excluded",
+              "rationale": "the ADMM outer loop and the fixed reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the resolve path; not yet covered by the policy chrono-freedom probe, so argued rather than gated"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "outcomes travel on expected/optional status returns; no throw, dynamic_cast, or typeid on the solve/resolve path; not driven by the no-exceptions probe, so argued rather than gated"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "carries no RNG; the ADMM recursion, Ruiz equilibration, and reduced-KKT polish are deterministic functions of the inputs"
+            }
+          }
+        },
+        {
+          "module": "dense_admm_qp (dynamic N)",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "no",
+              "qualifier": "host-tier: the dynamic-N instantiation sizes its workspace at construction and the Eigen dynamic decompositions allocate; no zero-alloc gate, not RT-claimed"
+            },
+            "bounded-iterations?": {
+              "verdict": "excluded",
+              "rationale": "the ADMM outer loop and the fixed reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the resolve path; not yet covered by the policy chrono-freedom probe, so argued rather than gated"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "outcomes travel on expected/optional status returns; no throw, dynamic_cast, or typeid on the solve/resolve path; not driven by the no-exceptions probe, so argued rather than gated"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "carries no RNG; the ADMM recursion, Ruiz equilibration, and reduced-KKT polish are deterministic functions of the inputs"
+            }
+          }
+        },
+        {
+          "module": "sparse_admm_qp",
+          "cells": {
+            "allocation-free?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "resolve hot loop only, given a warm pose and polish off: the KKT is factored once at pose and the vectors-only resolve iteration performs no factorization, no pattern work, and no heap allocation; pose allocates its storage one-time and polish re-analyzes a freshly shaped reduced KKT and allocates per call, so both are outside the claim; host-tier",
+              "evidence": [
+                {"kind": "ctest_test", "name": "qp_alloc_gate_sparse_admm_resolve", "note": "zero-allocation assertion over the warm-started resolve hot loop with polish and adaptive-rho off"},
+                {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
+              ]
+            },
+            "bounded-iterations?": {
+              "verdict": "excluded",
+              "rationale": "the ADMM outer loop and the reduced-KKT polish refinement are bounded by the caller's max_iterations / polish_refine_iter budgets; no intrinsic inner iterative leaf to gate"
+            },
+            "wall-clock-free?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "the solver reads no clock: the adaptive-rho schedule triggers on a fixed iteration interval, never a measured duration, and no <chrono> is reachable from the solve or resolve path -- the claim holds only while that trigger stays iteration-based; not covered by the policy chrono-freedom probe, so argued rather than gated"
+            },
+            "exceptions-off-clean?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "outcomes travel on expected/optional return channels; no throw, dynamic_cast, or typeid on the solve or resolve path -- the claim holds only while that error channel stays in place. Eigen's sparse containers can still throw on an allocation failure, which is why this is argued and host-tier rather than gated"
+            },
+            "deterministic(seeded)?": {
+              "verdict": "yes",
+              "class": "argued",
+              "rationale": "carries no RNG; the Ruiz equilibration, the ADMM recursion, the AMD fill-reducing ordering of the simplicial LDL^T, and the polish are deterministic functions of the inputs"
             }
           }
         }

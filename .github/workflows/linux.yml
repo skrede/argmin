@@ -39,6 +39,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The check body lives in the script so that its negative control can run
+      # the same code that gates here; a check nobody has ever seen fail is not
+      # a check.
+      - name: Enforce no tests|lib -> benchmarks|python dependency edge
+        if: matrix.compiler == 'gcc-14'
+        run: |
+          bash scripts/dependency_edge_check.sh
+          bash scripts/dependency_edge_negative_control.sh
+
       - name: Install gcovr
         if: matrix.coverage
         run: pip install gcovr==8.6
@@ -53,12 +62,14 @@ jobs:
               -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination --coverage" \
               -DCMAKE_C_FLAGS="--coverage" \
               -DARGMIN_BUILD_TESTS=ON \
+              -DARGMIN_BUILD_BENCHMARKS=OFF \
               -DARGMIN_BUILD_EXAMPLES=OFF \
               -DARGMIN_CMAKE_FETCH_DEPS=ON
           else
             cmake . -B build -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_CXX_FLAGS="-Werror -Wno-invalid-feature-combination" \
               -DARGMIN_BUILD_TESTS=ON \
+              -DARGMIN_BUILD_BENCHMARKS=OFF \
               -DARGMIN_BUILD_EXAMPLES=OFF \
               -DARGMIN_CMAKE_FETCH_DEPS=ON
           fi
@@ -68,6 +79,15 @@ jobs:
 
       - name: Test
         run: cd build && ctest --output-on-failure
+
+      # Deletability enforcement. The allocation gates were re-homed out of the
+      # benchmark tree into tests/, so they must register and run with the
+      # benchmarks disabled (this leg builds -DARGMIN_BUILD_BENCHMARKS=OFF). A
+      # label selection that matches nothing is a ctest success, so
+      # --no-tests=error turns a silently dropped gate or a lost `alloc-gate`
+      # label into a failure here instead of a vacuously green allocation claim.
+      - name: Enforce the allocation gates run without benchmarks
+        run: cd build && ctest --output-on-failure --no-tests=error -L alloc-gate
 
       # ctest suppresses a passing test's stdout, so the spread magnitude the
       # cross-path test reports is invisible under --output-on-failure. Run the
@@ -86,7 +106,9 @@ jobs:
             --filter 'lib/argmin/include/argmin/' \
             --exclude-throw-branches \
             --exclude-unreachable-branches \
+            --exclude 'detail/diagnostics/alloc_counter\.h' \
             --gcov-ignore-errors=source_not_found \
+            --merge-mode-functions=separate \
             --xml coverage.xml
 
       - name: Coverage gate
@@ -98,7 +120,9 @@ jobs:
             --filter 'lib/argmin/include/argmin/' \
             --exclude-throw-branches \
             --exclude-unreachable-branches \
+            --exclude 'detail/diagnostics/alloc_counter\.h' \
             --gcov-ignore-errors=source_not_found \
+            --merge-mode-functions=separate \
             --json coverage.json
           python3 scripts/coverage_gate.py coverage.json scripts/coverage_floors.txt
 
@@ -276,30 +300,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Every allocation gate except the Levenberg-Marquardt one is registered
-      # alongside the cross-solver comparison benchmarks, and its driver
-      # includes the comparison library's C++ header unconditionally. Without
-      # the library present the whole group silently disappears from the
-      # configure and only one gate registers, which strips the allocation-free
-      # evidence down to a twelfth of what it claims to cover while leaving the
-      # job green. Install it so the gate set is complete.
-      - name: Install the cross-solver comparison library
-        run: sudo apt-get update && sudo apt-get install -y libnlopt-cxx-dev
-
       - name: Configure
         env:
           CC: clang-18
           CXX: clang++-18
-          # The C++ development package depends on the C one, so two CMake
-          # package configs land, both named NLoptConfig.cmake: one under
-          # cmake/nlopt exporting NLopt::nlopt, one under cmake/nlopt_cxx
-          # exporting NLopt::nlopt_cxx. A bare config search matches the glob
-          # for both and settles on the C++ one, whose target name is not the
-          # one the benchmark targets link. Point the search at the C config
-          # explicitly. Only C-implemented algorithms are used here, so the C
-          # library is the correct link target and the C++ header that sits
-          # beside it is a header-only wrapper over that same API.
-          NLopt_DIR: /usr/lib/x86_64-linux-gnu/cmake/nlopt
+        # The allocation gates live in the tests tree and link neither the
+        # cross-solver comparison library nor the benchmark tree, so no NLopt
+        # install is needed here. Benchmarks stay ON only so the citation
+        # resolver below can reach the non-alloc cited cells (the deterministic
+        # freedom scans and the fast regression gate).
+        #
         # The libcmaes comparator runs its own find_package(Eigen3), which
         # fails under FetchContent'd Eigen (no Eigen3Config.cmake is
         # exported). It is an optional external CMA-ES baseline, not part of
@@ -312,20 +322,25 @@ jobs:
             -DARGMIN_BENCH_LIBCMAES=OFF \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
-      # A missing comparison library degrades the configure silently: the gates
-      # simply do not register and the ctest step below still passes on the
-      # ones that remain. Assert the count so that degradation fails here
-      # instead of being reported as a green allocation-free claim. The literal
-      # is deliberate -- adding or removing a gate should force a visible edit.
+      - name: Build
+        run: cmake --build build
+
+      # The gates are argmin-only correctness cases in the tests tree, so the
+      # count is NLopt-independent. Assert it anyway so a silently dropped case
+      # or `alloc-gate` label fails here instead of being reported as a green
+      # allocation-free claim. The literal is deliberate -- adding or removing a
+      # gate should force a visible edit. catch_discover_tests registers the
+      # gates at build time, so this must run after the build (a pre-build
+      # `ctest -N` would find zero).
       - name: Verify the full allocation-gate set registered
         run: |
           cd build
-          count=$(ctest -N -L alloc-gate | grep -c 'Test #')
+          # ctest right-aligns the test index, so a literal 'Test #' misses any
+          # entry whose index is narrower than the widest one on the run. The
+          # guard exists to catch a dropped gate; it must not miscount silently.
+          count=$(ctest -N -L alloc-gate | grep -cE '^ *Test +#')
           echo "allocation gates registered: $count"
-          test "$count" -eq 12 || { echo "expected 12 allocation gates, found $count"; exit 1; }
-
-      - name: Build
-        run: cmake --build build
+          test "$count" -eq 15 || { echo "expected 15 allocation gates, found $count"; exit 1; }
 
       # ctest treats a label selection that matches nothing as success, so
       # without --no-tests=error this step would pass if the labels it names
@@ -529,6 +544,43 @@ jobs:
           fi
           echo "PASS: newlib-nano -fno-exceptions link resolved every symbol"
           arm-none-eabi-size "$elf"
+
+  python-bindings:
+    runs-on: ubuntu-24.04
+    name: python bindings (build + pytest)
+
+    # The extension is gated behind an option that defaults off, so no other job
+    # in this workflow builds it and none of them would notice it breaking. This
+    # is the only job that will.
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner image does not ship the generator this job's preset names,
+      # and every other leg here configures without a preset, so nothing else
+      # installs it. Without this step the configure step below fails outright.
+      - name: Install the build generator
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Creates the repository-local environment and installs the exactly
+      # pinned, binary-only dependency set into it and nowhere else.
+      - name: Bootstrap the interpreter environment
+        run: python3 scripts/bootstrap_python_env.py
+
+      - name: Configure
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: cmake --preset python-bindings
+
+      - name: Build
+        run: cmake --build build/python -j2
+
+      - name: Test
+        run: ctest --test-dir build/python --output-on-failure
 
   examples:
     runs-on: ubuntu-24.04

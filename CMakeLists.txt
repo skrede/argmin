@@ -31,6 +31,7 @@ option(ARGMIN_BUILD_EXAMPLES "Build examples" OFF)
 option(ARGMIN_BUILD_FUZZ_TESTS "Build fuzz test targets" OFF)
 option(ARGMIN_BUILD_PROPERTY_TESTS "Build property-based test targets (requires RapidCheck)" OFF)
 option(ARGMIN_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(ARGMIN_BUILD_PYTHON "Build the Python extension module and its test suite" OFF)
 option(ARGMIN_CMAKE_FETCH_DEPS "Use CMake FetchContent to download and install dependencies" OFF)
 
 include(FetchContent)
@@ -49,7 +50,7 @@ if(ARGMIN_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-if(ARGMIN_BUILD_TESTS OR ARGMIN_BUILD_FUZZ_TESTS OR ARGMIN_BUILD_PROPERTY_TESTS OR ARGMIN_BUILD_BENCHMARKS)
+if(ARGMIN_BUILD_TESTS OR ARGMIN_BUILD_FUZZ_TESTS OR ARGMIN_BUILD_PROPERTY_TESTS OR ARGMIN_BUILD_BENCHMARKS OR ARGMIN_BUILD_PYTHON)
     enable_testing()
 endif()
 
@@ -59,4 +60,8 @@ endif()
 
 if(ARGMIN_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
+endif()
+
+if(ARGMIN_BUILD_PYTHON)
+    add_subdirectory(python)
 endif()
