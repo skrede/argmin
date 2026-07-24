@@ -1,10 +1,13 @@
 // Sparse ADMM QP polish micro-benchmark (argmin-only, informative).
 //
 // Reproduces the per-step cost of the reduced-KKT polish on the control-shaped
-// linear-MPC family. The polish re-analyzes and re-factorizes a freshly shaped
-// reduced KKT on every resolve by construction, so its cost is a per-call
-// constant this bench isolates by differencing a polish-on run against a
-// polish-off run over an identical problem sequence.
+// linear-MPC family, and A/Bs the pattern-gated reuse of that polish factor. The
+// polish re-analyzes and re-factorizes a freshly shaped reduced KKT whenever the
+// active-set pattern, the delta or the pose changes, so its cost is isolated by
+// differencing a polish-on run against a polish-off run over an identical problem
+// sequence; the reuse A/B differences a reuse-enabled polish-on run against a
+// reuse-disabled one over the same sequence, so the saving the reuse buys on a
+// hit is measured directly against the always-re-analyzing path.
 //
 // Two warm-resolve regimes are measured per cell, matching how the solver is
 // exercised in practice:
@@ -21,7 +24,10 @@
 // count with polish on and off, the derived polish share of per-step cost, and
 // the consecutive-step fraction of identical polish active-set patterns (the
 // reuse hit rate a pattern-gated cache would see), derived exactly as the
-// solver derives its own active set from the returned unscaled duals.
+// solver derives its own active set from the returned unscaled duals. It then
+// prints the reuse A/B: the per-step median with the reuse seam enabled against
+// disabled and the instruction saving between them, the direct measure of the
+// pattern-gated reuse lever in each regime.
 //
 // This target is INFORMATIVE: it prints numbers and asserts nothing. A gated
 // argmin-only measurement belongs under tests/ for deletability; this ungated
@@ -178,9 +184,10 @@ struct measured_pass
 // resolve. The active-set hit rate is derived only on the polish-carrying pass,
 // where the returned duals reflect the polished iterate.
 measured_pass run_pass(const control_qp& cell, const std::vector<step_problem>& sequence,
-                       bool polish, bool collect_hits)
+                       bool polish, bool reuse, bool collect_hits)
 {
     argmin::sparse_admm_qp_solver<double> solver;
+    solver.set_polish_reuse(reuse);
     argmin::sparse_qp_options opts;
     opts.polish = polish;
     argmin::qp_result<double> out;
@@ -247,8 +254,11 @@ double median_int(const std::vector<int>& values)
 void report_regime(const char* label, const control_qp& cell,
                    const std::vector<step_problem>& sequence)
 {
-    const measured_pass on = run_pass(cell, sequence, true, true);
-    const measured_pass off = run_pass(cell, sequence, false, false);
+    // The polish share isolates the intrinsic re-analyzing polish cost, so it is
+    // measured with the reuse seam OFF; the reuse lever is reported separately by
+    // report_reuse. This keeps the share independent of the reuse hit rate.
+    const measured_pass on = run_pass(cell, sequence, true, false, true);
+    const measured_pass off = run_pass(cell, sequence, false, false, false);
 
     if(!on.armed || !off.armed)
     {
@@ -270,6 +280,33 @@ void report_regime(const char* label, const control_qp& cell,
                 100.0 * on.hit_rate);
 }
 
+// Reuse A/B: polish stays on for both passes; the seam alone differs. reuse-on
+// takes the pattern-gated fast path on a hit, reuse-off re-analyzes every call
+// (the pre-reuse behavior). The saving is (reuse-off - reuse-on) instructions per
+// step: positive means the reuse paid, and a near-zero value on a ~0%-hit regime
+// is the evidence the miss-path compare is effectively free rather than a net
+// per-step regression.
+void report_reuse(const char* label, const control_qp& cell,
+                  const std::vector<step_problem>& sequence)
+{
+    const measured_pass on = run_pass(cell, sequence, true, true, false);
+    const measured_pass off = run_pass(cell, sequence, true, false, false);
+
+    if(!on.armed || !off.armed)
+    {
+        std::printf("    %-8s | reuse A/B: instruction counter unavailable\n", label);
+        return;
+    }
+
+    const double med_on = median(on.instructions);
+    const double med_off = median(off.instructions);
+    const double saved = med_off - med_on;
+    const double pct = med_off > 0.0 ? 100.0 * saved / med_off : 0.0;
+
+    std::printf("    %-8s | reuse-on %9.0f | reuse-off %9.0f | saved %+9.0f (%+5.1f%%)\n",
+                label, med_on, med_off, saved, pct);
+}
+
 void run_cell(int n_input, int horizon, int steps)
 {
     const control_qp cell =
@@ -282,6 +319,8 @@ void run_cell(int n_input, int horizon, int steps)
     const std::vector<step_problem> rollout = build_rollout(cell, steps);
     report_regime("pertIC", cell, pertic);
     report_regime("rollout", cell, rollout);
+    report_reuse("pertIC", cell, pertic);
+    report_reuse("rollout", cell, rollout);
 }
 
 }

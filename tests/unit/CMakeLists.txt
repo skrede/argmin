@@ -46,6 +46,7 @@ add_executable(argmin_unit_tests
     dense_admm_qp_test.cpp
     sparse_admm_qp_test.cpp
     sparse_control_qp_test.cpp
+    sparse_polish_reuse_test.cpp
     sparse_qp_reference_test.cpp
     maros_meszaros_dense_test.cpp
     step_budget_solver_test.cpp
@@ -195,6 +196,19 @@ catch_discover_tests(argmin_unit_tests
     TEST_SPEC "[move_asan]"
     TEST_PREFIX "asan-move:"
     PROPERTIES LABELS "asan-move"
+)
+
+# Dedicated ctest selection for the polish-KKT reuse correctness cases. The
+# [sparse_polish_reuse]-tagged cases prove the pattern-gated polish factor reuse
+# is bit-identical to the always-re-analyzing path and that the conservative
+# detector re-analyzes on every active-set change. This second discovery pass
+# re-registers those cases under a "sparse_polish_reuse:" name prefix so
+# `ctest -R sparse_polish_reuse` (and the label) select exactly them; a plain
+# ctest still runs them once under their unprefixed names.
+catch_discover_tests(argmin_unit_tests
+    TEST_SPEC "[sparse_polish_reuse]"
+    TEST_PREFIX "sparse_polish_reuse:"
+    PROPERTIES LABELS "sparse_polish_reuse"
 )
 
 # Dedicated ctest label for oracle-backed pins (wave-2 instruments:

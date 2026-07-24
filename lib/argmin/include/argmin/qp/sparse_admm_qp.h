@@ -35,10 +35,12 @@
 // storage -- a one-time real-time setup cost. resolve() performs no
 // factorization and no pattern work, and, given a warm pose and polish off, its
 // vectors-only iteration performs no heap allocation; that property is held by a
-// labeled allocation gate. Polish re-analyzes a freshly shaped reduced KKT and
-// allocates per call, so a real-time deployment runs with polish off. The
-// allocation-free property is the resolve iteration only -- never the whole
-// solver, and never pose or polish -- so this is a host-tier solver.
+// labeled allocation gate. Polish re-analyzes and re-allocates its reduced KKT
+// whenever the active-set pattern, the delta or the pose changes -- which a
+// real-time tracking workload does on nearly every step -- so a real-time
+// deployment runs with polish off. The allocation-free property is the resolve
+// iteration only -- never the whole solver, and never pose or polish -- so this
+// is a host-tier solver.
 //
 // Reference: Stellato, Banjac, Goulart, Bemporad, Boyd (2020), "OSQP: An
 //            operator splitting solver for quadratic programs," Math. Prog.
@@ -177,12 +179,23 @@ public:
     // factor-once-at-pose contract is observable rather than merely documented:
     // across a resolve() the iteration counts must not move except for the
     // numeric refactorization an accepted adaptive-rho update performs. The
-    // polish is counted separately because it analyzes a freshly shaped reduced
-    // system on every call by construction, which is a different claim.
+    // polish is counted separately because it reuses its reduced-KKT analysis
+    // and numeric factor whenever the active-set pattern, the delta and the pose
+    // are unchanged, and re-analyzes only when one of those changes or the
+    // factorization fails, so its counters increment once per analysis actually
+    // performed rather than once per call.
     std::size_t iteration_analyses() const { return kkt_.symbolic_analyses(); }
     std::size_t iteration_factorizations() const { return kkt_.numeric_factorizations(); }
     std::size_t polish_analyses() const { return polish_kkt_.symbolic_analyses(); }
     std::size_t polish_factorizations() const { return polish_kkt_.numeric_factorizations(); }
+
+    // Measurement and test seam, not a solver option: toggles the pattern-gated
+    // reuse of the polish reduced-KKT analysis and factor so an in-process A/B
+    // and the bit-identity correctness test can compare the reusing path against
+    // the always-re-analyzing path. Enabled by default; disabling forces a
+    // re-analysis on every polish call, reproducing the pre-reuse behavior.
+    void set_polish_reuse(bool enabled) { polish_reuse_enabled_ = enabled; }
+    bool polish_reuse() const { return polish_reuse_enabled_; }
 
 private:
     static constexpr double rho_min_ = 1e-6;
@@ -302,6 +315,9 @@ private:
         active_upper_.clear();
         active_lower_.reserve(static_cast<std::size_t>(m_));
         active_upper_.reserve(static_cast<std::size_t>(m_));
+        // A re-pose can change P, A or the shape, so any cached polish factor is
+        // no longer bit-identical to a freshly analyzed one: drop it.
+        polish_cache_valid_ = false;
 
         ruiz(opts);
         if(m_ > 0)
@@ -719,8 +735,14 @@ private:
 
     // Delta-regularized reduced-KKT polish (Stellato et al. 2020, Section 5.3).
     // The active set comes from the unscaled dual signs and the reduced system
-    // is sized to it, so the pattern differs per call and is analyzed per call.
-    // A factorization failure is a rejection of the polish, not an error.
+    // is sized to it. Because P, A and delta are frozen across a resolve, an
+    // unchanged active-set pattern yields a bit-identical reduced KKT, so its
+    // symbolic analysis and numeric factor are reused: the pattern, the delta
+    // and the pose are compared per call and the analysis is redone only when
+    // one of them changes or the factorization fails. The comparison is exact
+    // element-wise index-vector equality, never a hash, so a changed pattern can
+    // never reuse a stale factor. A factorization failure is a rejection of the
+    // polish, not an error.
     //
     // Two departures from the reference implementation's accept rule, both
     // forced by the same observed failure: an inactive row whose multiplier is
@@ -736,7 +758,6 @@ private:
     {
         active_lower_.clear();
         active_upper_.clear();
-        std::fill(act_row_.begin(), act_row_.end(), -1);
         const Scalar y_inf = m_ > 0 ? y_unscaled_.cwiseAbs().maxCoeff() : Scalar(0);
         const Scalar active_tol =
             Scalar(polish_active_tol_) * std::max(Scalar(1), y_inf);
@@ -753,44 +774,76 @@ private:
         const int dim = n_ + mact;
         const Scalar delta = static_cast<Scalar>(o.delta);
 
-        for(int k = 0; k < nl; ++k)
-            act_row_[static_cast<std::size_t>(active_lower_[static_cast<std::size_t>(k)])] = k;
-        for(int k = 0; k < nu; ++k)
-            act_row_[static_cast<std::size_t>(active_upper_[static_cast<std::size_t>(k)])] = nl + k;
+        // Conservative pattern-gated reuse: an unchanged active-set pattern, an
+        // unchanged delta and an intact cache (no re-pose, no prior factor
+        // failure) mean the reduced KKT is bit-identical to the one already
+        // analyzed and factored, so both the symbolic analysis and the numeric
+        // factor are reused verbatim. The index vectors are compared by exact
+        // element-wise content -- size first, then element by element,
+        // short-circuiting on the first mismatch -- never by a hash or compact
+        // signature, whose collisions could serve a stale factor for a changed
+        // pattern and return a wrong polished answer.
+        const bool reuse = polish_reuse_enabled_ && polish_cache_valid_
+                           && polish_cache_delta_ == delta
+                           && polish_cache_lower_ == active_lower_
+                           && polish_cache_upper_ == active_upper_;
 
-        A_act_ = sparse_type(mact, n_);
-        triplets_.clear();
-        for(int j = 0; j < n_; ++j)
-            for(typename sparse_type::InnerIterator it(A_, j); it; ++it)
+        if(!reuse)
+        {
+            std::fill(act_row_.begin(), act_row_.end(), -1);
+            for(int k = 0; k < nl; ++k)
+                act_row_[static_cast<std::size_t>(active_lower_[static_cast<std::size_t>(k)])] = k;
+            for(int k = 0; k < nu; ++k)
+                act_row_[static_cast<std::size_t>(active_upper_[static_cast<std::size_t>(k)])] =
+                    nl + k;
+
+            A_act_ = sparse_type(mact, n_);
+            triplets_.clear();
+            for(int j = 0; j < n_; ++j)
+                for(typename sparse_type::InnerIterator it(A_, j); it; ++it)
+                {
+                    const int r = act_row_[static_cast<std::size_t>(it.row())];
+                    if(r >= 0)
+                        triplets_.emplace_back(static_cast<index_type>(r),
+                                               static_cast<index_type>(j), it.value());
+                }
+            A_act_.setFromTriplets(triplets_.begin(), triplets_.end());
+            A_act_.makeCompressed();
+
+            polish_delta_.assign(static_cast<std::size_t>(mact), delta);
+            if(!factor_fresh(polish_kkt_, P_, A_act_, delta, polish_delta_))
             {
-                const int r = act_row_[static_cast<std::size_t>(it.row())];
-                if(r >= 0)
-                    triplets_.emplace_back(static_cast<index_type>(r), static_cast<index_type>(j),
-                                           it.value());
+                // A failed analysis leaves no reusable factor: drop the cache so
+                // the next call cannot mistake the stale member factor for a hit.
+                polish_cache_valid_ = false;
+                return false;
             }
-        A_act_.setFromTriplets(triplets_.begin(), triplets_.end());
-        A_act_.makeCompressed();
 
-        polish_delta_.assign(static_cast<std::size_t>(mact), delta);
-        if(!factor_fresh(polish_kkt_, P_, A_act_, delta, polish_delta_))
-            return false;
+            K_unreg_ = sparse_type(dim, dim);
+            triplets_.clear();
+            for(int j = 0; j < n_; ++j)
+                for(typename sparse_type::InnerIterator it(P_, j); it; ++it)
+                    triplets_.emplace_back(static_cast<index_type>(it.row()),
+                                           static_cast<index_type>(j), it.value());
+            for(int j = 0; j < n_; ++j)
+                for(typename sparse_type::InnerIterator it(A_act_, j); it; ++it)
+                {
+                    const index_type r = static_cast<index_type>(n_ + it.row());
+                    const index_type cj = static_cast<index_type>(j);
+                    triplets_.emplace_back(r, cj, it.value());
+                    triplets_.emplace_back(cj, r, it.value());
+                }
+            K_unreg_.setFromTriplets(triplets_.begin(), triplets_.end());
+            K_unreg_.makeCompressed();
 
-        K_unreg_ = sparse_type(dim, dim);
-        triplets_.clear();
-        for(int j = 0; j < n_; ++j)
-            for(typename sparse_type::InnerIterator it(P_, j); it; ++it)
-                triplets_.emplace_back(static_cast<index_type>(it.row()),
-                                       static_cast<index_type>(j), it.value());
-        for(int j = 0; j < n_; ++j)
-            for(typename sparse_type::InnerIterator it(A_act_, j); it; ++it)
-            {
-                const index_type r = static_cast<index_type>(n_ + it.row());
-                const index_type cj = static_cast<index_type>(j);
-                triplets_.emplace_back(r, cj, it.value());
-                triplets_.emplace_back(cj, r, it.value());
-            }
-        K_unreg_.setFromTriplets(triplets_.begin(), triplets_.end());
-        K_unreg_.makeCompressed();
+            // The member factor and unregularized reduced KKT now match this
+            // pattern and delta; record them so an unchanged next call reuses
+            // them. Set only past a successful factor_fresh.
+            polish_cache_lower_ = active_lower_;
+            polish_cache_upper_ = active_upper_;
+            polish_cache_delta_ = delta;
+            polish_cache_valid_ = true;
+        }
 
         rhs_red_.resize(dim);
         rhs_red_.head(n_) = -q_;
@@ -918,6 +971,14 @@ private:
     std::vector<int> act_row_;
     std::vector<int> active_lower_;
     std::vector<int> active_upper_;
+    // Pattern-gated polish-reuse cache: the previous call's active-set index
+    // vectors and delta, plus a validity flag reset by a re-pose or a factor
+    // failure. A hit reuses polish_kkt_ and K_unreg_ without re-analyzing.
+    std::vector<int> polish_cache_lower_;
+    std::vector<int> polish_cache_upper_;
+    Scalar polish_cache_delta_{Scalar(0)};
+    bool polish_cache_valid_{false};
+    bool polish_reuse_enabled_{true};
     vector<Scalar> rhs_red_;
     vector<Scalar> sol_red_;
     vector<Scalar> refine_res_;

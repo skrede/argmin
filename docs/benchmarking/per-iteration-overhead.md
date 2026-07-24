@@ -120,17 +120,25 @@ figure did not reproduce, and the driver behind it is gone, so it is stated here
 only to retire it.
 
 A pattern-gated reuse of the polish factorization — skipping the re-analysis and
-re-factorization when the active-set pattern is unchanged from the previous
-step — is the candidate lever this measurement supports. Its payoff is bounded
-by the hit rate times roughly three quarters of the polish cost. The hit rates
-above are strongly workload-dependent: they reach into the tens of percent under
-gentle initial-condition noise and fall to zero under a saturated tracking
-rollout (every reference in that regime exceeds the state bound, so the active
-set churns each step). **The expected saving of roughly 10-20% of per-step cost
-in stable-pattern regimes only is a research-derived projection, not a shipped
-result;** the on-host A/B that confirms or revises it updates this figure to a
-measured number. Under churn the projected saving is near zero, so this is a
-conditional lever, not a dominant one.
+re-factorization when the active-set pattern, the delta and the pose are all
+unchanged from the previous step — is implemented and A/B-measured on this host
+by toggling it in-process over an identical problem sequence (`reuse-on` against
+`reuse-off` in the benchmark output). The measured saving is strongly workload-
+and size-dependent. On the smallest, most stable cell (ni=2 N=10 under gentle
+initial-condition noise, where consecutive steps share an active-set pattern most
+often, at a 64% consecutive-pattern rate) the reuse cuts **30.7% of per-step
+cost** — 1.24M down to 0.86M userspace instructions per warm resolve. On the
+larger perturbed-initial-condition cells the pre-polish active set churns enough
+that the reuse almost never fires and the saving is **within 0.03% of zero**;
+under the saturated tracking rollout the hit rate is zero on every cell and the
+saving is **within 0.002% of zero** — the conservative element-wise pattern
+compare on the miss path is effectively free and never a net per-step regression.
+So this is a conditional lever that pays materially only in a small-and-stable
+regime and is a measured no-op — not a regression — everywhere else on this
+family; it is not a dominant per-step lever. The reuse is bit-identical to the
+re-analyzing path by construction (P, A and delta are frozen across a resolve, so
+an unchanged active set yields a bit-identical reduced KKT), which a committed
+correctness test pins on both a stable-pattern and a pattern-churning sequence.
 
 ## Native versus Python-binding per-solve overhead (measured)
 

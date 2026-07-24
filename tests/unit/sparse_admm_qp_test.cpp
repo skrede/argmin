@@ -374,9 +374,11 @@ TEST_CASE("sparse_admm_qp warm resolve converges faster without re-equilibrating
 // rho schedule disabled a resolve moves neither counter at all, and with it
 // enabled the only counter that moves is the numeric one.
 //
-// The polish is counted on its own instrument. It analyzes a freshly shaped
-// reduced system on every call by design, and folding that into the iteration
-// counts would hide exactly the distinction being pinned.
+// The polish is counted on its own instrument. It reuses its reduced-KKT
+// analysis and factor whenever the active-set pattern, the delta and the pose
+// are unchanged, so on this stable-pattern resolve the polish counters stay
+// frozen -- the reuse is what the frozen counter observes -- while folding them
+// into the iteration counts would hide exactly the distinction being pinned.
 // ---------------------------------------------------------------------------
 TEST_CASE("sparse_admm_qp resolve performs no analysis and no unscheduled refactorization",
           "[qp][sparse_resolve_work]")
@@ -412,14 +414,20 @@ TEST_CASE("sparse_admm_qp resolve performs no analysis and no unscheduled refact
     adaptive.warm_start = false;
     REQUIRE(adaptive.adaptive_rho);
 
+    // The pattern, the delta and the pose are all unchanged across this resolve,
+    // so the polish reuses its analysis and numeric factor: both polish counters
+    // stay frozen -- that frozen counter IS the observable reuse -- while the
+    // iteration factorization still moves once for the scheduled rho update.
     const std::size_t polish_analyses_before = solver.polish_analyses();
+    const std::size_t polish_factorizations_before = solver.polish_factorizations();
     auto scheduled = solver.resolve(p.q, p.l, p.u, adaptive);
     REQUIRE(scheduled);
     CHECK(solver.iteration_analyses() == analyses_after_pose);
     CHECK(solver.iteration_factorizations() > factorizations_after_pose);
     CHECK(scheduled->iterations >= static_cast<int>(adaptive.adaptive_rho_interval));
 
-    CHECK(solver.polish_analyses() > polish_analyses_before);
+    CHECK(solver.polish_analyses() == polish_analyses_before);
+    CHECK(solver.polish_factorizations() == polish_factorizations_before);
     CHECK(solver.polish_analyses() == solver.polish_factorizations());
 }
 
