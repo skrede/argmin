@@ -21,16 +21,25 @@ from typing import Any
 
 
 COHORT_SOLVERS = {
+    "augmented_lagrangian",
     "bobyqa",
     "byrd_lbfgsb",
+    "ccsa_quadratic",
+    "cmaes",
+    "cobyla",
     "filter_nw_sqp_accurate",
     "filter_slsqp_accurate",
     "filter_trsqp_accurate",
     "filter_trsqp_fast",
+    "gcmma",
+    "gcmma_move_limit_shrink",
+    "gcmma_raa_augmented",
     "kraft_slsqp_accurate",
     "lbfgsb",
+    "mma",
     "multistart_bobyqa",
     "nw_sqp_accurate",
+    "restarting_cmaes",
     "tr_sqp_accurate",
     "tr_sqp_fast",
 }
@@ -157,18 +166,6 @@ MANUAL_ITERS_OVERRIDE: dict[tuple[str, str, str], int] = {
 }
 
 
-# Curated Hock-Schittkowski fixtures that were measured but never carried a
-# baseline row, so they tripped the "cell not in baseline (informational)"
-# warning instead of being gated. They are folded into the cohort here so every
-# measured cohort cell for these problems is gated with an oracle-sourced
-# disposition. A problem is only added for a solver/mode that actually measured
-# it (the summary aggregation drops any expanded cell with no measurement).
-CURATED_FIXTURE_PROBLEMS = [
-    "hs021", "hs023", "hs027", "hs029", "hs030", "hs031",
-    "hs034", "hs036", "hs037", "hs038", "hs044", "hs052",
-]
-
-
 HEADER_COMMENT_BLOCK = """\
 # Regression baseline keyed by (solver, problem, mode).
 # Numeric bounds are historical gate values. The disposition column controls
@@ -282,60 +279,26 @@ def load_baseline_rows(path: Path,
     return out
 
 
-def load_curated_cells(prior_baseline: Path) -> set[tuple[str, str, str]]:
-    rows = load_baseline_rows(prior_baseline)
-    return {(row["solver"], row["problem"], row["mode"]) for row in rows}
+def measured_cohort_cells(summary_path: Path) -> set[tuple[str, str, str]]:
+    """Every measured ``(solver, problem, dispatch_mode)`` cell for a cohort solver.
 
-
-def expand_cohort_for_new_solvers(
-    curated: set[tuple[str, str, str]],
-    ref_solver: str,
-    new_solvers: list[str],
-) -> set[tuple[str, str, str]]:
-    ref_cells = [(p, m) for (s, p, m) in curated if s == ref_solver]
-    if not ref_cells:
-        print(f"regen_baseline: WARN: reference solver {ref_solver!r} not "
-              "present in curated cohort; expansion is a no-op",
-              file=sys.stderr)
-        return set(curated)
-    out = set(curated)
-    added = 0
-    for new_solver in new_solvers:
-        dispatch_mode = solver_dispatch_mode(new_solver)
-        for problem, _ref_mode in ref_cells:
-            tup = (new_solver, problem, dispatch_mode)
-            if tup not in out:
-                out.add(tup)
-                added += 1
-    print(f"regen_baseline: cohort expansion added {added} new cells "
-          f"(ref_solver={ref_solver}, new_solvers={new_solvers})",
-          file=sys.stderr)
-    return out
-
-
-def expand_cohort_for_new_problems(
-    curated: set[tuple[str, str, str]],
-    new_problems: list[str],
-) -> set[tuple[str, str, str]]:
-    """Fold measured-but-ungated fixture problems into the curated cohort.
-
-    Adds ``(solver, problem, dispatch_mode)`` for every cohort solver and each
-    new problem. The summary aggregation only emits a cell that has an actual
-    measurement, so an expanded combination a solver never ran produces no row.
+    The gate's coverage universe is every measured cohort cell, not the curated
+    subset a prior baseline happened to carry. Extending the cohort alone
+    under-covers, because a partially-covered solver's committed rows hold only
+    a fraction of the problems it actually measured; the ungated remainder must
+    be folded in from the summary itself. A cell is included for every distinct
+    problem the cohort solver ran, so the emitted baseline is a superset of the
+    measured cohort set.
     """
-    out = set(curated)
-    added = 0
-    for solver in sorted(COHORT_SOLVERS):
-        dispatch_mode = solver_dispatch_mode(solver)
-        for problem in new_problems:
-            tup = (solver, problem, dispatch_mode)
-            if tup not in out:
-                out.add(tup)
-                added += 1
-    print(f"regen_baseline: cohort expansion added {added} new fixture cells "
-          f"(problems={new_problems})",
-          file=sys.stderr)
-    return out
+    with summary_path.open("r", newline="") as f:
+        rows = list(csv.DictReader(f))
+    cells: set[tuple[str, str, str]] = set()
+    for row in rows:
+        solver = row.get("solver", "")
+        if solver not in COHORT_SOLVERS:
+            continue
+        cells.add((solver, row["problem"], solver_dispatch_mode(solver)))
+    return cells
 
 
 def load_release_provenance(path: Path) -> dict[str, str] | None:
@@ -405,16 +368,33 @@ def load_oracle_verdict(path: Path) -> dict[tuple[str, str, str], dict[str, str]
     return dict(by_cell)
 
 
-def oracle_disposition(verdict: dict[tuple[str, str, str], dict[str, str]],
-                       key: tuple[str, str, str],
-                       cell_seeds: list[str],
-                       context: str) -> str:
-    """Resolve a cell disposition from the independent oracle verdict.
+# Sentinel returned by the classifier for a cell whose seeds disagree (some
+# pass, some fail). Such a cell has no stable per-seed correctness verdict, so
+# it cannot carry a deterministic pass/expected_fail disposition the single-seed
+# fast gate can honor.
+ORACLE_CLASS_MIXED = "mixed"
 
-    Applies the pinned seed-aggregation rule: the cell is ``pass`` iff every
-    seed of that cell cleared the oracle, otherwise ``expected_fail``. A cell
-    with no verdict, or a cell missing any of its measured seeds, fails closed
-    (raises) rather than silently falling back to a self-derived disposition.
+# Reason recorded on a seed-variant cell's excluded row. A stochastic global
+# optimizer on a multimodal problem converges to the global basin on some seeds
+# and stalls in a local one on others; its per-seed pass/fail is not a stable
+# gate signal, so the cell carries a coverage row that is not correctness-gated.
+SEED_VARIANT_EXCLUSION_REASON = (
+    "seed-variant stochastic convergence: the per-seed oracle verdict disagrees "
+    "across seeds, so per-seed correctness is not a stable gate signal"
+)
+
+
+def oracle_verdict_class(verdict: dict[tuple[str, str, str], dict[str, str]],
+                         key: tuple[str, str, str],
+                         cell_seeds: list[str],
+                         context: str) -> str:
+    """Classify a cell's seeds as ``pass``, ``expected_fail``, or ``mixed``.
+
+    Applies the pinned seed-aggregation rule with a third outcome: the cell is
+    ``pass`` iff every seed cleared the oracle, ``expected_fail`` iff every seed
+    failed (a deterministic failure, e.g. a cap-stalled cell), and ``mixed`` iff
+    the seeds disagree. A cell with no verdict, or one missing any measured seed,
+    fails closed (raises) rather than falling back to a self-derived disposition.
     """
     seeds = verdict.get(key)
     if seeds is None:
@@ -426,8 +406,27 @@ def oracle_disposition(verdict: dict[tuple[str, str, str], dict[str, str]],
         raise ValueError(
             f"{context}: oracle verdict for cell {key} is missing "
             f"seed(s) {', '.join(missing)}; failing closed")
-    all_pass = all(seeds[s] == ORACLE_PASS_TOKEN for s in cell_seeds)
-    return DISPOSITION_PASS if all_pass else DISPOSITION_EXPECTED_FAIL
+    passes = [seeds[s] == ORACLE_PASS_TOKEN for s in cell_seeds]
+    if all(passes):
+        return DISPOSITION_PASS
+    if not any(passes):
+        return DISPOSITION_EXPECTED_FAIL
+    return ORACLE_CLASS_MIXED
+
+
+def oracle_disposition(verdict: dict[tuple[str, str, str], dict[str, str]],
+                       key: tuple[str, str, str],
+                       cell_seeds: list[str],
+                       context: str) -> str:
+    """Resolve a two-valued cell disposition from the independent oracle verdict.
+
+    Collapses the classifier's ``mixed`` outcome into ``expected_fail``: the
+    whole-cohort disposition invariant (assert_dispositions_from_oracle) treats a
+    seed-variant cell as not-all-pass. Cells the generator marks ``excluded`` for
+    seed variance are skipped by that assert, so they never reach this collapse.
+    """
+    klass = oracle_verdict_class(verdict, key, cell_seeds, context)
+    return DISPOSITION_PASS if klass == DISPOSITION_PASS else DISPOSITION_EXPECTED_FAIL
 
 
 def write_baseline(path: Path, rows: list[dict[str, str]]) -> None:
@@ -536,31 +535,41 @@ def aggregate_summary(args: argparse.Namespace,
 def generated_rows(args: argparse.Namespace,
                    provenance: dict[str, str],
                    verdict: dict[tuple[str, str, str], dict[str, str]]) -> list[dict[str, str]]:
-    curated_cells = load_curated_cells(args.prior_baseline)
-    print(f"regen_baseline: curated cohort size = {len(curated_cells)} cells",
+    prior_rows = {
+        (row["solver"], row["problem"], row["mode"]): row
+        for row in load_baseline_rows(args.prior_baseline)
+    }
+    curated_cells = set(prior_rows) | measured_cohort_cells(args.summary)
+    print(f"regen_baseline: coverage universe = {len(curated_cells)} cells "
+          f"(prior committed {len(prior_rows)} + measured cohort union)",
           file=sys.stderr)
 
-    prior_solvers = {s for (s, _p, _m) in curated_cells}
-    missing_new_solvers = [s for s in sorted(COHORT_SOLVERS) if s not in prior_solvers]
-    if missing_new_solvers:
-        curated_cells = expand_cohort_for_new_solvers(
-            curated_cells,
-            ref_solver="filter_nw_sqp_accurate",
-            new_solvers=missing_new_solvers,
-        )
-
-    prior_problems = {p for (_s, p, _m) in curated_cells}
-    missing_fixture_problems = [p for p in CURATED_FIXTURE_PROBLEMS
-                                if p not in prior_problems]
-    if missing_fixture_problems:
-        curated_cells = expand_cohort_for_new_problems(
-            curated_cells,
-            new_problems=missing_fixture_problems,
-        )
-
     by_cell = aggregate_summary(args, curated_cells)
+
+    # Every committed row is carried forward verbatim under --preserve-prior-rows:
+    # this run adds coverage for the previously-ungated cells and must not move a
+    # committed reference number (a moved value would need a methodology-ledger
+    # entry). Only genuinely new cells are measured and gated here. Without the
+    # flag the generator re-derives every cell from this run, the default the
+    # generation self-test exercises.
+    preserve_prior = getattr(args, "preserve_prior_rows", False)
+    all_keys = set(prior_rows) | set(by_cell)
     rows_out: list[dict[str, str]] = []
-    for (solver, problem, mode), cell in sorted(by_cell.items()):
+    carried = 0
+    for (solver, problem, mode) in sorted(all_keys):
+        key = (solver, problem, mode)
+        if preserve_prior and key in prior_rows:
+            rows_out.append(prior_rows[key])
+            carried += 1
+            continue
+        cell = by_cell.get(key)
+        if cell is None:
+            # A committed cell that this run did not measure: carry it forward so
+            # coverage never regresses (only reachable without --preserve-prior-rows
+            # when a prior cell is absent from the summary).
+            rows_out.append(prior_rows[key])
+            carried += 1
+            continue
         min_acc_log10, max_cv_log10 = mode_tolerances(mode)
         if cell["excluded"]:
             rows_out.append({
@@ -594,12 +603,34 @@ def generated_rows(args: argparse.Namespace,
         if manual_iters is not None:
             bound_iters = manual_iters
 
-        disposition = oracle_disposition(
+        klass = oracle_verdict_class(
             verdict,
             (solver, problem, mode),
             cell["seeds"],
             f"{args.summary}:{solver}:{problem}:{mode}",
         )
+        if klass == ORACLE_CLASS_MIXED:
+            # Seed-variant cell (a stochastic optimizer on a multimodal problem):
+            # no deterministic per-seed correctness verdict, so it carries a
+            # coverage row that is not correctness-gated rather than a
+            # pass/expected_fail the single-seed fast gate cannot honor.
+            rows_out.append({
+                "solver": solver,
+                "problem": problem,
+                "mode": mode,
+                "max_us_per_step": "0",
+                "min_accuracy_log10": f"{min_acc_log10:.1f}",
+                "max_outer_iters": "0",
+                "max_cv_log10": f"{max_cv_log10:.1f}",
+                "disposition": DISPOSITION_EXCLUDED,
+                "provenance_id": provenance["provenance_id"],
+                "wall_gate_policy": provenance["wall_gate_policy"],
+                "exclusion_reason": SEED_VARIANT_EXCLUSION_REASON,
+                "baseline_instr_per_iter": "",
+                "instr_ceiling": "",
+            })
+            continue
+        disposition = klass
 
         # Committed reference instructions/iter (median across seeds) plus, for
         # the real-time-critical families, an absolute ceiling a margin above
@@ -632,6 +663,9 @@ def generated_rows(args: argparse.Namespace,
             "baseline_instr_per_iter": baseline_ipi,
             "instr_ceiling": ceiling,
         })
+    print(f"regen_baseline: {carried} committed row(s) carried forward, "
+          f"{len(rows_out) - carried} cell(s) freshly generated",
+          file=sys.stderr)
     return rows_out
 
 
@@ -947,6 +981,162 @@ def run_self_test() -> int:
     return 0
 
 
+SELF_TEST_PRESERVE_SUMMARY = """\
+solver,library,problem,class,dimension,seed,mode,solver_iters,f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,known_optimum,accuracy,constraint_violation,status,row_disposition,cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,provenance_id,instructions
+bobyqa,argmin,problem_a,inequality,2,42,publication,2,2,0,0,0,20,0.0,0.0,1e-10,1e-10,converged,included,none,,20,20,selftest-run,200
+bobyqa,argmin,problem_c,inequality,2,42,publication,4,4,0,0,0,40,0.0,0.0,1e-10,1e-10,converged,included,none,,40,40,selftest-run,800
+"""
+
+SELF_TEST_PRESERVE_PRIOR = """\
+solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,disposition,provenance_id,wall_gate_policy,exclusion_reason,baseline_instr_per_iter,instr_ceiling
+bobyqa,problem_a,default,7,-8.0,3,-6.0,pass,committed-run,enforced,,99,
+"""
+
+SELF_TEST_PRESERVE_VERDICT = """\
+solver,problem,mode,seed,oracle_pass,objective_distance,feasibility_residual,kkt_residual,witness
+bobyqa,problem_a,publication,42,pass,1e-12,0.0,0.0,feasibility-at-x*
+bobyqa,problem_c,publication,42,pass,1e-12,0.0,0.0,feasibility-at-x*
+"""
+
+
+def run_preserve_prior_self_test() -> int:
+    """Prove --preserve-prior-rows carries committed rows forward unchanged.
+
+    A committed cell is emitted byte-for-byte from the prior baseline (no
+    re-measured number, no re-stamped provenance), while a genuinely new
+    measured cohort cell is freshly generated with this run's provenance. This
+    is the coverage-add contract: add rows for the ungated cells without moving
+    a committed reference number.
+    """
+    with tempfile.TemporaryDirectory(prefix="argmin-regen-preserve-") as tmp_s:
+        tmp = Path(tmp_s)
+        summary = tmp / "summary.csv"
+        prior = tmp / "prior.csv"
+        provenance = tmp / "provenance.json"
+        verdict = tmp / "verdict.csv"
+        output = tmp / "baseline.csv"
+        write_text(summary, SELF_TEST_PRESERVE_SUMMARY)
+        write_text(prior, SELF_TEST_PRESERVE_PRIOR)
+        write_text(verdict, SELF_TEST_PRESERVE_VERDICT)
+        write_text(provenance, json.dumps({
+            "build_type": "Release",
+            "provenance_id": "selftest-release",
+            "wall_gate_policy": "enforced",
+        }))
+        args = argparse.Namespace(
+            summary=summary,
+            prior_baseline=prior,
+            output=output,
+            provenance=provenance,
+            oracle_verdict=verdict,
+            preserve_prior_rows=True,
+        )
+        if generate_baseline(args) != 0:
+            return 1
+        rows = load_baseline_rows(output)
+        by_key = {(r["solver"], r["problem"]): r for r in rows}
+        if len(rows) != 2:
+            print("regen_baseline preserve self-test: expected two output rows",
+                  file=sys.stderr)
+            return 1
+        carried = by_key[("bobyqa", "problem_a")]
+        # The committed row survives verbatim: original bound and provenance, no
+        # re-measurement from the summary (which would give a different bound).
+        if (carried["max_us_per_step"] != "7"
+                or carried["provenance_id"] != "committed-run"
+                or carried["max_outer_iters"] != "3"
+                or carried["baseline_instr_per_iter"] != "99"):
+            print("regen_baseline preserve self-test: committed row was not "
+                  "carried forward unchanged", file=sys.stderr)
+            return 1
+        fresh = by_key[("bobyqa", "problem_c")]
+        # The new cell is freshly generated with this run's provenance.
+        if fresh["provenance_id"] != "selftest-release":
+            print("regen_baseline preserve self-test: new cell was not freshly "
+                  "generated", file=sys.stderr)
+            return 1
+    return 0
+
+
+SELF_TEST_SEED_VARIANT_SUMMARY = """\
+solver,library,problem,class,dimension,seed,mode,solver_iters,f_evals,g_evals,c_evals,J_evals,wall_time_us,final_objective,known_optimum,accuracy,constraint_violation,status,row_disposition,cap_status,exclusion_reason,solve_wall_time_us,end_to_end_wall_time_us,provenance_id,instructions
+cmaes,argmin,multimodal_2,unconstrained,2,42,publication,50,50,0,0,0,60,0.0,0.0,1e-10,0.0,converged,included,none,,60,60,selftest-run,3000
+cmaes,argmin,multimodal_2,unconstrained,2,43,publication,50,50,0,0,0,60,5.0,0.0,5e-1,0.0,failed,included,none,,60,60,selftest-run,3000
+"""
+
+SELF_TEST_SEED_VARIANT_PRIOR = """\
+solver,problem,mode,max_us_per_step,min_accuracy_log10,max_outer_iters,max_cv_log10,expected
+cmaes,multimodal_2,default,10,-8.0,10,-8.0,pass
+"""
+
+SELF_TEST_SEED_VARIANT_VERDICT = """\
+solver,problem,mode,seed,oracle_pass,objective_distance,feasibility_residual,kkt_residual,witness
+cmaes,multimodal_2,publication,42,pass,1e-12,0.0,0.0,feasibility-at-x*
+cmaes,multimodal_2,publication,43,fail,5e-1,0.0,0.0,feasibility-at-x*
+"""
+
+
+def run_seed_variant_self_test() -> int:
+    """Prove a seed-variant cell is excluded, not marked pass/expected_fail.
+
+    A cell whose per-seed oracle verdict disagrees (one seed passes, another
+    fails) has no stable per-seed correctness verdict, so it must carry an
+    excluded coverage row with the seed-variance reason rather than a
+    pass/expected_fail disposition the single-seed fast gate cannot honor.
+    """
+    with tempfile.TemporaryDirectory(prefix="argmin-regen-seedvar-") as tmp_s:
+        tmp = Path(tmp_s)
+        summary = tmp / "summary.csv"
+        prior = tmp / "prior.csv"
+        provenance = tmp / "provenance.json"
+        verdict = tmp / "verdict.csv"
+        output = tmp / "baseline.csv"
+        write_text(summary, SELF_TEST_SEED_VARIANT_SUMMARY)
+        write_text(prior, SELF_TEST_SEED_VARIANT_PRIOR)
+        write_text(verdict, SELF_TEST_SEED_VARIANT_VERDICT)
+        write_text(provenance, json.dumps({
+            "build_type": "Release",
+            "provenance_id": "selftest-release",
+            "wall_gate_policy": "enforced",
+        }))
+        args = argparse.Namespace(
+            summary=summary,
+            prior_baseline=prior,
+            output=output,
+            provenance=provenance,
+            oracle_verdict=verdict,
+        )
+        if generate_baseline(args) != 0:
+            return 1
+        rows = load_baseline_rows(output)
+        if len(rows) != 1:
+            print("regen_baseline seed-variant self-test: expected one row",
+                  file=sys.stderr)
+            return 1
+        row = rows[0]
+        if row["disposition"] != DISPOSITION_EXCLUDED:
+            print("regen_baseline seed-variant self-test: mixed verdict cell was "
+                  f"not excluded (got {row['disposition']!r})", file=sys.stderr)
+            return 1
+        if not row["exclusion_reason"]:
+            print("regen_baseline seed-variant self-test: excluded cell carries "
+                  "no exclusion reason", file=sys.stderr)
+            return 1
+
+        # The whole-cohort oracle assert must accept the excluded row (it skips
+        # excluded cells), never demand a pass/expected_fail for a mixed verdict.
+        assert_args = argparse.Namespace(
+            summary=summary,
+            current_baseline=output,
+            oracle_verdict=verdict,
+        )
+        if assert_dispositions_from_oracle(assert_args) != 0:
+            print("regen_baseline seed-variant self-test: oracle assert rejected "
+                  "the excluded seed-variant row", file=sys.stderr)
+            return 1
+    return 0
+
+
 def run_release_guard_self_test() -> int:
     with tempfile.TemporaryDirectory(prefix="argmin-regen-guard-") as tmp_s:
         tmp = Path(tmp_s)
@@ -1058,16 +1248,27 @@ def main() -> int:
     p.add_argument("--disabled-register", action="append", type=Path)
     p.add_argument("--accuracy-cutoff", type=float, default=1e-12)
     p.add_argument("--cv-cutoff", type=float, default=1e-8)
+    p.add_argument("--preserve-prior-rows", action="store_true",
+                   help="carry every committed baseline row forward unchanged "
+                        "and generate only the newly-covered cells; used when "
+                        "adding coverage without moving committed reference "
+                        "numbers")
     p.add_argument("--migrate-existing-baseline", action="store_true")
     p.add_argument("--validate-ledger-completeness", action="store_true")
     p.add_argument("--assert-dispositions-from-oracle", action="store_true")
     p.add_argument("--self-test", action="store_true")
+    p.add_argument("--self-test-preserve-prior-rows", action="store_true")
+    p.add_argument("--self-test-seed-variant", action="store_true")
     p.add_argument("--self-test-release-guard", action="store_true")
     p.add_argument("--self-test-ledger-completeness", action="store_true")
     args = p.parse_args()
 
     if args.self_test:
         return run_self_test()
+    if args.self_test_preserve_prior_rows:
+        return run_preserve_prior_self_test()
+    if args.self_test_seed_variant:
+        return run_seed_variant_self_test()
     if args.self_test_release_guard:
         return run_release_guard_self_test()
     if args.self_test_ledger_completeness:
