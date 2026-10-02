@@ -150,8 +150,8 @@ void register_qp_result(nb::module_& m)
         .def(
             "__init__",
             [](qp_result_type* self, const vector<double>& x, const vector<double>& y,
-               qp_solve_status status, int iterations, bool polished, double primal_residual,
-               double dual_residual, double objective_value)
+               qp_solve_status status, int iterations, bool polished, bool warm_started,
+               double primal_residual, double dual_residual, double objective_value)
             {
                 check_all_finite(x, "x");
                 check_all_finite(y, "y");
@@ -159,20 +159,30 @@ void register_qp_result(nb::module_& m)
                 check_non_negative(primal_residual, "primal_residual");
                 check_non_negative(dual_residual, "dual_residual");
                 check_finite(objective_value, "objective_value");
-                new(self) qp_result_type{x,          y,
-                                         status,     iterations,
-                                         polished,   primal_residual,
-                                         dual_residual, objective_value};
+                new(self) qp_result_type{x,
+                                         y,
+                                         status,
+                                         iterations,
+                                         polished,
+                                         warm_started,
+                                         primal_residual,
+                                         dual_residual,
+                                         objective_value};
             },
             nb::arg("x") = vector<double>(), nb::arg("y") = vector<double>(),
             nb::arg("status") = qp_solve_status::solved, nb::arg("iterations") = 0,
-            nb::arg("polished") = false, nb::arg("primal_residual") = 0.0,
+            nb::arg("polished") = false, nb::arg("warm_started") = false,
+            nb::arg("primal_residual") = 0.0,
             nb::arg("dual_residual") = 0.0, nb::arg("objective_value") = 0.0)
         .def_prop_ro("x", [](const qp_result_type& result) { return result.x; })
         .def_prop_ro("y", [](const qp_result_type& result) { return result.y; })
         .def_ro("status", &qp_result_type::status)
         .def_ro("iterations", &qp_result_type::iterations)
         .def_ro("polished", &qp_result_type::polished)
+        .def_ro("warm_started", &qp_result_type::warm_started,
+                "True iff a primal seed (the warm_start() vector or the iterate retained from the "
+                "previous solve) was consumed. A dual seed whose length does not match the posed "
+                "problem is replaced by zeros and does not clear the flag.")
         .def_ro("primal_residual", &qp_result_type::primal_residual)
         .def_ro("dual_residual", &qp_result_type::dual_residual)
         .def_ro("objective_value", &qp_result_type::objective_value)
@@ -185,6 +195,7 @@ void register_qp_result(nb::module_& m)
                         + ", primal_residual=" + format_number(result.primal_residual)
                         + ", dual_residual=" + format_number(result.dual_residual)
                         + ", polished=" + (result.polished ? "True" : "False")
+                        + ", warm_started=" + (result.warm_started ? "True" : "False")
                         + ", x=" + format_length(static_cast<int>(result.x.size()))
                         + ", y=" + format_length(static_cast<int>(result.y.size())) + ")";
              });

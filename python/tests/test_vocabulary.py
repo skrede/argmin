@@ -56,6 +56,14 @@ def test_solve_result_fields_are_readable(argmin):
     assert result.x.tolist() == [1.5, -2.25]
 
 
+def test_a_qp_result_carries_the_warm_start_outcome(argmin):
+    result = argmin.QpResult(x=np.array([1.5]), warm_started=True)
+
+    assert result.warm_started is True
+    assert "warm_started=True" in repr(result)
+    assert argmin.QpResult().warm_started is False
+
+
 def test_qp_result_arrays_outlive_the_producing_object(argmin):
     x, y = (lambda result: (result.x, result.y))(qp_result(argmin))
     gc.collect()

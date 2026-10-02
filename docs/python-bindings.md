@@ -60,8 +60,11 @@ one of them, on a default-constructed instance and on the snapshot a solver
 reports.
 
 **Results and statuses.** `QpResult` and `SolveResult` carry the iterates,
-residuals, counts and objective values. `QpStatus` and `SolverStatus` name how a
-solve ended. `ArgminError` and `ErrorKind` are the error channel.
+residuals, counts and objective values. `QpResult.warm_started` reports whether
+the dense operator-splitting solver consumed a primal seed (the `warm_start()`
+vector or the iterate retained from its previous solve); a dual seed whose
+length does not match the posed problem is replaced by zeros without clearing
+the flag. `QpStatus` and `SolverStatus` name how a solve ended. `ArgminError` and `ErrorKind` are the error channel.
 
 **Compiled test problems.** `Rosenbrock` and `ConstrainedTestProblem` are the
 same problems compiled into the extension, each with a `solve_native()` entry

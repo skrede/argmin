@@ -46,6 +46,9 @@ struct qp_result
     qp_solve_status status{qp_solve_status::solved};
     int iterations{0};
     bool polished{false};
+    // True iff a primal seed (the caller's warm_start() vector or the iterate retained from
+    // the previous solve) was consumed; a dual seed replaced by zeros does not clear it.
+    bool warm_started{false};
     Scalar primal_residual{0};
     Scalar dual_residual{0};
     Scalar objective_value{0};

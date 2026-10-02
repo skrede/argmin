@@ -7,11 +7,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <random>
 #include <limits>
 #include <vector>
+#include <cstdint>
 
 using Catch::Approx;
 using namespace argmin;
@@ -184,6 +186,55 @@ std::vector<osqp_problem> equality_family(int trials)
         out.push_back(std::move(p));
     }
     return out;
+}
+
+// The leading m rows of a fixed pool over one strictly convex objective, so a
+// single decision vector can be posed against different row counts. The
+// unconstrained minimizer sits outside the boxes, so the multipliers are
+// nonzero and a consumed dual seed changes the trajectory.
+osqp_problem seed_problem(int m)
+{
+    osqp_problem p;
+    p.P = Eigen::MatrixXd{{2.0, 0.5, 0.0}, {0.5, 1.0, 0.0}, {0.0, 0.0, 1.5}};
+    p.q = Eigen::VectorXd{{-3.0, 2.0, -1.0}};
+    const Eigen::MatrixXd pool{{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {1.0, 1.0, 1.0}, {1.0, -1.0, 0.0}};
+    const Eigen::VectorXd lower{{-0.3, -0.4, -0.5, -1.0}};
+    const Eigen::VectorXd upper{{0.3, 0.4, 0.5, 1.0}};
+    p.A = pool.topRows(m);
+    p.l = lower.head(m);
+    p.u = upper.head(m);
+    return p;
+}
+
+bool same_bits(const Eigen::VectorXd& a, const Eigen::VectorXd& b)
+{
+    if(a.size() != b.size())
+        return false;
+    for(Eigen::Index i = 0; i < a.size(); ++i)
+        if(std::bit_cast<std::uint64_t>(a[i]) != std::bit_cast<std::uint64_t>(b[i]))
+            return false;
+    return true;
+}
+
+bool same_solve(const qp_result<double>& a, const qp_result<double>& b)
+{
+    return same_bits(a.x, b.x) && same_bits(a.y, b.y) && a.iterations == b.iterations
+           && a.warm_started == b.warm_started;
+}
+
+const Eigen::VectorXd seed_x{{0.1, -0.2, 0.05}};
+const Eigen::VectorXd seed_y{{0.4, -0.3, 0.2, 0.1}};
+
+// Polish snaps nearby iterates onto one active-set solution and termination is
+// checked only every few iterations; both can hide which seed was consumed. A
+// short unpolished run exposes the raw trajectory instead.
+dense_qp_options trajectory_options()
+{
+    dense_qp_options opts;
+    opts.polish = false;
+    opts.check_termination = 1;
+    opts.max_iterations = 8;
+    return opts;
 }
 
 }
@@ -497,4 +548,186 @@ TEST_CASE("dense_admm_qp polish agrees with the active-set oracle on equality-co
     std::printf("[dense polish guard] %d/%d members polished, worst objective gap against the "
                 "active-set oracle %.3e, worst regression %.3e\n",
                 accepted, members, worst_oracle_gap, worst_regression);
+}
+
+// ---------------------------------------------------------------------------
+// An empty dual seed must leave the dual iterate at zero, never at whatever the
+// dual workspace happened to hold. A read of never-written storage is invisible
+// to an ordinary assertion, so its observable form is equivalence: the
+// empty-dual solve is bit-identical to one seeded with an explicit zero dual,
+// while a nonzero dual seed visibly moves the trajectory. The memory sanitizer
+// job reports the read itself. The primal seed is still consumed, so the solve
+// reports that it was warm-started.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp seeds no uninitialized dual storage when the dual seed is empty", "[qp_warm]")
+{
+    const dense_qp_options probe = trajectory_options();
+    CHECK(dense_qp_options{}.warm_start);
+    const osqp_problem p = seed_problem(4);
+
+    dense_admm_qp_solver<double> empty_dual(3, 4);
+    REQUIRE_FALSE(empty_dual.warm_start(seed_x, Eigen::VectorXd()));
+    const auto result = empty_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->y.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zero_dual(3, 4);
+    REQUIRE_FALSE(zero_dual.warm_start(seed_x, Eigen::VectorXd::Zero(4)));
+    const auto control = zero_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+
+    dense_admm_qp_solver<double> full_dual(3, 4);
+    REQUIRE_FALSE(full_dual.warm_start(seed_x, seed_y));
+    const auto seeded = full_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(seeded);
+    CHECK_FALSE(same_bits(seeded->x, control->x));
+}
+
+// ---------------------------------------------------------------------------
+// A non-finite seed is refused when it is handed over, before anything is
+// stored: the following solve must be bit-identical to one on a solver that
+// was never seeded, and must report that it was not warm-started.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp rejects a non-finite warm-start seed", "[qp_warm]")
+{
+    const dense_qp_options probe = trajectory_options();
+    const osqp_problem p = seed_problem(4);
+    dense_admm_qp_solver<double> solver(3, 4);
+
+    Eigen::VectorXd nan_x = seed_x;
+    nan_x[1] = std::numeric_limits<double>::quiet_NaN();
+    const auto nan_error = solver.warm_start(nan_x, seed_y);
+    REQUIRE(nan_error);
+    CHECK(*nan_error == qp_error::non_finite_input);
+
+    Eigen::VectorXd inf_y = seed_y;
+    inf_y[2] = inf;
+    const auto inf_error = solver.warm_start(seed_x, inf_y);
+    REQUIRE(inf_error);
+    CHECK(*inf_error == qp_error::non_finite_input);
+
+    const auto result = solver.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK_FALSE(result->warm_started);
+
+    dense_admm_qp_solver<double> never_seeded(3, 4);
+    const auto control = never_seeded.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// A dual seed one entry short is not prefixed into the iterate: it is replaced
+// by zeros while the primal seed is kept, so the solve still reports a warm
+// start and matches the explicit zero-dual control bit for bit. A short primal
+// seed never reaches consumption; it is refused when it is handed over.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp keeps the primal seed when the dual seed is short", "[qp_warm]")
+{
+    const dense_qp_options probe = trajectory_options();
+    const osqp_problem p = seed_problem(4);
+
+    dense_admm_qp_solver<double> short_dual(3, 4);
+    const auto short_primal = short_dual.warm_start(seed_x.head(2), seed_y);
+    REQUIRE(short_primal);
+    CHECK(*short_primal == qp_error::dimension_mismatch);
+    REQUIRE_FALSE(short_dual.warm_start(seed_x, seed_y.head(3)));
+    const auto result = short_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zero_dual(3, 4);
+    REQUIRE_FALSE(zero_dual.warm_start(seed_x, Eigen::VectorXd::Zero(4)));
+    const auto control = zero_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// A shorter re-seed after a full one must not inherit the tail of the earlier
+// dual seed or of the retained iterate: the resolve matches the control that
+// re-seeds with an explicit zero dual.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp re-seeding with a shorter dual vector falls back to zeros", "[qp_warm]")
+{
+    const dense_qp_options probe = trajectory_options();
+    const osqp_problem p = seed_problem(4);
+    const Eigen::VectorXd q2 = 1.05 * p.q;
+    const Eigen::VectorXd reseed_x{{-0.05, 0.1, 0.0}};
+
+    dense_admm_qp_solver<double> shorter(3, 4);
+    REQUIRE_FALSE(shorter.warm_start(seed_x, seed_y));
+    const auto first = shorter.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(first);
+    CHECK(first->warm_started);
+    REQUIRE_FALSE(shorter.warm_start(reseed_x, seed_y.head(2)));
+    const auto result = shorter.resolve(q2, p.l, p.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zeroed(3, 4);
+    REQUIRE_FALSE(zeroed.warm_start(seed_x, seed_y));
+    REQUIRE(zeroed.solve(p.P, p.q, p.A, p.l, p.u, probe));
+    REQUIRE_FALSE(zeroed.warm_start(reseed_x, Eigen::VectorXd::Zero(4)));
+    const auto control = zeroed.resolve(q2, p.l, p.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// The case that separates validating against the posed row count from
+// validating against capacity: a seed stored for a 2-row problem fits the
+// 4-row capacity, but the 4-row pose must consume none of it. The primal seed
+// still matches the posed decision count, so it is kept.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp drops a stale seed when the problem is re-posed with more rows", "[qp_warm]")
+{
+    const dense_qp_options probe = trajectory_options();
+    const osqp_problem small = seed_problem(2);
+    const osqp_problem large = seed_problem(4);
+
+    dense_admm_qp_solver<double> reposed(3, 4);
+    REQUIRE(reposed.solve(small.P, small.q, small.A, small.l, small.u, probe));
+    REQUIRE_FALSE(reposed.warm_start(seed_x, seed_y.head(2)));
+    const auto result = reposed.solve(large.P, large.q, large.A, large.l, large.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->y.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zero_dual(3, 4);
+    REQUIRE_FALSE(zero_dual.warm_start(seed_x, Eigen::VectorXd::Zero(4)));
+    const auto control = zero_dual.solve(large.P, large.q, large.A, large.l, large.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// The mirror of the case above: a dual seed sized to the full capacity is not
+// truncated onto a pose with fewer rows. Only this shape tells consumption
+// against the posed row count apart from consumption against the capacity.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp drops a capacity-length seed when the problem is posed with fewer rows", "[qp_warm]")
+{
+    const dense_qp_options probe = trajectory_options();
+    const osqp_problem small = seed_problem(2);
+
+    dense_admm_qp_solver<double> fewer(3, 4);
+    REQUIRE_FALSE(fewer.warm_start(seed_x, seed_y));
+    const auto result = fewer.solve(small.P, small.q, small.A, small.l, small.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zero_dual(3, 4);
+    REQUIRE_FALSE(zero_dual.warm_start(seed_x, Eigen::VectorXd::Zero(2)));
+    const auto control = zero_dual.solve(small.P, small.q, small.A, small.l, small.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
 }

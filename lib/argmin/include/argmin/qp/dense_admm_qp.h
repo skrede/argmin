@@ -51,6 +51,7 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <cstdint>
 #include <optional>
 #include <algorithm>
 
@@ -66,6 +67,7 @@ public:
     dense_admm_qp_solver(int n, int m)
         : n_cap_(n)
         , m_cap_(m)
+        , seed_consumed_(false)
         , P_(n, n)
         , q_(n)
         , A_(m, n)
@@ -108,8 +110,9 @@ public:
         , ntmp2_(n)
         , mtmp_(m)
         , mtmp2_(m)
-        , ws_x_(n)
-        , ws_y_(m)
+        , ws_x_(vector<Scalar, N>::Zero(n))
+        , ws_y_(vector<Scalar>::Zero(m))
+        , ws_y_len_(0)
         , K_red_(n + m, n + m)
         , K_red_reg_(n + m, n + m)
         , lu_(n + m)
@@ -124,7 +127,7 @@ public:
         active_upper_.reserve(static_cast<std::size_t>(m));
     }
 
-    dense_admm_qp_solver() = default;
+    dense_admm_qp_solver() : seed_consumed_(false), ws_y_len_(0) {}
 
     expected<result_type, qp_error>
     solve(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
@@ -200,14 +203,18 @@ public:
 
     // Rejects rather than clamps: a seed shorter than the primal capacity would
     // read past its end, and one longer than the dual capacity would write past
-    // ws_y_'s. Both are silent in a release build.
+    // ws_y_'s. Both are silent in a release build. A non-finite seed is refused
+    // too, since nothing downstream re-checks it before it enters the iterate.
     std::optional<qp_error> warm_start(const vector<Scalar, N>& x, const vector<Scalar>& y)
     {
         if(x.size() < n_cap_ || static_cast<int>(y.size()) > m_cap_)
             return qp_error::dimension_mismatch;
+        if(!x.head(n_cap_).allFinite() || (y.size() > 0 && !y.allFinite()))
+            return qp_error::non_finite_input;
         ws_x_.head(n_cap_) = x.head(n_cap_);
         if(y.size() > 0)
             ws_y_.head(static_cast<int>(y.size())) = y;
+        ws_y_len_ = static_cast<std::int32_t>(y.size());
         has_warm_ = true;
         return std::nullopt;
     }
@@ -385,14 +392,20 @@ private:
         llt_.compute(K_);
     }
 
+    // A stored seed is consumed only when its length matches the posed problem,
+    // not the capacity; a dual seed that does not match is replaced by zeros.
     void seed_iterates(const dense_qp_options& opts)
     {
-        if(opts.warm_start && has_warm_)
+        seed_consumed_ = opts.warm_start && has_warm_ && static_cast<int>(ws_x_.size()) == n_;
+        if(seed_consumed_)
         {
             x_.head(n_) = ws_x_.head(n_).cwiseQuotient(D_.head(n_));
             if(m_ > 0)
             {
-                y_.head(m_) = c_ * ws_y_.head(m_).cwiseQuotient(E_.head(m_));
+                if(ws_y_len_ == m_)
+                    y_.head(m_) = c_ * ws_y_.head(m_).cwiseQuotient(E_.head(m_));
+                else
+                    y_.head(m_).setZero();
                 // The A*x product is evaluated into a scratch member first: a
                 // matrix-vector product nested inside a coefficient-wise
                 // cwiseMax/cwiseMin chain forces Eigen to heap-allocate the
@@ -678,6 +691,7 @@ private:
         out.status = status_;
         out.iterations = iters_;
         out.polished = polished;
+        out.warm_started = seed_consumed_;
         out.primal_residual = m_ > 0 ? rpn : Scalar(0);
         out.dual_residual = rdn;
         ntmp_.head(n_).noalias() = P_ * x_unscaled_.head(n_);
@@ -689,6 +703,7 @@ private:
             ws_x_.head(n_) = x_unscaled_.head(n_);
             if(m_ > 0)
                 ws_y_.head(m_) = y_unscaled_.head(m_);
+            ws_y_len_ = m_;
             has_warm_ = true;
         }
     }
@@ -821,6 +836,7 @@ private:
     Scalar current_rho_{Scalar(0.1)};
     bool posed_{false};
     bool has_warm_{false};
+    bool seed_consumed_;
 
     matrix<Scalar, N, N> P_;
     vector<Scalar, N> q_;
@@ -876,6 +892,7 @@ private:
 
     vector<Scalar, N> ws_x_;
     vector<Scalar> ws_y_;
+    std::int32_t ws_y_len_;
 
     Scalar rp_norm_{0};
     Scalar rd_norm_{0};
