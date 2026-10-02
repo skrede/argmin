@@ -64,10 +64,12 @@
 #include <Eigen/SparseCore>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 #include <cstddef>
 #include <optional>
 #include <algorithm>
+#include <functional>
 
 namespace argmin
 {
@@ -79,6 +81,8 @@ public:
     using sparse_type = Eigen::SparseMatrix<Scalar, Eigen::ColMajor>;
     using index_type = typename sparse_type::StorageIndex;
     using result_type = qp_result<Scalar>;
+
+    sparse_admm_qp_solver() : seed_consumed_(false) {}
 
     expected<result_type, qp_error>
     solve(const sparse_type& P, const vector<Scalar>& q, const sparse_type& A,
@@ -109,11 +113,14 @@ public:
                const vector<Scalar>& l, const vector<Scalar>& u, result_type& out,
                const sparse_qp_options& opts = {})
     {
+        if(auto err = validate_option_domains(opts))
+            return err;
         if(auto err = validate_full(P, q, A, l, u))
             return err;
-        if(!pose(P, q, A, l, u, opts))
-            return qp_error::invalid_problem;
-        run_admm(opts);
+        if(auto err = pose(P, q, A, l, u, opts))
+            return err;
+        if(auto err = run_admm(opts))
+            return err;
         finalize(opts, out);
         return std::nullopt;
     }
@@ -126,20 +133,12 @@ public:
     resolve_into(const vector<Scalar>& q, const vector<Scalar>& l, const vector<Scalar>& u,
                  result_type& out, const sparse_qp_options& opts = {})
     {
+        if(auto err = validate_option_domains(opts))
+            return err;
         if(!posed_)
             return qp_error::invalid_problem;
-        if(static_cast<int>(q.size()) != n_ || static_cast<int>(l.size()) != m_
-           || static_cast<int>(u.size()) != m_)
-            return qp_error::dimension_mismatch;
-        if(!q.allFinite())
-            return qp_error::non_finite_input;
-        for(int i = 0; i < m_; ++i)
-        {
-            if(std::isnan(l[i]) || std::isnan(u[i]))
-                return qp_error::non_finite_input;
-            if(l[i] > u[i])
-                return qp_error::invalid_bounds;
-        }
+        if(auto err = validate_vectors(q, l, u))
+            return err;
         q_ = q;
         if(m_ > 0)
         {
@@ -148,7 +147,8 @@ public:
         }
         rescale_vectors();
         seed_iterates(opts);
-        run_admm(opts);
+        if(auto err = run_admm(opts))
+            return err;
         finalize(opts, out);
         return std::nullopt;
     }
@@ -227,6 +227,38 @@ private:
         return true;
     }
 
+    std::optional<qp_error> validate_option_domains(const sparse_qp_options& o) const
+    {
+        const auto positive = [](double v) { return std::isfinite(v) && v > 0.0; };
+        const auto nonnegative = [](double v) { return std::isfinite(v) && v >= 0.0; };
+        const bool penalties = positive(o.rho) && positive(o.sigma) && positive(o.delta);
+        const bool relaxation = std::isfinite(o.alpha) && o.alpha > 0.0 && o.alpha < 2.0;
+        const bool adaptive = std::isfinite(o.adaptive_rho_tolerance) && o.adaptive_rho_tolerance >= 1.0;
+        const bool convergence = nonnegative(o.eps_abs) && nonnegative(o.eps_rel) && (o.eps_abs > 0.0 || o.eps_rel > 0.0);
+        const bool certificates = positive(o.eps_prim_inf) && positive(o.eps_dual_inf);
+        if(penalties && relaxation && adaptive && convergence && certificates && o.max_iterations > 0)
+            return std::nullopt;
+        return qp_error::invalid_options;
+    }
+
+    std::optional<qp_error>
+    validate_vectors(const vector<Scalar>& q, const vector<Scalar>& l, const vector<Scalar>& u) const
+    {
+        if(static_cast<int>(q.size()) != n_ || static_cast<int>(l.size()) != m_
+           || static_cast<int>(u.size()) != m_)
+            return qp_error::dimension_mismatch;
+        if(!q.allFinite())
+            return qp_error::non_finite_input;
+        for(int i = 0; i < m_; ++i)
+        {
+            if(std::isnan(l[i]) || std::isnan(u[i]))
+                return qp_error::non_finite_input;
+            if(l[i] > u[i])
+                return qp_error::invalid_bounds;
+        }
+        return std::nullopt;
+    }
+
     std::optional<qp_error>
     validate_full(const sparse_type& P, const vector<Scalar>& q, const sparse_type& A,
                   const vector<Scalar>& l, const vector<Scalar>& u) const
@@ -251,8 +283,46 @@ private:
         return std::nullopt;
     }
 
-    bool pose(const sparse_type& P, const vector<Scalar>& q, const sparse_type& A,
-              const vector<Scalar>& l, const vector<Scalar>& u, const sparse_qp_options& opts)
+    std::optional<qp_error> pose(const sparse_type& P, const vector<Scalar>& q, const sparse_type& A,
+                                 const vector<Scalar>& l, const vector<Scalar>& u,
+                                 const sparse_qp_options& opts)
+    {
+        if(opts.validate_convexity && !objective_is_symmetric(P))
+            return qp_error::invalid_problem;
+        store_problem(P, q, A, l, u);
+        sigma_ = static_cast<Scalar>(opts.sigma);
+        ruiz(opts);
+        if(m_ > 0)
+            Einv_ = E_.cwiseInverse();
+        init_rho(opts);
+        if(!factor_fresh(kkt_, P_scaled_, A_scaled_, sigma_, rho_inv_))
+            return qp_error::factorization_failed;
+        seed_iterates(opts);
+        posed_ = true;
+        return std::nullopt;
+    }
+
+    // The system factor reads only the lower triangle of P while the residuals and the objective
+    // read all of it, so P must be symmetric to the relative 10 n eps that floating-point assembly
+    // leaves. Positive semidefiniteness is assumed on this path, not verified.
+    bool objective_is_symmetric(const sparse_type& P) const
+    {
+        const sparse_type transposed = P.transpose();
+        const sparse_type difference = P - transposed;
+        Scalar asymmetry = Scalar(0);
+        for(int j = 0; j < static_cast<int>(difference.cols()); ++j)
+            for(typename sparse_type::InnerIterator it(difference, j); it; ++it)
+                asymmetry = std::max(asymmetry, std::abs(it.value()));
+        Scalar magnitude = Scalar(1);
+        for(int j = 0; j < static_cast<int>(P.cols()); ++j)
+            for(typename sparse_type::InnerIterator it(P, j); it; ++it)
+                magnitude = std::max(magnitude, std::abs(it.value()));
+        const Scalar n = static_cast<Scalar>(P.rows());
+        return asymmetry <= Scalar(10) * n * std::numeric_limits<Scalar>::epsilon() * magnitude;
+    }
+
+    void store_problem(const sparse_type& P, const vector<Scalar>& q, const sparse_type& A,
+                       const vector<Scalar>& l, const vector<Scalar>& u)
     {
         const int n = static_cast<int>(P.rows());
         const int m = static_cast<int>(A.rows());
@@ -263,8 +333,6 @@ private:
         posed_ = false;
         n_ = n;
         m_ = m;
-        sigma_ = static_cast<Scalar>(opts.sigma);
-
         P_ = P;
         A_ = A;
         P_.makeCompressed();
@@ -272,62 +340,35 @@ private:
         q_ = q;
         l_ = l;
         u_ = u;
+        size_workspaces();
+        // A re-pose can change P, A or the shape, so any cached polish factor is
+        // no longer bit-identical to a freshly analyzed one: drop it.
+        polish_cache_valid_ = false;
+    }
 
-        D_.resize(n_);
-        scan_n_.resize(n_);
-        q_scaled_.resize(n_);
-        E_.resize(m_);
-        Einv_.resize(m_);
-        scan_m_.resize(m_);
-        l_scaled_.resize(m_);
-        u_scaled_.resize(m_);
-        rho_vec_.resize(m_);
-        rho_inv_vec_.resize(m_);
-        base_mult_.resize(m_);
-        rho_inv_.assign(static_cast<std::size_t>(m_), Scalar(1));
-
+    void size_workspaces()
+    {
+        using workspace = std::reference_wrapper<vector<Scalar>>;
+        for(workspace v : {workspace(D_), workspace(scan_n_), workspace(q_scaled_), workspace(x_),
+                           workspace(x_tilde_), workspace(x_iter_prev_), workspace(x_unscaled_),
+                           workspace(Px_buf_), workspace(Aty_buf_), workspace(rd_), workspace(ntmp_),
+                           workspace(ntmp2_), workspace(px_x_)})
+            v.get().resize(n_);
+        for(workspace v : {workspace(E_), workspace(Einv_), workspace(scan_m_), workspace(l_scaled_),
+                           workspace(u_scaled_), workspace(rho_vec_), workspace(rho_inv_vec_),
+                           workspace(base_mult_), workspace(z_), workspace(z_tilde_), workspace(z_prev_),
+                           workspace(y_), workspace(y_iter_prev_), workspace(y_unscaled_),
+                           workspace(z_unscaled_), workspace(Ax_buf_), workspace(rp_), workspace(mtmp_),
+                           workspace(mtmp2_), workspace(px_y_)})
+            v.get().resize(m_);
         rhs_kkt_.resize(n_ + m_);
         sol_kkt_.resize(n_ + m_);
-        x_.resize(n_);
-        x_tilde_.resize(n_);
-        x_iter_prev_.resize(n_);
-        x_unscaled_.resize(n_);
-        Px_buf_.resize(n_);
-        Aty_buf_.resize(n_);
-        rd_.resize(n_);
-        ntmp_.resize(n_);
-        ntmp2_.resize(n_);
-        px_x_.resize(n_);
-        z_.resize(m_);
-        z_tilde_.resize(m_);
-        z_prev_.resize(m_);
-        y_.resize(m_);
-        y_iter_prev_.resize(m_);
-        y_unscaled_.resize(m_);
-        z_unscaled_.resize(m_);
-        Ax_buf_.resize(m_);
-        rp_.resize(m_);
-        mtmp_.resize(m_);
-        mtmp2_.resize(m_);
-        px_y_.resize(m_);
+        rho_inv_.assign(static_cast<std::size_t>(m_), Scalar(1));
         act_row_.assign(static_cast<std::size_t>(m_), -1);
         active_lower_.clear();
         active_upper_.clear();
         active_lower_.reserve(static_cast<std::size_t>(m_));
         active_upper_.reserve(static_cast<std::size_t>(m_));
-        // A re-pose can change P, A or the shape, so any cached polish factor is
-        // no longer bit-identical to a freshly analyzed one: drop it.
-        polish_cache_valid_ = false;
-
-        ruiz(opts);
-        if(m_ > 0)
-            Einv_ = E_.cwiseInverse();
-        init_rho(opts);
-        if(!factor_fresh(kkt_, P_scaled_, A_scaled_, sigma_, rho_inv_))
-            return false;
-        seed_iterates(opts);
-        posed_ = true;
-        return true;
     }
 
     // Modified Ruiz equilibration on the stacked KKT form [P A^T; A 0] plus a
@@ -417,8 +458,7 @@ private:
         current_rho_ = static_cast<Scalar>(opts.rho);
         for(int i = 0; i < m_; ++i)
         {
-            const bool eq = std::isfinite(l_[i]) && std::isfinite(u_[i])
-                            && (u_[i] - l_[i]) <= Scalar(eq_tol_);
+            const bool eq = detail::is_equality_bound(l_[i], u_[i], Scalar(eq_tol_));
             base_mult_[i] = eq ? Scalar(eq_boost_) : Scalar(1);
         }
         rebuild_rho_vec();
@@ -437,18 +477,14 @@ private:
         }
     }
 
+    // A dual seed of the wrong length is replaced by zeros while the primal seed is kept, which
+    // leaves exactly the state an explicit zero dual seed produces.
     void seed_iterates(const sparse_qp_options& opts)
     {
-        if(opts.warm_start && has_warm_ && static_cast<int>(ws_x_.size()) == n_)
+        seed_consumed_ = opts.warm_start && has_warm_ && static_cast<int>(ws_x_.size()) == n_;
+        if(!seed_consumed_)
         {
-            x_ = ws_x_.cwiseQuotient(D_);
-            if(m_ > 0 && static_cast<int>(ws_y_.size()) == m_)
-            {
-                y_ = c_ * ws_y_.cwiseQuotient(E_);
-                mtmp_.noalias() = A_scaled_ * x_;
-                z_ = mtmp_.cwiseMax(l_scaled_).cwiseMin(u_scaled_);
-                return;
-            }
+            x_.setZero();
             if(m_ > 0)
             {
                 y_.setZero();
@@ -456,12 +492,15 @@ private:
             }
             return;
         }
-        x_.setZero();
-        if(m_ > 0)
-        {
+        x_ = ws_x_.cwiseQuotient(D_);
+        if(m_ == 0)
+            return;
+        if(static_cast<int>(ws_y_.size()) == m_)
+            y_ = c_ * ws_y_.cwiseQuotient(E_);
+        else
             y_.setZero();
-            z_.setZero();
-        }
+        mtmp_.noalias() = A_scaled_ * x_;
+        z_ = mtmp_.cwiseMax(l_scaled_).cwiseMin(u_scaled_);
     }
 
     // Algorithm 1, with x_tilde and nu read out of one full-KKT solve and
@@ -491,7 +530,7 @@ private:
         }
     }
 
-    void run_admm(const sparse_qp_options& opts)
+    std::optional<qp_error> run_admm(const sparse_qp_options& opts)
     {
         status_ = qp_solve_status::max_iterations;
         iters_ = 0;
@@ -502,40 +541,42 @@ private:
         {
             admm_step(opts);
             iters_ = k + 1;
-            bool have_resid = false;
-            if((k + 1) % check == 0)
-            {
-                refresh_residuals();
-                have_resid = true;
-                if(converged(opts))
-                {
-                    status_ = qp_solve_status::solved;
-                    break;
-                }
-                if(check_primal_infeasible(opts))
-                {
-                    status_ = qp_solve_status::primal_infeasible;
-                    break;
-                }
-                if(check_dual_infeasible(opts))
-                {
-                    status_ = qp_solve_status::dual_infeasible;
-                    break;
-                }
-            }
+            const bool have_resid = (k + 1) % check == 0;
+            if(have_resid && terminated(opts))
+                break;
             if(opts.adaptive_rho && rho_iv > 0 && (k + 1) % rho_iv == 0)
             {
                 if(!have_resid)
                     refresh_residuals();
-                maybe_update_rho(opts);
+                if(!maybe_update_rho(opts))
+                    return qp_error::factorization_failed;
             }
         }
-        if(status_ == qp_solve_status::max_iterations)
-        {
-            refresh_residuals();
-            if(relaxed_converged(opts))
-                status_ = qp_solve_status::solved_inaccurate;
-        }
+        settle_at_iteration_cap(opts);
+        return std::nullopt;
+    }
+
+    bool terminated(const sparse_qp_options& opts)
+    {
+        refresh_residuals();
+        if(converged(opts))
+            status_ = qp_solve_status::solved;
+        else if(check_primal_infeasible(opts))
+            status_ = qp_solve_status::primal_infeasible;
+        else if(check_dual_infeasible(opts))
+            status_ = qp_solve_status::dual_infeasible;
+        else
+            return false;
+        return true;
+    }
+
+    void settle_at_iteration_cap(const sparse_qp_options& opts)
+    {
+        if(status_ != qp_solve_status::max_iterations)
+            return;
+        refresh_residuals();
+        if(relaxed_converged(opts))
+            status_ = qp_solve_status::solved_inaccurate;
     }
 
     void refresh_residuals()
@@ -658,22 +699,26 @@ private:
         return true;
     }
 
-    void maybe_update_rho(const sparse_qp_options& o)
+    // A failed refactor has already overwritten the previous factor, so the posed state is
+    // dropped and the caller must pose again.
+    bool maybe_update_rho(const sparse_qp_options& o)
     {
         if(m_ == 0)
-            return;
+            return true;
         const Scalar num = prim_scale_ > Scalar(0) ? rp_norm_ / prim_scale_ : rp_norm_;
         const Scalar den = dual_scale_ > Scalar(0) ? rd_norm_ / dual_scale_ : rd_norm_;
         if(num <= Scalar(0) || den <= Scalar(0))
-            return;
+            return true;
         const Scalar ratio = std::sqrt(num / den);
         const Scalar tol = static_cast<Scalar>(o.adaptive_rho_tolerance);
         if(ratio > tol || ratio < Scalar(1) / tol)
         {
             current_rho_ = std::clamp(current_rho_ * ratio, Scalar(rho_min_), Scalar(rho_max_));
             rebuild_rho_vec();
-            kkt_.refactorize(rho_inv_);
+            if(!kkt_.refactorize(rho_inv_))
+                posed_ = false;
         }
+        return posed_;
     }
 
     void finalize(const sparse_qp_options& o, result_type& out)
@@ -719,6 +764,7 @@ private:
         out.status = status_;
         out.iterations = iters_;
         out.polished = polished;
+        out.warm_started = seed_consumed_;
         out.primal_residual = m_ > 0 ? rpn : Scalar(0);
         out.dual_residual = rdn;
         ntmp_.noalias() = P_ * x_unscaled_;
@@ -901,6 +947,7 @@ private:
     Scalar current_rho_{Scalar(0.1)};
     bool posed_{false};
     bool has_warm_{false};
+    bool seed_consumed_;
 
     sparse_type P_;
     sparse_type A_;

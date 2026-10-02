@@ -22,6 +22,9 @@ namespace argmin
 // polish) and their knobs are free to diverge without either type following the
 // other.
 //
+// validate_convexity gates a pose-time symmetry check on P, not an inertia test: on this
+// path positive semidefiniteness is assumed rather than verified.
+//
 // Reference: Stellato, Banjac, Goulart, Bemporad, Boyd (2020), "OSQP: An
 //            operator splitting solver for quadratic programs"; OSQP solver
 //            settings defaults.
@@ -44,6 +47,7 @@ struct sparse_qp_options
     std::uint16_t polish_refine_iter{3};
     double delta{1e-6};
     bool warm_start{true};
+    bool validate_convexity{true};
 };
 
 }

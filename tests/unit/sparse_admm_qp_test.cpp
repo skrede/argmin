@@ -10,12 +10,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <limits>
 #include <random>
 #include <vector>
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 
 using namespace argmin;
 
@@ -172,6 +175,86 @@ osqp_problem warm_fixture()
     p.l[n + 1] = -0.3;
     p.u[n + 1] = 0.3;
     return p;
+}
+
+// The leading m rows of a fixed pool over one strictly convex objective, the
+// same construction the dense seed cases use. The unconstrained minimizer sits
+// outside the boxes, so the multipliers are nonzero and a consumed dual seed
+// changes the trajectory.
+osqp_problem seed_problem(int m)
+{
+    osqp_problem p;
+    p.P = Eigen::MatrixXd{{2.0, 0.5, 0.0}, {0.5, 1.0, 0.0}, {0.0, 0.0, 1.5}};
+    p.q = Eigen::VectorXd{{-3.0, 2.0, -1.0}};
+    const Eigen::MatrixXd pool{{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {1.0, 1.0, 1.0}, {1.0, -1.0, 0.0}};
+    const Eigen::VectorXd lower{{-0.3, -0.4, -0.5, -1.0}};
+    const Eigen::VectorXd upper{{0.3, 0.4, 0.5, 1.0}};
+    p.A = pool.topRows(m);
+    p.l = lower.head(m);
+    p.u = upper.head(m);
+    return p;
+}
+
+std::optional<qp_error> refusal(const expected<qp_result<double>, qp_error>& result)
+{
+    if(result)
+        return std::nullopt;
+    return result.error();
+}
+
+bool same_bits(const Eigen::VectorXd& a, const Eigen::VectorXd& b)
+{
+    if(a.size() != b.size())
+        return false;
+    for(Eigen::Index i = 0; i < a.size(); ++i)
+        if(std::bit_cast<std::uint64_t>(a[i]) != std::bit_cast<std::uint64_t>(b[i]))
+            return false;
+    return true;
+}
+
+bool same_solve(const qp_result<double>& a, const qp_result<double>& b)
+{
+    return same_bits(a.x, b.x) && same_bits(a.y, b.y) && a.iterations == b.iterations
+           && a.warm_started == b.warm_started;
+}
+
+const Eigen::VectorXd seed_x{{0.1, -0.2, 0.05}};
+const Eigen::VectorXd seed_y{{0.4, -0.3, 0.2, 0.1}};
+
+// Polish snaps nearby iterates onto one active-set solution and termination is
+// checked only every few iterations; both can hide which seed was consumed. A
+// short unpolished run exposes the raw trajectory instead.
+sparse_qp_options trajectory_options()
+{
+    sparse_qp_options opts;
+    opts.polish = false;
+    opts.check_termination = 1;
+    opts.max_iterations = 8;
+    return opts;
+}
+
+// Poses the four-row seed problem, then resolves it from the given seed, so the
+// pose-time reshaping never sees the seed.
+expected<qp_result<double>, qp_error> resolve_from(const Eigen::VectorXd& x, const Eigen::VectorXd& y,
+                                                   const sparse_qp_options& resolve_opts)
+{
+    const osqp_problem p = seed_problem(4);
+    sparse_admm_qp_solver<double> solver;
+    REQUIRE(solver.solve(to_sparse(p.P), p.q, to_sparse(p.A), p.l, p.u, trajectory_options()));
+    solver.warm_start(x, y);
+    return solver.resolve(1.05 * p.q, p.l, p.u, resolve_opts);
+}
+
+expected<qp_result<double>, qp_error> boxed_solve(const Eigen::MatrixXd& P, bool validate)
+{
+    const Eigen::VectorXd q{{1.0, -1.0}};
+    const Eigen::MatrixXd A = Eigen::MatrixXd::Identity(2, 2);
+    const Eigen::VectorXd l{{-1.0, -1.0}};
+    const Eigen::VectorXd u{{1.0, 1.0}};
+    sparse_qp_options opts;
+    opts.validate_convexity = validate;
+    sparse_admm_qp_solver<double> solver;
+    return solver.solve(P.sparseView(0.0, 0.0), q, to_sparse(A), l, u, opts);
 }
 
 }
@@ -695,4 +778,325 @@ TEST_CASE("sparse_admm_qp re-poses a used instance onto a different sparsity pat
     CHECK(solver.scaling_cost() == c_a);
     CHECK((solver.scaling_primal() - D_a).cwiseAbs().maxCoeff() == 0.0);
     CHECK((solver.scaling_dual() - E_a).cwiseAbs().maxCoeff() == 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// Option values outside their domain are refused on the error channel at both
+// entry points, with the value and the field set the dense splitting solver
+// uses: the two are compared against each other, so a domain one refuses and
+// the other accepts is a defect in whichever of them moved.
+// ---------------------------------------------------------------------------
+TEST_CASE("sparse_admm_qp rejects option values outside their domain", "[qp_options]")
+{
+    const osqp_problem p = seed_problem(4);
+    const sparse Ps = to_sparse(p.P);
+    const sparse As = to_sparse(p.A);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const auto rejected = [&](const auto& mutate)
+    {
+        sparse_qp_options opts;
+        mutate(opts);
+        sparse_admm_qp_solver<double> fresh;
+        const auto solved = fresh.solve(Ps, p.q, As, p.l, p.u, opts);
+        sparse_admm_qp_solver<double> posed;
+        REQUIRE(posed.solve(Ps, p.q, As, p.l, p.u));
+        const auto resolved = posed.resolve(p.q, p.l, p.u, opts);
+        return refusal(solved) == qp_error::invalid_options
+               && refusal(resolved) == qp_error::invalid_options;
+    };
+    const auto agrees_with_dense = [&](const auto& mutate)
+    {
+        sparse_qp_options sparse_opts;
+        mutate(sparse_opts);
+        dense_qp_options dense_opts;
+        mutate(dense_opts);
+        sparse_admm_qp_solver<double> sparse_solver;
+        dense_admm_qp_solver<double> dense_solver(3, 4);
+        return refusal(sparse_solver.solve(Ps, p.q, As, p.l, p.u, sparse_opts))
+               == refusal(dense_solver.solve(p.P, p.q, p.A, p.l, p.u, dense_opts));
+    };
+
+    SECTION("penalty parameter")
+    {
+        for(const double v : {0.0, -0.1, nan, inf})
+        {
+            const auto set = [v](auto& o) { o.rho = v; };
+            CHECK(rejected(set));
+            CHECK(agrees_with_dense(set));
+        }
+    }
+    SECTION("regularization")
+    {
+        for(const double v : {0.0, -1e-6, nan, inf})
+        {
+            const auto set = [v](auto& o) { o.sigma = v; };
+            CHECK(rejected(set));
+            CHECK(agrees_with_dense(set));
+        }
+    }
+    SECTION("over-relaxation")
+    {
+        for(const double v : {0.0, 2.0, -0.5, 2.5, nan, inf})
+        {
+            const auto set = [v](auto& o) { o.alpha = v; };
+            CHECK(rejected(set));
+            CHECK(agrees_with_dense(set));
+        }
+    }
+    SECTION("polish regularization")
+    {
+        for(const double v : {0.0, -1e-6, nan, inf})
+        {
+            const auto set = [v](auto& o) { o.delta = v; };
+            CHECK(rejected(set));
+            CHECK(agrees_with_dense(set));
+        }
+    }
+    SECTION("adaptive ratio threshold")
+    {
+        for(const double v : {0.999, 0.0, nan, inf})
+        {
+            const auto set = [v](auto& o) { o.adaptive_rho_tolerance = v; };
+            CHECK(rejected(set));
+            CHECK(agrees_with_dense(set));
+        }
+    }
+    SECTION("convergence and certificate tolerances")
+    {
+        const auto both_zero = [](auto& o)
+        {
+            o.eps_abs = 0.0;
+            o.eps_rel = 0.0;
+        };
+        CHECK(rejected(both_zero));
+        CHECK(agrees_with_dense(both_zero));
+        for(const double v : {-1e-6, nan, inf})
+        {
+            const auto set_abs = [v](auto& o) { o.eps_abs = v; };
+            const auto set_rel = [v](auto& o) { o.eps_rel = v; };
+            CHECK(rejected(set_abs));
+            CHECK(rejected(set_rel));
+            CHECK(agrees_with_dense(set_abs));
+            CHECK(agrees_with_dense(set_rel));
+        }
+        for(const double v : {0.0, -1e-4, nan, inf})
+        {
+            const auto set_prim = [v](auto& o) { o.eps_prim_inf = v; };
+            const auto set_dual = [v](auto& o) { o.eps_dual_inf = v; };
+            CHECK(rejected(set_prim));
+            CHECK(rejected(set_dual));
+            CHECK(agrees_with_dense(set_prim));
+            CHECK(agrees_with_dense(set_dual));
+        }
+    }
+    SECTION("iteration budget")
+    {
+        const auto set = [](auto& o) { o.max_iterations = 0; };
+        CHECK(rejected(set));
+        CHECK(agrees_with_dense(set));
+    }
+    SECTION("in-domain boundary values solve")
+    {
+        const auto unit_threshold = [](auto& o) { o.adaptive_rho_tolerance = 1.0; };
+        const auto absolute_only = [](auto& o) { o.eps_rel = 0.0; };
+        const auto coerced = [](auto& o)
+        {
+            o.check_termination = 0;
+            o.adaptive_rho_interval = 0;
+        };
+        const auto solves = [&](const auto& mutate)
+        {
+            sparse_qp_options opts;
+            mutate(opts);
+            sparse_admm_qp_solver<double> solver;
+            const auto result = solver.solve(Ps, p.q, As, p.l, p.u, opts);
+            REQUIRE(result);
+            CHECK(result->status == qp_solve_status::solved);
+            CHECK(solver.resolve(p.q, p.l, p.u, opts));
+            CHECK(agrees_with_dense(mutate));
+        };
+        solves([](auto&) {});
+        solves(unit_threshold);
+        solves(absolute_only);
+        solves(coerced);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A system the no-pivot factorization cannot complete is a numerical failure,
+// not a defect in the caller's problem, and is reported as one; the solver then
+// refuses a resolve until it is posed again. With equilibration off, P = -sigma
+// cancels the regularization exactly and leaves a zero pivot.
+// ---------------------------------------------------------------------------
+TEST_CASE("sparse_admm_qp reports a factorization failure as a factorization failure",
+          "[qp_factorization]")
+{
+    sparse_qp_options opts;
+    opts.scaling = 0;
+    const osqp_problem valid = seed_problem(4);
+
+    SECTION("at pose")
+    {
+        const sparse P = to_sparse(Eigen::MatrixXd{{-opts.sigma}});
+        const Eigen::VectorXd q{{1.0}};
+        const sparse A(0, 1);
+        const Eigen::VectorXd empty(0);
+        sparse_admm_qp_solver<double> solver;
+        REQUIRE(solver.solve(to_sparse(valid.P), valid.q, to_sparse(valid.A), valid.l, valid.u));
+        const auto result = solver.solve(P, q, A, empty, empty, opts);
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == qp_error::factorization_failed);
+        CHECK_FALSE(result.error() == qp_error::invalid_problem);
+        const auto stale = solver.resolve(q, empty, empty, opts);
+        REQUIRE_FALSE(stale);
+        CHECK(stale.error() == qp_error::invalid_problem);
+    }
+    SECTION("after an accepted penalty update")
+    {
+        // P + sigma = -1e6 makes the system singular exactly at the penalty
+        // ceiling, which the first accepted update from 9e5 reaches through the
+        // clamp, so the zero pivot does not hinge on a rounding coincidence.
+        const double ceiling = 1e6;
+        opts.rho = 9e5;
+        opts.adaptive_rho_interval = 1;
+        opts.adaptive_rho_tolerance = 1.0;
+        opts.check_termination = 1000;
+        opts.max_iterations = 50;
+        const sparse P = to_sparse(Eigen::MatrixXd{{-ceiling - opts.sigma}});
+        REQUIRE(-ceiling - opts.sigma + opts.sigma == -ceiling);
+        const Eigen::VectorXd q{{10.0}};
+        const sparse A = to_sparse(Eigen::MatrixXd{{1.0}});
+        const Eigen::VectorXd l{{-1.0}};
+        const Eigen::VectorXd u{{1.0}};
+        sparse_qp_options fixed_penalty = opts;
+        fixed_penalty.adaptive_rho = false;
+        sparse_admm_qp_solver<double> control;
+        REQUIRE(control.solve(P, q, A, l, u, fixed_penalty));
+
+        sparse_admm_qp_solver<double> solver;
+        const auto result = solver.solve(P, q, A, l, u, opts);
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == qp_error::factorization_failed);
+        CHECK(solver.iteration_factorizations() == 2u);
+        const auto stale = solver.resolve(q, l, u, fixed_penalty);
+        REQUIRE_FALSE(stale);
+        CHECK(stale.error() == qp_error::invalid_problem);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The seed fallback is observable. A seed counts as used exactly when its
+// primal part was consumed: a dual of the wrong length is replaced by zeros
+// while the primal is kept, and the result matches an explicit zero-dual seed
+// bit for bit; a primal of the wrong length, no seed at all, or a seed carried
+// across a change of problem shape starts from zero and says so.
+// ---------------------------------------------------------------------------
+TEST_CASE("sparse_admm_qp reports whether the caller's seed was used", "[qp_warm]")
+{
+    const sparse_qp_options probe = trajectory_options();
+    sparse_qp_options cold = probe;
+    cold.warm_start = false;
+
+    SECTION("a full seed")
+    {
+        const auto result = resolve_from(seed_x, seed_y, probe);
+        REQUIRE(result);
+        CHECK(result->warm_started);
+        const auto zero_dual = resolve_from(seed_x, Eigen::VectorXd::Zero(4), probe);
+        REQUIRE(zero_dual);
+        CHECK_FALSE(same_bits(result->x, zero_dual->x));
+    }
+    SECTION("a primal seed with a dual of the wrong length")
+    {
+        const auto result = resolve_from(seed_x, seed_y.head(3), probe);
+        REQUIRE(result);
+        CHECK(result->warm_started);
+        const auto control = resolve_from(seed_x, Eigen::VectorXd::Zero(4), probe);
+        REQUIRE(control);
+        CHECK(same_solve(*result, *control));
+    }
+    SECTION("a primal seed of the wrong length")
+    {
+        const auto control = resolve_from(seed_x, seed_y, cold);
+        REQUIRE(control);
+        CHECK_FALSE(control->warm_started);
+        for(const Eigen::VectorXd& x : {Eigen::VectorXd(seed_x.head(2)), Eigen::VectorXd()})
+        {
+            const auto result = resolve_from(x, seed_y, probe);
+            REQUIRE(result);
+            CHECK_FALSE(result->warm_started);
+            CHECK(same_solve(*result, *control));
+        }
+    }
+    SECTION("no seed")
+    {
+        const osqp_problem p = seed_problem(4);
+        sparse_admm_qp_solver<double> unseeded;
+        const auto result = unseeded.solve(to_sparse(p.P), p.q, to_sparse(p.A), p.l, p.u, probe);
+        REQUIRE(result);
+        CHECK_FALSE(result->warm_started);
+        sparse_admm_qp_solver<double> never_warm;
+        const auto control = never_warm.solve(to_sparse(p.P), p.q, to_sparse(p.A), p.l, p.u, cold);
+        REQUIRE(control);
+        CHECK(same_solve(*result, *control));
+    }
+    SECTION("a seed carried across a change of problem shape")
+    {
+        const osqp_problem small = seed_problem(2);
+        const osqp_problem large = seed_problem(4);
+        sparse_admm_qp_solver<double> reshaped;
+        REQUIRE(reshaped.solve(to_sparse(small.P), small.q, to_sparse(small.A), small.l, small.u, probe));
+        reshaped.warm_start(seed_x, seed_y);
+        const auto result =
+            reshaped.solve(to_sparse(large.P), large.q, to_sparse(large.A), large.l, large.u, probe);
+        REQUIRE(result);
+        CHECK_FALSE(result->warm_started);
+        sparse_admm_qp_solver<double> fresh;
+        const auto control =
+            fresh.solve(to_sparse(large.P), large.q, to_sparse(large.A), large.l, large.u, cold);
+        REQUIRE(control);
+        CHECK(same_solve(*result, *control));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The system factor reads only the lower triangle of P while the residuals and
+// the objective read all of it, so an asymmetric P would be solved as one
+// problem and reported as another. Asymmetry at round-off level is accepted;
+// a rejected solve leaves the previously posed problem in place; the flag turns
+// the check off.
+// ---------------------------------------------------------------------------
+TEST_CASE("sparse_admm_qp rejects an asymmetric objective matrix", "[qp_convexity]")
+{
+    const Eigen::MatrixXd unequal{{2.0, 0.5}, {0.7, 1.0}};
+    const Eigen::MatrixXd one_sided{{2.0, 0.5}, {0.0, 1.0}};
+    for(const Eigen::MatrixXd& asymmetric : {unequal, one_sided})
+    {
+        const auto rejected = boxed_solve(asymmetric, true);
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error() == qp_error::invalid_problem);
+    }
+
+    Eigen::MatrixXd rounded{{2.0, 0.5}, {0.5, 1.0}};
+    rounded(1, 0) = std::nextafter(0.5, 1.0);
+    const auto accepted = boxed_solve(rounded, true);
+    REQUIRE(accepted);
+    CHECK(accepted->status == qp_solve_status::solved);
+
+    SECTION("a rejected solve keeps the posed problem")
+    {
+        const osqp_problem p = seed_problem(4);
+        sparse_admm_qp_solver<double> solver;
+        REQUIRE(solver.solve(to_sparse(p.P), p.q, to_sparse(p.A), p.l, p.u));
+        const Eigen::VectorXd q{{1.0, -1.0}};
+        const sparse A = to_sparse(Eigen::MatrixXd::Identity(2, 2));
+        const Eigen::VectorXd bound = Eigen::VectorXd::Ones(2);
+        CHECK_FALSE(solver.solve(to_sparse(unequal), q, A, -bound, bound));
+        CHECK(solver.resolve(p.q, p.l, p.u));
+    }
+    SECTION("the flag turns the check off")
+    {
+        CHECK(boxed_solve(unequal, false));
+        CHECK(boxed_solve(one_sided, false));
+    }
 }

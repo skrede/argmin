@@ -15,7 +15,7 @@ import pytest
 
 HEADERS = {
     "DenseQpOptions": ("options/dense_qp_options.h", "dense_qp_options", 18),
-    "SparseQpOptions": ("options/sparse_qp_options.h", "sparse_qp_options", 17),
+    "SparseQpOptions": ("options/sparse_qp_options.h", "sparse_qp_options", 18),
 }
 
 
