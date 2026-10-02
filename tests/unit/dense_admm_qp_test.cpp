@@ -237,6 +237,20 @@ dense_qp_options trajectory_options()
     return opts;
 }
 
+expected<qp_result<double>, qp_error> boxed_solve(const Eigen::MatrixXd& P, bool validate)
+{
+    const Eigen::VectorXd q{{1.0, -1.0}};
+    const Eigen::MatrixXd A = Eigen::MatrixXd::Identity(2, 2);
+    const Eigen::VectorXd l{{-1.0, -1.0}};
+    const Eigen::VectorXd u{{1.0, 1.0}};
+    dense_qp_options opts;
+    opts.rho = 10.0;
+    opts.adaptive_rho = false;
+    opts.validate_convexity = validate;
+    dense_admm_qp_solver<double> solver(2, 2);
+    return solver.solve(P, q, A, l, u, opts);
+}
+
 }
 
 // ---------------------------------------------------------------------------
@@ -730,4 +744,243 @@ TEST_CASE("dense_admm_qp drops a capacity-length seed when the problem is posed 
     const auto control = zero_dual.solve(small.P, small.q, small.A, small.l, small.u, probe);
     REQUIRE(control);
     CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// Equality-row classification scales the width tolerance by the bound
+// magnitude, floored at one: unit-scale rows classify exactly as under the
+// absolute rule, while a row expressed in larger units is no longer split into
+// two inequalities by a width that is pure round-off at its own scale.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp classifies equality rows by a scale-aware width", "[qp]")
+{
+    constexpr double tol = 1e-9;
+    CHECK(detail::is_equality_bound(0.0, 0.0, tol));
+    CHECK(detail::is_equality_bound(-1.0, -1.0 + 5e-10, tol));
+    CHECK_FALSE(detail::is_equality_bound(0.0, 1.0, tol));
+    CHECK(detail::is_equality_bound(1e6, 1e6 + 5e-4, tol));
+    CHECK_FALSE((1e6 + 5e-4) - 1e6 <= tol);
+
+    CHECK_FALSE(detail::is_equality_bound(-inf, 0.0, tol));
+    CHECK_FALSE(detail::is_equality_bound(0.0, inf, tol));
+    CHECK_FALSE(detail::is_equality_bound(-inf, inf, tol));
+    CHECK_FALSE(detail::is_equality_bound(inf, inf, tol));
+
+    const std::vector<double> widths{0.0, 1e-12, 5e-10, 1e-9, 1.0000001e-9, 2e-9, 1e-6, 0.5};
+    for(int k = -8; k <= 8; ++k)
+    {
+        const double l = 0.125 * k;
+        for(const double w : widths)
+        {
+            const double u = l + w;
+            if(std::abs(u) > 1.0)
+                continue;
+            CHECK(detail::is_equality_bound(l, u, tol) == ((u - l) <= tol));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Option values outside their domain are refused on the error channel at both
+// entry points rather than clamped, coerced or left to poison the iteration.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp rejects option values outside their domain", "[qp_options]")
+{
+    const osqp_problem p = seed_problem(4);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const auto rejected = [&](const dense_qp_options& opts)
+    {
+        dense_admm_qp_solver<double> fresh(3, 4);
+        const auto solved = fresh.solve(p.P, p.q, p.A, p.l, p.u, opts);
+        dense_admm_qp_solver<double> posed(3, 4);
+        REQUIRE(posed.solve(p.P, p.q, p.A, p.l, p.u));
+        const auto resolved = posed.resolve(p.q, p.l, p.u, opts);
+        return !solved && solved.error() == qp_error::invalid_options && !resolved && resolved.error() == qp_error::invalid_options;
+    };
+    const auto with = [](auto field, double value)
+    {
+        dense_qp_options opts;
+        opts.*field = value;
+        return opts;
+    };
+
+    SECTION("penalty parameter")
+    {
+        for(const double v : {0.0, -0.1, nan, inf})
+            CHECK(rejected(with(&dense_qp_options::rho, v)));
+    }
+    SECTION("regularization")
+    {
+        for(const double v : {0.0, -1e-6, nan, inf})
+            CHECK(rejected(with(&dense_qp_options::sigma, v)));
+    }
+    SECTION("over-relaxation")
+    {
+        for(const double v : {0.0, 2.0, -0.5, 2.5, nan, inf})
+            CHECK(rejected(with(&dense_qp_options::alpha, v)));
+    }
+    SECTION("polish regularization")
+    {
+        for(const double v : {0.0, -1e-6, nan, inf})
+            CHECK(rejected(with(&dense_qp_options::delta, v)));
+    }
+    SECTION("adaptive ratio threshold")
+    {
+        for(const double v : {0.999, 0.0, nan, inf})
+            CHECK(rejected(with(&dense_qp_options::adaptive_rho_tolerance, v)));
+    }
+    SECTION("convergence and certificate tolerances")
+    {
+        dense_qp_options both_zero;
+        both_zero.eps_abs = 0.0;
+        both_zero.eps_rel = 0.0;
+        CHECK(rejected(both_zero));
+        for(const auto field : {&dense_qp_options::eps_abs, &dense_qp_options::eps_rel})
+            for(const double v : {-1e-6, nan, inf})
+                CHECK(rejected(with(field, v)));
+        for(const auto field : {&dense_qp_options::eps_prim_inf, &dense_qp_options::eps_dual_inf})
+            for(const double v : {0.0, -1e-4, nan, inf})
+                CHECK(rejected(with(field, v)));
+    }
+    SECTION("iteration budget")
+    {
+        dense_qp_options opts;
+        opts.max_iterations = 0;
+        CHECK(rejected(opts));
+    }
+    SECTION("in-domain boundary values solve")
+    {
+        dense_qp_options unit_threshold;
+        unit_threshold.adaptive_rho_tolerance = 1.0;
+        dense_qp_options absolute_only;
+        absolute_only.eps_rel = 0.0;
+        dense_qp_options coerced;
+        coerced.check_termination = 0;
+        coerced.adaptive_rho_interval = 0;
+        for(const dense_qp_options& opts : {dense_qp_options{}, unit_threshold, absolute_only, coerced})
+        {
+            dense_admm_qp_solver<double> solver(3, 4);
+            const auto result = solver.solve(p.P, p.q, p.A, p.l, p.u, opts);
+            REQUIRE(result);
+            CHECK(result->status == qp_solve_status::solved);
+            REQUIRE(solver.resolve(p.q, p.l, p.u, opts));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A condensed matrix that fails to factor is reported, at pose and after an
+// accepted penalty update alike, and the solver refuses a later resolve until
+// it is posed again, since the failed factorization has replaced the old one.
+// The objective is indefinite on purpose and its detection is switched off:
+// with equilibration off, K is indefinite at the default penalty, and positive
+// definite at a penalty of 3 until the adaptive schedule lowers it.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp reports a failed factorization instead of solving on it", "[qp_options]")
+{
+    const Eigen::MatrixXd P{{-2.0}};
+    const Eigen::VectorXd q{{1.0}};
+    const Eigen::MatrixXd A{{1.0}};
+    const Eigen::VectorXd l{{-1.0}};
+    const Eigen::VectorXd u{{1.0}};
+    dense_qp_options opts;
+    opts.scaling = 0;
+    opts.validate_convexity = false;
+    const osqp_problem p = seed_problem(1);
+    const Eigen::MatrixXd valid_P = p.P.topLeftCorner(1, 1);
+    const Eigen::VectorXd valid_q = p.q.head(1);
+    const Eigen::MatrixXd valid_A = p.A.leftCols(1);
+
+    SECTION("at pose")
+    {
+        dense_admm_qp_solver<double> solver(1, 1);
+        REQUIRE(solver.solve(valid_P, valid_q, valid_A, p.l, p.u));
+        const auto result = solver.solve(P, q, A, l, u, opts);
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == qp_error::factorization_failed);
+        const auto stale = solver.resolve(q, l, u, opts);
+        REQUIRE_FALSE(stale);
+        CHECK(stale.error() == qp_error::invalid_problem);
+    }
+    SECTION("after an accepted penalty update")
+    {
+        opts.rho = 3.0;
+        opts.adaptive_rho_interval = 1;
+        opts.adaptive_rho_tolerance = 1.0;
+        opts.check_termination = 1000;
+        opts.max_iterations = 50;
+        dense_qp_options fixed_penalty = opts;
+        fixed_penalty.adaptive_rho = false;
+        dense_admm_qp_solver<double> control(1, 1);
+        REQUIRE(control.solve(P, q, A, l, u, fixed_penalty));
+
+        dense_admm_qp_solver<double> solver(1, 1);
+        const auto result = solver.solve(P, q, A, l, u, opts);
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == qp_error::factorization_failed);
+        const auto stale = solver.resolve(q, l, u, fixed_penalty);
+        REQUIRE_FALSE(stale);
+        CHECK(stale.error() == qp_error::invalid_problem);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Convexity detection at pose. Every variable is boxed and the penalty is held
+// fixed and large, so the condensed matrix factors even for the indefinite
+// objective: without detection the solve reports a clean status for a problem
+// whose answer carries no global-optimality guarantee. Turning the flag off
+// skips the check.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp rejects an asymmetric objective matrix", "[qp_convexity]")
+{
+    const Eigen::MatrixXd asymmetric{{2.0, 0.5}, {0.7, 1.0}};
+    const auto rejected = boxed_solve(asymmetric, true);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error() == qp_error::invalid_problem);
+
+    Eigen::MatrixXd rounded{{2.0, 0.5}, {0.5, 1.0}};
+    rounded(1, 0) = std::nextafter(0.5, 1.0);
+    const auto accepted = boxed_solve(rounded, true);
+    REQUIRE(accepted);
+    CHECK(accepted->status == qp_solve_status::solved);
+
+    SECTION("the flag turns the check off")
+    {
+        CHECK(boxed_solve(asymmetric, false));
+    }
+}
+
+TEST_CASE("dense_admm_qp rejects an indefinite objective matrix", "[qp_convexity]")
+{
+    const Eigen::MatrixXd indefinite{{1.0, 0.0}, {0.0, -0.5}};
+    const auto rejected = boxed_solve(indefinite, true);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error() == qp_error::invalid_problem);
+    const Eigen::MatrixXd negative_semidefinite{{0.0, 0.0}, {0.0, -1.0}};
+    CHECK_FALSE(boxed_solve(negative_semidefinite, true));
+
+    SECTION("the flag turns the check off")
+    {
+        const auto unchecked = boxed_solve(indefinite, false);
+        REQUIRE(unchecked);
+        CHECK(unchecked->status == qp_solve_status::solved);
+    }
+}
+
+TEST_CASE("dense_admm_qp accepts a semidefinite objective matrix", "[qp_convexity]")
+{
+    const Eigen::MatrixXd rank_one{{1.0, 1.0}, {1.0, 1.0}};
+    const Eigen::MatrixXd zero = Eigen::MatrixXd::Zero(2, 2);
+    const auto semidefinite = boxed_solve(rank_one, true);
+    REQUIRE(semidefinite);
+    CHECK(semidefinite->status == qp_solve_status::solved);
+    const auto linear = boxed_solve(zero, true);
+    REQUIRE(linear);
+    CHECK(linear->status == qp_solve_status::solved);
+
+    SECTION("the flag turns the check off")
+    {
+        CHECK(boxed_solve(rank_one, false));
+        CHECK(boxed_solve(zero, false));
+    }
 }

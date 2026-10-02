@@ -17,6 +17,11 @@ namespace argmin
 //   (b) polish defaults true (OSQP ships it false) because the polished,
 //       SQP-inner-grade result is this solver's reason to exist.
 //
+// validate_convexity gates a pose-time symmetry and inertia check on P that costs
+// one extra factorization per pose and nothing per resolve; it defaults on because
+// an indefinite P can still yield a factorable condensed matrix and a non-global
+// point reported under a clean status.
+//
 // Reference: Stellato, Banjac, Goulart, Bemporad, Boyd (2020), "OSQP: An
 //            operator splitting solver for quadratic programs"; OSQP solver
 //            settings defaults.
@@ -39,6 +44,7 @@ struct dense_qp_options
     std::uint16_t polish_refine_iter{3};
     double delta{1e-6};
     bool warm_start{true};
+    bool validate_convexity{true};
 };
 
 }

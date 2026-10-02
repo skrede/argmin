@@ -13,11 +13,9 @@ import pathlib
 
 import pytest
 
-MINIMUM_RECOVERED_FIELDS = 17
-
 HEADERS = {
-    "DenseQpOptions": ("options/dense_qp_options.h", "dense_qp_options"),
-    "SparseQpOptions": ("options/sparse_qp_options.h", "sparse_qp_options"),
+    "DenseQpOptions": ("options/dense_qp_options.h", "dense_qp_options", 18),
+    "SparseQpOptions": ("options/sparse_qp_options.h", "sparse_qp_options", 17),
 }
 
 
@@ -33,7 +31,7 @@ def literal_value(text: str):
 
 
 def committed_defaults(repository_root: pathlib.Path, binding_name: str) -> dict:
-    relative, struct = HEADERS[binding_name]
+    relative, struct, _ = HEADERS[binding_name]
     path = repository_root / "lib" / "argmin" / "include" / "argmin" / relative
     text = path.read_text()
     assert f"struct {struct}" in text, f"{path} declares no {struct}"
@@ -50,13 +48,13 @@ def committed_defaults(repository_root: pathlib.Path, binding_name: str) -> dict
 @pytest.mark.parametrize("binding_name", sorted(HEADERS))
 def test_the_parser_recovers_the_whole_roster(repository_root, binding_name):
     recovered = committed_defaults(repository_root, binding_name)
-    assert len(recovered) >= MINIMUM_RECOVERED_FIELDS, recovered
+    assert len(recovered) == HEADERS[binding_name][2], recovered
 
 
 @pytest.mark.parametrize("binding_name", sorted(HEADERS))
 def test_every_committed_default_is_the_exposed_default(argmin, repository_root, binding_name):
     recovered = committed_defaults(repository_root, binding_name)
-    assert len(recovered) >= MINIMUM_RECOVERED_FIELDS, recovered
+    assert len(recovered) == HEADERS[binding_name][2], recovered
 
     options = getattr(argmin, binding_name)()
     for name, expected in recovered.items():

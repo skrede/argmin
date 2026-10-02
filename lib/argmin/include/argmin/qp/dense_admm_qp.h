@@ -88,6 +88,7 @@ public:
         , base_mult_(m)
         , K_(n, n)
         , llt_(n)
+        , ldlt_P_(n)
         , scratch_mn_(m, n)
         , x_(n)
         , x_tilde_(n)
@@ -159,10 +160,14 @@ public:
                const matrix<Scalar, dynamic_dimension, N>& A, const vector<Scalar>& l,
                const vector<Scalar>& u, result_type& out, const dense_qp_options& opts = {})
     {
+        if(auto err = validate_option_domains(opts))
+            return err;
         if(auto err = validate_full(P, q, A, l, u))
             return err;
-        pose(P, q, A, l, u, opts);
-        run_admm(opts);
+        if(auto err = pose(P, q, A, l, u, opts))
+            return err;
+        if(auto err = run_admm(opts))
+            return err;
         finalize(opts, out);
         return std::nullopt;
     }
@@ -174,6 +179,8 @@ public:
     resolve_into(const vector<Scalar, N>& q, const vector<Scalar>& l,
                  const vector<Scalar>& u, result_type& out, const dense_qp_options& opts = {})
     {
+        if(auto err = validate_option_domains(opts))
+            return err;
         if(!posed_)
             return qp_error::invalid_problem;
         if(q.size() != n_ || static_cast<int>(l.size()) != m_
@@ -196,7 +203,8 @@ public:
         }
         rescale_vectors();
         seed_iterates(opts);
-        run_admm(opts);
+        if(auto err = run_admm(opts))
+            return err;
         finalize(opts, out);
         return std::nullopt;
     }
@@ -242,6 +250,20 @@ private:
     static constexpr int inaccurate_factor_ = 10;
     static constexpr double polish_active_tol_ = 1e-12;
 
+    std::optional<qp_error> validate_option_domains(const dense_qp_options& o) const
+    {
+        const auto positive = [](double v) { return std::isfinite(v) && v > 0.0; };
+        const auto nonnegative = [](double v) { return std::isfinite(v) && v >= 0.0; };
+        const bool penalties = positive(o.rho) && positive(o.sigma) && positive(o.delta);
+        const bool relaxation = std::isfinite(o.alpha) && o.alpha > 0.0 && o.alpha < 2.0;
+        const bool adaptive = std::isfinite(o.adaptive_rho_tolerance) && o.adaptive_rho_tolerance >= 1.0;
+        const bool convergence = nonnegative(o.eps_abs) && nonnegative(o.eps_rel) && (o.eps_abs > 0.0 || o.eps_rel > 0.0);
+        const bool certificates = positive(o.eps_prim_inf) && positive(o.eps_dual_inf);
+        if(penalties && relaxation && adaptive && convergence && certificates && o.max_iterations > 0)
+            return std::nullopt;
+        return qp_error::invalid_options;
+    }
+
     std::optional<qp_error>
     validate_full(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
                   const matrix<Scalar, dynamic_dimension, N>& A, const vector<Scalar>& l,
@@ -266,10 +288,13 @@ private:
         return std::nullopt;
     }
 
-    void pose(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
-              const matrix<Scalar, dynamic_dimension, N>& A, const vector<Scalar>& l,
-              const vector<Scalar>& u, const dense_qp_options& opts)
+    std::optional<qp_error> pose(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
+                                 const matrix<Scalar, dynamic_dimension, N>& A, const vector<Scalar>& l,
+                                 const vector<Scalar>& u, const dense_qp_options& opts)
     {
+        if(opts.validate_convexity && !problem_is_convex(P))
+            return qp_error::invalid_problem;
+        posed_ = false;
         n_ = static_cast<int>(P.rows());
         m_ = static_cast<int>(A.rows());
         sigma_ = static_cast<Scalar>(opts.sigma);
@@ -285,9 +310,30 @@ private:
         if(m_ > 0)
             Einv_.head(m_) = E_.head(m_).cwiseInverse();
         init_rho(opts);
-        build_and_factor_K();
+        if(!build_and_factor_K())
+            return qp_error::factorization_failed;
         seed_iterates(opts);
         posed_ = true;
+        return std::nullopt;
+    }
+
+    // Symmetry and inertia share one relative tolerance, 10 n eps: a P assembled from
+    // floating-point products carries asymmetry and semidefinite round-off of that order.
+    bool problem_is_convex(const matrix<Scalar, N, N>& P)
+    {
+        const int n = static_cast<int>(P.rows());
+        const Scalar tol = Scalar(10) * static_cast<Scalar>(n) * std::numeric_limits<Scalar>::epsilon();
+        Scalar asymmetry = Scalar(0);
+        for(int j = 0; j < n; ++j)
+            for(int i = j + 1; i < n; ++i)
+                asymmetry = std::max(asymmetry, std::abs(P(i, j) - P(j, i)));
+        if(asymmetry > tol * std::max(Scalar(1), P.cwiseAbs().maxCoeff()))
+            return false;
+        ldlt_P_.compute(P.template selfadjointView<Eigen::Lower>());
+        if(ldlt_P_.info() != Eigen::Success)
+            return false;
+        const Scalar d_max = std::max(ldlt_P_.vectorD().maxCoeff(), Scalar(0));
+        return ldlt_P_.vectorD().minCoeff() >= -tol * d_max;
     }
 
     // Modified Ruiz equilibration on the stacked KKT form [P A^T; A 0] plus a
@@ -364,8 +410,7 @@ private:
         current_rho_ = static_cast<Scalar>(opts.rho);
         for(int i = 0; i < m_; ++i)
         {
-            const bool eq = std::isfinite(l_[i]) && std::isfinite(u_[i])
-                            && (u_[i] - l_[i]) <= Scalar(eq_tol_);
+            const bool eq = detail::is_equality_bound(l_[i], u_[i], Scalar(eq_tol_));
             base_mult_[i] = eq ? Scalar(eq_boost_) : Scalar(1);
         }
         rebuild_rho_vec();
@@ -379,7 +424,7 @@ private:
             rho_inv_vec_.head(m_) = rho_vec_.head(m_).cwiseInverse();
     }
 
-    void build_and_factor_K()
+    bool build_and_factor_K()
     {
         K_ = P_scaled_;
         K_.diagonal().array() += sigma_;
@@ -390,6 +435,7 @@ private:
             K_.noalias() += A_scaled_.topRows(m_).transpose() * scratch_mn_.topRows(m_);
         }
         llt_.compute(K_);
+        return llt_.info() == Eigen::Success;
     }
 
     // A stored seed is consumed only when its length matches the posed problem,
@@ -458,7 +504,7 @@ private:
         }
     }
 
-    void run_admm(const dense_qp_options& opts)
+    std::optional<qp_error> run_admm(const dense_qp_options& opts)
     {
         status_ = qp_solve_status::max_iterations;
         iters_ = 0;
@@ -494,7 +540,8 @@ private:
             {
                 if(!have_resid)
                     refresh_residuals();
-                maybe_update_rho(opts);
+                if(!maybe_update_rho(opts))
+                    return qp_error::factorization_failed;
             }
         }
         if(status_ == qp_solve_status::max_iterations)
@@ -503,6 +550,7 @@ private:
             if(relaxed_converged(opts))
                 status_ = qp_solve_status::solved_inaccurate;
         }
+        return std::nullopt;
     }
 
     void refresh_residuals()
@@ -625,22 +673,25 @@ private:
         return true;
     }
 
-    void maybe_update_rho(const dense_qp_options& o)
+    // A failed refactor has already overwritten the previous factor, so the posed state is
+    // dropped and the caller must pose again.
+    bool maybe_update_rho(const dense_qp_options& o)
     {
         if(m_ == 0)
-            return;
+            return true;
         const Scalar num = prim_scale_ > Scalar(0) ? rp_norm_ / prim_scale_ : rp_norm_;
         const Scalar den = dual_scale_ > Scalar(0) ? rd_norm_ / dual_scale_ : rd_norm_;
         if(num <= Scalar(0) || den <= Scalar(0))
-            return;
+            return true;
         const Scalar ratio = std::sqrt(num / den);
         const Scalar tol = static_cast<Scalar>(o.adaptive_rho_tolerance);
         if(ratio > tol || ratio < Scalar(1) / tol)
         {
             current_rho_ = std::clamp(current_rho_ * ratio, Scalar(rho_min_), Scalar(rho_max_));
             rebuild_rho_vec();
-            build_and_factor_K();
+            posed_ = build_and_factor_K();
         }
+        return posed_;
     }
 
     void finalize(const dense_qp_options& o, result_type& out)
@@ -863,7 +914,11 @@ private:
     // Condensed KKT is a fixed n x n member: the EIGEN_STACK_ALLOCATION_LIMIT
     // ceiling caps a fixed-N instantiation at N <= 128 for double.
     matrix<Scalar, N, N> K_;
+    // llt_ reads only the lower triangle of K_, which agrees with the full-matrix uses of P_ in the
+    // dual residual and the objective because pose rejects an asymmetric P; with validate_convexity
+    // off, that symmetry is the caller's obligation.
     Eigen::LLT<matrix<Scalar, N, N>> llt_;
+    Eigen::LDLT<matrix<Scalar, N, N>> ldlt_P_;
     matrix<Scalar, dynamic_dimension, N> scratch_mn_;
 
     vector<Scalar, N> x_;

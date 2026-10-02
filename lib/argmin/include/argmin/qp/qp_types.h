@@ -14,7 +14,9 @@
 
 #include "argmin/types.h"
 
+#include <cmath>
 #include <cstdint>
+#include <algorithm>
 
 namespace argmin
 {
@@ -28,6 +30,8 @@ enum class qp_solve_status : std::uint8_t
     dual_infeasible
 };
 
+// invalid_problem is problem data the method cannot handle, invalid_options a tuning value
+// outside its domain, and factorization_failed a numerical decomposition that reported failure.
 enum class qp_error : std::uint8_t
 {
     dimension_mismatch,
@@ -35,7 +39,9 @@ enum class qp_error : std::uint8_t
     non_finite_input,
     capacity_exceeded,
     infeasible_start,
-    invalid_problem
+    invalid_problem,
+    invalid_options,
+    factorization_failed
 };
 
 template <typename Scalar = double, int N = argmin::dynamic_dimension>
@@ -53,6 +59,22 @@ struct qp_result
     Scalar dual_residual{0};
     Scalar objective_value{0};
 };
+
+namespace detail
+{
+
+// The max(1, ...) floor keeps the previous absolute rule exactly at unit scale, so no row of
+// unit magnitude reclassifies. It is one shared definition because the dense and sparse solvers
+// must classify identically, or comparing their solutions stops being meaningful.
+template <typename Scalar>
+bool is_equality_bound(Scalar l, Scalar u, Scalar eq_tol)
+{
+    if(!std::isfinite(l) || !std::isfinite(u))
+        return false;
+    return (u - l) <= eq_tol * std::max(Scalar(1), std::max(std::abs(l), std::abs(u)));
+}
+
+}
 
 }
 
