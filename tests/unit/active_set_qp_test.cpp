@@ -1157,3 +1157,41 @@ TEST_CASE("active-set terminal verification is not excused by a far bound on ano
     CHECK(solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::max_iterations);
     CHECK(solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::max_iterations);
 }
+
+TEST_CASE("active-set step test scales with the iterate", "[qp][qp_kkt]")
+{
+    // The unconstrained minimizer c is cut off by x1 >= 0.5 s, so the solution sits on that row and
+    // the equality. At magnitude s a null step is rounding of order epsilon * s, which an absolute
+    // step test never accepts, so the solver cycled to its iteration cap.
+    Eigen::MatrixXd G(3, 3);
+    G << 2.0, 0.6, 0.1,
+         0.6, 1.0, 0.2,
+         0.1, 0.2, 1.5;
+    Eigen::MatrixXd A_eq(1, 3);
+    A_eq << 0.3, 1.1, -0.5;
+    const Eigen::VectorXd b_eq{{0.0}};
+    Eigen::MatrixXd A_in(2, 3);
+    A_in << -1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0;
+    const Eigen::Vector3d c{1.3, -0.7, 0.4};
+    const Eigen::Vector3d starts[] = {{0.0, 0.0, 0.0}, {0.1, 0.2, 0.1}, {-0.37, 0.11, 0.02}};
+
+    for(const double s : {1e5, 1e6, 1e7})
+    {
+        const Eigen::VectorXd d = -G * (s * c);
+        const Eigen::VectorXd b_in{{-0.5 * s, -10.0 * s}};
+        for(const Eigen::Vector3d& start : starts)
+        {
+            const Eigen::VectorXd x0 = s * start;
+            active_set_qp_solver<double> solver(3, 3);
+            const auto stateful = solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0);
+            const auto free = solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0);
+            for(const auto& result : {stateful, free})
+            {
+                CHECK(result.status == qp_status::optimal);
+                CHECK(result.iterations < 5);
+                CHECK(result.x[0] == Approx(0.5 * s).epsilon(1e-12));
+            }
+        }
+    }
+}

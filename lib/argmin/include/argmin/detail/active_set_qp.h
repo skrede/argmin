@@ -933,7 +933,7 @@ private:
                 return;
             }
 
-            if(p.norm() < tol)
+            if(p.norm() < tol * (Scalar(1) + x.norm()))
             {
                 int drop = most_negative_multiplier(lambda_sub_, W_, m_eq, tol, bland);
                 if(drop == -1)
@@ -1393,7 +1393,7 @@ qp_result<Scalar, N> solve_qp(
             return res;
         }
 
-        if(p.norm() < tol)
+        if(p.norm() < tol * (Scalar(1) + x.norm()))
         {
             // At stationary point for current working set -- check multipliers
             int drop = most_negative_multiplier(lambda_W, W, m_eq, tol, bland);
