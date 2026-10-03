@@ -347,7 +347,9 @@ jobs:
       # were renamed or deleted -- the job would go green having run nothing.
       # The fast regression gate here is a CORRECTNESS gate. It enforces
       # oracle-witnessed correctness (oracle verdict, final accuracy, feasibility,
-      # solver status) on every baseline cell -- all toolchain-invariant. It does
+      # solver status) on every non-excluded baseline cell. A cell whose verdict
+      # flips between gcc and clang builds is excluded with that reason, since
+      # its verdict is not a stable signal on any toolchain. It does
       # NOT gate the performance CEILINGS: neither the iteration count
       # (max_outer_iters) nor the instruction cost (instructions/iter). Those are
       # decision-identity properties WITHIN a toolchain, not across toolchains --
