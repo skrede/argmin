@@ -8,6 +8,8 @@
 #include "argmin/options/sparse_qp_options.h"
 #include "argmin/options/dense_active_set_qp_options.h"
 
+#include "portable_random.h"
+
 #include <Eigen/Core>
 #include <Eigen/SparseCore>
 
@@ -113,20 +115,20 @@ std::vector<osqp_problem> convex_family()
 {
     std::vector<osqp_problem> out;
     std::mt19937 rng(424242);
-    std::normal_distribution<double> nd(0.0, 1.0);
-    std::uniform_real_distribution<double> ud(0.5, 2.0);
+    const auto nd = [&rng] { return portable_random::normal(rng); };
+    const auto ud = [&rng] { return portable_random::uniform(rng, 0.5, 2.0); };
     for(int trial = 0; trial < 40; ++trial)
     {
         const int n = 2 + (trial % 4);
         Eigen::MatrixXd M(n, n);
         for(int i = 0; i < n; ++i)
             for(int j = 0; j < n; ++j)
-                M(i, j) = nd(rng);
+                M(i, j) = nd();
         osqp_problem p;
-        p.P = M.transpose() * M + (1.0 + ud(rng)) * Eigen::MatrixXd::Identity(n, n);
+        p.P = M.transpose() * M + (1.0 + ud()) * Eigen::MatrixXd::Identity(n, n);
         p.q.resize(n);
         for(int i = 0; i < n; ++i)
-            p.q[i] = nd(rng);
+            p.q[i] = nd();
         const int m = n + 1;
         p.A = Eigen::MatrixXd::Zero(m, n);
         p.l.resize(m);
@@ -134,14 +136,14 @@ std::vector<osqp_problem> convex_family()
         for(int i = 0; i < n; ++i)
         {
             p.A(i, i) = 1.0;
-            const double b = ud(rng);
+            const double b = ud();
             p.l[i] = -b;
             p.u[i] = b;
         }
         for(int j = 0; j < n; ++j)
-            p.A(m - 1, j) = nd(rng);
-        p.l[m - 1] = -2.0 * ud(rng);
-        p.u[m - 1] = 2.0 * ud(rng);
+            p.A(m - 1, j) = nd();
+        p.l[m - 1] = -2.0 * ud();
+        p.u[m - 1] = 2.0 * ud();
         out.push_back(std::move(p));
     }
     return out;
@@ -162,20 +164,20 @@ std::vector<osqp_problem> equality_family(int trials)
 {
     std::vector<osqp_problem> out;
     std::mt19937 rng(20260722);
-    std::normal_distribution<double> nd(0.0, 1.0);
-    std::uniform_real_distribution<double> ud(0.3, 1.5);
+    const auto nd = [&rng] { return portable_random::normal(rng); };
+    const auto ud = [&rng] { return portable_random::uniform(rng, 0.3, 1.5); };
     for(int trial = 0; trial < trials; ++trial)
     {
         const int n = 3 + (trial % 4);
         Eigen::MatrixXd M(n, n);
         for(int i = 0; i < n; ++i)
             for(int j = 0; j < n; ++j)
-                M(i, j) = nd(rng);
+                M(i, j) = nd();
         osqp_problem p;
         p.P = M.transpose() * M + 0.5 * Eigen::MatrixXd::Identity(n, n);
         p.q.resize(n);
         for(int i = 0; i < n; ++i)
-            p.q[i] = 3.0 * nd(rng);
+            p.q[i] = 3.0 * nd();
         const int m = n + 1;
         p.A = Eigen::MatrixXd::Zero(m, n);
         p.l.resize(m);
@@ -183,7 +185,7 @@ std::vector<osqp_problem> equality_family(int trials)
         for(int i = 0; i < n; ++i)
         {
             p.A(i, i) = 1.0;
-            const double b = ud(rng);
+            const double b = ud();
             p.l[i] = -b;
             p.u[i] = b;
         }
@@ -576,7 +578,7 @@ TEST_CASE("dense_active_set_qp defaults reproduce the values it previously recei
         CHECK((rf->x - kraft_reference(f)).cwiseAbs().maxCoeff() <= 1e-9);
         iterations += rf->iterations;
     }
-    CHECK(iterations == 43);
+    CHECK(iterations == 40);
 }
 
 // ---------------------------------------------------------------------------
