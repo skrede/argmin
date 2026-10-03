@@ -933,7 +933,44 @@ private:
                 return;
             }
 
-            if(p.norm() < tol * (Scalar(1) + x.norm()))
+            // A step under tol (1 + ||x||) is rounding at the iterate's magnitude: it is still taken, so a
+            // near-optimal start lands on the subproblem minimizer, and the working set is then treated as
+            // stationary. The working-set multipliers already satisfy A_W^T lambda = g + G p there.
+            const Scalar p_norm = p.norm();
+            bool stationary = p_norm < tol;
+            if(!stationary)
+            {
+                const bool null_step = p_norm < tol * (Scalar(1) + x.norm());
+                auto [alpha, blocking_idx] = blocking_step_length_member(
+                    x, p_sub_.head(n), m_total, n, m_eq);
+                x += alpha * p;
+
+                if(alpha < Scalar(1) && blocking_idx >= 0)
+                {
+                    W_.push_back(blocking_idx);
+                    // Add constraint: Givens QR update
+                    const int new_wsize = static_cast<int>(W_.size());
+                    if(qr_valid_ && new_wsize <= n)
+                    {
+                        rhs_lam_.head(n).noalias() =
+                            A_full_.row(blocking_idx).head(n).transpose();
+                        add_constraint_qr<Scalar>(
+                            Q_explicit_, R_, rhs_lam_.head(n), new_wsize);
+                        ++givens_update_count_;
+                    }
+                    else
+                    {
+                        qr_valid_ = false;
+                    }
+                }
+                else if(null_step)
+                {
+                    g_k_.head(n).noalias() = G * x + d;
+                    stationary = true;
+                }
+            }
+
+            if(stationary)
             {
                 int drop = most_negative_multiplier(lambda_sub_, W_, m_eq, tol, bland);
                 if(drop == -1)
@@ -957,31 +994,6 @@ private:
                     qr_valid_ = false;
                 }
                 W_.erase(W_.begin() + drop);
-            }
-            else
-            {
-                auto [alpha, blocking_idx] = blocking_step_length_member(
-                    x, p_sub_.head(n), m_total, n, m_eq);
-                x += alpha * p;
-
-                if(alpha < Scalar(1) && blocking_idx >= 0)
-                {
-                    W_.push_back(blocking_idx);
-                    // Add constraint: Givens QR update
-                    const int new_wsize = static_cast<int>(W_.size());
-                    if(qr_valid_ && new_wsize <= n)
-                    {
-                        rhs_lam_.head(n).noalias() =
-                            A_full_.row(blocking_idx).head(n).transpose();
-                        add_constraint_qr<Scalar>(
-                            Q_explicit_, R_, rhs_lam_.head(n), new_wsize);
-                        ++givens_update_count_;
-                    }
-                    else
-                    {
-                        qr_valid_ = false;
-                    }
-                }
             }
         }
 
@@ -1393,7 +1405,26 @@ qp_result<Scalar, N> solve_qp(
             return res;
         }
 
-        if(p.norm() < tol * (Scalar(1) + x.norm()))
+        const Scalar p_norm = p.norm();
+        bool stationary = p_norm < tol;
+        if(!stationary)
+        {
+            const bool null_step = p_norm < tol * (Scalar(1) + x.norm());
+            // Step is nonzero: compute blocking step length (eq. 16.29)
+            auto [alpha, blocking_idx] = blocking_step_length<Scalar, N>(
+                x, p, A_full, b_full, W, m_eq);
+            x += alpha * p;
+
+            if(alpha < Scalar(1) && blocking_idx >= 0)
+                W.push_back(blocking_idx);
+            else if(null_step)
+            {
+                g_k = (G * x + d).eval();
+                stationary = true;
+            }
+        }
+
+        if(stationary)
         {
             // At stationary point for current working set -- check multipliers
             int drop = most_negative_multiplier(lambda_W, W, m_eq, tol, bland);
@@ -1412,16 +1443,6 @@ qp_result<Scalar, N> solve_qp(
             }
             // Remove the constraint with the selected multiplier
             W.erase(W.begin() + drop);
-        }
-        else
-        {
-            // Step is nonzero: compute blocking step length (eq. 16.29)
-            auto [alpha, blocking_idx] = blocking_step_length<Scalar, N>(
-                x, p, A_full, b_full, W, m_eq);
-            x += alpha * p;
-
-            if(alpha < Scalar(1) && blocking_idx >= 0)
-                W.push_back(blocking_idx);
         }
     }
 

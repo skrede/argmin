@@ -1195,3 +1195,37 @@ TEST_CASE("active-set step test scales with the iterate", "[qp][qp_kkt]")
         }
     }
 }
+
+TEST_CASE("active-set takes a rounding-sized step before declaring a warm start stationary",
+          "[qp][qp_kkt]")
+{
+    // A start 1e-12 relative from the solution of a stiff objective: the step is under
+    // tol (1 + ||x||), yet skipping it leaves a gradient of order 1e6 times the offset, which the
+    // terminal verification rightly refuses. Taking the step lands on the minimizer.
+    Eigen::MatrixXd G(3, 3);
+    G << 2.0, 0.6, 0.1,
+         0.6, 1.0, 0.2,
+         0.1, 0.2, 1.5;
+    G *= 1e6;
+    Eigen::MatrixXd A_eq(1, 3);
+    A_eq << 0.3, 1.1, -0.5;
+    const double s = 1e4;
+    const Eigen::VectorXd xs = s * Eigen::Vector3d{1.3, -0.7, 0.4};
+    const Eigen::VectorXd b_eq = A_eq * xs;
+    const Eigen::VectorXd d = -G * xs + 0.8e6 * A_eq.transpose();
+    Eigen::MatrixXd A_in(0, 3);
+    Eigen::VectorXd b_in(0);
+
+    for(const Eigen::Vector3d& direction : {Eigen::Vector3d{1.1, -0.3, 0.0}, Eigen::Vector3d{0.6, -0.3, 0.9}})
+    {
+        const Eigen::VectorXd x0 = xs + 1e-12 * s * direction;
+        active_set_qp_solver<double> solver(3, 1);
+        const auto stateful = solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0);
+        const auto free = solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0);
+        for(const auto& result : {stateful, free})
+        {
+            CHECK(result.status == qp_status::optimal);
+            CHECK((result.x - xs).lpNorm<Eigen::Infinity>() < 1e-10 * s);
+        }
+    }
+}
