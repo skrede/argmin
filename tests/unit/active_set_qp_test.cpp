@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <utility>
 
 using Catch::Approx;
 using namespace argmin;
@@ -1098,4 +1099,41 @@ TEST_CASE("active_set_qp_solver does not return optimal for an infeasible termin
         CHECK(result.lambda[1] == Approx(1.0 / delta).epsilon(1e-6));
         CHECK(result.lambda[0] == Approx(-1.0 / delta).epsilon(1e-6));
     }
+}
+
+TEST_CASE("active-set projection judges a large start by its backward error", "[qp][qp_rank]")
+{
+    // One consistent row through the origin, so the minimizer of 0.5 ||x||^2 is x = 0. From a
+    // start of magnitude s the projected residual is rounding of order epsilon * s, which an
+    // absolute tolerance would read as an inconsistent system.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(3, 3);
+    Eigen::VectorXd d = Eigen::VectorXd::Zero(3);
+    Eigen::MatrixXd A_eq(1, 3);
+    A_eq << 0.3, 0.7, 1.1;
+    const Eigen::VectorXd b_eq{{0.0}};
+    Eigen::MatrixXd A_in(0, 3);
+    Eigen::VectorXd b_in(0);
+    const Eigen::VectorXd direction{{1.37, -0.91, 0.53}};
+    const auto solve_both = [&](double scale) {
+        active_set_qp_solver<double> solver(3, 1);
+        const Eigen::VectorXd x0 = scale * direction;
+        return std::pair{solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0),
+                         solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0)};
+    };
+
+    for(const double scale : {1e5, 1e6})
+    {
+        const auto [stateful, free] = solve_both(scale);
+        for(const auto& result : {stateful, free})
+        {
+            CHECK(result.status == qp_status::optimal);
+            CHECK(result.x.lpNorm<Eigen::Infinity>() < 1e-12 * scale);
+        }
+    }
+
+    // At 1e8 the terminal check still bounds the residual by the landed x ~ 0 rather than the
+    // cancelled start, so the correct point is reported unverified, never infeasible.
+    const auto [stateful, free] = solve_both(1e8);
+    CHECK(stateful.status == qp_status::max_iterations);
+    CHECK(free.status == qp_status::max_iterations);
 }

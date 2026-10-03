@@ -419,17 +419,33 @@ bool equality_projection_is_reliable(const Eigen::MatrixBase<Derived>& r_diag,
     return smallest > eps * Scalar(m_eq) * r_diag.head(m_eq).cwiseAbs().maxCoeff();
 }
 
+// Componentwise backward-error scale max_i sum_j |a_ij||x_j| (Higham, Accuracy and Stability of
+// Numerical Algorithms, 2nd ed., section 7.1): the rounding a residual inherits from the iterate.
+template <typename Scalar, typename DerivedA, typename DerivedX>
+Scalar equality_row_magnitude(const Eigen::MatrixBase<DerivedA>& A,
+                              const Eigen::MatrixBase<DerivedX>& x,
+                              std::int32_t m_eq)
+{
+    Scalar magnitude{0};
+    for(std::int32_t i = 0; i < m_eq; ++i)
+        magnitude = std::max(magnitude, A.row(i).cwiseAbs().dot(x.cwiseAbs()));
+    return magnitude;
+}
+
+// The magnitude is taken at the iterate before projection, whose cancellation the landed
+// residual carries.
 template <typename Scalar, typename DerivedA, typename DerivedB, typename DerivedX, typename DerivedR>
 bool equality_residual_within(const Eigen::MatrixBase<DerivedA>& A,
                               const Eigen::MatrixBase<DerivedB>& b,
                               const Eigen::MatrixBase<DerivedX>& x,
                               Eigen::MatrixBase<DerivedR>& residual,
                               std::int32_t m_eq,
-                              Scalar tol)
+                              Scalar tol,
+                              Scalar magnitude)
 {
     residual.head(m_eq).noalias() = b.head(m_eq) - A.topRows(m_eq) * x;
-    return residual.head(m_eq).template lpNorm<Eigen::Infinity>()
-           <= tol * (Scalar(1) + b.head(m_eq).template lpNorm<Eigen::Infinity>());
+    const Scalar scale = std::max(b.head(m_eq).template lpNorm<Eigen::Infinity>(), magnitude);
+    return residual.head(m_eq).template lpNorm<Eigen::Infinity>() <= tol * (Scalar(1) + scale);
 }
 
 template <typename Scalar, typename DerivedA, typename DerivedB, typename DerivedX>
@@ -853,6 +869,7 @@ private:
                 b_full_.head(m_eq) - A_full_.topRows(m_eq).leftCols(n) * x;
             if(residual_.head(m_eq).cwiseAbs().maxCoeff() > tol)
             {
+                const Scalar magnitude = equality_row_magnitude<Scalar>(A_full_.leftCols(n), x, m_eq);
                 qr_lambda_.compute(A_full_.topRows(m_eq).leftCols(n).transpose());
                 bool reliable = equality_projection_is_reliable(
                     qr_lambda_.matrixQR().diagonal(), m_eq, Eigen::NumTraits<Scalar>::epsilon());
@@ -868,9 +885,10 @@ private:
                     x += rhs_.head(n);
                     // An unpivoted diagonal can miss a near-singular factor (Kahan's
                     // matrix), so the landed residual is the second escalation trigger.
-                    reliable = equality_residual_within(A_full_.leftCols(n), b_full_, x, residual_, m_eq, tol);
+                    reliable = equality_residual_within(A_full_.leftCols(n), b_full_, x, residual_, m_eq,
+                                                        tol, magnitude);
                 }
-                if(!reliable && !project_equalities_pivoted(n, m_eq, tol))
+                if(!reliable && !project_equalities_pivoted(n, m_eq, tol, magnitude))
                 {
                     lambda_full_.setZero(m_total);
                     status_ = qp_status::infeasible;
@@ -1063,7 +1081,7 @@ private:
     // by. The padded diagonal size is n, so the unpadded epsilon * m_eq threshold is prescribed;
     // qr_rr_ is shared with the multiplier solves, which rely on the default, so it is restored.
     // Expects residual_.head(m_eq) to hold b_eq - A_eq x and returns the consistency test.
-    bool project_equalities_pivoted(int n, int m_eq, Scalar tol)
+    bool project_equalities_pivoted(int n, int m_eq, Scalar tol, Scalar magnitude)
     {
         auto x = x_.head(n);
         iws_pad_.setZero(n, n);
@@ -1079,7 +1097,7 @@ private:
         rhs_padded_.head(n).applyOnTheLeft(qr_rr_.householderQ());
         qr_rr_.setThreshold(Eigen::Default);
         x += rhs_padded_.head(n);
-        return equality_residual_within(A_full_.leftCols(n), b_full_, x, residual_, m_eq, tol);
+        return equality_residual_within(A_full_.leftCols(n), b_full_, x, residual_, m_eq, tol, magnitude);
     }
 
     // Blocking step length (N&W eq. 16.29) over the member constraint block.
@@ -1315,6 +1333,7 @@ qp_result<Scalar, N> solve_qp(
         Eigen::Matrix<Scalar, Eigen::Dynamic, 1> residual = b_eq - A_eq * x;
         if(residual.cwiseAbs().maxCoeff() > tol)
         {
+            const Scalar magnitude = equality_row_magnitude<Scalar>(A_eq, x, m_eq);
             Eigen::ColPivHouseholderQR<Eigen::Matrix<Scalar, N, Eigen::Dynamic>> qr(n, m_eq);
             qr.setThreshold(Eigen::NumTraits<Scalar>::epsilon() * Scalar(m_eq));
             qr.compute(A_eq.transpose());
@@ -1324,7 +1343,7 @@ qp_result<Scalar, N> solve_qp(
             qr.matrixQR().topLeftCorner(r, r).template triangularView<Eigen::Upper>().transpose()
                 .solveInPlace(dx.head(r));
             x += qr.householderQ() * dx;
-            if(!equality_residual_within(A_full, b_full, x, residual, m_eq, tol))
+            if(!equality_residual_within(A_full, b_full, x, residual, m_eq, tol, magnitude))
             {
                 qp_result<Scalar, N> res;
                 res.x = x;
