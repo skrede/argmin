@@ -954,8 +954,10 @@ TEST_CASE("sparse_admm_qp reports a factorization failure as a factorization fai
     SECTION("after an accepted penalty update")
     {
         // P + sigma = -1e6 makes the system singular exactly at the penalty
-        // ceiling, which the first accepted update from 9e5 reaches through the
-        // clamp, so the zero pivot does not hinge on a rounding coincidence.
+        // ceiling. Without clipping z_tilde = A x_tilde, so the first primal
+        // residual would be pure round-off; q puts x_tilde = q / (1e6 - rho) = 10
+        // past u = 1, the clip leaves residual ratio sqrt(10), and the first
+        // update from 9e5 lands on the clamp regardless of FP contraction.
         const double ceiling = 1e6;
         opts.rho = 9e5;
         opts.adaptive_rho_interval = 1;
@@ -964,7 +966,7 @@ TEST_CASE("sparse_admm_qp reports a factorization failure as a factorization fai
         opts.max_iterations = 50;
         const sparse P = to_sparse(Eigen::MatrixXd{{-ceiling - opts.sigma}});
         REQUIRE(-ceiling - opts.sigma + opts.sigma == -ceiling);
-        const Eigen::VectorXd q{{10.0}};
+        const Eigen::VectorXd q{{1e6}};
         const sparse A = to_sparse(Eigen::MatrixXd{{1.0}});
         const Eigen::VectorXd l{{-1.0}};
         const Eigen::VectorXd u{{1.0}};
