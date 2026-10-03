@@ -251,7 +251,8 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_nw", "note": "zero-allocation assertion over the fixed-N steady-state window"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_nw", "note": "zero-allocation assertion over the fixed-N steady-state window; the inner active-set solves in that window run the always-on terminal KKT verification and the equality-projection rank screen, so both are covered without a separate gate"},
+                {"kind": "ctest_test", "name": "qp_escalation_allocation_probe", "note": "no armed gate window reaches the escalated pivoted equality projection, which runs only on rank-deficient or inconsistent equality rows; this probe arms a counting window over that path on a degenerate input"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -303,7 +304,8 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_nw", "note": "zero-allocation assertion over the fixed-N steady-state window"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_nw", "note": "zero-allocation assertion over the fixed-N steady-state window; the inner active-set solves in that window run the always-on terminal KKT verification and the equality-projection rank screen, so both are covered without a separate gate"},
+                {"kind": "ctest_test", "name": "qp_escalation_allocation_probe", "note": "no armed gate window reaches the escalated pivoted equality projection, which runs only on rank-deficient or inconsistent equality rows; this probe arms a counting window over that path on a degenerate input"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ],
               "footnotes": ["restore"]
@@ -1059,7 +1061,7 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "qp_alloc_gate_dense_admm", "note": "zero-allocation assertion over the warm-started resolve hot loop"},
+                {"kind": "ctest_test", "name": "qp_alloc_gate_dense_admm", "note": "zero-allocation assertion over the warm-started resolve hot loop; every armed resolve runs the option-domain validation and consumes the retained seed through the length-checked seeding path, so both are covered without a separate gate"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -1120,7 +1122,7 @@
               "class": "gated",
               "qualifier": "resolve hot loop only, given a warm pose and polish off: the KKT is factored once at pose and the vectors-only resolve iteration performs no factorization, no pattern work, and no heap allocation; pose allocates its storage one-time and polish re-analyzes a freshly shaped reduced KKT and allocates per call, so both are outside the claim; host-tier",
               "evidence": [
-                {"kind": "ctest_test", "name": "qp_alloc_gate_sparse_admm_resolve", "note": "zero-allocation assertion over the warm-started resolve hot loop with polish and adaptive-rho off"},
+                {"kind": "ctest_test", "name": "qp_alloc_gate_sparse_admm_resolve", "note": "zero-allocation assertion over the warm-started resolve hot loop with polish and adaptive-rho off; every armed resolve runs the option-domain validation and consumes the retained seed through the length-checked seeding path, so both are covered without a separate gate"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
