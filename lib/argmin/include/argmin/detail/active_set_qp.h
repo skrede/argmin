@@ -456,21 +456,21 @@ bool terminal_primal_within(const Eigen::MatrixBase<DerivedA>& A,
                             std::int32_t m_total,
                             Scalar tol)
 {
-    Scalar worst{0};
-    Scalar scale{0};
+    // Each row is held to its own componentwise backward error (Oettli and Prager 1964), so a far
+    // bound on one row cannot excuse the violation of another.
     for(std::int32_t i = 0; i < m_total; ++i)
     {
-        // A -inf right-hand side is an absent bound: always satisfied and kept out of the scale.
+        // A -inf right-hand side is an absent bound: always satisfied.
         if(i >= m_eq && b[i] == -std::numeric_limits<Scalar>::infinity())
             continue;
-        const Scalar ax = A.row(i).dot(x);
-        const Scalar r = ax - b[i];
+        const Scalar r = A.row(i).dot(x) - b[i];
         if(!std::isfinite(r))
             return false;
-        worst = std::max(worst, i < m_eq ? std::abs(r) : std::max(Scalar(0), -r));
-        scale = std::max({scale, std::abs(ax), std::abs(b[i])});
+        const Scalar violation = i < m_eq ? std::abs(r) : std::max(Scalar(0), -r);
+        if(violation > tol * (Scalar(1) + A.row(i).cwiseAbs().dot(x.cwiseAbs()) + std::abs(b[i])))
+            return false;
     }
-    return worst <= tol * (Scalar(1) + scale);
+    return true;
 }
 
 // Complementarity needs no numeric check: the multiplier assembly zero-fills every row outside the

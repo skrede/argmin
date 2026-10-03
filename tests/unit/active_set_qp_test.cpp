@@ -1024,7 +1024,7 @@ TEST_CASE("active_set_qp_solver does not return optimal for an infeasible termin
 
     SECTION("primal feasibility")
     {
-        // x = (0.4, 0.4) violates the row by 0.2 against a bound of tol (1 + 1).
+        // x = (0.4, 0.4) violates the row by 0.2 against a bound of tol (1 + 0.8 + 1).
         x << 0.4, 0.4;
         g << 0.4, 0.4;
         lambda << 0.0;
@@ -1136,4 +1136,24 @@ TEST_CASE("active-set projection judges a large start by its backward error", "[
     const auto [stateful, free] = solve_both(1e8);
     CHECK(stateful.status == qp_status::max_iterations);
     CHECK(free.status == qp_status::max_iterations);
+}
+
+TEST_CASE("active-set terminal verification is not excused by a far bound on another row",
+          "[qp][qp_kkt]")
+{
+    // The contradictory pair x1 >= 1, -x1 >= 0 from x1 = 0.5 ends unverified; adding the slack row
+    // x2 >= -1e30 must not lend its magnitude to the violated rows.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd d = Eigen::VectorXd::Zero(2);
+    Eigen::MatrixXd A_eq(0, 2);
+    Eigen::VectorXd b_eq(0);
+    Eigen::MatrixXd A_in(3, 2);
+    A_in << 1.0, 0.0,
+            -1.0, 0.0,
+            0.0, 1.0;
+    const Eigen::VectorXd b_in{{1.0, 0.0, -1e30}};
+    const Eigen::VectorXd x0{{0.5, 0.0}};
+    active_set_qp_solver<double> solver(2, 3);
+    CHECK(solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::max_iterations);
+    CHECK(solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::max_iterations);
 }
