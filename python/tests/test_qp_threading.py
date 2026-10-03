@@ -11,14 +11,20 @@ held, four workers doing the identical total work land at a ratio near one; a
 any work quantum above roughly a hundred microseconds, and the per-solve time
 here is milliseconds, so that form would ship a dropped release green. Correct
 behavior on four cores lands near three to five tenths.
+
+The contention tests share one instance across threads instead. A failure there
+means a second caller entered a solver that was already running, solve or
+mutator alike, and was not turned away with a typed error.
 """
 
 import os
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
+import scipy.sparse as sp
 
 pytestmark = pytest.mark.slow
 
@@ -27,6 +33,7 @@ SOLVES_PER_WORKER = 8
 TOTAL_SOLVES = WORKERS * SOLVES_PER_WORKER
 SPEEDUP_RATIO = 0.7
 MINIMUM_SOLVE_SECONDS = 5e-4
+CONTENTION_ROUNDS = 200
 
 
 def usable_cores() -> int:
@@ -58,8 +65,8 @@ def test_a_fixed_workload_split_four_ways_is_measurably_faster(argmin):
     P, q, A, l, u = timed_problem()
     rows, size = A.shape
 
-    # One solver per worker: these solvers are stateful, and sharing one across
-    # threads would be a data race rather than the defect under test.
+    # One solver per worker: a shared instance admits one caller at a time and
+    # rejects the rest, so sharing would serialize the very solves being timed.
     solvers = [argmin.DenseAdmmQpSolver(size, rows) for _ in range(WORKERS)]
     for solver in solvers:
         assert solver.solve(P, q, A, l, u).status == argmin.QpStatus.solved
@@ -113,3 +120,68 @@ def test_every_worker_reaches_the_same_answer(argmin):
 
     for answer in answers[1:]:
         assert np.allclose(answer, answers[0], atol=1e-8)
+
+
+def shared_solver(argmin, kind, problem):
+    P, q, A, l, u = problem
+    rows, size = A.shape
+    if kind == "sparse_admm":
+        solver = argmin.SparseAdmmQpSolver()
+        return solver, (sp.csc_matrix(P), q, sp.csc_matrix(A), l, u)
+    return argmin.DenseAdmmQpSolver(size, rows), problem
+
+
+# A quadratic-program solve takes no callback, so there is no in-flight signal
+# to wait on: these tests repeat until an overlap happens and then assert only
+# that the rejection is typed, never which caller lost or how often.
+@pytest.mark.parametrize("kind", ["dense_admm", "sparse_admm"])
+def test_a_concurrent_solve_on_a_shared_qp_solver_is_rejected(argmin, kind):
+    solver, arguments = shared_solver(argmin, kind, timed_problem())
+    start = threading.Barrier(WORKERS)
+
+    def contend(_: int):
+        start.wait()
+        try:
+            return solver.solve(*arguments).status
+        except argmin.ArgminError as error:
+            return error.kind
+
+    outcomes = []
+    for _ in range(CONTENTION_ROUNDS):
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            outcomes += pool.map(contend, range(WORKERS))
+        if argmin.ErrorKind.invalid_state in outcomes:
+            break
+
+    assert argmin.ErrorKind.invalid_state in outcomes
+    assert set(outcomes) <= {argmin.ErrorKind.invalid_state, argmin.QpStatus.solved}
+
+    with pytest.raises(argmin.ArgminError):
+        solver.solve(*arguments[:-1], np.ones(1))
+    assert solver.solve(*arguments).status == argmin.QpStatus.solved
+
+
+@pytest.mark.parametrize("kind", ["dense_admm", "sparse_admm"])
+def test_a_mutator_entering_during_a_solve_is_rejected(argmin, kind):
+    solver, arguments = shared_solver(argmin, kind, timed_problem())
+    seed = np.zeros(arguments[1].shape[0])
+    solver.solve(*arguments)
+
+    rejected = []
+    for _ in range(CONTENTION_ROUNDS):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            running = pool.submit(solver.solve, *arguments)
+            while not running.done() and not rejected:
+                try:
+                    solver.warm_start(seed)
+                except argmin.ArgminError as error:
+                    rejected.append(error.kind)
+            try:
+                running.result()
+            except argmin.ArgminError as error:
+                rejected.append(error.kind)
+        if rejected:
+            break
+
+    assert rejected
+    assert set(rejected) == {argmin.ErrorKind.invalid_state}

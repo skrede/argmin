@@ -30,7 +30,11 @@ with no callback anywhere in the loop:
 
 Each exposes `solve`, `resolve`, `warm_start` and `reset`. A constraint count of
 zero is the unconstrained program and is accepted; a decision length of zero is
-not.
+not. The dense solvers' `warm_start` takes a primal seed of the decision length
+and an optional dual seed of at most the constraint capacity, used only when its
+length equals the posed row count; the sparse solver has no capacity, so its
+`warm_start` requires a preceding solve and takes both seeds at exactly the posed
+lengths, an empty dual included.
 
 **Nonlinear methods.** Five policies through the step-budget driver:
 
@@ -50,7 +54,9 @@ differences.
 
 **Options.** `DenseQpOptions`, `SparseQpOptions` and `DenseActiveSetQpOptions`
 are passed as arguments, the last because the active-set solver takes its own
-three-field options rather than the splitting solvers'; everything else is set
+three-field options rather than the splitting solvers'; both splitting options
+types carry `validate_convexity`, which defaults on and refuses an asymmetric
+objective matrix; everything else is set
 through keyword arguments on a solver's constructor and read back through the
 snapshots. `SolverOptions`, `LineSearchOptions`,
 `LbfgsbOptions`, `BobyqaOptions`, `CobylaOptions`, `SlsqpOptions`,
@@ -62,11 +68,11 @@ one of them, on a default-constructed instance and on the snapshot a solver
 reports.
 
 **Results and statuses.** `QpResult` and `SolveResult` carry the iterates,
-residuals, counts and objective values. `QpResult.warm_started` reports whether
-the dense operator-splitting solver consumed a primal seed (the `warm_start()`
+residuals, counts and objective values. `QpResult.warm_started` is true when
+either operator-splitting solver consumed a primal seed (the `warm_start()`
 vector or the iterate retained from its previous solve); a dual seed whose
 length does not match the posed problem is replaced by zeros without clearing
-the flag. `QpStatus` and `SolverStatus` name how a solve ended. `ArgminError` and `ErrorKind` are the error channel.
+the flag, and the active-set solver always reports false. `QpStatus` and `SolverStatus` name how a solve ended. `ArgminError` and `ErrorKind` are the error channel.
 
 **Compiled test problems.** `Rosenbrock` and `ConstrainedTestProblem` are the
 same problems compiled into the extension, each with a `solve_native()` entry
@@ -109,8 +115,12 @@ shapes, lengths, bound ordering and finiteness before any solver sees the data,
 with checks that survive a release build. A violation raises `ArgminError`, which
 carries a `.kind` attribute naming the category — `dimension_mismatch`,
 `invalid_bounds`, `non_finite_input`, `capacity_exceeded`, `infeasible_start`,
-`invalid_problem`, `invalid_array`, `invalid_callback`, `invalid_state`. Match on
-`.kind`, not on the message.
+`invalid_problem`, `invalid_options`, `factorization_failed`, `invalid_array`,
+`invalid_callback`, `invalid_state`. Match on `.kind`, not on the message.
+`invalid_options` is an option value outside its domain, such as a non-positive
+penalty or tolerance; `factorization_failed` is a quadratic-program solve whose
+linear system could not be factorized. A warm start the solver refuses raises
+like any other violation; it is never discarded.
 
 **A solve outcome is not an exception.** Reaching an iteration cap, stalling, or
 certifying a problem infeasible is an answer, and it travels as an enumeration
@@ -147,7 +157,10 @@ than leaking for the interpreter's lifetime.
 
 A re-entrant call is rejected: a second `solve`, `step` or `reset` while one is
 already running raises with `invalid_state`. `abort()` deliberately does not take
-that guard, so it remains callable from another thread while a solve runs.
+that guard, so it remains callable from another thread while a solve runs. The
+quadratic-program solvers carry the same guard on every method, `warm_start` and
+`reset` included: a call entering an instance that another thread is solving on
+raises `invalid_state` instead of racing it.
 
 ## Performance, stated honestly
 

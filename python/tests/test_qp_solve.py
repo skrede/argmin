@@ -110,3 +110,52 @@ def test_resolve_agrees_with_a_fresh_solve_on_the_updated_vectors(argmin, kind):
     assert resolved.status == argmin.QpStatus.solved
     assert not np.allclose(fresh.x, OPTIMUM, atol=1e-3), "the update must move the optimum"
     assert np.allclose(resolved.x, fresh.x, atol=1e-6)
+
+
+# The three-variable problem's active-set path is long enough for the budget and
+# the convergence tolerance to show. The band row's relative width, 1e-3, lies
+# between the default equality tolerance and the raised one, so raising it turns
+# an inequality pair whose interior holds the optimum into an equality.
+def active_set_problem():
+    P = np.array([[2.0, 0.5, 0.0], [0.5, 1.0, 0.0], [0.0, 0.0, 1.5]])
+    q = np.array([-3.0, 2.0, -1.0])
+    A = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0], [1.0, -1.0, 0.0]])
+    l = np.array([-0.3, -0.4, -0.5, -1.0])
+    return P, q, A, l, -l
+
+
+def equality_band_problem():
+    P = np.eye(2)
+    q = np.array([-0.5, -0.5005])
+    A = np.array([[1.0, 1.0]])
+    return P, q, A, np.array([1.0]), np.array([1.001])
+
+
+def test_every_active_set_option_changes_the_solve(argmin):
+    def solve(problem, start=None, **fields):
+        P, q, A, l, u = problem
+        options = argmin.DenseActiveSetQpOptions()
+        for name, value in fields.items():
+            setattr(options, name, value)
+        solver = argmin.DenseActiveSetQpSolver(P.shape[0], A.shape[0])
+        if start is not None:
+            solver.warm_start(start)
+        return solver.solve(P, q, A, l, u, options)
+
+    roster = {name for name in dir(argmin.DenseActiveSetQpOptions()) if not name.startswith("_")}
+    assert roster == {"max_iterations", "tolerance", "equality_tolerance"}
+
+    default = solve(active_set_problem())
+    assert default.status == argmin.QpStatus.solved
+    assert solve(active_set_problem(), max_iterations=1).status == argmin.QpStatus.max_iterations
+
+    loose = solve(active_set_problem(), tolerance=0.35)
+    assert loose.status == argmin.QpStatus.solved
+    assert loose.iterations != default.iterations
+    assert np.allclose(loose.x, default.x, rtol=0.0, atol=1e-12)
+
+    start = np.array([0.5, 0.5])
+    inequality = solve(equality_band_problem(), start)
+    equality = solve(equality_band_problem(), start, equality_tolerance=1e-2)
+    assert inequality.x.sum() == pytest.approx(1.0005, abs=1e-12)
+    assert equality.x.sum() == pytest.approx(1.0, abs=1e-12)

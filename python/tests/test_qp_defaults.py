@@ -14,6 +14,11 @@ import pathlib
 import pytest
 
 HEADERS = {
+    "DenseActiveSetQpOptions": (
+        "options/dense_active_set_qp_options.h",
+        "dense_active_set_qp_options",
+        3,
+    ),
     "DenseQpOptions": ("options/dense_qp_options.h", "dense_qp_options", 18),
     "SparseQpOptions": ("options/sparse_qp_options.h", "sparse_qp_options", 18),
 }
@@ -76,15 +81,21 @@ def test_a_misspelled_field_is_not_found(argmin, repository_root, binding_name):
         )
 
 
+def changed(value):
+    if isinstance(value, bool):
+        return not value
+    return 7 if isinstance(value, int) else 0.5
+
+
 @pytest.mark.parametrize("binding_name", sorted(HEADERS))
-def test_a_written_field_reads_back(argmin, binding_name):
+def test_a_written_field_reads_back(argmin, repository_root, binding_name):
+    recovered = committed_defaults(repository_root, binding_name)
     options = getattr(argmin, binding_name)()
-    options.max_iterations = 7
-    options.eps_abs = 0.5
-    options.polish = not options.polish
-    assert options.max_iterations == 7
-    assert options.eps_abs == 0.5
-    assert getattr(argmin, binding_name)().polish is not options.polish
+    for name, default in recovered.items():
+        setattr(options, name, changed(default))
+    for name, default in recovered.items():
+        assert getattr(options, name) == changed(default), name
+        assert getattr(getattr(argmin, binding_name)(), name) == default, name
 
 
 @pytest.mark.parametrize("binding_name", sorted(HEADERS))

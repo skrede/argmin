@@ -240,3 +240,100 @@ def test_the_interpreter_survives_every_violation(argmin):
                 make_solver(argmin, "dense_admm").solve(P, bad, A, l, u)
     result = make_solver(argmin, "dense_admm").solve(P, q, A, l, u)
     assert np.allclose(result.x, [0.3, 0.7], atol=1e-6)
+
+
+@pytest.mark.parametrize("kind", ALL)
+def test_an_option_outside_its_domain_is_its_own_category(argmin, kind):
+    P, q, A, l, u = reference_problem()
+    if kind == "dense_active_set":
+        options = argmin.DenseActiveSetQpOptions()
+        options.tolerance = 0.0
+    else:
+        options = argmin.SparseQpOptions() if kind == "sparse_admm" else argmin.DenseQpOptions()
+        options.rho = 0.0
+    solver = make_solver(argmin, kind)
+    with pytest.raises(argmin.ArgminError) as raised:
+        if kind == "sparse_admm":
+            solver.solve(sp.csc_matrix(P), q, sp.csc_matrix(A), l, u, options)
+        else:
+            solver.solve(P, q, A, l, u, options)
+    assert raised.value.kind == expect(argmin, "invalid_options")
+
+
+# With scaling off, an objective of exactly -sigma cancels the regularization and
+# leaves an exactly zero pivot, which the factorization reports deterministically.
+def test_a_failed_factorization_is_its_own_category(argmin):
+    options = argmin.SparseQpOptions()
+    options.scaling = 0
+    P = sp.csc_matrix(np.array([[-options.sigma]]))
+    A = sp.csc_matrix((0, 1))
+    with pytest.raises(argmin.ArgminError) as raised:
+        argmin.SparseAdmmQpSolver().solve(P, np.zeros(1), A, np.zeros(0), np.zeros(0), options)
+    assert raised.value.kind == expect(argmin, "factorization_failed")
+
+
+@pytest.mark.parametrize(
+    "x_length,y_length",
+    [(1, 3), (3, 3), (2, 2), (2, 0), (2, 4)],
+    ids=["short_primal", "long_primal", "short_dual", "empty_dual", "long_dual"],
+)
+def test_a_sparse_warm_start_of_the_wrong_length_is_rejected(argmin, x_length, y_length):
+    solver = posed_solver(argmin, "sparse_admm")
+    with pytest.raises(argmin.ArgminError) as raised:
+        solver.warm_start(np.full(x_length, 0.5), np.zeros(y_length))
+    assert raised.value.kind == expect(argmin, "dimension_mismatch")
+
+
+def test_a_sparse_warm_start_before_any_solve_is_rejected(argmin):
+    with pytest.raises(argmin.ArgminError) as raised:
+        argmin.SparseAdmmQpSolver().warm_start(FEASIBLE_START, np.zeros(3))
+    assert raised.value.kind == expect(argmin, "invalid_state")
+
+
+@pytest.mark.parametrize("kind", DENSE)
+def test_a_dense_dual_seed_beyond_the_constraint_capacity_is_rejected(argmin, kind):
+    solver = make_solver(argmin, kind)
+    solver.warm_start(FEASIBLE_START)
+    with pytest.raises(argmin.ArgminError) as raised:
+        solver.warm_start(FEASIBLE_START, np.zeros(4))
+    assert raised.value.kind == expect(argmin, "dimension_mismatch")
+
+
+# The capacity is a maximum, so a problem posed with fewer rows takes a dual
+# seed of its own row count; a capacity-length seed would be replaced by zeros.
+def test_a_dense_dual_seed_for_fewer_rows_than_capacity_is_consumed(argmin):
+    P, q, A, l, u = reference_problem()
+    options = argmin.DenseQpOptions()
+    options.max_iterations = 1
+    options.check_termination = 1
+    options.adaptive_rho = False
+    options.polish = False
+
+    def first_iterate(dual):
+        solver = argmin.DenseAdmmQpSolver(2, 5)
+        solver.warm_start(FEASIBLE_START, dual)
+        return solver.solve(P, q, A, l, u, options)
+
+    seeded = first_iterate(np.array([-2.0, 1.0, 1.0]))
+    unseeded = first_iterate(np.zeros(3))
+    assert seeded.warm_started and unseeded.warm_started
+    assert not np.array_equal(seeded.y, unseeded.y)
+    assert np.array_equal(first_iterate(np.zeros(5)).y, unseeded.y)
+
+
+@pytest.mark.parametrize("kind", ["dense_admm", "sparse_admm"])
+def test_an_asymmetric_objective_is_rejected_unless_convexity_checking_is_off(argmin, kind):
+    _, q, A, l, u = reference_problem()
+    P = np.array([[4.0, 1.5], [0.5, 2.0]])
+    options = argmin.SparseQpOptions() if kind == "sparse_admm" else argmin.DenseQpOptions()
+    assert options.validate_convexity is True
+    with pytest.raises(argmin.ArgminError) as raised:
+        call_solve(make_solver(argmin, kind), kind, P, q, A, l, u)
+    assert raised.value.kind == expect(argmin, "invalid_problem")
+
+    options.validate_convexity = False
+    if kind == "sparse_admm":
+        result = make_solver(argmin, kind).solve(sp.csc_matrix(P), q, sp.csc_matrix(A), l, u, options)
+    else:
+        result = make_solver(argmin, kind).solve(P, q, A, l, u, options)
+    assert result.x.shape == (2,)

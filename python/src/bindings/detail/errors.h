@@ -17,7 +17,7 @@
 namespace argmin::python
 {
 
-// The first six mirror argmin::qp_error value for value; a test asserts that
+// The first eight mirror argmin::qp_error value for value; a test asserts that
 // correspondence by name, so a value added to the library and forgotten here
 // fails the suite instead of degrading to a generic message.
 enum class error_kind : std::uint8_t
@@ -28,6 +28,8 @@ enum class error_kind : std::uint8_t
     capacity_exceeded,
     infeasible_start,
     invalid_problem,
+    invalid_options,
+    factorization_failed,
     invalid_array,
     invalid_callback,
     invalid_state
@@ -65,6 +67,8 @@ private:
         case qp_error::capacity_exceeded: return error_kind::capacity_exceeded;
         case qp_error::infeasible_start: return error_kind::infeasible_start;
         case qp_error::invalid_problem: return error_kind::invalid_problem;
+        case qp_error::invalid_options: return error_kind::invalid_options;
+        case qp_error::factorization_failed: return error_kind::factorization_failed;
     }
     return error_kind::invalid_problem;
 }
@@ -85,6 +89,10 @@ private:
             return "the supplied starting point is not usable";
         case qp_error::invalid_problem:
             return "the problem as posed cannot be solved by this method";
+        case qp_error::invalid_options:
+            return "an option value lies outside its valid domain";
+        case qp_error::factorization_failed:
+            return "a matrix factorization failed during the solve";
     }
     return "the problem as posed cannot be solved by this method";
 }

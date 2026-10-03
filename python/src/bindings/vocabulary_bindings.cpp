@@ -85,15 +85,18 @@ void translate_argmin_error(const std::exception_ptr& raised, void*)
 void register_error_channel(nb::module_& m)
 {
     nb::enum_<error_kind>(m, "ErrorKind",
-                     "The machine-readable category carried by ArgminError.kind. Mirrors the "
-                     "library's own precondition-failure channel value for value, and adds the "
-                     "three categories that exist only at the interpreter boundary.")
+                     "The machine-readable category carried by ArgminError.kind. The first eight "
+                     "mirror the library's own error channel value for value, including an option "
+                     "outside its domain and a failed factorization; the last three exist only at "
+                     "the interpreter boundary.")
         .value("dimension_mismatch", error_kind::dimension_mismatch)
         .value("invalid_bounds", error_kind::invalid_bounds)
         .value("non_finite_input", error_kind::non_finite_input)
         .value("capacity_exceeded", error_kind::capacity_exceeded)
         .value("infeasible_start", error_kind::infeasible_start)
         .value("invalid_problem", error_kind::invalid_problem)
+        .value("invalid_options", error_kind::invalid_options)
+        .value("factorization_failed", error_kind::factorization_failed)
         .value("invalid_array", error_kind::invalid_array)
         .value("invalid_callback", error_kind::invalid_callback)
         .value("invalid_state", error_kind::invalid_state);
@@ -180,9 +183,10 @@ void register_qp_result(nb::module_& m)
         .def_ro("iterations", &qp_result_type::iterations)
         .def_ro("polished", &qp_result_type::polished)
         .def_ro("warm_started", &qp_result_type::warm_started,
-                "True iff a primal seed (the warm_start() vector or the iterate retained from the "
-                "previous solve) was consumed. A dual seed whose length does not match the posed "
-                "problem is replaced by zeros and does not clear the flag.")
+                "True iff an operator-splitting solver consumed a primal seed (the warm_start() "
+                "vector or the iterate retained from the previous solve). A dual seed whose length "
+                "does not match the posed problem is replaced by zeros and does not clear the "
+                "flag. The active-set solver always reports False.")
         .def_ro("primal_residual", &qp_result_type::primal_residual)
         .def_ro("dual_residual", &qp_result_type::dual_residual)
         .def_ro("objective_value", &qp_result_type::objective_value)

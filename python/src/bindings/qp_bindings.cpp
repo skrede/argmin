@@ -19,6 +19,7 @@
 
 #include <Eigen/SparseCore>
 
+#include <atomic>
 #include <string>
 #include <utility>
 #include <string_view>
@@ -52,7 +53,7 @@ std::string describe_options(std::string_view name, const Options& opts)
            + format_number(opts.scaling) + ", polish=" + (opts.polish ? "True" : "False")
            + ", polish_refine_iter=" + format_number(opts.polish_refine_iter) + ", delta="
            + format_number(opts.delta) + ", warm_start=" + (opts.warm_start ? "True" : "False")
-           + ")";
+           + ", validate_convexity=" + (opts.validate_convexity ? "True" : "False") + ")";
 }
 
 // The class is bound over the library aggregate itself rather than over a
@@ -81,6 +82,7 @@ void bind_options(nb::module_& m, const char* name, const char* doc)
         .def_rw("polish_refine_iter", &Options::polish_refine_iter)
         .def_rw("delta", &Options::delta)
         .def_rw("warm_start", &Options::warm_start)
+        .def_rw("validate_convexity", &Options::validate_convexity)
         .def("__repr__",
              [name](const Options& opts) { return describe_options(name, opts); });
 }
@@ -147,12 +149,13 @@ public:
         posed_ = true;
     }
 
-    void require_posed() const
+    void require_posed(std::string_view operation) const
     {
         if(posed_)
             return;
         raise_argmin_error(error_kind::invalid_state,
-                           "resolve requires a preceding solve to pose the problem");
+                           std::string(operation)
+                               + " requires a preceding solve to pose the problem");
     }
 
     [[nodiscard]] int posed_rows() const { return n_; }
@@ -167,13 +170,37 @@ private:
 template <typename Solver, typename Options>
 class dense_qp_facade
 {
+    // Every public method takes the guard, the mutators included: a solve runs
+    // with the interpreter lock released, so an unguarded warm_start or reset
+    // from another thread would write into state that solve is reading.
+    class busy_guard
+    {
+    public:
+        explicit busy_guard(dense_qp_facade& owner) : owner_(owner)
+        {
+            bool idle = false;
+            if(!owner_.busy_.compare_exchange_strong(idle, true))
+                raise_argmin_error(error_kind::invalid_state,
+                                   "this solver is already running on another thread");
+        }
+
+        ~busy_guard() { owner_.busy_.store(false); }
+
+        busy_guard(const busy_guard&) = delete;
+        busy_guard& operator=(const busy_guard&) = delete;
+
+    private:
+        dense_qp_facade& owner_;
+    };
+
 public:
-    dense_qp_facade(int n, int m) : n_cap_(n), m_cap_(m), solver_(n, m) {}
+    dense_qp_facade(int n, int m) : n_cap_(n), m_cap_(m), solver_(n, m), busy_(false) {}
 
     qp_result_type solve(const dense_matrix& P, const dense_vector& q, const dense_matrix& A,
                          const dense_vector& l, const dense_vector& u,
                          const Options& opts)
     {
+        const busy_guard guard(*this);
         check_problem_data(P, q, A, l, u);
         const int n = static_cast<int>(P.rows());
         const int m = static_cast<int>(A.rows());
@@ -193,7 +220,8 @@ public:
     qp_result_type resolve(const dense_vector& q, const dense_vector& l, const dense_vector& u,
                            const Options& opts)
     {
-        state_.require_posed();
+        const busy_guard guard(*this);
+        state_.require_posed("resolve");
         check_update_data(q, l, u, state_.posed_rows(), state_.posed_constraints());
 
         auto outcome = run_resolve(q, l, u, opts);
@@ -204,17 +232,19 @@ public:
 
     void warm_start(const dense_vector& x, const dense_vector& y)
     {
+        const busy_guard guard(*this);
         check_vector_length(x, n_cap_, "x");
         check_all_finite(x, "x");
-        if(y.size() != 0)
-        {
-            check_vector_length(y, m_cap_, "y");
-            check_all_finite(y, "y");
-        }
-        solver_.warm_start(x, y);
+        check_all_finite(y, "y");
+        if(const auto rejected = solver_.warm_start(x, y))
+            raise_qp_error(*rejected, "warm_start");
     }
 
-    void reset() { solver_.reset(); }
+    void reset()
+    {
+        const busy_guard guard(*this);
+        solver_.reset();
+    }
 
     [[nodiscard]] int decision_capacity() const { return n_cap_; }
     [[nodiscard]] int constraint_capacity() const { return m_cap_; }
@@ -258,6 +288,7 @@ private:
     int m_cap_;
     Solver solver_;
     posed_state state_;
+    std::atomic<bool> busy_;
 };
 
 sparse_matrix as_compressed_column(nb::handle value, std::string_view name)
@@ -275,10 +306,33 @@ sparse_matrix as_compressed_column(nb::handle value, std::string_view name)
 
 class sparse_qp_facade
 {
+    class busy_guard
+    {
+    public:
+        explicit busy_guard(sparse_qp_facade& owner) : owner_(owner)
+        {
+            bool idle = false;
+            if(!owner_.busy_.compare_exchange_strong(idle, true))
+                raise_argmin_error(error_kind::invalid_state,
+                                   "this solver is already running on another thread");
+        }
+
+        ~busy_guard() { owner_.busy_.store(false); }
+
+        busy_guard(const busy_guard&) = delete;
+        busy_guard& operator=(const busy_guard&) = delete;
+
+    private:
+        sparse_qp_facade& owner_;
+    };
+
 public:
+    sparse_qp_facade() : busy_(false) {}
+
     qp_result_type solve(nb::handle P, const dense_vector& q, nb::handle A, const dense_vector& l,
                          const dense_vector& u, const sparse_qp_options& opts)
     {
+        const busy_guard guard(*this);
         const sparse_matrix P_csc = as_compressed_column(P, "P");
         const sparse_matrix A_csc = as_compressed_column(A, "A");
 
@@ -306,7 +360,8 @@ public:
     qp_result_type resolve(const dense_vector& q, const dense_vector& l, const dense_vector& u,
                            const sparse_qp_options& opts)
     {
-        state_.require_posed();
+        const busy_guard guard(*this);
+        state_.require_posed("resolve");
         check_update_data(q, l, u, state_.posed_rows(), state_.posed_constraints());
 
         auto outcome = run_resolve(q, l, u, opts);
@@ -317,12 +372,20 @@ public:
 
     void warm_start(const dense_vector& x, const dense_vector& y)
     {
+        const busy_guard guard(*this);
+        state_.require_posed("warm_start");
+        check_vector_length(x, state_.posed_rows(), "x");
+        check_vector_length(y, state_.posed_constraints(), "y");
         check_all_finite(x, "x");
         check_all_finite(y, "y");
         solver_.warm_start(x, y);
     }
 
-    void reset() { solver_.reset(); }
+    void reset()
+    {
+        const busy_guard guard(*this);
+        solver_.reset();
+    }
 
 private:
     expected<qp_result_type, qp_error> run_solve(const sparse_matrix& P, const dense_vector& q,
@@ -344,6 +407,7 @@ private:
 
     sparse_admm_qp_solver<double> solver_;
     posed_state state_;
+    std::atomic<bool> busy_;
 };
 
 template <typename Solver, typename Options>
