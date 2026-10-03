@@ -42,6 +42,10 @@ def solve_with(argmin, kind, P, q, A, l, u, options=None):
 
 
 def capped_options(argmin, kind):
+    if kind == "dense_active_set":
+        options = argmin.DenseActiveSetQpOptions()
+        options.max_iterations = 1
+        return options
     options = argmin.SparseQpOptions() if kind == "sparse_admm" else argmin.DenseQpOptions()
     options.max_iterations = 1
     options.check_termination = 1

@@ -10,8 +10,9 @@
 //   min 0.5 * x^T P x + q^T x  s.t.  l <= A x <= u
 //
 // by pure input transformation in adapter-owned buffers: each row i of A with
-// bounds (l_i, u_i) becomes an equality a_i^T x = l_i when l_i == u_i, an
-// inequality a_i^T x >= l_i for a finite lower bound, and a second inequality
+// bounds (l_i, u_i) becomes an equality a_i^T x = l_i when the bounds coincide
+// within the scale-aware equality tolerance the operator-splitting solvers also
+// apply, an inequality a_i^T x >= l_i for a finite lower bound, and a second inequality
 // -a_i^T x >= -u_i for a finite upper bound (infinite bounds skipped, matching
 // the finite-bound-fold idiom of the LSQ/LSEI QP). The recovered active-set
 // multipliers are sign-mapped back onto the OSQP dual y. Not a single line of
@@ -26,7 +27,7 @@
 //     infeasible status, so a start that violates l <= A x0 <= u on the mapped
 //     rows is rejected here as qp_error::infeasible_start.
 //   - Equality-row count <= n. The delegated solver requires the equality
-//     block to have at most n rows; more than n equality rows (l_i == u_i) is
+//     block to have at most n rows; more than n equality rows is
 //     rejected as qp_error::invalid_problem.
 //   - Convexity. A non-positive-definite reduced Hessian is surfaced by the
 //     delegated solver and mapped here to qp_error::invalid_problem.
@@ -38,8 +39,8 @@
 //            feasible-start assumption).
 
 #include "argmin/detail/active_set_qp.h"
-#include "argmin/options/dense_qp_options.h"
 #include "argmin/options/qp_options.h"
+#include "argmin/options/dense_active_set_qp_options.h"
 #include "argmin/qp/qp_types.h"
 #include "argmin/expected.h"
 #include "argmin/types.h"
@@ -94,7 +95,7 @@ public:
     expected<result_type, qp_error>
     solve(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
           const matrix<Scalar, dynamic_dimension, N>& A, const vector<Scalar>& l,
-          const vector<Scalar>& u, const dense_qp_options& opts = {})
+          const vector<Scalar>& u, const dense_active_set_qp_options& opts = {})
     {
         result_type out;
         if(auto err = solve_into(P, q, A, l, u, out, opts))
@@ -104,7 +105,7 @@ public:
 
     expected<result_type, qp_error>
     resolve(const vector<Scalar, N>& q, const vector<Scalar>& l,
-            const vector<Scalar>& u, const dense_qp_options& opts = {})
+            const vector<Scalar>& u, const dense_active_set_qp_options& opts = {})
     {
         result_type out;
         if(auto err = resolve_into(q, l, u, out, opts))
@@ -115,8 +116,10 @@ public:
     std::optional<qp_error>
     solve_into(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
                const matrix<Scalar, dynamic_dimension, N>& A, const vector<Scalar>& l,
-               const vector<Scalar>& u, result_type& out, const dense_qp_options& opts = {})
+               const vector<Scalar>& u, result_type& out, const dense_active_set_qp_options& opts = {})
     {
+        if(auto err = validate_option_domains(opts))
+            return err;
         if(auto err = validate_full(P, q, A, l, u))
             return err;
         n_ = static_cast<int>(P.rows());
@@ -137,8 +140,10 @@ public:
     // warm-starts the active set from the last solution (working-set-level).
     std::optional<qp_error>
     resolve_into(const vector<Scalar, N>& q, const vector<Scalar>& l,
-                 const vector<Scalar>& u, result_type& out, const dense_qp_options& opts = {})
+                 const vector<Scalar>& u, result_type& out, const dense_active_set_qp_options& opts = {})
     {
+        if(auto err = validate_option_domains(opts))
+            return err;
         if(!posed_)
             return qp_error::invalid_problem;
         if(q.size() != n_ || static_cast<int>(l.size()) != m_
@@ -162,9 +167,19 @@ public:
         return run(out, opts);
     }
 
-    void warm_start(const vector<Scalar, N>& x, const vector<Scalar>&)
+    // Rejects rather than clamps: a primal seed shorter than the decision capacity
+    // would be read past its end into x0_, which is silent in a release build. The
+    // dual seed is validated against the constraint capacity like the
+    // operator-splitting solvers' and then unused: the active-set method takes no
+    // dual start.
+    std::optional<qp_error> warm_start(const vector<Scalar, N>& x, const vector<Scalar>& y)
     {
+        if(x.size() < n_cap_ || static_cast<int>(y.size()) > m_cap_)
+            return qp_error::dimension_mismatch;
+        if(!x.head(n_cap_).allFinite() || (y.size() > 0 && !y.allFinite()))
+            return qp_error::non_finite_input;
         x0_.head(n_cap_) = x.head(n_cap_);
+        return std::nullopt;
     }
 
     void reset()
@@ -173,8 +188,15 @@ public:
     }
 
 private:
-    static constexpr double eq_tol_ = 1e-9;
     static constexpr double feas_tol_ = 1e-7;
+
+    std::optional<qp_error> validate_option_domains(const dense_active_set_qp_options& o) const
+    {
+        const auto positive = [](double v) { return std::isfinite(v) && v > 0.0; };
+        if(o.max_iterations > 0 && positive(o.tolerance) && positive(o.equality_tolerance))
+            return std::nullopt;
+        return qp_error::invalid_options;
+    }
 
     std::optional<qp_error>
     validate_full(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
@@ -200,19 +222,18 @@ private:
         return std::nullopt;
     }
 
-    bool is_equality_row(int i) const
+    bool is_equality_row(int i, const dense_active_set_qp_options& opts) const
     {
-        return std::isfinite(l_[i]) && std::isfinite(u_[i])
-               && (u_[i] - l_[i]) <= Scalar(eq_tol_);
+        return detail::is_equality_bound(l_[i], u_[i], Scalar(opts.equality_tolerance));
     }
 
-    std::optional<qp_error> run(result_type& out, const dense_qp_options& opts)
+    std::optional<qp_error> run(result_type& out, const dense_active_set_qp_options& opts)
     {
         // Equality-row-count contract: the delegated solver requires at most n
         // equality rows.
         int m_eq = 0;
         for(int i = 0; i < m_; ++i)
-            if(is_equality_row(i))
+            if(is_equality_row(i, opts))
                 ++m_eq;
         if(m_eq > n_)
             return qp_error::invalid_problem;
@@ -226,7 +247,7 @@ private:
             for(int i = 0; i < m_; ++i)
             {
                 const Scalar ai = ax_[i];
-                if(is_equality_row(i))
+                if(is_equality_row(i, opts))
                 {
                     if(std::abs(ai - l_[i]) > Scalar(feas_tol_))
                         return qp_error::infeasible_start;
@@ -241,11 +262,11 @@ private:
             }
         }
 
-        split_rows(m_eq);
+        split_rows(m_eq, opts);
 
         argmin::qp_options inner;
         inner.max_iterations = opts.max_iterations;
-        inner.tolerance = static_cast<double>(opts.eps_abs);
+        inner.tolerance = opts.tolerance;
 
         held_.solve_into(P_, q_.head(n_), A_eq_, b_eq_, A_in_, b_in_, x0_.head(n_),
                          inner, held_res_);
@@ -261,12 +282,12 @@ private:
     // tracking each mapped row's originating OSQP index (and, for inequality
     // rows, whether it is the upper-bound reflection) so the dual sign-map can
     // scatter multipliers back onto y.
-    void split_rows(int m_eq)
+    void split_rows(int m_eq, const dense_active_set_qp_options& opts)
     {
         int m_in = 0;
         for(int i = 0; i < m_; ++i)
         {
-            if(is_equality_row(i))
+            if(is_equality_row(i, opts))
                 continue;
             if(std::isfinite(l_[i]))
                 ++m_in;
@@ -286,7 +307,7 @@ private:
         int ri = 0;
         for(int i = 0; i < m_; ++i)
         {
-            if(is_equality_row(i))
+            if(is_equality_row(i, opts))
             {
                 A_eq_.row(re) = A_.row(i).head(n_);
                 b_eq_[re] = l_[i];
@@ -361,6 +382,7 @@ private:
         }
         out.iterations = held_res_.iterations;
         out.polished = false;
+        out.warm_started = false;
 
         Px_.head(n_).noalias() = P_ * out.x.head(n_);
         Scalar rp = Scalar(0);

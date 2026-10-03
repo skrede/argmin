@@ -10,6 +10,7 @@
 
 #include "argmin/options/dense_qp_options.h"
 #include "argmin/options/sparse_qp_options.h"
+#include "argmin/options/dense_active_set_qp_options.h"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
@@ -84,6 +85,25 @@ void bind_options(nb::module_& m, const char* name, const char* doc)
              [name](const Options& opts) { return describe_options(name, opts); });
 }
 
+void bind_active_set_options(nb::module_& m)
+{
+    nb::class_<dense_active_set_qp_options>(
+        m, "DenseActiveSetQpOptions",
+        "Configuration for the dense active-set quadratic-program solver. It carries only the "
+        "settings that solver honors; the exposed defaults are the library's own.")
+        .def(nb::init<>())
+        .def_rw("max_iterations", &dense_active_set_qp_options::max_iterations)
+        .def_rw("tolerance", &dense_active_set_qp_options::tolerance)
+        .def_rw("equality_tolerance", &dense_active_set_qp_options::equality_tolerance)
+        .def("__repr__",
+             [](const dense_active_set_qp_options& opts)
+             {
+                 return "DenseActiveSetQpOptions(max_iterations=" + format_number(opts.max_iterations)
+                        + ", tolerance=" + format_number(opts.tolerance)
+                        + ", equality_tolerance=" + format_number(opts.equality_tolerance) + ")";
+             });
+}
+
 void check_problem_data(const dense_matrix& P, const dense_vector& q, const dense_matrix& A,
                         const dense_vector& l, const dense_vector& u)
 {
@@ -144,7 +164,7 @@ private:
     bool posed_{false};
 };
 
-template <typename Solver>
+template <typename Solver, typename Options>
 class dense_qp_facade
 {
 public:
@@ -152,7 +172,7 @@ public:
 
     qp_result_type solve(const dense_matrix& P, const dense_vector& q, const dense_matrix& A,
                          const dense_vector& l, const dense_vector& u,
-                         const dense_qp_options& opts)
+                         const Options& opts)
     {
         check_problem_data(P, q, A, l, u);
         const int n = static_cast<int>(P.rows());
@@ -171,7 +191,7 @@ public:
     }
 
     qp_result_type resolve(const dense_vector& q, const dense_vector& l, const dense_vector& u,
-                           const dense_qp_options& opts)
+                           const Options& opts)
     {
         state_.require_posed();
         check_update_data(q, l, u, state_.posed_rows(), state_.posed_constraints());
@@ -220,7 +240,7 @@ private:
     expected<qp_result_type, qp_error> run_solve(const dense_matrix& P, const dense_vector& q,
                                                  const dense_matrix& A, const dense_vector& l,
                                                  const dense_vector& u,
-                                                 const dense_qp_options& opts)
+                                                 const Options& opts)
     {
         nb::gil_scoped_release released;
         return solver_.solve(P, q, A, l, u, opts);
@@ -228,7 +248,7 @@ private:
 
     expected<qp_result_type, qp_error> run_resolve(const dense_vector& q, const dense_vector& l,
                                                    const dense_vector& u,
-                                                   const dense_qp_options& opts)
+                                                   const Options& opts)
     {
         nb::gil_scoped_release released;
         return solver_.resolve(q, l, u, opts);
@@ -326,10 +346,10 @@ private:
     posed_state state_;
 };
 
-template <typename Solver>
+template <typename Solver, typename Options>
 void bind_dense_solver(nb::module_& m, const char* name, const char* doc)
 {
-    using facade = dense_qp_facade<Solver>;
+    using facade = dense_qp_facade<Solver, Options>;
 
     nb::class_<facade>(m, name, doc)
         .def(
@@ -342,9 +362,9 @@ void bind_dense_solver(nb::module_& m, const char* name, const char* doc)
             },
             nb::arg("n"), nb::arg("m"))
         .def("solve", &facade::solve, nb::arg("P"), nb::arg("q"), nb::arg("A"), nb::arg("l"),
-             nb::arg("u"), nb::arg("options") = dense_qp_options())
+             nb::arg("u"), nb::arg("options") = Options())
         .def("resolve", &facade::resolve, nb::arg("q"), nb::arg("l"), nb::arg("u"),
-             nb::arg("options") = dense_qp_options())
+             nb::arg("options") = Options())
         .def("warm_start", &facade::warm_start, nb::arg("x"), nb::arg("y") = dense_vector())
         .def("reset", &facade::reset)
         .def_prop_ro("n", &facade::decision_capacity)
@@ -382,19 +402,20 @@ void register_qp(nb::module_& m)
 {
     bind_options<dense_qp_options>(
         m, "DenseQpOptions",
-        "Configuration for the dense quadratic-program solvers. The exposed defaults are "
-        "the library's own; every field is readable and writable.");
+        "Configuration for the dense operator-splitting quadratic-program solver. The exposed "
+        "defaults are the library's own; every field is readable and writable.");
     bind_options<sparse_qp_options>(
         m, "SparseQpOptions",
         "Configuration for the sparse quadratic-program solver, with the same fields and "
         "the same library defaults as the dense form.");
+    bind_active_set_options(m);
 
-    bind_dense_solver<dense_admm_qp_solver<double>>(
+    bind_dense_solver<dense_admm_qp_solver<double>, dense_qp_options>(
         m, "DenseAdmmQpSolver",
         "Operator-splitting solver for a dense quadratic program, constructed for a fixed "
         "decision length and a maximum constraint-row count. A constraint count of zero is "
         "the unconstrained program.");
-    bind_dense_solver<dense_active_set_qp_solver<double>>(
+    bind_dense_solver<dense_active_set_qp_solver<double>, dense_active_set_qp_options>(
         m, "DenseActiveSetQpSolver",
         "Active-set solver for a dense quadratic program. It requires a feasible starting "
         "point: seed one with warm_start() before solving a problem whose equality rows the "

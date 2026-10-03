@@ -48,9 +48,11 @@ configuration and `policy_options()` for the method's own. A gradient is optiona
 on the quasi-Newton method and falls back to the library's own finite
 differences.
 
-**Options.** `DenseQpOptions` and `SparseQpOptions` are passed as arguments;
-everything else is set through keyword arguments on a solver's constructor and
-read back through the snapshots. `SolverOptions`, `LineSearchOptions`,
+**Options.** `DenseQpOptions`, `SparseQpOptions` and `DenseActiveSetQpOptions`
+are passed as arguments, the last because the active-set solver takes its own
+three-field options rather than the splitting solvers'; everything else is set
+through keyword arguments on a solver's constructor and read back through the
+snapshots. `SolverOptions`, `LineSearchOptions`,
 `LbfgsbOptions`, `BobyqaOptions`, `CobylaOptions`, `SlsqpOptions`,
 `QpSubproblemOptions`, `TrustRegionOptions`, `CmaesOptions` and
 `CmaesDetectionOptions` are all bound over the library's own aggregates, so an
