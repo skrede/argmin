@@ -180,6 +180,11 @@ if(_argmin_alloc_gate_sanitizer EQUAL -1)
         PROPERTIES LABELS "alloc-gate")
     catch_discover_tests(argmin_alloc_gate_test
         TEST_SPEC "[canary]")
+    # The active-set equality-escalation probe needs the armed sensors this target defines, but it
+    # covers a degenerate-input path rather than a real-time policy, so it is registered without
+    # the label for the same reason as the canary.
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[qp-escalation-alloc]")
 else()
     set_target_properties(argmin_alloc_gate_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
 endif()

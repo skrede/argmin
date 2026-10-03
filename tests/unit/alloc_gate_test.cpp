@@ -35,6 +35,7 @@
 #include "argmin/solver/projected_gradient_gn_policy.h"
 #include "argmin/solver/lm_policy.h"
 #include "argmin/solver/step_budget_solver.h"
+#include "argmin/detail/active_set_qp.h"
 #include "argmin/detail/lbfgsb_direction.h"
 
 #include "argmin/qp/dense_admm_qp.h"
@@ -742,6 +743,50 @@ TEST_CASE("alloc_gate_projected_gradient_gn", "[alloc-gate]")
             solver.step();
     });
 
+    CHECK(counts.eigen == 0);
+    CHECK(counts.c == 0);
+}
+
+// The sequential-programming gates arm their windows around well-conditioned fixtures, so none of
+// them reaches the active-set solver's pivoted equality projection. This probe re-solves two
+// rank-deficient equality systems after one unarmed solve of each has brought every lazily sized
+// member to its final shape. The contradictory pair can only be reported infeasible by the
+// projection's consistency test, which witnesses that the armed window ran the escalated path.
+TEST_CASE("qp_escalation_allocation_probe", "[qp-escalation-alloc]")
+{
+    constexpr int N = 3;
+    const Eigen::Matrix<double, N, N> G = Eigen::Matrix<double, N, N>::Identity();
+    const Eigen::Vector<double, N> d{-1.0, 0.0, 1.0};
+    Eigen::Matrix<double, Eigen::Dynamic, N> A_eq(2, N);
+    A_eq << 1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0;
+    const Eigen::VectorXd b_redundant{{3.0, 3.0}};
+    const Eigen::VectorXd b_contradictory{{3.0, 4.0}};
+    const Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq(0, N);
+    const Eigen::VectorXd b_ineq(0);
+    const Eigen::Vector<double, N> x0 = Eigen::Vector<double, N>::Zero();
+    const argmin::qp_options opts{};
+
+    using argmin::detail::qp_status;
+    argmin::detail::active_set_qp_solver<double, N> solver(N, 2);
+    argmin::detail::active_set_qp_solver<double, N>::result_type out;
+    solver.solve_into(G, d, A_eq, b_contradictory, A_ineq, b_ineq, x0, opts, out);
+    REQUIRE(out.status == qp_status::infeasible);
+    solver.solve_into(G, d, A_eq, b_redundant, A_ineq, b_ineq, x0, opts, out);
+    REQUIRE(out.status == qp_status::optimal);
+    REQUIRE((out.x - Eigen::Vector<double, N>{2.0, 1.0, 0.0}).cwiseAbs().maxCoeff() <= 1e-10);
+
+    qp_status redundant_status = qp_status::max_iterations;
+    qp_status contradictory_status = qp_status::optimal;
+    const auto counts = run_armed([&] {
+        solver.solve_into(G, d, A_eq, b_redundant, A_ineq, b_ineq, x0, opts, out);
+        redundant_status = out.status;
+        solver.solve_into(G, d, A_eq, b_contradictory, A_ineq, b_ineq, x0, opts, out);
+        contradictory_status = out.status;
+    });
+
+    CHECK(redundant_status == qp_status::optimal);
+    CHECK(contradictory_status == qp_status::infeasible);
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);
 }
