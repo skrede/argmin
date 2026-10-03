@@ -1265,7 +1265,8 @@ private:
 //              A_ineq x >= b_ineq        (inequality, lower-bound form)
 //
 // Convention: inequality constraints are A_ineq * x >= b_ineq.
-// The initial point x0 must be feasible.
+// The initial point x0 must satisfy the inequality rows; an equality-infeasible
+// x0 is projected onto the equality manifold before the first iteration.
 //
 // Reference: N&W Algorithm 16.1, pp. 460-463.
 template <typename Scalar = double, int N = argmin::dynamic_dimension,
@@ -1286,6 +1287,8 @@ qp_result<Scalar, N> solve_qp(
     const int m_total = m_eq + m_ineq;
     const int max_iter = static_cast<int>(opts.max_iterations);
     const auto tol = static_cast<Scalar>(opts.tolerance);
+    // The same backward-stability floor as the stateful solver's terminal verification.
+    const Scalar verify_tol = std::max(tol, std::sqrt(Eigen::NumTraits<Scalar>::epsilon()));
 
     // Assemble full constraint matrix: [A_eq; A_ineq] x >= [b_eq; b_ineq]
     // (Equality constraints treated as a_i^T x = b_i, always active.)
@@ -1302,8 +1305,38 @@ qp_result<Scalar, N> solve_qp(
         b_full.tail(m_ineq) = b_ineq;
     }
 
-    auto W = initial_working_set<Scalar, N>(x0, A_full, b_full, m_eq, tol);
     Eigen::Vector<Scalar, N> x = x0;
+
+    // Phase-1 feasibility invariant (N&W 2e Section 16.1) restored by the minimum-norm
+    // under-determined correction (Lemma 16.5), rank-truncated through a column-pivoted QR of A_eq^T
+    // so a dependent row is dropped and an inconsistent one is demonstrated rather than divided by.
+    if(m_eq > 0)
+    {
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1> residual = b_eq - A_eq * x;
+        if(residual.cwiseAbs().maxCoeff() > tol)
+        {
+            Eigen::ColPivHouseholderQR<Eigen::Matrix<Scalar, N, Eigen::Dynamic>> qr(n, m_eq);
+            qr.setThreshold(Eigen::NumTraits<Scalar>::epsilon() * Scalar(m_eq));
+            qr.compute(A_eq.transpose());
+            const int r = static_cast<int>(qr.rank());
+            Eigen::Vector<Scalar, N> dx = Eigen::Vector<Scalar, N>::Zero(n);
+            dx.head(r) = (qr.colsPermutation().transpose() * residual).head(r);
+            qr.matrixQR().topLeftCorner(r, r).template triangularView<Eigen::Upper>().transpose()
+                .solveInPlace(dx.head(r));
+            x += qr.householderQ() * dx;
+            if(!equality_residual_within(A_full, b_full, x, residual, m_eq, tol))
+            {
+                qp_result<Scalar, N> res;
+                res.x = x;
+                res.lambda = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>::Zero(m_total);
+                res.status = qp_status::infeasible;
+                res.iterations = 0;
+                return res;
+            }
+        }
+    }
+
+    auto W = initial_working_set<Scalar, N>(x, A_full, b_full, m_eq, tol);
 
     // Anti-cycling: after this many iterations without convergence, switch
     // the leaving-constraint choice to Bland's lowest-index rule, which
@@ -1347,12 +1380,14 @@ qp_result<Scalar, N> solve_qp(
             int drop = most_negative_multiplier(lambda_W, W, m_eq, tol, bland);
             if(drop == -1)
             {
-                // All inequality multipliers non-negative: optimal
                 auto lambda_full = build_full_lambda(lambda_W, W, m_total);
+                Eigen::Matrix<Scalar, Eigen::Dynamic, 1> scratch(n);
+                const bool verified = terminal_kkt_holds(A_full, b_full, x, g_k, lambda_full, m_eq, m_total,
+                                                         verify_tol, scratch);
                 qp_result<Scalar, N> res;
                 res.x = x;
                 res.lambda = lambda_full;
-                res.status = qp_status::optimal;
+                res.status = verified ? qp_status::optimal : qp_status::max_iterations;
                 res.iterations = iter;
                 return res;
             }
