@@ -64,10 +64,11 @@ def _problem_set() -> list[str]:
               "P_inf" if N >= prereg.LONG_HORIZON_MIN_N else f"{_value(prereg.LEGACY_TERMINAL_WEIGHT)} I",
               "dense, sparse", ", ".join(prereg.REGIMES)] for nx, nu, N in prereg.mpc_cells()]
     n, m = prereg.DENSE_ONLY_DIMENSIONS
-    cells.append([prereg.DENSE_ONLY_PROBLEM, "-", "-", "-", f"n {n}, m {m}", "dense", "fixed"])
+    fixed_problems = [[prereg.DENSE_ONLY_PROBLEM, str(n), str(m), "dense", "fixed"]]
     variants = [[name, _fields(fields)] for name, fields in
                 (("nominal", prereg.NOMINAL_VARIANT), ("tight", prereg.TIGHT_VARIANT))]
     return [*markdown_table(["Cell", "nx", "nu", "N", "Terminal weight", "Cohorts", "Regimes"], cells), "",
+            *markdown_table(["Problem", "n", "m", "Cohorts", "Regimes"], fixed_problems), "",
             *markdown_table(["Variant", "Parameters"], variants)]
 
 

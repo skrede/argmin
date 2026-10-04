@@ -75,23 +75,25 @@ def _structure_cell(summaries: dict, nx: int, nu: int, N: int, variant: str) -> 
                   for arm in prereg.STRUCTURE_REFERENCE_ARMS if prereg.expressible(arm, N)]
     qualifying = [(arm, group) for arm, group in references if group.pass_rate == 1]
     best = min(qualifying, key=lambda item: item[1].median_tick_ns) if qualifying else None
-    ratio = _ratio(argmin, best[1] if best else None)
+    ratio = _ratio(argmin, best[1] if best else None) if argmin.pass_rate == 1 else None
     entry = {"cell": cell, "variant": variant, "N": N, "argmin_pass_rate": argmin.pass_rate,
              "argmin_median_tick_ns": argmin.median_tick_ns, "best_reference": best[0] if best else None,
              "references": [{"arm": arm, "pass_rate": group.pass_rate, "median_tick_ns": group.median_tick_ns,
                              "qualifies": group.pass_rate == 1} for arm, group in references],
              "meets_threshold": ratio is not None and ratio >= prereg.BLOCK_STRUCTURE_RATIO_THRESHOLD,
              **_ratio_entry(ratio)}
+    failures = {}
     if best is None:
-        reason, text = "no_qualifying_reference", "no structure-exploiting reference passes every tick"
-    elif argmin.n_pass == 0:
-        reason, text = "argmin_no_passing_tick", "argmin has no passing tick"
-    elif not entry["meets_threshold"]:
+        failures["no_qualifying_reference"] = "no structure-exploiting reference passes every tick"
+    if argmin.pass_rate != 1:
+        failures["argmin_pass_rate"] = f"argmin pass rate {argmin.pass_rate} is below 1"
+    if ratio is not None and not entry["meets_threshold"]:
         threshold = str(prereg.BLOCK_STRUCTURE_RATIO_THRESHOLD)
-        reason, text = "ratio_below_threshold", f"ratio {ratio} ({display_ratio(ratio)}) is below {threshold}"
-    else:
+        failures["ratio_below_threshold"] = f"ratio {ratio} ({display_ratio(ratio)}) is below {threshold}"
+    if not failures:
         return entry, None
-    return entry, _failure([reason], f"{cell} {variant}: {text}", cell=cell, variant=variant)
+    message = f"{cell} {variant}: " + "; ".join(failures.values())
+    return entry, _failure(list(failures), message, cell=cell, variant=variant)
 
 
 def _growth(ratios: dict) -> tuple[list[dict], list[dict]]:

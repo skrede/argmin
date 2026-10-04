@@ -87,7 +87,25 @@ def test_block_structure_fails_a_cell_where_argmin_never_passes():
     overrides = [*long_horizon_ratios(3000, 4000), (sparse("nx4_nu2_N100", "tight", "argmin_sparse_admm"), group(1, 0))]
     rule = block_structure(summaries(overrides), ())
     assert rule["outcome"] == "NO-GO"
-    assert reasons(rule)[0] == ("nx4_nu2_N100", "tight", ["argmin_no_passing_tick"])
+    assert reasons(rule)[0] == ("nx4_nu2_N100", "tight", ["argmin_pass_rate"])
+
+
+def test_block_structure_one_failing_argmin_tick_leaves_the_ratio_undefined():
+    overrides = [*long_horizon_ratios(3000, 4000), (sparse("nx4_nu2_N50", "nominal", "argmin_sparse_admm"), group(9000, 299))]
+    rule = block_structure(summaries(overrides), ())
+    assert rule["outcome"] == "NO-GO"
+    assert reasons(rule) == [("nx4_nu2_N50", "nominal", ["argmin_pass_rate"]), ("nx4_nu2", "nominal", ["no_growth"])]
+    assert "299/300" in rule["failing_conditions"][0]["message"]
+    assert next(cell for cell in rule["cells"] if cell["cell"] == "nx4_nu2_N50" and cell["variant"] == "nominal")[
+        "ratio"] is None
+
+
+def test_block_structure_lists_every_failing_condition_of_a_cell():
+    cell = "nx8_nu3_N100"
+    overrides = [*long_horizon_ratios(3000, 4000), (sparse(cell, "tight", "argmin_sparse_admm"), group(4000, 299)),
+                 (sparse(cell, "tight", "hpipm"), group(1000, 299)), (sparse(cell, "tight", "tinympc"), group(1000, 0))]
+    rule = block_structure(summaries(overrides), ())
+    assert reasons(rule)[0] == (cell, "tight", ["no_qualifying_reference", "argmin_pass_rate"])
 
 
 def test_block_structure_drops_a_refused_tight_family_but_keeps_its_nominal_variant():
@@ -243,3 +261,5 @@ def test_preregistration_tables_are_deterministic_and_complete():
     assert "| OSQP replacement ratio limit (at most) | 5/4 |" in text
     assert "| Block-structure ratio threshold (at least) | 3 |" in text
     assert "x86-64-v3" in text
+    assert "| dense_mpc_shaped | 10 | 5 | dense | fixed |" in text
+    assert all("dense_mpc_shaped" not in line for line in text.splitlines() if line.count("|") == 8)
