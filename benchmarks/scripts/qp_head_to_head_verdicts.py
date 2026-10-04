@@ -25,7 +25,8 @@ from qp_head_to_head import preregistration as prereg
 from qp_head_to_head.aggregate import summarize
 from qp_head_to_head.dense_rules import dense_default
 from qp_head_to_head.records import RefusedInput, RunData, load_run
-from qp_head_to_head.render import preregistration_tables, render_json, render_markdown
+from qp_head_to_head.render import preregistration_tables, render_json, render_markdown, report_sections
+from qp_head_to_head.report import group_reports
 from qp_head_to_head.sparse_rules import block_structure, osqp_replacement
 
 
@@ -38,6 +39,7 @@ def compute_outputs(run: RunData) -> tuple[str, str]:
         "block_structure": block_structure(summaries, run.refused_families),
         "dense_default": dense_default(summaries, run.refused_families),
         "osqp_replacement": osqp_replacement(summaries, run.refused_families),
+        **report_sections(run, summaries, group_reports(run)),
     }
     return render_json(verdicts), render_markdown(verdicts)
 

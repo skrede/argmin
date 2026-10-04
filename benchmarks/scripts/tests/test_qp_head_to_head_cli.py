@@ -35,7 +35,15 @@ def test_outputs_are_byte_identical_across_processes(full_run_outputs, full_run_
     assert full_run_outputs.json_path.read_bytes() == json_text.encode("utf-8")
     assert full_run_outputs.md_path.read_bytes() == markdown_text.encode("utf-8")
     assert set(json.loads(json_text)) == {"schema", "run_id", "recorded", "osqp_replacement", "block_structure",
-                                          "dense_default"}
+                                          "dense_default", "summary", "excluded", "inputs", "preregistration"}
+
+
+def test_outputs_name_inputs_without_the_run_directory(full_run, full_run_outputs):
+    for path in (full_run_outputs.json_path, full_run_outputs.md_path):
+        text = path.read_text()
+        assert str(full_run) not in text and str(full_run.parent) not in text
+    names = {entry["name"] for entry in json.loads(full_run_outputs.json_path.read_text())["inputs"]}
+    assert names == {f"{cohort}_rep{rep}.csv.gz" for cohort in prereg.COHORTS for rep in range(prereg.REPETITIONS)}
 
 
 def test_row_order_does_not_change_the_outputs(full_run_data):

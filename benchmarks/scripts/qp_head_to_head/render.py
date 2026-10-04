@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 from fractions import Fraction
 
+from . import preregistration as prereg
 from .aggregate import display_ratio, exact_text
 from .preregistration_tables import markdown_table, preregistration_tables
+from .records import RunData
+from .report import summary_entry
 
-__all__ = ["render_json", "render_markdown", "preregistration_tables"]
+__all__ = ["render_json", "render_markdown", "preregistration_tables", "report_sections"]
 
 NO_PASSING_TICK = "no passing tick"
 
@@ -17,6 +20,30 @@ def _encode(value: object) -> str:
     if isinstance(value, Fraction):
         return exact_text(value)
     raise TypeError(f"cannot serialize {type(value).__name__}")
+
+
+def _excluded(run: RunData) -> dict:
+    families = [prereg.family_id(nx, nu) for nx, nu in prereg.families()]
+    refused = [{"family": family, **run.manifest["binding_gate"][family]}
+               for family in families if family in run.refused_families]
+    not_expressible = [{name: entry[name] for name in ("cohort", "arm", "cell")}
+                       for entry in prereg.expressibility_matrix() if not entry["expressible"]]
+    return {"refused_tight_families": refused, "not_expressible": not_expressible}
+
+
+def _preregistration() -> dict:
+    thresholds = {"block_structure_ratio_at_least": prereg.BLOCK_STRUCTURE_RATIO_THRESHOLD,
+                  "osqp_replacement_ratio_at_most": prereg.OSQP_REPLACEMENT_RATIO_LIMIT,
+                  "qualifying_pass_rate": Fraction(1)}
+    return {"argmin_sha": prereg.ARGMIN_SHA, "competitor_pins": dict(prereg.COMPETITOR_PINS),
+            "build_policy": dict(prereg.BUILD_POLICY), "constants": prereg.manifest_constants(),
+            "arm_settings": prereg.ARM_SETTINGS, "thresholds": thresholds}
+
+
+def report_sections(run: RunData, summaries: dict, reports: dict) -> dict:
+    return {"summary": [summary_entry(key, summary, reports[key]) for key, summary in summaries.items()],
+            "excluded": _excluded(run), "inputs": [dict(entry) for entry in run.inputs],
+            "preregistration": _preregistration()}
 
 
 def render_json(verdicts: dict) -> str:
@@ -79,12 +106,46 @@ def _osqp_replacement(rule: dict) -> list[str]:
             *markdown_table(headers, rows), *_failures(rule["failing_cells"])]
 
 
+def _spread(entry: dict) -> str:
+    return NO_PASSING_TICK if entry["p25_tick_ns"] is None else f"{entry['p25_tick_us']} - {entry['p75_tick_us']}"
+
+
+def _summary_row(entry: dict, dense: bool) -> list[str]:
+    def joined(*names: str) -> str:
+        return " / ".join(entry[name] for name in names)
+
+    return [entry["cell"], entry["variant"], f"`{entry['arm']}`", entry["pass_rate"], entry["median_tick_us"],
+            _spread(entry), joined("median_setup_us", "median_update_us", "median_solve_us"),
+            *([entry["median_condense_us"]] if dense else []),
+            joined(*(f"median_instr_{phase}_display" for phase in ("setup", "update", "solve", "tick"))),
+            joined("iterations_min_display", "iterations_median_display", "iterations_max_display"),
+            entry["worst_kkt_max_display"], entry["fail_classes_display"], entry["allocs_max_display"],
+            *([str(entry["fallback_count"])] if dense else [])]
+
+
+def _summary_tables(entries: list[dict]) -> list[str]:
+    lines = ["## Group summary"]
+    for cohort in prereg.COHORTS:
+        dense = cohort == "dense"
+        headers = ["Cell", "Variant", "Arm", "Pass rate", "Median tick (us)", "Tick p25 - p75 (us)",
+                   "Median setup / update / solve (us)", *(["Median condense (us)"] if dense else []),
+                   "Median instructions setup / update / solve / tick", "Iterations min / median / max",
+                   "Worst KKT residual", "Failures", "Allocations max", *(["Fallbacks"] if dense else [])]
+        for regime in prereg.REGIMES:
+            for tier in prereg.TIERS:
+                rows = [_summary_row(entry, dense) for entry in entries
+                        if (entry["cohort"], entry["regime"], entry["tier"]) == (cohort, regime, tier)]
+                lines += ["", f"### {cohort} cohort, {regime} regime, {tier} tier", "",
+                          *markdown_table(headers, rows)]
+    return lines
+
+
 def render_markdown(verdicts: dict) -> str:
     lines = []
     if not verdicts["recorded"]:
         lines += ["> Advisory output: not a recorded run, not publishable.", ""]
     lines += ["# Head-to-head QP benchmark verdicts", "", f"Run `{verdicts['run_id']}`.", ""]
-    for section in (_block_structure(verdicts["block_structure"]), _dense_default(verdicts["dense_default"]),
+    for section in (_summary_tables(verdicts["summary"]), _block_structure(verdicts["block_structure"]), _dense_default(verdicts["dense_default"]),
                     _osqp_replacement(verdicts["osqp_replacement"])):
         lines += section + [""]
     return "\n".join(lines)
