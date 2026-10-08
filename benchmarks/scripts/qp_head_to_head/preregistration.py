@@ -83,7 +83,7 @@ ARMS = (
     ArmSpec("osqp", "sparse", "competitor", "native", _BOTH_TIERS),
     ArmSpec("proxqp_sparse", "sparse", "competitor", "native", _BOTH_TIERS),
     ArmSpec("hpipm", "sparse", "reference", "native", _BOTH_TIERS),
-    ArmSpec("tinympc", "sparse", "reference", "recovered", _BOTH_TIERS),
+    ArmSpec("tinympc", "sparse", "report_only", "recovered", _BOTH_TIERS),
     ArmSpec("argmin_sparse_admm_polished", "sparse", "report_only", "native", _MPC_ONLY),
     ArmSpec("osqp_polished", "sparse", "report_only", "native", _MPC_ONLY),
 )
@@ -91,7 +91,7 @@ ARMS = (
 DENSE_CANDIDATE_ARMS = ("argmin_dense_admm", "argmin_dense_active_set")
 SPARSE_CANDIDATE_ARM = "argmin_sparse_admm"
 REPLACEMENT_INCUMBENT_ARM = "osqp"
-STRUCTURE_REFERENCE_ARMS = ("hpipm", "tinympc")
+STRUCTURE_REFERENCE_ARMS = ("hpipm",)
 FALLBACK_ARM = "argmin_dense_active_set"
 UPDATE_APIS = ("separate", "fused")
 

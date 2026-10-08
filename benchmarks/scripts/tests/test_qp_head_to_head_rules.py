@@ -69,18 +69,17 @@ def test_block_structure_equal_ratios_do_not_count_as_growth():
 
 
 def test_block_structure_needs_a_reference_passing_every_tick():
-    overrides = [*long_horizon_ratios(3000, 4000), (sparse("nx8_nu3_N50", "nominal", "hpipm"), group(1000, 299)),
-                 (sparse("nx8_nu3_N50", "nominal", "tinympc"), group(1000, 0))]
+    overrides = [*long_horizon_ratios(3000, 4000), (sparse("nx8_nu3_N50", "nominal", "hpipm"), group(1000, 299))]
     rule = block_structure(summaries(overrides), ())
     assert rule["outcome"] == "NO-GO"
     assert reasons(rule) == [("nx8_nu3_N50", "nominal", ["no_qualifying_reference"]),
                              ("nx8_nu3", "nominal", ["no_growth"])]
 
 
-@pytest.mark.parametrize("tinympc, best", [(900, "tinympc"), (1000, "hpipm"), (1100, "hpipm")])
-def test_block_structure_picks_the_faster_reference_and_breaks_ties_by_registry_order(tinympc, best):
-    rule = block_structure(summaries([(sparse(arm="tinympc"), group(tinympc))]), ())
-    assert {cell["best_reference"] for cell in rule["cells"]} == {best}
+def test_block_structure_never_reads_the_report_only_tinympc_arm():
+    rule = block_structure(summaries([(sparse(arm="tinympc"), group(1))]), ())
+    assert {cell["best_reference"] for cell in rule["cells"]} == {"hpipm"}
+    assert all([ref["arm"] for ref in cell["references"]] == ["hpipm"] for cell in rule["cells"])
 
 
 def test_block_structure_fails_a_cell_where_argmin_never_passes():
@@ -103,7 +102,7 @@ def test_block_structure_one_failing_argmin_tick_leaves_the_ratio_undefined():
 def test_block_structure_lists_every_failing_condition_of_a_cell():
     cell = "nx8_nu3_N100"
     overrides = [*long_horizon_ratios(3000, 4000), (sparse(cell, "tight", "argmin_sparse_admm"), group(4000, 299)),
-                 (sparse(cell, "tight", "hpipm"), group(1000, 299)), (sparse(cell, "tight", "tinympc"), group(1000, 0))]
+                 (sparse(cell, "tight", "hpipm"), group(1000, 299))]
     rule = block_structure(summaries(overrides), ())
     assert reasons(rule)[0] == (cell, "tight", ["no_qualifying_reference", "argmin_pass_rate"])
 

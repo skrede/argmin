@@ -31,12 +31,10 @@ Scope: the sparse cohort, the `closed_loop` regime and the `mpc` tier, on the lo
 (N >= 50) in the nominal variant and in the tight variant unless the binding gate refused that
 family's tight variant.
 
-For each in-scope cell-variant, a structure-exploiting reference (`hpipm`, `tinympc`) qualifies if
-it is expressible on the cell and its pass rate is exactly 1. The best reference is the qualifying
-one with the smaller median tick; an exact tie goes to the earlier arm in registry order (`hpipm`).
-The ratio is `median tick(argmin_sparse_admm) / median tick(best reference)`. It is defined only
-when a reference qualifies and `argmin_sparse_admm` has a pass rate of exactly 1; an undefined
-ratio fails that cell-variant.
+For each in-scope cell-variant, the structure-exploiting reference `hpipm` qualifies if its pass
+rate is exactly 1. The ratio is `median tick(argmin_sparse_admm) / median tick(hpipm)`. It is
+defined only when the reference qualifies and `argmin_sparse_admm` has a pass rate of exactly 1; an
+undefined ratio fails that cell-variant.
 
 The outcome is GO if and only if all of the following hold:
 
@@ -146,6 +144,24 @@ Three amendments were made before the freeze, before any recorded run existed:
 3. The dense-only problem's dimensions moved from the terminal-weight column of the problem-set
    table into a table of their own. Reason: they were in the wrong column; no value changed.
 
+Three more were made after the freeze, on the evidence of the harness's smoke runs, before any
+recorded run existed:
+
+4. The convention probe solves ProxQP at `eps_abs = eps_rel = 1e-9`; its tolerance stays 1e-6 and
+   every timed setting is unchanged. Reason: at its high-tier `1e-6` ProxQP returned multipliers
+   with the right signs but errors of 2.45e-6 (dense) and 3.75e-6 (sparse), which is its solve
+   tolerance, not a convention error; a probe tolerance equal to the solve tolerance left no margin.
+5. TinyMPC is report-only and `hpipm` is Rule A's only reference. Reason: at its pin, `tiny_setup`
+   stores `Q + rho I` and `R + rho I` as the stage weights its ADMM fixed point minimizes, so it
+   solves a different QP from every other arm; on the tight variant it would still pass every tick
+   and could be Rule A's best reference on that different problem.
+6. In the judge's complementarity term the multiplier scale enters as `1 + ||y||_inf` instead of
+   `||y||_inf`. Reason: the old term is invariant to the scale of `y`, so on a tick where no row
+   binds any residual multiplier on a slack row scored its slack over the problem scale (0.655 for
+   `argmin_dense_admm` and 0.159 for OSQP on one such smoke tick), failing operator-splitting arms
+   through the metric rather than the solution. Where `||y||_inf >= 1` the term changes by at most
+   a factor of 2.
+
 ### Constants
 
 | Quantity | Value | Constant |
@@ -213,7 +229,7 @@ Three amendments were made before the freeze, before any recorded run existed:
 | sparse | `osqp` | competitor | native | mpc, high | every cell |
 | sparse | `proxqp_sparse` | competitor | native | mpc, high | every cell |
 | sparse | `hpipm` | reference | native | mpc, high | every cell |
-| sparse | `tinympc` | reference | recovered | mpc, high | long-horizon cells only |
+| sparse | `tinympc` | report_only | recovered | mpc, high | long-horizon cells only |
 | sparse | `argmin_sparse_admm_polished` | report_only | native | mpc | every cell |
 | sparse | `osqp_polished` | report_only | native | mpc | every cell |
 
@@ -287,9 +303,10 @@ on the sparse data in the other, because it is the incumbent in ctrlpp's linear 
 yardstick for both forms; the OSQP arm that decides rule C is OSQP's C API built from source under
 the uniform build policy.
 
-HPIPM (an interior-point method on the stage-wise OCP form) and TinyMPC (ADMM with a cached Riccati
-solve) are structure-exploiting references: their gap to the generic sparse arms is what
-block-structured storage could buy, so they decide rule A only. The polished sub-arms
+HPIPM (an interior-point method on the stage-wise OCP form) is the structure-exploiting
+reference: its gap to the generic sparse arms is what block-structured storage could buy, so it
+decides rule A only. TinyMPC (ADMM with a cached Riccati solve) is report-only: at its pin it adds
+`rho I` to the stage weights its fixed point minimizes, so it solves a different QP. The polished sub-arms
 (`argmin_dense_admm_polished`, `argmin_sparse_admm_polished`, `osqp_polished`) run at the MPC tier,
 are reported, and are excluded from every rule.
 
@@ -363,14 +380,18 @@ rotated by the repetition index. Every expressible combination therefore has exa
 A tick passes if and only if its `kkt_max` is at most the tier threshold, inclusive: 1e-3 at the
 `mpc` tier and 1e-6 at the `high` tier. `kkt_max` is the relative KKT residual of ctrlpp's QP
 accuracy judge, evaluated by the harness on each arm's primal and dual solution mapped to OSQP's
-sign convention over the instance's own row order. A solver's own status never decides a pass. A
+sign convention over the instance's own row order. Its complementarity term is
+`max_i |y_i (bound_i - row_i)| / ((1 + ||y||_inf) (||Ax|| + ||l|| + ||u||))`, so a multiplier left
+on a row that does not bind scores its own size. A solver's own status never decides a pass. A
 tick that does not pass is classified as `inaccurate` (the solver claimed success and the judge
 failed it), `max_iter`, `infeasible_claim` or `error`.
 
 Each arm runs with its own documented settings for the tier (the arm-settings table above). Every
 rule-deciding native-dual arm must pass a convention probe at setup: a small QP with an active
 upper bound, an active lower bound and an equality row, solved exactly by enumeration, whose mapped
-multipliers must match to 1e-6, or the run aborts naming the arm. TinyMPC returns no multipliers;
+multipliers must match to 1e-6, or the run aborts naming the arm. The probe is untimed and runs
+each arm at its high-tier settings, except ProxQP, which it solves at `eps_abs = eps_rel = 1e-9`.
+TinyMPC returns no multipliers;
 they are recovered by least squares on the rows active within `threshold (1 + |bound_i|)` and then
 judged like any other arm's, and its rows are marked `dual_kind = recovered`.
 
