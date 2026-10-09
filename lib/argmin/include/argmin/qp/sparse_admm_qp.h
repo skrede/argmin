@@ -56,6 +56,7 @@
 
 #include "argmin/qp/detail/sparse_kkt.h"
 #include "argmin/qp/detail/polish_accept.h"
+#include "argmin/options/admm_defaults.h"
 #include "argmin/options/sparse_qp_options.h"
 #include "argmin/qp/qp_types.h"
 #include "argmin/expected.h"
@@ -67,6 +68,7 @@
 #include <limits>
 #include <vector>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <algorithm>
 #include <functional>
@@ -74,7 +76,7 @@
 namespace argmin
 {
 
-template <typename Scalar = double>
+template <scalar Scalar = double>
 class sparse_admm_qp_solver
 {
 public:
@@ -86,7 +88,7 @@ public:
 
     expected<result_type, qp_error>
     solve(const sparse_type& P, const vector<Scalar>& q, const sparse_type& A,
-          const vector<Scalar>& l, const vector<Scalar>& u, const sparse_qp_options& opts = {})
+          const vector<Scalar>& l, const vector<Scalar>& u, const sparse_qp_options<Scalar>& opts = {})
     {
         result_type out;
         if(auto err = solve_into(P, q, A, l, u, out, opts))
@@ -96,7 +98,7 @@ public:
 
     expected<result_type, qp_error>
     resolve(const vector<Scalar>& q, const vector<Scalar>& l, const vector<Scalar>& u,
-            const sparse_qp_options& opts = {})
+            const sparse_qp_options<Scalar>& opts = {})
     {
         result_type out;
         if(auto err = resolve_into(q, l, u, out, opts))
@@ -111,7 +113,7 @@ public:
     std::optional<qp_error>
     solve_into(const sparse_type& P, const vector<Scalar>& q, const sparse_type& A,
                const vector<Scalar>& l, const vector<Scalar>& u, result_type& out,
-               const sparse_qp_options& opts = {})
+               const sparse_qp_options<Scalar>& opts = {})
     {
         if(auto err = validate_option_domains(opts))
             return err;
@@ -131,7 +133,7 @@ public:
     // boundary; it requires a fresh solve_into().
     std::optional<qp_error>
     resolve_into(const vector<Scalar>& q, const vector<Scalar>& l, const vector<Scalar>& u,
-                 result_type& out, const sparse_qp_options& opts = {})
+                 result_type& out, const sparse_qp_options<Scalar>& opts = {})
     {
         if(auto err = validate_option_domains(opts))
             return err;
@@ -198,12 +200,7 @@ public:
     bool polish_reuse() const { return polish_reuse_enabled_; }
 
 private:
-    static constexpr double rho_min_ = 1e-6;
-    static constexpr double rho_max_ = 1e6;
-    static constexpr double eq_boost_ = 1e3;
-    static constexpr double eq_tol_ = 1e-9;
     static constexpr int inaccurate_factor_ = 10;
-    static constexpr double polish_active_tol_ = 1e-12;
 
     // The single site at which symbolic analysis is performed. Pose reaches it
     // for the iteration KKT and the polish reaches it for its own reduced KKT;
@@ -227,16 +224,17 @@ private:
         return true;
     }
 
-    std::optional<qp_error> validate_option_domains(const sparse_qp_options& o) const
+    std::optional<qp_error> validate_option_domains(const sparse_qp_options<Scalar>& o) const
     {
-        const auto positive = [](double v) { return std::isfinite(v) && v > 0.0; };
-        const auto nonnegative = [](double v) { return std::isfinite(v) && v >= 0.0; };
+        const auto positive = [](Scalar v) { return std::isfinite(v) && v > Scalar(0); };
+        const auto nonnegative = [](Scalar v) { return std::isfinite(v) && v >= Scalar(0); };
         const bool penalties = positive(o.rho) && positive(o.sigma) && positive(o.delta);
-        const bool relaxation = std::isfinite(o.alpha) && o.alpha > 0.0 && o.alpha < 2.0;
-        const bool adaptive = std::isfinite(o.adaptive_rho_tolerance) && o.adaptive_rho_tolerance >= 1.0;
-        const bool convergence = nonnegative(o.eps_abs) && nonnegative(o.eps_rel) && (o.eps_abs > 0.0 || o.eps_rel > 0.0);
+        const bool relaxation = std::isfinite(o.alpha) && o.alpha > Scalar(0) && o.alpha < Scalar(2);
+        const bool adaptive = std::isfinite(o.adaptive_rho_tolerance) && o.adaptive_rho_tolerance >= Scalar(1);
+        const bool convergence = nonnegative(o.eps_abs) && nonnegative(o.eps_rel) && (o.eps_abs > Scalar(0) || o.eps_rel > Scalar(0));
         const bool certificates = positive(o.eps_prim_inf) && positive(o.eps_dual_inf);
-        if(penalties && relaxation && adaptive && convergence && certificates && o.max_iterations > 0)
+        const bool budget = o.max_iterations > 0 && o.max_iterations <= static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max());
+        if(penalties && relaxation && adaptive && convergence && certificates && budget)
             return std::nullopt;
         return qp_error::invalid_options;
     }
@@ -285,7 +283,7 @@ private:
 
     std::optional<qp_error> pose(const sparse_type& P, const vector<Scalar>& q, const sparse_type& A,
                                  const vector<Scalar>& l, const vector<Scalar>& u,
-                                 const sparse_qp_options& opts)
+                                 const sparse_qp_options<Scalar>& opts)
     {
         if(opts.validate_convexity && !objective_is_symmetric(P))
             return qp_error::invalid_problem;
@@ -373,7 +371,7 @@ private:
 
     // Modified Ruiz equilibration on the stacked KKT form [P A^T; A 0] plus a
     // cost scaling c. Reference: Stellato et al. 2020, Section 5.1.
-    void ruiz(const sparse_qp_options& opts)
+    void ruiz(const sparse_qp_options<Scalar>& opts)
     {
         P_scaled_ = P_;
         A_scaled_ = A_;
@@ -453,13 +451,13 @@ private:
         }
     }
 
-    void init_rho(const sparse_qp_options& opts)
+    void init_rho(const sparse_qp_options<Scalar>& opts)
     {
         current_rho_ = static_cast<Scalar>(opts.rho);
         for(int i = 0; i < m_; ++i)
         {
-            const bool eq = detail::is_equality_bound(l_[i], u_[i], Scalar(eq_tol_));
-            base_mult_[i] = eq ? Scalar(eq_boost_) : Scalar(1);
+            const bool eq = detail::is_equality_bound(l_[i], u_[i], admm_defaults<Scalar>::eq_tol);
+            base_mult_[i] = eq ? admm_defaults<Scalar>::eq_boost : Scalar(1);
         }
         rebuild_rho_vec();
     }
@@ -468,7 +466,7 @@ private:
     {
         for(int i = 0; i < m_; ++i)
             rho_vec_[i] =
-                std::clamp(current_rho_ * base_mult_[i], Scalar(rho_min_), Scalar(rho_max_));
+                std::clamp(current_rho_ * base_mult_[i], admm_defaults<Scalar>::rho_min, admm_defaults<Scalar>::rho_max);
         if(m_ > 0)
         {
             rho_inv_vec_ = rho_vec_.cwiseInverse();
@@ -479,7 +477,7 @@ private:
 
     // A dual seed of the wrong length is replaced by zeros while the primal seed is kept, which
     // leaves exactly the state an explicit zero dual seed produces.
-    void seed_iterates(const sparse_qp_options& opts)
+    void seed_iterates(const sparse_qp_options<Scalar>& opts)
     {
         seed_consumed_ = opts.warm_start && has_warm_ && static_cast<int>(ws_x_.size()) == n_;
         if(!seed_consumed_)
@@ -505,7 +503,7 @@ private:
 
     // Algorithm 1, with x_tilde and nu read out of one full-KKT solve and
     // z_tilde recovered from the dual block.
-    void admm_step(const sparse_qp_options& opts)
+    void admm_step(const sparse_qp_options<Scalar>& opts)
     {
         const Scalar alpha = static_cast<Scalar>(opts.alpha);
         x_iter_prev_ = x_;
@@ -530,7 +528,7 @@ private:
         }
     }
 
-    std::optional<qp_error> run_admm(const sparse_qp_options& opts)
+    std::optional<qp_error> run_admm(const sparse_qp_options<Scalar>& opts)
     {
         status_ = qp_solve_status::max_iterations;
         iters_ = 0;
@@ -556,7 +554,7 @@ private:
         return std::nullopt;
     }
 
-    bool terminated(const sparse_qp_options& opts)
+    bool terminated(const sparse_qp_options<Scalar>& opts)
     {
         refresh_residuals();
         if(converged(opts))
@@ -570,7 +568,7 @@ private:
         return true;
     }
 
-    void settle_at_iteration_cap(const sparse_qp_options& opts)
+    void settle_at_iteration_cap(const sparse_qp_options<Scalar>& opts)
     {
         if(status_ != qp_solve_status::max_iterations)
             return;
@@ -624,7 +622,7 @@ private:
         ds = std::max(px_inf, std::max(aty_inf, q_inf));
     }
 
-    bool converged(const sparse_qp_options& o) const
+    bool converged(const sparse_qp_options<Scalar>& o) const
     {
         const Scalar ep = static_cast<Scalar>(o.eps_abs);
         const Scalar er = static_cast<Scalar>(o.eps_rel);
@@ -633,7 +631,7 @@ private:
         return p && d;
     }
 
-    bool relaxed_converged(const sparse_qp_options& o) const
+    bool relaxed_converged(const sparse_qp_options<Scalar>& o) const
     {
         const Scalar ep = Scalar(inaccurate_factor_) * static_cast<Scalar>(o.eps_abs);
         const Scalar er = Scalar(inaccurate_factor_) * static_cast<Scalar>(o.eps_rel);
@@ -645,7 +643,7 @@ private:
     // Certificates from the successive-iterate deltas dy, dx (Banjac et al.
     // 2019; Stellato et al. 2020, Section 3.4). Deltas are unscaled so the
     // bound tests use the caller's l, u.
-    bool check_primal_infeasible(const sparse_qp_options& o)
+    bool check_primal_infeasible(const sparse_qp_options<Scalar>& o)
     {
         if(m_ == 0)
             return false;
@@ -672,7 +670,7 @@ private:
         return sup < -static_cast<Scalar>(o.eps_prim_inf) * dy_inf;
     }
 
-    bool check_dual_infeasible(const sparse_qp_options& o)
+    bool check_dual_infeasible(const sparse_qp_options<Scalar>& o)
     {
         ntmp_ = D_.cwiseProduct(x_ - x_iter_prev_);
         const Scalar dx_inf = ntmp_.cwiseAbs().maxCoeff();
@@ -701,7 +699,7 @@ private:
 
     // A failed refactor has already overwritten the previous factor, so the posed state is
     // dropped and the caller must pose again.
-    bool maybe_update_rho(const sparse_qp_options& o)
+    bool maybe_update_rho(const sparse_qp_options<Scalar>& o)
     {
         if(m_ == 0)
             return true;
@@ -713,7 +711,7 @@ private:
         const Scalar tol = static_cast<Scalar>(o.adaptive_rho_tolerance);
         if(ratio > tol || ratio < Scalar(1) / tol)
         {
-            current_rho_ = std::clamp(current_rho_ * ratio, Scalar(rho_min_), Scalar(rho_max_));
+            current_rho_ = std::clamp(current_rho_ * ratio, admm_defaults<Scalar>::rho_min, admm_defaults<Scalar>::rho_max);
             rebuild_rho_vec();
             if(!kkt_.refactorize(rho_inv_))
                 posed_ = false;
@@ -721,7 +719,7 @@ private:
         return posed_;
     }
 
-    void finalize(const sparse_qp_options& o, result_type& out)
+    void finalize(const sparse_qp_options<Scalar>& o, result_type& out)
     {
         // The ADMM iterate's primal residual is Ax - z against the operator-
         // splitting auxiliary z (Stellato et al. 2020, Section 3.4), not the
@@ -800,13 +798,13 @@ private:
     // answer labeled solved. So a multiplier must clear a relative threshold
     // before it is read as a bound assignment, and the polished pair is
     // additionally required not to worsen the objective.
-    bool try_polish(const sparse_qp_options& o, Scalar cur_rp, Scalar cur_rd, Scalar cur_obj)
+    bool try_polish(const sparse_qp_options<Scalar>& o, Scalar cur_rp, Scalar cur_rd, Scalar cur_obj)
     {
         active_lower_.clear();
         active_upper_.clear();
         const Scalar y_inf = m_ > 0 ? y_unscaled_.cwiseAbs().maxCoeff() : Scalar(0);
         const Scalar active_tol =
-            Scalar(polish_active_tol_) * std::max(Scalar(1), y_inf);
+            admm_defaults<Scalar>::polish_active_tol * std::max(Scalar(1), y_inf);
         for(int i = 0; i < m_; ++i)
         {
             if(y_unscaled_[i] < -active_tol)
@@ -942,9 +940,9 @@ private:
 
     int n_{0};
     int m_{0};
-    Scalar sigma_{Scalar(1e-6)};
+    Scalar sigma_{admm_defaults<Scalar>::sigma};
     Scalar c_{Scalar(1)};
-    Scalar current_rho_{Scalar(0.1)};
+    Scalar current_rho_{admm_defaults<Scalar>::rho};
     bool posed_{false};
     bool has_warm_{false};
     bool seed_consumed_;

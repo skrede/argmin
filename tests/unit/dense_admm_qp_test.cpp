@@ -238,9 +238,9 @@ const Eigen::VectorXd seed_y{{0.4, -0.3, 0.2, 0.1}};
 // Polish snaps nearby iterates onto one active-set solution and termination is
 // checked only every few iterations; both can hide which seed was consumed. A
 // short unpolished run exposes the raw trajectory instead.
-dense_qp_options trajectory_options()
+dense_qp_options<> trajectory_options()
 {
-    dense_qp_options opts;
+    dense_qp_options<> opts;
     opts.polish = false;
     opts.check_termination = 1;
     opts.max_iterations = 8;
@@ -253,7 +253,7 @@ expected<qp_result<double>, qp_error> boxed_solve(const Eigen::MatrixXd& P, bool
     const Eigen::MatrixXd A = Eigen::MatrixXd::Identity(2, 2);
     const Eigen::VectorXd l{{-1.0, -1.0}};
     const Eigen::VectorXd u{{1.0, 1.0}};
-    dense_qp_options opts;
+    dense_qp_options<> opts;
     opts.rho = 10.0;
     opts.adaptive_rho = false;
     opts.validate_convexity = validate;
@@ -287,10 +287,10 @@ row_verdicts classify_row(double L, double w)
     {
         const Eigen::VectorXd l{{L, -1.0}};
         const Eigen::VectorXd u{{upper, 1.0}};
-        dense_qp_options d = trajectory_options();
+        dense_qp_options<> d = trajectory_options();
         d.adaptive_rho = false;
         d.scaling = 0;
-        sparse_qp_options s;
+        sparse_qp_options<> s;
         s.polish = false;
         s.check_termination = 1;
         s.max_iterations = 8;
@@ -512,7 +512,7 @@ TEST_CASE("dense_active_set_qp rejects option values outside their domain", "[qp
 {
     const osqp_problem p = seed_problem(4);
     const double nan = std::numeric_limits<double>::quiet_NaN();
-    const auto rejected = [&](const dense_active_set_qp_options& opts)
+    const auto rejected = [&](const dense_active_set_qp_options<>& opts)
     {
         dense_active_set_qp_solver<double> fresh(3, 4);
         const auto solved = fresh.solve(p.P, p.q, p.A, p.l, p.u, opts);
@@ -524,15 +524,17 @@ TEST_CASE("dense_active_set_qp rejects option values outside their domain", "[qp
 
     SECTION("iteration budget")
     {
-        dense_active_set_qp_options opts;
+        dense_active_set_qp_options<> opts;
         opts.max_iterations = 0;
+        CHECK(rejected(opts));
+        opts.max_iterations = static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) + 1u;
         CHECK(rejected(opts));
     }
     SECTION("convergence tolerance")
     {
         for(const double v : {0.0, -1e-6, nan, inf})
         {
-            dense_active_set_qp_options opts;
+            dense_active_set_qp_options<> opts;
             opts.tolerance = v;
             CHECK(rejected(opts));
         }
@@ -541,7 +543,7 @@ TEST_CASE("dense_active_set_qp rejects option values outside their domain", "[qp
     {
         for(const double v : {0.0, -1e-9, nan, inf})
         {
-            dense_active_set_qp_options opts;
+            dense_active_set_qp_options<> opts;
             opts.equality_tolerance = v;
             CHECK(rejected(opts));
         }
@@ -556,9 +558,9 @@ TEST_CASE("dense_active_set_qp rejects option values outside their domain", "[qp
 // ---------------------------------------------------------------------------
 TEST_CASE("dense_active_set_qp defaults reproduce the values it previously received", "[qp_options]")
 {
-    const dense_active_set_qp_options defaults;
-    CHECK(defaults.max_iterations == dense_qp_options{}.max_iterations);
-    CHECK(defaults.tolerance == dense_qp_options{}.eps_abs);
+    const dense_active_set_qp_options<> defaults;
+    CHECK(defaults.max_iterations == dense_qp_options<>{}.max_iterations);
+    CHECK(defaults.tolerance == dense_qp_options<>{}.eps_abs);
     CHECK(defaults.equality_tolerance == 1e-9);
 
     const osqp_problem p = seed_problem(4);
@@ -591,7 +593,7 @@ TEST_CASE("dense_active_set_qp honors its iteration budget and tolerance", "[qp_
 {
     const osqp_problem p = seed_problem(4);
 
-    dense_active_set_qp_options capped;
+    dense_active_set_qp_options<> capped;
     capped.max_iterations = 1;
     dense_active_set_qp_solver<double> budget(3, 4);
     const auto rb = budget.solve(p.P, p.q, p.A, p.l, p.u, capped);
@@ -599,7 +601,7 @@ TEST_CASE("dense_active_set_qp honors its iteration budget and tolerance", "[qp_
     CHECK(rb->status == qp_solve_status::max_iterations);
     CHECK(rb->iterations == 1);
 
-    dense_active_set_qp_options wide;
+    dense_active_set_qp_options<> wide;
     wide.tolerance = 0.35;
     dense_active_set_qp_solver<double> loose(3, 4);
     const auto rw = loose.solve(p.P, p.q, p.A, p.l, p.u, wide);
@@ -735,7 +737,7 @@ TEST_CASE("dense_active_set_qp writes its warm-start outcome into reused storage
 TEST_CASE("dense_active_set_qp classifies equality rows as both splitting solvers do", "[qp]")
 {
     constexpr double eq_tol = 1e-9;
-    CHECK(dense_active_set_qp_options{}.equality_tolerance == eq_tol);
+    CHECK(dense_active_set_qp_options<>{}.equality_tolerance == eq_tol);
     int equalities = 0;
     int magnitude_equalities = 0;
     for(const double L : {0.25, 1e3, 1e6})
@@ -821,8 +823,8 @@ TEST_CASE("dense_admm_qp polish agrees with the active-set oracle on equality-co
 {
     constexpr double oracle_tol = 1e-4;
 
-    dense_qp_options with_polish;
-    dense_qp_options without_polish;
+    dense_qp_options<> with_polish;
+    dense_qp_options<> without_polish;
     without_polish.polish = false;
 
     int accepted = 0;
@@ -893,8 +895,8 @@ TEST_CASE("dense_admm_qp polish agrees with the active-set oracle on equality-co
 // ---------------------------------------------------------------------------
 TEST_CASE("dense_admm_qp seeds no uninitialized dual storage when the dual seed is empty", "[qp_warm]")
 {
-    const dense_qp_options probe = trajectory_options();
-    CHECK(dense_qp_options{}.warm_start);
+    const dense_qp_options<> probe = trajectory_options();
+    CHECK(dense_qp_options<>{}.warm_start);
     const osqp_problem p = seed_problem(4);
 
     dense_admm_qp_solver<double> empty_dual(3, 4);
@@ -925,7 +927,7 @@ TEST_CASE("dense_admm_qp seeds no uninitialized dual storage when the dual seed 
 // ---------------------------------------------------------------------------
 TEST_CASE("dense_admm_qp rejects a non-finite warm-start seed", "[qp_warm]")
 {
-    const dense_qp_options probe = trajectory_options();
+    const dense_qp_options<> probe = trajectory_options();
     const osqp_problem p = seed_problem(4);
     dense_admm_qp_solver<double> solver(3, 4);
 
@@ -960,7 +962,7 @@ TEST_CASE("dense_admm_qp rejects a non-finite warm-start seed", "[qp_warm]")
 // ---------------------------------------------------------------------------
 TEST_CASE("dense_admm_qp keeps the primal seed when the dual seed is short", "[qp_warm]")
 {
-    const dense_qp_options probe = trajectory_options();
+    const dense_qp_options<> probe = trajectory_options();
     const osqp_problem p = seed_problem(4);
 
     dense_admm_qp_solver<double> short_dual(3, 4);
@@ -987,7 +989,7 @@ TEST_CASE("dense_admm_qp keeps the primal seed when the dual seed is short", "[q
 // ---------------------------------------------------------------------------
 TEST_CASE("dense_admm_qp re-seeding with a shorter dual vector falls back to zeros", "[qp_warm]")
 {
-    const dense_qp_options probe = trajectory_options();
+    const dense_qp_options<> probe = trajectory_options();
     const osqp_problem p = seed_problem(4);
     const Eigen::VectorXd q2 = 1.05 * p.q;
     const Eigen::VectorXd reseed_x{{-0.05, 0.1, 0.0}};
@@ -1020,7 +1022,7 @@ TEST_CASE("dense_admm_qp re-seeding with a shorter dual vector falls back to zer
 // ---------------------------------------------------------------------------
 TEST_CASE("dense_admm_qp drops a stale seed when the problem is re-posed with more rows", "[qp_warm]")
 {
-    const dense_qp_options probe = trajectory_options();
+    const dense_qp_options<> probe = trajectory_options();
     const osqp_problem small = seed_problem(2);
     const osqp_problem large = seed_problem(4);
 
@@ -1047,7 +1049,7 @@ TEST_CASE("dense_admm_qp drops a stale seed when the problem is re-posed with mo
 // ---------------------------------------------------------------------------
 TEST_CASE("dense_admm_qp drops a capacity-length seed when the problem is posed with fewer rows", "[qp_warm]")
 {
-    const dense_qp_options probe = trajectory_options();
+    const dense_qp_options<> probe = trajectory_options();
     const osqp_problem small = seed_problem(2);
 
     dense_admm_qp_solver<double> fewer(3, 4);
@@ -1106,7 +1108,7 @@ TEST_CASE("dense_admm_qp rejects option values outside their domain", "[qp_optio
 {
     const osqp_problem p = seed_problem(4);
     const double nan = std::numeric_limits<double>::quiet_NaN();
-    const auto rejected = [&](const dense_qp_options& opts)
+    const auto rejected = [&](const dense_qp_options<>& opts)
     {
         dense_admm_qp_solver<double> fresh(3, 4);
         const auto solved = fresh.solve(p.P, p.q, p.A, p.l, p.u, opts);
@@ -1117,7 +1119,7 @@ TEST_CASE("dense_admm_qp rejects option values outside their domain", "[qp_optio
     };
     const auto with = [](auto field, double value)
     {
-        dense_qp_options opts;
+        dense_qp_options<> opts;
         opts.*field = value;
         return opts;
     };
@@ -1125,57 +1127,59 @@ TEST_CASE("dense_admm_qp rejects option values outside their domain", "[qp_optio
     SECTION("penalty parameter")
     {
         for(const double v : {0.0, -0.1, nan, inf})
-            CHECK(rejected(with(&dense_qp_options::rho, v)));
+            CHECK(rejected(with(&dense_qp_options<>::rho, v)));
     }
     SECTION("regularization")
     {
         for(const double v : {0.0, -1e-6, nan, inf})
-            CHECK(rejected(with(&dense_qp_options::sigma, v)));
+            CHECK(rejected(with(&dense_qp_options<>::sigma, v)));
     }
     SECTION("over-relaxation")
     {
         for(const double v : {0.0, 2.0, -0.5, 2.5, nan, inf})
-            CHECK(rejected(with(&dense_qp_options::alpha, v)));
+            CHECK(rejected(with(&dense_qp_options<>::alpha, v)));
     }
     SECTION("polish regularization")
     {
         for(const double v : {0.0, -1e-6, nan, inf})
-            CHECK(rejected(with(&dense_qp_options::delta, v)));
+            CHECK(rejected(with(&dense_qp_options<>::delta, v)));
     }
     SECTION("adaptive ratio threshold")
     {
         for(const double v : {0.999, 0.0, nan, inf})
-            CHECK(rejected(with(&dense_qp_options::adaptive_rho_tolerance, v)));
+            CHECK(rejected(with(&dense_qp_options<>::adaptive_rho_tolerance, v)));
     }
     SECTION("convergence and certificate tolerances")
     {
-        dense_qp_options both_zero;
+        dense_qp_options<> both_zero;
         both_zero.eps_abs = 0.0;
         both_zero.eps_rel = 0.0;
         CHECK(rejected(both_zero));
-        for(const auto field : {&dense_qp_options::eps_abs, &dense_qp_options::eps_rel})
+        for(const auto field : {&dense_qp_options<>::eps_abs, &dense_qp_options<>::eps_rel})
             for(const double v : {-1e-6, nan, inf})
                 CHECK(rejected(with(field, v)));
-        for(const auto field : {&dense_qp_options::eps_prim_inf, &dense_qp_options::eps_dual_inf})
+        for(const auto field : {&dense_qp_options<>::eps_prim_inf, &dense_qp_options<>::eps_dual_inf})
             for(const double v : {0.0, -1e-4, nan, inf})
                 CHECK(rejected(with(field, v)));
     }
     SECTION("iteration budget")
     {
-        dense_qp_options opts;
+        dense_qp_options<> opts;
         opts.max_iterations = 0;
+        CHECK(rejected(opts));
+        opts.max_iterations = static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) + 1u;
         CHECK(rejected(opts));
     }
     SECTION("in-domain boundary values solve")
     {
-        dense_qp_options unit_threshold;
+        dense_qp_options<> unit_threshold;
         unit_threshold.adaptive_rho_tolerance = 1.0;
-        dense_qp_options absolute_only;
+        dense_qp_options<> absolute_only;
         absolute_only.eps_rel = 0.0;
-        dense_qp_options coerced;
+        dense_qp_options<> coerced;
         coerced.check_termination = 0;
         coerced.adaptive_rho_interval = 0;
-        for(const dense_qp_options& opts : {dense_qp_options{}, unit_threshold, absolute_only, coerced})
+        for(const dense_qp_options<>& opts : {dense_qp_options<>{}, unit_threshold, absolute_only, coerced})
         {
             dense_admm_qp_solver<double> solver(3, 4);
             const auto result = solver.solve(p.P, p.q, p.A, p.l, p.u, opts);
@@ -1201,7 +1205,7 @@ TEST_CASE("dense_admm_qp reports a failed factorization instead of solving on it
     const Eigen::MatrixXd A{{1.0}};
     const Eigen::VectorXd l{{-1.0}};
     const Eigen::VectorXd u{{1.0}};
-    dense_qp_options opts;
+    dense_qp_options<> opts;
     opts.scaling = 0;
     opts.validate_convexity = false;
     const osqp_problem p = seed_problem(1);
@@ -1227,7 +1231,7 @@ TEST_CASE("dense_admm_qp reports a failed factorization instead of solving on it
         opts.adaptive_rho_tolerance = 1.0;
         opts.check_termination = 1000;
         opts.max_iterations = 50;
-        dense_qp_options fixed_penalty = opts;
+        dense_qp_options<> fixed_penalty = opts;
         fixed_penalty.adaptive_rho = false;
         dense_admm_qp_solver<double> control(1, 1);
         REQUIRE(control.solve(P, q, A, l, u, fixed_penalty));

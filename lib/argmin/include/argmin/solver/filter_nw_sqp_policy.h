@@ -114,7 +114,7 @@ struct filter_nw_sqp_policy
     // convention).
     //
     // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
-    static constexpr std::uint16_t default_qp_max_iterations = 200;
+    static constexpr std::uint32_t default_qp_max_iterations = 200;
 
     // QP convergence tolerance (NLopt's double-precision baseline).
     //
@@ -157,7 +157,7 @@ struct filter_nw_sqp_policy
         // QP subproblem params. Brace-initialized from the policy's
         // static-constexpr defaults so options.qp.{max_iterations,
         // tolerance} reflect the shipped policy contract.
-        qp_options qp{
+        qp_options<scalar_type> qp{
             .max_iterations = default_qp_max_iterations,
             .tolerance = default_qp_tolerance,
         };
@@ -463,7 +463,7 @@ struct filter_nw_sqp_policy
         // Restoration-success and restoration-exhaustion (after reset cap)
         // return inline from inside the loop.
         const bool has_bounds = has_finite_box(s.lower, s.upper);
-        const qp_options& qp_opts = options.qp;
+        const qp_options<scalar_type>& qp_opts = options.qp;
 
         typename decltype(s.qp_solver)::result_type qp;
         Eigen::Vector<double, N>& p = s.bufs.p_buf;

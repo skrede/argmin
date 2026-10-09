@@ -48,6 +48,7 @@
 #include <Eigen/Core>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 #include <cstdint>
 #include <optional>
@@ -56,7 +57,7 @@
 namespace argmin
 {
 
-template <typename Scalar = double, int N = argmin::dynamic_dimension>
+template <scalar Scalar = double, int N = argmin::dynamic_dimension>
 class dense_active_set_qp_solver
 {
 public:
@@ -95,7 +96,7 @@ public:
     expected<result_type, qp_error>
     solve(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
           const matrix<Scalar, dynamic_dimension, N>& A, const vector<Scalar>& l,
-          const vector<Scalar>& u, const dense_active_set_qp_options& opts = {})
+          const vector<Scalar>& u, const dense_active_set_qp_options<Scalar>& opts = {})
     {
         result_type out;
         if(auto err = solve_into(P, q, A, l, u, out, opts))
@@ -105,7 +106,7 @@ public:
 
     expected<result_type, qp_error>
     resolve(const vector<Scalar, N>& q, const vector<Scalar>& l,
-            const vector<Scalar>& u, const dense_active_set_qp_options& opts = {})
+            const vector<Scalar>& u, const dense_active_set_qp_options<Scalar>& opts = {})
     {
         result_type out;
         if(auto err = resolve_into(q, l, u, out, opts))
@@ -116,7 +117,7 @@ public:
     std::optional<qp_error>
     solve_into(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
                const matrix<Scalar, dynamic_dimension, N>& A, const vector<Scalar>& l,
-               const vector<Scalar>& u, result_type& out, const dense_active_set_qp_options& opts = {})
+               const vector<Scalar>& u, result_type& out, const dense_active_set_qp_options<Scalar>& opts = {})
     {
         if(auto err = validate_option_domains(opts))
             return err;
@@ -140,7 +141,7 @@ public:
     // warm-starts the active set from the last solution (working-set-level).
     std::optional<qp_error>
     resolve_into(const vector<Scalar, N>& q, const vector<Scalar>& l,
-                 const vector<Scalar>& u, result_type& out, const dense_active_set_qp_options& opts = {})
+                 const vector<Scalar>& u, result_type& out, const dense_active_set_qp_options<Scalar>& opts = {})
     {
         if(auto err = validate_option_domains(opts))
             return err;
@@ -188,12 +189,11 @@ public:
     }
 
 private:
-    static constexpr double feas_tol_ = 1e-7;
-
-    std::optional<qp_error> validate_option_domains(const dense_active_set_qp_options& o) const
+    std::optional<qp_error> validate_option_domains(const dense_active_set_qp_options<Scalar>& o) const
     {
-        const auto positive = [](double v) { return std::isfinite(v) && v > 0.0; };
-        if(o.max_iterations > 0 && positive(o.tolerance) && positive(o.equality_tolerance))
+        const auto positive = [](Scalar v) { return std::isfinite(v) && v > Scalar(0); };
+        const bool budget = o.max_iterations > 0 && o.max_iterations <= static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max());
+        if(budget && positive(o.tolerance) && positive(o.equality_tolerance))
             return std::nullopt;
         return qp_error::invalid_options;
     }
@@ -222,12 +222,12 @@ private:
         return std::nullopt;
     }
 
-    bool is_equality_row(int i, const dense_active_set_qp_options& opts) const
+    bool is_equality_row(int i, const dense_active_set_qp_options<Scalar>& opts) const
     {
         return detail::is_equality_bound(l_[i], u_[i], Scalar(opts.equality_tolerance));
     }
 
-    std::optional<qp_error> run(result_type& out, const dense_active_set_qp_options& opts)
+    std::optional<qp_error> run(result_type& out, const dense_active_set_qp_options<Scalar>& opts)
     {
         // Equality-row-count contract: the delegated solver requires at most n
         // equality rows.
@@ -249,14 +249,14 @@ private:
                 const Scalar ai = ax_[i];
                 if(is_equality_row(i, opts))
                 {
-                    if(std::abs(ai - l_[i]) > Scalar(feas_tol_))
+                    if(std::abs(ai - l_[i]) > active_set_qp_defaults<Scalar>::feas_tol)
                         return qp_error::infeasible_start;
                 }
                 else
                 {
-                    if(std::isfinite(l_[i]) && ai < l_[i] - Scalar(feas_tol_))
+                    if(std::isfinite(l_[i]) && ai < l_[i] - active_set_qp_defaults<Scalar>::feas_tol)
                         return qp_error::infeasible_start;
-                    if(std::isfinite(u_[i]) && ai > u_[i] + Scalar(feas_tol_))
+                    if(std::isfinite(u_[i]) && ai > u_[i] + active_set_qp_defaults<Scalar>::feas_tol)
                         return qp_error::infeasible_start;
                 }
             }
@@ -264,7 +264,7 @@ private:
 
         split_rows(m_eq, opts);
 
-        argmin::qp_options inner;
+        argmin::qp_options<Scalar> inner;
         inner.max_iterations = opts.max_iterations;
         inner.tolerance = opts.tolerance;
 
@@ -282,7 +282,7 @@ private:
     // tracking each mapped row's originating OSQP index (and, for inequality
     // rows, whether it is the upper-bound reflection) so the dual sign-map can
     // scatter multipliers back onto y.
-    void split_rows(int m_eq, const dense_active_set_qp_options& opts)
+    void split_rows(int m_eq, const dense_active_set_qp_options<Scalar>& opts)
     {
         int m_in = 0;
         for(int i = 0; i < m_; ++i)

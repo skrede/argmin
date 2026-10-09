@@ -36,6 +36,11 @@ jobs:
       - name: Test
         run: cd build && ctest -C Release --output-on-failure --timeout 30
 
+      # The float solves run in their own labeled step so a lost `float` label or an empty
+      # selection fails here instead of passing vacuously.
+      - name: Float gate
+        run: cd build && ctest -C Release --output-on-failure --no-tests=error -L float
+
       # ctest suppresses a passing test's stdout, so the spread magnitude the
       # cross-path test reports is invisible under --output-on-failure. Surface
       # it on every green run, so the bounded aggregate check is pinned against

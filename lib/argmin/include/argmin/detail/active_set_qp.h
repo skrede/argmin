@@ -663,7 +663,7 @@ public:
         const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
         const Eigen::Vector<Scalar, Mineq>& b_ineq,
         const Eigen::Vector<Scalar, N>& x0,
-        const argmin::qp_options& opts = {})
+        const argmin::qp_options<Scalar>& opts = {})
     {
         const int n = static_cast<int>(G.rows());
         const int m_eq = static_cast<int>(A_eq.rows());
@@ -687,7 +687,7 @@ public:
         const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
         const Eigen::Vector<Scalar, Mineq>& b_ineq,
         const Eigen::Vector<Scalar, N>& x0,
-        const argmin::qp_options& opts,
+        const argmin::qp_options<Scalar>& opts,
         result_type& out)
     {
         const int n = static_cast<int>(G.rows());
@@ -714,7 +714,7 @@ public:
         const Eigen::Vector<Scalar, N>& lower,
         const Eigen::Vector<Scalar, N>& upper,
         const Eigen::Vector<Scalar, N>& x0,
-        const argmin::qp_options& opts = {})
+        const argmin::qp_options<Scalar>& opts = {})
     {
         const int n = static_cast<int>(G.rows());
         const int m_eq = static_cast<int>(A_eq.rows());
@@ -737,7 +737,7 @@ public:
         const Eigen::Vector<Scalar, N>& lower,
         const Eigen::Vector<Scalar, N>& upper,
         const Eigen::Vector<Scalar, N>& x0,
-        const argmin::qp_options& opts,
+        const argmin::qp_options<Scalar>& opts,
         result_type& out)
     {
         const int n = static_cast<int>(G.rows());
@@ -831,10 +831,10 @@ private:
         const Eigen::Ref<const n_square_matrix>& G,
         const Eigen::Ref<const n_vector>& d,
         const Eigen::Ref<const n_vector>& x0,
-        const argmin::qp_options& opts)
+        const argmin::qp_options<Scalar>& opts)
     {
         const int m_total = m_eq + m_ineq;
-        const int max_iter = static_cast<int>(opts.max_iterations);
+        const int max_iter = static_cast<int>(std::min(opts.max_iterations, static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())));
         const auto tol = static_cast<Scalar>(opts.tolerance);
         // The terminal verification floor is sqrt(epsilon): a backward-stable null-space step on a
         // working set conditioned beyond about 1e4 cannot meet the 1e-12 accurate-mode tolerance,
@@ -1309,13 +1309,13 @@ qp_result<Scalar, N> solve_qp(
     const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
     const Eigen::Vector<Scalar, Mineq>& b_ineq,
     const Eigen::Vector<Scalar, N>& x0,
-    const argmin::qp_options& opts = {})
+    const argmin::qp_options<Scalar>& opts = {})
 {
     const int n = static_cast<int>(G.rows());
     const int m_eq = static_cast<int>(A_eq.rows());
     const int m_ineq = static_cast<int>(A_ineq.rows());
     const int m_total = m_eq + m_ineq;
-    const int max_iter = static_cast<int>(opts.max_iterations);
+    const int max_iter = static_cast<int>(std::min(opts.max_iterations, static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())));
     const auto tol = static_cast<Scalar>(opts.tolerance);
     // The same backward-stability floor as the stateful solver's terminal verification.
     const Scalar verify_tol = std::max(tol, std::sqrt(Eigen::NumTraits<Scalar>::epsilon()));
@@ -1475,7 +1475,7 @@ qp_result<Scalar, N> solve_qp(
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper,
     const Eigen::Vector<Scalar, N>& x0,
-    const argmin::qp_options& opts = {})
+    const argmin::qp_options<Scalar>& opts = {})
 {
     const int n = static_cast<int>(G.rows());
     const int m_ineq = static_cast<int>(A_ineq.rows());

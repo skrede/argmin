@@ -44,7 +44,7 @@ enum class qp_error : std::uint8_t
     factorization_failed
 };
 
-template <typename Scalar = double, int N = argmin::dynamic_dimension>
+template <scalar Scalar = double, int N = argmin::dynamic_dimension>
 struct qp_result
 {
     vector<Scalar, N> x;
@@ -66,7 +66,7 @@ namespace detail
 // The max(1, ...) floor keeps the previous absolute rule exactly at unit scale, so no row of
 // unit magnitude reclassifies. It is one shared definition because the dense and sparse solvers
 // must classify identically, or comparing their solutions stops being meaningful.
-template <typename Scalar>
+template <scalar Scalar>
 bool is_equality_bound(Scalar l, Scalar u, Scalar eq_tol)
 {
     if(!std::isfinite(l) || !std::isfinite(u))

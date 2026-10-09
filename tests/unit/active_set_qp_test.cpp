@@ -174,7 +174,7 @@ TEST_CASE("solve_qp does not return optimal for contradictory inequalities", "[q
     Eigen::VectorXd b_ineq(2);
     b_ineq << 1.0, 0.0;  // x >= 1 and -x >= 0 => x <= 0
     Eigen::VectorXd x0{{0.5}};
-    qp_options opts{.max_iterations = 50};
+    qp_options<> opts{.max_iterations = 50};
 
     auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
 
@@ -369,7 +369,7 @@ TEST_CASE("solve_qp returns computed multipliers on max-iteration exit",
     Eigen::VectorXd b_ineq(5);
     b_ineq << -2.0, -6.0, -2.0, 0.0, 0.0;
     Eigen::VectorXd x0{{2.0, 0.0}};
-    qp_options opts{.max_iterations = 1};
+    qp_options<> opts{.max_iterations = 1};
 
     auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
 
@@ -464,7 +464,7 @@ TEST_CASE("solve_qp terminates on a redundant-constraint degenerate vertex",
               0.0, 5.0;
     Eigen::VectorXd b_ineq{{0.0, 0.0, 0.0, 0.0}};
     Eigen::VectorXd x0{{0.0, 0.0}};
-    qp_options opts{.max_iterations = 50};
+    qp_options<> opts{.max_iterations = 50};
 
     auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
 

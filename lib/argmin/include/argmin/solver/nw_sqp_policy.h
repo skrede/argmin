@@ -101,7 +101,7 @@ struct nw_sqp_policy
     // convention).
     //
     // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
-    static constexpr std::uint16_t default_qp_max_iterations = 200;
+    static constexpr std::uint32_t default_qp_max_iterations = 200;
 
     // QP convergence tolerance (NLopt's double-precision baseline).
     //
@@ -145,7 +145,7 @@ struct nw_sqp_policy
         // QP subproblem params. Brace-initialized from the policy's
         // static-constexpr defaults so options.qp.{max_iterations,
         // tolerance} reflect the shipped policy contract.
-        qp_options qp{
+        qp_options<scalar_type> qp{
             .max_iterations = default_qp_max_iterations,
             .tolerance = default_qp_tolerance,
         };
@@ -451,7 +451,7 @@ struct nw_sqp_policy
         // and brace-initialized with the accurate-mode fallback literals at
         // the struct level (200, 1e-12). Per-policy per-mode wiring happens
         // at options_type instantiation time, no read-site indirection.
-        const argmin::qp_options& qp_opts = options.qp;
+        const argmin::qp_options<scalar_type>& qp_opts = options.qp;
 
         bool has_finite_bounds = has_finite_box(s.lower, s.upper);
 

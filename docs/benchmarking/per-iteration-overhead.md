@@ -223,7 +223,7 @@ int main()
     Eigen::VectorXd l(3); l << 1.0, 0.0, 0.0;
     Eigen::VectorXd u(3); u << 1.0, 0.7, 0.7;
     argmin::sparse_admm_qp_solver<double> solver;
-    argmin::sparse_qp_options opts;
+    argmin::sparse_qp_options<> opts;
     for(int i = 0; i < 2000; ++i) (void)solver.solve(P, q, A, l, u, opts);
     std::vector<double> t; t.reserve(20000);
     for(int i = 0; i < 20000; ++i)

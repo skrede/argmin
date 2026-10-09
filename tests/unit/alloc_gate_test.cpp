@@ -652,7 +652,7 @@ TEST_CASE("qp_alloc_gate_sparse_admm_resolve", "[alloc-gate]")
     // The claim scope: resolve is allocation-free given a warm pose and polish
     // off. adaptive_rho is disabled to keep any refactorization -- a pose-class
     // allocation event -- out of the armed resolve window.
-    argmin::sparse_qp_options opts;
+    argmin::sparse_qp_options<> opts;
     opts.polish = false;
     opts.adaptive_rho = false;
     REQUIRE_FALSE(opts.polish);
@@ -765,7 +765,7 @@ TEST_CASE("qp_escalation_allocation_probe", "[qp-escalation-alloc]")
     const Eigen::Matrix<double, Eigen::Dynamic, N> A_ineq(0, N);
     const Eigen::VectorXd b_ineq(0);
     const Eigen::Vector<double, N> x0 = Eigen::Vector<double, N>::Zero();
-    const argmin::qp_options opts{};
+    const argmin::qp_options<> opts{};
 
     using argmin::detail::qp_status;
     argmin::detail::active_set_qp_solver<double, N> solver(N, 2);

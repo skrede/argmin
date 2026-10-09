@@ -139,7 +139,7 @@ struct kraft_slsqp_policy
     // make the value observable to callers.
     //
     // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
-    static constexpr std::uint16_t default_qp_max_iterations = 200;
+    static constexpr std::uint32_t default_qp_max_iterations = 200;
 
     // QP convergence tolerance (acc^2 in Kraft's QP cast); matches
     // NLopt's double-precision baseline.
@@ -195,7 +195,7 @@ struct kraft_slsqp_policy
         // comments above) but brace-initialized here for API uniformity
         // with the N&W lineage and to make per-mode propagation visible
         // to callers reading options.qp.
-        qp_options qp{
+        qp_options<scalar_type> qp{
             .max_iterations = default_qp_max_iterations,
             .tolerance = default_qp_tolerance,
         };

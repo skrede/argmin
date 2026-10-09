@@ -80,6 +80,11 @@ jobs:
       - name: Test
         run: cd build && ctest --output-on-failure
 
+      # The float solves run in their own labeled step so a lost `float` label or an empty
+      # selection fails here instead of passing vacuously.
+      - name: Float gate
+        run: cd build && ctest --output-on-failure --no-tests=error -L float
+
       # Deletability enforcement. The allocation gates were re-homed out of the
       # benchmark tree into tests/, so they must register and run with the
       # benchmarks disabled (this leg builds -DARGMIN_BUILD_BENCHMARKS=OFF). A
@@ -434,6 +439,11 @@ jobs:
 
       - name: Test (including the integration consumer path)
         run: cd build && ctest --output-on-failure
+
+      # The float solves run in their own labeled step so a lost `float` label or an empty
+      # selection fails here instead of passing vacuously.
+      - name: Float gate
+        run: cd build && ctest --output-on-failure --no-tests=error -L float
 
   standards:
     # Pins the language floor and both expected code paths. The C++20 leg

@@ -71,8 +71,8 @@ TEST_CASE("cmaes_options exposes literature defaults directly", "[options]")
 
 TEST_CASE("qp_options is direct-value (reference shape)", "[options]")
 {
-    qp_options o{};
-    static_assert(std::is_same_v<std::uint16_t, decltype(o.max_iterations)>);
+    qp_options<> o{};
+    static_assert(std::is_same_v<std::uint32_t, decltype(o.max_iterations)>);
     static_assert(std::is_same_v<double, decltype(o.tolerance)>);
     CHECK(o.max_iterations == 200);
     CHECK(o.tolerance == 1e-12);

@@ -121,7 +121,7 @@ struct filter_slsqp_policy
     // observable on options.qp.
     //
     // Reference: NLopt slsqp.c:700-1100 (LSI/LSEI cap convention).
-    static constexpr std::uint16_t default_qp_max_iterations = 200;
+    static constexpr std::uint32_t default_qp_max_iterations = 200;
 
     // QP convergence tolerance (NLopt's double-precision baseline).
     //
@@ -158,7 +158,7 @@ struct filter_slsqp_policy
         // QP subproblem params. Dead-wired on filter_slsqp at present
         // (kraft_lsq_qp_recovery_solver does not consume options.qp);
         // brace-initialized here for API uniformity with the N&W lineage.
-        qp_options qp{
+        qp_options<scalar_type> qp{
             .max_iterations = default_qp_max_iterations,
             .tolerance = default_qp_tolerance,
         };

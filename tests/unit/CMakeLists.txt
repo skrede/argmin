@@ -189,6 +189,23 @@ else()
     set_target_properties(argmin_alloc_gate_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
 endif()
 
+# Float instantiations live in their own executable so they neither double the heaviest unit
+# translation units nor enter the double-only allocation-gate executable.
+add_executable(argmin_float_tests
+    float/float_gate_test.cpp
+    float/qp_float_test.cpp
+)
+target_link_libraries(argmin_float_tests
+    PRIVATE
+        argmin::argmin
+        Catch2::Catch2WithMain
+)
+target_compile_options(argmin_float_tests
+    PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
+catch_discover_tests(argmin_float_tests
+    TEST_SPEC "[float]"
+    PROPERTIES LABELS "float")
+
 # Dedicated ctest label for the move-and-step ASan instrument so the
 # sanitize CI job can select it explicitly (`ctest -L asan-move`) even
 # though the whole suite already runs under -fsanitize=address. This is

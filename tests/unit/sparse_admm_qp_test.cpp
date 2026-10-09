@@ -226,9 +226,9 @@ const Eigen::VectorXd seed_y{{0.4, -0.3, 0.2, 0.1}};
 // Polish snaps nearby iterates onto one active-set solution and termination is
 // checked only every few iterations; both can hide which seed was consumed. A
 // short unpolished run exposes the raw trajectory instead.
-sparse_qp_options trajectory_options()
+sparse_qp_options<> trajectory_options()
 {
-    sparse_qp_options opts;
+    sparse_qp_options<> opts;
     opts.polish = false;
     opts.check_termination = 1;
     opts.max_iterations = 8;
@@ -238,7 +238,7 @@ sparse_qp_options trajectory_options()
 // Poses the four-row seed problem, then resolves it from the given seed, so the
 // pose-time reshaping never sees the seed.
 expected<qp_result<double>, qp_error> resolve_from(const Eigen::VectorXd& x, const Eigen::VectorXd& y,
-                                                   const sparse_qp_options& resolve_opts)
+                                                   const sparse_qp_options<>& resolve_opts)
 {
     const osqp_problem p = seed_problem(4);
     sparse_admm_qp_solver<double> solver;
@@ -253,7 +253,7 @@ expected<qp_result<double>, qp_error> boxed_solve(const Eigen::MatrixXd& P, bool
     const Eigen::MatrixXd A = Eigen::MatrixXd::Identity(2, 2);
     const Eigen::VectorXd l{{-1.0, -1.0}};
     const Eigen::VectorXd u{{1.0, 1.0}};
-    sparse_qp_options opts;
+    sparse_qp_options<> opts;
     opts.validate_convexity = validate;
     sparse_admm_qp_solver<double> solver;
     return solver.solve(P.sparseView(0.0, 0.0), q, to_sparse(A), l, u, opts);
@@ -472,7 +472,7 @@ TEST_CASE("sparse_admm_qp resolve performs no analysis and no unscheduled refact
     const sparse Ps = to_sparse(p.P);
     const sparse As = to_sparse(p.A);
 
-    sparse_qp_options fixed_rho;
+    sparse_qp_options<> fixed_rho;
     fixed_rho.adaptive_rho = false;
 
     sparse_admm_qp_solver<double> solver;
@@ -495,7 +495,7 @@ TEST_CASE("sparse_admm_qp resolve performs no analysis and no unscheduled refact
 
     // Cold-started so the run is long enough for the schedule to fire; the
     // pattern is untouched, so any factorization it triggers is values-only.
-    sparse_qp_options adaptive;
+    sparse_qp_options<> adaptive;
     adaptive.warm_start = false;
     REQUIRE(adaptive.adaptive_rho);
 
@@ -545,8 +545,8 @@ TEST_CASE("sparse_admm_qp polish agrees with the active-set oracle on equality-c
 {
     constexpr double oracle_tol = 1e-4;
 
-    sparse_qp_options with_polish;
-    sparse_qp_options without_polish;
+    sparse_qp_options<> with_polish;
+    sparse_qp_options<> without_polish;
     without_polish.polish = false;
 
     int accepted = 0;
@@ -796,7 +796,7 @@ TEST_CASE("sparse_admm_qp rejects option values outside their domain", "[qp_opti
     const double nan = std::numeric_limits<double>::quiet_NaN();
     const auto rejected = [&](const auto& mutate)
     {
-        sparse_qp_options opts;
+        sparse_qp_options<> opts;
         mutate(opts);
         sparse_admm_qp_solver<double> fresh;
         const auto solved = fresh.solve(Ps, p.q, As, p.l, p.u, opts);
@@ -808,9 +808,9 @@ TEST_CASE("sparse_admm_qp rejects option values outside their domain", "[qp_opti
     };
     const auto agrees_with_dense = [&](const auto& mutate)
     {
-        sparse_qp_options sparse_opts;
+        sparse_qp_options<> sparse_opts;
         mutate(sparse_opts);
-        dense_qp_options dense_opts;
+        dense_qp_options<> dense_opts;
         mutate(dense_opts);
         sparse_admm_qp_solver<double> sparse_solver;
         dense_admm_qp_solver<double> dense_solver(3, 4);
@@ -896,6 +896,9 @@ TEST_CASE("sparse_admm_qp rejects option values outside their domain", "[qp_opti
         const auto set = [](auto& o) { o.max_iterations = 0; };
         CHECK(rejected(set));
         CHECK(agrees_with_dense(set));
+        const auto above_int32 = [](auto& o) { o.max_iterations = static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) + 1u; };
+        CHECK(rejected(above_int32));
+        CHECK(agrees_with_dense(above_int32));
     }
     SECTION("in-domain boundary values solve")
     {
@@ -908,7 +911,7 @@ TEST_CASE("sparse_admm_qp rejects option values outside their domain", "[qp_opti
         };
         const auto solves = [&](const auto& mutate)
         {
-            sparse_qp_options opts;
+            sparse_qp_options<> opts;
             mutate(opts);
             sparse_admm_qp_solver<double> solver;
             const auto result = solver.solve(Ps, p.q, As, p.l, p.u, opts);
@@ -933,7 +936,7 @@ TEST_CASE("sparse_admm_qp rejects option values outside their domain", "[qp_opti
 TEST_CASE("sparse_admm_qp reports a factorization failure as a factorization failure",
           "[qp_factorization]")
 {
-    sparse_qp_options opts;
+    sparse_qp_options<> opts;
     opts.scaling = 0;
     const osqp_problem valid = seed_problem(4);
 
@@ -972,7 +975,7 @@ TEST_CASE("sparse_admm_qp reports a factorization failure as a factorization fai
         const sparse A = to_sparse(Eigen::MatrixXd{{1.0}});
         const Eigen::VectorXd l{{-1.0}};
         const Eigen::VectorXd u{{1.0}};
-        sparse_qp_options fixed_penalty = opts;
+        sparse_qp_options<> fixed_penalty = opts;
         fixed_penalty.adaptive_rho = false;
         sparse_admm_qp_solver<double> control;
         REQUIRE(control.solve(P, q, A, l, u, fixed_penalty));
@@ -997,8 +1000,8 @@ TEST_CASE("sparse_admm_qp reports a factorization failure as a factorization fai
 // ---------------------------------------------------------------------------
 TEST_CASE("sparse_admm_qp reports whether the caller's seed was used", "[qp_warm]")
 {
-    const sparse_qp_options probe = trajectory_options();
-    sparse_qp_options cold = probe;
+    const sparse_qp_options<> probe = trajectory_options();
+    sparse_qp_options<> cold = probe;
     cold.warm_start = false;
 
     SECTION("a full seed")

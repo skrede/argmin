@@ -141,7 +141,7 @@ std::vector<step_problem> build_pertic(const control_qp& cell, int steps)
 std::vector<step_problem> build_rollout(const control_qp& cell, int steps)
 {
     argmin::sparse_admm_qp_solver<double> solver;
-    argmin::sparse_qp_options opts;
+    argmin::sparse_qp_options<> opts;
     argmin::qp_result<double> out;
 
     Eigen::VectorXd state = cell.x0;
@@ -188,7 +188,7 @@ measured_pass run_pass(const control_qp& cell, const std::vector<step_problem>& 
 {
     argmin::sparse_admm_qp_solver<double> solver;
     solver.set_polish_reuse(reuse);
-    argmin::sparse_qp_options opts;
+    argmin::sparse_qp_options<> opts;
     opts.polish = polish;
     argmin::qp_result<double> out;
 

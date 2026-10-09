@@ -104,7 +104,7 @@ std::vector<step_problem> build_stable(const control_qp& cell, int steps)
 std::vector<step_problem> build_churning(const control_qp& cell, int steps)
 {
     sparse_admm_qp_solver<double> solver;
-    sparse_qp_options opts;
+    sparse_qp_options<> opts;
     qp_result<double> out;
 
     Eigen::VectorXd state = cell.x0;
@@ -152,7 +152,7 @@ pass_result run_pass(const control_qp& cell, const std::vector<step_problem>& se
 {
     sparse_admm_qp_solver<double> solver;
     solver.set_polish_reuse(reuse_enabled);
-    sparse_qp_options opts;
+    sparse_qp_options<> opts;
     qp_result<double> out;
 
     solver.solve_into(cell.P, sequence[0].q, cell.A, sequence[0].l, sequence[0].u, out, opts);

@@ -149,14 +149,14 @@ void bind_lbfgsb_options(nb::module_& m)
 
 void bind_qp_subproblem_options(nb::module_& m)
 {
-    nb::class_<qp_options>(m, "QpSubproblemOptions",
+    nb::class_<qp_options<>>(m, "QpSubproblemOptions",
                           "Read-only view of the quadratic subproblem parameters carried by "
                           "the sequential quadratic programming policy.")
         .def(nb::init<>())
-        .def_ro("max_iterations", &qp_options::max_iterations)
-        .def_ro("tolerance", &qp_options::tolerance)
+        .def_ro("max_iterations", &qp_options<>::max_iterations)
+        .def_ro("tolerance", &qp_options<>::tolerance)
         .def("__repr__",
-             [](const qp_options& opts)
+             [](const qp_options<>& opts)
              {
                  return "QpSubproblemOptions(max_iterations=" + format_number(opts.max_iterations)
                         + ", tolerance=" + format_number(opts.tolerance) + ")";

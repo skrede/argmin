@@ -3,6 +3,8 @@
 
 #include <Eigen/Core>
 
+#include <concepts>
+
 // Force-inline attribute portable across GCC, Clang, and MSVC.
 //
 // Used on per-iteration helper functions where the function-call boundary
@@ -33,6 +35,9 @@ namespace argmin
 // evaluation. Always assign to a concrete type (vector<>, matrix<>, etc.).
 
 inline constexpr int dynamic_dimension = Eigen::Dynamic;
+
+template <typename S>
+concept scalar = std::same_as<S, float> || std::same_as<S, double>;
 
 template <typename Scalar = double, int N = dynamic_dimension>
 using vector = Eigen::Vector<Scalar, N>;

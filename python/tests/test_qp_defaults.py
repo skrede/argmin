@@ -24,8 +24,34 @@ HEADERS = {
 }
 
 
-def literal_value(text: str):
+# A brace default may name a per-scalar table member or wrap a literal in a
+# scalar cast. Both resolve to the double row, which is what the double-only
+# binding exposes; the float row is never read.
+TABLE_REFERENCE = re.compile(r"(\w+)<(?:Scalar|scalar_type|S|double)>::(\w+)")
+SCALAR_CAST = re.compile(r"(?:Scalar|scalar_type|S)\((.*)\)")
+
+
+def double_row(include_root: pathlib.Path, table: str, member: str) -> str:
+    specialization = re.compile(r"\bstruct\s+" + re.escape(table) + r"<double>\s*\{(.*?)\n\s*\};", re.DOTALL)
+    for path in sorted(include_root.rglob("*.h")):
+        body = specialization.search(path.read_text())
+        if body:
+            row = re.search(
+                r"static\s+constexpr\s+[\w:]+\s+" + re.escape(member) + r"\s*=\s*([^;]+);", body.group(1)
+            )
+            assert row, f"{table}<double> in {path} declares no {member}"
+            return row.group(1)
+    raise AssertionError(f"no header under {include_root} specializes {table}<double>")
+
+
+def literal_value(text: str, include_root: pathlib.Path):
     stripped = text.strip()
+    reference = TABLE_REFERENCE.fullmatch(stripped)
+    if reference:
+        return literal_value(double_row(include_root, *reference.groups()), include_root)
+    cast = SCALAR_CAST.fullmatch(stripped)
+    if cast:
+        return literal_value(cast.group(1), include_root)
     if stripped == "true":
         return True
     if stripped == "false":
@@ -37,7 +63,8 @@ def literal_value(text: str):
 
 def committed_defaults(repository_root: pathlib.Path, binding_name: str) -> dict:
     relative, struct, _ = HEADERS[binding_name]
-    path = repository_root / "lib" / "argmin" / "include" / "argmin" / relative
+    include_root = repository_root / "lib" / "argmin" / "include" / "argmin"
+    path = include_root / relative
     text = path.read_text()
     assert f"struct {struct}" in text, f"{path} declares no {struct}"
     # The body terminator has to be anchored to a line start: an unanchored
@@ -45,7 +72,7 @@ def committed_defaults(repository_root: pathlib.Path, binding_name: str) -> dict
     # nothing, which the recovered-count guard below catches.
     body = text.split(f"struct {struct}", 1)[1].split("\n};", 1)[0]
     return {
-        name: literal_value(literal)
+        name: literal_value(literal, include_root)
         for name, literal in re.findall(r"([a-z_][a-z_0-9]*)\{([^}]*)\}", body)
     }
 

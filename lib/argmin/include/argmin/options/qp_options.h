@@ -1,10 +1,29 @@
 #ifndef HPP_GUARD_ARGMIN_OPTIONS_QP_OPTIONS_H
 #define HPP_GUARD_ARGMIN_OPTIONS_QP_OPTIONS_H
 
+#include "argmin/types.h"
+
 #include <cstdint>
 
 namespace argmin
 {
+
+template <scalar S>
+struct qp_subproblem_defaults;
+
+template <>
+struct qp_subproblem_defaults<double>
+{
+    static constexpr double tolerance = 1e-12;
+};
+
+template <>
+struct qp_subproblem_defaults<float>
+{
+    // A precision-class value keeps the double row's fraction of the available precision:
+    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
+    static constexpr float tolerance = 5e-6f;  // rule
+};
 
 // Active-set QP solver parameters.
 //
@@ -16,7 +35,7 @@ namespace argmin
 // for any default-constructed qp_options{} instance. Per-policy per-mode
 // defaults are surfaced through each policy's options_type via a designated
 // initializer of the form
-//   qp_options qp{
+//   qp_options<scalar_type> qp{
 //       .max_iterations = default_qp_max_iterations,
 //       .tolerance      = default_qp_tolerance,
 //   };
@@ -29,10 +48,11 @@ namespace argmin
 //            accurate-mode fallback);
 //            Kraft 1988 DFVLR-FB 88-28 Section 3.2 (QP cast accuracy via
 //            acc^2 convergence threshold).
+template <scalar Scalar = double>
 struct qp_options
 {
-    std::uint16_t max_iterations{200};
-    double tolerance{1e-12};
+    std::uint32_t max_iterations{200};
+    Scalar tolerance{qp_subproblem_defaults<Scalar>::tolerance};
 };
 
 }

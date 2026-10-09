@@ -45,7 +45,12 @@ import argmin
 
 INCLUDE_ROOT = pathlib.Path("lib") / "argmin" / "include" / "argmin"
 
-INFINITY = "std::numeric_limits<double>::infinity()"
+INFINITY = re.compile(r"std::numeric_limits<(?:double|Scalar|scalar_type)>::infinity\(\)")
+
+# A per-scalar table reference and a scalar cast both resolve to the double row,
+# which is what the double-only binding exposes; the float row is never read.
+TABLE_REFERENCE = re.compile(r"(\w+)<(?:Scalar|scalar_type|S|double)>::(\w+)")
+SCALAR_CAST = re.compile(r"(?:Scalar|scalar_type|S)\((.*)\)")
 
 
 class Unresolved:
@@ -229,6 +234,18 @@ def struct_body(text, struct):
     return text[opening + 1 : matching_brace(text, opening)]
 
 
+def double_row_constants(table):
+    root = pathlib.Path(__file__).resolve().parents[2] / INCLUDE_ROOT
+    specialization = re.compile(r"\bstruct\s+" + re.escape(table) + r"<double>\s*\{")
+    for path in sorted(root.rglob("*.h")):
+        text = strip_comments(path.read_text())
+        match = specialization.search(text)
+        if match:
+            opening = match.end() - 1
+            return declared_constants(text[opening + 1 : matching_brace(text, opening)])
+    return None
+
+
 def declared_constants(text):
     pattern = r"static\s+constexpr\s+[\w:<>,\s]*?\b(\w+)\s*=\s*([^;]+);"
     return {name: value.strip() for name, value in re.findall(pattern, text)}
@@ -298,8 +315,18 @@ def resolve(expression, constants, depth=0):
         return True
     if text == "false":
         return False
-    if text.replace(" ", "") == INFINITY.replace(" ", ""):
+    if INFINITY.fullmatch(text.replace(" ", "")):
         return math.inf
+    cast = SCALAR_CAST.fullmatch(text)
+    if cast and depth < 4:
+        return resolve(cast.group(1), constants, depth + 1)
+    reference = TABLE_REFERENCE.fullmatch(text)
+    if reference and depth < 4:
+        table, member = reference.groups()
+        row = double_row_constants(table)
+        if row is not None and member in row:
+            return resolve(row[member], row, depth + 1)
+        return Unresolved(text)
     if text.startswith("."):
         fields = []
         for part in split_top_level(text, ","):
@@ -319,7 +346,7 @@ def resolve(expression, constants, depth=0):
 def declared_category(head):
     if re.search(r"\bbool\b", head):
         return bool
-    if re.search(r"\b(double|float)\b", head):
+    if re.search(r"\b(double|float|Scalar|scalar_type|S)\b", head):
         return float
     if re.search(r"\b(int\d*_t|u?int|std::size_t|size_t|short|long)\b", head):
         return int
