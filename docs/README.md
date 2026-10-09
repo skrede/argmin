@@ -12,6 +12,7 @@
 - [Embedded Cross-Compiling](embedded.md) -- carrying the zero-allocation contract onto bare-metal targets: the Eigen stack-temporary flags (`EIGEN_ALLOCA`, `EIGEN_STACK_ALLOCATION_LIMIT`), the newlib strict-dialect trap, and the stack-budgeting rule.
 - [Python Bindings](python-bindings.md) -- the bound surface, the error and lifetime contracts across the interpreter boundary, the measured cost of an objective defined in Python, and the list of things deliberately not provided.
 - [Publication Benchmarking](benchmarking/publish-bench.md) -- methodology, provenance requirements, and baseline eligibility rules for the publication-grade benchmark harness.
+- [QP Solver Head-to-Head](benchmarking/qp-head-to-head.md) -- the three argmin QP solvers against OSQP, qpOASES, DAQP, ProxQP, HPIPM and TinyMPC under decision rules committed before measurement: methodology, results, and the three verdicts.
 
 ## Examples
 
