@@ -456,7 +456,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
     {
         hs076 problem;
         auto x0 = problem.initial_point();
-        step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -477,7 +477,7 @@ TEST_CASE("mma on hock-schittkowski problems", "[hs][mma]")
     {
         hs035 problem;
         auto x0 = problem.initial_point();
-        step_budget_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<double, hs035<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -524,7 +524,7 @@ TEST_CASE("mma on hock-schittkowski HS024", "[hs][mma]")
 
     hs024 problem;
     auto x0 = problem.initial_point();
-    step_budget_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs024<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -557,7 +557,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
     {
         hs076 problem;
         auto x0 = problem.initial_point();
-        step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)
@@ -585,7 +585,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
         // crashing, even though it does not converge.
         hs024 problem;
         auto x0 = problem.initial_point();
-        step_budget_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<double, hs024<>::problem_dimension>{}, problem, x0, opts};
 
         for(int i = 0; i < 50; ++i)
         {
@@ -599,7 +599,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
     {
         hs035 problem;
         auto x0 = problem.initial_point();
-        step_budget_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<double, hs035<>::problem_dimension>{}, problem, x0, opts};
 
         double best_feasible = 1e10;
         for(int i = 0; i < 500; ++i)

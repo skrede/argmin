@@ -42,7 +42,7 @@ TEST_CASE("mma converges on HS076", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     // MMA on HS076 reaches best_feasible approximately -4.6713 within
@@ -94,7 +94,7 @@ TEST_CASE("mma converges on HS076 with iter-budget cap", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     // Post-port best_feasible within 0.012 of f* = -4.6818
@@ -165,7 +165,7 @@ TEST_CASE("mma converges on HS024", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs024<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -229,7 +229,7 @@ TEST_CASE("mma converges on HS043", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs043<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -291,7 +291,7 @@ TEST_CASE("mma converges on HS043 with iter-budget cap", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs043<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     // Post-port best_feasible measured at -41.87 within the 546-iter
@@ -324,7 +324,7 @@ TEST_CASE("mma converges on HS035", "[mma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs035<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -368,7 +368,7 @@ TEST_CASE("gcmma converges on HS076", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -418,7 +418,7 @@ TEST_CASE("gcmma converges on HS035", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs035<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -464,7 +464,7 @@ TEST_CASE("gcmma converges on HS043", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs043<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -510,7 +510,7 @@ TEST_CASE("gcmma converges on HS076 with iter-budget cap", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     // GCMMA post-fix HS076: best_feasible within 0.05 of f* = -4.6818
@@ -559,7 +559,7 @@ TEST_CASE("gcmma converges on HS043 (path-iv smoke)", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs043<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs043<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -600,7 +600,7 @@ TEST_CASE("gcmma converges on HS035 (path-iv smoke)", "[mma][gcmma]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs035<>::problem_dimension>{}, problem, x0, opts};
 
     double best_feasible = 1e10;
     for(int i = 0; i < 500; ++i)
@@ -644,10 +644,10 @@ TEST_CASE("gcmma conservativity rho-growth path exercise", "[mma][gcmma]")
     opts.set_objective_threshold(1e-15);
 
     // Low rho_init forces rho growth on most inner iterations.
-    typename ccsa_quadratic_policy<hs076<>::problem_dimension>::options_type policy_opts;
+    typename ccsa_quadratic_policy<double, hs076<>::problem_dimension>::options_type policy_opts;
     policy_opts.rho_init = 1e-6;
 
-    step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{},
+    step_budget_solver solver{ccsa_quadratic_policy<double, hs076<>::problem_dimension>{},
                         problem, x0, opts, policy_opts};
 
     // Track best objective regardless of feasibility.
@@ -689,7 +689,7 @@ TEST_CASE("mma step and step_n consistency", "[mma]")
 
     SECTION("step returns finite values")
     {
-        step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
         {
@@ -702,7 +702,7 @@ TEST_CASE("mma step and step_n consistency", "[mma]")
 
     SECTION("step_n reaches similar result as solve")
     {
-        step_budget_solver solver{ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.step_n(200);
         CHECK(std::isfinite(result.objective_value));
         CHECK(result.objective_value < problem.value(x0));

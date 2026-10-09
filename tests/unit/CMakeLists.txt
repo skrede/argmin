@@ -199,6 +199,7 @@ add_executable(argmin_float_tests
     float/line_search_sqp_float_test.cpp
     float/trust_region_sqp_float_test.cpp
     float/least_squares_float_test.cpp
+    float/mma_float_test.cpp
 )
 target_link_libraries(argmin_float_tests
     PRIVATE

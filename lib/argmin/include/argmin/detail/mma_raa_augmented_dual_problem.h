@@ -36,6 +36,8 @@
 
 #include "argmin/types.h"
 
+#include "argmin/options/mma_defaults.h"
+
 #include <Eigen/Core>
 
 #include <algorithm>
@@ -81,7 +83,7 @@ struct mma_raa_augmented_dual_problem
     int m_dual{0};
 
     int newton_max_iter{30};
-    Scalar newton_tol{1e-12};
+    Scalar newton_tol{mma_defaults<Scalar>::dual_newton_tolerance};
 
     mutable Eigen::Vector<Scalar, N> x_primal;
     mutable Scalar gval{0};

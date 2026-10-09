@@ -41,6 +41,8 @@
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/types.h"
 
+#include "argmin/options/mma_defaults.h"
+
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -54,41 +56,41 @@
 namespace argmin::alternative::gcmma
 {
 
-template <int N = dynamic_dimension,
+template <scalar Scalar = double, int N = dynamic_dimension,
           template <scalar, int> typename DualPolicy = lbfgsb_policy>
 struct rho_wval_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
 
     template <int M>
-    using rebind = rho_wval_policy<M, DualPolicy>;
+    using rebind = rho_wval_policy<Scalar, M, DualPolicy>;
 
     struct options_type
     {
-        std::optional<double> asymptote_contract{};       // 0.7
-        std::optional<double> asymptote_expand{};         // 1.2
-        std::optional<double> asymptote_init{};           // 0.5
-        std::optional<double> asymptote_init_unbounded{}; // 1.0
-        std::optional<double> asymptote_min_fraction{};   // 1e-4
-        std::optional<double> asymptote_max_fraction{};   // 10.0
-        std::optional<double> move_limit_fraction{};      // 0.1
-        double move_bound_fraction{0.5};                  // Svanberg XXMOVE
-        double raai{1e-5};                                // p/q regularizer
+        std::optional<Scalar> asymptote_contract{};       // 0.7
+        std::optional<Scalar> asymptote_expand{};         // 1.2
+        std::optional<Scalar> asymptote_init{};           // 0.5
+        std::optional<Scalar> asymptote_init_unbounded{}; // 1.0
+        std::optional<Scalar> asymptote_min_fraction{};   // 1e-4
+        std::optional<Scalar> asymptote_max_fraction{};   // 10.0
+        std::optional<Scalar> move_limit_fraction{};      // 0.1
+        Scalar move_bound_fraction{mma_defaults<Scalar>::move_bound_fraction};  // Svanberg XXMOVE
+        Scalar raai{mma_defaults<Scalar>::raai};  // p/q regularizer
 
         // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale *
         // max(|g_i(x0)|, 1). The per-constraint scale reference keeps the
         // exact-l1-penalty condition c_i > |mu_i*| scale-relative; the
         // scale multiplier is empirical (swept). See detail/mma_subproblem.h
         // recover_elastic_slacks(). Direct value.
-        double dual_bound_scale{1000.0};
+        Scalar dual_bound_scale{mma_defaults<Scalar>::dual_bound_scale};
 
         // Conservativity loop and rho parameters.
         std::optional<std::uint16_t> max_inner_iterations{};  // 15
-        std::optional<double> rho_init{};                     // 1.0
-        std::optional<double> rho_min{};                      // 1e-5
-        std::optional<double> rho_decay{};                    // 0.1 (between outer iters)
+        std::optional<Scalar> rho_init{};                     // 1.0
+        std::optional<Scalar> rho_min{};                      // 1e-5
+        std::optional<Scalar> rho_decay{};                    // 0.1 (between outer iters)
 
-        std::optional<double> stall_tolerance_threshold{};
+        std::optional<Scalar> stall_tolerance_threshold{};
         std::uint16_t stall_window{50};
     };
 
@@ -101,33 +103,33 @@ struct rho_wval_policy
         }();
 
         const P* problem{nullptr};
-        Eigen::Vector<double, N> x, g;
-        double f{};
-        Eigen::Vector<double, M> c_ineq;
-        Eigen::Matrix<double, M, N> J_ineq;
+        Eigen::Vector<Scalar, N> x, g;
+        Scalar f{};
+        Eigen::Vector<Scalar, M> c_ineq;
+        Eigen::Matrix<Scalar, M, N> J_ineq;
 
-        Eigen::Vector<double, N> L, U;
-        Eigen::Vector<double, N> alpha, beta;
-        Eigen::Vector<double, N> w;          // separable quadratic weights
+        Eigen::Vector<Scalar, N> L, U;
+        Eigen::Vector<Scalar, N> alpha, beta;
+        Eigen::Vector<Scalar, N> w;          // separable quadratic weights
 
-        Eigen::Vector<double, N> p_obj, q_obj;
-        Eigen::Matrix<double, M, N> p_con, q_con;
-        double r_obj{0};
-        Eigen::Vector<double, M> r_con;
+        Eigen::Vector<Scalar, N> p_obj, q_obj;
+        Eigen::Matrix<Scalar, M, N> p_con, q_con;
+        Scalar r_obj{0};
+        Eigen::Vector<Scalar, M> r_con;
 
         // Penalty parameters (mutate inside conservativity loop).
-        double rho_obj{1.0};
-        Eigen::Vector<double, M> rho_con;
+        Scalar rho_obj{mma_defaults<Scalar>::rho_init};
+        Eigen::Vector<Scalar, M> rho_con;
 
-        Eigen::Vector<double, N> x_old1, x_old2;
-        Eigen::Vector<double, N> lower, upper;
-        Eigen::Vector<double, M> y_dual;
+        Eigen::Vector<Scalar, N> x_old1, x_old2;
+        Eigen::Vector<Scalar, N> lower, upper;
+        Eigen::Vector<Scalar, M> y_dual;
 
         // Bounded-dual elastics. c_dual_ref[i] = max(|g_i(x0)|, 1) is the
         // fixed per-constraint scale reference; c_dual[i] =
         // dual_bound_scale * c_dual_ref[i] is the working dual upper bound.
-        Eigen::Vector<double, M> c_dual_ref;
-        Eigen::Vector<double, M> c_dual;
+        Eigen::Vector<Scalar, M> c_dual_ref;
+        Eigen::Vector<Scalar, M> c_dual;
 
         std::uint32_t iteration{0};
 
@@ -142,13 +144,13 @@ struct rho_wval_policy
 
     template <typename Problem, typename Convergence>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& opts,
                              const options_type& policy_opts)
     {
         auto s = init(problem, x0, opts);
         s.opts = policy_opts;
-        const double ri = s.opts.rho_init.value_or(1.0);
+        const Scalar ri = s.opts.rho_init.value_or(mma_defaults<Scalar>::rho_init);
         s.rho_obj = ri;
         s.rho_con.setConstant(ri);
         init_asymptotes(s);
@@ -157,11 +159,11 @@ struct rho_wval_policy
 
     template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>&)
     {
-        static_assert(differentiable<Problem>);
-        static_assert(constrained<Problem>);
+        static_assert(differentiable<Problem, Scalar>);
+        static_assert(constrained<Problem, Scalar>);
 
         const int n = problem.dimension();
         const int n_eq = problem.num_equality();
@@ -194,8 +196,8 @@ struct rho_wval_policy
         s.q_con.resize(m, n);
         s.r_con.resize(m);
         s.rho_con.resize(m);
-        s.rho_con.setConstant(1.0);
-        s.rho_obj = 1.0;
+        s.rho_con.setConstant(mma_defaults<Scalar>::rho_init);
+        s.rho_obj = mma_defaults<Scalar>::rho_init;
         s.y_dual.resize(m);
         s.y_dual.setZero();
         s.c_dual_ref.resize(m);
@@ -209,9 +211,9 @@ struct rho_wval_policy
             // Size the probe on the full constraint count (equalities
             // first) so the evaluation cannot overflow even when the
             // problem is about to be rejected for carrying equalities.
-            Eigen::VectorXd c_tmp(n_all);
+            Eigen::VectorX<Scalar> c_tmp(n_all);
             problem.constraints(x0, c_tmp);
-            Eigen::MatrixXd J_tmp(n_all, n);
+            Eigen::MatrixX<Scalar> J_tmp(n_all, n);
             problem.constraint_jacobian(x0, J_tmp);
             if(!s.invalid_problem)
             {
@@ -220,20 +222,20 @@ struct rho_wval_policy
                 // Elastic dual-bound scale reference max(|g_i(x0)|, 1),
                 // g_i = -c_ineq_i (fixed for the run).
                 for(int i = 0; i < m; ++i)
-                    s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
+                    s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), Scalar(1.0));
             }
         }
 
-        if constexpr(bound_constrained<Problem>)
+        if constexpr(bound_constrained<Problem, Scalar>)
         {
             s.lower = problem.lower_bounds();
             s.upper = problem.upper_bounds();
         }
         else
         {
-            constexpr double inf = std::numeric_limits<double>::infinity();
-            s.lower = Eigen::Vector<double, N>::Constant(n, -inf);
-            s.upper = Eigen::Vector<double, N>::Constant(n, inf);
+            constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+            s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
         }
 
         init_asymptotes(s);
@@ -244,7 +246,7 @@ struct rho_wval_policy
     }
 
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         constexpr int MC = state_type<P>::M;
         const int n = static_cast<int>(s.x.size());
@@ -257,11 +259,11 @@ struct rho_wval_policy
         // SQP or an augmented Lagrangian.
         if(s.invalid_problem)
         {
-            return step_result<double>{
+            return step_result<Scalar>{
                 .objective_value = s.f,
                 .gradient_norm = s.g.norm(),
-                .step_size = 0.0,
-                .objective_change = 0.0,
+                .step_size = Scalar(0.0),
+                .objective_change = Scalar(0.0),
                 .improved = false,
                 .is_null_step = true,
                 .x_norm = s.x.norm(),
@@ -269,39 +271,39 @@ struct rho_wval_policy
             };
         }
 
-        const double gam_dec = s.opts.asymptote_contract.value_or(0.7);
-        const double gam_inc = s.opts.asymptote_expand.value_or(1.2);
-        const double s_min_f = s.opts.asymptote_min_fraction.value_or(1e-4);
-        const double s_max_f = s.opts.asymptote_max_fraction.value_or(10.0);
-        const double move_lim = s.opts.move_limit_fraction.value_or(0.1);
-        const double raai = s.opts.raai;
+        const Scalar gam_dec = s.opts.asymptote_contract.value_or(mma_defaults<Scalar>::asymptote_contract);
+        const Scalar gam_inc = s.opts.asymptote_expand.value_or(mma_defaults<Scalar>::asymptote_expand);
+        const Scalar s_min_f = s.opts.asymptote_min_fraction.value_or(mma_defaults<Scalar>::asymptote_min_fraction);
+        const Scalar s_max_f = s.opts.asymptote_max_fraction.value_or(mma_defaults<Scalar>::asymptote_max_fraction);
+        const Scalar move_lim = s.opts.move_limit_fraction.value_or(mma_defaults<Scalar>::move_limit_fraction);
+        const Scalar raai = s.opts.raai;
         const std::uint16_t max_inner =
             s.opts.max_inner_iterations.value_or(15);
-        const double rho_min = s.opts.rho_min.value_or(1e-5);
-        const double rho_decay = s.opts.rho_decay.value_or(0.1);
+        const Scalar rho_min = s.opts.rho_min.value_or(mma_defaults<Scalar>::rho_min);
+        const Scalar rho_decay = s.opts.rho_decay.value_or(mma_defaults<Scalar>::rho_decay);
 
-        constexpr double inf = std::numeric_limits<double>::infinity();
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
 
         // 1. Asymptote oscillation update.
         if(s.iteration >= 2)
         {
             for(int j = 0; j < n; ++j)
             {
-                const double dx2 =
+                const Scalar dx2 =
                     (s.x[j] - s.x_old1[j]) * (s.x_old1[j] - s.x_old2[j]);
-                const double gam = dx2 < 0.0 ? gam_dec
-                                 : dx2 > 0.0 ? gam_inc : 1.0;
+                const Scalar gam = dx2 < Scalar(0.0) ? gam_dec
+                                 : dx2 > Scalar(0.0) ? gam_inc : Scalar(1.0);
                 s.L[j] = s.x[j] - gam * (s.x_old1[j] - s.L[j]);
                 s.U[j] = s.x[j] + gam * (s.U[j] - s.x_old1[j]);
 
-                double range;
+                Scalar range;
                 if(s.lower[j] > -inf && s.upper[j] < inf)
                     range = s.upper[j] - s.lower[j];
                 else
-                    range = std::max(std::abs(s.x[j]), 1.0);
+                    range = std::max(std::abs(s.x[j]), Scalar(1.0));
 
-                const double min_d = std::max(s_min_f * range, 1e-12);
-                const double max_d = s_max_f * range;
+                const Scalar min_d = std::max(s_min_f * range, mma_defaults<Scalar>::min_asymptote_distance);
+                const Scalar max_d = s_max_f * range;
                 if(s.x[j] - s.L[j] < min_d) s.L[j] = s.x[j] - min_d;
                 if(s.x[j] - s.L[j] > max_d) s.L[j] = s.x[j] - max_d;
                 if(s.U[j] - s.x[j] < min_d) s.U[j] = s.x[j] + min_d;
@@ -314,15 +316,15 @@ struct rho_wval_policy
         //    buffer, and the XXMOVE=0.5 move bound x_k +/- move_bnd*range_j
         //    with the box-width analog 2*max(|x_kj|, 1) for an unbounded
         //    variable (engages only once the asymptote inflates).
-        const double move_bnd = s.opts.move_bound_fraction;
+        const Scalar move_bnd = s.opts.move_bound_fraction;
         for(int j = 0; j < n; ++j)
         {
-            double range;
+            Scalar range;
             if(s.lower[j] > -inf && s.upper[j] < inf)
                 range = s.upper[j] - s.lower[j];
             else
-                range = 2.0 * std::max(std::abs(s.x[j]), 1.0);
-            const double mb = move_bnd * range;
+                range = Scalar(2.0) * std::max(std::abs(s.x[j]), Scalar(1.0));
+            const Scalar mb = move_bnd * range;
 
             s.alpha[j] = std::max({s.lower[j],
                                    s.L[j] + move_lim * (s.x[j] - s.L[j]),
@@ -335,8 +337,8 @@ struct rho_wval_policy
             // sigma this weight (U-L)/(dxU*dxL) = 2*sigma/sigma^2 = 2/sigma;
             // the factor-2 is absorbed into the 0.5 penalty-mass scaling so
             // the augmented quadratic matches NLopt's 0.5*(dx/sigma)^2.
-            const double dxU = s.U[j] - s.x[j];
-            const double dxL = s.x[j] - s.L[j];
+            const Scalar dxU = s.U[j] - s.x[j];
+            const Scalar dxL = s.x[j] - s.L[j];
             s.w[j] = (s.U[j] - s.L[j]) / (dxU * dxL);
         }
 
@@ -347,41 +349,41 @@ struct rho_wval_policy
 
         for(int j = 0; j < n; ++j)
         {
-            const double dxU = s.U[j] - s.x[j];
-            const double dxL = s.x[j] - s.L[j];
+            const Scalar dxU = s.U[j] - s.x[j];
+            const Scalar dxL = s.x[j] - s.L[j];
 
             // Distance-scaled regularizer raai/range_j (Svanberg 2007
             // notes eqs. 2.3-2.4) with a scale proxy for unbounded
             // variables, plus the 1.001/0.001 gradient mixing so a
             // zero-gradient component keeps its minimizer at x_k.
-            double range;
+            Scalar range;
             if(s.lower[j] > -inf && s.upper[j] < inf)
                 range = s.upper[j] - s.lower[j];
             else
-                range = std::max(std::abs(s.x[j]), 1.0);
-            const double raa_reg = raai / range;
+                range = std::max(std::abs(s.x[j]), Scalar(1.0));
+            const Scalar raa_reg = raai / range;
 
-            const double gp = std::max(s.g[j], 0.0);
-            const double gm = std::max(-s.g[j], 0.0);
-            s.p_obj[j] = dxU * dxU * (1.001 * gp + 0.001 * gm + raa_reg);
-            s.q_obj[j] = dxL * dxL * (0.001 * gp + 1.001 * gm + raa_reg);
+            const Scalar gp = std::max(s.g[j], Scalar(0.0));
+            const Scalar gm = std::max(-s.g[j], Scalar(0.0));
+            s.p_obj[j] = dxU * dxU * (Scalar(1.001) * gp + Scalar(0.001) * gm + raa_reg);
+            s.q_obj[j] = dxL * dxL * (Scalar(0.001) * gp + Scalar(1.001) * gm + raa_reg);
             s.r_obj -= s.p_obj[j] / dxU + s.q_obj[j] / dxL;
 
             for(int i = 0; i < m; ++i)
             {
-                const double gij = -s.J_ineq(i, j);
-                const double gpij = std::max(gij, 0.0);
-                const double gmij = std::max(-gij, 0.0);
+                const Scalar gij = -s.J_ineq(i, j);
+                const Scalar gpij = std::max(gij, Scalar(0.0));
+                const Scalar gmij = std::max(-gij, Scalar(0.0));
                 s.p_con(i, j) =
-                    dxU * dxU * (1.001 * gpij + 0.001 * gmij + raa_reg);
+                    dxU * dxU * (Scalar(1.001) * gpij + Scalar(0.001) * gmij + raa_reg);
                 s.q_con(i, j) =
-                    dxL * dxL * (0.001 * gpij + 1.001 * gmij + raa_reg);
+                    dxL * dxL * (Scalar(0.001) * gpij + Scalar(1.001) * gmij + raa_reg);
                 s.r_con[i] -= s.p_con(i, j) / dxU + s.q_con(i, j) / dxL;
             }
         }
 
         // 4. Conservativity loop with rho-growth on non-conservative trial.
-        detail::mma_augmented_dual_problem<double, N, MC> dual_prob;
+        detail::mma_augmented_dual_problem<Scalar, N, MC> dual_prob;
         dual_prob.L_out = &s.L;
         dual_prob.U_out = &s.U;
         dual_prob.x_k_out = &s.x;
@@ -409,9 +411,9 @@ struct rho_wval_policy
             s.c_dual = s.opts.dual_bound_scale * s.c_dual_ref;
         dual_prob.c_dual_out = &s.c_dual;
 
-        Eigen::Vector<double, N> x_trial(n);
-        double f_trial = s.f;
-        Eigen::VectorXd c_trial = s.c_ineq;
+        Eigen::Vector<Scalar, N> x_trial(n);
+        Scalar f_trial = s.f;
+        Eigen::VectorX<Scalar> c_trial = s.c_ineq;
 
         // Persistent inner dual solver: construct the box-constrained solver
         // state once per outer iteration and cold-restart it (reset_clear
@@ -422,8 +424,8 @@ struct rho_wval_policy
         DualPolicy<scalar_type, MC> dp;
         solver_options<default_convergence<scalar_type>> dopts;
         dopts.max_iterations = 100;
-        dopts.set_gradient_threshold(1e-9);
-        dopts.set_step_threshold(1e-15);
+        dopts.set_gradient_threshold(mma_defaults<Scalar>::dual_gradient_threshold);
+        dopts.set_step_threshold(mma_defaults<Scalar>::dual_step_threshold);
         using dual_state_t = decltype(dp.init(dual_prob, s.y_dual, dopts));
         std::optional<dual_state_t> ds;
 
@@ -448,8 +450,8 @@ struct rho_wval_policy
                     // gradient norm: at a dual solution with an inactive
                     // constraint (y_i = 0) the raw component stays bounded
                     // away from zero and the loop would run to its cap.
-                    if(dsr.kkt_residual.value_or(dsr.gradient_norm) < 1e-9
-                       || dsr.step_size < 1e-15)
+                    if(dsr.kkt_residual.value_or(dsr.gradient_norm) < mma_defaults<Scalar>::dual_gradient_threshold
+                       || dsr.step_size < mma_defaults<Scalar>::dual_step_threshold)
                         break;
                 }
                 s.y_dual = ds->x;
@@ -458,8 +460,8 @@ struct rho_wval_policy
             }
             else
             {
-                const Eigen::Vector<double, MC> y_empty =
-                    Eigen::Vector<double, MC>::Zero(0);
+                const Eigen::Vector<Scalar, MC> y_empty =
+                    Eigen::Vector<Scalar, MC>::Zero(0);
                 (void)dual_prob.value(y_empty);
                 x_trial = dual_prob.x_primal;
             }
@@ -467,7 +469,7 @@ struct rho_wval_policy
             f_trial = s.problem->value(x_trial);
             if(m > 0)
             {
-                Eigen::VectorXd c_tmp(m);
+                Eigen::VectorX<Scalar> c_tmp(m);
                 s.problem->constraints(x_trial, c_tmp);
                 c_trial = c_tmp;
             }
@@ -485,18 +487,18 @@ struct rho_wval_policy
 
             // NLopt mma.c rho-growth (lines 388-391), on the raw
             // approximation shortfall.
-            const double wval = std::max(dual_prob.wval, 1e-20);
+            const Scalar wval = std::max(dual_prob.wval, Scalar(1e-20));
             if(f_trial > dual_prob.gval)
                 s.rho_obj = std::min(
-                    10.0 * s.rho_obj,
-                    1.1 * (s.rho_obj + (f_trial - dual_prob.gval) / wval));
+                    Scalar(10.0) * s.rho_obj,
+                    Scalar(1.1) * (s.rho_obj + (f_trial - dual_prob.gval) / wval));
             for(int i = 0; i < m; ++i)
             {
-                const double gi_trial = -c_trial[i];
+                const Scalar gi_trial = -c_trial[i];
                 if(gi_trial > dual_prob.gcval[i])
                     s.rho_con[i] = std::min(
-                        10.0 * s.rho_con[i],
-                        1.1 * (s.rho_con[i]
+                        Scalar(10.0) * s.rho_con[i],
+                        Scalar(1.1) * (s.rho_con[i]
                                + (gi_trial - dual_prob.gcval[i]) / wval));
             }
 
@@ -510,31 +512,31 @@ struct rho_wval_policy
             // strictly more conservative approximation.
             if(inner + 1 == max_inner)
             {
-                double viol_old = 0.0;
-                double viol_new = 0.0;
+                Scalar viol_old = Scalar(0.0);
+                Scalar viol_new = Scalar(0.0);
                 for(int i = 0; i < m; ++i)
                 {
                     viol_old = std::max(viol_old, -s.c_ineq[i]);
                     viol_new = std::max(viol_new, -c_trial[i]);
                 }
                 const bool acceptable =
-                    (f_trial < s.f && viol_new <= viol_old + 1e-12)
-                    || (viol_new < viol_old - 1e-12);
+                    (f_trial < s.f && viol_new <= viol_old + mma_defaults<Scalar>::violation_slack)
+                    || (viol_new < viol_old - mma_defaults<Scalar>::violation_slack);
 
                 if(!acceptable)
                 {
-                    const Eigen::Matrix<double, 0, N> J_eq_empty(0, n);
-                    const Eigen::Vector<double, 0> lambda_eq_empty;
-                    const Eigen::Vector<double, 0> c_eq_empty;
-                    const double kkt = detail::kkt_residual<double, N, 0, MC>(
+                    const Eigen::Matrix<Scalar, 0, N> J_eq_empty(0, n);
+                    const Eigen::Vector<Scalar, 0> lambda_eq_empty;
+                    const Eigen::Vector<Scalar, 0> c_eq_empty;
+                    const Scalar kkt = detail::kkt_residual<Scalar, N, 0, MC>(
                         s.g, J_eq_empty, s.J_ineq,
                         lambda_eq_empty, s.y_dual, c_eq_empty, s.c_ineq);
 
-                    return step_result<double>{
+                    return step_result<Scalar>{
                         .objective_value = s.f,
                         .gradient_norm = s.g.norm(),
-                        .step_size = 0.0,
-                        .objective_change = 0.0,
+                        .step_size = Scalar(0.0),
+                        .objective_change = Scalar(0.0),
                         .improved = false,
                         .is_null_step = true,
                         .constraint_violation =
@@ -553,8 +555,8 @@ struct rho_wval_policy
             s.rho_con[i] = std::max(rho_decay * s.rho_con[i], rho_min);
 
         // 6. Commit trial.
-        const double f_old = s.f;
-        const double step_size = (x_trial - s.x).norm();
+        const Scalar f_old = s.f;
+        const Scalar step_size = (x_trial - s.x).norm();
 
         s.x_old2 = s.x_old1;
         s.x_old1 = s.x;
@@ -565,21 +567,21 @@ struct rho_wval_policy
         if(m > 0)
         {
             s.c_ineq = c_trial;
-            Eigen::MatrixXd J_tmp(m, n);
+            Eigen::MatrixX<Scalar> J_tmp(m, n);
             s.problem->constraint_jacobian(s.x, J_tmp);
             s.J_ineq = J_tmp;
         }
 
         ++s.iteration;
 
-        const Eigen::Matrix<double, 0, N> J_eq_empty(0, n);
-        const Eigen::Vector<double, 0> lambda_eq_empty;
-        const Eigen::Vector<double, 0> c_eq_empty;
-        const double kkt = detail::kkt_residual<double, N, 0, MC>(
+        const Eigen::Matrix<Scalar, 0, N> J_eq_empty(0, n);
+        const Eigen::Vector<Scalar, 0> lambda_eq_empty;
+        const Eigen::Vector<Scalar, 0> c_eq_empty;
+        const Scalar kkt = detail::kkt_residual<Scalar, N, 0, MC>(
             s.g, J_eq_empty, s.J_ineq,
             lambda_eq_empty, s.y_dual, c_eq_empty, s.c_ineq);
 
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value = s.f,
             .gradient_norm = s.g.norm(),
             .step_size = step_size,
@@ -593,7 +595,7 @@ struct rho_wval_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = x0;
         s.f = s.problem->value(x0);
@@ -601,26 +603,26 @@ struct rho_wval_policy
         const int m = static_cast<int>(s.c_ineq.size());
         if(m > 0)
         {
-            Eigen::VectorXd c_tmp(m);
+            Eigen::VectorX<Scalar> c_tmp(m);
             s.problem->constraints(x0, c_tmp);
             s.c_ineq = c_tmp;
-            Eigen::MatrixXd J_tmp(m, static_cast<int>(s.x.size()));
+            Eigen::MatrixX<Scalar> J_tmp(m, static_cast<int>(s.x.size()));
             s.problem->constraint_jacobian(x0, J_tmp);
             s.J_ineq = J_tmp;
             for(int i = 0; i < m; ++i)
-                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), 1.0);
+                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), Scalar(1.0));
         }
         s.iteration = 0;
         s.x_old1 = x0;
         s.x_old2 = x0;
         s.y_dual.setZero();
-        const double ri = s.opts.rho_init.value_or(1.0);
+        const Scalar ri = s.opts.rho_init.value_or(mma_defaults<Scalar>::rho_init);
         s.rho_obj = ri;
         s.rho_con.setConstant(ri);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset(s, x0);
         init_asymptotes(s);
@@ -630,18 +632,18 @@ private:
     template <typename P>
     void init_asymptotes(state_type<P>& s)
     {
-        constexpr double inf = std::numeric_limits<double>::infinity();
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
         const int n = static_cast<int>(s.x.size());
-        const double s_init = s.opts.asymptote_init.value_or(0.5);
-        const double s_init_un = s.opts.asymptote_init_unbounded.value_or(1.0);
+        const Scalar s_init = s.opts.asymptote_init.value_or(mma_defaults<Scalar>::asymptote_init);
+        const Scalar s_init_un = s.opts.asymptote_init_unbounded.value_or(mma_defaults<Scalar>::asymptote_init_unbounded);
 
         for(int j = 0; j < n; ++j)
         {
-            double half;
+            Scalar half;
             if(s.lower[j] > -inf && s.upper[j] < inf)
                 half = s_init * (s.upper[j] - s.lower[j]);
             else
-                half = s_init_un * std::max(std::abs(s.x[j]), 1.0);
+                half = s_init_un * std::max(std::abs(s.x[j]), Scalar(1.0));
             s.L[j] = s.x[j] - half;
             s.U[j] = s.x[j] + half;
         }

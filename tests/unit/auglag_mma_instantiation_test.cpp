@@ -135,7 +135,7 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
 
     SECTION("augmented Lagrangian over moving asymptotes")
     {
-        step_budget_solver solver{augmented_lagrangian_policy<mma_policy<D>, D>{},
+        step_budget_solver solver{augmented_lagrangian_policy<mma_policy<double, D>, D>{},
             problem, x0, opts};
         // Under bounded-work chunking a single step() may only advance the
         // inner solve by one chunk (a null step); drive to the first COMPLETED
@@ -155,7 +155,7 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
 
     SECTION("augmented Lagrangian over globally convergent MMA")
     {
-        step_budget_solver solver{augmented_lagrangian_policy<gcmma_policy<D>, D>{},
+        step_budget_solver solver{augmented_lagrangian_policy<gcmma_policy<double, D>, D>{},
             problem, x0, opts};
         // Under bounded-work chunking a single step() may only advance the
         // inner solve by one chunk (a null step); drive to the first COMPLETED
@@ -175,7 +175,7 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
 
     SECTION("augmented Lagrangian over quadratic-penalty CCSA")
     {
-        step_budget_solver solver{augmented_lagrangian_policy<ccsa_quadratic_policy<D>, D>{},
+        step_budget_solver solver{augmented_lagrangian_policy<ccsa_quadratic_policy<double, D>, D>{},
             problem, x0, opts};
         // Under bounded-work chunking a single step() may only advance the
         // inner solve by one chunk (a null step); drive to the first COMPLETED
@@ -201,9 +201,9 @@ TEST_CASE("auglag_mma_instantiation_test: constrained inner solvers instantiate 
 TEST_CASE("auglag_mma_instantiation_test: concept-probe fork selects the correct view",
           "[auglag][mma][instantiation]")
 {
-    using mma_al   = augmented_lagrangian_policy<mma_policy<D>, D>;
-    using gcmma_al = augmented_lagrangian_policy<gcmma_policy<D>, D>;
-    using ccsa_al  = augmented_lagrangian_policy<ccsa_quadratic_policy<D>, D>;
+    using mma_al   = augmented_lagrangian_policy<mma_policy<double, D>, D>;
+    using gcmma_al = augmented_lagrangian_policy<gcmma_policy<double, D>, D>;
+    using ccsa_al  = augmented_lagrangian_policy<ccsa_quadratic_policy<double, D>, D>;
     using lbfgsb_al = augmented_lagrangian_policy<lbfgsb_policy<double, D>, D>;
 
     STATIC_REQUIRE(mma_al::state_type<convex_eq>::lift_equalities_only);
@@ -227,10 +227,10 @@ TEST_CASE("auglag_mma_instantiation_test: equality-lifting view survives move-th
     Eigen::VectorXd x0 = problem.initial_point();
     solver_options<> opts;
 
-    construct_move_step(augmented_lagrangian_policy<mma_policy<D>, D>{},
+    construct_move_step(augmented_lagrangian_policy<mma_policy<double, D>, D>{},
                         problem, x0, opts);
-    construct_move_step(augmented_lagrangian_policy<gcmma_policy<D>, D>{},
+    construct_move_step(augmented_lagrangian_policy<gcmma_policy<double, D>, D>{},
                         problem, x0, opts);
-    construct_move_step(augmented_lagrangian_policy<ccsa_quadratic_policy<D>, D>{},
+    construct_move_step(augmented_lagrangian_policy<ccsa_quadratic_policy<double, D>, D>{},
                         problem, x0, opts);
 }

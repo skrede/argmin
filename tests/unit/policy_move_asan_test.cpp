@@ -322,7 +322,7 @@ TEST_CASE("mma survives move-then-step", "[move_asan]")
     auto x0 = problem.initial_point();
     solver_options<> opts;
 
-    construct_move_step(mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts);
+    construct_move_step(mma_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts);
 }
 
 TEST_CASE("gcmma survives move-then-step", "[move_asan]")
@@ -331,7 +331,7 @@ TEST_CASE("gcmma survives move-then-step", "[move_asan]")
     auto x0 = problem.initial_point();
     solver_options<> opts;
 
-    construct_move_step(gcmma_policy<hs024<>::problem_dimension>{}, problem, x0, opts);
+    construct_move_step(gcmma_policy<double, hs024<>::problem_dimension>{}, problem, x0, opts);
 }
 
 TEST_CASE("ccsa_quadratic survives move-then-step", "[move_asan]")
@@ -340,7 +340,7 @@ TEST_CASE("ccsa_quadratic survives move-then-step", "[move_asan]")
     auto x0 = problem.initial_point();
     solver_options<> opts;
 
-    construct_move_step(ccsa_quadratic_policy<hs076<>::problem_dimension>{},
+    construct_move_step(ccsa_quadratic_policy<double, hs076<>::problem_dimension>{},
                         problem, x0, opts);
 }
 

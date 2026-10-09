@@ -27,7 +27,7 @@ TEST_CASE("gcmma raa-augmented converges on HS024", "[gcmma_raa]")
     opts.set_objective_threshold(1e-12);
     step_budget_solver solver{
         alternative::gcmma::raa_augmented_policy<
-            hs024<>::problem_dimension>{},
+            double, hs024<>::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve(opts);
     CHECK(result.objective_value == Approx(-1.0).margin(0.05));
@@ -44,7 +44,7 @@ TEST_CASE("gcmma raa-augmented converges on HS035", "[gcmma_raa]")
     opts.set_objective_threshold(1e-12);
     step_budget_solver solver{
         alternative::gcmma::raa_augmented_policy<
-            hs035<>::problem_dimension>{},
+            double, hs035<>::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve(opts);
     CHECK(result.objective_value == Approx(1.0 / 9.0).margin(0.05));
@@ -61,7 +61,7 @@ TEST_CASE("gcmma raa-augmented converges on HS076", "[gcmma_raa]")
     opts.set_objective_threshold(1e-12);
     step_budget_solver solver{
         alternative::gcmma::raa_augmented_policy<
-            hs076<>::problem_dimension>{},
+            double, hs076<>::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve(opts);
     CHECK(result.objective_value == Approx(-4.6818).margin(0.05));

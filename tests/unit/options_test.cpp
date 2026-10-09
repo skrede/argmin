@@ -25,7 +25,7 @@ using namespace argmin;
 
 TEST_CASE("asymptote_options exposes literature defaults directly", "[options]")
 {
-    asymptote_options o{};
+    asymptote_options<> o{};
     static_assert(std::is_same_v<double, decltype(o.minimum_distance_fraction)>);
     static_assert(std::is_same_v<double, decltype(o.maximum_distance_fraction)>);
     CHECK(o.minimum_distance_fraction == 0.01);
@@ -47,7 +47,7 @@ TEST_CASE("trust_region_options exposes literature defaults directly", "[options
 
 TEST_CASE("mma_subproblem_options exposes literature defaults directly", "[options]")
 {
-    mma_subproblem_options o{};
+    mma_subproblem_options<> o{};
     static_assert(std::is_same_v<std::uint16_t, decltype(o.dual_max_iterations)>);
     static_assert(std::is_same_v<double, decltype(o.dual_tolerance)>);
     static_assert(std::is_same_v<double, decltype(o.backtrack_factor)>);

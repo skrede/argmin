@@ -403,13 +403,13 @@ int main()
     {
         hs076<> problem;
         auto x0 = problem.initial_point();
-        exercise(mma_policy<hs076<>::problem_dimension>{}, problem, x0);
-        exercise(ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0);
+        exercise(mma_policy<double, hs076<>::problem_dimension>{}, problem, x0);
+        exercise(ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0);
     }
     {
         hs024<> problem;
         auto x0 = problem.initial_point();
-        exercise(gcmma_policy<hs024<>::problem_dimension>{}, problem, x0);
+        exercise(gcmma_policy<double, hs024<>::problem_dimension>{}, problem, x0);
     }
 
     // --- The other three drivers -------------------------------------------
