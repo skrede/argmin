@@ -405,7 +405,7 @@ sweep_row sweep_argmin(const Problem& problem,
                        std::optional<double> gamma_f,
                        std::optional<double> gamma_h)
 {
-    using policy_t = argmin::filter_slsqp_policy<
+    using policy_t = argmin::filter_slsqp_policy<double,
         argmin::problem_dimension_v<Problem>>;
 
     auto x0 = problem.initial_point();
@@ -641,7 +641,7 @@ bool probe_regression_hs026()
     opts.set_step_threshold(1e-12);
 
     argmin::step_budget_solver solver{
-        argmin::filter_slsqp_policy<argmin::hs026<>::problem_dimension>{},
+        argmin::filter_slsqp_policy<double, argmin::hs026<>::problem_dimension>{},
         p, x0, opts};
     argmin::step_result<double> last{};
     argmin::step_result<double> last_with_kkt{};
@@ -694,7 +694,7 @@ bool probe_regression_hs024()
     opts.set_step_threshold(1e-12);
 
     argmin::step_budget_solver solver{
-        argmin::filter_slsqp_policy<argmin::hs024<>::problem_dimension>{},
+        argmin::filter_slsqp_policy<double, argmin::hs024<>::problem_dimension>{},
         p, x0, opts};
     auto result = solver.solve(opts);
 

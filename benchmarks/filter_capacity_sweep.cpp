@@ -79,7 +79,7 @@ struct suite_cell
     std::function<cell_result(std::size_t cap, int overflow_policy)> run;
 };
 
-template <template <int> class Policy, typename Problem>
+template <template <argmin::scalar, int> class Policy, typename Problem>
 cell_result solve_cell(const Problem& problem, std::size_t cap, int overflow_policy)
 {
     auto& st = argmin::detail::filter_sweep_state();
@@ -96,14 +96,14 @@ cell_result solve_cell(const Problem& problem, std::size_t cap, int overflow_pol
     opts.set_step_threshold(1e-12);
 
     argmin::step_budget_solver solver{
-        Policy<Problem::problem_dimension>{}, problem, x0, opts};
+        Policy<double, Problem::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     return {result.objective_value, result.constraint_violation,
             result.iterations, st.highwater, st.evictions};
 }
 
-template <template <int> class Policy, typename Problem>
+template <template <argmin::scalar, int> class Policy, typename Problem>
 suite_cell make_cell(std::string name, Problem problem)
 {
     return suite_cell{
@@ -116,7 +116,7 @@ suite_cell make_cell(std::string name, Problem problem)
 // The ten filter-lineage HS cells: the failing family that motivates
 // filter acceptance (HS024/035/039/040/043/050) plus the reference cells
 // used as the non-regression bar (HS026/028/071/076).
-template <template <int> class Policy>
+template <template <argmin::scalar, int> class Policy>
 std::vector<suite_cell> build_suite()
 {
     std::vector<suite_cell> cells;
@@ -134,10 +134,11 @@ std::vector<suite_cell> build_suite()
 }
 
 // filter_trsqp mode-fixed aliases so the mode-templated policy fits the
-// single-parameter policy-template contract used by the runner.
-template <int N>
+// scalar-and-dimension policy-template contract used by the runner; the
+// scalar is ignored while filter_trsqp is double-only.
+template <argmin::scalar S, int N>
 using filter_trsqp_accurate = argmin::filter_trsqp_policy<N, argmin::sqp_mode::accurate>;
-template <int N>
+template <argmin::scalar S, int N>
 using filter_trsqp_fast = argmin::filter_trsqp_policy<N, argmin::sqp_mode::fast>;
 
 constexpr std::size_t unbounded_cap = 1u << 30;
@@ -210,7 +211,7 @@ void run_sweep(std::vector<suite_cell>& cells, const policy_report& rep,
     }
 }
 
-template <template <int> class Policy>
+template <template <argmin::scalar, int> class Policy>
 void run_policy(const char* policy_name)
 {
     auto cells = build_suite<Policy>();

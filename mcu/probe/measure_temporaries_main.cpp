@@ -92,7 +92,7 @@ int main()
     std::printf("[nw_sqp hs071] largest single temporary = %zu B\n", nw);
 
     const std::size_t filt = measure_policy_temporary(
-        argmin::filter_nw_sqp_policy<hs071<>::problem_dimension>{}, hs071<>{});
+        argmin::filter_nw_sqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{});
     std::printf("[filter_nw_sqp hs071] largest single temporary = %zu B\n", filt);
 
     const std::size_t lm = measure_policy_temporary(

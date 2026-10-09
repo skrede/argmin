@@ -110,11 +110,11 @@ static_assert(std::is_same_v<
     nw_sqp_policy_accurate<double, dynamic_dimension>,
     nw_sqp_policy<double, dynamic_dimension>>);
 static_assert(std::is_same_v<
-    filter_slsqp_policy_accurate<dynamic_dimension>,
-    filter_slsqp_policy<dynamic_dimension>>);
+    filter_slsqp_policy_accurate<double, dynamic_dimension>,
+    filter_slsqp_policy<double, dynamic_dimension>>);
 static_assert(std::is_same_v<
-    filter_nw_sqp_policy_accurate<dynamic_dimension>,
-    filter_nw_sqp_policy<dynamic_dimension>>);
+    filter_nw_sqp_policy_accurate<double, dynamic_dimension>,
+    filter_nw_sqp_policy<double, dynamic_dimension>>);
 static_assert(std::is_same_v<
     tr_sqp_policy_fast<dynamic_dimension>,
     tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>);
@@ -138,8 +138,8 @@ static_assert(std::is_same_v<
     typename kraft_slsqp_policy<double, dynamic_dimension>::template rebind<4>,
     kraft_slsqp_policy<double, 4>>);
 static_assert(std::is_same_v<
-    typename filter_nw_sqp_policy<dynamic_dimension>::template rebind<4>,
-    filter_nw_sqp_policy<4>>);
+    typename filter_nw_sqp_policy<double, dynamic_dimension>::template rebind<4>,
+    filter_nw_sqp_policy<double, 4>>);
 static_assert(std::is_same_v<
     typename tr_sqp_policy<dynamic_dimension, sqp_mode::fast>::template rebind<4>,
     tr_sqp_policy<4, sqp_mode::fast>>);

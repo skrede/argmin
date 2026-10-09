@@ -148,8 +148,8 @@ TEMPLATE_TEST_CASE(
     "[sqp][consistency][mode]",
     (kraft_slsqp_policy_accurate<double, dynamic_dimension>),
     (nw_sqp_policy_accurate<double, dynamic_dimension>),
-    filter_slsqp_policy_accurate<dynamic_dimension>,
-    filter_nw_sqp_policy_accurate<dynamic_dimension>,
+    (filter_slsqp_policy_accurate<double, dynamic_dimension>),
+    (filter_nw_sqp_policy_accurate<double, dynamic_dimension>),
     tr_sqp_policy_accurate<dynamic_dimension>,
     tr_sqp_policy_fast<dynamic_dimension>,
     filter_trsqp_policy_accurate<dynamic_dimension>,
@@ -376,7 +376,7 @@ TEMPLATE_TEST_CASE(
         }
 
         if constexpr (std::is_same_v<Policy, nw_sqp_policy<double, dynamic_dimension>>
-                      || std::is_same_v<Policy, filter_nw_sqp_policy<dynamic_dimension>>)
+                      || std::is_same_v<Policy, filter_nw_sqp_policy<double, dynamic_dimension>>)
         {
             CHECK(solver.constraint_violation() < NW_SQP_HS071_CV_BAR);
         }
@@ -847,9 +847,9 @@ TEMPLATE_TEST_CASE(
         if constexpr(std::is_same_v<Policy,
                          nw_sqp_policy<double, dynamic_dimension>>
                   || std::is_same_v<Policy,
-                         filter_slsqp_policy<dynamic_dimension>>
+                         filter_slsqp_policy<double, dynamic_dimension>>
                   || std::is_same_v<Policy,
-                         filter_nw_sqp_policy<dynamic_dimension>>)
+                         filter_nw_sqp_policy<double, dynamic_dimension>>)
         {
             sqrt_nan_emitter<> problem;
             auto x0 = problem.initial_point();
@@ -900,9 +900,9 @@ TEMPLATE_TEST_CASE(
         // line-search-family only); the configured retry budget is
         // applied where the field exists.
         if constexpr(std::is_same_v<Policy,
-                         filter_slsqp_policy<dynamic_dimension>>
+                         filter_slsqp_policy<double, dynamic_dimension>>
                   || std::is_same_v<Policy,
-                         filter_nw_sqp_policy<dynamic_dimension>>
+                         filter_nw_sqp_policy<double, dynamic_dimension>>
                   || std::is_same_v<Policy,
                          filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>
                   || std::is_same_v<Policy,

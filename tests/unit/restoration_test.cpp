@@ -30,8 +30,7 @@
 using argmin::detail::feasibility_restoration;
 using argmin::detail::lm_restoration_result;
 using argmin::detail::restoration_status;
-using argmin::detail::restoration_lambda_min;
-using argmin::detail::restoration_lambda_max;
+using argmin::detail::restoration_constants;
 
 namespace
 {
@@ -238,6 +237,6 @@ TEST_CASE("feasibility_restoration rank-deficient Jacobian stabilizes",
     REQUIRE(std::isfinite(x(1)));
     REQUIRE(std::isfinite(result.final_c_norm_l2));
     REQUIRE(result.final_c_norm_l2 < c_norm_initial);
-    REQUIRE(result.final_lambda >= restoration_lambda_min);
-    REQUIRE(result.final_lambda <= restoration_lambda_max);
+    REQUIRE(result.final_lambda >= restoration_constants<double>::lambda_min);
+    REQUIRE(result.final_lambda <= restoration_constants<double>::lambda_max);
 }

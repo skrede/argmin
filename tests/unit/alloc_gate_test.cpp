@@ -190,13 +190,13 @@ TEST_CASE("sqp_alloc_gate_filter_nw", "[alloc-gate]")
     const auto opts = sqp_gate_opts();
 
     check_steady_zero(sensor::measure_steady(
-        argmin::filter_nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
+        argmin::filter_nw_sqp_policy<double, argmin::hs071<>::problem_dimension>{},
         argmin::hs071<>{}, opts, 10));
     check_steady_zero(sensor::measure_steady(
-        argmin::filter_nw_sqp_policy<argmin::sd012<>::problem_dimension>{},
+        argmin::filter_nw_sqp_policy<double, argmin::sd012<>::problem_dimension>{},
         argmin::sd012<>{}, opts, 10));
     check_steady_zero(sensor::measure_steady(
-        argmin::filter_nw_sqp_policy<argmin::sd024<>::problem_dimension>{},
+        argmin::filter_nw_sqp_policy<double, argmin::sd024<>::problem_dimension>{},
         argmin::sd024<>{}, opts, 10));
 }
 
@@ -250,7 +250,7 @@ TEST_CASE("sqp_alloc_gate_filter_slsqp", "[alloc-gate]")
     Eigen::Vector<double, 4> x0{1.0, 5.0, 5.0, 1.0};
     const auto opts = sqp_gate_opts();
 
-    argmin::step_budget_solver solver{argmin::filter_slsqp_policy<4>{},
+    argmin::step_budget_solver solver{argmin::filter_slsqp_policy<double, 4>{},
                                       problem, x0, opts};
 
     solver.step();

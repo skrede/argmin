@@ -268,7 +268,7 @@ inline int run_all_rt_policies()
     // filter-NW-SQP on fixed-4 HS071.
     rc |= measure_steady_window(
         "filter_nw_sqp hs071",
-        argmin::filter_nw_sqp_policy<hs071<>::problem_dimension>{}, hs071<>{}, 0);
+        argmin::filter_nw_sqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{}, 0);
 
     // Levenberg-Marquardt on fixed-2 least-squares Rosenbrock.
     rc |= measure_steady_window(

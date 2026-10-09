@@ -168,7 +168,7 @@ TEST_CASE("filter_slsqp warm reset re-seeds the filter ceiling at the new point"
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-6);
 
-    step_budget_solver solver{filter_slsqp_policy<hs071<>::problem_dimension>{},
+    step_budget_solver solver{filter_slsqp_policy<double, hs071<>::problem_dimension>{},
                               problem, x0, opts};
     solver.solve(opts); // converge; the filter accumulates entries
 

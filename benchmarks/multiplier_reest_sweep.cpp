@@ -148,11 +148,11 @@ using kraft_4   = argmin::kraft_slsqp_policy_accurate<double, 4>;
 using nw_3      = argmin::nw_sqp_policy_accurate<double, 3>;
 using nw_4      = argmin::nw_sqp_policy_accurate<double, 4>;
 
-using fslsqp_3  = argmin::filter_slsqp_policy_accurate<3>;
-using fslsqp_4  = argmin::filter_slsqp_policy_accurate<4>;
+using fslsqp_3  = argmin::filter_slsqp_policy_accurate<double, 3>;
+using fslsqp_4  = argmin::filter_slsqp_policy_accurate<double, 4>;
 
-using fnw_3     = argmin::filter_nw_sqp_policy_accurate<3>;
-using fnw_4     = argmin::filter_nw_sqp_policy_accurate<4>;
+using fnw_3     = argmin::filter_nw_sqp_policy_accurate<double, 3>;
+using fnw_4     = argmin::filter_nw_sqp_policy_accurate<double, 4>;
 
 // Per-problem concrete instantiations (named here so BENCHMARK_TEMPLATE
 // can take them by type).

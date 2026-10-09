@@ -23,6 +23,8 @@
 
 #include "argmin/detail/lagrangian.h"
 
+#include "argmin/types.h"
+
 #include <Eigen/Core>
 
 #include <algorithm>
@@ -47,6 +49,27 @@ struct restoration_result
     Scalar constraint_violation{};
     bool success{false};
     std::uint16_t iterations_used{0};
+};
+
+template <scalar S>
+struct filter_restoration_constants;
+
+template <>
+struct filter_restoration_constants<double>
+{
+    static constexpr double infeasibility_floor = 1e-12;
+    static constexpr double zero_guard = 1e-15;
+    static constexpr double alpha_min = 1e-10;
+};
+
+template <>
+struct filter_restoration_constants<float>
+{
+    // A precision-class value keeps the double row's fraction of the available precision:
+    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
+    static constexpr float infeasibility_floor = 5e-6f;  // rule
+    static constexpr float zero_guard = 2e-7f;           // rule
+    static constexpr float alpha_min = 4e-5f;            // rule
 };
 
 // L1 penalty restoration: steepest descent on h(x) with backtracking.
@@ -84,7 +107,7 @@ restoration_result<Scalar, N> restore_l1(
 
         Scalar h_k = constraint_violation(c_eq, c_ineq);
 
-        if(h_k < Scalar(1e-12))
+        if(h_k < filter_restoration_constants<Scalar>::infeasibility_floor)
         {
             return {x, h_k, true, step};
         }
@@ -130,14 +153,14 @@ restoration_result<Scalar, N> restore_l1(
         }
 
         Scalar p_norm = p.norm();
-        if(p_norm < Scalar(1e-15))
+        if(p_norm < filter_restoration_constants<Scalar>::zero_guard)
         {
             return {x, h_k, false, step};
         }
 
         // Backtracking line search on constraint violation
         Scalar alpha = Scalar(1);
-        constexpr Scalar alpha_min = Scalar(1e-10);
+        constexpr Scalar alpha_min = filter_restoration_constants<Scalar>::alpha_min;
 
         while(alpha > alpha_min)
         {
@@ -166,7 +189,7 @@ restoration_result<Scalar, N> restore_l1(
     problem.eval_constraints(x, c_eq_final, c_ineq_final);
     Scalar h_final = constraint_violation(c_eq_final, c_ineq_final);
 
-    return {x, h_final, h_final < Scalar(1e-12), max_steps};
+    return {x, h_final, h_final < filter_restoration_constants<Scalar>::infeasibility_floor, max_steps};
 }
 
 // Feasibility QP restoration: minimize constraint violation via the
@@ -198,7 +221,7 @@ restoration_result<Scalar, N> restore_feasibility_qp(
 
         Scalar h_k = constraint_violation(c_eq, c_ineq);
 
-        if(h_k < Scalar(1e-12))
+        if(h_k < filter_restoration_constants<Scalar>::infeasibility_floor)
         {
             return {x, h_k, true, step};
         }
@@ -221,14 +244,14 @@ restoration_result<Scalar, N> restore_feasibility_qp(
         Eigen::Vector<Scalar, N> p = qp_result.x;
         Scalar p_norm = p.norm();
 
-        if(p_norm < Scalar(1e-15))
+        if(p_norm < filter_restoration_constants<Scalar>::zero_guard)
         {
             return {x, h_k, false, step};
         }
 
         // Backtracking on constraint violation
         Scalar alpha = Scalar(1);
-        constexpr Scalar alpha_min = Scalar(1e-10);
+        constexpr Scalar alpha_min = filter_restoration_constants<Scalar>::alpha_min;
 
         while(alpha > alpha_min)
         {
@@ -256,7 +279,7 @@ restoration_result<Scalar, N> restore_feasibility_qp(
     problem.eval_constraints(x, c_eq_final, c_ineq_final);
     Scalar h_final = constraint_violation(c_eq_final, c_ineq_final);
 
-    return {x, h_final, h_final < Scalar(1e-12), max_steps};
+    return {x, h_final, h_final < filter_restoration_constants<Scalar>::infeasibility_floor, max_steps};
 }
 
 }

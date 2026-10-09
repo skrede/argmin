@@ -64,19 +64,33 @@ namespace argmin::detail
 // step in the well-conditioned regime; lambda_max is the divergence
 // guard (a step of magnitude ||J^T c|| / lambda_max becomes
 // machine-precision small for any reasonable ||J^T c||).
+// The 2x shrink on accept and 4x grow on reject is the canonical
+// Marquardt schedule.
 //
 // Reference: Nocedal and Wright 2e Section 10.3 (Levenberg-Marquardt
 //            damping bracket).
-inline constexpr double restoration_lambda_min = 1e-12;
-inline constexpr double restoration_lambda_max = 1e8;
+template <scalar S>
+struct restoration_constants;
 
-// LM lambda update factors (literature defaults; symmetric expansion /
-// contraction). The 2x shrink on accept and 4x grow on reject is the
-// canonical Marquardt schedule; downstream sweeps may revisit on a
-// per-cell basis but the helper exposes no knobs for these factors
-// at this prototype's surface.
-inline constexpr double restoration_lambda_shrink = 0.5;
-inline constexpr double restoration_lambda_grow   = 4.0;
+template <>
+struct restoration_constants<double>
+{
+    static constexpr double lambda_min = 1e-12;
+    static constexpr double lambda_max = 1e8;
+    static constexpr double lambda_shrink = 0.5;
+    static constexpr double lambda_grow = 4.0;
+};
+
+template <>
+struct restoration_constants<float>
+{
+    // A precision-class value keeps the double row's fraction of the available precision:
+    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
+    static constexpr float lambda_min = 5e-6f;    // rule
+    static constexpr float lambda_max = 1e8f;     // magnitude cap
+    static constexpr float lambda_shrink = 0.5f;  // dimensionless
+    static constexpr float lambda_grow = 4.0f;    // dimensionless
+};
 
 // Status returned by feasibility_restoration. The caller's policy
 // dispatches on the value:
@@ -249,7 +263,7 @@ lm_restoration_result feasibility_restoration(
                 // regularization (extreme numerical conditioning).
                 // Grow lambda and retry; if we are already at the
                 // cap, declare lambda_grew_unbounded.
-                if(lambda >= static_cast<Scalar>(restoration_lambda_max))
+                if(lambda >= restoration_constants<Scalar>::lambda_max)
                 {
                     result.status =
                         restoration_status::lambda_grew_unbounded;
@@ -259,11 +273,9 @@ lm_restoration_result feasibility_restoration(
                         static_cast<double>(lambda);
                     return result;
                 }
-                lambda = min(static_cast<Scalar>(
-                                 restoration_lambda_max),
+                lambda = min(restoration_constants<Scalar>::lambda_max,
                              lambda
-                                 * static_cast<Scalar>(
-                                     restoration_lambda_grow));
+                                 * restoration_constants<Scalar>::lambda_grow);
                 continue;
             }
 
@@ -279,7 +291,7 @@ lm_restoration_result feasibility_restoration(
             {
                 // Non-finite step propagation guard. Treat as an LM
                 // reject and grow lambda.
-                if(lambda >= static_cast<Scalar>(restoration_lambda_max))
+                if(lambda >= restoration_constants<Scalar>::lambda_max)
                 {
                     result.status =
                         restoration_status::lambda_grew_unbounded;
@@ -289,11 +301,9 @@ lm_restoration_result feasibility_restoration(
                         static_cast<double>(lambda);
                     return result;
                 }
-                lambda = min(static_cast<Scalar>(
-                                 restoration_lambda_max),
+                lambda = min(restoration_constants<Scalar>::lambda_max,
                              lambda
-                                 * static_cast<Scalar>(
-                                     restoration_lambda_grow));
+                                 * restoration_constants<Scalar>::lambda_grow);
                 continue;
             }
 
@@ -313,18 +323,16 @@ lm_restoration_result feasibility_restoration(
                 x      = x_trial_buf;
                 c_buf  = c_trial_buf;
                 c_norm = c_trial_norm;
-                lambda = max(static_cast<Scalar>(
-                                 restoration_lambda_min),
+                lambda = max(restoration_constants<Scalar>::lambda_min,
                              lambda
-                                 * static_cast<Scalar>(
-                                     restoration_lambda_shrink));
+                                 * restoration_constants<Scalar>::lambda_shrink);
                 inner_accepted = true;
             }
             else
             {
                 // Reject: grow lambda. If we are already at the cap,
                 // declare lambda_grew_unbounded.
-                if(lambda >= static_cast<Scalar>(restoration_lambda_max))
+                if(lambda >= restoration_constants<Scalar>::lambda_max)
                 {
                     result.status =
                         restoration_status::lambda_grew_unbounded;
@@ -334,11 +342,9 @@ lm_restoration_result feasibility_restoration(
                         static_cast<double>(lambda);
                     return result;
                 }
-                lambda = min(static_cast<Scalar>(
-                                 restoration_lambda_max),
+                lambda = min(restoration_constants<Scalar>::lambda_max,
                              lambda
-                                 * static_cast<Scalar>(
-                                     restoration_lambda_grow));
+                                 * restoration_constants<Scalar>::lambda_grow);
                 // Inner retry continues the while loop with the
                 // grown lambda; no fresh J(x) needed because x has
                 // not moved on a reject.

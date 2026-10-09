@@ -21,6 +21,11 @@ struct line_search_sqp_defaults<double>
     static constexpr double sigma_max = 1e10;
     static constexpr double initial_penalty = 1.0;
     static constexpr double zero_guard = 1e-15;
+    static constexpr double filter_gamma_f = 1e-5;
+    static constexpr double filter_gamma_h = 1e-5;
+    static constexpr double infeasibility_floor = 1e-12;
+    static constexpr double restoration_alpha_min = 1e-10;
+    static constexpr double restoration_trigger = 1e-8;
 };
 
 template <>
@@ -37,6 +42,11 @@ struct line_search_sqp_defaults<float>
     static constexpr float sigma_max = 1e10f;              // magnitude cap
     static constexpr float initial_penalty = 1.0f;         // dimensionless
     static constexpr float zero_guard = 2e-7f;             // rule
+    static constexpr float filter_gamma_f = 1e-5f;         // dimensionless
+    static constexpr float filter_gamma_h = 1e-5f;         // dimensionless
+    static constexpr float infeasibility_floor = 5e-6f;    // rule
+    static constexpr float restoration_alpha_min = 4e-5f;  // rule
+    static constexpr float restoration_trigger = 3e-4f;    // rule
 };
 
 }

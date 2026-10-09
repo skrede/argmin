@@ -348,9 +348,9 @@ int main()
         hs071<> problem;
         auto x0 = problem.initial_point();
         exercise(kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
-        exercise(filter_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
+        exercise(filter_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
         exercise(nw_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
-        exercise(filter_nw_sqp_policy<hs071<>::problem_dimension>{}, problem, x0);
+        exercise(filter_nw_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
         exercise(tr_sqp_policy<hs071<>::problem_dimension>{}, problem, x0);
         exercise(filter_trsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
     }

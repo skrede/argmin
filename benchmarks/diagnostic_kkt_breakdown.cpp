@@ -576,31 +576,31 @@ int main()
 
     // ---- filter_slsqp: 6 cases ------------------------------------
     run_sqp_case("filter_slsqp hs006", Hs006{},
-                 argmin::filter_slsqp_policy<Hs006::problem_dimension>{});
+                 argmin::filter_slsqp_policy<double, Hs006::problem_dimension>{});
     run_sqp_case("filter_slsqp hs007", Hs007{},
-                 argmin::filter_slsqp_policy<Hs007::problem_dimension>{});
+                 argmin::filter_slsqp_policy<double, Hs007::problem_dimension>{});
     run_sqp_case("filter_slsqp hs024", Hs024{},
-                 argmin::filter_slsqp_policy<Hs024::problem_dimension>{});
+                 argmin::filter_slsqp_policy<double, Hs024::problem_dimension>{});
     run_sqp_case("filter_slsqp hs026", Hs026{},
-                 argmin::filter_slsqp_policy<Hs026::problem_dimension>{});
+                 argmin::filter_slsqp_policy<double, Hs026::problem_dimension>{});
     run_sqp_case("filter_slsqp hs043", Hs043{},
-                 argmin::filter_slsqp_policy<Hs043::problem_dimension>{});
+                 argmin::filter_slsqp_policy<double, Hs043::problem_dimension>{});
     run_sqp_case("filter_slsqp hs071", Hs071{},
-                 argmin::filter_slsqp_policy<Hs071::problem_dimension>{});
+                 argmin::filter_slsqp_policy<double, Hs071::problem_dimension>{});
 
     // ---- filter_nw_sqp: 6 cases -----------------------------------
     run_sqp_case("filter_nw_sqp hs006", Hs006{},
-                 argmin::filter_nw_sqp_policy<Hs006::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<double, Hs006::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs007", Hs007{},
-                 argmin::filter_nw_sqp_policy<Hs007::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<double, Hs007::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs024", Hs024{},
-                 argmin::filter_nw_sqp_policy<Hs024::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<double, Hs024::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs026", Hs026{},
-                 argmin::filter_nw_sqp_policy<Hs026::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<double, Hs026::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs043", Hs043{},
-                 argmin::filter_nw_sqp_policy<Hs043::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<double, Hs043::problem_dimension>{});
     run_sqp_case("filter_nw_sqp hs071", Hs071{},
-                 argmin::filter_nw_sqp_policy<Hs071::problem_dimension>{});
+                 argmin::filter_nw_sqp_policy<double, Hs071::problem_dimension>{});
 
     // Retained non-SQP reference trajectory (unrelated to the
     // 24-case matrix above; preserved from the earlier harness

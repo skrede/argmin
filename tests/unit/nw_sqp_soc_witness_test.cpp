@@ -254,7 +254,7 @@ TEST_CASE("filter_nw_sqp reaches the HS043 optimum without over-rejection",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{filter_nw_sqp_policy<hs043<>::problem_dimension>{},
+    step_budget_solver solver{filter_nw_sqp_policy<double, hs043<>::problem_dimension>{},
                         problem, x0, opts};
     auto result = solver.solve(opts);
 
