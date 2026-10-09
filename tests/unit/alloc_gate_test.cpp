@@ -281,7 +281,7 @@ TEST_CASE("sqp_alloc_gate_filter_trsqp", "[alloc-gate]")
     Eigen::Vector<double, 3> x0{-2.6, 2.0, 2.0};
     const auto opts = sqp_gate_opts();
 
-    argmin::step_budget_solver solver{argmin::filter_trsqp_policy_accurate<3>{},
+    argmin::step_budget_solver solver{argmin::filter_trsqp_policy_accurate<double, 3>{},
                                       problem, x0, opts};
 
     solver.step();
@@ -311,7 +311,7 @@ TEST_CASE("sqp_alloc_gate_tr_sqp", "[alloc-gate]")
     const auto opts = sqp_gate_opts();
 
     argmin::step_budget_solver solver{
-        argmin::tr_sqp_policy<3, argmin::sqp_mode::accurate>{}, problem, x0, opts};
+        argmin::tr_sqp_policy<double, 3, argmin::sqp_mode::accurate>{}, problem, x0, opts};
 
     solver.step();
     solver.step();

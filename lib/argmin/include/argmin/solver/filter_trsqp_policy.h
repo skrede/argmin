@@ -27,7 +27,7 @@
 // Inequalities are reformulated via slacks (c_ineq(x) + s = 0, s >= 0).
 // The joint primal is z = (x, s) in R^{n + n_ineq}; the Lagrangian
 // Hessian approximation lives on the joint space via
-// dense_ldl_bfgs<double, N>.
+// dense_ldl_bfgs<Scalar, N>.
 //
 // Feasibility-restoration prototype is wired in behind a four-way
 // gate (trust_radius below floor, filter rejected the candidate,
@@ -85,6 +85,8 @@
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/filter_acceptance.h"
 
+#include "argmin/options/trust_region_sqp_defaults.h"
+
 #include "argmin/result/step_result.h"
 
 #include "argmin/solver/options.h"
@@ -124,14 +126,14 @@ namespace argmin
 //            (accurate-mode adaptive forcing);
 //            Dembo, Eisenstat, Steihaug 1982 SIAM J. Numer. Anal.
 //            19(2):400-408 (fast-mode forcing sequence).
-template <int N = dynamic_dimension, sqp_mode Mode = sqp_mode::accurate>
+template <scalar Scalar = double, int N = dynamic_dimension, sqp_mode Mode = sqp_mode::accurate>
 struct filter_trsqp_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
     static constexpr sqp_mode mode_ = Mode;
 
     template <int M>
-    using rebind = filter_trsqp_policy<M, Mode>;
+    using rebind = filter_trsqp_policy<Scalar, M, Mode>;
 
     // Filter-reject acceptance gate variant. tr_shrink follows
     // Fletcher-Leyffer-Toint 2002 Section 3 (filter is a Boolean
@@ -159,12 +161,15 @@ struct filter_trsqp_policy
     // with kraft_slsqp, nw_sqp, filter_slsqp, filter_nw_sqp). A consumer
     // racing line-search vs trust-region policies under
     // basic_solver_group sees a uniform tolerance contract.
-    static constexpr double default_gradient_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-8;
-    static constexpr double default_step_tolerance_rel =
-        (Mode == sqp_mode::fast) ? 1e-6 : 1e-12;
-    static constexpr double default_feasibility_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
+    static constexpr Scalar default_gradient_tolerance =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::gradient_tolerance_fast
+                                 : trust_region_sqp_defaults<Scalar>::gradient_tolerance_accurate;
+    static constexpr Scalar default_step_tolerance_rel =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::step_tolerance_rel_fast
+                                 : trust_region_sqp_defaults<Scalar>::step_tolerance_rel_accurate;
+    static constexpr Scalar default_feasibility_tolerance =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::feasibility_tolerance_fast
+                                 : trust_region_sqp_defaults<Scalar>::feasibility_tolerance_accurate;
 
     // BFGS-skip-on-non-positive-curvature gate (policy-level; the
     // dense_ldl_bfgs helper itself is mode-blind). Fast mode skips the
@@ -213,8 +218,8 @@ struct filter_trsqp_policy
     //            (universal trust-region defaults; consistent across
     //            scipy trust-constr, Ceres trust-region minimizer,
     //            KNITRO).
-    static constexpr double default_initial_trust_radius = 1.0;
-    static constexpr double default_min_trust_radius     = 1e-12;
+    static constexpr Scalar default_initial_trust_radius = trust_region_sqp_defaults<Scalar>::initial_trust_radius;
+    static constexpr Scalar default_min_trust_radius     = trust_region_sqp_defaults<Scalar>::min_trust_radius;
 
     // Second-order correction retry budget. On a rejected primary
     // composite step whose trial violation did not decrease (the
@@ -279,10 +284,12 @@ struct filter_trsqp_policy
 
     // Filter envelope margins (Wachter and Biegler 2006 Section 2.3,
     // eq. 6).
-    static constexpr double default_filter_gamma_f =
-        (Mode == sqp_mode::fast) ? 1e-2 : 1e-2;
-    static constexpr double default_filter_gamma_h =
-        (Mode == sqp_mode::fast) ? 1e-2 : 1e-2;
+    static constexpr Scalar default_filter_gamma_f =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::filter_gamma
+                                 : trust_region_sqp_defaults<Scalar>::filter_gamma;
+    static constexpr Scalar default_filter_gamma_h =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::filter_gamma
+                                 : trust_region_sqp_defaults<Scalar>::filter_gamma;
 
     // Filter-reject acceptance gate variant. tr_shrink follows
     // Fletcher-Leyffer-Toint 2002 Section 3; switching_condition is a
@@ -305,14 +312,18 @@ struct filter_trsqp_policy
     //
     // Reference: Wachter and Biegler 2006 Math. Programming
     //            106:25-57 Section 4 (default constants).
-    static constexpr double default_filter_switching_delta =
-        (Mode == sqp_mode::fast) ? 1.0 : 1.0;
-    static constexpr double default_filter_switching_s_theta =
-        (Mode == sqp_mode::fast) ? 1.1 : 1.1;
-    static constexpr double default_filter_switching_s_phi =
-        (Mode == sqp_mode::fast) ? 2.3 : 2.3;
-    static constexpr double default_filter_switching_eta_phi =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-4;
+    static constexpr Scalar default_filter_switching_delta =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::switching_delta
+                                 : trust_region_sqp_defaults<Scalar>::switching_delta;
+    static constexpr Scalar default_filter_switching_s_theta =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::switching_s_theta
+                                 : trust_region_sqp_defaults<Scalar>::switching_s_theta;
+    static constexpr Scalar default_filter_switching_s_phi =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::switching_s_phi
+                                 : trust_region_sqp_defaults<Scalar>::switching_s_phi;
+    static constexpr Scalar default_filter_switching_eta_phi =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::switching_eta_phi
+                                 : trust_region_sqp_defaults<Scalar>::switching_eta_phi;
 
     // Feasibility-restoration knob defaults (minimal-viable
     // Levenberg-Marquardt prototype). The per-mode default budget is
@@ -327,7 +338,7 @@ struct filter_trsqp_policy
     //            full version).
     static constexpr std::size_t default_restoration_max_iter =
         (Mode == sqp_mode::fast) ? std::size_t{10} : std::size_t{10};
-    static constexpr double default_restoration_lambda_init = 1e-3;
+    static constexpr Scalar default_restoration_lambda_init = trust_region_sqp_defaults<Scalar>::restoration_lambda_init;
 
     struct options_type
     {
@@ -337,8 +348,8 @@ struct filter_trsqp_policy
         //
         // Reference: Nocedal and Wright 2e Section 4.1 (universal TR
         //            radius defaults).
-        double initial_trust_radius{default_initial_trust_radius};
-        double min_trust_radius{default_min_trust_radius};
+        Scalar initial_trust_radius{default_initial_trust_radius};
+        Scalar min_trust_radius{default_min_trust_radius};
 
         // Steihaug-CG inner-iter cap MULTIPLIER; resolved against
         // n + n_ineq at the step() call site.
@@ -365,8 +376,8 @@ struct filter_trsqp_policy
         // eq. 6). Independent asymmetric margins; gamma_f scales the
         // objective dominance slack, gamma_h scales the constraint
         // violation dominance slack.
-        double gamma_f{default_filter_gamma_f};
-        double gamma_h{default_filter_gamma_h};
+        Scalar gamma_f{default_filter_gamma_f};
+        Scalar gamma_h{default_filter_gamma_h};
 
         // Filter-reject gate variant. tr_shrink follows
         // Fletcher-Leyffer-Toint 2002 Section 3 (always add accepted
@@ -386,11 +397,11 @@ struct filter_trsqp_policy
         // the directional term -grad_f^T p, and eta_phi is the eq. 20
         // Armijo-type sufficient-reduction fraction. Defaults are the
         // literature-fixed Wachter-Biegler 2006 Section 4 constants.
-        double filter_switching_delta{default_filter_switching_delta};
-        double filter_switching_s_theta{
+        Scalar filter_switching_delta{default_filter_switching_delta};
+        Scalar filter_switching_s_theta{
             default_filter_switching_s_theta};
-        double filter_switching_s_phi{default_filter_switching_s_phi};
-        double filter_switching_eta_phi{
+        Scalar filter_switching_s_phi{default_filter_switching_s_phi};
+        Scalar filter_switching_eta_phi{
             default_filter_switching_eta_phi};
 
         // Feasibility-restoration knobs (minimal-viable Levenberg-
@@ -429,8 +440,8 @@ struct filter_trsqp_policy
         //            this prototype is a minimal-viable LM
         //            simplification).
         std::size_t restoration_max_iter{default_restoration_max_iter};
-        double restoration_lambda_init{default_restoration_lambda_init};
-        double restoration_feasibility_tolerance{
+        Scalar restoration_lambda_init{default_restoration_lambda_init};
+        Scalar restoration_feasibility_tolerance{
             default_feasibility_tolerance};
     };
 
@@ -445,15 +456,15 @@ struct filter_trsqp_policy
         }();
 
         const P* problem{nullptr};
-        Eigen::Vector<double, N> x;
-        Eigen::Vector<double, N> g;
-        Eigen::VectorXd c_eq;
-        Eigen::VectorXd c_ineq;
-        Eigen::Matrix<double, Eigen::Dynamic, N> J_eq;
-        Eigen::Matrix<double, Eigen::Dynamic, N> J_ineq;
-        Eigen::Vector<double, N> lower;
-        Eigen::Vector<double, N> upper;
-        Eigen::VectorXd lambda;
+        Eigen::Vector<Scalar, N> x;
+        Eigen::Vector<Scalar, N> g;
+        Eigen::VectorX<Scalar> c_eq;
+        Eigen::VectorX<Scalar> c_ineq;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> J_eq;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> J_ineq;
+        Eigen::Vector<Scalar, N> lower;
+        Eigen::Vector<Scalar, N> upper;
+        Eigen::VectorX<Scalar> lambda;
 
         // Cross-policy state-resident buffer struct. Filter-TRSQP uses
         // the x-only-typed bufs for the constraint-axis buffers (c_all,
@@ -465,25 +476,25 @@ struct filter_trsqp_policy
         // constant for the x-only dimension.
         //
         // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers.
-        argmin::detail::sqp_state_buffers<double, N> bufs;
+        argmin::detail::sqp_state_buffers<Scalar, N> bufs;
 
         // Joint-space (x, s) dynamic buffers. Sized at n + n_ineq on
         // init; the joint primal dimension is runtime even when N is
         // fixed.
-        Eigen::VectorXd joint_x_old_buf;
-        Eigen::VectorXd joint_grad_L_old_buf;
-        Eigen::VectorXd joint_grad_L_new_buf;
-        Eigen::VectorXd joint_sk_buf;
-        Eigen::VectorXd joint_yk_buf;
+        Eigen::VectorX<Scalar> joint_x_old_buf;
+        Eigen::VectorX<Scalar> joint_grad_L_old_buf;
+        Eigen::VectorX<Scalar> joint_grad_L_new_buf;
+        Eigen::VectorX<Scalar> joint_sk_buf;
+        Eigen::VectorX<Scalar> joint_yk_buf;
 
         // Slack vector for the inequality reformulation
         // c_ineq(x) + s = 0, s >= 0.
-        Eigen::VectorXd s_slack;
+        Eigen::VectorX<Scalar> s_slack;
 
         // Current trust-region radius; updated by the filter-acceptance
         // dispatch inside step(). The skeleton seeds it from
         // options.initial_trust_radius at init / reset time.
-        double trust_radius{default_initial_trust_radius};
+        Scalar trust_radius{default_initial_trust_radius};
 
         // BO-internal state; updated by the LNP heuristic inside
         // byrd_omojokun_composite_step ONLY when penalty_factor > 0.
@@ -494,19 +505,19 @@ struct filter_trsqp_policy
         // not an augmented-merit ratio test.
         //
         // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3.
-        double penalty{1.0};
+        Scalar penalty{Scalar(1.0)};
 
         // LDLT workspace pair used by
         // detail::equality_feasibility_warmstart on the joint Jacobian
         // inside the byrd_omojokun normal-step leg.
-        Eigen::MatrixXd AAt_workspace;
-        Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;
-        Eigen::VectorXd w_workspace;
+        Eigen::MatrixX<Scalar> AAt_workspace;
+        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_feasibility;
+        Eigen::VectorX<Scalar> w_workspace;
 
         // Byrd-Omojokun normal-leg / predicted-reduction scratch, sized
         // on the joint primal (n + n_ineq) and constraint (n_eq + n_ineq)
         // axes at init / reset. Keeps the composite step allocation-free.
-        detail::byrd_omojokun_workspace<double, Eigen::Dynamic> bo_ws;
+        detail::byrd_omojokun_workspace<Scalar, Eigen::Dynamic> bo_ws;
 
         // Per-step joint-space scratch, hoisted out of step() and sized
         // once on the joint primal (n_total = n + n_ineq) and constraint
@@ -514,23 +525,23 @@ struct filter_trsqp_policy
         // runtime quantity even when N pins the x-only dimension, so
         // these would otherwise heap-allocate on every step; hoisting
         // them makes the real-time step window allocation-free.
-        Eigen::MatrixXd step_A_joint;         // m_total x n_total
-        Eigen::VectorXd step_c_joint;         // m_total
-        Eigen::VectorXd step_lower_joint;     // n_total
-        Eigen::VectorXd step_upper_joint;     // n_total
-        Eigen::VectorXd step_z_k;             // n_total
-        Eigen::VectorXd step_g_obj_joint;     // n_total
-        Eigen::VectorXd step_v_buf;           // n_total
-        Eigen::VectorXd step_u_buf;           // n_total
-        Eigen::VectorXd step_r_cg_buf;        // n_total
-        Eigen::VectorXd step_d_cg_buf;        // n_total
-        Eigen::VectorXd step_Bd_cg_buf;       // n_total
-        Eigen::VectorXd step_p_out;           // n_total
-        Eigen::VectorXd trial_s_buf;          // n_ineq
-        Eigen::VectorXd trial_c_joint_buf;    // m_total
-        Eigen::VectorXd soc_c_all_buf;        // m_total
-        Eigen::VectorXd soc_c_trial_joint;    // m_total
-        Eigen::VectorXd soc_c_joint;          // m_total
+        Eigen::MatrixX<Scalar> step_A_joint;         // m_total x n_total
+        Eigen::VectorX<Scalar> step_c_joint;         // m_total
+        Eigen::VectorX<Scalar> step_lower_joint;     // n_total
+        Eigen::VectorX<Scalar> step_upper_joint;     // n_total
+        Eigen::VectorX<Scalar> step_z_k;             // n_total
+        Eigen::VectorX<Scalar> step_g_obj_joint;     // n_total
+        Eigen::VectorX<Scalar> step_v_buf;           // n_total
+        Eigen::VectorX<Scalar> step_u_buf;           // n_total
+        Eigen::VectorX<Scalar> step_r_cg_buf;        // n_total
+        Eigen::VectorX<Scalar> step_d_cg_buf;        // n_total
+        Eigen::VectorX<Scalar> step_Bd_cg_buf;       // n_total
+        Eigen::VectorX<Scalar> step_p_out;           // n_total
+        Eigen::VectorX<Scalar> trial_s_buf;          // n_ineq
+        Eigen::VectorX<Scalar> trial_c_joint_buf;    // m_total
+        Eigen::VectorX<Scalar> soc_c_all_buf;        // m_total
+        Eigen::VectorX<Scalar> soc_c_trial_joint;    // m_total
+        Eigen::VectorX<Scalar> soc_c_joint;          // m_total
 
         // Restoration helper buffers. Allocated only when
         // options.restoration_max_iter > 0 at policy construction time
@@ -544,14 +555,14 @@ struct filter_trsqp_policy
         // failed-restoration fall-through path.
         //
         // Reference: Nocedal and Wright 2e Section 10.3.
-        Eigen::VectorXd              restoration_c;
-        Eigen::VectorXd              restoration_c_trial;
-        Eigen::MatrixXd              restoration_J;
-        Eigen::MatrixXd              restoration_JtJ;
-        Eigen::Vector<double, N>     restoration_rhs;
-        Eigen::Vector<double, N>     restoration_dx;
-        Eigen::Vector<double, N>     restoration_xtrial;
-        Eigen::LDLT<Eigen::MatrixXd> restoration_ldlt;
+        Eigen::VectorX<Scalar>              restoration_c;
+        Eigen::VectorX<Scalar>              restoration_c_trial;
+        Eigen::MatrixX<Scalar>              restoration_J;
+        Eigen::MatrixX<Scalar>              restoration_JtJ;
+        Eigen::Vector<Scalar, N>     restoration_rhs;
+        Eigen::Vector<Scalar, N>     restoration_dx;
+        Eigen::Vector<Scalar, N>     restoration_xtrial;
+        Eigen::LDLT<Eigen::MatrixX<Scalar>> restoration_ldlt;
 
         // Snapshot of the iterate at restoration entry. The LM helper
         // mutates s.x in place across its accepted inner steps, so a
@@ -559,7 +570,7 @@ struct filter_trsqp_policy
         // entry iterate to keep s.x consistent with the state-resident
         // f / g / c / J evaluations that were NOT refreshed on the
         // failure path.
-        Eigen::Vector<double, N>     restoration_x_entry;
+        Eigen::Vector<Scalar, N>     restoration_x_entry;
 
         // Restoration budget latch. Set when a restoration attempt
         // exhausts its budget (or exits without producing an iterate
@@ -574,7 +585,7 @@ struct filter_trsqp_policy
         // sweep.
         bool restoration_exhausted{false};
 
-        double objective_value{};
+        Scalar objective_value{};
         // Lagrangian-Hessian approximation on the JOINT (x, s) space;
         // sized n + n_ineq.
         //
@@ -584,7 +595,7 @@ struct filter_trsqp_policy
         //            BFGS);
         //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.3 (BFGS in
         //            the SQP outer loop).
-        detail::dense_ldl_bfgs<double, Eigen::Dynamic> hessian;
+        detail::dense_ldl_bfgs<Scalar, Eigen::Dynamic> hessian;
 
         // Filter-set member; the acceptance gate at the composite-step
         // call site is dominance-based, not augmented-merit-based.
@@ -593,7 +604,7 @@ struct filter_trsqp_policy
         //            91:239-269 Section 2.1;
         //            Wachter and Biegler 2006 Math. Programming
         //            106:25-57 Section 2.3 eq. 6.
-        argmin::detail::filter_set<double> filter;
+        argmin::detail::filter_set<Scalar> filter;
 
         std::uint32_t iteration{0};
         int n_eq{0};
@@ -602,7 +613,7 @@ struct filter_trsqp_policy
 
     template <typename Problem, typename Convergence>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& opts,
                              const options_type& policy_opts)
     {
@@ -612,13 +623,13 @@ struct filter_trsqp_policy
 
     template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& /*opts*/)
     {
-        static_assert(differentiable<Problem>,
-                      "filter_trsqp_policy requires differentiable<Problem>");
-        static_assert(constrained<Problem>,
-                      "filter_trsqp_policy requires constrained<Problem>");
+        static_assert(differentiable<Problem, Scalar>,
+                      "filter_trsqp_policy requires differentiable<Problem, Scalar>");
+        static_assert(constrained<Problem, Scalar>,
+                      "filter_trsqp_policy requires constrained<Problem, Scalar>");
 
         const int n = problem.dimension();
         state_type<Problem> s;
@@ -657,7 +668,7 @@ struct filter_trsqp_policy
         if(m_joint > 0)
         {
             s.AAt_workspace.resize(m_joint, m_joint);
-            s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(m_joint);
+            s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixX<Scalar>>(m_joint);
             s.w_workspace.resize(m_joint);
         }
         s.bo_ws.resize(n_joint, m_joint);
@@ -702,47 +713,47 @@ struct filter_trsqp_policy
             s.restoration_dx.resize(n);
             s.restoration_xtrial.resize(n);
             s.restoration_x_entry.resize(n);
-            s.restoration_ldlt = Eigen::LDLT<Eigen::MatrixXd>(n);
+            s.restoration_ldlt = Eigen::LDLT<Eigen::MatrixX<Scalar>>(n);
         }
 
         // Constraint evaluation on the un-reformulated x-only shape.
-        Eigen::VectorXd c_eval(m);
+        Eigen::VectorX<Scalar> c_eval(m);
         if(m > 0)
             problem.constraints(x0, c_eval);
         s.c_eq = c_eval.head(s.n_eq);
         s.c_ineq = c_eval.tail(s.n_ineq);
 
-        Eigen::MatrixXd J_eval(m, n);
+        Eigen::MatrixX<Scalar> J_eval(m, n);
         if(m > 0)
             problem.constraint_jacobian(x0, J_eval);
         s.J_eq = J_eval.topRows(s.n_eq);
         s.J_ineq = J_eval.bottomRows(s.n_ineq);
 
         // Box bounds: detected via concept.
-        if constexpr(bound_constrained<Problem>)
+        if constexpr(bound_constrained<Problem, Scalar>)
         {
             s.lower = problem.lower_bounds();
             s.upper = problem.upper_bounds();
         }
         else
         {
-            constexpr double inf = std::numeric_limits<double>::infinity();
-            s.lower = Eigen::Vector<double, N>::Constant(n, -inf);
-            s.upper = Eigen::Vector<double, N>::Constant(n, inf);
+            constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+            s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
         }
 
         // Slack initialization: s_0 = max(c_ineq(x_0), 0) enforces
         // s_0 >= 0 and zeroes the joint residual c_ineq - s at every
         // feasible initial iterate.
-        s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
+        s.s_slack = s.c_ineq.cwiseMax(Scalar(0.0)).eval();
 
         // Lagrangian-Hessian on the joint (x, s) space. dense_ldl_bfgs
         // initializes to identity; the slack block picks up curvature
         // through (s_k, y_k) pairs naturally on subsequent push() calls.
-        s.hessian = detail::dense_ldl_bfgs<double, Eigen::Dynamic>(
+        s.hessian = detail::dense_ldl_bfgs<Scalar, Eigen::Dynamic>(
             n + s.n_ineq);
 
-        s.lambda = Eigen::VectorXd::Zero(m);
+        s.lambda = Eigen::VectorX<Scalar>::Zero(m);
 
         s.trust_radius = options.initial_trust_radius;
         s.iteration = 0;
@@ -762,13 +773,13 @@ struct filter_trsqp_policy
         //            Fletcher and Leyffer 2002 Section 2.1 (the
         //            initial filter is seeded with the iter-0 point so
         //            dominance is well-defined on trial 0).
-        double h_0 = 0.0;
+        Scalar h_0 = Scalar(0.0);
         if(s.n_eq > 0)
             h_0 += s.c_eq.cwiseAbs().sum();
         if(s.n_ineq > 0)
-            h_0 += (-s.c_ineq).cwiseMax(0.0).sum();
-        s.filter.initialize(1e4 * std::max(1.0, h_0),
-                            1e-4 * std::max(1.0, h_0));
+            h_0 += (-s.c_ineq).cwiseMax(Scalar(0.0)).sum();
+        s.filter.initialize(Scalar(1e4) * std::max(Scalar(1.0), h_0),
+                            Scalar(1e-4) * std::max(Scalar(1.0), h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
         s.filter.add(s.objective_value, h_0);
 
@@ -776,7 +787,7 @@ struct filter_trsqp_policy
     }
 
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         // Trust-region SQP step with filter acceptance: Byrd-Omojokun
         // composite step on the slack-reformulated joint variable
@@ -802,7 +813,7 @@ struct filter_trsqp_policy
         const int m_total = s.n_eq + n_ineq;
         std::size_t bfgs_skip_count = 0;
 
-        constexpr double inf = std::numeric_limits<double>::infinity();
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
 
         // Runtime envelope retune so options.gamma_f / options.gamma_h
         // changes between solve() calls take effect on the next step
@@ -814,11 +825,11 @@ struct filter_trsqp_policy
         // and re-used across the primary step and any SOC retry: the
         // iterate s.x has not moved between attempts, so the "current"
         // violation is the same scalar across both.
-        double h_current = 0.0;
+        Scalar h_current = Scalar(0.0);
         if(s.n_eq > 0)
             h_current += s.c_eq.cwiseAbs().sum();
         if(n_ineq > 0)
-            h_current += (-s.c_ineq).cwiseMax(0.0).sum();
+            h_current += (-s.c_ineq).cwiseMax(Scalar(0.0)).sum();
 
         // Section B -- Joint Lagrangian gradient at the current iterate.
         //
@@ -831,7 +842,7 @@ struct filter_trsqp_policy
         //          the slack-bound multiplier zeta = mu -- which is
         //          why stationarity is measured with the box-projected
         //          form in Section E, not the raw norm).
-        argmin::detail::assemble_joint_lagrangian_gradient<double, N>(
+        argmin::detail::assemble_joint_lagrangian_gradient<Scalar, N>(
             s.g, s.J_eq, s.J_ineq,
             s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
             n, n_ineq, s.joint_grad_L_new_buf);
@@ -841,10 +852,10 @@ struct filter_trsqp_policy
         // stationarity leg is the box-projected form, so kkt-gated
         // convergence can fire at solutions with an active box bound
         // (the raw leg equals the unmodeled bound multiplier there).
-        auto bound_aware_kkt = [&s]() -> double {
+        auto bound_aware_kkt = [&s]() -> Scalar {
             // N-typed so the internal Lagrangian-gradient leg is a fixed-N
             // stack vector, not a per-call heap VectorXd.
-            return argmin::detail::kkt_residual<double,
+            return argmin::detail::kkt_residual<Scalar,
                                                 N,
                                                 Eigen::Dynamic,
                                                 Eigen::Dynamic>(
@@ -887,8 +898,8 @@ struct filter_trsqp_policy
         // Section E reads the same displaced box.
         auto& lower_joint = s.step_lower_joint;
         auto& upper_joint = s.step_upper_joint;
-        lower_joint.head(n) = (s.lower - s.x).template cast<double>();
-        upper_joint.head(n) = (s.upper - s.x).template cast<double>();
+        lower_joint.head(n) = (s.lower - s.x).template cast<Scalar>();
+        upper_joint.head(n) = (s.upper - s.x).template cast<Scalar>();
         if(n_ineq > 0)
         {
             lower_joint.tail(n_ineq) = -s.s_slack;
@@ -907,14 +918,14 @@ struct filter_trsqp_policy
         // accuracy at sqrt(mu_max) under the Eisenstat-Walker schedule.
         // At interior points the two measures coincide. The forcing
         // formulas themselves are unchanged; only the driving norm is.
-        const double proj_stationarity =
-            argmin::detail::projected_stationarity_displaced<double>(
+        const Scalar proj_stationarity =
+            argmin::detail::projected_stationarity_displaced<Scalar>(
                 s.joint_grad_L_new_buf, lower_joint, upper_joint);
-        double eps_k;
+        Scalar eps_k;
         if constexpr (Mode == sqp_mode::fast)
-            eps_k = std::min(0.1, proj_stationarity);
+            eps_k = std::min(Scalar(0.1), proj_stationarity);
         else
-            eps_k = std::min(0.5, std::sqrt(proj_stationarity));
+            eps_k = std::min(Scalar(0.5), std::sqrt(proj_stationarity));
 
         // Section F -- Steihaug-CG inner-iteration cap.
         const std::size_t max_cg_iter =
@@ -922,8 +933,8 @@ struct filter_trsqp_policy
             * static_cast<std::size_t>(n_total);
 
         // Section G -- Hessian-vector-product closure.
-        auto hessian_op = [&s](const Eigen::Ref<const Eigen::VectorXd>& v,
-                               Eigen::Ref<Eigen::VectorXd> out) {
+        auto hessian_op = [&s](const Eigen::Ref<const Eigen::VectorX<Scalar>>& v,
+                               Eigen::Ref<Eigen::VectorX<Scalar>> out) {
             s.hessian.multiply(v, out);
         };
 
@@ -940,14 +951,14 @@ struct filter_trsqp_policy
         // its Ref-typed p_out without materializing a temporary VectorXd
         // copy on every trial evaluation.
         auto trial_eval = [&s, n, n_ineq](
-            const Eigen::Ref<const Eigen::VectorXd>& p)
-            -> std::pair<double, double>
+            const Eigen::Ref<const Eigen::VectorX<Scalar>>& p)
+            -> std::pair<Scalar, Scalar>
         {
-            Eigen::Vector<double, N> x_trial = s.x + p.head(n);
+            Eigen::Vector<Scalar, N> x_trial = s.x + p.head(n);
             if(n_ineq > 0)
                 s.trial_s_buf.noalias() = s.s_slack + p.tail(n_ineq);
 
-            const double f_new = s.problem->value(x_trial);
+            const Scalar f_new = s.problem->value(x_trial);
 
             if(s.n_eq + n_ineq > 0)
                 s.problem->constraints(x_trial, s.bufs.c_trial_buf);
@@ -965,7 +976,7 @@ struct filter_trsqp_policy
         // unweighted-objective predicted-vs-actual comparison used by
         // the radius rho rule; c_norm_old is not consumed here because
         // the filter does not need an L2 cross-iterate diff).
-        const double f_old = s.objective_value;
+        const Scalar f_old = s.objective_value;
 
         // Section J -- Per-step workspaces in joint primal space.
         auto& z_k = s.step_z_k;
@@ -1006,9 +1017,9 @@ struct filter_trsqp_policy
         // (Lalee, Nocedal, Plantenga 1998 Section 3.1: the retry
         // exploits curvature from the trial-point residual, not radius
         // expansion).
-        const double delta_pre_step = s.trust_radius;
+        const Scalar delta_pre_step = s.trust_radius;
         auto bo_step = argmin::detail::byrd_omojokun_composite_step<
-            double, Eigen::Dynamic>(
+            Scalar, Eigen::Dynamic>(
             z_k, s.joint_grad_L_new_buf, g_obj_joint,
             hessian_op,
             A_joint, c_joint,
@@ -1017,7 +1028,7 @@ struct filter_trsqp_policy
             trial_eval,
             s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
             v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
-            s.bo_ws, s.penalty, 0.0);
+            s.bo_ws, s.penalty, Scalar(0.0));
 
         // Directional objective-model term grad_f^T p of the PRIMARY
         // composite step, consumed by the switching-condition
@@ -1032,7 +1043,7 @@ struct filter_trsqp_policy
         // Reference: Wachter and Biegler 2006 Section 2.3 eq. (19),
         //            Section 2.4 (SOC keeps the uncorrected direction
         //            in the switching and Armijo tests).
-        const double grad_f_dot_p = s.g.dot(p_out.head(n));
+        const Scalar grad_f_dot_p = s.g.dot(p_out.head(n));
 
         // Filter dispatch lambda. Computes h_trial from the
         // post-trial_eval s.bufs.c_trial_buf via the VectorBlock
@@ -1052,15 +1063,15 @@ struct filter_trsqp_policy
         // Consumed by the filter dispatch below AND by the Section K'
         // SOC trigger / continuation gates (the filter family's theta
         // measure).
-        auto compute_h_trial = [&s]() -> double
+        auto compute_h_trial = [&s]() -> Scalar
         {
-            double h_trial = 0.0;
+            Scalar h_trial = Scalar(0.0);
             if(s.n_eq > 0)
                 h_trial += s.bufs.c_trial_buf.head(s.n_eq)
                               .cwiseAbs().sum();
             if(s.n_ineq > 0)
                 h_trial += (-s.bufs.c_trial_buf.tail(s.n_ineq))
-                              .cwiseMax(0.0).sum();
+                              .cwiseMax(Scalar(0.0)).sum();
             return h_trial;
         };
 
@@ -1068,11 +1079,11 @@ struct filter_trsqp_policy
                                           &compute_h_trial,
                                           grad_f_dot_p,
                                           f_old, this](
-            const argmin::detail::byrd_omojokun_step_result& bo,
-            double delta_input)
-            -> std::pair<bool, double>
+            const argmin::detail::byrd_omojokun_step_result<Scalar>& bo,
+            Scalar delta_input)
+            -> std::pair<bool, Scalar>
         {
-            const double h_trial = compute_h_trial();
+            const Scalar h_trial = compute_h_trial();
 
             // Acceptance + augmentation verdict per reject-gate
             // variant. tr_shrink (default): plain filter memory check,
@@ -1098,13 +1109,13 @@ struct filter_trsqp_policy
             if(options.reject_mode
                == filter_reject_mode::switching_condition)
             {
-                const argmin::detail::wb_switching_params<double>
+                const argmin::detail::wb_switching_params<Scalar>
                     wb_params{options.filter_switching_delta,
                               options.filter_switching_s_theta,
                               options.filter_switching_s_phi,
                               options.filter_switching_eta_phi};
                 const auto verdict =
-                    argmin::detail::wb_switching_acceptance<double>(
+                    argmin::detail::wb_switching_acceptance<Scalar>(
                         s.filter, f_old, h_current,
                         bo.f_new, h_trial, grad_f_dot_p,
                         options.gamma_f, options.gamma_h,
@@ -1121,7 +1132,7 @@ struct filter_trsqp_policy
             if(!acceptable)
             {
                 return {false,
-                        argmin::detail::tr_shrink_factor * delta_input};
+                        argmin::detail::byrd_omojokun_constants<Scalar>::shrink_factor * delta_input};
             }
 
             // Filter-accepted step: radius rule is decoupled from
@@ -1142,20 +1153,20 @@ struct filter_trsqp_policy
             // prediction and expand the radius on a model-increasing
             // step. The radius is held; only a genuinely very-
             // successful objective-leg prediction expands.
-            const double actual_obj = f_old - bo.f_new;
-            const double step_norm = p_out.norm();
+            const Scalar actual_obj = f_old - bo.f_new;
+            const Scalar step_norm = p_out.norm();
 
-            double new_delta = delta_input;
-            if(bo.predicted > 0.0)
+            Scalar new_delta = delta_input;
+            if(bo.predicted > Scalar(0.0))
             {
-                const double rho = actual_obj / bo.predicted;
-                if(rho > argmin::detail::tr_eta_2
+                const Scalar rho = actual_obj / bo.predicted;
+                if(rho > argmin::detail::byrd_omojokun_constants<Scalar>::eta_2
                    && step_norm
-                      >= argmin::detail::tr_boundary_guard
+                      >= argmin::detail::byrd_omojokun_constants<Scalar>::boundary_guard
                          * delta_input)
                     new_delta = std::min(
-                        argmin::detail::tr_expand_factor * delta_input,
-                        argmin::detail::tr_delta_max);
+                        argmin::detail::byrd_omojokun_constants<Scalar>::expand_factor * delta_input,
+                        argmin::detail::byrd_omojokun_constants<Scalar>::delta_max);
             }
 
             // Filter augmentation per the verdict computed above. The
@@ -1208,7 +1219,7 @@ struct filter_trsqp_policy
         if(!accepted && options.soc_max_iterations > 0
            && compute_h_trial() >= h_current)
         {
-            Eigen::Vector<double, N> x_trial(n);
+            Eigen::Vector<Scalar, N> x_trial(n);
             auto& s_trial = s.trial_s_buf;
             auto& c_all_trial = s.soc_c_all_buf;
             auto& c_trial_joint = s.soc_c_trial_joint;
@@ -1216,7 +1227,7 @@ struct filter_trsqp_policy
 
             // Filter-measure violation of the most recent trial,
             // driving the kappa_soc contraction test across retries.
-            double theta_trial_prev = compute_h_trial();
+            Scalar theta_trial_prev = compute_h_trial();
 
             for(std::size_t soc_iter = 0;
                 soc_iter < options.soc_max_iterations;
@@ -1239,12 +1250,12 @@ struct filter_trsqp_policy
 
                 // SOC residual through the shared assembly helper:
                 // c_soc = c_trial_joint - A_joint * p_out.
-                argmin::detail::assemble_joint_soc<double,
+                argmin::detail::assemble_joint_soc<Scalar,
                                                    Eigen::Dynamic>(
                     c_trial_joint, A_joint, p_out, c_joint_soc);
 
                 bo_step = argmin::detail::byrd_omojokun_composite_step<
-                    double, Eigen::Dynamic>(
+                    Scalar, Eigen::Dynamic>(
                     z_k, s.joint_grad_L_new_buf, g_obj_joint,
                     hessian_op,
                     A_joint, c_joint_soc,
@@ -1253,7 +1264,7 @@ struct filter_trsqp_policy
                     trial_eval,
                     s.AAt_workspace, s.ldlt_feasibility, s.w_workspace,
                     v_buf, u_buf, r_cg_buf, d_cg_buf, Bd_cg_buf, p_out,
-                    s.bo_ws, s.penalty, 0.0);
+                    s.bo_ws, s.penalty, Scalar(0.0));
 
                 std::tie(accepted, new_delta) =
                     compute_accept_and_radius(bo_step, delta_pre_step);
@@ -1266,7 +1277,7 @@ struct filter_trsqp_policy
                 // kappa_soc relative to the previous trial. The
                 // negated form routes a NaN violation to the abort
                 // branch.
-                const double theta_trial_new = compute_h_trial();
+                const Scalar theta_trial_new = compute_h_trial();
                 if(!(theta_trial_new
                      < argmin::detail::sqp_common_constants<scalar_type>::kappa_soc * theta_trial_prev))
                     break;
@@ -1355,19 +1366,19 @@ struct filter_trsqp_policy
             // original x with the original c(x); slack lifting is a
             // filter_trsqp internal that does not belong in the
             // feasibility-restoration objective.
-            auto cfn = [&s](const Eigen::Vector<double, N>& xv,
-                            Eigen::VectorXd&                 cv)
+            auto cfn = [&s](const Eigen::Vector<Scalar, N>& xv,
+                            Eigen::VectorX<Scalar>&                 cv)
             {
                 s.problem->constraints(xv, cv);
             };
-            auto jfn = [&s](const Eigen::Vector<double, N>& xv,
-                            Eigen::MatrixXd&                 Jv)
+            auto jfn = [&s](const Eigen::Vector<Scalar, N>& xv,
+                            Eigen::MatrixX<Scalar>&                 Jv)
             {
                 s.problem->constraint_jacobian(xv, Jv);
             };
 
             const auto restoration_outcome =
-                argmin::detail::feasibility_restoration<double, N>(
+                argmin::detail::feasibility_restoration<Scalar, N>(
                     s.x, cfn, jfn, s.lower, s.upper,
                     options.restoration_max_iter,
                     options.restoration_lambda_init,
@@ -1387,8 +1398,8 @@ struct filter_trsqp_policy
             // free here: the trial-evaluation closure has no further
             // readers this iteration.
             bool restoration_acceptable = false;
-            double restoration_h = 0.0;
-            double restoration_f = 0.0;
+            Scalar restoration_h = Scalar(0.0);
+            Scalar restoration_f = Scalar(0.0);
             if(restoration_outcome.status
                == argmin::detail::restoration_status::converged)
             {
@@ -1401,7 +1412,7 @@ struct filter_trsqp_policy
                 if(n_ineq > 0)
                     restoration_h +=
                         (-s.bufs.c_trial_buf.tail(n_ineq))
-                            .cwiseMax(0.0).sum();
+                            .cwiseMax(Scalar(0.0)).sum();
                 restoration_acceptable =
                     s.filter.is_acceptable(restoration_f,
                                            restoration_h);
@@ -1451,7 +1462,7 @@ struct filter_trsqp_policy
                 // c_ineq - s nominally zero at the restored iterate
                 // (mirroring the init()-time s_slack seeding).
                 if(n_ineq > 0)
-                    s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
+                    s.s_slack = s.c_ineq.cwiseMax(Scalar(0.0)).eval();
 
                 // The restoration OUTPUT is deliberately NOT added to
                 // the filter (W-B practice: the filter was augmented
@@ -1461,7 +1472,7 @@ struct filter_trsqp_policy
                 // solver is about to re-enter).
                 ++s.iteration;
                 auto r = argmin::detail::null_step_result<
-                    double, N, Eigen::Dynamic, Eigen::Dynamic>(
+                    Scalar, N, Eigen::Dynamic, Eigen::Dynamic>(
                     s.objective_value, s.g, s.J_eq, s.J_ineq,
                     s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
                     s.c_eq, s.c_ineq, s.x.norm(),
@@ -1496,7 +1507,7 @@ struct filter_trsqp_policy
         // consecutive null-steps.
         if(s.trust_radius < options.min_trust_radius)
         {
-            auto r = argmin::detail::null_step_result<double, N,
+            auto r = argmin::detail::null_step_result<Scalar, N,
                                                       Eigen::Dynamic,
                                                       Eigen::Dynamic>(
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
@@ -1517,7 +1528,7 @@ struct filter_trsqp_policy
         // already been shrunk by the filter dispatch above.
         if(!accepted)
         {
-            auto r = argmin::detail::null_step_result<double, N,
+            auto r = argmin::detail::null_step_result<Scalar, N,
                                                       Eigen::Dynamic,
                                                       Eigen::Dynamic>(
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
@@ -1584,7 +1595,7 @@ struct filter_trsqp_policy
             {
                 s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
                 s.bufs.kkt_mu_ineq_buf.setZero(n_ineq);
-                argmin::detail::compute_kkt_multipliers_active_set<double, N,
+                argmin::detail::compute_kkt_multipliers_active_set<Scalar, N,
                                                                   Eigen::Dynamic,
                                                                   Eigen::Dynamic>(
                     s.g, s.J_eq, s.J_ineq, s.c_ineq, s.bufs.kkt_ws,
@@ -1609,7 +1620,7 @@ struct filter_trsqp_policy
         z_k.head(n) = s.x;
         if(n_ineq > 0)
             z_k.tail(n_ineq) = s.s_slack;
-        argmin::detail::compute_joint_bfgs_pair<double, N>(
+        argmin::detail::compute_joint_bfgs_pair<Scalar, N>(
             s.bufs.g_old_buf, s.g,
             s.bufs.J_all_old.topRows(s.n_eq),
             s.bufs.J_all_old.bottomRows(n_ineq),
@@ -1625,19 +1636,19 @@ struct filter_trsqp_policy
         // Reference: Kraft 1988 DFVLR-FB 88-28 Section 2.2.3;
         //            Nocedal and Wright 2e Procedure 18.2 + eq.
         //            18.22-18.24.
-        const double sTy = s.joint_sk_buf.dot(s.joint_yk_buf);
-        if(s.joint_sk_buf.norm() > 1e-15)
+        const Scalar sTy = s.joint_sk_buf.dot(s.joint_yk_buf);
+        if(s.joint_sk_buf.norm() > trust_region_sqp_defaults<Scalar>::zero_guard)
         {
             if constexpr (Mode == sqp_mode::fast)
             {
-                if(sTy > 0.0)
+                if(sTy > Scalar(0.0))
                     s.hessian.push(s.joint_sk_buf, s.joint_yk_buf);
                 else
                     ++bfgs_skip_count;
             }
             else
             {
-                if(sTy > 0.0)
+                if(sTy > Scalar(0.0))
                     s.hessian.push(s.joint_sk_buf, s.joint_yk_buf);
             }
         }
@@ -1653,21 +1664,21 @@ struct filter_trsqp_policy
         // Reference: Nocedal and Wright 2e Definition 12.1;
         //            Section 12.3 + eq. 12.34;
         //            Section 16.7 (projected-gradient optimality).
-        const double kkt = bound_aware_kkt();
+        const Scalar kkt = bound_aware_kkt();
 
         // Re-displace the joint box at the accepted iterate for the
         // projected stationarity report (the Section D box was
         // displaced at the pre-step iterate; the upper slack leg stays
         // +inf).
-        lower_joint.head(n) = (s.lower - s.x).template cast<double>();
-        upper_joint.head(n) = (s.upper - s.x).template cast<double>();
+        lower_joint.head(n) = (s.lower - s.x).template cast<Scalar>();
+        upper_joint.head(n) = (s.upper - s.x).template cast<Scalar>();
         if(n_ineq > 0)
             lower_joint.tail(n_ineq) = -s.s_slack;
-        const double grad_L_norm_new =
-            argmin::detail::projected_stationarity_displaced<double>(
+        const Scalar grad_L_norm_new =
+            argmin::detail::projected_stationarity_displaced<Scalar>(
                 s.joint_grad_L_new_buf, lower_joint, upper_joint);
 
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value      = s.objective_value,
             .gradient_norm        = grad_L_norm_new,
             .step_size            = p_out.norm(),
@@ -1701,7 +1712,7 @@ struct filter_trsqp_policy
     // an unrelated point), the inert BO-internal penalty, and the
     // restoration budget latch.
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
@@ -1721,12 +1732,12 @@ struct filter_trsqp_policy
         s.J_eq = s.bufs.J_all.topRows(s.n_eq);
         s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
 
-        s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
+        s.s_slack = s.c_ineq.cwiseMax(Scalar(0.0)).eval();
         s.trust_radius = options.initial_trust_radius;
         // Inert at this policy's composite-step call site
         // (penalty_factor = 0.0 keeps the LNP update a no-op) but
         // re-seeded anyway so no cross-run value survives a reset.
-        s.penalty = 1.0;
+        s.penalty = Scalar(1.0);
         s.iteration = 0;
         s.restoration_exhausted = false;
 
@@ -1739,13 +1750,13 @@ struct filter_trsqp_policy
         //
         // Reference: Wachter and Biegler 2006 eq. (8) and Section 4.
         s.filter.clear();
-        double h_0 = 0.0;
+        Scalar h_0 = Scalar(0.0);
         if(s.n_eq > 0)
             h_0 += s.c_eq.cwiseAbs().sum();
         if(s.n_ineq > 0)
-            h_0 += (-s.c_ineq).cwiseMax(0.0).sum();
-        s.filter.initialize(1e4 * std::max(1.0, h_0),
-                            1e-4 * std::max(1.0, h_0));
+            h_0 += (-s.c_ineq).cwiseMax(Scalar(0.0)).sum();
+        s.filter.initialize(Scalar(1e4) * std::max(Scalar(1.0), h_0),
+                            Scalar(1e-4) * std::max(Scalar(1.0), h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
         s.filter.add(s.objective_value, h_0);
     }
@@ -1754,7 +1765,7 @@ struct filter_trsqp_policy
     // multiplier estimate; the filter reseed is performed by reset().
     template <typename P>
     void reset_clear(state_type<P>& s,
-                     Eigen::Ref<const Eigen::Vector<double, N>> x0)
+                     Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset(s, x0);
         s.hessian.reset();
@@ -1762,19 +1773,19 @@ struct filter_trsqp_policy
     }
 };
 
-template <int N = dynamic_dimension>
-using filter_trsqp_policy_fast = filter_trsqp_policy<N, sqp_mode::fast>;
+template <scalar Scalar = double, int N = dynamic_dimension>
+using filter_trsqp_policy_fast = filter_trsqp_policy<Scalar, N, sqp_mode::fast>;
 
-template <int N = dynamic_dimension>
+template <scalar Scalar = double, int N = dynamic_dimension>
 using filter_trsqp_policy_accurate =
-    filter_trsqp_policy<N, sqp_mode::accurate>;
+    filter_trsqp_policy<Scalar, N, sqp_mode::accurate>;
 
 // In-header concept gate: surfaces nlp_solver concept-satisfaction
 // failures at the first compile of any TU that includes this header
 // rather than waiting for the downstream compile-test TU. Mirrors the
 // pattern in tests/compile/sqp_mode_racing_test.cpp.
-static_assert(nlp_solver<step_budget_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>>);
-static_assert(nlp_solver<step_budget_solver<filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>>);
+static_assert(nlp_solver<step_budget_solver<filter_trsqp_policy<double, dynamic_dimension, sqp_mode::accurate>>>);
+static_assert(nlp_solver<step_budget_solver<filter_trsqp_policy<double, dynamic_dimension, sqp_mode::fast>>>);
 
 }
 

@@ -101,8 +101,8 @@ double min_solve_wall_seconds(const Problem& problem, const Eigen::VectorXd& x0,
 TEMPLATE_TEST_CASE(
     "tr_sqp HS071 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs071<>::problem_dimension>,
-    tr_sqp_policy_fast<hs071<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs071<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs071<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -142,8 +142,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "tr_sqp HS026 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs026<>::problem_dimension>,
-    tr_sqp_policy_fast<hs026<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs026<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs026<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -191,8 +191,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "tr_sqp HS043 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs043<>::problem_dimension>,
-    tr_sqp_policy_fast<hs043<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs043<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs043<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -245,8 +245,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "tr_sqp HS024 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs024<>::problem_dimension>,
-    tr_sqp_policy_fast<hs024<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs024<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs024<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -309,8 +309,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "tr_sqp HS035 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs035<>::problem_dimension>,
-    tr_sqp_policy_fast<hs035<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs035<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs035<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -346,8 +346,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "tr_sqp HS039 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs039<>::problem_dimension>,
-    tr_sqp_policy_fast<hs039<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs039<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs039<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -383,8 +383,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "tr_sqp HS040 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs040<>::problem_dimension>,
-    tr_sqp_policy_fast<hs040<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs040<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs040<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -420,8 +420,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "tr_sqp HS050 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs050<>::problem_dimension>,
-    tr_sqp_policy_fast<hs050<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs050<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs050<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -454,8 +454,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "tr_sqp HS028 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs028<>::problem_dimension>,
-    tr_sqp_policy_fast<hs028<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs028<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs028<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -498,8 +498,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "tr_sqp HS076 (parametric on mode)",
     "[sqp][tr_sqp][regression][mode]",
-    tr_sqp_policy_accurate<hs076<>::problem_dimension>,
-    tr_sqp_policy_fast<hs076<>::problem_dimension>)
+    (tr_sqp_policy_accurate<double, hs076<>::problem_dimension>),
+    (tr_sqp_policy_fast<double, hs076<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -548,8 +548,8 @@ TEST_CASE("tr_sqp _fast wall <= _accurate wall (HS071)",
 {
     hs071<> problem;
     const Eigen::VectorXd x0 = problem.initial_point();
-    using accurate_t = tr_sqp_policy_accurate<hs071<>::problem_dimension>;
-    using fast_t     = tr_sqp_policy_fast<hs071<>::problem_dimension>;
+    using accurate_t = tr_sqp_policy_accurate<double, hs071<>::problem_dimension>;
+    using fast_t     = tr_sqp_policy_fast<double, hs071<>::problem_dimension>;
     // Robust min-over-batches estimate: a single sub-100us wall sample is
     // dominated by scheduler/cache noise on shared CI (a lone contended
     // t_fast can spuriously breach the budget while t_acc runs clean). The
@@ -677,7 +677,7 @@ TEST_CASE("tr_sqp SOC retry fires on a rejected step whose violation "
     solver_options opts;
     opts.max_iterations = 5;
 
-    tr_sqp_policy_accurate<2> pol{};
+    tr_sqp_policy_accurate<double, 2> pol{};
     pol.options.soc_max_iterations = 2;
     step_budget_solver solver{pol, problem, x0, opts};
 
@@ -699,7 +699,7 @@ TEST_CASE("tr_sqp SOC retry stays out on a rejected step whose "
     solver_options opts;
     opts.max_iterations = 5;
 
-    tr_sqp_policy_accurate<2> pol{};
+    tr_sqp_policy_accurate<double, 2> pol{};
     pol.options.soc_max_iterations = 2;
     step_budget_solver solver{pol, problem, x0, opts};
 
@@ -727,7 +727,7 @@ TEST_CASE("kraft_slsqp_accurate vs tr_sqp_accurate race on HS071",
         hs071<>::problem_dimension,
         hs071<>,
         kraft_slsqp_policy_accurate<double, hs071<>::problem_dimension>,
-        tr_sqp_policy_accurate<hs071<>::problem_dimension>>
+        tr_sqp_policy_accurate<double, hs071<>::problem_dimension>>
         group{problem, x0, opts};
 
     auto result = group.step_n(opts.max_iterations, opts);

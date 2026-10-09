@@ -351,8 +351,8 @@ int main()
         exercise(filter_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
         exercise(nw_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
         exercise(filter_nw_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
-        exercise(tr_sqp_policy<hs071<>::problem_dimension>{}, problem, x0);
-        exercise(filter_trsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
+        exercise(tr_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
+        exercise(filter_trsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
     }
 
     // --- Constrained NLP on the dynamic-N axis -----------------------------

@@ -16,6 +16,7 @@ inline constexpr double k_qp = 1.0;
 inline constexpr double k_harness = 10.0;
 inline constexpr double k_lbfgsb = 10.0;
 inline constexpr double k_line_search_sqp = 10.0;
+inline constexpr double k_trust_region_sqp = 10.0;
 
 inline double tolerance(double k)
 {

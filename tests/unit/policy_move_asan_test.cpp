@@ -238,7 +238,7 @@ TEST_CASE("tr_sqp survives move-then-step", "[move_asan]")
     auto x0 = problem.initial_point();
     solver_options<> opts;
 
-    construct_move_step(tr_sqp_policy<hs076<>::problem_dimension>{}, problem, x0, opts);
+    construct_move_step(tr_sqp_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts);
 }
 
 TEST_CASE("lbfgsb survives move-then-step", "[move_asan]")

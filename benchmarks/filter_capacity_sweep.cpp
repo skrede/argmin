@@ -134,12 +134,11 @@ std::vector<suite_cell> build_suite()
 }
 
 // filter_trsqp mode-fixed aliases so the mode-templated policy fits the
-// scalar-and-dimension policy-template contract used by the runner; the
-// scalar is ignored while filter_trsqp is double-only.
+// scalar-and-dimension policy-template contract used by the runner.
 template <argmin::scalar S, int N>
-using filter_trsqp_accurate = argmin::filter_trsqp_policy<N, argmin::sqp_mode::accurate>;
+using filter_trsqp_accurate = argmin::filter_trsqp_policy<S, N, argmin::sqp_mode::accurate>;
 template <argmin::scalar S, int N>
-using filter_trsqp_fast = argmin::filter_trsqp_policy<N, argmin::sqp_mode::fast>;
+using filter_trsqp_fast = argmin::filter_trsqp_policy<S, N, argmin::sqp_mode::fast>;
 
 constexpr std::size_t unbounded_cap = 1u << 30;
 

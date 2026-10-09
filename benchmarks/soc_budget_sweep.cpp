@@ -589,53 +589,53 @@ int main(int argc, char** argv)
     // convention. HS028 gets 500 (long shallow ridge on the joint
     // slack-augmented primal); the rest get 200.
     run_cell_block<
-        tr_sqp_policy<hs024_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs024_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs024_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs024_t::problem_dimension, sqp_mode::fast>>(
         "hs024", static_cast<double>(p024.optimal_value()), 200, p024, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs026_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs026_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs026_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs026_t::problem_dimension, sqp_mode::fast>>(
         "hs026", static_cast<double>(p026.optimal_value()), 200, p026, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs028_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs028_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs028_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs028_t::problem_dimension, sqp_mode::fast>>(
         "hs028", static_cast<double>(p028.optimal_value()), 500, p028, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs035_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs035_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs035_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs035_t::problem_dimension, sqp_mode::fast>>(
         "hs035", static_cast<double>(p035.optimal_value()), 200, p035, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs039_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs039_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs039_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs039_t::problem_dimension, sqp_mode::fast>>(
         "hs039", static_cast<double>(p039.optimal_value()), 200, p039, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs040_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs040_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs040_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs040_t::problem_dimension, sqp_mode::fast>>(
         "hs040", static_cast<double>(p040.optimal_value()), 200, p040, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs043_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs043_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs043_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs043_t::problem_dimension, sqp_mode::fast>>(
         "hs043", static_cast<double>(p043.optimal_value()), 200, p043, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs050_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs050_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs050_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs050_t::problem_dimension, sqp_mode::fast>>(
         "hs050", static_cast<double>(p050.optimal_value()), 200, p050, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs071_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs071_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs071_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs071_t::problem_dimension, sqp_mode::fast>>(
         "hs071", static_cast<double>(p071.optimal_value()), 200, p071, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs076_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs076_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs076_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs076_t::problem_dimension, sqp_mode::fast>>(
         "hs076", static_cast<double>(p076.optimal_value()), 200, p076, blocks);
 
     // Print the sweep table.

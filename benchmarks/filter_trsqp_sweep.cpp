@@ -81,7 +81,7 @@ namespace
 
 using argmin::sqp_mode;
 template <int N, sqp_mode Mode>
-using policy_t = argmin::filter_trsqp_policy<N, Mode>;
+using policy_t = argmin::filter_trsqp_policy<double, N, Mode>;
 
 // Filter-reject mode is nested inside the policy; alias for brevity.
 template <sqp_mode Mode>

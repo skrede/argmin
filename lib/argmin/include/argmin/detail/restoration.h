@@ -162,14 +162,14 @@ lm_restoration_result feasibility_restoration(
     std::size_t                                       max_iter,
     Scalar                                            lambda_init,
     Scalar                                            feasibility_tol,
-    Eigen::VectorXd&                                  c_buf,
-    Eigen::VectorXd&                                  c_trial_buf,
-    Eigen::MatrixXd&                                  J_buf,
-    Eigen::MatrixXd&                                  JtJ_buf,
+    Eigen::VectorX<Scalar>&                           c_buf,
+    Eigen::VectorX<Scalar>&                           c_trial_buf,
+    Eigen::MatrixX<Scalar>&                           J_buf,
+    Eigen::MatrixX<Scalar>&                           JtJ_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>>              rhs_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>>              dx_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>>              x_trial_buf,
-    Eigen::LDLT<Eigen::MatrixXd>&                     ldlt_buf)
+    Eigen::LDLT<Eigen::MatrixX<Scalar>>&              ldlt_buf)
 {
     using std::min;
     using std::max;
@@ -185,10 +185,10 @@ lm_restoration_result feasibility_restoration(
     // check is the cleanest no-op behavior for a restoration call on
     // an already-feasible iterate.
     constraints(x, c_buf);
-    double c_norm = c_buf.norm();
-    result.final_c_norm_l2 = c_norm;
+    Scalar c_norm = c_buf.norm();
+    result.final_c_norm_l2 = static_cast<double>(c_norm);
 
-    if(c_norm < static_cast<double>(feasibility_tol))
+    if(c_norm < feasibility_tol)
     {
         result.status = restoration_status::converged;
         return result;
@@ -213,7 +213,7 @@ lm_restoration_result feasibility_restoration(
         {
             result.status = restoration_status::degenerate_no_progress;
             result.iterations_used = iter;
-            result.final_c_norm_l2 = c_norm;
+            result.final_c_norm_l2 = static_cast<double>(c_norm);
             result.final_lambda    = static_cast<double>(lambda);
             return result;
         }
@@ -268,7 +268,7 @@ lm_restoration_result feasibility_restoration(
                     result.status =
                         restoration_status::lambda_grew_unbounded;
                     result.iterations_used = iter;
-                    result.final_c_norm_l2 = c_norm;
+                    result.final_c_norm_l2 = static_cast<double>(c_norm);
                     result.final_lambda    =
                         static_cast<double>(lambda);
                     return result;
@@ -296,7 +296,7 @@ lm_restoration_result feasibility_restoration(
                     result.status =
                         restoration_status::lambda_grew_unbounded;
                     result.iterations_used = iter;
-                    result.final_c_norm_l2 = c_norm;
+                    result.final_c_norm_l2 = static_cast<double>(c_norm);
                     result.final_lambda    =
                         static_cast<double>(lambda);
                     return result;
@@ -315,7 +315,7 @@ lm_restoration_result feasibility_restoration(
 
             // Trial residual at the projected point.
             constraints(x_trial_buf, c_trial_buf);
-            const double c_trial_norm = c_trial_buf.norm();
+            const Scalar c_trial_norm = c_trial_buf.norm();
 
             if(c_trial_norm < c_norm)
             {
@@ -337,7 +337,7 @@ lm_restoration_result feasibility_restoration(
                     result.status =
                         restoration_status::lambda_grew_unbounded;
                     result.iterations_used = iter;
-                    result.final_c_norm_l2 = c_norm;
+                    result.final_c_norm_l2 = static_cast<double>(c_norm);
                     result.final_lambda    =
                         static_cast<double>(lambda);
                     return result;
@@ -352,11 +352,11 @@ lm_restoration_result feasibility_restoration(
         }
 
         // Iteration committed; check feasibility.
-        if(c_norm < static_cast<double>(feasibility_tol))
+        if(c_norm < feasibility_tol)
         {
             result.status          = restoration_status::converged;
             result.iterations_used = iter + 1;
-            result.final_c_norm_l2 = c_norm;
+            result.final_c_norm_l2 = static_cast<double>(c_norm);
             result.final_lambda    = static_cast<double>(lambda);
             return result;
         }
@@ -365,7 +365,7 @@ lm_restoration_result feasibility_restoration(
     // max_iter reached without converging.
     result.status          = restoration_status::max_iter_reached;
     result.iterations_used = max_iter;
-    result.final_c_norm_l2 = c_norm;
+    result.final_c_norm_l2 = static_cast<double>(c_norm);
     result.final_lambda    = static_cast<double>(lambda);
     return result;
 }

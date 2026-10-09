@@ -150,10 +150,10 @@ TEMPLATE_TEST_CASE(
     (nw_sqp_policy_accurate<double, dynamic_dimension>),
     (filter_slsqp_policy_accurate<double, dynamic_dimension>),
     (filter_nw_sqp_policy_accurate<double, dynamic_dimension>),
-    tr_sqp_policy_accurate<dynamic_dimension>,
-    tr_sqp_policy_fast<dynamic_dimension>,
-    filter_trsqp_policy_accurate<dynamic_dimension>,
-    filter_trsqp_policy_fast<dynamic_dimension>)
+    (tr_sqp_policy_accurate<double, dynamic_dimension>),
+    (tr_sqp_policy_fast<double, dynamic_dimension>),
+    (filter_trsqp_policy_accurate<double, dynamic_dimension>),
+    (filter_trsqp_policy_fast<double, dynamic_dimension>))
 {
     using Policy = TestType;
     SECTION("HS007 Lagrangian gradient vanishes at constrained optimum")
@@ -176,13 +176,13 @@ TEMPLATE_TEST_CASE(
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-12);
         if constexpr(std::is_same_v<Policy,
-                         tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>
+                         tr_sqp_policy<double, dynamic_dimension, sqp_mode::fast>>
                   || std::is_same_v<Policy,
-                         tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                         tr_sqp_policy<double, dynamic_dimension, sqp_mode::accurate>>
                   || std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::fast>>
                   || std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::accurate>>)
         {
             opts.set_gradient_threshold(
                 Policy::default_gradient_tolerance);
@@ -213,7 +213,7 @@ TEMPLATE_TEST_CASE(
         //            Section 3 (filter-TR convergence theory,
         //            radius-floor termination).
         if constexpr(std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>)
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::fast>>)
         {
             CHECK(std::isfinite(result.gradient_norm));
         }
@@ -256,13 +256,13 @@ TEMPLATE_TEST_CASE(
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-12);
         if constexpr(std::is_same_v<Policy,
-                         tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>
+                         tr_sqp_policy<double, dynamic_dimension, sqp_mode::fast>>
                   || std::is_same_v<Policy,
-                         tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                         tr_sqp_policy<double, dynamic_dimension, sqp_mode::accurate>>
                   || std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::fast>>
                   || std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::accurate>>)
         {
             opts.set_gradient_threshold(
                 Policy::default_gradient_tolerance);
@@ -295,9 +295,9 @@ TEMPLATE_TEST_CASE(
         // does not change the per-iter radius-update dynamics that
         // drive the early-termination behavior.
         if constexpr(!std::is_same_v<Policy,
-                         tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>
+                         tr_sqp_policy<double, dynamic_dimension, sqp_mode::fast>>
                   && !std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>)
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::fast>>)
         {
             CHECK(last.gradient_norm < 1e-4);
             REQUIRE(last.kkt_residual.has_value());
@@ -777,13 +777,13 @@ TEMPLATE_TEST_CASE(
         // family are gated off below so the line-search-family contract
         // remains a hard requirement on the four line-search policies.
         if constexpr(!std::is_same_v<Policy,
-                         tr_sqp_policy<dynamic_dimension, sqp_mode::fast>>
+                         tr_sqp_policy<double, dynamic_dimension, sqp_mode::fast>>
                   && !std::is_same_v<Policy,
-                         tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                         tr_sqp_policy<double, dynamic_dimension, sqp_mode::accurate>>
                   && !std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::fast>>
                   && !std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>)
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::accurate>>)
         {
             sqrt_nan_emitter<> problem;
             auto x0 = problem.initial_point();
@@ -904,9 +904,9 @@ TEMPLATE_TEST_CASE(
                   || std::is_same_v<Policy,
                          filter_nw_sqp_policy<double, dynamic_dimension>>
                   || std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::accurate>>
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::accurate>>
                   || std::is_same_v<Policy,
-                         filter_trsqp_policy<dynamic_dimension, sqp_mode::fast>>)
+                         filter_trsqp_policy<double, dynamic_dimension, sqp_mode::fast>>)
         {
             using Problem = hs026<>;
             using PolicyN = typename Policy::template rebind<

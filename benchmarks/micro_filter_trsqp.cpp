@@ -221,8 +221,8 @@ timing bench_argmin(const Problem& problem,
     // Lalee-Nocedal-Plantenga 1998 reference trust-region defaults).
     using policy_t = std::conditional_t<
         Mode == argmin::sqp_mode::fast,
-        argmin::filter_trsqp_policy_fast<argmin::problem_dimension_v<Problem>>,
-        argmin::filter_trsqp_policy_accurate<argmin::problem_dimension_v<Problem>>>;
+        argmin::filter_trsqp_policy_fast<double, argmin::problem_dimension_v<Problem>>,
+        argmin::filter_trsqp_policy_accurate<double, argmin::problem_dimension_v<Problem>>>;
 
     auto x0 = problem.initial_point();
     argmin::solver_options opts;
@@ -283,7 +283,7 @@ sweep_row sweep_argmin(const Problem& problem,
                        std::optional<double> gamma_f,
                        std::optional<double> gamma_h)
 {
-    using policy_t = argmin::filter_trsqp_policy<
+    using policy_t = argmin::filter_trsqp_policy<double,
         argmin::problem_dimension_v<Problem>, argmin::sqp_mode::accurate>;
 
     auto x0 = problem.initial_point();
@@ -439,7 +439,7 @@ bool probe_kkt_residual()
     opts.set_step_threshold(1e-12);
 
     argmin::step_budget_solver solver{
-        argmin::filter_trsqp_policy_accurate<argmin::hs028<>::problem_dimension>{},
+        argmin::filter_trsqp_policy_accurate<double, argmin::hs028<>::problem_dimension>{},
         problem, x0, opts};
 
     argmin::step_result<double> last_with_kkt{};
@@ -492,7 +492,7 @@ bool probe_regression_hs026()
     opts.set_step_threshold(1e-12);
 
     argmin::step_budget_solver solver{
-        argmin::filter_trsqp_policy<argmin::hs026<>::problem_dimension, Mode>{},
+        argmin::filter_trsqp_policy<double, argmin::hs026<>::problem_dimension, Mode>{},
         p, x0, opts};
     argmin::step_result<double> last{};
     argmin::step_result<double> last_with_kkt{};
@@ -547,7 +547,7 @@ template <argmin::sqp_mode Mode>
 bool probe_regression_hs028()
 {
     using policy_t =
-        argmin::filter_trsqp_policy<argmin::hs028<>::problem_dimension, Mode>;
+        argmin::filter_trsqp_policy<double, argmin::hs028<>::problem_dimension, Mode>;
 
     argmin::hs028<> p;
     Eigen::Vector<double, argmin::hs028<>::problem_dimension> x0 =

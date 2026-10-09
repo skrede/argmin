@@ -35,7 +35,7 @@ struct line_search_sqp_defaults<float>
     // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
     static constexpr float gradient_tolerance = 3e-4f;     // rule
     static constexpr float step_tolerance_rel = 5e-6f;     // rule
-    static constexpr float feasibility_tolerance = 2e-3f;  // rule
+    static constexpr float feasibility_tolerance = 1e-3f;  // gate: rule value 2e-3 failed hs043
     static constexpr float armijo_c1 = 1e-4f;              // dimensionless
     static constexpr float armijo_rho = 0.5f;              // dimensionless
     static constexpr float qp_tolerance = 5e-6f;           // rule
