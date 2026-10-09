@@ -418,12 +418,12 @@ void run_lbfgsb_family_gate()
 
 TEST_CASE("alloc_gate_byrd_lbfgsb", "[alloc-gate]")
 {
-    run_lbfgsb_family_gate<argmin::byrd_lbfgsb_policy<2>>();
+    run_lbfgsb_family_gate<argmin::byrd_lbfgsb_policy<double, 2>>();
 }
 
 TEST_CASE("alloc_gate_lbfgsb", "[alloc-gate]")
 {
-    run_lbfgsb_family_gate<argmin::lbfgsb_policy<2>>();
+    run_lbfgsb_family_gate<argmin::lbfgsb_policy<double, 2>>();
 }
 
 // augmented_lagrangian outer method-of-multipliers path, armed across a window
@@ -443,7 +443,7 @@ TEST_CASE("alloc_gate_augmented_lagrangian", "[alloc-gate]")
     opts.set_step_threshold(1e-15);
 
     using policy_t = argmin::augmented_lagrangian_policy<
-        argmin::lbfgsb_policy<4>, 4>;
+        argmin::lbfgsb_policy<double, 4>, 4>;
     policy_t::options_type popts;
 
     argmin::step_budget_solver solver{policy_t{}, problem, x0, opts, popts};

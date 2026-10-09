@@ -204,7 +204,7 @@ TEST_CASE("auglag_mma_instantiation_test: concept-probe fork selects the correct
     using mma_al   = augmented_lagrangian_policy<mma_policy<D>, D>;
     using gcmma_al = augmented_lagrangian_policy<gcmma_policy<D>, D>;
     using ccsa_al  = augmented_lagrangian_policy<ccsa_quadratic_policy<D>, D>;
-    using lbfgsb_al = augmented_lagrangian_policy<lbfgsb_policy<D>, D>;
+    using lbfgsb_al = augmented_lagrangian_policy<lbfgsb_policy<double, D>, D>;
 
     STATIC_REQUIRE(mma_al::state_type<convex_eq>::lift_equalities_only);
     STATIC_REQUIRE(gcmma_al::state_type<convex_eq>::lift_equalities_only);

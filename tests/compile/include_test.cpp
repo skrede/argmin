@@ -38,7 +38,7 @@
         Eigen::VectorXd x0{{-1.2, 1.0}};
         solver_options opts;
 
-        step_budget_solver<lbfgsb_policy<2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};
+        step_budget_solver<lbfgsb_policy<double, 2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};
         step_budget_solver generic{lbfgsb_policy<>{}, problem, x0, opts};
         (void)fast;
         (void)generic;

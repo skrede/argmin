@@ -14,6 +14,25 @@
 namespace argmin::detail
 {
 
+template <scalar S>
+struct compact_lbfgs_constants;
+
+template <>
+struct compact_lbfgs_constants<double>
+{
+    static constexpr double theta_min = 1e-10;
+    static constexpr double theta_max = 1e10;
+};
+
+template <>
+struct compact_lbfgs_constants<float>
+{
+    // A precision-class value keeps the double row's fraction of the available precision:
+    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
+    static constexpr float theta_min = 4e-5f;  // rule
+    static constexpr float theta_max = 1e10f;  // magnitude cap
+};
+
 // Factorization strategy for the (structurally indefinite) 2m x 2m middle
 // matrix M = [[theta S^T S, L], [L^T, -D]] appearing in the compact L-BFGS
 // representation. Eigen::LDLT is out of contract here (it targets positive
@@ -167,7 +186,7 @@ public:
         // Initial Hessian scaling: theta = y^T y / s^T y (N&W eq. 9.6, inverse of gamma_0).
         // gamma_0 = s^T y / y^T y scales H_0 to approximate curvature magnitude.
         theta_ = y.squaredNorm() / sTy_effective;
-        theta_ = std::clamp(theta_, Scalar(1e-10), Scalar(1e10));
+        theta_ = std::clamp(theta_, compact_lbfgs_constants<Scalar>::theta_min, compact_lbfgs_constants<Scalar>::theta_max);
 
         recompute_middle();
     }

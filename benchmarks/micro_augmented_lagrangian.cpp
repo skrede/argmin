@@ -550,7 +550,7 @@ bool probe_regression_hs039()
 
     argmin::step_budget_solver solver{
         argmin::augmented_lagrangian_policy<
-            argmin::lbfgsb_policy<argmin::hs039<>::problem_dimension>,
+            argmin::lbfgsb_policy<double, argmin::hs039<>::problem_dimension>,
             argmin::hs039<>::problem_dimension>{},
         p, x0, opts};
     argmin::step_result<double> last{};

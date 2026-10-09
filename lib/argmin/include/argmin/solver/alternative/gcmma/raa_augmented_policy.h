@@ -46,7 +46,7 @@ namespace argmin::alternative::gcmma
 {
 
 template <int N = dynamic_dimension,
-          template<int> typename DualPolicy = lbfgsb_policy>
+          template <scalar, int> typename DualPolicy = lbfgsb_policy>
 struct raa_augmented_policy
 {
     using scalar_type = double;
@@ -397,7 +397,7 @@ struct raa_augmented_policy
         // per-inner re-construction would, while reusing the allocated
         // buffers) rather than re-allocating it on every conservativity
         // iteration.
-        DualPolicy<MC> dp;
+        DualPolicy<scalar_type, MC> dp;
         solver_options<default_convergence<scalar_type>> dopts;
         dopts.max_iterations = 100;
         dopts.set_gradient_threshold(1e-9);

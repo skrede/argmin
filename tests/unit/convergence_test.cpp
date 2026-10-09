@@ -345,7 +345,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock problem{};
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            step_budget_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
+            step_budget_solver<lbfgsb_policy<double, rosenbrock<>::problem_dimension>, rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
@@ -354,7 +354,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             booth problem{};
             Eigen::VectorXd x0{{0.0, 0.0}};
-            step_budget_solver<lbfgsb_policy<booth<>::problem_dimension>, booth<>::problem_dimension, booth<>> solver{problem, x0, opts};
+            step_budget_solver<lbfgsb_policy<double, booth<>::problem_dimension>, booth<>::problem_dimension, booth<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
@@ -363,7 +363,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             beale problem{};
             Eigen::VectorXd x0{{0.0, 0.0}};
-            step_budget_solver<lbfgsb_policy<beale<>::problem_dimension>, beale<>::problem_dimension, beale<>> solver{problem, x0, opts};
+            step_budget_solver<lbfgsb_policy<double, beale<>::problem_dimension>, beale<>::problem_dimension, beale<>> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-8);
         }
@@ -603,7 +603,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS071")
         {
             hs071 problem;
-            step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
+            step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, hs071<>::problem_dimension>>{},
                 problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(17.014).margin(0.5));
@@ -613,7 +613,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+            step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, hs076<>::problem_dimension>>{},
                 problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(0.2));
@@ -624,7 +624,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<rosenbrock_constrained::problem_dimension>>{}, 
+            step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, rosenbrock_constrained::problem_dimension>>{},
                 problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
@@ -794,10 +794,10 @@ TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]"
         constexpr int D = beale<>::problem_dimension;
         Eigen::Vector<double, D> x0_fixed{{0.0, 0.0}};
 
-        step_budget_solver<lbfgsb_policy<D>, D, beale<>> solver1{problem, x0_fixed, opts};
+        step_budget_solver<lbfgsb_policy<double, D>, D, beale<>> solver1{problem, x0_fixed, opts};
         auto result = solver1.solve();
 
-        step_budget_solver<lbfgsb_policy<D>, D, beale<>> solver2{problem, x0_fixed, opts};
+        step_budget_solver<lbfgsb_policy<double, D>, D, beale<>> solver2{problem, x0_fixed, opts};
         int manual_iters = 0;
         step_result<double> last{};
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -834,10 +834,10 @@ TEST_CASE("solve() zero-arg converges same as manual step loop", "[convergence]"
         constexpr int D = rosenbrock<>::problem_dimension;
         Eigen::Vector<double, D> x0_fixed{{-1.0, -1.0}};
 
-        step_budget_solver<lbfgsb_policy<D>, D, rosenbrock<>> solver1{problem, x0_fixed, opts};
+        step_budget_solver<lbfgsb_policy<double, D>, D, rosenbrock<>> solver1{problem, x0_fixed, opts};
         auto result = solver1.solve();
 
-        step_budget_solver<lbfgsb_policy<D>, D, rosenbrock<>> solver2{problem, x0_fixed, opts};
+        step_budget_solver<lbfgsb_policy<double, D>, D, rosenbrock<>> solver2{problem, x0_fixed, opts};
         int manual_iters = 0;
         step_result<double> last{};
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -1029,7 +1029,7 @@ TEST_CASE("stall criterion does not regress well-behaved L-BFGS-B convergence", 
     constexpr int D = rosenbrock<>::problem_dimension;
     Eigen::Vector<double, D> x0{{-1.0, -1.0}};
 
-    step_budget_solver<lbfgsb_policy<D>, D, rosenbrock<>> solver{problem, x0, opts};
+    step_budget_solver<lbfgsb_policy<double, D>, D, rosenbrock<>> solver{problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.status != solver_status::stalled);
@@ -1240,7 +1240,7 @@ TEST_CASE("defaulted L-BFGS-B solve() on Rosenbrock terminates by criterion well
     Eigen::VectorXd x0{{-1.0, -1.0}};
 
     solver_options<> opts;  // fully defaulted: no threshold configured
-    step_budget_solver<lbfgsb_policy<rosenbrock<>::problem_dimension>,
+    step_budget_solver<lbfgsb_policy<double, rosenbrock<>::problem_dimension>,
                  rosenbrock<>::problem_dimension, rosenbrock<>> solver{problem, x0, opts};
     auto result = solver.solve();
 

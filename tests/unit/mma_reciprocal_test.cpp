@@ -137,7 +137,7 @@ TEST_CASE("mma dual solve terminates on the projected KKT residual",
     // Solve the dual from a warm start y0 = 1 with the production inner
     // loop, gated on the projected KKT residual.
     Eigen::VectorXd y0{{1.0}};
-    lbfgsb_policy<Eigen::Dynamic> dp;
+    lbfgsb_policy<double, Eigen::Dynamic> dp;
     solver_options<default_convergence<>> dopts;
     dopts.max_iterations = 100;
     dopts.set_gradient_threshold(1e-9);

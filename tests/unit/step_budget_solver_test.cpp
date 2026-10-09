@@ -485,7 +485,7 @@ TEST_CASE("step_budget_solver CTAD rebind preserves configured policy options",
           "[solver][ctad]")
 {
     // quadratic_with_gradient::problem_dimension == 2, so the deduction guide
-    // rebinds lbfgsb_policy<> (dynamic) to lbfgsb_policy<2>: the converting
+    // rebinds lbfgsb_policy<> (dynamic) to lbfgsb_policy<double, 2>: the converting
     // constructor -- not the plain same-type constructor -- runs. The
     // configured option must survive the rebind rather than being reset by a
     // default-constructed rebound policy.
@@ -503,7 +503,7 @@ TEST_CASE("step_budget_solver CTAD rebind preserves configured policy options",
         // The converting ctor really ran: the stored policy is the rebound
         // fixed-dimension type, not the dynamic source type.
         static_assert(std::is_same_v<
-            std::remove_cvref_t<decltype(solver.policy())>, lbfgsb_policy<2>>);
+            std::remove_cvref_t<decltype(solver.policy())>, lbfgsb_policy<double, 2>>);
 
         CHECK(solver.policy().options.stall_window == 7);
     }

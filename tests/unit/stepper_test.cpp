@@ -93,8 +93,8 @@ static_assert(nlp_solver<step_budget_solver<test::mock_policy>>,
               "the driver owns a convergence loop -- it satisfies nlp_solver");
 
 // Also holds for a real gradient policy instantiation.
-static_assert(steppable<stepper<lbfgsb_policy<2>, 2, quadratic_with_gradient>>);
-static_assert(!nlp_solver<stepper<lbfgsb_policy<2>, 2, quadratic_with_gradient>>);
+static_assert(steppable<stepper<lbfgsb_policy<double, 2>, 2, quadratic_with_gradient>>);
+static_assert(!nlp_solver<stepper<lbfgsb_policy<double, 2>, 2, quadratic_with_gradient>>);
 
 TEST_CASE("stepper satisfies steppable but not nlp_solver", "[stepper][concept]")
 {

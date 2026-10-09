@@ -12,6 +12,28 @@
 namespace argmin
 {
 
+namespace detail
+{
+
+template <scalar S>
+struct strong_wolfe_constants;
+
+template <>
+struct strong_wolfe_constants<double>
+{
+    static constexpr double interpolation_floor = 1e-12;
+};
+
+template <>
+struct strong_wolfe_constants<float>
+{
+    // A precision-class value keeps the double row's fraction of the available precision:
+    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
+    static constexpr float interpolation_floor = 5e-6f;  // rule
+};
+
+}
+
 // Strong Wolfe line search with bracketing and zoom phases.
 //
 // Finds alpha satisfying the strong Wolfe conditions:
@@ -43,7 +65,7 @@ template <typename Phi, typename DPhi, typename Scalar = double>
                                                       DPhi&& dphi,
                                                       Scalar phi0,
                                                       Scalar dphi0,
-                                                      const line_search_options& opts = {})
+                                                      const line_search_options<Scalar>& opts = {})
 {
     line_search_result<Scalar> result;
     result.value = phi0;
@@ -73,7 +95,7 @@ template <typename Phi, typename DPhi, typename Scalar = double>
             return std::nullopt;
 
         Scalar denom = Scalar(2) * (phi_hi - phi_lo - dphi_lo * d);
-        if(std::abs(denom) < Scalar(1e-12) * std::max(Scalar(1), std::abs(phi_hi - phi_lo)))
+        if(std::abs(denom) < detail::strong_wolfe_constants<Scalar>::interpolation_floor * std::max(Scalar(1), std::abs(phi_hi - phi_lo)))
             return std::nullopt;
 
         Scalar alpha_min = a_lo - dphi_lo * d * d / denom;

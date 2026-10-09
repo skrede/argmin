@@ -339,8 +339,8 @@ int main()
     {
         fixed_rosenbrock problem;
         Eigen::Vector<double, 2> x0(-1.2, 1.0);
-        exercise(lbfgsb_policy<fixed_rosenbrock::problem_dimension>{}, problem, x0);
-        exercise(byrd_lbfgsb_policy<fixed_rosenbrock::problem_dimension>{}, problem, x0);
+        exercise(lbfgsb_policy<double, fixed_rosenbrock::problem_dimension>{}, problem, x0);
+        exercise(byrd_lbfgsb_policy<double, fixed_rosenbrock::problem_dimension>{}, problem, x0);
     }
 
     // --- Constrained NLP: the six SQP policies on fixed-N HS071 ------------
@@ -366,7 +366,7 @@ int main()
     {
         hs035<> problem;
         auto x0 = problem.initial_point();
-        exercise(augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+        exercise(augmented_lagrangian_policy<lbfgsb_policy<double, hs035<>::problem_dimension>>{},
                  problem, x0);
     }
 

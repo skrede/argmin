@@ -35,7 +35,7 @@ namespace argmin
 {
 
 template <int N = dynamic_dimension,
-          template<int> typename DualPolicy = lbfgsb_policy>
+          template <scalar, int> typename DualPolicy = lbfgsb_policy>
 using gcmma_policy = alternative::gcmma::rho_wval_policy<N, DualPolicy>;
 
 }

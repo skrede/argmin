@@ -57,7 +57,7 @@ namespace argmin
 {
 
 template <int N = dynamic_dimension,
-          template<int> typename DualPolicy = lbfgsb_policy>
+          template <scalar, int> typename DualPolicy = lbfgsb_policy>
 struct mma_policy
 {
     using scalar_type = double;
@@ -447,7 +447,7 @@ struct mma_policy
 
         if(m > 0)
         {
-            DualPolicy<MC> dp;
+            DualPolicy<scalar_type, MC> dp;
             solver_options<default_convergence<scalar_type>> dopts;
             dopts.max_iterations = 100;
             dopts.set_gradient_threshold(1e-9);

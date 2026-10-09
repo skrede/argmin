@@ -303,7 +303,7 @@ bool probe_regression_brown_badly_scaled()
     opts.set_step_threshold(1e-14);
 
     argmin::step_budget_solver solver{
-        argmin::byrd_lbfgsb_policy<argmin::brown_badly_scaled<>::problem_dimension>{},
+        argmin::byrd_lbfgsb_policy<double, argmin::brown_badly_scaled<>::problem_dimension>{},
         p, x0, opts};
     argmin::step_result<double> last{};
     std::uint32_t iters = 0;

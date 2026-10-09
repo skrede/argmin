@@ -39,13 +39,13 @@ namespace
 inline int g_dual_init_count = 0;
 inline int g_dual_reset_clear_count = 0;
 
-template <int M>
+template <scalar S, int M>
 struct counting_lbfgsb
 {
-    lbfgsb_policy<M> inner_;
+    lbfgsb_policy<S, M> inner_;
 
     template <typename Problem, typename Convergence>
-    auto init(const Problem& p, const Eigen::Vector<double, M>& x0,
+    auto init(const Problem& p, const Eigen::Vector<S, M>& x0,
               const solver_options<Convergence>& opts)
     {
         ++g_dual_init_count;
@@ -56,7 +56,7 @@ struct counting_lbfgsb
     auto step(State& s) { return inner_.step(s); }
 
     template <typename State>
-    void reset_clear(State& s, const Eigen::Vector<double, M>& x0)
+    void reset_clear(State& s, const Eigen::Vector<S, M>& x0)
     {
         ++g_dual_reset_clear_count;
         inner_.reset_clear(s, x0);

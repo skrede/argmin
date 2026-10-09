@@ -61,7 +61,7 @@ namespace argmin::alternative::gcmma
 {
 
 template <int N = dynamic_dimension,
-          template<int> typename DualPolicy = lbfgsb_policy>
+          template <scalar, int> typename DualPolicy = lbfgsb_policy>
 struct move_limit_shrink_policy
 {
     using scalar_type = double;
@@ -368,7 +368,7 @@ struct move_limit_shrink_policy
         // clears the L-BFGS curvature so each inner solve starts fresh, as a
         // per-inner re-construction would, while reusing the allocated
         // buffers) rather than re-allocating it on every shrink iteration.
-        DualPolicy<MC> dp;
+        DualPolicy<scalar_type, MC> dp;
         solver_options<default_convergence<scalar_type>> dopts;
         dopts.max_iterations = 100;
         dopts.set_gradient_threshold(1e-9);

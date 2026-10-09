@@ -148,7 +148,7 @@ struct filter_nw_sqp_policy
         // line_search_options field-declaration order (c1, c2, rho,
         // max_alpha, max_iterations); skipped designators (c2, max_alpha)
         // keep their line_search_options-side defaults (0.9 and 1.0).
-        line_search_options line_search{
+        line_search_options<scalar_type> line_search{
             .c1 = default_armijo_c1,
             .rho = default_armijo_rho,
             .max_iterations = default_line_search_max_iterations,

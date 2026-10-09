@@ -125,14 +125,14 @@ TEST_CASE("step_budget loop matches a manual step() loop bit-identically",
 
     // Manual step() loop: record the per-step objective sequence and the
     // terminal iterate.
-    step_budget_solver<lbfgsb_policy<4>, 4, rosenbrock<double, 4>> manual{prob, x0};
+    step_budget_solver<lbfgsb_policy<double, 4>, 4, rosenbrock<double, 4>> manual{prob, x0};
     std::vector<double> traj;
     traj.reserve(K);
     for(std::uint32_t i = 0; i < K; ++i)
         traj.push_back(manual.step().objective_value);
 
     // Loop path: step_n over the same setup must reach the same terminal x.
-    step_budget_solver<lbfgsb_policy<4>, 4, rosenbrock<double, 4>> loop{prob, x0};
+    step_budget_solver<lbfgsb_policy<double, 4>, 4, rosenbrock<double, 4>> loop{prob, x0};
     auto loop_res = loop.step_n(K);
 
     for(int k = 0; k < 4; ++k)
@@ -141,7 +141,7 @@ TEST_CASE("step_budget loop matches a manual step() loop bit-identically",
 
     // A second independent manual loop reproduces the objective sequence
     // exactly (deterministic policy dynamics).
-    step_budget_solver<lbfgsb_policy<4>, 4, rosenbrock<double, 4>> manual2{prob, x0};
+    step_budget_solver<lbfgsb_policy<double, 4>, 4, rosenbrock<double, 4>> manual2{prob, x0};
     for(std::uint32_t i = 0; i < K; ++i)
         CHECK(manual2.step().objective_value == traj[i]);
 }
@@ -153,12 +153,12 @@ TEST_CASE("step_and_time with an infinite deadline reproduces the step trajector
     Eigen::Vector4d x0(-1.2, 1.0, -1.2, 1.0);
     constexpr std::uint32_t K = 40;
 
-    step_budget_solver<lbfgsb_policy<4>, 4, rosenbrock<double, 4>> step_only{prob, x0};
+    step_budget_solver<lbfgsb_policy<double, 4>, 4, rosenbrock<double, 4>> step_only{prob, x0};
     auto step_res = step_only.step_n(K);
 
     time_budget_options<> opts;
     opts.max_time = std::chrono::hours(1); // effectively infinite
-    step_and_time_budget_solver<lbfgsb_policy<4>, 4, rosenbrock<double, 4>>
+    step_and_time_budget_solver<lbfgsb_policy<double, 4>, 4, rosenbrock<double, 4>>
         combined{prob, x0, opts};
     auto comb_res = combined.step_n(K, opts);
 
@@ -251,7 +251,7 @@ TEST_CASE("fixed-N MatrixBase x0 binds to ctor and reset", "[budget_driver]")
     // The time drivers accept the same fixed-N x0 surface.
     time_budget_options<> topts;
     topts.max_time = std::chrono::hours(1);
-    time_budget_solver<lbfgsb_policy<4>, 4, rosenbrock<double, 4>> tsolver{
+    time_budget_solver<lbfgsb_policy<double, 4>, 4, rosenbrock<double, 4>> tsolver{
         prob, x0, topts};
     tsolver.reset_clear(xf.cast<double>());
     auto r2 = tsolver.step_n(5, topts);
