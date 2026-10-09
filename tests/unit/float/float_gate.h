@@ -22,6 +22,9 @@ inline constexpr double k_least_squares = 10.0;
 inline constexpr double k_mma = 30.0;
 // Derivative-free solves have a precision floor near sqrt(eps_float) * scale.
 inline constexpr double k_derivative_free = 30.0;
+// The float and double runs of a stochastic search share a seed but not a trajectory, since their
+// samples round differently from the first generation on.
+inline constexpr double k_stochastic = 100.0;
 
 inline double tolerance(double k)
 {

@@ -58,7 +58,7 @@ TEST_CASE("mma_subproblem_options exposes literature defaults directly", "[optio
 
 TEST_CASE("cmaes_options exposes literature defaults directly", "[options]")
 {
-    cmaes_options o{};
+    cmaes_options<> o{};
     static_assert(std::is_same_v<double, decltype(o.sigma_collapse_threshold)>);
     static_assert(std::is_same_v<double, decltype(o.condition_number_limit)>);
     static_assert(std::is_same_v<double, decltype(o.objective_value_tolerance)>);

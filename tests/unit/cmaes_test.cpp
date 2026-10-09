@@ -599,7 +599,7 @@ TEST_CASE("cmaes_policy: equal_fun_values exact zero", "[cmaes]")
     opts.set_objective_threshold(1e-30);
     opts.set_step_threshold(1e-30);
 
-    cmaes_policy<2> policy;
+    cmaes_policy<double, 2> policy;
     policy.options.seed = 42u;
     // Defeat TolFun (which would also fire on flat fitness with default
     // 1e-12 tolerance) so EqualFunValues is the criterion that fires.
@@ -637,7 +637,7 @@ TEST_CASE("cmaes_policy: equal_fun_values rejects sub-epsilon", "[cmaes]")
     opts.set_objective_threshold(1e-30);
     opts.set_step_threshold(1e-30);
 
-    cmaes_policy<2> policy;
+    cmaes_policy<double, 2> policy;
     policy.options.initial_sigma = 0.5;
     policy.options.seed = 42u;
     // Defeat all other §B.3 EXIT criteria so only EqualFunValues could
@@ -885,7 +885,7 @@ TEST_CASE("cmaes_policy: flat coordinate converges without spurious divergence",
     opts.set_objective_threshold(1e-30);
     opts.set_step_threshold(1e-30);
 
-    cmaes_policy<2> policy;
+    cmaes_policy<double, 2> policy;
     policy.options.initial_sigma = 0.1;
     policy.options.seed = 42u;
     policy.options.cmaes.objective_value_tolerance = 1e-30;
@@ -921,7 +921,7 @@ TEST_CASE("cmaes_policy: tol_x_up divergence detection", "[cmaes]")
     opts.set_objective_threshold(1e-30);
     opts.set_step_threshold(1e-30);
 
-    cmaes_policy<2> policy;
+    cmaes_policy<double, 2> policy;
     policy.options.initial_sigma = 0.1;
     policy.options.seed = 42u;
 
@@ -1354,7 +1354,7 @@ TEST_CASE("cmaes_policy: reset refreshes params on lambda bump", "[cmaes]")
 }
 
 // Lock the cmaes_policy::MaxPopulation contract: when a caller explicitly
-// instantiates `cmaes_policy<N, M>` with `M > 512`, the per-step buffer
+// instantiates `cmaes_policy<double, N, M>` with `M > 512`, the per-step buffer
 // cap (`state_type<P>::MaxPop`) MUST honor `M`, not silently fall back
 // to the hardcoded 512. The IPOP escalation guard then fires at the
 // caller-chosen ceiling rather than at the buffer's hidden floor.
@@ -1386,8 +1386,8 @@ TEST_CASE("cmaes_policy: MaxPopulation template parameter widens IPOP cap",
 {
     // (1) MaxPop reflects MaxPopulation when set, falls back to 512 otherwise.
     using policy_default_t = cmaes_policy<>;
-    using policy_wide_t    = cmaes_policy<2, 1024>;
-    using policy_narrow_t  = cmaes_policy<2, 256>;
+    using policy_wide_t    = cmaes_policy<double, 2, 1024>;
+    using policy_narrow_t  = cmaes_policy<double, 2, 256>;
     using state_default_t  = policy_default_t::state_type<rastrigin<double>>;
     using state_wide_t     = policy_wide_t::state_type<rastrigin<double>>;
     using state_narrow_t   = policy_narrow_t::state_type<rastrigin<double>>;
@@ -1534,7 +1534,7 @@ TEST_CASE("cmaes_policy: NaN guard catches non-maximum NaN entry",
     solver_options opts;
     opts.max_iterations = 1;
 
-    cmaes_policy<2> policy;
+    cmaes_policy<double, 2> policy;
     policy.options.seed = 42u;
 
     auto state = policy.init(problem, x0, opts);

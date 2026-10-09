@@ -69,37 +69,37 @@
 namespace argmin::alternative::cmaes
 {
 
-template <int N = dynamic_dimension, int MaxPopulation = dynamic_dimension>
+template <scalar Scalar = double, int N = dynamic_dimension, int MaxPopulation = dynamic_dimension>
 struct no_repair_adaptive_penalty_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
 
     template <int M>
-    using rebind = no_repair_adaptive_penalty_policy<M, MaxPopulation>;
+    using rebind = no_repair_adaptive_penalty_policy<Scalar, M, MaxPopulation>;
 
     enum class restart_strategy { none, ipop };
 
     struct options_type
     {
         std::optional<std::uint32_t> lambda{};           // population size (default: auto, K&W 8.19)
-        std::optional<double> initial_sigma{};           // initial step size (default: bound-scaled, Hansen tutorial)
+        std::optional<Scalar> initial_sigma{};           // initial step size (default: bound-scaled, Hansen tutorial)
         restart_strategy restart{restart_strategy::none};
         std::optional<std::uint64_t> seed{};             // RNG seed
-        cmaes_options cmaes{};                           // Detection params (Hansen tutorial)
+        cmaes_options<Scalar> cmaes{};                   // Detection params (Hansen tutorial)
         std::optional<std::uint32_t> eigendecomposition_skip_generations{}; // Override Hansen formula
         std::optional<std::uint32_t> stagnation_window{};  // Override Hansen stagnation window formula
         std::uint16_t stall_window{100};
-        double feasibility_gate{std::numeric_limits<double>::infinity()};
+        Scalar feasibility_gate{std::numeric_limits<Scalar>::infinity()};
     };
 
     template <typename P = void>
     struct state_type
     {
         const P* problem{nullptr};
-        Eigen::Vector<double, N> x;
-        double objective_value{};
+        Eigen::Vector<Scalar, N> x;
+        Scalar objective_value{};
 
-        Eigen::Vector<double, N> mean;
+        Eigen::Vector<Scalar, N> mean;
 
         // Auger & Hansen 2005 ("A Restart CMA Evolution Strategy with
         // Increasing Population Size", CEC 2005) §III: on each IPOP restart
@@ -109,29 +109,29 @@ struct no_repair_adaptive_penalty_policy
         // see cmasolutions.cc:49 _xmean = p._x0min within
         // CMASolutions(Parameters&), invoked from
         // ipopcmastrategy.cc:reset_search_state per restart).
-        Eigen::Vector<double, N> x0;
+        Eigen::Vector<Scalar, N> x0;
 
-        Eigen::Matrix<double, N, N> C;
-        Eigen::Matrix<double, N, N> B;
-        Eigen::Vector<double, N> D;
-        Eigen::Vector<double, N> p_sigma;
-        Eigen::Vector<double, N> p_c;
-        double sigma{};
+        Eigen::Matrix<Scalar, N, N> C;
+        Eigen::Matrix<Scalar, N, N> B;
+        Eigen::Vector<Scalar, N> D;
+        Eigen::Vector<Scalar, N> p_sigma;
+        Eigen::Vector<Scalar, N> p_c;
+        Scalar sigma{};
         std::uint32_t generation{0};
-        detail::cmaes_params<> params;
+        detail::cmaes_params<Scalar> params;
         detail::xoshiro256 rng{1};
 
-        Eigen::Vector<double, N> lower;
-        Eigen::Vector<double, N> upper;
+        Eigen::Vector<Scalar, N> lower;
+        Eigen::Vector<Scalar, N> upper;
         bool has_bounds{false};
 
-        double initial_sigma{};
-        double best_ever_value{std::numeric_limits<double>::infinity()};
+        Scalar initial_sigma{};
+        Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
 
         // Hansen stagnation detection history.
         // Reference: Hansen (2023) arXiv:1604.00772, Section B.3 item 5.
-        std::vector<double> best_fitness_history;
-        std::vector<double> median_fitness_history;
+        std::vector<Scalar> best_fitness_history;
+        std::vector<Scalar> median_fitness_history;
         std::uint32_t stagnation_window_min{120};
 
         // Hansen 2023 (arXiv:1604.00772) section B.3 item 1 NoEffectAxis,
@@ -149,9 +149,9 @@ struct no_repair_adaptive_penalty_policy
         // canonical case; we record the actual init-time value to be
         // robust to any future init() change. Preserved across IPOP
         // restart (same baseline, same divergence cap).
-        double initial_d_max{1.0};
+        Scalar initial_d_max{Scalar(1.0)};
 
-        Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, N, N>> eigen_solver;
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix<Scalar, N, N>> eigen_solver;
 
         bool covariance_dirty{false};
         std::uint32_t decomposition_skip_k{1};
@@ -182,25 +182,25 @@ struct no_repair_adaptive_penalty_policy
         // for callers that do not opt in.
         static constexpr int MaxPop =
             (MaxPopulation == argmin::dynamic_dimension) ? 512 : MaxPopulation;
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> fitnesses_buf;
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxPop, 1> unpenalized_buf;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1, 0, MaxPop, 1> fitnesses_buf;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1, 0, MaxPop, 1> unpenalized_buf;
         std::vector<int> idx_buf;
-        Eigen::Matrix<double, N, Eigen::Dynamic, 0,
+        Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxPop> deltas_buf;
-        std::vector<double> gen_fitnesses_buf;
+        std::vector<Scalar> gen_fitnesses_buf;
 
         // Per-coord adaptive boundary penalty weights. Initialized to 1
         // in init(); updated each step from a moving average of the
         // diagonal of the rank-mu accumulator (Hansen 2009 §3
         // prescribes the half-life c_c).
-        Eigen::Vector<double, N> adaptive_weights;
+        Eigen::Vector<Scalar, N> adaptive_weights;
     };
 
     options_type options{};
 
     template <typename Problem, typename Convergence>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
+                    const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
@@ -209,7 +209,7 @@ struct no_repair_adaptive_penalty_policy
 
     template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
+                    const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
@@ -221,7 +221,7 @@ struct no_repair_adaptive_penalty_policy
         // §III: each restart sets s.mean back to the user's initial point.
         s.x0 = x0;
 
-        if constexpr(bound_constrained<Problem>)
+        if constexpr(bound_constrained<Problem, Scalar>)
         {
             s.lower = problem.lower_bounds();
             s.upper = problem.upper_bounds();
@@ -232,7 +232,7 @@ struct no_repair_adaptive_penalty_policy
         // The exponential moving average in step() updates them from
         // the diagonal of the rank-mu accumulator each generation.
         // Reference: Hansen (2009) §3.
-        s.adaptive_weights = Eigen::Vector<double, N>::Ones(n);
+        s.adaptive_weights = Eigen::Vector<Scalar, N>::Ones(n);
 
         // Sigma initialization: explicit > bound-scaled > default.
         // Hansen (2023) arXiv:1604.00772: sigma = 1/4 to 1/3 of search space.
@@ -242,18 +242,18 @@ struct no_repair_adaptive_penalty_policy
         }
         else if(s.has_bounds)
         {
-            double max_range = 0.0;
+            Scalar max_range = Scalar(0.0);
             for(int i = 0; i < n; ++i)
             {
-                double range = s.upper[i] - s.lower[i];
+                Scalar range = s.upper[i] - s.lower[i];
                 if(std::isfinite(range))
                     max_range = std::max(max_range, range);
             }
-            s.sigma = max_range > 0.0 ? max_range / 3.0 : 0.3;
+            s.sigma = max_range > Scalar(0.0) ? max_range / Scalar(3.0) : Scalar(0.3);
         }
         else
         {
-            s.sigma = 0.3;
+            s.sigma = Scalar(0.3);
         }
         s.initial_sigma = s.sigma;
 
@@ -264,8 +264,8 @@ struct no_repair_adaptive_penalty_policy
             : 0;
         if(pop_lambda == 0 && s.has_bounds)
             pop_lambda = std::max(4 * n,
-                static_cast<int>(4 + std::floor(3.0 * std::log(n))));
-        s.params = detail::compute_constants(n, pop_lambda);
+                static_cast<int>(4 + std::floor(Scalar(3.0) * std::log(static_cast<Scalar>(n)))));
+        s.params = detail::compute_constants<Scalar>(n, pop_lambda);
 
         // Reject the silent UB at lambda > MaxPop as a terminal status
         // rather than a resize: s.fitnesses_buf et al. are
@@ -294,11 +294,11 @@ struct no_repair_adaptive_penalty_policy
             s.gen_fitnesses_buf.resize(static_cast<std::size_t>(s.params.lambda));
         }
 
-        s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
-        s.p_sigma = Eigen::Vector<double, N>::Zero(n);
-        s.p_c = Eigen::Vector<double, N>::Zero(n);
-        s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
-        s.D = Eigen::Vector<double, N>::Ones(n);
+        s.C = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+        s.p_sigma = Eigen::Vector<Scalar, N>::Zero(n);
+        s.p_c = Eigen::Vector<Scalar, N>::Zero(n);
+        s.B = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+        s.D = Eigen::Vector<Scalar, N>::Ones(n);
         s.eigen_solver.compute(s.C);
         s.covariance_dirty = false;
 
@@ -331,10 +331,10 @@ struct no_repair_adaptive_penalty_policy
         }
         else
         {
-            double skip_denom = 10.0 * n * (s.params.c_1 + s.params.c_mu);
+            Scalar skip_denom = Scalar(10.0) * static_cast<Scalar>(n) * (s.params.c_1 + s.params.c_mu);
             s.decomposition_skip_k = std::max(
                 std::uint32_t{1},
-                static_cast<std::uint32_t>(std::floor(1.0 / skip_denom)));
+                static_cast<std::uint32_t>(std::floor(Scalar(1.0) / skip_denom)));
         }
 
         // xoshiro256+ RNG: 32 bytes state vs 2.5KB for mt19937.
@@ -350,7 +350,7 @@ struct no_repair_adaptive_penalty_policy
         // dimension/popsize ratio; the 120 floor is the paper's lower
         // bound for short-history runs.
         s.stagnation_window_min = std::uint32_t{120}
-            + static_cast<std::uint32_t>(std::ceil(30.0 * n / s.params.lambda));
+            + static_cast<std::uint32_t>(std::ceil(Scalar(30.0) * static_cast<Scalar>(n) / static_cast<Scalar>(s.params.lambda)));
         if(options.stagnation_window.has_value())
             s.stagnation_window_min = *options.stagnation_window;
 
@@ -362,7 +362,7 @@ struct no_repair_adaptive_penalty_policy
     }
 
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         // Reject an over-cap population before touching any lambda-sized
         // buffer (they were left unsized by init()/reset() precisely so
@@ -372,11 +372,11 @@ struct no_repair_adaptive_penalty_policy
         // parameter on cmaes_policy.
         if(s.invalid_problem)
         {
-            return step_result<double>{
+            return step_result<Scalar>{
                 .objective_value = s.objective_value,
-                .gradient_norm = 0.0,
-                .step_size = 0.0,
-                .objective_change = 0.0,
+                .gradient_norm = Scalar(0.0),
+                .step_size = Scalar(0.0),
+                .objective_change = Scalar(0.0),
                 .improved = false,
                 .is_null_step = true,
                 .x_norm = s.x.norm(),
@@ -387,7 +387,7 @@ struct no_repair_adaptive_penalty_policy
         const int n = static_cast<int>(s.mean.size());
         const int lambda = s.params.lambda;
         const int mu = s.params.mu;
-        double old_best = s.objective_value;
+        Scalar old_best = s.objective_value;
 
         // The local MaxPop alias derives from the state_type cap so
         // both compile-time ceilings stay in lockstep with the policy's
@@ -395,7 +395,7 @@ struct no_repair_adaptive_penalty_policy
         constexpr int MaxPop = state_type<P>::MaxPop;
 
         // 1. Sample offspring
-        auto offspring = detail::sample_offspring<double, N, MaxPop>(
+        auto offspring = detail::sample_offspring<Scalar, N, MaxPop>(
             s.mean, s.sigma, s.B, s.D, lambda, s.rng);
 
         // 2. Evaluate with optional repair+penalty.
@@ -433,25 +433,25 @@ struct no_repair_adaptive_penalty_policy
         //     when state.x is set to the repaired best-of-generation.
         // The penalty term is sum_i adaptive_weights[i] * (x_i - clip_i)^2.
         // Reference: Hansen (2009) §3.
-        Eigen::Matrix<double, N, Eigen::Dynamic, 0,
+        Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N, MaxPop>
             repaired_buf(n, lambda);
         for(int i = 0; i < lambda; ++i)
         {
             const auto xi = offspring.col(i);
-            Eigen::Vector<double, N> xi_repaired = xi;
-            double penalty = 0.0;
+            Eigen::Vector<Scalar, N> xi_repaired = xi;
+            Scalar penalty = Scalar(0.0);
             if(s.has_bounds)
             {
                 xi_repaired = xi.cwiseMax(s.lower).cwiseMin(s.upper);
-                Eigen::Vector<double, N> diff = xi_repaired - xi;
+                Eigen::Vector<Scalar, N> diff = xi_repaired - xi;
                 penalty = (s.adaptive_weights.array() * diff.array().square()).sum();
                 unpenalized[i] = s.problem->value(xi_repaired);
                 fitnesses[i] = s.problem->value(xi) + penalty;
             }
             else
             {
-                const double f_raw = s.problem->value(xi);
+                const Scalar f_raw = s.problem->value(xi);
                 unpenalized[i] = f_raw;
                 fitnesses[i] = f_raw;
             }
@@ -466,22 +466,22 @@ struct no_repair_adaptive_penalty_policy
         });
 
         // 4. Update mean: weighted recombination of mu best
-        Eigen::Vector<double, N> mean_old = s.mean;
-        Eigen::Vector<double, N> mean_new = Eigen::Vector<double, N>::Zero(n);
+        Eigen::Vector<Scalar, N> mean_old = s.mean;
+        Eigen::Vector<Scalar, N> mean_new = Eigen::Vector<Scalar, N>::Zero(n);
         for(int i = 0; i < mu; ++i)
             mean_new += s.params.weights[i]
                       * offspring.col(idx[static_cast<std::size_t>(i)]);
 
         // 5. delta_w = (mean_new - mean_old) / sigma
-        Eigen::Vector<double, N> delta_w = ((mean_new - mean_old) / s.sigma).eval();
+        Eigen::Vector<Scalar, N> delta_w = ((mean_new - mean_old) / s.sigma).eval();
 
         // 6. Update evolution path p_sigma (CSA)
         // C^{-1/2} * v = B * D^{-1} * B^T * v
-        Eigen::Vector<double, N> C_inv_sqrt_dw =
+        Eigen::Vector<Scalar, N> C_inv_sqrt_dw =
             (s.B * s.D.cwiseInverse().asDiagonal() * (s.B.transpose() * delta_w)).eval();
 
-        s.p_sigma = (1.0 - s.params.c_sigma) * s.p_sigma
-                  + std::sqrt(s.params.c_sigma * (2.0 - s.params.c_sigma) * s.params.mu_eff)
+        s.p_sigma = (Scalar(1.0) - s.params.c_sigma) * s.p_sigma
+                  + std::sqrt(s.params.c_sigma * (Scalar(2.0) - s.params.c_sigma) * s.params.mu_eff)
                     * C_inv_sqrt_dw;
 
         // 7. Update sigma. Cache the sampling sigma first: the rank-mu
@@ -489,20 +489,20 @@ struct no_repair_adaptive_penalty_policy
         // by the sigma that SAMPLED it, i.e. this pre-update value. The
         // step-size is adapted only after the covariance is formed
         // (Hansen 2016, arXiv:1604.00772, eq. 47; purecma.tell ordering).
-        const double sampling_sigma = s.sigma;
+        const Scalar sampling_sigma = s.sigma;
         s.sigma *= std::exp(s.params.c_sigma / s.params.d_sigma
-                          * (s.p_sigma.norm() / s.params.chi_n - 1.0));
+                          * (s.p_sigma.norm() / s.params.chi_n - Scalar(1.0)));
 
         // 8. h_sigma indicator
-        double gen_factor = 1.0 - std::pow(1.0 - s.params.c_sigma,
-                                           2.0 * static_cast<double>(s.generation + 1));
-        double h_sigma = (s.p_sigma.norm() / std::sqrt(gen_factor)
-                         < (1.4 + 2.0 / (static_cast<double>(n) + 1.0)) * s.params.chi_n)
-                         ? 1.0 : 0.0;
+        Scalar gen_factor = Scalar(1.0) - std::pow(Scalar(1.0) - s.params.c_sigma,
+                                                   Scalar(2.0) * static_cast<Scalar>(s.generation + 1));
+        Scalar h_sigma = (s.p_sigma.norm() / std::sqrt(gen_factor)
+                         < (Scalar(1.4) + Scalar(2.0) / (static_cast<Scalar>(n) + Scalar(1.0))) * s.params.chi_n)
+                         ? Scalar(1.0) : Scalar(0.0);
 
         // 9. Update evolution path p_c
-        s.p_c = (1.0 - s.params.c_c) * s.p_c
-              + h_sigma * std::sqrt(s.params.c_c * (2.0 - s.params.c_c) * s.params.mu_eff)
+        s.p_c = (Scalar(1.0) - s.params.c_c) * s.p_c
+              + h_sigma * std::sqrt(s.params.c_c * (Scalar(2.0) - s.params.c_c) * s.params.mu_eff)
                 * delta_w;
 
         // 10. Compute deltas for covariance update (state-owned buffer
@@ -527,8 +527,8 @@ struct no_repair_adaptive_penalty_policy
         // no signature change to detail::update_covariance is required.
         if(s.has_bounds)
         {
-            Eigen::Vector<double, N> rank_mu_diag =
-                Eigen::Vector<double, N>::Zero(n);
+            Eigen::Vector<Scalar, N> rank_mu_diag =
+                Eigen::Vector<Scalar, N>::Zero(n);
             for(int i = 0; i < mu; ++i)
             {
                 const auto di = deltas.col(i);
@@ -536,7 +536,7 @@ struct no_repair_adaptive_penalty_policy
                     += s.params.weights[i] * di.array().square();
             }
             s.adaptive_weights =
-                (1.0 - s.params.c_c) * s.adaptive_weights
+                (Scalar(1.0) - s.params.c_c) * s.adaptive_weights
                 + s.params.c_c * rank_mu_diag.cwiseAbs();
         }
 
@@ -567,7 +567,7 @@ struct no_repair_adaptive_penalty_policy
         // objective is feasible-evaluated), preserving the G12
         // caller-facing-unpenalized contract.
         const int best_offspring = idx[0];
-        double gen_best_f = unpenalized[best_offspring];
+        Scalar gen_best_f = unpenalized[best_offspring];
         if(gen_best_f < s.objective_value)
         {
             s.objective_value = gen_best_f;
@@ -603,13 +603,13 @@ struct no_repair_adaptive_penalty_policy
         if(!std::isfinite(s.sigma) || !s.D.allFinite() || !s.C.allFinite())
         {
             ++s.generation;
-            return step_result<double>{
+            return step_result<Scalar>{
                 .objective_value = s.objective_value,
-                .gradient_norm = 0.0,
-                .step_size = 0.0,
-                .objective_change = 0.0,
+                .gradient_norm = Scalar(0.0),
+                .step_size = Scalar(0.0),
+                .objective_change = Scalar(0.0),
                 .improved = false,
-                .x_norm = s.x.allFinite() ? s.x.norm() : 0.0,
+                .x_norm = s.x.allFinite() ? s.x.norm() : Scalar(0.0),
                 .policy_status = solver_status::diverged,
             };
         }
@@ -629,14 +629,14 @@ struct no_repair_adaptive_penalty_policy
         // by the {Stagnation, sigma_collapse, ConditionCov} restart-set
         // logic below), while the §B.3 EXIT-only criteria always exit and
         // are never recycled.
-        const double legacy_tol_factor =
+        const Scalar legacy_tol_factor =
             options.cmaes.sigma_collapse_threshold;
         if(s.sigma * s.D.maxCoeff() < legacy_tol_factor * s.initial_sigma)
             policy_status = solver_status::roundoff_limited;
 
         // Condition number explosion detection (diverged)
-        double cond_limit = options.cmaes.condition_number_limit;
-        double cond = s.D.maxCoeff() / std::max(s.D.minCoeff(), 1e-30);
+        Scalar cond_limit = options.cmaes.condition_number_limit;
+        Scalar cond = s.D.maxCoeff() / std::max(s.D.minCoeff(), cmaes_defaults<Scalar>::eigenvalue_floor);
         if(!policy_status.has_value() && cond * cond > cond_limit)
             policy_status = solver_status::diverged;
 
@@ -698,10 +698,10 @@ struct no_repair_adaptive_penalty_policy
         // Status mapping: ftol_reached.
         if(!policy_status.has_value())
         {
-            const double tol_fun = options.cmaes.objective_value_tolerance;
+            const Scalar tol_fun = options.cmaes.objective_value_tolerance;
             const auto tol_fun_window = static_cast<std::size_t>(
-                10 + std::ceil(30.0 * static_cast<double>(n)
-                               / static_cast<double>(s.params.lambda)));
+                10 + std::ceil(Scalar(30.0) * static_cast<Scalar>(n)
+                               / static_cast<Scalar>(s.params.lambda)));
             if(s.best_fitness_history.size() >= tol_fun_window)
             {
                 auto win_begin = s.best_fitness_history.end()
@@ -710,8 +710,8 @@ struct no_repair_adaptive_penalty_policy
                     std::minmax_element(win_begin, s.best_fitness_history.end());
                 auto [gen_min, gen_max] =
                     std::minmax_element(fitnesses.data(), fitnesses.data() + lambda);
-                const double full_min = std::min(*hist_min, *gen_min);
-                const double full_max = std::max(*hist_max, *gen_max);
+                const Scalar full_min = std::min(*hist_min, *gen_min);
+                const Scalar full_max = std::max(*hist_max, *gen_max);
                 if(full_max - full_min < tol_fun)
                     policy_status = solver_status::ftol_reached;
             }
@@ -734,8 +734,8 @@ struct no_repair_adaptive_penalty_policy
         if(!policy_status.has_value())
         {
             const auto efv_window = static_cast<std::size_t>(
-                10 + std::ceil(30.0 * static_cast<double>(n)
-                               / static_cast<double>(s.params.lambda)));
+                10 + std::ceil(Scalar(30.0) * static_cast<Scalar>(n)
+                               / static_cast<Scalar>(s.params.lambda)));
             if(s.best_fitness_history.size() >= efv_window)
             {
                 auto it = s.best_fitness_history.end()
@@ -756,12 +756,12 @@ struct no_repair_adaptive_penalty_policy
         // Status mapping: roundoff_limited (numerical floor reached).
         if(!policy_status.has_value())
         {
-            const double tol_x = options.cmaes.step_size_tolerance
+            const Scalar tol_x = options.cmaes.step_size_tolerance
                                  * s.initial_sigma;
             bool tol_x_all_coords = true;
             for(int i = 0; i < n; ++i)
             {
-                const double std_i = s.sigma * std::sqrt(s.C(i, i));
+                const Scalar std_i = s.sigma * std::sqrt(s.C(i, i));
                 if(std_i >= tol_x)
                 {
                     tol_x_all_coords = false;
@@ -791,8 +791,8 @@ struct no_repair_adaptive_penalty_policy
         // behavior" attribution).
         if(!policy_status.has_value())
         {
-            constexpr double tol_x_up_factor = 1.0e4;
-            const double current_max_d = s.D.maxCoeff();
+            constexpr Scalar tol_x_up_factor = Scalar(1.0e4);
+            const Scalar current_max_d = s.D.maxCoeff();
             if(s.sigma * current_max_d
                > tol_x_up_factor * s.initial_sigma * s.initial_d_max)
                 policy_status = solver_status::diverged;
@@ -812,13 +812,13 @@ struct no_repair_adaptive_penalty_policy
         {
             const int axis_i = s.axis_cycle_index;
             s.axis_cycle_index = (s.axis_cycle_index + 1) % n;
-            const double d_ii = s.D(axis_i);
-            const double scale = 0.1 * s.sigma * d_ii;
+            const Scalar d_ii = s.D(axis_i);
+            const Scalar scale = Scalar(0.1) * s.sigma * d_ii;
             bool no_effect_axis = true;
             for(int j = 0; j < n; ++j)
             {
-                const double m_j = s.mean(j);
-                const double m_j_perturbed = m_j + scale * s.B(j, axis_i);
+                const Scalar m_j = s.mean(j);
+                const Scalar m_j_perturbed = m_j + scale * s.B(j, axis_i);
                 if(m_j != m_j_perturbed)
                 {
                     no_effect_axis = false;
@@ -843,8 +843,8 @@ struct no_repair_adaptive_penalty_policy
         {
             for(int i = 0; i < n; ++i)
             {
-                const double m_i = s.mean(i);
-                const double m_i_perturbed = m_i + 0.2 * s.sigma * std::sqrt(s.C(i, i));
+                const Scalar m_i = s.mean(i);
+                const Scalar m_i_perturbed = m_i + Scalar(0.2) * s.sigma * std::sqrt(s.C(i, i));
                 if(m_i == m_i_perturbed)
                 {
                     policy_status = solver_status::roundoff_limited;
@@ -899,27 +899,27 @@ struct no_repair_adaptive_penalty_policy
             // without needing a per-restart hand-tune.
             auto window = std::max(
                 static_cast<std::size_t>(s.stagnation_window_min),
-                static_cast<std::size_t>(std::ceil(0.2 * static_cast<double>(s.generation))));
+                static_cast<std::size_t>(std::ceil(Scalar(0.2) * static_cast<Scalar>(s.generation))));
             if(s.best_fitness_history.size() >= window)
             {
-                auto check_stagnation = [](const std::vector<double>& history,
+                auto check_stagnation = [](const std::vector<Scalar>& history,
                                            std::size_t win) {
                     std::size_t seg = win * 3 / 10;
                     if(seg == 0)
                         return false;
                     std::size_t h = history.size();
                     // Median of first 30% of window.
-                    std::vector<double> old_seg(history.begin() + static_cast<std::ptrdiff_t>(h - win),
+                    std::vector<Scalar> old_seg(history.begin() + static_cast<std::ptrdiff_t>(h - win),
                                                 history.begin() + static_cast<std::ptrdiff_t>(h - win + seg));
                     auto om = old_seg.begin() + static_cast<std::ptrdiff_t>(seg / 2);
                     std::nth_element(old_seg.begin(), om, old_seg.end());
-                    double old_median = *om;
+                    Scalar old_median = *om;
                     // Median of last 30% of window.
-                    std::vector<double> new_seg(history.end() - static_cast<std::ptrdiff_t>(seg),
+                    std::vector<Scalar> new_seg(history.end() - static_cast<std::ptrdiff_t>(seg),
                                                 history.end());
                     auto nm = new_seg.begin() + static_cast<std::ptrdiff_t>(seg / 2);
                     std::nth_element(new_seg.begin(), nm, new_seg.end());
-                    double new_median = *nm;
+                    Scalar new_median = *nm;
                     return new_median >= old_median;
                 };
 
@@ -943,18 +943,18 @@ struct no_repair_adaptive_penalty_policy
                 {
                     policy_status = solver_status::stalled;
                     ++s.generation;
-                    return step_result<double>{
+                    return step_result<Scalar>{
                         .objective_value = s.objective_value,
                         .gradient_norm = s.sigma * s.D.maxCoeff(),
-                        .step_size = 0.0,
-                        .objective_change = 0.0,
+                        .step_size = Scalar(0.0),
+                        .objective_change = Scalar(0.0),
                         .improved = false,
                         .x_norm = s.x.norm(),
                         .policy_status = policy_status,
                     };
                 }
 
-                s.params = detail::compute_constants(n, new_lambda);
+                s.params = detail::compute_constants<Scalar>(n, new_lambda);
 
                 // Hansen 2023 (arXiv:1604.00772) section B.3 paragraph
                 // "Stagnation": the minimum stagnation history window is
@@ -970,8 +970,8 @@ struct no_repair_adaptive_penalty_policy
                 // 2026-04-30 libcmaes head-to-head.
                 s.stagnation_window_min = std::uint32_t{120}
                     + static_cast<std::uint32_t>(
-                        std::ceil(30.0 * static_cast<double>(n)
-                                  / static_cast<double>(s.params.lambda)));
+                        std::ceil(Scalar(30.0) * static_cast<Scalar>(n)
+                                  / static_cast<Scalar>(s.params.lambda)));
 
                 // Auger & Hansen 2005, "A Restart CMA Evolution Strategy
                 // with Increasing Population Size", CEC 2005 §III: each
@@ -1000,18 +1000,18 @@ struct no_repair_adaptive_penalty_policy
                 }
                 else
                 {
-                    const double skip_denom =
-                        10.0 * static_cast<double>(n)
+                    const Scalar skip_denom =
+                        Scalar(10.0) * static_cast<Scalar>(n)
                         * (s.params.c_1 + s.params.c_mu);
                     s.decomposition_skip_k = std::max(
                         std::uint32_t{1},
                         static_cast<std::uint32_t>(
-                            std::floor(1.0 / skip_denom)));
+                            std::floor(Scalar(1.0) / skip_denom)));
                 }
 
-                s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
-                s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
-                s.D = Eigen::Vector<double, N>::Ones(n);
+                s.C = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+                s.B = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+                s.D = Eigen::Vector<Scalar, N>::Ones(n);
                 s.covariance_dirty = false;
                 s.p_sigma.setZero();
                 s.p_c.setZero();
@@ -1031,13 +1031,13 @@ struct no_repair_adaptive_penalty_policy
         // - gradient_norm proxy: sigma * max(D) -- collapses when converged
         // - When no improvement, use sigma as proxy for objective_change and
         //   step_size to prevent step_budget_solver's ftol/stall checks firing early
-        double grad_proxy = s.sigma * s.D.maxCoeff();
+        Scalar grad_proxy = s.sigma * s.D.maxCoeff();
         bool improved = s.objective_value < old_best;
-        double obj_change = improved ? (s.objective_value - old_best) : s.sigma;
-        double effective_step = improved ? (delta_w.norm() * s.sigma)
+        Scalar obj_change = improved ? (s.objective_value - old_best) : s.sigma;
+        Scalar effective_step = improved ? (delta_w.norm() * s.sigma)
                                         : s.sigma;
 
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value = s.objective_value,
             .gradient_norm = grad_proxy,
             .step_size = effective_step,
@@ -1049,7 +1049,7 @@ struct no_repair_adaptive_penalty_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
         // Refresh strategy parameters for the current options.lambda value
@@ -1063,7 +1063,7 @@ struct no_repair_adaptive_penalty_policy
         // References:
         //   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
-        s.params = detail::compute_constants(n,
+        s.params = detail::compute_constants<Scalar>(n,
             static_cast<int>(options.lambda.value_or(0)));
         // Re-evaluate the population-cap guard on the refreshed lambda. A
         // reset that lands over the cap flags the state so step() returns
@@ -1077,9 +1077,9 @@ struct no_repair_adaptive_penalty_policy
         s.best_ever_value = s.objective_value;
         s.p_sigma.setZero();
         s.p_c.setZero();
-        s.C = Eigen::Matrix<double, N, N>::Identity(n, n);
-        s.B = Eigen::Matrix<double, N, N>::Identity(n, n);
-        s.D = Eigen::Vector<double, N>::Ones(n);
+        s.C = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+        s.B = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
+        s.D = Eigen::Vector<Scalar, N>::Ones(n);
         s.sigma = s.initial_sigma;
         s.generation = 0;
         s.best_fitness_history.clear();
@@ -1087,7 +1087,7 @@ struct no_repair_adaptive_penalty_policy
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset(s, x0);
     }

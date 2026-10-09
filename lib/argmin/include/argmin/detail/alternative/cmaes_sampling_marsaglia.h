@@ -42,6 +42,7 @@
 #include <random>
 #include <cstdint>
 #include <utility>
+#include <concepts>
 
 namespace argmin::detail::alternative::marsaglia
 {
@@ -66,12 +67,23 @@ namespace argmin::detail::alternative::marsaglia
 // so t is never exactly 1/2 and the result u is never exactly 0: the
 // lattice sits in the OPEN interval (-1, 1), is symmetric, and has mean
 // exactly 0. This makes the u != 0 / s > 0 disc guard structural.
-template <typename RNG>
-inline auto canonical_uniform_pm1(RNG& rng) -> double
+// The float draw is the same construction at float width: the top 23
+// engine bits form an odd integer below 2^24, inside float's 24-bit
+// significand, scaled by 2^-24.
+template <scalar Scalar, typename RNG>
+inline Scalar canonical_uniform_pm1(RNG& rng)
 {
     const std::uint64_t x = rng();
-    const double t = static_cast<double>(((x >> 12) << 1) | UINT64_C(1)) * 0x1.0p-53;
-    return t * 2.0 - 1.0;
+    if constexpr(std::same_as<Scalar, double>)
+    {
+        const double t = static_cast<double>(((x >> 12) << 1) | UINT64_C(1)) * 0x1.0p-53;
+        return t * 2.0 - 1.0;
+    }
+    else
+    {
+        const float t = static_cast<float>(((x >> 41) << 1) | UINT64_C(1)) * 0x1.0p-24f;
+        return t * 2.0f - 1.0f;
+    }
 }
 
 // One Marsaglia polar pair: two independent N(0,1) draws from two
@@ -82,8 +94,8 @@ auto marsaglia_polar(RNG& rng) -> std::pair<Scalar, Scalar>
 {
     while(true)
     {
-        const Scalar u = static_cast<Scalar>(canonical_uniform_pm1(rng));
-        const Scalar v = static_cast<Scalar>(canonical_uniform_pm1(rng));
+        const Scalar u = canonical_uniform_pm1<Scalar>(rng);
+        const Scalar v = canonical_uniform_pm1<Scalar>(rng);
         const Scalar s = u * u + v * v;
         if(s > Scalar(0) && s < Scalar(1))
         {

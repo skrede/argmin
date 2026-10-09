@@ -201,6 +201,7 @@ add_executable(argmin_float_tests
     float/least_squares_float_test.cpp
     float/mma_float_test.cpp
     float/derivative_free_float_test.cpp
+    float/cmaes_float_test.cpp
 )
 target_link_libraries(argmin_float_tests
     PRIVATE

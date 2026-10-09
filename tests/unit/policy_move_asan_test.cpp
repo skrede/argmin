@@ -350,7 +350,7 @@ TEST_CASE("cmaes survives move-then-step", "[move_asan]")
     Eigen::VectorXd x0{{-1.0, -1.0}};
     solver_options<> opts;
 
-    construct_move_step(cmaes_policy<box_rosenbrock::problem_dimension>{},
+    construct_move_step(cmaes_policy<double, box_rosenbrock::problem_dimension>{},
                         problem, x0, opts);
 }
 

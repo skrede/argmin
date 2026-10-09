@@ -632,7 +632,7 @@ void run_all_argmin_solvers(
         traces.push_back(std::move(trace));
     }
 
-    // restarting_policy<cmaes_policy<...>>: gate mirrors CMA-ES (global + bounds).
+    // restarting_policy<cmaes_policy<double, ...>>: gate mirrors CMA-ES (global + bounds).
     // Plumb the per-row seed through options.inner so the decorator's inner
     // cmaes_policy uses the caller-visible seed rather than the deterministic
     // default fallback that restarting_policy::init() emits when
@@ -664,12 +664,12 @@ void run_all_argmin_solvers(
     //   cells that never need it.
     if constexpr(is_global && is_bound)
     {
-        typename restarting_policy<cmaes_policy<dynamic_dimension, 4096>>::options_type rcmaes_opts{};
+        typename restarting_policy<cmaes_policy<double, dynamic_dimension, 4096>>::options_type rcmaes_opts{};
         rcmaes_opts.inner.seed = seed;
         std::vector<trace_entry> trace;
         try
         {
-            auto r = run_argmin_solver<restarting_policy<cmaes_policy<dynamic_dimension, 4096>>>(
+            auto r = run_argmin_solver<restarting_policy<cmaes_policy<double, dynamic_dimension, 4096>>>(
                 "restarting_cmaes", problem_name, prob, max_iterations, collect_trace, trace,
                 config, rcmaes_opts);
             results.push_back(r);

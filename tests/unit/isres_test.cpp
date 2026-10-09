@@ -103,7 +103,7 @@ static_assert(bound_constrained<simple_constrained>);
 // Verify restarting_policy rebind propagates through the decorator.
 static_assert(std::same_as<
     restarting_policy<cmaes_policy<>>::rebind<3>,
-    restarting_policy<cmaes_policy<3>>>);
+    restarting_policy<cmaes_policy<double, 3>>>);
 
 static_assert(std::same_as<
     restarting_policy<isres_policy<>>::rebind<3>,
