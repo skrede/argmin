@@ -117,7 +117,7 @@ void accumulate(int max_steps, int& joint_steps, int& parmu_grew_on_joint,
     solver_options opts;
     opts.max_iterations = static_cast<std::uint32_t>(max_steps);
 
-    cobyla_policy pol;
+    cobyla_policy<> pol;
     auto s = pol.init(problem, x0, opts);
 
     constexpr double tol = 1e-12;

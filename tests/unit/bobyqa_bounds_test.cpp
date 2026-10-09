@@ -113,7 +113,7 @@ TEST_CASE("bobyqa never evaluates the objective outside the box with a near-boun
     solver_options opts;
     opts.max_iterations = 300;
 
-    step_budget_solver solver{bobyqa_policy<dynamic_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy<double, dynamic_dimension>{}, problem, x0, opts};
     auto result = solver.solve();
 
     INFO("out-of-bounds evaluations: " << breaches);
@@ -143,13 +143,13 @@ TEST_CASE("bobyqa repairs a box tighter than twice the requested radius",
     // Request an initial radius (0.8) larger than half the box range (0.5), so
     // an unrepaired +/- rhobeg perturbation from the center would step outside
     // [0, 1]. The clamp must shrink it to <= 0.5 * range.
-    bobyqa_policy<dynamic_dimension>::options_type popts;
+    bobyqa_policy<double, dynamic_dimension>::options_type popts;
     popts.initial_trust_radius = 0.8;
 
     solver_options opts;
     opts.max_iterations = 300;
 
-    step_budget_solver solver{bobyqa_policy<dynamic_dimension>{popts}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy<double, dynamic_dimension>{popts}, problem, x0, opts};
     auto result = solver.solve();
 
     INFO("out-of-bounds evaluations: " << breaches);
@@ -168,7 +168,7 @@ TEST_CASE("bobyqa scales mixed finite/infinite bounds coherently", "[bobyqa][bou
     x0 << 0.0, 0.0;
     solver_options opts;
 
-    bobyqa_policy<dynamic_dimension> pol;
+    bobyqa_policy<double, dynamic_dimension> pol;
     auto s = pol.init(problem, x0, opts);
 
     // The bounded variable (range 200) and the unbounded variable share the
@@ -179,7 +179,7 @@ TEST_CASE("bobyqa scales mixed finite/infinite bounds coherently", "[bobyqa][bou
 
     // And it converges to the interior optimum on the unbounded coordinate.
     opts.max_iterations = 400;
-    step_budget_solver solver{bobyqa_policy<dynamic_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{bobyqa_policy<double, dynamic_dimension>{}, problem, x0, opts};
     auto result = solver.solve();
     CHECK(result.objective_value < 1e-6);
 }

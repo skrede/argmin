@@ -34,7 +34,7 @@ TEST_CASE("asymptote_options exposes literature defaults directly", "[options]")
 
 TEST_CASE("trust_region_options exposes literature defaults directly", "[options]")
 {
-    trust_region_options o{};
+    trust_region_options<> o{};
     static_assert(std::is_same_v<double, decltype(o.eta_good)>);
     static_assert(std::is_same_v<double, decltype(o.geometry_factor)>);
     CHECK(o.eta_good == 0.7);

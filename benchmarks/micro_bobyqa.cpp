@@ -229,7 +229,7 @@ int main()
     // HS001
     {
         argmin::bench::println("\n--- HS001 (Rosenbrock variant, x1 >= -1.5) ---");
-        auto fixed = bench_argmin(argmin::bobyqa_policy<2>{}, argmin::hs001<double>{}, reps);
+        auto fixed = bench_argmin(argmin::bobyqa_policy<double, 2>{}, argmin::hs001<double>{}, reps);
         auto dyn   = bench_argmin(argmin::bobyqa_policy<>{},  hs001_dynamic{}, reps);
         auto nlopt = bench_nlopt_hs001(reps);
         print_row("argmin<2>", fixed);
@@ -244,7 +244,7 @@ int main()
     // HS005
     {
         argmin::bench::println("\n--- HS005 (trigonometric, tight bounds) ---");
-        auto fixed = bench_argmin(argmin::bobyqa_policy<2>{}, argmin::hs005<double>{}, reps);
+        auto fixed = bench_argmin(argmin::bobyqa_policy<double, 2>{}, argmin::hs005<double>{}, reps);
         auto dyn   = bench_argmin(argmin::bobyqa_policy<>{},  hs005_dynamic{}, reps);
         auto nlopt = bench_nlopt_hs005(reps);
         print_row("argmin<2>", fixed);

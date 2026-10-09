@@ -35,12 +35,12 @@ namespace
 {
 
 using bobyqa_options = bobyqa_policy<>::options_type;
-using cobyla_options = cobyla_policy::options_type;
+using cobyla_options = cobyla_policy<>::options_type;
 using cmaes_policy_options = cmaes_policy<>::options_type;
 using cmaes_restart = cmaes_policy<>::restart_strategy;
 
 using bobyqa_wrapper = solver_wrapper<bobyqa_policy<>, bounded_problem>;
-using cobyla_wrapper = solver_wrapper<cobyla_policy, constrained_values_problem>;
+using cobyla_wrapper = solver_wrapper<cobyla_policy<>, constrained_values_problem>;
 using cmaes_wrapper = solver_wrapper<cmaes_policy<>, value_problem>;
 
 std::string describe_optional(const std::optional<double>& value)
@@ -50,18 +50,18 @@ std::string describe_optional(const std::optional<double>& value)
 
 void bind_trust_region_options(nb::module_& m)
 {
-    nb::class_<trust_region_options>(m, "TrustRegionOptions",
+    nb::class_<trust_region_options<>>(m, "TrustRegionOptions",
                                     "Read-only view of the trust-region acceptance and radius "
                                     "update parameters.")
         .def(nb::init<>())
-        .def_ro("eta_good", &trust_region_options::eta_good)
-        .def_ro("eta_poor", &trust_region_options::eta_poor)
-        .def_ro("expand_factor", &trust_region_options::expand_factor)
-        .def_ro("shrink_factor", &trust_region_options::shrink_factor)
-        .def_ro("step_threshold", &trust_region_options::step_threshold)
-        .def_ro("geometry_factor", &trust_region_options::geometry_factor)
+        .def_ro("eta_good", &trust_region_options<>::eta_good)
+        .def_ro("eta_poor", &trust_region_options<>::eta_poor)
+        .def_ro("expand_factor", &trust_region_options<>::expand_factor)
+        .def_ro("shrink_factor", &trust_region_options<>::shrink_factor)
+        .def_ro("step_threshold", &trust_region_options<>::step_threshold)
+        .def_ro("geometry_factor", &trust_region_options<>::geometry_factor)
         .def("__repr__",
-             [](const trust_region_options& opts)
+             [](const trust_region_options<>& opts)
              {
                  return "TrustRegionOptions(eta_good=" + format_number(opts.eta_good)
                         + ", eta_poor=" + format_number(opts.eta_poor)

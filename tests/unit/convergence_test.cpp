@@ -384,7 +384,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             bounded_rosenbrock problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            step_budget_solver<bobyqa_policy<bounded_rosenbrock::problem_dimension>,
+            step_budget_solver<bobyqa_policy<double, bounded_rosenbrock::problem_dimension>,
                          bounded_rosenbrock::problem_dimension, bounded_rosenbrock> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
@@ -394,7 +394,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             bounded_booth problem;
             Eigen::VectorXd x0{{0.0, 0.0}};
-            step_budget_solver<bobyqa_policy<bounded_booth::problem_dimension>,
+            step_budget_solver<bobyqa_policy<double, bounded_booth::problem_dimension>,
                          bounded_booth::problem_dimension, bounded_booth> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);
@@ -404,7 +404,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             bounded_himmelblau problem;
             Eigen::VectorXd x0{{1.0, 1.0}};
-            step_budget_solver<bobyqa_policy<bounded_himmelblau::problem_dimension>,
+            step_budget_solver<bobyqa_policy<double, bounded_himmelblau::problem_dimension>,
                          bounded_himmelblau::problem_dimension, bounded_himmelblau> solver{problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value < 1e-4);

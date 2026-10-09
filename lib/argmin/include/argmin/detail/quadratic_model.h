@@ -28,6 +28,25 @@
 namespace argmin::detail
 {
 
+template <scalar S>
+struct quadratic_model_constants;
+
+template <>
+struct quadratic_model_constants<double>
+{
+    static constexpr double svd_threshold = 1e-12;
+    static constexpr double lagrange_floor = 1e-12;
+};
+
+template <>
+struct quadratic_model_constants<float>
+{
+    // A precision-class value keeps the double row's fraction of the available precision:
+    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
+    static constexpr float svd_threshold = 5e-6f;   // rule
+    static constexpr float lagrange_floor = 5e-6f;  // rule
+};
+
 template <typename Scalar = double, int N = argmin::dynamic_dimension>
 struct quadratic_model
 {
@@ -41,7 +60,7 @@ struct quadratic_model
     // At x_base, sum_k L_k(x_base) = 1 (partition of unity).
     //
     // Reference: Powell 2009, Section 2 — Lagrange polynomials for interpolation.
-    Eigen::VectorXd lagrange_values;
+    Eigen::VectorX<Scalar> lagrange_values;
 
     // Polynomial basis matrix Phi (m x p) where p = 1 + n + n*(n+1)/2.
     // Row i contains the polynomial basis vector evaluated at Y[:,i] - x_base.
@@ -150,7 +169,7 @@ quadratic_model<Scalar, N> build_model(
 
     // Solve min ||theta||_2 s.t. Phi * theta = f_values via SVD
     auto svd = Phi.bdcSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
-    svd.setThreshold(Scalar(1e-12));
+    svd.setThreshold(quadratic_model_constants<Scalar>::svd_threshold);
     Eigen::Vector<Scalar, Pcoeff> theta = svd.solve(f_values);
 
     // Extract model coefficients from theta
@@ -191,7 +210,7 @@ quadratic_model<Scalar, N> build_model(
         auto U = svd.matrixU();  // m x m
 
         // w = V^T * phi(x_base), then scale by Sigma^{-1}, then multiply by U
-        Eigen::VectorXd w = V.transpose() * phi_xbase.template cast<double>();
+        Eigen::VectorX<Scalar> w = V.transpose() * phi_xbase.template cast<Scalar>();
         for(int i = 0; i < sv.size(); ++i)
         {
             if(sv[i] > thr)
@@ -199,13 +218,13 @@ quadratic_model<Scalar, N> build_model(
                 w[i] /= sv[i];
             }
             else
-                w[i] = 0.0;
+                w[i] = Scalar(0.0);
         }
         // Zero out components beyond singular value count
         for(int i = static_cast<int>(sv.size()); i < w.size(); ++i)
-            w[i] = 0.0;
+            w[i] = Scalar(0.0);
 
-        model.lagrange_values = U.template cast<double>() * w.head(m);
+        model.lagrange_values = U.template cast<Scalar>() * w.head(m);
     }
 
     // Initialize incremental data structures.
@@ -237,7 +256,7 @@ quadratic_model<Scalar, N> build_model(
 //
 // Reference: Powell 2009, Section 2.
 template <typename Scalar = double, int N = argmin::dynamic_dimension, int P = argmin::dynamic_dimension>
-Eigen::VectorXd compute_lagrange_at_point(
+Eigen::VectorX<Scalar> compute_lagrange_at_point(
     const Eigen::Matrix<Scalar, N, P>& Y,
     const Eigen::Vector<Scalar, P>& /*f_values*/,
     const Eigen::Vector<Scalar, N>& x_base,
@@ -271,7 +290,7 @@ Eigen::VectorXd compute_lagrange_at_point(
     }
 
     auto svd = Phi.bdcSvd(Eigen::ComputeFullU | Eigen::ComputeFullV);
-    svd.setThreshold(Scalar(1e-12));
+    svd.setThreshold(quadratic_model_constants<Scalar>::svd_threshold);
 
     // Build phi(x_query)
     Eigen::Vector<Scalar, N> sq = (x_query - x_base).eval();
@@ -296,18 +315,18 @@ Eigen::VectorXd compute_lagrange_at_point(
     auto V = svd.matrixV();
     auto U = svd.matrixU();
 
-    Eigen::VectorXd w = V.transpose() * phi_q.template cast<double>();
+    Eigen::VectorX<Scalar> w = V.transpose() * phi_q.template cast<Scalar>();
     for(int i = 0; i < sv.size(); ++i)
     {
         if(sv[i] > thr)
             w[i] /= sv[i];
         else
-            w[i] = 0.0;
+            w[i] = Scalar(0.0);
     }
     for(int i = static_cast<int>(sv.size()); i < w.size(); ++i)
-        w[i] = 0.0;
+        w[i] = Scalar(0.0);
 
-    return U.template cast<double>() * w.head(m);
+    return U.template cast<Scalar>() * w.head(m);
 }
 
 // Update model after replacing interpolation point k with a new point.
@@ -417,7 +436,7 @@ Eigen::VectorX<Scalar> update_model_incremental(
     Eigen::VectorX<Scalar> lv_xnew = compute_lagrange_incremental(model, x_base, x_new);
 
     // Step 2: Check denominator -- |L_t(x_new)| must be non-negligible.
-    if(std::abs(lv_xnew[t]) < Scalar(1e-12))
+    if(std::abs(lv_xnew[t]) < quadratic_model_constants<Scalar>::lagrange_floor)
         return Eigen::VectorX<Scalar>{};
 
     // Step 3: Update Phi row t and refresh pseudoinverse via LDLT.

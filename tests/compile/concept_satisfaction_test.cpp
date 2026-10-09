@@ -430,7 +430,7 @@ static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::ccsa_quadrat
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::cmaes_policy<>>>);
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::lm_policy<>>>);
 
-static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::cobyla_policy>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::cobyla_policy<>>>);
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::isres_policy<>>>);
 
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::projected_gn_policy<>>>);

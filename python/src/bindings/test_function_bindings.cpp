@@ -163,7 +163,7 @@ result_type solve_constrained_native(const native_constrained& problem, std::str
     if(method == "slsqp")
         return run_native<kraft_slsqp_policy<>>(problem, x0, opts);
     if(method == "cobyla")
-        return run_native<cobyla_policy>(problem, x0, opts);
+        return run_native<cobyla_policy<>>(problem, x0, opts);
     reject_method(method, "'slsqp', 'cobyla'");
 }
 

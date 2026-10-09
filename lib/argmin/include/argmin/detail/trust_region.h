@@ -288,13 +288,13 @@ Scalar compute_rho(Scalar f_old, Scalar f_new, Scalar q_old, Scalar q_new)
 // Reference: Powell 2009, Section 5.
 template <typename Scalar = double>
 Scalar update_radius(Scalar delta, Scalar rho, Scalar step_norm, Scalar delta_max,
-                     const trust_region_options& opts = {})
+                     const trust_region_options<Scalar>& opts = {})
 {
-    const auto eta_good = static_cast<Scalar>(opts.eta_good);
-    const auto eta_poor = static_cast<Scalar>(opts.eta_poor);
-    const auto step_thr = static_cast<Scalar>(opts.step_threshold);
-    const auto expand = static_cast<Scalar>(opts.expand_factor);
-    const auto shrink = static_cast<Scalar>(opts.shrink_factor);
+    const Scalar eta_good = opts.eta_good;
+    const Scalar eta_poor = opts.eta_poor;
+    const Scalar step_thr = opts.step_threshold;
+    const Scalar expand = opts.expand_factor;
+    const Scalar shrink = opts.shrink_factor;
 
     if(rho > eta_good && step_norm > step_thr * delta)
         return std::min(expand * delta, delta_max);
@@ -343,10 +343,10 @@ template <typename Scalar = double, int N = argmin::dynamic_dimension>
 int check_geometry(const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& Y,
                    const Eigen::Vector<Scalar, N>& x_k,
                    Scalar delta,
-                   const trust_region_options& opts = {})
+                   const trust_region_options<Scalar>& opts = {})
 {
     const int m = Y.cols();
-    const auto geo_factor = static_cast<Scalar>(opts.geometry_factor);
+    const Scalar geo_factor = opts.geometry_factor;
     Scalar worst_dist = geo_factor * delta;
     int worst_idx = -1;
 
@@ -387,7 +387,7 @@ int select_replacement(const Eigen::Matrix<Scalar, N, P>& Y,
                        const Eigen::Vector<Scalar, N>& x_new,
                        Scalar f_new,
                        const Eigen::Vector<Scalar, N>& x_k,
-                       const Eigen::VectorXd& lagrange_values_at_xnew,
+                       const Eigen::VectorX<Scalar>& lagrange_values_at_xnew,
                        Scalar delta)
 {
     const int m = static_cast<int>(Y.cols());
@@ -579,7 +579,7 @@ std::pair<Eigen::Vector<Scalar, N>, Scalar> altmov_line_search(
     {
         if(k == sys.kopt) continue;
 
-        Eigen::Vector<Scalar, N> d = (sys.xpt.col(k).head(n) - sys.xopt).eval();
+        Eigen::Vector<Scalar, N> d = sys.xpt.col(k).head(n) - sys.xopt;
         auto [slbd, subd] = altmov_clip_step_bounds(sys.xopt, d, adelt, lower, upper);
         if(slbd >= subd) continue;
 

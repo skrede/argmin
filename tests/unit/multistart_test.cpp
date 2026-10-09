@@ -292,7 +292,7 @@ TEST_CASE("multistart mirrors inner constraint violation through the decorator",
     Eigen::VectorXd x0{{0.0, 0.0}};
     solver_options opts;
 
-    using ms_policy = multistart_policy<cobyla_policy>;
+    using ms_policy = multistart_policy<cobyla_policy<>>;
     step_budget_solver solver{ms_policy{}, problem, x0, opts};
 
     // The initial iterate is deeply infeasible (c = 0 + 0 - 10 = -10) and
@@ -310,7 +310,7 @@ TEST_CASE("multistart propagates the inner policy's fixed-N vector type",
     // Compile-time pin: a fixed-N inner policy keeps fully-fixed state
     // inside the decorator instead of collapsing to Eigen::VectorXd.
     static_assert(std::is_same_v<
-        decltype(std::declval<multistart_policy<bobyqa_policy<2>>
+        decltype(std::declval<multistart_policy<bobyqa_policy<double, 2>>
             ::state_type<fixed_dim_quadratic>>().x),
         Eigen::Vector<double, 2>>);
 

@@ -689,7 +689,7 @@ void run_all_argmin_solvers(
 
     // COBYLA: constrained derivative-free (requires bounds + constraint values).
     if constexpr(constrained_values<Problem> && is_bound)
-        run_constrained("cobyla", cobyla_policy{});
+        run_constrained("cobyla", cobyla_policy<>{});
 
     // ISRES: global constrained (requires bounds + constraint values).
     //

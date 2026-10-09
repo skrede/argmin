@@ -637,7 +637,7 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
+        step_budget_solver solver{cobyla_policy<>{}, problem, x0, opts};
         auto result = solver.solve();
 
         INFO("HS024 objective: " << result.objective_value);
@@ -657,7 +657,7 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
+        step_budget_solver solver{cobyla_policy<>{}, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(0.5));
@@ -674,7 +674,7 @@ TEST_CASE("cobyla on hock-schittkowski problems", "[hs][cobyla]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{cobyla_policy{}, problem, x0, opts};
+        step_budget_solver solver{cobyla_policy<>{}, problem, x0, opts};
         auto result = solver.solve();
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1.0));

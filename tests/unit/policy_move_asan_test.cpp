@@ -294,7 +294,7 @@ TEST_CASE("cobyla survives move-then-step", "[move_asan]")
     Eigen::VectorXd x0{{2.0, 2.0}};
     solver_options<> opts;
 
-    construct_move_step(cobyla_policy{}, problem, x0, opts);
+    construct_move_step(cobyla_policy<>{}, problem, x0, opts);
 }
 
 TEST_CASE("augmented_lagrangian survives move-then-step", "[move_asan]")

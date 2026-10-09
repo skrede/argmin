@@ -392,9 +392,9 @@ int main()
     {
         derivative_free_constrained problem;
         Eigen::VectorXd x0{{2.0, 2.0}};
-        // cobyla_policy is dimension-agnostic: it is a non-template whose
-        // rebind is the identity, so it takes no dimension argument.
-        exercise(cobyla_policy{}, problem, x0);
+        // cobyla_policy is dimension-agnostic: its rebind ignores the
+        // dimension, so it takes no dimension argument.
+        exercise(cobyla_policy<>{}, problem, x0);
         exercise(isres_policy<derivative_free_constrained::problem_dimension>{},
                  problem, x0);
     }

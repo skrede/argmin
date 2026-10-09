@@ -101,7 +101,7 @@ TEST_CASE("augmented lagrangian with BOBYQA inner solver",
     // a cited rationale is the intended escape hatch.
     opts.constraint_tolerance = 5e-2;
 
-    step_budget_solver solver{augmented_lagrangian_policy<bobyqa_policy<hs035<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<bobyqa_policy<double, hs035<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 

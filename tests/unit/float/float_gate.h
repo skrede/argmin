@@ -20,6 +20,8 @@ inline constexpr double k_trust_region_sqp = 10.0;
 inline constexpr double k_least_squares = 10.0;
 // Moving-asymptote solves stop on subproblem-level tolerances, so their float gap is wider.
 inline constexpr double k_mma = 30.0;
+// Derivative-free solves have a precision floor near sqrt(eps_float) * scale.
+inline constexpr double k_derivative_free = 30.0;
 
 inline double tolerance(double k)
 {
