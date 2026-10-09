@@ -273,7 +273,7 @@ inline int run_all_rt_policies()
     // Levenberg-Marquardt on fixed-2 least-squares Rosenbrock.
     rc |= measure_steady_window(
         "lm rosenbrock_ls",
-        argmin::lm_policy<fixed_rosenbrock_ls::problem_dimension>{},
+        argmin::lm_policy<double, fixed_rosenbrock_ls::problem_dimension>{},
         fixed_rosenbrock_ls{}, 0);
 
     return rc;

@@ -257,7 +257,7 @@ void run_lm(golden_map& g, const std::string& fixture)
     Problem problem;
     auto x0 = problem.initial_point();
     auto opts = lm_opts();
-    step_budget_solver solver{lm_policy<Problem::problem_dimension>{},
+    step_budget_solver solver{lm_policy<double, Problem::problem_dimension>{},
                               problem, x0, opts};
     capture_trajectory(g, "lm", fixture, solver);
 }

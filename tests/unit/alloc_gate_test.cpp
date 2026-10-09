@@ -207,9 +207,9 @@ TEST_CASE("alloc_gate_lm", "[alloc-gate]")
     const auto opts = lm_gate_opts();
 
     check_steady_zero(sensor::measure_steady(
-        argmin::lm_policy<2>{}, rosenbrock_ls_fixed{}, opts, 10));
+        argmin::lm_policy<double, 2>{}, rosenbrock_ls_fixed{}, opts, 10));
     check_steady_zero(sensor::measure_steady(
-        argmin::lm_policy<argmin::sd_ls012<>::problem_dimension>{},
+        argmin::lm_policy<double, argmin::sd_ls012<>::problem_dimension>{},
         argmin::sd_ls012<>{}, opts, 10));
 }
 
@@ -485,7 +485,7 @@ TEST_CASE("alloc_gate_projected_gn", "[alloc-gate]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-12);
 
-    argmin::step_budget_solver solver{argmin::projected_gn_policy<2>{},
+    argmin::step_budget_solver solver{argmin::projected_gn_policy<double, 2>{},
                                       problem, x0, opts};
 
     solver.step();
@@ -724,7 +724,7 @@ TEST_CASE("alloc_gate_projected_gradient_gn", "[alloc-gate]")
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-12);
 
-    argmin::step_budget_solver solver{argmin::projected_gradient_gn_policy<2>{},
+    argmin::step_budget_solver solver{argmin::projected_gradient_gn_policy<double, 2>{},
                                       problem, x0, opts};
 
     solver.step();

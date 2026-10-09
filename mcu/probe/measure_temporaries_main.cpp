@@ -96,7 +96,7 @@ int main()
     std::printf("[filter_nw_sqp hs071] largest single temporary = %zu B\n", filt);
 
     const std::size_t lm = measure_policy_temporary(
-        argmin::lm_policy<argmin::mcu::fixed_rosenbrock_ls::problem_dimension>{},
+        argmin::lm_policy<double, argmin::mcu::fixed_rosenbrock_ls::problem_dimension>{},
         argmin::mcu::fixed_rosenbrock_ls{});
     std::printf("[lm rosenbrock_ls] largest single temporary = %zu B\n", lm);
 

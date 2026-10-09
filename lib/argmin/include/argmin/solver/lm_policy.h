@@ -24,6 +24,8 @@
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
 
+#include "argmin/options/least_squares_defaults.h"
+
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -37,23 +39,24 @@
 namespace argmin
 {
 
-template <int N = dynamic_dimension>
+template <scalar Scalar = double, int N = dynamic_dimension>
 struct lm_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
 
     template <int M>
-    using rebind = lm_policy<M>;
+    using rebind = lm_policy<Scalar, M>;
 
+    // An unset field takes its least_squares_defaults<Scalar> value.
     struct options_type
     {
-        std::optional<double> initial_lambda{};      // LM damping init (default: auto via Nielsen, Nielsen 1999)
-        std::optional<double> tau{};                 // initial damping scale (default: 1e-3, Nielsen 1999)
-        std::optional<double> nu_initial{};          // damping direction factor (default: 2.0, Nielsen 1999)
-        std::optional<double> damping_factor{};      // lambda update 1/3 factor (default: 1/3, Nielsen 1999)
-        std::optional<double> diagonal_min_clamp{};  // min diagonal value (default: 1e-8)
-        std::optional<double> lambda_min{};          // lambda floor (default: 1e-20)
-        std::optional<double> lambda_max{};          // lambda ceiling (default: 1e20)
+        std::optional<Scalar> initial_lambda{};      // LM damping init (default: auto via Nielsen, Nielsen 1999)
+        std::optional<Scalar> tau{};                 // initial damping scale (Nielsen 1999)
+        std::optional<Scalar> nu_initial{};          // damping direction factor (Nielsen 1999)
+        std::optional<Scalar> damping_factor{};      // lambda update floor factor (Nielsen 1999)
+        std::optional<Scalar> diagonal_min_clamp{};  // min diagonal value
+        std::optional<Scalar> lambda_min{};          // lambda floor
+        std::optional<Scalar> lambda_max{};          // lambda ceiling
         std::uint16_t stall_window{50};
         // feasibility_gate intentionally omitted: lm_policy is unconstrained least-squares;
         // step_result reports no constraint_violation signal, so gating ftol_reached on a
@@ -66,24 +69,24 @@ struct lm_policy
     struct state_type
     {
         const P* problem{nullptr};
-        Eigen::Vector<double, N> x;
-        double objective_value{};     // 0.5 * ||r||^2
-        double lambda{};              // damping parameter
-        double nu{2.0};              // lambda multiplier on rejection
-        Eigen::VectorXd r;           // current residuals (m-dimensional, stays dynamic)
-        Eigen::MatrixXd J;           // current Jacobian (m x n, stays dynamic for concept compat)
+        Eigen::Vector<Scalar, N> x;
+        Scalar objective_value{};     // 0.5 * ||r||^2
+        Scalar lambda{};              // damping parameter
+        Scalar nu{least_squares_defaults<Scalar>::nu_initial};  // lambda multiplier on rejection
+        Eigen::VectorX<Scalar> r;     // current residuals (m-dimensional, stays dynamic)
+        Eigen::MatrixX<Scalar> J;     // current Jacobian (m x n, stays dynamic for concept compat)
         // Per-step work buffers, sized once in init and reused so a warm
         // steady-state step performs no heap allocation.
-        Eigen::VectorXd r_trial;     // trial-point residuals (m-dimensional)
-        Eigen::VectorXd Jh;          // J * h product for the gain ratio (m-dimensional)
-        double initial_objective{};  // for divergence detection
+        Eigen::VectorX<Scalar> r_trial;  // trial-point residuals (m-dimensional)
+        Eigen::VectorX<Scalar> Jh;       // J * h product for the gain ratio (m-dimensional)
+        Scalar initial_objective{};      // for divergence detection
         std::uint32_t iteration{0};
         int num_residuals{};
     };
 
     template <typename Problem, typename Convergence>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
+                    const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
@@ -92,7 +95,7 @@ struct lm_policy
 
     template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
+                    const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         state_type<Problem> s;
@@ -108,54 +111,54 @@ struct lm_policy
         s.r_trial.resize(s.num_residuals);
         s.Jh.resize(s.num_residuals);
         s.problem->residuals(x0, s.r);
-        if constexpr(requires(const Problem& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
+        if constexpr(requires(const Problem& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
                          p.jacobian(xx, JJ);
                      })
             s.problem->jacobian(x0, s.J);
         else
         {
-            auto residual_fn = [&](const Eigen::Vector<double, N>& xx, Eigen::VectorXd& rr) {
+            auto residual_fn = [&](const Eigen::Vector<Scalar, N>& xx, Eigen::VectorX<Scalar>& rr) {
                 s.problem->residuals(xx, rr);
             };
             fd_jacobian<N>(residual_fn, x0, s.J, s.num_residuals);
         }
-        s.objective_value = 0.5 * s.r.squaredNorm();
+        s.objective_value = Scalar(0.5) * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
 
         // Initialize lambda (Nielsen 1999)
-        double init_lambda = options.initial_lambda.value_or(0.0);
-        double tau = options.tau.value_or(1e-3);
-        if(init_lambda > 0.0)
+        Scalar init_lambda = options.initial_lambda.value_or(Scalar(0));
+        Scalar tau = options.tau.value_or(least_squares_defaults<Scalar>::tau);
+        if(init_lambda > Scalar(0))
         {
             s.lambda = init_lambda;
         }
         else
         {
-            Eigen::Vector<double, N> diag = (s.J.transpose() * s.J).diagonal();
-            double max_diag = diag.maxCoeff();
-            s.lambda = (max_diag > 0.0) ? tau * max_diag : 1e-4;
+            Eigen::Vector<Scalar, N> diag = (s.J.transpose() * s.J).diagonal();
+            Scalar max_diag = diag.maxCoeff();
+            s.lambda = (max_diag > Scalar(0)) ? tau * max_diag : least_squares_defaults<Scalar>::fallback_lambda;
         }
 
-        s.nu = options.nu_initial.value_or(2.0);
+        s.nu = options.nu_initial.value_or(least_squares_defaults<Scalar>::nu_initial);
         return s;
     }
 
     // One LM iteration per K&W Algorithm 6.3 with Nielsen (1999) lambda update.
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
-        const double diag_min = options.diagonal_min_clamp.value_or(1e-8);
-        const double lam_min = options.lambda_min.value_or(1e-20);
-        const double lam_max = options.lambda_max.value_or(1e20);
-        const double damp_factor = options.damping_factor.value_or(1.0 / 3.0);
+        const Scalar diag_min = options.diagonal_min_clamp.value_or(least_squares_defaults<Scalar>::diagonal_min_clamp);
+        const Scalar lam_min = options.lambda_min.value_or(least_squares_defaults<Scalar>::lambda_min);
+        const Scalar lam_max = options.lambda_max.value_or(least_squares_defaults<Scalar>::lambda_max);
+        const Scalar damp_factor = options.damping_factor.value_or(least_squares_defaults<Scalar>::damping_factor);
 
         // Gauss-Newton Hessian approximation
-        Eigen::Matrix<double, N, N> H(n, n);
+        Eigen::Matrix<Scalar, N, N> H(n, n);
         H.noalias() = s.J.transpose() * s.J;
 
         // Gradient of 0.5*||r||^2: g = J^T * r
-        Eigen::Vector<double, N> g(n);
+        Eigen::Vector<Scalar, N> g(n);
         g.noalias() = s.J.transpose() * s.r;
 
         // Diagonal-scaled damping (K&W Eq. 6.11)
@@ -163,27 +166,27 @@ struct lm_policy
             H(i, i) += s.lambda * std::max(H(i, i), diag_min);
 
         // Solve damped normal equations via LDLT
-        Eigen::Vector<double, N> h = H.ldlt().solve(-g);
+        Eigen::Vector<Scalar, N> h = H.ldlt().solve(-g);
 
         // Trial point
-        Eigen::Vector<double, N> x_trial = (s.x + h).eval();
+        Eigen::Vector<Scalar, N> x_trial = (s.x + h).eval();
 
         // Evaluate trial residuals into the state-resident buffer
         // (residual dimension, stays dynamic; storage reused per step).
-        Eigen::VectorXd& r_trial = s.r_trial;
+        Eigen::VectorX<Scalar>& r_trial = s.r_trial;
         s.problem->residuals(x_trial, r_trial);
-        double f_trial = 0.5 * r_trial.squaredNorm();
+        Scalar f_trial = Scalar(0.5) * r_trial.squaredNorm();
 
         // Gain ratio (Nielsen 1999): direct model reduction using the original
         // Jacobian, predicted = -h^T g - 0.5 * ||J*h||^2. For the exact LM step
         // this equals 0.5*||J*h||^2 + lambda*h^T D h >= 0, so a non-positive
         // predicted reduction signals a degenerate or garbage solve rather than
         // a real model decrease -- in that case the trial must NOT be accepted.
-        double actual = s.objective_value - f_trial;
+        Scalar actual = s.objective_value - f_trial;
         // J * h lands in the state-resident buffer instead of a per-step
         // product temporary; same kernel, reused storage.
         s.Jh.noalias() = s.J * h;
-        double predicted = -(h.dot(g) + 0.5 * s.Jh.squaredNorm());
+        Scalar predicted = -(h.dot(g) + Scalar(0.5) * s.Jh.squaredNorm());
 
         // Guarded gain ratio (detail::gain_ratio): requires a strictly positive
         // predicted reduction and a finite actual reduction before dividing,
@@ -191,37 +194,37 @@ struct lm_policy
         // silent accept and gates a NaN/Inf residual evaluation (which makes
         // `actual` non-finite) so a divergent trial cannot masquerade as an
         // improvement.
-        double rho = detail::gain_ratio(actual, predicted);
+        Scalar rho = detail::gain_ratio(actual, predicted);
 
         // Accept/reject with Nielsen (1999) lambda update
-        const double old_value = s.objective_value;
-        bool accepted = rho > 0.0;
+        const Scalar old_value = s.objective_value;
+        bool accepted = rho > Scalar(0);
 
         if(accepted)
         {
             s.x = x_trial;
             s.r = r_trial;
-            if constexpr(requires(const P& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
+            if constexpr(requires(const P& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
                              p.jacobian(xx, JJ);
                          })
                 s.problem->jacobian(s.x, s.J);
             else
             {
-                auto residual_fn = [&](const Eigen::Vector<double, N>& xx, Eigen::VectorXd& rr) {
+                auto residual_fn = [&](const Eigen::Vector<Scalar, N>& xx, Eigen::VectorX<Scalar>& rr) {
                     s.problem->residuals(xx, rr);
                 };
                 fd_jacobian<N>(residual_fn, s.x, s.J, s.num_residuals);
             }
             s.objective_value = f_trial;
 
-            double factor = 1.0 - std::pow(2.0 * rho - 1.0, 3.0);
+            Scalar factor = Scalar(1) - std::pow(Scalar(2) * rho - Scalar(1), Scalar(3));
             s.lambda *= std::max(damp_factor, factor);
-            s.nu = options.nu_initial.value_or(2.0);
+            s.nu = options.nu_initial.value_or(least_squares_defaults<Scalar>::nu_initial);
         }
         else
         {
             s.lambda *= s.nu;
-            s.nu *= 2.0;
+            s.nu *= Scalar(2);
         }
 
         // Clamp lambda to prevent overflow/underflow
@@ -235,7 +238,7 @@ struct lm_policy
         std::optional<solver_status> policy_status{};
         if(!std::isfinite(f_trial))
             policy_status = solver_status::diverged;
-        else if(s.initial_objective > 0.0 && s.objective_value > 100.0 * s.initial_objective)
+        else if(s.initial_objective > Scalar(0) && s.objective_value > Scalar(100) * s.initial_objective)
             policy_status = solver_status::diverged;
 
         // Report h.norm() as step_size even on rejection so step_budget_solver's stall
@@ -245,7 +248,7 @@ struct lm_policy
         // reported lambda here leaked an internal damping value into the
         // user-visible step_result. ftol_reached is now correctly gated on the
         // KKT residual (convergence.h), so no proxy is needed to suppress it.
-        double effective_change = s.objective_value - old_value;
+        Scalar effective_change = s.objective_value - old_value;
 
         // KKT residual for unconstrained least-squares: infinity-norm of the
         // gradient g = J^T r of 0.5*||r||^2. First-order optimality holds iff
@@ -255,9 +258,9 @@ struct lm_policy
         // Reference: N&W 2e Section 10.3 (nonlinear least-squares first-order
         //            conditions); N&W 2e Section 12.1 (KKT conditions reduce
         //            to stationarity when no constraints are present).
-        double kkt = g.template lpNorm<Eigen::Infinity>();
+        Scalar kkt = g.template lpNorm<Eigen::Infinity>();
 
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value = s.objective_value,
             .gradient_norm = g.norm(),
             .step_size = h.norm(),
@@ -270,37 +273,37 @@ struct lm_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = x0;
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, x0.size());
         s.problem->residuals(x0, s.r);
-        if constexpr(requires(const P& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
+        if constexpr(requires(const P& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
                          p.jacobian(xx, JJ);
                      })
             s.problem->jacobian(x0, s.J);
         else
         {
-            auto residual_fn = [&](const Eigen::Vector<double, N>& xx, Eigen::VectorXd& rr) {
+            auto residual_fn = [&](const Eigen::Vector<Scalar, N>& xx, Eigen::VectorX<Scalar>& rr) {
                 s.problem->residuals(xx, rr);
             };
             fd_jacobian<N>(residual_fn, x0, s.J, s.num_residuals);
         }
-        s.objective_value = 0.5 * s.r.squaredNorm();
+        s.objective_value = Scalar(0.5) * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
 
         // Nielsen init for lambda using policy options
-        double tau = options.tau.value_or(1e-3);
-        Eigen::Vector<double, N> diag = (s.J.transpose() * s.J).diagonal();
-        double max_diag = diag.maxCoeff();
-        s.lambda = (max_diag > 0.0) ? tau * max_diag : 1e-4;
-        s.nu = options.nu_initial.value_or(2.0);
+        Scalar tau = options.tau.value_or(least_squares_defaults<Scalar>::tau);
+        Eigen::Vector<Scalar, N> diag = (s.J.transpose() * s.J).diagonal();
+        Scalar max_diag = diag.maxCoeff();
+        s.lambda = (max_diag > Scalar(0)) ? tau * max_diag : least_squares_defaults<Scalar>::fallback_lambda;
+        s.nu = options.nu_initial.value_or(least_squares_defaults<Scalar>::nu_initial);
         s.iteration = 0;
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset(s, x0);
     }

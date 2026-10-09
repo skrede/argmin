@@ -333,7 +333,7 @@ TEST_CASE("lm_policy: exact gain ratio on a quadratic; honest objective_change",
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-12);
 
-    step_budget_solver solver{lm_policy<2>{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy<double, 2>{}, problem, x0, opts};
 
     // Each accepted step's reported objective_change must equal the true
     // objective decrease (the value before minus the value after), never a
@@ -369,7 +369,7 @@ TEST_CASE("lm_policy: rejected step reports zero objective_change, not lambda",
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-12);
 
-    step_budget_solver solver{lm_policy<1>{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy<double, 1>{}, problem, x0, opts};
 
     // Step 1: the Gauss-Newton step overshoots, so the trial is rejected. The
     // reported objective_change must be exactly 0 (the iterate did not move),
@@ -433,7 +433,7 @@ double lm_trajectory_fingerprint(double& out_f, double& out_x0, double& out_x1)
     solver_options opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-12);
-    step_budget_solver solver{lm_policy<2>{}, problem, x0, opts};
+    step_budget_solver solver{lm_policy<double, 2>{}, problem, x0, opts};
     double fp = 0.0;
     for(int i = 0; i < 50; ++i)
     {

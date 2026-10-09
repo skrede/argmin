@@ -739,10 +739,10 @@ TEST_CASE("projected_gradient_gn_policy: gain_ratio extraction is numerically id
 // runtime-dimension trajectory bit-for-bit.
 //
 // The problem's problem_dimension drives the CTAD deduction guide, which
-// rebinds the policy to projected_gn_policy<N>. bounded_powell_singular_ls
+// rebinds the policy to projected_gn_policy<double, N>. bounded_powell_singular_ls
 // declares dynamic_dimension (rebinds to the dynamic path); the fixed-4
 // twin below declares problem_dimension = 4 (rebinds to
-// projected_gn_policy<4>, decision variable + box on Vector<double, 4>).
+// projected_gn_policy<double, 4>, decision variable + box on Vector<double, 4>).
 // Both run the identical Powell-singular least-squares math, so the whole
 // objective / step-size / iterate sequence must match exactly -- the
 // de-type-erasure and axis typing introduce no numerical drift.

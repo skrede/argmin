@@ -15,6 +15,8 @@
 //            IMM-REP-1999-05 (the gain-ratio accept test); N&W 2e Section 4.1
 //            (the trust-region ratio rho_k).
 
+#include "argmin/types.h"
+
 #include <cmath>
 
 namespace argmin::detail
@@ -27,10 +29,11 @@ namespace argmin::detail
 // Gating on the finiteness of `actual` also gates a non-finite trial objective:
 // callers compute actual = f(x) - f(x_trial) with f(x) finite, so a NaN or Inf
 // trial makes `actual` non-finite and the ratio collapses to 0.
-inline double gain_ratio(double actual, double predicted)
+template <scalar Scalar>
+Scalar gain_ratio(Scalar actual, Scalar predicted)
 {
-    const bool valid = std::isfinite(actual) && predicted > 0.0;
-    return valid ? actual / predicted : 0.0;
+    const bool valid = std::isfinite(actual) && predicted > Scalar(0);
+    return valid ? actual / predicted : Scalar(0);
 }
 
 }
