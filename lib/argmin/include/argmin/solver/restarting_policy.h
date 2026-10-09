@@ -89,7 +89,7 @@ struct restarting_policy
     Inner inner_policy_{};
     options_type options{};
 
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
                     const auto& x0,
                     const solver_options<Convergence>& opts)

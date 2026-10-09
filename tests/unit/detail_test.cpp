@@ -428,8 +428,8 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // default_convergence carries step_tolerance_criterion. Set the
     // threshold to a value the mean_sigma beats (1e-6 > 1e-7) -> fires.
     {
-        argmin::default_convergence conv{};
-        std::get<argmin::step_tolerance_criterion>(conv.criteria).threshold = 1e-6;
+        argmin::default_convergence<> conv{};
+        std::get<argmin::step_tolerance_criterion<>>(conv.criteria).threshold = 1e-6;
         CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1e-9, n, lower, upper));
     }
@@ -437,8 +437,8 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // Same convergence with a tighter threshold (1e-9) the mean_sigma does
     // not beat -> does not fire.
     {
-        argmin::default_convergence conv{};
-        std::get<argmin::step_tolerance_criterion>(conv.criteria).threshold = 1e-9;
+        argmin::default_convergence<> conv{};
+        std::get<argmin::step_tolerance_criterion<>>(conv.criteria).threshold = 1e-9;
         CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));
     }
@@ -453,7 +453,7 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // step_tolerance_criterion entirely) is exercised by the
     // slsqp_compatible_convergence case below.
     {
-        argmin::default_convergence conv{};
+        argmin::default_convergence<> conv{};
         CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1.0, n, lower, upper));
         CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
@@ -464,7 +464,7 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // SFINAE guard must keep the function compilable AND silently fall
     // back to bound_relative semantics.
     {
-        argmin::slsqp_compatible_convergence conv{};
+        argmin::slsqp_compatible_convergence<> conv{};
         CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1.0, n, lower, upper));
         CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(

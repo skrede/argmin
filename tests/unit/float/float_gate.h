@@ -13,6 +13,7 @@ namespace argmin::float_gate
 {
 
 inline constexpr double k_qp = 1.0;
+inline constexpr double k_harness = 10.0;
 
 inline double tolerance(double k)
 {

@@ -7,6 +7,7 @@
 // the build fails with a clear concept-violation error.
 
 #include "argmin/formulation/concepts.h"
+#include "argmin/detail/runner_concept_probe.h"
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/time_budget_solver.h"
 #include "argmin/solver/step_and_time_budget_solver.h"
@@ -86,6 +87,47 @@ static_assert(argmin::differentiable<argmin::rastrigin<float>, float>);
 
 static_assert(argmin::objective<argmin::ackley<float>, float>);
 static_assert(argmin::differentiable<argmin::ackley<float>, float>);
+
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::detail::runner_concept_probe_policy<float>>, float>);
+static_assert(argmin::steppable<argmin::stepper<argmin::detail::runner_concept_probe_policy<float>>, float>);
+
+namespace
+{
+
+struct float_problem
+{
+    static constexpr int problem_dimension = 2;
+
+    float value(const Eigen::Vector<float, 2>&) const { return 0.0f; }
+    int dimension() const { return 2; }
+    Eigen::Vector<float, 2> lower_bounds() const { return Eigen::Vector<float, 2>::Zero(); }
+    Eigen::Vector<float, 2> upper_bounds() const { return Eigen::Vector<float, 2>::Ones(); }
+};
+
+struct double_valued_problem
+{
+    static constexpr int problem_dimension = 2;
+
+    double value(const Eigen::Vector<float, 2>&) const { return 0.0; }
+    int dimension() const { return 2; }
+};
+
+struct double_bounded_problem
+{
+    static constexpr int problem_dimension = 2;
+
+    float value(const Eigen::Vector<float, 2>&) const { return 0.0f; }
+    int dimension() const { return 2; }
+    Eigen::Vector<double, 2> lower_bounds() const { return Eigen::Vector<double, 2>::Zero(); }
+    Eigen::Vector<double, 2> upper_bounds() const { return Eigen::Vector<double, 2>::Ones(); }
+};
+
+}
+
+static_assert(argmin::objective<float_problem, float>);
+static_assert(argmin::bound_constrained<float_problem, float>);
+static_assert(!argmin::objective<double_valued_problem, float>);
+static_assert(!argmin::bound_constrained<double_bounded_problem, float>);
 
 // ---------------------------------------------------------------------------
 // Test functions should NOT satisfy higher-order concepts

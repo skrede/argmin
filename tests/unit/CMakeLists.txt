@@ -194,6 +194,7 @@ endif()
 add_executable(argmin_float_tests
     float/float_gate_test.cpp
     float/qp_float_test.cpp
+    float/harness_float_test.cpp
 )
 target_link_libraries(argmin_float_tests
     PRIVATE

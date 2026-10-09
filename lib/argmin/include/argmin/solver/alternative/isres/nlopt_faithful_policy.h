@@ -254,7 +254,7 @@ struct nlopt_faithful_policy
         return init(problem, x0, opts);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
         requires objective<Problem>
               && constrained_values<Problem>
               && bound_constrained<Problem>
@@ -471,10 +471,10 @@ struct nlopt_faithful_policy
         // stays std::nullopt and step() silently falls back to the
         // bound-relative form.
         if constexpr(detail::tuple_contains_v<
-                         step_tolerance_criterion,
+                         step_tolerance_criterion<scalar_type>,
                          decltype(opts.convergence.criteria)>)
         {
-            const auto& crit = std::get<step_tolerance_criterion>(
+            const auto& crit = std::get<step_tolerance_criterion<scalar_type>>(
                 opts.convergence.criteria);
             s.convergence_xtol_threshold = crit.threshold;
         }

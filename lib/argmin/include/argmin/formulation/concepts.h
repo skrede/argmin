@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <concepts>
+#include <type_traits>
 
 namespace argmin
 {
@@ -64,7 +65,7 @@ template <typename P, typename S = double>
 concept objective = has_problem_dimension<P> &&
     requires(const P& p, const Eigen::Vector<S, problem_dimension_v<P>>& x)
 {
-    { p.value(x) } -> std::convertible_to<S>;
+    { p.value(x) } -> std::same_as<S>;
     { p.dimension() } -> std::convertible_to<int>;
 };
 
@@ -89,6 +90,10 @@ concept bound_constrained = objective<P, S> &&
 {
     { p.lower_bounds() } -> std::convertible_to<Eigen::Vector<S, problem_dimension_v<P>>>;
     { p.upper_bounds() } -> std::convertible_to<Eigen::Vector<S, problem_dimension_v<P>>>;
+    // Eigen's converting constructor is not SFINAE-constrained on the scalar, so the shape check
+    // alone would admit double bounds for a float policy and fail later inside Eigen.
+    requires std::same_as<typename std::remove_cvref_t<decltype(p.lower_bounds())>::Scalar, S>;
+    requires std::same_as<typename std::remove_cvref_t<decltype(p.upper_bounds())>::Scalar, S>;
 };
 
 template <typename P, typename S = double>

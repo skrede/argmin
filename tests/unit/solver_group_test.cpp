@@ -370,10 +370,10 @@ TEST_CASE("group step_n cannot fire false convergence from a retirement-induced 
     // pins gradient_norm at 10.0) -- so the only way `converged` could ever
     // fire here is via a fabricated (value-initialized, gradient_norm == 0)
     // step_result following retirement of index 0.
-    default_convergence conv;
+    default_convergence<> conv;
     std::get<0>(conv.criteria).threshold = 1e-9;
 
-    solver_options<default_convergence> opts;
+    solver_options<default_convergence<>> opts;
     opts.convergence = conv;
 
     basic_solver_group<fallback_schedule, argmin::dynamic_dimension, void,

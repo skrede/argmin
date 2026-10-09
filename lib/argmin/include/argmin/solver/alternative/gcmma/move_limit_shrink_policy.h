@@ -154,7 +154,7 @@ struct move_limit_shrink_policy
         return s;
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
                              const Eigen::Vector<double, N>& x0,
                              const solver_options<Convergence>&)
@@ -369,7 +369,7 @@ struct move_limit_shrink_policy
         // per-inner re-construction would, while reusing the allocated
         // buffers) rather than re-allocating it on every shrink iteration.
         DualPolicy<MC> dp;
-        solver_options<default_convergence> dopts;
+        solver_options<default_convergence<scalar_type>> dopts;
         dopts.max_iterations = 100;
         dopts.set_gradient_threshold(1e-9);
         dopts.set_step_threshold(1e-15);

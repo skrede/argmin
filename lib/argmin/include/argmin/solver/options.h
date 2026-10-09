@@ -3,6 +3,8 @@
 
 #include "argmin/solver/convergence.h"
 
+#include "argmin/options/convergence_defaults.h"
+
 #include <cstdint>
 #include <optional>
 #include <tuple>
@@ -23,13 +25,14 @@ namespace argmin
 // that composes criterion types via fold expression. Individual tolerance
 // thresholds live in the criterion types, not here.
 
-template <typename Convergence = default_convergence>
+template <typename Convergence = default_convergence<>>
 struct solver_options
 {
     using convergence_type = Convergence;
+    using scalar_type = typename Convergence::scalar_type;
 
     std::uint32_t max_iterations{1000};
-    std::optional<double> constraint_tolerance{};
+    std::optional<scalar_type> constraint_tolerance{};
     // Threshold used by step_budget_solver's best-seen feasibility-first
     // comparator: an iterate with constraint_violation <= this value
     // is treated as feasible when selecting the returned point.
@@ -46,68 +49,68 @@ struct solver_options
     // Reference: NLopt nlopt_optimize best-solution-returned convention
     //            (nlopt/src/api/nlopt.c); N&W 2e Definition 12.1
     //            (primal feasibility).
-    double feasibility_tolerance{1e-6};
+    scalar_type feasibility_tolerance{convergence_defaults<scalar_type>::feasibility_tolerance};
     Convergence convergence{};
 
     // Convenience accessors for common convergence criteria thresholds.
     // These delegate to the corresponding criterion in the convergence policy.
 
     template <typename C = Convergence>
-    void set_gradient_threshold(double v)
-        requires requires(C& c) { std::get<gradient_tolerance_criterion>(c.criteria); }
+    void set_gradient_threshold(scalar_type v)
+        requires requires(C& c) { std::get<gradient_tolerance_criterion<scalar_type>>(c.criteria); }
     {
-        std::get<gradient_tolerance_criterion>(convergence.criteria).threshold = v;
+        std::get<gradient_tolerance_criterion<scalar_type>>(convergence.criteria).threshold = v;
     }
 
     template <typename C = Convergence>
-    void set_objective_threshold(double v)
-        requires requires(C& c) { std::get<objective_tolerance_criterion>(c.criteria); }
+    void set_objective_threshold(scalar_type v)
+        requires requires(C& c) { std::get<objective_tolerance_criterion<scalar_type>>(c.criteria); }
     {
-        std::get<objective_tolerance_criterion>(convergence.criteria).threshold = v;
-        std::get<objective_tolerance_criterion>(convergence.criteria).stationarity_threshold = v;
+        std::get<objective_tolerance_criterion<scalar_type>>(convergence.criteria).threshold = v;
+        std::get<objective_tolerance_criterion<scalar_type>>(convergence.criteria).stationarity_threshold = v;
     }
 
     template <typename C = Convergence>
-    void set_stationarity_threshold(double v)
-        requires requires(C& c) { std::get<objective_tolerance_criterion>(c.criteria); }
+    void set_stationarity_threshold(scalar_type v)
+        requires requires(C& c) { std::get<objective_tolerance_criterion<scalar_type>>(c.criteria); }
     {
-        std::get<objective_tolerance_criterion>(convergence.criteria).stationarity_threshold = v;
+        std::get<objective_tolerance_criterion<scalar_type>>(convergence.criteria).stationarity_threshold = v;
     }
 
     template <typename C = Convergence>
-    void set_step_threshold(double v)
-        requires requires(C& c) { std::get<step_tolerance_criterion>(c.criteria); }
+    void set_step_threshold(scalar_type v)
+        requires requires(C& c) { std::get<step_tolerance_criterion<scalar_type>>(c.criteria); }
     {
-        std::get<step_tolerance_criterion>(convergence.criteria).threshold = v;
+        std::get<step_tolerance_criterion<scalar_type>>(convergence.criteria).threshold = v;
     }
 
     template <typename C = Convergence>
-    void set_objective_threshold_rel(double v)
-        requires requires(C& c) { std::get<objective_tolerance_rel_criterion>(c.criteria); }
+    void set_objective_threshold_rel(scalar_type v)
+        requires requires(C& c) { std::get<objective_tolerance_rel_criterion<scalar_type>>(c.criteria); }
     {
-        std::get<objective_tolerance_rel_criterion>(convergence.criteria).threshold = v;
-        std::get<objective_tolerance_rel_criterion>(convergence.criteria).stationarity_threshold = v;
+        std::get<objective_tolerance_rel_criterion<scalar_type>>(convergence.criteria).threshold = v;
+        std::get<objective_tolerance_rel_criterion<scalar_type>>(convergence.criteria).stationarity_threshold = v;
     }
 
     template <typename C = Convergence>
-    void set_step_threshold_rel(double v)
-        requires requires(C& c) { std::get<step_tolerance_rel_criterion>(c.criteria); }
+    void set_step_threshold_rel(scalar_type v)
+        requires requires(C& c) { std::get<step_tolerance_rel_criterion<scalar_type>>(c.criteria); }
     {
-        std::get<step_tolerance_rel_criterion>(convergence.criteria).threshold = v;
+        std::get<step_tolerance_rel_criterion<scalar_type>>(convergence.criteria).threshold = v;
     }
 
     template <typename C = Convergence>
-    void set_stall_threshold(double v)
-        requires requires(C& c) { std::get<stall_tolerance_criterion>(c.criteria); }
+    void set_stall_threshold(scalar_type v)
+        requires requires(C& c) { std::get<stall_tolerance_criterion<scalar_type>>(c.criteria); }
     {
-        std::get<stall_tolerance_criterion>(convergence.criteria).threshold = v;
+        std::get<stall_tolerance_criterion<scalar_type>>(convergence.criteria).threshold = v;
     }
 
     template <typename C = Convergence>
     void set_stall_window(std::uint16_t v)
-        requires requires(C& c) { std::get<stall_tolerance_criterion>(c.criteria); }
+        requires requires(C& c) { std::get<stall_tolerance_criterion<scalar_type>>(c.criteria); }
     {
-        std::get<stall_tolerance_criterion>(convergence.criteria).window = v;
+        std::get<stall_tolerance_criterion<scalar_type>>(convergence.criteria).window = v;
     }
 };
 

@@ -517,7 +517,7 @@ struct augmented_lagrangian_policy
         return s;
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
                              const Eigen::Vector<scalar_type, N>& x0,
                              const solver_options<Convergence>& /*solver_opts*/)
@@ -648,7 +648,7 @@ struct augmented_lagrangian_policy
             s.omega = static_cast<scalar_type>(tol_eta * std::pow(s.mu, tol_alpha));
         const scalar_type inner_tol = std::max(*s.omega, inner_grad_tol);
 
-        solver_options<> inner_opts;
+        solver_options<default_convergence<scalar_type>> inner_opts;
         inner_opts.max_iterations = inner_max;
         // The inner adaptive tolerance gates the inner solve on its KKT
         // residual, not the raw objective-gradient norm: gradient_tolerance_
@@ -660,11 +660,11 @@ struct augmented_lagrangian_policy
         // is the projected inner-KKT residual from the dual solve -- the
         // correct omega_k -> 0 quantity for the augmented-Lagrangian outer
         // schedule; the raw gradient norm would be the wrong measure there.
-        std::get<gradient_tolerance_criterion>(inner_opts.convergence.criteria)
+        std::get<gradient_tolerance_criterion<scalar_type>>(inner_opts.convergence.criteria)
             .threshold = inner_tol;
-        std::get<objective_tolerance_criterion>(inner_opts.convergence.criteria)
+        std::get<objective_tolerance_criterion<scalar_type>>(inner_opts.convergence.criteria)
             .threshold = scalar_type(1e-15);
-        std::get<step_tolerance_criterion>(inner_opts.convergence.criteria)
+        std::get<step_tolerance_criterion<scalar_type>>(inner_opts.convergence.criteria)
             .threshold = scalar_type(1e-15);
 
         // Start a fresh inner solve when none is in progress. This is where

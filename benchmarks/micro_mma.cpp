@@ -374,7 +374,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
     // NLopt-parity convergence: ftol_rel + xtol_rel via
     // slsqp_compatible_convergence so cross-bench measurements are
     // meaningful.
-    argmin::solver_options<argmin::slsqp_compatible_convergence> opts;
+    argmin::solver_options<argmin::slsqp_compatible_convergence<>> opts;
     opts.max_iterations = 5000;
     opts.set_objective_threshold_rel(1e-12);
     opts.set_step_threshold_rel(1e-12);

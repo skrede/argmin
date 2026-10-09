@@ -63,13 +63,13 @@ std::string describe_driver_options(const driver_options& opts)
            + (tolerance ? format_number(*tolerance) : std::string("None"))
            + ", feasibility_tolerance=" + format_number(opts.feasibility_tolerance)
            + ", gradient_threshold="
-           + format_number(criterion_of<gradient_tolerance_criterion>(opts).threshold)
+           + format_number(criterion_of<gradient_tolerance_criterion<>>(opts).threshold)
            + ", objective_threshold="
-           + format_number(criterion_of<objective_tolerance_criterion>(opts).threshold)
+           + format_number(criterion_of<objective_tolerance_criterion<>>(opts).threshold)
            + ", stationarity_threshold="
-           + format_number(criterion_of<objective_tolerance_criterion>(opts).stationarity_threshold)
+           + format_number(criterion_of<objective_tolerance_criterion<>>(opts).stationarity_threshold)
            + ", step_threshold="
-           + format_number(criterion_of<step_tolerance_criterion>(opts).threshold) + ")";
+           + format_number(criterion_of<step_tolerance_criterion<>>(opts).threshold) + ")";
 }
 
 void bind_line_search_options(nb::module_& m)
@@ -101,24 +101,24 @@ void bind_driver_options(nb::module_& m)
         .def_ro("feasibility_tolerance", &driver_options::feasibility_tolerance)
         .def_prop_ro("gradient_threshold",
                      [](const driver_options& opts)
-                     { return criterion_of<gradient_tolerance_criterion>(opts).threshold; })
+                     { return criterion_of<gradient_tolerance_criterion<>>(opts).threshold; })
         .def_prop_ro("objective_threshold",
                      [](const driver_options& opts)
-                     { return criterion_of<objective_tolerance_criterion>(opts).threshold; })
+                     { return criterion_of<objective_tolerance_criterion<>>(opts).threshold; })
         .def_prop_ro("stationarity_threshold",
                      [](const driver_options& opts) {
-                         return criterion_of<objective_tolerance_criterion>(opts)
+                         return criterion_of<objective_tolerance_criterion<>>(opts)
                              .stationarity_threshold;
                      })
         .def_prop_ro("step_threshold",
                      [](const driver_options& opts)
-                     { return criterion_of<step_tolerance_criterion>(opts).threshold; })
+                     { return criterion_of<step_tolerance_criterion<>>(opts).threshold; })
         .def_prop_ro("stall_threshold",
                      [](const driver_options& opts)
-                     { return criterion_of<stall_tolerance_criterion>(opts).threshold; })
+                     { return criterion_of<stall_tolerance_criterion<>>(opts).threshold; })
         .def_prop_ro("stall_window",
                      [](const driver_options& opts)
-                     { return criterion_of<stall_tolerance_criterion>(opts).window; })
+                     { return criterion_of<stall_tolerance_criterion<>>(opts).window; })
         .def("__repr__", &describe_driver_options);
 }
 

@@ -56,7 +56,7 @@ struct sleeping_policy
 
     std::chrono::microseconds per_step{1000};
 
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename Problem, typename Convergence = default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const solver_options<Convergence>&)
     {

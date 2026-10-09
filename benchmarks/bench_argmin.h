@@ -159,7 +159,7 @@ inline void warn_instruction_counter_unavailable_once()
 // solver sets its inner `objective_tolerance_criterion::stationarity_threshold`
 // directly, and the composite kkt_residual E-measure (N&W 2e Definition 12.1,
 // eq. 12.34) carries primal feasibility into the single termination test.
-template <typename Policy, typename Convergence = default_convergence,
+template <typename Policy, typename Convergence = default_convergence<>,
           typename Problem, typename... PolicyOpts>
 auto run_argmin_solver(std::string_view solver_name,
                         std::string_view problem_name,
@@ -460,7 +460,7 @@ void run_all_argmin_solvers(
 
     auto run_constrained = [&]<typename Policy>(std::string_view name, Policy) {
         std::vector<trace_entry> trace;
-        auto r = run_argmin_solver<Policy, default_convergence>(
+        auto r = run_argmin_solver<Policy, default_convergence<>>(
             name, problem_name, prob, max_iterations, collect_trace, trace,
             config);
         results.push_back(r);
@@ -515,7 +515,7 @@ void run_all_argmin_solvers(
             {
                 {
                     std::vector<trace_entry> trace;
-                    auto r = run_argmin_solver<mma_policy<>, default_convergence>(
+                    auto r = run_argmin_solver<mma_policy<>, default_convergence<>>(
                         "mma", problem_name, prob, max_iterations, collect_trace, trace,
                         config);
                     results.push_back(r);
@@ -523,7 +523,7 @@ void run_all_argmin_solvers(
                 }
                 {
                     std::vector<trace_entry> trace;
-                    auto r = run_argmin_solver<gcmma_policy<>, default_convergence>(
+                    auto r = run_argmin_solver<gcmma_policy<>, default_convergence<>>(
                         "gcmma", problem_name, prob, max_iterations, collect_trace, trace,
                         config);
                     results.push_back(r);
@@ -531,7 +531,7 @@ void run_all_argmin_solvers(
                 }
                 {
                     std::vector<trace_entry> trace;
-                    auto r = run_argmin_solver<ccsa_quadratic_policy<>, default_convergence>(
+                    auto r = run_argmin_solver<ccsa_quadratic_policy<>, default_convergence<>>(
                         "ccsa_quadratic", problem_name, prob, max_iterations, collect_trace, trace,
                         config);
                     results.push_back(r);
@@ -546,7 +546,7 @@ void run_all_argmin_solvers(
                     std::vector<trace_entry> trace;
                     auto r = run_argmin_solver<
                         alternative::gcmma::move_limit_shrink_policy<>,
-                        default_convergence>(
+                        default_convergence<>>(
                         "gcmma_move_limit_shrink", problem_name, prob,
                         max_iterations, collect_trace, trace, config);
                     results.push_back(r);
@@ -556,7 +556,7 @@ void run_all_argmin_solvers(
                     std::vector<trace_entry> trace;
                     auto r = run_argmin_solver<
                         alternative::gcmma::raa_augmented_policy<>,
-                        default_convergence>(
+                        default_convergence<>>(
                         "gcmma_raa_augmented", problem_name, prob,
                         max_iterations, collect_trace, trace, config);
                     results.push_back(r);
@@ -708,7 +708,7 @@ void run_all_argmin_solvers(
         typename isres_policy<>::options_type isres_opts{};
         isres_opts.seed = seed;
         std::vector<trace_entry> trace;
-        auto r = run_argmin_solver<isres_policy<>, default_convergence>(
+        auto r = run_argmin_solver<isres_policy<>, default_convergence<>>(
             "isres", problem_name, prob, max_iterations, collect_trace, trace,
             config, isres_opts);
         results.push_back(r);

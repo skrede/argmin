@@ -138,7 +138,7 @@ struct original_argmin_policy
         return init(problem, x0, opts);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
         requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
     state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<double, N>& /*x0*/,

@@ -389,10 +389,10 @@ inline bool sigma_collapsed_xtol_coupled(
     const Eigen::Vector<double, N>& upper)
 {
     const double mean_sigma = s.sigmas.leftCols(s.mu).mean();
-    if constexpr(tuple_contains_v<step_tolerance_criterion,
+    if constexpr(tuple_contains_v<step_tolerance_criterion<typename Convergence::scalar_type>,
                                   decltype(convergence.criteria)>)
     {
-        const auto& crit = std::get<step_tolerance_criterion>(convergence.criteria);
+        const auto& crit = std::get<step_tolerance_criterion<typename Convergence::scalar_type>>(convergence.criteria);
         return mean_sigma < crit.threshold;
     }
     const double mean_range = (upper - lower).mean();

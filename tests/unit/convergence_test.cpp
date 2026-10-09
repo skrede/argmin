@@ -887,7 +887,7 @@ TEST_CASE("Solver group: lbfgsb + cmaes racing", "[convergence][solver_group]")
 
 TEST_CASE("stall_tolerance_criterion detects constant objective", "[convergence][stall]")
 {
-    stall_tolerance_criterion criterion;
+    stall_tolerance_criterion<> criterion;
     criterion.threshold = 1e-10;
     criterion.window = 5;
 
@@ -907,7 +907,7 @@ TEST_CASE("stall_tolerance_criterion detects constant objective", "[convergence]
 
 TEST_CASE("stall_tolerance_criterion does not fire on improving objective", "[convergence][stall]")
 {
-    stall_tolerance_criterion criterion;
+    stall_tolerance_criterion<> criterion;
     criterion.threshold = 1e-10;
     criterion.window = 5;
 
@@ -923,7 +923,7 @@ TEST_CASE("stall_tolerance_criterion does not fire on improving objective", "[co
 
 TEST_CASE("stall_tolerance_criterion catches oscillating SQP pattern", "[convergence][stall]")
 {
-    stall_tolerance_criterion criterion;
+    stall_tolerance_criterion<> criterion;
     criterion.threshold = 1e-10;
     criterion.window = 10;
 
@@ -941,7 +941,7 @@ TEST_CASE("stall_tolerance_criterion catches oscillating SQP pattern", "[converg
 
 TEST_CASE("stall detection disabled with nullopt threshold", "[convergence][stall]")
 {
-    stall_tolerance_criterion criterion;
+    stall_tolerance_criterion<> criterion;
     criterion.threshold = std::nullopt;
 
     for(std::uint32_t i = 0; i < 50; ++i)
@@ -1012,7 +1012,7 @@ TEST_CASE("set_stall_threshold convenience setter works", "[convergence][stall]"
     opts.set_stall_threshold(1e-6);
     opts.set_stall_window(30);
 
-    auto& criterion = std::get<stall_tolerance_criterion>(opts.convergence.criteria);
+    auto& criterion = std::get<stall_tolerance_criterion<>>(opts.convergence.criteria);
     CHECK(criterion.threshold.value() == 1e-6);
     CHECK(criterion.window == 30);
 }
@@ -1043,7 +1043,7 @@ TEST_CASE("stall criterion does not regress well-behaved L-BFGS-B convergence", 
 TEST_CASE("stall_tolerance_criterion fires at window=200 not at window=64",
           "[convergence][stall][enlarged]")
 {
-    stall_tolerance_criterion crit;
+    stall_tolerance_criterion<> crit;
     crit.threshold = 1e-8;
     crit.window = 200;
 
@@ -1079,7 +1079,7 @@ TEST_CASE("objective_tolerance_criterion blocks ftol when kkt_residual exceeds t
     // kkt_residual large and ftol correctly does not fire.
     //
     // Reference: N&W 2e Definition 12.1, eq 12.34.
-    objective_tolerance_criterion crit;
+    objective_tolerance_criterion<> crit;
     crit.threshold = 1e-6;
     crit.stationarity_threshold = 1e-8;
 
@@ -1098,7 +1098,7 @@ TEST_CASE("objective_tolerance_criterion fires ftol when kkt_residual under thre
     // objective change together satisfy the ftol test.
     //
     // Reference: N&W 2e Definition 12.1, eq 12.34.
-    objective_tolerance_criterion crit;
+    objective_tolerance_criterion<> crit;
     crit.threshold = 1e-6;
     crit.stationarity_threshold = 1e-8;
 
@@ -1118,7 +1118,7 @@ TEST_CASE("objective_tolerance_criterion does not fire when kkt_residual is at g
     // does not fire.
     //
     // Reference: N&W 2e Definition 12.1.
-    objective_tolerance_criterion crit;
+    objective_tolerance_criterion<> crit;
     crit.threshold = 1e-6;
     crit.stationarity_threshold = 1e-8;
 
@@ -1137,7 +1137,7 @@ TEST_CASE("objective_tolerance_rel_criterion blocks ftol when kkt_residual excee
     // objective change.
     //
     // Reference: N&W 2e Definition 12.1.
-    objective_tolerance_rel_criterion crit;
+    objective_tolerance_rel_criterion<> crit;
     crit.threshold = 1e-6;
     crit.stationarity_threshold = 1e-8;
 
@@ -1153,7 +1153,7 @@ TEST_CASE("objective_tolerance_rel_criterion fires ftol when kkt_residual under 
           "[convergence]")
 {
     // Reference: N&W 2e Definition 12.1, eq 12.34.
-    objective_tolerance_rel_criterion crit;
+    objective_tolerance_rel_criterion<> crit;
     crit.threshold = 1e-6;
     crit.stationarity_threshold = 1e-8;
 
@@ -1177,7 +1177,7 @@ TEST_CASE("objective_tolerance_rel_criterion fires ftol when kkt_residual under 
 TEST_CASE("default-constructed gradient_tolerance_criterion fires without being configured",
           "[convergence][defaults]")
 {
-    gradient_tolerance_criterion crit{};
+    gradient_tolerance_criterion<> crit{};
     step_result<double> r{.gradient_norm = 1e-9};
     const auto status = crit.check(r, 5);
     REQUIRE(status.has_value());
@@ -1187,7 +1187,7 @@ TEST_CASE("default-constructed gradient_tolerance_criterion fires without being 
 TEST_CASE("default-constructed objective_tolerance_criterion fires without being configured",
           "[convergence][defaults]")
 {
-    objective_tolerance_criterion crit{};
+    objective_tolerance_criterion<> crit{};
     step_result<double> r{.objective_change = 1e-15};
     const auto status = crit.check(r, 5);
     REQUIRE(status.has_value());
@@ -1197,7 +1197,7 @@ TEST_CASE("default-constructed objective_tolerance_criterion fires without being
 TEST_CASE("default-constructed step_tolerance_criterion fires without being configured",
           "[convergence][defaults]")
 {
-    step_tolerance_criterion crit{};
+    step_tolerance_criterion<> crit{};
     step_result<double> r{.step_size = 1e-15};
     const auto status = crit.check(r, 5);
     REQUIRE(status.has_value());
@@ -1210,7 +1210,7 @@ TEST_CASE("default_convergence returns a terminator on a converged Rosenbrock-li
     // A synthetic converged trace (tiny gradient, tiny objective change,
     // tiny step) at iteration > 1: a default-constructed default_convergence
     // must return a by-criterion status without any threshold configured.
-    default_convergence conv{};
+    default_convergence<> conv{};
     step_result<double> r{
         .objective_value = 1e-30,
         .gradient_norm = 1e-12,
