@@ -103,7 +103,7 @@ TEST_CASE("warm reset is Eigen-allocation-free at fixed N",
     solver_options opts;
     opts.max_iterations = 50;
 
-    step_budget_solver solver{kraft_slsqp_policy<hs071<>::problem_dimension>{},
+    step_budget_solver solver{kraft_slsqp_policy<double, hs071<>::problem_dimension>{},
                               problem, x0, opts};
     solver.step();
     solver.step();

@@ -48,15 +48,15 @@ using namespace argmin;
 // has_options_type<Policy> is satisfied) would fail this check.
 //
 // kraft_slsqp_policy::options_type is a plain nested struct; the LHS
-// resolves to the kraft_slsqp_policy<N>-nested options_type and the RHS
+// resolves to the kraft_slsqp_policy<double, N>-nested options_type and the RHS
 // names that same nested type. The check is non-trivial because it
 // exercises the alias's specialization-selection logic, which
 // `is_same_v<T, T>` would not.
 static_assert(std::is_same_v<
     argmin::policy_options_t<
-        argmin::kraft_slsqp_policy<argmin::dynamic_dimension>,
+        argmin::kraft_slsqp_policy<double, argmin::dynamic_dimension>,
         double>,
-    typename argmin::kraft_slsqp_policy<argmin::dynamic_dimension>::options_type>);
+    typename argmin::kraft_slsqp_policy<double, argmin::dynamic_dimension>::options_type>);
 
 // tr_sqp retains its Mode NTTP; the per-mode options_type forwarding
 // must continue to distinguish the two variants in the std::tuple<...>
@@ -104,11 +104,11 @@ static_assert(!std::is_same_v<
 // (tr_sqp, filter_trsqp).
 // -----------------------------------------------------------------------
 static_assert(std::is_same_v<
-    kraft_slsqp_policy_accurate<dynamic_dimension>,
-    kraft_slsqp_policy<dynamic_dimension>>);
+    kraft_slsqp_policy_accurate<double, dynamic_dimension>,
+    kraft_slsqp_policy<double, dynamic_dimension>>);
 static_assert(std::is_same_v<
-    nw_sqp_policy_accurate<dynamic_dimension>,
-    nw_sqp_policy<dynamic_dimension>>);
+    nw_sqp_policy_accurate<double, dynamic_dimension>,
+    nw_sqp_policy<double, dynamic_dimension>>);
 static_assert(std::is_same_v<
     filter_slsqp_policy_accurate<dynamic_dimension>,
     filter_slsqp_policy<dynamic_dimension>>);
@@ -135,8 +135,8 @@ static_assert(std::is_same_v<
 // silently defaulted to accurate would fail this check.
 // -----------------------------------------------------------------------
 static_assert(std::is_same_v<
-    typename kraft_slsqp_policy<dynamic_dimension>::template rebind<4>,
-    kraft_slsqp_policy<4>>);
+    typename kraft_slsqp_policy<double, dynamic_dimension>::template rebind<4>,
+    kraft_slsqp_policy<double, 4>>);
 static_assert(std::is_same_v<
     typename filter_nw_sqp_policy<dynamic_dimension>::template rebind<4>,
     filter_nw_sqp_policy<4>>);
@@ -220,7 +220,7 @@ using racing_cross_family = basic_solver_group<
     round_robin_schedule,
     dynamic_dimension,
     void,
-    kraft_slsqp_policy<dynamic_dimension>,
+    kraft_slsqp_policy<double, dynamic_dimension>,
     tr_sqp_policy<dynamic_dimension, sqp_mode::accurate>>;
 
 static_assert(std::is_same_v<racing_cross_family, racing_cross_family>);

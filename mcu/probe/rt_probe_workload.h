@@ -258,12 +258,12 @@ inline int run_all_rt_policies()
     // Line-search SQP (kraft_slsqp) on fixed-4 HS071.
     rc |= measure_steady_window(
         "kraft_slsqp hs071",
-        argmin::kraft_slsqp_policy<hs071<>::problem_dimension>{}, hs071<>{}, 0);
+        argmin::kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{}, 0);
 
     // NW-SQP on fixed-4 HS071.
     rc |= measure_steady_window(
         "nw_sqp hs071",
-        argmin::nw_sqp_policy<hs071<>::problem_dimension>{}, hs071<>{}, 0);
+        argmin::nw_sqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{}, 0);
 
     // filter-NW-SQP on fixed-4 HS071.
     rc |= measure_steady_window(

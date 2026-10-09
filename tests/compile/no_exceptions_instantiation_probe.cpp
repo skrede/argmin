@@ -347,9 +347,9 @@ int main()
     {
         hs071<> problem;
         auto x0 = problem.initial_point();
-        exercise(kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
+        exercise(kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
         exercise(filter_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
-        exercise(nw_sqp_policy<hs071<>::problem_dimension>{}, problem, x0);
+        exercise(nw_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
         exercise(filter_nw_sqp_policy<hs071<>::problem_dimension>{}, problem, x0);
         exercise(tr_sqp_policy<hs071<>::problem_dimension>{}, problem, x0);
         exercise(filter_trsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
@@ -422,11 +422,11 @@ int main()
     {
         hs071<> problem;
         auto x0 = problem.initial_point();
-        exercise_stepper(kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
-        exercise_time_budget(kraft_slsqp_policy<hs071<>::problem_dimension>{},
+        exercise_stepper(kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
+        exercise_time_budget(kraft_slsqp_policy<double, hs071<>::problem_dimension>{},
                              problem, x0);
         exercise_step_and_time_budget(
-            kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
+            kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
     }
     {
         rosenbrock<> problem{.n = 2};

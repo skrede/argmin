@@ -177,7 +177,7 @@ TEST_CASE("nw_sqp unconstrained Rosenbrock", "[sqp]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{nw_sqp_policy<unconstrained_rosenbrock::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{nw_sqp_policy<double, unconstrained_rosenbrock::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK((result.status == solver_status::converged
@@ -198,7 +198,7 @@ TEST_CASE("nw_sqp equality constrained", "[sqp]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{nw_sqp_policy<equality_constrained_quadratic::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{nw_sqp_policy<double, equality_constrained_quadratic::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK((result.status == solver_status::converged
@@ -219,7 +219,7 @@ TEST_CASE("nw_sqp inequality constrained", "[sqp]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{nw_sqp_policy<inequality_rosenbrock::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{nw_sqp_policy<double, inequality_rosenbrock::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // The unconstrained minimum (1,1) is on the boundary of x0^2+x1^2<=2
@@ -239,7 +239,7 @@ TEST_CASE("nw_sqp box constrained", "[sqp]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{nw_sqp_policy<box_constrained_rosenbrock::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{nw_sqp_policy<double, box_constrained_rosenbrock::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Solution must respect bounds [0, 0.8]
@@ -262,7 +262,7 @@ TEST_CASE("nw_sqp step solve step_n", "[sqp]")
 
     SECTION("step returns finite values")
     {
-        step_budget_solver solver{nw_sqp_policy<unconstrained_rosenbrock::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<double, unconstrained_rosenbrock::problem_dimension>{}, problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
         {
@@ -278,7 +278,7 @@ TEST_CASE("nw_sqp step solve step_n", "[sqp]")
 
     SECTION("solve converges from scratch")
     {
-        step_budget_solver solver{nw_sqp_policy<unconstrained_rosenbrock::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<double, unconstrained_rosenbrock::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK((result.status == solver_status::converged
                || result.status == solver_status::ftol_reached
@@ -365,7 +365,7 @@ TEST_CASE("nw_sqp HS007 accuracy guard",
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    step_budget_solver solver{nw_sqp_policy<hs007<>::problem_dimension>{},
+    step_budget_solver solver{nw_sqp_policy<double, hs007<>::problem_dimension>{},
                         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -399,7 +399,7 @@ TEST_CASE("nw_sqp HS026 accuracy guard",
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    step_budget_solver solver{nw_sqp_policy<hs026<>::problem_dimension>{},
+    step_budget_solver solver{nw_sqp_policy<double, hs026<>::problem_dimension>{},
                         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -716,7 +716,7 @@ TEST_CASE("nw_sqp converges on dynamic-dimension HS problems",
 TEST_CASE("nw_sqp HS071 mixed constraints (regression guard)",
           "[sqp][regression][mode]")
 {
-    using policy_t = nw_sqp_policy_accurate<hs071<>::problem_dimension>;
+    using policy_t = nw_sqp_policy_accurate<double, hs071<>::problem_dimension>;
 
     hs071<> problem;
     auto x0 = problem.initial_point();
@@ -736,7 +736,7 @@ TEST_CASE("nw_sqp HS071 mixed constraints (regression guard)",
 TEST_CASE("nw_sqp HS026 (regression guard)",
           "[sqp][regression][mode]")
 {
-    using policy_t = nw_sqp_policy_accurate<hs026<>::problem_dimension>;
+    using policy_t = nw_sqp_policy_accurate<double, hs026<>::problem_dimension>;
 
     hs026 problem;
     auto x0 = problem.initial_point();
@@ -757,7 +757,7 @@ TEST_CASE("nw_sqp HS026 (regression guard)",
 TEST_CASE("nw_sqp HS007 (regression guard)",
           "[sqp][regression][mode]")
 {
-    using policy_t = nw_sqp_policy_accurate<hs007<>::problem_dimension>;
+    using policy_t = nw_sqp_policy_accurate<double, hs007<>::problem_dimension>;
 
     hs007 problem;
     auto x0 = problem.initial_point();
@@ -779,7 +779,7 @@ TEST_CASE("nw_sqp HS007 (regression guard)",
 TEST_CASE("nw_sqp HS028 (regression guard)",
           "[sqp][regression][mode]")
 {
-    using policy_t = nw_sqp_policy_accurate<hs028<>::problem_dimension>;
+    using policy_t = nw_sqp_policy_accurate<double, hs028<>::problem_dimension>;
 
     hs028<> problem;
     auto x0 = problem.initial_point();

@@ -523,7 +523,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS071")
         {
             hs071 problem;
-            step_budget_solver solver{kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, problem.initial_point(), opts};
+            step_budget_solver solver{kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 30.0);
@@ -532,7 +532,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            step_budget_solver solver{kraft_slsqp_policy<hs076<>::problem_dimension>{}, problem, problem.initial_point(), opts};
+            step_budget_solver solver{kraft_slsqp_policy<double, hs076<>::problem_dimension>{}, problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
             CHECK(solver.constraint_violation() < 1e-4);
@@ -542,7 +542,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            step_budget_solver solver{kraft_slsqp_policy<rosenbrock_constrained::problem_dimension>{}, problem, x0, opts};
+            step_budget_solver solver{kraft_slsqp_policy<double, rosenbrock_constrained::problem_dimension>{}, problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 1.0);
@@ -563,7 +563,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS071")
         {
             hs071 problem;
-            step_budget_solver solver{nw_sqp_policy<hs071<>::problem_dimension>{}, problem, problem.initial_point(), opts};
+            step_budget_solver solver{nw_sqp_policy<double, hs071<>::problem_dimension>{}, problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 30.0);
@@ -572,7 +572,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         SECTION("HS076")
         {
             hs076 problem;
-            step_budget_solver solver{nw_sqp_policy<hs076<>::problem_dimension>{}, problem, problem.initial_point(), opts};
+            step_budget_solver solver{nw_sqp_policy<double, hs076<>::problem_dimension>{}, problem, problem.initial_point(), opts};
             auto result = solver.solve(opts);
             CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
             CHECK(solver.constraint_violation() < 1e-4);
@@ -582,7 +582,7 @@ TEST_CASE("Convergence test suite: all v0.1.0 solvers", "[convergence]")
         {
             rosenbrock_constrained problem;
             Eigen::VectorXd x0{{-1.0, -1.0}};
-            step_budget_solver solver{nw_sqp_policy<rosenbrock_constrained::problem_dimension>{}, problem, x0, opts};
+            step_budget_solver solver{nw_sqp_policy<double, rosenbrock_constrained::problem_dimension>{}, problem, x0, opts};
             auto result = solver.solve(opts);
             CHECK(std::isfinite(result.objective_value));
             CHECK(result.objective_value < 1.0);
@@ -964,7 +964,7 @@ TEST_CASE("kraft_slsqp hs043 terminates before max_iterations with stall detecti
     opts.set_objective_threshold(1e-15);
     opts.set_stall_threshold(1e-12);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs043<>::problem_dimension>{},
+    step_budget_solver solver{kraft_slsqp_policy<double, hs043<>::problem_dimension>{},
                         problem, problem.initial_point(), opts};
     auto result = solver.solve(opts);
 
@@ -999,7 +999,7 @@ TEST_CASE("nw_sqp hs071 terminates within bounded iterations", "[convergence][st
     opts.set_objective_threshold(1e-15);
     opts.set_stall_threshold(1e-12);
 
-    step_budget_solver solver{nw_sqp_policy<hs071<>::problem_dimension>{},
+    step_budget_solver solver{nw_sqp_policy<double, hs071<>::problem_dimension>{},
                         problem, problem.initial_point(), opts};
     auto result = solver.solve(opts);
 

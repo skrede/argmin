@@ -447,17 +447,17 @@ template <typename Problem>
     auto x0 = problem.initial_point();
     auto core_opts = make_core_options<Problem>(opts);
 
-    argmin::nw_sqp_policy<Problem::problem_dimension> policy;
+    argmin::nw_sqp_policy<double, Problem::problem_dimension> policy;
     policy.options.multiplier_reest_every_k = 1;
 
 #if ARGMIN_NW_PROFILE_HAS_BUDGET_DRIVERS
     using solver_type =
-        argmin::step_budget_solver<argmin::nw_sqp_policy<Problem::problem_dimension>,
+        argmin::step_budget_solver<argmin::nw_sqp_policy<double, Problem::problem_dimension>,
                                    Problem::problem_dimension,
                                    Problem>;
 #else
     using solver_type =
-        argmin::basic_solver<argmin::nw_sqp_policy<Problem::problem_dimension>,
+        argmin::basic_solver<argmin::nw_sqp_policy<double, Problem::problem_dimension>,
                              Problem::problem_dimension,
                              Problem>;
 #endif
@@ -488,7 +488,7 @@ template <typename Problem>
 {
     Problem problem;
     auto x0 = problem.initial_point();
-    argmin::nw_sqp_policy<Problem::problem_dimension> policy;
+    argmin::nw_sqp_policy<double, Problem::problem_dimension> policy;
     policy.options.multiplier_reest_every_k = 1;
 
 #if ARGMIN_NW_PROFILE_HAS_BUDGET_DRIVERS
@@ -499,7 +499,7 @@ template <typename Problem>
     time_opts.time_poll_stride = 1;
 
     using solver_type =
-        argmin::time_budget_solver<argmin::nw_sqp_policy<Problem::problem_dimension>,
+        argmin::time_budget_solver<argmin::nw_sqp_policy<double, Problem::problem_dimension>,
                                    Problem::problem_dimension,
                                    Problem>;
 #else
@@ -510,7 +510,7 @@ template <typename Problem>
         time_opts.max_time = std::chrono::milliseconds(opts.time_budget_ms);
 
     using solver_type =
-        argmin::basic_solver<argmin::nw_sqp_policy<Problem::problem_dimension>,
+        argmin::basic_solver<argmin::nw_sqp_policy<double, Problem::problem_dimension>,
                              Problem::problem_dimension,
                              Problem>;
 #endif

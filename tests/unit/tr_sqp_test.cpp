@@ -726,7 +726,7 @@ TEST_CASE("kraft_slsqp_accurate vs tr_sqp_accurate race on HS071",
         round_robin_schedule,
         hs071<>::problem_dimension,
         hs071<>,
-        kraft_slsqp_policy_accurate<hs071<>::problem_dimension>,
+        kraft_slsqp_policy_accurate<double, hs071<>::problem_dimension>,
         tr_sqp_policy_accurate<hs071<>::problem_dimension>>
         group{problem, x0, opts};
 

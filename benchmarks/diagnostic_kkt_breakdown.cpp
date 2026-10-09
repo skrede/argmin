@@ -548,31 +548,31 @@ int main()
 
     // ---- kraft_slsqp: 6 cases -------------------------------------
     run_sqp_case("kraft_slsqp hs006", Hs006{},
-                 argmin::kraft_slsqp_policy<Hs006::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<double, Hs006::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs007", Hs007{},
-                 argmin::kraft_slsqp_policy<Hs007::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<double, Hs007::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs024", Hs024{},
-                 argmin::kraft_slsqp_policy<Hs024::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<double, Hs024::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs026", Hs026{},
-                 argmin::kraft_slsqp_policy<Hs026::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<double, Hs026::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs043", Hs043{},
-                 argmin::kraft_slsqp_policy<Hs043::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<double, Hs043::problem_dimension>{});
     run_sqp_case("kraft_slsqp hs071", Hs071{},
-                 argmin::kraft_slsqp_policy<Hs071::problem_dimension>{});
+                 argmin::kraft_slsqp_policy<double, Hs071::problem_dimension>{});
 
     // ---- nw_sqp: 6 cases ------------------------------------------
     run_sqp_case("nw_sqp hs006", Hs006{},
-                 argmin::nw_sqp_policy<Hs006::problem_dimension>{});
+                 argmin::nw_sqp_policy<double, Hs006::problem_dimension>{});
     run_sqp_case("nw_sqp hs007", Hs007{},
-                 argmin::nw_sqp_policy<Hs007::problem_dimension>{});
+                 argmin::nw_sqp_policy<double, Hs007::problem_dimension>{});
     run_sqp_case("nw_sqp hs024", Hs024{},
-                 argmin::nw_sqp_policy<Hs024::problem_dimension>{});
+                 argmin::nw_sqp_policy<double, Hs024::problem_dimension>{});
     run_sqp_case("nw_sqp hs026", Hs026{},
-                 argmin::nw_sqp_policy<Hs026::problem_dimension>{});
+                 argmin::nw_sqp_policy<double, Hs026::problem_dimension>{});
     run_sqp_case("nw_sqp hs043", Hs043{},
-                 argmin::nw_sqp_policy<Hs043::problem_dimension>{});
+                 argmin::nw_sqp_policy<double, Hs043::problem_dimension>{});
     run_sqp_case("nw_sqp hs071", Hs071{},
-                 argmin::nw_sqp_policy<Hs071::problem_dimension>{});
+                 argmin::nw_sqp_policy<double, Hs071::problem_dimension>{});
 
     // ---- filter_slsqp: 6 cases ------------------------------------
     run_sqp_case("filter_slsqp hs006", Hs006{},

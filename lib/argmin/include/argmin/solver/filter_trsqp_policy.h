@@ -226,7 +226,7 @@ struct filter_trsqp_policy
     // region radius is held fixed across retries (the retry exploits
     // curvature information from the trial-point residual, not radius
     // expansion); between retries the violation must contract by
-    // detail::kappa_soc or the loop aborts.
+    // detail::sqp_common_constants::kappa_soc or the loop aborts.
     //
     // The zero default is re-derived (2026-07-05, lockstep with
     // tr_sqp_policy) against the corrected SOC residual
@@ -1190,7 +1190,7 @@ struct filter_trsqp_policy
         // fails the >= comparison and skips the retry too).
         //
         // Continuation: between retries the trial violation must
-        // contract by detail::kappa_soc (Wachter-Biegler A-5.9) or
+        // contract by detail::sqp_common_constants::kappa_soc (Wachter-Biegler A-5.9) or
         // the loop aborts; a NaN retry violation fails the negated
         // contraction test and aborts.
         //
@@ -1268,7 +1268,7 @@ struct filter_trsqp_policy
                 // branch.
                 const double theta_trial_new = compute_h_trial();
                 if(!(theta_trial_new
-                     < argmin::detail::kappa_soc * theta_trial_prev))
+                     < argmin::detail::sqp_common_constants<scalar_type>::kappa_soc * theta_trial_prev))
                     break;
                 theta_trial_prev = theta_trial_new;
             }

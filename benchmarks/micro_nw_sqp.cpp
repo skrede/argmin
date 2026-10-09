@@ -394,7 +394,7 @@ bool probe_regression_hs026()
     opts.set_step_threshold(1e-12);
 
     argmin::step_budget_solver solver{
-        argmin::nw_sqp_policy<argmin::hs026<>::problem_dimension>{},
+        argmin::nw_sqp_policy<double, argmin::hs026<>::problem_dimension>{},
         p, x0, opts};
     argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -435,7 +435,7 @@ bool probe_regression_hs007_iter_bound()
     opts.set_step_threshold(1e-12);
 
     argmin::step_budget_solver solver{
-        argmin::nw_sqp_policy<argmin::hs007<>::problem_dimension>{},
+        argmin::nw_sqp_policy<double, argmin::hs007<>::problem_dimension>{},
         p, x0, opts};
     auto result = solver.solve(opts);
 

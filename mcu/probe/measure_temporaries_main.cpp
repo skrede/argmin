@@ -84,11 +84,11 @@ int main()
 
     // The exact four-policy set from rt_probe_workload.h:156-184.
     const std::size_t kraft = measure_policy_temporary(
-        argmin::kraft_slsqp_policy<hs071<>::problem_dimension>{}, hs071<>{});
+        argmin::kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{});
     std::printf("[kraft_slsqp hs071] largest single temporary = %zu B\n", kraft);
 
     const std::size_t nw = measure_policy_temporary(
-        argmin::nw_sqp_policy<hs071<>::problem_dimension>{}, hs071<>{});
+        argmin::nw_sqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{});
     std::printf("[nw_sqp hs071] largest single temporary = %zu B\n", nw);
 
     const std::size_t filt = measure_policy_temporary(

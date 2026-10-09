@@ -184,7 +184,7 @@ struct tr_sqp_policy
     // region radius is held fixed across retries (the retry exploits
     // curvature information from the trial-point residual, not radius
     // expansion); between retries the violation must contract by
-    // detail::kappa_soc or the loop aborts.
+    // detail::sqp_common_constants::kappa_soc or the loop aborts.
     //
     // Default re-derived (2026-07-05) from the joint
     // (penalty_factor, soc_max_iterations) sweep across
@@ -888,7 +888,7 @@ struct tr_sqp_policy
         // fails the >= comparison and skips the retry.
         //
         // Continuation: between retries the trial violation must
-        // contract by detail::kappa_soc (Wachter-Biegler A-5.9) or
+        // contract by detail::sqp_common_constants::kappa_soc (Wachter-Biegler A-5.9) or
         // the loop aborts; a NaN retry violation fails the negated
         // contraction test and aborts.
         //
@@ -993,7 +993,7 @@ struct tr_sqp_policy
                 // negated form routes a NaN violation to the abort
                 // branch.
                 if(!(bo_step.c_norm_new
-                     < argmin::detail::kappa_soc * theta_trial_prev))
+                     < argmin::detail::sqp_common_constants<scalar_type>::kappa_soc * theta_trial_prev))
                     break;
                 theta_trial_prev = bo_step.c_norm_new;
             }

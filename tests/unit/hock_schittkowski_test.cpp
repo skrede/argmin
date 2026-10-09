@@ -214,7 +214,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{nw_sqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         // HS071 with equality + inequality is hard for BFGS-based SQP;
@@ -233,7 +233,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{nw_sqp_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
@@ -250,7 +250,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{nw_sqp_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<double, hs024<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(1e-2));
@@ -267,7 +267,7 @@ TEST_CASE("nw_sqp on hock-schittkowski problems", "[hs][sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{nw_sqp_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{nw_sqp_policy<double, hs035<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1e-2));
@@ -291,7 +291,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         // SLSQP with L-BFGS Hessian on mixed eq/ineq;
@@ -310,7 +310,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{kraft_slsqp_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-4.681818).margin(1e-2));
@@ -327,7 +327,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{kraft_slsqp_policy<hs024<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<double, hs024<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(-1.0).margin(1e-2));
@@ -344,7 +344,7 @@ TEST_CASE("kraft_slsqp on hock-schittkowski problems", "[hs][slsqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{kraft_slsqp_policy<hs035<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<double, hs035<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
 
         CHECK(result.objective_value == Approx(1.0 / 9.0).margin(1e-2));

@@ -39,7 +39,7 @@ namespace
 //   f* ~ 17.014
 //
 // This struct uses `problem_dimension = dynamic_dimension` to exercise
-// the runtime-dimension path through kraft_slsqp_policy<-1>,
+// the runtime-dimension path through kraft_slsqp_policy<double, -1>,
 // kraft_lsq_qp_solver<double, -1>, and all the dynamic Eigen
 // specializations. See hs071_fixed below for the compile-time N=4
 // variant; comparing the two measures the fraction of per-step cost
@@ -103,7 +103,7 @@ struct hs071
 };
 
 // Compile-time fixed-N=4 variant of HS071. Exercises the compile-time
-// dimension path through kraft_slsqp_policy<4>,
+// dimension path through kraft_slsqp_policy<double, 4>,
 // kraft_lsq_qp_solver<double, 4>, adaptive_bfgs<double, 4, 10>, and
 // lsi<double, 4>. The workspace-dimension fixes in adaptive_bfgs.h
 // and lsi.h only take effect on this path; the dynamic-N hs071 struct
@@ -440,7 +440,7 @@ timing bench_argmin_fixed(std::uint32_t reps)
     // Warmup + convergence check.
     std::uint32_t iters = 0;
     {
-        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<double, 4>{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(std::abs(result.objective_value - 17.014) > 0.5)
@@ -454,7 +454,7 @@ timing bench_argmin_fixed(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<double, 4>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         cv = result.constraint_violation;
@@ -733,7 +733,7 @@ timing bench_argmin_6dof_fixed(std::uint32_t reps)
 
     std::uint32_t iters = 0;
     {
-        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<double, 6>{}, problem, x0, opts};
         auto result = solver.solve();
         iters = static_cast<std::uint32_t>(result.iterations);
         if(!std::isfinite(result.objective_value))
@@ -747,7 +747,7 @@ timing bench_argmin_6dof_fixed(std::uint32_t reps)
     std::uint64_t total_ls_calls = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<double, 6>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         cv = result.constraint_violation;
@@ -900,7 +900,7 @@ bool probe_regression_hs026()
     opts.set_step_threshold(1e-12);
 
     argmin::step_budget_solver solver{
-        argmin::kraft_slsqp_policy<argmin::hs026<>::problem_dimension>{},
+        argmin::kraft_slsqp_policy<double, argmin::hs026<>::problem_dimension>{},
         p, x0, opts};
     argmin::step_result<double> last{};
     for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -1027,7 +1027,7 @@ int main()
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<double, 4>{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<4>  HS071",
                                  solver.convergence().last_check_results());
@@ -1094,7 +1094,7 @@ int main()
         opts.set_gradient_threshold(1e-8);
         opts.set_objective_threshold(1e-10);
         opts.set_step_threshold(1e-10);
-        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<6>{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<double, 6>{}, problem, x0, opts};
         (void)solver.solve();
         print_last_check_results("kraft_slsqp<6>  synthetic 6-DoF",
                                  solver.convergence().last_check_results());

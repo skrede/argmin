@@ -509,8 +509,8 @@ static_assert(!argmin::nlp_solver<argmin::stepper<argmin::cmaes_policy<>>>);
 
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>);
 static_assert(argmin::steppable<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>);
-static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::nw_sqp_policy<12>>>);
-static_assert(argmin::steppable<argmin::step_budget_solver<argmin::nw_sqp_policy<12>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::nw_sqp_policy<double, 12>>>);
+static_assert(argmin::steppable<argmin::step_budget_solver<argmin::nw_sqp_policy<double, 12>>>);
 
 namespace
 {
@@ -537,10 +537,10 @@ struct uncapped_mock
 
 static_assert(argmin::has_constraint_count<capped_mock>);
 static_assert(argmin::constraint_count_v<capped_mock> == 12);
-static_assert(argmin::nw_sqp_policy<12>::state_type<capped_mock>::M == 12);
+static_assert(argmin::nw_sqp_policy<double, 12>::state_type<capped_mock>::M == 12);
 
 static_assert(!argmin::has_constraint_count<uncapped_mock>);
-static_assert(argmin::nw_sqp_policy<12>::state_type<uncapped_mock>::M
+static_assert(argmin::nw_sqp_policy<double, 12>::state_type<uncapped_mock>::M
               == argmin::dynamic_dimension);
 
 // problem_dimension concept verification

@@ -146,8 +146,8 @@ struct sqrt_nan_emitter
 TEMPLATE_TEST_CASE(
     "SQP step_result consistency across SQP family (line-search + trust-region)",
     "[sqp][consistency][mode]",
-    kraft_slsqp_policy_accurate<dynamic_dimension>,
-    nw_sqp_policy_accurate<dynamic_dimension>,
+    (kraft_slsqp_policy_accurate<double, dynamic_dimension>),
+    (nw_sqp_policy_accurate<double, dynamic_dimension>),
     filter_slsqp_policy_accurate<dynamic_dimension>,
     filter_nw_sqp_policy_accurate<dynamic_dimension>,
     tr_sqp_policy_accurate<dynamic_dimension>,
@@ -375,7 +375,7 @@ TEMPLATE_TEST_CASE(
                 break;
         }
 
-        if constexpr (std::is_same_v<Policy, nw_sqp_policy<dynamic_dimension>>
+        if constexpr (std::is_same_v<Policy, nw_sqp_policy<double, dynamic_dimension>>
                       || std::is_same_v<Policy, filter_nw_sqp_policy<dynamic_dimension>>)
         {
             CHECK(solver.constraint_violation() < NW_SQP_HS071_CV_BAR);
@@ -663,7 +663,7 @@ TEMPLATE_TEST_CASE(
         // sibling line-search SQP policies that DO consume the
         // stride may differ.
         if constexpr(std::is_same_v<Policy,
-                         kraft_slsqp_policy<dynamic_dimension>>)
+                         kraft_slsqp_policy<double, dynamic_dimension>>)
         {
             using Problem = hs071<>;
             using PolicyN = typename Policy::template rebind<
@@ -845,7 +845,7 @@ TEMPLATE_TEST_CASE(
         // flow (single-pass step() with no in-loop null-step branch on
         // the same code path) and are excluded.
         if constexpr(std::is_same_v<Policy,
-                         nw_sqp_policy<dynamic_dimension>>
+                         nw_sqp_policy<double, dynamic_dimension>>
                   || std::is_same_v<Policy,
                          filter_slsqp_policy<dynamic_dimension>>
                   || std::is_same_v<Policy,

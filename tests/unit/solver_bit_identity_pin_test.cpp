@@ -235,7 +235,7 @@ void run_nw(golden_map& g, const std::string& fixture)
     Problem problem;
     auto x0 = problem.initial_point();
     auto opts = sqp_opts();
-    step_budget_solver solver{nw_sqp_policy<Problem::problem_dimension>{},
+    step_budget_solver solver{nw_sqp_policy<double, Problem::problem_dimension>{},
                               problem, x0, opts};
     capture_trajectory(g, "nw_sqp", fixture, solver);
 }

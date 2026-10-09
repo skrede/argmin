@@ -228,7 +228,7 @@ TEST_CASE("kraft_slsqp (line-search SQP) survives move-then-step", "[move_asan]"
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options<> opts;
 
-    construct_move_step(kraft_slsqp_policy<box_rosenbrock::problem_dimension>{},
+    construct_move_step(kraft_slsqp_policy<double, box_rosenbrock::problem_dimension>{},
                         problem, x0, opts);
 }
 

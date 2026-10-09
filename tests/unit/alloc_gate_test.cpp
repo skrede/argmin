@@ -147,16 +147,16 @@ TEST_CASE("sqp_alloc_gate_nw", "[alloc-gate]")
     const auto opts = sqp_gate_opts();
 
     check_steady_zero(sensor::measure_steady(
-        argmin::nw_sqp_policy<argmin::hs071<>::problem_dimension>{},
+        argmin::nw_sqp_policy<double, argmin::hs071<>::problem_dimension>{},
         argmin::hs071<>{}, opts, 10));
     check_steady_zero(sensor::measure_steady(
-        argmin::nw_sqp_policy<argmin::sd006<>::problem_dimension>{},
+        argmin::nw_sqp_policy<double, argmin::sd006<>::problem_dimension>{},
         argmin::sd006<>{}, opts, 10));
     check_steady_zero(sensor::measure_steady(
-        argmin::nw_sqp_policy<argmin::sd012<>::problem_dimension>{},
+        argmin::nw_sqp_policy<double, argmin::sd012<>::problem_dimension>{},
         argmin::sd012<>{}, opts, 10));
     check_steady_zero(sensor::measure_steady(
-        argmin::nw_sqp_policy<argmin::sd024<>::problem_dimension>{},
+        argmin::nw_sqp_policy<double, argmin::sd024<>::problem_dimension>{},
         argmin::sd024<>{}, opts, 10));
 }
 
@@ -170,13 +170,13 @@ TEST_CASE("sqp_alloc_gate_nw_bounded_m", "[alloc-gate]")
     const auto opts = sqp_gate_opts();
 
     check_steady_zero(sensor::measure_steady(
-        argmin::nw_sqp_policy<undercap_rosenbrock::problem_dimension>{},
+        argmin::nw_sqp_policy<double, undercap_rosenbrock::problem_dimension>{},
         undercap_rosenbrock{}, opts, 10));
 
     undercap_rosenbrock problem;
     auto x0 = problem.initial_point();
     argmin::step_budget_solver solver{
-        argmin::nw_sqp_policy<undercap_rosenbrock::problem_dimension>{},
+        argmin::nw_sqp_policy<double, undercap_rosenbrock::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve();
     const double f_gap = std::abs(result.objective_value - problem.optimal_value());
@@ -221,7 +221,7 @@ TEST_CASE("sqp_alloc_gate_kraft", "[alloc-gate]")
     Eigen::Vector<double, 4> x0{1.0, 5.0, 5.0, 1.0};
     const auto opts = sqp_gate_opts();
 
-    argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<4>{},
+    argmin::step_budget_solver solver{argmin::kraft_slsqp_policy<double, 4>{},
                                       problem, x0, opts};
 
     // Warmup absorbs lazy first-push BFGS allocations.
