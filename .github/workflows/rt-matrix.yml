@@ -1,9 +1,10 @@
 name: RT matrix
 
-# The real-time safety matrix and the determinism page publish tables that are
-# rendered from checked-in data files. This workflow fails when a published
-# table and its data file disagree -- that is, when someone hand-edits a
-# generated region instead of editing the data and re-rendering.
+# The real-time safety matrix, the determinism page and the float-support page
+# publish tables that are rendered from checked-in data files. This workflow
+# fails when a published table and its data file disagree -- that is, when
+# someone hand-edits a generated region instead of editing the data and
+# re-rendering.
 #
 # It exists separately from the build workflows for one reason. Every other
 # workflow here carries `paths-ignore: ['**.md', 'docs/**', ...]`, deliberately,
@@ -28,6 +29,7 @@ on:
       # The published documents whose generated regions are checked.
       - 'docs/rt-safety-matrix.md'
       - 'docs/determinism.md'
+      - 'docs/float-support.md'
       # The generator, its data files, and the negative control. Globbed, so a
       # data file added later is watched without anyone remembering this list.
       - 'scripts/rt_matrix*'
@@ -46,6 +48,7 @@ on:
     paths:
       - 'docs/rt-safety-matrix.md'
       - 'docs/determinism.md'
+      - 'docs/float-support.md'
       - 'scripts/rt_matrix*'
       - 'benchmarks/CMakeLists.txt'
       - 'tests/unit/CMakeLists.txt'
@@ -73,6 +76,7 @@ jobs:
         run: |
           python3 scripts/rt_matrix.py check scripts/rt_matrix_cells.json docs/rt-safety-matrix.md
           python3 scripts/rt_matrix.py check scripts/rt_matrix_tiers.json docs/determinism.md
+          python3 scripts/rt_matrix.py check scripts/rt_matrix_float.json docs/float-support.md
 
       # The step above is only evidence if it can go red. This mutates a cell on
       # a copy and asserts the check catches it and names the row -- every run,

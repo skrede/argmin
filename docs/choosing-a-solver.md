@@ -65,7 +65,7 @@ MMA and GCMMA reach the correct objective on the cells they were designed for (H
 
 ## Compile-time vs dynamic dimensions
 
-Every policy template takes an `N` parameter that propagates to inner Eigen types. A scalar-generic policy takes the scalar type first, `float` or `double` (the default), and the dimension second: `lbfgsb_policy<double, 2>` and `lbfgsb_policy<float, 2>` are the double and float solvers for a 2-D problem. Pass a concrete `int` for fixed dimensions and `argmin::dynamic_dimension` (the default) for runtime-sized problems. Fixed dimensions enable stack allocation, more aggressive inlining, and eliminate heap traffic in the hot path — the difference is meaningful for small `n` in tight loops (IK, MPC).
+Every policy template takes an `N` parameter that propagates to inner Eigen types. A scalar-generic policy takes the scalar type first, `float` or `double` (the default), and the dimension second: `lbfgsb_policy<double, 2>` and `lbfgsb_policy<float, 2>` are the double and float solvers for a 2-D problem. Which families are gated in `float`, and against what, is listed in [Float Support](float-support.md). Pass a concrete `int` for fixed dimensions and `argmin::dynamic_dimension` (the default) for runtime-sized problems. Fixed dimensions enable stack allocation, more aggressive inlining, and eliminate heap traffic in the hot path — the difference is meaningful for small `n` in tight loops (IK, MPC).
 
 ```cpp
 // Fully-spelled fixed-dimension form (Problem given, so state_type resolves).

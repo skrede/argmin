@@ -389,6 +389,7 @@ jobs:
         run: |
           python3 scripts/rt_matrix.py resolve scripts/rt_matrix_cells.json build .github/workflows
           python3 scripts/rt_matrix.py resolve scripts/rt_matrix_tiers.json build .github/workflows
+          python3 scripts/rt_matrix.py resolve scripts/rt_matrix_float.json build .github/workflows
 
   install-test:
     runs-on: ubuntu-24.04

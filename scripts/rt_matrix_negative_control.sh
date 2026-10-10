@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prove that the real-time documentation drift check is able to fail.
 #
-# The published real-time safety matrix and the determinism page carry tables
+# The published real-time safety matrix, the determinism page and the float-support
+# page carry tables
 # rendered from checked-in data files, and CI runs `rt_matrix.py check` to go
 # red when a table and its data file disagree. That check is only worth
 # something if it can go red. A check that cannot fail, trusted as evidence, is
@@ -9,7 +10,7 @@
 # and every claim resting on it inherits a confidence nobody earned.
 #
 # So the check is not assumed to discriminate. It is made to, on every run, for
-# both documents:
+# every document:
 #
 #   1. an untouched document passes             -- the check is not simply red
 #   2. a load-bearing mutation inside a
@@ -42,6 +43,8 @@ MATRIX_DATA="scripts/rt_matrix_cells.json"
 MATRIX_DOC="docs/rt-safety-matrix.md"
 TIERS_DATA="scripts/rt_matrix_tiers.json"
 TIERS_DOC="docs/determinism.md"
+FLOAT_DATA="scripts/rt_matrix_float.json"
+FLOAT_DOC="docs/float-support.md"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -204,6 +207,7 @@ echo "proving the real-time documentation drift check can fail:"
 
 prove_clean_passes "$MATRIX_DATA" "$MATRIX_DOC" "safety matrix"
 prove_clean_passes "$TIERS_DATA" "$TIERS_DOC" "determinism tiers"
+prove_clean_passes "$FLOAT_DATA" "$FLOAT_DOC" "float support"
 
 # A cell's evidence class is the claim's strength. Downgrading a gated cell to
 # argued is the edit a reader would most want caught -- and the reverse, an
@@ -237,6 +241,12 @@ prove_mutation_fails "$TIERS_DATA" "$TIERS_DOC" "tiers" "cross-instantiation num
     'fixed-N path reproduces the dynamic-N trajectry' \
     "determinism tiers: a cited test name corrupted in place"
 
+# A float-support row is a claim that a family's float answer is checked against
+# double; dropping the gate behind it would publish float support nothing defends.
+prove_mutation_fails "$FLOAT_DATA" "$FLOAT_DOC" "float-status" "CMA-ES (all three variants) in float tracks double" \
+    '**yes** *(gated)*' 'yes *(argued)*' \
+    "float support: a gated family hand-downgraded to argued"
+
 prove_no_bypass_hook
 
 echo
@@ -246,5 +256,5 @@ if [ "$failures" -ne 0 ]; then
     exit 1
 fi
 
-echo "the drift check discriminates: both documents pass untouched, and a mutated"
+echo "the drift check discriminates: every document passes untouched, and a mutated"
 echo "cell goes red naming its own row, with no way to tell the checker to pass"

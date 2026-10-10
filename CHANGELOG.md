@@ -25,6 +25,16 @@ Policies available at HEAD, grouped by problem class:
 - **Global / stochastic:** `cmaes`, restarting CMA-ES, `isres`
 - **Meta:** `augmented_lagrangian` (wraps any unconstrained inner policy)
 
+### Changed
+
+- Every policy, the QP and line-search options, the convergence criteria and
+  `default_convergence` take the scalar type as their first template argument
+  (`float` or `double`, defaulting to `double`), for example
+  `nw_sqp_policy<double, NV>` and `gradient_tolerance_criterion<>`.
+- The QP options' `max_iterations` is `std::uint32_t`.
+- `float` is supported per algorithm family, each gated against `double`; see
+  [docs/float-support.md](docs/float-support.md).
+
 ### Notes
 
 - Every policy plugs into `step_budget_solver<Policy>` and exposes a
