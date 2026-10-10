@@ -54,7 +54,7 @@ float max_violation(const Problem& problem, const vector<float, Problem::problem
     return violation;
 }
 
-template <template <scalar, int> typename Policy, template <typename> typename Problem>
+template <template <typename, int> typename Policy, template <typename> typename Problem>
 void check_sqp_tracks_double(double k)
 {
     const Problem<double> problem_d;

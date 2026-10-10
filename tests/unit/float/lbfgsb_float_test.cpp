@@ -39,7 +39,7 @@ solve_result<typename Policy::scalar_type, 2> drive(const Problem& problem)
     return solver.solve();
 }
 
-template <template <scalar, int> typename Policy, template <scalar> typename Problem>
+template <template <typename, int> typename Policy, template <typename> typename Problem>
 void check_tracks_double()
 {
     const Problem<double> problem_d;
@@ -52,7 +52,7 @@ void check_tracks_double()
     CHECK(tracks(result_f.x, result_d.x, k_lbfgsb));
 }
 
-template <template <scalar, int> typename Policy>
+template <template <typename, int> typename Policy>
 void check_active_bound()
 {
     const active_box_rosenbrock<double> problem_d;
@@ -64,7 +64,7 @@ void check_active_bound()
     CHECK(result_f.x[0] == problem_f.upper_bounds()[0]);
 }
 
-template <template <scalar, int> typename Policy>
+template <template <typename, int> typename Policy>
 void check_family()
 {
     check_tracks_double<Policy, plain_rosenbrock>();

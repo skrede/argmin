@@ -11,13 +11,13 @@
 namespace argmin::float_gate
 {
 
-template <template <scalar, int> typename Policy, template <typename> typename Problem>
+template <template <typename, int> typename Policy, template <typename> typename Problem>
 void check_line_search_tracks_double()
 {
     check_sqp_tracks_double<Policy, Problem>(k_line_search_sqp);
 }
 
-template <template <scalar, int> typename Policy>
+template <template <typename, int> typename Policy>
 void check_line_search_family()
 {
     SECTION("hs071")
@@ -41,7 +41,7 @@ void check_line_search_family()
     }
 }
 
-template <template <scalar, int> typename Policy>
+template <template <typename, int> typename Policy>
 void check_filter_family()
 {
     SECTION("hs071")

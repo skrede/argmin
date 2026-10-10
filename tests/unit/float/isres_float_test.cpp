@@ -68,7 +68,7 @@ float squared_violation(const Problem& problem, const vector<float, Problem::pro
     return sum;
 }
 
-template <template <scalar, int> typename Policy, template <scalar> typename Problem>
+template <template <typename, int> typename Policy, template <typename> typename Problem>
 void check_tracks_double()
 {
     const Problem<double> problem_d;
@@ -85,7 +85,7 @@ void check_tracks_double()
 
 // Both scalars stop after the first generation here: an infinite bound makes the bound-relative
 // collapse threshold infinite, so the stop records where the first generation landed.
-template <template <scalar, int> typename Policy, template <scalar> typename Problem>
+template <template <typename, int> typename Policy, template <typename> typename Problem>
 void check_first_generation_stop()
 {
     const Problem<double> problem_d;

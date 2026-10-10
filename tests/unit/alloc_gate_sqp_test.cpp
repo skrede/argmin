@@ -43,7 +43,7 @@ argmin::solver_options<> sqp_gate_opts()
 // Assert the steps taken after a converged solve are allocation-free, in the
 // scalar's own default options. The solve must have reached the solution, or
 // the window would measure descent steps a second time.
-template <template <argmin::scalar, int> typename Policy, argmin::scalar Scalar>
+template <template <typename, int> typename Policy, argmin::scalar Scalar>
 void check_at_solution_zero()
 {
     argmin::solver_options<argmin::default_convergence<Scalar>> opts;

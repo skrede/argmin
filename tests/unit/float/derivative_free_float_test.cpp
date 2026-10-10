@@ -54,7 +54,7 @@ solve_result<typename Policy::scalar_type, Problem::problem_dimension> drive(con
     return solver.solve();
 }
 
-template <template <scalar> typename Problem>
+template <template <typename> typename Problem>
 void check_cobyla_tracks_double()
 {
     const Problem<double> problem_d;
@@ -68,7 +68,7 @@ void check_cobyla_tracks_double()
     CHECK(max_violation(problem_f, result_f.x) <= solver_options<default_convergence<float>>{}.feasibility_tolerance);
 }
 
-template <template <scalar> typename Problem>
+template <template <typename> typename Problem>
 void check_bobyqa_tracks_double()
 {
     const Problem<double> problem_d;

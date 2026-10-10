@@ -79,7 +79,7 @@ struct suite_cell
     std::function<cell_result(std::size_t cap, int overflow_policy)> run;
 };
 
-template <template <argmin::scalar, int> class Policy, typename Problem>
+template <template <typename, int> class Policy, typename Problem>
 cell_result solve_cell(const Problem& problem, std::size_t cap, int overflow_policy)
 {
     auto& st = argmin::detail::filter_sweep_state();
@@ -103,7 +103,7 @@ cell_result solve_cell(const Problem& problem, std::size_t cap, int overflow_pol
             result.iterations, st.highwater, st.evictions};
 }
 
-template <template <argmin::scalar, int> class Policy, typename Problem>
+template <template <typename, int> class Policy, typename Problem>
 suite_cell make_cell(std::string name, Problem problem)
 {
     return suite_cell{
@@ -116,7 +116,7 @@ suite_cell make_cell(std::string name, Problem problem)
 // The ten filter-lineage HS cells: the failing family that motivates
 // filter acceptance (HS024/035/039/040/043/050) plus the reference cells
 // used as the non-regression bar (HS026/028/071/076).
-template <template <argmin::scalar, int> class Policy>
+template <template <typename, int> class Policy>
 std::vector<suite_cell> build_suite()
 {
     std::vector<suite_cell> cells;
@@ -210,7 +210,7 @@ void run_sweep(std::vector<suite_cell>& cells, const policy_report& rep,
     }
 }
 
-template <template <argmin::scalar, int> class Policy>
+template <template <typename, int> class Policy>
 void run_policy(const char* policy_name)
 {
     auto cells = build_suite<Policy>();

@@ -51,7 +51,7 @@ bool stopped_by_criterion(solver_status status)
     return status == solver_status::converged || status == solver_status::stalled;
 }
 
-template <template <scalar, int> typename Policy, template <scalar> typename Problem, bool ActiveBound = false>
+template <template <typename, int> typename Policy, template <typename> typename Problem, bool ActiveBound = false>
 void check_tracks_double()
 {
     const Problem<double> problem_d;
@@ -69,7 +69,7 @@ void check_tracks_double()
     }
 }
 
-template <template <scalar, int> typename Policy>
+template <template <typename, int> typename Policy>
 void check_projected()
 {
     SECTION("rosenbrock_ls")

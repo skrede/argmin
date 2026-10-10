@@ -43,7 +43,7 @@ bool accepted(solver_status status)
     return std::ranges::find(accepted_statuses, status) != accepted_statuses.end();
 }
 
-template <template <scalar, int> typename Policy, template <typename> typename Problem>
+template <template <typename, int> typename Policy, template <typename> typename Problem>
 void check_tracks_double()
 {
     const Problem<double> problem_d;
@@ -57,7 +57,7 @@ void check_tracks_double()
     CHECK(max_violation(problem_f, result_f.x) <= solver_options<default_convergence<float>>{}.feasibility_tolerance);
 }
 
-template <template <scalar, int> typename Policy, template <typename> typename First, template <typename> typename Second>
+template <template <typename, int> typename Policy, template <typename> typename First, template <typename> typename Second>
 void check_family(const char* first, const char* second)
 {
     SECTION(first)

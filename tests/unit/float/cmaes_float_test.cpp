@@ -56,7 +56,7 @@ solve_result<typename Policy::scalar_type, Problem::problem_dimension> drive(con
     return solver.solve();
 }
 
-template <template <scalar, int> typename Policy, typename ProblemD, typename ProblemF>
+template <template <typename, int> typename Policy, typename ProblemD, typename ProblemF>
 void check_tracks_double(const ProblemD& problem_d, const ProblemF& problem_f)
 {
     const auto result_d = drive<Policy<double, ProblemD::problem_dimension>>(problem_d);
@@ -73,13 +73,13 @@ void check_tracks_double(const ProblemD& problem_d, const ProblemF& problem_f)
     }
 }
 
-template <template <scalar, int> typename Policy>
+template <template <typename, int> typename Policy>
 void check_rosenbrock()
 {
     check_tracks_double<Policy>(rosenbrock<double>{}, rosenbrock<float>{});
 }
 
-template <template <scalar, int> typename Policy>
+template <template <typename, int> typename Policy>
 void check_active_box_rosenbrock()
 {
     check_tracks_double<Policy>(active_box_rosenbrock<double>{}, active_box_rosenbrock<float>{});

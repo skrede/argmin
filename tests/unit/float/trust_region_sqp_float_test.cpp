@@ -20,7 +20,7 @@ enum class experimental_check
     finite_only
 };
 
-template <template <scalar, int> typename Policy>
+template <template <typename, int> typename Policy>
 void check_hs035_hs028()
 {
     SECTION("hs035")
@@ -34,7 +34,7 @@ void check_hs035_hs028()
     }
 }
 
-template <template <scalar, int> typename Policy, template <typename> typename Problem>
+template <template <typename, int> typename Policy, template <typename> typename Problem>
 void check_experimental(experimental_check check)
 {
     const Problem<double> problem_d;

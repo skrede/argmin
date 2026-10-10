@@ -77,7 +77,7 @@ restarting_policy<cmaes_policy<S>> restarting()
     return policy;
 }
 
-template <template <scalar> typename Problem>
+template <template <typename> typename Problem>
 void check_augmented_lagrangian()
 {
     const Problem<double> problem_d;
