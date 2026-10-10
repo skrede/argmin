@@ -112,6 +112,23 @@ void check_steady_zero(const sensor::steady_state_result& r)
     CHECK_FALSE(r.terminated_early);
 }
 
+// Assert the steps taken after a converged solve are allocation-free, in the
+// scalar's own default options. The solve must have reached the solution, or
+// the window would measure descent steps a second time.
+template <template <argmin::scalar, int> typename Policy, argmin::scalar Scalar>
+void check_at_solution_zero()
+{
+    argmin::solver_options<argmin::default_convergence<Scalar>> opts;
+    opts.max_iterations = 200;
+    const auto r = sensor::measure_at_solution(
+        Policy<Scalar, argmin::hs071<Scalar>::problem_dimension>{}, argmin::hs071<Scalar>{}, opts, 20);
+    REQUIRE((r.solve_status == argmin::solver_status::converged
+             || r.solve_status == argmin::solver_status::ftol_reached
+             || r.solve_status == argmin::solver_status::stalled));
+    CHECK(r.eigen_malloc == 0);
+    CHECK(r.c_alloc == 0);
+}
+
 // MSVC-safe defeat of dead-store elimination on the canary allocation: writing
 // the heap pointer to a volatile sink forces the allocation to be materialized
 // without the GCC/Clang-only inline-asm escape.
@@ -158,6 +175,9 @@ TEST_CASE("sqp_alloc_gate_nw", "[alloc-gate]")
     check_steady_zero(sensor::measure_steady(
         argmin::nw_sqp_policy<double, argmin::sd024<>::problem_dimension>{},
         argmin::sd024<>{}, opts, 10));
+
+    check_at_solution_zero<argmin::nw_sqp_policy, double>();
+    check_at_solution_zero<argmin::nw_sqp_policy, float>();
 }
 
 // Runtime-m-below-cap nw_sqp gate: the declared constraint cap (12) exceeds the
@@ -198,6 +218,9 @@ TEST_CASE("sqp_alloc_gate_filter_nw", "[alloc-gate]")
     check_steady_zero(sensor::measure_steady(
         argmin::filter_nw_sqp_policy<double, argmin::sd024<>::problem_dimension>{},
         argmin::sd024<>{}, opts, 10));
+
+    check_at_solution_zero<argmin::filter_nw_sqp_policy, double>();
+    check_at_solution_zero<argmin::filter_nw_sqp_policy, float>();
 }
 
 // Levenberg-Marquardt on the 2D Rosenbrock least-squares fixture and the 12D
@@ -239,6 +262,9 @@ TEST_CASE("sqp_alloc_gate_kraft", "[alloc-gate]")
 
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);
+
+    check_at_solution_zero<argmin::kraft_slsqp_policy, double>();
+    check_at_solution_zero<argmin::kraft_slsqp_policy, float>();
 }
 
 // filter_slsqp at fixed N over the warm-started real-time regime: several ticks

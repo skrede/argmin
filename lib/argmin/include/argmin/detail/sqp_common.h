@@ -261,9 +261,12 @@ ARGMIN_FORCE_INLINE step_result<Scalar> null_step_result(
 //                 partial-multiplier returns (qp.lambda.size() < m_total);
 //                 rationale: removes the duplicated scatter pattern at
 //                 four call sites across the SQP family.
-template <typename Scalar>
+// qp_lambda is taken as MatrixBase, not Ref<const VectorX>: a const Ref silently
+// copies into a heap temporary when its argument cannot be mapped, and the bounded
+// multiplier storage of the fixed-N QP must be read in place.
+template <typename Scalar, typename Derived>
 ARGMIN_FORCE_INLINE void extract_qp_multipliers(
-    const Eigen::Vector<Scalar, Eigen::Dynamic>& qp_lambda,
+    const Eigen::MatrixBase<Derived>& qp_lambda,
     int n_eq,
     int n_ineq,
     Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> lam_eq_out,

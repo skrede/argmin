@@ -1369,13 +1369,13 @@ private:
     }
 
     template <typename Problem>
-    static Scalar lagrangian_gradient_norm(const state_type<Problem>& s)
+    static Scalar lagrangian_gradient_norm(state_type<Problem>& s)
     {
         const int m = s.n_eq + s.n_ineq;
         if(m == 0)
             return s.g.norm();
 
-        Eigen::Matrix<Scalar, Eigen::Dynamic, N> A(m, s.n);
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A = s.bufs.lag_A_buf;
         if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
         if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
         return detail::lagrangian_gradient(s.g, A, s.lambda).norm();

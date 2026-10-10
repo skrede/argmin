@@ -15,7 +15,8 @@
 // reset-time allocation can never be miscounted as per-step. terminated_early
 // records whether the policy signaled termination inside the armed window: a
 // window that is not pre-convergence is not a steady state, and a zero read
-// from it would be vacuous.
+// from it would be vacuous. measure_at_solution covers the steps after
+// convergence, which the descent window never reaches.
 
 #include "argmin/detail/diagnostics/alloc_counter.h"
 
@@ -66,6 +67,32 @@ steady_state_result measure_steady(Policy policy, const Problem& problem,
         armed_steps,
         terminated_early,
     };
+}
+
+struct at_solution_result
+{
+    std::size_t eigen_malloc;
+    std::size_t c_alloc;
+    solver_status solve_status;
+};
+
+// A real-time loop keeps stepping once the solver sits at its solution, and the
+// steps taken there run code (null-step reporting, multiplier extraction) that a
+// pre-convergence window never reaches. Solve unarmed, then arm the steps after.
+template <typename Policy, typename Problem, typename Options>
+at_solution_result measure_at_solution(Policy policy, const Problem& problem,
+                                       const Options& opts, std::size_t hot_steps)
+{
+    argmin::step_budget_solver solver{policy, problem, problem.initial_point(), opts};
+    const solver_status solve_status = solver.solve().status;
+
+    reset_alloc_count();
+    arm_alloc_trace();
+    for(std::size_t i = 0; i < hot_steps; ++i)
+        solver.step();
+    disarm_alloc_trace();
+
+    return at_solution_result{read_eigen_malloc_count(), read_c_alloc_count(), solve_status};
 }
 
 }
