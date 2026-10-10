@@ -104,10 +104,15 @@ class compact_lbfgs
 public:
     compact_lbfgs()
     {
+        S_.setZero();
+        Y_.setZero();
         STS_.setZero();
         L_.setZero();
         D_.setZero();
         middle_.setZero();
+        rho_.setZero();
+        alpha_.setZero();
+        Wz_.setZero();
     }
 
     // Add a new (s, y) pair with damped curvature update.

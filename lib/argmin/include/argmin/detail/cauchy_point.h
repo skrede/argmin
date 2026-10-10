@@ -78,15 +78,15 @@ class cauchy_point_solver
 {
 public:
     explicit cauchy_point_solver(int n)
-        : d_(n)
-        , Bd_(n)
-        , z_(n)
-        , x_cauchy_(n)
+        : d_(Eigen::Vector<Scalar, N>::Zero(n))
+        , Bd_(Eigen::Vector<Scalar, N>::Zero(n))
+        , z_(Eigen::Vector<Scalar, N>::Zero(n))
+        , x_cauchy_(Eigen::Vector<Scalar, N>::Zero(n))
     {
         bps_.reserve(static_cast<std::size_t>(n));
         result_.free_indices.reserve(static_cast<std::size_t>(n));
         result_.active_indices.reserve(static_cast<std::size_t>(n));
-        result_.x_cauchy.resize(n);
+        result_.x_cauchy.setZero(n);
     }
 
     cauchy_point_solver() = default;

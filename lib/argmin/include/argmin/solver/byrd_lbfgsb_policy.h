@@ -154,7 +154,7 @@ struct byrd_lbfgsb_policy
         }
         auto& [d, alpha_max] = *dir;
 
-        Eigen::Vector<Scalar, N> cached_g(s.x.size());
+        Eigen::Vector<Scalar, N> cached_g = Eigen::Vector<Scalar, N>::Zero(s.x.size());
         Scalar cached_alpha = Scalar(-1.0);
 
         auto phi = [&](Scalar a) {
@@ -183,7 +183,7 @@ struct byrd_lbfgsb_policy
 
         s.objective_value = s.problem->value(s.x);
 
-        Eigen::Vector<Scalar, N> new_g(s.x.size());
+        Eigen::Vector<Scalar, N> new_g = Eigen::Vector<Scalar, N>::Zero(s.x.size());
         if constexpr(bound_constrained<P, Scalar>)
         {
             if(cached_alpha == ls.alpha &&

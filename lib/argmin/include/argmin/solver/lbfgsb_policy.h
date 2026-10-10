@@ -170,7 +170,7 @@ struct lbfgsb_policy
         // The dphi callback computes the gradient at the trial point, which
         // is the same point accepted after line search. Cache it to avoid
         // a redundant gradient evaluation after step acceptance.
-        Eigen::Vector<Scalar, N> cached_g(s.x.size());
+        Eigen::Vector<Scalar, N> cached_g = Eigen::Vector<Scalar, N>::Zero(s.x.size());
         Scalar cached_alpha = Scalar(-1.0);
 
         auto phi = [&](Scalar a) {
@@ -206,7 +206,7 @@ struct lbfgsb_policy
         // Reuse cached gradient from line search dphi callback if it was
         // evaluated at the accepted alpha and projection didn't change x.
         // Unconstrained: no projection, so cached gradient is always valid.
-        Eigen::Vector<Scalar, N> new_g(s.x.size());
+        Eigen::Vector<Scalar, N> new_g = Eigen::Vector<Scalar, N>::Zero(s.x.size());
         if constexpr(bound_constrained<P, Scalar>)
         {
             if(cached_alpha == ls.alpha &&

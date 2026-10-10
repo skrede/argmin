@@ -108,6 +108,7 @@ target_compile_options(argmin_unit_tests PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${
 if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(argmin_unit_tests PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    target_link_options(argmin_unit_tests PRIVATE ${ARGMIN_GCC_FALSE_POSITIVE_FLAGS})
 endif()
 
 catch_discover_tests(argmin_unit_tests)
@@ -144,6 +145,7 @@ catch_discover_tests(argmin_warm_start_boundary_test)
 # gates that need no comparison library, so they run under the plain `dev` preset.
 add_executable(argmin_alloc_gate_test
     alloc_gate_test.cpp
+    alloc_gate_sqp_test.cpp
     alloc_sensor_counters.cpp
 )
 # Sensor B (the glibc __libc_* strong-symbol overrides) links only on Linux; the
@@ -196,7 +198,10 @@ add_executable(argmin_float_tests
     float/qp_float_test.cpp
     float/harness_float_test.cpp
     float/lbfgsb_float_test.cpp
-    float/line_search_sqp_float_test.cpp
+    float/nw_sqp_float_test.cpp
+    float/kraft_slsqp_float_test.cpp
+    float/filter_slsqp_float_test.cpp
+    float/filter_nw_sqp_float_test.cpp
     float/trust_region_sqp_float_test.cpp
     float/least_squares_float_test.cpp
     float/mma_float_test.cpp

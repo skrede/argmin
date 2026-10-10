@@ -7,6 +7,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
+# gcc before 15 reports Eigen's AVX paths at tiny fixed sizes as out of bounds, and cannot relate a
+# runtime loop bound to fixed-size storage. Both are false positives; MSan checks real uninitialized reads.
+# Under LTO these warnings fire at link time, so LTO targets pass the set to the linker as well.
+set(ARGMIN_GCC_FALSE_POSITIVE_FLAGS
+    $<$<AND:$<CXX_COMPILER_ID:GNU>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,15>>:
+        -Wno-array-bounds
+        -Wno-stringop-overflow
+        -Wno-stringop-overread
+        -Wno-maybe-uninitialized
+        -Wno-aggressive-loop-optimizations
+    >
+)
+
 set(ARGMIN_WARNING_FLAGS
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /utf-8>
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:
@@ -24,6 +37,7 @@ set(ARGMIN_WARNING_FLAGS
         -Wimplicit-fallthrough
         -Wformat=2
     >
+    ${ARGMIN_GCC_FALSE_POSITIVE_FLAGS}
 )
 
 option(ARGMIN_BUILD_TESTS "Build unit and compile tests" OFF)
