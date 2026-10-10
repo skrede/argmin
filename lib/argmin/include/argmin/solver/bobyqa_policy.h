@@ -126,6 +126,7 @@ struct bobyqa_policy
         detail::interpolation_system<Scalar, N> sys;  // BMAT/ZMAT factored interpolation system
         Scalar delta{};
         Scalar delta_max{};
+        Scalar initial_radius{};
         Scalar final_trust_radius{derivative_free_defaults<Scalar>::final_trust_radius};
         Scalar rho{};       // Current minimum trust radius (contracts toward rho_end)
         Scalar rho_end{};   // Final rho target (= final_trust_radius)
@@ -321,6 +322,7 @@ struct bobyqa_policy
         shift_inside_bounds(s.x_scaled, h, s.lower_scaled, s.upper_scaled);
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
 
+        s.initial_radius = h;
         s.delta = h;
         s.delta_max = Scalar(10.0) * h;
 
@@ -346,24 +348,30 @@ struct bobyqa_policy
         s.initialized = true;
         s.iteration = 0;
 
-        // Powell 2009, Section 5: two-radius rho contraction scheme.
-        s.rho = s.delta;
         s.rho_end = s.final_trust_radius;
+        seed_driver(s);
 
-        // Seed the ntrits driver state. The bootstrap has evaluated the 2n+1
-        // interpolation points, so nevals starts there (matching the reference
-        // counter, which includes PRELIM). nfsav/nresc start at the same count.
+        return s;
+    }
+
+    // Seed the ntrits driver state after a bootstrap. Powell 2009, Section 5:
+    // rho starts at the bootstrap radius. The bootstrap has evaluated the 2n+1
+    // interpolation points, so nevals starts there (matching the reference
+    // counter, which includes PRELIM). nfsav/nresc start at the same count.
+    template <typename P>
+    static void seed_driver(state_type<P>& s)
+    {
+        s.rho = s.delta;
         s.nevals = s.m;
         s.nevals_reported = 0;
         s.nfsav = s.m;
         s.nresc = s.m;
         s.ntrits = 0;
+        s.itest = 0;
         s.diffa = Scalar(0.0);
         s.diffb = Scalar(0.0);
         s.diffc = Scalar(0.0);
         s.xoptsq = s.sys.xopt.squaredNorm();
-
-        return s;
     }
 
     // Diagonal element of the ZMAT-factored H block: hdiag_k = sum_jj zmat(k,jj)^2.
@@ -1063,14 +1071,26 @@ struct bobyqa_policy
         bool improved = s.objective_value < old_incumbent_f;
         s.last_improved = improved;
 
+        // BOBYQA owns its own termination, as cobyla_policy does: until Powell's
+        // stop fires, progress is reported at no less than the trust-radius
+        // scale. A geometry step leaves dnorm at the preceding short trust step,
+        // and at rho_end every evaluated step is only bounded below by
+        // 0.5 rho_end, so raw magnitudes would trip the step, objective and
+        // gradient criteria before the policy's own stop.
         Eigen::Vector<Scalar, N> gopt_now = detail::model_gradient_at(s.sys, zero_d);
         Scalar grad_proxy = gopt_now.norm();
-        if(s.rho > s.rho_end)
+        if(!terminated)
             grad_proxy = std::max(grad_proxy, Scalar(1.0));
 
         Scalar obj_change = s.objective_value - old_incumbent_f;
         Scalar effective_step = improved ? last_eval_dnorm : s.delta;
         Scalar effective_change = improved ? obj_change : s.delta;
+        if(!terminated)
+        {
+            effective_step = std::max(effective_step, s.rho);
+            if(std::abs(effective_change) < s.rho)
+                effective_change = s.rho;
+        }
 
         std::uint32_t evals = static_cast<std::uint32_t>(s.nevals) - s.nevals_reported;
         s.nevals_reported = static_cast<std::uint32_t>(s.nevals);
@@ -1109,8 +1129,7 @@ struct bobyqa_policy
         s.iteration = 0;
         s.initialized = false;
 
-        Scalar h = s.delta;
-        h = clamp_radius_to_bounds(h, s.lower_scaled, s.upper_scaled);
+        Scalar h = clamp_radius_to_bounds(s.initial_radius, s.lower_scaled, s.upper_scaled);
         shift_inside_bounds(s.x_scaled, h, s.lower_scaled, s.upper_scaled);
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
 
@@ -1124,6 +1143,8 @@ struct bobyqa_policy
         s.x_scaled = s.sys.xbase + s.sys.xopt;
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
         s.objective_value = s.sys.fval[s.sys.kopt];
+        s.delta = h;
+        seed_driver(s);
         s.initialized = true;
     }
 };

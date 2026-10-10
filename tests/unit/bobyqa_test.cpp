@@ -710,6 +710,27 @@ TEST_CASE("bobyqa rho exhaustion reports converged status", "[bobyqa]")
     CHECK(result.objective_value < 1e-5);
 }
 
+// A solve that ends on BOBYQA's own stop leaves the driver at the final radius
+// with a deferred short step pending; reset must discard both.
+TEST_CASE("bobyqa reset after its own stop reproduces a fresh solve", "[bobyqa]")
+{
+    hs038 problem;
+    solver_options opts;
+    opts.max_iterations = 2000;
+
+    step_budget_solver fresh{bobyqa_policy<double, 4>{}, problem, problem.initial_point(), opts};
+    const auto first = fresh.solve(opts);
+    REQUIRE(first.status == solver_status::converged);
+
+    fresh.reset(problem.initial_point());
+    const auto second = fresh.solve(opts);
+
+    CHECK(second.status == first.status);
+    CHECK(second.iterations == first.iterations);
+    CHECK(second.objective_value == first.objective_value);
+    CHECK(second.x == first.x);
+}
+
 TEST_CASE("bobyqa incremental model infrastructure", "[bobyqa][incremental]")
 {
     // Build a simple 2D quadratic model and verify incremental update correctness.

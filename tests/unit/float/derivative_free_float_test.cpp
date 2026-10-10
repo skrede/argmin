@@ -54,20 +54,6 @@ solve_result<typename Policy::scalar_type, Problem::problem_dimension> drive(con
     return solver.solve();
 }
 
-// With the default criteria's thresholds at zero only the policy's own trust-radius stop ends the solve.
-template <typename Policy, typename Problem>
-solve_result<typename Policy::scalar_type, Problem::problem_dimension> drive_to_own_stop(const Problem& problem)
-{
-    using S = typename Policy::scalar_type;
-    solver_options<default_convergence<S>> opts{};
-    opts.max_iterations = max_iterations;
-    opts.set_gradient_threshold(S(0));
-    opts.set_objective_threshold(S(0));
-    opts.set_step_threshold(S(0));
-    step_budget_solver solver{Policy{}, problem, problem.initial_point(), opts};
-    return solver.solve();
-}
-
 template <template <scalar> typename Problem>
 void check_cobyla_tracks_double()
 {
@@ -83,24 +69,20 @@ void check_cobyla_tracks_double()
 }
 
 template <template <scalar> typename Problem>
-void check_bobyqa_experimental()
+void check_bobyqa_tracks_double()
 {
     const Problem<double> problem_d;
     const Problem<float> problem_f;
     const auto result_d = drive<bobyqa<double>>(problem_d);
     const auto result_f = drive<bobyqa<float>>(problem_f);
-    const auto own_stop_f = drive_to_own_stop<bobyqa<float>>(problem_f);
 
     REQUIRE(accepted(bobyqa_accepted_statuses, result_d.status));
-    REQUIRE(result_f.x.allFinite());
-    CHECK_NOFAIL(accepted(bobyqa_accepted_statuses, result_f.status));
-    CHECK_NOFAIL(tracks(result_f.x, result_d.x, k_derivative_free));
-    REQUIRE(own_stop_f.status == solver_status::converged);
-    CHECK(tracks(own_stop_f.x, result_d.x, k_derivative_free));
+    REQUIRE(accepted(bobyqa_accepted_statuses, result_f.status));
+    CHECK(tracks(result_f.x, result_d.x, k_derivative_free));
     if constexpr(std::is_same_v<Problem<float>, active_box_rosenbrock<float>>)
     {
         CHECK(result_d.x[0] == problem_d.upper_bounds()[0]);
-        CHECK(own_stop_f.x[0] == problem_f.upper_bounds()[0]);
+        CHECK(result_f.x[0] == problem_f.upper_bounds()[0]);
     }
 }
 
@@ -119,18 +101,20 @@ TEST_CASE("derivative-free policies in float track double on bounded and constra
     }
 }
 
-// Under the default criteria the float solve ends early on the step-tolerance or gradient stop: once the
-// trust radius reaches its final value, and after a geometry step that reports the length of the
-// preceding short step, BOBYQA's reported step and model gradient fall below the float thresholds.
-TEST_CASE("BOBYQA in float on bounded fixtures where the default criteria stop it before its own trust-radius stop", "[float]")
+TEST_CASE("BOBYQA in float tracks double on bounded fixtures at its own defaults", "[float]")
 {
     SECTION("active_box_rosenbrock")
     {
-        check_bobyqa_experimental<active_box_rosenbrock>();
+        check_bobyqa_tracks_double<active_box_rosenbrock>();
     }
 
     SECTION("hs038")
     {
-        check_bobyqa_experimental<hs038>();
+        check_bobyqa_tracks_double<hs038>();
+    }
+
+    SECTION("hs001")
+    {
+        check_bobyqa_tracks_double<hs001>();
     }
 }

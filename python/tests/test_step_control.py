@@ -115,14 +115,20 @@ def test_a_reset_returns_to_the_given_starting_point(method):
 # reset sits within the initial trust radius of the requested point rather than
 # on it. Construction defers that bootstrap to the first step, which is why a
 # freshly built solver does report the point it was given.
-def test_a_reset_of_the_interpolation_method_resamples_around_the_given_point():
+def test_a_reset_of_the_interpolation_method_restarts_as_a_fresh_solver_at_the_given_point():
+    lower, upper = BOX
+    fresh = argmin.BobyqaSolver(
+        objective, ELSEWHERE, lower_bounds=lower, upper_bounds=upper, max_iterations=2000
+    )
     solver = make_bobyqa()
     assert np.array_equal(solver.x, START)
 
     solver.step_n(6)
     solver.reset(ELSEWHERE)
-    assert not np.array_equal(solver.x, ELSEWHERE)
-    assert np.linalg.norm(solver.x - ELSEWHERE) <= 1.0
+    assert np.array_equal(solver.x, fresh.x)
+    solver.step_n(20)
+    fresh.step_n(20)
+    assert np.array_equal(solver.x, fresh.x)
 
 
 @ALL_METHODS
