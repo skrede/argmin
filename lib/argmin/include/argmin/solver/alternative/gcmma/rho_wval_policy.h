@@ -411,7 +411,7 @@ struct rho_wval_policy
             s.c_dual = s.opts.dual_bound_scale * s.c_dual_ref;
         dual_prob.c_dual_out = &s.c_dual;
 
-        Eigen::Vector<Scalar, N> x_trial(n);
+        Eigen::Vector<Scalar, N> x_trial = s.x;
         Scalar f_trial = s.f;
         Eigen::VectorX<Scalar> c_trial = s.c_ineq;
 
