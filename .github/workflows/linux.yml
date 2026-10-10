@@ -305,6 +305,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The build uses -march=native and the runner pool mixes CPU generations, so a
+      # correctness verdict that differs between runs can only be traced with the CPU on record.
+      - name: Record the runner CPU
+        run: |
+          grep -m1 'model name' /proc/cpuinfo
+          echo "avx512: $(grep -m1 -o 'avx512[a-z_]*' /proc/cpuinfo | head -1 || echo none)"
+
       - name: Configure
         env:
           CC: clang-18
@@ -366,6 +373,15 @@ jobs:
       # it does NOT mean iteration counts or instruction costs were verified.
       - name: Run alloc-gate, oracle-pin, and fast regression instruments (correctness gated; iteration + instruction ceilings NOT gated here)
         run: cd build && ctest --output-on-failure --no-tests=error -L "alloc-gate|oracle-pin|regression-fast"
+
+      # The summary, returned points and oracle verdicts are what a breach is diagnosed from.
+      - name: Upload the regression run on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-gate-runs
+          path: build/regression_gate_runs
+          retention-days: 14
 
       # The real-time safety matrix and the determinism page cite a named test,
       # label, or job for every claim they gate. This resolves each of those
