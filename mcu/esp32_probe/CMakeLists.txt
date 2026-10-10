@@ -1,6 +1,6 @@
 # Top-level ESP-IDF project for the ESP32 *accessible* allocation proof.
 #
-# This is the D-01 accessible claim: the fixed-N four-policy solve() probe runs
+# This is the accessible claim: the fixed-N four-policy solve() probe runs
 # under ESP-IDF with FreeRTOS present and IDF's allocator in the loop -- a real
 # embeddability result but a SOFTER zero-heap statement than the bare-metal
 # NUCLEO proof (mcu/nucleo_h753zi/). It is never presented as bare-metal.

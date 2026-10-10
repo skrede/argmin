@@ -557,6 +557,33 @@ jobs:
           echo "PASS: newlib-nano -fno-exceptions link resolved every symbol"
           arm-none-eabi-size "$elf"
 
+      # A silently dropped float workload must fail here, not pass as a smaller ELF.
+      - name: Assert float policy instantiations linked
+        run: |
+          syms=$(arm-none-eabi-nm -C build-arm-gate/argmin_arm_link_gate.elf)
+          grep -q 'kraft_slsqp_policy<float' <<<"$syms" || { echo "FAIL: kraft_slsqp_policy<float> missing"; exit 1; }
+          grep -q 'lm_policy<float' <<<"$syms" || { echo "FAIL: lm_policy<float> missing"; exit 1; }
+          echo "PASS: float policy instantiations present"
+
+  # Build-only: proves the double+float probe compiles under ESP-IDF per commit.
+  # The on-device allocation numbers remain an operator capture.
+  esp32-float-build:
+    runs-on: ubuntu-24.04
+    name: esp32 probe build (ESP-IDF, double + float)
+    container: espressif/idf:v6.0.2
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the ESP32 probe
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py -C mcu/esp32_probe set-target esp32
+          idf.py -C mcu/esp32_probe build
+
   python-bindings:
     runs-on: ubuntu-24.04
     name: python bindings (build + pytest)

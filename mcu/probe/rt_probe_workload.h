@@ -43,9 +43,11 @@
 
 #include <Eigen/Core>
 
+#include <cmath>
+#include <cstdio>
 #include <cstddef>
 #include <cstdint>
-#include <cmath>
+#include <type_traits>
 
 // The zero-allocation-per-step claim these windows measure depends on Eigen
 // routing its internal kernel temporaries (product/solve blocking buffers,
@@ -169,6 +171,7 @@ namespace argmin::mcu
 
 // Fixed-2 least-squares Rosenbrock for lm_policy, with an initial_point() so it
 // drives the same steady-state warmup path as the constrained fixtures.
+template <argmin::scalar Scalar>
 struct fixed_rosenbrock_ls
 {
     static constexpr int problem_dimension = 2;
@@ -176,47 +179,70 @@ struct fixed_rosenbrock_ls
     [[nodiscard]] int dimension() const { return 2; }
     [[nodiscard]] int num_residuals() const { return 2; }
 
-    [[nodiscard]] Eigen::Vector<double, 2> initial_point() const
+    [[nodiscard]] Eigen::Vector<Scalar, 2> initial_point() const
     {
-        return Eigen::Vector<double, 2>(-1.0, 1.0);
+        return Eigen::Vector<Scalar, 2>(Scalar(-1.0), Scalar(1.0));
     }
 
-    [[nodiscard]] double value(const Eigen::Vector<double, 2>& x) const
+    [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, 2>& x) const
     {
-        const double r0 = 1.0 - x(0);
-        const double r1 = std::sqrt(5.0) * (x(1) - x(0) * x(0));
-        return 0.5 * (r0 * r0 + r1 * r1);
+        const Scalar r0 = Scalar(1.0) - x(0);
+        const Scalar r1 = std::sqrt(Scalar(5.0)) * (x(1) - x(0) * x(0));
+        return Scalar(0.5) * (r0 * r0 + r1 * r1);
     }
 
-    void residuals(const Eigen::Vector<double, 2>& x, Eigen::VectorXd& r) const
+    void residuals(const Eigen::Vector<Scalar, 2>& x, Eigen::VectorX<Scalar>& r) const
     {
-        r(0) = 1.0 - x(0);
-        r(1) = std::sqrt(5.0) * (x(1) - x(0) * x(0));
+        r(0) = Scalar(1.0) - x(0);
+        r(1) = std::sqrt(Scalar(5.0)) * (x(1) - x(0) * x(0));
     }
 
-    void jacobian(const Eigen::Vector<double, 2>& x, Eigen::MatrixXd& J) const
+    void jacobian(const Eigen::Vector<Scalar, 2>& x, Eigen::MatrixX<Scalar>& J) const
     {
-        J(0, 0) = -1.0;
-        J(0, 1) = 0.0;
-        J(1, 0) = -2.0 * std::sqrt(5.0) * x(0);
-        J(1, 1) = std::sqrt(5.0);
+        J(0, 0) = Scalar(-1.0);
+        J(0, 1) = Scalar(0.0);
+        J(1, 0) = Scalar(-2.0) * std::sqrt(Scalar(5.0)) * x(0);
+        J(1, 1) = std::sqrt(Scalar(5.0));
     }
 };
 
-// One steady-state window for a single fixed-N policy on one problem. Mirrors
-// the host steady-state driver (argmin/detail/diagnostics/steady_state_driver.h). Returns a process-style rc
-// (0 pass). min_per_step is 0 for the RT-claimed policies (held to the
-// zero-allocation gate immediately). label feeds the on-device report line.
-template <typename Policy, typename Problem>
-int measure_steady_window(const char* label, Policy policy,
-                          const Problem& problem, std::size_t min_per_step)
+struct no_clock
 {
-    auto x0 = problem.initial_point();
+    static constexpr bool enabled = false;
+
+    void start() {}
+
+    std::uint32_t stop() { return std::uint32_t{0}; }
+};
+
+inline argmin::solver_options<> probe_options(std::type_identity<double>)
+{
     argmin::solver_options opts;
     opts.max_iterations = 200;
     opts.set_gradient_threshold(1e-8);
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
+    return opts;
+}
+
+// The float defaults stand in for the double thresholds above, which lie below float resolution.
+inline argmin::solver_options<argmin::default_convergence<float>> probe_options(std::type_identity<float>)
+{
+    argmin::solver_options<argmin::default_convergence<float>> opts;
+    opts.max_iterations = 200;
+    return opts;
+}
+
+// One steady-state window for a single fixed-N policy on one problem. Mirrors
+// the host steady-state driver (argmin/detail/diagnostics/steady_state_driver.h). Returns a process-style rc
+// (0 pass). min_per_step is 0 for the RT-claimed policies (held to the
+// zero-allocation gate immediately). label feeds the on-device report line.
+template <typename Policy, typename Problem, typename Clock>
+int measure_steady_window(const char* label, Policy policy,
+                          const Problem& problem, std::size_t min_per_step, Clock& clock)
+{
+    auto x0 = problem.initial_point();
+    auto opts = probe_options(std::type_identity<typename Policy::scalar_type>{});
 
     argmin::step_budget_solver solver{policy, problem, x0, opts};
 
@@ -229,16 +255,22 @@ int measure_steady_window(const char* label, Policy policy,
     argmin::detail::bench::reset_alloc_count();
     argmin::detail::bench::arm_alloc_trace();
     bool terminated = false;
+    clock.start();
     for(std::size_t i = 0; i < hot_steps; ++i)
     {
         const auto r = solver.step();
         if(r.policy_status.has_value())
             terminated = true;
     }
+    const std::uint32_t cycles = clock.stop();
     argmin::detail::bench::disarm_alloc_trace();
 
     if(terminated)
         return 1;         // window was not pre-convergence steady state
+
+    if constexpr(Clock::enabled)
+        std::printf("  [timing] %s cycles=%lu armed_steps=10 per_step=%lu\n", label,
+                    static_cast<unsigned long>(cycles), static_cast<unsigned long>(cycles / hot_steps));
 
     return argmin::detail::bench::evaluate_gate(label, hot_steps, min_per_step);
 }
@@ -249,34 +281,42 @@ int measure_steady_window(const char* label, Policy policy,
 // are no-ops, so this returns 0 after simply instantiating + running each
 // policy -- which is exactly the -fno-exceptions link surface the CI gate
 // needs. Under a target build it reports the real on-device allocs/step.
-inline int run_all_rt_policies()
+template <argmin::scalar Scalar, typename Clock = no_clock>
+int run_all_rt_policies(Clock& clock)
 {
     using argmin::hs071;
+    constexpr bool is_float = std::is_same_v<Scalar, float>;
 
     int rc = 0;
 
     // Line-search SQP (kraft_slsqp) on fixed-4 HS071.
     rc |= measure_steady_window(
-        "kraft_slsqp hs071",
-        argmin::kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{}, 0);
+        is_float ? "kraft_slsqp hs071 float" : "kraft_slsqp hs071",
+        argmin::kraft_slsqp_policy<Scalar, hs071<Scalar>::problem_dimension>{}, hs071<Scalar>{}, 0, clock);
 
     // NW-SQP on fixed-4 HS071.
     rc |= measure_steady_window(
-        "nw_sqp hs071",
-        argmin::nw_sqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{}, 0);
+        is_float ? "nw_sqp hs071 float" : "nw_sqp hs071",
+        argmin::nw_sqp_policy<Scalar, hs071<Scalar>::problem_dimension>{}, hs071<Scalar>{}, 0, clock);
 
     // filter-NW-SQP on fixed-4 HS071.
     rc |= measure_steady_window(
-        "filter_nw_sqp hs071",
-        argmin::filter_nw_sqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{}, 0);
+        is_float ? "filter_nw_sqp hs071 float" : "filter_nw_sqp hs071",
+        argmin::filter_nw_sqp_policy<Scalar, hs071<Scalar>::problem_dimension>{}, hs071<Scalar>{}, 0, clock);
 
     // Levenberg-Marquardt on fixed-2 least-squares Rosenbrock.
     rc |= measure_steady_window(
-        "lm rosenbrock_ls",
-        argmin::lm_policy<double, fixed_rosenbrock_ls::problem_dimension>{},
-        fixed_rosenbrock_ls{}, 0);
+        is_float ? "lm rosenbrock_ls float" : "lm rosenbrock_ls",
+        argmin::lm_policy<Scalar, fixed_rosenbrock_ls<Scalar>::problem_dimension>{}, fixed_rosenbrock_ls<Scalar>{}, 0, clock);
 
     return rc;
+}
+
+template <argmin::scalar Scalar>
+int run_all_rt_policies()
+{
+    no_clock clock;
+    return run_all_rt_policies<Scalar>(clock);
 }
 
 }
