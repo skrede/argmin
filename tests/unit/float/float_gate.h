@@ -25,6 +25,8 @@ inline constexpr double k_derivative_free = 30.0;
 // The float and double runs of a stochastic search share a seed but not a trajectory, since their
 // samples round differently from the first generation on.
 inline constexpr double k_stochastic = 100.0;
+// A wrapper over a float inner policy inherits the inner policy's precision floor.
+inline constexpr double k_wrapper = 10.0;
 
 inline double tolerance(double k)
 {

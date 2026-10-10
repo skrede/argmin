@@ -360,7 +360,7 @@ TEST_CASE("isres survives move-then-step", "[move_asan]")
     Eigen::VectorXd x0{{2.0, 2.0}};
     solver_options<> opts;
 
-    construct_move_step(isres_policy<simple_constrained::problem_dimension>{},
+    construct_move_step(isres_policy<double, simple_constrained::problem_dimension>{},
                         problem, x0, opts);
 }
 

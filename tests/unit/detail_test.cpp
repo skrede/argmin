@@ -502,8 +502,8 @@ TEST_CASE("ISRES operators preserve existing detail symbols byte-for-byte",
     // workspace-class ctor to confirm preservation; full coverage of
     // the existing ops lives in isres_test.cpp.
     const int n = 4;
-    argmin::detail::es_learning_rates rates =
-        argmin::detail::compute_es_rates(n);
+    argmin::detail::es_learning_rates<double> rates =
+        argmin::detail::compute_es_rates<double>(n);
     // Role-correct assignment (Schwefel/NLopt): tau is the per-component
     // rate 1/sqrt(2*sqrt(n)); tau_prime the once-per-individual global
     // rate 1/sqrt(2*n).

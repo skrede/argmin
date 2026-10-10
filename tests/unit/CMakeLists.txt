@@ -202,6 +202,8 @@ add_executable(argmin_float_tests
     float/mma_float_test.cpp
     float/derivative_free_float_test.cpp
     float/cmaes_float_test.cpp
+    float/isres_float_test.cpp
+    float/wrapper_float_test.cpp
 )
 target_link_libraries(argmin_float_tests
     PRIVATE

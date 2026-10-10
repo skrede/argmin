@@ -11,13 +11,14 @@
 // Reference: Runarsson & Yao (2005), "Search Biases in Constrained
 //            Evolutionary Optimization", IEEE Trans. SMC-C, eq. 2.
 
+#include "argmin/detail/scalar_distributions.h"
+
 #include "argmin/types.h"
 
 #include <Eigen/Core>
 
-#include <cstdint>
-#include <random>
 #include <vector>
+#include <cstdint>
 
 namespace argmin::detail
 {
@@ -33,7 +34,7 @@ namespace argmin::detail
 // rng: random number generator
 //
 // Reference: Runarsson & Yao (2005), Algorithm 1, eq. 2.
-template <typename Scalar = double, int Lambda = argmin::dynamic_dimension, typename Rng>
+template <scalar Scalar, int Lambda = argmin::dynamic_dimension, typename Rng>
 void stochastic_rank(std::vector<std::uint32_t>& indices,
                      const Eigen::Vector<Scalar, Lambda>& objectives,
                      const Eigen::Vector<Scalar, Lambda>& violations,
@@ -44,7 +45,7 @@ void stochastic_rank(std::vector<std::uint32_t>& indices,
     if(n <= 1)
         return;
 
-    std::uniform_real_distribution<double> uniform(0.0, 1.0);
+    unit_uniform_distribution<Scalar> uniform;
 
     for(std::size_t sweep = 0; sweep < n; ++sweep)
     {
@@ -56,7 +57,7 @@ void stochastic_rank(std::vector<std::uint32_t>& indices,
             auto b = indices[j + 1];
 
             bool compare_by_objective =
-                (violations[a] <= 0.0 && violations[b] <= 0.0)
+                (violations[a] <= Scalar(0) && violations[b] <= Scalar(0))
                 || uniform(rng) < pf;
 
             bool should_swap = compare_by_objective

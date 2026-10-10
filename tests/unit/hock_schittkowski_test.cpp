@@ -698,7 +698,7 @@ TEST_CASE("isres on hock-schittkowski problems", "[hs][isres]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        isres_policy<hs024<>::problem_dimension> policy;
+        isres_policy<double, hs024<>::problem_dimension> policy;
         policy.options.seed = 42u;
 
         step_budget_solver solver{policy, problem, x0, opts};
@@ -717,7 +717,7 @@ TEST_CASE("isres on hock-schittkowski problems", "[hs][isres]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        isres_policy<hs035<>::problem_dimension> policy;
+        isres_policy<double, hs035<>::problem_dimension> policy;
         policy.options.seed = 42u;
 
         step_budget_solver solver{policy, problem, x0, opts};

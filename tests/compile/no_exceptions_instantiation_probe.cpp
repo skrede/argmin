@@ -395,7 +395,7 @@ int main()
         // cobyla_policy is dimension-agnostic: its rebind ignores the
         // dimension, so it takes no dimension argument.
         exercise(cobyla_policy<>{}, problem, x0);
-        exercise(isres_policy<derivative_free_constrained::problem_dimension>{},
+        exercise(isres_policy<double, derivative_free_constrained::problem_dimension>{},
                  problem, x0);
     }
 

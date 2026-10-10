@@ -60,7 +60,7 @@ struct multistart_policy
     // inner policy templates on the problem, plain state_type otherwise) instead
     // of duplicating it, and derives x / lower / upper / best_ever_x from the
     // inner state's own vector type so fixed-N inner policies keep fully-fixed
-    // state inside this decorator rather than collapsing to Eigen::VectorXd.
+    // state inside this decorator rather than collapsing to a dynamic vector.
     template <typename P = void>
     struct state_type
     {
@@ -68,9 +68,9 @@ struct multistart_policy
         decltype(std::declval<detail::resolve_inner_state_t<Inner, P>>().x) x{};
         decltype(x) lower{};
         decltype(x) upper{};
-        double objective_value{};
+        scalar_type objective_value{};
         std::uint32_t stagnation_count{0};
-        double best_ever_value{std::numeric_limits<double>::infinity()};
+        scalar_type best_ever_value{std::numeric_limits<scalar_type>::infinity()};
         decltype(x) best_ever_x{};
         bool restart_pending{false};
         std::uint16_t restart_count{0};
@@ -79,8 +79,8 @@ struct multistart_policy
         // Mirrors the inner policy's constraint residuals so
         // step_budget_solver::constraint_violation() reads the real inner violation
         // for constrained inner policies instead of silently reading zero.
-        Eigen::VectorXd c_eq{};
-        Eigen::VectorXd c_ineq{};
+        Eigen::VectorX<scalar_type> c_eq{};
+        Eigen::VectorX<scalar_type> c_ineq{};
     };
 
     Inner inner_policy_{};
@@ -146,22 +146,22 @@ struct multistart_policy
                 s.inner.objective_value = s.best_ever_value;
                 return step_result<scalar_type>{
                     .objective_value = s.best_ever_value,
-                    .gradient_norm = 0.0,
-                    .step_size = 0.0,
-                    .objective_change = 0.0,
+                    .gradient_norm = scalar_type(0.0),
+                    .step_size = scalar_type(0.0),
+                    .objective_change = scalar_type(0.0),
                     .improved = false,
                     .policy_status = solver_status::budget_exhausted,
                 };
             }
 
             // Generate Halton-seeded starting point within bounds. Widened to
-            // Eigen::VectorXd on both ternary branches: halton_to_bounds always
+            // a dynamic vector on both ternary branches: halton_to_bounds always
             // returns a dynamic vector, while s.best_ever_x may now be a
             // fixed-N vector for fixed-N inner policies, and the conditional
             // operator requires a single common type.
-            Eigen::VectorXd new_x0 = (s.lower.size() > 0 && s.upper.size() > 0)
-                ? detail::halton_to_bounds(s.restart_count, s.dimension, s.lower, s.upper)
-                : Eigen::VectorXd(s.best_ever_x);
+            Eigen::VectorX<scalar_type> new_x0 = (s.lower.size() > 0 && s.upper.size() > 0)
+                ? detail::halton_to_bounds<scalar_type>(s.restart_count, s.dimension, s.lower, s.upper)
+                : Eigen::VectorX<scalar_type>(s.best_ever_x);
 
             inner_policy_.reset_clear(s.inner, new_x0);
             ++s.restart_count;
@@ -171,9 +171,9 @@ struct multistart_policy
 
             return step_result<scalar_type>{
                 .objective_value = s.inner.objective_value,
-                .gradient_norm = 1.0,
-                .step_size = 1.0,
-                .objective_change = 1.0,
+                .gradient_norm = scalar_type(1.0),
+                .step_size = scalar_type(1.0),
+                .objective_change = scalar_type(1.0),
                 .improved = false,
             };
         }

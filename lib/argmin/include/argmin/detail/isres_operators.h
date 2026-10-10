@@ -13,6 +13,7 @@
 //            K&W Section 8.6 (evolution strategies).
 
 #include "argmin/detail/tuple_contains.h"
+#include "argmin/detail/scalar_distributions.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/types.h"
 
@@ -36,7 +37,7 @@ namespace argmin::detail
 // uses [-1, 1] as a fallback range.
 //
 // Reference: K&W Section 8.6 (ES initialization).
-template <int N = argmin::dynamic_dimension, typename Scalar = double, typename Rng>
+template <int N = argmin::dynamic_dimension, scalar Scalar, typename Rng>
 Eigen::Matrix<Scalar, N, Eigen::Dynamic> initialize_population(
     int n, int lambda,
     const Eigen::Vector<Scalar, N>& lower,
@@ -44,7 +45,7 @@ Eigen::Matrix<Scalar, N, Eigen::Dynamic> initialize_population(
     Rng& rng)
 {
     constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-    std::uniform_real_distribution<Scalar> uniform(Scalar(0), Scalar(1));
+    unit_uniform_distribution<Scalar> uniform;
 
     Eigen::Matrix<Scalar, N, Eigen::Dynamic> pop(n, lambda);
 
@@ -67,7 +68,7 @@ Eigen::Matrix<Scalar, N, Eigen::Dynamic> initialize_population(
 // If infinite range on a dimension, uses 1.0.
 //
 // Reference: Runarsson & Yao (2005).
-template <int N = argmin::dynamic_dimension, typename Scalar = double>
+template <int N = argmin::dynamic_dimension, scalar Scalar>
 Eigen::Matrix<Scalar, N, Eigen::Dynamic> initialize_sigmas(
     int n, int lambda,
     const Eigen::Vector<Scalar, N>& lower,
@@ -108,7 +109,7 @@ Eigen::Matrix<Scalar, N, Eigen::Dynamic> initialize_sigmas(
 //   Clamp x_new to [lower, upper]
 //
 // Reference: Runarsson & Yao (2005), K&W Section 8.6.
-template <int N = argmin::dynamic_dimension, typename Scalar = double, typename Rng>
+template <int N = argmin::dynamic_dimension, scalar Scalar, typename Rng>
 std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, N>> mutate_individual(
     const Eigen::Vector<Scalar, N>& parent,
     const std::type_identity_t<Eigen::Vector<Scalar, N>>& sigma,
@@ -121,7 +122,7 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, N>> mutate_individual(
     Rng& rng)
 {
     const int n = parent.size();
-    std::normal_distribution<Scalar> normal(Scalar(0), Scalar(1));
+    standard_normal_distribution<Scalar> normal;
 
     // Log-normal self-adaptation (element-wise)
     Scalar global_noise = tau * normal(rng);
@@ -151,7 +152,7 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, N>> mutate_individual(
 //
 // Reference: Runarsson & Yao (2005), K&W Section 8.6.
 
-template <typename Scalar = double, int N = argmin::dynamic_dimension>
+template <scalar Scalar, int N = argmin::dynamic_dimension>
 class isres_operator_workspace
 {
 public:
@@ -179,7 +180,7 @@ public:
         Rng& rng)
     {
         const int n = static_cast<int>(parent.size());
-        std::normal_distribution<Scalar> normal(Scalar(0), Scalar(1));
+        standard_normal_distribution<Scalar> normal;
 
         Scalar global_noise = tau * normal(rng);
         for(int i = 0; i < n; ++i)
@@ -212,7 +213,7 @@ private:
 // violation = sum(|c_eq|) + sum(max(0, -c_ineq))
 //
 // Reference: N&W eq. 15.24 / 17.44.
-template <typename Scalar = double, int M = argmin::dynamic_dimension, int Lambda = argmin::dynamic_dimension>
+template <scalar Scalar, int M = argmin::dynamic_dimension, int Lambda = argmin::dynamic_dimension>
 Eigen::Vector<Scalar, Lambda> compute_violations(
     const Eigen::Matrix<Scalar, M, Lambda>& constraints_matrix,
     int n_eq,
@@ -254,18 +255,20 @@ Eigen::Vector<Scalar, Lambda> compute_violations(
 // consumption exactly.
 //
 // Reference: NLopt 2.10.0 isres.c; Schwefel (1995); K&W Section 8.6.
+template <scalar Scalar>
 struct es_learning_rates
 {
-    double tau;
-    double tau_prime;
+    Scalar tau;
+    Scalar tau_prime;
 };
 
-inline es_learning_rates compute_es_rates(int n)
+template <scalar Scalar>
+es_learning_rates<Scalar> compute_es_rates(int n)
 {
-    double nd = static_cast<double>(n);
+    Scalar nd = static_cast<Scalar>(n);
     return {
-        .tau = 1.0 / std::sqrt(2.0 * std::sqrt(nd)),
-        .tau_prime = 1.0 / std::sqrt(2.0 * nd),
+        .tau = Scalar(1) / std::sqrt(Scalar(2) * std::sqrt(nd)),
+        .tau_prime = Scalar(1) / std::sqrt(Scalar(2) * nd),
     };
 }
 
@@ -289,7 +292,7 @@ inline es_learning_rates compute_es_rates(int n)
 //            Man, and Cybernetics, Part C, 35(2):233-243.
 //            K&W 2e Section 8.6.
 //            NLopt 2.10.0 isres.c lines 254-260 (operator body).
-template <int N = argmin::dynamic_dimension, typename Scalar = double>
+template <int N = argmin::dynamic_dimension, scalar Scalar>
 inline void differential_variation(
     Eigen::Ref<Eigen::Matrix<Scalar, N, Eigen::Dynamic>> population,
     const Eigen::Matrix<Scalar, N, Eigen::Dynamic>& x0_snapshot,
@@ -323,7 +326,7 @@ inline void differential_variation(
 //            35(2):233-243, Section III; K&W 2e Section 8.6.
 //            NLopt 2.10.0 isres.c lines 240-244 (sigma_max =
 //            (ub-lb)/sqrt(n) plus per-mutation clamp placement).
-template <typename Scalar = double, typename Rng>
+template <scalar Scalar, typename Rng>
 inline Scalar log_normal_mutate(
     Scalar sigma,
     Scalar tau,
@@ -331,7 +334,7 @@ inline Scalar log_normal_mutate(
     Scalar sigma_max,
     Rng& rng)
 {
-    std::normal_distribution<Scalar> normal(Scalar(0), Scalar(1));
+    standard_normal_distribution<Scalar> normal;
     const Scalar sigma_new = sigma
         * std::exp(tau_prime_rand + tau * normal(rng));
     return std::min(sigma_new, sigma_max);
@@ -353,17 +356,17 @@ inline Scalar log_normal_mutate(
 //            Hansen, N. (2023), "The CMA Evolution Strategy: A Tutorial,"
 //            arXiv:1604.00772, Section B.5 (TolX termination convention,
 //            design rationale only).
-template <typename State, int N>
+template <typename State, typename Scalar, int N>
 inline bool sigma_collapsed_bound_relative(
     const State& s,
-    double ratio,
+    Scalar ratio,
     int n,
-    const Eigen::Vector<double, N>& lower,
-    const Eigen::Vector<double, N>& upper)
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
 {
-    const double mean_sigma = s.sigmas.leftCols(s.mu).mean();
-    const double mean_range = (upper - lower).mean();
-    return mean_sigma < ratio * mean_range / std::sqrt(static_cast<double>(n));
+    const Scalar mean_sigma = s.sigmas.leftCols(s.mu).mean();
+    const Scalar mean_range = (upper - lower).mean();
+    return mean_sigma < ratio * mean_range / std::sqrt(static_cast<Scalar>(n));
 }
 
 // Sigma-collapse predicate (xtol-coupled form, convergence-policy template).
@@ -379,32 +382,32 @@ inline bool sigma_collapsed_bound_relative(
 //
 // Reference: Runarsson, T. P., and Yao, X. (2005), IEEE Trans. SMC-C
 //            35(2):233-243, Section V (termination); K&W 2e Section 8.6.
-template <typename State, typename Convergence, int N>
+template <typename State, typename Convergence, typename Scalar, int N>
 inline bool sigma_collapsed_xtol_coupled(
     const State& s,
     const Convergence& convergence,
-    double fallback_ratio,
+    Scalar fallback_ratio,
     int n,
-    const Eigen::Vector<double, N>& lower,
-    const Eigen::Vector<double, N>& upper)
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
 {
-    const double mean_sigma = s.sigmas.leftCols(s.mu).mean();
+    const Scalar mean_sigma = s.sigmas.leftCols(s.mu).mean();
     if constexpr(tuple_contains_v<step_tolerance_criterion<typename Convergence::scalar_type>,
                                   decltype(convergence.criteria)>)
     {
         const auto& crit = std::get<step_tolerance_criterion<typename Convergence::scalar_type>>(convergence.criteria);
         return mean_sigma < crit.threshold;
     }
-    const double mean_range = (upper - lower).mean();
+    const Scalar mean_range = (upper - lower).mean();
     return mean_sigma < fallback_ratio * mean_range
-                          / std::sqrt(static_cast<double>(n));
+                          / std::sqrt(static_cast<Scalar>(n));
 }
 
 // Sigma-collapse predicate (xtol-coupled form, captured-threshold overload).
 //
 // Variant `step()` bodies cannot thread the Convergence type through
 // state_type<P>, so init() captures the threshold value at policy
-// init-time (`s.convergence_xtol_threshold = std::optional<double>`)
+// init-time (`s.convergence_xtol_threshold = std::optional<Scalar>`)
 // and step() calls THIS overload with the captured value. If the caller
 // passes a finite, positive `threshold_value`, the predicate uses it;
 // otherwise it falls back to the bound-relative form with
@@ -412,21 +415,21 @@ inline bool sigma_collapsed_xtol_coupled(
 //
 // Reference: Runarsson, T. P., and Yao, X. (2005), IEEE Trans. SMC-C
 //            35(2):233-243, Section V (termination); K&W 2e Section 8.6.
-template <typename State, int N>
+template <typename State, typename Scalar, int N>
 inline bool sigma_collapsed_xtol_coupled(
     const State& s,
-    double threshold_value,
-    double fallback_ratio,
+    Scalar threshold_value,
+    Scalar fallback_ratio,
     int n,
-    const Eigen::Vector<double, N>& lower,
-    const Eigen::Vector<double, N>& upper)
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
 {
-    const double mean_sigma = s.sigmas.leftCols(s.mu).mean();
-    if(std::isfinite(threshold_value) && threshold_value > 0.0)
+    const Scalar mean_sigma = s.sigmas.leftCols(s.mu).mean();
+    if(std::isfinite(threshold_value) && threshold_value > Scalar(0))
         return mean_sigma < threshold_value;
-    const double mean_range = (upper - lower).mean();
+    const Scalar mean_range = (upper - lower).mean();
     return mean_sigma < fallback_ratio * mean_range
-                          / std::sqrt(static_cast<double>(n));
+                          / std::sqrt(static_cast<Scalar>(n));
 }
 
 }
