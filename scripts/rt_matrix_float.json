@@ -105,7 +105,11 @@
                 },
                 {
                   "kind": "ctest_test",
-                  "name": "filter SQP policies in float track double on constrained Hock-Schittkowski fixtures at their own defaults"
+                  "name": "filter_slsqp in float tracks double on constrained Hock-Schittkowski fixtures at its own defaults"
+                },
+                {
+                  "kind": "ctest_test",
+                  "name": "filter_nw_sqp in float tracks double on constrained Hock-Schittkowski fixtures at its own defaults"
                 },
                 {
                   "kind": "ci_job",
