@@ -414,6 +414,25 @@ TEST_CASE("sigma_collapsed_bound_relative fires only below threshold",
         s, 1e-9, n, lower, upper));
 }
 
+TEST_CASE("sigma_collapsed_bound_relative stays finite on a half-bounded variable",
+          "[isres_operators]")
+{
+    constexpr int n = 2;
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    Eigen::Vector<double, 2> lower; lower << -10.0, -10.0;
+    Eigen::Vector<double, 2> upper; upper <<  10.0,  inf;
+
+    sigma_state s;
+    s.mu = 3;
+    s.sigmas = argmin::detail::initialize_sigmas<2>(n, s.mu, lower, upper);
+    CHECK_FALSE(argmin::detail::sigma_collapsed_bound_relative(
+        s, 1e-9, n, lower, upper));
+
+    s.sigmas = Eigen::MatrixXd::Constant(n, s.mu, 1e-15);
+    CHECK(argmin::detail::sigma_collapsed_bound_relative(
+        s, 1e-9, n, lower, upper));
+}
+
 TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls back",
           "[isres_operators]")
 {

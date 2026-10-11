@@ -325,7 +325,7 @@
             "guaranteed?": {
               "verdict": "yes",
               "class": "gated",
-              "qualifier": "on hs023, and the original variant on hs024, k = 100; two variants on hs024 are experimental, see below",
+              "qualifier": "on hs023 and hs024, k = 100",
               "evidence": [
                 {
                   "kind": "ctest_test",

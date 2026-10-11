@@ -83,7 +83,7 @@ Windows build jobs, which select the `float` test label explicitly.
 | moving asymptotes (mma, ccsa_quadratic, the three GCMMA variants) in float track double | **yes** *(gated)* (inequality-constrained fixtures, k = 30; GCMMA move-limit shrinking on hs076 is experimental, see below) | moving-asymptote policies in float track double on inequality-constrained fixtures at their own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
 | derivative-free (bobyqa, cobyla) in float tracks double | **yes** *(gated)* (bounded and constrained fixtures, k = 30) | derivative-free policies in float track double on bounded and constrained fixtures at their own defaults; BOBYQA in float tracks double on bounded fixtures at its own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
 | CMA-ES (all three variants) in float tracks double | **yes** *(gated)* (unconstrained and active-bound Rosenbrock, k = 100) | CMA-ES in float tracks double on Rosenbrock at its own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
-| ISRES (all three variants) in float tracks double | **yes** *(gated)* (on hs023, and the original variant on hs024, k = 100; two variants on hs024 are experimental, see below) | ISRES in float tracks double on an inequality-constrained fixture at its own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
+| ISRES (all three variants) in float tracks double | **yes** *(gated)* (on hs023 and hs024, k = 100) | ISRES in float tracks double on an inequality-constrained fixture at its own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
 | wrappers (augmented_lagrangian, multistart, restarting) over a float inner policy track double | **yes** *(gated)* (k = 10) | wrappers over a float inner policy track double at their own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
 <!-- END GENERATED: float-status -->
 
@@ -108,9 +108,6 @@ tracked as an open issue against the `double` behavior:
 - **GCMMA move-limit shrinking on hs076**: the `double` run never stops by a
   criterion (f = -3.06, -3.35 and -4.58 after 200, 2,000 and 20,000 iterations,
   against an optimum of -4.6818).
-- **ISRES, the faithful and Runarsson-Yao variants on hs024**: hs024's infinite
-  upper bound makes the bound-relative collapse threshold infinite, so both
-  variants stop after one generation in `double` as well.
 
 ## Determinism
 

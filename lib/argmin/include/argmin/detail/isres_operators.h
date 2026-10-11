@@ -340,6 +340,23 @@ inline Scalar log_normal_mutate(
     return std::min(sigma_new, sigma_max);
 }
 
+// Mean bound width the sigma-collapse predicates measure against. An unbounded
+// dimension contributes the sqrt(n) range initialize_sigmas seeds its sigma from,
+// so one infinite bound cannot make the threshold infinite.
+template <typename Scalar, int N>
+inline Scalar sigma_reference_range(
+    int n,
+    const Eigen::Vector<Scalar, N>& lower,
+    const Eigen::Vector<Scalar, N>& upper)
+{
+    constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+    const auto bounded = (lower.array() > -inf) && (upper.array() < inf);
+    if(bounded.all())
+        return (upper - lower).mean();
+    const Scalar sqrt_n = std::sqrt(static_cast<Scalar>(n));
+    return bounded.select((upper - lower).array(), sqrt_n).mean();
+}
+
 // Sigma-collapse predicate (bound-relative form).
 //
 // Returns true when the population's mean per-individual sigma over the
@@ -365,7 +382,7 @@ inline bool sigma_collapsed_bound_relative(
     const Eigen::Vector<Scalar, N>& upper)
 {
     const Scalar mean_sigma = s.sigmas.leftCols(s.mu).mean();
-    const Scalar mean_range = (upper - lower).mean();
+    const Scalar mean_range = sigma_reference_range(n, lower, upper);
     return mean_sigma < ratio * mean_range / std::sqrt(static_cast<Scalar>(n));
 }
 
@@ -398,7 +415,7 @@ inline bool sigma_collapsed_xtol_coupled(
         const auto& crit = std::get<step_tolerance_criterion<typename Convergence::scalar_type>>(convergence.criteria);
         return mean_sigma < crit.threshold;
     }
-    const Scalar mean_range = (upper - lower).mean();
+    const Scalar mean_range = sigma_reference_range(n, lower, upper);
     return mean_sigma < fallback_ratio * mean_range
                           / std::sqrt(static_cast<Scalar>(n));
 }
@@ -427,7 +444,7 @@ inline bool sigma_collapsed_xtol_coupled(
     const Scalar mean_sigma = s.sigmas.leftCols(s.mu).mean();
     if(std::isfinite(threshold_value) && threshold_value > Scalar(0))
         return mean_sigma < threshold_value;
-    const Scalar mean_range = (upper - lower).mean();
+    const Scalar mean_range = sigma_reference_range(n, lower, upper);
     return mean_sigma < fallback_ratio * mean_range
                           / std::sqrt(static_cast<Scalar>(n));
 }

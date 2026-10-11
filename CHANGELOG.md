@@ -37,6 +37,9 @@ Policies available at HEAD, grouped by problem class:
 
 ### Fixed
 
+- ISRES no longer reports `ftol_reached` after its first generation when a
+  variable has an infinite bound: the sigma-collapse stop measures an unbounded
+  dimension against the same reference range its initial step size uses.
 - `ccsa_quadratic` in `float` keeps its move box resolvable: the minimum move
   limit is 3e-4 of the variable range instead of 1e-8, which is below `float`
   precision at unit scale.

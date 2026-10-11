@@ -32,8 +32,10 @@ namespace
 constexpr std::uint32_t max_iterations = 2000;
 constexpr std::uint64_t seed = 42;
 
-// ISRES reports ftol_reached on its own sigma-collapse stop; converged is a harness criterion.
-constexpr std::array accepted_statuses{solver_status::ftol_reached, solver_status::converged};
+// ISRES reports ftol_reached on its own sigma-collapse stop; converged and stalled are harness
+// criteria, stalled firing once the surviving population stops improving the objective.
+constexpr std::array accepted_statuses{solver_status::ftol_reached, solver_status::converged,
+                                       solver_status::stalled};
 
 bool accepted(solver_status status)
 {
@@ -83,23 +85,6 @@ void check_tracks_double()
     CHECK(squared_violation(problem_f, result_f.x) <= isres_defaults<float>::feasibility_gate);
 }
 
-// Both scalars stop after the first generation here: an infinite bound makes the bound-relative
-// collapse threshold infinite, so the stop records where the first generation landed.
-template <template <typename, int> typename Policy, template <typename> typename Problem>
-void check_first_generation_stop()
-{
-    const Problem<double> problem_d;
-    const Problem<float> problem_f;
-    const auto result_d = drive<Policy<double, Problem<double>::problem_dimension>>(problem_d);
-    const auto result_f = drive<Policy<float, Problem<float>::problem_dimension>>(problem_f);
-
-    REQUIRE(accepted(result_d.status));
-    REQUIRE(result_f.x.allFinite());
-    CHECK(accepted(result_f.status));
-    CHECK(squared_violation(problem_f, result_f.x) <= isres_defaults<float>::feasibility_gate);
-    CHECK_NOFAIL(tracks(result_f.x, result_d.x, k_stochastic));
-}
-
 template <scalar S, int N>
 using nlopt_faithful = isres_policy<S, N>;
 
@@ -128,21 +113,18 @@ TEST_CASE("ISRES in float tracks double on an inequality-constrained fixture at 
         check_tracks_double<original_argmin, hs023>();
     }
 
-    SECTION("original_argmin_policy hs024")
-    {
-        check_tracks_double<original_argmin, hs024>();
-    }
-}
-
-TEST_CASE("ISRES in float on a half-bounded fixture where the collapse stop fires after one generation", "[float]")
-{
     SECTION("isres_policy hs024")
     {
-        check_first_generation_stop<nlopt_faithful, hs024>();
+        check_tracks_double<nlopt_faithful, hs024>();
     }
 
     SECTION("runarsson_yao_paper_policy hs024")
     {
-        check_first_generation_stop<runarsson_yao, hs024>();
+        check_tracks_double<runarsson_yao, hs024>();
+    }
+
+    SECTION("original_argmin_policy hs024")
+    {
+        check_tracks_double<original_argmin, hs024>();
     }
 }
