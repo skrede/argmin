@@ -117,12 +117,13 @@ enum class restoration_status : std::uint8_t
 // classification, the iteration count used (for diagnostics roll-up
 // at the caller), the final feasibility residual norm, and the final
 // lambda value (for sweep-time tuning of lambda_init).
+template <typename Scalar>
 struct lm_restoration_result
 {
     restoration_status status;
     std::size_t        iterations_used;
-    double             final_c_norm_l2;
-    double             final_lambda;
+    Scalar             final_c_norm_l2;
+    Scalar             final_lambda;
 };
 
 // Levenberg-Marquardt feasibility restoration.
@@ -153,7 +154,7 @@ struct lm_restoration_result
 //                  caller's allocation site.
 template <typename Scalar, int N, typename ConstraintFn,
           typename JacobianFn>
-lm_restoration_result feasibility_restoration(
+lm_restoration_result<Scalar> feasibility_restoration(
     Eigen::Ref<Eigen::Vector<Scalar, N>>              x,
     ConstraintFn&&                                    constraints,
     JacobianFn&&                                      jacobian,
@@ -174,19 +175,18 @@ lm_restoration_result feasibility_restoration(
     using std::min;
     using std::max;
 
-    lm_restoration_result result{};
+    lm_restoration_result<Scalar> result{};
     result.status          = restoration_status::max_iter_reached;
     result.iterations_used = 0;
-    result.final_c_norm_l2 =
-        std::numeric_limits<double>::quiet_NaN();
-    result.final_lambda = static_cast<double>(lambda_init);
+    result.final_c_norm_l2 = std::numeric_limits<Scalar>::quiet_NaN();
+    result.final_lambda    = lambda_init;
 
     // Initial residual evaluation. An exit on the entry feasibility
     // check is the cleanest no-op behavior for a restoration call on
     // an already-feasible iterate.
     constraints(x, c_buf);
     Scalar c_norm = c_buf.norm();
-    result.final_c_norm_l2 = static_cast<double>(c_norm);
+    result.final_c_norm_l2 = c_norm;
 
     if(c_norm < feasibility_tol)
     {
@@ -213,8 +213,8 @@ lm_restoration_result feasibility_restoration(
         {
             result.status = restoration_status::degenerate_no_progress;
             result.iterations_used = iter;
-            result.final_c_norm_l2 = static_cast<double>(c_norm);
-            result.final_lambda    = static_cast<double>(lambda);
+            result.final_c_norm_l2 = c_norm;
+            result.final_lambda    = lambda;
             return result;
         }
 
@@ -268,9 +268,8 @@ lm_restoration_result feasibility_restoration(
                     result.status =
                         restoration_status::lambda_grew_unbounded;
                     result.iterations_used = iter;
-                    result.final_c_norm_l2 = static_cast<double>(c_norm);
-                    result.final_lambda    =
-                        static_cast<double>(lambda);
+                    result.final_c_norm_l2 = c_norm;
+                    result.final_lambda    = lambda;
                     return result;
                 }
                 lambda = min(restoration_constants<Scalar>::lambda_max,
@@ -296,9 +295,8 @@ lm_restoration_result feasibility_restoration(
                     result.status =
                         restoration_status::lambda_grew_unbounded;
                     result.iterations_used = iter;
-                    result.final_c_norm_l2 = static_cast<double>(c_norm);
-                    result.final_lambda    =
-                        static_cast<double>(lambda);
+                    result.final_c_norm_l2 = c_norm;
+                    result.final_lambda    = lambda;
                     return result;
                 }
                 lambda = min(restoration_constants<Scalar>::lambda_max,
@@ -337,9 +335,8 @@ lm_restoration_result feasibility_restoration(
                     result.status =
                         restoration_status::lambda_grew_unbounded;
                     result.iterations_used = iter;
-                    result.final_c_norm_l2 = static_cast<double>(c_norm);
-                    result.final_lambda    =
-                        static_cast<double>(lambda);
+                    result.final_c_norm_l2 = c_norm;
+                    result.final_lambda    = lambda;
                     return result;
                 }
                 lambda = min(restoration_constants<Scalar>::lambda_max,
@@ -356,8 +353,8 @@ lm_restoration_result feasibility_restoration(
         {
             result.status          = restoration_status::converged;
             result.iterations_used = iter + 1;
-            result.final_c_norm_l2 = static_cast<double>(c_norm);
-            result.final_lambda    = static_cast<double>(lambda);
+            result.final_c_norm_l2 = c_norm;
+            result.final_lambda    = lambda;
             return result;
         }
     }
@@ -365,8 +362,8 @@ lm_restoration_result feasibility_restoration(
     // max_iter reached without converging.
     result.status          = restoration_status::max_iter_reached;
     result.iterations_used = max_iter;
-    result.final_c_norm_l2 = static_cast<double>(c_norm);
-    result.final_lambda    = static_cast<double>(lambda);
+    result.final_c_norm_l2 = c_norm;
+    result.final_lambda    = lambda;
     return result;
 }
 

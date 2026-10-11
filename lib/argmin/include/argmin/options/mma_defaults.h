@@ -20,7 +20,6 @@ struct mma_defaults<double>
     static constexpr double dual_newton_tolerance = 1e-12;
     static constexpr double subproblem_dual_tolerance = 1e-9;
     static constexpr double subproblem_backtrack_factor = 0.95;
-    static constexpr double stall_threshold = 1e-6;
     static constexpr double asymptote_contract = 0.7;
     static constexpr double asymptote_expand = 1.2;
     static constexpr double asymptote_init = 0.5;
@@ -50,7 +49,8 @@ struct mma_defaults<float>
 {
     // A precision-class value keeps the double row's fraction of the available precision:
     // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure. The asymptote, move-limit,
-    // sigma, rho and raa parameters are ratios of the variable range or the penalty scale.
+    // sigma, rho and raa parameters are ratios of the variable range or the penalty scale, except
+    // sigma_min_fraction: it keeps the move box x +/- sigma resolvable, so it takes the rule value.
     static constexpr float dual_gradient_threshold = 1e-4f;      // rule
     static constexpr float dual_step_threshold = 2e-7f;          // rule
     static constexpr float min_asymptote_distance = 5e-6f;       // rule
@@ -59,7 +59,6 @@ struct mma_defaults<float>
     static constexpr float dual_newton_tolerance = 5e-6f;        // rule
     static constexpr float subproblem_dual_tolerance = 1e-4f;    // rule
     static constexpr float subproblem_backtrack_factor = 0.95f;  // dimensionless
-    static constexpr float stall_threshold = 2e-3f;              // rule
     static constexpr float asymptote_contract = 0.7f;            // dimensionless
     static constexpr float asymptote_expand = 1.2f;              // dimensionless
     static constexpr float asymptote_init = 0.5f;                // dimensionless
@@ -73,7 +72,7 @@ struct mma_defaults<float>
     static constexpr float sigma_init = 0.5f;                    // dimensionless
     static constexpr float sigma_decrease = 0.7f;                // dimensionless
     static constexpr float sigma_increase = 1.2f;                // dimensionless
-    static constexpr float sigma_min_fraction = 1e-8f;           // dimensionless
+    static constexpr float sigma_min_fraction = 3e-4f;           // rule
     static constexpr float sigma_max_fraction = 10.0f;           // dimensionless
     static constexpr float rho_init = 1.0f;                      // dimensionless
     static constexpr float rho_min = 1e-5f;                      // dimensionless

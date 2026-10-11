@@ -56,7 +56,10 @@ rule value, and then it moves to the nearest value that passes. Three did:
 
 The trust-region SQP feasibility tolerances in both modes also start at 1e-3,
 the driver's value, rather than at their rule values (2e-2 fast, 2e-3 accurate):
-the fast-mode rule value fails under the policies' own tolerances.
+the fast-mode rule value fails under the policies' own tolerances. In `float` the
+two modes therefore share one feasibility tolerance; `sqp_mode::fast` and
+`sqp_mode::accurate` differ only in their gradient and relative step tolerances,
+where `double` also separates them by two decades in feasibility.
 
 ## Status per family
 

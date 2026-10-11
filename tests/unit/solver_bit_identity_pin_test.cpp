@@ -26,14 +26,19 @@
 //     set, else oracles/solver_bit_identity_golden.csv), and on a matching
 //     target assert every captured value bit-for-bit.
 //
-// Coverage: the four real-time-path solvers, each on a representative fixed-N
+// Coverage: the real-time-path solvers, each on a representative fixed-N
 // fixture family -- nw_sqp on hs071 and sd012, filter_nw_sqp on hs071 and
-// sd024, lm on a 2D Rosenbrock least-squares and sd_ls012 -- snapshotting the
-// full iterate vector, the objective, and (where the state exposes them) the
-// multipliers at three points spread across each trajectory.
+// sd024, lm on a 2D Rosenbrock least-squares and sd_ls012 -- plus bobyqa on a
+// Rosenbrock whose minimizer sits on an active bound, the one derivative-free
+// policy whose per-step report drives the harness stopping criteria. Each
+// snapshots the full iterate vector, the objective, and (where the state
+// exposes them) the multipliers at three points spread across the trajectory.
+
+#include "float/float_fixtures.h"
 
 #include "argmin/solver/options.h"
 #include "argmin/solver/lm_policy.h"
+#include "argmin/solver/bobyqa_policy.h"
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/filter_nw_sqp_policy.h"
@@ -262,6 +267,18 @@ void run_lm(golden_map& g, const std::string& fixture)
     capture_trajectory(g, "lm", fixture, solver);
 }
 
+template <typename Problem>
+void run_bobyqa(golden_map& g, const std::string& fixture)
+{
+    Problem problem;
+    auto x0 = problem.initial_point();
+    solver_options<> opts;
+    opts.max_iterations = 200;
+    step_budget_solver solver{bobyqa_policy<double, Problem::problem_dimension>{},
+                              problem, x0, opts};
+    capture_trajectory(g, "bobyqa", fixture, solver);
+}
+
 [[nodiscard]] golden_map build_trajectories()
 {
     golden_map g;
@@ -271,6 +288,7 @@ void run_lm(golden_map& g, const std::string& fixture)
     run_filter_nw<sd024<>>(g, "sd024");
     run_lm<rosenbrock_ls2>(g, "rosenbrock2");
     run_lm<sd_ls012<>>(g, "sd_ls012");
+    run_bobyqa<float_fixtures::active_box_rosenbrock<double>>(g, "active_box_rosenbrock");
     return g;
 }
 

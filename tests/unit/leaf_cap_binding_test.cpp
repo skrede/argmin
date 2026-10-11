@@ -104,7 +104,7 @@ struct workspace_2d
 };
 
 template <typename ConstraintFn, typename JacobianFn>
-argmin::detail::lm_restoration_result run_restoration(
+argmin::detail::lm_restoration_result<double> run_restoration(
     Eigen::Vector2d& x, ConstraintFn&& cfn, JacobianFn&& jfn,
     workspace_2d& wk, std::size_t max_iter, double lambda_init)
 {

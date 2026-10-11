@@ -135,7 +135,7 @@ TEST_CASE("feasibility_restoration linear constraint converges",
 
     workspace_2d wk(1);
 
-    lm_restoration_result result = feasibility_restoration<double, 2>(
+    lm_restoration_result<double> result = feasibility_restoration<double, 2>(
         x, cfn, jfn, lower, upper,
         /*max_iter=*/std::size_t{5},
         /*lambda_init=*/1e-3,
@@ -174,7 +174,7 @@ TEST_CASE("feasibility_restoration quadratic constraint converges",
 
     workspace_2d wk(1);
 
-    lm_restoration_result result = feasibility_restoration<double, 2>(
+    lm_restoration_result<double> result = feasibility_restoration<double, 2>(
         x, cfn, jfn, lower, upper,
         /*max_iter=*/std::size_t{50},
         /*lambda_init=*/1e-3,
@@ -215,7 +215,7 @@ TEST_CASE("feasibility_restoration rank-deficient Jacobian stabilizes",
 
     workspace_2d wk(2);
 
-    lm_restoration_result result = feasibility_restoration<double, 2>(
+    lm_restoration_result<double> result = feasibility_restoration<double, 2>(
         x, cfn, jfn, lower, upper,
         /*max_iter=*/std::size_t{100},
         /*lambda_init=*/1e-3,

@@ -646,7 +646,7 @@ struct augmented_lagrangian_policy
         const scalar_type tol_eta = s.opts.inner_tolerance_eta;
         const scalar_type tol_alpha = s.opts.inner_tolerance_alpha;
         if(!s.inner_active && !s.omega.has_value())
-            s.omega = static_cast<scalar_type>(tol_eta * std::pow(s.mu, tol_alpha));
+            s.omega = tol_eta * std::pow(s.mu, tol_alpha);
         const scalar_type inner_tol = std::max(*s.omega, inner_grad_tol);
 
         solver_options<default_convergence<scalar_type>> inner_opts;
@@ -979,7 +979,7 @@ struct augmented_lagrangian_policy
             // omega from the new (smaller) mu rather than carrying the
             // possibly-unreachable tolerance accumulated in the previous
             // regime.
-            s.omega = static_cast<scalar_type>(tol_eta * std::pow(s.mu, tol_alpha));
+            s.omega = tol_eta * std::pow(s.mu, tol_alpha);
         }
         s.prev_viol = gate_viol;
 

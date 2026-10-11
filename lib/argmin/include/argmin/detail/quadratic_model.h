@@ -210,7 +210,7 @@ quadratic_model<Scalar, N> build_model(
         auto U = svd.matrixU();  // m x m
 
         // w = V^T * phi(x_base), then scale by Sigma^{-1}, then multiply by U
-        Eigen::VectorX<Scalar> w = V.transpose() * phi_xbase.template cast<Scalar>();
+        Eigen::VectorX<Scalar> w = V.transpose() * phi_xbase;
         for(int i = 0; i < sv.size(); ++i)
         {
             if(sv[i] > thr)
@@ -224,7 +224,7 @@ quadratic_model<Scalar, N> build_model(
         for(int i = static_cast<int>(sv.size()); i < w.size(); ++i)
             w[i] = Scalar(0.0);
 
-        model.lagrange_values = U.template cast<Scalar>() * w.head(m);
+        model.lagrange_values = U * w.head(m);
     }
 
     // Initialize incremental data structures.
@@ -315,7 +315,7 @@ Eigen::VectorX<Scalar> compute_lagrange_at_point(
     auto V = svd.matrixV();
     auto U = svd.matrixU();
 
-    Eigen::VectorX<Scalar> w = V.transpose() * phi_q.template cast<Scalar>();
+    Eigen::VectorX<Scalar> w = V.transpose() * phi_q;
     for(int i = 0; i < sv.size(); ++i)
     {
         if(sv[i] > thr)
@@ -326,7 +326,7 @@ Eigen::VectorX<Scalar> compute_lagrange_at_point(
     for(int i = static_cast<int>(sv.size()); i < w.size(); ++i)
         w[i] = Scalar(0.0);
 
-    return U.template cast<Scalar>() * w.head(m);
+    return U * w.head(m);
 }
 
 // Update model after replacing interpolation point k with a new point.

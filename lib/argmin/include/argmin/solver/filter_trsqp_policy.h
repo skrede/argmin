@@ -898,8 +898,8 @@ struct filter_trsqp_policy
         // Section E reads the same displaced box.
         auto& lower_joint = s.step_lower_joint;
         auto& upper_joint = s.step_upper_joint;
-        lower_joint.head(n) = (s.lower - s.x).template cast<Scalar>();
-        upper_joint.head(n) = (s.upper - s.x).template cast<Scalar>();
+        lower_joint.head(n) = s.lower - s.x;
+        upper_joint.head(n) = s.upper - s.x;
         if(n_ineq > 0)
         {
             lower_joint.tail(n_ineq) = -s.s_slack;
@@ -1670,8 +1670,8 @@ struct filter_trsqp_policy
         // projected stationarity report (the Section D box was
         // displaced at the pre-step iterate; the upper slack leg stays
         // +inf).
-        lower_joint.head(n) = (s.lower - s.x).template cast<Scalar>();
-        upper_joint.head(n) = (s.upper - s.x).template cast<Scalar>();
+        lower_joint.head(n) = s.lower - s.x;
+        upper_joint.head(n) = s.upper - s.x;
         if(n_ineq > 0)
             lower_joint.tail(n_ineq) = -s.s_slack;
         const Scalar grad_L_norm_new =

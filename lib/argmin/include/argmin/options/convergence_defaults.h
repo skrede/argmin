@@ -17,6 +17,7 @@ struct convergence_defaults<double>
     static constexpr double stationarity_threshold = 1e-8;
     static constexpr double step_threshold = 1e-8;
     static constexpr double feasibility_tolerance = 1e-6;
+    static constexpr double stall_threshold = 1e-6;
 };
 
 template <>
@@ -29,6 +30,7 @@ struct convergence_defaults<float>
     static constexpr float stationarity_threshold = 3e-4f;  // rule
     static constexpr float step_threshold = 3e-4f;          // rule
     static constexpr float feasibility_tolerance = 1e-3f;   // gate: rule value 2e-3 failed hs043
+    static constexpr float stall_threshold = 2e-3f;         // rule
 };
 
 }

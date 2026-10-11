@@ -35,6 +35,12 @@ Policies available at HEAD, grouped by problem class:
 - `float` is supported per algorithm family, each gated against `double`; see
   [docs/float-support.md](docs/float-support.md).
 
+### Fixed
+
+- `ccsa_quadratic` in `float` keeps its move box resolvable: the minimum move
+  limit is 3e-4 of the variable range instead of 1e-8, which is below `float`
+  precision at unit scale.
+
 ### Notes
 
 - Every policy plugs into `step_budget_solver<Policy>` and exposes a

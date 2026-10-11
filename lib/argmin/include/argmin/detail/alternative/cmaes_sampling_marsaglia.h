@@ -8,9 +8,7 @@
 // the Marsaglia polar method on top of xoshiro256+. Generates two
 // Gaussians per pair of uniforms with one log + one sqrt; no trig
 // calls. Roughly 2-3x faster than std::normal_distribution per
-// Marsaglia & Bray (1964); the empirical multiplier on the
-// argmin + libstdc++ + xoshiro256+ stack is reported in the Plan
-// 05 A/B verdict doc.
+// Marsaglia & Bray (1964).
 //
 // The pair-cache carries NO cross-call state: each single draw
 // computes one polar pair and discards the spare, so the value a

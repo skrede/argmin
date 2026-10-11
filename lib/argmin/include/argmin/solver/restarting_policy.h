@@ -240,7 +240,7 @@ private:
         // IPOP: population = initial_lambda * 2^restart_count
         scalar_type multiplier = options.population_multiplier;
         auto new_pop = static_cast<std::uint32_t>(
-            s.initial_lambda * std::pow(multiplier, s.restart_count));
+            static_cast<scalar_type>(s.initial_lambda) * std::pow(multiplier, static_cast<scalar_type>(s.restart_count)));
 
         // Update inner population size via the appropriate field
         if constexpr(requires { inner_policy_.options.population_size; })

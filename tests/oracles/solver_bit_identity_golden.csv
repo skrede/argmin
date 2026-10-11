@@ -12,8 +12,17 @@
 # committing its output; the target-identity line then activates the
 # assertions only on the matching leg.
 #
-# captured (compile date Jul 18 2026)
+# captured (compile date Oct 11 2026)
 target_identity,gcc-14;x86_64;DEBUG
+bobyqa|active_box_rosenbrock|final|f|0,0x3fd0000000000000
+bobyqa|active_box_rosenbrock|final|x|0,0x3fe0000000000000
+bobyqa|active_box_rosenbrock|final|x|1,0x3fd0000000000002
+bobyqa|active_box_rosenbrock|step10|f|0,0x400f7a739f5df592
+bobyqa|active_box_rosenbrock|step10|x|0,0xbfef62c804719986
+bobyqa|active_box_rosenbrock|step10|x|1,0x3fef1f3c2f7035bf
+bobyqa|active_box_rosenbrock|step3|f|0,0x400feb7846094b1c
+bobyqa|active_box_rosenbrock|step3|x|0,0xbfefd67dd46db826
+bobyqa|active_box_rosenbrock|step3|x|1,0x3ff0000000000000
 filter_nw_sqp|hs071|final|f|0,0x40310396a315f57e
 filter_nw_sqp|hs071|final|lambda|0,0xbfc4ab0082ccdd05
 filter_nw_sqp|hs071|final|lambda|1,0x3fe1ac63c1001e36

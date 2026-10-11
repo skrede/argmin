@@ -77,7 +77,7 @@ struct ccsa_quadratic_policy
         std::optional<Scalar> sigma_init{};           // default: 0.5
         std::optional<Scalar> sigma_decrease{};       // default: 0.7
         std::optional<Scalar> sigma_increase{};       // default: 1.2
-        std::optional<Scalar> sigma_min_fraction{};   // default: 1e-8
+        std::optional<Scalar> sigma_min_fraction{};   // default: 1e-8 (3e-4 in float)
         std::optional<Scalar> sigma_max_fraction{};   // default: 10.0
 
         // CCSA regularizer controls. rho and per-constraint rhoc start

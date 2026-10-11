@@ -10,7 +10,7 @@
 #include "argmin/solver/convergence.h"
 #include "argmin/solver/options.h"
 
-#include "argmin/options/mma_defaults.h"
+#include "argmin/options/convergence_defaults.h"
 
 #include "argmin/formulation/concepts.h"
 
@@ -633,7 +633,7 @@ public:
             if constexpr(detail::tuple_contains_v<stall_tolerance_criterion<scalar_type>, criteria_tuple>)
             {
                 auto& stall = std::get<stall_tolerance_criterion<scalar_type>>(stored_convergence_.criteria);
-                stall.threshold = policy_opts.stall_tolerance_threshold.value_or(mma_defaults<scalar_type>::stall_threshold);
+                stall.threshold = policy_opts.stall_tolerance_threshold.value_or(convergence_defaults<scalar_type>::stall_threshold);
                 if constexpr(requires { policy_opts.rho_init; }
                           || requires { policy_opts.raa0; })
                 {

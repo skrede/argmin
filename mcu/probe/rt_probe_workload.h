@@ -269,8 +269,9 @@ int measure_steady_window(const char* label, Policy policy,
         return 1;         // window was not pre-convergence steady state
 
     if constexpr(Clock::enabled)
-        std::printf("  [timing] %s cycles=%lu armed_steps=10 per_step=%lu\n", label,
-                    static_cast<unsigned long>(cycles), static_cast<unsigned long>(cycles / hot_steps));
+        std::printf("  [timing] %s cycles=%lu armed_steps=%lu per_step=%lu\n", label,
+                    static_cast<unsigned long>(cycles), static_cast<unsigned long>(hot_steps),
+                    static_cast<unsigned long>(cycles / hot_steps));
 
     return argmin::detail::bench::evaluate_gate(label, hot_steps, min_per_step);
 }
