@@ -69,11 +69,19 @@ nanobind_add_module(
     _argmin
     NB_STATIC
     src/_argmin.cpp
-    src/bindings/vocabulary_bindings.cpp
-    src/bindings/qp_bindings.cpp
-    src/bindings/nlp_gradient_bindings.cpp
-    src/bindings/nlp_derivative_free_bindings.cpp
-    src/bindings/test_function_bindings.cpp
+    src/bindings/error_channel_bindings.cpp
+    src/bindings/status_bindings.cpp
+    src/bindings/result_bindings.cpp
+    src/bindings/qp_options_bindings.cpp
+    src/bindings/qp_solver_bindings.cpp
+    src/bindings/nlp_option_bindings.cpp
+    src/bindings/lbfgsb_bindings.cpp
+    src/bindings/kraft_slsqp_bindings.cpp
+    src/bindings/bobyqa_bindings.cpp
+    src/bindings/cobyla_bindings.cpp
+    src/bindings/cmaes_bindings.cpp
+    src/bindings/rosenbrock_bindings.cpp
+    src/bindings/constrained_test_problem_bindings.cpp
 )
 
 argmin_python_consume_as_system(nanobind-static)

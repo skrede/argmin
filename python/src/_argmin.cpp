@@ -9,9 +9,17 @@ NB_MODULE(_argmin, m)
     m.doc() = "argmin C++20 optimization library — Python bindings";
     m.attr("__version__") = ARGMIN_PYTHON_VERSION_STRING;
 
-    argmin::python::register_vocabulary(m);
-    argmin::python::register_qp(m);
-    argmin::python::register_nlp_gradient(m);
-    argmin::python::register_nlp_derivative_free(m);
-    argmin::python::register_test_functions(m);
+    argmin::python::register_error_channel(m);
+    argmin::python::register_status_enums(m);
+    argmin::python::register_results(m);
+    argmin::python::register_qp_options(m);
+    argmin::python::register_qp_solvers(m);
+    argmin::python::register_nlp_options(m);
+    argmin::python::register_lbfgsb(m);
+    argmin::python::register_kraft_slsqp(m);
+    argmin::python::register_bobyqa(m);
+    argmin::python::register_cobyla(m);
+    argmin::python::register_cmaes(m);
+    argmin::python::register_rosenbrock(m);
+    argmin::python::register_constrained_test_problem(m);
 }
