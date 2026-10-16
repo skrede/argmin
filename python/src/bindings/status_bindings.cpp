@@ -38,7 +38,8 @@ void register_status_enums(nb::module_& m)
         .value("objective_stalled", solver_status::objective_stalled)
         .value("time_limit_reached", solver_status::time_limit_reached)
         .value("aborted", solver_status::aborted)
-        .value("invalid_problem", solver_status::invalid_problem);
+        .value("invalid_problem", solver_status::invalid_problem)
+        .value("line_search_failed", solver_status::line_search_failed);
 }
 
 }

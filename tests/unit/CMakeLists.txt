@@ -20,6 +20,7 @@ add_executable(argmin_unit_tests
     bobyqa_bounds_test.cpp
     bobyqa_xbase_shift_test.cpp
     lbfgsb_test.cpp
+    lbfgsb_line_search_failure_test.cpp
     cmaes_test.cpp
     cmaes_invalid_problem_test.cpp
     cmaes_sampling_test.cpp

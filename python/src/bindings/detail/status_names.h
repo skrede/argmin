@@ -39,6 +39,7 @@ inline const char* name_of(solver_status status)
         case solver_status::time_limit_reached: return "time_limit_reached";
         case solver_status::aborted: return "aborted";
         case solver_status::invalid_problem: return "invalid_problem";
+        case solver_status::line_search_failed: return "line_search_failed";
     }
     return "unknown";
 }

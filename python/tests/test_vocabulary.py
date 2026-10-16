@@ -147,3 +147,9 @@ def test_a_policy_enumeration_is_the_type_its_option_field_reports(repository_ro
         value = getattr(bound(options_name)(), field)
         assert isinstance(value, bound(bound_name))
         assert value.name in bound(bound_name).__members__
+
+
+def test_the_solver_status_covers_its_committed_enumerators(repository_root):
+    committed = committed_enumerators(repository_root, "result/status.h", "solver_status")
+    assert "line_search_failed" in committed
+    assert sorted(bound("SolverStatus").__members__) == sorted(committed)

@@ -288,6 +288,7 @@ struct profile_row
     case argmin::solver_status::aborted: return "aborted";
 #if ARGMIN_NW_PROFILE_HAS_BUDGET_DRIVERS
     case argmin::solver_status::invalid_problem: return "invalid_problem";
+    case argmin::solver_status::line_search_failed: return "line_search_failed";
 #endif
     }
     return "unknown";

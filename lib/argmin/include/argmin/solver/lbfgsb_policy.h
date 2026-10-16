@@ -25,6 +25,7 @@
 #include "argmin/detail/compact_lbfgs.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/lbfgsb_direction.h"
+#include "argmin/detail/lbfgsb_step_attempt.h"
 #include "argmin/line_search/armijo.h"
 #include "argmin/line_search/strong_wolfe.h"
 #include "argmin/line_search/options.h"
@@ -37,6 +38,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -139,132 +141,20 @@ struct lbfgsb_policy
         if(s.iteration != 0)
             s.problem->gradient(s.x, s.g);
 
-        // Direction computation: compile-time unconstrained fast path,
-        // runtime all-free fast path, or full GCP + subspace minimization.
         auto dir = detail::compute_direction<P, Scalar, N>(
             s.x, s.g, s.lower, s.upper, s.B, s.gcp_solver, s.ssm_solver);
         if(!dir)
-        {
-            // KKT residual for bound-constrained optimality: projected-gradient
-            // infinity-norm. For unconstrained problems, s.lower/s.upper are
-            // +/-inf and the expression collapses to ||s.g||_inf.
-            // Reference: N&W 2e Section 16.7 (projected gradient optimality).
-            auto kkt = detail::kkt_residual_bound<Scalar, N>(
-                s.x, s.g, s.lower, s.upper);
-            return step_result<Scalar>{
-                .objective_value = s.objective_value,
-                .gradient_norm = s.g.norm(),
-                .step_size = Scalar(0.0),
-                .objective_change = Scalar(0.0),
-                .improved = false,
-                .x_norm = s.x.norm(),
-                .kkt_residual = kkt,
-                .evaluations = 0,  // no line search ran on this null step
-            };
-        }
-        auto& result = *dir;
-        auto& d = result.d;
-        auto& alpha_max = result.alpha_max;
-
-        // Line search functors with gradient caching.
-        // The dphi callback computes the gradient at the trial point, which
-        // is the same point accepted after line search. Cache it to avoid
-        // a redundant gradient evaluation after step acceptance.
-        Eigen::Vector<Scalar, N> cached_g = Eigen::Vector<Scalar, N>::Zero(s.x.size());
-        Scalar cached_alpha = Scalar(-1.0);
-
-        auto phi = [&](Scalar a) {
-            return s.problem->value((s.x + a * d).eval());
-        };
-        auto dphi = [&](Scalar a) {
-            s.problem->gradient((s.x + a * d).eval(), cached_g);
-            cached_alpha = a;
-            return cached_g.dot(d);
-        };
-
-        // Line search with feasible step cap, using embedded line search options.
-        // Dispatch based on configured strategy (Strong Wolfe default, Armijo optional).
-        line_search_options<Scalar> ls_opts = options.line_search;
-        ls_opts.max_alpha = std::min(ls_opts.max_alpha, alpha_max);
-        Scalar dphi0 = s.g.dot(d);
-        auto ls = (options.line_search_type == lbfgsb_line_search::armijo)
-            ? armijo(phi, s.objective_value, dphi0, ls_opts)
-            : strong_wolfe(phi, dphi, s.objective_value, dphi0, ls_opts);
-
-        // Update iterate
-        Eigen::Vector<Scalar, N> x_old = s.x;
-        Scalar old_f = s.objective_value;
-        if constexpr(bound_constrained<P, Scalar>)
-            s.x = detail::project((s.x + ls.alpha * d).eval(), s.lower, s.upper);
+            return null_direction_step(s, 0);
+        detail::lbfgsb_attempt<Scalar, N> a(s.x.size());
+        std::optional<step_result<Scalar>> r;
+        if(detail::attempt_lbfgsb_step<P>(s, dir->d, dir->alpha_max, options, a))
+            r = detail::commit_lbfgsb_step<P>(s, a, dir->d);
         else
-            s.x = (s.x + ls.alpha * d).eval();
-
-        // Evaluate objective at projected point (projection may differ from
-        // line search trial point due to bound clamping)
-        s.objective_value = s.problem->value(s.x);
-
-        // Reuse cached gradient from line search dphi callback if it was
-        // evaluated at the accepted alpha and projection didn't change x.
-        // Unconstrained: no projection, so cached gradient is always valid.
-        Eigen::Vector<Scalar, N> new_g = Eigen::Vector<Scalar, N>::Zero(s.x.size());
-        if constexpr(bound_constrained<P, Scalar>)
-        {
-            if(cached_alpha == ls.alpha &&
-               s.x.isApprox((x_old + ls.alpha * d).eval(), Scalar(0.0)))
-                new_g = cached_g;
-            else
-                s.problem->gradient(s.x, new_g);
-        }
-        else
-        {
-            if(cached_alpha == ls.alpha)
-                new_g = cached_g;
-            else
-                s.problem->gradient(s.x, new_g);
-        }
-
-        // Update L-BFGS curvature pairs
-        Eigen::Vector<Scalar, N> sk = (s.x - x_old).eval();
-        Eigen::Vector<Scalar, N> yk = (new_g - s.g).eval();
-        s.B.push(sk, yk);
-
-        // Store new gradient
-        s.g = new_g;
-
-        // Increment iteration
-        ++s.iteration;
-
-        Scalar step_norm = sk.norm();
-        Scalar x_norm = s.x.norm();
-
-        // Roundoff detection (N&W Section 3.4):
-        // step too small relative to iterate magnitude
-        std::optional<solver_status> policy_status{};
-        constexpr Scalar eps = std::numeric_limits<Scalar>::epsilon();
-        if(step_norm < eps * std::max(x_norm, Scalar(1.0)) * Scalar(10.0))
-            policy_status = solver_status::roundoff_limited;
-
-        // KKT residual for bound-constrained optimality: projected-gradient
-        // infinity-norm at the newly-accepted iterate using the freshly-
-        // evaluated gradient new_g. For unconstrained problems
-        // s.lower/s.upper are +/-inf and this collapses to ||new_g||_inf.
-        // Reference: N&W 2e Section 16.7 (projected gradient optimality).
-        auto kkt = detail::kkt_residual_bound<Scalar, N>(
-            s.x, new_g, s.lower, s.upper);
-
-        return step_result<Scalar>{
-            .objective_value = s.objective_value,
-            .gradient_norm = new_g.norm(),
-            .step_size = step_norm,
-            .objective_change = s.objective_value - old_f,
-            .improved = s.objective_value < old_f,
-            .x_norm = x_norm,
-            .kkt_residual = kkt,
-            .policy_status = policy_status,
-            // Line-search trial evaluations plus the objective evaluation at
-            // the projected accepted iterate -- the genuine per-step count.
-            .evaluations = static_cast<std::uint32_t>(ls.evaluations) + 1u,
-        };
+            r = detail::retry_lbfgsb_step<P>(s, options, a);
+        step_result<Scalar> result = r ? *r : null_direction_step(s, 1);
+        // Every line-search trial plus the objective evaluation at each attempted iterate.
+        result.evaluations = a.evaluations;
+        return result;
     }
 
     // Hot start -- preserves curvature pairs.
@@ -284,6 +174,29 @@ struct lbfgsb_policy
     {
         reset(s, x0);
         s.B.reset();
+    }
+
+private:
+    template <typename P>
+    step_result<Scalar> null_direction_step(const state_type<P>& s, std::size_t resets) const
+    {
+        // KKT residual for bound-constrained optimality: projected-gradient
+        // infinity-norm. For unconstrained problems, s.lower/s.upper are
+        // +/-inf and the expression collapses to ||s.g||_inf.
+        // Reference: N&W 2e Section 16.7 (projected gradient optimality).
+        auto kkt = detail::kkt_residual_bound<Scalar, N>(
+            s.x, s.g, s.lower, s.upper);
+        return step_result<Scalar>{
+            .objective_value = s.objective_value,
+            .gradient_norm = s.g.norm(),
+            .step_size = Scalar(0.0),
+            .objective_change = Scalar(0.0),
+            .improved = false,
+            .x_norm = s.x.norm(),
+            .kkt_residual = kkt,
+            .evaluations = 0,
+            .diagnostics = {.bfgs_reset_count = resets},
+        };
     }
 };
 
