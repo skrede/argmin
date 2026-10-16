@@ -465,6 +465,7 @@
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "alloc_gate_lbfgsb", "note": "zero-allocation assertion including the bound-active generalized-Cauchy-point/subspace branch"},
+                {"kind": "ctest_test", "name": "alloc_gate_lbfgsb_line_search_failure", "note": "zero-allocation assertion across the reset-and-retry and terminal line-search-failure branches"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -472,7 +473,8 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "line search exhaustion surfaces a null step rather than a silent accept"},
+                {"kind": "ctest_test", "name": "L-BFGS-B line-search failure: a second consecutive failure ends the solve non-converged - lbfgsb_2"},
+                {"kind": "ctest_test", "name": "L-BFGS-B line-search failure: an empty memory terminates without a retry - lbfgsb_2"},
                 {"kind": "ci_job", "name": "c++20 (build + ctest)"},
                 {"kind": "ci_job", "name": "c++23 (build + ctest)"}
               ]
@@ -516,6 +518,7 @@
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "alloc_gate_byrd_lbfgsb", "note": "zero-allocation assertion on the bound-active path"},
+                {"kind": "ctest_test", "name": "alloc_gate_byrd_lbfgsb_line_search_failure", "note": "zero-allocation assertion across the reset-and-retry and terminal line-search-failure branches"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -523,7 +526,8 @@
               "verdict": "yes",
               "class": "gated",
               "evidence": [
-                {"kind": "ctest_test", "name": "line search exhaustion surfaces a null step rather than a silent accept"},
+                {"kind": "ctest_test", "name": "L-BFGS-B line-search failure: a second consecutive failure ends the solve non-converged - byrd_lbfgsb_2"},
+                {"kind": "ctest_test", "name": "L-BFGS-B line-search failure: an empty memory terminates without a retry - byrd_lbfgsb_2"},
                 {"kind": "ci_job", "name": "c++20 (build + ctest)"},
                 {"kind": "ci_job", "name": "c++23 (build + ctest)"}
               ]
