@@ -729,7 +729,7 @@ TEST_CASE("cmaes_policy: tol_x exit on contracted distribution", "[cmaes]")
 TEST_CASE("cmaes_policy: objective_value_tolerance user override", "[cmaes]")
 {
     // The user-override plumbing for objective_value_tolerance routes
-    // through cmaes_options and is read directly (direct-value default
+    // through cmaes_detection_options and is read directly (direct-value default
     // 1e-12) at the §B.3 item 6 check site. A loose user threshold (1e-6) MUST fire
     // earlier than the default (1e-12). We compare iter counts on two
     // identical runs differing only in the user threshold.
@@ -780,7 +780,7 @@ TEST_CASE("cmaes_policy: sigma_collapse_threshold user override", "[cmaes]")
 {
     // Legacy single-axis sigma collapse check is RETAINED as a user
     // override hook for callers that explicitly set
-    // `cmaes_options::sigma_collapse_threshold`. This test pins the
+    // `cmaes_detection_options::sigma_collapse_threshold`. This test pins the
     // user-override path so a future cleanup that drops the field would
     // flip a deterministic inequality.
     //

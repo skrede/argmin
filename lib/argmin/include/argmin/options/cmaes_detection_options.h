@@ -1,5 +1,5 @@
-#ifndef HPP_GUARD_ARGMIN_OPTIONS_CMAES_OPTIONS_H
-#define HPP_GUARD_ARGMIN_OPTIONS_CMAES_OPTIONS_H
+#ifndef HPP_GUARD_ARGMIN_OPTIONS_CMAES_DETECTION_OPTIONS_H
+#define HPP_GUARD_ARGMIN_OPTIONS_CMAES_DETECTION_OPTIONS_H
 
 #include "argmin/types.h"
 
@@ -34,7 +34,7 @@ struct cmaes_defaults<float>
 // CMA-ES strategy and convergence detection parameters.
 // Reference: Hansen 2023 tutorial, K&W 2e 8.7.
 template <scalar Scalar = double>
-struct cmaes_options
+struct cmaes_detection_options
 {
     // sigma below this = roundoff_limited (Hansen tutorial)
     Scalar sigma_collapse_threshold{cmaes_defaults<Scalar>::sigma_collapse_threshold};

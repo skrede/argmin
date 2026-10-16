@@ -47,7 +47,7 @@
 #include "argmin/detail/cmaes_constants.h"
 #include "argmin/detail/cmaes_covariance.h"
 #include "argmin/detail/cmaes_sampling.h"
-#include "argmin/options/cmaes_options.h"
+#include "argmin/options/cmaes_detection_options.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
@@ -85,7 +85,7 @@ struct no_repair_adaptive_penalty_policy
         std::optional<Scalar> initial_sigma{};           // initial step size (default: bound-scaled, Hansen tutorial)
         restart_strategy restart{restart_strategy::none};
         std::optional<std::uint64_t> seed{};             // RNG seed
-        cmaes_options<Scalar> cmaes{};                   // Detection params (Hansen tutorial)
+        cmaes_detection_options<Scalar> cmaes{};         // Detection params (Hansen tutorial)
         std::optional<std::uint32_t> eigendecomposition_skip_generations{}; // Override Hansen formula
         std::optional<std::uint32_t> stagnation_window{};  // Override Hansen stagnation window formula
         std::uint16_t stall_window{100};
@@ -622,7 +622,7 @@ struct no_repair_adaptive_penalty_policy
         // §B.3 EXIT-only TolX block below (item 7) and is the canonical
         // disposition for the criterion. This site is RETAINED as a
         // user-override hook for legacy callers that explicitly set
-        // `cmaes_options::sigma_collapse_threshold` (direct-value default
+        // `cmaes_detection_options::sigma_collapse_threshold` (direct-value default
         // 1e-12 * initial_sigma; a caller wanting the §B.3 TolX baseline
         // sets that field directly).
         // The legacy probe also remains an IPOP restart trigger (recycled
@@ -694,7 +694,7 @@ struct no_repair_adaptive_penalty_policy
         // generations and all function values of the recent generation is
         // below TolFun. Choosing TolFun depends on the problem, while
         // 10^-12 is a conservative first guess." User-tunable via
-        // cmaes_options::objective_value_tolerance.
+        // cmaes_detection_options::objective_value_tolerance.
         // Status mapping: ftol_reached.
         if(!policy_status.has_value())
         {
@@ -750,7 +750,7 @@ struct no_repair_adaptive_penalty_policy
         // of the normal distribution is smaller than TolX in all coordinates
         // and sigma*p_c is smaller than TolX in all components. By default
         // we set TolX to 10^-12 times the initial sigma." User-tunable via
-        // cmaes_options::step_size_tolerance (interpreted as a multiplicative
+        // cmaes_detection_options::step_size_tolerance (interpreted as a multiplicative
         // factor against initial_sigma, matching Hansen's "10^-12 times the
         // initial sigma" formulation).
         // Status mapping: roundoff_limited (numerical floor reached).

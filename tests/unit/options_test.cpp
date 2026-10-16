@@ -1,8 +1,8 @@
 #include "argmin/options/qp_options.h"
-#include "argmin/options/cmaes_options.h"
 #include "argmin/options/asymptote_options.h"
 #include "argmin/options/trust_region_options.h"
 #include "argmin/options/mma_subproblem_options.h"
+#include "argmin/options/cmaes_detection_options.h"
 #include "argmin/solver/cmaes_policy.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/restarting_policy.h"
@@ -56,9 +56,9 @@ TEST_CASE("mma_subproblem_options exposes literature defaults directly", "[optio
     CHECK(o.backtrack_factor == 0.95);
 }
 
-TEST_CASE("cmaes_options exposes literature defaults directly", "[options]")
+TEST_CASE("cmaes_detection_options exposes literature defaults directly", "[options]")
 {
-    cmaes_options<> o{};
+    cmaes_detection_options<> o{};
     static_assert(std::is_same_v<double, decltype(o.sigma_collapse_threshold)>);
     static_assert(std::is_same_v<double, decltype(o.condition_number_limit)>);
     static_assert(std::is_same_v<double, decltype(o.objective_value_tolerance)>);

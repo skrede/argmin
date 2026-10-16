@@ -12,7 +12,7 @@
 #include "argmin/types.h"
 #include "argmin/solver/options.h"
 #include "argmin/solver/cmaes_policy.h"
-#include "argmin/options/cmaes_options.h"
+#include "argmin/options/cmaes_detection_options.h"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
@@ -38,19 +38,19 @@ using cmaes_policy_options = cmaes_policy<>::options_type;
 using cmaes_restart = cmaes_policy<>::restart_strategy;
 using cmaes_wrapper = solver_wrapper<cmaes_policy<>, value_problem>;
 
-void bind_cmaes_options(nb::module_& m)
+void bind_cmaes_detection_options(nb::module_& m)
 {
-    nb::class_<cmaes_options<>>(m, "CmaesDetectionOptions",
+    nb::class_<cmaes_detection_options<>>(m, "CmaesDetectionOptions",
                                "Read-only view of the evolution strategy's degeneracy detection "
                                "thresholds: step-size collapse, covariance conditioning and the "
                                "two flatness tolerances.")
         .def(nb::init<>())
-        .def_ro("sigma_collapse_threshold", &cmaes_options<>::sigma_collapse_threshold)
-        .def_ro("condition_number_limit", &cmaes_options<>::condition_number_limit)
-        .def_ro("objective_value_tolerance", &cmaes_options<>::objective_value_tolerance)
-        .def_ro("step_size_tolerance", &cmaes_options<>::step_size_tolerance)
+        .def_ro("sigma_collapse_threshold", &cmaes_detection_options<>::sigma_collapse_threshold)
+        .def_ro("condition_number_limit", &cmaes_detection_options<>::condition_number_limit)
+        .def_ro("objective_value_tolerance", &cmaes_detection_options<>::objective_value_tolerance)
+        .def_ro("step_size_tolerance", &cmaes_detection_options<>::step_size_tolerance)
         .def("__repr__",
-             [](const cmaes_options<>& opts)
+             [](const cmaes_detection_options<>& opts)
              {
                  return "CmaesDetectionOptions(sigma_collapse_threshold="
                         + format_number(opts.sigma_collapse_threshold)
@@ -161,7 +161,7 @@ void bind_cmaes_solver(nb::module_& m)
 
 void register_cmaes(nb::module_& m)
 {
-    bind_cmaes_options(m);
+    bind_cmaes_detection_options(m);
     bind_cmaes_solver(m);
 }
 

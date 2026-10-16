@@ -39,7 +39,9 @@ TABLE = {
     "LineSearchOptions": entry(Source("line_search/options.h", "line_search_options", 5)),
     "QpSubproblemOptions": entry(Source("options/qp_options.h", "qp_options", 2)),
     "TrustRegionOptions": entry(Source("options/trust_region_options.h", "trust_region_options", 6)),
-    "CmaesDetectionOptions": entry(Source("options/cmaes_options.h", "cmaes_options", 4)),
+    "CmaesDetectionOptions": entry(
+        Source("options/cmaes_detection_options.h", "cmaes_detection_options", 4)
+    ),
     "LbfgsbOptions": entry(Source("solver/lbfgsb_policy.h", "options_type", 3)),
     "BobyqaOptions": entry(Source("solver/bobyqa_policy.h", "options_type", 5)),
     "CobylaOptions": entry(Source("solver/cobyla_policy.h", "options_type", 4)),
