@@ -43,8 +43,8 @@ constexpr const char* tr_sqp_solver_doc =
     "it by the ratio of actual to predicted reduction instead of a line search. Needs the "
     "constraint vector and its Jacobian, plus the equality and inequality counts. Equalities "
     "come first in the constraint vector and are driven to zero; inequalities follow and "
-    "are held non-negative. The lower_bounds and upper_bounds keywords are rejected, "
-    "because this solver does not support bounds yet.";
+    "are held non-negative. The lower_bounds and upper_bounds keywords bound the "
+    "variables, each as an array or a zero-argument callable returning one.";
 
 std::string describe_tr_sqp_options(const tr_sqp_options& opts)
 {
@@ -107,7 +107,6 @@ void construct_tr_sqp(tr_sqp_wrapper* self, nb::object objective, const vector<d
                       std::optional<double> step_threshold, std::optional<double> stall_threshold,
                       std::optional<int> stall_window)
 {
-    reject_bounds(lower_bounds, upper_bounds);
     constrained_callables calls{std::move(objective),    std::move(gradient),
                                 std::move(constraints),  std::move(constraint_jacobian),
                                 std::move(lower_bounds), std::move(upper_bounds)};

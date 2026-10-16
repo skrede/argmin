@@ -1,7 +1,6 @@
 #ifndef HPP_GUARD_ARGMIN_PYTHON_BINDINGS_DETAIL_CONSTRAINED_CONSTRUCTION_H
 #define HPP_GUARD_ARGMIN_PYTHON_BINDINGS_DETAIL_CONSTRAINED_CONSTRUCTION_H
 
-#include "bindings/detail/errors.h"
 #include "bindings/detail/validate.h"
 #include "bindings/detail/callback_set.h"
 #include "bindings/detail/keyword_options.h"
@@ -27,17 +26,6 @@ struct constrained_callables
     nanobind::object lower_bounds;
     nanobind::object upper_bounds;
 };
-
-// constrained_problem has no bound accessors, so a box passed here would never
-// reach the policy; refusing it keeps the keyword from being accepted and ignored.
-inline void reject_bounds(const nanobind::object& lower, const nanobind::object& upper)
-{
-    const auto absent = [](const nanobind::object& bound)
-    { return !bound.is_valid() || bound.is_none(); };
-    if(absent(lower) && absent(upper))
-        return;
-    raise_argmin_error(error_kind::invalid_problem, "bounds are not supported by this solver yet");
-}
 
 inline void check_constrained_inputs(const vector<double>& x0, const constrained_callables& calls)
 {

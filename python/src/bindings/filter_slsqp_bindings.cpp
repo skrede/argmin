@@ -42,8 +42,8 @@ constexpr const char* filter_solver_doc =
     "Mathematical Programming 91, with feasibility restoration when no step is acceptable. "
     "Needs the constraint vector and its Jacobian, plus the equality and inequality counts. "
     "Equalities come first in the constraint vector and are driven to zero; inequalities "
-    "follow and are held non-negative. The lower_bounds and upper_bounds keywords are "
-    "rejected, because this solver does not support bounds yet.";
+    "follow and are held non-negative. The lower_bounds and upper_bounds keywords bound "
+    "the variables, each as an array or a zero-argument callable returning one.";
 
 const char* restoration_name(detail::restoration_strategy strategy)
 {
@@ -120,7 +120,6 @@ void construct_filter_slsqp(filter_wrapper* self, nb::object objective, const ve
                             std::optional<double> step_threshold,
                             std::optional<double> stall_threshold, std::optional<int> stall_window)
 {
-    reject_bounds(lower_bounds, upper_bounds);
     constrained_callables calls{std::move(objective),    std::move(gradient),
                                 std::move(constraints),  std::move(constraint_jacobian),
                                 std::move(lower_bounds), std::move(upper_bounds)};

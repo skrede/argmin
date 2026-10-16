@@ -136,6 +136,19 @@ public:
     {
         invoke_jacobian(x, J);
     }
+
+    // The sequential quadratic programming policies read a box only from a
+    // problem that satisfies bound_constrained; without these a caller's box is
+    // silently dropped.
+    vector<double> lower_bounds() const
+    {
+        return invoke_bound(callbacks().lower_bounds, lower_is_callable(), lower_cache(), "lower");
+    }
+
+    vector<double> upper_bounds() const
+    {
+        return invoke_bound(callbacks().upper_bounds, upper_is_callable(), upper_cache(), "upper");
+    }
 };
 
 // Each adapter must satisfy exactly the tier its policy needs and no more.
@@ -157,6 +170,7 @@ static_assert(argmin::constrained_values<constrained_values_problem>);
 static_assert(!argmin::constrained<constrained_values_problem>);
 
 static_assert(argmin::constrained<constrained_problem>);
+static_assert(argmin::bound_constrained<constrained_problem>);
 
 }
 
