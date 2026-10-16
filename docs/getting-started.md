@@ -114,8 +114,11 @@ The full concept definitions are in
 
 - `result.status` -- a `solver_status` enum. A successful stop is reported as
   `converged`, `xtol_reached`, or `ftol_reached` depending on which tolerance
-  tripped first; `max_iterations`, `stalled`, and `invalid_problem` are the
-  common non-success codes.
+  tripped first; `max_iterations`, `stalled`, `line_search_failed`, and
+  `invalid_problem` are the common non-success codes. `line_search_failed`
+  comes from the L-BFGS-B policies: a line-search step was rejected and so was
+  its retry from a reset curvature memory (or the memory was already empty),
+  and the iterate was held at the last accepted point.
 - `result.x` -- the solution vector.
 - `result.objective_value` -- the objective at `result.x`.
 
