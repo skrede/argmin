@@ -519,8 +519,13 @@ struct rho_wval_policy
                     viol_old = std::max(viol_old, -s.c_ineq[i]);
                     viol_new = std::max(viol_new, -c_trial[i]);
                 }
+                // A trial at the current iterate is a fixed point: conservativity there fails only by
+                // roundoff, so null-stepping would grow rho forever. Committing it lets the step
+                // tolerance stop the run.
+                const bool at_iterate = (x_trial - s.x).norm()
+                    <= std::numeric_limits<Scalar>::epsilon() * (Scalar(1.0) + s.x.norm());
                 const bool acceptable =
-                    (f_trial < s.f && viol_new <= viol_old + mma_defaults<Scalar>::violation_slack)
+                    ((f_trial < s.f || at_iterate) && viol_new <= viol_old + mma_defaults<Scalar>::violation_slack)
                     || (viol_new < viol_old - mma_defaults<Scalar>::violation_slack);
 
                 if(!acceptable)
