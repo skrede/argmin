@@ -38,6 +38,11 @@ using cmaes_policy_options = cmaes_policy<>::options_type;
 using cmaes_restart = cmaes_policy<>::restart_strategy;
 using cmaes_wrapper = solver_wrapper<cmaes_policy<>, value_problem>;
 
+constexpr const char* cmaes_known_defect =
+    "CMA-ES has no passing cell in the library's publication benchmark cohort (0 pass, 4 "
+    "expected failures, 2 excluded), and it converges to local minima on the Ackley and "
+    "Schwefel functions.";
+
 void bind_cmaes_detection_options(nb::module_& m)
 {
     nb::class_<cmaes_detection_options<>>(m, "CmaesDetectionOptions",
@@ -97,7 +102,12 @@ void bind_cmaes_solver(nb::module_& m)
     nb::class_<cmaes_wrapper> cls(
         m, "CmaesSolver", nb::type_slots(wrapper_slots<cmaes_wrapper>),
         "Covariance-matrix-adaptation evolution strategy. Stochastic: pass a seed to make "
-        "a run reproducible, and read it back from the policy options snapshot.");
+        "a run reproducible, and read it back from the policy options snapshot. "
+        "Experimental, with a known defect. CMA-ES has no passing cell in the library's "
+        "publication benchmark cohort (0 pass, 4 expected failures, 2 excluded), and it "
+        "converges to local minima on the Ackley and Schwefel functions.");
+    cls.attr("maturity") = "experimental";
+    cls.attr("known_defect") = cmaes_known_defect;
     cls.def(
         "__init__",
         [](cmaes_wrapper* self, nb::object objective, const vector<double>& x0,

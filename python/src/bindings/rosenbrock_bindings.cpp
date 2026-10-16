@@ -7,8 +7,6 @@
 
 #include "argmin/types.h"
 #include "argmin/solver/options.h"
-#include "argmin/solver/cmaes_policy.h"
-#include "argmin/solver/bobyqa_policy.h"
 #include "argmin/solver/lbfgsb_policy.h"
 
 #include <nanobind/nanobind.h>
@@ -41,11 +39,7 @@ result_type solve_rosenbrock_native(const rosenbrock& problem, std::string_view 
 
     if(method == "lbfgsb")
         return run_native<lbfgsb_policy<>>(problem, x0, opts);
-    if(method == "bobyqa")
-        return run_native<bobyqa_policy<>>(problem, x0, opts);
-    if(method == "cmaes")
-        return run_native<cmaes_policy<>>(problem, x0, opts);
-    reject_method(method, "'lbfgsb', 'bobyqa', 'cmaes'");
+    reject_top_level_method(method, "'lbfgsb'");
 }
 
 void bind_rosenbrock(nb::module_& m)

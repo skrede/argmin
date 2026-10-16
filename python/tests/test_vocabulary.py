@@ -3,6 +3,8 @@ import gc
 
 import numpy as np
 
+from surface_namespaces import bound
+
 NUMERIC_FIELD = re.compile(r"(\w+)=([-+0-9.eE]+)")
 
 
@@ -132,16 +134,16 @@ def committed_enumerators(repository_root, header, enumeration):
     ]
 
 
-def test_the_policy_enumerations_cover_their_committed_enumerators(argmin, repository_root):
+def test_the_policy_enumerations_cover_their_committed_enumerators(repository_root):
     for bound_name, (header, enumeration, _, _) in POLICY_ENUMS.items():
         committed = committed_enumerators(repository_root, header, enumeration)
         assert committed, (bound_name, header)
-        members = getattr(argmin, bound_name).__members__
+        members = bound(bound_name).__members__
         assert sorted(members) == sorted(committed), (bound_name, sorted(members), committed)
 
 
-def test_a_policy_enumeration_is_the_type_its_option_field_reports(argmin, repository_root):
+def test_a_policy_enumeration_is_the_type_its_option_field_reports(repository_root):
     for bound_name, (_, _, options_name, field) in POLICY_ENUMS.items():
-        value = getattr(getattr(argmin, options_name)(), field)
-        assert isinstance(value, getattr(argmin, bound_name))
-        assert value.name in getattr(argmin, bound_name).__members__
+        value = getattr(bound(options_name)(), field)
+        assert isinstance(value, bound(bound_name))
+        assert value.name in bound(bound_name).__members__

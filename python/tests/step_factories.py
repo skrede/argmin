@@ -3,6 +3,7 @@
 import numpy as np
 
 import argmin
+import argmin.experimental as experimental
 
 PROBLEM = argmin.Rosenbrock(2)
 START = PROBLEM.initial_point()
@@ -34,7 +35,7 @@ def make_lbfgsb():
 
 def make_bobyqa():
     lower, upper = BOX
-    return argmin.BobyqaSolver(
+    return experimental.BobyqaSolver(
         objective, START, lower_bounds=lower, upper_bounds=upper, max_iterations=2000
     )
 

@@ -21,6 +21,8 @@ void register_cobyla(nanobind::module_& m);
 void register_cmaes(nanobind::module_& m);
 void register_rosenbrock(nanobind::module_& m);
 void register_constrained_test_problem(nanobind::module_& m);
+void register_experimental(nanobind::module_& m);
+void register_experimental_native(nanobind::module_& gated);
 
 }
 

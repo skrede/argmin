@@ -3,6 +3,7 @@
 import numpy as np
 
 import argmin
+import argmin.experimental as experimental
 
 BUDGET = 500
 # The library's default gradient threshold stops the trust-region method one
@@ -10,6 +11,13 @@ BUDGET = 500
 # moves no other constrained method's stopping iteration.
 CONSTRAINED_SOLVE = dict(max_iterations=BUDGET, gradient_threshold=1e-6)
 BOX = (np.full(2, -5.0), np.full(2, 5.0))
+EXPERIMENTAL_NATIVE = ("bobyqa", "cmaes", "cobyla")
+
+
+def native_solve(problem, method, **keywords):
+    if method in EXPERIMENTAL_NATIVE:
+        return experimental.solve_native(problem, method, **keywords)
+    return problem.solve_native(method, **keywords)
 
 
 def rosenbrock_problem():
@@ -60,7 +68,7 @@ def wrapped_lbfgsb(problem, objective, gradient):
 
 def wrapped_bobyqa(problem, objective, gradient):
     lower, upper = BOX
-    return argmin.BobyqaSolver(
+    return experimental.BobyqaSolver(
         objective,
         problem.initial_point(),
         lower_bounds=lower,
@@ -109,7 +117,7 @@ def wrapped_tr_sqp(problem, objective, gradient, constraints, jacobian):
 
 
 def wrapped_cobyla(problem, objective, gradient, constraints, jacobian):
-    return argmin.CobylaSolver(
+    return experimental.CobylaSolver(
         objective,
         problem.initial_point(),
         constraints=constraints,

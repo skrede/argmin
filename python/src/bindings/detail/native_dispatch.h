@@ -10,7 +10,9 @@
 
 #include <nanobind/nanobind.h>
 
+#include <array>
 #include <string>
+#include <algorithm>
 #include <string_view>
 
 namespace argmin::python
@@ -23,6 +25,19 @@ using result_type = solve_result<double>;
     raise_argmin_error(error_kind::invalid_problem,
                        "unknown method '" + std::string(method) + "', expected one of "
                            + std::string(accepted));
+}
+
+inline constexpr std::array<std::string_view, 3> experimental_methods{"bobyqa", "cmaes", "cobyla"};
+
+[[noreturn]] inline void reject_top_level_method(std::string_view method,
+                                                 std::string_view accepted)
+{
+    if(std::ranges::find(experimental_methods, method) != experimental_methods.end())
+        raise_argmin_error(error_kind::invalid_problem,
+                           "method '" + std::string(method)
+                               + "' is experimental; it is available from "
+                                 "argmin.experimental.solve_native");
+    reject_method(method, accepted);
 }
 
 template <typename Policy, typename Problem>

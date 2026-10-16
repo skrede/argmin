@@ -84,6 +84,8 @@ nanobind_add_module(
     src/bindings/cmaes_bindings.cpp
     src/bindings/rosenbrock_bindings.cpp
     src/bindings/constrained_test_problem_bindings.cpp
+    src/bindings/experimental_bindings.cpp
+    src/bindings/experimental_native_bindings.cpp
 )
 
 argmin_python_consume_as_system(nanobind-static)
@@ -106,6 +108,7 @@ install(TARGETS _argmin LIBRARY DESTINATION argmin)
 
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/argmin/__init__.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/argmin/experimental.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/argmin/py.typed"
     DESTINATION argmin)
 

@@ -15,6 +15,9 @@ import re
 import pytest
 
 import argmin
+import argmin.experimental as experimental
+
+from surface_namespaces import EXPORTED, bound
 
 BINDINGS = pathlib.Path(__file__).resolve().parents[1] / "src" / "bindings"
 
@@ -101,11 +104,7 @@ def spelled(cpp):
 
 
 def exported_types():
-    return {
-        name
-        for name in argmin.__all__
-        if inspect.isclass(getattr(argmin, name, None))
-    }
+    return {name for name in EXPORTED if inspect.isclass(bound(name))}
 
 
 @pytest.mark.parametrize("name", sorted(CPP_TYPE))
@@ -115,14 +114,15 @@ def test_the_name_follows_the_rule(name):
 
 @pytest.mark.parametrize("name", sorted(CPP_TYPE))
 def test_the_name_is_exported(name):
-    assert name in argmin.__all__
-    assert inspect.isclass(getattr(argmin, name, None))
+    assert name in EXPORTED
+    assert inspect.isclass(bound(name))
 
 
 @pytest.mark.parametrize("old", sorted(RENAMED))
 def test_the_old_name_is_gone(old):
-    assert old not in argmin.__all__
+    assert old not in EXPORTED
     assert not hasattr(argmin, old)
+    assert not hasattr(experimental, old)
     assert RENAMED[old] in CPP_TYPE
 
 

@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 import argmin
+import argmin.experimental as experimental
 
 from step_factories import (
     BOX,
@@ -72,7 +73,7 @@ def test_a_reset_returns_to_the_given_starting_point(method):
 # freshly built solver does report the point it was given.
 def test_a_reset_of_the_interpolation_method_restarts_as_a_fresh_solver_at_the_given_point():
     lower, upper = BOX
-    fresh = argmin.BobyqaSolver(
+    fresh = experimental.BobyqaSolver(
         objective, ELSEWHERE, lower_bounds=lower, upper_bounds=upper, max_iterations=2000
     )
     solver = make_bobyqa()

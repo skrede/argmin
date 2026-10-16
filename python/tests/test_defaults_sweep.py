@@ -36,6 +36,7 @@ import pytest
 
 import argmin
 
+from surface_namespaces import bound
 from defaults_table import NOT_AN_OPTIONS_SET, TABLE
 from defaults_solvers import POLICY_OPTION_TYPE, UNCONFIGURED, bound_value_types
 from defaults_parser import (
@@ -59,16 +60,16 @@ def test_the_parser_recovers_the_roster(repository_root, binding_name):
 
 @pytest.mark.parametrize("binding_name", sorted(TABLE))
 def test_every_committed_default_is_the_exposed_default(repository_root, binding_name):
-    check_entry(repository_root, getattr(argmin, binding_name)(), binding_name)
+    check_entry(repository_root, bound(binding_name)(), binding_name)
 
 
 @pytest.mark.parametrize("binding_name", sorted(TABLE))
 def test_a_misspelled_field_is_not_found(repository_root, binding_name):
-    bound = getattr(argmin, binding_name)()
+    instance = bound(binding_name)()
     for source in TABLE[binding_name].sources:
         members, _ = recover(repository_root, source)
         for field, _, _ in members:
-            assert not hasattr(bound, source.renamed(field) + "_"), (
+            assert not hasattr(instance, source.renamed(field) + "_"), (
                 f"{binding_name} answers to {field}_, so the attribute lookup this "
                 "module relies on cannot discriminate"
             )

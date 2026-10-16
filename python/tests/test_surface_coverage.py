@@ -9,12 +9,13 @@ The allowance list is the escape hatch, and it is deliberately visible: an
 entry needs a one-line reason, and the reason is asserted to be there.
 """
 
-import inspect
 import pathlib
 
 import pytest
 
 import argmin
+
+from surface_namespaces import EXPORTED, bound, namespace_of
 
 THIS_MODULE = pathlib.Path(__file__).name
 
@@ -30,16 +31,16 @@ def test_dependencies():
     assert argmin.__all__, "the package exports nothing"
 
 
-@pytest.mark.parametrize("name", sorted(argmin.__all__))
+@pytest.mark.parametrize("name", EXPORTED)
 def test_every_exported_name_resolves(name):
-    assert hasattr(argmin, name), f"{name} is exported but not importable"
-    assert getattr(argmin, name) is not None
+    assert hasattr(namespace_of(name), name), f"{name} is exported but not importable"
+    assert bound(name) is not None
 
 
-@pytest.mark.parametrize("name", sorted(argmin.__all__))
+@pytest.mark.parametrize("name", EXPORTED)
 def test_every_exported_type_and_function_is_documented(name):
-    value = getattr(argmin, name)
-    if not (inspect.isclass(value) or inspect.isroutine(value)):
+    value = bound(name)
+    if not callable(value):
         assert name in NO_BEHAVIORAL_TEST, (
             f"{name} is neither a class nor a function and is not on the allowance list"
         )
@@ -59,7 +60,7 @@ def other_test_sources():
     }
 
 
-@pytest.mark.parametrize("name", sorted(argmin.__all__))
+@pytest.mark.parametrize("name", EXPORTED)
 def test_every_exported_name_is_referenced_by_a_test(name):
     if name in NO_BEHAVIORAL_TEST:
         pytest.skip(f"allowed: {NO_BEHAVIORAL_TEST[name]}")
@@ -95,4 +96,6 @@ def test_the_export_list_matches_the_module_namespace():
         if not name.startswith("_") and name != "annotations"
     }
     public.discard("argmin")
+    # The deliberate opt-in submodule; any earlier test may have imported it.
+    public.discard("experimental")
     assert public <= exported, sorted(public - exported)

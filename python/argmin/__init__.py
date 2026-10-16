@@ -1,13 +1,5 @@
 from ._argmin import (
     ArgminError,
-    BobyqaOptions,
-    BobyqaSolver,
-    CmaesDetectionOptions,
-    CmaesOptions,
-    CmaesRestartStrategy,
-    CmaesSolver,
-    CobylaOptions,
-    CobylaSolver,
     ConstrainedTestProblem,
     DenseActiveSetQpOptions,
     DenseActiveSetQpSolver,
@@ -34,20 +26,11 @@ from ._argmin import (
     SparseQpOptions,
     TrSqpOptions,
     TrSqpSolver,
-    TrustRegionOptions,
     __version__,
 )
 
 __all__ = [
     "ArgminError",
-    "BobyqaOptions",
-    "BobyqaSolver",
-    "CmaesDetectionOptions",
-    "CmaesOptions",
-    "CmaesRestartStrategy",
-    "CmaesSolver",
-    "CobylaOptions",
-    "CobylaSolver",
     "ConstrainedTestProblem",
     "DenseActiveSetQpOptions",
     "DenseActiveSetQpSolver",
@@ -74,6 +57,5 @@ __all__ = [
     "SparseQpOptions",
     "TrSqpOptions",
     "TrSqpSolver",
-    "TrustRegionOptions",
     "__version__",
 ]

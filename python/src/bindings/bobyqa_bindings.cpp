@@ -37,6 +37,11 @@ namespace
 using bobyqa_options = bobyqa_policy<>::options_type;
 using bobyqa_wrapper = solver_wrapper<bobyqa_policy<>, bounded_problem>;
 
+constexpr const char* bobyqa_known_defect =
+    "BOBYQA reports a solve as converged when it ends by exhausting the 200000-pass "
+    "safety cap on the internal state machine of one iteration, so a stuck run reads as "
+    "a success.";
+
 void bind_trust_region_options(nb::module_& m)
 {
     nb::class_<trust_region_options<>>(m, "TrustRegionOptions",
@@ -88,7 +93,12 @@ void bind_bobyqa_solver(nb::module_& m)
     nb::class_<bobyqa_wrapper> cls(
         m, "BobyqaSolver", nb::type_slots(wrapper_slots<bobyqa_wrapper>),
         "Bound-constrained derivative-free trust-region interpolation method. Takes an "
-        "objective only; no gradient is used or requested.");
+        "objective only; no gradient is used or requested. Experimental, with a known "
+        "defect. BOBYQA reports a solve as converged when it ends by exhausting the "
+        "200000-pass safety cap on the internal state machine of one iteration, so a stuck "
+        "run reads as a success.");
+    cls.attr("maturity") = "experimental";
+    cls.attr("known_defect") = bobyqa_known_defect;
     cls.def(
         "__init__",
         [](bobyqa_wrapper* self, nb::object objective, const vector<double>& x0,

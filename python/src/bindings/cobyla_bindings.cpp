@@ -35,6 +35,11 @@ namespace
 using cobyla_options = cobyla_policy<>::options_type;
 using cobyla_wrapper = solver_wrapper<cobyla_policy<>, constrained_values_problem>;
 
+constexpr const char* cobyla_known_defect =
+    "COBYLA returns objective values of 84, 7516 and 7.7 against an optimum of 0 on the "
+    "Hock-Schittkowski problems 48, 50 and 51, and its bound repair can evaluate the "
+    "objective outside the box under the default initial trust radius.";
+
 void bind_cobyla_options(nb::module_& m)
 {
     nb::class_<cobyla_options>(m, "CobylaOptions",
@@ -62,7 +67,12 @@ void bind_cobyla_solver(nb::module_& m)
         m, "CobylaSolver", nb::type_slots(wrapper_slots<cobyla_wrapper>),
         "Derivative-free constrained optimization by linear approximations. Takes an "
         "objective, a constraint vector and the two constraint counts; box bounds are "
-        "rewritten into explicit constraints by the method itself.");
+        "rewritten into explicit constraints by the method itself. Experimental, with a "
+        "known defect. COBYLA returns objective values of 84, 7516 and 7.7 against an "
+        "optimum of 0 on the Hock-Schittkowski problems 48, 50 and 51, and its bound repair "
+        "can evaluate the objective outside the box under the default initial trust radius.");
+    cls.attr("maturity") = "experimental";
+    cls.attr("known_defect") = cobyla_known_defect;
     cls.def(
         "__init__",
         [](cobyla_wrapper* self, nb::object objective, const vector<double>& x0,

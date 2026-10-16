@@ -3,6 +3,7 @@
 import numpy as np
 
 import argmin
+import argmin.experimental as experimental
 
 X0 = np.array([-1.2, 1.0])
 FEASIBLE_START = np.array([0.3, 0.3])
@@ -49,7 +50,7 @@ def make_bobyqa(**overrides):
         max_iterations=2000,
     )
     arguments.update(overrides)
-    return argmin.BobyqaSolver(**arguments)
+    return experimental.BobyqaSolver(**arguments)
 
 
 def make_cobyla(**overrides):
@@ -62,7 +63,7 @@ def make_cobyla(**overrides):
         max_iterations=3000,
     )
     arguments.update(overrides)
-    return argmin.CobylaSolver(**arguments)
+    return experimental.CobylaSolver(**arguments)
 
 
 def make_kraft_slsqp(**overrides):
@@ -113,7 +114,7 @@ def make_tr_sqp(**overrides):
 def make_cmaes(**overrides):
     arguments = dict(objective=rosenbrock, x0=X0, seed=20240722, max_iterations=800)
     arguments.update(overrides)
-    return argmin.CmaesSolver(**arguments)
+    return experimental.CmaesSolver(**arguments)
 
 
 FACTORIES = {

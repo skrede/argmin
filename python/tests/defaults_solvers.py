@@ -5,6 +5,9 @@ import inspect
 import numpy as np
 
 import argmin
+import argmin.experimental as experimental
+
+from surface_namespaces import BOUND_MODULES, EXPORTED, bound
 
 
 def rosenbrock(x):
@@ -28,8 +31,8 @@ def feasible_start():
 # the library defaults to.
 UNCONFIGURED = {
     "LbfgsbSolver": lambda: argmin.LbfgsbSolver(objective=rosenbrock, x0=feasible_start()),
-    "BobyqaSolver": lambda: argmin.BobyqaSolver(objective=rosenbrock, x0=feasible_start()),
-    "CobylaSolver": lambda: argmin.CobylaSolver(
+    "BobyqaSolver": lambda: experimental.BobyqaSolver(objective=rosenbrock, x0=feasible_start()),
+    "CobylaSolver": lambda: experimental.CobylaSolver(
         objective=rosenbrock,
         x0=feasible_start(),
         constraints=unit_disk,
@@ -60,7 +63,7 @@ UNCONFIGURED = {
         num_equality=0,
         num_inequality=1,
     ),
-    "CmaesSolver": lambda: argmin.CmaesSolver(objective=rosenbrock, x0=feasible_start()),
+    "CmaesSolver": lambda: experimental.CmaesSolver(objective=rosenbrock, x0=feasible_start()),
 }
 
 POLICY_OPTION_TYPE = {
@@ -76,9 +79,9 @@ POLICY_OPTION_TYPE = {
 
 def bound_value_types():
     found = {}
-    for name in argmin.__all__:
-        value = getattr(argmin, name, None)
-        if not inspect.isclass(value) or value.__module__ != argmin._argmin.__name__:
+    for name in EXPORTED:
+        value = bound(name)
+        if not inspect.isclass(value) or value.__module__ not in BOUND_MODULES:
             continue
         if issubclass(value, BaseException) or hasattr(value, "__members__"):
             continue

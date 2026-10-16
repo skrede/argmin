@@ -34,6 +34,7 @@ from parity_methods import (
     CONSTRAINED_METHODS,
     CONSTRAINED_SOLVE,
     UNCONSTRAINED_METHODS,
+    native_solve,
     reexpressed_constrained,
     reexpressed_constrained_gradient,
     reexpressed_constraint_jacobian,
@@ -69,7 +70,7 @@ def assert_agree(native, interpreted):
 @pytest.mark.parametrize("method", sorted(UNCONSTRAINED_METHODS))
 def test_a_delegating_objective_matches_the_compiled_one(method):
     problem = rosenbrock_problem()
-    native = problem.solve_native(method, max_iterations=BUDGET)
+    native = native_solve(problem, method, max_iterations=BUDGET)
     interpreted = UNCONSTRAINED_METHODS[method](
         problem, problem.value, problem.gradient
     ).solve()
@@ -85,7 +86,7 @@ def test_a_delegating_objective_matches_the_compiled_one(method):
 @pytest.mark.parametrize("method", sorted(UNCONSTRAINED_METHODS))
 def test_a_reexpressed_objective_matches_the_compiled_one(method):
     problem = rosenbrock_problem()
-    native = problem.solve_native(method, max_iterations=BUDGET)
+    native = native_solve(problem, method, max_iterations=BUDGET)
     interpreted = UNCONSTRAINED_METHODS[method](
         problem, reexpressed_rosenbrock, reexpressed_rosenbrock_gradient
     ).solve()
@@ -96,7 +97,7 @@ def test_a_reexpressed_objective_matches_the_compiled_one(method):
 @pytest.mark.parametrize("method", sorted(CONSTRAINED_METHODS))
 def test_a_delegating_constrained_objective_matches_the_compiled_one(method):
     problem = argmin.ConstrainedTestProblem()
-    native = problem.solve_native(method, **CONSTRAINED_SOLVE)
+    native = native_solve(problem, method, **CONSTRAINED_SOLVE)
     interpreted = CONSTRAINED_METHODS[method](
         problem,
         problem.value,
@@ -114,7 +115,7 @@ def test_a_delegating_constrained_objective_matches_the_compiled_one(method):
 @pytest.mark.parametrize("method", sorted(CONSTRAINED_METHODS))
 def test_a_reexpressed_constrained_objective_matches_the_compiled_one(method):
     problem = argmin.ConstrainedTestProblem()
-    native = problem.solve_native(method, **CONSTRAINED_SOLVE)
+    native = native_solve(problem, method, **CONSTRAINED_SOLVE)
     interpreted = CONSTRAINED_METHODS[method](
         problem,
         reexpressed_constrained,
@@ -151,7 +152,7 @@ def test_the_cost_of_an_interpreter_defined_objective_is_reported(method, capsys
     problem = rosenbrock_problem()
 
     native_seconds = _average_seconds(
-        lambda: problem.solve_native(method, max_iterations=BUDGET)
+        lambda: native_solve(problem, method, max_iterations=BUDGET)
     )
     interpreter_seconds = _average_seconds(
         lambda: UNCONSTRAINED_METHODS[method](
