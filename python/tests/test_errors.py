@@ -37,7 +37,7 @@ def test_the_kind_enumeration_covers_the_library_error_channel(argmin, repositor
 
 
 def test_the_answer_channel_is_not_the_failure_channel(argmin):
-    for enumeration in (argmin.QpStatus, argmin.SolverStatus):
+    for enumeration in (argmin.QpSolveStatus, argmin.SolverStatus):
         for member in enumeration.__members__.values():
             assert not isinstance(member, BaseException)
             assert not (isinstance(member, type) and issubclass(member, BaseException))

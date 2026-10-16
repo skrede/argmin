@@ -31,7 +31,7 @@ namespace argmin::python
 namespace
 {
 
-result_type solve_rosenbrock_native(const native_rosenbrock& problem, std::string_view method,
+result_type solve_rosenbrock_native(const rosenbrock& problem, std::string_view method,
                                     const std::optional<vector<double>>& start,
                                     const solver_options<>& opts)
 {
@@ -50,7 +50,7 @@ result_type solve_rosenbrock_native(const native_rosenbrock& problem, std::strin
 
 void bind_rosenbrock(nb::module_& m)
 {
-    nb::class_<native_rosenbrock>(
+    nb::class_<rosenbrock>(
         m, "Rosenbrock",
         "The Rosenbrock valley compiled into the extension at any dimension of at least "
         "two, with an optional box. Its value and gradient are callable from the "
@@ -58,14 +58,14 @@ void bind_rosenbrock(nb::module_& m)
         "loop, which is what makes a parity comparison against the boundary possible.")
         .def(
             "__init__",
-            [](native_rosenbrock* self, int n, const std::optional<vector<double>>& lower_bounds,
+            [](rosenbrock* self, int n, const std::optional<vector<double>>& lower_bounds,
                const std::optional<vector<double>>& upper_bounds)
             {
                 check_positive_dimension(n, "n");
                 if(n < 2)
                     raise_argmin_error(error_kind::dimension_mismatch,
                                        "n must be at least 2, got " + format_number(n));
-                native_rosenbrock problem;
+                rosenbrock problem;
                 problem.shape.n = n;
                 problem.lower = lower_bounds ? *lower_bounds
                                              : vector<double>::Constant(n, -unbounded);
@@ -76,20 +76,20 @@ void bind_rosenbrock(nb::module_& m)
                 check_no_nan(problem.lower, "lower_bounds");
                 check_no_nan(problem.upper, "upper_bounds");
                 check_ordered_bounds(problem.lower, problem.upper);
-                new(self) native_rosenbrock(std::move(problem));
+                new(self) rosenbrock(std::move(problem));
             },
             nb::arg("n") = 2, nb::arg("lower_bounds") = nb::none(),
             nb::arg("upper_bounds") = nb::none(),
             "The n-dimensional Rosenbrock valley compiled into the extension, with the global "
             "minimum at the all-ones point and an optimal value of zero.")
-        .def("dimension", &native_rosenbrock::dimension)
-        .def("optimal_value", &native_rosenbrock::optimal_value)
-        .def("initial_point", &native_rosenbrock::initial_point)
-        .def("lower_bounds", &native_rosenbrock::lower_bounds)
-        .def("upper_bounds", &native_rosenbrock::upper_bounds)
+        .def("dimension", &rosenbrock::dimension)
+        .def("optimal_value", &rosenbrock::optimal_value)
+        .def("initial_point", &rosenbrock::initial_point)
+        .def("lower_bounds", &rosenbrock::lower_bounds)
+        .def("upper_bounds", &rosenbrock::upper_bounds)
         .def(
             "value",
-            [](const native_rosenbrock& problem, const vector<double>& x)
+            [](const rosenbrock& problem, const vector<double>& x)
             {
                 check_vector_length(x, problem.dimension(), "x");
                 return problem.value(x);
@@ -97,7 +97,7 @@ void bind_rosenbrock(nb::module_& m)
             nb::arg("x"))
         .def(
             "gradient",
-            [](const native_rosenbrock& problem, const vector<double>& x)
+            [](const rosenbrock& problem, const vector<double>& x)
             {
                 check_vector_length(x, problem.dimension(), "x");
                 vector<double> g;
@@ -111,7 +111,7 @@ void bind_rosenbrock(nb::module_& m)
         // checking it against this entry point tests the boundary itself.
         .def(
             "solve_native",
-            [](const native_rosenbrock& problem, std::string_view method,
+            [](const rosenbrock& problem, std::string_view method,
                const std::optional<vector<double>>& x0, std::optional<int> max_iterations,
                std::optional<double> feasibility_tolerance,
                std::optional<double> constraint_tolerance,
@@ -134,7 +134,7 @@ void bind_rosenbrock(nb::module_& m)
             nb::arg("step_threshold") = nb::none(), nb::arg("stall_threshold") = nb::none(),
             nb::arg("stall_window") = nb::none())
         .def("__repr__",
-             [](const native_rosenbrock& problem)
+             [](const rosenbrock& problem)
              { return "Rosenbrock(n=" + format_number(problem.dimension()) + ")"; });
 }
 

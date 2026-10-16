@@ -36,7 +36,7 @@ UNCONFIGURED = {
         num_equality=0,
         num_inequality=1,
     ),
-    "SlsqpSolver": lambda: argmin.SlsqpSolver(
+    "KraftSlsqpSolver": lambda: argmin.KraftSlsqpSolver(
         objective=rosenbrock,
         x0=feasible_start(),
         constraints=unit_disk,
@@ -67,7 +67,7 @@ POLICY_OPTION_TYPE = {
     "LbfgsbSolver": "LbfgsbOptions",
     "BobyqaSolver": "BobyqaOptions",
     "CobylaSolver": "CobylaOptions",
-    "SlsqpSolver": "SlsqpOptions",
+    "KraftSlsqpSolver": "KraftSlsqpOptions",
     "FilterSlsqpSolver": "FilterSlsqpOptions",
     "TrSqpSolver": "TrSqpOptions",
     "CmaesSolver": "CmaesOptions",

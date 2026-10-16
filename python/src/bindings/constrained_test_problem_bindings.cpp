@@ -27,7 +27,8 @@ namespace argmin::python
 namespace
 {
 
-result_type solve_constrained_native(const native_constrained& problem, std::string_view method,
+result_type solve_constrained_native(const constrained_test_problem& problem,
+                                     std::string_view method,
                                      const std::optional<vector<double>>& start,
                                      const solver_options<>& opts)
 {
@@ -35,7 +36,7 @@ result_type solve_constrained_native(const native_constrained& problem, std::str
     check_vector_length(x0, problem.dimension(), "x0");
     check_all_finite(x0, "x0");
 
-    if(method == "slsqp")
+    if(method == "kraft_slsqp")
         return run_native<kraft_slsqp_policy<>>(problem, x0, opts);
     if(method == "filter_slsqp")
         return run_native<filter_slsqp_policy<>>(problem, x0, opts);
@@ -43,12 +44,12 @@ result_type solve_constrained_native(const native_constrained& problem, std::str
         return run_native<tr_sqp_policy<>>(problem, x0, opts);
     if(method == "cobyla")
         return run_native<cobyla_policy<>>(problem, x0, opts);
-    reject_method(method, "'slsqp', 'filter_slsqp', 'tr_sqp', 'cobyla'");
+    reject_method(method, "'kraft_slsqp', 'filter_slsqp', 'tr_sqp', 'cobyla'");
 }
 
 void bind_constrained_problem(nb::module_& m)
 {
-    nb::class_<native_constrained>(
+    nb::class_<constrained_test_problem>(
         m, "ConstrainedTestProblem",
         "A two-variable equality-constrained problem compiled into the extension, with the "
         "same callback-free solve_native() entry point as the Rosenbrock valley.")
@@ -56,14 +57,14 @@ void bind_constrained_problem(nb::module_& m)
              "Hock and Schittkowski problem six: minimize (1 - x0)^2 subject to the equality "
              "10 (x1 - x0^2) = 0, with the solution at the all-ones point and an optimal value "
              "of zero.")
-        .def("dimension", &native_constrained::dimension)
-        .def("num_equality", &native_constrained::num_equality)
-        .def("num_inequality", &native_constrained::num_inequality)
-        .def("optimal_value", &native_constrained::optimal_value)
-        .def("initial_point", &native_constrained::initial_point)
+        .def("dimension", &constrained_test_problem::dimension)
+        .def("num_equality", &constrained_test_problem::num_equality)
+        .def("num_inequality", &constrained_test_problem::num_inequality)
+        .def("optimal_value", &constrained_test_problem::optimal_value)
+        .def("initial_point", &constrained_test_problem::initial_point)
         .def(
             "value",
-            [](const native_constrained& problem, const vector<double>& x)
+            [](const constrained_test_problem& problem, const vector<double>& x)
             {
                 check_vector_length(x, problem.dimension(), "x");
                 return problem.value(x);
@@ -71,7 +72,7 @@ void bind_constrained_problem(nb::module_& m)
             nb::arg("x"))
         .def(
             "gradient",
-            [](const native_constrained& problem, const vector<double>& x)
+            [](const constrained_test_problem& problem, const vector<double>& x)
             {
                 check_vector_length(x, problem.dimension(), "x");
                 vector<double> g;
@@ -81,7 +82,7 @@ void bind_constrained_problem(nb::module_& m)
             nb::arg("x"))
         .def(
             "constraints",
-            [](const native_constrained& problem, const vector<double>& x)
+            [](const constrained_test_problem& problem, const vector<double>& x)
             {
                 check_vector_length(x, problem.dimension(), "x");
                 vector<double> c;
@@ -91,7 +92,7 @@ void bind_constrained_problem(nb::module_& m)
             nb::arg("x"))
         .def(
             "constraint_jacobian",
-            [](const native_constrained& problem, const vector<double>& x)
+            [](const constrained_test_problem& problem, const vector<double>& x)
             {
                 check_vector_length(x, problem.dimension(), "x");
                 matrix<double> J;
@@ -101,7 +102,7 @@ void bind_constrained_problem(nb::module_& m)
             nb::arg("x"))
         .def(
             "solve_native",
-            [](const native_constrained& problem, std::string_view method,
+            [](const constrained_test_problem& problem, std::string_view method,
                const std::optional<vector<double>>& x0, std::optional<int> max_iterations,
                std::optional<double> feasibility_tolerance,
                std::optional<double> constraint_tolerance,
@@ -123,7 +124,8 @@ void bind_constrained_problem(nb::module_& m)
             nb::arg("objective_threshold") = nb::none(),
             nb::arg("step_threshold") = nb::none(), nb::arg("stall_threshold") = nb::none(),
             nb::arg("stall_window") = nb::none())
-        .def("__repr__", [](const native_constrained&) { return "ConstrainedTestProblem()"; });
+        .def("__repr__",
+             [](const constrained_test_problem&) { return "ConstrainedTestProblem()"; });
 }
 
 }

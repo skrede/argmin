@@ -69,8 +69,8 @@ def wrapped_bobyqa(problem, objective, gradient):
     )
 
 
-def wrapped_slsqp(problem, objective, gradient, constraints, jacobian):
-    return argmin.SlsqpSolver(
+def wrapped_kraft_slsqp(problem, objective, gradient, constraints, jacobian):
+    return argmin.KraftSlsqpSolver(
         objective,
         problem.initial_point(),
         gradient=gradient,
@@ -121,7 +121,7 @@ def wrapped_cobyla(problem, objective, gradient, constraints, jacobian):
 
 UNCONSTRAINED_METHODS = {"lbfgsb": wrapped_lbfgsb, "bobyqa": wrapped_bobyqa}
 CONSTRAINED_METHODS = {
-    "slsqp": wrapped_slsqp,
+    "kraft_slsqp": wrapped_kraft_slsqp,
     "filter_slsqp": wrapped_filter_slsqp,
     "tr_sqp": wrapped_tr_sqp,
     "cobyla": wrapped_cobyla,

@@ -18,11 +18,11 @@ inline constexpr double unbounded = std::numeric_limits<double>::infinity();
 // valley. The box is exposed so a caller can pose the identical bounded
 // problem to the interpreter-side methods, which is the only way the parity
 // comparison holds every input fixed but the boundary.
-struct native_rosenbrock
+struct rosenbrock
 {
     static constexpr int problem_dimension = dynamic_dimension;
 
-    rosenbrock<double> shape{};
+    argmin::rosenbrock<double> shape{};
     vector<double> lower{};
     vector<double> upper{};
 
@@ -40,7 +40,7 @@ struct native_rosenbrock
 // The equality-constrained problem is published at a fixed size; this face
 // re-expresses it at dynamic dimension so a native result carries the same
 // vector type the wrapped methods return.
-struct native_constrained
+struct constrained_test_problem
 {
     static constexpr int problem_dimension = dynamic_dimension;
 

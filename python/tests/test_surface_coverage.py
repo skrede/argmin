@@ -49,12 +49,13 @@ def test_every_exported_type_and_function_is_documented(name):
     assert documentation != name, f"{name}'s docstring only restates its name"
 
 
+# The naming table spells every export without exercising one, so it is not a mention.
 def other_test_sources():
     directory = pathlib.Path(__file__).parent
     return {
         path.name: path.read_text()
         for path in sorted(directory.glob("*.py"))
-        if path.name not in (THIS_MODULE, "conftest.py")
+        if path.name not in (THIS_MODULE, "conftest.py", "test_naming.py")
     }
 
 

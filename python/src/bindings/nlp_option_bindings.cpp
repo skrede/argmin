@@ -73,7 +73,7 @@ void bind_driver_options(nb::module_& m)
 
 void bind_qp_subproblem_options(nb::module_& m)
 {
-    nb::class_<qp_options<>>(m, "QpSubproblemOptions",
+    nb::class_<qp_options<>>(m, "QpOptions",
                           "Read-only view of the quadratic subproblem parameters carried by "
                           "the sequential quadratic programming policy.")
         .def(nb::init<>())
@@ -82,7 +82,7 @@ void bind_qp_subproblem_options(nb::module_& m)
         .def("__repr__",
              [](const qp_options<>& opts)
              {
-                 return "QpSubproblemOptions(max_iterations=" + format_number(opts.max_iterations)
+                 return "QpOptions(max_iterations=" + format_number(opts.max_iterations)
                         + ", tolerance=" + format_number(opts.tolerance) + ")";
              });
 }

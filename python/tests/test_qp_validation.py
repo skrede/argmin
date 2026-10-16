@@ -126,7 +126,7 @@ def test_an_infinite_bound_is_accepted(argmin, kind):
     l = np.array([1.0, -np.inf, -np.inf])
     u = np.array([1.0, np.inf, np.inf])
     result = call_solve(make_solver(argmin, kind), kind, P, q, A, l, u)
-    assert result.status == argmin.QpStatus.solved
+    assert result.status == argmin.QpSolveStatus.solved
     assert np.allclose(result.x, [0.25, 0.75], atol=1e-6)
 
 
@@ -175,7 +175,7 @@ def test_a_zero_constraint_count_solves_the_unconstrained_program(argmin, kind):
 
     result = call_solve(solver, kind, P, q, A, empty, empty)
 
-    assert result.status == argmin.QpStatus.solved
+    assert result.status == argmin.QpSolveStatus.solved
     # The stationarity condition P x + q = 0 has the closed-form solution
     # x = -P^-1 q = (1, 2) with no constraint to displace it.
     assert np.allclose(result.x, [1.0, 2.0], atol=1e-6)

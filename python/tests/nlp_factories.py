@@ -65,7 +65,7 @@ def make_cobyla(**overrides):
     return argmin.CobylaSolver(**arguments)
 
 
-def make_slsqp(**overrides):
+def make_kraft_slsqp(**overrides):
     arguments = dict(
         objective=rosenbrock,
         x0=FEASIBLE_START,
@@ -77,7 +77,7 @@ def make_slsqp(**overrides):
         max_iterations=500,
     )
     arguments.update(overrides)
-    return argmin.SlsqpSolver(**arguments)
+    return argmin.KraftSlsqpSolver(**arguments)
 
 
 def make_filter_slsqp(**overrides):
@@ -120,12 +120,12 @@ FACTORIES = {
     "lbfgsb": make_lbfgsb,
     "bobyqa": make_bobyqa,
     "cobyla": make_cobyla,
-    "slsqp": make_slsqp,
+    "kraft_slsqp": make_kraft_slsqp,
     "filter_slsqp": make_filter_slsqp,
     "tr_sqp": make_tr_sqp,
     "cmaes": make_cmaes,
 }
 
-BOUNDED = ("lbfgsb", "bobyqa", "cobyla", "slsqp")
-CONSTRAINED = ("cobyla", "slsqp", "filter_slsqp", "tr_sqp")
-CONSTRAINED_ADAPTER = ("filter_slsqp", "slsqp", "tr_sqp")
+BOUNDED = ("lbfgsb", "bobyqa", "cobyla", "kraft_slsqp")
+CONSTRAINED = ("cobyla", "kraft_slsqp", "filter_slsqp", "tr_sqp")
+CONSTRAINED_ADAPTER = ("filter_slsqp", "kraft_slsqp", "tr_sqp")

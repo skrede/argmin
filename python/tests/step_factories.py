@@ -39,8 +39,8 @@ def make_bobyqa():
     )
 
 
-def make_slsqp():
-    return argmin.SlsqpSolver(
+def make_kraft_slsqp():
+    return argmin.KraftSlsqpSolver(
         objective,
         START,
         gradient=gradient,
@@ -81,7 +81,7 @@ def make_tr_sqp():
 FACTORIES = {
     "lbfgsb": make_lbfgsb,
     "bobyqa": make_bobyqa,
-    "slsqp": make_slsqp,
+    "kraft_slsqp": make_kraft_slsqp,
     "filter_slsqp": make_filter_slsqp,
     "tr_sqp": make_tr_sqp,
 }
@@ -89,4 +89,4 @@ FACTORIES = {
 # BOBYQA rebuilds its whole interpolation model on either reset entry point, so
 # the two are behaviorally indistinguishable for it; only the policies that
 # carry curvature across a reset can show the difference.
-STATE_CARRYING = ("lbfgsb", "slsqp", "filter_slsqp", "tr_sqp")
+STATE_CARRYING = ("lbfgsb", "kraft_slsqp", "filter_slsqp", "tr_sqp")

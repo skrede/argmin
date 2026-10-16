@@ -38,7 +38,7 @@ using slsqp_wrapper = solver_wrapper<kraft_slsqp_policy<>, constrained_problem>;
 
 void bind_slsqp_options(nb::module_& m)
 {
-    nb::class_<slsqp_options>(m, "SlsqpOptions",
+    nb::class_<slsqp_options>(m, "KraftSlsqpOptions",
                              "Read-only view of the sequential least-squares quadratic "
                              "programming policy's own configuration.")
         .def(nb::init<>())
@@ -55,7 +55,7 @@ void bind_slsqp_options(nb::module_& m)
         .def("__repr__",
              [](const slsqp_options& opts)
              {
-                 return "SlsqpOptions(initial_penalty=" + format_number(opts.initial_penalty)
+                 return "KraftSlsqpOptions(initial_penalty=" + format_number(opts.initial_penalty)
                         + ", line_search=" + describe_line_search(opts.line_search)
                         + ", stall_window=" + format_number(opts.stall_window) + ")";
              });
@@ -64,7 +64,7 @@ void bind_slsqp_options(nb::module_& m)
 void bind_slsqp_solver(nb::module_& m)
 {
     nb::class_<slsqp_wrapper> cls(
-        m, "SlsqpSolver", nb::type_slots(wrapper_slots<slsqp_wrapper>),
+        m, "KraftSlsqpSolver", nb::type_slots(wrapper_slots<slsqp_wrapper>),
         "Sequential least-squares quadratic programming for a constrained problem. Needs "
         "the constraint vector and its Jacobian, plus the equality and inequality counts.");
     cls.def(
@@ -134,7 +134,7 @@ void bind_slsqp_solver(nb::module_& m)
         "quadratic program with a BFGS Lagrangian-Hessian approximation, after Kraft "
         "(1988), DFVLR-FB 88-28. Equalities come first in the constraint vector and are "
         "driven to zero; inequalities follow and are held non-negative.");
-    def_solver_methods(cls, "SlsqpSolver");
+    def_solver_methods(cls, "KraftSlsqpSolver");
 }
 
 }

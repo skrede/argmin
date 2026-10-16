@@ -12,7 +12,7 @@ namespace argmin::python
 
 void register_status_enums(nb::module_& m)
 {
-    nb::enum_<qp_solve_status>(m, "QpStatus",
+    nb::enum_<qp_solve_status>(m, "QpSolveStatus",
                               "How a quadratic-program solve ended. An iteration cap or an "
                               "infeasibility certificate is an answer, not an error, so it "
                               "arrives here rather than as a raised exception.")

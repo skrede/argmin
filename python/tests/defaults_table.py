@@ -37,7 +37,7 @@ TABLE = {
         Source("options/dense_active_set_qp_options.h", "dense_active_set_qp_options", 3)
     ),
     "LineSearchOptions": entry(Source("line_search/options.h", "line_search_options", 5)),
-    "QpSubproblemOptions": entry(Source("options/qp_options.h", "qp_options", 2)),
+    "QpOptions": entry(Source("options/qp_options.h", "qp_options", 2)),
     "TrustRegionOptions": entry(Source("options/trust_region_options.h", "trust_region_options", 6)),
     "CmaesDetectionOptions": entry(
         Source("options/cmaes_detection_options.h", "cmaes_detection_options", 4)
@@ -45,7 +45,7 @@ TABLE = {
     "LbfgsbOptions": entry(Source("solver/lbfgsb_policy.h", "options_type", 3)),
     "BobyqaOptions": entry(Source("solver/bobyqa_policy.h", "options_type", 5)),
     "CobylaOptions": entry(Source("solver/cobyla_policy.h", "options_type", 4)),
-    "SlsqpOptions": entry(Source("solver/kraft_slsqp_policy.h", "options_type", 6)),
+    "KraftSlsqpOptions": entry(Source("solver/kraft_slsqp_policy.h", "options_type", 6)),
     "FilterSlsqpOptions": entry(Source("solver/filter_slsqp_policy.h", "options_type", 9)),
     "TrSqpOptions": entry(Source("solver/tr_sqp_policy.h", "options_type", 8)),
     "CmaesOptions": entry(

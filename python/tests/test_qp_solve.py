@@ -61,7 +61,7 @@ ADMM = ["dense_admm", "sparse_admm"]
 @pytest.mark.parametrize("kind", ALL)
 def test_the_analytic_optimum_is_reached(argmin, kind):
     _, result = solve_with(argmin, kind, *reference_problem())
-    assert result.status == argmin.QpStatus.solved
+    assert result.status == argmin.QpSolveStatus.solved
     assert np.allclose(result.x, OPTIMUM, atol=1e-6)
     assert result.objective_value == pytest.approx(OPTIMAL_OBJECTIVE, abs=1e-6)
 
@@ -69,7 +69,7 @@ def test_the_analytic_optimum_is_reached(argmin, kind):
 @pytest.mark.parametrize("kind", ALL)
 def test_the_iteration_cap_is_an_attribute_and_not_an_exception(argmin, kind):
     _, result = solve_with(argmin, kind, *reference_problem(), options=capped_options(argmin, kind))
-    assert result.status == argmin.QpStatus.max_iterations
+    assert result.status == argmin.QpSolveStatus.max_iterations
     assert result.x.shape == (2,)
 
 
@@ -79,7 +79,7 @@ def test_infeasibility_is_an_attribute_and_not_an_exception(argmin, kind):
     l = np.array([1.0, 0.0, 0.0])
     u = np.array([1.0, 0.2, 0.2])
     _, result = solve_with(argmin, kind, P, q, A, l, u)
-    assert result.status == argmin.QpStatus.primal_infeasible
+    assert result.status == argmin.QpSolveStatus.primal_infeasible
 
 
 # The active-set adapter documents a feasible-start contract: it cannot certify
@@ -106,8 +106,8 @@ def test_resolve_agrees_with_a_fresh_solve_on_the_updated_vectors(argmin, kind):
     resolved = solver.resolve(updated_q, l, u)
 
     _, fresh = solve_with(argmin, kind, P, updated_q, A, l, u)
-    assert fresh.status == argmin.QpStatus.solved
-    assert resolved.status == argmin.QpStatus.solved
+    assert fresh.status == argmin.QpSolveStatus.solved
+    assert resolved.status == argmin.QpSolveStatus.solved
     assert not np.allclose(fresh.x, OPTIMUM, atol=1e-3), "the update must move the optimum"
     assert np.allclose(resolved.x, fresh.x, atol=1e-6)
 
@@ -146,11 +146,11 @@ def test_every_active_set_option_changes_the_solve(argmin):
     assert roster == {"max_iterations", "tolerance", "equality_tolerance"}
 
     default = solve(active_set_problem())
-    assert default.status == argmin.QpStatus.solved
-    assert solve(active_set_problem(), max_iterations=1).status == argmin.QpStatus.max_iterations
+    assert default.status == argmin.QpSolveStatus.solved
+    assert solve(active_set_problem(), max_iterations=1).status == argmin.QpSolveStatus.max_iterations
 
     loose = solve(active_set_problem(), tolerance=0.35)
-    assert loose.status == argmin.QpStatus.solved
+    assert loose.status == argmin.QpSolveStatus.solved
     assert loose.iterations != default.iterations
     assert np.allclose(loose.x, default.x, rtol=0.0, atol=1e-12)
 

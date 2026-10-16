@@ -61,7 +61,7 @@ void bind_cmaes_detection_options(nb::module_& m)
                         + ", step_size_tolerance=" + format_number(opts.step_size_tolerance) + ")";
              });
 
-    nb::enum_<cmaes_restart>(m, "CmaesRestart",
+    nb::enum_<cmaes_restart>(m, "CmaesRestartStrategy",
                             "Whether the evolution strategy restarts with an increasing "
                             "population after an exit criterion fires.")
         .value("none", cmaes_restart::none)

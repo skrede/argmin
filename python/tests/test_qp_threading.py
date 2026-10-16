@@ -69,7 +69,7 @@ def test_a_fixed_workload_split_four_ways_is_measurably_faster(argmin):
     # rejects the rest, so sharing would serialize the very solves being timed.
     solvers = [argmin.DenseAdmmQpSolver(size, rows) for _ in range(WORKERS)]
     for solver in solvers:
-        assert solver.solve(P, q, A, l, u).status == argmin.QpStatus.solved
+        assert solver.solve(P, q, A, l, u).status == argmin.QpSolveStatus.solved
 
     start = time.perf_counter()
     for _ in range(TOTAL_SOLVES):
@@ -112,7 +112,7 @@ def test_every_worker_reaches_the_same_answer(argmin):
     def solve_once(_: int) -> np.ndarray:
         solver = argmin.DenseAdmmQpSolver(size, rows)
         result = solver.solve(P, q, A, l, u)
-        assert result.status == argmin.QpStatus.solved
+        assert result.status == argmin.QpSolveStatus.solved
         return result.x
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
@@ -154,11 +154,11 @@ def test_a_concurrent_solve_on_a_shared_qp_solver_is_rejected(argmin, kind):
             break
 
     assert argmin.ErrorKind.invalid_state in outcomes
-    assert set(outcomes) <= {argmin.ErrorKind.invalid_state, argmin.QpStatus.solved}
+    assert set(outcomes) <= {argmin.ErrorKind.invalid_state, argmin.QpSolveStatus.solved}
 
     with pytest.raises(argmin.ArgminError):
         solver.solve(*arguments[:-1], np.ones(1))
-    assert solver.solve(*arguments).status == argmin.QpStatus.solved
+    assert solver.solve(*arguments).status == argmin.QpSolveStatus.solved
 
 
 @pytest.mark.parametrize("kind", ["dense_admm", "sparse_admm"])

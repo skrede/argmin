@@ -65,7 +65,7 @@ def sample_result(argmin):
     return argmin.QpResult(
         x=np.array([1.5, -2.25, 3.0]),
         y=np.array([0.125]),
-        status=argmin.QpStatus.solved,
+        status=argmin.QpSolveStatus.solved,
         iterations=12,
         polished=True,
         primal_residual=1.25e-09,

@@ -10,7 +10,7 @@ def qp_result(argmin):
     return argmin.QpResult(
         x=np.array([1.5, -2.25, 3.0]),
         y=np.array([0.125, 0.25]),
-        status=argmin.QpStatus.solved_inaccurate,
+        status=argmin.QpSolveStatus.solved_inaccurate,
         iterations=17,
         polished=True,
         primal_residual=1.25e-09,
@@ -34,7 +34,7 @@ def solve_result(argmin):
 def test_qp_result_fields_are_readable(argmin):
     result = qp_result(argmin)
 
-    assert result.status == argmin.QpStatus.solved_inaccurate
+    assert result.status == argmin.QpSolveStatus.solved_inaccurate
     assert result.iterations == 17
     assert result.polished is True
     assert result.primal_residual == 1.25e-09
@@ -101,7 +101,7 @@ POLICY_ENUMS = {
         "LbfgsbOptions",
         "line_search_type",
     ),
-    "CmaesRestart": (
+    "CmaesRestartStrategy": (
         "solver/alternative/cmaes/pwq_reparameterization_policy.h",
         "restart_strategy",
         "CmaesOptions",
