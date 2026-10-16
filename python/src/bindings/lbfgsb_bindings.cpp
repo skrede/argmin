@@ -97,10 +97,8 @@ void bind_lbfgsb_solver(nb::module_& m)
 
             lbfgsb_options policy_opts;
             if(policy_stall_window)
-            {
-                check_positive_dimension(*policy_stall_window, "policy_stall_window");
-                policy_opts.stall_window = static_cast<std::uint16_t>(*policy_stall_window);
-            }
+                policy_opts.stall_window =
+                    positive_count<std::uint16_t>(*policy_stall_window, "policy_stall_window");
 
             auto adapter = std::make_unique<bounded_problem>(static_cast<int>(x0.size()),
                                                              std::move(calls));

@@ -3,13 +3,17 @@
 
 #include "bindings/detail/errors.h"
 #include "bindings/detail/validate.h"
+#include "bindings/detail/format_number.h"
 
 #include "argmin/solver/options.h"
 
 #include <nanobind/nanobind.h>
 
+#include <limits>
 #include <string>
 #include <cstdint>
+#include <utility>
+#include <concepts>
 #include <optional>
 #include <string_view>
 
@@ -32,14 +36,25 @@ struct driver_keywords
     std::optional<int> stall_window{};
 };
 
+// A bare cast would wrap an out-of-range Python integer into a different,
+// valid-looking count, so every unsigned count field is narrowed through here.
+template <std::unsigned_integral Count>
+Count positive_count(int value, std::string_view name)
+{
+    if(value > 0 && std::cmp_less_equal(value, std::numeric_limits<Count>::max()))
+        return static_cast<Count>(value);
+    raise_argmin_error(error_kind::dimension_mismatch,
+                       std::string(name) + " must be in [1, "
+                           + format_number(std::numeric_limits<Count>::max()) + "], got "
+                           + format_number(value));
+}
+
 inline solver_options<> configure(const driver_keywords& keywords)
 {
     solver_options<> opts;
     if(keywords.max_iterations)
-    {
-        check_positive_dimension(*keywords.max_iterations, "max_iterations");
-        opts.max_iterations = static_cast<std::uint32_t>(*keywords.max_iterations);
-    }
+        opts.max_iterations = positive_count<std::uint32_t>(*keywords.max_iterations,
+                                                            "max_iterations");
     if(keywords.feasibility_tolerance)
     {
         check_non_negative(*keywords.feasibility_tolerance, "feasibility_tolerance");
@@ -71,10 +86,8 @@ inline solver_options<> configure(const driver_keywords& keywords)
         opts.set_stall_threshold(*keywords.stall_threshold);
     }
     if(keywords.stall_window)
-    {
-        check_positive_dimension(*keywords.stall_window, "stall_window");
-        opts.set_stall_window(static_cast<std::uint16_t>(*keywords.stall_window));
-    }
+        opts.set_stall_window(positive_count<std::uint16_t>(*keywords.stall_window,
+                                                            "stall_window"));
     return opts;
 }
 

@@ -102,10 +102,8 @@ filter_options filter_policy_options(std::optional<int> policy_stall_window)
 {
     filter_options opts;
     if(policy_stall_window)
-    {
-        check_positive_dimension(*policy_stall_window, "policy_stall_window");
-        opts.stall_window = static_cast<std::uint16_t>(*policy_stall_window);
-    }
+        opts.stall_window =
+            positive_count<std::uint16_t>(*policy_stall_window, "policy_stall_window");
     return opts;
 }
 

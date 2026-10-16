@@ -97,10 +97,8 @@ void bind_slsqp_solver(nb::module_& m)
                 policy_opts.initial_penalty =
                     positive_option(*initial_penalty, "initial_penalty");
             if(policy_stall_window)
-            {
-                check_positive_dimension(*policy_stall_window, "policy_stall_window");
-                policy_opts.stall_window = static_cast<std::uint16_t>(*policy_stall_window);
-            }
+                policy_opts.stall_window =
+                    positive_count<std::uint16_t>(*policy_stall_window, "policy_stall_window");
 
             callback_set calls;
             calls.objective = std::move(objective);

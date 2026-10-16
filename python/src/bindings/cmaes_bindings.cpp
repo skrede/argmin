@@ -130,20 +130,15 @@ void bind_cmaes_solver(nb::module_& m)
 
             cmaes_policy_options policy_opts;
             if(population_size)
-            {
-                check_positive_dimension(*population_size, "population_size");
-                policy_opts.lambda = static_cast<std::uint32_t>(*population_size);
-            }
+                policy_opts.lambda =
+                    positive_count<std::uint32_t>(*population_size, "population_size");
             if(initial_sigma)
                 policy_opts.initial_sigma = positive_option(*initial_sigma, "initial_sigma");
             if(seed)
                 policy_opts.seed = *seed;
             if(policy_stall_window)
-            {
-                check_positive_dimension(*policy_stall_window, "policy_stall_window");
                 policy_opts.stall_window =
-                    static_cast<std::uint16_t>(*policy_stall_window);
-            }
+                    positive_count<std::uint16_t>(*policy_stall_window, "policy_stall_window");
 
             callback_set calls;
             calls.objective = std::move(objective);

@@ -3,6 +3,7 @@
 
 #include "bindings/detail/errors.h"
 #include "bindings/detail/validate.h"
+#include "bindings/detail/keyword_options.h"
 #include "bindings/detail/problem_adapter.h"
 
 #include "argmin/types.h"
@@ -53,8 +54,7 @@ public:
 
     result_type step_n(int budget)
     {
-        check_positive_dimension(budget, "budget");
-        const auto span = static_cast<std::uint32_t>(budget);
+        const std::uint32_t span = positive_count<std::uint32_t>(budget, "budget");
         return run([span](driver_type& driver) { return driver.step_n(span); });
     }
 

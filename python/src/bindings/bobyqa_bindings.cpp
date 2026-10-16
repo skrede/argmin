@@ -128,11 +128,8 @@ void bind_bobyqa_solver(nb::module_& m)
                 policy_opts.final_trust_radius =
                     positive_option(*final_trust_radius, "final_trust_radius");
             if(policy_stall_window)
-            {
-                check_positive_dimension(*policy_stall_window, "policy_stall_window");
                 policy_opts.stall_window =
-                    static_cast<std::uint16_t>(*policy_stall_window);
-            }
+                    positive_count<std::uint16_t>(*policy_stall_window, "policy_stall_window");
 
             callback_set calls;
             calls.objective = std::move(objective);
