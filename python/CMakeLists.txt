@@ -78,6 +78,7 @@ nanobind_add_module(
     src/bindings/lbfgsb_bindings.cpp
     src/bindings/kraft_slsqp_bindings.cpp
     src/bindings/filter_slsqp_bindings.cpp
+    src/bindings/tr_sqp_bindings.cpp
     src/bindings/bobyqa_bindings.cpp
     src/bindings/cobyla_bindings.cpp
     src/bindings/cmaes_bindings.cpp

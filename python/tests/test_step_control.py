@@ -94,22 +94,27 @@ def test_a_reset_restarts_the_iteration_count(method):
     assert solver.step_n(2).iterations == 2
 
 
-# The difference is asserted by what the next step does, not by reading any
-# internal: a reset that kept the accumulated curvature takes a different first
-# step than one that threw it away.
+def post_reset_path(method, entry, steps):
+    solver = FACTORIES[method]()
+    solver.step_n(15)
+    getattr(solver, entry)(START)
+    path = []
+    for _ in range(steps):
+        solver.step()
+        path.append(solver.x.copy())
+    return np.array(path)
+
+
+# The difference is asserted by what the next steps do, not by reading any
+# internal: a reset that kept the accumulated curvature takes a different path
+# than one that threw it away. A trust-region step can be rejected outright or
+# cut to the boundary along steepest descent, neither of which reads the
+# curvature, so the path is compared over three steps rather than one.
 @pytest.mark.parametrize("method", STATE_CARRYING)
 def test_the_two_resets_differ_by_observed_behavior(method):
-    preserving = FACTORIES[method]()
-    preserving.step_n(15)
-    preserving.reset(START)
-    preserving.step()
-
-    clearing = FACTORIES[method]()
-    clearing.step_n(15)
-    clearing.reset_clear(START)
-    clearing.step()
-
-    assert not np.allclose(preserving.x, clearing.x)
+    preserving = post_reset_path(method, "reset", 3)
+    clearing = post_reset_path(method, "reset_clear", 3)
+    assert not np.allclose(preserving, clearing)
 
 
 @pytest.mark.parametrize("method", STATE_CARRYING)

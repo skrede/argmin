@@ -45,6 +45,7 @@ TABLE = {
     "CobylaOptions": entry(Source("solver/cobyla_policy.h", "options_type", 4)),
     "SlsqpOptions": entry(Source("solver/kraft_slsqp_policy.h", "options_type", 6)),
     "FilterSlsqpOptions": entry(Source("solver/filter_slsqp_policy.h", "options_type", 9)),
+    "TrSqpOptions": entry(Source("solver/tr_sqp_policy.h", "options_type", 8)),
     "CmaesOptions": entry(
         Source(
             "solver/alternative/cmaes/pwq_reparameterization_policy.h",

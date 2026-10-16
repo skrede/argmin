@@ -5,6 +5,10 @@ import numpy as np
 import argmin
 
 BUDGET = 500
+# The library's default gradient threshold stops the trust-region method one
+# iteration short of the objective tolerance the parity tests assert; this one
+# moves no other constrained method's stopping iteration.
+CONSTRAINED_SOLVE = dict(max_iterations=BUDGET, gradient_threshold=1e-6)
 BOX = (np.full(2, -5.0), np.full(2, 5.0))
 
 
@@ -74,7 +78,7 @@ def wrapped_slsqp(problem, objective, gradient, constraints, jacobian):
         constraint_jacobian=jacobian,
         num_equality=problem.num_equality(),
         num_inequality=problem.num_inequality(),
-        max_iterations=BUDGET,
+        **CONSTRAINED_SOLVE,
     )
 
 
@@ -87,7 +91,20 @@ def wrapped_filter_slsqp(problem, objective, gradient, constraints, jacobian):
         constraint_jacobian=jacobian,
         num_equality=problem.num_equality(),
         num_inequality=problem.num_inequality(),
-        max_iterations=BUDGET,
+        **CONSTRAINED_SOLVE,
+    )
+
+
+def wrapped_tr_sqp(problem, objective, gradient, constraints, jacobian):
+    return argmin.TrSqpSolver(
+        objective,
+        problem.initial_point(),
+        gradient=gradient,
+        constraints=constraints,
+        constraint_jacobian=jacobian,
+        num_equality=problem.num_equality(),
+        num_inequality=problem.num_inequality(),
+        **CONSTRAINED_SOLVE,
     )
 
 
@@ -98,7 +115,7 @@ def wrapped_cobyla(problem, objective, gradient, constraints, jacobian):
         constraints=constraints,
         num_equality=problem.num_equality(),
         num_inequality=problem.num_inequality(),
-        max_iterations=BUDGET,
+        **CONSTRAINED_SOLVE,
     )
 
 
@@ -106,5 +123,6 @@ UNCONSTRAINED_METHODS = {"lbfgsb": wrapped_lbfgsb, "bobyqa": wrapped_bobyqa}
 CONSTRAINED_METHODS = {
     "slsqp": wrapped_slsqp,
     "filter_slsqp": wrapped_filter_slsqp,
+    "tr_sqp": wrapped_tr_sqp,
     "cobyla": wrapped_cobyla,
 }

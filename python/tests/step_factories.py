@@ -65,14 +65,28 @@ def make_filter_slsqp():
     )
 
 
+def make_tr_sqp():
+    return argmin.TrSqpSolver(
+        objective,
+        START,
+        gradient=gradient,
+        constraints=inactive_constraint,
+        constraint_jacobian=inactive_jacobian,
+        num_equality=0,
+        num_inequality=1,
+        max_iterations=500,
+    )
+
+
 FACTORIES = {
     "lbfgsb": make_lbfgsb,
     "bobyqa": make_bobyqa,
     "slsqp": make_slsqp,
     "filter_slsqp": make_filter_slsqp,
+    "tr_sqp": make_tr_sqp,
 }
 
 # BOBYQA rebuilds its whole interpolation model on either reset entry point, so
 # the two are behaviorally indistinguishable for it; only the policies that
 # carry curvature across a reset can show the difference.
-STATE_CARRYING = ("lbfgsb", "slsqp", "filter_slsqp")
+STATE_CARRYING = ("lbfgsb", "slsqp", "filter_slsqp", "tr_sqp")

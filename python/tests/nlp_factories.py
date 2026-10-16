@@ -95,6 +95,21 @@ def make_filter_slsqp(**overrides):
     return argmin.FilterSlsqpSolver(**arguments)
 
 
+def make_tr_sqp(**overrides):
+    arguments = dict(
+        objective=rosenbrock,
+        x0=FEASIBLE_START,
+        gradient=rosenbrock_gradient,
+        constraints=unit_disk,
+        constraint_jacobian=unit_disk_jacobian,
+        num_equality=0,
+        num_inequality=1,
+        max_iterations=500,
+    )
+    arguments.update(overrides)
+    return argmin.TrSqpSolver(**arguments)
+
+
 def make_cmaes(**overrides):
     arguments = dict(objective=rosenbrock, x0=X0, seed=20240722, max_iterations=800)
     arguments.update(overrides)
@@ -107,9 +122,10 @@ FACTORIES = {
     "cobyla": make_cobyla,
     "slsqp": make_slsqp,
     "filter_slsqp": make_filter_slsqp,
+    "tr_sqp": make_tr_sqp,
     "cmaes": make_cmaes,
 }
 
 BOUNDED = ("lbfgsb", "bobyqa", "cobyla", "slsqp")
-CONSTRAINED = ("cobyla", "slsqp", "filter_slsqp")
-CONSTRAINED_ADAPTER = ("filter_slsqp", "slsqp")
+CONSTRAINED = ("cobyla", "slsqp", "filter_slsqp", "tr_sqp")
+CONSTRAINED_ADAPTER = ("filter_slsqp", "slsqp", "tr_sqp")

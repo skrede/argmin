@@ -32,6 +32,7 @@ import argmin
 from parity_methods import (
     BUDGET,
     CONSTRAINED_METHODS,
+    CONSTRAINED_SOLVE,
     UNCONSTRAINED_METHODS,
     reexpressed_constrained,
     reexpressed_constrained_gradient,
@@ -95,7 +96,7 @@ def test_a_reexpressed_objective_matches_the_compiled_one(method):
 @pytest.mark.parametrize("method", sorted(CONSTRAINED_METHODS))
 def test_a_delegating_constrained_objective_matches_the_compiled_one(method):
     problem = argmin.ConstrainedTestProblem()
-    native = problem.solve_native(method, max_iterations=BUDGET)
+    native = problem.solve_native(method, **CONSTRAINED_SOLVE)
     interpreted = CONSTRAINED_METHODS[method](
         problem,
         problem.value,
@@ -113,7 +114,7 @@ def test_a_delegating_constrained_objective_matches_the_compiled_one(method):
 @pytest.mark.parametrize("method", sorted(CONSTRAINED_METHODS))
 def test_a_reexpressed_constrained_objective_matches_the_compiled_one(method):
     problem = argmin.ConstrainedTestProblem()
-    native = problem.solve_native(method, max_iterations=BUDGET)
+    native = problem.solve_native(method, **CONSTRAINED_SOLVE)
     interpreted = CONSTRAINED_METHODS[method](
         problem,
         reexpressed_constrained,

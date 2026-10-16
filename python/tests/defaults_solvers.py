@@ -52,6 +52,14 @@ UNCONFIGURED = {
         num_equality=0,
         num_inequality=1,
     ),
+    "TrSqpSolver": lambda: argmin.TrSqpSolver(
+        objective=rosenbrock,
+        x0=feasible_start(),
+        constraints=unit_disk,
+        constraint_jacobian=unit_disk_jacobian,
+        num_equality=0,
+        num_inequality=1,
+    ),
     "CmaesSolver": lambda: argmin.CmaesSolver(objective=rosenbrock, x0=feasible_start()),
 }
 
@@ -61,6 +69,7 @@ POLICY_OPTION_TYPE = {
     "CobylaSolver": "CobylaOptions",
     "SlsqpSolver": "SlsqpOptions",
     "FilterSlsqpSolver": "FilterSlsqpOptions",
+    "TrSqpSolver": "TrSqpOptions",
     "CmaesSolver": "CmaesOptions",
 }
 

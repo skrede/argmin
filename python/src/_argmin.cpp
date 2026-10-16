@@ -18,6 +18,7 @@ NB_MODULE(_argmin, m)
     argmin::python::register_lbfgsb(m);
     argmin::python::register_kraft_slsqp(m);
     argmin::python::register_filter_slsqp(m);
+    argmin::python::register_tr_sqp(m);
     argmin::python::register_bobyqa(m);
     argmin::python::register_cobyla(m);
     argmin::python::register_cmaes(m);

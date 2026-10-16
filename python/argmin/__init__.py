@@ -32,6 +32,8 @@ from ._argmin import (
     SolverStatus,
     SparseAdmmQpSolver,
     SparseQpOptions,
+    TrSqpOptions,
+    TrSqpSolver,
     TrustRegionOptions,
     __version__,
 )
@@ -70,6 +72,8 @@ __all__ = [
     "SolverStatus",
     "SparseAdmmQpSolver",
     "SparseQpOptions",
+    "TrSqpOptions",
+    "TrSqpSolver",
     "TrustRegionOptions",
     "__version__",
 ]

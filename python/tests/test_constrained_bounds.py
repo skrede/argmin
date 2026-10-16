@@ -7,7 +7,7 @@ import argmin
 
 from nlp_factories import FACTORIES
 
-REJECTS_BOUNDS = ("filter_slsqp",)
+REJECTS_BOUNDS = ("filter_slsqp", "tr_sqp")
 
 LOWER = np.array([-1.0, -1.0])
 UPPER = np.array([1.0, 1.0])

@@ -25,6 +25,10 @@ INFINITY = re.compile(r"std::numeric_limits<(?:double|Scalar|scalar_type)>::infi
 # which is what the double-only binding exposes; the float row is never read.
 TABLE_REFERENCE = re.compile(r"(\w+)<(?:Scalar|scalar_type|S|double)>::(\w+)")
 SCALAR_CAST = re.compile(r"(?:Scalar|scalar_type|S)\((.*)\)")
+BRACE_CAST = re.compile(r"std::(?:size_t|u?int(?:8|16|32|64)_t)\{(.*)\}")
+# The binding instantiates the trust-region policy in its accurate mode, so a
+# default chosen on the mode resolves to the branch taken when it is not fast.
+MODE_CONDITIONAL = re.compile(r"\(\s*Mode\s*==\s*sqp_mode::fast\s*\)\s*\?(.*)")
 
 
 class Unresolved:
@@ -59,6 +63,25 @@ def double_row_constants(table):
     return None
 
 
+def false_branch(rest):
+    depth = 0
+    for index, character in enumerate(rest):
+        depth += (character in "({") - (character in ")}")
+        neighbors = rest[index - 1 : index] + rest[index + 1 : index + 2]
+        if character == ":" and depth == 0 and ":" not in neighbors:
+            return rest[index + 1 :]
+    return None
+
+
+def unwrapped(text):
+    for form in (SCALAR_CAST, BRACE_CAST):
+        match = form.fullmatch(text)
+        if match:
+            return match.group(1)
+    conditional = MODE_CONDITIONAL.fullmatch(text)
+    return false_branch(conditional.group(1)) if conditional else None
+
+
 def resolve(expression, constants, depth=0):
     text = " ".join(expression.split()).strip().rstrip(",").strip()
     if text == "":
@@ -71,9 +94,9 @@ def resolve(expression, constants, depth=0):
         return False
     if INFINITY.fullmatch(text.replace(" ", "")):
         return math.inf
-    cast = SCALAR_CAST.fullmatch(text)
-    if cast and depth < 4:
-        return resolve(cast.group(1), constants, depth + 1)
+    inner = unwrapped(text)
+    if inner is not None and depth < 4:
+        return resolve(inner, constants, depth + 1)
     reference = TABLE_REFERENCE.fullmatch(text)
     if reference and depth < 4:
         table, member = reference.groups()
