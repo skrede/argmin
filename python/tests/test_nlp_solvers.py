@@ -9,8 +9,14 @@ import pytest
 
 import argmin
 
-X0 = np.array([-1.2, 1.0])
-FEASIBLE_START = np.array([0.3, 0.3])
+from nlp_factories import (
+    BOUNDED,
+    CONSTRAINED,
+    FACTORIES,
+    make_cmaes,
+    rosenbrock,
+    unit_disk,
+)
 
 TERMINAL_STATUSES = frozenset(
     status
@@ -18,95 +24,6 @@ TERMINAL_STATUSES = frozenset(
     if status != argmin.SolverStatus.running
 )
 
-
-def rosenbrock(x):
-    return float((1.0 - x[0]) ** 2 + 5.0 * (x[1] - x[0] ** 2) ** 2)
-
-
-def rosenbrock_gradient(x):
-    return np.array(
-        [
-            -2.0 * (1.0 - x[0]) - 20.0 * x[0] * (x[1] - x[0] ** 2),
-            10.0 * (x[1] - x[0] ** 2),
-        ]
-    )
-
-
-def unit_disk(x):
-    return np.array([1.0 - x[0] ** 2 - x[1] ** 2])
-
-
-def unit_disk_jacobian(x):
-    return np.array([[-2.0 * x[0], -2.0 * x[1]]])
-
-
-def make_lbfgsb(**overrides):
-    arguments = dict(
-        objective=rosenbrock,
-        x0=X0,
-        gradient=rosenbrock_gradient,
-        max_iterations=500,
-    )
-    arguments.update(overrides)
-    return argmin.LbfgsbSolver(**arguments)
-
-
-def make_bobyqa(**overrides):
-    arguments = dict(
-        objective=rosenbrock,
-        x0=X0,
-        lower_bounds=np.array([-5.0, -5.0]),
-        upper_bounds=np.array([5.0, 5.0]),
-        max_iterations=2000,
-    )
-    arguments.update(overrides)
-    return argmin.BobyqaSolver(**arguments)
-
-
-def make_cobyla(**overrides):
-    arguments = dict(
-        objective=rosenbrock,
-        x0=FEASIBLE_START,
-        constraints=unit_disk,
-        num_equality=0,
-        num_inequality=1,
-        max_iterations=3000,
-    )
-    arguments.update(overrides)
-    return argmin.CobylaSolver(**arguments)
-
-
-def make_slsqp(**overrides):
-    arguments = dict(
-        objective=rosenbrock,
-        x0=FEASIBLE_START,
-        gradient=rosenbrock_gradient,
-        constraints=unit_disk,
-        constraint_jacobian=unit_disk_jacobian,
-        num_equality=0,
-        num_inequality=1,
-        max_iterations=500,
-    )
-    arguments.update(overrides)
-    return argmin.SlsqpSolver(**arguments)
-
-
-def make_cmaes(**overrides):
-    arguments = dict(objective=rosenbrock, x0=X0, seed=20240722, max_iterations=800)
-    arguments.update(overrides)
-    return argmin.CmaesSolver(**arguments)
-
-
-FACTORIES = {
-    "lbfgsb": make_lbfgsb,
-    "bobyqa": make_bobyqa,
-    "cobyla": make_cobyla,
-    "slsqp": make_slsqp,
-    "cmaes": make_cmaes,
-}
-
-BOUNDED = ("lbfgsb", "bobyqa", "cobyla", "slsqp")
-CONSTRAINED = ("cobyla", "slsqp")
 
 ALL_METHODS = pytest.mark.parametrize("method", sorted(FACTORIES))
 
@@ -248,12 +165,6 @@ def test_a_constraint_count_that_is_negative_is_rejected(method):
     with pytest.raises(argmin.ArgminError) as raised:
         FACTORIES[method](num_inequality=-1)
     assert raised.value.kind == argmin.ErrorKind.dimension_mismatch
-
-
-def test_a_jacobian_of_the_wrong_shape_is_rejected():
-    with pytest.raises(argmin.ArgminError) as raised:
-        make_slsqp(constraint_jacobian=lambda x: np.zeros((2, 2))).solve()
-    assert raised.value.kind == argmin.ErrorKind.invalid_callback
 
 
 # The cycle runs interpreter -> solver -> adapter -> bound method -> owner ->

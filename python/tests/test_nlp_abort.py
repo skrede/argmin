@@ -23,6 +23,8 @@ import pytest
 
 import argmin
 
+from nlp_factories import CONSTRAINED_ADAPTER, FACTORIES
+
 DIMENSION = 20
 CALLBACK_DELAY = 0.001
 JOIN_TIMEOUT = 20.0
@@ -165,3 +167,34 @@ def test_a_second_solve_on_a_busy_solver_is_rejected():
     solver.abort()
     worker.join(timeout=JOIN_TIMEOUT)
     assert not worker.is_alive()
+
+
+# A two-variable constrained solve finishes in a few milliseconds, so the
+# objective holds the loop until the abort has been requested; otherwise the
+# solve could converge before the other thread reaches it.
+class HeldObjective(SlowObjective):
+    def __init__(self):
+        super().__init__()
+        self.released = threading.Event()
+
+    def __call__(self, x):
+        value = super().__call__(x)
+        if self.entered_loop.is_set():
+            self.released.wait(timeout=DEADLINE)
+        return value
+
+
+@pytest.mark.parametrize("method", CONSTRAINED_ADAPTER)
+def test_abort_from_another_thread_stops_a_constrained_solve(method):
+    objective = HeldObjective()
+    solver = FACTORIES[method](objective=objective, max_iterations=1_000_000)
+    objective.arm()
+
+    worker, outcome = run_in_worker(solver)
+    assert objective.entered_loop.wait(timeout=DEADLINE), "the solve never entered its loop"
+    solver.abort()
+    objective.released.set()
+
+    worker.join(timeout=JOIN_TIMEOUT)
+    assert not worker.is_alive(), f"the worker was still running after {JOIN_TIMEOUT} s"
+    assert outcome["result"].status == argmin.SolverStatus.aborted

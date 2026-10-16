@@ -14,6 +14,7 @@ void register_qp_solvers(nanobind::module_& m);
 void register_nlp_options(nanobind::module_& m);
 void register_lbfgsb(nanobind::module_& m);
 void register_kraft_slsqp(nanobind::module_& m);
+void register_filter_slsqp(nanobind::module_& m);
 void register_bobyqa(nanobind::module_& m);
 void register_cobyla(nanobind::module_& m);
 void register_cmaes(nanobind::module_& m);

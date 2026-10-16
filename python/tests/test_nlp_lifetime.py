@@ -13,6 +13,8 @@ import pytest
 
 import argmin
 
+from nlp_factories import CONSTRAINED_ADAPTER, FACTORIES, unit_disk, unit_disk_jacobian
+
 START = np.array([-1.2, 1.0])
 OPTIMUM = np.array([1.0, 1.0])
 
@@ -155,3 +157,23 @@ def test_a_solver_in_a_reference_cycle_is_collectable():
     gc.collect()
 
     assert tracker() is None
+
+
+@pytest.mark.parametrize("method", CONSTRAINED_ADAPTER)
+def test_constraint_closures_survive_losing_every_caller_reference(method):
+    def make_closures():
+        offset = np.zeros(2)
+        return (
+            lambda x: unit_disk(x + offset),
+            lambda x: unit_disk_jacobian(x + offset),
+        )
+
+    constraints, jacobian = make_closures()
+    solver = FACTORIES[method](constraints=constraints, constraint_jacobian=jacobian)
+    del constraints, jacobian
+    gc.collect()
+
+    reference = FACTORIES[method]().solve()
+    result = solver.solve()
+    assert result.status == reference.status
+    assert np.array_equal(result.x, reference.x)

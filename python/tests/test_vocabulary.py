@@ -107,6 +107,12 @@ POLICY_ENUMS = {
         "CmaesOptions",
         "restart",
     ),
+    "RestorationStrategy": (
+        "detail/filter_restoration.h",
+        "restoration_strategy",
+        "FilterSlsqpOptions",
+        "restoration",
+    ),
 }
 
 

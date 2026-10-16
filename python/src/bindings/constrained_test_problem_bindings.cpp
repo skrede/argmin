@@ -8,6 +8,7 @@
 #include "argmin/solver/options.h"
 #include "argmin/solver/cobyla_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
+#include "argmin/solver/filter_slsqp_policy.h"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/eigen/dense.h>
@@ -35,9 +36,11 @@ result_type solve_constrained_native(const native_constrained& problem, std::str
 
     if(method == "slsqp")
         return run_native<kraft_slsqp_policy<>>(problem, x0, opts);
+    if(method == "filter_slsqp")
+        return run_native<filter_slsqp_policy<>>(problem, x0, opts);
     if(method == "cobyla")
         return run_native<cobyla_policy<>>(problem, x0, opts);
-    reject_method(method, "'slsqp', 'cobyla'");
+    reject_method(method, "'slsqp', 'filter_slsqp', 'cobyla'");
 }
 
 void bind_constrained_problem(nb::module_& m)
