@@ -14,6 +14,7 @@ struct mma_defaults<double>
 {
     static constexpr double dual_gradient_threshold = 1e-9;
     static constexpr double dual_step_threshold = 1e-15;
+    static constexpr double dual_value_noise = 1e-12;
     static constexpr double min_asymptote_distance = 1e-12;
     static constexpr double violation_slack = 1e-12;
     static constexpr double subproblem_epsilon = 1e-10;
@@ -53,6 +54,7 @@ struct mma_defaults<float>
     // sigma_min_fraction: it keeps the move box x +/- sigma resolvable, so it takes the rule value.
     static constexpr float dual_gradient_threshold = 1e-4f;      // rule
     static constexpr float dual_step_threshold = 2e-7f;          // rule
+    static constexpr float dual_value_noise = 5e-6f;             // rule
     static constexpr float min_asymptote_distance = 5e-6f;       // rule
     static constexpr float violation_slack = 5e-6f;              // rule
     static constexpr float subproblem_epsilon = 4e-5f;           // rule

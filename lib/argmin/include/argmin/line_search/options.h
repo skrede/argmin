@@ -22,6 +22,10 @@ namespace argmin
 // max_alpha: initial step length (unit step for quasi-Newton methods).
 //
 // max_iterations: evaluation budget.
+//
+// relative_value_noise: half-width of the band phi(0) + relative_value_noise * |phi(0)| inside which a
+//     trial that fails the value tests is accepted on the curvature condition alone -- the approximate
+//     Wolfe conditions of Hager and Zhang (2005), SIAM J. Optim. 16(1):170-192. Zero disables the band.
 
 template <scalar Scalar = double>
 struct line_search_options
@@ -31,6 +35,7 @@ struct line_search_options
     Scalar rho{Scalar(0.5)};
     Scalar max_alpha{Scalar(1.0)};
     std::uint16_t max_iterations{40};
+    Scalar relative_value_noise{Scalar(0)};
 };
 
 }

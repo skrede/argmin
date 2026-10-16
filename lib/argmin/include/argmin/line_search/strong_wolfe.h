@@ -3,6 +3,7 @@
 
 #include "argmin/line_search/result.h"
 #include "argmin/line_search/options.h"
+#include "argmin/line_search/approximate_wolfe.h"
 
 #include <algorithm>
 #include <cmath>
@@ -71,6 +72,9 @@ template <typename Phi, typename DPhi, typename Scalar = double>
     result.value = phi0;
 
     auto budget_ok = [&]() { return result.evaluations < opts.max_iterations; };
+
+    auto approximately_wolfe = [&](Scalar alpha, Scalar phi_alpha) -> bool
+    { return detail::approximately_wolfe(dphi, alpha, phi_alpha, phi0, dphi0, opts, result); };
 
     // Any return path that has not achieved success reports value = phi0,
     // matching the Armijo backtracker's failure contract (see armijo.h).
@@ -141,6 +145,8 @@ template <typename Phi, typename DPhi, typename Scalar = double>
             if(!phi_j_finite ||
                phi_j > phi0 + opts.c1 * alpha_j * dphi0 || phi_j >= phi_lo)
             {
+                if(approximately_wolfe(alpha_j, phi_j))
+                    return result;
                 alpha_hi = alpha_j;
                 phi_hi = phi_j;
             }
@@ -210,6 +216,8 @@ template <typename Phi, typename DPhi, typename Scalar = double>
            phi_alpha > phi0 + opts.c1 * alpha * dphi0 ||
            (phi_alpha >= phi_prev && i > 1))
         {
+            if(approximately_wolfe(alpha, phi_alpha))
+                return result;
             return finalize(zoom(alpha_prev, alpha, phi_prev, dphi_prev, phi_alpha));
         }
 

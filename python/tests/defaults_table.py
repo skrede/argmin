@@ -36,7 +36,7 @@ TABLE = {
     "DenseActiveSetQpOptions": entry(
         Source("options/dense_active_set_qp_options.h", "dense_active_set_qp_options", 3)
     ),
-    "LineSearchOptions": entry(Source("line_search/options.h", "line_search_options", 5)),
+    "LineSearchOptions": entry(Source("line_search/options.h", "line_search_options", 6)),
     "QpOptions": entry(Source("options/qp_options.h", "qp_options", 2)),
     "TrustRegionOptions": entry(Source("options/trust_region_options.h", "trust_region_options", 6)),
     "CmaesDetectionOptions": entry(

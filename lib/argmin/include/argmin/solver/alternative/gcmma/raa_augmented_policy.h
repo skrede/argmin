@@ -400,6 +400,9 @@ struct raa_augmented_policy
         // buffers) rather than re-allocating it on every conservativity
         // iteration.
         DualPolicy<scalar_type, MC> dp;
+        // Near the dual optimum the decrease left falls below the roundoff of the dual value, so the line
+        // search certifies those steps from the exact dual gradient instead.
+        dp.options.line_search.relative_value_noise = mma_defaults<Scalar>::dual_value_noise;
         solver_options<default_convergence<scalar_type>> dopts;
         dopts.max_iterations = 100;
         dopts.set_gradient_threshold(mma_defaults<Scalar>::dual_gradient_threshold);

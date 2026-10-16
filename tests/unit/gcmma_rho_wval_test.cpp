@@ -40,26 +40,21 @@ inline int g_dual_init_count = 0;
 inline int g_dual_reset_clear_count = 0;
 
 template <scalar S, int M>
-struct counting_lbfgsb
+struct counting_lbfgsb : lbfgsb_policy<S, M>
 {
-    lbfgsb_policy<S, M> inner_;
-
     template <typename Problem, typename Convergence>
     auto init(const Problem& p, const Eigen::Vector<S, M>& x0,
               const solver_options<Convergence>& opts)
     {
         ++g_dual_init_count;
-        return inner_.init(p, x0, opts);
+        return lbfgsb_policy<S, M>::init(p, x0, opts);
     }
-
-    template <typename State>
-    auto step(State& s) { return inner_.step(s); }
 
     template <typename State>
     void reset_clear(State& s, const Eigen::Vector<S, M>& x0)
     {
         ++g_dual_reset_clear_count;
-        inner_.reset_clear(s, x0);
+        lbfgsb_policy<S, M>::reset_clear(s, x0);
     }
 };
 

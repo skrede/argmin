@@ -26,13 +26,15 @@ void bind_line_search_options(nb::module_& m)
     nb::class_<line_search_options<>>(m, "LineSearchOptions",
                                    "Read-only view of the line-search parameters a policy is "
                                    "configured with: the two Wolfe constants, the backtracking "
-                                   "factor, the maximum step and the evaluation cap.")
+                                   "factor, the maximum step, the evaluation cap and the relative "
+                                   "value-noise band.")
         .def(nb::init<>())
         .def_ro("c1", &line_search_options<>::c1)
         .def_ro("c2", &line_search_options<>::c2)
         .def_ro("rho", &line_search_options<>::rho)
         .def_ro("max_alpha", &line_search_options<>::max_alpha)
         .def_ro("max_iterations", &line_search_options<>::max_iterations)
+        .def_ro("relative_value_noise", &line_search_options<>::relative_value_noise)
         .def("__repr__", &describe_line_search);
 }
 

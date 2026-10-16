@@ -26,7 +26,8 @@ inline std::string describe_line_search(const line_search_options<>& opts)
 {
     return "LineSearchOptions(c1=" + format_number(opts.c1) + ", c2=" + format_number(opts.c2)
            + ", rho=" + format_number(opts.rho) + ", max_alpha=" + format_number(opts.max_alpha)
-           + ", max_iterations=" + format_number(opts.max_iterations) + ")";
+           + ", max_iterations=" + format_number(opts.max_iterations)
+           + ", relative_value_noise=" + format_number(opts.relative_value_noise) + ")";
 }
 
 inline std::string describe_driver_options(const driver_options& opts)
