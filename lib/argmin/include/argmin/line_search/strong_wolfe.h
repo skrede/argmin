@@ -4,36 +4,13 @@
 #include "argmin/line_search/result.h"
 #include "argmin/line_search/options.h"
 #include "argmin/line_search/approximate_wolfe.h"
+#include "argmin/line_search/strong_wolfe_zoom.h"
 
-#include <algorithm>
 #include <cmath>
-#include <limits>
-#include <optional>
+#include <algorithm>
 
 namespace argmin
 {
-
-namespace detail
-{
-
-template <scalar S>
-struct strong_wolfe_constants;
-
-template <>
-struct strong_wolfe_constants<double>
-{
-    static constexpr double interpolation_floor = 1e-12;
-};
-
-template <>
-struct strong_wolfe_constants<float>
-{
-    // A precision-class value keeps the double row's fraction of the available precision:
-    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
-    static constexpr float interpolation_floor = 5e-6f;  // rule
-};
-
-}
 
 // Strong Wolfe line search with bracketing and zoom phases.
 //
@@ -73,9 +50,6 @@ template <typename Phi, typename DPhi, typename Scalar = double>
 
     auto budget_ok = [&]() { return result.evaluations < opts.max_iterations; };
 
-    auto approximately_wolfe = [&](Scalar alpha, Scalar phi_alpha) -> bool
-    { return detail::approximately_wolfe(dphi, alpha, phi_alpha, phi0, dphi0, opts, result); };
-
     // Any return path that has not achieved success reports value = phi0,
     // matching the Armijo backtracker's failure contract (see armijo.h).
     auto finalize = [&](line_search_result<Scalar> r) -> line_search_result<Scalar>
@@ -86,111 +60,6 @@ template <typename Phi, typename DPhi, typename Scalar = double>
             r.success = false;
         }
         return r;
-    };
-
-    // Quadratic interpolation minimizer (N&W p. 59).
-    // Given (a_lo, phi_lo, dphi_lo) and (a_hi, phi_hi), returns the
-    // minimizer of the quadratic interpolant, or nullopt if degenerate.
-    auto quadratic_minimize = [](Scalar a_lo, Scalar phi_lo, Scalar dphi_lo,
-                                 Scalar a_hi, Scalar phi_hi) -> std::optional<Scalar>
-    {
-        Scalar d = a_hi - a_lo;
-        if(std::abs(d) < std::numeric_limits<Scalar>::epsilon())
-            return std::nullopt;
-
-        Scalar denom = Scalar(2) * (phi_hi - phi_lo - dphi_lo * d);
-        if(std::abs(denom) < detail::strong_wolfe_constants<Scalar>::interpolation_floor * std::max(Scalar(1), std::abs(phi_hi - phi_lo)))
-            return std::nullopt;
-
-        Scalar alpha_min = a_lo - dphi_lo * d * d / denom;
-
-        Scalar lo = std::min(a_lo, a_hi);
-        Scalar hi = std::max(a_lo, a_hi);
-        Scalar margin = Scalar(0.2) * (hi - lo);
-        if(!std::isfinite(alpha_min) ||
-           alpha_min <= lo + margin || alpha_min >= hi - margin)
-            return std::nullopt;
-
-        return alpha_min;
-    };
-
-    // --- zoom phase (N&W Algorithm 3.6) ---
-    // Interpolation-based refinement within a bracket [alpha_lo, alpha_hi],
-    // with bisection fallback when interpolation is degenerate.
-    // Reference: N&W pp. 59-62.
-    auto zoom = [&](Scalar alpha_lo, Scalar alpha_hi,
-                    Scalar phi_lo, Scalar dphi_lo_val,
-                    Scalar phi_hi) -> line_search_result<Scalar>
-    {
-        int zoom_iter = 0;
-        while(budget_ok())
-        {
-            auto interp = (zoom_iter > 0)
-                ? quadratic_minimize(alpha_lo, phi_lo, dphi_lo_val,
-                                     alpha_hi, phi_hi)
-                : std::optional<Scalar>{};
-            Scalar alpha_j = interp ? *interp
-                                    : (alpha_lo + alpha_hi) / Scalar(2);
-            ++zoom_iter;
-
-            Scalar phi_j = phi(alpha_j);
-            ++result.evaluations;
-
-            bool phi_j_finite = std::isfinite(phi_j);
-            if(!phi_j_finite)
-                ++result.diagnostics.nan_eval_count;
-
-            // NaN/Inf gate: a non-finite trial is treated as an upper
-            // bracket (short-circuits before the ordered comparisons).
-            if(!phi_j_finite ||
-               phi_j > phi0 + opts.c1 * alpha_j * dphi0 || phi_j >= phi_lo)
-            {
-                if(approximately_wolfe(alpha_j, phi_j))
-                    return result;
-                alpha_hi = alpha_j;
-                phi_hi = phi_j;
-            }
-            else
-            {
-                Scalar dphi_j = dphi(alpha_j);
-                ++result.evaluations;
-
-                bool dphi_j_finite = std::isfinite(dphi_j);
-                if(!dphi_j_finite)
-                    ++result.diagnostics.nan_eval_count;
-
-                if(dphi_j_finite && std::abs(dphi_j) <= opts.c2 * std::abs(dphi0))
-                {
-                    result.alpha = alpha_j;
-                    result.value = phi_j;
-                    result.success = true;
-                    return result;
-                }
-
-                if(!dphi_j_finite || dphi_j * (alpha_hi - alpha_lo) >= Scalar(0))
-                {
-                    alpha_hi = alpha_lo;
-                    phi_hi = phi_lo;
-                }
-
-                alpha_lo = alpha_j;
-                phi_lo = phi_j;
-                dphi_lo_val = dphi_j;
-            }
-
-            // Bracket too narrow -- return best found
-            if(std::abs(alpha_hi - alpha_lo) <
-               std::numeric_limits<Scalar>::epsilon() * std::max(Scalar(1), alpha_hi))
-            {
-                result.alpha = alpha_lo;
-                result.value = phi_lo;
-                return result;
-            }
-        }
-
-        result.alpha = alpha_lo;
-        result.value = phi_lo;
-        return result;
     };
 
     // --- bracketing phase (N&W Algorithm 3.5) ---
@@ -216,9 +85,11 @@ template <typename Phi, typename DPhi, typename Scalar = double>
            phi_alpha > phi0 + opts.c1 * alpha * dphi0 ||
            (phi_alpha >= phi_prev && i > 1))
         {
-            if(approximately_wolfe(alpha, phi_alpha))
+            if(detail::approximately_wolfe(dphi, alpha, phi_alpha, phi0, dphi0, opts, result))
                 return result;
-            return finalize(zoom(alpha_prev, alpha, phi_prev, dphi_prev, phi_alpha));
+            return finalize(
+                detail::strong_wolfe_zoom(phi, dphi, detail::wolfe_bracket<Scalar>{alpha_prev, alpha, phi_prev, dphi_prev, phi_alpha},
+                                          phi0, dphi0, opts, result));
         }
 
         Scalar dphi_alpha = dphi(alpha);
@@ -241,7 +112,9 @@ template <typename Phi, typename DPhi, typename Scalar = double>
         // found in reversed order.
         if(!dphi_alpha_finite || dphi_alpha >= Scalar(0))
         {
-            return finalize(zoom(alpha, alpha_prev, phi_alpha, dphi_alpha, phi_prev));
+            return finalize(
+                detail::strong_wolfe_zoom(phi, dphi, detail::wolfe_bracket<Scalar>{alpha, alpha_prev, phi_alpha, dphi_alpha, phi_prev},
+                                          phi0, dphi0, opts, result));
         }
 
         // Expand step: geometric growth from the unit initial trial
