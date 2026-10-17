@@ -43,7 +43,7 @@ COBYLA rewrites box bounds into explicit constraints, and its bound repair can e
 
 `cmaes` and the restarting wrapper around it converge to local minima rather than the global optimum on `ackley_2`, `ackley_10`, and `schwefel_2`. The local-minimum escape is weaker than the Hansen-Auger active-CMA reference. In the publication cohort `cmaes` also fails on `rastrigin_10` and `griewank_2`, and its verdict on `rastrigin_2` changes with the seed; the restarting wrapper passes only `rastrigin_2`.
 
-**Workaround:** for those specific landscapes, run with multiple seeds and take the best, or use `restarting_policy` wrapping `cmaes`, which passes `rastrigin_2` but does not close the Ackley / Schwefel gap. An active-CMA variant is in the v0.3.x scope.
+**Workaround:** for those specific landscapes, run with multiple seeds and take the best, or use `restarting_policy` wrapping `cmaes`, which passes `rastrigin_2` but does not close the Ackley / Schwefel gap. The active covariance update that the reference uses is not implemented yet.
 
 ### MMA / GCMMA conjoined-gate FAILs
 
