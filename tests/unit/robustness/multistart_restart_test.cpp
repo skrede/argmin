@@ -191,7 +191,7 @@ TEST_CASE("halton_point stays in the unit cube beyond the table dimension",
     constexpr int n = 70;
     for(std::uint32_t i = 0; i < 8; ++i)
     {
-        const Eigen::VectorXd p = detail::halton_point(i, n);
+        const Eigen::VectorXd p = detail::halton_point<double>(i, n);
         REQUIRE(p.size() == n);
         for(int d = 0; d < n; ++d)
         {

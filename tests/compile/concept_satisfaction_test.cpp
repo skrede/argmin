@@ -7,6 +7,7 @@
 // the build fails with a clear concept-violation error.
 
 #include "argmin/formulation/concepts.h"
+#include "argmin/detail/runner_concept_probe.h"
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/time_budget_solver.h"
 #include "argmin/solver/step_and_time_budget_solver.h"
@@ -86,6 +87,47 @@ static_assert(argmin::differentiable<argmin::rastrigin<float>, float>);
 
 static_assert(argmin::objective<argmin::ackley<float>, float>);
 static_assert(argmin::differentiable<argmin::ackley<float>, float>);
+
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::detail::runner_concept_probe_policy<float>>, float>);
+static_assert(argmin::steppable<argmin::stepper<argmin::detail::runner_concept_probe_policy<float>>, float>);
+
+namespace
+{
+
+struct float_problem
+{
+    static constexpr int problem_dimension = 2;
+
+    float value(const Eigen::Vector<float, 2>&) const { return 0.0f; }
+    int dimension() const { return 2; }
+    Eigen::Vector<float, 2> lower_bounds() const { return Eigen::Vector<float, 2>::Zero(); }
+    Eigen::Vector<float, 2> upper_bounds() const { return Eigen::Vector<float, 2>::Ones(); }
+};
+
+struct double_valued_problem
+{
+    static constexpr int problem_dimension = 2;
+
+    double value(const Eigen::Vector<float, 2>&) const { return 0.0; }
+    int dimension() const { return 2; }
+};
+
+struct double_bounded_problem
+{
+    static constexpr int problem_dimension = 2;
+
+    float value(const Eigen::Vector<float, 2>&) const { return 0.0f; }
+    int dimension() const { return 2; }
+    Eigen::Vector<double, 2> lower_bounds() const { return Eigen::Vector<double, 2>::Zero(); }
+    Eigen::Vector<double, 2> upper_bounds() const { return Eigen::Vector<double, 2>::Ones(); }
+};
+
+}
+
+static_assert(argmin::objective<float_problem, float>);
+static_assert(argmin::bound_constrained<float_problem, float>);
+static_assert(!argmin::objective<double_valued_problem, float>);
+static_assert(!argmin::bound_constrained<double_bounded_problem, float>);
 
 // ---------------------------------------------------------------------------
 // Test functions should NOT satisfy higher-order concepts
@@ -388,7 +430,7 @@ static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::ccsa_quadrat
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::cmaes_policy<>>>);
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::lm_policy<>>>);
 
-static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::cobyla_policy>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::cobyla_policy<>>>);
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::isres_policy<>>>);
 
 static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::projected_gn_policy<>>>);
@@ -451,6 +493,55 @@ static_assert(argmin::steppable<argmin::stepper<argmin::cmaes_policy<>>>);
 static_assert(!argmin::nlp_solver<argmin::stepper<argmin::nw_sqp_policy<>>>);
 static_assert(!argmin::nlp_solver<argmin::stepper<argmin::bobyqa_policy<>>>);
 static_assert(!argmin::nlp_solver<argmin::stepper<argmin::cmaes_policy<>>>);
+
+// ---------------------------------------------------------------------------
+// Compile-time constraint-bound channel: backward-compat instantiation and
+// derive-vs-default-M.
+//
+// The problem-surface constraint_count threads to the policy's
+// state_type<P>::M as a compile-time upper bound with no new policy template
+// parameter. These pin that (a) the unbound and dimension-bound nw_sqp_policy
+// forms still instantiate and satisfy the solver concepts verbatim, (b) a
+// capped problem derives M from its declared cap even when the cap exceeds the
+// runtime constraint count, and (c) omitting the member reproduces the
+// dynamic-M default.
+// ---------------------------------------------------------------------------
+
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::steppable<argmin::step_budget_solver<argmin::nw_sqp_policy<>>>);
+static_assert(argmin::nlp_solver<argmin::step_budget_solver<argmin::nw_sqp_policy<double, 12>>>);
+static_assert(argmin::steppable<argmin::step_budget_solver<argmin::nw_sqp_policy<double, 12>>>);
+
+namespace
+{
+
+// A capped fixed-N problem whose declared cap (12) strictly exceeds its runtime
+// constraint count (2 equality + 4 inequality = 6).
+struct capped_mock
+{
+    static constexpr int problem_dimension = 12;
+    static constexpr int constraint_count = 12;
+    int num_equality() const { return 2; }
+    int num_inequality() const { return 4; }
+};
+
+// The same shape without the optional cap: the derivation falls back to dynamic.
+struct uncapped_mock
+{
+    static constexpr int problem_dimension = 12;
+    int num_equality() const { return 2; }
+    int num_inequality() const { return 4; }
+};
+
+}
+
+static_assert(argmin::has_constraint_count<capped_mock>);
+static_assert(argmin::constraint_count_v<capped_mock> == 12);
+static_assert(argmin::nw_sqp_policy<double, 12>::state_type<capped_mock>::M == 12);
+
+static_assert(!argmin::has_constraint_count<uncapped_mock>);
+static_assert(argmin::nw_sqp_policy<double, 12>::state_type<uncapped_mock>::M
+              == argmin::dynamic_dimension);
 
 // problem_dimension concept verification
 static_assert(argmin::has_problem_dimension<argmin::himmelblau<>>);

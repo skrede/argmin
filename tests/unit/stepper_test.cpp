@@ -93,8 +93,8 @@ static_assert(nlp_solver<step_budget_solver<test::mock_policy>>,
               "the driver owns a convergence loop -- it satisfies nlp_solver");
 
 // Also holds for a real gradient policy instantiation.
-static_assert(steppable<stepper<lbfgsb_policy<2>, 2, quadratic_with_gradient>>);
-static_assert(!nlp_solver<stepper<lbfgsb_policy<2>, 2, quadratic_with_gradient>>);
+static_assert(steppable<stepper<lbfgsb_policy<double, 2>, 2, quadratic_with_gradient>>);
+static_assert(!nlp_solver<stepper<lbfgsb_policy<double, 2>, 2, quadratic_with_gradient>>);
 
 TEST_CASE("stepper satisfies steppable but not nlp_solver", "[stepper][concept]")
 {
@@ -117,7 +117,7 @@ TEST_CASE("stepper reset mid-run restarts identically to a fresh construction",
     Eigen::VectorXd x0{{3.0, 4.0}};
     solver_options<> opts;
     opts.max_iterations = 1000;
-    std::get<gradient_tolerance_criterion>(opts.convergence.criteria).threshold = 1e-4;
+    std::get<gradient_tolerance_criterion<>>(opts.convergence.criteria).threshold = 1e-4;
 
     // A: step a few times, then reset back to x0 and drive to termination.
     stepper<test::mock_policy> a{prob, x0, opts};

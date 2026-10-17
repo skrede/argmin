@@ -1,0 +1,397 @@
+{
+  "schema": "determinism-tiers",
+  "tables": [
+    {
+      "id": "float-status",
+      "columns": [
+        "guaranteed?"
+      ],
+      "rows": [
+        {
+          "module": "QP solvers (dense_active_set_qp, dense_admm_qp, sparse_admm_qp) in float track double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "on the seeded convex family, k = 1",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "dense active-set QP in float tracks the double solution of the seeded convex family at its own defaults"
+                },
+                {
+                  "kind": "ctest_test",
+                  "name": "dense splitting QP in float tracks the double solution of the seeded convex family at its own defaults"
+                },
+                {
+                  "kind": "ctest_test",
+                  "name": "sparse splitting QP in float tracks the double solution of the seeded convex family at its own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "L-BFGS-B (lbfgsb, byrd_lbfgsb) in float tracks double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "unconstrained and active-bound Rosenbrock, k = 10",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "L-BFGS-B in float tracks double on an unconstrained and an active-bound Rosenbrock at its own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "line-search SQP (kraft_slsqp, nw_sqp, filter_slsqp, filter_nw_sqp) in float tracks double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "constrained Hock-Schittkowski fixtures, k = 10",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "kraft_slsqp in float tracks double on constrained Hock-Schittkowski fixtures at its own defaults"
+                },
+                {
+                  "kind": "ctest_test",
+                  "name": "nw_sqp in float tracks double on constrained Hock-Schittkowski fixtures at its own defaults"
+                },
+                {
+                  "kind": "ctest_test",
+                  "name": "filter_slsqp in float tracks double on constrained Hock-Schittkowski fixtures at its own defaults"
+                },
+                {
+                  "kind": "ctest_test",
+                  "name": "filter_nw_sqp in float tracks double on constrained Hock-Schittkowski fixtures at its own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "trust-region SQP (tr_sqp, filter_trsqp, both modes) in float tracks double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "on the ten gated mode-and-fixture cells, k = 10; six further cells are experimental, see below",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "trust-region SQP policies in float track double on constrained Hock-Schittkowski fixtures at their own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "least squares (lm, projected_gn, projected_gradient_gn) in float tracks double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "zero-residual and active-bound fixtures, k = 10; `projected_gradient_gn` on the active-bound fixture is experimental, see below",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "least-squares policies in float track double on zero-residual and active-bound fixtures at their own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "moving asymptotes (mma, ccsa_quadratic, the three GCMMA variants) in float track double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "inequality-constrained fixtures, k = 30; GCMMA move-limit shrinking on hs076 is experimental, see below",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "moving-asymptote policies in float track double on inequality-constrained fixtures at their own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "derivative-free (bobyqa, cobyla) in float tracks double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "bounded and constrained fixtures, k = 30",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "derivative-free policies in float track double on bounded and constrained fixtures at their own defaults"
+                },
+                {
+                  "kind": "ctest_test",
+                  "name": "BOBYQA in float tracks double on bounded fixtures at its own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "CMA-ES (all three variants) in float tracks double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "unconstrained and active-bound Rosenbrock, k = 100",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "CMA-ES in float tracks double on Rosenbrock at its own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "ISRES (all three variants) in float tracks double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "on hs023 and hs024, k = 100",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "ISRES in float tracks double on an inequality-constrained fixture at its own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "wrappers (augmented_lagrangian, multistart, restarting) over a float inner policy track double",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "k = 10",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "wrappers over a float inner policy track double at their own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

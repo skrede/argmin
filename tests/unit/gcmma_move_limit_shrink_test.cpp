@@ -42,7 +42,7 @@ TEST_CASE("gcmma move-limit-shrink converges on HS024",
 
     step_budget_solver solver{
         alternative::gcmma::move_limit_shrink_policy<
-            hs024<>::problem_dimension>{},
+            double, hs024<>::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve(opts);
 
@@ -72,7 +72,7 @@ TEST_CASE("gcmma move-limit-shrink makes progress on HS035",
 
     step_budget_solver solver{
         alternative::gcmma::move_limit_shrink_policy<
-            hs035<>::problem_dimension>{},
+            double, hs035<>::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve(opts);
 
@@ -99,7 +99,7 @@ TEST_CASE("gcmma move-limit-shrink makes progress on HS076",
 
     step_budget_solver solver{
         alternative::gcmma::move_limit_shrink_policy<
-            hs076<>::problem_dimension>{},
+            double, hs076<>::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve(opts);
 

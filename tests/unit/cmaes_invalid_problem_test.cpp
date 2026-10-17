@@ -57,11 +57,11 @@ constexpr std::uint32_t OverCapLambda = 16u;  // > TestMaxPop
 constexpr std::uint32_t UnderCapLambda = 6u;  // < TestMaxPop
 
 using pwq_capped =
-    alternative::cmaes::pwq_reparameterization_policy<dynamic_dimension, TestMaxPop>;
+    alternative::cmaes::pwq_reparameterization_policy<double, dynamic_dimension, TestMaxPop>;
 using l2_capped =
-    alternative::cmaes::repair_l2_penalty_policy<dynamic_dimension, TestMaxPop>;
+    alternative::cmaes::repair_l2_penalty_policy<double, dynamic_dimension, TestMaxPop>;
 using no_repair_capped =
-    alternative::cmaes::no_repair_adaptive_penalty_policy<dynamic_dimension, TestMaxPop>;
+    alternative::cmaes::no_repair_adaptive_penalty_policy<double, dynamic_dimension, TestMaxPop>;
 
 bounded_sphere make_problem()
 {

@@ -407,6 +407,95 @@ void initial_working_set(
     }
 }
 
+// Rank screen on an unpivoted QR factor: the standard rank decision |R_kk| <= tol |R_11| with tol
+// proportional to dimension times machine epsilon (LAPACK xGEQP3 convention; Golub and Van Loan
+// section 5.4), the same epsilon-times-dimension form initial_working_set prescribes above.
+template <typename Scalar, typename Derived>
+bool equality_projection_is_reliable(const Eigen::MatrixBase<Derived>& r_diag,
+                                     std::int32_t m_eq,
+                                     Scalar eps)
+{
+    const Scalar smallest = r_diag.head(m_eq).cwiseAbs().minCoeff();
+    return smallest > eps * Scalar(m_eq) * r_diag.head(m_eq).cwiseAbs().maxCoeff();
+}
+
+// Componentwise backward-error scale max_i sum_j |a_ij||x_j| (Higham, Accuracy and Stability of
+// Numerical Algorithms, 2nd ed., section 7.1): the rounding a residual inherits from the iterate.
+template <typename Scalar, typename DerivedA, typename DerivedX>
+Scalar equality_row_magnitude(const Eigen::MatrixBase<DerivedA>& A,
+                              const Eigen::MatrixBase<DerivedX>& x,
+                              std::int32_t m_eq)
+{
+    Scalar magnitude{0};
+    for(std::int32_t i = 0; i < m_eq; ++i)
+        magnitude = std::max(magnitude, A.row(i).cwiseAbs().dot(x.cwiseAbs()));
+    return magnitude;
+}
+
+// The magnitude is taken at the iterate before projection, whose cancellation the landed
+// residual carries.
+template <typename Scalar, typename DerivedA, typename DerivedB, typename DerivedX, typename DerivedR>
+bool equality_residual_within(const Eigen::MatrixBase<DerivedA>& A,
+                              const Eigen::MatrixBase<DerivedB>& b,
+                              const Eigen::MatrixBase<DerivedX>& x,
+                              Eigen::MatrixBase<DerivedR>& residual,
+                              std::int32_t m_eq,
+                              Scalar tol,
+                              Scalar magnitude)
+{
+    residual.head(m_eq).noalias() = b.head(m_eq) - A.topRows(m_eq) * x;
+    const Scalar scale = std::max(b.head(m_eq).template lpNorm<Eigen::Infinity>(), magnitude);
+    return residual.head(m_eq).template lpNorm<Eigen::Infinity>() <= tol * (Scalar(1) + scale);
+}
+
+template <typename Scalar, typename DerivedA, typename DerivedB, typename DerivedX>
+bool terminal_primal_within(const Eigen::MatrixBase<DerivedA>& A,
+                            const Eigen::MatrixBase<DerivedB>& b,
+                            const Eigen::MatrixBase<DerivedX>& x,
+                            std::int32_t m_eq,
+                            std::int32_t m_total,
+                            Scalar tol)
+{
+    // Each row is held to its own componentwise backward error (Oettli and Prager 1964), so a far
+    // bound on one row cannot excuse the violation of another.
+    for(std::int32_t i = 0; i < m_total; ++i)
+    {
+        // A -inf right-hand side is an absent bound: always satisfied.
+        if(i >= m_eq && b[i] == -std::numeric_limits<Scalar>::infinity())
+            continue;
+        const Scalar r = A.row(i).dot(x) - b[i];
+        if(!std::isfinite(r))
+            return false;
+        const Scalar violation = i < m_eq ? std::abs(r) : std::max(Scalar(0), -r);
+        if(violation > tol * (Scalar(1) + A.row(i).cwiseAbs().dot(x.cwiseAbs()) + std::abs(b[i])))
+            return false;
+    }
+    return true;
+}
+
+// Complementarity needs no numeric check: the multiplier assembly zero-fills every row outside the
+// working set, so it reduces to primal feasibility on the working rows, which is checked here.
+template <typename Scalar, typename DerivedA, typename DerivedB, typename DerivedX, typename DerivedG,
+          typename DerivedL, typename DerivedS>
+bool terminal_kkt_holds(const Eigen::MatrixBase<DerivedA>& A, const Eigen::MatrixBase<DerivedB>& b,
+                        const Eigen::MatrixBase<DerivedX>& x, const Eigen::MatrixBase<DerivedG>& g,
+                        const Eigen::MatrixBase<DerivedL>& lambda, std::int32_t m_eq,
+                        std::int32_t m_total, Scalar tol, Eigen::MatrixBase<DerivedS>& scratch)
+{
+    const auto lam = lambda.head(m_total);
+    if(!(x.allFinite() && g.allFinite() && lam.allFinite()) || !terminal_primal_within(A, b, x, m_eq, m_total, tol))
+        return false;
+    const Scalar dual_floor = -tol * (Scalar(1) + lam.template lpNorm<Eigen::Infinity>());
+    if(m_total > m_eq && lam.tail(m_total - m_eq).minCoeff() < dual_floor)
+        return false;
+    auto residual = scratch.head(x.size());
+    residual.noalias() = A.topRows(m_total).transpose() * lam;
+    const Scalar atl_inf = residual.template lpNorm<Eigen::Infinity>();
+    residual = g - residual;
+    return residual.template lpNorm<Eigen::Infinity>()
+           <= tol * (Scalar(1) + std::max(g.template lpNorm<Eigen::Infinity>(), atl_inf));
+}
+
 // Stateful dense active-set QP solver with pre-allocated workspace.
 //
 // Pre-allocates factorization objects and workspace matrices at construction,
@@ -574,7 +663,7 @@ public:
         const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
         const Eigen::Vector<Scalar, Mineq>& b_ineq,
         const Eigen::Vector<Scalar, N>& x0,
-        const argmin::qp_options& opts = {})
+        const argmin::qp_options<Scalar>& opts = {})
     {
         const int n = static_cast<int>(G.rows());
         const int m_eq = static_cast<int>(A_eq.rows());
@@ -598,7 +687,7 @@ public:
         const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
         const Eigen::Vector<Scalar, Mineq>& b_ineq,
         const Eigen::Vector<Scalar, N>& x0,
-        const argmin::qp_options& opts,
+        const argmin::qp_options<Scalar>& opts,
         result_type& out)
     {
         const int n = static_cast<int>(G.rows());
@@ -625,7 +714,7 @@ public:
         const Eigen::Vector<Scalar, N>& lower,
         const Eigen::Vector<Scalar, N>& upper,
         const Eigen::Vector<Scalar, N>& x0,
-        const argmin::qp_options& opts = {})
+        const argmin::qp_options<Scalar>& opts = {})
     {
         const int n = static_cast<int>(G.rows());
         const int m_eq = static_cast<int>(A_eq.rows());
@@ -648,7 +737,7 @@ public:
         const Eigen::Vector<Scalar, N>& lower,
         const Eigen::Vector<Scalar, N>& upper,
         const Eigen::Vector<Scalar, N>& x0,
-        const argmin::qp_options& opts,
+        const argmin::qp_options<Scalar>& opts,
         result_type& out)
     {
         const int n = static_cast<int>(G.rows());
@@ -742,11 +831,16 @@ private:
         const Eigen::Ref<const n_square_matrix>& G,
         const Eigen::Ref<const n_vector>& d,
         const Eigen::Ref<const n_vector>& x0,
-        const argmin::qp_options& opts)
+        const argmin::qp_options<Scalar>& opts)
     {
         const int m_total = m_eq + m_ineq;
-        const int max_iter = static_cast<int>(opts.max_iterations);
+        const int max_iter = static_cast<int>(std::min(opts.max_iterations, static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())));
         const auto tol = static_cast<Scalar>(opts.tolerance);
+        // The terminal verification floor is sqrt(epsilon): a backward-stable null-space step on a
+        // working set conditioned beyond about 1e4 cannot meet the 1e-12 accurate-mode tolerance,
+        // while the floor admits conditioning to about 1e8 and matches the order of the public
+        // adapter's entry feasibility tolerance, so this check is never stricter than that contract.
+        const Scalar verify_tol = std::max(tol, std::sqrt(Eigen::NumTraits<Scalar>::epsilon()));
 
         compute_initial_working_set(x0, m_total, n, m_eq, tol);
 
@@ -775,15 +869,32 @@ private:
                 b_full_.head(m_eq) - A_full_.topRows(m_eq).leftCols(n) * x;
             if(residual_.head(m_eq).cwiseAbs().maxCoeff() > tol)
             {
+                const Scalar magnitude = equality_row_magnitude<Scalar>(A_full_.leftCols(n), x, m_eq);
                 qr_lambda_.compute(A_full_.topRows(m_eq).leftCols(n).transpose());
-                rhs_.head(n).setZero();
-                rhs_.head(m_eq) = qr_lambda_.matrixQR()
-                    .topLeftCorner(m_eq, m_eq)
-                    .template triangularView<Eigen::Upper>()
-                    .transpose()
-                    .solve(residual_.head(m_eq));
-                rhs_.head(n).applyOnTheLeft(qr_lambda_.householderQ());
-                x += rhs_.head(n);
+                bool reliable = equality_projection_is_reliable(
+                    qr_lambda_.matrixQR().diagonal(), m_eq, Eigen::NumTraits<Scalar>::epsilon());
+                if(reliable)
+                {
+                    rhs_.head(n).setZero();
+                    rhs_.head(m_eq) = qr_lambda_.matrixQR()
+                        .topLeftCorner(m_eq, m_eq)
+                        .template triangularView<Eigen::Upper>()
+                        .transpose()
+                        .solve(residual_.head(m_eq));
+                    rhs_.head(n).applyOnTheLeft(qr_lambda_.householderQ());
+                    x += rhs_.head(n);
+                    // An unpivoted diagonal can miss a near-singular factor (Kahan's
+                    // matrix), so the landed residual is the second escalation trigger.
+                    reliable = equality_residual_within(A_full_.leftCols(n), b_full_, x, residual_, m_eq,
+                                                        tol, magnitude);
+                }
+                if(!reliable && !project_equalities_pivoted(n, m_eq, tol, magnitude))
+                {
+                    lambda_full_.setZero(m_total);
+                    status_ = qp_status::infeasible;
+                    iters_ = 0;
+                    return;
+                }
             }
         }
 
@@ -822,31 +933,14 @@ private:
                 return;
             }
 
-            if(p.norm() < tol)
+            // A step under tol (1 + ||x||) is rounding at the iterate's magnitude: it is still taken, so a
+            // near-optimal start lands on the subproblem minimizer, and the working set is then treated as
+            // stationary. The working-set multipliers already satisfy A_W^T lambda = g + G p there.
+            const Scalar p_norm = p.norm();
+            bool stationary = p_norm < tol;
+            if(!stationary)
             {
-                int drop = most_negative_multiplier(lambda_sub_, W_, m_eq, tol, bland);
-                if(drop == -1)
-                {
-                    build_full_lambda(lambda_sub_, W_, m_total, lambda_full_);
-                    status_ = qp_status::optimal;
-                    iters_ = iter;
-                    return;
-                }
-                // Remove constraint: Givens QR downdate
-                if(qr_valid_ && wsize > 1)
-                {
-                    remove_constraint_qr<Scalar>(
-                        Q_explicit_, R_, drop, wsize);
-                    ++givens_update_count_;
-                }
-                else
-                {
-                    qr_valid_ = false;
-                }
-                W_.erase(W_.begin() + drop);
-            }
-            else
-            {
+                const bool null_step = p_norm < tol * (Scalar(1) + x.norm());
                 auto [alpha, blocking_idx] = blocking_step_length_member(
                     x, p_sub_.head(n), m_total, n, m_eq);
                 x += alpha * p;
@@ -869,6 +963,37 @@ private:
                         qr_valid_ = false;
                     }
                 }
+                else if(null_step)
+                {
+                    g_k_.head(n).noalias() = G * x + d;
+                    stationary = true;
+                }
+            }
+
+            if(stationary)
+            {
+                int drop = most_negative_multiplier(lambda_sub_, W_, m_eq, tol, bland);
+                if(drop == -1)
+                {
+                    build_full_lambda(lambda_sub_, W_, m_total, lambda_full_);
+                    const bool verified = terminal_kkt_holds(A_full_.leftCols(n), b_full_, x, g_k_.head(n),
+                                                             lambda_full_, m_eq, m_total, verify_tol, rhs_);
+                    status_ = verified ? qp_status::optimal : qp_status::max_iterations;
+                    iters_ = iter;
+                    return;
+                }
+                // Remove constraint: Givens QR downdate
+                if(qr_valid_ && wsize > 1)
+                {
+                    remove_constraint_qr<Scalar>(
+                        Q_explicit_, R_, drop, wsize);
+                    ++givens_update_count_;
+                }
+                else
+                {
+                    qr_valid_ = false;
+                }
+                W_.erase(W_.begin() + drop);
             }
         }
 
@@ -961,6 +1086,30 @@ private:
                 W_.push_back(idx);
             }
         }
+    }
+
+    // Rank-truncated minimum-norm equality correction from the column-pivoted factor of A_eq^T
+    // padded to n x n (zero columns add no rank), so a dependent row is dropped instead of divided
+    // by. The padded diagonal size is n, so the unpadded epsilon * m_eq threshold is prescribed;
+    // qr_rr_ is shared with the multiplier solves, which rely on the default, so it is restored.
+    // Expects residual_.head(m_eq) to hold b_eq - A_eq x and returns the consistency test.
+    bool project_equalities_pivoted(int n, int m_eq, Scalar tol, Scalar magnitude)
+    {
+        auto x = x_.head(n);
+        iws_pad_.setZero(n, n);
+        iws_pad_.leftCols(m_eq) = A_full_.topRows(m_eq).leftCols(n).transpose();
+        qr_rr_.setThreshold(Eigen::NumTraits<Scalar>::epsilon() * Scalar(m_eq));
+        qr_rr_.compute(iws_pad_);
+        const int r = static_cast<int>(qr_rr_.rank());
+        residual_.segment(m_eq, n - m_eq).setZero();
+        rhs_padded_.head(n).noalias() = qr_rr_.colsPermutation().transpose() * residual_.head(n);
+        qr_rr_.matrixQR().topLeftCorner(r, r).template triangularView<Eigen::Upper>().transpose()
+            .solveInPlace(rhs_padded_.head(r));
+        rhs_padded_.segment(r, n - r).setZero();
+        rhs_padded_.head(n).applyOnTheLeft(qr_rr_.householderQ());
+        qr_rr_.setThreshold(Eigen::Default);
+        x += rhs_padded_.head(n);
+        return equality_residual_within(A_full_.leftCols(n), b_full_, x, residual_, m_eq, tol, magnitude);
     }
 
     // Blocking step length (N&W eq. 16.29) over the member constraint block.
@@ -1146,7 +1295,8 @@ private:
 //              A_ineq x >= b_ineq        (inequality, lower-bound form)
 //
 // Convention: inequality constraints are A_ineq * x >= b_ineq.
-// The initial point x0 must be feasible.
+// The initial point x0 must satisfy the inequality rows; an equality-infeasible
+// x0 is projected onto the equality manifold before the first iteration.
 //
 // Reference: N&W Algorithm 16.1, pp. 460-463.
 template <typename Scalar = double, int N = argmin::dynamic_dimension,
@@ -1159,14 +1309,16 @@ qp_result<Scalar, N> solve_qp(
     const Eigen::Matrix<Scalar, Mineq, N>& A_ineq,
     const Eigen::Vector<Scalar, Mineq>& b_ineq,
     const Eigen::Vector<Scalar, N>& x0,
-    const argmin::qp_options& opts = {})
+    const argmin::qp_options<Scalar>& opts = {})
 {
     const int n = static_cast<int>(G.rows());
     const int m_eq = static_cast<int>(A_eq.rows());
     const int m_ineq = static_cast<int>(A_ineq.rows());
     const int m_total = m_eq + m_ineq;
-    const int max_iter = static_cast<int>(opts.max_iterations);
+    const int max_iter = static_cast<int>(std::min(opts.max_iterations, static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())));
     const auto tol = static_cast<Scalar>(opts.tolerance);
+    // The same backward-stability floor as the stateful solver's terminal verification.
+    const Scalar verify_tol = std::max(tol, std::sqrt(Eigen::NumTraits<Scalar>::epsilon()));
 
     // Assemble full constraint matrix: [A_eq; A_ineq] x >= [b_eq; b_ineq]
     // (Equality constraints treated as a_i^T x = b_i, always active.)
@@ -1183,8 +1335,39 @@ qp_result<Scalar, N> solve_qp(
         b_full.tail(m_ineq) = b_ineq;
     }
 
-    auto W = initial_working_set<Scalar, N>(x0, A_full, b_full, m_eq, tol);
     Eigen::Vector<Scalar, N> x = x0;
+
+    // Phase-1 feasibility invariant (N&W 2e Section 16.1) restored by the minimum-norm
+    // under-determined correction (Lemma 16.5), rank-truncated through a column-pivoted QR of A_eq^T
+    // so a dependent row is dropped and an inconsistent one is demonstrated rather than divided by.
+    if(m_eq > 0)
+    {
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1> residual = b_eq - A_eq * x;
+        if(residual.cwiseAbs().maxCoeff() > tol)
+        {
+            const Scalar magnitude = equality_row_magnitude<Scalar>(A_eq, x, m_eq);
+            Eigen::ColPivHouseholderQR<Eigen::Matrix<Scalar, N, Eigen::Dynamic>> qr(n, m_eq);
+            qr.setThreshold(Eigen::NumTraits<Scalar>::epsilon() * Scalar(m_eq));
+            qr.compute(A_eq.transpose());
+            const int r = static_cast<int>(qr.rank());
+            Eigen::Vector<Scalar, N> dx = Eigen::Vector<Scalar, N>::Zero(n);
+            dx.head(r) = (qr.colsPermutation().transpose() * residual).head(r);
+            qr.matrixQR().topLeftCorner(r, r).template triangularView<Eigen::Upper>().transpose()
+                .solveInPlace(dx.head(r));
+            x += qr.householderQ() * dx;
+            if(!equality_residual_within(A_full, b_full, x, residual, m_eq, tol, magnitude))
+            {
+                qp_result<Scalar, N> res;
+                res.x = x;
+                res.lambda = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>::Zero(m_total);
+                res.status = qp_status::infeasible;
+                res.iterations = 0;
+                return res;
+            }
+        }
+    }
+
+    auto W = initial_working_set<Scalar, N>(x, A_full, b_full, m_eq, tol);
 
     // Anti-cycling: after this many iterations without convergence, switch
     // the leaving-constraint choice to Bland's lowest-index rule, which
@@ -1222,26 +1405,11 @@ qp_result<Scalar, N> solve_qp(
             return res;
         }
 
-        if(p.norm() < tol)
+        const Scalar p_norm = p.norm();
+        bool stationary = p_norm < tol;
+        if(!stationary)
         {
-            // At stationary point for current working set -- check multipliers
-            int drop = most_negative_multiplier(lambda_W, W, m_eq, tol, bland);
-            if(drop == -1)
-            {
-                // All inequality multipliers non-negative: optimal
-                auto lambda_full = build_full_lambda(lambda_W, W, m_total);
-                qp_result<Scalar, N> res;
-                res.x = x;
-                res.lambda = lambda_full;
-                res.status = qp_status::optimal;
-                res.iterations = iter;
-                return res;
-            }
-            // Remove the constraint with the selected multiplier
-            W.erase(W.begin() + drop);
-        }
-        else
-        {
+            const bool null_step = p_norm < tol * (Scalar(1) + x.norm());
             // Step is nonzero: compute blocking step length (eq. 16.29)
             auto [alpha, blocking_idx] = blocking_step_length<Scalar, N>(
                 x, p, A_full, b_full, W, m_eq);
@@ -1249,6 +1417,32 @@ qp_result<Scalar, N> solve_qp(
 
             if(alpha < Scalar(1) && blocking_idx >= 0)
                 W.push_back(blocking_idx);
+            else if(null_step)
+            {
+                g_k = (G * x + d).eval();
+                stationary = true;
+            }
+        }
+
+        if(stationary)
+        {
+            // At stationary point for current working set -- check multipliers
+            int drop = most_negative_multiplier(lambda_W, W, m_eq, tol, bland);
+            if(drop == -1)
+            {
+                auto lambda_full = build_full_lambda(lambda_W, W, m_total);
+                Eigen::Matrix<Scalar, Eigen::Dynamic, 1> scratch(n);
+                const bool verified = terminal_kkt_holds(A_full, b_full, x, g_k, lambda_full, m_eq, m_total,
+                                                         verify_tol, scratch);
+                qp_result<Scalar, N> res;
+                res.x = x;
+                res.lambda = lambda_full;
+                res.status = verified ? qp_status::optimal : qp_status::max_iterations;
+                res.iterations = iter;
+                return res;
+            }
+            // Remove the constraint with the selected multiplier
+            W.erase(W.begin() + drop);
         }
     }
 
@@ -1281,7 +1475,7 @@ qp_result<Scalar, N> solve_qp(
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper,
     const Eigen::Vector<Scalar, N>& x0,
-    const argmin::qp_options& opts = {})
+    const argmin::qp_options<Scalar>& opts = {})
 {
     const int n = static_cast<int>(G.rows());
     const int m_ineq = static_cast<int>(A_ineq.rows());

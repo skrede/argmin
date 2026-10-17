@@ -42,7 +42,7 @@ public:
                   "Schedule does not satisfy the schedule contract: it must "
                   "expose select(n), reset(), and notify(step_result).");
 
-    template <typename P, typename Convergence = default_convergence>
+    template <typename P, typename Convergence = default_convergence<scalar_type>>
         requires (std::constructible_from<step_budget_solver<Policies, N, Problem>, const P&,
                   const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&> && ...)
     basic_solver_group(const P& problem,
@@ -59,7 +59,7 @@ public:
     }
 
     // Per-policy options constructor.
-    template <typename P, typename Convergence = default_convergence>
+    template <typename P, typename Convergence = default_convergence<scalar_type>>
         requires (std::constructible_from<step_budget_solver<Policies, N, Problem>, const P&,
                   const Eigen::VectorX<scalar_type>&, const solver_options<Convergence>&,
                   const policy_options_t<Policies, scalar_type>&> && ...)
@@ -150,12 +150,12 @@ public:
 
     solve_result<scalar_type, N> solve()
     {
-        solver_options<> opts;
+        solver_options<default_convergence<scalar_type>> opts;
         opts.max_iterations = max_iterations_;
         return step_n(max_iterations_, opts);
     }
 
-    template <typename Convergence = default_convergence>
+    template <typename Convergence = default_convergence<scalar_type>>
     solve_result<scalar_type, N> step_n(std::uint32_t budget,
                                         const solver_options<Convergence>& opts = {})
     {
@@ -398,8 +398,8 @@ private:
     std::tuple<step_budget_solver<Policies, N, Problem>...> solvers_;
     Schedule schedule_;
     std::uint32_t max_iterations_{1000};
-    std::optional<double> constraint_tolerance_{};
-    double feasibility_tolerance_{1e-6};
+    std::optional<scalar_type> constraint_tolerance_{};
+    scalar_type feasibility_tolerance_{convergence_defaults<scalar_type>::feasibility_tolerance};
     std::array<bool, sizeof...(Policies)> retired_{};
     std::array<solve_result<scalar_type, N>, sizeof...(Policies)> results_{};
 };

@@ -10,6 +10,8 @@
 //            quasi-random sequences of points in evaluating
 //            multi-dimensional integrals", Numerische Mathematik, 2(1).
 
+#include "argmin/types.h"
+
 #include <Eigen/Core>
 
 #include <array>
@@ -20,16 +22,17 @@ namespace argmin::detail
 
 // Van der Corput sequence value for index `i` in base `b`.
 // Returns a value in (0, 1).
-inline constexpr double van_der_corput(std::uint32_t i, std::uint32_t b)
+template <scalar Scalar>
+constexpr Scalar van_der_corput(std::uint32_t i, std::uint32_t b)
 {
-    double result = 0.0;
-    double f = 1.0 / static_cast<double>(b);
+    Scalar result = Scalar(0.0);
+    Scalar f = Scalar(1.0) / static_cast<Scalar>(b);
     std::uint32_t n = i;
     while(n > 0)
     {
-        result += static_cast<double>(n % b) * f;
+        result += static_cast<Scalar>(n % b) * f;
         n /= b;
-        f /= static_cast<double>(b);
+        f /= static_cast<Scalar>(b);
     }
     return result;
 }
@@ -86,24 +89,26 @@ inline std::uint32_t halton_base(int d)
 // coordinates share a base for any n.
 //
 // Reference: Halton (1960).
-inline Eigen::VectorXd halton_point(std::uint32_t index, int n)
+template <scalar Scalar>
+Eigen::VectorX<Scalar> halton_point(std::uint32_t index, int n)
 {
-    Eigen::VectorXd point(n);
+    Eigen::VectorX<Scalar> point(n);
     for(int d = 0; d < n; ++d)
     {
         const std::uint32_t base = halton_base(d);
-        point[d] = van_der_corput(index + 1, base);  // +1: skip index 0 (returns 0.0)
+        point[d] = van_der_corput<Scalar>(index + 1, base);  // +1: skip index 0 (returns 0.0)
     }
     return point;
 }
 
 // Map a Halton point from [0,1]^n to [lower, upper] bounds.
-inline Eigen::VectorXd halton_to_bounds(
+template <scalar Scalar>
+Eigen::VectorX<Scalar> halton_to_bounds(
     std::uint32_t index, int n,
-    const Eigen::VectorXd& lower,
-    const Eigen::VectorXd& upper)
+    const Eigen::VectorX<Scalar>& lower,
+    const Eigen::VectorX<Scalar>& upper)
 {
-    auto h = halton_point(index, n);
+    auto h = halton_point<Scalar>(index, n);
     return (lower.array() + h.array() * (upper.array() - lower.array())).matrix();
 }
 

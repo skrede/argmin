@@ -22,6 +22,7 @@
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/subspace_minimization.h"
 #include "argmin/formulation/concepts.h"
+#include "argmin/types.h"
 
 #include <Eigen/Core>
 
@@ -31,6 +32,23 @@
 
 namespace argmin::detail
 {
+
+template <scalar S>
+struct lbfgsb_direction_constants;
+
+template <>
+struct lbfgsb_direction_constants<double>
+{
+    static constexpr double zero_guard = 1e-15;
+};
+
+template <>
+struct lbfgsb_direction_constants<float>
+{
+    // A precision-class value keeps the double row's fraction of the available precision:
+    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
+    static constexpr float zero_guard = 2e-7f;  // rule
+};
 
 // Result of direction computation: search direction and maximum feasible step.
 
@@ -108,10 +126,10 @@ std::optional<direction_result<Scalar, N>> compute_direction(
 {
     // Branch 1: compile-time unconstrained -- pure two-loop recursion.
     // N&W Algorithm 9.1: d = -H_k * g.
-    if constexpr(!bound_constrained<Problem>)
+    if constexpr(!bound_constrained<Problem, Scalar>)
     {
         Eigen::Vector<Scalar, N> d = -(B.two_loop_recursion(g)).eval();
-        if(d.norm() < 1e-15)
+        if(d.norm() < lbfgsb_direction_constants<Scalar>::zero_guard)
             return std::nullopt;
         return direction_result<Scalar, N>{
             .d = std::move(d),
@@ -125,13 +143,13 @@ std::optional<direction_result<Scalar, N>> compute_direction(
         if(all_variables_free<Scalar, N>(x, g, lower, upper))
         {
             Eigen::Vector<Scalar, N> d = -(B.two_loop_recursion(g)).eval();
-            if(d.norm() < 1e-15)
+            if(d.norm() < lbfgsb_direction_constants<Scalar>::zero_guard)
                 return std::nullopt;
 
             Scalar alpha_max = compute_alpha_max<Scalar, N>(x, d, lower, upper);
 
             // Degenerate geometry: fall through to GCP path.
-            if(alpha_max >= 1e-15)
+            if(alpha_max >= lbfgsb_direction_constants<Scalar>::zero_guard)
             {
                 return direction_result<Scalar, N>{
                     .d = std::move(d),
@@ -148,20 +166,20 @@ std::optional<direction_result<Scalar, N>> compute_direction(
 
         Eigen::Vector<Scalar, N> d = (x_new - x).eval();
 
-        if(d.norm() < 1e-15)
+        if(d.norm() < lbfgsb_direction_constants<Scalar>::zero_guard)
             return std::nullopt;
 
         Scalar alpha_max = compute_alpha_max<Scalar, N>(x, d, lower, upper);
 
         // Fallback to Cauchy direction if alpha_max is too small.
-        if(alpha_max < 1e-15)
+        if(alpha_max < lbfgsb_direction_constants<Scalar>::zero_guard)
         {
             d = (gcp.x_cauchy - x).eval();
-            if(d.norm() < 1e-15)
+            if(d.norm() < lbfgsb_direction_constants<Scalar>::zero_guard)
                 return std::nullopt;
 
             alpha_max = compute_alpha_max<Scalar, N>(x, d, lower, upper);
-            if(alpha_max < 1e-15)
+            if(alpha_max < lbfgsb_direction_constants<Scalar>::zero_guard)
                 return std::nullopt;
         }
 

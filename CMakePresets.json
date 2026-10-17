@@ -89,6 +89,18 @@
                 "ARGMIN_BUILD_FUZZ_TESTS": "ON",
                 "ARGMIN_CMAKE_FETCH_DEPS": "ON"
             }
+        },
+        {
+            "name": "python-bindings",
+            "displayName": "Python extension module and its test suite",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/python",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "ARGMIN_BUILD_PYTHON": "ON",
+                "ARGMIN_BUILD_TESTS": "OFF",
+                "ARGMIN_CMAKE_FETCH_DEPS": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -119,6 +131,10 @@
         {
             "name": "fuzz",
             "configurePreset": "fuzz"
+        },
+        {
+            "name": "python-bindings",
+            "configurePreset": "python-bindings"
         }
     ],
     "testPresets": [
@@ -153,6 +169,13 @@
         {
             "name": "sanitize",
             "configurePreset": "sanitize",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "python-bindings",
+            "configurePreset": "python-bindings",
             "output": {
                 "outputOnFailure": true
             }

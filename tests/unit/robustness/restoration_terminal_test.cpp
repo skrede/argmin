@@ -61,7 +61,7 @@ struct workspace_2d
 
 // Runs the helper with the given callbacks from x, returning the result.
 template <typename ConstraintFn, typename JacobianFn>
-lm_restoration_result run_restoration(
+lm_restoration_result<double> run_restoration(
     Eigen::Vector2d& x, ConstraintFn&& cfn, JacobianFn&& jfn,
     workspace_2d& wk, std::size_t max_iter, double lambda_init)
 {

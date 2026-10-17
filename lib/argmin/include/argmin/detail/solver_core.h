@@ -10,6 +10,8 @@
 #include "argmin/solver/convergence.h"
 #include "argmin/solver/options.h"
 
+#include "argmin/options/convergence_defaults.h"
+
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -42,7 +44,7 @@ struct policy_options_impl
 template <typename Policy, typename Scalar>
 struct policy_options_impl<Policy, Scalar, false>
 {
-    using type = solver_options<>;
+    using type = solver_options<default_convergence<Scalar>>;
 };
 }
 
@@ -84,7 +86,7 @@ using resolve_state_t =
 // NOT know about convergence. Reference: K&W Section 4.4 (convergence
 // criteria), N&W Section 3.1.
 template <typename Policy, int N = dynamic_dimension, typename Problem = void,
-          typename Convergence = default_convergence>
+          typename Convergence = default_convergence<typename Policy::scalar_type>>
 class solver_core
 {
 public:
@@ -104,6 +106,8 @@ public:
                   "expose scalar_type and step(state) / reset(state, x0) / "
                   "reset_clear(state, x0), and its state must expose x. "
                   "Construct via CTAD from a problem + x0.");
+    static_assert(std::same_as<typename Convergence::scalar_type, scalar_type>,
+                  "Convergence criteria must use the same scalar type as the policy.");
 
     // Rebinds the incoming problem reference onto the class-template
     // Problem slot so the loop can call value()/constraints() directly
@@ -286,12 +290,12 @@ public:
     }
 
     // Overload for policies without options_type: the fourth argument is
-    // solver_options<> (the policy_options_t fallback) and is ignored.
+    // the policy_options_t fallback solver_options and is ignored.
     template <typename P>
         requires (!has_options_type<Policy>)
     solver_core(const P& problem, const Eigen::VectorX<scalar_type>& x0,
                 const solver_options<Convergence>& opts,
-                const solver_options<>&)
+                const solver_options<default_convergence<scalar_type>>&)
         : max_iterations_{opts.max_iterations}
         , constraint_tolerance_{opts.constraint_tolerance}
         , feasibility_tolerance_{opts.feasibility_tolerance}
@@ -417,8 +421,8 @@ public:
     // by the driver facade when it rebuilds the local solver_options on the
     // defaulted solve() / step_n(budget) paths.
     std::uint32_t max_iterations() const { return max_iterations_; }
-    std::optional<double> constraint_tolerance() const { return constraint_tolerance_; }
-    double feasibility_tolerance() const { return feasibility_tolerance_; }
+    std::optional<scalar_type> constraint_tolerance() const { return constraint_tolerance_; }
+    scalar_type feasibility_tolerance() const { return feasibility_tolerance_; }
 
     void abort() { abort_flag_.store(true, std::memory_order_relaxed); }
 
@@ -539,15 +543,15 @@ public:
     void forward_solver_hints(const solver_options<Convergence>& opts)
     {
         using criteria_tuple = decltype(stored_convergence_.criteria);
-        if constexpr(detail::tuple_contains_v<objective_tolerance_criterion, criteria_tuple>)
+        if constexpr(detail::tuple_contains_v<objective_tolerance_criterion<scalar_type>, criteria_tuple>)
         {
-            auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+            auto& ftol = std::get<objective_tolerance_criterion<scalar_type>>(stored_convergence_.criteria);
             if(opts.constraint_tolerance)
                 ftol.stationarity_threshold = std::max(ftol.stationarity_threshold, *opts.constraint_tolerance);
         }
-        if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
+        if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion<scalar_type>, criteria_tuple>)
         {
-            auto& ftol_rel = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
+            auto& ftol_rel = std::get<objective_tolerance_rel_criterion<scalar_type>>(stored_convergence_.criteria);
             if(opts.constraint_tolerance)
                 ftol_rel.stationarity_threshold = std::max(ftol_rel.stationarity_threshold, *opts.constraint_tolerance);
         }
@@ -565,10 +569,10 @@ public:
             // hard-error for any Convergence lacking stall_tolerance_criterion
             // (e.g. a caller-supplied policy combining a stall_window-bearing
             // policy's options with a bespoke non-stall convergence type).
-            if constexpr(detail::tuple_contains_v<stall_tolerance_criterion,
+            if constexpr(detail::tuple_contains_v<stall_tolerance_criterion<scalar_type>,
                                                    decltype(stored_convergence_.criteria)>)
             {
-                auto& stall = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
+                auto& stall = std::get<stall_tolerance_criterion<scalar_type>>(stored_convergence_.criteria);
                 stall.window = policy_opts.stall_window;
             }
         }
@@ -585,18 +589,18 @@ public:
         if constexpr(requires { policy_opts.kkt_tolerance; })
         {
             using criteria_tuple = decltype(stored_convergence_.criteria);
-            if constexpr(detail::tuple_contains_v<objective_tolerance_criterion, criteria_tuple>)
+            if constexpr(detail::tuple_contains_v<objective_tolerance_criterion<scalar_type>, criteria_tuple>)
             {
-                auto& ftol = std::get<objective_tolerance_criterion>(stored_convergence_.criteria);
+                auto& ftol = std::get<objective_tolerance_criterion<scalar_type>>(stored_convergence_.criteria);
                 if(policy_opts.kkt_tolerance)
                 {
                     ftol.stationarity_threshold =
                         std::max(ftol.stationarity_threshold, *policy_opts.kkt_tolerance);
                 }
             }
-            if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion, criteria_tuple>)
+            if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion<scalar_type>, criteria_tuple>)
             {
-                auto& ftol_rel = std::get<objective_tolerance_rel_criterion>(stored_convergence_.criteria);
+                auto& ftol_rel = std::get<objective_tolerance_rel_criterion<scalar_type>>(stored_convergence_.criteria);
                 if(policy_opts.kkt_tolerance)
                 {
                     ftol_rel.stationarity_threshold =
@@ -626,10 +630,10 @@ public:
         if constexpr(requires { policy_opts.stall_tolerance_threshold; })
         {
             using criteria_tuple = decltype(stored_convergence_.criteria);
-            if constexpr(detail::tuple_contains_v<stall_tolerance_criterion, criteria_tuple>)
+            if constexpr(detail::tuple_contains_v<stall_tolerance_criterion<scalar_type>, criteria_tuple>)
             {
-                auto& stall = std::get<stall_tolerance_criterion>(stored_convergence_.criteria);
-                stall.threshold = policy_opts.stall_tolerance_threshold.value_or(1e-6);
+                auto& stall = std::get<stall_tolerance_criterion<scalar_type>>(stored_convergence_.criteria);
+                stall.threshold = policy_opts.stall_tolerance_threshold.value_or(convergence_defaults<scalar_type>::stall_threshold);
                 if constexpr(requires { policy_opts.rho_init; }
                           || requires { policy_opts.raa0; })
                 {
@@ -642,13 +646,13 @@ public:
 private:
     Policy policy_{};
     std::uint32_t max_iterations_{1000};
-    std::optional<double> constraint_tolerance_{};
+    std::optional<scalar_type> constraint_tolerance_{};
     // Mirrors solver_options::feasibility_tolerance (constructor-time
     // configured); read back into the locally-rebuilt solver_options on the
     // defaulted solve()/step_n(budget) paths so the best-seen feasibility
     // comparator honors the constructor's configured value instead of
     // reverting to solver_options's own 1e-6 default.
-    double feasibility_tolerance_{1e-6};
+    scalar_type feasibility_tolerance_{convergence_defaults<scalar_type>::feasibility_tolerance};
     Convergence stored_convergence_{};
     const Problem* problem_ptr_{nullptr};
     state_type state_;

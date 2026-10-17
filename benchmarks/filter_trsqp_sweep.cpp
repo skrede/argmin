@@ -81,7 +81,7 @@ namespace
 
 using argmin::sqp_mode;
 template <int N, sqp_mode Mode>
-using policy_t = argmin::filter_trsqp_policy<N, Mode>;
+using policy_t = argmin::filter_trsqp_policy<double, N, Mode>;
 
 // Filter-reject mode is nested inside the policy; alias for brevity.
 template <sqp_mode Mode>
@@ -125,6 +125,8 @@ std::string_view status_name(argmin::solver_status s)
         case solver_status::objective_stalled:          return "objective_stalled";
         case solver_status::time_limit_reached:         return "time_limit_reached";
         case solver_status::aborted:                    return "aborted";
+        case solver_status::invalid_problem:            return "invalid_problem";
+        case solver_status::line_search_failed:         return "line_search_failed";
     }
     return "unknown";
 }

@@ -30,8 +30,8 @@
 namespace argmin
 {
 
-template <int N = dynamic_dimension, int MaxPopulation = dynamic_dimension>
-using cmaes_policy = alternative::cmaes::pwq_reparameterization_policy<N, MaxPopulation>;
+template <scalar Scalar = double, int N = dynamic_dimension, int MaxPopulation = dynamic_dimension>
+using cmaes_policy = alternative::cmaes::pwq_reparameterization_policy<Scalar, N, MaxPopulation>;
 
 }
 

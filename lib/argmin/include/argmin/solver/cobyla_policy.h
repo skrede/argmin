@@ -37,6 +37,7 @@
 #include "argmin/detail/cobyla_simplex.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/lagrangian.h"
+#include "argmin/options/derivative_free_defaults.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 
@@ -53,19 +54,20 @@
 namespace argmin
 {
 
+template <scalar Scalar = double>
 struct cobyla_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
 
     template <int M>
-    using rebind = cobyla_policy;
+    using rebind = cobyla_policy<Scalar>;
 
     struct options_type
     {
-        double initial_trust_radius{0.0};   // 0 means auto (10% of max bound range, else 1.0)
-        double final_trust_radius{1e-8};
+        Scalar initial_trust_radius{Scalar(0.0)};   // 0 means auto (10% of max bound range, else 1.0)
+        Scalar final_trust_radius{derivative_free_defaults<Scalar>::final_trust_radius};
         std::uint16_t stall_window{50};
-        double feasibility_gate{1e-4};
+        Scalar feasibility_gate{derivative_free_defaults<Scalar>::cobyla_feasibility_gate};
     };
 
     options_type options{};
@@ -74,16 +76,16 @@ struct cobyla_policy
     struct state_type
     {
         const P* problem{nullptr};
-        Eigen::VectorXd x;
-        Eigen::VectorXd lower;
-        Eigen::VectorXd upper;
-        Eigen::VectorXd c_eq;
-        Eigen::VectorXd c_ineq;
-        double objective_value{};
+        Eigen::VectorX<Scalar> x;
+        Eigen::VectorX<Scalar> lower;
+        Eigen::VectorX<Scalar> upper;
+        Eigen::VectorX<Scalar> c_eq;
+        Eigen::VectorX<Scalar> c_ineq;
+        Scalar objective_value{};
         // Powell merit penalty. Adapts upward only through
         // barmu = (predicted objective increase) / (predicted reduction in max
         // violation) -- i.e. only when reaching feasibility costs objective.
-        double parmu{0.0};
+        Scalar parmu{Scalar(0.0)};
         int n_eq{0};
         int n_ineq{0};
         int m_powell{0};
@@ -91,21 +93,21 @@ struct cobyla_policy
 
         // The engine is heap-owned so state moves leave its internal pointers
         // (captured by the evaluator) valid.
-        std::shared_ptr<detail::cobyla_engine<double>> engine;
+        std::shared_ptr<detail::cobyla_engine<Scalar>> engine;
     };
 
     template <typename Problem, typename Convergence>
-        requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
-    state_type<Problem> init(const Problem& problem, const Eigen::VectorXd& x0,
+        requires objective<Problem, Scalar> && constrained_values<Problem, Scalar> && bound_constrained<Problem, Scalar>
+    state_type<Problem> init(const Problem& problem, const Eigen::VectorX<Scalar>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
         return init(problem, x0, opts);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
-        requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
-    state_type<Problem> init(const Problem& problem, const Eigen::VectorXd& x0,
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
+        requires objective<Problem, Scalar> && constrained_values<Problem, Scalar> && bound_constrained<Problem, Scalar>
+    state_type<Problem> init(const Problem& problem, const Eigen::VectorX<Scalar>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
@@ -126,10 +128,10 @@ struct cobyla_policy
         }
         s.m_powell = s.n_ineq + 2 * s.n_eq + n_bound;
 
-        double rhobeg = auto_trust_radius(s.lower, s.upper, n);
-        double rhoend = options.final_trust_radius;
+        Scalar rhobeg = auto_trust_radius(s.lower, s.upper, n);
+        Scalar rhoend = options.final_trust_radius;
 
-        s.engine = std::make_shared<detail::cobyla_engine<double>>();
+        s.engine = std::make_shared<detail::cobyla_engine<Scalar>>();
         make_evaluator_and_init(s, rhobeg, rhoend);
 
         sync_from_engine(s);
@@ -138,9 +140,9 @@ struct cobyla_policy
     }
 
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
-        const double old_f = s.objective_value;
+        const Scalar old_f = s.objective_value;
 
         bool running = s.engine->advance();
         ++s.iteration;
@@ -160,16 +162,16 @@ struct cobyla_policy
         // free incumbent (the simplex pole) can hold still for several
         // evaluations while the model and geometry improve. The gradient proxy
         // is likewise floored while RHO has not reached RHOEND.
-        const double rho = s.engine->rho();
-        double grad_proxy = s.engine->gradient_proxy();
+        const Scalar rho = s.engine->rho();
+        Scalar grad_proxy = s.engine->gradient_proxy();
         if(running && rho > options.final_trust_radius)
-            grad_proxy = std::max(grad_proxy, 1.0);
+            grad_proxy = std::max(grad_proxy, Scalar(1.0));
 
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value = s.objective_value,
             .gradient_norm = grad_proxy,
-            .step_size = running ? rho : 0.0,
-            .objective_change = running ? rho : 0.0,
+            .step_size = running ? rho : Scalar(0.0),
+            .objective_change = running ? rho : Scalar(0.0),
             .improved = improved,
             .is_null_step = !running,
             .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
@@ -178,21 +180,21 @@ struct cobyla_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::VectorXd> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::VectorX<Scalar>> x0)
     {
         reset_clear(s, x0);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::VectorXd> x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::VectorX<Scalar>> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
         s.iteration = 0;
-        s.parmu = 0.0;
+        s.parmu = Scalar(0.0);
 
         const int n = static_cast<int>(s.x.size());
-        double rhobeg = auto_trust_radius(s.lower, s.upper, n);
-        double rhoend = options.final_trust_radius;
+        Scalar rhobeg = auto_trust_radius(s.lower, s.upper, n);
+        Scalar rhoend = options.final_trust_radius;
         make_evaluator_and_init(s, rhobeg, rhoend);
         sync_from_engine(s);
     }
@@ -200,40 +202,40 @@ struct cobyla_policy
 private:
     // Auto initial trust radius: 10% of the largest finite bound range, or 1.0
     // when no coordinate is finitely bounded (matching the reference rho0=1.0).
-    double auto_trust_radius(const Eigen::VectorXd& lower,
-                             const Eigen::VectorXd& upper, int n) const
+    Scalar auto_trust_radius(const Eigen::VectorX<Scalar>& lower,
+                             const Eigen::VectorX<Scalar>& upper, int n) const
     {
-        double h = options.initial_trust_radius;
-        if(h > 0.0)
+        Scalar h = options.initial_trust_radius;
+        if(h > Scalar(0.0))
             return h;
-        double max_range = 0.0;
+        Scalar max_range = Scalar(0.0);
         for(int i = 0; i < n; ++i)
         {
-            double range_i = upper[i] - lower[i];
+            Scalar range_i = upper[i] - lower[i];
             if(std::isfinite(range_i))
                 max_range = std::max(max_range, range_i);
         }
-        return (max_range > 0.0) ? 0.1 * max_range : 1.0;
+        return (max_range > Scalar(0.0)) ? Scalar(0.1) * max_range : Scalar(1.0);
     }
 
     // Build the Powell-convention evaluator (captures the problem by pointer)
     // and initialize the engine. The evaluator also refreshes s.c_eq / s.c_ineq
     // so step_budget_solver's constraint_violation reporting sees the latest point.
     template <typename P>
-    void make_evaluator_and_init(state_type<P>& s, double rhobeg, double rhoend)
+    void make_evaluator_and_init(state_type<P>& s, Scalar rhobeg, Scalar rhoend)
     {
         const P* problem = s.problem;
         const int n = static_cast<int>(s.x.size());
         const int n_eq = s.n_eq;
         const int n_ineq = s.n_ineq;
-        Eigen::VectorXd lower = s.lower;
-        Eigen::VectorXd upper = s.upper;
+        Eigen::VectorX<Scalar> lower = s.lower;
+        Eigen::VectorX<Scalar> upper = s.upper;
 
         auto eval = [problem, n, n_eq, n_ineq, lower, upper]
-            (const Eigen::VectorXd& x, Eigen::VectorXd& con) -> double
+            (const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& con) -> Scalar
         {
             const int m_total = n_eq + n_ineq;
-            Eigen::VectorXd c_full(std::max(m_total, 0));
+            Eigen::VectorX<Scalar> c_full(std::max(m_total, 0));
             if(m_total > 0)
                 problem->constraints(x, c_full);
 
@@ -271,7 +273,7 @@ private:
         const int m_total = s.n_eq + s.n_ineq;
         if(m_total > 0)
         {
-            Eigen::VectorXd c_full(m_total);
+            Eigen::VectorX<Scalar> c_full(m_total);
             s.problem->constraints(s.x, c_full);
             s.c_eq = c_full.head(s.n_eq);
             s.c_ineq = c_full.tail(s.n_ineq);

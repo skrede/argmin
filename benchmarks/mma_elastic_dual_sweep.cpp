@@ -254,11 +254,11 @@ void run_problem(const std::string& pname, const Problem& problem,
     for(double c : grid)
     {
         out.push_back(run_cell(pname, "ccsa",
-            argmin::ccsa_quadratic_policy<N>{}, problem, c));
+            argmin::ccsa_quadratic_policy<double, N>{}, problem, c));
         out.push_back(run_cell(pname, "mma",
-            argmin::mma_policy<N>{}, problem, c));
+            argmin::mma_policy<double, N>{}, problem, c));
         out.push_back(run_cell(pname, "gcmma_rho_wval",
-            argmin::alternative::gcmma::rho_wval_policy<N>{}, problem, c));
+            argmin::alternative::gcmma::rho_wval_policy<double, N>{}, problem, c));
     }
 }
 

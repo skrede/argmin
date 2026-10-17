@@ -414,6 +414,25 @@ TEST_CASE("sigma_collapsed_bound_relative fires only below threshold",
         s, 1e-9, n, lower, upper));
 }
 
+TEST_CASE("sigma_collapsed_bound_relative stays finite on a half-bounded variable",
+          "[isres_operators]")
+{
+    constexpr int n = 2;
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    Eigen::Vector<double, 2> lower; lower << -10.0, -10.0;
+    Eigen::Vector<double, 2> upper; upper <<  10.0,  inf;
+
+    sigma_state s;
+    s.mu = 3;
+    s.sigmas = argmin::detail::initialize_sigmas<2>(n, s.mu, lower, upper);
+    CHECK_FALSE(argmin::detail::sigma_collapsed_bound_relative(
+        s, 1e-9, n, lower, upper));
+
+    s.sigmas = Eigen::MatrixXd::Constant(n, s.mu, 1e-15);
+    CHECK(argmin::detail::sigma_collapsed_bound_relative(
+        s, 1e-9, n, lower, upper));
+}
+
 TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls back",
           "[isres_operators]")
 {
@@ -428,8 +447,8 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // default_convergence carries step_tolerance_criterion. Set the
     // threshold to a value the mean_sigma beats (1e-6 > 1e-7) -> fires.
     {
-        argmin::default_convergence conv{};
-        std::get<argmin::step_tolerance_criterion>(conv.criteria).threshold = 1e-6;
+        argmin::default_convergence<> conv{};
+        std::get<argmin::step_tolerance_criterion<>>(conv.criteria).threshold = 1e-6;
         CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1e-9, n, lower, upper));
     }
@@ -437,8 +456,8 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // Same convergence with a tighter threshold (1e-9) the mean_sigma does
     // not beat -> does not fire.
     {
-        argmin::default_convergence conv{};
-        std::get<argmin::step_tolerance_criterion>(conv.criteria).threshold = 1e-9;
+        argmin::default_convergence<> conv{};
+        std::get<argmin::step_tolerance_criterion<>>(conv.criteria).threshold = 1e-9;
         CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1e-12, n, lower, upper));
     }
@@ -453,7 +472,7 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // step_tolerance_criterion entirely) is exercised by the
     // slsqp_compatible_convergence case below.
     {
-        argmin::default_convergence conv{};
+        argmin::default_convergence<> conv{};
         CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1.0, n, lower, upper));
         CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
@@ -464,7 +483,7 @@ TEST_CASE("sigma_collapsed_xtol_coupled honors convergence threshold and falls b
     // SFINAE guard must keep the function compilable AND silently fall
     // back to bound_relative semantics.
     {
-        argmin::slsqp_compatible_convergence conv{};
+        argmin::slsqp_compatible_convergence<> conv{};
         CHECK(argmin::detail::sigma_collapsed_xtol_coupled(
             s, conv, /*fallback_ratio=*/1.0, n, lower, upper));
         CHECK_FALSE(argmin::detail::sigma_collapsed_xtol_coupled(
@@ -502,8 +521,8 @@ TEST_CASE("ISRES operators preserve existing detail symbols byte-for-byte",
     // workspace-class ctor to confirm preservation; full coverage of
     // the existing ops lives in isres_test.cpp.
     const int n = 4;
-    argmin::detail::es_learning_rates rates =
-        argmin::detail::compute_es_rates(n);
+    argmin::detail::es_learning_rates<double> rates =
+        argmin::detail::compute_es_rates<double>(n);
     // Role-correct assignment (Schwefel/NLopt): tau is the per-component
     // rate 1/sqrt(2*sqrt(n)); tau_prime the once-per-individual global
     // rate 1/sqrt(2*n).

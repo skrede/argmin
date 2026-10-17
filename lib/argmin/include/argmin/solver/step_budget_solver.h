@@ -57,7 +57,7 @@ namespace argmin
 // Reference: K&W Section 4.4 (convergence criteria), N&W Section 3.1.
 
 template <typename Policy, int N = dynamic_dimension, typename Problem = void,
-          typename Convergence = default_convergence>
+          typename Convergence = default_convergence<typename Policy::scalar_type>>
 class step_budget_solver
 {
 public:
@@ -150,12 +150,12 @@ public:
     {}
 
     // Overload for policies without options_type: the fourth argument is
-    // solver_options<> (the policy_options_t fallback) and is ignored.
+    // the policy_options_t fallback solver_options and is ignored.
     template <typename P, typename Derived>
         requires (!has_options_type<Policy>)
     step_budget_solver(const P& problem, const Eigen::MatrixBase<Derived>& x0,
                        const solver_options<Convergence>& opts,
-                       const solver_options<>& policy_opts)
+                       const solver_options<default_convergence<scalar_type>>& policy_opts)
         : core_{problem, to_x0(x0), opts, policy_opts}
     {}
 
@@ -306,7 +306,7 @@ step_budget_solver(Policy, const Problem&,
 // Definition-site conformance: pinned against a minimal witness policy so a
 // facade change that broke the surface fails the library's own build here,
 // not a downstream consumer's first instantiation.
-static_assert(nlp_solver<step_budget_solver<detail::runner_concept_probe_policy>>,
+static_assert(nlp_solver<step_budget_solver<detail::runner_concept_probe_policy<>>>,
               "step_budget_solver owns a convergence loop and must satisfy "
               "nlp_solver (which refines steppable)");
 

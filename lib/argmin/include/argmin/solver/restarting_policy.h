@@ -59,7 +59,7 @@ struct restarting_policy
     {
         typename Inner::options_type inner{};
         std::optional<std::uint32_t> stagnation_limit{};  // truly optional: unset = auto formula 10 + ceil(30 n / lambda)
-        double population_multiplier{2.0};                // IPOP doubling (Auger & Hansen 2005)
+        scalar_type population_multiplier{scalar_type(2.0)};  // IPOP doubling (Auger & Hansen 2005)
         // stall_window / feasibility_gate intentionally not declared on the decorator.
         // restarting_policy emits synthetic (obj_change=1.0, step_size=1.0) step_results on
         // restart and maintains its own internal stall logic (see the restart-trigger block
@@ -76,20 +76,20 @@ struct restarting_policy
         const P* problem{nullptr};
         decltype(x) x0_saved{};
         std::uint32_t stagnation_count{0};
-        double best_ever_value{std::numeric_limits<double>::infinity()};
+        scalar_type best_ever_value{std::numeric_limits<scalar_type>::infinity()};
         bool restart_pending{false};
         std::uint32_t restart_count{0};
         std::uint32_t dimension{0};
         std::uint32_t initial_lambda{0};
 
-        Eigen::VectorXd c_eq{};
-        Eigen::VectorXd c_ineq{};
+        Eigen::VectorX<scalar_type> c_eq{};
+        Eigen::VectorX<scalar_type> c_ineq{};
     };
 
     Inner inner_policy_{};
     options_type options{};
 
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
                     const auto& x0,
                     const solver_options<Convergence>& opts)
@@ -136,7 +136,7 @@ struct restarting_policy
             s.initial_lambda = static_cast<std::uint32_t>(s.inner.params.lambda);
         else
             s.initial_lambda = static_cast<std::uint32_t>(
-                4 + 3 * std::log(static_cast<double>(s.dimension)));
+                4 + 3 * std::log(static_cast<scalar_type>(s.dimension)));
 
         sync_from_inner(s);
         return s;
@@ -163,9 +163,9 @@ struct restarting_policy
 
             return step_result<scalar_type>{
                 .objective_value = s.inner.objective_value,
-                .gradient_norm = 1.0,
-                .step_size = 1.0,
-                .objective_change = 1.0,
+                .gradient_norm = scalar_type(1.0),
+                .step_size = scalar_type(1.0),
+                .objective_change = scalar_type(1.0),
                 .improved = false,
                 .x_norm = s.inner.x.norm(),
             };
@@ -238,9 +238,9 @@ private:
         ++s.restart_count;
 
         // IPOP: population = initial_lambda * 2^restart_count
-        double multiplier = options.population_multiplier;
+        scalar_type multiplier = options.population_multiplier;
         auto new_pop = static_cast<std::uint32_t>(
-            s.initial_lambda * std::pow(multiplier, s.restart_count));
+            static_cast<scalar_type>(s.initial_lambda) * std::pow(multiplier, static_cast<scalar_type>(s.restart_count)));
 
         // Update inner population size via the appropriate field
         if constexpr(requires { inner_policy_.options.population_size; })

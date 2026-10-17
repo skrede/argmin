@@ -26,13 +26,15 @@ template <typename Scalar = double, int N = argmin::dynamic_dimension>
 class subspace_minimizer
 {
 public:
+    // Factorizing the identity leaves every LDLT field determinate, so moving a freshly built
+    // minimizer into a solver state copies no indeterminate values.
     explicit subspace_minimizer(int n)
-        : Bd_(n)
-        , r_F_(n)
-        , d_hat_(n)
-        , x_new_(n)
-        , B_FF_(n, n)
-        , ldlt_(n)
+        : Bd_(reduced_vector::Zero(n))
+        , r_F_(reduced_vector::Zero(n))
+        , d_hat_(reduced_vector::Zero(n))
+        , x_new_(Eigen::Vector<Scalar, N>::Zero(n))
+        , B_FF_(reduced_matrix::Identity(n, n))
+        , ldlt_(B_FF_)
     {
     }
 

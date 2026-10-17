@@ -111,8 +111,8 @@ using namespace argmin;
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS024 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_accurate<hs024<>::problem_dimension>,
-    filter_trsqp_policy_fast<hs024<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs024<>::problem_dimension>),
+    (filter_trsqp_policy_fast<double, hs024<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -148,8 +148,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS026 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_accurate<hs026<>::problem_dimension>,
-    filter_trsqp_policy_fast<hs026<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs026<>::problem_dimension>),
+    (filter_trsqp_policy_fast<double, hs026<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -183,8 +183,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS028 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_accurate<hs028<>::problem_dimension>,
-    filter_trsqp_policy_fast<hs028<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs028<>::problem_dimension>),
+    (filter_trsqp_policy_fast<double, hs028<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -231,8 +231,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS035 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_accurate<hs035<>::problem_dimension>,
-    filter_trsqp_policy_fast<hs035<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs035<>::problem_dimension>),
+    (filter_trsqp_policy_fast<double, hs035<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -268,8 +268,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS039 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_accurate<hs039<>::problem_dimension>,
-    filter_trsqp_policy_fast<hs039<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs039<>::problem_dimension>),
+    (filter_trsqp_policy_fast<double, hs039<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -305,8 +305,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS040 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_accurate<hs040<>::problem_dimension>,
-    filter_trsqp_policy_fast<hs040<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs040<>::problem_dimension>),
+    (filter_trsqp_policy_fast<double, hs040<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -383,7 +383,7 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS043 (accurate mode)",
     "[sqp][filter_trsqp][regression][mode][!mayfail]",
-    filter_trsqp_policy_accurate<hs043<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs043<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -416,7 +416,7 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS043 (fast mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_fast<hs043<>::problem_dimension>)
+    (filter_trsqp_policy_fast<double, hs043<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -478,7 +478,7 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS050 (accurate mode)",
     "[sqp][filter_trsqp][regression][mode][!mayfail]",
-    filter_trsqp_policy_accurate<hs050<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs050<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -503,7 +503,7 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS050 (fast mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_fast<hs050<>::problem_dimension>)
+    (filter_trsqp_policy_fast<double, hs050<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -542,7 +542,7 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS071 (accurate mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_accurate<hs071<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs071<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -585,7 +585,7 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS071 (fast mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_fast<hs071<>::problem_dimension>)
+    (filter_trsqp_policy_fast<double, hs071<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -630,8 +630,8 @@ TEMPLATE_TEST_CASE(
 TEMPLATE_TEST_CASE(
     "filter_trsqp HS076 (parametric on mode)",
     "[sqp][filter_trsqp][regression][mode]",
-    filter_trsqp_policy_accurate<hs076<>::problem_dimension>,
-    filter_trsqp_policy_fast<hs076<>::problem_dimension>)
+    (filter_trsqp_policy_accurate<double, hs076<>::problem_dimension>),
+    (filter_trsqp_policy_fast<double, hs076<>::problem_dimension>))
 {
     using Policy = TestType;
     using policy_t = Policy;
@@ -936,7 +936,7 @@ TEST_CASE("filter_trsqp restoration augments with the triggering "
     circle_equality_problem problem;
     Eigen::Vector2d x0{2.0, 2.0};
 
-    filter_trsqp_policy_accurate<2> policy;
+    filter_trsqp_policy_accurate<double, 2> policy;
     policy.options.initial_trust_radius = 5e-2;
     policy.options.min_trust_radius     = 1e-3;
     policy.options.restoration_max_iter = 50;
@@ -990,7 +990,7 @@ TEST_CASE("filter_trsqp failed restoration latches and does not "
     infeasible_equality_problem problem;
     Eigen::Vector2d x0{0.5, 0.5};
 
-    filter_trsqp_policy_accurate<2> policy;
+    filter_trsqp_policy_accurate<double, 2> policy;
     policy.options.initial_trust_radius = 5e-2;
     policy.options.min_trust_radius     = 1e-3;
     policy.options.restoration_max_iter = 10;
@@ -1045,7 +1045,7 @@ TEST_CASE("filter_trsqp reset reseeds the filter and zeroes stale "
     auto x0 = problem.initial_point();
 
     using policy_t =
-        filter_trsqp_policy_accurate<hs040<>::problem_dimension>;
+        filter_trsqp_policy_accurate<double, hs040<>::problem_dimension>;
     policy_t policy;
 
     solver_options opts;
@@ -1121,7 +1121,7 @@ TEST_CASE("filter_trsqp Maratos stall at a feasible iterate escapes "
     maratos_circle_problem problem;
     Eigen::Vector2d x0{std::cos(0.5), std::sin(0.5)};  // feasible
 
-    using policy_t = filter_trsqp_policy_accurate<2>;
+    using policy_t = filter_trsqp_policy_accurate<double, 2>;
     policy_t policy;
     policy.options.soc_max_iterations = 2;
 

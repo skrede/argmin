@@ -25,6 +25,73 @@ Policies available at HEAD, grouped by problem class:
 - **Global / stochastic:** `cmaes`, restarting CMA-ES, `isres`
 - **Meta:** `augmented_lagrangian` (wraps any unconstrained inner policy)
 
+### Added
+
+- Python: `FilterSlsqpSolver` (with `FilterSlsqpOptions` and
+  `RestorationStrategy`) and `TrSqpSolver` (with `TrSqpOptions`, accurate mode),
+  also available as the `filter_slsqp` and `tr_sqp` methods of
+  `ConstrainedTestProblem.solve_native`. See
+  [docs/python-bindings.md](docs/python-bindings.md) for the benchmark evidence
+  behind both.
+- `solver_status::line_search_failed` (Python `SolverStatus.line_search_failed`),
+  reported by the L-BFGS-B policies when a line-search step and its retry from a
+  reset curvature memory are both rejected.
+- `line_search_options::relative_value_noise`, an opt-in approximate Wolfe band
+  (Hager and Zhang 2005): a trial whose value is at most
+  `phi(0) + relative_value_noise * |phi(0)|` is accepted on the strong-Wolfe
+  curvature condition alone. It defaults to 0, which disables the band;
+  Python's `LineSearchOptions` reports it.
+
+### Changed
+
+- Python names follow the C++ types they bind, with no aliases for the old
+  names: `SlsqpSolver` is `KraftSlsqpSolver`, `SlsqpOptions` is
+  `KraftSlsqpOptions`, `QpSubproblemOptions` is `QpOptions`, `QpStatus` is
+  `QpSolveStatus`, `CmaesRestart` is `CmaesRestartStrategy`, and the compiled
+  Kraft method is selected as `kraft_slsqp` instead of `slsqp`.
+- Python: COBYLA, BOBYQA and CMA-ES, with their own option and enum types, moved
+  behind `import argmin.experimental`. Each gated solver carries `maturity` and
+  `known_defect` attributes; their compiled-problem solves moved to
+  `argmin.experimental.solve_native`, and the top-level `solve_native` refuses
+  them with `invalid_problem`.
+- The CMA-ES detection options are `cmaes_detection_options`, in
+  `argmin/options/cmaes_detection_options.h` (formerly `cmaes_options`).
+- Some L-BFGS-B solves that ended `roundoff_limited` near a solution now end
+  `line_search_failed`.
+- Every policy, the QP and line-search options, the convergence criteria and
+  `default_convergence` take the scalar type as their first template argument
+  (`float` or `double`, defaulting to `double`), for example
+  `nw_sqp_policy<double, NV>` and `gradient_tolerance_criterion<>`.
+- The QP options' `max_iterations` is `std::uint32_t`.
+- `float` is supported per algorithm family, each gated against `double`; see
+  [docs/float-support.md](docs/float-support.md).
+
+### Fixed
+
+- Both L-BFGS-B policies no longer commit a failed line-search step: a
+  non-finite trial, a non-positive step or a search without sufficient decrease
+  leaves the iterate in place, the step is retried once from a reset curvature
+  memory, and a second rejection ends the solve with `line_search_failed`.
+- The constrained SQP solvers apply their bounds. `KraftSlsqpSolver` accepted
+  `lower_bounds` and `upper_bounds` from Python but never passed them to the
+  policy, so a solve could report `converged` outside the box.
+- The MMA, CCSA quadratic and GCMMA dual solves accept roundoff-level
+  line-search steps through the approximate Wolfe band, where the remaining
+  decrease near the dual optimum falls below the roundoff of the dual value.
+- GCMMA's `rho_wval` variant commits a trial that sits at the current iterate
+  within roundoff, when it does not raise the constraint violation past its
+  slack, instead of null-stepping until the iteration cap.
+- Python count options (`max_iterations`, `stall_window`, `policy_stall_window`,
+  CMA-ES `population_size` and the `step_n` budget) too large for their
+  unsigned C++ field raise `ArgminError` with `dimension_mismatch` instead of
+  wrapping; a `stall_window` of 65545 used to become 9.
+- ISRES no longer reports `ftol_reached` after its first generation when a
+  variable has an infinite bound: the sigma-collapse stop measures an unbounded
+  dimension against the same reference range its initial step size uses.
+- `ccsa_quadratic` in `float` keeps its move box resolvable: the minimum move
+  limit is 3e-4 of the variable range instead of 1e-8, which is below `float`
+  precision at unit scale.
+
 ### Notes
 
 - Every policy plugs into `step_budget_solver<Policy>` and exposes a

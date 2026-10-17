@@ -22,22 +22,23 @@ namespace detail
 // The method bodies exist only to satisfy the solver_policy surface at compile
 // time; nothing ever calls them at runtime, so they are excluded from coverage
 // as provably unreachable -- a concept witness, not a code path.
+template <scalar Scalar = double>
 struct runner_concept_probe_policy
 {
-    using scalar_type = double;
-    struct state_type { Eigen::VectorXd x; };
+    using scalar_type = Scalar;
+    struct state_type { Eigen::VectorX<Scalar> x; };
 
     // LCOV_EXCL_START
-    template <typename Problem, typename Convergence = default_convergence>
-    state_type init(const Problem&, const Eigen::VectorXd& x0,
+    template <typename Problem, typename Convergence = default_convergence<Scalar>>
+    state_type init(const Problem&, const Eigen::VectorX<Scalar>& x0,
                     const solver_options<Convergence>&)
     {
         return state_type{.x = x0};
     }
 
-    step_result<double> step(state_type&) { return {}; }
-    void reset(state_type& s, const Eigen::VectorXd& x0) { s.x = x0; }
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0) { s.x = x0; }
+    step_result<Scalar> step(state_type&) { return {}; }
+    void reset(state_type& s, const Eigen::VectorX<Scalar>& x0) { s.x = x0; }
+    void reset_clear(state_type& s, const Eigen::VectorX<Scalar>& x0) { s.x = x0; }
     // LCOV_EXCL_STOP
 };
 

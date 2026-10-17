@@ -92,13 +92,21 @@ The report lands within ~5 s of the copy. Expected console output:
 ```
 [argmin] NUCLEO-H753ZI on-device allocation proof
 [argmin] blindness canary PASS (deliberate allocation observed)
+[argmin] SystemCoreClock = <hz> Hz
+  [timing] kraft_slsqp hs071 cycles=<n> armed_steps=10 per_step=<n/10>
   [alloc-gate] kraft_slsqp hs071  ... per_step=0.00 ... PASS (zero-alloc gate)
-  [alloc-gate] nw_sqp hs071       ... per_step=0.00 ... PASS (zero-alloc gate)
-  [alloc-gate] filter_nw_sqp hs071 ... per_step=0.00 ... PASS (zero-alloc gate)
-  [alloc-gate] lm rosenbrock_ls   ... per_step=0.00 ... PASS (zero-alloc gate)
+  ...                              (nw_sqp hs071, filter_nw_sqp hs071, lm rosenbrock_ls)
+  [timing] kraft_slsqp hs071 float cycles=<n> armed_steps=10 per_step=<n/10>
+  [alloc-gate] kraft_slsqp hs071 float ... per_step=0.00 ... PASS (zero-alloc gate)
+  ...                              (the same three policies, labels ending in " float")
 [argmin] _sbrk one-time setup high-water = <bytes> bytes (<n> calls)
 [argmin] RT-window gate result: PASS (0 allocs/step on all windows)
 ```
+
+Each window, in `double` and then in `float`, prints a `[timing]` line with
+the DWT cycle count over its ten armed steps, and the core clock is printed
+once so cycles convert to time. Both are recorded, not gated: only the
+allocation lines decide PASS or FAIL.
 
 The blindness canary line is load-bearing: a reported `per_step=0.00` is only
 meaningful because the canary proved the sensor observes a deliberate
@@ -144,6 +152,7 @@ telemetry summary also goes out **UART1** (TX=GPIO17, RX=GPIO16 at 115200).
 the PSRAM CLK/CS lines on **ESP32-WROVER** — confirm the module (silkscreen or
 the boot-log PSRAM line); on a WROVER pick another free GPIO pair
 (`kTelemetryTx`/`kTelemetryRx` in `main/probe_main.cpp`, a config-constant
-change). The `double` solvers are soft-float on the classic ESP32 (single-
-precision HW FPU) — that affects wall-time only, not the allocation count.
+change). The image runs each policy in `double` and in `float`: on the classic
+ESP32 the `double` windows run in software floating point and the `float`
+windows on the hardware single-precision FPU. No timing claims are made here.
 

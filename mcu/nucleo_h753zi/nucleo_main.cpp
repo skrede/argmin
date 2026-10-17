@@ -6,15 +6,15 @@
 //      console (--specs=rdimon.specs),
 //   2. runs the mandatory blindness canary (wrap_malloc.cpp) -- a deliberate
 //      allocation MUST be observed, else the reported zeros are a blind sensor,
-//   3. drives the four RT-claimed policies through their fixed-N steady-state
-//      windows (rt_probe_workload.h), each of which prints its allocs/step via
-//      evaluate_gate, and
+//   3. drives the four RT-claimed policies, in double and then in float, through
+//      their fixed-N steady-state windows (rt_probe_workload.h), each of which
+//      prints its allocs/step via evaluate_gate and its DWT cycle count, and
 //   4. reports the _sbrk one-time-setup high-water bytes.
 //
 // The on-device allocs/step number this prints is captured by the operator
 // (see README.md); the expected result is 0.00/step on every RT window,
-// reproducing the Phase-60 host contract, with the canary proving the sensor
-// is live.
+// matching the host fixed-N zero-allocation contract, with the canary proving
+// the sensor is live. The cycle counts are recorded, never gated.
 //
 // The two macros below must precede any Eigen include (transitively through
 // rt_probe_workload.h -> alloc_counter.h) so the Eigen-native counting sensor
@@ -23,6 +23,8 @@
 #define EIGEN_RUNTIME_NO_MALLOC
 #define eigen_assert(x) \
     do { if(!(x)) ::argmin::detail::bench::on_eigen_malloc(); } while(0)
+
+#include "nucleo_h753zi/dwt_cycle_clock.h"
 
 #include "probe/rt_probe_workload.h"
 
@@ -75,7 +77,11 @@ int main()
                     argmin::mcu::overflow_probe_forced_bytes()),
                 static_cast<unsigned long>(overflow_allocs));
 
-    const int rc = argmin::mcu::run_all_rt_policies();
+    argmin::mcu::dwt_cycle_clock clock;
+    clock.enable();
+    std::printf("[argmin] SystemCoreClock = %lu Hz\n", static_cast<unsigned long>(SystemCoreClock));
+
+    const int rc = argmin::mcu::run_all_rt_policies<double>(clock) | argmin::mcu::run_all_rt_policies<float>(clock);
 
     std::printf("[argmin] _sbrk one-time setup high-water = %lu bytes "
                 "(%lu calls)\n",

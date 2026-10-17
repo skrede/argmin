@@ -91,7 +91,7 @@ TEST_CASE("restarting_policy bit-identity within process", "[restarting_policy][
     // the `restarting_cmaes` summary row at fixed seed: 25 cells
     // shifted final_objective between two consecutive rebuilds at the
     // same SHA, while the directly-driven `cmaes` row was rebuild-stable
-    // because its bench wiring sets cmaes_options.seed explicitly).
+    // because its bench wiring sets options.seed explicitly).
     //
     // The fresh-solver-per-run pattern defeats first-run-cache effects
     // (state-type buffers carrying over within a single solver instance);

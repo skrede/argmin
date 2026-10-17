@@ -188,7 +188,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
 
     // Warmup.
     {
-        argmin::step_budget_solver solver{argmin::cobyla_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::cobyla_policy<>{}, problem, x0, opts};
         solver.solve();
     }
 
@@ -197,7 +197,7 @@ timing bench_argmin(const Problem& problem, std::uint32_t reps)
     std::uint32_t iters = 0;
     for(std::uint32_t r = 0; r < reps; ++r)
     {
-        argmin::step_budget_solver solver{argmin::cobyla_policy{}, problem, x0, opts};
+        argmin::step_budget_solver solver{argmin::cobyla_policy<>{}, problem, x0, opts};
         auto result = solver.solve();
         fval = result.objective_value;
         iters = result.iterations;

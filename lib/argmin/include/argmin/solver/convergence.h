@@ -4,6 +4,8 @@
 #include "argmin/result/step_result.h"
 #include "argmin/result/status.h"
 
+#include "argmin/options/convergence_defaults.h"
+
 #include <array>
 #include <cmath>
 #include <tuple>
@@ -15,8 +17,10 @@
 namespace argmin
 {
 
+template <scalar S = double>
 struct gradient_tolerance_criterion
 {
+    using scalar_type = S;
     // Direct-value literature default (no optional/inertness): a
     // default-constructed criterion is active out of the box.
     //
@@ -30,7 +34,7 @@ struct gradient_tolerance_criterion
     // suite: fires well after L-BFGS-B reaches
     // machine-zero on Rosenbrock and does not trip prematurely on the HS
     // suite's constrained problems.
-    double threshold{1e-5};
+    S threshold{convergence_defaults<S>::gradient_threshold};
 
     // Stationarity is gated on the composite KKT residual (Lagrangian
     // stationarity + primal feasibility + dual feasibility +
@@ -48,18 +52,20 @@ struct gradient_tolerance_criterion
     //            Definition 12.1 (KKT first-order optimality conditions);
     //            eq. 12.34 (Lagrangian stationarity leg of the
     //            composite measure).
-    std::optional<solver_status> check(const step_result<double>& r,
+    std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t /*iteration*/) const
     {
-        const double kkt = r.kkt_residual.value_or(r.gradient_norm);
+        const S kkt = r.kkt_residual.value_or(r.gradient_norm);
         if(kkt < threshold)
             return solver_status::converged;
         return std::nullopt;
     }
 };
 
+template <scalar S = double>
 struct objective_tolerance_criterion
 {
+    using scalar_type = S;
     // Direct-value literature default: 1e-10 matches the ftol convention
     // of Dennis and Schnabel's machine-precision-scaled function-value
     // stopping test (reproduced in N&W 2e Section 2.2), consistent with
@@ -67,10 +73,10 @@ struct objective_tolerance_criterion
     // 1980, "User Guide for MINPACK-1," ANL-80-74) of sqrt(machine
     // epsilon)-to-eps^(2/3) for double precision (eps ~ 2.22e-16).
     // Empirically swept against Rosenbrock/HS.
-    double threshold{1e-10};
+    S threshold{convergence_defaults<S>::objective_threshold};
     // Direct-value literature default: 1e-8 matches N&W 2e Definition
     // 12.1's typical first-order KKT stationarity gate.
-    double stationarity_threshold{1e-8};
+    S stationarity_threshold{convergence_defaults<S>::stationarity_threshold};
     // Primal feasibility is folded directly into r.kkt_residual via the
     // full first-order optimality error composition (stationarity + primal
     // equality + primal inequality + dual feasibility + complementarity).
@@ -86,12 +92,12 @@ struct objective_tolerance_criterion
     // primal-feasibility information). Stationarity is evaluated against
     // kkt_residual (populated by gradient-aware policies) with a fallback
     // to gradient_norm for policies that leave kkt_residual nullopt.
-    std::optional<solver_status> check(const step_result<double>& r,
+    std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t iteration) const
     {
         if(iteration > 1 && std::abs(r.objective_change) < threshold)
         {
-            const double kkt = r.kkt_residual.value_or(r.gradient_norm);
+            const S kkt = r.kkt_residual.value_or(r.gradient_norm);
             if(kkt < stationarity_threshold)
                 return solver_status::ftol_reached;
         }
@@ -99,16 +105,18 @@ struct objective_tolerance_criterion
     }
 };
 
+template <scalar S = double>
 struct step_tolerance_criterion
 {
+    using scalar_type = S;
     // Direct-value literature default: 1e-8 matches the xtol convention
     // of sqrt(machine epsilon) (~1.49e-8 for double precision) used by
     // MINPACK / Dennis and Schnabel-style step-length stopping tests
     // (More, Garbow, Hillstrom 1980, "User Guide for MINPACK-1,"
     // ANL-80-74; N&W 2e Section 2.2). Empirically swept against
     // Rosenbrock/HS.
-    double threshold{1e-8};
-    double feasibility_tolerance{1e-6};
+    S threshold{convergence_defaults<S>::step_threshold};
+    S feasibility_tolerance{convergence_defaults<S>::feasibility_tolerance};
 
     // A null step (step_size == 0 because the policy intentionally made
     // no move -- SQP zero-step degeneracy, trust-region rho contraction,
@@ -132,7 +140,7 @@ struct step_tolerance_criterion
     //
     // Reference: N&W 2e Section 18.4 (SQP convergence analysis);
     //            N&W 2e Section 18.3 (Maratos effect).
-    std::optional<solver_status> check(const step_result<double>& r,
+    std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t iteration) const
     {
         if(r.is_null_step)
@@ -146,17 +154,19 @@ struct step_tolerance_criterion
 };
 
 // Relative function decrease test (N&W 2e Section 2.2; K&W 2e Section 2.3)
+template <scalar S = double>
 struct objective_tolerance_rel_criterion
 {
+    using scalar_type = S;
     // No literature default: this is the NLopt-style ftol_rel override
     // (see slsqp_compatible_convergence below) rather than a member of
     // default_convergence, so it stays optional/inert until the caller
     // opts in via set_objective_threshold_rel(...).
-    std::optional<double> threshold{};
+    std::optional<S> threshold{};
     // Direct-value literature default: 1e-8, matching the absolute
     // objective_tolerance_criterion's stationarity_threshold convention
     // (N&W 2e Definition 12.1).
-    double stationarity_threshold{1e-8};
+    S stationarity_threshold{convergence_defaults<S>::stationarity_threshold};
     // Primal feasibility is folded directly into r.kkt_residual via the
     // full first-order optimality error composition (stationarity + primal
     // equality + primal inequality + dual feasibility + complementarity).
@@ -173,15 +183,15 @@ struct objective_tolerance_rel_criterion
     // evaluated against kkt_residual (populated by gradient-aware
     // policies) with a fallback to gradient_norm for policies that leave
     // kkt_residual nullopt.
-    std::optional<solver_status> check(const step_result<double>& r,
+    std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
             return std::nullopt;
         if(iteration > 1 &&
-           std::abs(r.objective_change) / std::max(std::abs(r.objective_value), 1.0) < *threshold)
+           std::abs(r.objective_change) / std::max(std::abs(r.objective_value), S(1)) < *threshold)
         {
-            const double kkt = r.kkt_residual.value_or(r.gradient_norm);
+            const S kkt = r.kkt_residual.value_or(r.gradient_norm);
             if(kkt < stationarity_threshold)
                 return solver_status::ftol_reached;
         }
@@ -190,10 +200,12 @@ struct objective_tolerance_rel_criterion
 };
 
 // Relative step length test (N&W 2e Section 2.2; K&W 2e Section 2.3)
+template <scalar S = double>
 struct step_tolerance_rel_criterion
 {
-    std::optional<double> threshold{};
-    double feasibility_tolerance{1e-6};
+    using scalar_type = S;
+    std::optional<S> threshold{};
+    S feasibility_tolerance{convergence_defaults<S>::feasibility_tolerance};
 
     // Null steps and infeasible iterates are exempt for the same reasons
     // as in step_tolerance_criterion. See step_tolerance_criterion::check
@@ -203,7 +215,7 @@ struct step_tolerance_rel_criterion
     //
     // Reference: N&W 2e Section 18.4 (SQP convergence analysis);
     //            N&W 2e Section 18.3 (Maratos effect).
-    std::optional<solver_status> check(const step_result<double>& r,
+    std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
@@ -213,7 +225,7 @@ struct step_tolerance_rel_criterion
         if(r.constraint_violation > feasibility_tolerance)
             return std::nullopt;
         if(iteration > 1 &&
-           r.step_size / std::max(r.x_norm, 1.0) < *threshold)
+           r.step_size / std::max(r.x_norm, S(1)) < *threshold)
             return solver_status::xtol_reached;
         return std::nullopt;
     }
@@ -231,14 +243,16 @@ struct step_tolerance_rel_criterion
 // objective alone may appear to oscillate while overall progress stalls.
 //
 // Reference: K&W 2e Section 4.4 (convergence criteria).
+template <scalar S = double>
 struct stall_tolerance_criterion
 {
+    using scalar_type = S;
     // No literature default: stall detection is a window/scale-dependent
     // safety net (auto-enabled per-policy via forward_policy_hints, e.g.
     // the MMA/GCMMA stall_tolerance_threshold option), not a universal
     // stopping test, so it stays optional/inert until a caller or policy
     // opts in.
-    std::optional<double> threshold{};
+    std::optional<S> threshold{};
     std::uint16_t window{50};
     bool track_best_seen_feasible{false};
     // Feasibility floor for the best-seen-feasible metric below. Direct-
@@ -246,9 +260,9 @@ struct stall_tolerance_criterion
     // convention (solver_options::feasibility_tolerance; N&W 2e
     // Definition 12.1), configurable per-criterion instead of a hardcoded
     // local constant.
-    double feasibility_tolerance{1e-6};
+    S feasibility_tolerance{convergence_defaults<S>::feasibility_tolerance};
 
-    std::optional<solver_status> check(const step_result<double>& r,
+    std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
@@ -268,7 +282,7 @@ struct stall_tolerance_criterion
         // approximation family; the globally convergent conservative-convex
         // approximation framework it accompanies is Svanberg 2002 (SIAM J.
         // Optim. 12(2)).
-        double metric;
+        S metric;
         if(track_best_seen_feasible)
         {
             if(r.constraint_violation <= feasibility_tolerance
@@ -285,9 +299,9 @@ struct stall_tolerance_criterion
         if(iteration < effective_window)
             return std::nullopt;
 
-        double old_metric = buffer_[(iteration - effective_window + 1) % max_window];
+        S old_metric = buffer_[(iteration - effective_window + 1) % max_window];
 
-        if(std::abs(metric - old_metric) < *threshold * std::max(std::abs(metric), 1.0))
+        if(std::abs(metric - old_metric) < *threshold * std::max(std::abs(metric), S(1)))
             return solver_status::stalled;
 
         return std::nullopt;
@@ -295,13 +309,14 @@ struct stall_tolerance_criterion
 
 private:
     static constexpr std::uint16_t max_window = 512;
-    mutable std::array<double, max_window> buffer_{};
-    mutable double best_seen_feasible_{std::numeric_limits<double>::infinity()};
+    mutable std::array<S, max_window> buffer_{};
+    mutable S best_seen_feasible_{std::numeric_limits<S>::infinity()};
 };
 
 template <typename... Criteria>
 struct convergence_policy
 {
+    using scalar_type = typename std::tuple_element_t<0, std::tuple<Criteria...>>::scalar_type;
     std::tuple<Criteria...> criteria;
 
     // Per-criterion statuses from the most recent check() call, exposed
@@ -316,7 +331,7 @@ struct convergence_policy
     // terminator. Short-circuit semantics for the return value are
     // preserved; per-criterion outcomes are available via
     // last_check_results(). Reference: K&W 2e Section 4.4.
-    std::optional<solver_status> check(const step_result<double>& r,
+    std::optional<solver_status> check(const step_result<scalar_type>& r,
                                        std::uint32_t iteration) const
     {
         std::size_t idx = 0;
@@ -346,11 +361,11 @@ struct convergence_policy
     }
 };
 
-using default_convergence = convergence_policy<
-    gradient_tolerance_criterion,
-    objective_tolerance_criterion,
-    step_tolerance_criterion,
-    stall_tolerance_criterion
+template <scalar S = double> using default_convergence = convergence_policy<
+    gradient_tolerance_criterion<S>,
+    objective_tolerance_criterion<S>,
+    step_tolerance_criterion<S>,
+    stall_tolerance_criterion<S>
 >;
 
 // NLopt-SLSQP-compatible convergence: matches NLopt's slsqp.c:1140-1220
@@ -366,10 +381,10 @@ using default_convergence = convergence_policy<
 //
 // Reference: K&W 2e Section 4.4 (convergence criteria), N&W 2e Section 2.2
 //            (relative/absolute tolerance tests).
-using slsqp_compatible_convergence = convergence_policy<
-    objective_tolerance_rel_criterion,
-    step_tolerance_rel_criterion,
-    stall_tolerance_criterion
+template <scalar S = double> using slsqp_compatible_convergence = convergence_policy<
+    objective_tolerance_rel_criterion<S>,
+    step_tolerance_rel_criterion<S>,
+    stall_tolerance_criterion<S>
 >;
 
 }

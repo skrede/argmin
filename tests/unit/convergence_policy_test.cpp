@@ -25,7 +25,7 @@ using namespace argmin;
 TEST_CASE("gradient_tolerance_criterion fires on small gradient",
           "[convergence_policy]")
 {
-    gradient_tolerance_criterion c{.threshold = 1e-6};
+    gradient_tolerance_criterion<> c{.threshold = 1e-6};
     step_result<double> r{.gradient_norm = 1e-7};
     auto status = c.check(r, 5);
     REQUIRE(status.has_value());
@@ -39,7 +39,7 @@ TEST_CASE("gradient_tolerance_criterion fires on small gradient",
 TEST_CASE("gradient_tolerance_criterion fires on default-constructed threshold",
           "[convergence_policy]")
 {
-    gradient_tolerance_criterion c{};
+    gradient_tolerance_criterion<> c{};
     step_result<double> r{.gradient_norm = 1e-20};
     auto status = c.check(r, 5);
     REQUIRE(status.has_value());
@@ -49,7 +49,7 @@ TEST_CASE("gradient_tolerance_criterion fires on default-constructed threshold",
 TEST_CASE("gradient_tolerance_criterion does not fire above the default threshold",
           "[convergence_policy]")
 {
-    gradient_tolerance_criterion c{};
+    gradient_tolerance_criterion<> c{};
     step_result<double> r{.gradient_norm = 1.0};
     auto status = c.check(r, 5);
     CHECK(!status.has_value());
@@ -60,7 +60,7 @@ TEST_CASE("gradient_tolerance_criterion does not fire above the default threshol
 TEST_CASE("objective_tolerance_criterion skips iteration 1",
           "[convergence_policy]")
 {
-    objective_tolerance_criterion c{.threshold = 1e-10};
+    objective_tolerance_criterion<> c{.threshold = 1e-10};
     step_result<double> r{.objective_change = 1e-15};
 
     auto status_iter1 = c.check(r, 1);
@@ -76,7 +76,7 @@ TEST_CASE("objective_tolerance_criterion skips iteration 1",
 TEST_CASE("step_tolerance_criterion fires on small step",
           "[convergence_policy]")
 {
-    step_tolerance_criterion c{.threshold = 1e-8};
+    step_tolerance_criterion<> c{.threshold = 1e-8};
     step_result<double> r{.step_size = 1e-9};
 
     auto status_iter1 = c.check(r, 1);
@@ -93,7 +93,7 @@ TEST_CASE("objective_tolerance_rel fires on small relative change",
           "[convergence_policy]")
 {
     // Relative change: |0.005| / max(|100.0|, 1.0) = 5e-5 < 1e-4
-    objective_tolerance_rel_criterion c{.threshold = 1e-4};
+    objective_tolerance_rel_criterion<> c{.threshold = 1e-4};
     step_result<double> r{
         .objective_value = 100.0,
         .objective_change = 0.005,
@@ -108,7 +108,7 @@ TEST_CASE("objective_tolerance_rel does not fire on large relative change",
           "[convergence_policy]")
 {
     // Relative change: |5.0| / max(|100.0|, 1.0) = 0.05 > 1e-4
-    objective_tolerance_rel_criterion c{.threshold = 1e-4};
+    objective_tolerance_rel_criterion<> c{.threshold = 1e-4};
     step_result<double> r{
         .objective_value = 100.0,
         .objective_change = 5.0,
@@ -124,7 +124,7 @@ TEST_CASE("step_tolerance_rel fires on small relative step",
           "[convergence_policy]")
 {
     // Relative step: 1e-9 / max(10.0, 1.0) = 1e-10 < 1e-8
-    step_tolerance_rel_criterion c{.threshold = 1e-8};
+    step_tolerance_rel_criterion<> c{.threshold = 1e-8};
     step_result<double> r{
         .step_size = 1e-9,
         .x_norm = 10.0,
@@ -139,7 +139,7 @@ TEST_CASE("step_tolerance_rel does not fire on large relative step",
           "[convergence_policy]")
 {
     // Relative step: 1.0 / max(10.0, 1.0) = 0.1 > 1e-8
-    step_tolerance_rel_criterion c{.threshold = 1e-8};
+    step_tolerance_rel_criterion<> c{.threshold = 1e-8};
     step_result<double> r{
         .step_size = 1.0,
         .x_norm = 10.0,
@@ -153,11 +153,11 @@ TEST_CASE("step_tolerance_rel does not fire on large relative step",
 
 TEST_CASE("convergence_policy first match wins", "[convergence_policy]")
 {
-    convergence_policy<gradient_tolerance_criterion,
-                       objective_tolerance_criterion> cp{
+    convergence_policy<gradient_tolerance_criterion<>,
+                       objective_tolerance_criterion<>> cp{
         .criteria = {
-            gradient_tolerance_criterion{.threshold = 1e-6},
-            objective_tolerance_criterion{.threshold = 1e-10},
+            gradient_tolerance_criterion<>{.threshold = 1e-6},
+            objective_tolerance_criterion<>{.threshold = 1e-10},
         }
     };
     // Both would fire, but gradient is checked first
@@ -179,9 +179,9 @@ TEST_CASE("convergence_policy first match wins", "[convergence_policy]")
 TEST_CASE("convergence_policy with default thresholds does not fire on large residuals",
           "[convergence_policy]")
 {
-    convergence_policy<gradient_tolerance_criterion,
-                       objective_tolerance_criterion,
-                       step_tolerance_criterion> cp{};
+    convergence_policy<gradient_tolerance_criterion<>,
+                       objective_tolerance_criterion<>,
+                       step_tolerance_criterion<>> cp{};
     step_result<double> r{
         .gradient_norm = 1.0,
         .step_size = 1.0,
@@ -196,8 +196,8 @@ TEST_CASE("convergence_policy with default thresholds does not fire on large res
 TEST_CASE("convergence_policy gradient-only for derivative-free scenario",
           "[convergence_policy]")
 {
-    convergence_policy<gradient_tolerance_criterion> cp{
-        .criteria = {gradient_tolerance_criterion{.threshold = 1e-3}}
+    convergence_policy<gradient_tolerance_criterion<>> cp{
+        .criteria = {gradient_tolerance_criterion<>{.threshold = 1e-3}}
     };
     step_result<double> r_above{.gradient_norm = 1e-2};
     CHECK(!cp.check(r_above, 5).has_value());
@@ -213,7 +213,7 @@ TEST_CASE("convergence_policy gradient-only for derivative-free scenario",
 TEST_CASE("objective_tolerance_criterion stationarity gate blocks when gradient large",
           "[convergence_policy]")
 {
-    objective_tolerance_criterion c{
+    objective_tolerance_criterion<> c{
         .threshold = 1e-10,
         .stationarity_threshold = 1e-6,
     };
@@ -230,7 +230,7 @@ TEST_CASE("objective_tolerance_criterion stationarity gate blocks when gradient 
 TEST_CASE("objective_tolerance_criterion stationarity gate passes when gradient small",
           "[convergence_policy]")
 {
-    objective_tolerance_criterion c{
+    objective_tolerance_criterion<> c{
         .threshold = 1e-10,
         .stationarity_threshold = 1e-6,
     };
@@ -248,7 +248,7 @@ TEST_CASE("objective_tolerance_criterion stationarity gate passes when gradient 
 TEST_CASE("objective_tolerance_criterion stationarity gate uses default when nullopt",
           "[convergence_policy]")
 {
-    objective_tolerance_criterion c{.threshold = 1e-10};
+    objective_tolerance_criterion<> c{.threshold = 1e-10};
 
     // gradient_norm below default gate (1e-8) -- should pass
     step_result<double> r_small{
@@ -273,7 +273,7 @@ TEST_CASE("objective_tolerance_criterion stationarity gate uses default when nul
 TEST_CASE("objective_tolerance_rel_criterion stationarity gate blocks when gradient large",
           "[convergence_policy]")
 {
-    objective_tolerance_rel_criterion c{
+    objective_tolerance_rel_criterion<> c{
         .threshold = 1e-10,
         .stationarity_threshold = 1e-6,
     };
@@ -294,7 +294,7 @@ TEST_CASE("set_objective_threshold propagates stationarity_threshold",
     solver_options<> opts;
     opts.set_objective_threshold(1e-10);
 
-    auto& crit = std::get<objective_tolerance_criterion>(opts.convergence.criteria);
+    auto& crit = std::get<objective_tolerance_criterion<>>(opts.convergence.criteria);
     CHECK(crit.stationarity_threshold == 1e-10);
 }
 
@@ -303,15 +303,15 @@ TEST_CASE("set_objective_threshold propagates stationarity_threshold",
 TEST_CASE("convergence_policy with stationarity gate does not fire on stagnant non-stationary point",
           "[convergence_policy]")
 {
-    default_convergence conv{
+    default_convergence<> conv{
         .criteria = {
-            gradient_tolerance_criterion{.threshold = 1e-6},
-            objective_tolerance_criterion{
+            gradient_tolerance_criterion<>{.threshold = 1e-6},
+            objective_tolerance_criterion<>{
                 .threshold = 1e-10,
                 .stationarity_threshold = 1e-6,
             },
-            step_tolerance_criterion{.threshold = 1e-12},
-            stall_tolerance_criterion{},
+            step_tolerance_criterion<>{.threshold = 1e-12},
+            stall_tolerance_criterion<>{},
         }
     };
 
@@ -337,7 +337,7 @@ TEST_CASE("objective_tolerance_criterion blocks ftol when kkt_residual is large"
     // if objective_change is below threshold.
     //
     // Reference: N&W 2e Definition 12.1 (KKT optimality requires feasibility).
-    objective_tolerance_criterion c{
+    objective_tolerance_criterion<> c{
         .threshold = 1e-10,
         .stationarity_threshold = 1e-4,
     };
@@ -356,7 +356,7 @@ TEST_CASE("objective_tolerance_criterion fires when kkt_residual is small",
 {
     // Counterpart to the block-when-large test: small kkt_residual below the
     // stationarity gate allows ftol_reached to fire.
-    objective_tolerance_criterion c{
+    objective_tolerance_criterion<> c{
         .threshold = 1e-10,
         .stationarity_threshold = 1e-4,
     };
@@ -380,8 +380,8 @@ TEST_CASE("objective_tolerance_criterion fires when kkt_residual is small",
 TEST_CASE("convergence_policy last_check_results captures every criterion",
           "[convergence_policy]")
 {
-    convergence_policy<gradient_tolerance_criterion,
-                       step_tolerance_criterion> policy{};
+    convergence_policy<gradient_tolerance_criterion<>,
+                       step_tolerance_criterion<>> policy{};
     std::get<0>(policy.criteria).threshold = 1e-6;
     std::get<1>(policy.criteria).threshold = 1e-6;
 
@@ -407,8 +407,8 @@ TEST_CASE("convergence_policy last_check_results captures every criterion",
 TEST_CASE("convergence_policy reports first-firing criterion as status",
           "[convergence_policy]")
 {
-    convergence_policy<gradient_tolerance_criterion,
-                       step_tolerance_criterion> policy{};
+    convergence_policy<gradient_tolerance_criterion<>,
+                       step_tolerance_criterion<>> policy{};
     std::get<0>(policy.criteria).threshold = 1e-6;
     std::get<1>(policy.criteria).threshold = 1e-6;
 
@@ -432,8 +432,8 @@ TEST_CASE("convergence_policy reports first-firing criterion as status",
 TEST_CASE("convergence_policy last_check_results reports mid-tuple fire when earlier criterion disabled",
           "[convergence_policy]")
 {
-    convergence_policy<gradient_tolerance_criterion,
-                       step_tolerance_criterion> policy{};
+    convergence_policy<gradient_tolerance_criterion<>,
+                       step_tolerance_criterion<>> policy{};
     // Gradient criterion left at its direct-value default (1e-5); the
     // step_result below (gradient_norm = 1.0) is well above that default,
     // so it still does not fire.
@@ -462,7 +462,7 @@ TEST_CASE("convergence_policy last_check_results reports mid-tuple fire when ear
 TEST_CASE("slsqp_compatible_convergence fires on relative ftol at iteration >= 2",
           "[convergence_policy]")
 {
-    slsqp_compatible_convergence policy{};
+    slsqp_compatible_convergence<> policy{};
     std::get<0>(policy.criteria).threshold = 1e-10;
     std::get<0>(policy.criteria).stationarity_threshold = 1.0;
 
@@ -489,7 +489,7 @@ TEST_CASE("slsqp_compatible_convergence fires on relative ftol at iteration >= 2
 TEST_CASE("slsqp_compatible_convergence fires on relative xtol at iteration >= 2",
           "[convergence_policy]")
 {
-    slsqp_compatible_convergence policy{};
+    slsqp_compatible_convergence<> policy{};
     std::get<1>(policy.criteria).threshold = 1e-10;
 
     step_result<double> r{};
@@ -515,7 +515,7 @@ TEST_CASE("slsqp_compatible_convergence fires on relative xtol at iteration >= 2
 TEST_CASE("slsqp_compatible_convergence does not carry a gradient_tolerance slot",
           "[convergence_policy]")
 {
-    slsqp_compatible_convergence policy{};
+    slsqp_compatible_convergence<> policy{};
 
     // Compile-time guarantee that no gradient_tolerance_criterion is in
     // the tuple: std::get<gradient_tolerance_criterion>(policy.criteria)

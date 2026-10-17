@@ -25,6 +25,7 @@
 #include "argmin/detail/trust_region.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/options/trust_region_options.h"
+#include "argmin/options/derivative_free_defaults.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
@@ -91,21 +92,21 @@ Eigen::Matrix<Scalar, N, N> build_explicit_hessian(
     return H;
 }
 
-template <int N = dynamic_dimension>
+template <scalar Scalar = double, int N = dynamic_dimension>
 struct bobyqa_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
 
     template <int M>
-    using rebind = bobyqa_policy<M>;
+    using rebind = bobyqa_policy<Scalar, M>;
 
     struct options_type
     {
-        std::optional<double> initial_trust_radius{};             // default: auto, 10% of max bound range (Powell 2009)
-        std::optional<double> final_trust_radius{};               // default: 1e-8, stopping criterion on delta (Powell 2009)
-        trust_region_options trust{};                              // Embedded trust region params
+        std::optional<Scalar> initial_trust_radius{};             // default: auto, 10% of max bound range (Powell 2009)
+        std::optional<Scalar> final_trust_radius{};               // default: 1e-8 in double, stopping criterion on delta (Powell 2009)
+        trust_region_options<Scalar> trust{};                     // Embedded trust region params
         std::uint16_t stall_window{200};
-        double feasibility_gate{std::numeric_limits<double>::infinity()};
+        Scalar feasibility_gate{std::numeric_limits<Scalar>::infinity()};
     };
 
     options_type options{};
@@ -114,20 +115,21 @@ struct bobyqa_policy
     struct state_type
     {
         const P* problem{nullptr};
-        Eigen::Vector<double, N> x;
-        Eigen::Vector<double, N> lower;
-        Eigen::Vector<double, N> upper;
-        Eigen::Vector<double, N> scale;          // scale[i] = normalized bound range (Powell 2009, PRELIM)
-        Eigen::Vector<double, N> x_scaled;       // x in scaled space: x_scaled[i] = x[i] / scale[i]
-        Eigen::Vector<double, N> lower_scaled;   // lower[i] / scale[i]
-        Eigen::Vector<double, N> upper_scaled;   // upper[i] / scale[i]
-        double objective_value{};
-        detail::interpolation_system<double, N> sys;  // BMAT/ZMAT factored interpolation system
-        double delta{};
-        double delta_max{};
-        double final_trust_radius{1e-8};
-        double rho{};       // Current minimum trust radius (contracts toward rho_end)
-        double rho_end{};   // Final rho target (= final_trust_radius)
+        Eigen::Vector<Scalar, N> x;
+        Eigen::Vector<Scalar, N> lower;
+        Eigen::Vector<Scalar, N> upper;
+        Eigen::Vector<Scalar, N> scale;          // scale[i] = normalized bound range (Powell 2009, PRELIM)
+        Eigen::Vector<Scalar, N> x_scaled;       // x in scaled space: x_scaled[i] = x[i] / scale[i]
+        Eigen::Vector<Scalar, N> lower_scaled;   // lower[i] / scale[i]
+        Eigen::Vector<Scalar, N> upper_scaled;   // upper[i] / scale[i]
+        Scalar objective_value{};
+        detail::interpolation_system<Scalar, N> sys;  // BMAT/ZMAT factored interpolation system
+        Scalar delta{};
+        Scalar delta_max{};
+        Scalar initial_radius{};
+        Scalar final_trust_radius{derivative_free_defaults<Scalar>::final_trust_radius};
+        Scalar rho{};       // Current minimum trust radius (contracts toward rho_end)
+        Scalar rho_end{};   // Final rho target (= final_trust_radius)
         std::uint32_t iteration{0};
         std::uint16_t rescue_counter{0};  // Consecutive rho contractions without improvement (Powell 2009, RESCUE)
         bool last_improved{false};       // Whether the previous step improved the objective
@@ -169,10 +171,10 @@ struct bobyqa_policy
         // the least-Frobenius-norm interpolant to shed accumulated Hessian error.
         int itest{0};
         std::uint32_t nevals_reported{0};
-        double diffa{0.0};
-        double diffb{0.0};
-        double diffc{0.0};
-        double xoptsq{0.0};
+        Scalar diffa{Scalar(0.0)};
+        Scalar diffb{Scalar(0.0)};
+        Scalar diffc{Scalar(0.0)};
+        Scalar xoptsq{Scalar(0.0)};
 
         // Diagnostic: number of short-step trials whose objective evaluation was
         // deferred (dnorm < 0.5*rho, ntrits = -1). Each such trial is NOT passed
@@ -185,26 +187,26 @@ struct bobyqa_policy
     // finite bound range: rhobeg <= 0.5 * min_i (upper_i - lower_i). This is
     // the precondition that lets the 2n bootstrap perturbations stay inside
     // the box on every finite-bounded coordinate.
-    static double clamp_radius_to_bounds(double h,
-                                         const Eigen::Vector<double, N>& lower_scaled,
-                                         const Eigen::Vector<double, N>& upper_scaled)
+    static Scalar clamp_radius_to_bounds(Scalar h,
+                                         const Eigen::Vector<Scalar, N>& lower_scaled,
+                                         const Eigen::Vector<Scalar, N>& upper_scaled)
     {
         const int n = static_cast<int>(lower_scaled.size());
         for(int i = 0; i < n; ++i)
         {
-            double range_i = upper_scaled[i] - lower_scaled[i];
-            if(std::isfinite(range_i) && range_i < 2.0 * h)
-                h = 0.5 * range_i;
+            Scalar range_i = upper_scaled[i] - lower_scaled[i];
+            if(std::isfinite(range_i) && range_i < Scalar(2.0) * h)
+                h = Scalar(0.5) * range_i;
         }
-        return (h > 0.0) ? h : 1.0;
+        return (h > Scalar(0.0)) ? h : Scalar(1.0);
     }
 
     // Move x0 at least h inside every finite bound. Unbounded coordinates are
     // left untouched. After this, x0 +/- h stays within [lower, upper] on all
     // finite-bounded coordinates.
-    static void shift_inside_bounds(Eigen::Vector<double, N>& x_scaled, double h,
-                                    const Eigen::Vector<double, N>& lower_scaled,
-                                    const Eigen::Vector<double, N>& upper_scaled)
+    static void shift_inside_bounds(Eigen::Vector<Scalar, N>& x_scaled, Scalar h,
+                                    const Eigen::Vector<Scalar, N>& lower_scaled,
+                                    const Eigen::Vector<Scalar, N>& upper_scaled)
     {
         const int n = static_cast<int>(x_scaled.size());
         for(int i = 0; i < n; ++i)
@@ -217,19 +219,19 @@ struct bobyqa_policy
     }
 
     template <typename Problem, typename Convergence>
-        requires objective<Problem> && bound_constrained<Problem>
+        requires objective<Problem, Scalar> && bound_constrained<Problem, Scalar>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
+                    const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
         return init(problem, x0, opts);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
-        requires objective<Problem> && bound_constrained<Problem>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
+        requires objective<Problem, Scalar> && bound_constrained<Problem, Scalar>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
+                    const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
@@ -253,28 +255,28 @@ struct bobyqa_policy
         // with the widest bounded variable after normalization rather than
         // being suppressed.
         s.scale.resize(n);
-        double ref_range = 0.0;
+        Scalar ref_range = Scalar(0.0);
         for(int i = 0; i < n; ++i)
         {
-            double range = s.upper[i] - s.lower[i];
+            Scalar range = s.upper[i] - s.lower[i];
             if(std::isfinite(range) && range > ref_range)
                 ref_range = range;
         }
-        if(ref_range <= 0.0)
-            ref_range = 1.0;
+        if(ref_range <= Scalar(0.0))
+            ref_range = Scalar(1.0);
         for(int i = 0; i < n; ++i)
         {
-            double range = s.upper[i] - s.lower[i];
+            Scalar range = s.upper[i] - s.lower[i];
             s.scale[i] = std::isfinite(range) ? range : ref_range;
         }
-        double max_scale = s.scale.maxCoeff();
-        if(max_scale > 0.0)
+        Scalar max_scale = s.scale.maxCoeff();
+        if(max_scale > Scalar(0.0))
             s.scale /= max_scale;
         // Guard against zero-range dimensions (lower == upper)
         for(int i = 0; i < n; ++i)
         {
-            if(s.scale[i] < 1e-15)
-                s.scale[i] = 1.0;
+            if(s.scale[i] < derivative_free_defaults<Scalar>::scale_guard)
+                s.scale[i] = Scalar(1.0);
         }
 
         // Transform bounds to scaled space
@@ -293,20 +295,20 @@ struct bobyqa_policy
         s.m = 2 * n + 1;
 
         // Final trust radius
-        s.final_trust_radius = options.final_trust_radius.value_or(1e-8);
+        s.final_trust_radius = options.final_trust_radius.value_or(derivative_free_defaults<Scalar>::final_trust_radius);
 
         // Initial trust-region radius in SCALED space (Powell 2009).
-        double h = options.initial_trust_radius.value_or(0.0);
-        if(h <= 0.0)
+        Scalar h = options.initial_trust_radius.value_or(Scalar(0.0));
+        if(h <= Scalar(0.0))
         {
-            double max_range = 0.0;
+            Scalar max_range = Scalar(0.0);
             for(int i = 0; i < n; ++i)
             {
-                double range_i = s.upper_scaled[i] - s.lower_scaled[i];
+                Scalar range_i = s.upper_scaled[i] - s.lower_scaled[i];
                 if(std::isfinite(range_i))
                     max_range = std::max(max_range, range_i);
             }
-            h = (max_range > 0.0) ? 0.1 * max_range : 1.0;
+            h = (max_range > Scalar(0.0)) ? Scalar(0.1) * max_range : Scalar(1.0);
         }
 
         // Bound-safety repair (core BOBYQA guarantee: the objective is NEVER
@@ -320,8 +322,9 @@ struct bobyqa_policy
         shift_inside_bounds(s.x_scaled, h, s.lower_scaled, s.upper_scaled);
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
 
+        s.initial_radius = h;
         s.delta = h;
-        s.delta_max = 10.0 * h;
+        s.delta_max = Scalar(10.0) * h;
 
         // Bootstrap the BMAT/ZMAT interpolation system.
         // The bootstrap evaluates f at 2n+1 coordinate-perturbation points
@@ -330,9 +333,9 @@ struct bobyqa_policy
         // Reference: Powell 2009, Section 2.
         //   Adapted from NLopt prelim_() lines 1710-1950.
         //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L1710
-        s.sys = detail::bootstrap_interpolation_system<double, N>(
+        s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
             s.x_scaled, h, s.lower_scaled, s.upper_scaled,
-            [&](const Eigen::Vector<double, N>& x_sc) {
+            [&](const Eigen::Vector<Scalar, N>& x_sc) {
                 return s.problem->value(
                     (x_sc.array() * s.scale.array()).matrix());
             });
@@ -345,32 +348,38 @@ struct bobyqa_policy
         s.initialized = true;
         s.iteration = 0;
 
-        // Powell 2009, Section 5: two-radius rho contraction scheme.
-        s.rho = s.delta;
         s.rho_end = s.final_trust_radius;
+        seed_driver(s);
 
-        // Seed the ntrits driver state. The bootstrap has evaluated the 2n+1
-        // interpolation points, so nevals starts there (matching the reference
-        // counter, which includes PRELIM). nfsav/nresc start at the same count.
+        return s;
+    }
+
+    // Seed the ntrits driver state after a bootstrap. Powell 2009, Section 5:
+    // rho starts at the bootstrap radius. The bootstrap has evaluated the 2n+1
+    // interpolation points, so nevals starts there (matching the reference
+    // counter, which includes PRELIM). nfsav/nresc start at the same count.
+    template <typename P>
+    static void seed_driver(state_type<P>& s)
+    {
+        s.rho = s.delta;
         s.nevals = s.m;
         s.nevals_reported = 0;
         s.nfsav = s.m;
         s.nresc = s.m;
         s.ntrits = 0;
-        s.diffa = 0.0;
-        s.diffb = 0.0;
-        s.diffc = 0.0;
+        s.itest = 0;
+        s.diffa = Scalar(0.0);
+        s.diffb = Scalar(0.0);
+        s.diffc = Scalar(0.0);
         s.xoptsq = s.sys.xopt.squaredNorm();
-
-        return s;
     }
 
     // Diagonal element of the ZMAT-factored H block: hdiag_k = sum_jj zmat(k,jj)^2.
     // This is Powell's alpha for point k (bobyqb_ lines 2503-2510).
     template <typename Sys>
-    static double zmat_hdiag(const Sys& sys, int k, int nptm)
+    static Scalar zmat_hdiag(const Sys& sys, int k, int nptm)
     {
-        double h = 0.0;
+        Scalar h = Scalar(0.0);
         for(int jj = 0; jj < nptm; ++jj)
             h += sys.zmat(k, jj) * sys.zmat(k, jj);
         return h;
@@ -380,7 +389,7 @@ struct bobyqa_policy
     struct replacement_choice
     {
         int knew{0};        // index of the point to delete
-        double denom{0.0};  // the chosen update denominator
+        Scalar denom{Scalar(0.0)};  // the chosen update denominator
         bool refuse{true};  // true when the denominator is roundoff-collapsed
     };
 
@@ -400,25 +409,25 @@ struct bobyqa_policy
     // pre-evaluation selection, or xnew for the post-evaluation recompute.
     template <typename Sys, typename VlagVec>
     static replacement_choice select_replacement_relative(
-        const Sys& sys, const VlagVec& vlag, double beta, double delta,
-        const Eigen::Vector<double, N>& ref_point)
+        const Sys& sys, const VlagVec& vlag, Scalar beta, Scalar delta,
+        const Eigen::Vector<Scalar, N>& ref_point)
     {
         const int nn = static_cast<int>(sys.xbase.size());
         const int mm = sys.m_points;
         const int nptm = mm - nn - 1;
-        const double delsq = delta * delta;
+        const Scalar delsq = delta * delta;
 
         replacement_choice c;
-        double scaden = 0.0;
-        double biglsq = 0.0;
+        Scalar scaden = Scalar(0.0);
+        Scalar biglsq = Scalar(0.0);
         for(int k = 0; k < mm; ++k)
         {
             if(k == sys.kopt) continue;
-            double hdiag = zmat_hdiag(sys, k, nptm);
-            double den = beta * hdiag + vlag[k] * vlag[k];
-            double distsq = (sys.xpt.col(k).head(nn) - ref_point).squaredNorm();
-            double ratio_sq = distsq / delsq;
-            double temp = std::max(1.0, ratio_sq * ratio_sq);
+            Scalar hdiag = zmat_hdiag(sys, k, nptm);
+            Scalar den = beta * hdiag + vlag[k] * vlag[k];
+            Scalar distsq = (sys.xpt.col(k).head(nn) - ref_point).squaredNorm();
+            Scalar ratio_sq = distsq / delsq;
+            Scalar temp = std::max(Scalar(1.0), ratio_sq * ratio_sq);
             if(temp * den > scaden)
             {
                 scaden = temp * den;
@@ -427,15 +436,15 @@ struct bobyqa_policy
             }
             biglsq = std::max(biglsq, temp * vlag[k] * vlag[k]);
         }
-        c.refuse = (scaden <= 0.5 * biglsq);
+        c.refuse = (scaden <= Scalar(0.5) * biglsq);
         return c;
     }
 
     // Outcome of the least-Frobenius-norm model-reset test.
     struct frobenius_reset_result
     {
-        double gqsq{0.0};        // projected magnitude of the current model gradient
-        double gisq{0.0};        // projected magnitude of the interpolant gradient
+        Scalar gqsq{Scalar(0.0)};        // projected magnitude of the current model gradient
+        Scalar gisq{Scalar(0.0)};        // projected magnitude of the interpolant gradient
         bool reset_applied{false};  // whether gopt/pq/hq were replaced this call
     };
 
@@ -455,26 +464,24 @@ struct bobyqa_policy
     // are the bound offsets lower_scaled - xbase and upper_scaled - xbase.
     template <typename Sys>
     static frobenius_reset_result frobenius_model_reset(
-        Sys& sys, const Eigen::Vector<double, N>& sl,
-        const Eigen::Vector<double, N>& su, int& itest)
+        Sys& sys, const Eigen::Vector<Scalar, N>& sl,
+        const Eigen::Vector<Scalar, N>& su, int& itest)
     {
         const int n = static_cast<int>(sys.xbase.size());
         const int mm = sys.m_points;
         const int nptm = mm - n - 1;
 
         using vec_m =
-            Eigen::Vector<double, Sys::MaxM>;
+            Eigen::Vector<Scalar, Sys::MaxM>;
 
         vec_m lfvlag(mm);   // fval[k] - fval[kopt]
         vec_m w(mm);        // least-Frobenius-norm pq weights
+        w.setZero();
         for(int k = 0; k < mm; ++k)
-        {
             lfvlag[k] = sys.fval[k] - sys.fval[sys.kopt];
-            w[k] = 0.0;
-        }
         for(int j = 0; j < nptm; ++j)
         {
-            double sum = 0.0;
+            Scalar sum = Scalar(0.0);
             for(int k = 0; k < mm; ++k)
                 sum += sys.zmat(k, j) * lfvlag[k];
             for(int k = 0; k < mm; ++k)
@@ -485,29 +492,29 @@ struct bobyqa_policy
         vec_m wscaled(mm);  // (xpt_k . xopt) * pq_k for the gradient sum
         for(int k = 0; k < mm; ++k)
         {
-            double sum = sys.xpt.col(k).head(n).dot(sys.xopt);
+            Scalar sum = sys.xpt.col(k).head(n).dot(sys.xopt);
             wpq[k] = w[k];
             wscaled[k] = sum * w[k];
         }
 
-        Eigen::Vector<double, N> gi(n);  // interpolant gradient at xopt
+        Eigen::Vector<Scalar, N> gi(n);  // interpolant gradient at xopt
         frobenius_reset_result r;
         for(int i = 0; i < n; ++i)
         {
-            double sum = 0.0;
+            Scalar sum = Scalar(0.0);
             for(int k = 0; k < mm; ++k)
                 sum += sys.bmat(k, i) * lfvlag[k] + sys.xpt(i, k) * wscaled[k];
             if(sys.xopt[i] == sl[i])
             {
-                double gq = std::min(0.0, sys.gopt[i]);
-                double gc = std::min(0.0, sum);
+                Scalar gq = std::min(Scalar(0.0), sys.gopt[i]);
+                Scalar gc = std::min(Scalar(0.0), sum);
                 r.gqsq += gq * gq;
                 r.gisq += gc * gc;
             }
             else if(sys.xopt[i] == su[i])
             {
-                double gq = std::max(0.0, sys.gopt[i]);
-                double gc = std::max(0.0, sum);
+                Scalar gq = std::max(Scalar(0.0), sys.gopt[i]);
+                Scalar gc = std::max(Scalar(0.0), sum);
                 r.gqsq += gq * gq;
                 r.gisq += gc * gc;
             }
@@ -520,7 +527,7 @@ struct bobyqa_policy
         }
 
         ++itest;
-        if(r.gqsq < 10.0 * r.gisq)
+        if(r.gqsq < Scalar(10.0) * r.gisq)
             itest = 0;
         if(itest >= 3)
         {
@@ -530,7 +537,7 @@ struct bobyqa_policy
                 sys.pq[k] = wpq[k];
             const int nh = n * (n + 1) / 2;
             for(int i = 0; i < nh; ++i)
-                sys.hq[i] = 0.0;
+                sys.hq[i] = Scalar(0.0);
             itest = 0;
             r.reset_applied = true;
         }
@@ -558,11 +565,11 @@ struct bobyqa_policy
     //   Ported statement-for-statement from NLopt bobyqb_ lines 2100-3053.
     //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L2100
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
         const int nptm = s.m - n - 1;
-        const double old_incumbent_f = s.objective_value;
+        const Scalar old_incumbent_f = s.objective_value;
 
         // Machine labels (the bobyqb_ goto targets, reified as a state variable).
         enum class label { l60, l90, l210, l230, l360, l650, l680 };
@@ -570,13 +577,13 @@ struct bobyqa_policy
         // Evaluate the objective at a trial point given in shifted coordinates
         // (relative to xbase), clamping into the box so the objective is never
         // probed outside [xl, xu]. Returns {f, x in scaled-absolute coords}.
-        auto eval_shifted = [&](const Eigen::Vector<double, N>& xn)
-            -> std::pair<double, Eigen::Vector<double, N>>
+        auto eval_shifted = [&](const Eigen::Vector<Scalar, N>& xn)
+            -> std::pair<Scalar, Eigen::Vector<Scalar, N>>
         {
-            Eigen::Vector<double, N> xabs = detail::project(
+            Eigen::Vector<Scalar, N> xabs = detail::project(
                 (s.sys.xbase + xn).eval(), s.lower_scaled, s.upper_scaled);
-            Eigen::Vector<double, N> xorig = (xabs.array() * s.scale.array()).matrix();
-            double f = s.problem->value(xorig);
+            Eigen::Vector<Scalar, N> xorig = (xabs.array() * s.scale.array()).matrix();
+            Scalar f = s.problem->value(xorig);
             ++s.nevals;
             return {f, xabs};
         };
@@ -587,13 +594,13 @@ struct bobyqa_policy
         // behind the factorization); the rebuild's 2n+1 evaluations are counted.
         auto do_rescue = [&]()
         {
-            double h = s.rho;
-            Eigen::Vector<double, N> xb = s.sys.xbase + s.sys.xopt;
+            Scalar h = s.rho;
+            Eigen::Vector<Scalar, N> xb = s.sys.xbase + s.sys.xopt;
             h = clamp_radius_to_bounds(h, s.lower_scaled, s.upper_scaled);
             shift_inside_bounds(xb, h, s.lower_scaled, s.upper_scaled);
-            s.sys = detail::bootstrap_interpolation_system<double, N>(
+            s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
                 xb, h, s.lower_scaled, s.upper_scaled,
-                [&](const Eigen::Vector<double, N>& x_sc) {
+                [&](const Eigen::Vector<Scalar, N>& x_sc) {
                     return s.problem->value((x_sc.array() * s.scale.array()).matrix());
                 });
             s.nevals += s.m;
@@ -605,13 +612,13 @@ struct bobyqa_policy
 
         // Within-iteration locals (never persist across calls -- each call
         // resumes at L60, the top of a fresh trust-region iteration).
-        Eigen::Vector<double, N> d, xnew, gnew;
-        Eigen::Vector<double, N> zero_d = Eigen::Vector<double, N>::Zero(n);
-        Eigen::Vector<double, detail::interpolation_system<double, N>::MaxMpN> vlag;
-        double dsq = 0.0, dnorm = 0.0, adelt = 0.0, ratio = 0.0;
-        double beta = 0.0, denom = 0.0, vquad = 0.0, alpha = 0.0;
-        double geo_distsq = 0.0;
-        double last_eval_dnorm = 0.0;
+        Eigen::Vector<Scalar, N> d, xnew, gnew;
+        Eigen::Vector<Scalar, N> zero_d = Eigen::Vector<Scalar, N>::Zero(n);
+        Eigen::Vector<Scalar, detail::interpolation_system<Scalar, N>::MaxMpN> vlag;
+        Scalar dsq = Scalar(0.0), dnorm = Scalar(0.0), adelt = Scalar(0.0), ratio = Scalar(0.0);
+        Scalar beta = Scalar(0.0), denom = Scalar(0.0), vquad = Scalar(0.0), alpha = Scalar(0.0);
+        Scalar geo_distsq = Scalar(0.0);
+        Scalar last_eval_dnorm = Scalar(0.0);
         int knew = -1;
 
         bool did_eval = false;
@@ -621,8 +628,8 @@ struct bobyqa_policy
         // point Powell reports outside the factored model, and only when it
         // strictly improves on the model's best node (bobyqb_ lines 2582-2586).
         bool deferred_improved = false;
-        double deferred_f = 0.0;
-        Eigen::Vector<double, N> deferred_xabs;
+        Scalar deferred_f = Scalar(0.0);
+        Eigen::Vector<Scalar, N> deferred_xabs;
 
         label loc = label::l60;
         int safety = 0;
@@ -656,22 +663,22 @@ struct bobyqa_policy
             {
                 // Generate the trust-region step (TRSBOX) that minimizes the
                 // model subject to the trust radius and the box.
-                Eigen::Vector<double, N> mg = detail::model_gradient_at(s.sys, zero_d);
-                Eigen::Matrix<double, N, N> H = build_explicit_hessian<double, N>(s.sys);
-                Eigen::Vector<double, N> x_opt_abs = s.sys.xbase + s.sys.xopt;
+                Eigen::Vector<Scalar, N> mg = detail::model_gradient_at(s.sys, zero_d);
+                Eigen::Matrix<Scalar, N, N> H = build_explicit_hessian<Scalar, N>(s.sys);
+                Eigen::Vector<Scalar, N> x_opt_abs = s.sys.xbase + s.sys.xopt;
                 d = detail::solve_trust_region_box(
                     mg, H, x_opt_abs, s.delta, s.lower_scaled, s.upper_scaled);
                 dsq = d.squaredNorm();
                 dnorm = std::min(s.delta, std::sqrt(dsq));
 
-                if(dnorm < 0.5 * s.rho)
+                if(dnorm < Scalar(0.5) * s.rho)
                 {
                     // Short step: defer the evaluation (bobyqb_ L60, lines
                     // 2157-2206). Route to a geometry refresh (L650) or a rho
                     // reduction (L680) instead of evaluating this trial.
                     s.ntrits = -1;
                     ++s.short_step_count;
-                    geo_distsq = (10.0 * s.rho) * (10.0 * s.rho);
+                    geo_distsq = (Scalar(10.0) * s.rho) * (Scalar(10.0) * s.rho);
 
                     bool go_650 = false;
                     if(s.nevals <= s.nfsav + 2)
@@ -682,16 +689,16 @@ struct bobyqa_policy
                     }
                     else
                     {
-                        double errbig = std::max({s.diffa, s.diffb, s.diffc});
-                        double frhosq = 0.125 * s.rho * s.rho;
+                        Scalar errbig = std::max({s.diffa, s.diffb, s.diffc});
+                        Scalar frhosq = Scalar(0.125) * s.rho * s.rho;
                         // crvmin is avoided: use the policy-visible minimum
                         // diagonal model curvature as the errbig-test proxy
                         // (the same per-coordinate curvature the bdtol loop
                         // below uses). Keeps the port confined to the policy.
-                        double crvmin = std::numeric_limits<double>::infinity();
+                        Scalar crvmin = std::numeric_limits<Scalar>::infinity();
                         for(int j = 0; j < n; ++j)
                             crvmin = std::min(crvmin, H(j, j));
-                        if(crvmin > 0.0 && errbig > frhosq * crvmin)
+                        if(crvmin > Scalar(0.0) && errbig > frhosq * crvmin)
                         {
                             go_650 = true;
                         }
@@ -701,10 +708,10 @@ struct bobyqa_policy
                             // lines 2179-2204): would freeing a bound-active
                             // coordinate, plus its curvature over rho, still
                             // predict improvement?
-                            double bdtol = errbig / s.rho;
+                            Scalar bdtol = errbig / s.rho;
                             gnew = detail::model_gradient_at(s.sys, d);
-                            Eigen::Vector<double, N> sl = s.lower_scaled - s.sys.xbase;
-                            Eigen::Vector<double, N> su = s.upper_scaled - s.sys.xbase;
+                            Eigen::Vector<Scalar, N> sl = s.lower_scaled - s.sys.xbase;
+                            Eigen::Vector<Scalar, N> su = s.upper_scaled - s.sys.xbase;
                             xnew = s.sys.xopt + d;
                             // The reference's TRSBOX returns a bound-active
                             // component bitwise equal to sl/su via
@@ -721,15 +728,15 @@ struct bobyqa_policy
                             // the test; the evaluated step is rebuilt below).
                             for(int j = 0; j < n; ++j)
                             {
-                                double bscale = std::max({1.0, std::abs(sl[j]),
+                                Scalar bscale = std::max({Scalar(1.0), std::abs(sl[j]),
                                                           std::abs(su[j]),
                                                           std::abs(xnew[j])});
                                 // An eps-scale relative tolerance (8 ULP against
                                 // the coordinate magnitude); empirically the
                                 // detection is insensitive to this factor across
                                 // several orders of magnitude.
-                                double snap_tol =
-                                    8.0 * std::numeric_limits<double>::epsilon()
+                                Scalar snap_tol =
+                                    Scalar(8.0) * std::numeric_limits<Scalar>::epsilon()
                                     * bscale;
                                 if(std::abs(xnew[j] - sl[j]) <= snap_tol)
                                     xnew[j] = sl[j];
@@ -738,12 +745,12 @@ struct bobyqa_policy
                             }
                             for(int j = 0; j < n; ++j)
                             {
-                                double bdtest = bdtol;
+                                Scalar bdtest = bdtol;
                                 if(xnew[j] == sl[j]) bdtest = gnew[j];
                                 if(xnew[j] == su[j]) bdtest = -gnew[j];
                                 if(bdtest < bdtol)
                                 {
-                                    bdtest += 0.5 * H(j, j) * s.rho;
+                                    bdtest += Scalar(0.5) * H(j, j) * s.rho;
                                     if(bdtest < bdtol)
                                     {
                                         go_650 = true;
@@ -779,10 +786,10 @@ struct bobyqa_policy
                 // the sl -= xopt / su -= xopt bookkeeping is automatic. The
                 // displacement d is invariant under the shift, so the trial
                 // point in the new frame is simply xopt(=0) + d.
-                if(dsq <= s.xoptsq * 1e-3)
+                if(dsq <= s.xoptsq * Scalar(1e-3))
                 {
                     detail::shift_xbase(s.sys);
-                    s.xoptsq = 0.0;
+                    s.xoptsq = Scalar(0.0);
                 }
                 xnew = s.sys.xopt + d;
                 loc = (s.ntrits == 0) ? label::l210 : label::l230;
@@ -792,10 +799,10 @@ struct bobyqa_policy
             case label::l210:
             {
                 // ALTMOV geometry step for the KNEW-th point (chosen at L650).
-                Eigen::Vector<double, N> geo = detail::altmov_geometry_step<double, N>(
+                Eigen::Vector<Scalar, N> geo = detail::altmov_geometry_step<Scalar, N>(
                     s.sys, knew, adelt, s.lower_scaled - s.sys.xbase,
                     s.upper_scaled - s.sys.xbase);
-                Eigen::Vector<double, N> geo_abs = detail::project(
+                Eigen::Vector<Scalar, N> geo_abs = detail::project(
                     (s.sys.xbase + geo).eval(), s.lower_scaled, s.upper_scaled);
                 xnew = geo_abs - s.sys.xbase;
                 d = xnew - s.sys.xopt;
@@ -816,7 +823,7 @@ struct bobyqa_policy
                     // (bobyqb_ line 2477).
                     alpha = zmat_hdiag(s.sys, knew, nptm);
                     denom = detail::compute_denom(vlag[knew], alpha, beta);
-                    if(denom <= 0.5 * vlag[knew] * vlag[knew])
+                    if(denom <= Scalar(0.5) * vlag[knew] * vlag[knew])
                     {
                         if(s.nevals > s.nresc) { do_rescue(); loc = label::l60; break; }
                         terminated = true;
@@ -871,9 +878,9 @@ struct bobyqa_policy
                     break;
                 }
 
-                const double old_fopt = s.sys.fval[s.sys.kopt];
+                const Scalar old_fopt = s.sys.fval[s.sys.kopt];
                 vquad = detail::evaluate_interpolation_model(s.sys, d);
-                double diff = f - old_fopt - vquad;
+                Scalar diff = f - old_fopt - vquad;
                 s.diffc = s.diffb;
                 s.diffb = s.diffa;
                 s.diffa = std::abs(diff);
@@ -882,7 +889,7 @@ struct bobyqa_policy
 
                 if(s.ntrits > 0)
                 {
-                    if(vquad >= 0.0)
+                    if(vquad >= Scalar(0.0))
                     {
                         // The trust step failed to reduce the model. Powell
                         // returns here (bobyqb_ lines 2632-2637) because his
@@ -894,21 +901,21 @@ struct bobyqa_policy
                         // a failed trust iteration: shrink delta and let the
                         // geometry / rho-reduction path carry progress (rho
                         // exhaustion remains the true termination).
-                        ratio = 0.0;
-                        s.delta = std::min(0.5 * s.delta, dnorm);
-                        if(s.delta <= 1.5 * s.rho)
+                        ratio = Scalar(0.0);
+                        s.delta = std::min(Scalar(0.5) * s.delta, dnorm);
+                        if(s.delta <= Scalar(1.5) * s.rho)
                             s.delta = s.rho;
                     }
                     else
                     {
                         ratio = (f - old_fopt) / vquad;
-                        if(ratio <= 0.1)
-                            s.delta = std::min(0.5 * s.delta, dnorm);
-                        else if(ratio <= 0.7)
-                            s.delta = std::max(0.5 * s.delta, dnorm);
+                        if(ratio <= Scalar(0.1))
+                            s.delta = std::min(Scalar(0.5) * s.delta, dnorm);
+                        else if(ratio <= Scalar(0.7))
+                            s.delta = std::max(Scalar(0.5) * s.delta, dnorm);
                         else
-                            s.delta = std::max(0.5 * s.delta, 2.0 * dnorm);
-                        if(s.delta <= 1.5 * s.rho)
+                            s.delta = std::max(Scalar(0.5) * s.delta, Scalar(2.0) * dnorm);
+                        if(s.delta <= Scalar(1.5) * s.rho)
                             s.delta = s.rho;
                     }
 
@@ -923,7 +930,7 @@ struct bobyqa_policy
                     if(f < old_fopt)
                     {
                         int ksav = knew;
-                        double densav = denom;
+                        Scalar densav = denom;
                         replacement_choice c = select_replacement_relative(
                             s.sys, vlag, beta, s.delta, xnew);
                         if(c.refuse)
@@ -952,8 +959,8 @@ struct bobyqa_policy
                     // when the explicit-Hessian model's gradient dominates the
                     // interpolant's for three consecutive trust iterations, shed
                     // the accumulated Hessian error by adopting the interpolant.
-                    Eigen::Vector<double, N> sl = s.lower_scaled - s.sys.xbase;
-                    Eigen::Vector<double, N> su = s.upper_scaled - s.sys.xbase;
+                    Eigen::Vector<Scalar, N> sl = s.lower_scaled - s.sys.xbase;
+                    Eigen::Vector<Scalar, N> su = s.upper_scaled - s.sys.xbase;
                     frobenius_model_reset(s.sys, sl, su, s.itest);
                 }
 
@@ -962,13 +969,13 @@ struct bobyqa_policy
                     loc = label::l60;
                     break;
                 }
-                if(f <= old_fopt + 0.1 * vquad)
+                if(f <= old_fopt + Scalar(0.1) * vquad)
                 {
                     loc = label::l60;
                     break;
                 }
-                geo_distsq = std::max((2.0 * s.delta) * (2.0 * s.delta),
-                                      (10.0 * s.rho) * (10.0 * s.rho));
+                geo_distsq = std::max((Scalar(2.0) * s.delta) * (Scalar(2.0) * s.delta),
+                                      (Scalar(10.0) * s.rho) * (Scalar(10.0) * s.rho));
                 loc = label::l650;
                 break;
             }
@@ -979,10 +986,10 @@ struct bobyqa_policy
                 // geometry threshold (bobyqb_ lines 2946-2963).
                 knew = 0;
                 bool found = false;
-                double best = geo_distsq;
+                Scalar best = geo_distsq;
                 for(int k = 0; k < s.m; ++k)
                 {
-                    double sum = (s.sys.xpt.col(k).head(n) - s.sys.xopt).squaredNorm();
+                    Scalar sum = (s.sys.xpt.col(k).head(n) - s.sys.xopt).squaredNorm();
                     if(sum > best)
                     {
                         best = sum;
@@ -993,15 +1000,15 @@ struct bobyqa_policy
 
                 if(found)
                 {
-                    double dist = std::sqrt(best);
+                    Scalar dist = std::sqrt(best);
                     if(s.ntrits == -1)
                     {
-                        s.delta = std::min(0.1 * s.delta, 0.5 * dist);
-                        if(s.delta <= 1.5 * s.rho)
+                        s.delta = std::min(Scalar(0.1) * s.delta, Scalar(0.5) * dist);
+                        if(s.delta <= Scalar(1.5) * s.rho)
                             s.delta = s.rho;
                     }
                     s.ntrits = 0;
-                    adelt = std::max(std::min(0.1 * dist, s.delta), s.rho);
+                    adelt = std::max(std::min(Scalar(0.1) * dist, s.delta), s.rho);
                     dsq = adelt * adelt;
                     loc = label::l90;
                     break;
@@ -1009,7 +1016,7 @@ struct bobyqa_policy
 
                 if(s.ntrits == -1)
                     loc = label::l680;
-                else if(ratio > 0.0)
+                else if(ratio > Scalar(0.0))
                     loc = label::l60;
                 else if(std::max(s.delta, dnorm) > s.rho)
                     loc = label::l60;
@@ -1064,19 +1071,31 @@ struct bobyqa_policy
         bool improved = s.objective_value < old_incumbent_f;
         s.last_improved = improved;
 
-        Eigen::Vector<double, N> gopt_now = detail::model_gradient_at(s.sys, zero_d);
-        double grad_proxy = gopt_now.norm();
-        if(s.rho > s.rho_end)
-            grad_proxy = std::max(grad_proxy, 1.0);
+        // BOBYQA owns its own termination, as cobyla_policy does: until Powell's
+        // stop fires, progress is reported at no less than the trust-radius
+        // scale. A geometry step leaves dnorm at the preceding short trust step,
+        // and at rho_end every evaluated step is only bounded below by
+        // 0.5 rho_end, so raw magnitudes would trip the step, objective and
+        // gradient criteria before the policy's own stop.
+        Eigen::Vector<Scalar, N> gopt_now = detail::model_gradient_at(s.sys, zero_d);
+        Scalar grad_proxy = gopt_now.norm();
+        if(!terminated)
+            grad_proxy = std::max(grad_proxy, Scalar(1.0));
 
-        double obj_change = s.objective_value - old_incumbent_f;
-        double effective_step = improved ? last_eval_dnorm : s.delta;
-        double effective_change = improved ? obj_change : s.delta;
+        Scalar obj_change = s.objective_value - old_incumbent_f;
+        Scalar effective_step = improved ? last_eval_dnorm : s.delta;
+        Scalar effective_change = improved ? obj_change : s.delta;
+        if(!terminated)
+        {
+            effective_step = std::max(effective_step, s.rho);
+            if(std::abs(effective_change) < s.rho)
+                effective_change = s.rho;
+        }
 
         std::uint32_t evals = static_cast<std::uint32_t>(s.nevals) - s.nevals_reported;
         s.nevals_reported = static_cast<std::uint32_t>(s.nevals);
 
-        step_result<double> r{
+        step_result<Scalar> r{
             .objective_value = s.objective_value,
             .gradient_norm = grad_proxy,
             .step_size = effective_step,
@@ -1097,27 +1116,26 @@ struct bobyqa_policy
     // Cold restart -- BOBYQA has no warm-start mode since the interpolation
     // set is point-specific.
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset_clear(s, x0);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
         s.x_scaled = (s.x.array() / s.scale.array()).matrix();
         s.iteration = 0;
         s.initialized = false;
 
-        double h = s.delta;
-        h = clamp_radius_to_bounds(h, s.lower_scaled, s.upper_scaled);
+        Scalar h = clamp_radius_to_bounds(s.initial_radius, s.lower_scaled, s.upper_scaled);
         shift_inside_bounds(s.x_scaled, h, s.lower_scaled, s.upper_scaled);
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
 
-        s.sys = detail::bootstrap_interpolation_system<double, N>(
+        s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
             s.x_scaled, h, s.lower_scaled, s.upper_scaled,
-            [&](const Eigen::Vector<double, N>& x_sc) {
+            [&](const Eigen::Vector<Scalar, N>& x_sc) {
                 return s.problem->value(
                     (x_sc.array() * s.scale.array()).matrix());
             });
@@ -1125,6 +1143,8 @@ struct bobyqa_policy
         s.x_scaled = s.sys.xbase + s.sys.xopt;
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
         s.objective_value = s.sys.fval[s.sys.kopt];
+        s.delta = h;
+        seed_driver(s);
         s.initialized = true;
     }
 };

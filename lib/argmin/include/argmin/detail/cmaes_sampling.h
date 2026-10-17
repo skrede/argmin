@@ -37,6 +37,7 @@
 #include <Eigen/Core>
 
 #include <random>
+#include <concepts>
 
 namespace argmin::detail
 {
@@ -96,6 +97,24 @@ Scalar repair_and_penalize(Eigen::Vector<Scalar, N>& x,
         }
     }
     return penalty;
+}
+
+// Uniform draw on [lo, hi] for the restart mean. The double draw keeps the standard-library
+// distribution its pinned trajectories were recorded with; the float draw uses the portable
+// raw-bits uniform, so a float solve depends on no implementation-defined distribution.
+template <scalar Scalar, typename RNG>
+Scalar uniform_in_interval(RNG& rng, Scalar lo, Scalar hi)
+{
+    if constexpr(std::same_as<Scalar, double>)
+    {
+        std::uniform_real_distribution<double> u(lo, hi);
+        return u(rng);
+    }
+    else
+    {
+        const Scalar t = Scalar(0.5) * (alternative::marsaglia::canonical_uniform_pm1<Scalar>(rng) + Scalar(1));
+        return lo + (hi - lo) * t;
+    }
 }
 
 }

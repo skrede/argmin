@@ -36,12 +36,12 @@ struct quadratic
 
 TEST_CASE("objective_tolerance_rel stops step_budget_solver", "[tolerance]")
 {
-    using conv = convergence_policy<objective_tolerance_rel_criterion>;
+    using conv = convergence_policy<objective_tolerance_rel_criterion<>>;
 
     solver_options<conv> opts;
     opts.max_iterations = 1000;
     opts.convergence.criteria = {
-        objective_tolerance_rel_criterion{.threshold = 1e-2}
+        objective_tolerance_rel_criterion<>{.threshold = 1e-2}
     };
 
     quadratic prob;
@@ -64,12 +64,12 @@ TEST_CASE("step_tolerance_rel stops step_budget_solver", "[tolerance]")
     // mock_policy: step_size=0.5 constant, x_norm = 5 * 0.5^k.
     // relative step = step_size / max(x_norm, 1.0).
     // At iteration 2: x_norm = 1.25, ratio = 0.5/1.25 = 0.4 < 0.5 -> triggers.
-    using conv = convergence_policy<step_tolerance_rel_criterion>;
+    using conv = convergence_policy<step_tolerance_rel_criterion<>>;
 
     solver_options<conv> opts;
     opts.max_iterations = 1000;
     opts.convergence.criteria = {
-        step_tolerance_rel_criterion{.threshold = 0.5}
+        step_tolerance_rel_criterion<>{.threshold = 0.5}
     };
 
     quadratic prob;

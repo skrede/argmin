@@ -26,7 +26,9 @@ gcovr build/coverage \
     --filter 'lib/argmin/include/argmin/' \
     --exclude-throw-branches \
     --exclude-unreachable-branches \
+    --exclude 'detail/diagnostics/alloc_counter\.h' \
     --gcov-ignore-errors=source_not_found \
+    --merge-mode-functions=separate \
     --json coverage.json
 
 python3 scripts/coverage_gate.py coverage.json scripts/coverage_floors.txt

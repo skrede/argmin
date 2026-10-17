@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_ARGMIN_OPTIONS_ASYMPTOTE_OPTIONS_H
 #define HPP_GUARD_ARGMIN_OPTIONS_ASYMPTOTE_OPTIONS_H
 
+#include "argmin/types.h"
+
 namespace argmin
 {
 
@@ -26,10 +28,11 @@ namespace argmin
 //            SIAM J. Optim. 12(2):555-573 (upper clamp, Section 4.2);
 //            arjendeetman/GCMMA-MMA-Python mmasub (symmetric paper port;
 //            albefalow = 0.01, albefaup = 10 default).
+template <scalar Scalar = double>
 struct asymptote_options
 {
-    double minimum_distance_fraction{0.01};  // min (U - L) / range (Svanberg 1987)
-    double maximum_distance_fraction{10.0};  // max (U - L) / range (Svanberg 2002)
+    Scalar minimum_distance_fraction{Scalar(0.01)};  // min (U - L) / range (Svanberg 1987)
+    Scalar maximum_distance_fraction{Scalar(10)};    // max (U - L) / range (Svanberg 2002)
 };
 
 }

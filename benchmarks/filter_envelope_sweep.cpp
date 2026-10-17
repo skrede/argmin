@@ -118,7 +118,7 @@ std::string fmt_num(double v)
 struct slsqp_tag {};
 struct nw_sqp_tag {};
 
-template <template <int> class Policy> struct policy_tag;
+template <template <typename, int> class Policy> struct policy_tag;
 template <> struct policy_tag<argmin::filter_slsqp_policy>  { using type = slsqp_tag;  };
 template <> struct policy_tag<argmin::filter_nw_sqp_policy> { using type = nw_sqp_tag; };
 
@@ -167,7 +167,7 @@ double feasibility_at(const Problem& prob, const Vec& x)
     return viol;
 }
 
-template <template <int> class Policy, typename Problem>
+template <template <typename, int> class Policy, typename Problem>
 cell_result run_cell(std::string_view name, double gamma_f, double gamma_h)
 {
     using tag = typename policy_tag<Policy>::type;
@@ -177,11 +177,11 @@ cell_result run_cell(std::string_view name, double gamma_f, double gamma_h)
     auto x0 = problem.initial_point();
     auto opts = cohort_opts(tag{});
 
-    typename Policy<N>::options_type policy_opts;
+    typename Policy<double, N>::options_type policy_opts;
     policy_opts.gamma_f = gamma_f;
     policy_opts.gamma_h = gamma_h;
 
-    argmin::step_budget_solver solver{Policy<N>{}, problem, x0, opts, policy_opts};
+    argmin::step_budget_solver solver{Policy<double, N>{}, problem, x0, opts, policy_opts};
     auto result = solver.solve(opts);
 
     cell_result cr{};
@@ -195,7 +195,7 @@ cell_result run_cell(std::string_view name, double gamma_f, double gamma_h)
     return cr;
 }
 
-template <template <int> class Policy>
+template <template <typename, int> class Policy>
 combo_result run_combo(double gf, double gh)
 {
     combo_result combo{};
@@ -230,7 +230,7 @@ bool is_value(double a, double b)
     return std::abs(a - b) <= std::abs(b) * 1e-12;
 }
 
-template <template <int> class Policy>
+template <template <typename, int> class Policy>
 policy_sweep_result run_policy_sweep(const char* policy_name)
 {
     std::printf("\n=== %s envelope sweep (publication bar: |f-f*| < %.0e, cv < %.0e) ===\n",

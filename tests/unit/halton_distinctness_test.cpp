@@ -59,7 +59,7 @@ TEST_CASE("halton: no two coordinate sequences coincide for dims > 10", "[halton
     std::vector<Eigen::VectorXd> pts;
     pts.reserve(n_points);
     for(int i = 0; i < n_points; ++i)
-        pts.push_back(detail::halton_point(static_cast<std::uint32_t>(i), n));
+        pts.push_back(detail::halton_point<double>(static_cast<std::uint32_t>(i), n));
 
     for(int a = 0; a < n; ++a)
     {

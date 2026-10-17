@@ -1,0 +1,1308 @@
+#include "argmin/qp/dense_admm_qp.h"
+#include "argmin/qp/sparse_admm_qp.h"
+#include "argmin/qp/dense_active_set_qp.h"
+
+#include "argmin/detail/kraft_lsq_qp.h"
+
+#include "argmin/options/dense_qp_options.h"
+#include "argmin/options/sparse_qp_options.h"
+#include "argmin/options/dense_active_set_qp_options.h"
+
+#include "portable_random.h"
+
+#include <Eigen/Core>
+#include <Eigen/SparseCore>
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include <bit>
+#include <cmath>
+#include <cstdio>
+#include <random>
+#include <limits>
+#include <vector>
+#include <cstdint>
+#include <utility>
+
+using Catch::Approx;
+using namespace argmin;
+
+namespace
+{
+
+constexpr double inf = std::numeric_limits<double>::infinity();
+
+struct osqp_problem
+{
+    Eigen::MatrixXd P;
+    Eigen::VectorXd q;
+    Eigen::MatrixXd A;
+    Eigen::VectorXd l;
+    Eigen::VectorXd u;
+};
+
+bool is_eq_row(const osqp_problem& p, int i)
+{
+    return std::isfinite(p.l[i]) && std::isfinite(p.u[i]) && (p.u[i] - p.l[i]) <= 1e-9;
+}
+
+// Trusted oracle: solve the same QP through the Kraft LSQ/LSEI active-set QP.
+// The OSQP rows are folded into the oracle's (A_eq, A_ineq >=) blocks with the
+// same finite-bound-skip mapping the adapter uses; box bounds pass as infinite
+// so every constraint lives in the general blocks.
+Eigen::VectorXd kraft_reference(const osqp_problem& p)
+{
+    const int n = static_cast<int>(p.P.rows());
+    const int m = static_cast<int>(p.A.rows());
+    int m_eq = 0;
+    int m_in = 0;
+    for(int i = 0; i < m; ++i)
+    {
+        if(is_eq_row(p, i))
+            ++m_eq;
+        else
+        {
+            if(std::isfinite(p.l[i]))
+                ++m_in;
+            if(std::isfinite(p.u[i]))
+                ++m_in;
+        }
+    }
+    Eigen::MatrixXd A_eq(m_eq, n);
+    Eigen::MatrixXd A_in(m_in, n);
+    Eigen::VectorXd b_eq(m_eq);
+    Eigen::VectorXd b_in(m_in);
+    int re = 0;
+    int ri = 0;
+    for(int i = 0; i < m; ++i)
+    {
+        if(is_eq_row(p, i))
+        {
+            A_eq.row(re) = p.A.row(i);
+            b_eq[re] = p.l[i];
+            ++re;
+        }
+        else
+        {
+            if(std::isfinite(p.l[i]))
+            {
+                A_in.row(ri) = p.A.row(i);
+                b_in[ri] = p.l[i];
+                ++ri;
+            }
+            if(std::isfinite(p.u[i]))
+            {
+                A_in.row(ri) = -p.A.row(i);
+                b_in[ri] = -p.u[i];
+                ++ri;
+            }
+        }
+    }
+    const Eigen::VectorXd p_lo = Eigen::VectorXd::Constant(n, -inf);
+    const Eigen::VectorXd p_hi = Eigen::VectorXd::Constant(n, inf);
+
+    detail::kraft_lsq_qp_solver<double> oracle;
+    oracle.resize(n, m_eq, m_in, 0, 0);
+    auto res = oracle.solve(p.P, p.q, A_eq, b_eq, A_in, b_in, p_lo, p_hi);
+    return res.x;
+}
+
+// A family of strictly-convex OSQP problems (seeded random SPD P, box rows plus
+// a general two-sided coupling row) on which both solvers have a unique
+// minimizer. Deterministic via a fixed seed.
+std::vector<osqp_problem> convex_family()
+{
+    std::vector<osqp_problem> out;
+    std::mt19937 rng(424242);
+    const auto nd = [&rng] { return portable_random::normal(rng); };
+    const auto ud = [&rng] { return portable_random::uniform(rng, 0.5, 2.0); };
+    for(int trial = 0; trial < 40; ++trial)
+    {
+        const int n = 2 + (trial % 4);
+        Eigen::MatrixXd M(n, n);
+        for(int i = 0; i < n; ++i)
+            for(int j = 0; j < n; ++j)
+                M(i, j) = nd();
+        osqp_problem p;
+        p.P = M.transpose() * M + (1.0 + ud()) * Eigen::MatrixXd::Identity(n, n);
+        p.q.resize(n);
+        for(int i = 0; i < n; ++i)
+            p.q[i] = nd();
+        const int m = n + 1;
+        p.A = Eigen::MatrixXd::Zero(m, n);
+        p.l.resize(m);
+        p.u.resize(m);
+        for(int i = 0; i < n; ++i)
+        {
+            p.A(i, i) = 1.0;
+            const double b = ud();
+            p.l[i] = -b;
+            p.u[i] = b;
+        }
+        for(int j = 0; j < n; ++j)
+            p.A(m - 1, j) = nd();
+        p.l[m - 1] = -2.0 * ud();
+        p.u[m - 1] = 2.0 * ud();
+        out.push_back(std::move(p));
+    }
+    return out;
+}
+
+double relative_gap(double a, double b)
+{
+    return std::abs(a - b) / std::max(1.0, std::abs(b));
+}
+
+// A seeded family carrying a genuine equality row alongside boxes that are
+// mostly inactive -- the same construction, seed and trial shape the sparse
+// suite uses, so both suites exercise one family. It is the shape that exposes
+// the polish's active-set frailty: the equality row's multiplier is large,
+// every inactive box multiplier is pure round-off, and a round-off sign read as
+// a bound assignment pins an interior variable to a bound.
+std::vector<osqp_problem> equality_family(int trials)
+{
+    std::vector<osqp_problem> out;
+    std::mt19937 rng(20260722);
+    const auto nd = [&rng] { return portable_random::normal(rng); };
+    const auto ud = [&rng] { return portable_random::uniform(rng, 0.3, 1.5); };
+    for(int trial = 0; trial < trials; ++trial)
+    {
+        const int n = 3 + (trial % 4);
+        Eigen::MatrixXd M(n, n);
+        for(int i = 0; i < n; ++i)
+            for(int j = 0; j < n; ++j)
+                M(i, j) = nd();
+        osqp_problem p;
+        p.P = M.transpose() * M + 0.5 * Eigen::MatrixXd::Identity(n, n);
+        p.q.resize(n);
+        for(int i = 0; i < n; ++i)
+            p.q[i] = 3.0 * nd();
+        const int m = n + 1;
+        p.A = Eigen::MatrixXd::Zero(m, n);
+        p.l.resize(m);
+        p.u.resize(m);
+        for(int i = 0; i < n; ++i)
+        {
+            p.A(i, i) = 1.0;
+            const double b = ud();
+            p.l[i] = -b;
+            p.u[i] = b;
+        }
+        for(int j = 0; j < n; ++j)
+            p.A(m - 1, j) = 1.0;
+        p.l[m - 1] = 0.5;
+        p.u[m - 1] = 0.5;
+        out.push_back(std::move(p));
+    }
+    return out;
+}
+
+// The leading m rows of a fixed pool over one strictly convex objective, so a
+// single decision vector can be posed against different row counts. The
+// unconstrained minimizer sits outside the boxes, so the multipliers are
+// nonzero and a consumed dual seed changes the trajectory.
+osqp_problem seed_problem(int m)
+{
+    osqp_problem p;
+    p.P = Eigen::MatrixXd{{2.0, 0.5, 0.0}, {0.5, 1.0, 0.0}, {0.0, 0.0, 1.5}};
+    p.q = Eigen::VectorXd{{-3.0, 2.0, -1.0}};
+    const Eigen::MatrixXd pool{{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {1.0, 1.0, 1.0}, {1.0, -1.0, 0.0}};
+    const Eigen::VectorXd lower{{-0.3, -0.4, -0.5, -1.0}};
+    const Eigen::VectorXd upper{{0.3, 0.4, 0.5, 1.0}};
+    p.A = pool.topRows(m);
+    p.l = lower.head(m);
+    p.u = upper.head(m);
+    return p;
+}
+
+bool same_bits(const Eigen::VectorXd& a, const Eigen::VectorXd& b)
+{
+    if(a.size() != b.size())
+        return false;
+    for(Eigen::Index i = 0; i < a.size(); ++i)
+        if(std::bit_cast<std::uint64_t>(a[i]) != std::bit_cast<std::uint64_t>(b[i]))
+            return false;
+    return true;
+}
+
+bool same_solve(const qp_result<double>& a, const qp_result<double>& b)
+{
+    return same_bits(a.x, b.x) && same_bits(a.y, b.y) && a.iterations == b.iterations
+           && a.warm_started == b.warm_started;
+}
+
+const Eigen::VectorXd seed_x{{0.1, -0.2, 0.05}};
+const Eigen::VectorXd seed_y{{0.4, -0.3, 0.2, 0.1}};
+
+// Polish snaps nearby iterates onto one active-set solution and termination is
+// checked only every few iterations; both can hide which seed was consumed. A
+// short unpolished run exposes the raw trajectory instead.
+dense_qp_options<> trajectory_options()
+{
+    dense_qp_options<> opts;
+    opts.polish = false;
+    opts.check_termination = 1;
+    opts.max_iterations = 8;
+    return opts;
+}
+
+expected<qp_result<double>, qp_error> boxed_solve(const Eigen::MatrixXd& P, bool validate)
+{
+    const Eigen::VectorXd q{{1.0, -1.0}};
+    const Eigen::MatrixXd A = Eigen::MatrixXd::Identity(2, 2);
+    const Eigen::VectorXd l{{-1.0, -1.0}};
+    const Eigen::VectorXd u{{1.0, 1.0}};
+    dense_qp_options<> opts;
+    opts.rho = 10.0;
+    opts.adaptive_rho = false;
+    opts.validate_convexity = validate;
+    dense_admm_qp_solver<double> solver(2, 2);
+    return solver.solve(P, q, A, l, u, opts);
+}
+
+// Rows (L, L + w) are posed so that each solver's classification is observable.
+// A splitting solver weights an equality row's penalty a thousandfold, and over
+// a short trajectory from the origin only the lower bound binds, so an
+// inequality row runs bit-identically to the same row with a much wider upper
+// bound. The adapter rejects more equality rows than decision variables, so
+// three rows in two variables sharing that bound pair are refused exactly when
+// they are equalities.
+struct row_verdicts
+{
+    bool adapter;
+    bool dense;
+    bool sparse;
+};
+
+row_verdicts classify_row(double L, double w)
+{
+    const Eigen::MatrixXd P = Eigen::MatrixXd::Identity(2, 2);
+    const Eigen::VectorXd q{{1.0, -1.0}};
+    const Eigen::MatrixXd A{{1.0, 1.0}, {1.0, -1.0}};
+    const Eigen::SparseMatrix<double> P_s = P.sparseView();
+    const Eigen::SparseMatrix<double> A_s = A.sparseView();
+    const double wide = L + w + 1e-6 * std::max(1.0, L);
+    const auto trajectories = [&](double upper)
+    {
+        const Eigen::VectorXd l{{L, -1.0}};
+        const Eigen::VectorXd u{{upper, 1.0}};
+        dense_qp_options<> d = trajectory_options();
+        d.adaptive_rho = false;
+        d.scaling = 0;
+        sparse_qp_options<> s;
+        s.polish = false;
+        s.check_termination = 1;
+        s.max_iterations = 8;
+        s.adaptive_rho = false;
+        s.scaling = 0;
+        dense_admm_qp_solver<double> dense(2, 2);
+        sparse_admm_qp_solver<double> sparse;
+        const auto rd = dense.solve(P, q, A, l, u, d);
+        const auto rs = sparse.solve(P_s, q, A_s, l, u, s);
+        REQUIRE(rd);
+        REQUIRE(rs);
+        return std::pair{rd->x, rs->x};
+    };
+    const auto [dense_row, sparse_row] = trajectories(L + w);
+    const auto [dense_wide, sparse_wide] = trajectories(wide);
+
+    const Eigen::MatrixXd A3{{1.0, 0.0}, {0.0, 1.0}, {0.5, 0.5}};
+    dense_active_set_qp_solver<double> adapter(2, 3);
+    REQUIRE_FALSE(adapter.warm_start(Eigen::VectorXd::Constant(2, L), Eigen::VectorXd()));
+    const auto r = adapter.solve(P, q, A3, Eigen::VectorXd::Constant(3, L), Eigen::VectorXd::Constant(3, L + w));
+    const bool refused = !r && r.error() == qp_error::invalid_problem;
+    REQUIRE((refused || r.has_value()));
+    return {refused, !same_bits(dense_row, dense_wide), !same_bits(sparse_row, sparse_wide)};
+}
+
+}
+
+// ---------------------------------------------------------------------------
+// Parity against the Kraft oracle.
+//
+// On strictly-convex problems both solvers reach the same unique minimizer.
+// The committed tolerance is 1e-9; the measured worst-case deviation over this
+// family is ~3.3e-16 (machine precision), so the bound has ~7 orders of
+// headroom -- it is a genuine accuracy gate, not a loosened pass. The polish
+// is required to succeed on every fixture (a rejection is a diagnostic).
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp matches the Kraft oracle within a tight tolerance", "[qp_parity]")
+{
+    constexpr double parity_tol = 1e-9;
+    for(const auto& p : convex_family())
+    {
+        const int n = static_cast<int>(p.P.rows());
+        const int m = static_cast<int>(p.A.rows());
+        const Eigen::VectorXd x_ref = kraft_reference(p);
+
+        dense_admm_qp_solver<double> solver(n, m);
+        auto r = solver.solve(p.P, p.q, p.A, p.l, p.u);
+        REQUIRE(r);
+        CHECK(r->status == qp_solve_status::solved);
+        CHECK(r->polished);
+        CHECK((r->x - x_ref).cwiseAbs().maxCoeff() <= parity_tol);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Warm-start correctness: a vectors-only resolve after a ~1% perturbation
+// reaches the cold answer in strictly fewer iterations and reuses the frozen
+// Ruiz factors (no re-equilibration).
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp warm resolve converges faster without re-equilibrating",
+          "[qp_warm]")
+{
+    const int n = 5;
+    Eigen::MatrixXd P = Eigen::MatrixXd::Zero(n, n);
+    for(int i = 0; i < n; ++i)
+        P(i, i) = std::pow(50.0, static_cast<double>(i) / (n - 1));
+    Eigen::VectorXd q(n);
+    for(int i = 0; i < n; ++i)
+        q[i] = (i % 2 ? 1.0 : -1.0) * (i + 1);
+
+    const int m = n + 2;
+    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(m, n);
+    Eigen::VectorXd l(m);
+    Eigen::VectorXd u(m);
+    for(int i = 0; i < n; ++i)
+    {
+        A(i, i) = 1.0;
+        l[i] = -0.2;
+        u[i] = 0.2;
+    }
+    A(n, 0) = 1.0;
+    A(n, 1) = 1.0;
+    l[n] = -0.1;
+    u[n] = 0.1;
+    for(int j = 0; j < n; ++j)
+        A(n + 1, j) = 1.0;
+    l[n + 1] = -0.3;
+    u[n + 1] = 0.3;
+
+    dense_admm_qp_solver<double> solver(n, m);
+    auto cold = solver.solve(P, q, A, l, u);
+    REQUIRE(cold);
+
+    const double c0 = solver.scaling_cost();
+    const Eigen::VectorXd D0 = solver.scaling_primal();
+    const Eigen::VectorXd E0 = solver.scaling_dual();
+
+    // Unperturbed warm resolve: seeded from the retained optimum, it converges
+    // by the first termination check.
+    auto same = solver.resolve(q, l, u);
+    REQUIRE(same);
+    CHECK(same->iterations <= 25);
+
+    // No re-equilibration: the Ruiz factors are bit-for-bit the pose-time ones.
+    CHECK(solver.scaling_cost() == c0);
+    CHECK((solver.scaling_primal() - D0).cwiseAbs().maxCoeff() == 0.0);
+    CHECK((solver.scaling_dual() - E0).cwiseAbs().maxCoeff() == 0.0);
+
+    // ~1% perturbation: warm resolve vs a cold solve of the perturbed problem.
+    const Eigen::VectorXd q2 = q * 1.01;
+    const Eigen::VectorXd l2 = l * 1.01;
+    const Eigen::VectorXd u2 = u * 1.01;
+    auto warm = solver.resolve(q2, l2, u2);
+    REQUIRE(warm);
+
+    dense_admm_qp_solver<double> fresh(n, m);
+    auto cold_perturbed = fresh.solve(P, q2, A, l2, u2);
+    REQUIRE(cold_perturbed);
+
+    CHECK((warm->x - cold_perturbed->x).cwiseAbs().maxCoeff() <= 1e-6);
+    CHECK(warm->iterations < cold_perturbed->iterations);
+}
+
+// ---------------------------------------------------------------------------
+// Primal-infeasibility certificate on a trivially infeasible box: x >= 1 and
+// x <= 0. A capability the active-set path lacks.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp certifies a trivially infeasible box", "[qp_infeasible]")
+{
+    const int n = 1;
+    const int m = 2;
+    Eigen::MatrixXd P = Eigen::MatrixXd::Identity(n, n);
+    Eigen::VectorXd q(n);
+    q << 0.0;
+    Eigen::MatrixXd A(m, n);
+    A << 1.0, 1.0;
+    Eigen::VectorXd l(m);
+    l << 1.0, -inf;
+    Eigen::VectorXd u(m);
+    u << inf, 0.0;
+
+    dense_admm_qp_solver<double> solver(n, m);
+    auto r = solver.solve(P, q, A, l, u);
+    REQUIRE(r);
+    CHECK(r->status == qp_solve_status::primal_infeasible);
+}
+
+// ---------------------------------------------------------------------------
+// Adapter row-mapping and inherited-contract errors. The read-only active-set
+// adapter, given a feasible start, reaches the same optimum as the ADMM/Kraft
+// path on a mixed equality / one-sided / box problem; an inequality-infeasible
+// start and an over-determined equality set surface as checked errors.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_active_set_qp adapter maps OSQP rows and checks its contract",
+          "[qp_adapter]")
+{
+    const int n = 2;
+    const int m = 4;
+    Eigen::MatrixXd P = Eigen::MatrixXd::Identity(n, n);
+    Eigen::VectorXd q(n);
+    q << 0.0, 0.0;
+    Eigen::MatrixXd A(m, n);
+    A << 1.0, 1.0,   // equality x1 + x2 = 1
+         1.0, 0.0,   // one-sided x1 >= 0
+         1.0, 0.0,   // box x1
+         0.0, 1.0;   // box x2
+    Eigen::VectorXd l(m);
+    l << 1.0, 0.0, -5.0, -5.0;
+    Eigen::VectorXd u(m);
+    u << 1.0, inf, 5.0, 5.0;
+
+    dense_admm_qp_solver<double> admm(n, m);
+    auto ref = admm.solve(P, q, A, l, u);
+    REQUIRE(ref);
+
+    dense_active_set_qp_solver<double> adapter(n, m);
+    Eigen::VectorXd x0(n);
+    x0 << 0.5, 0.5;  // feasible start
+    adapter.warm_start(x0, Eigen::VectorXd());
+    auto r = adapter.solve(P, q, A, l, u);
+    REQUIRE(r);
+    CHECK(r->status == qp_solve_status::solved);
+    CHECK((r->x - ref->x).cwiseAbs().maxCoeff() <= 1e-6);
+
+    SECTION("inequality-infeasible start is rejected")
+    {
+        dense_active_set_qp_solver<double> a2(n, m);
+        Eigen::VectorXd bad(n);
+        bad << 10.0, 10.0;
+        a2.warm_start(bad, Eigen::VectorXd());
+        auto rbad = a2.solve(P, q, A, l, u);
+        REQUIRE_FALSE(rbad);
+        CHECK(rbad.error() == qp_error::infeasible_start);
+    }
+
+    SECTION("over-determined equality set is rejected")
+    {
+        dense_active_set_qp_solver<double> a3(1, 2);
+        Eigen::MatrixXd P1 = Eigen::MatrixXd::Identity(1, 1);
+        Eigen::VectorXd q1(1);
+        q1 << 0.0;
+        Eigen::MatrixXd A1(2, 1);
+        A1 << 1.0, 1.0;
+        Eigen::VectorXd l1(2);
+        l1 << 1.0, 1.0;
+        Eigen::VectorXd u1(2);
+        u1 << 1.0, 1.0;
+        auto rover = a3.solve(P1, q1, A1, l1, u1);
+        REQUIRE_FALSE(rover);
+        CHECK(rover.error() == qp_error::invalid_problem);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The adapter's option values outside their domain are refused on the error
+// channel at both entry points, like the operator-splitting solvers'.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_active_set_qp rejects option values outside their domain", "[qp_options]")
+{
+    const osqp_problem p = seed_problem(4);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const auto rejected = [&](const dense_active_set_qp_options<>& opts)
+    {
+        dense_active_set_qp_solver<double> fresh(3, 4);
+        const auto solved = fresh.solve(p.P, p.q, p.A, p.l, p.u, opts);
+        dense_active_set_qp_solver<double> posed(3, 4);
+        REQUIRE(posed.solve(p.P, p.q, p.A, p.l, p.u));
+        const auto resolved = posed.resolve(p.q, p.l, p.u, opts);
+        return !solved && solved.error() == qp_error::invalid_options && !resolved && resolved.error() == qp_error::invalid_options;
+    };
+
+    SECTION("iteration budget")
+    {
+        dense_active_set_qp_options<> opts;
+        opts.max_iterations = 0;
+        CHECK(rejected(opts));
+        opts.max_iterations = static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) + 1u;
+        CHECK(rejected(opts));
+    }
+    SECTION("convergence tolerance")
+    {
+        for(const double v : {0.0, -1e-6, nan, inf})
+        {
+            dense_active_set_qp_options<> opts;
+            opts.tolerance = v;
+            CHECK(rejected(opts));
+        }
+    }
+    SECTION("equality tolerance")
+    {
+        for(const double v : {0.0, -1e-9, nan, inf})
+        {
+            dense_active_set_qp_options<> opts;
+            opts.equality_tolerance = v;
+            CHECK(rejected(opts));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The adapter's defaults are the values it received from a default-constructed
+// dense_qp_options before it had an options type of its own, so a caller who
+// sets nothing sees no change. The pinned outcomes were measured on the
+// adapter as it stood before that change.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_active_set_qp defaults reproduce the values it previously received", "[qp_options]")
+{
+    const dense_active_set_qp_options<> defaults;
+    CHECK(defaults.max_iterations == dense_qp_options<>{}.max_iterations);
+    CHECK(defaults.tolerance == dense_qp_options<>{}.eps_abs);
+    CHECK(defaults.equality_tolerance == 1e-9);
+
+    const osqp_problem p = seed_problem(4);
+    dense_active_set_qp_solver<double> solver(3, 4);
+    const auto r = solver.solve(p.P, p.q, p.A, p.l, p.u, defaults);
+    REQUIRE(r);
+    CHECK(r->status == qp_solve_status::solved);
+    CHECK(r->iterations == 3);
+
+    int iterations = 0;
+    for(const auto& f : convex_family())
+    {
+        dense_active_set_qp_solver<double> member(static_cast<int>(f.P.rows()), static_cast<int>(f.A.rows()));
+        const auto rf = member.solve(f.P, f.q, f.A, f.l, f.u, defaults);
+        REQUIRE(rf);
+        CHECK(rf->status == qp_solve_status::solved);
+        CHECK((rf->x - kraft_reference(f)).cwiseAbs().maxCoeff() <= 1e-9);
+        iterations += rf->iterations;
+    }
+    CHECK(iterations == 40);
+}
+
+// ---------------------------------------------------------------------------
+// Both tuning values reach the solver. A budget of one stops a solve that
+// needs three; a tolerance wider than the start's distance to the first row's
+// bounds puts that row in the initial working set, which changes the path
+// taken but not the answer.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_active_set_qp honors its iteration budget and tolerance", "[qp_options]")
+{
+    const osqp_problem p = seed_problem(4);
+
+    dense_active_set_qp_options<> capped;
+    capped.max_iterations = 1;
+    dense_active_set_qp_solver<double> budget(3, 4);
+    const auto rb = budget.solve(p.P, p.q, p.A, p.l, p.u, capped);
+    REQUIRE(rb);
+    CHECK(rb->status == qp_solve_status::max_iterations);
+    CHECK(rb->iterations == 1);
+
+    dense_active_set_qp_options<> wide;
+    wide.tolerance = 0.35;
+    dense_active_set_qp_solver<double> loose(3, 4);
+    const auto rw = loose.solve(p.P, p.q, p.A, p.l, p.u, wide);
+    dense_active_set_qp_solver<double> tight(3, 4);
+    const auto rt = tight.solve(p.P, p.q, p.A, p.l, p.u);
+    REQUIRE(rw);
+    REQUIRE(rt);
+    CHECK(rw->iterations != rt->iterations);
+    CHECK((rw->x - rt->x).cwiseAbs().maxCoeff() <= 1e-12);
+}
+
+// ---------------------------------------------------------------------------
+// The adapter's warm start follows the operator-splitting solvers' contract: a
+// primal seed shorter than the decision capacity or a dual seed longer than
+// the constraint capacity is refused and nothing is stored, while an empty
+// dual seed and a primal seed longer than the capacity are accepted. A seed far
+// outside the bounds makes storage observable: the next solve rejects it as an
+// infeasible start exactly when it was stored.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_active_set_qp rejects a warm start whose length does not match", "[qp_warm]")
+{
+    const osqp_problem p = seed_problem(4);
+    const Eigen::VectorXd far{{10.0, 10.0, 10.0}};
+    dense_active_set_qp_solver<double> solver(3, 4);
+    const auto stored = [&]
+    {
+        const auto r = solver.solve(p.P, p.q, p.A, p.l, p.u);
+        return !r && r.error() == qp_error::infeasible_start;
+    };
+
+    SECTION("a primal seed shorter than the decision capacity")
+    {
+        const auto err = solver.warm_start(far.head(2), Eigen::VectorXd());
+        REQUIRE(err);
+        CHECK(*err == qp_error::dimension_mismatch);
+        CHECK_FALSE(stored());
+    }
+    SECTION("an empty primal seed")
+    {
+        const auto err = solver.warm_start(Eigen::VectorXd(), Eigen::VectorXd());
+        REQUIRE(err);
+        CHECK(*err == qp_error::dimension_mismatch);
+        CHECK_FALSE(stored());
+    }
+    SECTION("a dual seed longer than the constraint capacity")
+    {
+        const auto err = solver.warm_start(far, Eigen::VectorXd::Zero(5));
+        REQUIRE(err);
+        CHECK(*err == qp_error::dimension_mismatch);
+        CHECK_FALSE(stored());
+    }
+    SECTION("an empty dual seed on a solver that has not been posed")
+    {
+        CHECK_FALSE(solver.warm_start(far, Eigen::VectorXd()));
+        CHECK(stored());
+    }
+    SECTION("a primal seed longer than the decision capacity uses its leading entries")
+    {
+        CHECK_FALSE(solver.warm_start(Eigen::VectorXd{{10.0, 10.0, 10.0, 0.0}}, Eigen::VectorXd()));
+        CHECK(stored());
+    }
+    SECTION("a correctly sized seed starts the solve")
+    {
+        CHECK_FALSE(solver.warm_start(far, Eigen::VectorXd::Zero(4)));
+        CHECK(stored());
+
+        const Eigen::VectorXd optimum{{0.3, -0.4, 0.6}};
+        dense_active_set_qp_solver<double> seeded(3, 4);
+        REQUIRE_FALSE(seeded.warm_start(optimum, seed_y));
+        const auto warm = seeded.solve(p.P, p.q, p.A, p.l, p.u);
+        dense_active_set_qp_solver<double> cold(3, 4);
+        const auto reference = cold.solve(p.P, p.q, p.A, p.l, p.u);
+        REQUIRE(warm);
+        REQUIRE(reference);
+        CHECK(warm->iterations < reference->iterations);
+        CHECK((warm->x - reference->x).cwiseAbs().maxCoeff() <= 1e-12);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A non-finite seed is refused before anything is stored, so the next solve
+// matches one on a solver that was never seeded.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_active_set_qp rejects a non-finite warm-start seed", "[qp_warm]")
+{
+    const osqp_problem p = seed_problem(4);
+    dense_active_set_qp_solver<double> solver(3, 4);
+
+    Eigen::VectorXd nan_x = Eigen::VectorXd::Zero(3);
+    nan_x[1] = std::numeric_limits<double>::quiet_NaN();
+    const auto nan_error = solver.warm_start(nan_x, Eigen::VectorXd());
+    REQUIRE(nan_error);
+    CHECK(*nan_error == qp_error::non_finite_input);
+
+    Eigen::VectorXd inf_y = seed_y;
+    inf_y[2] = inf;
+    const auto inf_error = solver.warm_start(Eigen::VectorXd::Constant(3, 10.0), inf_y);
+    REQUIRE(inf_error);
+    CHECK(*inf_error == qp_error::non_finite_input);
+
+    const auto result = solver.solve(p.P, p.q, p.A, p.l, p.u);
+    dense_active_set_qp_solver<double> never_seeded(3, 4);
+    const auto control = never_seeded.solve(p.P, p.q, p.A, p.l, p.u);
+    REQUIRE(result);
+    REQUIRE(control);
+    CHECK(same_bits(result->x, control->x));
+    CHECK(result->iterations == control->iterations);
+}
+
+// ---------------------------------------------------------------------------
+// The result object is caller-owned storage reused across calls, so the
+// adapter writes the warm-start outcome rather than leaving a stale value.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_active_set_qp writes its warm-start outcome into reused storage", "[qp_warm]")
+{
+    const osqp_problem p = seed_problem(4);
+    dense_active_set_qp_solver<double> solver(3, 4);
+    qp_result<double> out;
+    out.warm_started = true;
+    REQUIRE_FALSE(solver.solve_into(p.P, p.q, p.A, p.l, p.u, out));
+    CHECK_FALSE(out.warm_started);
+    out.warm_started = true;
+    REQUIRE_FALSE(solver.resolve_into(p.q, p.l, p.u, out));
+    CHECK_FALSE(out.warm_started);
+}
+
+
+// ---------------------------------------------------------------------------
+// The adapter and both splitting solvers classify the same bound rows
+// identically, at unit scale and far above it. The exact-equality and wide
+// rows confirm the observation itself discriminates.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_active_set_qp classifies equality rows as both splitting solvers do", "[qp]")
+{
+    constexpr double eq_tol = 1e-9;
+    CHECK(dense_active_set_qp_options<>{}.equality_tolerance == eq_tol);
+    int equalities = 0;
+    int magnitude_equalities = 0;
+    for(const double L : {0.25, 1e3, 1e6})
+    {
+        for(const double rel : {0.0, 5e-10, 9e-10, 1.1e-9, 2e-9, 1e-6})
+        {
+            const double w = rel * std::max(1.0, L);
+            const bool shared = detail::is_equality_bound(L, L + w, eq_tol);
+            const row_verdicts v = classify_row(L, w);
+            INFO("L = " << L << ", relative width = " << rel);
+            CHECK(v.adapter == shared);
+            CHECK(v.dense == shared);
+            CHECK(v.sparse == shared);
+            equalities += shared ? 1 : 0;
+            magnitude_equalities += (shared && w > eq_tol) ? 1 : 0;
+        }
+    }
+    CHECK(equalities == 9);
+    CHECK(magnitude_equalities == 4);
+}
+
+// ---------------------------------------------------------------------------
+// Polish padding-invariance. The reduced-KKT polish assembles the active set
+// into a constant (n + m_cap) padded shape with an identity trailing block, so
+// a PartialPivLU pivot could in principle cross into the padding. This asserts
+// the polished solution is independent of the padding amount: a solver sized at
+// the exact constraint count and one with extra unused capacity agree to
+// machine precision. Measured worst-case deviation over this family is
+// ~1.1e-16; the committed bound is 1e-12. If this ever fails, the remedy is the
+// fixed (n + m) reduced-shape polish with every row present and inactive rows
+// delta-slacked.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp polish is invariant to the padding amount", "[qp_parity]")
+{
+    constexpr double pad_tol = 1e-12;
+    for(const auto& p : convex_family())
+    {
+        const int n = static_cast<int>(p.P.rows());
+        const int m = static_cast<int>(p.A.rows());
+
+        dense_admm_qp_solver<double> tight(n, m);
+        auto rt = tight.solve(p.P, p.q, p.A, p.l, p.u);
+        REQUIRE(rt);
+
+        dense_admm_qp_solver<double> padded(n, m + 7);
+        auto rp = padded.solve(p.P, p.q, p.A, p.l, p.u);
+        REQUIRE(rp);
+
+        CHECK(rt->polished);
+        CHECK(rp->polished);
+        CHECK((rt->x - rp->x).cwiseAbs().maxCoeff() <= pad_tol);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Polish accept-rule gate on the equality-constrained family. The convex family
+// above carries no equality row, so it never produces a large multiplier beside
+// round-off ones and never exercised this path; the polished answer here is
+// gated directly against the independent active-set oracle rather than against
+// another operator-splitting solver.
+//
+// This is a regression gate for a real and severe failure, not a theoretical
+// nicety. Selecting the active set from the strict sign of the dual -- the
+// reference implementation's rule -- reads the arbitrary sign of a round-off
+// multiplier as a bound assignment and pins an interior variable to a bound.
+// The resulting point is primal feasible and solves its own reduced system
+// exactly, so both residuals improve and a residual-only accept test takes it:
+// a grossly suboptimal answer, labeled solved. Over a 400-member seeded
+// superset that regressed the objective against the solver's own unpolished
+// iterate on 17 problems, by up to 3.12 relative. With the relative activity
+// threshold on the multipliers and the tolerance-scaled objective guard in
+// place nothing on that superset regresses and the polish is still accepted on
+// every member -- the guards reject broken polishes, not all of them. Over the
+// 60 members exercised here the pre-fix rule polished 48 with a worst objective
+// gap against the oracle of 3.018; with the guards in place the polish is
+// accepted on all 60, the worst objective gap against the oracle is 5.16e-14
+// and the worst regression against the solver's own unpolished iterate is
+// 8.78e-7, so the committed 1e-4 bound keeps ten orders of headroom on the
+// first and two on the second.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp polish agrees with the active-set oracle on equality-constrained rows",
+          "[qp_polish_guard]")
+{
+    constexpr double oracle_tol = 1e-4;
+
+    dense_qp_options<> with_polish;
+    dense_qp_options<> without_polish;
+    without_polish.polish = false;
+
+    int accepted = 0;
+    int members = 0;
+    double worst_oracle_gap = 0.0;
+    double worst_regression = 0.0;
+    for(const auto& p : equality_family(60))
+    {
+        const int n = static_cast<int>(p.P.rows());
+        const int m = static_cast<int>(p.A.rows());
+
+        Eigen::MatrixXd A_eq(1, n);
+        A_eq.row(0) = p.A.row(m - 1);
+        Eigen::VectorXd b_eq(1);
+        b_eq[0] = p.l[m - 1];
+        const Eigen::MatrixXd A_in(0, n);
+        const Eigen::VectorXd b_in(0);
+        detail::kraft_lsq_qp_solver<double> oracle;
+        oracle.resize(n, 1, 0, n, n);
+        auto ref = oracle.solve(p.P, p.q, A_eq, b_eq, A_in, b_in, p.l.head(n), p.u.head(n));
+        const double reference_objective = 0.5 * ref.x.dot(p.P * ref.x) + p.q.dot(ref.x);
+
+        dense_admm_qp_solver<double> polished_solver(n, m);
+        auto rp = polished_solver.solve(p.P, p.q, p.A, p.l, p.u, with_polish);
+        REQUIRE(rp);
+        dense_admm_qp_solver<double> raw_solver(n, m);
+        auto rr = raw_solver.solve(p.P, p.q, p.A, p.l, p.u, without_polish);
+        REQUIRE(rr);
+        if(rr->status != qp_solve_status::solved)
+            continue;
+
+        ++members;
+        if(rp->polished)
+            ++accepted;
+
+        const double oracle_gap = relative_gap(rp->objective_value, reference_objective);
+        worst_oracle_gap = std::max(worst_oracle_gap, oracle_gap);
+        CHECK(oracle_gap <= oracle_tol);
+
+        const double regression = (rp->objective_value - rr->objective_value)
+                                  / std::max(1.0, std::abs(reference_objective));
+        worst_regression = std::max(worst_regression, regression);
+        CHECK(regression <= oracle_tol);
+
+        // Feasibility at the solver's own convergence tolerance, which is what
+        // an accepted iterate is entitled to; the polished point is normally
+        // exact on its active rows.
+        const Eigen::VectorXd ax = p.A * rp->x;
+        CHECK((ax - p.l).minCoeff() >= -1e-5);
+        CHECK((p.u - ax).minCoeff() >= -1e-5);
+    }
+
+    REQUIRE(members > 0);
+    CHECK(accepted * 2 > members);
+    std::printf("[dense polish guard] %d/%d members polished, worst objective gap against the "
+                "active-set oracle %.3e, worst regression %.3e\n",
+                accepted, members, worst_oracle_gap, worst_regression);
+}
+
+// ---------------------------------------------------------------------------
+// An empty dual seed must leave the dual iterate at zero, never at whatever the
+// dual workspace happened to hold. A read of never-written storage is invisible
+// to an ordinary assertion, so its observable form is equivalence: the
+// empty-dual solve is bit-identical to one seeded with an explicit zero dual,
+// while a nonzero dual seed visibly moves the trajectory. The memory sanitizer
+// job reports the read itself. The primal seed is still consumed, so the solve
+// reports that it was warm-started.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp seeds no uninitialized dual storage when the dual seed is empty", "[qp_warm]")
+{
+    const dense_qp_options<> probe = trajectory_options();
+    CHECK(dense_qp_options<>{}.warm_start);
+    const osqp_problem p = seed_problem(4);
+
+    dense_admm_qp_solver<double> empty_dual(3, 4);
+    REQUIRE_FALSE(empty_dual.warm_start(seed_x, Eigen::VectorXd()));
+    const auto result = empty_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->y.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zero_dual(3, 4);
+    REQUIRE_FALSE(zero_dual.warm_start(seed_x, Eigen::VectorXd::Zero(4)));
+    const auto control = zero_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+
+    dense_admm_qp_solver<double> full_dual(3, 4);
+    REQUIRE_FALSE(full_dual.warm_start(seed_x, seed_y));
+    const auto seeded = full_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(seeded);
+    CHECK_FALSE(same_bits(seeded->x, control->x));
+}
+
+// ---------------------------------------------------------------------------
+// A non-finite seed is refused when it is handed over, before anything is
+// stored: the following solve must be bit-identical to one on a solver that
+// was never seeded, and must report that it was not warm-started.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp rejects a non-finite warm-start seed", "[qp_warm]")
+{
+    const dense_qp_options<> probe = trajectory_options();
+    const osqp_problem p = seed_problem(4);
+    dense_admm_qp_solver<double> solver(3, 4);
+
+    Eigen::VectorXd nan_x = seed_x;
+    nan_x[1] = std::numeric_limits<double>::quiet_NaN();
+    const auto nan_error = solver.warm_start(nan_x, seed_y);
+    REQUIRE(nan_error);
+    CHECK(*nan_error == qp_error::non_finite_input);
+
+    Eigen::VectorXd inf_y = seed_y;
+    inf_y[2] = inf;
+    const auto inf_error = solver.warm_start(seed_x, inf_y);
+    REQUIRE(inf_error);
+    CHECK(*inf_error == qp_error::non_finite_input);
+
+    const auto result = solver.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK_FALSE(result->warm_started);
+
+    dense_admm_qp_solver<double> never_seeded(3, 4);
+    const auto control = never_seeded.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// A dual seed one entry short is not prefixed into the iterate: it is replaced
+// by zeros while the primal seed is kept, so the solve still reports a warm
+// start and matches the explicit zero-dual control bit for bit. A short primal
+// seed never reaches consumption; it is refused when it is handed over.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp keeps the primal seed when the dual seed is short", "[qp_warm]")
+{
+    const dense_qp_options<> probe = trajectory_options();
+    const osqp_problem p = seed_problem(4);
+
+    dense_admm_qp_solver<double> short_dual(3, 4);
+    const auto short_primal = short_dual.warm_start(seed_x.head(2), seed_y);
+    REQUIRE(short_primal);
+    CHECK(*short_primal == qp_error::dimension_mismatch);
+    REQUIRE_FALSE(short_dual.warm_start(seed_x, seed_y.head(3)));
+    const auto result = short_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zero_dual(3, 4);
+    REQUIRE_FALSE(zero_dual.warm_start(seed_x, Eigen::VectorXd::Zero(4)));
+    const auto control = zero_dual.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// A shorter re-seed after a full one must not inherit the tail of the earlier
+// dual seed or of the retained iterate: the resolve matches the control that
+// re-seeds with an explicit zero dual.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp re-seeding with a shorter dual vector falls back to zeros", "[qp_warm]")
+{
+    const dense_qp_options<> probe = trajectory_options();
+    const osqp_problem p = seed_problem(4);
+    const Eigen::VectorXd q2 = 1.05 * p.q;
+    const Eigen::VectorXd reseed_x{{-0.05, 0.1, 0.0}};
+
+    dense_admm_qp_solver<double> shorter(3, 4);
+    REQUIRE_FALSE(shorter.warm_start(seed_x, seed_y));
+    const auto first = shorter.solve(p.P, p.q, p.A, p.l, p.u, probe);
+    REQUIRE(first);
+    CHECK(first->warm_started);
+    REQUIRE_FALSE(shorter.warm_start(reseed_x, seed_y.head(2)));
+    const auto result = shorter.resolve(q2, p.l, p.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zeroed(3, 4);
+    REQUIRE_FALSE(zeroed.warm_start(seed_x, seed_y));
+    REQUIRE(zeroed.solve(p.P, p.q, p.A, p.l, p.u, probe));
+    REQUIRE_FALSE(zeroed.warm_start(reseed_x, Eigen::VectorXd::Zero(4)));
+    const auto control = zeroed.resolve(q2, p.l, p.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// The case that separates validating against the posed row count from
+// validating against capacity: a seed stored for a 2-row problem fits the
+// 4-row capacity, but the 4-row pose must consume none of it. The primal seed
+// still matches the posed decision count, so it is kept.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp drops a stale seed when the problem is re-posed with more rows", "[qp_warm]")
+{
+    const dense_qp_options<> probe = trajectory_options();
+    const osqp_problem small = seed_problem(2);
+    const osqp_problem large = seed_problem(4);
+
+    dense_admm_qp_solver<double> reposed(3, 4);
+    REQUIRE(reposed.solve(small.P, small.q, small.A, small.l, small.u, probe));
+    REQUIRE_FALSE(reposed.warm_start(seed_x, seed_y.head(2)));
+    const auto result = reposed.solve(large.P, large.q, large.A, large.l, large.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->y.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zero_dual(3, 4);
+    REQUIRE_FALSE(zero_dual.warm_start(seed_x, Eigen::VectorXd::Zero(4)));
+    const auto control = zero_dual.solve(large.P, large.q, large.A, large.l, large.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// The mirror of the case above: a dual seed sized to the full capacity is not
+// truncated onto a pose with fewer rows. Only this shape tells consumption
+// against the posed row count apart from consumption against the capacity.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp drops a capacity-length seed when the problem is posed with fewer rows", "[qp_warm]")
+{
+    const dense_qp_options<> probe = trajectory_options();
+    const osqp_problem small = seed_problem(2);
+
+    dense_admm_qp_solver<double> fewer(3, 4);
+    REQUIRE_FALSE(fewer.warm_start(seed_x, seed_y));
+    const auto result = fewer.solve(small.P, small.q, small.A, small.l, small.u, probe);
+    REQUIRE(result);
+    CHECK(result->x.allFinite());
+    CHECK(result->warm_started);
+
+    dense_admm_qp_solver<double> zero_dual(3, 4);
+    REQUIRE_FALSE(zero_dual.warm_start(seed_x, Eigen::VectorXd::Zero(2)));
+    const auto control = zero_dual.solve(small.P, small.q, small.A, small.l, small.u, probe);
+    REQUIRE(control);
+    CHECK(same_solve(*result, *control));
+}
+
+// ---------------------------------------------------------------------------
+// Equality-row classification scales the width tolerance by the bound
+// magnitude, floored at one: unit-scale rows classify exactly as under the
+// absolute rule, while a row expressed in larger units is no longer split into
+// two inequalities by a width that is pure round-off at its own scale.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp classifies equality rows by a scale-aware width", "[qp]")
+{
+    constexpr double tol = 1e-9;
+    CHECK(detail::is_equality_bound(0.0, 0.0, tol));
+    CHECK(detail::is_equality_bound(-1.0, -1.0 + 5e-10, tol));
+    CHECK_FALSE(detail::is_equality_bound(0.0, 1.0, tol));
+    CHECK(detail::is_equality_bound(1e6, 1e6 + 5e-4, tol));
+    CHECK_FALSE((1e6 + 5e-4) - 1e6 <= tol);
+
+    CHECK_FALSE(detail::is_equality_bound(-inf, 0.0, tol));
+    CHECK_FALSE(detail::is_equality_bound(0.0, inf, tol));
+    CHECK_FALSE(detail::is_equality_bound(-inf, inf, tol));
+    CHECK_FALSE(detail::is_equality_bound(inf, inf, tol));
+
+    const std::vector<double> widths{0.0, 1e-12, 5e-10, 1e-9, 1.0000001e-9, 2e-9, 1e-6, 0.5};
+    for(int k = -8; k <= 8; ++k)
+    {
+        const double l = 0.125 * k;
+        for(const double w : widths)
+        {
+            const double u = l + w;
+            if(std::abs(u) > 1.0)
+                continue;
+            CHECK(detail::is_equality_bound(l, u, tol) == ((u - l) <= tol));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Option values outside their domain are refused on the error channel at both
+// entry points rather than clamped, coerced or left to poison the iteration.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp rejects option values outside their domain", "[qp_options]")
+{
+    const osqp_problem p = seed_problem(4);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const auto rejected = [&](const dense_qp_options<>& opts)
+    {
+        dense_admm_qp_solver<double> fresh(3, 4);
+        const auto solved = fresh.solve(p.P, p.q, p.A, p.l, p.u, opts);
+        dense_admm_qp_solver<double> posed(3, 4);
+        REQUIRE(posed.solve(p.P, p.q, p.A, p.l, p.u));
+        const auto resolved = posed.resolve(p.q, p.l, p.u, opts);
+        return !solved && solved.error() == qp_error::invalid_options && !resolved && resolved.error() == qp_error::invalid_options;
+    };
+    const auto with = [](auto field, double value)
+    {
+        dense_qp_options<> opts;
+        opts.*field = value;
+        return opts;
+    };
+
+    SECTION("penalty parameter")
+    {
+        for(const double v : {0.0, -0.1, nan, inf})
+            CHECK(rejected(with(&dense_qp_options<>::rho, v)));
+    }
+    SECTION("regularization")
+    {
+        for(const double v : {0.0, -1e-6, nan, inf})
+            CHECK(rejected(with(&dense_qp_options<>::sigma, v)));
+    }
+    SECTION("over-relaxation")
+    {
+        for(const double v : {0.0, 2.0, -0.5, 2.5, nan, inf})
+            CHECK(rejected(with(&dense_qp_options<>::alpha, v)));
+    }
+    SECTION("polish regularization")
+    {
+        for(const double v : {0.0, -1e-6, nan, inf})
+            CHECK(rejected(with(&dense_qp_options<>::delta, v)));
+    }
+    SECTION("adaptive ratio threshold")
+    {
+        for(const double v : {0.999, 0.0, nan, inf})
+            CHECK(rejected(with(&dense_qp_options<>::adaptive_rho_tolerance, v)));
+    }
+    SECTION("convergence and certificate tolerances")
+    {
+        dense_qp_options<> both_zero;
+        both_zero.eps_abs = 0.0;
+        both_zero.eps_rel = 0.0;
+        CHECK(rejected(both_zero));
+        for(const auto field : {&dense_qp_options<>::eps_abs, &dense_qp_options<>::eps_rel})
+            for(const double v : {-1e-6, nan, inf})
+                CHECK(rejected(with(field, v)));
+        for(const auto field : {&dense_qp_options<>::eps_prim_inf, &dense_qp_options<>::eps_dual_inf})
+            for(const double v : {0.0, -1e-4, nan, inf})
+                CHECK(rejected(with(field, v)));
+    }
+    SECTION("iteration budget")
+    {
+        dense_qp_options<> opts;
+        opts.max_iterations = 0;
+        CHECK(rejected(opts));
+        opts.max_iterations = static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) + 1u;
+        CHECK(rejected(opts));
+    }
+    SECTION("in-domain boundary values solve")
+    {
+        dense_qp_options<> unit_threshold;
+        unit_threshold.adaptive_rho_tolerance = 1.0;
+        dense_qp_options<> absolute_only;
+        absolute_only.eps_rel = 0.0;
+        dense_qp_options<> coerced;
+        coerced.check_termination = 0;
+        coerced.adaptive_rho_interval = 0;
+        for(const dense_qp_options<>& opts : {dense_qp_options<>{}, unit_threshold, absolute_only, coerced})
+        {
+            dense_admm_qp_solver<double> solver(3, 4);
+            const auto result = solver.solve(p.P, p.q, p.A, p.l, p.u, opts);
+            REQUIRE(result);
+            CHECK(result->status == qp_solve_status::solved);
+            REQUIRE(solver.resolve(p.q, p.l, p.u, opts));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A condensed matrix that fails to factor is reported, at pose and after an
+// accepted penalty update alike, and the solver refuses a later resolve until
+// it is posed again, since the failed factorization has replaced the old one.
+// The objective is indefinite on purpose and its detection is switched off:
+// with equilibration off, K is indefinite at the default penalty, and positive
+// definite at a penalty of 3 until the adaptive schedule lowers it.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp reports a failed factorization instead of solving on it", "[qp_options]")
+{
+    const Eigen::MatrixXd P{{-2.0}};
+    const Eigen::VectorXd q{{1.0}};
+    const Eigen::MatrixXd A{{1.0}};
+    const Eigen::VectorXd l{{-1.0}};
+    const Eigen::VectorXd u{{1.0}};
+    dense_qp_options<> opts;
+    opts.scaling = 0;
+    opts.validate_convexity = false;
+    const osqp_problem p = seed_problem(1);
+    const Eigen::MatrixXd valid_P = p.P.topLeftCorner(1, 1);
+    const Eigen::VectorXd valid_q = p.q.head(1);
+    const Eigen::MatrixXd valid_A = p.A.leftCols(1);
+
+    SECTION("at pose")
+    {
+        dense_admm_qp_solver<double> solver(1, 1);
+        REQUIRE(solver.solve(valid_P, valid_q, valid_A, p.l, p.u));
+        const auto result = solver.solve(P, q, A, l, u, opts);
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == qp_error::factorization_failed);
+        const auto stale = solver.resolve(q, l, u, opts);
+        REQUIRE_FALSE(stale);
+        CHECK(stale.error() == qp_error::invalid_problem);
+    }
+    SECTION("after an accepted penalty update")
+    {
+        opts.rho = 3.0;
+        opts.adaptive_rho_interval = 1;
+        opts.adaptive_rho_tolerance = 1.0;
+        opts.check_termination = 1000;
+        opts.max_iterations = 50;
+        dense_qp_options<> fixed_penalty = opts;
+        fixed_penalty.adaptive_rho = false;
+        dense_admm_qp_solver<double> control(1, 1);
+        REQUIRE(control.solve(P, q, A, l, u, fixed_penalty));
+
+        dense_admm_qp_solver<double> solver(1, 1);
+        const auto result = solver.solve(P, q, A, l, u, opts);
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == qp_error::factorization_failed);
+        const auto stale = solver.resolve(q, l, u, fixed_penalty);
+        REQUIRE_FALSE(stale);
+        CHECK(stale.error() == qp_error::invalid_problem);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Convexity detection at pose. Every variable is boxed and the penalty is held
+// fixed and large, so the condensed matrix factors even for the indefinite
+// objective: without detection the solve reports a clean status for a problem
+// whose answer carries no global-optimality guarantee. Turning the flag off
+// skips the check.
+// ---------------------------------------------------------------------------
+TEST_CASE("dense_admm_qp rejects an asymmetric objective matrix", "[qp_convexity]")
+{
+    const Eigen::MatrixXd asymmetric{{2.0, 0.5}, {0.7, 1.0}};
+    const auto rejected = boxed_solve(asymmetric, true);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error() == qp_error::invalid_problem);
+
+    Eigen::MatrixXd rounded{{2.0, 0.5}, {0.5, 1.0}};
+    rounded(1, 0) = std::nextafter(0.5, 1.0);
+    const auto accepted = boxed_solve(rounded, true);
+    REQUIRE(accepted);
+    CHECK(accepted->status == qp_solve_status::solved);
+
+    SECTION("the flag turns the check off")
+    {
+        CHECK(boxed_solve(asymmetric, false));
+    }
+}
+
+TEST_CASE("dense_admm_qp rejects an indefinite objective matrix", "[qp_convexity]")
+{
+    const Eigen::MatrixXd indefinite{{1.0, 0.0}, {0.0, -0.5}};
+    const auto rejected = boxed_solve(indefinite, true);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error() == qp_error::invalid_problem);
+    const Eigen::MatrixXd negative_semidefinite{{0.0, 0.0}, {0.0, -1.0}};
+    CHECK_FALSE(boxed_solve(negative_semidefinite, true));
+
+    SECTION("the flag turns the check off")
+    {
+        const auto unchecked = boxed_solve(indefinite, false);
+        REQUIRE(unchecked);
+        CHECK(unchecked->status == qp_solve_status::solved);
+    }
+}
+
+TEST_CASE("dense_admm_qp accepts a semidefinite objective matrix", "[qp_convexity]")
+{
+    const Eigen::MatrixXd rank_one{{1.0, 1.0}, {1.0, 1.0}};
+    const Eigen::MatrixXd zero = Eigen::MatrixXd::Zero(2, 2);
+    const auto semidefinite = boxed_solve(rank_one, true);
+    REQUIRE(semidefinite);
+    CHECK(semidefinite->status == qp_solve_status::solved);
+    const auto linear = boxed_solve(zero, true);
+    REQUIRE(linear);
+    CHECK(linear->status == qp_solve_status::solved);
+
+    SECTION("the flag turns the check off")
+    {
+        CHECK(boxed_solve(rank_one, false));
+        CHECK(boxed_solve(zero, false));
+    }
+}

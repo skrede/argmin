@@ -82,28 +82,48 @@
 namespace argmin::detail
 {
 
-// Normal-step damping factor.
+// zeta is the normal-step damping factor.
 //
 // Reference: Nocedal and Wright 2e eq. 18.45 (zeta damping); Lalee,
 //            Nocedal, Plantenga 1998 Section 3.2; scipy
 //            equality_constrained_sqp.py TR_FACTOR (literature
 //            universal value).
-inline constexpr double zeta = 0.8;
-
-// TR ratio thresholds and radius-update factors. Consumed by callers
-// (tr_sqp_policy, filter_trsqp_policy) to perform the eta_1 / eta_2
-// rho-branch and the boundary-guarded expand step at the composite-
-// step call site.
+//
+// The TR ratio thresholds (eta_1 shrinks, eta_2 expands) and radius-
+// update factors are consumed by callers (tr_sqp_policy,
+// filter_trsqp_policy) at the composite-step call site; the radius
+// expands only when ||p|| >= boundary_guard * delta.
 //
 // Reference: Nocedal and Wright 2e Section 4.1 Algorithm 4.1
 //            universal defaults (consistent with scipy trust-constr,
 //            Ceres trust-region minimizer, KNITRO).
-inline constexpr double tr_eta_1          = 0.1;   // shrink threshold
-inline constexpr double tr_eta_2          = 0.75;  // expand threshold
-inline constexpr double tr_shrink_factor  = 0.25;
-inline constexpr double tr_expand_factor  = 2.0;
-inline constexpr double tr_delta_max      = 1e10;
-inline constexpr double tr_boundary_guard = 0.9;   // expand only when ||p|| >= 0.9 * delta
+template <scalar S>
+struct byrd_omojokun_constants;
+
+template <>
+struct byrd_omojokun_constants<double>
+{
+    static constexpr double zeta = 0.8;
+    static constexpr double eta_1 = 0.1;
+    static constexpr double eta_2 = 0.75;
+    static constexpr double shrink_factor = 0.25;
+    static constexpr double expand_factor = 2.0;
+    static constexpr double delta_max = 1e10;
+    static constexpr double boundary_guard = 0.9;
+};
+
+template <>
+struct byrd_omojokun_constants<float>
+{
+    // Ratios and factors are precision-independent; the radius cap is a magnitude within float range.
+    static constexpr float zeta = 0.8f;            // dimensionless
+    static constexpr float eta_1 = 0.1f;           // dimensionless
+    static constexpr float eta_2 = 0.75f;          // dimensionless
+    static constexpr float shrink_factor = 0.25f;  // dimensionless
+    static constexpr float expand_factor = 2.0f;   // dimensionless
+    static constexpr float delta_max = 1e10f;      // magnitude cap
+    static constexpr float boundary_guard = 0.9f;  // dimensionless
+};
 
 // Number of iterative-refinement passes applied by the null-space
 // projector on the tangential leg (Gould-Hribar-Nocedal 2001 Alg.
@@ -170,12 +190,13 @@ inline constexpr bool tangential_lin_more_restart = true;
 //                                  the zeta * delta boundary.
 //   tangential_cg_status        -- exit status of the inner Steihaug-CG
 //                                  call on the tangential leg.
+template <typename Scalar>
 struct byrd_omojokun_step_result
 {
-    double predicted;
-    double vpred;
-    double f_new;
-    double c_norm_new;
+    Scalar predicted;
+    Scalar vpred;
+    Scalar f_new;
+    Scalar c_norm_new;
     bool p_out_filled;
     bool normal_step_lsq_fallback;
     cg_exit_status tangential_cg_status;
@@ -204,9 +225,9 @@ struct byrd_omojokun_workspace
     Eigen::Vector<Scalar, N> lower_t;
     Eigen::Vector<Scalar, N> upper_t;
     Eigen::Vector<Scalar, N> Bp;
-    Eigen::VectorXd Ag_n;
-    Eigen::VectorXd Av;
-    Eigen::VectorXd Ap_plus_c;
+    Eigen::VectorX<Scalar> Ag_n;
+    Eigen::VectorX<Scalar> Av;
+    Eigen::VectorX<Scalar> Ap_plus_c;
 
 
     // Lin-More tangential free-set restart scratch. The augmented normal
@@ -214,10 +235,10 @@ struct byrd_omojokun_workspace
     // worst case m_total + n_joint (every joint coordinate fixed) and used
     // through top-left blocks so the max-sized LDLT factors a same-shape
     // system on every restart (no per-restart reallocation).
-    Eigen::MatrixXd A_aug;
-    Eigen::MatrixXd AAt_aug;
-    Eigen::VectorXd w_aug;
-    Eigen::LDLT<Eigen::MatrixXd> ldlt_aug;
+    Eigen::MatrixX<Scalar> A_aug;
+    Eigen::MatrixX<Scalar> AAt_aug;
+    Eigen::VectorX<Scalar> w_aug;
+    Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_aug;
     std::vector<int> fixed;
 
     void resize(int n_joint, int m_total)
@@ -241,7 +262,7 @@ struct byrd_omojokun_workspace
         A_aug.resize(m_aug_max, n_joint);
         AAt_aug.resize(m_aug_max, m_aug_max);
         w_aug.resize(m_aug_max);
-        ldlt_aug = Eigen::LDLT<Eigen::MatrixXd>(m_aug_max);
+        ldlt_aug = Eigen::LDLT<Eigen::MatrixX<Scalar>>(m_aug_max);
         fixed.reserve(static_cast<std::size_t>(n_joint));
     }
 };
@@ -325,22 +346,22 @@ struct byrd_omojokun_workspace
 //            library's default is 0 (growth disabled) pending an
 //            HS-suite re-sweep against the corrected gate.
 template <typename Scalar, int N, typename HessianOp, typename TrialEval>
-byrd_omojokun_step_result byrd_omojokun_composite_step(
+byrd_omojokun_step_result<Scalar> byrd_omojokun_composite_step(
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& z_k,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g_obj,
     HessianOp&& hessian_op,
     const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& A,
-    const Eigen::Ref<const Eigen::VectorXd>& c,
+    const Eigen::Ref<const Eigen::VectorX<Scalar>>& c,
     Scalar delta,
     Scalar eps,
     std::size_t max_cg_iter,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& lower_displaced,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& upper_displaced,
     TrialEval&& trial_eval,
-    Eigen::MatrixXd& AAt_workspace,
-    Eigen::LDLT<Eigen::MatrixXd>& ldlt_workspace,
-    Eigen::VectorXd& w_workspace,
+    Eigen::MatrixX<Scalar>& AAt_workspace,
+    Eigen::LDLT<Eigen::MatrixX<Scalar>>& ldlt_workspace,
+    Eigen::VectorX<Scalar>& w_workspace,
     Eigen::Ref<Eigen::Vector<Scalar, N>> v_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>> u_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>> r_cg_buf,
@@ -357,12 +378,12 @@ byrd_omojokun_step_result byrd_omojokun_composite_step(
                 // caller). Retained in the signature for clarity at
                 // call sites and for future use by diagnostics.
 
-    byrd_omojokun_step_result result{};
+    byrd_omojokun_step_result<Scalar> result{};
     result.p_out_filled = false;
     result.normal_step_lsq_fallback = false;
     result.tangential_cg_status = cg_exit_status::forcing;
 
-    const Scalar delta_n = zeta * delta;
+    const Scalar delta_n = byrd_omojokun_constants<Scalar>::zeta * delta;
 
     // ── Factorize A A^T once per composite step ────────────────────
     //
