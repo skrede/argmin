@@ -35,17 +35,15 @@ Both N&W-flavour SQP variants can accept an iter-0 step that satisfies the *line
 
 **Workaround:** use `kraft_slsqp` or `filter_slsqp` for the same problem class. Both reach `f* ± 1e-8`. The N&W variants exist primarily as references for ongoing comparison work and should not be used for production solves at this time.
 
-### COBYLA on linear-equality reformulations of unconstrained QPs
+### COBYLA bound repair outside the box
 
-COBYLA's adaptive `parmu` parameter was hotfixed, closing the silent-wrong-optimum bug on HS024. However, several other Powell-faithfulness gaps remain (rho contraction, simplex denormalisation, axis-aligned geometry steps, lax conditioning threshold). On HS048 / HS050 / HS051 — unconstrained quadratics posed with linear equality constraints — COBYLA returns `f` orders of magnitude away from the true optimum (`f = 84 / 7516 / 7.7` against `f* = 0`).
-
-**Workaround:** for problems with explicit equality constraints, prefer `kraft_slsqp`, `filter_slsqp`, or `augmented_lagrangian` wrapping `bobyqa`. A Powell-faithfulness rewrite of COBYLA is scheduled for v0.3.x.
+COBYLA rewrites box bounds into explicit constraints, and its bound repair can evaluate the objective outside the box under the default initial trust radius: a coordinate starting at 0.5 in [0, 0.6], beside a coordinate with a much wider range, has its first simplex vertex evaluated at 0.75. An objective that is undefined outside its bounds must tolerate those evaluations.
 
 ### CMA-ES on Ackley / Schwefel
 
-`cmaes` and the restarting wrapper around it converge to local minima rather than the global optimum on `ackley_2`, `ackley_10`, and `schwefel_2`. The local-minimum escape is weaker than the Hansen-Auger active-CMA reference. On Rastrigin (2-D and 10-D) and Griewank (2-D) the median seed reaches machine zero; the gap is concentrated on landscapes with very flat basins.
+`cmaes` and the restarting wrapper around it converge to local minima rather than the global optimum on `ackley_2`, `ackley_10`, and `schwefel_2`. The local-minimum escape is weaker than the Hansen-Auger active-CMA reference. In the publication cohort `cmaes` also fails on `rastrigin_10` and `griewank_2`, and its verdict on `rastrigin_2` changes with the seed; the restarting wrapper passes only `rastrigin_2`.
 
-**Workaround:** for those specific landscapes, run with multiple seeds and take the best, or use `restarting_policy` wrapping `cmaes` which improves the success rate on Rastrigin / Griewank but does not close the Ackley / Schwefel gap. An active-CMA variant is in the v0.3.x scope.
+**Workaround:** for those specific landscapes, run with multiple seeds and take the best, or use `restarting_policy` wrapping `cmaes`, which passes `rastrigin_2` but does not close the Ackley / Schwefel gap. An active-CMA variant is in the v0.3.x scope.
 
 ### MMA / GCMMA conjoined-gate FAILs
 

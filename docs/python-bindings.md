@@ -134,12 +134,12 @@ from argmin.experimental import CobylaSolver
 
 | name | method | known defect | publication cohort |
 | --- | --- | --- | --- |
-| `CobylaSolver` | derivative-free constrained optimization by linear approximations | its bound repair can evaluate the objective outside the box under the default initial trust radius: a coordinate starting at 0.5 in `[0, 0.6]`, beside a coordinate with a much wider range, has its first simplex vertex evaluated at 0.75 | `cobyla` 23 pass / 4 expected_fail |
-| `BobyqaSolver` | bound-constrained derivative-free trust-region interpolation | a run that ends by exhausting the 200000-pass safety cap on the internal state machine of one iteration is reported as `converged`, so a stuck run reads as a success | `bobyqa` 4 pass / 7 expected_fail |
-| `CmaesSolver` | covariance-matrix-adaptation evolution strategy | no passing cell in the publication cohort; on the Ackley and Schwefel functions it can stop at a local minimum and report `converged` | `cmaes` 0 pass / 4 expected_fail / 2 excluded |
+| `CobylaSolver` | derivative-free constrained optimization by linear approximations | COBYLA's bound repair can evaluate the objective outside the box under the default initial trust radius: a coordinate starting at 0.5 in [0, 0.6], beside a coordinate with a much wider range, has its first simplex vertex evaluated at 0.75. | `cobyla` 23 pass / 4 expected_fail |
+| `BobyqaSolver` | bound-constrained derivative-free trust-region interpolation | BOBYQA reports a solve as converged when it ends by exhausting the 200000-pass safety cap on the internal state machine of one iteration, so a stuck run reads as a success. | `bobyqa` 4 pass / 7 expected_fail |
+| `CmaesSolver` | covariance-matrix-adaptation evolution strategy | CMA-ES has no passing cell in the library's publication benchmark cohort (0 pass, 4 expected failures, 2 excluded), and it converges to local minima on the Ackley and Schwefel functions. | `cmaes` 0 pass / 4 expected_fail / 2 excluded |
 
 Each gated solver class carries two attributes: `maturity`, which reads
-`"experimental"`, and `known_defect`, a sentence naming the defect, which the
+`"experimental"`, and `known_defect`, the sentence in the table above, which the
 class docstring also contains. Importing the submodule or constructing a gated
 solver emits no warning; the import is the opt-in. The submodule also holds the
 gated methods' own option and enum types — `CobylaOptions`, `BobyqaOptions`,

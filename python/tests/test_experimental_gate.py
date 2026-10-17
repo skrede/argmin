@@ -86,6 +86,14 @@ def test_a_gated_solver_states_its_defect(name):
 
 
 @pytest.mark.parametrize("name", sorted(GATED_SOLVERS))
+def test_the_bindings_document_states_the_same_defect(repository_root, name):
+    document = (repository_root / "docs" / "python-bindings.md").read_text()
+    rows = [line for line in document.splitlines() if line.startswith(f"| `{name}` |")]
+    assert len(rows) == 1
+    assert f"| {getattr(experimental, name).known_defect} |" in rows[0]
+
+
+@pytest.mark.parametrize("name", sorted(GATED_SOLVERS))
 def test_a_known_defect_names_no_planning_identifier(name):
     solver = getattr(experimental, name)
     assert not PLANNING_IDENTIFIER.search(solver.known_defect)
