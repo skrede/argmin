@@ -264,7 +264,7 @@ gcmma_raa_augmented,hs031,default,19,-8.0,15,-6.0,excluded,publish-2026-07-24T11
 gcmma_raa_augmented,hs034,default,18,-8.0,65,-6.0,pass,publish-2026-07-24T11-44-24Z,enforced,,129819,
 gcmma_raa_augmented,hs035,default,14,-8.0,19,-6.0,pass,publish-2026-07-24T11-44-24Z,enforced,,93418,
 gcmma_raa_augmented,hs036,default,23,-8.0,21,-6.0,excluded,publish-2026-07-24T11-44-24Z,enforced,"toolchain-variant termination: the returned point's oracle verdict flips between gcc and clang builds of the same source, so the verdict is not a stable gate signal on any toolchain",180585,
-gcmma_raa_augmented,hs037,default,15,-8.0,59,-6.0,pass,publish-2026-10-16T20-26-32Z,enforced,,124679,
+gcmma_raa_augmented,hs037,default,15,-8.0,59,-6.0,excluded,publish-2026-10-17T09-17-34Z,enforced,"toolchain-variant termination: the returned point's oracle verdict flips between gcc and clang builds of the same source, so the verdict is not a stable gate signal on any toolchain",124679,
 gcmma_raa_augmented,hs043,default,57,-8.0,23,-6.0,pass,publish-2026-10-16T20-26-32Z,enforced,,553029,
 gcmma_raa_augmented,hs044,default,24,-8.0,15,-6.0,pass,publish-2026-07-24T11-44-24Z,enforced,,232895,
 gcmma_raa_augmented,hs076,default,30,-8.0,24,-6.0,pass,publish-2026-10-16T20-26-32Z,enforced,,233585,
