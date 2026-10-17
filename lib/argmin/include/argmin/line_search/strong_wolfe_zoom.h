@@ -68,20 +68,10 @@ std::optional<Scalar> quadratic_minimize(Scalar a_lo, Scalar phi_lo, Scalar dphi
     return alpha_min;
 }
 
-// A non-finite trial is treated as an upper bracket: the isfinite gate short-circuits the
-// ordered comparisons that follow it.
 template <typename DPhi, typename Scalar>
-bool zoom_accepts(DPhi& dphi, wolfe_bracket<Scalar>& b, Scalar alpha_j, Scalar phi_j, Scalar phi0, Scalar dphi0,
-                  const line_search_options<Scalar>& opts, line_search_result<Scalar>& result)
+bool zoom_lower_accepts(DPhi& dphi, wolfe_bracket<Scalar>& b, Scalar alpha_j, Scalar phi_j, Scalar dphi0,
+                        const line_search_options<Scalar>& opts, line_search_result<Scalar>& result)
 {
-    if(!std::isfinite(phi_j) || phi_j > phi0 + opts.c1 * alpha_j * dphi0 || phi_j >= b.phi_lo)
-    {
-        if(approximately_wolfe(dphi, alpha_j, phi_j, phi0, dphi0, opts, result))
-            return true;
-        b.alpha_hi = alpha_j;
-        b.phi_hi = phi_j;
-        return false;
-    }
     Scalar dphi_j = dphi(alpha_j);
     ++result.evaluations;
     bool dphi_j_finite = std::isfinite(dphi_j);
@@ -103,6 +93,23 @@ bool zoom_accepts(DPhi& dphi, wolfe_bracket<Scalar>& b, Scalar alpha_j, Scalar p
     b.phi_lo = phi_j;
     b.dphi_lo = dphi_j;
     return false;
+}
+
+// A non-finite trial is treated as an upper bracket: the isfinite gate short-circuits the
+// ordered comparisons that follow it.
+template <typename DPhi, typename Scalar>
+bool zoom_accepts(DPhi& dphi, wolfe_bracket<Scalar>& b, Scalar alpha_j, Scalar phi_j, Scalar phi0, Scalar dphi0,
+                  const line_search_options<Scalar>& opts, line_search_result<Scalar>& result)
+{
+    if(!std::isfinite(phi_j) || phi_j > phi0 + opts.c1 * alpha_j * dphi0 || phi_j >= b.phi_lo)
+    {
+        if(approximately_wolfe(dphi, alpha_j, phi_j, phi0, dphi0, opts, result))
+            return true;
+        b.alpha_hi = alpha_j;
+        b.phi_hi = phi_j;
+        return false;
+    }
+    return zoom_lower_accepts(dphi, b, alpha_j, phi_j, dphi0, opts, result);
 }
 
 // Zoom phase, N&W Algorithm 3.6 (pp. 59-62): bisection first, quadratic interpolation after,
