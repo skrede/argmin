@@ -49,6 +49,7 @@ add_executable(argmin_unit_tests
     sparse_admm_qp_test.cpp
     sparse_control_qp_test.cpp
     sparse_polish_reuse_test.cpp
+    sparse_admm_move_test.cpp
     sparse_qp_reference_test.cpp
     maros_meszaros_dense_test.cpp
     step_budget_solver_test.cpp
@@ -150,6 +151,7 @@ add_executable(argmin_alloc_gate_test
     alloc_gate_sqp_test.cpp
     alloc_sensor_counters.cpp
     alloc_gate_line_search_failure_test.cpp
+    alloc_gate_sparse_move_test.cpp
 )
 # Sensor B (the glibc __libc_* strong-symbol overrides) links only on Linux; the
 # CMake platform guard is the sole gate (no __linux__ #ifdef inside the source).
@@ -190,6 +192,9 @@ if(_argmin_alloc_gate_sanitizer EQUAL -1)
     # the label for the same reason as the canary.
     catch_discover_tests(argmin_alloc_gate_test
         TEST_SPEC "[qp-escalation-alloc]")
+    # Witnesses a value-semantics contract rather than a real-time step, so it stays unlabeled.
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[qp-move-alloc]")
 else()
     set_target_properties(argmin_alloc_gate_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
 endif()

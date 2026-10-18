@@ -27,14 +27,17 @@
 //            (2020), "OSQP: An operator splitting solver for quadratic
 //            programs," Math. Prog. Comp. 12:637-672, Section 5.
 
+#include "argmin/qp/detail/reset_on_move_flag.h"
+
 #include "argmin/types.h"
 
 #include <Eigen/SparseCore>
 #include <Eigen/SparseCholesky>
 #include <Eigen/OrderingMethods>
 
-#include <cstddef>
+#include <memory>
 #include <vector>
+#include <cstddef>
 
 namespace argmin::detail
 {
@@ -65,7 +68,9 @@ public:
         n_ = 0;
         m_ = 0;
         diag_slot_.clear();
-        K_ = sparse_type(n + m, n + m);
+        K_ = std::make_unique<sparse_type>(n + m, n + m);
+        if(!ldlt_)
+            ldlt_ = std::make_unique<factorization_type>();
 
         if(static_cast<int>(P.cols()) != n || static_cast<int>(A.cols()) != n)
             return false;
@@ -96,12 +101,12 @@ public:
             triplets.emplace_back(static_cast<index_type>(n + i), static_cast<index_type>(n + i),
                                   -rho_inv[static_cast<std::size_t>(i)]);
 
-        K_.setFromTriplets(triplets.begin(), triplets.end());
-        K_.makeCompressed();
+        K_->setFromTriplets(triplets.begin(), triplets.end());
+        K_->makeCompressed();
 
         diag_slot_.assign(static_cast<std::size_t>(m), -1);
-        const index_type* outer = K_.outerIndexPtr();
-        const index_type* inner = K_.innerIndexPtr();
+        const index_type* outer = K_->outerIndexPtr();
+        const index_type* inner = K_->innerIndexPtr();
         for(int i = 0; i < m; ++i)
         {
             const index_type col = static_cast<index_type>(n + i);
@@ -116,8 +121,8 @@ public:
         }
 
         ++symbolic_analyses_;
-        ldlt_.analyzePattern(K_);
-        if(ldlt_.info() != Eigen::Success)
+        ldlt_->analyzePattern(*K_);
+        if(ldlt_->info() != Eigen::Success)
             return false;
 
         n_ = n;
@@ -145,13 +150,13 @@ public:
         if(!analyzed_ || rho_inv.size() != static_cast<std::size_t>(m_))
             return false;
 
-        Scalar* values = K_.valuePtr();
+        Scalar* values = K_->valuePtr();
         for(std::size_t i = 0; i < rho_inv.size(); ++i)
             values[diag_slot_[i]] = -rho_inv[i];
 
         ++numeric_factorizations_;
-        ldlt_.factorize(K_);
-        factorized_ = ldlt_.info() == Eigen::Success;
+        ldlt_->factorize(*K_);
+        factorized_ = ldlt_->info() == Eigen::Success;
         if(factorized_)
         {
             // A rho update recomputes the factor diagonal D, so the cached
@@ -160,7 +165,7 @@ public:
             // value (one Eigen copy); refactorize() is off the resolve claim and
             // already allocates inside Eigen's factorize, so materializing D once
             // to invert it is acceptable.
-            dinv_ = ldlt_.vectorD().cwiseInverse();
+            dinv_ = ldlt_->vectorD().cwiseInverse();
         }
         return factorized_;
     }
@@ -180,27 +185,27 @@ public:
         // has rows() entries) but is the only place the polish path's reduced
         // solution vectors are sized.
         out.resize(rows());
-        if(ldlt_.info() != Eigen::Success)
+        if(!ldlt_ || ldlt_->info() != Eigen::Success)
             return;
 
         // Guard the triangular solves for a degenerate fully-diagonal factor
         // (L == I, no stored off-diagonal), mirroring _solve_impl's own guard.
-        const bool has_off_diagonal = ldlt_.matrixL().nestedExpression().nonZeros() > 0;
+        const bool has_off_diagonal = ldlt_->matrixL().nestedExpression().nonZeros() > 0;
 
-        work_ = ldlt_.permutationP() * rhs;
+        work_ = ldlt_->permutationP() * rhs;
         if(has_off_diagonal)
-            ldlt_.matrixL().solveInPlace(work_);
+            ldlt_->matrixL().solveInPlace(work_);
         work_.array() *= dinv_.array();
         if(has_off_diagonal)
-            ldlt_.matrixU().solveInPlace(work_);
-        out = ldlt_.permutationPinv() * work_;
+            ldlt_->matrixU().solveInPlace(work_);
+        out = ldlt_->permutationPinv() * work_;
     }
 
-    const sparse_type& matrix() const { return K_; }
+    const sparse_type& matrix() const { return *K_; }
 
     // Exposes the signs the factorization actually computed, which is the only
     // way to assert that the indefinite path was exercised.
-    auto diagonal_factor() const { return ldlt_.vectorD(); }
+    auto diagonal_factor() const { return ldlt_->vectorD(); }
 
     // Monotone across re-poses and never reset: the factor-once contract of the
     // owning solver is a statement about work performed over a lifetime, and a
@@ -215,8 +220,10 @@ public:
     bool factorized() const { return factorized_; }
 
 private:
-    sparse_type K_;
-    factorization_type ldlt_;
+    // Both are heap-boxed because Eigen 3.4's SparseMatrix has no move members and SimplicialLDLT
+    // is not movable at all, so by-value members would make every owner copy on move or not move.
+    std::unique_ptr<sparse_type> K_;
+    std::unique_ptr<factorization_type> ldlt_;
     std::vector<int> diag_slot_;
     // Resolve-path scratch, sized in analyze() and (dinv_) value-refreshed in
     // refactorize(); mutable so solve_into stays const for its const callers.
@@ -226,8 +233,8 @@ private:
     std::size_t numeric_factorizations_{0};
     int n_{0};
     int m_{0};
-    bool analyzed_{false};
-    bool factorized_{false};
+    reset_on_move_flag analyzed_{false};
+    reset_on_move_flag factorized_{false};
 };
 
 }

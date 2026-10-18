@@ -56,6 +56,7 @@
 
 #include "argmin/qp/detail/sparse_kkt.h"
 #include "argmin/qp/detail/polish_accept.h"
+#include "argmin/qp/detail/reset_on_move_flag.h"
 #include "argmin/options/admm_defaults.h"
 #include "argmin/options/sparse_qp_options.h"
 #include "argmin/qp/qp_types.h"
@@ -66,6 +67,7 @@
 
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <vector>
 #include <cstddef>
 #include <cstdint>
@@ -293,7 +295,7 @@ private:
         if(m_ > 0)
             Einv_ = E_.cwiseInverse();
         init_rho(opts);
-        if(!factor_fresh(kkt_, P_scaled_, A_scaled_, sigma_, rho_inv_))
+        if(!factor_fresh(kkt_, *P_scaled_, *A_scaled_, sigma_, rho_inv_))
             return qp_error::factorization_failed;
         seed_iterates(opts);
         posed_ = true;
@@ -331,10 +333,10 @@ private:
         posed_ = false;
         n_ = n;
         m_ = m;
-        P_ = P;
-        A_ = A;
-        P_.makeCompressed();
-        A_.makeCompressed();
+        P_ = std::make_unique<sparse_type>(P);
+        A_ = std::make_unique<sparse_type>(A);
+        P_->makeCompressed();
+        A_->makeCompressed();
         q_ = q;
         l_ = l;
         u_ = u;
@@ -373,8 +375,8 @@ private:
     // cost scaling c. Reference: Stellato et al. 2020, Section 5.1.
     void ruiz(const sparse_qp_options<Scalar>& opts)
     {
-        P_scaled_ = P_;
-        A_scaled_ = A_;
+        P_scaled_ = std::make_unique<sparse_type>(*P_);
+        A_scaled_ = std::make_unique<sparse_type>(*A_);
         q_scaled_ = q_;
         D_.setOnes();
         if(m_ > 0)
@@ -386,9 +388,9 @@ private:
             for(int j = 0; j < n_; ++j)
             {
                 Scalar d = Scalar(0);
-                for(typename sparse_type::InnerIterator pit(P_scaled_, j); pit; ++pit)
+                for(typename sparse_type::InnerIterator pit(*P_scaled_, j); pit; ++pit)
                     d = std::max(d, std::abs(pit.value()));
-                for(typename sparse_type::InnerIterator ait(A_scaled_, j); ait; ++ait)
+                for(typename sparse_type::InnerIterator ait(*A_scaled_, j); ait; ++ait)
                     d = std::max(d, std::abs(ait.value()));
                 scan_n_[j] = d > Scalar(0) ? Scalar(1) / std::sqrt(d) : Scalar(1);
             }
@@ -396,7 +398,7 @@ private:
             {
                 scan_m_.setZero();
                 for(int j = 0; j < n_; ++j)
-                    for(typename sparse_type::InnerIterator ait(A_scaled_, j); ait; ++ait)
+                    for(typename sparse_type::InnerIterator ait(*A_scaled_, j); ait; ++ait)
                     {
                         const int i = static_cast<int>(ait.row());
                         scan_m_[i] = std::max(scan_m_[i], std::abs(ait.value()));
@@ -407,10 +409,10 @@ private:
             }
 
             for(int j = 0; j < n_; ++j)
-                for(typename sparse_type::InnerIterator pit(P_scaled_, j); pit; ++pit)
+                for(typename sparse_type::InnerIterator pit(*P_scaled_, j); pit; ++pit)
                     pit.valueRef() *= scan_n_[static_cast<int>(pit.row())] * scan_n_[j];
             for(int j = 0; j < n_; ++j)
-                for(typename sparse_type::InnerIterator ait(A_scaled_, j); ait; ++ait)
+                for(typename sparse_type::InnerIterator ait(*A_scaled_, j); ait; ++ait)
                     ait.valueRef() *= scan_m_[static_cast<int>(ait.row())] * scan_n_[j];
             q_scaled_.array() *= scan_n_.array();
             D_.array() *= scan_n_.array();
@@ -421,7 +423,7 @@ private:
             for(int j = 0; j < n_; ++j)
             {
                 Scalar cmax = Scalar(0);
-                for(typename sparse_type::InnerIterator pit(P_scaled_, j); pit; ++pit)
+                for(typename sparse_type::InnerIterator pit(*P_scaled_, j); pit; ++pit)
                     cmax = std::max(cmax, std::abs(pit.value()));
                 mean_pcol += cmax;
             }
@@ -429,7 +431,7 @@ private:
             const Scalar qn = q_scaled_.cwiseAbs().maxCoeff();
             const Scalar denom = std::max(mean_pcol, qn);
             const Scalar gamma = denom > Scalar(0) ? Scalar(1) / denom : Scalar(1);
-            P_scaled_.coeffs() *= gamma;
+            P_scaled_->coeffs() *= gamma;
             q_scaled_ *= gamma;
             c_ *= gamma;
         }
@@ -497,7 +499,7 @@ private:
             y_ = c_ * ws_y_.cwiseQuotient(E_);
         else
             y_.setZero();
-        mtmp_.noalias() = A_scaled_ * x_;
+        mtmp_.noalias() = *A_scaled_ * x_;
         z_ = mtmp_.cwiseMax(l_scaled_).cwiseMin(u_scaled_);
     }
 
@@ -598,7 +600,7 @@ private:
                         const vector<Scalar>& zu, Scalar& rpn, Scalar& rdn, Scalar& ps,
                         Scalar& ds)
     {
-        Px_buf_.noalias() = P_ * xu;
+        Px_buf_.noalias() = *P_ * xu;
         rd_ = Px_buf_ + q_;
         Scalar ax_inf = Scalar(0);
         Scalar z_inf = Scalar(0);
@@ -606,8 +608,8 @@ private:
         rpn = Scalar(0);
         if(m_ > 0)
         {
-            Ax_buf_.noalias() = A_ * xu;
-            Aty_buf_.noalias() = A_.transpose() * yu;
+            Ax_buf_.noalias() = *A_ * xu;
+            Aty_buf_.noalias() = A_->transpose() * yu;
             rd_ += Aty_buf_;
             rp_ = Ax_buf_ - zu;
             rpn = rp_.cwiseAbs().maxCoeff();
@@ -651,7 +653,7 @@ private:
         const Scalar dy_inf = mtmp_.cwiseAbs().maxCoeff();
         if(dy_inf <= Scalar(0))
             return false;
-        ntmp_.noalias() = A_.transpose() * mtmp_;
+        ntmp_.noalias() = A_->transpose() * mtmp_;
         if(ntmp_.cwiseAbs().maxCoeff() > static_cast<Scalar>(o.eps_prim_inf) * dy_inf)
             return false;
         Scalar sup = Scalar(0);
@@ -676,14 +678,14 @@ private:
         const Scalar dx_inf = ntmp_.cwiseAbs().maxCoeff();
         if(dx_inf <= Scalar(0))
             return false;
-        ntmp2_.noalias() = P_ * ntmp_;
+        ntmp2_.noalias() = *P_ * ntmp_;
         if(ntmp2_.cwiseAbs().maxCoeff() > static_cast<Scalar>(o.eps_dual_inf) * dx_inf)
             return false;
         if(q_.dot(ntmp_) > -static_cast<Scalar>(o.eps_dual_inf) * dx_inf)
             return false;
         if(m_ > 0)
         {
-            mtmp_.noalias() = A_ * ntmp_;
+            mtmp_.noalias() = *A_ * ntmp_;
             const Scalar tol = static_cast<Scalar>(o.eps_dual_inf) * dx_inf;
             for(int i = 0; i < m_; ++i)
             {
@@ -732,7 +734,7 @@ private:
         Scalar ds = Scalar(0);
         residual_norms(x_unscaled_, y_unscaled_, z_unscaled_, rpn, rdn, ps, ds);
 
-        ntmp_.noalias() = P_ * x_unscaled_;
+        ntmp_.noalias() = *P_ * x_unscaled_;
         const Scalar iterate_objective =
             Scalar(0.5) * x_unscaled_.dot(ntmp_) + q_.dot(x_unscaled_);
 
@@ -747,7 +749,7 @@ private:
                 if(m_ > 0)
                 {
                     y_unscaled_ = px_y_;
-                    Ax_buf_.noalias() = A_ * x_unscaled_;
+                    Ax_buf_.noalias() = *A_ * x_unscaled_;
                     z_unscaled_ = Ax_buf_.cwiseMax(l_).cwiseMin(u_);
                 }
                 residual_norms(x_unscaled_, y_unscaled_, z_unscaled_, rpn, rdn, ps, ds);
@@ -765,7 +767,7 @@ private:
         out.warm_started = seed_consumed_;
         out.primal_residual = m_ > 0 ? rpn : Scalar(0);
         out.dual_residual = rdn;
-        ntmp_.noalias() = P_ * x_unscaled_;
+        ntmp_.noalias() = *P_ * x_unscaled_;
         out.objective_value = Scalar(0.5) * x_unscaled_.dot(ntmp_) + q_.dot(x_unscaled_);
 
         if(o.warm_start)
@@ -841,21 +843,21 @@ private:
                 act_row_[static_cast<std::size_t>(active_upper_[static_cast<std::size_t>(k)])] =
                     nl + k;
 
-            A_act_ = sparse_type(mact, n_);
+            A_act_ = std::make_unique<sparse_type>(mact, n_);
             triplets_.clear();
             for(int j = 0; j < n_; ++j)
-                for(typename sparse_type::InnerIterator it(A_, j); it; ++it)
+                for(typename sparse_type::InnerIterator it(*A_, j); it; ++it)
                 {
                     const int r = act_row_[static_cast<std::size_t>(it.row())];
                     if(r >= 0)
                         triplets_.emplace_back(static_cast<index_type>(r),
                                                static_cast<index_type>(j), it.value());
                 }
-            A_act_.setFromTriplets(triplets_.begin(), triplets_.end());
-            A_act_.makeCompressed();
+            A_act_->setFromTriplets(triplets_.begin(), triplets_.end());
+            A_act_->makeCompressed();
 
             polish_delta_.assign(static_cast<std::size_t>(mact), delta);
-            if(!factor_fresh(polish_kkt_, P_, A_act_, delta, polish_delta_))
+            if(!factor_fresh(polish_kkt_, *P_, *A_act_, delta, polish_delta_))
             {
                 // A failed analysis leaves no reusable factor: drop the cache so
                 // the next call cannot mistake the stale member factor for a hit.
@@ -863,22 +865,22 @@ private:
                 return false;
             }
 
-            K_unreg_ = sparse_type(dim, dim);
+            K_unreg_ = std::make_unique<sparse_type>(dim, dim);
             triplets_.clear();
             for(int j = 0; j < n_; ++j)
-                for(typename sparse_type::InnerIterator it(P_, j); it; ++it)
+                for(typename sparse_type::InnerIterator it(*P_, j); it; ++it)
                     triplets_.emplace_back(static_cast<index_type>(it.row()),
                                            static_cast<index_type>(j), it.value());
             for(int j = 0; j < n_; ++j)
-                for(typename sparse_type::InnerIterator it(A_act_, j); it; ++it)
+                for(typename sparse_type::InnerIterator it(*A_act_, j); it; ++it)
                 {
                     const index_type r = static_cast<index_type>(n_ + it.row());
                     const index_type cj = static_cast<index_type>(j);
                     triplets_.emplace_back(r, cj, it.value());
                     triplets_.emplace_back(cj, r, it.value());
                 }
-            K_unreg_.setFromTriplets(triplets_.begin(), triplets_.end());
-            K_unreg_.makeCompressed();
+            K_unreg_->setFromTriplets(triplets_.begin(), triplets_.end());
+            K_unreg_->makeCompressed();
 
             // The member factor and unregularized reduced KKT now match this
             // pattern and delta; record them so an unchanged next call reuses
@@ -899,7 +901,7 @@ private:
         polish_kkt_.solve_into(rhs_red_, sol_red_);
         for(int r = 0; r < static_cast<int>(o.polish_refine_iter); ++r)
         {
-            refine_res_.noalias() = K_unreg_ * sol_red_;
+            refine_res_.noalias() = *K_unreg_ * sol_red_;
             refine_res_ = rhs_red_ - refine_res_;
             polish_kkt_.solve_into(refine_res_, refine_corr_);
             sol_red_ += refine_corr_;
@@ -915,7 +917,7 @@ private:
                 px_y_[active_lower_[static_cast<std::size_t>(k)]] = sol_red_[n_ + k];
             for(int k = 0; k < nu; ++k)
                 px_y_[active_upper_[static_cast<std::size_t>(k)]] = sol_red_[n_ + nl + k];
-            Ax_buf_.noalias() = A_ * px_x_;
+            Ax_buf_.noalias() = *A_ * px_x_;
             mtmp2_ = Ax_buf_.cwiseMax(l_).cwiseMin(u_);
         }
         Scalar rpn = Scalar(0);
@@ -923,7 +925,7 @@ private:
         Scalar ps = Scalar(0);
         Scalar ds = Scalar(0);
         residual_norms(px_x_, px_y_, mtmp2_, rpn, rdn, ps, ds);
-        ntmp_.noalias() = P_ * px_x_;
+        ntmp_.noalias() = *P_ * px_x_;
         const Scalar polished_objective = Scalar(0.5) * px_x_.dot(ntmp_) + q_.dot(px_x_);
         // The iterate is accepted while still slightly infeasible, and an
         // infeasible point can undercut the optimal objective. The multipliers
@@ -943,18 +945,20 @@ private:
     Scalar sigma_{admm_defaults<Scalar>::sigma};
     Scalar c_{Scalar(1)};
     Scalar current_rho_{admm_defaults<Scalar>::rho};
-    bool posed_{false};
-    bool has_warm_{false};
+    detail::reset_on_move_flag posed_{false};
+    detail::reset_on_move_flag has_warm_{false};
     bool seed_consumed_;
 
-    sparse_type P_;
-    sparse_type A_;
+    // Heap-boxed so the solver's move transfers storage, because Eigen 3.4's SparseMatrix has no
+    // move members and its default constructor allocates.
+    std::unique_ptr<sparse_type> P_;
+    std::unique_ptr<sparse_type> A_;
     vector<Scalar> q_;
     vector<Scalar> l_;
     vector<Scalar> u_;
 
-    sparse_type P_scaled_;
-    sparse_type A_scaled_;
+    std::unique_ptr<sparse_type> P_scaled_;
+    std::unique_ptr<sparse_type> A_scaled_;
     vector<Scalar> q_scaled_;
     vector<Scalar> l_scaled_;
     vector<Scalar> u_scaled_;
@@ -1009,8 +1013,8 @@ private:
     int iters_{0};
 
     detail::sparse_kkt<Scalar> polish_kkt_;
-    sparse_type A_act_;
-    sparse_type K_unreg_;
+    std::unique_ptr<sparse_type> A_act_;
+    std::unique_ptr<sparse_type> K_unreg_;
     std::vector<Eigen::Triplet<Scalar, index_type>> triplets_;
     std::vector<Scalar> polish_delta_;
     std::vector<int> act_row_;
@@ -1022,7 +1026,7 @@ private:
     std::vector<int> polish_cache_lower_;
     std::vector<int> polish_cache_upper_;
     Scalar polish_cache_delta_{Scalar(0)};
-    bool polish_cache_valid_{false};
+    detail::reset_on_move_flag polish_cache_valid_{false};
     bool polish_reuse_enabled_{true};
     vector<Scalar> rhs_red_;
     vector<Scalar> sol_red_;
