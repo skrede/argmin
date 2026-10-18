@@ -463,7 +463,9 @@ struct tr_sqp_policy
         if(m_joint > 0)
         {
             s.AAt_workspace.resize(m_joint, m_joint);
-            s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixX<Scalar>>(m_joint);
+            // Eigen 3.4's sized constructor leaves m_info indeterminate and moving it is undefined
+            // behavior; factoring an identity defines every member.
+            s.ldlt_feasibility.compute(Eigen::MatrixX<Scalar>::Identity(m_joint, m_joint));
             s.w_workspace.resize(m_joint);
         }
         s.bo_ws.resize(n_joint, m_joint);

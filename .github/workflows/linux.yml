@@ -147,7 +147,7 @@ jobs:
           - name: asan-ubsan
             cc: clang-18
             cxx: clang++-18
-            flags: "-fsanitize=address,undefined -fno-omit-frame-pointer"
+            flags: "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
 
     runs-on: ubuntu-24.04
     name: sanitize (${{ matrix.name }})

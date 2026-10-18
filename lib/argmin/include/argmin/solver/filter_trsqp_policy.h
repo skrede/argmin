@@ -668,7 +668,9 @@ struct filter_trsqp_policy
         if(m_joint > 0)
         {
             s.AAt_workspace.resize(m_joint, m_joint);
-            s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixX<Scalar>>(m_joint);
+            // Eigen 3.4's sized constructor leaves m_info indeterminate and moving it is undefined
+            // behavior; factoring an identity defines every member.
+            s.ldlt_feasibility.compute(Eigen::MatrixX<Scalar>::Identity(m_joint, m_joint));
             s.w_workspace.resize(m_joint);
         }
         s.bo_ws.resize(n_joint, m_joint);
@@ -713,7 +715,9 @@ struct filter_trsqp_policy
             s.restoration_dx.resize(n);
             s.restoration_xtrial.resize(n);
             s.restoration_x_entry.resize(n);
-            s.restoration_ldlt = Eigen::LDLT<Eigen::MatrixX<Scalar>>(n);
+            // Eigen 3.4's sized constructor leaves m_info indeterminate and moving it is undefined
+            // behavior; factoring an identity defines every member.
+            s.restoration_ldlt.compute(Eigen::MatrixX<Scalar>::Identity(n, n));
         }
 
         // Constraint evaluation on the un-reformulated x-only shape.

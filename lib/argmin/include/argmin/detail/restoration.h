@@ -150,8 +150,7 @@ struct lm_restoration_result
 //   rhs_buf     -- n
 //   dx_buf      -- n
 //   x_trial_buf -- n
-//   ldlt_buf    -- pre-sized to n via Eigen::LDLT<MatrixXd>(n) at the
-//                  caller's allocation site.
+//   ldlt_buf    -- pre-sized to n at the caller's allocation site.
 template <typename Scalar, int N, typename ConstraintFn,
           typename JacobianFn>
 lm_restoration_result<Scalar> feasibility_restoration(

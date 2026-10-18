@@ -604,7 +604,9 @@ public:
         , qr_lambda_(n, n)
         , qr_rr_(n, n)
         , qr_full_(n, n)
-        , llt_reduced_(n)
+        // Eigen 3.4's sized constructor leaves m_info indeterminate and moving it is undefined
+        // behavior; factoring an identity defines every member.
+        , llt_reduced_(n_square_matrix::Identity(n, n))
         , Q_explicit_(n, n)
         , R_(n, max_constraints)
         , ZtGZ_(n, n)

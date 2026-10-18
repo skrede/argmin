@@ -289,7 +289,9 @@ struct nw_sqp_policy
         if(s.n_eq > 0)
         {
             s.AAt_workspace.resize(s.n_eq, s.n_eq);
-            s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixX<Scalar>>(s.n_eq);
+            // Eigen 3.4's sized constructor leaves m_info indeterminate and moving it is undefined
+            // behavior; factoring an identity defines every member.
+            s.ldlt_feasibility.compute(Eigen::MatrixX<Scalar>::Identity(s.n_eq, s.n_eq));
             s.w_workspace.resize(s.n_eq);
         }
 

@@ -262,7 +262,9 @@ struct byrd_omojokun_workspace
         A_aug.resize(m_aug_max, n_joint);
         AAt_aug.resize(m_aug_max, m_aug_max);
         w_aug.resize(m_aug_max);
-        ldlt_aug = Eigen::LDLT<Eigen::MatrixX<Scalar>>(m_aug_max);
+        // Eigen 3.4's sized constructor leaves m_info indeterminate and moving it is undefined
+        // behavior; factoring an identity defines every member.
+        ldlt_aug.compute(Eigen::MatrixX<Scalar>::Identity(m_aug_max, m_aug_max));
         fixed.reserve(static_cast<std::size_t>(n_joint));
     }
 };
