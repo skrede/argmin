@@ -153,6 +153,7 @@ add_executable(argmin_alloc_gate_test
     alloc_sensor_counters.cpp
     alloc_gate_line_search_failure_test.cpp
     alloc_gate_sparse_move_test.cpp
+    alloc_gate_reduced_hessian_test.cpp
 )
 # Sensor B (the glibc __libc_* strong-symbol overrides) links only on Linux; the
 # CMake platform guard is the sole gate (no __linux__ #ifdef inside the source).
@@ -196,6 +197,9 @@ if(_argmin_alloc_gate_sanitizer EQUAL -1)
     # Witnesses a value-semantics contract rather than a real-time step, so it stays unlabeled.
     catch_discover_tests(argmin_alloc_gate_test
         TEST_SPEC "[qp-move-alloc]")
+    # Pins a dynamic-path allocation count rather than a real-time gate, so it stays unlabeled.
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[qp-reduced-hessian-alloc]")
 else()
     set_target_properties(argmin_alloc_gate_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
 endif()

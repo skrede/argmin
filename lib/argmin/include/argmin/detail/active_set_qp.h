@@ -192,8 +192,10 @@ std::pair<Eigen::Vector<Scalar, N>, Eigen::Vector<Scalar, Mw>> solve_equality_qp
     // => p_y = 0 (the subproblem has RHS = 0 because we work with p = x - x_k)
     // So p = Z * p_z where (Z^T G Z) p_z = -Z^T g_k  (eq. 16.18)
 
+    Eigen::Matrix<Scalar, Eigen::Dynamic, N> ZtG(nz, n);
+    ZtG.noalias() = Z.transpose() * G;
     Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> ZtGZ(nz, nz);
-    ZtGZ.noalias() = Z.transpose() * G * Z;
+    ZtGZ.noalias() = ZtG * Z;
     Eigen::LLT<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>> llt(std::move(ZtGZ));
 
     // Check inertia: if the reduced Hessian Z^T G Z is not positive definite
@@ -630,6 +632,7 @@ public:
         , lambda_full_(max_constraints)
         , A_aug_(max_constraints, n)
         , b_aug_(max_constraints)
+        , ZtG_(n, n)
     {
         W_.reserve(static_cast<std::size_t>(max_constraints));
         last_W_.reserve(static_cast<std::size_t>(max_constraints));
@@ -1191,8 +1194,8 @@ private:
         auto Y_block = Q_explicit_.leftCols(rank);
         auto Z_block = Q_explicit_.rightCols(nz);
 
-        ZtGZ_.topLeftCorner(nz, nz).noalias() =
-            Z_block.transpose() * G * Z_block;
+        ZtG_.topLeftCorner(nz, n).noalias() = Z_block.transpose() * G;
+        ZtGZ_.topLeftCorner(nz, nz).noalias() = ZtG_.topLeftCorner(nz, n) * Z_block;
         // Factor a fixed n x n block-diagonal system [Z^T G Z, 0; 0, I] so the
         // reduced-Hessian LLT always computes the same shape (no resize
         // realloc). The identity trailing block does not couple into the
@@ -1288,6 +1291,9 @@ private:
 
     constraint_matrix A_aug_;
     constraint_vector b_aug_;
+    // Declared last: storage inserted ahead of existing members shifts their addresses, and Eigen's
+    // alignment peeling on unaligned fixed-size storage then changes the rounding of some fixed-N sizes.
+    n_square_matrix ZtG_;
 };
 
 // Dense active-set QP solver.
