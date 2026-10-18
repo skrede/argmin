@@ -1,0 +1,97 @@
+#ifndef HPP_GUARD_ARGMIN_DETAIL_COBYLA_POLICY_BRIDGE_H
+#define HPP_GUARD_ARGMIN_DETAIL_COBYLA_POLICY_BRIDGE_H
+
+#include "argmin/detail/lagrangian.h"
+
+#include "argmin/result/status.h"
+#include "argmin/result/step_result.h"
+
+#include <Eigen/Core>
+
+#include <cmath>
+#include <cstdint>
+#include <optional>
+#include <algorithm>
+
+namespace argmin::detail
+{
+
+// Auto initial trust radius: 10% of the largest finite bound range, or 1.0
+// when no coordinate is finitely bounded (matching the reference rho0=1.0).
+template <typename Scalar>
+inline Scalar cobyla_auto_trust_radius(Scalar initial_trust_radius, const Eigen::VectorX<Scalar>& lower,
+                                       const Eigen::VectorX<Scalar>& upper, std::int32_t n)
+{
+    Scalar h = initial_trust_radius;
+    if(h > Scalar(0.0))
+        return h;
+    Scalar max_range = Scalar(0.0);
+    for(int i = 0; i < n; ++i)
+    {
+        Scalar range_i = upper[i] - lower[i];
+        if(std::isfinite(range_i))
+            max_range = std::max(max_range, range_i);
+    }
+    return (max_range > Scalar(0.0)) ? Scalar(0.1) * max_range : Scalar(1.0);
+}
+
+// Copy the engine incumbent into the policy state and refresh the split
+// constraint vectors used for violation reporting.
+template <typename State>
+inline void cobyla_sync_from_engine(State& s)
+{
+    using Scalar = typename decltype(s.x)::Scalar;
+    s.x = s.engine->x();
+    s.objective_value = s.engine->objective_value();
+    s.parmu = s.engine->parmu();
+
+    const int m_total = s.n_eq + s.n_ineq;
+    if(m_total > 0)
+    {
+        Eigen::VectorX<Scalar> c_full(m_total);
+        s.problem->constraints(s.x, c_full);
+        s.c_eq = c_full.head(s.n_eq);
+        s.c_ineq = c_full.tail(s.n_ineq);
+    }
+    else
+    {
+        s.c_eq.resize(0);
+        s.c_ineq.resize(0);
+    }
+}
+
+// COBYLA owns its own termination: it iterates until the trust radius
+// RHO contracts to RHOEND and then reports xtol_reached via
+// policy_status. Until then the reported progress magnitudes are kept
+// at the trust-radius scale so step_budget_solver's step / objective / stall
+// criteria do not declare convergence prematurely -- the derivative-
+// free incumbent (the simplex pole) can hold still for several
+// evaluations while the model and geometry improve. The gradient proxy
+// is likewise floored while RHO has not reached RHOEND.
+template <typename State, typename Scalar>
+inline step_result<Scalar> cobyla_step_report(const State& s, bool running, bool improved, Scalar final_trust_radius)
+{
+    std::optional<solver_status> policy_status{};
+    if(!running)
+        policy_status = s.engine->status();
+
+    const Scalar rho = s.engine->rho();
+    Scalar grad_proxy = s.engine->gradient_proxy();
+    if(running && rho > final_trust_radius)
+        grad_proxy = std::max(grad_proxy, Scalar(1.0));
+
+    return step_result<Scalar>{
+        .objective_value = s.objective_value,
+        .gradient_norm = grad_proxy,
+        .step_size = running ? rho : Scalar(0.0),
+        .objective_change = running ? rho : Scalar(0.0),
+        .improved = improved,
+        .is_null_step = !running,
+        .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
+        .policy_status = policy_status,
+    };
+}
+
+}
+
+#endif

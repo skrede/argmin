@@ -34,22 +34,23 @@
 //            models the objective and constraint functions by linear
 //            interpolation." K&W 2e, Section 10.7.
 
+#include "argmin/solver/options.h"
+
 #include "argmin/detail/cobyla_simplex.h"
 #include "argmin/detail/bound_projection.h"
-#include "argmin/detail/lagrangian.h"
+#include "argmin/detail/cobyla_policy_bridge.h"
+#include "argmin/detail/cobyla_powell_evaluator.h"
+
 #include "argmin/options/derivative_free_defaults.h"
+
 #include "argmin/result/step_result.h"
-#include "argmin/solver/options.h"
 
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
-#include <algorithm>
-#include <cmath>
-#include <limits>
 #include <memory>
-#include <optional>
+#include <cstdint>
 
 namespace argmin
 {
@@ -118,23 +119,15 @@ struct cobyla_policy
         s.x = detail::project(x0, s.lower, s.upper);
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
+        s.m_powell = s.n_ineq + 2 * s.n_eq + detail::cobyla_finite_bound_count(s.lower, s.upper);
 
-        // Count finite box bounds (added as explicit Powell constraints).
-        int n_bound = 0;
-        for(int i = 0; i < n; ++i)
-        {
-            if(std::isfinite(s.lower[i])) ++n_bound;
-            if(std::isfinite(s.upper[i])) ++n_bound;
-        }
-        s.m_powell = s.n_ineq + 2 * s.n_eq + n_bound;
-
-        Scalar rhobeg = auto_trust_radius(s.lower, s.upper, n);
+        Scalar rhobeg = detail::cobyla_auto_trust_radius(options.initial_trust_radius, s.lower, s.upper, n);
         Scalar rhoend = options.final_trust_radius;
 
         s.engine = std::make_shared<detail::cobyla_engine<Scalar>>();
-        make_evaluator_and_init(s, rhobeg, rhoend);
+        detail::cobyla_init_engine(s, rhobeg, rhoend);
 
-        sync_from_engine(s);
+        detail::cobyla_sync_from_engine(s);
         s.iteration = 0;
         return s;
     }
@@ -146,37 +139,10 @@ struct cobyla_policy
 
         bool running = s.engine->advance();
         ++s.iteration;
-        sync_from_engine(s);
+        detail::cobyla_sync_from_engine(s);
 
         const bool improved = s.objective_value < old_f;
-
-        std::optional<solver_status> policy_status{};
-        if(!running)
-            policy_status = s.engine->status();
-
-        // COBYLA owns its own termination: it iterates until the trust radius
-        // RHO contracts to RHOEND and then reports xtol_reached via
-        // policy_status. Until then the reported progress magnitudes are kept
-        // at the trust-radius scale so step_budget_solver's step / objective / stall
-        // criteria do not declare convergence prematurely -- the derivative-
-        // free incumbent (the simplex pole) can hold still for several
-        // evaluations while the model and geometry improve. The gradient proxy
-        // is likewise floored while RHO has not reached RHOEND.
-        const Scalar rho = s.engine->rho();
-        Scalar grad_proxy = s.engine->gradient_proxy();
-        if(running && rho > options.final_trust_radius)
-            grad_proxy = std::max(grad_proxy, Scalar(1.0));
-
-        return step_result<Scalar>{
-            .objective_value = s.objective_value,
-            .gradient_norm = grad_proxy,
-            .step_size = running ? rho : Scalar(0.0),
-            .objective_change = running ? rho : Scalar(0.0),
-            .improved = improved,
-            .is_null_step = !running,
-            .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
-            .policy_status = policy_status,
-        };
+        return detail::cobyla_step_report(s, running, improved, options.final_trust_radius);
     }
 
     template <typename P>
@@ -193,96 +159,10 @@ struct cobyla_policy
         s.parmu = Scalar(0.0);
 
         const int n = static_cast<int>(s.x.size());
-        Scalar rhobeg = auto_trust_radius(s.lower, s.upper, n);
+        Scalar rhobeg = detail::cobyla_auto_trust_radius(options.initial_trust_radius, s.lower, s.upper, n);
         Scalar rhoend = options.final_trust_radius;
-        make_evaluator_and_init(s, rhobeg, rhoend);
-        sync_from_engine(s);
-    }
-
-private:
-    // Auto initial trust radius: 10% of the largest finite bound range, or 1.0
-    // when no coordinate is finitely bounded (matching the reference rho0=1.0).
-    Scalar auto_trust_radius(const Eigen::VectorX<Scalar>& lower,
-                             const Eigen::VectorX<Scalar>& upper, int n) const
-    {
-        Scalar h = options.initial_trust_radius;
-        if(h > Scalar(0.0))
-            return h;
-        Scalar max_range = Scalar(0.0);
-        for(int i = 0; i < n; ++i)
-        {
-            Scalar range_i = upper[i] - lower[i];
-            if(std::isfinite(range_i))
-                max_range = std::max(max_range, range_i);
-        }
-        return (max_range > Scalar(0.0)) ? Scalar(0.1) * max_range : Scalar(1.0);
-    }
-
-    // Build the Powell-convention evaluator (captures the problem by pointer)
-    // and initialize the engine. The evaluator also refreshes s.c_eq / s.c_ineq
-    // so step_budget_solver's constraint_violation reporting sees the latest point.
-    template <typename P>
-    void make_evaluator_and_init(state_type<P>& s, Scalar rhobeg, Scalar rhoend)
-    {
-        const P* problem = s.problem;
-        const int n = static_cast<int>(s.x.size());
-        const int n_eq = s.n_eq;
-        const int n_ineq = s.n_ineq;
-        Eigen::VectorX<Scalar> lower = s.lower;
-        Eigen::VectorX<Scalar> upper = s.upper;
-
-        auto eval = [problem, n, n_eq, n_ineq, lower, upper]
-            (const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& con) -> Scalar
-        {
-            const int m_total = n_eq + n_ineq;
-            Eigen::VectorX<Scalar> c_full(std::max(m_total, 0));
-            if(m_total > 0)
-                problem->constraints(x, c_full);
-
-            int idx = 0;
-            for(int i = 0; i < n_ineq; ++i)
-                con(idx++) = c_full[n_eq + i];
-            for(int j = 0; j < n_eq; ++j)
-            {
-                con(idx++) = c_full[j];
-                con(idx++) = -c_full[j];
-            }
-            for(int i = 0; i < n; ++i)
-            {
-                if(std::isfinite(lower[i]))
-                    con(idx++) = x[i] - lower[i];
-                if(std::isfinite(upper[i]))
-                    con(idx++) = upper[i] - x[i];
-            }
-            return problem->value(x);
-        };
-
-        s.engine->init(n, s.m_powell, s.x, s.lower, s.upper, rhobeg, rhoend,
-                       std::move(eval));
-    }
-
-    // Copy the engine incumbent into the policy state and refresh the split
-    // constraint vectors used for violation reporting.
-    template <typename P>
-    void sync_from_engine(state_type<P>& s)
-    {
-        s.x = s.engine->x();
-        s.objective_value = s.engine->objective_value();
-        s.parmu = s.engine->parmu();
-
-        const int m_total = s.n_eq + s.n_ineq;
-        if(m_total > 0)
-        {
-            Eigen::VectorX<Scalar> c_full(m_total);
-            s.problem->constraints(s.x, c_full);
-            s.c_eq = c_full.head(s.n_eq);
-            s.c_ineq = c_full.tail(s.n_ineq);
-        }
-        else
-        {
-            s.c_eq.resize(0);
-            s.c_ineq.resize(0);
-        }
+        detail::cobyla_init_engine(s, rhobeg, rhoend);
+        detail::cobyla_sync_from_engine(s);
     }
 };
 
