@@ -16,6 +16,7 @@ add_executable(argmin_unit_tests
     isres_alternatives_test.cpp
     isres_determinism_test.cpp
     cobyla_test.cpp
+    cobyla_invalid_box_test.cpp
     bobyqa_test.cpp
     bobyqa_bounds_test.cpp
     bobyqa_xbase_shift_test.cpp

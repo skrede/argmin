@@ -40,6 +40,32 @@ constexpr const char* cobyla_known_defect =
     "initial trust radius: a coordinate starting at 0.5 in [0, 0.6], beside a coordinate "
     "with a much wider range, has its first simplex vertex evaluated at 0.75.";
 
+void check_cobyla_box(const vector<double>& lower, const vector<double>& upper)
+{
+    for(int index = 0; index < static_cast<int>(lower.size()); ++index)
+    {
+        if(lower[index] < upper[index])
+            continue;
+        const char* relation = lower[index] == upper[index] ? " equals" : " exceeds";
+        raise_argmin_error(error_kind::invalid_bounds,
+                           std::string("lower bound ") + format_number(lower[index]) + relation
+                               + " upper bound " + format_number(upper[index]) + " at index "
+                               + format_number(index));
+    }
+}
+
+// The bound callables are read here, before the solver exists, so a raising one surfaces its
+// own exception instead of the box check reading the cached unbounded fallback.
+std::unique_ptr<constrained_values_problem> checked_box_adapter(int n, callback_set calls)
+{
+    auto adapter = std::make_unique<constrained_values_problem>(n, std::move(calls));
+    const vector<double> lower = adapter->lower_bounds();
+    const vector<double> upper = adapter->upper_bounds();
+    adapter->rethrow_if_latched();
+    check_cobyla_box(lower, upper);
+    return adapter;
+}
+
 void bind_cobyla_options(nb::module_& m)
 {
     nb::class_<cobyla_options>(m, "CobylaOptions",
@@ -118,8 +144,7 @@ void bind_cobyla_solver(nb::module_& m)
             check_positive_dimension(calls.num_equality + calls.num_inequality,
                                      "num_equality + num_inequality");
 
-            auto adapter = std::make_unique<constrained_values_problem>(
-                static_cast<int>(x0.size()), std::move(calls));
+            auto adapter = checked_box_adapter(static_cast<int>(x0.size()), std::move(calls));
             new(self) cobyla_wrapper(std::move(adapter), x0, opts, policy_opts);
         },
         nb::arg("objective"), nb::arg("x0"), nb::arg("constraints"),

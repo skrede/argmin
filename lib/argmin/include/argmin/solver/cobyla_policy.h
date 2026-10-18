@@ -91,6 +91,8 @@ struct cobyla_policy
         int n_ineq{0};
         int m_powell{0};
         std::uint32_t iteration{0};
+        std::int32_t invalid_coordinate{-1};
+        bool invalid_problem{false};
 
         // The engine is heap-owned so state moves leave its internal pointers
         // (captured by the evaluator) valid.
@@ -116,17 +118,16 @@ struct cobyla_policy
         s.problem = &problem;
         s.lower = problem.lower_bounds();
         s.upper = problem.upper_bounds();
+        if(detail::cobyla_reject_invalid_box(s, x0))
+            return s;
         s.x = detail::project(x0, s.lower, s.upper);
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
         s.m_powell = s.n_ineq + 2 * s.n_eq + detail::cobyla_finite_bound_count(s.lower, s.upper);
-
         Scalar rhobeg = detail::cobyla_auto_trust_radius(options.initial_trust_radius, s.lower, s.upper, n);
         Scalar rhoend = options.final_trust_radius;
-
         s.engine = std::make_shared<detail::cobyla_engine<Scalar>>();
         detail::cobyla_init_engine(s, rhobeg, rhoend);
-
         detail::cobyla_sync_from_engine(s);
         s.iteration = 0;
         return s;
@@ -135,6 +136,8 @@ struct cobyla_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::cobyla_invalid_step_report<Scalar>(s);
         const Scalar old_f = s.objective_value;
 
         bool running = s.engine->advance();
@@ -154,6 +157,8 @@ struct cobyla_policy
     template <typename P>
     void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::VectorX<Scalar>> x0)
     {
+        if(detail::cobyla_reject_invalid_box(s, x0))
+            return;
         s.x = detail::project(x0, s.lower, s.upper);
         s.iteration = 0;
         s.parmu = Scalar(0.0);

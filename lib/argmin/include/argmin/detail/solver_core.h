@@ -488,6 +488,12 @@ public:
     //            Problem types.
     scalar_type seed_best_f() const
     {
+        // A problem its policy rejected is never evaluated, not even at x_0.
+        if constexpr(requires { state_.invalid_problem; })
+        {
+            if(state_.invalid_problem)
+                return std::numeric_limits<scalar_type>::infinity();
+        }
         if constexpr(!std::is_same_v<Problem, void>)
             return static_cast<scalar_type>(problem_ptr_->value(state_.x));
         else

@@ -9,6 +9,7 @@
 #include <Eigen/Core>
 
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <optional>
 #include <algorithm>
@@ -33,6 +34,51 @@ inline Scalar cobyla_auto_trust_radius(Scalar initial_trust_radius, const Eigen:
             max_range = std::max(max_range, range_i);
     }
     return (max_range > Scalar(0.0)) ? Scalar(0.1) * max_range : Scalar(1.0);
+}
+
+template <typename Scalar>
+inline std::int32_t cobyla_first_invalid_coordinate(const Eigen::VectorX<Scalar>& lower,
+                                                    const Eigen::VectorX<Scalar>& upper)
+{
+    for(Eigen::Index i = 0; i < lower.size(); ++i)
+    {
+        if(!(lower[i] < upper[i]))
+            return static_cast<std::int32_t>(i);
+    }
+    return -1;
+}
+
+// A rejected state keeps x0 as given, since an empty box has no projection, and never builds
+// an engine; its objective is NaN because nothing is ever evaluated.
+template <typename State, typename Vector>
+inline bool cobyla_reject_invalid_box(State& s, const Vector& x0)
+{
+    using Scalar = typename decltype(s.x)::Scalar;
+    s.invalid_coordinate = cobyla_first_invalid_coordinate(s.lower, s.upper);
+    s.invalid_problem = s.invalid_coordinate >= 0;
+    if(s.invalid_problem)
+    {
+        s.x = x0;
+        s.objective_value = std::numeric_limits<Scalar>::quiet_NaN();
+        s.iteration = 0;
+    }
+    return s.invalid_problem;
+}
+
+template <typename Scalar, typename State>
+inline step_result<Scalar> cobyla_invalid_step_report(const State& s)
+{
+    return step_result<Scalar>{
+        .objective_value = s.objective_value,
+        .gradient_norm = Scalar(0.0),
+        .step_size = Scalar(0.0),
+        .objective_change = Scalar(0.0),
+        .improved = false,
+        .is_null_step = true,
+        .constraint_violation = Scalar(0.0),
+        .policy_status = solver_status::invalid_problem,
+        .evaluations = 0,
+    };
 }
 
 // Copy the engine incumbent into the policy state and refresh the split
