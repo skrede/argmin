@@ -1,5 +1,4 @@
 #include "alloc_gate_support.h"
-
 #include "sparse_admm_move_support.h"
 
 #include <optional>

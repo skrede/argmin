@@ -11,7 +11,7 @@ namespace argmin::detail
 class reset_on_move_flag
 {
 public:
-    reset_on_move_flag(bool value) noexcept : value_(value) {}
+    explicit reset_on_move_flag(bool value) noexcept : value_(value) {}
 
     reset_on_move_flag(reset_on_move_flag&& other) noexcept : value_(std::exchange(other.value_, false)) {}
 

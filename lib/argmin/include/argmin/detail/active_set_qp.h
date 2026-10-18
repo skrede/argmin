@@ -606,9 +606,7 @@ public:
         , qr_lambda_(n, n)
         , qr_rr_(n, n)
         , qr_full_(n, n)
-        // Eigen 3.4's sized constructor leaves m_info indeterminate and moving it is undefined
-        // behavior; factoring an identity defines every member.
-        , llt_reduced_(n_square_matrix::Identity(n, n))
+        , llt_reduced_(primed_decomposition<decltype(llt_reduced_)>(n))
         , Q_explicit_(n, n)
         , R_(n, max_constraints)
         , ZtGZ_(n, n)
@@ -639,7 +637,10 @@ public:
         iws_candidates_.reserve(static_cast<std::size_t>(max_constraints));
     }
 
-    active_set_qp_solver() = default;
+    active_set_qp_solver()
+        : llt_reduced_(primed_decomposition<decltype(llt_reduced_)>())
+    {
+    }
 
     // Solve QP subproblem using pre-allocated workspace.
     //

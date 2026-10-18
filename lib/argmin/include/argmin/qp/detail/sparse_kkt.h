@@ -201,11 +201,19 @@ public:
         out = ldlt_->permutationPinv() * work_;
     }
 
-    const sparse_type& matrix() const { return *K_; }
+    const sparse_type& matrix() const
+    {
+        eigen_assert(K_ && "sparse_kkt::matrix() requires a prior analyze()");
+        return *K_;
+    }
 
     // Exposes the signs the factorization actually computed, which is the only
     // way to assert that the indefinite path was exercised.
-    auto diagonal_factor() const { return ldlt_->vectorD(); }
+    auto diagonal_factor() const
+    {
+        eigen_assert(ldlt_ && "sparse_kkt::diagonal_factor() requires a prior analyze()");
+        return ldlt_->vectorD();
+    }
 
     // Monotone across re-poses and never reset: the factor-once contract of the
     // owning solver is a statement about work performed over a lifetime, and a
@@ -213,9 +221,10 @@ public:
     std::size_t symbolic_analyses() const { return symbolic_analyses_; }
     std::size_t numeric_factorizations() const { return numeric_factorizations_; }
 
-    int rows() const { return n_ + m_; }
-    int primal_size() const { return n_; }
-    int dual_size() const { return m_; }
+    // The sizes follow analyzed_, so a moved-from instance reports none of the analysis that moved.
+    int rows() const { return analyzed_ ? n_ + m_ : 0; }
+    int primal_size() const { return analyzed_ ? n_ : 0; }
+    int dual_size() const { return analyzed_ ? m_ : 0; }
     bool analyzed() const { return analyzed_; }
     bool factorized() const { return factorized_; }
 

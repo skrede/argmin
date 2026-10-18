@@ -48,6 +48,25 @@ using matrix = Eigen::Matrix<Scalar, Rows, Cols>;
 template <typename Scalar = double, int N = dynamic_dimension>
 using row_vector = Eigen::RowVector<Scalar, N>;
 
+namespace detail
+{
+
+template <int Dim>
+inline constexpr int smallest_extent = Dim == dynamic_dimension ? 0 : Dim;
+
+// Eigen 3.4's LDLT/LLT constructors leave m_info indeterminate and moving one is undefined behavior;
+// factoring an identity, empty when the decomposition is unused, defines every member.
+template <typename Decomposition>
+Decomposition primed_decomposition(
+    Eigen::Index size = smallest_extent<Decomposition::MatrixType::RowsAtCompileTime>)
+{
+    Decomposition decomposition;
+    decomposition.compute(Decomposition::MatrixType::Identity(size, size));
+    return decomposition;
+}
+
+}
+
 }
 
 #endif

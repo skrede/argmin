@@ -40,6 +40,11 @@ namespace argmin::detail
 template <scalar Scalar, int N = dynamic_dimension>
 struct projected_gn_workspace
 {
+    projected_gn_workspace()
+        : ldlt(primed_decomposition<decltype(ldlt)>())
+    {
+    }
+
     // Active-set reduced-solve buffers (Nielsen/LM path).
     std::vector<int> free_indices;
     Eigen::MatrixX<Scalar> H_free;

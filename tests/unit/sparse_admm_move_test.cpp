@@ -1,6 +1,7 @@
 #include "sparse_admm_move_support.h"
 
 #include "argmin/qp/detail/sparse_kkt.h"
+
 #include "argmin/qp/sparse_admm_qp.h"
 
 #include <catch2/catch_test_macros.hpp>

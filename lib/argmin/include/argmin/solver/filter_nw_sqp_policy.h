@@ -333,11 +333,9 @@ struct filter_nw_sqp_policy
         if(s.n_eq > 0)
         {
             s.AAt_workspace.resize(s.n_eq, s.n_eq);
-            // Eigen 3.4's sized constructor leaves m_info indeterminate and moving it is undefined
-            // behavior; factoring an identity defines every member.
-            s.ldlt_feasibility.compute(Eigen::MatrixX<Scalar>::Identity(s.n_eq, s.n_eq));
             s.w_workspace.resize(s.n_eq);
         }
+        s.ldlt_feasibility = detail::primed_decomposition<decltype(s.ldlt_feasibility)>(s.n_eq);
 
         if(m > 0)
             problem.constraints(x0, s.bufs.c_all);

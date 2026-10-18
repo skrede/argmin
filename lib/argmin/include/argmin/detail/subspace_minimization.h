@@ -38,7 +38,10 @@ public:
     {
     }
 
-    subspace_minimizer() = default;
+    subspace_minimizer()
+        : ldlt_(primed_decomposition<decltype(ldlt_)>())
+    {
+    }
 
     // Solve the subspace minimization problem using pre-allocated workspace.
     //

@@ -80,6 +80,7 @@ add_executable(argmin_unit_tests
     ik_pose_batch_test.cpp
     policy_move_asan_test.cpp
     decomposition_init_state_test.cpp
+    decomposition_move_state_test.cpp
     filter_acceptance_test.cpp
     interpolation_delta_property_test.cpp
     hs_gradient_fd_test.cpp

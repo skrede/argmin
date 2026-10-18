@@ -107,7 +107,9 @@ class mma_subproblem_solver
 
 public:
     explicit mma_subproblem_solver(int n, int m)
-        : n_{n}, m_{m}
+        : n_{n}
+        , m_{m}
+        , ldlt_(primed_decomposition<decltype(ldlt_)>(m))
     {
         y_.resize(m);
         y_.setZero();
@@ -118,7 +120,10 @@ public:
         dy_.resize(m);
     }
 
-    mma_subproblem_solver() = default;
+    mma_subproblem_solver()
+        : ldlt_(primed_decomposition<decltype(ldlt_)>())
+    {
+    }
 
     // Solve the CCSA subproblem. Returns the trial point.
     //

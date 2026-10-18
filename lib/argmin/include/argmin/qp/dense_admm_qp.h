@@ -88,8 +88,8 @@ public:
         , rho_inv_vec_(m)
         , base_mult_(m)
         , K_(n, n)
-        , llt_(n)
-        , ldlt_P_(n)
+        , llt_(detail::primed_decomposition<decltype(llt_)>(n))
+        , ldlt_P_(detail::primed_decomposition<decltype(ldlt_P_)>(n))
         , scratch_mn_(m, n)
         , x_(n)
         , x_tilde_(n)
@@ -129,7 +129,13 @@ public:
         active_upper_.reserve(static_cast<std::size_t>(m));
     }
 
-    dense_admm_qp_solver() : seed_consumed_(false), ws_y_len_(0) {}
+    dense_admm_qp_solver()
+        : seed_consumed_(false)
+        , llt_(detail::primed_decomposition<decltype(llt_)>())
+        , ldlt_P_(detail::primed_decomposition<decltype(ldlt_P_)>())
+        , ws_y_len_(0)
+    {
+    }
 
     expected<result_type, qp_error>
     solve(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
