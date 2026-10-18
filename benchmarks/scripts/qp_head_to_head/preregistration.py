@@ -13,7 +13,7 @@ from fractions import Fraction
 
 from .arm_settings import ARM_SETTINGS
 
-ARGMIN_SHA = "ca7ec854a02dc90f0b423cec52bda9a4f306c43a"
+ARGMIN_SHA = "2e0eb5402f9349b34a5b15fdb30185abea0f8484"
 
 COMPETITOR_PINS = {
     "osqp": "236713ce9a56c182ac3230d52108f952afce1523",
