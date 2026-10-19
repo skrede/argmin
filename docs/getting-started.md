@@ -28,9 +28,9 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE argmin::argmin)
 ```
 
-`FetchContent_MakeAvailable(argmin)` pulls argmin and its Eigen dependency
-automatically. Linking `argmin::argmin` puts the headers and Eigen on your
-include path.
+`FetchContent_MakeAvailable(argmin)` brings in argmin; the configure command
+below enables `ARGMIN_CMAKE_FETCH_DEPS`, which brings in Eigen as well. Linking
+`argmin::argmin` puts argmin's headers and Eigen on your include path.
 
 ## Your first solve
 

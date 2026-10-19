@@ -45,7 +45,7 @@ step and stays out of everything else.
 
 - C++20 compiler (floor): GCC 10+, Clang 13+, MSVC 17.0+; a C++23 toolchain (GCC 14+, Clang 18+, MSVC 17.10+) is used when available.
 - CMake 3.28+
-- Eigen 3.4+ (auto-fetched via `FetchContent` if not provided)
+- Eigen 3.4+ -- install it where `find_package` can see it, or enable `ARGMIN_CMAKE_FETCH_DEPS` to build against a pinned copy fetched by argmin.
 
 ## Quick Install
 
@@ -63,7 +63,14 @@ FetchContent_MakeAvailable(argmin)
 target_link_libraries(my_app PRIVATE argmin::argmin)
 ```
 
-This pulls argmin and its Eigen dependency automatically. No manual installation required.
+```bash
+cmake -B build -DARGMIN_CMAKE_FETCH_DEPS=ON
+cmake --build build
+./build/my_app
+```
+
+This brings in argmin, and with `ARGMIN_CMAKE_FETCH_DEPS` enabled as above it brings in a pinned
+Eigen as well. Without the option, Eigen 3.4+ must already be installed where `find_package` can see it.
 
 ### find_package
 

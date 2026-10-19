@@ -1,0 +1,132 @@
+name: Documented acquisition
+
+# The build workflows ignore document changes on purpose, so a check that proves a
+# document lived in one of them would never re-run on the edit it exists to catch.
+# This workflow watches the documents instead, through an allow-list: an allow-list
+# fails closed when an input is added later, where a denylist fails open.
+
+on:
+  push:
+    branches: [master, develop]
+    paths:
+      - 'README.md'
+      - 'docs/getting-started.md'
+      - 'CMakeLists.txt'
+      - 'lib/CMakeLists.txt'
+      - 'lib/argmin/CMakeLists.txt'
+      - 'scripts/extract_doc_snippet.py'
+      - '.github/workflows/acquisition.yml'
+  pull_request:
+    branches: [master, develop]
+    paths:
+      - 'README.md'
+      - 'docs/getting-started.md'
+      - 'CMakeLists.txt'
+      - 'lib/CMakeLists.txt'
+      - 'lib/argmin/CMakeLists.txt'
+      - 'scripts/extract_doc_snippet.py'
+      - '.github/workflows/acquisition.yml'
+  workflow_dispatch:
+
+# The job executes text taken from the documents, so it gets nothing beyond a read token.
+permissions:
+  contents: read
+
+jobs:
+  clean-room:
+    runs-on: ubuntu-24.04
+    name: documented snippets (clean room, no system Eigen)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Must precede every other configure: on a runner that ships Eigen the legs below
+      # would pass whether or not the documented path works.
+      - name: Assert the runner has no discoverable Eigen
+        run: |
+          C="$RUNNER_TEMP/canary"
+          mkdir -p "$C"
+          cat > "$C/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.28)
+          project(eigen_canary CXX)
+          find_package(Eigen3 CONFIG QUIET)
+          if(Eigen3_FOUND)
+              message(FATAL_ERROR "This runner has a discoverable Eigen3 at ${Eigen3_DIR}; the clean room is not clean.")
+          endif()
+          EOF
+          cmake -S "$C" -B "$C/build"
+
+      - name: Extract the documented project, program and commands
+        run: |
+          X="$RUNNER_TEMP/acquisition"
+          mkdir -p "$X/raw" "$X/doc"
+          S=scripts/extract_doc_snippet.py
+          D=docs/getting-started.md
+          python3 "$S" --file "$D" --lang cmake --contains 'FetchContent_MakeAvailable(argmin)' > "$X/raw/project.cmake"
+          python3 "$S" --file "$D" --lang cpp   --contains 'rosenbrock'                          > "$X/raw/main.cpp"
+          python3 "$S" --file "$D" --lang bash  --contains 'ARGMIN_CMAKE_FETCH_DEPS'             > "$X/raw/commands.sh"
+          for f in "$X"/raw/*; do echo "::group::$f"; cat "$f"; echo "::endgroup::"; done
+
+      - name: Assemble the project with the two lines the document implies
+        run: |
+          X="$RUNNER_TEMP/acquisition"
+          V=$(grep -oP '^- CMake \K[0-9.]+(?= or newer)' docs/getting-started.md)
+          test -n "$V"
+          printf '%s\n' "cmake_minimum_required(VERSION $V)" 'project(documented_acquisition CXX)' > "$X/prepended.cmake"
+          echo "Prepended to the extracted project body:"
+          cat "$X/prepended.cmake"
+          cat "$X/prepended.cmake" "$X/raw/project.cmake" > "$X/doc/CMakeLists.txt"
+          cp "$X/raw/main.cpp" "$X/doc/main.cpp"
+
+      # The redirect makes the fetch resolve to this checkout rather than a published
+      # branch, so a regression under review turns this leg red.
+      - name: Run the documented commands against the tree under review
+        run: |
+          X="$RUNNER_TEMP/acquisition"
+          test "$(grep -c '^cmake -B ' "$X/raw/commands.sh")" -eq 1
+          sed "/^cmake -B /s|\$| -DFETCHCONTENT_SOURCE_DIR_ARGMIN=$GITHUB_WORKSPACE|" \
+            "$X/raw/commands.sh" > "$X/run.sh"
+          cd "$X/doc"
+          bash -euxo pipefail "$X/run.sh"
+
+      - name: Without the fetch option, configuring must refuse and name the prerequisite
+        run: |
+          X="$RUNNER_TEMP/acquisition"
+          cd "$X/doc"
+          if cmake -B build-off -DARGMIN_CMAKE_FETCH_DEPS=OFF \
+               -DFETCHCONTENT_SOURCE_DIR_ARGMIN="$GITHUB_WORKSPACE" > "$X/off.log" 2>&1; then
+            cat "$X/off.log"
+            echo "configuring without the fetch option succeeded on a runner with no Eigen" >&2
+            exit 1
+          fi
+          cat "$X/off.log"
+          grep -Fq 'Eigen' "$X/off.log"
+          grep -Fq 'ARGMIN_CMAKE_FETCH_DEPS' "$X/off.log"
+
+      - name: README acquisition text matches the text this job executed
+        run: |
+          X="$RUNNER_TEMP/acquisition"
+          S=scripts/extract_doc_snippet.py
+          python3 "$S" --file README.md --lang cmake --contains 'FetchContent_MakeAvailable(argmin)' > "$X/readme.cmake"
+          python3 "$S" --file README.md --lang bash  --contains 'ARGMIN_CMAKE_FETCH_DEPS'             > "$X/readme.sh"
+          python3 - "$X" <<'EOF'
+          import re, sys
+          X = sys.argv[1]
+          claim = re.compile(r"auto[- ]?fetch|automatic|automatically|no manual install", re.I)
+          dependency = re.compile(r"\bEigen\b|\bdependenc", re.I)
+          bad = []
+          for doc in ("README.md", "docs/getting-started.md"):
+              for para in re.split(r"\n\s*\n", open(doc, encoding="utf-8").read()):
+                  for unit in re.split(r"(?m)^\s*[-*]\s+", para):
+                      if claim.search(unit) and dependency.search(unit) and "ARGMIN_CMAKE_FETCH_DEPS" not in unit:
+                          bad.append(f"{doc}: {unit.strip().splitlines()[0][:90]}")
+          # README's fragment omits add_executable on purpose, so containment runs one way only.
+          executed = open(f"{X}/raw/project.cmake").read().splitlines()
+          extra = [l for l in open(f"{X}/readme.cmake").read().splitlines() if l.strip() and l not in executed]
+          bad += [f"README.md cmake line never executed: {l}" for l in extra]
+          if open(f"{X}/readme.sh").read() != open(f"{X}/raw/commands.sh").read():
+              bad.append("README.md bash block differs from the executed getting-started commands")
+          for b in bad:
+              print(b, file=sys.stderr)
+          sys.exit(1 if bad else 0)
+          EOF
