@@ -1,39 +1,49 @@
+# Scoped to this directory, never the root: under ALWAYS a declaration that carries no find_package
+# arguments can be satisfied by find_package, which leaves the <name>_SOURCE_DIR it dereferences empty.
 if(ARGMIN_CMAKE_FETCH_DEPS)
-    FetchContent_Declare(
-        Eigen3
-        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-        GIT_TAG 3.4.0
-        GIT_SHALLOW TRUE
-        EXCLUDE_FROM_ALL
-        SOURCE_SUBDIR this-directory-does-not-exist
-    )
-    FetchContent_MakeAvailable(Eigen3)
+    set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE NEVER)
+else()
+    set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE ALWAYS)
+endif()
+
+FetchContent_Declare(
+    Eigen3
+    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+    GIT_TAG 3147391d946bb4b6c68edd901f2add6ac1f31f8c  # 3.4.0
+    EXCLUDE_FROM_ALL
+    SOURCE_SUBDIR this-directory-does-not-exist
+    FIND_PACKAGE_ARGS 3.4 CONFIG GLOBAL
+)
+FetchContent_MakeAvailable(Eigen3)
+
+# The target decides, not the inheritable eigen3_SOURCE_DIR, because a parent may already supply
+# Eigen3::Eigen. Fetching is opt-in, so without the option the find-first fallback must refuse rather
+# than turn a missing prerequisite into a silent download.
+if(NOT TARGET Eigen3::Eigen)
+    if(NOT ARGMIN_CMAKE_FETCH_DEPS)
+        message(FATAL_ERROR
+            "argmin requires Eigen >= 3.4, and no discoverable Eigen3 package of that version was found. "
+            "The pinned Eigen source was populated as the fallback but is deliberately not used while "
+            "ARGMIN_CMAKE_FETCH_DEPS is OFF. Install Eigen >= 3.4 where find_package can see it, or set "
+            "ARGMIN_CMAKE_FETCH_DEPS=ON to build against the pinned source.")
+    endif()
     add_library(eigen_headers INTERFACE)
     add_library(Eigen3::Eigen ALIAS eigen_headers)
     target_include_directories(eigen_headers SYSTEM INTERFACE
         "${eigen3_SOURCE_DIR}"
     )
-    set(ARGMIN_EIGEN_INCLUDE_DIRS "${eigen3_SOURCE_DIR}" CACHE INTERNAL
-        "Eigen include dirs, for tooling that needs them outside a target link")
-else()
-    find_package(Eigen3 CONFIG REQUIRED)
-    if(Eigen3_VERSION VERSION_LESS "3.4")
-        message(FATAL_ERROR "argmin requires Eigen >= 3.4, found ${Eigen3_VERSION}")
-    endif()
-
-    get_target_property(_eigen_aliased Eigen3::Eigen ALIASED_TARGET)
-    if(_eigen_aliased)
-        set(_eigen_target ${_eigen_aliased})
-    else()
-        set(_eigen_target Eigen3::Eigen)
-    endif()
-    get_target_property(_eigen_inc ${_eigen_target} INTERFACE_INCLUDE_DIRECTORIES)
-    set_target_properties(${_eigen_target} PROPERTIES
-        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_eigen_inc}"
-    )
-    set(ARGMIN_EIGEN_INCLUDE_DIRS "${_eigen_inc}" CACHE INTERNAL
-        "Eigen include dirs, for tooling that needs them outside a target link")
 endif()
+
+get_target_property(_eigen_aliased Eigen3::Eigen ALIASED_TARGET)
+if(_eigen_aliased)
+    set(_eigen_target ${_eigen_aliased})
+else()
+    set(_eigen_target Eigen3::Eigen)
+endif()
+get_target_property(_eigen_inc ${_eigen_target} INTERFACE_INCLUDE_DIRECTORIES)
+get_target_property(_eigen_imported ${_eigen_target} IMPORTED)
+set(ARGMIN_EIGEN_INCLUDE_DIRS "${_eigen_inc}" CACHE INTERNAL
+    "Eigen include dirs, for tooling that needs them outside a target link")
 
 set(INCLUDE_DIRECTORY include)
 
@@ -52,11 +62,12 @@ target_link_libraries(argmin
 )
 
 if(ARGMIN_INSTALL)
-    if(eigen3_SOURCE_DIR)
+    if(NOT _eigen_imported)
         message(FATAL_ERROR
-            "ARGMIN_INSTALL is ON but Eigen was fetched (ARGMIN_CMAKE_FETCH_DEPS). A fetched Eigen is a "
-            "local target belonging to no export set, so argmin's export cannot generate around it. "
-            "Supply a discoverable Eigen and leave ARGMIN_CMAKE_FETCH_DEPS off, or turn ARGMIN_INSTALL off.")
+            "ARGMIN_INSTALL is ON but the Eigen3::Eigen that argmin links is not an imported target: it was "
+            "fetched (ARGMIN_CMAKE_FETCH_DEPS) or built by a parent project. Such a target belongs to no "
+            "export set, so argmin's export cannot generate around it. Supply a discoverable Eigen and "
+            "leave ARGMIN_CMAKE_FETCH_DEPS off, or turn ARGMIN_INSTALL off.")
     endif()
 
     install(TARGETS argmin

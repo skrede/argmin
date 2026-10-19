@@ -37,7 +37,7 @@ include(FetchContent)
 # library never includes the firmware.
 set(ARGMIN_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/argmin/include")
 
-# Eigen, pinned to the same tag the library uses (lib/argmin/CMakeLists.txt).
+# Eigen, pinned to the same commit the library uses (lib/argmin/CMakeLists.txt).
 # Fetch is the default so a bare `cmake -S mcu` needs no setup and the arm link
 # gate stays hermetic, but an integrator with their own Eigen (a vendored tree,
 # an air-gapped mirror, a different pinned version) sets ARGMIN_MCU_EIGEN_DIR to
@@ -52,8 +52,7 @@ else()
     FetchContent_Declare(
         Eigen3
         GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-        GIT_TAG 3.4.0
-        GIT_SHALLOW TRUE
+        GIT_TAG 3147391d946bb4b6c68edd901f2add6ac1f31f8c  # 3.4.0
         EXCLUDE_FROM_ALL
         SOURCE_SUBDIR this-directory-does-not-exist
     )
