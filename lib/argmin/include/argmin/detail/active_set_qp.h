@@ -1024,7 +1024,7 @@ private:
         qr_full_in_.leftCols(m) = A_W.transpose();
         qr_full_.compute(qr_full_in_);
         Q_explicit_.setIdentity(n, n);
-        Q_explicit_.applyOnTheLeft(qr_full_.householderQ());
+        qr_full_.householderQ().applyThisOnTheLeft(Q_explicit_, residual_);
         R_.topLeftCorner(n, m).setZero();
         // Reference, not a copy: matrixQR() returns the decomposition's
         // internal matrix by const reference; a by-value auto here
@@ -1179,7 +1179,8 @@ private:
             // the least-squares multipliers finite on a degenerate vertex.
             p_sub_.head(n).setZero();
             qr_rr_.compute(A_W.transpose());
-            lambda_sub_.head(m) = qr_rr_.solve(g_k);
+            rhs_padded_.head(n) = g_k;
+            solve_rank_revealing_into(lambda_sub_.head(m), n);
             return;
         }
 
@@ -1207,15 +1208,16 @@ private:
         if(reduced_hessian_ok && llt_reduced_.info() != Eigen::Success)
             *reduced_hessian_ok = false;
 
-        rhs_.head(nz).noalias() = -(Z_block.transpose() * g_k);
+        rhs_.head(nz).noalias() = Z_block.transpose() * g_k;
         rhs_padded_.head(n).setZero();
-        rhs_padded_.head(nz) = rhs_.head(nz);
+        rhs_padded_.head(nz) = -rhs_.head(nz);
         p_z_.head(n) = llt_reduced_.solve(rhs_padded_.head(n));
         p_sub_.head(n).noalias() = Z_block * p_z_.head(nz);
 
         AY_.topLeftCorner(m, rank).noalias() = A_W * Y_block;
-        rhs_lam_.head(rank).noalias() =
-            Y_block.transpose() * (g_k + G * p_sub_.head(n));
+        rhs_.head(n).noalias() = G * p_sub_.head(n);
+        rhs_.head(n) += g_k;
+        rhs_lam_.head(rank).noalias() = Y_block.transpose() * rhs_.head(n);
         // Pad AY^T (rank x rank, since rank == m) to a fixed n x n block-
         // diagonal system [AY^T, 0; 0, I] and solve [rhs_lam; 0]. Column
         // pivoting decouples across the zero off-diagonal blocks, so the
@@ -1228,8 +1230,57 @@ private:
         rhs_padded_.head(n).setZero();
         rhs_padded_.head(rank) = rhs_lam_.head(rank);
         qr_rr_.compute(AY_pad_);
-        p_z_.head(n) = qr_rr_.solve(rhs_padded_.head(n));
+        solve_rank_revealing_into(p_z_.head(n), n);
         lambda_sub_.head(rank) = p_z_.head(rank);
+    }
+
+    // ColPivHouseholderQR::solve of qr_rr_ against rhs_padded_.head(n), overwriting it, with Eigen's
+    // own operations in Eigen's order; only its right-hand-side copy moves into member storage.
+    template <typename Dst>
+    void solve_rank_revealing_into(Dst&& dst, int n)
+    {
+        auto c = rhs_padded_.head(n);
+        const Eigen::Index pivots = qr_rr_.nonzeroPivots();
+        if(pivots == 0)
+        {
+            dst.setZero();
+            return;
+        }
+        for(Eigen::Index k = 0; k < pivots; ++k)
+            apply_rank_revealing_reflector(c.bottomRightCorner(n - k, c.cols()), k);
+        qr_rr_.matrixQR().topLeftCorner(pivots, pivots).template triangularView<Eigen::Upper>()
+            .solveInPlace(c.topRows(pivots));
+        const auto& perm = qr_rr_.colsPermutation().indices();
+        for(Eigen::Index i = 0; i < pivots; ++i)
+            dst.row(perm.coeff(i)) = c.row(i);
+        for(Eigen::Index i = pivots; i < qr_rr_.cols(); ++i)
+            dst.row(perm.coeff(i)).setZero();
+    }
+
+    // MatrixBase::applyHouseholderOnTheLeft for the k-th reflector of qr_rr_, whose scaled essential
+    // part Eigen materializes in a heap temporary at dynamic size; here it reuses residual_.
+    template <typename Derived>
+    void apply_rank_revealing_reflector(Derived&& dst, Eigen::Index k)
+    {
+        const Scalar tau = qr_rr_.hCoeffs().coeff(k);
+        if(dst.rows() == 1)
+        {
+            dst *= Scalar(1) - tau;
+            return;
+        }
+        if(tau == Scalar(0))
+            return;
+        using essential_type = Eigen::Block<const qr_lambda_matrix, Eigen::Dynamic, 1>;
+        const Eigen::Index tail = dst.rows() - 1;
+        const essential_type essential(qr_rr_.matrixQR(), k + 1, k, tail, 1);
+        Scalar w;
+        Eigen::Map<Eigen::Matrix<Scalar, 1, Eigen::Dynamic, Eigen::RowMajor, 1, 1>> tmp(&w, dst.cols());
+        auto bottom = dst.bottomRows(tail);
+        tmp.noalias() = essential.adjoint() * bottom;
+        tmp += dst.row(0);
+        dst.row(0) -= tau * tmp;
+        residual_.head(tail) = tau * essential;
+        bottom.noalias() -= residual_.head(tail) * tmp;
     }
 
     int n_{0};
