@@ -11,7 +11,7 @@ BUDGET = 500
 # moves no other constrained method's stopping iteration.
 CONSTRAINED_SOLVE = dict(max_iterations=BUDGET, gradient_threshold=1e-6)
 BOX = (np.full(2, -5.0), np.full(2, 5.0))
-EXPERIMENTAL_NATIVE = ("bobyqa", "cmaes", "cobyla")
+EXPERIMENTAL_NATIVE = ("bobyqa", "cmaes")
 
 
 def native_solve(problem, method, **keywords):
@@ -117,7 +117,7 @@ def wrapped_tr_sqp(problem, objective, gradient, constraints, jacobian):
 
 
 def wrapped_cobyla(problem, objective, gradient, constraints, jacobian):
-    return experimental.CobylaSolver(
+    return argmin.CobylaSolver(
         objective,
         problem.initial_point(),
         constraints=constraints,

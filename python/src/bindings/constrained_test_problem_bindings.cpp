@@ -6,6 +6,7 @@
 
 #include "argmin/types.h"
 #include "argmin/solver/options.h"
+#include "argmin/solver/cobyla_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
 #include "argmin/solver/filter_slsqp_policy.h"
@@ -41,7 +42,9 @@ result_type solve_constrained_native(const constrained_test_problem& problem,
         return run_native<filter_slsqp_policy<>>(problem, x0, opts);
     if(method == "tr_sqp")
         return run_native<tr_sqp_policy<>>(problem, x0, opts);
-    reject_top_level_method(method, "'kraft_slsqp', 'filter_slsqp', 'tr_sqp'");
+    if(method == "cobyla")
+        return run_native<cobyla_policy<>>(problem, x0, opts);
+    reject_top_level_method(method, "'kraft_slsqp', 'filter_slsqp', 'tr_sqp', 'cobyla'");
 }
 
 void bind_constrained_problem(nb::module_& m)

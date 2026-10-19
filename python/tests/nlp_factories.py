@@ -63,7 +63,7 @@ def make_cobyla(**overrides):
         max_iterations=3000,
     )
     arguments.update(overrides)
-    return experimental.CobylaSolver(**arguments)
+    return argmin.CobylaSolver(**arguments)
 
 
 def make_kraft_slsqp(**overrides):

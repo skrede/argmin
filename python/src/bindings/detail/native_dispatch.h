@@ -27,7 +27,7 @@ using result_type = solve_result<double>;
                            + std::string(accepted));
 }
 
-inline constexpr std::array<std::string_view, 3> experimental_methods{"bobyqa", "cmaes", "cobyla"};
+inline constexpr std::array<std::string_view, 2> experimental_methods{"bobyqa", "cmaes"};
 
 [[noreturn]] inline void reject_top_level_method(std::string_view method,
                                                  std::string_view accepted)

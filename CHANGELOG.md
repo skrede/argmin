@@ -41,6 +41,9 @@ Policies available at HEAD, grouped by problem class:
   `phi(0) + relative_value_noise * |phi(0)|` is accepted on the strong-Wolfe
   curvature condition alone. It defaults to 0, which disables the band;
   Python's `LineSearchOptions` reports it.
+- COBYLA's policy state carries `clamped_evaluations`, the number of evaluation
+  points its safety clamp moved into the box; Python reports it as
+  `CobylaSolver.clamped_evaluations`.
 
 ### Changed
 
@@ -49,11 +52,16 @@ Policies available at HEAD, grouped by problem class:
   `KraftSlsqpOptions`, `QpSubproblemOptions` is `QpOptions`, `QpStatus` is
   `QpSolveStatus`, `CmaesRestart` is `CmaesRestartStrategy`, and the compiled
   Kraft method is selected as `kraft_slsqp` instead of `slsqp`.
-- Python: COBYLA, BOBYQA and CMA-ES, with their own option and enum types, moved
-  behind `import argmin.experimental`. Each gated solver carries `maturity` and
+- Python: BOBYQA and CMA-ES, with their own option and enum types, moved behind
+  `import argmin.experimental`. Each gated solver carries `maturity` and
   `known_defect` attributes; their compiled-problem solves moved to
   `argmin.experimental.solve_native`, and the top-level `solve_native` refuses
-  them with `invalid_problem`.
+  them with `invalid_problem`. `CobylaSolver` and `CobylaOptions` stay in the
+  top-level `argmin` namespace, and `ConstrainedTestProblem.solve_native`
+  accepts `cobyla`.
+- COBYLA's automatic initial trust radius is capped at half the smallest finite
+  bound range (Powell's rule, as BOBYQA already applies); a radius the caller
+  supplies is not capped.
 - The CMA-ES detection options are `cmaes_detection_options`, in
   `argmin/options/cmaes_detection_options.h` (formerly `cmaes_options`).
 - Some L-BFGS-B solves that ended `roundoff_limited` near a solution now end
@@ -68,6 +76,14 @@ Policies available at HEAD, grouped by problem class:
 
 ### Fixed
 
+- COBYLA never evaluates the objective or the constraints outside the box. Two
+  sign errors in its bound repair, in the initial simplex step and in the
+  clamp of a trial step that undershoots a lower bound, are corrected, and a
+  counted clamp moves any remaining evaluation point into the box.
+- A COBYLA box with a fixed or inverted coordinate (a lower bound not below its
+  upper bound) ends with `invalid_problem` instead of a degenerate solve; from
+  Python, `CobylaSolver` raises `ArgminError` with `invalid_bounds` at
+  construction.
 - Both L-BFGS-B policies no longer commit a failed line-search step: a
   non-finite trial, a non-positive step or a search without sufficient decrease
   leaves the iterate in place, the step is retried once from a reset curvature

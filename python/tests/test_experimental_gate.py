@@ -23,17 +23,16 @@ from nlp_factories import FACTORIES
 GATED_SOLVERS = {
     "BobyqaSolver": "bobyqa",
     "CmaesSolver": "cmaes",
-    "CobylaSolver": "cobyla",
 }
 GATED_OPTIONS = (
     "BobyqaOptions",
     "CmaesDetectionOptions",
     "CmaesOptions",
     "CmaesRestartStrategy",
-    "CobylaOptions",
     "TrustRegionOptions",
 )
 GATED_TYPES = tuple(GATED_SOLVERS) + GATED_OPTIONS
+GRADUATED = ("CobylaOptions", "CobylaSolver")
 PLANNING_IDENTIFIER = re.compile(r"SEED-\d+|[Pp]hase \d")
 
 PROBE = """
@@ -50,7 +49,7 @@ def plain_import(repository_root):
         os.environ, PYTHONPATH=str(repository_root / "python"), PYTHONNOUSERSITE="1"
     )
     completed = subprocess.run(
-        [sys.executable, "-c", PROBE, json.dumps(GATED_TYPES)],
+        [sys.executable, "-c", PROBE, json.dumps(GATED_TYPES + GRADUATED)],
         env=environment,
         capture_output=True,
         text=True,
@@ -69,6 +68,24 @@ def test_a_plain_import_cannot_reach_a_gated_type(plain_import, name):
     assert name not in plain_import["reachable"]
     with pytest.raises(AttributeError):
         getattr(argmin, name)
+
+
+@pytest.mark.parametrize("name", GRADUATED)
+def test_a_plain_import_reaches_a_graduated_type(plain_import, name):
+    assert name in plain_import["reachable"]
+    assert name in argmin.__all__
+    assert inspect.isclass(getattr(argmin, name))
+
+
+@pytest.mark.parametrize("name", GRADUATED)
+def test_the_submodule_no_longer_exports_a_graduated_type(name):
+    assert name not in experimental.__all__
+    assert not hasattr(experimental, name)
+
+
+def test_a_graduated_solver_carries_no_label():
+    assert not hasattr(argmin.CobylaSolver, "maturity")
+    assert not hasattr(argmin.CobylaSolver, "known_defect")
 
 
 @pytest.mark.parametrize("name", GATED_TYPES)
@@ -129,7 +146,6 @@ def test_the_submodule_exports_exactly_the_gated_surface():
 TOP_LEVEL_PROBLEMS = {
     "bobyqa": lambda: argmin.Rosenbrock(2),
     "cmaes": lambda: argmin.Rosenbrock(2),
-    "cobyla": lambda: argmin.ConstrainedTestProblem(),
 }
 
 
@@ -155,5 +171,5 @@ def test_the_gated_native_solve_reaches_the_rosenbrock_optimum():
 
 def test_the_gated_native_solve_rejects_a_method_its_problem_does_not_take():
     with pytest.raises(argmin.ArgminError) as raised:
-        experimental.solve_native(argmin.ConstrainedTestProblem(), "bobyqa")
+        experimental.solve_native(argmin.Rosenbrock(2), "cobyla")
     assert raised.value.kind == argmin.ErrorKind.invalid_problem

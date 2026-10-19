@@ -38,7 +38,7 @@ length equals the posed row count; the sparse solver has no capacity, so its
 `warm_start` requires a preceding solve and takes both seeds at exactly the posed
 lengths, an empty dual included.
 
-**Nonlinear methods.** Four policies through the step-budget driver, importable
+**Nonlinear methods.** Five policies through the step-budget driver, importable
 from `argmin`:
 
 | name | method | Bounds |
@@ -47,21 +47,36 @@ from `argmin`:
 | `KraftSlsqpSolver` | sequential least-squares quadratic programming (Kraft 1988) | applied |
 | `FilterSlsqpSolver` | sequential least-squares quadratic programming with filter acceptance (Fletcher and Leyffer 2002) | applied |
 | `TrSqpSolver` | Byrd-Omojokun composite-step trust-region SQP, accurate mode; stops on the bound-aware KKT residual | applied |
+| `CobylaSolver` | derivative-free constrained optimization by linear approximations (Powell 1994) | applied |
 
 Each exposes `solve`, `step`, `step_n`, `reset`, `reset_clear`, `abort` and
 `status`, plus two read-only options snapshots: `options()` for the shared driver
-configuration and `policy_options()` for the method's own. A gradient is optional
-on all four and falls back to the library's own central differences. The three
-SQP solvers take `constraints` and `constraint_jacobian` callables with
-`num_equality` and `num_inequality` counts; inequalities are `g(x) >= 0`.
+configuration and `policy_options()` for the method's own. The four
+gradient-based solvers take an optional gradient and fall back to the library's
+own central differences; `CobylaSolver` takes none. The three SQP solvers take
+`constraints` and `constraint_jacobian` callables with `num_equality` and
+`num_inequality` counts; `CobylaSolver` takes `constraints` with the same two
+counts but no Jacobian. Inequalities are `g(x) >= 0`.
 
-**Bounds.** All four nonlinear solvers apply `lower_bounds` and `upper_bounds`,
+**Bounds.** All five nonlinear solvers apply `lower_bounds` and `upper_bounds`,
 given as arrays or as zero-argument callables returning arrays; an unset side is
 unbounded. The constrained solvers report a bound-active optimum differently,
 because their stopping tests differ: on a bowl whose minimum lies beyond a
-corner of the box, all three stop at that corner, but `KraftSlsqpSolver` and
+corner of the box, all four stop at that corner, but `KraftSlsqpSolver` and
 `FilterSlsqpSolver` report `stalled`, since the bound-blind KKT residual they
-stop on is not small there, while `TrSqpSolver` reports `converged`.
+stop on is not small there, `TrSqpSolver` reports `converged`, and
+`CobylaSolver` reports `xtol_reached`, its stop once the trust radius has
+contracted to its final value.
+
+`CobylaSolver` rewrites the box into explicit constraints, and every point it
+evaluates lies inside the box: its own steps respect the bounds, and a safety
+clamp moves any point that would not into the box before the objective and
+constraints see it. `clamped_evaluations` reports how many points that clamp
+had to move; it is zero on every tested problem. A coordinate whose lower bound
+is not below its upper bound (a fixed or an inverted box) is rejected at
+construction with an `ArgminError` of kind `invalid_bounds`. On the publication
+cohort it holds `cobyla` 23 pass / 4 expected_fail; every failing cell ends
+with a status other than `converged` (`stalled` or `max_iterations`).
 
 **Why the two newest solvers were added.** Both were chosen on the publication
 benchmark cohort, `benchmarks/baselines/publication-regression.csv`, not on a
@@ -85,11 +100,12 @@ objective matrix. Everything else is set through keyword arguments on a
 solver's constructor and read back through the snapshots. `SolverOptions`,
 `LineSearchOptions`, `LbfgsbOptions` with its `LbfgsbLineSearch` choice,
 `KraftSlsqpOptions`, `FilterSlsqpOptions` with its `RestorationStrategy`,
-`QpOptions` (the subproblem options both SLSQP solvers embed) and
-`TrSqpOptions` are all bound over the library's own aggregates, so an exposed
-default *is* the library's brace initializer rather than a second copy of it
-that can drift. A test sweep parses the committed headers and asserts every one
-of them, on a default-constructed instance and on the snapshot a solver reports.
+`QpOptions` (the subproblem options both SLSQP solvers embed), `TrSqpOptions`
+and `CobylaOptions` are all bound over the library's own aggregates, so an
+exposed default *is* the library's brace initializer rather than a second copy
+of it that can drift. A test sweep parses the committed headers and asserts
+every one of them, on a default-constructed instance and on the snapshot a
+solver reports.
 `LineSearchOptions.relative_value_noise` is the half-width of an approximate
 Wolfe band (Hager and Zhang 2005); it defaults to zero, which disables the band.
 
@@ -117,24 +133,24 @@ point that runs a solve with no interpreter callback in the loop. They exist so
 an objective defined in Python can be compared against the identical objective
 compiled in — which tests the boundary rather than the arithmetic. At the top
 level, `Rosenbrock.solve_native` accepts the method `lbfgsb` and
-`ConstrainedTestProblem.solve_native` accepts `kraft_slsqp`, `filter_slsqp` and
-`tr_sqp`; the gated methods are solved through `argmin.experimental.solve_native`.
+`ConstrainedTestProblem.solve_native` accepts `kraft_slsqp`, `filter_slsqp`,
+`tr_sqp` and `cobyla`; the gated methods are solved through
+`argmin.experimental.solve_native`.
 
 ## Gated: argmin.experimental
 
-`CobylaSolver`, `BobyqaSolver` and `CmaesSolver` each carry a confirmed defect
-that can return a wrong answer without saying so. Derivative-free and stochastic
-methods are a main reason to reach for this library from Python, so all three
-stay reachable, but reaching them is a deliberate act: they live in a submodule
-that `import argmin` does not load.
+`BobyqaSolver` and `CmaesSolver` each carry a confirmed defect that can return a
+wrong answer without saying so. Derivative-free and stochastic methods are a
+main reason to reach for this library from Python, so both stay reachable, but
+reaching them is a deliberate act: they live in a submodule that
+`import argmin` does not load.
 
 ```python
-from argmin.experimental import CobylaSolver
+from argmin.experimental import BobyqaSolver
 ```
 
 | name | method | known defect | publication cohort |
 | --- | --- | --- | --- |
-| `CobylaSolver` | derivative-free constrained optimization by linear approximations | COBYLA's bound repair can evaluate the objective outside the box under the default initial trust radius: a coordinate starting at 0.5 in [0, 0.6], beside a coordinate with a much wider range, has its first simplex vertex evaluated at 0.75. | `cobyla` 23 pass / 4 expected_fail |
 | `BobyqaSolver` | bound-constrained derivative-free trust-region interpolation | BOBYQA reports a solve as converged when it ends by exhausting the 200000-pass safety cap on the internal state machine of one iteration, so a stuck run reads as a success. | `bobyqa` 4 pass / 7 expected_fail |
 | `CmaesSolver` | covariance-matrix-adaptation evolution strategy | CMA-ES has no passing cell in the library's publication benchmark cohort (0 pass, 4 expected failures, 2 excluded), and it converges to local minima on the Ackley and Schwefel functions. | `cmaes` 0 pass / 4 expected_fail / 2 excluded |
 
@@ -142,13 +158,12 @@ Each gated solver class carries two attributes: `maturity`, which reads
 `"experimental"`, and `known_defect`, the sentence in the table above, which the
 class docstring also contains. Importing the submodule or constructing a gated
 solver emits no warning; the import is the opt-in. The submodule also holds the
-gated methods' own option and enum types — `CobylaOptions`, `BobyqaOptions`,
-`TrustRegionOptions`, `CmaesOptions`, `CmaesDetectionOptions` and
-`CmaesRestartStrategy` — and `argmin.experimental.solve_native`, the
-compiled-problem solve for the three methods (`bobyqa` and `cmaes` on a
-`Rosenbrock`, `cobyla` on a `ConstrainedTestProblem`). The top-level
-`solve_native` refuses those method names with `invalid_problem` and names the
-submodule entry point instead.
+gated methods' own option and enum types — `BobyqaOptions`, `TrustRegionOptions`,
+`CmaesOptions`, `CmaesDetectionOptions` and `CmaesRestartStrategy` — and
+`argmin.experimental.solve_native`, the compiled-problem solve for the two
+methods (`bobyqa` and `cmaes` on a `Rosenbrock`). The top-level `solve_native`
+refuses those method names with `invalid_problem` and names the submodule entry
+point instead.
 
 ## How to build and run
 
@@ -307,7 +322,7 @@ problem, which gained two native instantiations, for 4347 ms (9859 ms to
 14206 ms); the other 177 ms is spread over the unchanged units.
 
 After the two additions the extension measured 1181616 bytes (1153.92 KiB,
-1181.6 kB), with seven nonlinear policies (the four above and the three now
+1181.6 kB), with seven nonlinear policies (the five above and the two now
 gated) and three quadratic-program solvers compiled in. As built equals
 stripped at every measured point, because the module is linked with `-Wl,-s`.
 Before the binding sources were split into one translation unit per concern,

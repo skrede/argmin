@@ -24,7 +24,8 @@ LOWER = np.array([-1.0, -1.0])
 UPPER = np.array([1.0, 1.0])
 
 CONSTRAINED = ("KraftSlsqpSolver", "FilterSlsqpSolver", "TrSqpSolver")
-SOLVERS = ("LbfgsbSolver",) + CONSTRAINED
+DERIVATIVE_FREE = ("CobylaSolver",)
+SOLVERS = ("LbfgsbSolver",) + CONSTRAINED + DERIVATIVE_FREE
 
 
 def shifted_bowl(x):
@@ -62,14 +63,14 @@ def documented_bounds(text):
     return rows
 
 
-def observed_bounds(name):
+def solver_arguments(name):
     arguments = dict(
-        objective=shifted_bowl,
-        x0=np.array([0.0, 0.0]),
-        gradient=shifted_bowl_gradient,
-        lower_bounds=LOWER,
-        upper_bounds=UPPER,
+        objective=shifted_bowl, x0=np.array([0.0, 0.0]), lower_bounds=LOWER, upper_bounds=UPPER
     )
+    if name in DERIVATIVE_FREE:
+        arguments.update(constraints=loose_cap, num_equality=0, num_inequality=1)
+        return arguments
+    arguments.update(gradient=shifted_bowl_gradient)
     if name in CONSTRAINED:
         arguments.update(
             constraints=loose_cap,
@@ -77,6 +78,11 @@ def observed_bounds(name):
             num_equality=0,
             num_inequality=1,
         )
+    return arguments
+
+
+def observed_bounds(name):
+    arguments = solver_arguments(name)
     try:
         result = getattr(argmin, name)(**arguments).solve()
     except argmin.ArgminError as error:

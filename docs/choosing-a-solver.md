@@ -18,7 +18,7 @@ If you only remember one rule: **`lbfgsb` for unconstrained / box-constrained, `
 | Equality + inequality constrained, gradients available | `kraft_slsqp` | Faithful Kraft 1988 SLSQP with native box bounds. The default constrained solver. |
 | Same as above, **filter line-search** | `filter_slsqp` | Fletcher-Leyffer 2002 filter acceptance instead of L1 merit. Sometimes converges where `kraft_slsqp` stalls; usually a few more iterations. |
 | Constrained problem with separable structure (topology / structural opt) | `mma`, `gcmma`, or `ccsa_quadratic` | Method of Moving Asymptotes (Svanberg 1987 / 2002). Best when the objective and constraints are well-approximated by separable convex functions in `1/(U-x)` and `1/(x-L)`. |
-| Constrained problem, derivative-free | `cobyla` (with caveats) or `augmented_lagrangian` wrapping `bobyqa` | See "Known limitations" below before reaching for COBYLA. |
+| Constrained problem, derivative-free | `cobyla` or `augmented_lagrangian` wrapping `bobyqa` | Powell's linear-approximation trust region. Every point COBYLA evaluates lies inside the box; a fixed or inverted box (a lower bound not below its upper bound) is rejected with `invalid_problem`. |
 | General constrained, want to use any unconstrained solver as the inner | `augmented_lagrangian` | Meta-policy. Wraps any unconstrained or box-constrained policy and handles equality + inequality via penalty + multiplier updates. |
 | Bound-constrained, multimodal, no gradients | `cmaes` or `restarting_policy` wrapping `cmaes` | Covariance Matrix Adaptation Evolution Strategy. The restarting wrapper adds Hansen-Auger IPOP restarts for harder landscapes. |
 | Bound-constrained, multimodal, **with constraints** | `isres` | Runarsson-Yao 2005 stochastic ranking ES. Handles inequality constraints via stochastic ranking. |
@@ -34,10 +34,6 @@ Be aware of these before adopting a solver into a downstream pipeline:
 Both N&W-flavour SQP variants can accept an iter-0 step that satisfies the *linearised* inequality but nonlinearly violates it by a large margin, then park at that infeasible point with `status = max_iterations` and a final objective lower than the feasible optimum. Reproduces on HS071 (`f = 13.45` returned vs `f* = 17.014`).
 
 **Workaround:** use `kraft_slsqp` or `filter_slsqp` for the same problem class. Both reach `f* ± 1e-8`. The N&W variants exist primarily as references for ongoing comparison work and should not be used for production solves at this time.
-
-### COBYLA bound repair outside the box
-
-COBYLA rewrites box bounds into explicit constraints, and its bound repair can evaluate the objective outside the box under the default initial trust radius: a coordinate starting at 0.5 in [0, 0.6], beside a coordinate with a much wider range, has its first simplex vertex evaluated at 0.75. An objective that is undefined outside its bounds must tolerate those evaluations.
 
 ### CMA-ES on Ackley / Schwefel
 

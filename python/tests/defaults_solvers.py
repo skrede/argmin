@@ -32,7 +32,7 @@ def feasible_start():
 UNCONFIGURED = {
     "LbfgsbSolver": lambda: argmin.LbfgsbSolver(objective=rosenbrock, x0=feasible_start()),
     "BobyqaSolver": lambda: experimental.BobyqaSolver(objective=rosenbrock, x0=feasible_start()),
-    "CobylaSolver": lambda: experimental.CobylaSolver(
+    "CobylaSolver": lambda: argmin.CobylaSolver(
         objective=rosenbrock,
         x0=feasible_start(),
         constraints=unit_disk,

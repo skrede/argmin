@@ -14,7 +14,6 @@ void register_experimental(nb::module_& m)
         "Solvers reachable only by a deliberate import, each carrying a documented known "
         "defect in its docstring and in its known_defect attribute.");
     register_bobyqa(gated);
-    register_cobyla(gated);
     register_cmaes(gated);
     register_experimental_native(gated);
 }

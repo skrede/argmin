@@ -8,7 +8,6 @@
 #include "argmin/solver/options.h"
 #include "argmin/solver/cmaes_policy.h"
 #include "argmin/solver/bobyqa_policy.h"
-#include "argmin/solver/cobyla_policy.h"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/eigen/dense.h>
@@ -43,14 +42,6 @@ result_type dispatch(const rosenbrock& problem, std::string_view method,
     if(method == "cmaes")
         return run_native<cmaes_policy<>>(problem, x0, opts);
     reject_method(method, "'bobyqa', 'cmaes'");
-}
-
-result_type dispatch(const constrained_test_problem& problem, std::string_view method,
-                     const vector<double>& x0, const solver_options<>& opts)
-{
-    if(method == "cobyla")
-        return run_native<cobyla_policy<>>(problem, x0, opts);
-    reject_method(method, "'cobyla'");
 }
 
 template <typename Problem>
@@ -90,9 +81,6 @@ void register_experimental_native(nb::module_& gated)
 {
     def_solve_native<rosenbrock>(
         gated, "Runs 'bobyqa' or 'cmaes' against the compiled Rosenbrock valley with no "
-               "interpreter callback in the loop.");
-    def_solve_native<constrained_test_problem>(
-        gated, "Runs 'cobyla' against the compiled constrained test problem with no "
                "interpreter callback in the loop.");
 }
 

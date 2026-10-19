@@ -7,8 +7,6 @@ from ._argmin.experimental import (
     CmaesOptions,
     CmaesRestartStrategy,
     CmaesSolver,
-    CobylaOptions,
-    CobylaSolver,
     TrustRegionOptions,
     solve_native,
 )
@@ -20,8 +18,6 @@ __all__ = [
     "CmaesOptions",
     "CmaesRestartStrategy",
     "CmaesSolver",
-    "CobylaOptions",
-    "CobylaSolver",
     "TrustRegionOptions",
     "solve_native",
 ]

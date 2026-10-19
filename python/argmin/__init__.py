@@ -1,5 +1,7 @@
 from ._argmin import (
     ArgminError,
+    CobylaOptions,
+    CobylaSolver,
     ConstrainedTestProblem,
     DenseActiveSetQpOptions,
     DenseActiveSetQpSolver,
@@ -31,6 +33,8 @@ from ._argmin import (
 
 __all__ = [
     "ArgminError",
+    "CobylaOptions",
+    "CobylaSolver",
     "ConstrainedTestProblem",
     "DenseActiveSetQpOptions",
     "DenseActiveSetQpSolver",
