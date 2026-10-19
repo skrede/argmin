@@ -289,7 +289,7 @@ recorded run existed:
 
 | Component | Commit |
 |---|---|
-| argmin | `2e0eb5402f9349b34a5b15fdb30185abea0f8484` |
+| argmin | `29de9ae75d2d6d5c07977dbee3dc10d6071f3bcd` |
 | osqp | `236713ce9a56c182ac3230d52108f952afce1523` |
 | qpoases | `680f18c8ef0018a120e1604b769f056e8368df97` |
 | daqp | `29a8987d8b9a596c1ab6acf84c17d38b068b73bc` |
