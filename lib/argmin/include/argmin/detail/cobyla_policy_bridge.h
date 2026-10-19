@@ -2,6 +2,7 @@
 #define HPP_GUARD_ARGMIN_DETAIL_COBYLA_POLICY_BRIDGE_H
 
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/bound_projection.h"
 
 #include "argmin/result/status.h"
 #include "argmin/result/step_result.h"
@@ -17,23 +18,29 @@
 namespace argmin::detail
 {
 
-// Auto initial trust radius: 10% of the largest finite bound range, or 1.0
-// when no coordinate is finitely bounded (matching the reference rho0=1.0).
+// The automatic radius, 10% of the largest finite bound range, is capped at half the smallest
+// one, Powell's rule that every initial vertex fits in the box: Powell (2009), "The BOBYQA
+// algorithm for bound constrained optimization without derivatives", DAMTP 2009/NA06.
 template <typename Scalar>
 inline Scalar cobyla_auto_trust_radius(Scalar initial_trust_radius, const Eigen::VectorX<Scalar>& lower,
                                        const Eigen::VectorX<Scalar>& upper, std::int32_t n)
 {
-    Scalar h = initial_trust_radius;
-    if(h > Scalar(0.0))
-        return h;
+    if(initial_trust_radius > Scalar(0.0))
+        return initial_trust_radius;
     Scalar max_range = Scalar(0.0);
+    Scalar min_range = std::numeric_limits<Scalar>::infinity();
     for(int i = 0; i < n; ++i)
     {
         Scalar range_i = upper[i] - lower[i];
         if(std::isfinite(range_i))
+        {
             max_range = std::max(max_range, range_i);
+            min_range = std::min(min_range, range_i);
+        }
     }
-    return (max_range > Scalar(0.0)) ? Scalar(0.1) * max_range : Scalar(1.0);
+    if(!(max_range > Scalar(0.0)))
+        return Scalar(1.0);
+    return std::min(Scalar(0.1) * max_range, Scalar(0.5) * min_range);
 }
 
 template <typename Scalar>
@@ -87,9 +94,10 @@ template <typename State>
 inline void cobyla_sync_from_engine(State& s)
 {
     using Scalar = typename decltype(s.x)::Scalar;
-    s.x = s.engine->x();
+    s.x = detail::project(s.engine->x(), s.lower, s.upper);
     s.objective_value = s.engine->objective_value();
     s.parmu = s.engine->parmu();
+    s.clamped_evaluations = s.engine->clamped_evaluations();
 
     const int m_total = s.n_eq + s.n_ineq;
     if(m_total > 0)

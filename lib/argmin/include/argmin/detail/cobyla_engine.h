@@ -17,15 +17,16 @@ namespace argmin::detail
 
 // A single COBYLA solve, driven one evaluation at a time.
 //
-// The evaluator fills the length-m constraint vector in Powell's convention
-// (every entry must become non-negative) and returns the objective value.
+// The evaluator receives the point to evaluate the user at, which lies in the box, then the
+// engine's own point, from which the bound rows are built, and fills the length-m constraint
+// vector in Powell's convention (every entry must become non-negative), returning the objective.
 template <typename Scalar = double>
 class cobyla_engine
 {
 public:
     using vector_type = Eigen::Vector<Scalar, argmin::dynamic_dimension>;
     using matrix_type = Eigen::Matrix<Scalar, argmin::dynamic_dimension, argmin::dynamic_dimension>;
-    using evaluator = std::function<Scalar(const vector_type&, vector_type&)>;
+    using evaluator = std::function<Scalar(const vector_type&, const vector_type&, vector_type&)>;
 
     cobyla_engine() = default;
 
@@ -36,7 +37,7 @@ public:
     // upper  : upper bounds (may be +inf).
     // rhobeg : initial trust radius.
     // rhoend : final trust radius.
-    // eval   : (x, con_out[m]) -> f. Fills con_out (size m) and returns f.
+    // eval   : (x_eval, x, con_out[m]) -> f. Fills con_out (size m) and returns f.
     void init(int n, int m,
               const vector_type& x0,
               const vector_type& lower,
@@ -56,6 +57,7 @@ public:
     [[nodiscard]] Scalar objective_value() const { return f_best_; }
     [[nodiscard]] Scalar resmax() const { return resmax_best_; }
     [[nodiscard]] const vector_type& x() const { return x_best_; }
+    std::uint32_t clamped_evaluations() const { return clamped_evaluations_; }
     [[nodiscard]] Scalar gradient_proxy() const
     {
         Scalar g = Scalar(0);
@@ -77,6 +79,7 @@ private:
     Scalar lcg_urand(Scalar a, Scalar b);
 
     vector_type origin_coords() const;
+    void clamp_into_box(const vector_type& x);
     void evaluate(const vector_type& x);
     void bootstrap(const vector_type& x0);
     void build_initial_simplex(const vector_type& x0);
@@ -135,6 +138,7 @@ private:
     // 0-indexed working vectors.
     vector_type dx_;
     vector_type xcur_;
+    vector_type x_eval_;
     vector_type lower_;
     vector_type upper_;
 
@@ -158,6 +162,7 @@ private:
     int ifull_{1};
     int nevals_{0};
     std::uint32_t seed_{0};
+    std::uint32_t clamped_evaluations_{0};
     bool converged_{false};
     solver_status status_{solver_status::running};
 

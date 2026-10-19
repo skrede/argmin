@@ -85,6 +85,7 @@ public:
 
     [[nodiscard]] solver_status status() const { return driver_->status(); }
     [[nodiscard]] vector<double> x() const { return driver_->state().x; }
+    const typename driver_type::state_type& state() const { return driver_->state(); }
     [[nodiscard]] double gradient_norm() const { return driver_->gradient_norm(); }
     [[nodiscard]] double constraint_violation() const { return driver_->constraint_violation(); }
     [[nodiscard]] int dimension() const { return adapter_->dimension(); }

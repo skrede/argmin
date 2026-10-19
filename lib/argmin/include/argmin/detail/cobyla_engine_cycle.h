@@ -25,6 +25,7 @@ inline void cobyla_engine<Scalar>::init(int n, int m, const vector_type& x0, con
     rho_ = rhobeg;
     rho_initial_ = rhobeg;
     parmu_ = Scalar(0);
+    clamped_evaluations_ = 0;
     eval_ = std::move(eval);
     converged_ = false;
     status_ = solver_status::running;
@@ -49,6 +50,7 @@ inline void cobyla_engine<Scalar>::size_workspace()
     w_.setZero(n_ + 1);
     dx_.setZero(n_);
     xcur_.setZero(n_);
+    x_eval_.setZero(n_);
     x_best_.setZero(n_);
 }
 

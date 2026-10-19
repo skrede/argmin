@@ -86,3 +86,33 @@ def test_a_one_sided_box_constructs_and_solves():
 def test_an_unbounded_problem_constructs_and_solves():
     result = make_solver().solve()
     assert result.status in SUCCESS
+
+
+def test_the_narrow_coordinate_witness_evaluates_only_inside_its_box():
+    lower = np.array([0.0, -10.0])
+    upper = np.array([0.6, 10.0])
+    points = []
+
+    def objective(x):
+        points.append(np.array(x))
+        return float((x[0] - 0.3) ** 2 + (x[1] - 1.0) ** 2)
+
+    def constraints(x):
+        points.append(np.array(x))
+        return np.array([100.0 - x[0] - x[1]])
+
+    solver = CobylaSolver(
+        objective=objective,
+        x0=np.array([0.5, 1.0]),
+        constraints=constraints,
+        num_equality=0,
+        num_inequality=1,
+        lower_bounds=lower,
+        upper_bounds=upper,
+    )
+    assert solver.clamped_evaluations == 0
+    result = solver.solve()
+    assert result.status in SUCCESS
+    assert solver.clamped_evaluations == 0
+    assert points
+    assert all(np.all(point >= lower) and np.all(point <= upper) for point in points)

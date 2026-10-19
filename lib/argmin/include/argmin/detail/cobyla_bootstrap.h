@@ -18,12 +18,23 @@ inline typename cobyla_engine<Scalar>::vector_type cobyla_engine<Scalar>::origin
     return x;
 }
 
-// Evaluate f and constraints at x, filling con_ and resmax_/f_last_.
+// A NaN coordinate compares unequal, so it counts as moved and the counter never under-reports.
+template <typename Scalar>
+inline void cobyla_engine<Scalar>::clamp_into_box(const vector_type& x)
+{
+    x_eval_ = x.cwiseMax(lower_).cwiseMin(upper_);
+    if(!(x_eval_.array() == x.array()).all())
+        ++clamped_evaluations_;
+}
+
+// The user is evaluated at the point clamped into the box while the bound rows read the raw
+// point, so the model keeps an excursion's violation (NLopt cobyla.c, func_wrap).
 template <typename Scalar>
 inline void cobyla_engine<Scalar>::evaluate(const vector_type& x)
 {
+    clamp_into_box(x);
     vector_type conv(m_);
-    Scalar f = eval_(x, conv);
+    Scalar f = eval_(x_eval_, x, conv);
     resmax_ = Scalar(0);
     for(int k = 1; k <= m_; ++k)
     {
@@ -80,7 +91,7 @@ inline Scalar cobyla_engine<Scalar>::initial_step_length(std::int32_t i, Scalar 
         else if(upper_(i - 1) - xi > xi - lower_(i - 1))
             rhocur = Scalar(0.5) * (upper_(i - 1) - xi);
         else
-            rhocur = Scalar(0.5) * (xi - lower_(i - 1));
+            rhocur = -Scalar(0.5) * (xi - lower_(i - 1));
     }
     return rhocur;
 }

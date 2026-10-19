@@ -163,6 +163,11 @@ void bind_cobyla_solver(nb::module_& m)
         "objective and every constraint, requiring no derivatives (Powell 1994). "
         "Equalities come first in the constraint vector and are driven to zero; "
         "inequalities follow and are held non-negative.");
+    cls.def_prop_ro(
+        "clamped_evaluations",
+        [](const cobyla_wrapper& solver) { return solver.state().clamped_evaluations; },
+        "The number of evaluation points moved into the box before the objective and "
+        "constraints saw them.");
     def_solver_methods(cls, "CobylaSolver");
 }
 

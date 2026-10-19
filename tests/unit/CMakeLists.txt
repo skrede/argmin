@@ -16,6 +16,7 @@ add_executable(argmin_unit_tests
     isres_alternatives_test.cpp
     isres_determinism_test.cpp
     cobyla_test.cpp
+    cobyla_bounds_test.cpp
     cobyla_invalid_box_test.cpp
     bobyqa_test.cpp
     bobyqa_bounds_test.cpp
@@ -220,6 +221,7 @@ add_executable(argmin_float_tests
     float/least_squares_float_test.cpp
     float/mma_float_test.cpp
     float/derivative_free_float_test.cpp
+    float/cobyla_bounds_float_test.cpp
     float/cmaes_float_test.cpp
     float/isres_float_test.cpp
     float/wrapper_float_test.cpp

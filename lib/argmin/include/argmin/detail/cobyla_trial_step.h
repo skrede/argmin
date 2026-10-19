@@ -35,7 +35,7 @@ inline void cobyla_engine<Scalar>::clamp_dx_to_bounds()
         if(xi + dx_(i - 1) > upper_(i - 1))
             dx_(i - 1) = upper_(i - 1) - xi;
         if(xi + dx_(i - 1) < lower_(i - 1))
-            dx_(i - 1) = xi - lower_(i - 1);
+            dx_(i - 1) = lower_(i - 1) - xi;
     }
 }
 

@@ -35,12 +35,13 @@ struct cobyla_powell_evaluator
     Eigen::VectorX<Scalar> lower;
     Eigen::VectorX<Scalar> upper;
 
-    Scalar operator()(const Eigen::VectorX<Scalar>& x, Eigen::VectorX<Scalar>& con) const
+    Scalar operator()(const Eigen::VectorX<Scalar>& x_eval, const Eigen::VectorX<Scalar>& x,
+                      Eigen::VectorX<Scalar>& con) const
     {
         const int m_total = n_eq + n_ineq;
         Eigen::VectorX<Scalar> c_full(std::max(m_total, 0));
         if(m_total > 0)
-            problem.constraints(x, c_full);
+            problem.constraints(x_eval, c_full);
 
         int idx = 0;
         for(int i = 0; i < n_ineq; ++i)
@@ -57,7 +58,7 @@ struct cobyla_powell_evaluator
             if(std::isfinite(upper[i]))
                 con(idx++) = upper[i] - x[i];
         }
-        return problem.value(x);
+        return problem.value(x_eval);
     }
 };
 
