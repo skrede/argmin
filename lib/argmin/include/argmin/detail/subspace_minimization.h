@@ -26,22 +26,17 @@ template <typename Scalar = double, int N = argmin::dynamic_dimension>
 class subspace_minimizer
 {
 public:
-    // Factorizing the identity leaves every LDLT field determinate, so moving a freshly built
-    // minimizer into a solver state copies no indeterminate values.
     explicit subspace_minimizer(int n)
         : Bd_(reduced_vector::Zero(n))
         , r_F_(reduced_vector::Zero(n))
         , d_hat_(reduced_vector::Zero(n))
         , x_new_(Eigen::Vector<Scalar, N>::Zero(n))
         , B_FF_(reduced_matrix::Identity(n, n))
-        , ldlt_(B_FF_)
+        , ldlt_(n)
     {
     }
 
-    subspace_minimizer()
-        : ldlt_(primed_decomposition<decltype(ldlt_)>())
-    {
-    }
+    subspace_minimizer() = default;
 
     // Solve the subspace minimization problem using pre-allocated workspace.
     //
@@ -102,7 +97,7 @@ private:
     reduced_vector d_hat_;
     Eigen::Vector<Scalar, N> x_new_;
     reduced_matrix B_FF_;
-    Eigen::LDLT<reduced_matrix> ldlt_;
+    defined_decomposition<Eigen::LDLT<reduced_matrix>> ldlt_;
 };
 
 // Backward-compatible free function wrapper.

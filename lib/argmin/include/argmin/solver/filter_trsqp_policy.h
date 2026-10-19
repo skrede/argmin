@@ -511,7 +511,7 @@ struct filter_trsqp_policy
         // detail::equality_feasibility_warmstart on the joint Jacobian
         // inside the byrd_omojokun normal-step leg.
         Eigen::MatrixX<Scalar> AAt_workspace;
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_feasibility;
+        detail::defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> ldlt_feasibility;
         Eigen::VectorX<Scalar> w_workspace;
 
         // Byrd-Omojokun normal-leg / predicted-reduction scratch, sized
@@ -562,7 +562,7 @@ struct filter_trsqp_policy
         Eigen::Vector<Scalar, N>     restoration_rhs;
         Eigen::Vector<Scalar, N>     restoration_dx;
         Eigen::Vector<Scalar, N>     restoration_xtrial;
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> restoration_ldlt;
+        detail::defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> restoration_ldlt;
 
         // Snapshot of the iterate at restoration entry. The LM helper
         // mutates s.x in place across its accepted inner steps, so a
@@ -670,7 +670,7 @@ struct filter_trsqp_policy
             s.AAt_workspace.resize(m_joint, m_joint);
             s.w_workspace.resize(m_joint);
         }
-        s.ldlt_feasibility = detail::primed_decomposition<decltype(s.ldlt_feasibility)>(m_joint);
+        s.ldlt_feasibility = decltype(s.ldlt_feasibility)(m_joint);
         s.bo_ws.resize(n_joint, m_joint);
 
         // Per-step joint-space scratch sized once here (see state_type).
@@ -715,7 +715,7 @@ struct filter_trsqp_policy
             s.restoration_x_entry.resize(n);
         }
         const int n_restoration = options.restoration_max_iter > 0 ? n : 0;
-        s.restoration_ldlt = detail::primed_decomposition<decltype(s.restoration_ldlt)>(n_restoration);
+        s.restoration_ldlt = decltype(s.restoration_ldlt)(n_restoration);
 
         // Constraint evaluation on the un-reformulated x-only shape.
         Eigen::VectorX<Scalar> c_eval(m);

@@ -109,7 +109,7 @@ public:
     explicit mma_subproblem_solver(int n, int m)
         : n_{n}
         , m_{m}
-        , ldlt_(primed_decomposition<decltype(ldlt_)>(m))
+        , ldlt_(m)
     {
         y_.resize(m);
         y_.setZero();
@@ -120,10 +120,7 @@ public:
         dy_.resize(m);
     }
 
-    mma_subproblem_solver()
-        : ldlt_(primed_decomposition<decltype(ldlt_)>())
-    {
-    }
+    mma_subproblem_solver() = default;
 
     // Solve the CCSA subproblem. Returns the trial point.
     //
@@ -334,7 +331,7 @@ private:
 
     vec_m dual_grad_;
     mat_mm dual_hess_;
-    Eigen::LDLT<mat_mm> ldlt_;
+    defined_decomposition<Eigen::LDLT<mat_mm>> ldlt_;
     vec_m dy_;
 };
 

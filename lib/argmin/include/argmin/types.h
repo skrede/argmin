@@ -51,19 +51,20 @@ using row_vector = Eigen::RowVector<Scalar, N>;
 namespace detail
 {
 
-template <int Dim>
-inline constexpr int smallest_extent = Dim == dynamic_dimension ? 0 : Dim;
-
 // Eigen 3.4's LDLT/LLT constructors leave m_info indeterminate and moving one is undefined behavior;
-// factoring an identity, empty when the decomposition is unused, defines every member.
+// setting the protected member defines it without instantiating a factorization at construction.
 template <typename Decomposition>
-Decomposition primed_decomposition(
-    Eigen::Index size = smallest_extent<Decomposition::MatrixType::RowsAtCompileTime>)
+class defined_decomposition : public Decomposition
 {
-    Decomposition decomposition;
-    decomposition.compute(Decomposition::MatrixType::Identity(size, size));
-    return decomposition;
-}
+public:
+    defined_decomposition() { this->m_info = Eigen::Success; }
+
+    explicit defined_decomposition(Eigen::Index size)
+        : Decomposition(size)
+    {
+        this->m_info = Eigen::Success;
+    }
+};
 
 }
 

@@ -223,7 +223,7 @@ struct nw_sqp_policy
         argmin::detail::sqp_state_buffers<Scalar, N> bufs;
 
         Eigen::MatrixX<Scalar> AAt_workspace;      // Feasibility LDLT workspace
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_feasibility;  // Reusable factorization
+        detail::defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> ldlt_feasibility;  // Reusable factorization
         Eigen::VectorX<Scalar> w_workspace;        // LDLT solve in-place buffer
         Scalar objective_value{};
         Scalar sigma{Scalar(1.0)};
@@ -291,7 +291,7 @@ struct nw_sqp_policy
             s.AAt_workspace.resize(s.n_eq, s.n_eq);
             s.w_workspace.resize(s.n_eq);
         }
-        s.ldlt_feasibility = detail::primed_decomposition<decltype(s.ldlt_feasibility)>(s.n_eq);
+        s.ldlt_feasibility = decltype(s.ldlt_feasibility)(s.n_eq);
 
         // Evaluate constraints: single vector, split into eq/ineq
         if(m > 0)

@@ -238,7 +238,7 @@ struct byrd_omojokun_workspace
     Eigen::MatrixX<Scalar> A_aug;
     Eigen::MatrixX<Scalar> AAt_aug;
     Eigen::VectorX<Scalar> w_aug;
-    Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_aug;
+    defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> ldlt_aug;
     std::vector<int> fixed;
 
     void resize(int n_joint, int m_total)
@@ -262,7 +262,7 @@ struct byrd_omojokun_workspace
         A_aug.resize(m_aug_max, n_joint);
         AAt_aug.resize(m_aug_max, m_aug_max);
         w_aug.resize(m_aug_max);
-        ldlt_aug = primed_decomposition<decltype(ldlt_aug)>(m_aug_max);
+        ldlt_aug = decltype(ldlt_aug)(m_aug_max);
         fixed.reserve(static_cast<std::size_t>(n_joint));
     }
 };

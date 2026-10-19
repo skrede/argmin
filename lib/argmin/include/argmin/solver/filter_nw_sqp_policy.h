@@ -266,7 +266,7 @@ struct filter_nw_sqp_policy
         // sentinel for problems without a static constraint_count.
         detail::active_set_qp_solver<Scalar, N, M> qp_solver;
         Eigen::MatrixX<Scalar> AAt_workspace;
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_feasibility;
+        detail::defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> ldlt_feasibility;
         Eigen::VectorX<Scalar> w_workspace;
 
         Scalar objective_value{};
@@ -335,7 +335,7 @@ struct filter_nw_sqp_policy
             s.AAt_workspace.resize(s.n_eq, s.n_eq);
             s.w_workspace.resize(s.n_eq);
         }
-        s.ldlt_feasibility = detail::primed_decomposition<decltype(s.ldlt_feasibility)>(s.n_eq);
+        s.ldlt_feasibility = decltype(s.ldlt_feasibility)(s.n_eq);
 
         if(m > 0)
             problem.constraints(x0, s.bufs.c_all);

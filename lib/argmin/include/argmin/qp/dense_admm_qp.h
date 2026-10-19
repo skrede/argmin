@@ -88,8 +88,8 @@ public:
         , rho_inv_vec_(m)
         , base_mult_(m)
         , K_(n, n)
-        , llt_(detail::primed_decomposition<decltype(llt_)>(n))
-        , ldlt_P_(detail::primed_decomposition<decltype(ldlt_P_)>(n))
+        , llt_(n)
+        , ldlt_P_(n)
         , scratch_mn_(m, n)
         , x_(n)
         , x_tilde_(n)
@@ -129,13 +129,7 @@ public:
         active_upper_.reserve(static_cast<std::size_t>(m));
     }
 
-    dense_admm_qp_solver()
-        : seed_consumed_(false)
-        , llt_(detail::primed_decomposition<decltype(llt_)>())
-        , ldlt_P_(detail::primed_decomposition<decltype(ldlt_P_)>())
-        , ws_y_len_(0)
-    {
-    }
+    dense_admm_qp_solver() : seed_consumed_(false), ws_y_len_(0) {}
 
     expected<result_type, qp_error>
     solve(const matrix<Scalar, N, N>& P, const vector<Scalar, N>& q,
@@ -920,8 +914,8 @@ private:
     // llt_ reads only the lower triangle of K_, which agrees with the full-matrix uses of P_ in the
     // dual residual and the objective because pose rejects an asymmetric P; with validate_convexity
     // off, that symmetry is the caller's obligation.
-    Eigen::LLT<matrix<Scalar, N, N>> llt_;
-    Eigen::LDLT<matrix<Scalar, N, N>> ldlt_P_;
+    detail::defined_decomposition<Eigen::LLT<matrix<Scalar, N, N>>> llt_;
+    detail::defined_decomposition<Eigen::LDLT<matrix<Scalar, N, N>>> ldlt_P_;
     matrix<Scalar, dynamic_dimension, N> scratch_mn_;
 
     vector<Scalar, N> x_;

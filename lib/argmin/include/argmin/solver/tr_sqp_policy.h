@@ -346,7 +346,7 @@ struct tr_sqp_policy
         // LDLT workspace pair used by detail::equality_feasibility_warmstart
         // on the joint Jacobian inside the byrd_omojokun normal-step leg.
         Eigen::MatrixX<Scalar> AAt_workspace;
-        Eigen::LDLT<Eigen::MatrixX<Scalar>> ldlt_feasibility;
+        detail::defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> ldlt_feasibility;
         Eigen::VectorX<Scalar> w_workspace;
 
         // Byrd-Omojokun normal-leg / predicted-reduction scratch, sized
@@ -465,7 +465,7 @@ struct tr_sqp_policy
             s.AAt_workspace.resize(m_joint, m_joint);
             s.w_workspace.resize(m_joint);
         }
-        s.ldlt_feasibility = detail::primed_decomposition<decltype(s.ldlt_feasibility)>(m_joint);
+        s.ldlt_feasibility = decltype(s.ldlt_feasibility)(m_joint);
         s.bo_ws.resize(n_joint, m_joint);
 
         // Per-step joint-space scratch sized once here (see state_type).

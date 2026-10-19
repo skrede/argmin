@@ -606,7 +606,7 @@ public:
         , qr_lambda_(n, n)
         , qr_rr_(n, n)
         , qr_full_(n, n)
-        , llt_reduced_(primed_decomposition<decltype(llt_reduced_)>(n))
+        , llt_reduced_(n)
         , Q_explicit_(n, n)
         , R_(n, max_constraints)
         , ZtGZ_(n, n)
@@ -637,10 +637,7 @@ public:
         iws_candidates_.reserve(static_cast<std::size_t>(max_constraints));
     }
 
-    active_set_qp_solver()
-        : llt_reduced_(primed_decomposition<decltype(llt_reduced_)>())
-    {
-    }
+    active_set_qp_solver() = default;
 
     // Solve QP subproblem using pre-allocated workspace.
     //
@@ -1245,7 +1242,7 @@ private:
     Eigen::HouseholderQR<qr_lambda_matrix> qr_lambda_;
     Eigen::ColPivHouseholderQR<qr_lambda_matrix> qr_rr_;
     Eigen::HouseholderQR<qr_matrix> qr_full_;
-    Eigen::LLT<n_square_matrix> llt_reduced_;
+    defined_decomposition<Eigen::LLT<n_square_matrix>> llt_reduced_;
     q_matrix Q_explicit_;
     qr_matrix R_;
     bool qr_valid_{false};
