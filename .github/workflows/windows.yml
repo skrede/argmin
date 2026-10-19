@@ -84,3 +84,25 @@ jobs:
       - name: Run consumer test
         run: |
           build-consumer/Release/integration_test.exe
+
+      - name: Configure parent project
+        run: |
+          cmake tests/integration/parent -B build-parent -A x64 `
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-parent" `
+            -DARGMIN_CMAKE_FETCH_DEPS=OFF `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            '-DCMAKE_CXX_FLAGS=/std:c++latest'
+
+      - name: Build and install parent project
+        run: |
+          cmake --build build-parent --config Release
+          cmake --install build-parent --config Release
+
+      - name: Build and run transitive consumer
+        run: |
+          cmake tests/integration/parent_consumer -B build-parent-consumer -A x64 `
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-parent" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            '-DCMAKE_CXX_FLAGS=/std:c++latest'
+          cmake --build build-parent-consumer --config Release
+          build-parent-consumer/Release/transitive_consumer.exe
