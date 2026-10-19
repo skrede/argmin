@@ -76,24 +76,26 @@ struct cobyla_policy
     template <typename P = void>
     struct state_type
     {
-        const P* problem{nullptr};
+        state_type() : problem{nullptr}, objective_value{}, parmu{Scalar(0.0)}, n_eq{0}, n_ineq{0}, m_powell{0}, iteration{0}, clamped_evaluations{0}, invalid_coordinate{-1}, invalid_problem{false} {}
+
+        const P* problem;
         Eigen::VectorX<Scalar> x;
         Eigen::VectorX<Scalar> lower;
         Eigen::VectorX<Scalar> upper;
         Eigen::VectorX<Scalar> c_eq;
         Eigen::VectorX<Scalar> c_ineq;
-        Scalar objective_value{};
+        Scalar objective_value;
         // Powell merit penalty. Adapts upward only through
         // barmu = (predicted objective increase) / (predicted reduction in max
         // violation) -- i.e. only when reaching feasibility costs objective.
-        Scalar parmu{Scalar(0.0)};
-        int n_eq{0};
-        int n_ineq{0};
-        int m_powell{0};
-        std::uint32_t iteration{0};
-        std::uint32_t clamped_evaluations{0};
-        std::int32_t invalid_coordinate{-1};
-        bool invalid_problem{false};
+        Scalar parmu;
+        int n_eq;
+        int n_ineq;
+        int m_powell;
+        std::uint32_t iteration;
+        std::uint32_t clamped_evaluations;
+        std::int32_t invalid_coordinate;
+        bool invalid_problem;
 
         // The engine is heap-owned so state moves leave its internal pointers
         // (captured by the evaluator) valid.

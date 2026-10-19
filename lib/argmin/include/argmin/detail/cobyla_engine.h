@@ -28,7 +28,7 @@ public:
     using matrix_type = Eigen::Matrix<Scalar, argmin::dynamic_dimension, argmin::dynamic_dimension>;
     using evaluator = std::function<Scalar(const vector_type&, const vector_type&, vector_type&)>;
 
-    cobyla_engine() = default;
+    cobyla_engine();
 
     // n      : number of variables.
     // m      : number of Powell constraints (all >= 0 when feasible).
@@ -118,11 +118,11 @@ private:
     void mirror_best();
 
     // Problem dimensions.
-    int n_{0};
-    int m_{0};
-    int mp_{0};
-    int mpp_{0};
-    int np_{0};
+    int n_;
+    int m_;
+    int mp_;
+    int mpp_;
+    int np_;
 
     // Reference working storage (1-indexed access, row/col 0 unused).
     matrix_type sim_;
@@ -143,35 +143,35 @@ private:
     vector_type upper_;
 
     // Scalars.
-    Scalar rho_{0};
-    Scalar rho_initial_{0};
-    Scalar rhoend_{0};
-    Scalar parmu_{0};
-    Scalar parsig_{0};
-    Scalar pareta_{0};
-    Scalar resmax_{0};
-    Scalar f_last_{0};
-    Scalar prerec_{0};
-    Scalar prerem_{0};
-    Scalar sum_{0};
+    Scalar rho_;
+    Scalar rho_initial_;
+    Scalar rhoend_;
+    Scalar parmu_;
+    Scalar parsig_;
+    Scalar pareta_;
+    Scalar resmax_;
+    Scalar f_last_;
+    Scalar prerec_;
+    Scalar prerem_;
+    Scalar sum_;
 
     // Control flags.
-    int ibrnch_{0};
-    int iflag_{0};
-    int jdrop_{0};
-    int ifull_{1};
-    int nevals_{0};
-    std::uint32_t seed_{0};
-    std::uint32_t clamped_evaluations_{0};
-    bool converged_{false};
-    solver_status status_{solver_status::running};
+    int ibrnch_;
+    int iflag_;
+    int jdrop_;
+    int ifull_;
+    int nevals_;
+    std::uint32_t seed_;
+    std::uint32_t clamped_evaluations_;
+    bool converged_;
+    solver_status status_;
 
     // Incumbent mirror.
     vector_type x_best_;
-    Scalar f_best_{0};
-    Scalar resmax_best_{0};
+    Scalar f_best_;
+    Scalar resmax_best_;
 
-    evaluator eval_{};
+    evaluator eval_;
 };
 
 }

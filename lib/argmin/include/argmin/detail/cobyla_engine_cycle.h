@@ -12,6 +12,39 @@ namespace argmin::detail
 {
 
 template <typename Scalar>
+inline cobyla_engine<Scalar>::cobyla_engine()
+    : n_{0}
+    , m_{0}
+    , mp_{0}
+    , mpp_{0}
+    , np_{0}
+    , rho_{0}
+    , rho_initial_{0}
+    , rhoend_{0}
+    , parmu_{0}
+    , parsig_{0}
+    , pareta_{0}
+    , resmax_{0}
+    , f_last_{0}
+    , prerec_{0}
+    , prerem_{0}
+    , sum_{0}
+    , ibrnch_{0}
+    , iflag_{0}
+    , jdrop_{0}
+    , ifull_{1}
+    , nevals_{0}
+    , seed_{0}
+    , clamped_evaluations_{0}
+    , converged_{false}
+    , status_{solver_status::running}
+    , f_best_{0}
+    , resmax_best_{0}
+    , eval_{}
+{
+}
+
+template <typename Scalar>
 inline void cobyla_engine<Scalar>::init(int n, int m, const vector_type& x0, const vector_type& lower, const vector_type& upper, Scalar rhobeg, Scalar rhoend, evaluator eval)
 {
     n_ = n;
