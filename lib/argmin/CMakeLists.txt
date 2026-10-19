@@ -1,37 +1,32 @@
-# Scoped to this directory, never the root: under ALWAYS a declaration that carries no find_package
-# arguments can be satisfied by find_package, which leaves the <name>_SOURCE_DIR it dereferences empty.
-if(ARGMIN_CMAKE_FETCH_DEPS)
-    set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE NEVER)
-else()
-    set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE ALWAYS)
-endif()
-
-FetchContent_Declare(
-    Eigen3
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG 3147391d946bb4b6c68edd901f2add6ac1f31f8c  # 3.4.0
-    EXCLUDE_FROM_ALL
-    SOURCE_SUBDIR this-directory-does-not-exist
-    FIND_PACKAGE_ARGS 3.4 CONFIG GLOBAL
-)
-FetchContent_MakeAvailable(Eigen3)
-
 # The target decides, not the inheritable eigen3_SOURCE_DIR, because a parent may already supply
-# Eigen3::Eigen. Fetching is opt-in, so without the option the find-first fallback must refuse rather
-# than turn a missing prerequisite into a silent download.
+# Eigen3::Eigen. Fetching is opt-in, so without the option nothing is downloaded. The 3.4 floor is
+# checked by hand: Eigen's same-major version file rejects a 3.4 request from Eigen 5.
 if(NOT TARGET Eigen3::Eigen)
-    if(NOT ARGMIN_CMAKE_FETCH_DEPS)
-        message(FATAL_ERROR
-            "argmin requires Eigen >= 3.4, and no discoverable Eigen3 package of that version was found. "
-            "The pinned Eigen source was populated as the fallback but is deliberately not used while "
-            "ARGMIN_CMAKE_FETCH_DEPS is OFF. Install Eigen >= 3.4 where find_package can see it, or set "
-            "ARGMIN_CMAKE_FETCH_DEPS=ON to build against the pinned source.")
+    if(ARGMIN_CMAKE_FETCH_DEPS)
+        # A parent's ALWAYS would let find_package satisfy the declaration and leave eigen3_SOURCE_DIR empty.
+        set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE NEVER)
+        FetchContent_Declare(
+            Eigen3
+            GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+            GIT_TAG 3147391d946bb4b6c68edd901f2add6ac1f31f8c  # 3.4.0
+            EXCLUDE_FROM_ALL
+            SOURCE_SUBDIR this-directory-does-not-exist
+        )
+        FetchContent_MakeAvailable(Eigen3)
+        add_library(eigen_headers INTERFACE)
+        add_library(Eigen3::Eigen ALIAS eigen_headers)
+        target_include_directories(eigen_headers SYSTEM INTERFACE
+            "${eigen3_SOURCE_DIR}"
+        )
+    else()
+        find_package(Eigen3 CONFIG GLOBAL)
+        if(NOT Eigen3_FOUND OR Eigen3_VERSION VERSION_LESS "3.4")
+            message(FATAL_ERROR
+                "argmin requires Eigen >= 3.4, and no discoverable Eigen3 package of that version was found. "
+                "Install Eigen >= 3.4 where find_package can see it, or set ARGMIN_CMAKE_FETCH_DEPS=ON to "
+                "build against the pinned source.")
+        endif()
     endif()
-    add_library(eigen_headers INTERFACE)
-    add_library(Eigen3::Eigen ALIAS eigen_headers)
-    target_include_directories(eigen_headers SYSTEM INTERFACE
-        "${eigen3_SOURCE_DIR}"
-    )
 endif()
 
 get_target_property(_eigen_aliased Eigen3::Eigen ALIASED_TARGET)
