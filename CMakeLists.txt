@@ -48,6 +48,15 @@ option(ARGMIN_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(ARGMIN_BUILD_PYTHON "Build the Python extension module and its test suite" OFF)
 option(ARGMIN_CMAKE_FETCH_DEPS "Use CMake FetchContent to download and install dependencies" OFF)
 
+# On the fetch path Eigen3::Eigen aliases a local, uninstalled interface target that belongs to no
+# export set, so argmin's own export cannot generate there; the default is therefore not merely top-level.
+if(PROJECT_IS_TOP_LEVEL AND NOT ARGMIN_CMAKE_FETCH_DEPS)
+    set(_argmin_install_default ON)
+else()
+    set(_argmin_install_default OFF)
+endif()
+option(ARGMIN_INSTALL "Install argmin into the install prefix" ${_argmin_install_default})
+
 include(FetchContent)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(argmin)
+
+include("${CMAKE_CURRENT_LIST_DIR}/transitive_parentTargets.cmake")
+
+check_required_components(transitive_parent)

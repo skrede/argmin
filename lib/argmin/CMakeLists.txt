@@ -51,7 +51,14 @@ target_link_libraries(argmin
     Eigen3::Eigen
 )
 
-if(PROJECT_IS_TOP_LEVEL AND NOT ARGMIN_CMAKE_FETCH_DEPS)
+if(ARGMIN_INSTALL)
+    if(eigen3_SOURCE_DIR)
+        message(FATAL_ERROR
+            "ARGMIN_INSTALL is ON but Eigen was fetched (ARGMIN_CMAKE_FETCH_DEPS). A fetched Eigen is a "
+            "local target belonging to no export set, so argmin's export cannot generate around it. "
+            "Supply a discoverable Eigen and leave ARGMIN_CMAKE_FETCH_DEPS off, or turn ARGMIN_INSTALL off.")
+    endif()
+
     install(TARGETS argmin
         EXPORT argminTargets
     )
@@ -74,9 +81,11 @@ if(PROJECT_IS_TOP_LEVEL AND NOT ARGMIN_CMAKE_FETCH_DEPS)
         INSTALL_DESTINATION ${argmin_INSTALL_CMAKEDIR}
     )
 
+    # At 0.x a same-major rule would accept this install for a request of 0.1.0, contradicting the
+    # pre-1.0 policy that every minor release may break; staying stricter than semver past 1.0 is accepted.
     write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/argminConfigVersion.cmake"
-        COMPATIBILITY SameMajorVersion
+        COMPATIBILITY SameMinorVersion
     )
 
     install(FILES
