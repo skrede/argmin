@@ -156,6 +156,7 @@ add_executable(argmin_alloc_gate_test
     alloc_gate_line_search_failure_test.cpp
     alloc_gate_sparse_move_test.cpp
     alloc_gate_reduced_hessian_test.cpp
+    alloc_gate_kkt_multiplier_test.cpp
 )
 # Sensor B (the glibc __libc_* strong-symbol overrides) links only on Linux; the
 # CMake platform guard is the sole gate (no __linux__ #ifdef inside the source).

@@ -161,3 +161,32 @@ TEST_CASE("qp_equality_subproblem_allocation_count", "[qp-reduced-hessian-alloc]
         CHECK(counts.c == 0);
     }
 }
+
+TEST_CASE("qp_equality_restoration_allocation_count", "[qp-reduced-hessian-alloc]")
+{
+    const mpc_qp mpc = make_mpc_qp(11);
+    const equality_qp& qp = mpc.qp;
+    const argmin::qp_options<> opts{};
+    const auto rows = static_cast<std::int32_t>(qp.A_eq.rows() + 2 * qp.G.rows());
+    solver_type solver(static_cast<std::int32_t>(qp.G.rows()), rows);
+    solver_type::result_type out;
+    Eigen::VectorXd x_start = qp.x0;
+    x_start.segment(1, 3).array() += 0.5;
+    Eigen::VectorXd d = qp.d;
+    solver.solve_into(qp.G, d, qp.A_eq, qp.b_eq, qp.A_ineq, qp.b_ineq, mpc.lower, mpc.upper, x_start, opts, out);
+    REQUIRE(out.status == qp_status::optimal);
+
+    lcg rng(7);
+    for(std::int32_t solve = 0; solve < 4; ++solve)
+    {
+        for(Eigen::Index i = 0; i < d.size(); ++i)
+            d[i] += 0.2 * rng.next();
+        const window_counts counts = run_armed([&] {
+            solver.solve_into(qp.G, d, qp.A_eq, qp.b_eq, qp.A_ineq, qp.b_ineq, mpc.lower, mpc.upper, x_start, opts, out);
+        });
+        INFO("warm solve " << solve);
+        REQUIRE(out.status == qp_status::optimal);
+        CHECK(counts.eigen == 0);
+        CHECK(counts.c == 0);
+    }
+}

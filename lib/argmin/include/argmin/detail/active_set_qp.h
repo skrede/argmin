@@ -15,6 +15,7 @@
 //            norm under-determined solution via thin QR)
 
 #include "argmin/detail/givens_qr_update.h"
+#include "argmin/detail/householder_apply.h"
 #include "argmin/types.h"
 #include "argmin/options/qp_options.h"
 
@@ -884,7 +885,7 @@ private:
                         .template triangularView<Eigen::Upper>()
                         .transpose()
                         .solve(residual_.head(m_eq));
-                    rhs_.head(n).applyOnTheLeft(qr_lambda_.householderQ());
+                    apply_householder_q_on_the_left(qr_lambda_, m_eq, false, rhs_.head(n), residual_);
                     x += rhs_.head(n);
                     // An unpivoted diagonal can miss a near-singular factor (Kahan's
                     // matrix), so the landed residual is the second escalation trigger.
@@ -1182,7 +1183,7 @@ private:
             p_sub_.head(n).setZero();
             qr_rr_.compute(A_W.transpose());
             rhs_padded_.head(n) = g_k;
-            solve_rank_revealing_into(lambda_sub_.head(m), n);
+            col_piv_qr_solve_in_place(qr_rr_, rhs_padded_.head(n), lambda_sub_.head(m), residual_);
             return;
         }
 
@@ -1232,57 +1233,8 @@ private:
         rhs_padded_.head(n).setZero();
         rhs_padded_.head(rank) = rhs_lam_.head(rank);
         qr_rr_.compute(AY_pad_);
-        solve_rank_revealing_into(p_z_.head(n), n);
+        col_piv_qr_solve_in_place(qr_rr_, rhs_padded_.head(n), p_z_.head(n), residual_);
         lambda_sub_.head(rank) = p_z_.head(rank);
-    }
-
-    // ColPivHouseholderQR::solve of qr_rr_ against rhs_padded_.head(n), overwriting it, with Eigen's
-    // own operations in Eigen's order; only its right-hand-side copy moves into member storage.
-    template <typename Dst>
-    void solve_rank_revealing_into(Dst&& dst, int n)
-    {
-        auto c = rhs_padded_.head(n);
-        const Eigen::Index pivots = qr_rr_.nonzeroPivots();
-        if(pivots == 0)
-        {
-            dst.setZero();
-            return;
-        }
-        for(Eigen::Index k = 0; k < pivots; ++k)
-            apply_rank_revealing_reflector(c.bottomRightCorner(n - k, c.cols()), k);
-        qr_rr_.matrixQR().topLeftCorner(pivots, pivots).template triangularView<Eigen::Upper>()
-            .solveInPlace(c.topRows(pivots));
-        const auto& perm = qr_rr_.colsPermutation().indices();
-        for(Eigen::Index i = 0; i < pivots; ++i)
-            dst.row(perm.coeff(i)) = c.row(i);
-        for(Eigen::Index i = pivots; i < qr_rr_.cols(); ++i)
-            dst.row(perm.coeff(i)).setZero();
-    }
-
-    // MatrixBase::applyHouseholderOnTheLeft for the k-th reflector of qr_rr_, whose scaled essential
-    // part Eigen materializes in a heap temporary at dynamic size; here it reuses residual_.
-    template <typename Derived>
-    void apply_rank_revealing_reflector(Derived&& dst, Eigen::Index k)
-    {
-        const Scalar tau = qr_rr_.hCoeffs().coeff(k);
-        if(dst.rows() == 1)
-        {
-            dst *= Scalar(1) - tau;
-            return;
-        }
-        if(tau == Scalar(0))
-            return;
-        using essential_type = Eigen::Block<const qr_lambda_matrix, Eigen::Dynamic, 1>;
-        const Eigen::Index tail = dst.rows() - 1;
-        const essential_type essential(qr_rr_.matrixQR(), k + 1, k, tail, 1);
-        Scalar w;
-        Eigen::Map<Eigen::Matrix<Scalar, 1, Eigen::Dynamic, Eigen::RowMajor, 1, 1>> tmp(&w, dst.cols());
-        auto bottom = dst.bottomRows(tail);
-        tmp.noalias() = essential.adjoint() * bottom;
-        tmp += dst.row(0);
-        dst.row(0) -= tau * tmp;
-        residual_.head(tail) = tau * essential;
-        bottom.noalias() -= residual_.head(tail) * tmp;
     }
 
     int n_{0};
