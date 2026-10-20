@@ -71,3 +71,50 @@ Certification is by the fresh on-device capture above, taken from the exact
 current image (arm A, the bytes flashed and run). All four RT-claimed policies
 report 0.00 allocs/step with the defines in place, so the flag change preserves
 the zero-per-step contract on real hardware.
+
+
+## Float and release capture (2026-10-20)
+
+The first on-device run of the `float` windows on the ESP32, taken at commit `2441b15`. Its library
+differs from the release candidate `775a756` only by one deleted comment. The board is an **Olimex
+ESP32-POE**, flashed and read over its own CH340 USB bridge, with telemetry on UART1 → GPIO5 → an
+FT232R. GPIO17 is not used because it drives this board's Ethernet PHY clock. ESP-IDF `v6.0.2`
+(the version CI builds with), `xtensa-esp-elf-gcc (crosstool-NG esp-15.2.0_20251204) 15.2.0`. The console and telemetry readers were attached before a
+reset through the bridge's RTS line, so the boot-once report is complete.
+
+Image `argmin_esp32_probe.bin` sha256 `b6185b2d95f1d79480598234a94e275525a6fe82158a366e09e80757e3486d65`.
+
+### Console (UART0)
+
+```
+[argmin] ESP32 accessible allocation proof (RTOS-present)
+[argmin] warmup float 0.00
+[argmin] blindness canary PASS (deliberate allocation observed)
+  [alloc-gate] kraft_slsqp hs071  eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] kraft_slsqp hs071 PASS (zero-alloc gate)
+  [alloc-gate] nw_sqp hs071       eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] nw_sqp hs071 PASS (zero-alloc gate)
+  [alloc-gate] filter_nw_sqp hs071 eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] filter_nw_sqp hs071 PASS (zero-alloc gate)
+  [alloc-gate] lm rosenbrock_ls   eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] lm rosenbrock_ls PASS (zero-alloc gate)
+  [alloc-gate] kraft_slsqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] kraft_slsqp hs071 float PASS (zero-alloc gate)
+  [alloc-gate] nw_sqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] nw_sqp hs071 float PASS (zero-alloc gate)
+  [alloc-gate] filter_nw_sqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] filter_nw_sqp hs071 float PASS (zero-alloc gate)
+  [alloc-gate] lm rosenbrock_ls float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] lm rosenbrock_ls float PASS (zero-alloc gate)
+[argmin] argmin ESP32: RT-window gate PASS(0/step); whole-run heap total_allocations=546 (one-time setup, informational)
+```
+
+### Telemetry (UART1 / GPIO5 / FT232R)
+
+```
+argmin ESP32: RT-window gate PASS(0/step); whole-run heap total_allocations=546 (one-time setup, informational)
+```
+
+Reading: 0.00/step on all 8 windows (four policies, each in `double` and in `float`), and the
+blindness canary fires. The whole-run heap total of 546 is one-time setup across both scalar
+passes; the July capture ran `double` only and counted 274.
