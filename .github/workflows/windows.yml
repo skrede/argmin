@@ -68,13 +68,16 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             '-DCMAKE_CXX_FLAGS=/std:c++latest'
 
+      # pwsh otherwise fails a step only on its last command's exit code.
       - name: Build and install
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cmake --build build --config Release
           cmake --install build --config Release
 
       - name: Build consumer
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cmake tests/integration/consumer -B build-consumer -A x64 `
             -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
@@ -95,11 +98,13 @@ jobs:
 
       - name: Build and install parent project
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cmake --build build-parent --config Release
           cmake --install build-parent --config Release
 
       - name: Build and run transitive consumer
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cmake tests/integration/parent_consumer -B build-parent-consumer -A x64 `
             -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-parent" `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `

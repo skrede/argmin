@@ -92,6 +92,7 @@ if(ARGMIN_INSTALL)
     write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/argminConfigVersion.cmake"
         COMPATIBILITY SameMinorVersion
+        ARCH_INDEPENDENT
     )
 
     install(FILES
