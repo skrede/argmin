@@ -51,9 +51,7 @@ add_test(NAME runner_chrono_freedom_compiles COMMAND runner_chrono_freedom_probe
 # The <chrono>-freedom invariant is compiler-independent, so proving it on
 # GCC/Clang suffices: the dependency-dump scan uses -M-style output that MSVC
 # cl.exe does not provide, so MSVC skips the scan (never the compile probe
-# above, which runs everywhere). Eigen's include dirs come from a cache variable
-# rather than a genex on Eigen3::Eigen, whose find_package-imported target is not
-# visible in this sibling scope under system-Eigen (FetchContent aliases it).
+# above, which runs everywhere).
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_test(NAME runner_chrono_freedom_scan
         COMMAND ${CMAKE_COMMAND}
