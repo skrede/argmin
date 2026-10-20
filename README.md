@@ -19,7 +19,7 @@ Every solver is a policy that plugs into `step_budget_solver<Policy>` and expose
 ## Features
 
 - **Policy-based solvers:** every algorithm is a policy behind one uniform interface -- swap `lbfgsb_policy` for `kraft_slsqp_policy` without touching the calling code.
-- **Broad algorithm set:** L-BFGS-B, SLSQP (Kraft and filter variants), MMA / GCMMA / CCSA, Levenberg-Marquardt, Projected Gauss-Newton, BOBYQA, CMA-ES, and an augmented-Lagrangian meta-policy -- covering unconstrained, box, equality/inequality, least-squares, derivative-free, and global problems.
+- **Broad algorithm set:** L-BFGS-B, SLSQP (Kraft and filter variants), MMA / GCMMA / CCSA, Levenberg-Marquardt, Projected Gauss-Newton, BOBYQA, COBYLA, CMA-ES, and an augmented-Lagrangian meta-policy -- covering unconstrained, box, equality/inequality, least-squares, derivative-free, and global problems.
 - **Compile-time dimensions:** problem sizes propagate into Eigen types for stack allocation and zero-overhead fixed-`N` solves.
 - **Step-level execution control:** drive a solver one iteration at a time -- for a control loop, an IK chain, or an MPC tick that cannot afford a blocking `solve()`.
 - **Embeddable / real-time-minded:** a passive kernel that owns no thread, timer, or loop; several policies are certified allocation-free at a fixed dimension under a CI allocation gate (see the [RT safety matrix](docs/rt-safety-matrix.md)).
