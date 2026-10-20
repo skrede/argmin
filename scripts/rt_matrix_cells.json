@@ -568,6 +568,7 @@
           "cells": {
             "allocation-free?": {
               "verdict": "yes",
+              "footnotes": ["fdjac"],
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "alloc_gate_lm", "note": "zero-allocation assertion over the fixed-N steady-state window"},
@@ -614,6 +615,7 @@
           "cells": {
             "allocation-free?": {
               "verdict": "yes",
+              "footnotes": ["fdjac"],
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "alloc_gate_projected_gn", "note": "zero-allocation assertion on an active-bound fixture"},
@@ -659,6 +661,7 @@
           "cells": {
             "allocation-free?": {
               "verdict": "yes",
+              "footnotes": ["fdjac"],
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "alloc_gate_projected_gradient_gn", "note": "zero-allocation assertion on an active-bound fixture"},
