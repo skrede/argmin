@@ -49,9 +49,11 @@ std::atomic<bool> g_alloc_trace_armed{false};
 namespace
 {
 
+// The Olimex ESP32-POE drives its Ethernet PHY clock from GPIO17, and GPIO3 is the console's RX, so
+// telemetry uses GPIO5/4; GPIO5 is a strapping pin that must be high at boot, which an idle UART line is.
 constexpr uart_port_t kTelemetryUart = UART_NUM_1;
-constexpr int kTelemetryTx = 17;   // GPIO17 (WROOM: free; WROVER: PSRAM CS -- check board)
-constexpr int kTelemetryRx = 16;   // GPIO16 (WROOM: free; WROVER: PSRAM CLK -- check board)
+constexpr int kTelemetryTx = 5;
+constexpr int kTelemetryRx = 4;
 
 // heap_trace record buffer, internal RAM.
 heap_trace_record_t g_trace_buf[256];

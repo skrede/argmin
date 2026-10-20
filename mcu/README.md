@@ -142,17 +142,23 @@ per-step `0.00`/step result inside each armed window; ESP-IDF `heap_trace`
 ### Operator capture (board in hand)
 
 ```sh
-idf.py -C mcu/esp32_probe -p /dev/ttyUSB0 flash monitor
+idf.py -C mcu/esp32_probe -p /dev/serial/by-id/<board USB bridge> flash monitor
 ```
 
-Console (UART0) shows the canary + per-window `per_step=0.00` lines; the
-telemetry summary also goes out **UART1** (TX=GPIO17, RX=GPIO16 at 115200).
+Flash and read the console through the board's own USB bridge (a CH340 on the ESP32-POE); the
+telemetry adapter (an FT232R on GPIO5/4) is a second serial device. `/dev/ttyUSB<n>` numbering
+follows plug-in order, so name the port by id.
 
-**Board check before wiring:** GPIO16/17 are free on **ESP32-WROOM** but are
-the PSRAM CLK/CS lines on **ESP32-WROVER** — confirm the module (silkscreen or
-the boot-log PSRAM line); on a WROVER pick another free GPIO pair
-(`kTelemetryTx`/`kTelemetryRx` in `main/probe_main.cpp`, a config-constant
-change). The image runs each policy in `double` and in `float`: on the classic
-ESP32 the `double` windows run in software floating point and the `float`
-windows on the hardware single-precision FPU. No timing claims are made here.
+Console (UART0) shows the canary + per-window `per_step=0.00` lines; the
+telemetry summary also goes out **UART1** (TX=GPIO5, RX=GPIO4 at 115200).
+
+**Board check before wiring:** the bench board is an **Olimex ESP32-POE**, which drives its
+Ethernet PHY clock from GPIO17 and uses GPIO3 as the console's RX, so neither may carry
+telemetry. GPIO5 is a strapping pin that must be high at boot, which an idle UART line is. On
+another module, pick a free GPIO pair (`kTelemetryTx`/`kTelemetryRx` in `main/probe_main.cpp`, a
+config-constant change); on an ESP32-WROVER, GPIO16/17 are the PSRAM CLK/CS lines.
+
+The image runs each policy in `double` and in `float`: on the classic ESP32 the `double` windows
+run in software floating point and the `float` windows on the hardware single-precision FPU. No
+timing claims are made here.
 
