@@ -131,9 +131,7 @@ TEST_CASE("qp_reduced_hessian_allocation_count", "[qp-reduced-hessian-alloc]")
 
     CHECK(out.status == qp_status::optimal);
     CHECK(out.iterations == 1);
-    // The equality subproblem allocates nothing; the two left are the iteration gradient's G x
-    // temporary, one per active-set pass.
-    CHECK(counts.eigen == 2);
+    CHECK(counts.eigen == 0);
 }
 
 TEST_CASE("qp_equality_subproblem_allocation_count", "[qp-reduced-hessian-alloc]")
@@ -159,10 +157,7 @@ TEST_CASE("qp_equality_subproblem_allocation_count", "[qp-reduced-hessian-alloc]
         INFO("warm solve " << solve);
         REQUIRE(out.status == qp_status::optimal);
         CHECK(out.iterations > 4);
-        // One allocation per active-set pass is the gradient's G x temporary outside the subproblem;
-        // the subproblem itself allocated about n per pass before its solves moved into member storage.
-        const auto passes = static_cast<std::size_t>(out.iterations) + 1;
-        CHECK(counts.eigen == passes);
-        CHECK(counts.c == passes);
+        CHECK(counts.eigen == 0);
+        CHECK(counts.c == 0);
     }
 }

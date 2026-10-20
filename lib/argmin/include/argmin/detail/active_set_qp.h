@@ -911,7 +911,8 @@ private:
         for(int iter = 0; iter < max_iter; ++iter)
         {
             const bool bland = iter >= bland_threshold;
-            g_k_.head(n).noalias() = G * x + d;
+            g_k_.head(n).noalias() = G * x;
+            g_k_.head(n) += d;
 
             const int wsize = static_cast<int>(W_.size());
             for(int k = 0; k < wsize; ++k)
@@ -968,7 +969,8 @@ private:
                 }
                 else if(null_step)
                 {
-                    g_k_.head(n).noalias() = G * x + d;
+                    g_k_.head(n).noalias() = G * x;
+                    g_k_.head(n) += d;
                     stationary = true;
                 }
             }
