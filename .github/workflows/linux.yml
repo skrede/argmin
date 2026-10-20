@@ -148,6 +148,12 @@ jobs:
             cc: clang-18
             cxx: clang++-18
             flags: "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          # clang copies an indeterminate enum member with memcpy, which UBSan cannot see; g++ loads
+          # it and reports the invalid value, so only this leg guards the decomposition-state tests.
+          - name: ubsan-gcc
+            cc: gcc-14
+            cxx: g++-14
+            flags: "-fsanitize=undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
 
     runs-on: ubuntu-24.04
     name: sanitize (${{ matrix.name }})
