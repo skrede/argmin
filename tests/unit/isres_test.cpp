@@ -103,28 +103,28 @@ static_assert(bound_constrained<simple_constrained>);
 // Verify restarting_policy rebind propagates through the decorator.
 static_assert(std::same_as<
     restarting_policy<cmaes_policy<>>::rebind<3>,
-    restarting_policy<cmaes_policy<3>>>);
+    restarting_policy<cmaes_policy<double, 3>>>);
 
 static_assert(std::same_as<
     restarting_policy<isres_policy<>>::rebind<3>,
-    restarting_policy<isres_policy<3>>>);
+    restarting_policy<isres_policy<double, 3>>>);
 
 // ISRES alternative-variant restarting_policy::rebind transparency check.
 static_assert(std::same_as<
     restarting_policy<
         alternative::isres::nlopt_faithful_policy<>>::rebind<3>,
     restarting_policy<
-        alternative::isres::nlopt_faithful_policy<3>>>);
+        alternative::isres::nlopt_faithful_policy<double, 3>>>);
 static_assert(std::same_as<
     restarting_policy<
         alternative::isres::original_argmin_policy<>>::rebind<3>,
     restarting_policy<
-        alternative::isres::original_argmin_policy<3>>>);
+        alternative::isres::original_argmin_policy<double, 3>>>);
 static_assert(std::same_as<
     restarting_policy<
         alternative::isres::runarsson_yao_paper_policy<>>::rebind<3>,
     restarting_policy<
-        alternative::isres::runarsson_yao_paper_policy<3>>>);
+        alternative::isres::runarsson_yao_paper_policy<double, 3>>>);
 
 TEST_CASE("isres_policy: simple constrained 2D", "[isres]")
 {

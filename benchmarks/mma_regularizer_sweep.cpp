@@ -129,10 +129,10 @@ constexpr int kTailWindow = 20;
 template <typename Problem, int N>
 cell_result run_cell(const std::string& name, const Problem& problem,
                      const Eigen::VectorXd& x0, double fstar,
-                     typename mma_policy<N>::options_type popts,
+                     typename mma_policy<double, N>::options_type popts,
                      double knob_value)
 {
-    mma_policy<N> policy;
+    mma_policy<double, N> policy;
     solver_options<> opts;
     auto s = policy.init(problem, Eigen::Vector<double, N>(x0), opts, popts);
 
@@ -192,32 +192,32 @@ std::vector<cell_result> run_all(
         argmin::hs024<> p; using P = argmin::hs024<>;
         constexpr int N = P::problem_dimension;
         out.push_back(run_cell<P, N>("HS024", p, p.initial_point(),
-            p.optimal_value(), set(mma_policy<N>::options_type{}), knob_value));
+            p.optimal_value(), set(mma_policy<double, N>::options_type{}), knob_value));
     }
     {
         argmin::hs035<> p; using P = argmin::hs035<>;
         constexpr int N = P::problem_dimension;
         out.push_back(run_cell<P, N>("HS035", p, p.initial_point(),
-            p.optimal_value(), set(mma_policy<N>::options_type{}), knob_value));
+            p.optimal_value(), set(mma_policy<double, N>::options_type{}), knob_value));
     }
     {
         argmin::hs043<> p; using P = argmin::hs043<>;
         constexpr int N = P::problem_dimension;
         out.push_back(run_cell<P, N>("HS043", p, p.initial_point(),
-            p.optimal_value(), set(mma_policy<N>::options_type{}), knob_value));
+            p.optimal_value(), set(mma_policy<double, N>::options_type{}), knob_value));
     }
     {
         argmin::hs076<> p; using P = argmin::hs076<>;
         constexpr int N = P::problem_dimension;
         out.push_back(run_cell<P, N>("HS076", p, p.initial_point(),
-            p.optimal_value(), set(mma_policy<N>::options_type{}), knob_value));
+            p.optimal_value(), set(mma_policy<double, N>::options_type{}), knob_value));
     }
     {
         quartic_terminal p;
         constexpr int N = argmin::dynamic_dimension;
         out.push_back(run_cell<quartic_terminal, N>("quartic", p,
             p.initial_point(), p.optimal_value(),
-            set(mma_policy<N>::options_type{}), knob_value));
+            set(mma_policy<double, N>::options_type{}), knob_value));
     }
     return out;
 }

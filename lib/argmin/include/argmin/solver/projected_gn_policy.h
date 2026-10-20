@@ -36,6 +36,8 @@
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
 
+#include "argmin/options/least_squares_defaults.h"
+
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -49,26 +51,26 @@
 namespace argmin
 {
 
-template <int N = dynamic_dimension>
+template <scalar Scalar = double, int N = dynamic_dimension>
 struct projected_gn_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
 
     template <int M>
-    using rebind = projected_gn_policy<M>;
+    using rebind = projected_gn_policy<Scalar, M>;
 
     struct options_type
     {
-        double initial_lambda{0.0};     // 0 = auto via Nielsen init: tau * max(diag(J^T*J))
-        double tau{1e-3};               // for initial lambda computation
-        double diagonal_min_clamp{1e-8};
-        double lambda_min{1e-20};
-        double lambda_max{1e20};
+        Scalar initial_lambda{Scalar(0)};  // 0 = auto via Nielsen init: tau * max(diag(J^T*J))
+        Scalar tau{least_squares_defaults<Scalar>::tau};  // for initial lambda computation
+        Scalar diagonal_min_clamp{least_squares_defaults<Scalar>::diagonal_min_clamp};
+        Scalar lambda_min{least_squares_defaults<Scalar>::lambda_min};
+        Scalar lambda_max{least_squares_defaults<Scalar>::lambda_max};
 
         bool use_dogleg{false};
-        std::optional<double> trust_region_radius{};
-        std::optional<double> trust_region_expand_threshold{};
-        std::optional<double> trust_region_shrink_threshold{};
+        std::optional<Scalar> trust_region_radius{};
+        std::optional<Scalar> trust_region_expand_threshold{};
+        std::optional<Scalar> trust_region_shrink_threshold{};
 
         std::uint16_t stall_window{50};
         // feasibility_gate intentionally omitted: projected_gn_policy handles box bounds via
@@ -83,15 +85,15 @@ struct projected_gn_policy
     {
         const P* problem{nullptr};
 
-        Eigen::Vector<double, N> x;
-        Eigen::Vector<double, N> lower;
-        Eigen::Vector<double, N> upper;
-        double objective_value{};
-        double lambda{};
-        double nu{2.0};
-        double delta{1.0};
-        Eigen::VectorXd r;
-        Eigen::Matrix<double, Eigen::Dynamic, N> J;
+        Eigen::Vector<Scalar, N> x;
+        Eigen::Vector<Scalar, N> lower;
+        Eigen::Vector<Scalar, N> upper;
+        Scalar objective_value{};
+        Scalar lambda{};
+        Scalar nu{least_squares_defaults<Scalar>::nu_initial};
+        Scalar delta{Scalar(1)};
+        Eigen::VectorX<Scalar> r;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> J;
         std::uint32_t iteration{0};
         int num_residuals{};
 
@@ -100,23 +102,23 @@ struct projected_gn_policy
         // fixed-N axis it is filled here and copied into the compile-time-typed
         // J. On the dynamic axis J is itself a MatrixXd and is written directly,
         // leaving this buffer unused.
-        Eigen::MatrixXd J_raw;
+        Eigen::MatrixX<Scalar> J_raw;
 
         // Caller-owned scratch for the reduced solve and trial evaluation,
         // sized once and reused so the step is allocation-free at fixed N.
-        detail::projected_gn_workspace<N> ws;
+        detail::projected_gn_workspace<Scalar, N> ws;
     };
 
     template <typename Problem, typename Convergence>
-    state_type<Problem> init(const Problem& problem, const Eigen::Vector<double, N>& x0,
+    state_type<Problem> init(const Problem& problem, const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
         return init(problem, x0, opts);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
-    state_type<Problem> init(const Problem& problem, const Eigen::Vector<double, N>& x0,
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
+    state_type<Problem> init(const Problem& problem, const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>&)
     {
         state_type<Problem> s;
@@ -128,7 +130,7 @@ struct projected_gn_policy
         s.upper = problem.upper_bounds();
         s.x = detail::project(x0, s.lower, s.upper);
         s.num_residuals = problem.num_residuals();
-        s.delta = options.trust_region_radius.value_or(1.0);
+        s.delta = options.trust_region_radius.value_or(Scalar(1));
 
         // Evaluate initial residuals and Jacobian
         s.r.resize(s.num_residuals);
@@ -140,56 +142,56 @@ struct projected_gn_policy
         s.ws.Jd.resize(s.num_residuals);
         s.problem->residuals(s.x, s.r);
         evaluate_jacobian(s);
-        s.objective_value = 0.5 * s.r.squaredNorm();
+        s.objective_value = Scalar(0.5) * s.r.squaredNorm();
 
         init_lambda(s);
-        s.nu = 2.0;
+        s.nu = least_squares_defaults<Scalar>::nu_initial;
         return s;
     }
 
     // One projected GN iteration with active-set identification and
     // Nielsen (1999) / dogleg (N&W 4.1) globalization.
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
 
         // Gauss-Newton Hessian approximation: H = J^T J
-        Eigen::Matrix<double, N, N> H = (s.J.transpose() * s.J).eval();
+        Eigen::Matrix<Scalar, N, N> H = (s.J.transpose() * s.J).eval();
 
         // Gradient of 0.5*||r||^2: g = J^T r
-        Eigen::Vector<double, N> g = (s.J.transpose() * s.r).eval();
+        Eigen::Vector<Scalar, N> g = (s.J.transpose() * s.r).eval();
 
         // Active-set identification (N&W Section 16.6)
-        detail::identify_free_set_into(s.x, g, s.lower, s.upper, s.ws.free_indices);
+        detail::identify_free_set_into<Scalar>(s.x, g, s.lower, s.upper, s.ws.free_indices);
 
-        Eigen::Vector<double, N> h;
+        Eigen::Vector<Scalar, N> h;
         if(options.use_dogleg)
         {
             // Extract reduced system for dogleg
-            Eigen::MatrixXd H_free;
-            Eigen::VectorXd g_free;
-            detail::extract_reduced_system(H, g, s.ws.free_indices, H_free, g_free);
+            Eigen::MatrixX<Scalar> H_free;
+            Eigen::VectorX<Scalar> g_free;
+            detail::extract_reduced_system<Scalar>(H, g, s.ws.free_indices, H_free, g_free);
 
-            h = detail::dogleg_step(s.J, H_free, g_free, s.ws.free_indices, n, s.delta);
+            h = detail::dogleg_step<Scalar>(s.J, H_free, g_free, s.ws.free_indices, n, s.delta);
         }
         else
         {
             // Nielsen/LM mode: solve damped reduced system
-            detail::solve_reduced_gn_into(H, g, s.lambda,
-                                          options.diagonal_min_clamp, s.ws, h);
+            detail::solve_reduced_gn_into<Scalar, N>(H, g, s.lambda,
+                                                     options.diagonal_min_clamp, s.ws, h);
         }
 
         // Project trial point onto bounds before evaluating (N&W Section 16.7)
-        Eigen::Vector<double, N> x_plus_h = (s.x + h).eval();
-        Eigen::Vector<double, N> x_trial = detail::project(x_plus_h, s.lower, s.upper);
+        Eigen::Vector<Scalar, N> x_plus_h = (s.x + h).eval();
+        Eigen::Vector<Scalar, N> x_trial = detail::project(x_plus_h, s.lower, s.upper);
 
         // Effective step after projection
-        Eigen::Vector<double, N> d = (x_trial - s.x).eval();
+        Eigen::Vector<Scalar, N> d = (x_trial - s.x).eval();
 
         // Evaluate trial residuals
         s.problem->residuals(x_trial, s.ws.r_trial);
-        double f_trial = 0.5 * s.ws.r_trial.squaredNorm();
+        Scalar f_trial = Scalar(0.5) * s.ws.r_trial.squaredNorm();
 
         // Gain ratio via the direct model reduction evaluated at the ACCEPTED
         // (projected/backtracked) step d:
@@ -200,18 +202,18 @@ struct projected_gn_policy
         // fictitious denominator that spuriously inflates lambda. Both
         // globalization modes now share this direct form, and the trial is
         // accepted only when predicted > 0 and the trial objective is finite.
-        double actual = s.objective_value - f_trial;
+        Scalar actual = s.objective_value - f_trial;
         s.ws.Jd.noalias() = s.J * d;
-        double predicted = -(g.dot(d) + 0.5 * s.ws.Jd.squaredNorm());
+        Scalar predicted = -(g.dot(d) + Scalar(0.5) * s.ws.Jd.squaredNorm());
 
-        double rho = detail::gain_ratio(actual, predicted);
+        Scalar rho = detail::gain_ratio(actual, predicted);
 
         // Accept/reject with globalization update
-        const double old_value = s.objective_value;
-        bool accepted = rho > 0.0;
+        const Scalar old_value = s.objective_value;
+        bool accepted = rho > Scalar(0);
 
-        double expand_thresh = options.trust_region_expand_threshold.value_or(0.75);
-        double shrink_thresh = options.trust_region_shrink_threshold.value_or(0.25);
+        Scalar expand_thresh = options.trust_region_expand_threshold.value_or(Scalar(0.75));
+        Scalar shrink_thresh = options.trust_region_shrink_threshold.value_or(Scalar(0.25));
 
         if(accepted)
         {
@@ -222,28 +224,28 @@ struct projected_gn_policy
 
             if(options.use_dogleg)
             {
-                detail::update_trust_region(s.delta, rho, d.norm(),
-                                            expand_thresh, shrink_thresh);
+                detail::update_trust_region<Scalar>(s.delta, rho, d.norm(),
+                                                    expand_thresh, shrink_thresh);
             }
             else
             {
                 // Nielsen (1999) lambda update
-                double factor = 1.0 - std::pow(2.0 * rho - 1.0, 3.0);
-                s.lambda *= std::max(1.0 / 3.0, factor);
-                s.nu = 2.0;
+                Scalar factor = Scalar(1) - std::pow(Scalar(2) * rho - Scalar(1), Scalar(3));
+                s.lambda *= std::max(least_squares_defaults<Scalar>::damping_factor, factor);
+                s.nu = least_squares_defaults<Scalar>::nu_initial;
             }
         }
         else
         {
             if(options.use_dogleg)
             {
-                detail::update_trust_region(s.delta, rho, d.norm(),
-                                            expand_thresh, shrink_thresh);
+                detail::update_trust_region<Scalar>(s.delta, rho, d.norm(),
+                                                    expand_thresh, shrink_thresh);
             }
             else
             {
                 s.lambda *= s.nu;
-                s.nu *= 2.0;
+                s.nu *= Scalar(2);
             }
         }
 
@@ -258,15 +260,15 @@ struct projected_gn_policy
         // rejected step); the former hack that reported lambda here leaked an
         // internal damping value into the user-visible step_result, and
         // ftol_reached is correctly gated on the KKT residual.
-        double effective_change = s.objective_value - old_value;
+        Scalar effective_change = s.objective_value - old_value;
 
         // KKT residual for bound-constrained least-squares: projected-gradient
         // infinity-norm using the gradient g = J^T r of 0.5*||r||^2.
         // Reference: N&W 2e Section 16.7 (projected gradient optimality).
-        double kkt = detail::kkt_residual_bound<double, N>(
+        Scalar kkt = detail::kkt_residual_bound<Scalar, N>(
             s.x, g, s.lower, s.upper);
 
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value = s.objective_value,
             .gradient_norm = g.norm(),
             .step_size = h.norm(),
@@ -277,7 +279,7 @@ struct projected_gn_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
         const int n = static_cast<int>(x0.size());
@@ -290,16 +292,16 @@ struct projected_gn_policy
         s.ws.Jd.resize(s.num_residuals);
         s.problem->residuals(s.x, s.r);
         evaluate_jacobian(s);
-        s.objective_value = 0.5 * s.r.squaredNorm();
+        s.objective_value = Scalar(0.5) * s.r.squaredNorm();
 
         init_lambda(s);
-        s.nu = 2.0;
-        s.delta = options.trust_region_radius.value_or(1.0);
+        s.nu = least_squares_defaults<Scalar>::nu_initial;
+        s.delta = options.trust_region_radius.value_or(Scalar(1));
         s.iteration = 0;
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset(s, x0);
     }
@@ -311,7 +313,7 @@ private:
     // central finite-difference fallback is selected instead.
     template <typename P>
     static constexpr bool has_analytic_jacobian =
-        requires(const P& p, const Eigen::Vector<double, N>& xx, Eigen::MatrixXd& JJ) {
+        requires(const P& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
             p.jacobian(xx, JJ);
         };
 
@@ -321,14 +323,14 @@ private:
     template <typename P>
     void evaluate_jacobian(state_type<P>& s) const
     {
-        auto write = [&s](Eigen::MatrixXd& sink) {
+        auto write = [&s](Eigen::MatrixX<Scalar>& sink) {
             if constexpr(has_analytic_jacobian<P>)
             {
                 s.problem->jacobian(s.x, sink);
             }
             else
             {
-                auto residual_fn = [&s](const auto& xx, Eigen::VectorXd& rr) {
+                auto residual_fn = [&s](const auto& xx, Eigen::VectorX<Scalar>& rr) {
                     s.problem->residuals(xx, rr);
                 };
                 fd_jacobian<N>(residual_fn, s.x, sink, s.num_residuals);
@@ -352,15 +354,15 @@ private:
     template <typename P>
     void init_lambda(state_type<P>& s) const
     {
-        if(options.initial_lambda > 0.0)
+        if(options.initial_lambda > Scalar(0))
         {
             s.lambda = options.initial_lambda;
         }
         else
         {
-            Eigen::Vector<double, N> diag = (s.J.transpose() * s.J).diagonal();
-            double max_diag = diag.maxCoeff();
-            s.lambda = (max_diag > 0.0) ? options.tau * max_diag : 1e-4;
+            Eigen::Vector<Scalar, N> diag = (s.J.transpose() * s.J).diagonal();
+            Scalar max_diag = diag.maxCoeff();
+            s.lambda = (max_diag > Scalar(0)) ? options.tau * max_diag : least_squares_defaults<Scalar>::fallback_lambda;
         }
     }
 };

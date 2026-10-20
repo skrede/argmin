@@ -567,6 +567,7 @@ void update_bmat_zmat(
     Eigen::Vector<Scalar, interpolation_system<Scalar, N>::MaxM> w_vec;
     if constexpr(N == Eigen::Dynamic)
         w_vec.resize(m);
+    w_vec.setZero();
     for(int32_t i = 0; i < m; ++i)
         w_vec[i] = sys.zmat(knew, 0) * sys.zmat(i, 0);
     Scalar alpha = w_vec[knew];

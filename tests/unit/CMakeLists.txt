@@ -16,10 +16,13 @@ add_executable(argmin_unit_tests
     isres_alternatives_test.cpp
     isres_determinism_test.cpp
     cobyla_test.cpp
+    cobyla_bounds_test.cpp
+    cobyla_invalid_box_test.cpp
     bobyqa_test.cpp
     bobyqa_bounds_test.cpp
     bobyqa_xbase_shift_test.cpp
     lbfgsb_test.cpp
+    lbfgsb_line_search_failure_test.cpp
     cmaes_test.cpp
     cmaes_invalid_problem_test.cpp
     cmaes_sampling_test.cpp
@@ -42,6 +45,14 @@ add_executable(argmin_unit_tests
     kraft_slsqp_test.cpp
     kraft_lsq_qp_test.cpp
     kraft_lsq_qp_recovery_test.cpp
+    polish_accept_test.cpp
+    dense_admm_qp_test.cpp
+    sparse_admm_qp_test.cpp
+    sparse_control_qp_test.cpp
+    sparse_polish_reuse_test.cpp
+    sparse_admm_move_test.cpp
+    sparse_qp_reference_test.cpp
+    maros_meszaros_dense_test.cpp
     step_budget_solver_test.cpp
     stepper_test.cpp
     active_set_qp_test.cpp
@@ -69,6 +80,8 @@ add_executable(argmin_unit_tests
     nmpc_lqr_test.cpp
     ik_pose_batch_test.cpp
     policy_move_asan_test.cpp
+    decomposition_init_state_test.cpp
+    decomposition_move_state_test.cpp
     filter_acceptance_test.cpp
     interpolation_delta_property_test.cpp
     hs_gradient_fd_test.cpp
@@ -87,6 +100,7 @@ add_executable(argmin_unit_tests
     kraft_sigma_bump_witness_test.cpp
     merit_function_test.cpp
     substrate_scale_witness_test.cpp
+    sparse_kkt_witness_test.cpp
     expected_test.cpp
 )
 
@@ -100,6 +114,7 @@ target_compile_options(argmin_unit_tests PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${
 if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(argmin_unit_tests PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    target_link_options(argmin_unit_tests PRIVATE ${ARGMIN_GCC_FALSE_POSITIVE_FLAGS})
 endif()
 
 catch_discover_tests(argmin_unit_tests)
@@ -124,6 +139,105 @@ target_compile_options(argmin_warm_start_boundary_test
     PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
 catch_discover_tests(argmin_warm_start_boundary_test)
 
+# Zero-allocation correctness gates for the real-time-claimed policies. One
+# dedicated executable holds every gate as its own TEST_CASE; catch_discover_tests
+# exposes each as an independent ctest entry. The target defines BOTH
+# ARGMIN_BENCH_TRACE_ALLOC=1 (arming the diagnostics header's LIVE sensor branch)
+# and EIGEN_RUNTIME_NO_MALLOC (routing Eigen's runtime malloc gate into the
+# counting hook) -- replicating the define set the retired benchmarks/ alloc-gate
+# factory carried. Without ARGMIN_BENCH_TRACE_ALLOC the header compiles to its
+# no-op twin and every gate passes vacuously; the alloc_sensor_liveness_canary
+# case is the runtime proof the LIVE branch is selected. These are argmin-only
+# gates that need no comparison library, so they run under the plain `dev` preset.
+add_executable(argmin_alloc_gate_test
+    alloc_gate_test.cpp
+    alloc_gate_sqp_test.cpp
+    alloc_sensor_counters.cpp
+    alloc_gate_line_search_failure_test.cpp
+    alloc_gate_sparse_move_test.cpp
+    alloc_gate_reduced_hessian_test.cpp
+    alloc_gate_kkt_multiplier_test.cpp
+)
+# Sensor B (the glibc __libc_* strong-symbol overrides) links only on Linux; the
+# CMake platform guard is the sole gate (no __linux__ #ifdef inside the source).
+# Elsewhere read_alloc_count() degrades to the always-live Eigen sensor.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(argmin_alloc_gate_test PRIVATE alloc_sensor_b_linux.cpp)
+endif()
+target_link_libraries(argmin_alloc_gate_test
+    PRIVATE
+        argmin::argmin
+        Catch2::Catch2WithMain
+)
+target_compile_definitions(argmin_alloc_gate_test
+    PRIVATE ARGMIN_BENCH_TRACE_ALLOC=1 EIGEN_RUNTIME_NO_MALLOC)
+target_compile_options(argmin_alloc_gate_test
+    PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
+# Sensor B overrides malloc/free with __libc_* forwards, which bypasses and
+# fights the sanitizer's own allocator -- the binary segfaults at Catch2 test
+# discovery under -fsanitize={address,memory}. And an allocation count taken
+# under a sanitizer-replaced allocator is not a valid measurement regardless.
+# So under a sanitizer build the gate is neither built nor discovered (the main
+# argmin_unit_tests suite, including the [move_asan] cases, still runs under
+# -fsanitize). Discovery is guarded alongside EXCLUDE_FROM_ALL: catch_discover
+# on an unbuilt target otherwise registers _NOT_BUILT "Not Run" ctest failures.
+# Both sanitize CI legs carry -fsanitize on CMAKE_CXX_FLAGS, the sole gate.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _argmin_alloc_gate_sanitizer)
+if(_argmin_alloc_gate_sanitizer EQUAL -1)
+    # The gate cases carry the [alloc-gate] tag and the ctest `alloc-gate`
+    # label; the liveness canary carries [canary] and is registered without the
+    # label so the labeled count stays exactly the number of gates.
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[alloc-gate]"
+        PROPERTIES LABELS "alloc-gate")
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[canary]")
+    # The active-set equality-escalation probe needs the armed sensors this target defines, but it
+    # covers a degenerate-input path rather than a real-time policy, so it is registered without
+    # the label for the same reason as the canary.
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[qp-escalation-alloc]")
+    # Witnesses a value-semantics contract rather than a real-time step, so it stays unlabeled.
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[qp-move-alloc]")
+    # Pins a dynamic-path allocation count rather than a real-time gate, so it stays unlabeled.
+    catch_discover_tests(argmin_alloc_gate_test
+        TEST_SPEC "[qp-reduced-hessian-alloc]")
+else()
+    set_target_properties(argmin_alloc_gate_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif()
+
+# Float instantiations live in their own executable so they neither double the heaviest unit
+# translation units nor enter the double-only allocation-gate executable.
+add_executable(argmin_float_tests
+    float/float_gate_test.cpp
+    float/qp_float_test.cpp
+    float/harness_float_test.cpp
+    float/lbfgsb_float_test.cpp
+    float/nw_sqp_float_test.cpp
+    float/kraft_slsqp_float_test.cpp
+    float/filter_slsqp_float_test.cpp
+    float/filter_nw_sqp_float_test.cpp
+    float/trust_region_sqp_float_test.cpp
+    float/least_squares_float_test.cpp
+    float/mma_float_test.cpp
+    float/derivative_free_float_test.cpp
+    float/cobyla_bounds_float_test.cpp
+    float/cmaes_float_test.cpp
+    float/isres_float_test.cpp
+    float/wrapper_float_test.cpp
+)
+target_link_libraries(argmin_float_tests
+    PRIVATE
+        argmin::argmin
+        Catch2::Catch2WithMain
+)
+target_compile_options(argmin_float_tests
+    PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
+catch_discover_tests(argmin_float_tests
+    TEST_SPEC "[float]"
+    PROPERTIES LABELS "float")
+
 # Dedicated ctest label for the move-and-step ASan instrument so the
 # sanitize CI job can select it explicitly (`ctest -L asan-move`) even
 # though the whole suite already runs under -fsanitize=address. This is
@@ -136,6 +250,19 @@ catch_discover_tests(argmin_unit_tests
     TEST_SPEC "[move_asan]"
     TEST_PREFIX "asan-move:"
     PROPERTIES LABELS "asan-move"
+)
+
+# Dedicated ctest selection for the polish-KKT reuse correctness cases. The
+# [sparse_polish_reuse]-tagged cases prove the pattern-gated polish factor reuse
+# is bit-identical to the always-re-analyzing path and that the conservative
+# detector re-analyzes on every active-set change. This second discovery pass
+# re-registers those cases under a "sparse_polish_reuse:" name prefix so
+# `ctest -R sparse_polish_reuse` (and the label) select exactly them; a plain
+# ctest still runs them once under their unprefixed names.
+catch_discover_tests(argmin_unit_tests
+    TEST_SPEC "[sparse_polish_reuse]"
+    TEST_PREFIX "sparse_polish_reuse:"
+    PROPERTIES LABELS "sparse_polish_reuse"
 )
 
 # Dedicated ctest label for oracle-backed pins (wave-2 instruments:

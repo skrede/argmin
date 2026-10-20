@@ -228,7 +228,7 @@ TEST_CASE("kraft_slsqp (line-search SQP) survives move-then-step", "[move_asan]"
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options<> opts;
 
-    construct_move_step(kraft_slsqp_policy<box_rosenbrock::problem_dimension>{},
+    construct_move_step(kraft_slsqp_policy<double, box_rosenbrock::problem_dimension>{},
                         problem, x0, opts);
 }
 
@@ -238,7 +238,7 @@ TEST_CASE("tr_sqp survives move-then-step", "[move_asan]")
     auto x0 = problem.initial_point();
     solver_options<> opts;
 
-    construct_move_step(tr_sqp_policy<hs076<>::problem_dimension>{}, problem, x0, opts);
+    construct_move_step(tr_sqp_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts);
 }
 
 TEST_CASE("lbfgsb survives move-then-step", "[move_asan]")
@@ -247,7 +247,7 @@ TEST_CASE("lbfgsb survives move-then-step", "[move_asan]")
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options<> opts;
 
-    construct_move_step(lbfgsb_policy<box_rosenbrock::problem_dimension>{},
+    construct_move_step(lbfgsb_policy<double, box_rosenbrock::problem_dimension>{},
                         problem, x0, opts);
 }
 
@@ -257,7 +257,7 @@ TEST_CASE("byrd_lbfgsb survives move-then-step", "[move_asan]")
     Eigen::VectorXd x0{{-1.2, 1.0}};
     solver_options<> opts;
 
-    construct_move_step(byrd_lbfgsb_policy<box_rosenbrock::problem_dimension>{},
+    construct_move_step(byrd_lbfgsb_policy<double, box_rosenbrock::problem_dimension>{},
                         problem, x0, opts);
 }
 
@@ -294,7 +294,7 @@ TEST_CASE("cobyla survives move-then-step", "[move_asan]")
     Eigen::VectorXd x0{{2.0, 2.0}};
     solver_options<> opts;
 
-    construct_move_step(cobyla_policy{}, problem, x0, opts);
+    construct_move_step(cobyla_policy<>{}, problem, x0, opts);
 }
 
 TEST_CASE("augmented_lagrangian survives move-then-step", "[move_asan]")
@@ -312,7 +312,7 @@ TEST_CASE("augmented_lagrangian survives move-then-step", "[move_asan]")
     solver_options<> opts;
 
     construct_move_step(
-        augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+        augmented_lagrangian_policy<lbfgsb_policy<double, hs076<>::problem_dimension>>{},
         problem, x0, opts);
 }
 
@@ -322,7 +322,7 @@ TEST_CASE("mma survives move-then-step", "[move_asan]")
     auto x0 = problem.initial_point();
     solver_options<> opts;
 
-    construct_move_step(mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts);
+    construct_move_step(mma_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts);
 }
 
 TEST_CASE("gcmma survives move-then-step", "[move_asan]")
@@ -331,7 +331,7 @@ TEST_CASE("gcmma survives move-then-step", "[move_asan]")
     auto x0 = problem.initial_point();
     solver_options<> opts;
 
-    construct_move_step(gcmma_policy<hs024<>::problem_dimension>{}, problem, x0, opts);
+    construct_move_step(gcmma_policy<double, hs024<>::problem_dimension>{}, problem, x0, opts);
 }
 
 TEST_CASE("ccsa_quadratic survives move-then-step", "[move_asan]")
@@ -340,7 +340,7 @@ TEST_CASE("ccsa_quadratic survives move-then-step", "[move_asan]")
     auto x0 = problem.initial_point();
     solver_options<> opts;
 
-    construct_move_step(ccsa_quadratic_policy<hs076<>::problem_dimension>{},
+    construct_move_step(ccsa_quadratic_policy<double, hs076<>::problem_dimension>{},
                         problem, x0, opts);
 }
 
@@ -350,7 +350,7 @@ TEST_CASE("cmaes survives move-then-step", "[move_asan]")
     Eigen::VectorXd x0{{-1.0, -1.0}};
     solver_options<> opts;
 
-    construct_move_step(cmaes_policy<box_rosenbrock::problem_dimension>{},
+    construct_move_step(cmaes_policy<double, box_rosenbrock::problem_dimension>{},
                         problem, x0, opts);
 }
 
@@ -360,7 +360,7 @@ TEST_CASE("isres survives move-then-step", "[move_asan]")
     Eigen::VectorXd x0{{2.0, 2.0}};
     solver_options<> opts;
 
-    construct_move_step(isres_policy<simple_constrained::problem_dimension>{},
+    construct_move_step(isres_policy<double, simple_constrained::problem_dimension>{},
                         problem, x0, opts);
 }
 
@@ -374,7 +374,7 @@ TEST_CASE("isres survives move-then-step", "[move_asan]")
 TEST_CASE("augmented_lagrangian survives a move mid-chunk", "[move_asan]")
 {
     using policy_t =
-        augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>,
+        augmented_lagrangian_policy<lbfgsb_policy<double, hs076<>::problem_dimension>,
                                     hs076<>::problem_dimension>;
 
     hs076<> problem;

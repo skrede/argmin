@@ -137,8 +137,8 @@ TEST_CASE("mma dual solve terminates on the projected KKT residual",
     // Solve the dual from a warm start y0 = 1 with the production inner
     // loop, gated on the projected KKT residual.
     Eigen::VectorXd y0{{1.0}};
-    lbfgsb_policy<Eigen::Dynamic> dp;
-    solver_options<default_convergence> dopts;
+    lbfgsb_policy<double, Eigen::Dynamic> dp;
+    solver_options<default_convergence<>> dopts;
     dopts.max_iterations = 100;
     dopts.set_gradient_threshold(1e-9);
     dopts.set_step_threshold(1e-15);
@@ -186,7 +186,7 @@ TEST_CASE("strict mma plumbing executes on HS076", "[mma_reciprocal]")
     opts.set_objective_threshold(1e-12);
 
     step_budget_solver solver{
-        mma_policy<hs076<>::problem_dimension>{}, problem, x0, opts};
+        mma_policy<double, hs076<>::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     CHECK(std::isfinite(result.objective_value));
@@ -208,7 +208,7 @@ TEST_CASE("strict mma converges on separable_beam", "[mma_reciprocal]")
     opts.set_objective_threshold(1e-12);
 
     step_budget_solver solver{
-        mma_policy<separable_beam::problem_dimension>{}, problem, x0, opts};
+        mma_policy<double, separable_beam::problem_dimension>{}, problem, x0, opts};
     const auto result = solver.solve(opts);
 
     // f* = 2.0 at x0 = x1 = 1.0 (verified via KKT: lambda such that
@@ -324,9 +324,9 @@ TEST_CASE("bounded dual keeps the multiplier bounded on an infeasible start",
     opts.max_iterations = 200;
 
     auto max_multiplier = [&](double scale) {
-        ccsa_quadratic_policy<hs024<>::problem_dimension> policy;
+        ccsa_quadratic_policy<double, hs024<>::problem_dimension> policy;
         typename ccsa_quadratic_policy<
-            hs024<>::problem_dimension>::options_type popts;
+            double, hs024<>::problem_dimension>::options_type popts;
         popts.dual_bound_scale = scale;
         auto s = policy.init(problem, x0, opts, popts);
         double worst = 0.0;
@@ -375,7 +375,7 @@ TEST_CASE("ccsa with bounded-dual elastics converges from an infeasible start",
     opts.set_step_threshold(1e-15);
 
     step_budget_solver solver{
-        ccsa_quadratic_policy<halfspace_cell::problem_dimension>{},
+        ccsa_quadratic_policy<double, halfspace_cell::problem_dimension>{},
         problem, x0, opts};
 
     double best_feasible = 1e10;

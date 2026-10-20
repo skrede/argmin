@@ -30,7 +30,7 @@ struct mock_policy
         double step_size{0.5};
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -81,7 +81,7 @@ struct non_converging_policy
         int step_count{0};
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -134,7 +134,7 @@ struct constrained_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -196,7 +196,7 @@ struct feasible_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -245,7 +245,7 @@ struct infeasible_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -294,7 +294,7 @@ struct high_violation_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -343,7 +343,7 @@ struct converging_mock_policy
         std::uint32_t step_count{};
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -399,7 +399,7 @@ struct borderline_feasible_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -452,7 +452,7 @@ struct feasible_worse_objective_mock_policy
         Eigen::VectorXd c_ineq;
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -506,7 +506,7 @@ struct borderline_then_worse_mock_policy
         std::uint32_t step_count{};
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -570,7 +570,7 @@ struct roundoff_mock_policy
         std::uint32_t step_count{};
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -622,7 +622,7 @@ struct diverging_mock_policy
         std::uint32_t step_count{};
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
@@ -680,14 +680,14 @@ struct mock_policy_with_opts
         double step_size{0.5};
     };
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&)
     {
         return {.x = x0, .objective_value = 0.5 * x0.squaredNorm()};
     }
 
-    template <typename Problem, typename Convergence = argmin::default_convergence>
+    template <typename Problem, typename Convergence = argmin::default_convergence<>>
     state_type init(const Problem&, const Eigen::VectorXd& x0,
                     const argmin::solver_options<Convergence>&,
                     const options_type& policy_opts)

@@ -87,19 +87,19 @@ static_assert(std::same_as<
     restarting_policy<
         alternative::isres::nlopt_faithful_policy<>>::rebind<3>,
     restarting_policy<
-        alternative::isres::nlopt_faithful_policy<3>>>);
+        alternative::isres::nlopt_faithful_policy<double, 3>>>);
 
 static_assert(std::same_as<
     restarting_policy<
         alternative::isres::original_argmin_policy<>>::rebind<3>,
     restarting_policy<
-        alternative::isres::original_argmin_policy<3>>>);
+        alternative::isres::original_argmin_policy<double, 3>>>);
 
 static_assert(std::same_as<
     restarting_policy<
         alternative::isres::runarsson_yao_paper_policy<>>::rebind<3>,
     restarting_policy<
-        alternative::isres::runarsson_yao_paper_policy<3>>>);
+        alternative::isres::runarsson_yao_paper_policy<double, 3>>>);
 
 // ---------------------------------------------------------------------------
 // Smoke tests: each variant runs to completion on simple_constrained

@@ -31,6 +31,7 @@
 #include "argmin/detail/isres_operators.h"
 #include "argmin/detail/stochastic_ranking.h"
 #include "argmin/detail/xoshiro256.h"
+#include "argmin/options/isres_defaults.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
@@ -50,26 +51,26 @@
 namespace argmin::alternative::isres
 {
 
-template <int N = dynamic_dimension>
+template <scalar Scalar = double, int N = dynamic_dimension>
 struct original_argmin_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
 
     template <int M>
-    using rebind = original_argmin_policy<M>;
+    using rebind = original_argmin_policy<Scalar, M>;
 
     struct options_type
     {
         std::optional<std::uint32_t> population_size{};
-        std::optional<double> parent_fraction{};
-        std::optional<double> ranking_probability{};
+        std::optional<Scalar> parent_fraction{};
+        std::optional<Scalar> ranking_probability{};
         // pull_to_best_weight controls the alpha-pull-to-best operator
         // in the frozen-baseline mutation path (NOT differential
         // variation -- the field name reflects the actual semantic).
-        std::optional<double> pull_to_best_weight{};
+        std::optional<Scalar> pull_to_best_weight{};
         std::optional<std::uint64_t> seed{};
         std::uint16_t stall_window{200};
-        double feasibility_gate{1e-4};
+        Scalar feasibility_gate{isres_defaults<Scalar>::feasibility_gate};
     };
 
     template <typename P = void>
@@ -81,49 +82,49 @@ struct original_argmin_policy
         }();
 
         const P* problem{nullptr};
-        Eigen::Vector<double, N> x;
-        double objective_value{};
+        Eigen::Vector<Scalar, N> x;
+        Scalar objective_value{};
 
-        Eigen::Matrix<double, N, Eigen::Dynamic> population;
-        Eigen::MatrixXd sigmas;
-        Eigen::VectorXd fitnesses;
-        Eigen::VectorXd violations;
+        Eigen::Matrix<Scalar, N, Eigen::Dynamic> population;
+        Eigen::MatrixX<Scalar> sigmas;
+        Eigen::VectorX<Scalar> fitnesses;
+        Eigen::VectorX<Scalar> violations;
 
-        Eigen::Vector<double, N> lower;
-        Eigen::Vector<double, N> upper;
+        Eigen::Vector<Scalar, N> lower;
+        Eigen::Vector<Scalar, N> upper;
 
         // RNG: xoshiro256+ matches cmaes (consistent across the global
         // / stochastic policies). std::mt19937 was 2.5 KB of state;
         // xoshiro256 is 32 B.
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
-        double best_ever_value{std::numeric_limits<double>::infinity()};
+        Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
         // Track the least-infeasibility witness across the run so the
         // pre-feasible best update can compare against the rolling
         // best instead of the just-overwritten s.violations[0].
-        double best_ever_violation{std::numeric_limits<double>::infinity()};
+        Scalar best_ever_violation{std::numeric_limits<Scalar>::infinity()};
 
-        Eigen::VectorXd c_eq;
-        Eigen::VectorXd c_ineq;
+        Eigen::VectorX<Scalar> c_eq;
+        Eigen::VectorX<Scalar> c_ineq;
         int n_eq{0};
         int n_ineq{0};
 
         int lambda{0};
         int mu{0};
-        double pf{0.45};
-        double alpha{0.2};
-        detail::es_learning_rates rates{};
+        Scalar pf{Scalar(0.45)};
+        Scalar alpha{Scalar(0.2)};
+        detail::es_learning_rates<Scalar> rates{};
 
-        std::optional<detail::isres_operator_workspace<double, N>> mutation_workspace;
+        std::optional<detail::isres_operator_workspace<Scalar, N>> mutation_workspace;
 
         // Per-step buffers hoisted to state so step() does not
         // heap-resize them every generation. Sized to
         // current lambda in init(); persistent across steps.
-        Eigen::Matrix<double, N, Eigen::Dynamic> offspring_buf;
-        Eigen::MatrixXd new_sigmas_buf;
-        Eigen::VectorXd offspring_fitnesses_buf;
-        Eigen::VectorXd offspring_violations_buf;
-        Eigen::MatrixXd all_constraints_buf;
+        Eigen::Matrix<Scalar, N, Eigen::Dynamic> offspring_buf;
+        Eigen::MatrixX<Scalar> new_sigmas_buf;
+        Eigen::VectorX<Scalar> offspring_fitnesses_buf;
+        Eigen::VectorX<Scalar> offspring_violations_buf;
+        Eigen::MatrixX<Scalar> all_constraints_buf;
         std::vector<std::uint32_t> indices_buf;
     };
 
@@ -131,17 +132,17 @@ struct original_argmin_policy
 
     template <typename Problem, typename Convergence>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<double, N>& x0,
+                    const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
         return init(problem, x0, opts);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
-        requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
+        requires objective<Problem, Scalar> && constrained_values<Problem, Scalar> && bound_constrained<Problem, Scalar>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<double, N>& /*x0*/,
+                    const Eigen::Vector<Scalar, N>& /*x0*/,
                     const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
@@ -161,11 +162,11 @@ struct original_argmin_policy
         s.lambda = static_cast<int>(
             options.population_size.value_or(
                 static_cast<std::uint32_t>(20 * (n + 1))));
-        double frac = options.parent_fraction.value_or(1.0 / 7.0);
-        s.mu = std::max(1, static_cast<int>(s.lambda * frac));
-        s.pf = options.ranking_probability.value_or(0.45);
-        s.alpha = options.pull_to_best_weight.value_or(0.2);
-        s.rates = detail::compute_es_rates(n);
+        Scalar frac = options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0));
+        s.mu = std::max(1, static_cast<int>(static_cast<Scalar>(s.lambda) * frac));
+        s.pf = options.ranking_probability.value_or(Scalar(0.45));
+        s.alpha = options.pull_to_best_weight.value_or(Scalar(0.2));
+        s.rates = detail::compute_es_rates<Scalar>(n);
 
         // Seed RNG (xoshiro256+; consistent with cmaes_policy).
         const std::uint64_t seed = options.seed.value_or(
@@ -195,12 +196,12 @@ struct original_argmin_policy
 
         for(int j = 0; j < s.lambda; ++j)
         {
-            Eigen::Vector<double, N> xi = s.population.col(j);
+            Eigen::Vector<Scalar, N> xi = s.population.col(j);
             s.fitnesses[j] = s.problem->value(xi);
 
             if(n_c > 0)
             {
-                Eigen::VectorXd c(n_c);
+                Eigen::VectorX<Scalar> c(n_c);
                 s.problem->constraints(xi, c);
                 s.all_constraints_buf.col(j) = c;
             }
@@ -210,14 +211,14 @@ struct original_argmin_policy
         if(n_c > 0)
             s.violations = detail::compute_violations(s.all_constraints_buf, s.n_eq, s.n_ineq);
         else
-            s.violations = Eigen::VectorXd::Zero(s.lambda);
+            s.violations = Eigen::VectorX<Scalar>::Zero(s.lambda);
 
         // Find best individual (least violation first, then best objective)
         int best_idx = 0;
         for(int j = 1; j < s.lambda; ++j)
         {
-            bool feasible_j = s.violations[j] <= 0.0;
-            bool feasible_best = s.violations[best_idx] <= 0.0;
+            bool feasible_j = s.violations[j] <= Scalar(0.0);
+            bool feasible_best = s.violations[best_idx] <= Scalar(0.0);
 
             if(feasible_j && !feasible_best)
                 best_idx = j;
@@ -243,7 +244,7 @@ struct original_argmin_policy
         s.c_ineq.resize(s.n_ineq);
         if(n_c > 0)
         {
-            Eigen::VectorXd c(n_c);
+            Eigen::VectorX<Scalar> c(n_c);
             s.problem->constraints(s.x, c);
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
@@ -253,11 +254,11 @@ struct original_argmin_policy
     }
 
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         const int n = static_cast<int>(s.x.size());
         const int n_c = s.n_eq + s.n_ineq;
-        double old_best = s.objective_value;
+        Scalar old_best = s.objective_value;
 
         // 1. Generate offspring via mutation + differential variation.
         // Buffers live on s; mutation operator is unchanged in this
@@ -267,25 +268,28 @@ struct original_argmin_policy
             // Select parent from current population (top mu by rank)
             int parent_idx = j % s.mu;
             auto [child, sig] = s.mutation_workspace->mutate(
-                Eigen::Vector<double, N>(s.population.col(parent_idx)),
+                Eigen::Vector<Scalar, N>(s.population.col(parent_idx)),
                 s.sigmas.col(parent_idx),
                 s.x,
                 s.alpha, s.rates.tau, s.rates.tau_prime,
                 s.lower, s.upper, *s.rng);
 
             s.offspring_buf.col(j) = child;
-            s.new_sigmas_buf.col(j) = sig;
+            // Element-wise: gcc reports the packet copy of a short float vector into a dynamic
+            // column as an out-of-bounds read (-Warray-bounds, -Wstringop-overread).
+            for(int i = 0; i < n; ++i)
+                s.new_sigmas_buf(i, j) = sig[i];
         }
 
         // 2. Evaluate offspring (state-owned buffers).
         for(int j = 0; j < s.lambda; ++j)
         {
-            Eigen::Vector<double, N> xi = s.offspring_buf.col(j);
+            Eigen::Vector<Scalar, N> xi = s.offspring_buf.col(j);
             s.offspring_fitnesses_buf[j] = s.problem->value(xi);
 
             if(n_c > 0)
             {
-                Eigen::VectorXd c(n_c);
+                Eigen::VectorX<Scalar> c(n_c);
                 s.problem->constraints(xi, c);
                 s.all_constraints_buf.col(j) = c;
             }
@@ -336,25 +340,25 @@ struct original_argmin_policy
 
         // 6. Update best if improved.
         auto best_ranked = s.indices_buf[0];
-        const double best_ranked_f = s.offspring_fitnesses_buf[best_ranked];
-        const double best_ranked_v = s.offspring_violations_buf[best_ranked];
+        const Scalar best_ranked_f = s.offspring_fitnesses_buf[best_ranked];
+        const Scalar best_ranked_v = s.offspring_violations_buf[best_ranked];
 
-        if(best_ranked_f < s.best_ever_value && best_ranked_v <= 0.0)
+        if(best_ranked_f < s.best_ever_value && best_ranked_v <= Scalar(0.0))
         {
             s.best_ever_value = best_ranked_f;
-            s.best_ever_violation = 0.0;
+            s.best_ever_violation = Scalar(0.0);
             s.objective_value = best_ranked_f;
             s.x = s.offspring_buf.col(best_ranked);
 
             if(n_c > 0)
             {
-                Eigen::VectorXd c(n_c);
+                Eigen::VectorX<Scalar> c(n_c);
                 s.problem->constraints(s.x, c);
                 s.c_eq = c.head(s.n_eq);
                 s.c_ineq = c.tail(s.n_ineq);
             }
         }
-        else if(s.best_ever_value == std::numeric_limits<double>::infinity())
+        else if(s.best_ever_value == std::numeric_limits<Scalar>::infinity())
         {
             // No feasible point found yet -- track least-violating
             // witness. Pre-fix this branch compared `s.violations[0]`,
@@ -379,7 +383,7 @@ struct original_argmin_policy
 
                 if(n_c > 0)
                 {
-                    Eigen::VectorXd c(n_c);
+                    Eigen::VectorX<Scalar> c(n_c);
                     s.problem->constraints(s.x, c);
                     s.c_eq = c.head(s.n_eq);
                     s.c_ineq = c.tail(s.n_ineq);
@@ -390,12 +394,12 @@ struct original_argmin_policy
         ++s.generation;
 
         // Convergence signalling
-        double mean_sigma = s.sigmas.leftCols(s.mu).mean();
-        double grad_proxy = mean_sigma * std::sqrt(static_cast<double>(n));
+        Scalar mean_sigma = s.sigmas.leftCols(s.mu).mean();
+        Scalar grad_proxy = mean_sigma * std::sqrt(static_cast<Scalar>(n));
         bool improved = s.objective_value < old_best;
-        double obj_change = improved ? (s.objective_value - old_best) : mean_sigma;
+        Scalar obj_change = improved ? (s.objective_value - old_best) : mean_sigma;
 
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value = s.objective_value,
             .gradient_norm = grad_proxy,
             .step_size = mean_sigma,
@@ -406,7 +410,7 @@ struct original_argmin_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
 
@@ -418,13 +422,13 @@ struct original_argmin_policy
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
-        s.best_ever_violation = std::numeric_limits<double>::infinity();
+        s.best_ever_violation = std::numeric_limits<Scalar>::infinity();
         s.generation = 0;
 
         if(s.n_eq + s.n_ineq > 0)
         {
             const int n_c = s.n_eq + s.n_ineq;
-            Eigen::VectorXd c(n_c);
+            Eigen::VectorX<Scalar> c(n_c);
             s.problem->constraints(s.x, c);
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
@@ -432,7 +436,7 @@ struct original_argmin_policy
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset(s, x0);
     }

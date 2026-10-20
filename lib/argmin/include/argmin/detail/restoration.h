@@ -64,19 +64,33 @@ namespace argmin::detail
 // step in the well-conditioned regime; lambda_max is the divergence
 // guard (a step of magnitude ||J^T c|| / lambda_max becomes
 // machine-precision small for any reasonable ||J^T c||).
+// The 2x shrink on accept and 4x grow on reject is the canonical
+// Marquardt schedule.
 //
 // Reference: Nocedal and Wright 2e Section 10.3 (Levenberg-Marquardt
 //            damping bracket).
-inline constexpr double restoration_lambda_min = 1e-12;
-inline constexpr double restoration_lambda_max = 1e8;
+template <scalar S>
+struct restoration_constants;
 
-// LM lambda update factors (literature defaults; symmetric expansion /
-// contraction). The 2x shrink on accept and 4x grow on reject is the
-// canonical Marquardt schedule; downstream sweeps may revisit on a
-// per-cell basis but the helper exposes no knobs for these factors
-// at this prototype's surface.
-inline constexpr double restoration_lambda_shrink = 0.5;
-inline constexpr double restoration_lambda_grow   = 4.0;
+template <>
+struct restoration_constants<double>
+{
+    static constexpr double lambda_min = 1e-12;
+    static constexpr double lambda_max = 1e8;
+    static constexpr double lambda_shrink = 0.5;
+    static constexpr double lambda_grow = 4.0;
+};
+
+template <>
+struct restoration_constants<float>
+{
+    // A precision-class value keeps the double row's fraction of the available precision:
+    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
+    static constexpr float lambda_min = 5e-6f;    // rule
+    static constexpr float lambda_max = 1e8f;     // magnitude cap
+    static constexpr float lambda_shrink = 0.5f;  // dimensionless
+    static constexpr float lambda_grow = 4.0f;    // dimensionless
+};
 
 // Status returned by feasibility_restoration. The caller's policy
 // dispatches on the value:
@@ -103,12 +117,13 @@ enum class restoration_status : std::uint8_t
 // classification, the iteration count used (for diagnostics roll-up
 // at the caller), the final feasibility residual norm, and the final
 // lambda value (for sweep-time tuning of lambda_init).
+template <typename Scalar>
 struct lm_restoration_result
 {
     restoration_status status;
     std::size_t        iterations_used;
-    double             final_c_norm_l2;
-    double             final_lambda;
+    Scalar             final_c_norm_l2;
+    Scalar             final_lambda;
 };
 
 // Levenberg-Marquardt feasibility restoration.
@@ -135,11 +150,10 @@ struct lm_restoration_result
 //   rhs_buf     -- n
 //   dx_buf      -- n
 //   x_trial_buf -- n
-//   ldlt_buf    -- pre-sized to n via Eigen::LDLT<MatrixXd>(n) at the
-//                  caller's allocation site.
+//   ldlt_buf    -- pre-sized to n at the caller's allocation site.
 template <typename Scalar, int N, typename ConstraintFn,
           typename JacobianFn>
-lm_restoration_result feasibility_restoration(
+lm_restoration_result<Scalar> feasibility_restoration(
     Eigen::Ref<Eigen::Vector<Scalar, N>>              x,
     ConstraintFn&&                                    constraints,
     JacobianFn&&                                      jacobian,
@@ -148,33 +162,32 @@ lm_restoration_result feasibility_restoration(
     std::size_t                                       max_iter,
     Scalar                                            lambda_init,
     Scalar                                            feasibility_tol,
-    Eigen::VectorXd&                                  c_buf,
-    Eigen::VectorXd&                                  c_trial_buf,
-    Eigen::MatrixXd&                                  J_buf,
-    Eigen::MatrixXd&                                  JtJ_buf,
+    Eigen::VectorX<Scalar>&                           c_buf,
+    Eigen::VectorX<Scalar>&                           c_trial_buf,
+    Eigen::MatrixX<Scalar>&                           J_buf,
+    Eigen::MatrixX<Scalar>&                           JtJ_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>>              rhs_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>>              dx_buf,
     Eigen::Ref<Eigen::Vector<Scalar, N>>              x_trial_buf,
-    Eigen::LDLT<Eigen::MatrixXd>&                     ldlt_buf)
+    Eigen::LDLT<Eigen::MatrixX<Scalar>>&              ldlt_buf)
 {
     using std::min;
     using std::max;
 
-    lm_restoration_result result{};
+    lm_restoration_result<Scalar> result{};
     result.status          = restoration_status::max_iter_reached;
     result.iterations_used = 0;
-    result.final_c_norm_l2 =
-        std::numeric_limits<double>::quiet_NaN();
-    result.final_lambda = static_cast<double>(lambda_init);
+    result.final_c_norm_l2 = std::numeric_limits<Scalar>::quiet_NaN();
+    result.final_lambda    = lambda_init;
 
     // Initial residual evaluation. An exit on the entry feasibility
     // check is the cleanest no-op behavior for a restoration call on
     // an already-feasible iterate.
     constraints(x, c_buf);
-    double c_norm = c_buf.norm();
+    Scalar c_norm = c_buf.norm();
     result.final_c_norm_l2 = c_norm;
 
-    if(c_norm < static_cast<double>(feasibility_tol))
+    if(c_norm < feasibility_tol)
     {
         result.status = restoration_status::converged;
         return result;
@@ -200,7 +213,7 @@ lm_restoration_result feasibility_restoration(
             result.status = restoration_status::degenerate_no_progress;
             result.iterations_used = iter;
             result.final_c_norm_l2 = c_norm;
-            result.final_lambda    = static_cast<double>(lambda);
+            result.final_lambda    = lambda;
             return result;
         }
 
@@ -249,21 +262,18 @@ lm_restoration_result feasibility_restoration(
                 // regularization (extreme numerical conditioning).
                 // Grow lambda and retry; if we are already at the
                 // cap, declare lambda_grew_unbounded.
-                if(lambda >= static_cast<Scalar>(restoration_lambda_max))
+                if(lambda >= restoration_constants<Scalar>::lambda_max)
                 {
                     result.status =
                         restoration_status::lambda_grew_unbounded;
                     result.iterations_used = iter;
                     result.final_c_norm_l2 = c_norm;
-                    result.final_lambda    =
-                        static_cast<double>(lambda);
+                    result.final_lambda    = lambda;
                     return result;
                 }
-                lambda = min(static_cast<Scalar>(
-                                 restoration_lambda_max),
+                lambda = min(restoration_constants<Scalar>::lambda_max,
                              lambda
-                                 * static_cast<Scalar>(
-                                     restoration_lambda_grow));
+                                 * restoration_constants<Scalar>::lambda_grow);
                 continue;
             }
 
@@ -279,21 +289,18 @@ lm_restoration_result feasibility_restoration(
             {
                 // Non-finite step propagation guard. Treat as an LM
                 // reject and grow lambda.
-                if(lambda >= static_cast<Scalar>(restoration_lambda_max))
+                if(lambda >= restoration_constants<Scalar>::lambda_max)
                 {
                     result.status =
                         restoration_status::lambda_grew_unbounded;
                     result.iterations_used = iter;
                     result.final_c_norm_l2 = c_norm;
-                    result.final_lambda    =
-                        static_cast<double>(lambda);
+                    result.final_lambda    = lambda;
                     return result;
                 }
-                lambda = min(static_cast<Scalar>(
-                                 restoration_lambda_max),
+                lambda = min(restoration_constants<Scalar>::lambda_max,
                              lambda
-                                 * static_cast<Scalar>(
-                                     restoration_lambda_grow));
+                                 * restoration_constants<Scalar>::lambda_grow);
                 continue;
             }
 
@@ -305,7 +312,7 @@ lm_restoration_result feasibility_restoration(
 
             // Trial residual at the projected point.
             constraints(x_trial_buf, c_trial_buf);
-            const double c_trial_norm = c_trial_buf.norm();
+            const Scalar c_trial_norm = c_trial_buf.norm();
 
             if(c_trial_norm < c_norm)
             {
@@ -313,32 +320,27 @@ lm_restoration_result feasibility_restoration(
                 x      = x_trial_buf;
                 c_buf  = c_trial_buf;
                 c_norm = c_trial_norm;
-                lambda = max(static_cast<Scalar>(
-                                 restoration_lambda_min),
+                lambda = max(restoration_constants<Scalar>::lambda_min,
                              lambda
-                                 * static_cast<Scalar>(
-                                     restoration_lambda_shrink));
+                                 * restoration_constants<Scalar>::lambda_shrink);
                 inner_accepted = true;
             }
             else
             {
                 // Reject: grow lambda. If we are already at the cap,
                 // declare lambda_grew_unbounded.
-                if(lambda >= static_cast<Scalar>(restoration_lambda_max))
+                if(lambda >= restoration_constants<Scalar>::lambda_max)
                 {
                     result.status =
                         restoration_status::lambda_grew_unbounded;
                     result.iterations_used = iter;
                     result.final_c_norm_l2 = c_norm;
-                    result.final_lambda    =
-                        static_cast<double>(lambda);
+                    result.final_lambda    = lambda;
                     return result;
                 }
-                lambda = min(static_cast<Scalar>(
-                                 restoration_lambda_max),
+                lambda = min(restoration_constants<Scalar>::lambda_max,
                              lambda
-                                 * static_cast<Scalar>(
-                                     restoration_lambda_grow));
+                                 * restoration_constants<Scalar>::lambda_grow);
                 // Inner retry continues the while loop with the
                 // grown lambda; no fresh J(x) needed because x has
                 // not moved on a reject.
@@ -346,12 +348,12 @@ lm_restoration_result feasibility_restoration(
         }
 
         // Iteration committed; check feasibility.
-        if(c_norm < static_cast<double>(feasibility_tol))
+        if(c_norm < feasibility_tol)
         {
             result.status          = restoration_status::converged;
             result.iterations_used = iter + 1;
             result.final_c_norm_l2 = c_norm;
-            result.final_lambda    = static_cast<double>(lambda);
+            result.final_lambda    = lambda;
             return result;
         }
     }
@@ -360,7 +362,7 @@ lm_restoration_result feasibility_restoration(
     result.status          = restoration_status::max_iter_reached;
     result.iterations_used = max_iter;
     result.final_c_norm_l2 = c_norm;
-    result.final_lambda    = static_cast<double>(lambda);
+    result.final_lambda    = lambda;
     return result;
 }
 

@@ -19,7 +19,7 @@ Every solver is a policy that plugs into `step_budget_solver<Policy>` and expose
 ## Features
 
 - **Policy-based solvers:** every algorithm is a policy behind one uniform interface -- swap `lbfgsb_policy` for `kraft_slsqp_policy` without touching the calling code.
-- **Broad algorithm set:** L-BFGS-B, SLSQP (Kraft and filter variants), MMA / GCMMA / CCSA, Levenberg-Marquardt, Projected Gauss-Newton, BOBYQA, CMA-ES, and an augmented-Lagrangian meta-policy -- covering unconstrained, box, equality/inequality, least-squares, derivative-free, and global problems.
+- **Broad algorithm set:** L-BFGS-B, SLSQP (Kraft and filter variants), MMA / GCMMA / CCSA, Levenberg-Marquardt, Projected Gauss-Newton, BOBYQA, COBYLA, CMA-ES, and an augmented-Lagrangian meta-policy -- covering unconstrained, box, equality/inequality, least-squares, derivative-free, and global problems.
 - **Compile-time dimensions:** problem sizes propagate into Eigen types for stack allocation and zero-overhead fixed-`N` solves.
 - **Step-level execution control:** drive a solver one iteration at a time -- for a control loop, an IK chain, or an MPC tick that cannot afford a blocking `solve()`.
 - **Embeddable / real-time-minded:** a passive kernel that owns no thread, timer, or loop; several policies are certified allocation-free at a fixed dimension under a CI allocation gate (see the [RT safety matrix](docs/rt-safety-matrix.md)).
@@ -45,7 +45,7 @@ step and stays out of everything else.
 
 - C++20 compiler (floor): GCC 10+, Clang 13+, MSVC 17.0+; a C++23 toolchain (GCC 14+, Clang 18+, MSVC 17.10+) is used when available.
 - CMake 3.28+
-- Eigen 3.4+ (auto-fetched via `FetchContent` if not provided)
+- Eigen 3.4+ -- install it where `find_package` can see it, or enable `ARGMIN_CMAKE_FETCH_DEPS` to build against a pinned copy fetched by argmin.
 
 ## Quick Install
 
@@ -63,7 +63,14 @@ FetchContent_MakeAvailable(argmin)
 target_link_libraries(my_app PRIVATE argmin::argmin)
 ```
 
-This pulls argmin and its Eigen dependency automatically. No manual installation required.
+```bash
+cmake -B build -DARGMIN_CMAKE_FETCH_DEPS=ON
+cmake --build build
+./build/my_app
+```
+
+This brings in argmin, and with `ARGMIN_CMAKE_FETCH_DEPS` enabled as above it brings in a pinned
+Eigen as well. Without the option, Eigen 3.4+ must already be installed where `find_package` can see it.
 
 ### find_package
 
@@ -114,6 +121,7 @@ Bring your own problem by satisfying the `differentiable` concept (and `bound_co
 - [Documentation Index](docs/README.md) -- guides and references.
 - [Choosing a Solver](docs/choosing-a-solver.md) -- a problem-class-to-policy map.
 - [Real-Time Safety Matrix](docs/rt-safety-matrix.md) -- per-solver allocation-freedom, bounded iterations, and determinism.
+- [Python Bindings](docs/python-bindings.md) -- the bound surface, how to build and test it, and what it deliberately does not provide.
 - [Examples](examples/) -- runnable programs for each problem class.
 
 ## Contributing

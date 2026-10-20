@@ -43,6 +43,11 @@ jobs:
       - name: Test
         run: cd build && ctest --output-on-failure
 
+      # The float solves run in their own labeled step so a lost `float` label or an empty
+      # selection fails here instead of passing vacuously.
+      - name: Float gate
+        run: cd build && ctest --output-on-failure --no-tests=error -L float
+
       # The cross-path determinism test reports its spread magnitude through a
       # Catch2 WARN, which ctest discards for a passing test under
       # --output-on-failure. Invoking the test binary directly lets that line
@@ -79,3 +84,19 @@ jobs:
       - name: Run consumer test
         run: |
           ./build-consumer/integration_test
+
+      - name: Build and install parent project
+        run: |
+          cmake tests/integration/parent -B build-parent -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install-parent \
+            -DARGMIN_CMAKE_FETCH_DEPS=OFF
+          cmake --build build-parent
+          cmake --install build-parent
+
+      - name: Build and run transitive consumer
+        run: |
+          cmake tests/integration/parent_consumer -B build-parent-consumer \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/install-parent \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-parent-consumer
+          ./build-parent-consumer/transitive_consumer

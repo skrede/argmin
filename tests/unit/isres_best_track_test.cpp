@@ -179,7 +179,7 @@ TEST_CASE("isres: tau/tau' role assignment matches NLopt",
           "[isres][oracle-pin]")
 {
     const int n = 20;
-    const auto rates = detail::compute_es_rates(n);
+    const auto rates = detail::compute_es_rates<double>(n);
 
     const double per_component = 1.0 / std::sqrt(2.0 * std::sqrt(20.0));
     const double global_rate = 1.0 / std::sqrt(2.0 * 20.0);

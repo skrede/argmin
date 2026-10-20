@@ -40,7 +40,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{filter_nw_sqp_policy<hs071<>::problem_dimension>{},
+        step_budget_solver solver{filter_nw_sqp_policy<double, hs071<>::problem_dimension>{},
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -89,7 +89,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         opts.set_step_threshold(1e-12);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{filter_nw_sqp_policy<hs043<>::problem_dimension>{},
+        step_budget_solver solver{filter_nw_sqp_policy<double, hs043<>::problem_dimension>{},
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -107,7 +107,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
+        step_budget_solver solver{filter_nw_sqp_policy<double, hs039<>::problem_dimension>{},
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -126,7 +126,7 @@ TEST_CASE("filter_nw_sqp on hock-schittkowski problems", "[hs][filter_nw_sqp]")
         opts.set_step_threshold(1e-15);
         opts.set_objective_threshold(1e-15);
 
-        step_budget_solver solver{filter_nw_sqp_policy<hs076<>::problem_dimension>{},
+        step_budget_solver solver{filter_nw_sqp_policy<double, hs076<>::problem_dimension>{},
                             problem, x0, opts};
         auto result = solver.solve(opts);
 
@@ -152,7 +152,7 @@ TEST_CASE("filter_nw_sqp populates kkt_residual and exposes is_null_step",
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
+    step_budget_solver solver{filter_nw_sqp_policy<double, hs039<>::problem_dimension>{},
                         problem, x0, opts};
 
     bool populated = false;
@@ -194,7 +194,7 @@ TEST_CASE("filter_nw_sqp HS024 regression guard",
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    step_budget_solver solver{filter_nw_sqp_policy<hs024<>::problem_dimension>{},
+    step_budget_solver solver{filter_nw_sqp_policy<double, hs024<>::problem_dimension>{},
                         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -225,7 +225,7 @@ TEST_CASE("filter_nw_sqp reset() clears filter for warm-start convergence",
     opts.set_objective_threshold(1e-10);
     opts.set_step_threshold(1e-10);
 
-    step_budget_solver solver{filter_nw_sqp_policy<hs039<>::problem_dimension>{},
+    step_budget_solver solver{filter_nw_sqp_policy<double, hs039<>::problem_dimension>{},
                         problem, x0, opts};
 
     auto first = solver.solve(opts);
@@ -509,7 +509,7 @@ TEST_CASE("filter_nw_sqp converges on dynamic-dimension HS problems",
 TEST_CASE("filter_nw_sqp HS071 mixed constraints (regression guard)",
           "[filter_nw_sqp][regression][mode]")
 {
-    using policy_t = filter_nw_sqp_policy_accurate<hs071<>::problem_dimension>;
+    using policy_t = filter_nw_sqp_policy_accurate<double, hs071<>::problem_dimension>;
 
     hs071<> problem;
     auto x0 = problem.initial_point();
@@ -529,7 +529,7 @@ TEST_CASE("filter_nw_sqp HS071 mixed constraints (regression guard)",
 TEST_CASE("filter_nw_sqp HS043 inequality constraints (regression guard)",
           "[filter_nw_sqp][regression][mode]")
 {
-    using policy_t = filter_nw_sqp_policy_accurate<hs043<>::problem_dimension>;
+    using policy_t = filter_nw_sqp_policy_accurate<double, hs043<>::problem_dimension>;
 
     // HS043 is the filter-lineage regression for over-rejection on
     // strictly-feasible descent. The asymmetric envelope sweep
@@ -557,7 +557,7 @@ TEST_CASE("filter_nw_sqp HS043 inequality constraints (regression guard)",
 TEST_CASE("filter_nw_sqp HS026 (regression guard)",
           "[filter_nw_sqp][regression][mode]")
 {
-    using policy_t = filter_nw_sqp_policy_accurate<hs026<>::problem_dimension>;
+    using policy_t = filter_nw_sqp_policy_accurate<double, hs026<>::problem_dimension>;
 
     hs026 problem;
     auto x0 = problem.initial_point();
@@ -578,7 +578,7 @@ TEST_CASE("filter_nw_sqp HS026 (regression guard)",
 TEST_CASE("filter_nw_sqp HS028 (regression guard)",
           "[filter_nw_sqp][regression][mode]")
 {
-    using policy_t = filter_nw_sqp_policy_accurate<hs028<>::problem_dimension>;
+    using policy_t = filter_nw_sqp_policy_accurate<double, hs028<>::problem_dimension>;
 
     hs028<> problem;
     auto x0 = problem.initial_point();

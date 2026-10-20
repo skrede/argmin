@@ -8,3 +8,7 @@ CONFIG_HEAP_TRACING_STANDALONE=y
 # default app_main stack is left alone; this is documented for the operator.
 # C++ exceptions and RTTI are already OFF by default in ESP-IDF v6 -- no entry
 # needed here to get the -fno-exceptions -fno-rtti posture.
+
+# The image instantiates every policy in double and in float and exceeds the
+# default 1 MB app partition; the 1.5 MB layout still fits the 2 MB flash.
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y

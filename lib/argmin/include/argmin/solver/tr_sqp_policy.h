@@ -9,7 +9,7 @@
 //
 // Inequalities are reformulated via slacks (c_ineq(x) + s = 0, s >= 0).
 // The joint primal is z = (x, s) in R^{n + n_ineq}; the Lagrangian Hessian
-// approximation lives on the joint space via dense_ldl_bfgs<double, N>.
+// approximation lives on the joint space via dense_ldl_bfgs<Scalar, N>.
 //
 // argmin variant: bounds projection inside Steihaug-CG handles box bounds
 //                 on x and slack bounds on s uniformly; TR ratio thresholds
@@ -36,6 +36,8 @@
 #include "argmin/detail/steihaug_cg.h"
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/bound_projection.h"
+
+#include "argmin/options/trust_region_sqp_defaults.h"
 
 #include "argmin/result/step_result.h"
 
@@ -74,25 +76,28 @@ namespace argmin
 //            (accurate-mode adaptive forcing);
 //            Dembo, Eisenstat, Steihaug 1982 SIAM J. Numer. Anal.
 //            19(2):400-408 (fast-mode forcing sequence).
-template <int N = dynamic_dimension, sqp_mode Mode = sqp_mode::accurate>
+template <scalar Scalar = double, int N = dynamic_dimension, sqp_mode Mode = sqp_mode::accurate>
 struct tr_sqp_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
     static constexpr sqp_mode mode_ = Mode;
 
     template <int M>
-    using rebind = tr_sqp_policy<M, Mode>;
+    using rebind = tr_sqp_policy<Scalar, M, Mode>;
 
     // Cross-cutting convergence tolerances (cross-family consistency
     // with kraft_slsqp, nw_sqp, filter_slsqp, filter_nw_sqp). A consumer
     // racing line-search vs trust-region policies under
     // basic_solver_group sees a uniform tolerance contract.
-    static constexpr double default_gradient_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-8;
-    static constexpr double default_step_tolerance_rel =
-        (Mode == sqp_mode::fast) ? 1e-6 : 1e-12;
-    static constexpr double default_feasibility_tolerance =
-        (Mode == sqp_mode::fast) ? 1e-4 : 1e-6;
+    static constexpr Scalar default_gradient_tolerance =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::gradient_tolerance_fast
+                                 : trust_region_sqp_defaults<Scalar>::gradient_tolerance_accurate;
+    static constexpr Scalar default_step_tolerance_rel =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::step_tolerance_rel_fast
+                                 : trust_region_sqp_defaults<Scalar>::step_tolerance_rel_accurate;
+    static constexpr Scalar default_feasibility_tolerance =
+        (Mode == sqp_mode::fast) ? trust_region_sqp_defaults<Scalar>::feasibility_tolerance_fast
+                                 : trust_region_sqp_defaults<Scalar>::feasibility_tolerance_accurate;
 
     // BFGS-skip-on-non-positive-curvature gate (policy-level; the
     // dense_ldl_bfgs helper itself is mode-blind). Fast mode skips the
@@ -146,8 +151,8 @@ struct tr_sqp_policy
     //            (universal trust-region defaults; consistent across
     //            scipy trust-constr, Ceres trust-region minimizer,
     //            KNITRO).
-    static constexpr double default_initial_trust_radius = 1.0;
-    static constexpr double default_min_trust_radius     = 1e-12;
+    static constexpr Scalar default_initial_trust_radius = trust_region_sqp_defaults<Scalar>::initial_trust_radius;
+    static constexpr Scalar default_min_trust_radius     = trust_region_sqp_defaults<Scalar>::min_trust_radius;
 
     // Adaptive L2-merit penalty parameter defaults. The penalty is
     // persistent state on the joint Byrd-Omojokun ratio test (the
@@ -171,8 +176,8 @@ struct tr_sqp_policy
     // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3 (initial
     //            penalty; growth factor); scipy update_penalty
     //            (penalty_factor = 0.3 default).
-    static constexpr double default_initial_penalty = 1.0;
-    static constexpr double default_penalty_factor  = 0.3;
+    static constexpr Scalar default_initial_penalty = trust_region_sqp_defaults<Scalar>::initial_penalty;
+    static constexpr Scalar default_penalty_factor  = trust_region_sqp_defaults<Scalar>::penalty_factor;
 
     // Second-order correction retry budget. On a rejected primary
     // composite step whose trial violation did not decrease (the
@@ -184,7 +189,7 @@ struct tr_sqp_policy
     // region radius is held fixed across retries (the retry exploits
     // curvature information from the trial-point residual, not radius
     // expansion); between retries the violation must contract by
-    // detail::kappa_soc or the loop aborts.
+    // detail::sqp_common_constants::kappa_soc or the loop aborts.
     //
     // Default re-derived (2026-07-05) from the joint
     // (penalty_factor, soc_max_iterations) sweep across
@@ -232,8 +237,8 @@ struct tr_sqp_policy
         //
         // Reference: Nocedal and Wright 2e Section 4.1 (universal TR
         //            radius defaults).
-        double initial_trust_radius{default_initial_trust_radius};
-        double min_trust_radius{default_min_trust_radius};
+        Scalar initial_trust_radius{default_initial_trust_radius};
+        Scalar min_trust_radius{default_min_trust_radius};
 
         // Steihaug-CG inner-iter cap MULTIPLIER; resolved against
         // n + n_ineq at the step() call site.
@@ -255,7 +260,7 @@ struct tr_sqp_policy
         // update_penalty heuristic on every composite-step call.
         //
         // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3.
-        double initial_penalty{default_initial_penalty};
+        Scalar initial_penalty{default_initial_penalty};
 
         // LNP heuristic growth factor for the adaptive L2-merit penalty.
         // Selected empirically across {0.0, 0.01, 0.05, 0.1, 0.3} as
@@ -267,7 +272,7 @@ struct tr_sqp_policy
         //
         // Reference: Lalee, Nocedal, Plantenga 1998 equation 1.13;
         //            scipy update_penalty.
-        double penalty_factor{default_penalty_factor};
+        Scalar penalty_factor{default_penalty_factor};
 
         // Maximum number of second-order correction retries on the
         // inequality leg of the composite step. Zero disables SOC retry
@@ -291,15 +296,15 @@ struct tr_sqp_policy
         }();
 
         const P* problem{nullptr};
-        Eigen::Vector<double, N> x;
-        Eigen::Vector<double, N> g;
-        Eigen::VectorXd c_eq;
-        Eigen::VectorXd c_ineq;
-        Eigen::Matrix<double, Eigen::Dynamic, N> J_eq;
-        Eigen::Matrix<double, Eigen::Dynamic, N> J_ineq;
-        Eigen::Vector<double, N> lower;
-        Eigen::Vector<double, N> upper;
-        Eigen::VectorXd lambda;
+        Eigen::Vector<Scalar, N> x;
+        Eigen::Vector<Scalar, N> g;
+        Eigen::VectorX<Scalar> c_eq;
+        Eigen::VectorX<Scalar> c_ineq;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> J_eq;
+        Eigen::Matrix<Scalar, Eigen::Dynamic, N> J_ineq;
+        Eigen::Vector<Scalar, N> lower;
+        Eigen::Vector<Scalar, N> upper;
+        Eigen::VectorX<Scalar> lambda;
 
         // Cross-policy state-resident buffer struct. TRSQP uses the
         // x-only-typed bufs for the constraint-axis buffers (c_all, J_all,
@@ -310,25 +315,25 @@ struct tr_sqp_policy
         // a fixed compile-time constant for the x-only dimension.
         //
         // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers.
-        argmin::detail::sqp_state_buffers<double, N> bufs;
+        argmin::detail::sqp_state_buffers<Scalar, N> bufs;
 
         // Joint-space (x, s) dynamic buffers. Sized at n + n_ineq on init;
         // the joint primal dimension is runtime even when N is fixed.
-        Eigen::VectorXd joint_x_old_buf;
-        Eigen::VectorXd joint_grad_L_old_buf;
-        Eigen::VectorXd joint_grad_L_new_buf;
-        Eigen::VectorXd joint_sk_buf;
-        Eigen::VectorXd joint_yk_buf;
+        Eigen::VectorX<Scalar> joint_x_old_buf;
+        Eigen::VectorX<Scalar> joint_grad_L_old_buf;
+        Eigen::VectorX<Scalar> joint_grad_L_new_buf;
+        Eigen::VectorX<Scalar> joint_sk_buf;
+        Eigen::VectorX<Scalar> joint_yk_buf;
 
         // TRSQP-specific slack vector for the inequality reformulation
         // c_ineq(x) + s = 0, s >= 0. The full step() integration in a
         // later commit operates on the joint (x, s) primal.
-        Eigen::VectorXd s_slack;
+        Eigen::VectorX<Scalar> s_slack;
 
         // Current trust-region radius; updated by the ratio test inside
         // step(). The skeleton seeds it from options.initial_trust_radius
         // at init / reset time.
-        double trust_radius{default_initial_trust_radius};
+        Scalar trust_radius{default_initial_trust_radius};
 
         // Adaptive L2-merit penalty parameter (in/out across composite-
         // step calls). Seeded from options.initial_penalty at init() /
@@ -336,18 +341,18 @@ struct tr_sqp_policy
         // the LNP / scipy update_penalty heuristic on every step.
         //
         // Reference: Lalee, Nocedal, Plantenga 1998 Section 3.3.
-        double penalty{default_initial_penalty};
+        Scalar penalty{default_initial_penalty};
 
         // LDLT workspace pair used by detail::equality_feasibility_warmstart
         // on the joint Jacobian inside the byrd_omojokun normal-step leg.
-        Eigen::MatrixXd AAt_workspace;
-        Eigen::LDLT<Eigen::MatrixXd> ldlt_feasibility;
-        Eigen::VectorXd w_workspace;
+        Eigen::MatrixX<Scalar> AAt_workspace;
+        detail::defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> ldlt_feasibility;
+        Eigen::VectorX<Scalar> w_workspace;
 
         // Byrd-Omojokun normal-leg / predicted-reduction scratch, sized
         // on the joint primal (n + n_ineq) and constraint (n_eq + n_ineq)
         // axes at init / reset. Keeps the composite step allocation-free.
-        detail::byrd_omojokun_workspace<double, Eigen::Dynamic> bo_ws;
+        detail::byrd_omojokun_workspace<Scalar, Eigen::Dynamic> bo_ws;
 
         // Per-step joint-space scratch, hoisted out of step() and sized
         // once on the joint primal (n_total = n + n_ineq) and constraint
@@ -355,25 +360,25 @@ struct tr_sqp_policy
         // runtime quantity even when N pins the x-only dimension, so
         // these would otherwise heap-allocate on every step; hoisting
         // them makes the real-time step window allocation-free.
-        Eigen::MatrixXd step_A_joint;         // m_total x n_total
-        Eigen::VectorXd step_c_joint;         // m_total
-        Eigen::VectorXd step_lower_joint;     // n_total
-        Eigen::VectorXd step_upper_joint;     // n_total
-        Eigen::VectorXd step_z_k;             // n_total
-        Eigen::VectorXd step_g_obj_joint;     // n_total
-        Eigen::VectorXd step_v_buf;           // n_total
-        Eigen::VectorXd step_u_buf;           // n_total
-        Eigen::VectorXd step_r_cg_buf;        // n_total
-        Eigen::VectorXd step_d_cg_buf;        // n_total
-        Eigen::VectorXd step_Bd_cg_buf;       // n_total
-        Eigen::VectorXd step_p_out;           // n_total
-        Eigen::VectorXd trial_s_buf;          // n_ineq
-        Eigen::VectorXd trial_c_joint_buf;    // m_total
-        Eigen::VectorXd soc_c_all_buf;        // m_total
-        Eigen::VectorXd soc_c_trial_joint;    // m_total
-        Eigen::VectorXd soc_c_joint;          // m_total
+        Eigen::MatrixX<Scalar> step_A_joint;         // m_total x n_total
+        Eigen::VectorX<Scalar> step_c_joint;         // m_total
+        Eigen::VectorX<Scalar> step_lower_joint;     // n_total
+        Eigen::VectorX<Scalar> step_upper_joint;     // n_total
+        Eigen::VectorX<Scalar> step_z_k;             // n_total
+        Eigen::VectorX<Scalar> step_g_obj_joint;     // n_total
+        Eigen::VectorX<Scalar> step_v_buf;           // n_total
+        Eigen::VectorX<Scalar> step_u_buf;           // n_total
+        Eigen::VectorX<Scalar> step_r_cg_buf;        // n_total
+        Eigen::VectorX<Scalar> step_d_cg_buf;        // n_total
+        Eigen::VectorX<Scalar> step_Bd_cg_buf;       // n_total
+        Eigen::VectorX<Scalar> step_p_out;           // n_total
+        Eigen::VectorX<Scalar> trial_s_buf;          // n_ineq
+        Eigen::VectorX<Scalar> trial_c_joint_buf;    // m_total
+        Eigen::VectorX<Scalar> soc_c_all_buf;        // m_total
+        Eigen::VectorX<Scalar> soc_c_trial_joint;    // m_total
+        Eigen::VectorX<Scalar> soc_c_joint;          // m_total
 
-        double objective_value{};
+        Scalar objective_value{};
         // Lagrangian-Hessian approximation on the JOINT (x, s) space;
         // sized n + n_ineq. The compile-time dimension is Eigen::Dynamic
         // because the joint primal width is a runtime quantity even when
@@ -385,7 +390,7 @@ struct tr_sqp_policy
         //            BFGS);
         //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.3 (BFGS in
         //            the SQP outer loop).
-        detail::dense_ldl_bfgs<double, Eigen::Dynamic> hessian;
+        detail::dense_ldl_bfgs<Scalar, Eigen::Dynamic> hessian;
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
@@ -393,7 +398,7 @@ struct tr_sqp_policy
 
     template <typename Problem, typename Convergence>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& opts,
                              const options_type& policy_opts)
     {
@@ -401,15 +406,15 @@ struct tr_sqp_policy
         return init(problem, x0, opts);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& /*opts*/)
     {
-        static_assert(differentiable<Problem>,
-                      "tr_sqp_policy requires differentiable<Problem>");
-        static_assert(constrained<Problem>,
-                      "tr_sqp_policy requires constrained<Problem>");
+        static_assert(differentiable<Problem, Scalar>,
+                      "tr_sqp_policy requires differentiable<Problem, Scalar>");
+        static_assert(constrained<Problem, Scalar>,
+                      "tr_sqp_policy requires constrained<Problem, Scalar>");
 
         const int n = problem.dimension();
         state_type<Problem> s;
@@ -458,9 +463,9 @@ struct tr_sqp_policy
         if(m_joint > 0)
         {
             s.AAt_workspace.resize(m_joint, m_joint);
-            s.ldlt_feasibility = Eigen::LDLT<Eigen::MatrixXd>(m_joint);
             s.w_workspace.resize(m_joint);
         }
+        s.ldlt_feasibility = decltype(s.ldlt_feasibility)(m_joint);
         s.bo_ws.resize(n_joint, m_joint);
 
         // Per-step joint-space scratch sized once here (see state_type).
@@ -487,13 +492,13 @@ struct tr_sqp_policy
         // public-API-facing constraint_violation diagnostic continues
         // to report on the original problem; the slack-augmented joint
         // (A, c) is assembled at the step() site in a later commit.
-        Eigen::VectorXd c_eval(m);
+        Eigen::VectorX<Scalar> c_eval(m);
         if(m > 0)
             problem.constraints(x0, c_eval);
         s.c_eq = c_eval.head(s.n_eq);
         s.c_ineq = c_eval.tail(s.n_ineq);
 
-        Eigen::MatrixXd J_eval(m, n);
+        Eigen::MatrixX<Scalar> J_eval(m, n);
         if(m > 0)
             problem.constraint_jacobian(x0, J_eval);
         s.J_eq = J_eval.topRows(s.n_eq);
@@ -502,16 +507,16 @@ struct tr_sqp_policy
         // Box bounds: detected via concept. The slack bounds [0, +inf]
         // are implicit and applied inside Steihaug-CG by the joint-
         // dimension displaced box in the later step() integration.
-        if constexpr(bound_constrained<Problem>)
+        if constexpr(bound_constrained<Problem, Scalar>)
         {
             s.lower = problem.lower_bounds();
             s.upper = problem.upper_bounds();
         }
         else
         {
-            constexpr double inf = std::numeric_limits<double>::infinity();
-            s.lower = Eigen::Vector<double, N>::Constant(n, -inf);
-            s.upper = Eigen::Vector<double, N>::Constant(n, inf);
+            constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+            s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
         }
 
         // Slack initialization: s_0 = max(c_ineq(x_0), 0) enforces
@@ -525,21 +530,21 @@ struct tr_sqp_policy
         // Reference: scipy/optimize/_trustregion_constr/canonical_constraint.py
         //            (slack init matched to the inequality sign
         //             convention).
-        s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
+        s.s_slack = s.c_ineq.cwiseMax(Scalar(0.0)).eval();
 
         // Lagrangian-Hessian on the joint (x, s) space. dense_ldl_bfgs
         // initializes to identity; the slack block picks up curvature
         // through (s_k, y_k) pairs naturally on subsequent push() calls.
         // The compile-time dimension is Eigen::Dynamic so the joint
         // primal width is a runtime quantity.
-        s.hessian = detail::dense_ldl_bfgs<double, Eigen::Dynamic>(
+        s.hessian = detail::dense_ldl_bfgs<Scalar, Eigen::Dynamic>(
             n + s.n_ineq);
 
         // Multiplier vector sized on the un-reformulated constraint
         // count (cross-policy consistency with the line-search SQP
         // family; the slack-equality multipliers are policy-internal
         // and live inside bufs).
-        s.lambda = Eigen::VectorXd::Zero(m);
+        s.lambda = Eigen::VectorX<Scalar>::Zero(m);
 
         s.trust_radius = options.initial_trust_radius;
         s.penalty      = options.initial_penalty;
@@ -549,7 +554,7 @@ struct tr_sqp_policy
     }
 
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         // Trust-region SQP step: Byrd-Omojokun composite step on the
         // slack-reformulated joint variable z = (x, s).
@@ -576,7 +581,7 @@ struct tr_sqp_policy
         const int m_total = s.n_eq + n_ineq;
         std::size_t bfgs_skip_count = 0;
 
-        constexpr double inf = std::numeric_limits<double>::infinity();
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
 
         // Section B -- Joint Lagrangian gradient at the current iterate.
         //
@@ -593,7 +598,7 @@ struct tr_sqp_policy
         //           the slack-bound multiplier zeta = mu -- which is
         //           why stationarity is measured with the box-projected
         //           form in Section E, not the raw norm).
-        argmin::detail::assemble_joint_lagrangian_gradient<double, N>(
+        argmin::detail::assemble_joint_lagrangian_gradient<Scalar, N>(
             s.g, s.J_eq, s.J_ineq,
             s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
             n, n_ineq, s.joint_grad_L_new_buf);
@@ -603,10 +608,10 @@ struct tr_sqp_policy
         // stationarity leg is the box-projected form, so kkt-gated
         // convergence can fire at solutions with an active box bound
         // (the raw leg equals the unmodeled bound multiplier there).
-        auto bound_aware_kkt = [&s]() -> double {
+        auto bound_aware_kkt = [&s]() -> Scalar {
             // N-typed so the internal Lagrangian-gradient leg is a fixed-N
             // stack vector, not a per-call heap VectorXd.
-            return argmin::detail::kkt_residual<double,
+            return argmin::detail::kkt_residual<Scalar,
                                                 N,
                                                 Eigen::Dynamic,
                                                 Eigen::Dynamic>(
@@ -653,8 +658,8 @@ struct tr_sqp_policy
         // box.
         auto& lower_joint = s.step_lower_joint;
         auto& upper_joint = s.step_upper_joint;
-        lower_joint.head(n) = (s.lower - s.x).template cast<double>();
-        upper_joint.head(n) = (s.upper - s.x).template cast<double>();
+        lower_joint.head(n) = s.lower - s.x;
+        upper_joint.head(n) = s.upper - s.x;
         if(n_ineq > 0)
         {
             lower_joint.tail(n_ineq) = -s.s_slack;
@@ -673,14 +678,14 @@ struct tr_sqp_policy
         // accuracy at sqrt(mu_max) under the Eisenstat-Walker schedule.
         // At interior points the two measures coincide. The forcing
         // formulas themselves are unchanged; only the driving norm is.
-        const double proj_stationarity =
-            argmin::detail::projected_stationarity_displaced<double>(
+        const Scalar proj_stationarity =
+            argmin::detail::projected_stationarity_displaced<Scalar>(
                 s.joint_grad_L_new_buf, lower_joint, upper_joint);
-        double eps_k;
+        Scalar eps_k;
         if constexpr (Mode == sqp_mode::fast)
-            eps_k = std::min(0.1, proj_stationarity);
+            eps_k = std::min(Scalar(0.1), proj_stationarity);
         else
-            eps_k = std::min(0.5, std::sqrt(proj_stationarity));
+            eps_k = std::min(Scalar(0.5), std::sqrt(proj_stationarity));
 
         // Section F -- Steihaug-CG inner-iteration cap. Resolves the
         // policy-level multiplier against the joint primal width.
@@ -692,8 +697,8 @@ struct tr_sqp_policy
         // Lagrangian Hessian approximation lives in s.hessian (sized
         // n + n_ineq at init); the helper consumes it as a generic
         // callable so steihaug_cg / byrd_omojokun stay BFGS-blind.
-        auto hessian_op = [&s](const Eigen::Ref<const Eigen::VectorXd>& v,
-                               Eigen::Ref<Eigen::VectorXd> out) {
+        auto hessian_op = [&s](const Eigen::Ref<const Eigen::VectorX<Scalar>>& v,
+                               Eigen::Ref<Eigen::VectorX<Scalar>> out) {
             s.hessian.multiply(v, out);
         };
 
@@ -705,14 +710,14 @@ struct tr_sqp_policy
         // its Ref-typed p_out without materializing a temporary VectorXd
         // copy on every trial evaluation.
         auto trial_eval = [&s, n, n_ineq](
-            const Eigen::Ref<const Eigen::VectorXd>& p)
-            -> std::pair<double, double>
+            const Eigen::Ref<const Eigen::VectorX<Scalar>>& p)
+            -> std::pair<Scalar, Scalar>
         {
-            Eigen::Vector<double, N> x_trial = s.x + p.head(n);
+            Eigen::Vector<Scalar, N> x_trial = s.x + p.head(n);
             if(n_ineq > 0)
                 s.trial_s_buf.noalias() = s.s_slack + p.tail(n_ineq);
 
-            const double f_new = s.problem->value(x_trial);
+            const Scalar f_new = s.problem->value(x_trial);
 
             // Original (un-reformulated) constraint values land in the
             // shared c_trial_buf scratch; the joint residual is assembled
@@ -731,8 +736,8 @@ struct tr_sqp_policy
         };
 
         // Section I -- Baseline scalars for the ratio test.
-        const double c_norm_old = c_joint.norm();
-        const double f_old = s.objective_value;
+        const Scalar c_norm_old = c_joint.norm();
+        const Scalar f_old = s.objective_value;
 
         // Section J -- Per-step workspaces in joint primal space.
         // Hot-path optimization candidate: hoist these into s.bufs once
@@ -792,10 +797,10 @@ struct tr_sqp_policy
         //             pred > 0 -- a non-positive augmented predicted
         //             reduction takes the explicit reject branch
         //             below instead of forming rho).
-        const double delta_pre_step   = s.trust_radius;
-        const double penalty_pre_step = s.penalty;
+        const Scalar delta_pre_step   = s.trust_radius;
+        const Scalar penalty_pre_step = s.penalty;
         auto bo_step = argmin::detail::byrd_omojokun_composite_step<
-            double, Eigen::Dynamic>(
+            Scalar, Eigen::Dynamic>(
             z_k, s.joint_grad_L_new_buf, g_obj_joint,
             hessian_op,
             A_joint, c_joint,
@@ -815,18 +820,18 @@ struct tr_sqp_policy
         // radius snapshot lives in `delta_pre_step` and is consumed
         // by the SOC retry, not by the primary branch.
         auto compute_acceptance = [](const argmin::detail::
-                                         byrd_omojokun_step_result& bo,
-                                     double f_old_,
-                                     double c_norm_old_,
-                                     double penalty_,
-                                     double delta_in,
-                                     double step_norm)
-            -> std::pair<bool, double>
+                                         byrd_omojokun_step_result<Scalar>& bo,
+                                     Scalar f_old_,
+                                     Scalar c_norm_old_,
+                                     Scalar penalty_,
+                                     Scalar delta_in,
+                                     Scalar step_norm)
+            -> std::pair<bool, Scalar>
         {
-            const double actual =
+            const Scalar actual =
                 (f_old_ + penalty_ * c_norm_old_)
                 - (bo.f_new + penalty_ * bo.c_norm_new);
-            const double pred_aug =
+            const Scalar pred_aug =
                 bo.predicted + penalty_ * bo.vpred;
             // Explicit reject branch on a non-positive augmented
             // predicted reduction: N&W Algorithm 4.1's ratio test
@@ -838,20 +843,20 @@ struct tr_sqp_policy
             // guard was meant to protect. The negated comparison also
             // routes a NaN prediction (NaN-producing trial_eval) to
             // the reject branch.
-            if(!(pred_aug > 0.0))
+            if(!(pred_aug > Scalar(0.0)))
                 return {false,
-                        argmin::detail::tr_shrink_factor * delta_in};
-            const double rho = actual / pred_aug;
-            if(rho < argmin::detail::tr_eta_1)
+                        argmin::detail::byrd_omojokun_constants<Scalar>::shrink_factor * delta_in};
+            const Scalar rho = actual / pred_aug;
+            if(rho < argmin::detail::byrd_omojokun_constants<Scalar>::eta_1)
                 return {false,
-                        argmin::detail::tr_shrink_factor * delta_in};
-            if(rho > argmin::detail::tr_eta_2
+                        argmin::detail::byrd_omojokun_constants<Scalar>::shrink_factor * delta_in};
+            if(rho > argmin::detail::byrd_omojokun_constants<Scalar>::eta_2
                && step_norm
-                  >= argmin::detail::tr_boundary_guard * delta_in)
+                  >= argmin::detail::byrd_omojokun_constants<Scalar>::boundary_guard * delta_in)
                 return {true,
                         std::min(
-                            argmin::detail::tr_expand_factor * delta_in,
-                            argmin::detail::tr_delta_max)};
+                            argmin::detail::byrd_omojokun_constants<Scalar>::expand_factor * delta_in,
+                            argmin::detail::byrd_omojokun_constants<Scalar>::delta_max)};
             return {true, delta_in};
         };
 
@@ -888,7 +893,7 @@ struct tr_sqp_policy
         // fails the >= comparison and skips the retry.
         //
         // Continuation: between retries the trial violation must
-        // contract by detail::kappa_soc (Wachter-Biegler A-5.9) or
+        // contract by detail::sqp_common_constants::kappa_soc (Wachter-Biegler A-5.9) or
         // the loop aborts; a NaN retry violation fails the negated
         // contraction test and aborts.
         //
@@ -901,7 +906,7 @@ struct tr_sqp_policy
         // Rejection: if the retries are exhausted or the continuation
         // aborts, the policy falls through to Sections L/M/N with the
         // LAST retry's verdict; the trust radius from that retry
-        // reflects exactly one tr_shrink_factor application (not
+        // reflects exactly one shrink_factor application (not
         // chained shrinks), because each retry is invoked with
         // delta_pre_step as input.
         //
@@ -913,7 +918,7 @@ struct tr_sqp_policy
         if(!accepted && options.soc_max_iterations > 0
            && bo_step.c_norm_new >= c_norm_old)
         {
-            Eigen::Vector<double, N> x_trial(n);
+            Eigen::Vector<Scalar, N> x_trial(n);
             auto& s_trial = s.trial_s_buf;
             auto& c_all_trial = s.soc_c_all_buf;
             auto& c_trial_joint = s.soc_c_trial_joint;
@@ -921,7 +926,7 @@ struct tr_sqp_policy
 
             // Violation of the most recent trial, driving the
             // kappa_soc contraction test across retries.
-            double theta_trial_prev = bo_step.c_norm_new;
+            Scalar theta_trial_prev = bo_step.c_norm_new;
 
             for(std::size_t soc_iter = 0;
                 soc_iter < options.soc_max_iterations;
@@ -952,7 +957,7 @@ struct tr_sqp_policy
 
                 // SOC residual through the shared assembly helper:
                 // c_soc = c_trial_joint - A_joint * p_out.
-                argmin::detail::assemble_joint_soc<double,
+                argmin::detail::assemble_joint_soc<Scalar,
                                                    Eigen::Dynamic>(
                     c_trial_joint, A_joint, p_out, c_joint_soc);
 
@@ -962,7 +967,7 @@ struct tr_sqp_policy
                 // corrected residual.
                 s.penalty = penalty_pre_step;
                 bo_step = argmin::detail::byrd_omojokun_composite_step<
-                    double, Eigen::Dynamic>(
+                    Scalar, Eigen::Dynamic>(
                     z_k, s.joint_grad_L_new_buf, g_obj_joint,
                     hessian_op,
                     A_joint, c_joint_soc,
@@ -993,7 +998,7 @@ struct tr_sqp_policy
                 // negated form routes a NaN violation to the abort
                 // branch.
                 if(!(bo_step.c_norm_new
-                     < argmin::detail::kappa_soc * theta_trial_prev))
+                     < argmin::detail::sqp_common_constants<scalar_type>::kappa_soc * theta_trial_prev))
                     break;
                 theta_trial_prev = bo_step.c_norm_new;
             }
@@ -1016,7 +1021,7 @@ struct tr_sqp_policy
         // single-rejection branch handled in Section N.
         if(s.trust_radius < options.min_trust_radius)
         {
-            auto r = argmin::detail::null_step_result<double, N,
+            auto r = argmin::detail::null_step_result<Scalar, N,
                                                       Eigen::Dynamic,
                                                       Eigen::Dynamic>(
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
@@ -1041,7 +1046,7 @@ struct tr_sqp_policy
         //             iterate unchanged).
         if(!accepted)
         {
-            auto r = argmin::detail::null_step_result<double, N,
+            auto r = argmin::detail::null_step_result<Scalar, N,
                                                       Eigen::Dynamic,
                                                       Eigen::Dynamic>(
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
@@ -1110,7 +1115,7 @@ struct tr_sqp_policy
             {
                 s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
                 s.bufs.kkt_mu_ineq_buf.setZero(n_ineq);
-                argmin::detail::compute_kkt_multipliers_active_set<double, N,
+                argmin::detail::compute_kkt_multipliers_active_set<Scalar, N,
                                                                   Eigen::Dynamic,
                                                                   Eigen::Dynamic>(
                     s.g, s.J_eq, s.J_ineq, s.c_ineq, s.bufs.kkt_ws,
@@ -1135,7 +1140,7 @@ struct tr_sqp_policy
         z_k.head(n) = s.x;
         if(n_ineq > 0)
             z_k.tail(n_ineq) = s.s_slack;
-        argmin::detail::compute_joint_bfgs_pair<double, N>(
+        argmin::detail::compute_joint_bfgs_pair<Scalar, N>(
             s.bufs.g_old_buf, s.g,
             s.bufs.J_all_old.topRows(s.n_eq),
             s.bufs.J_all_old.bottomRows(n_ineq),
@@ -1160,19 +1165,19 @@ struct tr_sqp_policy
         // Only fast mode increments bfgs_skip_count -- the diagnostic
         // surface is fast-mode-only by convention, matching the in-tree
         // analog at nw_sqp_policy::step().
-        const double sTy = s.joint_sk_buf.dot(s.joint_yk_buf);
-        if(s.joint_sk_buf.norm() > 1e-15)
+        const Scalar sTy = s.joint_sk_buf.dot(s.joint_yk_buf);
+        if(s.joint_sk_buf.norm() > trust_region_sqp_defaults<Scalar>::zero_guard)
         {
             if constexpr (Mode == sqp_mode::fast)
             {
-                if(sTy > 0.0)
+                if(sTy > Scalar(0.0))
                     s.hessian.push(s.joint_sk_buf, s.joint_yk_buf);
                 else
                     ++bfgs_skip_count;
             }
             else
             {
-                if(sTy > 0.0)
+                if(sTy > Scalar(0.0))
                     s.hessian.push(s.joint_sk_buf, s.joint_yk_buf);
             }
         }
@@ -1192,25 +1197,25 @@ struct tr_sqp_policy
         //            feasibility);
         //            Section 12.3 + eq. 12.34 (Lagrangian stationarity);
         //            Section 16.7 (projected-gradient optimality).
-        const double kkt = bound_aware_kkt();
+        const Scalar kkt = bound_aware_kkt();
 
         // Re-displace the joint box at the accepted iterate for the
         // projected stationarity report (the Section D box was
         // displaced at the pre-step iterate; the upper slack leg stays
         // +inf).
-        lower_joint.head(n) = (s.lower - s.x).template cast<double>();
-        upper_joint.head(n) = (s.upper - s.x).template cast<double>();
+        lower_joint.head(n) = s.lower - s.x;
+        upper_joint.head(n) = s.upper - s.x;
         if(n_ineq > 0)
             lower_joint.tail(n_ineq) = -s.s_slack;
-        const double grad_L_norm_new =
-            argmin::detail::projected_stationarity_displaced<double>(
+        const Scalar grad_L_norm_new =
+            argmin::detail::projected_stationarity_displaced<Scalar>(
                 s.joint_grad_L_new_buf, lower_joint, upper_joint);
 
         // BFGS reset / Armijo-NaN counters stay at zero: TRSQP has no
         // BFGS-reset retry and no Armijo NaN gate (the ratio test does
         // not require trial-iterate finiteness recovery; a NaN-producing
         // problem callback is undefined behavior for this policy).
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value      = s.objective_value,
             .gradient_norm        = grad_L_norm_new,
             .step_size            = p_out.norm(),
@@ -1234,7 +1239,7 @@ struct tr_sqp_policy
 
     // Hot start -- preserves BFGS Hessian.
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
@@ -1254,7 +1259,7 @@ struct tr_sqp_policy
         s.J_eq = s.bufs.J_all.topRows(s.n_eq);
         s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
 
-        s.s_slack = s.c_ineq.cwiseMax(0.0).eval();
+        s.s_slack = s.c_ineq.cwiseMax(Scalar(0.0)).eval();
         s.trust_radius = options.initial_trust_radius;
         s.penalty      = options.initial_penalty;
         s.iteration = 0;
@@ -1272,7 +1277,7 @@ struct tr_sqp_policy
     // Cold restart -- clears BFGS Hessian.
     template <typename P>
     void reset_clear(state_type<P>& s,
-                     Eigen::Ref<const Eigen::Vector<double, N>> x0)
+                     Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset(s, x0);
         s.hessian.reset();
@@ -1280,11 +1285,11 @@ struct tr_sqp_policy
     }
 };
 
-template <int N = dynamic_dimension>
-using tr_sqp_policy_fast = tr_sqp_policy<N, sqp_mode::fast>;
+template <scalar Scalar = double, int N = dynamic_dimension>
+using tr_sqp_policy_fast = tr_sqp_policy<Scalar, N, sqp_mode::fast>;
 
-template <int N = dynamic_dimension>
-using tr_sqp_policy_accurate = tr_sqp_policy<N, sqp_mode::accurate>;
+template <scalar Scalar = double, int N = dynamic_dimension>
+using tr_sqp_policy_accurate = tr_sqp_policy<Scalar, N, sqp_mode::accurate>;
 
 }
 

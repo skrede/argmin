@@ -1,0 +1,11 @@
+# Test dependencies for the Python extension module, pinned exactly.
+#
+# numpy  -- every dense vector and matrix crosses the boundary as an ndarray
+# scipy  -- the sparse QP solver's matrices arrive as compressed-column objects
+# pytest -- runs the binding suite
+#
+# nanobind is deliberately absent: it is acquired through the build system, not
+# the interpreter.
+numpy==2.5.1
+scipy==1.18.0
+pytest==9.1.1

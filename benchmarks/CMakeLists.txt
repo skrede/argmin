@@ -25,35 +25,6 @@ endif()
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ARGMIN_LTO_SUPPORTED)
 
-# Allocation-gate target factory. Each gate target pairs a micro_* driver with
-# the shared alloc_trace_main.cpp, which owns the counting eigen_assert, the
-# atomic counters, the strong-symbol C-allocator interposition, and main().
-# Targets build in the shipping Release config (-O3 via the Release flags plus
-# -march=native) with EIGEN_RUNTIME_NO_MALLOC so Eigen's runtime malloc gate
-# routes into the report-and-continue counter rather than aborting. This gate
-# is the load-bearing embeddability instrument: it observes Eigen's
-# aligned_malloc traffic, which the retired global-operator-new counter could
-# not see. LTO is intentionally left off here so cross-TU optimization cannot
-# reason around the interposed allocator or the report-and-continue gate.
-function(argmin_add_alloc_gate _target _source _test_name)
-    add_executable(${_target} ${_source} alloc_trace_main.cpp)
-    target_link_libraries(${_target} PRIVATE argmin::argmin)
-    if(NLopt_FOUND)
-        target_link_libraries(${_target} PRIVATE NLopt::nlopt)
-    endif()
-    target_compile_definitions(${_target} PRIVATE
-        ARGMIN_BENCH_TRACE_ALLOC=1
-        EIGEN_RUNTIME_NO_MALLOC
-        ${ARGN})
-    target_compile_options(${_target} PRIVATE
-        $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-            -march=native -fno-math-errno -fno-trapping-math
-        >
-    )
-    add_test(NAME ${_test_name} COMMAND ${_target})
-    set_tests_properties(${_test_name} PROPERTIES LABELS "alloc-gate")
-endfunction()
-
 # Main benchmark executable (always builds).
 add_executable(argmin_bench
     benchmark_driver.cpp
@@ -474,61 +445,6 @@ if(NLopt_FOUND)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
 
-    # Allocation-gate targets for every real-time-claimed policy plus their
-    # reset() paths. Each pairs a micro_* driver's argmin_alloc_trace_probe()
-    # with the shared alloc_trace_main.cpp (see argmin_add_alloc_gate above).
-    # Every real-time-path gate runs in zero-allocation mode
-    # (ARGMIN_ALLOC_GATE_EXPECT_ZERO): a single armed steady-state heap
-    # allocation is red. The shared alloc_trace_main canary keeps the gate
-    # provably non-blind (an armed Eigen allocation must be observed).
-    # tr_sqp reuses the filter_trsqp driver with a policy-select define so
-    # both trust-region policies are covered.
-    argmin_add_alloc_gate(micro_kraft_slsqp_alloc_trace
-        micro_kraft_slsqp.cpp sqp_alloc_gate_kraft ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_nw_sqp_alloc_trace
-        micro_nw_sqp.cpp sqp_alloc_gate_nw ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_filter_slsqp_alloc_trace
-        micro_filter_slsqp.cpp sqp_alloc_gate_filter_slsqp
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_filter_nw_sqp_alloc_trace
-        micro_filter_nw_sqp.cpp sqp_alloc_gate_filter_nw
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_filter_trsqp_alloc_trace
-        micro_filter_trsqp.cpp sqp_alloc_gate_filter_trsqp
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_tr_sqp_alloc_trace
-        micro_filter_trsqp.cpp sqp_alloc_gate_tr_sqp ARGMIN_ALLOC_TRACE_TR_SQP
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    # The L-BFGS-B family is allocation-free on BOTH the all-free fast path and
-    # the bound-active GCP/subspace/reduced_hessian path, so both gates run in
-    # zero-allocation mode across both scenarios (the bound-active fixture
-    # carries a path-entry assertion so the zero-mode pass is not vacuous).
-    argmin_add_alloc_gate(micro_byrd_lbfgsb_alloc_trace
-        micro_byrd_lbfgsb.cpp alloc_gate_byrd_lbfgsb ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_lbfgsb_alloc_trace
-        micro_lbfgsb.cpp alloc_gate_lbfgsb ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-
-    # augmented_lagrangian outer method-of-multipliers path is allocation-free
-    # at fixed N in steady state, INCLUDING the penalty-reduction path (a
-    # reset_clear on the persisted inner solver, not a reconstruction), so the
-    # gate runs in zero-allocation mode. The probe asserts a mu reduction
-    # occurred inside the armed window so the zero-mode pass is not vacuous.
-    argmin_add_alloc_gate(micro_augmented_lagrangian_alloc_trace
-        micro_augmented_lagrangian.cpp alloc_gate_augmented_lagrangian
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-
-    # Projected Gauss-Newton family. Both probes drive a fixed-2 bounded linear
-    # least-squares fixture whose first coordinate pins at its upper bound, so
-    # the active-set / projection path is entered (asserted in the probe) with a
-    # stable free set across the armed window. After the per-call scratch hoist
-    # both run in zero-allocation mode.
-    argmin_add_alloc_gate(micro_projected_gn_alloc_trace
-        micro_projected_gn.cpp alloc_gate_projected_gn
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-    argmin_add_alloc_gate(micro_projected_gradient_gn_alloc_trace
-        micro_projected_gradient_gn.cpp alloc_gate_projected_gradient_gn
-        ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-
     add_executable(micro_augmented_lagrangian micro_augmented_lagrangian.cpp)
     target_link_libraries(micro_augmented_lagrangian PRIVATE argmin::argmin NLopt::nlopt)
     target_compile_options(micro_augmented_lagrangian PRIVATE
@@ -604,11 +520,6 @@ if(ARGMIN_LTO_SUPPORTED)
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
-# Levenberg-Marquardt allocation gate. Independent of NLopt, so it lives
-# outside the NLopt_FOUND block. Registered under the alloc-gate label.
-argmin_add_alloc_gate(micro_lm_alloc_trace micro_lm.cpp alloc_gate_lm
-    ARGMIN_ALLOC_GATE_EXPECT_ZERO)
-
 # NW-SQP step-budget versus time-budget profiling harness. This target emits
 # raw CSV rows with revision and harness provenance fields; it is intentionally
 # separate from publication benchmark summaries.
@@ -639,6 +550,25 @@ target_compile_options(micro_active_set_qp PRIVATE
 )
 if(ARGMIN_LTO_SUPPORTED)
     set_target_properties(micro_active_set_qp PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
+# Sparse ADMM QP polish micro-benchmark (argmin-only, informative). Isolates the
+# reduced-KKT polish per-step cost on the control-shaped MPC family; reuses the
+# structured LMPC generator that lives with the unit tests.
+add_executable(micro_sparse_admm_polish micro_sparse_admm_polish.cpp)
+target_link_libraries(micro_sparse_admm_polish PRIVATE argmin::argmin)
+target_include_directories(micro_sparse_admm_polish PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tests/unit)
+target_compile_options(micro_sparse_admm_polish PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
+        -march=native
+        -fno-math-errno
+        -fno-trapping-math
+    >
+)
+if(ARGMIN_LTO_SUPPORTED)
+    set_target_properties(micro_sparse_admm_polish PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
 
@@ -898,41 +828,13 @@ if(ARGMIN_BENCH_IPOPT)
     endif()
 endif()
 
-# Standalone regression gate. Consumes publish_summary.csv and a checked-in
-# per-cell baseline (benchmarks/baselines/publication-regression.csv); exits
-# non-zero on any pass cell breaching a numeric bound or any expected-fail
-# cell unexpectedly converging. C++20 std-only --
-# no Eigen, no argmin, no Catch2, no NLopt; pure CSV bound comparison.
-# Invoked post-bench from run_publish_bench.sh.
-add_executable(regression_check regression_check.cpp)
-target_compile_options(regression_check PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:
-        -fno-math-errno
-        -fno-trapping-math
-    >
-)
-if(CMAKE_TESTING_ENABLED)
-    add_test(NAME regression_check_self_test
-             COMMAND regression_check --self-test)
-    set_tests_properties(regression_check_self_test PROPERTIES
-        LABELS "regression;bench")
-    add_test(NAME regression_check_prohibited_self_test
-             COMMAND regression_check --self-test-prohibited-solvers)
-    set_tests_properties(regression_check_prohibited_self_test PROPERTIES
-        LABELS "regression;bench")
-    add_test(NAME regression_check_instructions_self_test
-             COMMAND regression_check --self-test-instructions)
-    set_tests_properties(regression_check_instructions_self_test PROPERTIES
-        LABELS "regression;bench")
-    add_test(NAME regression_check_oracle_witness_self_test
-             COMMAND regression_check --self-test-oracle-witness)
-    set_tests_properties(regression_check_oracle_witness_self_test PROPERTIES
-        LABELS "regression;bench")
-    add_test(NAME regression_check_perf_ceiling_relax_self_test
-             COMMAND regression_check --self-test-perf-ceiling-relax)
-    set_tests_properties(regression_check_perf_ceiling_relax_self_test PROPERTIES
-        LABELS "regression;bench")
-endif()
+# The standalone regression gate (regression_check) and its self-tests are the
+# toolchain-invariant, argmin-only gate LOGIC, so they live under tests/ (see
+# tests/regression/CMakeLists.txt) and survive a benchmarks/ deletion. The
+# publication gate below still invokes that same target when benchmarks are
+# built. oracle_check stays here: it drives the shared problem_registry and
+# re-validates the returned-point sidecar publish_bench emits, so it is
+# intrinsically part of the benchmark composition.
 
 # oracle_check -- independent analytic correctness validator. Links argmin
 # (header-only) + Eigen + the analytic test functions to recompute feasibility
@@ -1017,8 +919,11 @@ option(ARGMIN_BENCH_WEEKLY_REGRESSION_GATE
 # so it never fires in a default ctest run; a controlled weekly bench run (operator
 # box or self-hosted runner) sets that flag (label regression-weekly).
 #
-# Registered only when testing is enabled in the active benchmark build.
-if(CMAKE_TESTING_ENABLED)
+# Registered only when testing is enabled in the active benchmark build. The
+# gate invokes regression_check, which now lives under tests/, so it also
+# requires that target to exist (ARGMIN_BUILD_TESTS on alongside benchmarks --
+# the configuration the publication/labeled-instruments CI leg uses).
+if(CMAKE_TESTING_ENABLED AND TARGET regression_check)
     add_test(
         NAME publish_bench_regression_gate
         COMMAND

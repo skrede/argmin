@@ -162,7 +162,7 @@ TEST_CASE("kraft_slsqp unconstrained Rosenbrock", "[kraft_slsqp]")
     opts.set_gradient_threshold(1e-6);
     opts.max_iterations = 500;
 
-    step_budget_solver solver{kraft_slsqp_policy<rosenbrock<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, rosenbrock<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK((result.status == solver_status::converged
@@ -182,7 +182,7 @@ TEST_CASE("kraft_slsqp equality constrained", "[kraft_slsqp]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{kraft_slsqp_policy<equality_quadratic::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, equality_quadratic::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.x[0] == Approx(0.5).margin(1e-3));
@@ -201,7 +201,7 @@ TEST_CASE("kraft_slsqp inequality constrained", "[kraft_slsqp]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{kraft_slsqp_policy<ineq_rosenbrock::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, ineq_rosenbrock::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Solution is (1,1) which satisfies 1+1=2<=2 (active constraint).
@@ -221,7 +221,7 @@ TEST_CASE("kraft_slsqp box constrained", "[kraft_slsqp]")
     opts.set_step_threshold(1e-15);
     opts.set_objective_threshold(1e-15);
 
-    step_budget_solver solver{kraft_slsqp_policy<box_rosenbrock::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, box_rosenbrock::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Solution constrained by upper bound (optimum (1,1) excluded).
@@ -247,7 +247,7 @@ TEST_CASE("kraft_slsqp liepp-like budget", "[kraft_slsqp]")
     opts.set_step_threshold(1e-15);
     opts.max_iterations = 500;
 
-    step_budget_solver solver{kraft_slsqp_policy<liepp_box_rosenbrock::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, liepp_box_rosenbrock::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Must converge within 500 iterations (liepp budget)
@@ -288,7 +288,7 @@ TEST_CASE("kraft_slsqp step solve step_n", "[kraft_slsqp]")
 
     SECTION("step returns finite values")
     {
-        step_budget_solver solver{kraft_slsqp_policy<rosenbrock<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<double, rosenbrock<>::problem_dimension>{}, problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
         {
@@ -301,7 +301,7 @@ TEST_CASE("kraft_slsqp step solve step_n", "[kraft_slsqp]")
 
     SECTION("step_n with budget")
     {
-        step_budget_solver solver{kraft_slsqp_policy<rosenbrock<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<double, rosenbrock<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.step_n(50);
         CHECK(std::isfinite(result.objective_value));
         CHECK(result.iterations <= 50);
@@ -309,7 +309,7 @@ TEST_CASE("kraft_slsqp step solve step_n", "[kraft_slsqp]")
 
     SECTION("solve runs to convergence")
     {
-        step_budget_solver solver{kraft_slsqp_policy<rosenbrock<>::problem_dimension>{}, problem, x0, opts};
+        step_budget_solver solver{kraft_slsqp_policy<double, rosenbrock<>::problem_dimension>{}, problem, x0, opts};
         auto result = solver.solve(opts);
         CHECK((result.status == solver_status::converged
                || result.status == solver_status::ftol_reached));
@@ -326,7 +326,7 @@ TEST_CASE("kraft_slsqp converges on HS007 equality", "[kraft_slsqp]")
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs007<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, hs007<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
@@ -343,7 +343,7 @@ TEST_CASE("kraft_slsqp converges on HS039 equality", "[kraft_slsqp]")
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs039<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, hs039<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(-1.0).margin(0.01));
@@ -360,7 +360,7 @@ TEST_CASE("kraft_slsqp converges on HS040 equality", "[kraft_slsqp]")
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs040<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, hs040<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(-0.25).margin(0.01));
@@ -386,7 +386,7 @@ TEST_CASE("kraft_slsqp converges on HS026 (regression guard)", "[kraft_slsqp][re
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs026<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, hs026<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     // Residual iter-count gap: multiplier re-estimation via least-squares
@@ -443,7 +443,7 @@ TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-10);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(17.0140173).margin(0.1));
@@ -469,7 +469,7 @@ TEST_CASE("kraft_slsqp populates kkt_residual", "[kraft_slsqp][kkt]")
     opts.max_iterations = 100;
     opts.set_gradient_threshold(1e-6);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs071<>::problem_dimension>{},
+    step_budget_solver solver{kraft_slsqp_policy<double, hs071<>::problem_dimension>{},
                         problem, x0, opts};
 
     bool populated = false;
@@ -506,7 +506,7 @@ TEST_CASE("kraft_slsqp HS006 accuracy guard",
     opts.set_objective_threshold(1e-12);
     opts.set_step_threshold(1e-12);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs006<>::problem_dimension>{},
+    step_budget_solver solver{kraft_slsqp_policy<double, hs006<>::problem_dimension>{},
                         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -540,7 +540,7 @@ TEST_CASE("kraft_slsqp HS007 Lagrangian gradient < 1e-4 at optimum",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs007<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, hs007<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(-std::sqrt(3.0)).margin(0.01));
@@ -562,7 +562,7 @@ TEST_CASE("kraft_slsqp HS028 Lagrangian gradient < 1e-4 at optimum",
     opts.set_step_threshold(1e-12);
     opts.set_objective_threshold(1e-12);
 
-    step_budget_solver solver{kraft_slsqp_policy<hs028<>::problem_dimension>{}, problem, x0, opts};
+    step_budget_solver solver{kraft_slsqp_policy<double, hs028<>::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     CHECK(result.objective_value == Approx(0.0).margin(1e-6));
@@ -584,7 +584,7 @@ TEST_CASE("kraft_slsqp HS028 Lagrangian gradient < 1e-4 at optimum",
 TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
           "[kraft_slsqp][regression][mode]")
 {
-    using policy_t = kraft_slsqp_policy_accurate<hs071<>::problem_dimension>;
+    using policy_t = kraft_slsqp_policy_accurate<double, hs071<>::problem_dimension>;
 
     hs071<> problem;
     auto x0 = problem.initial_point();
@@ -609,7 +609,7 @@ TEST_CASE("kraft_slsqp HS071 mixed constraints (regression guard)",
 TEST_CASE("kraft_slsqp HS026 (regression guard)",
           "[kraft_slsqp][regression][mode]")
 {
-    using policy_t = kraft_slsqp_policy_accurate<hs026<>::problem_dimension>;
+    using policy_t = kraft_slsqp_policy_accurate<double, hs026<>::problem_dimension>;
 
     hs026 problem;
     auto x0 = problem.initial_point();
@@ -632,7 +632,7 @@ TEST_CASE("kraft_slsqp HS026 (regression guard)",
 TEST_CASE("kraft_slsqp HS028 (regression guard)",
           "[kraft_slsqp][regression][mode]")
 {
-    using policy_t = kraft_slsqp_policy_accurate<hs028<>::problem_dimension>;
+    using policy_t = kraft_slsqp_policy_accurate<double, hs028<>::problem_dimension>;
 
     hs028<> problem;
     auto x0 = problem.initial_point();

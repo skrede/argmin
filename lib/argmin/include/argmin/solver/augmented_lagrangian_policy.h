@@ -55,6 +55,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/options/augmented_lagrangian_defaults.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/options.h"
 #include "argmin/solver/step_budget_solver.h"
@@ -106,9 +107,9 @@ struct augmented_lagrangian_policy
 
     struct options_type
     {
-        scalar_type mu_init{scalar_type(0.1)};                     // Conn-Gould-Toint
-        scalar_type mu_decrease{scalar_type(0.25)};                // Conn-Gould-Toint
-        scalar_type mu_min{scalar_type(1e-6)};                     // Conn-Gould-Toint
+        scalar_type mu_init{augmented_lagrangian_defaults<scalar_type>::mu_init};          // Conn-Gould-Toint
+        scalar_type mu_decrease{augmented_lagrangian_defaults<scalar_type>::mu_decrease};  // Conn-Gould-Toint
+        scalar_type mu_min{augmented_lagrangian_defaults<scalar_type>::mu_min};            // Conn-Gould-Toint
         std::uint32_t inner_max_iterations{200};
 
         // Per-tick bound on inner-solver iterations. Each outer step()
@@ -125,9 +126,9 @@ struct augmented_lagrangian_policy
         // solve; set inner_chunk >= inner_max_iterations to recover
         // single-tick outer iterations (a full inner solve per step()).
         std::uint32_t inner_chunk{32};
-        scalar_type constraint_tolerance{scalar_type(1e-6)};       // K&W 10.9
-        scalar_type inner_gradient_tolerance{scalar_type(1e-6)};   // K&W 10.9
-        scalar_type feasibility_progress{scalar_type(0.25)};       // N&W 17.4
+        scalar_type constraint_tolerance{augmented_lagrangian_defaults<scalar_type>::constraint_tolerance};          // K&W 10.9
+        scalar_type inner_gradient_tolerance{augmented_lagrangian_defaults<scalar_type>::inner_gradient_tolerance};  // K&W 10.9
+        scalar_type feasibility_progress{augmented_lagrangian_defaults<scalar_type>::feasibility_progress};          // N&W 17.4
         typename InnerPolicy::options_type inner_opts = {};
 
         // Persist the inner solver across outer iterations, preserving
@@ -141,8 +142,8 @@ struct augmented_lagrangian_policy
         // whenever the penalty is reduced. Because mu < 1, both branches
         // shrink omega, so omega_k -> 0 even under multiplier-only progress.
         // Reference: N&W Algorithm 17.4, Step 2; CGT 1991 Section 3.
-        scalar_type inner_tolerance_eta{scalar_type(0.1)};
-        scalar_type inner_tolerance_alpha{scalar_type(0.9)};
+        scalar_type inner_tolerance_eta{augmented_lagrangian_defaults<scalar_type>::inner_tolerance_eta};
+        scalar_type inner_tolerance_alpha{augmented_lagrangian_defaults<scalar_type>::inner_tolerance_alpha};
         std::uint16_t stall_window{100};
     };
 
@@ -517,7 +518,7 @@ struct augmented_lagrangian_policy
         return s;
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
                              const Eigen::Vector<scalar_type, N>& x0,
                              const solver_options<Convergence>& /*solver_opts*/)
@@ -645,10 +646,10 @@ struct augmented_lagrangian_policy
         const scalar_type tol_eta = s.opts.inner_tolerance_eta;
         const scalar_type tol_alpha = s.opts.inner_tolerance_alpha;
         if(!s.inner_active && !s.omega.has_value())
-            s.omega = static_cast<scalar_type>(tol_eta * std::pow(s.mu, tol_alpha));
+            s.omega = tol_eta * std::pow(s.mu, tol_alpha);
         const scalar_type inner_tol = std::max(*s.omega, inner_grad_tol);
 
-        solver_options<> inner_opts;
+        solver_options<default_convergence<scalar_type>> inner_opts;
         inner_opts.max_iterations = inner_max;
         // The inner adaptive tolerance gates the inner solve on its KKT
         // residual, not the raw objective-gradient norm: gradient_tolerance_
@@ -660,12 +661,12 @@ struct augmented_lagrangian_policy
         // is the projected inner-KKT residual from the dual solve -- the
         // correct omega_k -> 0 quantity for the augmented-Lagrangian outer
         // schedule; the raw gradient norm would be the wrong measure there.
-        std::get<gradient_tolerance_criterion>(inner_opts.convergence.criteria)
+        std::get<gradient_tolerance_criterion<scalar_type>>(inner_opts.convergence.criteria)
             .threshold = inner_tol;
-        std::get<objective_tolerance_criterion>(inner_opts.convergence.criteria)
-            .threshold = scalar_type(1e-15);
-        std::get<step_tolerance_criterion>(inner_opts.convergence.criteria)
-            .threshold = scalar_type(1e-15);
+        std::get<objective_tolerance_criterion<scalar_type>>(inner_opts.convergence.criteria)
+            .threshold = augmented_lagrangian_defaults<scalar_type>::inner_stall_threshold;
+        std::get<step_tolerance_criterion<scalar_type>>(inner_opts.convergence.criteria)
+            .threshold = augmented_lagrangian_defaults<scalar_type>::inner_stall_threshold;
 
         // Start a fresh inner solve when none is in progress. This is where
         // the current outer iterate's constraints are evaluated, the inner
@@ -746,7 +747,7 @@ struct augmented_lagrangian_policy
         // feasibility floor (the bound-constrained inner reports cv == 0 and
         // this reduces to a plain objective comparison).
         {
-            constexpr scalar_type inner_feas_tol = scalar_type(1e-6);
+            constexpr scalar_type inner_feas_tol = augmented_lagrangian_defaults<scalar_type>::inner_feasibility_tolerance;
             if(detail::is_better(inner_result.objective_value,
                                  inner_result.constraint_violation,
                                  s.best_inner_f, s.best_inner_cv, inner_feas_tol))
@@ -978,7 +979,7 @@ struct augmented_lagrangian_policy
             // omega from the new (smaller) mu rather than carrying the
             // possibly-unreachable tolerance accumulated in the previous
             // regime.
-            s.omega = static_cast<scalar_type>(tol_eta * std::pow(s.mu, tol_alpha));
+            s.omega = tol_eta * std::pow(s.mu, tol_alpha);
         }
         s.prev_viol = gate_viol;
 

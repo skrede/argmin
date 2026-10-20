@@ -67,7 +67,7 @@ int main()
     opts.set_step_threshold(1e-12);
 
     step_budget_solver solver{
-        kraft_slsqp_policy<constrained_qp::problem_dimension>{}, problem, x0, opts};
+        kraft_slsqp_policy<double, constrained_qp::problem_dimension>{}, problem, x0, opts};
     auto result = solver.solve(opts);
 
     std::cout << "status: " << example::status_name(result.status) << '\n'

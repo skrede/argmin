@@ -18,7 +18,7 @@ If you only remember one rule: **`lbfgsb` for unconstrained / box-constrained, `
 | Equality + inequality constrained, gradients available | `kraft_slsqp` | Faithful Kraft 1988 SLSQP with native box bounds. The default constrained solver. |
 | Same as above, **filter line-search** | `filter_slsqp` | Fletcher-Leyffer 2002 filter acceptance instead of L1 merit. Sometimes converges where `kraft_slsqp` stalls; usually a few more iterations. |
 | Constrained problem with separable structure (topology / structural opt) | `mma`, `gcmma`, or `ccsa_quadratic` | Method of Moving Asymptotes (Svanberg 1987 / 2002). Best when the objective and constraints are well-approximated by separable convex functions in `1/(U-x)` and `1/(x-L)`. |
-| Constrained problem, derivative-free | `cobyla` (with caveats) or `augmented_lagrangian` wrapping `bobyqa` | See "Known limitations" below before reaching for COBYLA. |
+| Constrained problem, derivative-free | `cobyla` or `augmented_lagrangian` wrapping `bobyqa` | Powell's linear-approximation trust region. Every point COBYLA evaluates lies inside the box; a fixed or inverted box (a lower bound not below its upper bound) is rejected with `invalid_problem`. |
 | General constrained, want to use any unconstrained solver as the inner | `augmented_lagrangian` | Meta-policy. Wraps any unconstrained or box-constrained policy and handles equality + inequality via penalty + multiplier updates. |
 | Bound-constrained, multimodal, no gradients | `cmaes` or `restarting_policy` wrapping `cmaes` | Covariance Matrix Adaptation Evolution Strategy. The restarting wrapper adds Hansen-Auger IPOP restarts for harder landscapes. |
 | Bound-constrained, multimodal, **with constraints** | `isres` | Runarsson-Yao 2005 stochastic ranking ES. Handles inequality constraints via stochastic ranking. |
@@ -35,17 +35,11 @@ Both N&W-flavour SQP variants can accept an iter-0 step that satisfies the *line
 
 **Workaround:** use `kraft_slsqp` or `filter_slsqp` for the same problem class. Both reach `f* ± 1e-8`. The N&W variants exist primarily as references for ongoing comparison work and should not be used for production solves at this time.
 
-### COBYLA on linear-equality reformulations of unconstrained QPs
-
-COBYLA's adaptive `parmu` parameter was hotfixed, closing the silent-wrong-optimum bug on HS024. However, several other Powell-faithfulness gaps remain (rho contraction, simplex denormalisation, axis-aligned geometry steps, lax conditioning threshold). On HS048 / HS050 / HS051 — unconstrained quadratics posed with linear equality constraints — COBYLA returns `f` orders of magnitude away from the true optimum (`f = 84 / 7516 / 7.7` against `f* = 0`).
-
-**Workaround:** for problems with explicit equality constraints, prefer `kraft_slsqp`, `filter_slsqp`, or `augmented_lagrangian` wrapping `bobyqa`. A Powell-faithfulness rewrite of COBYLA is scheduled for v0.3.x.
-
 ### CMA-ES on Ackley / Schwefel
 
-`cmaes` and the restarting wrapper around it converge to local minima rather than the global optimum on `ackley_2`, `ackley_10`, and `schwefel_2`. The local-minimum escape is weaker than the Hansen-Auger active-CMA reference. On Rastrigin (2-D and 10-D) and Griewank (2-D) the median seed reaches machine zero; the gap is concentrated on landscapes with very flat basins.
+`cmaes` and the restarting wrapper around it converge to local minima rather than the global optimum on `ackley_2`, `ackley_10`, and `schwefel_2`. The local-minimum escape is weaker than the Hansen-Auger active-CMA reference. In the publication cohort `cmaes` also fails on `rastrigin_10` and `griewank_2`, and its verdict on `rastrigin_2` changes with the seed; the restarting wrapper passes only `rastrigin_2`.
 
-**Workaround:** for those specific landscapes, run with multiple seeds and take the best, or use `restarting_policy` wrapping `cmaes` which improves the success rate on Rastrigin / Griewank but does not close the Ackley / Schwefel gap. An active-CMA variant is in the v0.3.x scope.
+**Workaround:** for those specific landscapes, run with multiple seeds and take the best, or use `restarting_policy` wrapping `cmaes`, which passes `rastrigin_2` but does not close the Ackley / Schwefel gap. The active covariance update that the reference uses is not implemented yet.
 
 ### MMA / GCMMA conjoined-gate FAILs
 
@@ -65,11 +59,11 @@ MMA and GCMMA reach the correct objective on the cells they were designed for (H
 
 ## Compile-time vs dynamic dimensions
 
-Every policy template takes an `N` parameter that propagates to inner Eigen types. Pass a concrete `int` for fixed dimensions (`lbfgsb_policy<2>` for a 2-D problem) and `argmin::dynamic_dimension` (the default) for runtime-sized problems. Fixed dimensions enable stack allocation, more aggressive inlining, and eliminate heap traffic in the hot path — the difference is meaningful for small `n` in tight loops (IK, MPC).
+Every policy template takes an `N` parameter that propagates to inner Eigen types. A scalar-generic policy takes the scalar type first, `float` or `double` (the default), and the dimension second: `lbfgsb_policy<double, 2>` and `lbfgsb_policy<float, 2>` are the double and float solvers for a 2-D problem. Which families are gated in `float`, and against what, is listed in [Float Support](float-support.md). Pass a concrete `int` for fixed dimensions and `argmin::dynamic_dimension` (the default) for runtime-sized problems. Fixed dimensions enable stack allocation, more aggressive inlining, and eliminate heap traffic in the hot path — the difference is meaningful for small `n` in tight loops (IK, MPC).
 
 ```cpp
 // Fully-spelled fixed-dimension form (Problem given, so state_type resolves).
-step_budget_solver<lbfgsb_policy<2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};
+step_budget_solver<lbfgsb_policy<double, 2>, 2, rosenbrock<double, 2>> fast{problem, x0, opts};
 // CTAD deduces N and Problem from the arguments; the policy is rebound to the
 // problem's dimension automatically.
 step_budget_solver generic{lbfgsb_policy<>{}, problem, x0, opts};

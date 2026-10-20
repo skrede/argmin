@@ -59,25 +59,25 @@ struct sqp_state_buffers
     Eigen::Vector<Scalar, N> yk_buf;
 
     // Constraint-axis buffers (m = n_eq + n_ineq dynamic).
-    Eigen::VectorXd c_all;
-    Eigen::VectorXd c_trial_buf;
-    Eigen::VectorXd b_eq_workspace;
-    Eigen::VectorXd b_ineq_workspace;
-    Eigen::VectorXd b_eq_soc_buf;
-    Eigen::VectorXd b_ineq_soc_buf;
-    Eigen::VectorXd lam_buf;
-    Eigen::VectorXd lam_eq_buf;
-    Eigen::VectorXd lam_ineq_buf;
-    Eigen::VectorXd kkt_lambda_eq_buf;
-    Eigen::VectorXd kkt_mu_ineq_buf;
+    Eigen::VectorX<Scalar> c_all;
+    Eigen::VectorX<Scalar> c_trial_buf;
+    Eigen::VectorX<Scalar> b_eq_workspace;
+    Eigen::VectorX<Scalar> b_ineq_workspace;
+    Eigen::VectorX<Scalar> b_eq_soc_buf;
+    Eigen::VectorX<Scalar> b_ineq_soc_buf;
+    Eigen::VectorX<Scalar> lam_buf;
+    Eigen::VectorX<Scalar> lam_eq_buf;
+    Eigen::VectorX<Scalar> lam_ineq_buf;
+    Eigen::VectorX<Scalar> kkt_lambda_eq_buf;
+    Eigen::VectorX<Scalar> kkt_mu_ineq_buf;
 
-    // Constraint Jacobian (m x n). Typed Eigen::MatrixXd (dynamic rows AND
-    // columns) to match the user-facing constraint_jacobian callback API
-    // (which accepts Eigen::MatrixXd& by reference). Adopting Matrix<Scalar,
+    // Constraint Jacobian (m x n). Typed Eigen::MatrixX<Scalar> (dynamic rows
+    // AND columns) to match the user-facing constraint_jacobian callback API
+    // (which accepts Eigen::MatrixX<Scalar>& by reference). Adopting Matrix<Scalar,
     // Dynamic, N> here would break the binding at policies' init() and
     // post-step Jacobian re-evaluation sites for fixed-N problems.
-    Eigen::MatrixXd J_all;
-    Eigen::MatrixXd J_all_old;
+    Eigen::MatrixX<Scalar> J_all;
+    Eigen::MatrixX<Scalar> J_all_old;
 
     // Stacked constraint Jacobian [J_eq; J_ineq] (m x n) for the
     // Lagrangian-gradient-norm reporting leg. Typed Matrix<Scalar,
@@ -100,14 +100,14 @@ struct sqp_state_buffers
     // finite); detail::ldp re-shapes the nnls_* views to the actual row
     // count, which is constant per problem instance, so the projection
     // is allocation-free at steady state.
-    Eigen::MatrixXd soc_ldp_G_buf;
-    Eigen::VectorXd soc_ldp_h_buf;
-    Eigen::VectorXd soc_ldp_q_buf;
-    Eigen::VectorXd soc_ldp_lambda_buf;
-    Eigen::MatrixXd soc_nnls_A_buf;
-    Eigen::VectorXd soc_nnls_b_buf;
-    Eigen::VectorXd soc_nnls_x_buf;
-    Eigen::VectorXd soc_nnls_w_buf;
+    Eigen::MatrixX<Scalar> soc_ldp_G_buf;
+    Eigen::VectorX<Scalar> soc_ldp_h_buf;
+    Eigen::VectorX<Scalar> soc_ldp_q_buf;
+    Eigen::VectorX<Scalar> soc_ldp_lambda_buf;
+    Eigen::MatrixX<Scalar> soc_nnls_A_buf;
+    Eigen::VectorX<Scalar> soc_nnls_b_buf;
+    Eigen::VectorX<Scalar> soc_nnls_x_buf;
+    Eigen::VectorX<Scalar> soc_nnls_w_buf;
 
     // Maintained-factorization workspace threaded into detail::nnls through
     // the SOC-projection detail::ldp call (replaces nnls's former
@@ -261,9 +261,12 @@ ARGMIN_FORCE_INLINE step_result<Scalar> null_step_result(
 //                 partial-multiplier returns (qp.lambda.size() < m_total);
 //                 rationale: removes the duplicated scatter pattern at
 //                 four call sites across the SQP family.
-template <typename Scalar>
+// qp_lambda is taken as MatrixBase, not Ref<const VectorX>: a const Ref silently
+// copies into a heap temporary when its argument cannot be mapped, and the bounded
+// multiplier storage of the fixed-N QP must be read in place.
+template <typename Scalar, typename Derived>
 ARGMIN_FORCE_INLINE void extract_qp_multipliers(
-    const Eigen::Vector<Scalar, Eigen::Dynamic>& qp_lambda,
+    const Eigen::MatrixBase<Derived>& qp_lambda,
     int n_eq,
     int n_ineq,
     Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> lam_eq_out,
@@ -313,8 +316,8 @@ template <typename Scalar, int N>
 ARGMIN_FORCE_INLINE void compute_bfgs_pair_fused(
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g_old,
     const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g_new,
-    const Eigen::Ref<const Eigen::MatrixXd>& J_all_old,
-    const Eigen::Ref<const Eigen::MatrixXd>& J_all,
+    const Eigen::Ref<const Eigen::MatrixX<Scalar>>& J_all_old,
+    const Eigen::Ref<const Eigen::MatrixX<Scalar>>& J_all,
     const Eigen::Ref<const Eigen::Vector<Scalar, Eigen::Dynamic>>& lam_full,
     int m_total,
     Eigen::Ref<Eigen::Vector<Scalar, N>> grad_L_old,
@@ -471,7 +474,24 @@ ARGMIN_FORCE_INLINE void compute_joint_bfgs_pair(
 //            fixed scalar, not an argmin empirical selection; it is
 //            re-sweepable together with the SOC iteration budget once
 //            the corrected residual is exercised at non-zero defaults.
-inline constexpr double kappa_soc = 0.99;
+template <scalar S>
+struct sqp_common_constants;
+
+template <>
+struct sqp_common_constants<double>
+{
+    static constexpr double kappa_soc = 0.99;
+    static constexpr double ortho_floor = 1e-14;
+};
+
+template <>
+struct sqp_common_constants<float>
+{
+    // A precision-class value keeps the double row's fraction of the available precision:
+    // t_f = eps_f ^ (ln t_d / ln eps_d), rounded to one significant figure.
+    static constexpr float kappa_soc = 0.99f;    // dimensionless
+    static constexpr float ortho_floor = 7e-7f;  // rule
+};
 
 // Second-order-correction residual assembly for the trust-region SQP
 // family (shared by tr_sqp_policy and filter_trsqp_policy Section K').
@@ -530,8 +550,8 @@ template <typename Scalar, int N, int Meq = argmin::dynamic_dimension>
 ARGMIN_FORCE_INLINE void equality_feasibility_warmstart(
     const Eigen::Matrix<Scalar, Meq, N>& J_eq,
     const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
-    Eigen::MatrixXd& AAt_workspace,
-    Eigen::LDLT<Eigen::MatrixXd>& ldlt_workspace,
+    Eigen::MatrixX<Scalar>& AAt_workspace,
+    Eigen::LDLT<Eigen::MatrixX<Scalar>>& ldlt_workspace,
     Eigen::Vector<Scalar, Eigen::Dynamic>& w_workspace,
     Eigen::Ref<Eigen::Vector<Scalar, N>> p0_out)
 {
@@ -698,9 +718,9 @@ ARGMIN_FORCE_INLINE bool soc_seed_projection(
 template <typename Scalar, int N>
 ARGMIN_FORCE_INLINE void null_space_project(
     const Eigen::Ref<const Eigen::Matrix<Scalar, Eigen::Dynamic, N>>& A,
-    Eigen::LDLT<Eigen::MatrixXd>& ldlt,
+    Eigen::LDLT<Eigen::MatrixX<Scalar>>& ldlt,
     Eigen::Ref<Eigen::Vector<Scalar, N>> x,
-    Eigen::VectorXd& m_scratch,
+    Eigen::VectorX<Scalar>& m_scratch,
     int refine_passes)
 {
     const int m = static_cast<int>(A.rows());
@@ -710,14 +730,14 @@ ARGMIN_FORCE_INLINE void null_space_project(
     if(ldlt.info() != Eigen::Success)
     {
         // Rank-deficient AA^T: project off range(A^T) via pivoted QR.
-        Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(
+        Eigen::ColPivHouseholderQR<Eigen::MatrixX<Scalar>> qr(
             A.transpose());
         const int r = static_cast<int>(qr.rank());
         if(r == 0)
             return;
-        const Eigen::MatrixXd Q =
+        const Eigen::MatrixX<Scalar> Q =
             qr.householderQ()
-            * Eigen::MatrixXd::Identity(A.cols(), r);
+            * Eigen::MatrixX<Scalar>::Identity(A.cols(), r);
         x.noalias() -= Q * (Q.transpose() * x);
         return;
     }
@@ -736,7 +756,7 @@ ARGMIN_FORCE_INLINE void null_space_project(
         const Scalar scale =
             std::max(Scalar(1),
                      A_inf * x.template lpNorm<Eigen::Infinity>());
-        if(ortho <= Scalar(1e-14) * scale)
+        if(ortho <= sqp_common_constants<Scalar>::ortho_floor * scale)
             break;
         ldlt.solveInPlace(m_scratch);
         x.noalias() -= A.transpose() * m_scratch;

@@ -28,9 +28,9 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE argmin::argmin)
 ```
 
-`FetchContent_MakeAvailable(argmin)` pulls argmin and its Eigen dependency
-automatically. Linking `argmin::argmin` puts the headers and Eigen on your
-include path.
+`FetchContent_MakeAvailable(argmin)` brings in argmin; the configure command
+below enables `ARGMIN_CMAKE_FETCH_DEPS`, which brings in Eigen as well. Linking
+`argmin::argmin` puts argmin's headers and Eigen on your include path.
 
 ## Your first solve
 
@@ -114,8 +114,11 @@ The full concept definitions are in
 
 - `result.status` -- a `solver_status` enum. A successful stop is reported as
   `converged`, `xtol_reached`, or `ftol_reached` depending on which tolerance
-  tripped first; `max_iterations`, `stalled`, and `invalid_problem` are the
-  common non-success codes.
+  tripped first; `max_iterations`, `stalled`, `line_search_failed`, and
+  `invalid_problem` are the common non-success codes. `line_search_failed`
+  comes from the L-BFGS-B policies: a line-search step was rejected and so was
+  its retry from a reset curvature memory (or the memory was already empty),
+  and the iterate was held at the last accepted point.
 - `result.x` -- the solution vector.
 - `result.objective_value` -- the objective at `result.x`.
 

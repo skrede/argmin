@@ -33,7 +33,10 @@ enum class solver_status : std::uint8_t
     // method whose constraint buffers have no room for equality rows.
     // Signalled at runtime (the library is exception-free) so the caller
     // observes a terminal status instead of undefined behavior.
-    invalid_problem
+    invalid_problem,
+    // A line-search step was rejected twice in a row, once on the curvature memory and once from
+    // a reset memory, or once with an empty memory.
+    line_search_failed
 };
 
 }

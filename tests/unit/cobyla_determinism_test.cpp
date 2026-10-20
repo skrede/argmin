@@ -98,7 +98,7 @@ std::vector<std::array<double, 5>> drain_trajectory(Solver& solver)
 std::vector<std::array<double, 5>> record_trajectory(const Eigen::VectorXd& start)
 {
     simple_constrained problem;
-    step_budget_solver solver{cobyla_policy{}, problem, start, trajectory_options()};
+    step_budget_solver solver{cobyla_policy<>{}, problem, start, trajectory_options()};
     return drain_trajectory(solver);
 }
 
@@ -106,7 +106,7 @@ std::vector<std::array<double, 5>> record_trajectory_after_reset(
     const Eigen::VectorXd& start)
 {
     simple_constrained problem;
-    step_budget_solver solver{cobyla_policy{}, problem, start, trajectory_options()};
+    step_budget_solver solver{cobyla_policy<>{}, problem, start, trajectory_options()};
 
     (void)drain_trajectory(solver);
     solver.reset(start);

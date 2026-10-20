@@ -12,16 +12,18 @@
 
 using Catch::Approx;
 using argmin::detail::byrd_omojokun_composite_step;
-using argmin::detail::byrd_omojokun_step_result;
 using argmin::detail::byrd_omojokun_workspace;
 using argmin::detail::cg_exit_status;
-using argmin::detail::zeta;
-using argmin::detail::tr_eta_1;
-using argmin::detail::tr_eta_2;
-using argmin::detail::tr_shrink_factor;
-using argmin::detail::tr_expand_factor;
-using argmin::detail::tr_delta_max;
-using argmin::detail::tr_boundary_guard;
+using byrd_omojokun_step_result = argmin::detail::byrd_omojokun_step_result<double>;
+using bo_constants = argmin::detail::byrd_omojokun_constants<double>;
+
+constexpr double zeta = bo_constants::zeta;
+constexpr double tr_eta_1 = bo_constants::eta_1;
+constexpr double tr_eta_2 = bo_constants::eta_2;
+constexpr double tr_shrink_factor = bo_constants::shrink_factor;
+constexpr double tr_expand_factor = bo_constants::expand_factor;
+constexpr double tr_delta_max = bo_constants::delta_max;
+constexpr double tr_boundary_guard = bo_constants::boundary_guard;
 
 namespace
 {

@@ -143,3 +143,192 @@ as a budgeted per-temporary cap against the 64 KiB stack reserve in
 The 2026-07-18 re-capture above re-certifies 0.00/step on all four RT
 windows at the pinned limit and additionally proves the guardrail fires when a
 temporary exceeds it.
+
+## Float capture (2026-10-10)
+
+The probe image now runs every real-time window twice, once per scalar
+(`double`, then `float`, labeled with a trailing ` float`), and brackets each
+window with the DWT cycle counter. Both captures below were taken on the same
+physical NUCLEO-H753ZI (Cortex-M7, `SystemCoreClock` = 64 MHz, the HSI
+default; the clock tree is not reconfigured) on a Linux host, where the ST-Link
+VCP enumerates as `/dev/ttyACM0` at 115200 baud. The reader was started before
+the `.bin` was copied to the ST-Link drive, and each log holds a complete
+boot-once report. The DWT cycle counter counts without a debugger attached.
+
+**Toolchain:** `arm-none-eabi-gcc` 16.2.0 (Arch Repository build), same
+`ARGMIN_EIGEN_MCU_DEFS` (`EIGEN_ALLOCA=__builtin_alloca`,
+`EIGEN_STACK_ALLOCATION_LIMIT=8192`).
+
+### Capture 1: commit `f83a218`, FAIL
+
+Image `probe.bin` sha256
+`308ff50efaeedadf2336b6db3ee5e46f2d2aba3177effaa9e1486643d99ec2e4`; ELF text
+764,268 B, data 464 B, bss 103,160 B.
+
+```
+[argmin] NUCLEO-H753ZI on-device allocation proof
+[argmin] blindness canary PASS (deliberate allocation observed)
+[overflow-probe] forced 10368 B temporary > 8192 B limit: heap fallback observed (1 allocs) PASS
+[argmin] SystemCoreClock = 64000000 Hz
+  [timing] kraft_slsqp hs071 cycles=1887658 armed_steps=10 per_step=188765
+  [alloc-gate] kraft_slsqp hs071  eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] kraft_slsqp hs071 PASS (zero-alloc gate)
+  [timing] nw_sqp hs071 cycles=2663083 armed_steps=10 per_step=266308
+  [alloc-gate] nw_sqp hs071       eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] nw_sqp hs071 PASS (zero-alloc gate)
+  [timing] filter_nw_sqp hs071 cycles=2664932 armed_steps=10 per_step=266493
+  [alloc-gate] filter_nw_sqp hs071 eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] filter_nw_sqp hs071 PASS (zero-alloc gate)
+  [timing] lm rosenbrock_ls cycles=45410 armed_steps=10 per_step=4541
+  [alloc-gate] lm rosenbrock_ls   eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] lm rosenbrock_ls PASS (zero-alloc gate)
+  [timing] kraft_slsqp hs071 float cycles=1699461 armed_steps=10 per_step=169946
+  [alloc-gate] kraft_slsqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] kraft_slsqp hs071 float PASS (zero-alloc gate)
+  [timing] nw_sqp hs071 float cycles=2049872 armed_steps=10 per_step=204987
+  [alloc-gate] nw_sqp hs071 float eigen_malloc=2 c_alloc=2 armed_steps=10 per_step=0.20
+  [alloc-gate] nw_sqp hs071 float FAIL: zero-alloc gate saw 2 allocations
+  [timing] filter_nw_sqp hs071 float cycles=2078956 armed_steps=10 per_step=207895
+  [alloc-gate] filter_nw_sqp hs071 float eigen_malloc=2 c_alloc=2 armed_steps=10 per_step=0.20
+  [alloc-gate] filter_nw_sqp hs071 float FAIL: zero-alloc gate saw 2 allocations
+  [timing] lm rosenbrock_ls float cycles=37588 armed_steps=10 per_step=3758
+  [alloc-gate] lm rosenbrock_ls float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] lm rosenbrock_ls float PASS (zero-alloc gate)
+[argmin] _sbrk one-time setup high-water = 12688 bytes (15 calls)
+[argmin] RT-window gate result: FAIL (see per-window lines above)
+```
+
+`float` `nw_sqp` and `filter_nw_sqp` allocated at **0.20/step** (2 allocations
+in 10 armed steps). The other six windows were 0.00/step.
+
+**Root cause: the null-step path at the solution allocated.** In `float` the
+hs071 solve converges at step 7, inside the armed window (steps 3-12), so the
+window measured steps taken at the solution. The `double` solve had not
+converged by step 12, so the `double` windows never reached that path. A host
+reproduction with the MCU Eigen macro set found two sources:
+
+- `extract_qp_multipliers` took its multipliers as `const VectorX&`, so the
+  bounded QP's fixed-capacity multiplier vector was copied into a heap-allocated
+  `VectorX` on every null step (`nw_sqp`, `filter_nw_sqp`).
+- `filter_nw_sqp`'s Lagrangian-gradient norm built a stacked
+  `Matrix<S, Dynamic, N>` Jacobian per call.
+
+The defect was not specific to `float`: on host, a `double` `filter_nw_sqp` run
+that keeps stepping at the solution allocated 17 times over steps 3-42. The
+earlier zero-allocation record held only because its windows ended before
+convergence.
+
+**Fix: commit `6d862a7`.** `extract_qp_multipliers` reads the multipliers
+through `Eigen::MatrixBase<Derived>`, so no copy is made. `filter_nw_sqp` builds
+the stacked Jacobian in its preallocated state buffer. The host allocation gate
+gained an at-solution window: after a converged solve it arms the counter over
+20 further steps. That window runs for `kraft_slsqp`, `nw_sqp` and
+`filter_nw_sqp` in both scalars. Without the fix 2 of the gate's 15 cases fail;
+with it they pass. `double` trajectories are bit-identical.
+
+### Capture 2: commit `6d862a7`, PASS
+
+Image `probe.bin` sha256
+`81d5fab44824838c45aab50a29a7d7011218d6f17e1a0820f707d67d60c782cb`; ELF text
+765,484 B, data 464 B, bss 103,160 B.
+
+```
+[argmin] NUCLEO-H753ZI on-device allocation proof
+[argmin] blindness canary PASS (deliberate allocation observed)
+[overflow-probe] forced 10368 B temporary > 8192 B limit: heap fallback observed (1 allocs) PASS
+[argmin] SystemCoreClock = 64000000 Hz
+  [timing] kraft_slsqp hs071 cycles=1878122 armed_steps=10 per_step=187812
+  [alloc-gate] kraft_slsqp hs071  eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] kraft_slsqp hs071 PASS (zero-alloc gate)
+  [timing] nw_sqp hs071 cycles=2707784 armed_steps=10 per_step=270778
+  [alloc-gate] nw_sqp hs071       eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] nw_sqp hs071 PASS (zero-alloc gate)
+  [timing] filter_nw_sqp hs071 cycles=2713989 armed_steps=10 per_step=271398
+  [alloc-gate] filter_nw_sqp hs071 eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] filter_nw_sqp hs071 PASS (zero-alloc gate)
+  [timing] lm rosenbrock_ls cycles=44497 armed_steps=10 per_step=4449
+  [alloc-gate] lm rosenbrock_ls   eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] lm rosenbrock_ls PASS (zero-alloc gate)
+  [timing] kraft_slsqp hs071 float cycles=1709559 armed_steps=10 per_step=170955
+  [alloc-gate] kraft_slsqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] kraft_slsqp hs071 float PASS (zero-alloc gate)
+  [timing] nw_sqp hs071 float cycles=2071380 armed_steps=10 per_step=207138
+  [alloc-gate] nw_sqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] nw_sqp hs071 float PASS (zero-alloc gate)
+  [timing] filter_nw_sqp hs071 float cycles=2100960 armed_steps=10 per_step=210096
+  [alloc-gate] filter_nw_sqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] filter_nw_sqp hs071 float PASS (zero-alloc gate)
+  [timing] lm rosenbrock_ls float cycles=36672 armed_steps=10 per_step=3667
+  [alloc-gate] lm rosenbrock_ls float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] lm rosenbrock_ls float PASS (zero-alloc gate)
+[argmin] _sbrk one-time setup high-water = 12688 bytes (15 calls)
+[argmin] RT-window gate result: PASS (0 allocs/step on all windows)
+```
+
+### Reading
+
+- **Allocations: 0.00/step on all eight windows.** That covers `kraft_slsqp`,
+  `nw_sqp`, `filter_nw_sqp` and `lm`, each in `double` and in `float`. The
+  blindness canary and the over-limit guardrail probe both PASS, and the
+  `_sbrk` one-time setup high-water (12,688 B, 15 calls) is unchanged from the
+  `double`-only image.
+- **Cycles per armed step at 64 MHz, recorded only:**
+
+  | window | `double` | `float` |
+  |---|---|---|
+  | `kraft_slsqp` hs071 | 187,812 | 170,955 |
+  | `nw_sqp` hs071 | 270,778 | 207,138 |
+  | `filter_nw_sqp` hs071 | 271,398 | 210,096 |
+  | `lm` rosenbrock_ls | 4,449 | 3,667 |
+
+  These figures are not a timing claim, and the two columns do not compare
+  like with like. Each window covers steps 3-12 of a cold solve. The `float`
+  `nw_sqp` and `filter_nw_sqp` solves converge at step 7 and spend the rest of
+  the window at the solution, while the `double` solves are still descending. The core also runs
+  at the HSI default rather than the part's rated clock.
+
+
+## Release capture (2026-10-20)
+
+Taken at commit `714f159` on the same NUCLEO-H753ZI, with the same procedure and VCP as the float
+capture. The library differs from the earlier release candidate `775a756` only by one deleted
+comment. **Toolchain:** `arm-none-eabi-gcc (Arch Repository) 16.2.0`, same `ARGMIN_EIGEN_MCU_DEFS`.
+
+Image `probe.bin` sha256 `3beae09260fae880081541a626c49132df434f9e7064c95f069e4816a43f082f`; ELF text 762,876 B, data 464 B, bss 103,160 B.
+
+```
+[argmin] NUCLEO-H753ZI on-device allocation proof
+[argmin] blindness canary PASS (deliberate allocation observed)
+[overflow-probe] forced 10368 B temporary > 8192 B limit: heap fallback observed (1 allocs) PASS
+[argmin] SystemCoreClock = 64000000 Hz
+  [timing] kraft_slsqp hs071 cycles=1879271 armed_steps=10 per_step=187927
+  [alloc-gate] kraft_slsqp hs071  eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] kraft_slsqp hs071 PASS (zero-alloc gate)
+  [timing] nw_sqp hs071 cycles=2676867 armed_steps=10 per_step=267686
+  [alloc-gate] nw_sqp hs071       eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] nw_sqp hs071 PASS (zero-alloc gate)
+  [timing] filter_nw_sqp hs071 cycles=2685318 armed_steps=10 per_step=268531
+  [alloc-gate] filter_nw_sqp hs071 eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] filter_nw_sqp hs071 PASS (zero-alloc gate)
+  [timing] lm rosenbrock_ls cycles=45122 armed_steps=10 per_step=4512
+  [alloc-gate] lm rosenbrock_ls   eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] lm rosenbrock_ls PASS (zero-alloc gate)
+  [timing] kraft_slsqp hs071 float cycles=1682612 armed_steps=10 per_step=168261
+  [alloc-gate] kraft_slsqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] kraft_slsqp hs071 float PASS (zero-alloc gate)
+  [timing] nw_sqp hs071 float cycles=2101731 armed_steps=10 per_step=210173
+  [alloc-gate] nw_sqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] nw_sqp hs071 float PASS (zero-alloc gate)
+  [timing] filter_nw_sqp hs071 float cycles=2128195 armed_steps=10 per_step=212819
+  [alloc-gate] filter_nw_sqp hs071 float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] filter_nw_sqp hs071 float PASS (zero-alloc gate)
+  [timing] lm rosenbrock_ls float cycles=37369 armed_steps=10 per_step=3736
+  [alloc-gate] lm rosenbrock_ls float eigen_malloc=0 c_alloc=0 armed_steps=10 per_step=0.00
+  [alloc-gate] lm rosenbrock_ls float PASS (zero-alloc gate)
+[argmin] _sbrk one-time setup high-water = 12688 bytes (15 calls)
+[argmin] RT-window gate result: PASS (0 allocs/step on all windows)
+```
+
+Reading: 0.00/step on all 8 windows (four policies, each in `double` and in `float`), the blindness
+canary and the overflow guardrail both fire, and the one-time `_sbrk` setup high-water is 12,688 B.
+The cycle counts are recorded, not compared, and make no timing claim.

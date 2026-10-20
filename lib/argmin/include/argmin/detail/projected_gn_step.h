@@ -37,19 +37,19 @@ namespace argmin::detail
 //
 // Owned by policy state (never a helper-local static or thread_local), mirroring
 // the ldp / soc_nnls caller-owned-workspace threading convention.
-template <int N = dynamic_dimension>
+template <scalar Scalar, int N = dynamic_dimension>
 struct projected_gn_workspace
 {
     // Active-set reduced-solve buffers (Nielsen/LM path).
     std::vector<int> free_indices;
-    Eigen::MatrixXd H_free;
-    Eigen::VectorXd g_free;
-    Eigen::LDLT<Eigen::MatrixXd> ldlt;
-    Eigen::VectorXd h_free;
+    Eigen::MatrixX<Scalar> H_free;
+    Eigen::VectorX<Scalar> g_free;
+    defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> ldlt;
+    Eigen::VectorX<Scalar> h_free;
 
     // Trial-evaluation buffers on the runtime residual axis (both paths).
-    Eigen::VectorXd r_trial;
-    Eigen::VectorXd Jd;
+    Eigen::VectorX<Scalar> r_trial;
+    Eigen::VectorX<Scalar> Jd;
 };
 
 // Identify free (non-active) variable indices for active-set projection.
@@ -62,11 +62,12 @@ struct projected_gn_workspace
 //
 // Reference: N&W Section 16.6 (active-set identification for bound constraints).
 
-inline std::vector<int> identify_free_set(
-    const Eigen::VectorXd& x,
-    const Eigen::VectorXd& gradient,
-    const Eigen::VectorXd& lower,
-    const Eigen::VectorXd& upper)
+template <scalar Scalar>
+std::vector<int> identify_free_set(
+    const Eigen::VectorX<Scalar>& x,
+    const Eigen::VectorX<Scalar>& gradient,
+    const Eigen::VectorX<Scalar>& lower,
+    const Eigen::VectorX<Scalar>& upper)
 {
     const int n = static_cast<int>(x.size());
     std::vector<int> free_indices;
@@ -74,11 +75,11 @@ inline std::vector<int> identify_free_set(
 
     for(int i = 0; i < n; ++i)
     {
-        double eps = std::numeric_limits<double>::epsilon() * std::max(1.0, std::abs(x(i)));
+        Scalar eps = std::numeric_limits<Scalar>::epsilon() * std::max(Scalar(1), std::abs(x(i)));
         bool at_lower = x(i) <= lower(i) + eps;
         bool at_upper = x(i) >= upper(i) - eps;
-        bool active = (at_lower && gradient(i) > 0.0) ||
-                      (at_upper && gradient(i) < 0.0);
+        bool active = (at_lower && gradient(i) > Scalar(0)) ||
+                      (at_upper && gradient(i) < Scalar(0));
         if(!active)
             free_indices.push_back(i);
     }
@@ -91,13 +92,14 @@ inline std::vector<int> identify_free_set(
 // Identical selection to identify_free_set; the only difference is the sink:
 // out.clear() preserves the vector's capacity so no allocation occurs once the
 // buffer has grown to hold up to n indices. The bound arguments are taken by
-// Eigen::Ref so a compile-time-dimension Vector<double, N> binds without a copy.
+// Eigen::Ref so a compile-time-dimension Vector<Scalar, N> binds without a copy.
 
-inline void identify_free_set_into(
-    const Eigen::Ref<const Eigen::VectorXd>& x,
-    const Eigen::Ref<const Eigen::VectorXd>& gradient,
-    const Eigen::Ref<const Eigen::VectorXd>& lower,
-    const Eigen::Ref<const Eigen::VectorXd>& upper,
+template <scalar Scalar>
+void identify_free_set_into(
+    const Eigen::Ref<const Eigen::VectorX<Scalar>>& x,
+    const Eigen::Ref<const Eigen::VectorX<Scalar>>& gradient,
+    const Eigen::Ref<const Eigen::VectorX<Scalar>>& lower,
+    const Eigen::Ref<const Eigen::VectorX<Scalar>>& upper,
     std::vector<int>& out)
 {
     const int n = static_cast<int>(x.size());
@@ -105,11 +107,11 @@ inline void identify_free_set_into(
 
     for(int i = 0; i < n; ++i)
     {
-        double eps = std::numeric_limits<double>::epsilon() * std::max(1.0, std::abs(x(i)));
+        Scalar eps = std::numeric_limits<Scalar>::epsilon() * std::max(Scalar(1), std::abs(x(i)));
         bool at_lower = x(i) <= lower(i) + eps;
         bool at_upper = x(i) >= upper(i) - eps;
-        bool active = (at_lower && gradient(i) > 0.0) ||
-                      (at_upper && gradient(i) < 0.0);
+        bool active = (at_lower && gradient(i) > Scalar(0)) ||
+                      (at_upper && gradient(i) < Scalar(0));
         if(!active)
             out.push_back(i);
     }
@@ -119,12 +121,13 @@ inline void identify_free_set_into(
 //
 // Helper for solve_reduced_gn and dogleg_step to avoid code duplication.
 
-inline void extract_reduced_system(
-    const Eigen::MatrixXd& H,
-    const Eigen::VectorXd& gradient,
+template <scalar Scalar>
+void extract_reduced_system(
+    const Eigen::MatrixX<Scalar>& H,
+    const Eigen::VectorX<Scalar>& gradient,
     const std::vector<int>& free_indices,
-    Eigen::MatrixXd& H_free,
-    Eigen::VectorXd& g_free)
+    Eigen::MatrixX<Scalar>& H_free,
+    Eigen::VectorX<Scalar>& g_free)
 {
     int n_free = static_cast<int>(free_indices.size());
     H_free.resize(n_free, n_free);
@@ -144,12 +147,13 @@ inline void extract_reduced_system(
 
 // Scatter free-variable step back into full n-vector, zeroing active components.
 
-inline Eigen::VectorXd scatter_to_full(
-    const Eigen::VectorXd& h_free,
+template <scalar Scalar>
+Eigen::VectorX<Scalar> scatter_to_full(
+    const Eigen::VectorX<Scalar>& h_free,
     const std::vector<int>& free_indices,
     int n)
 {
-    Eigen::VectorXd h = Eigen::VectorXd::Zero(n);
+    Eigen::VectorX<Scalar> h = Eigen::VectorX<Scalar>::Zero(n);
     int n_free = static_cast<int>(free_indices.size());
     for(int i = 0; i < n_free; ++i)
         h(free_indices[static_cast<std::size_t>(i)]) = h_free(i);
@@ -165,28 +169,29 @@ inline Eigen::VectorXd scatter_to_full(
 // Reference: K&W Eq. 6.11 (Marquardt diagonal scaling).
 //            N&W Section 10.2-10.3 (Gauss-Newton normal equations).
 
-inline Eigen::VectorXd solve_reduced_gn(
-    const Eigen::MatrixXd& H,
-    const Eigen::VectorXd& gradient,
+template <scalar Scalar>
+Eigen::VectorX<Scalar> solve_reduced_gn(
+    const Eigen::MatrixX<Scalar>& H,
+    const Eigen::VectorX<Scalar>& gradient,
     const std::vector<int>& free_indices,
-    double lambda,
-    double diagonal_min_clamp)
+    Scalar lambda,
+    Scalar diagonal_min_clamp)
 {
     int n = static_cast<int>(gradient.size());
     int n_free = static_cast<int>(free_indices.size());
 
     if(n_free == 0)
-        return Eigen::VectorXd::Zero(n);
+        return Eigen::VectorX<Scalar>::Zero(n);
 
-    Eigen::MatrixXd H_free;
-    Eigen::VectorXd g_free;
+    Eigen::MatrixX<Scalar> H_free;
+    Eigen::VectorX<Scalar> g_free;
     extract_reduced_system(H, gradient, free_indices, H_free, g_free);
 
     // Diagonal-scaled damping (K&W Eq. 6.11, Marquardt 1963)
     for(int i = 0; i < n_free; ++i)
         H_free(i, i) += lambda * std::max(H_free(i, i), diagonal_min_clamp);
 
-    Eigen::VectorXd h_free = H_free.ldlt().solve(-g_free);
+    Eigen::VectorX<Scalar> h_free = H_free.ldlt().solve(-g_free);
     return scatter_to_full(h_free, free_indices, n);
 }
 
@@ -198,19 +203,19 @@ inline Eigen::VectorXd solve_reduced_gn(
 // into h_out. With a stable free-set size across steps the workspace matrices,
 // the LDLT internal storage, and h_out all reuse their allocations. The bound
 // H / gradient are taken by Eigen::Ref so the policy's compile-time-dimension
-// Matrix<double, N, N> / Vector<double, N> bind without a copy.
+// Matrix<Scalar, N, N> / Vector<Scalar, N> bind without a copy.
 //
 // Reference: K&W Eq. 6.11 (Marquardt diagonal scaling).
 //            N&W Section 10.2-10.3 (Gauss-Newton normal equations).
 
-template <int N>
+template <scalar Scalar, int N>
 void solve_reduced_gn_into(
-    const Eigen::Ref<const Eigen::MatrixXd>& H,
-    const Eigen::Ref<const Eigen::VectorXd>& gradient,
-    double lambda,
-    double diagonal_min_clamp,
-    projected_gn_workspace<N>& ws,
-    Eigen::Vector<double, N>& h_out)
+    const Eigen::Ref<const Eigen::MatrixX<Scalar>>& H,
+    const Eigen::Ref<const Eigen::VectorX<Scalar>>& gradient,
+    Scalar lambda,
+    Scalar diagonal_min_clamp,
+    projected_gn_workspace<Scalar, N>& ws,
+    Eigen::Vector<Scalar, N>& h_out)
 {
     const int n = static_cast<int>(gradient.size());
     const int n_free = static_cast<int>(ws.free_indices.size());
@@ -244,13 +249,14 @@ void solve_reduced_gn_into(
 
 // Extract columns at free_indices from the Jacobian.
 
-inline Eigen::MatrixXd extract_jacobian_free(
-    const Eigen::MatrixXd& J,
+template <scalar Scalar>
+Eigen::MatrixX<Scalar> extract_jacobian_free(
+    const Eigen::MatrixX<Scalar>& J,
     const std::vector<int>& free_indices)
 {
     int m = static_cast<int>(J.rows());
     int n_free = static_cast<int>(free_indices.size());
-    Eigen::MatrixXd J_free(m, n_free);
+    Eigen::MatrixX<Scalar> J_free(m, n_free);
     for(int i = 0; i < n_free; ++i)
         J_free.col(i) = J.col(free_indices[static_cast<std::size_t>(i)]);
     return J_free;
@@ -263,57 +269,58 @@ inline Eigen::MatrixXd extract_jacobian_free(
 //
 // Reference: N&W Section 4.1 (dogleg method), Algorithm 4.1.
 
-inline Eigen::VectorXd dogleg_step(
-    const Eigen::MatrixXd& J,
-    const Eigen::MatrixXd& H_free,
-    const Eigen::VectorXd& g_free,
+template <scalar Scalar>
+Eigen::VectorX<Scalar> dogleg_step(
+    const Eigen::MatrixX<Scalar>& J,
+    const Eigen::MatrixX<Scalar>& H_free,
+    const Eigen::VectorX<Scalar>& g_free,
     const std::vector<int>& free_indices,
     int n,
-    double delta)
+    Scalar delta)
 {
     int n_free = static_cast<int>(free_indices.size());
     if(n_free == 0)
-        return Eigen::VectorXd::Zero(n);
+        return Eigen::VectorX<Scalar>::Zero(n);
 
-    auto J_free = extract_jacobian_free(J, free_indices);
+    Eigen::MatrixX<Scalar> J_free = extract_jacobian_free(J, free_indices);
 
     // Cauchy scaling: t = ||g||^2 / ||J*g||^2 (steepest descent optimal step)
-    double g_sq = g_free.squaredNorm();
-    Eigen::VectorXd Jg = (J_free * g_free).eval();
-    double Jg_sq = Jg.squaredNorm();
-    double t = (Jg_sq > std::numeric_limits<double>::epsilon()) ? g_sq / Jg_sq : 1.0;
+    Scalar g_sq = g_free.squaredNorm();
+    Eigen::VectorX<Scalar> Jg = (J_free * g_free).eval();
+    Scalar Jg_sq = Jg.squaredNorm();
+    Scalar t = (Jg_sq > std::numeric_limits<Scalar>::epsilon()) ? g_sq / Jg_sq : Scalar(1);
 
     // GN step via LDLT with small epsilon regularization
-    Eigen::MatrixXd H_reg = H_free;
+    Eigen::MatrixX<Scalar> H_reg = H_free;
     for(int i = 0; i < n_free; ++i)
-        H_reg(i, i) += 100.0 * std::numeric_limits<double>::epsilon();
-    Eigen::VectorXd gn = H_reg.ldlt().solve(-g_free);
+        H_reg(i, i) += Scalar(100) * std::numeric_limits<Scalar>::epsilon();
+    Eigen::VectorX<Scalar> gn = H_reg.ldlt().solve(-g_free);
 
-    double gn_norm = gn.norm();
+    Scalar gn_norm = gn.norm();
     if(gn_norm <= delta)
         return scatter_to_full(gn, free_indices, n);
 
-    double sd_scaled_norm = t * g_free.norm();
+    Scalar sd_scaled_norm = t * g_free.norm();
     if(sd_scaled_norm >= delta)
     {
         // Scale Cauchy direction to trust-region boundary
-        Eigen::VectorXd cauchy = (-delta / g_free.norm()) * g_free;
+        Eigen::VectorX<Scalar> cauchy = (-delta / g_free.norm()) * g_free;
         return scatter_to_full(cauchy, free_indices, n);
     }
 
     // Interpolate along Cauchy-to-GN segment: p = a + beta*(b - a), ||p|| = delta
-    Eigen::VectorXd a = -t * g_free;
-    Eigen::VectorXd d = gn - a;
-    double a_sq = a.squaredNorm();
-    double d_sq = d.squaredNorm();
-    double a_dot_d = a.dot(d);
-    double delta_sq = delta * delta;
+    Eigen::VectorX<Scalar> a = -t * g_free;
+    Eigen::VectorX<Scalar> d = gn - a;
+    Scalar a_sq = a.squaredNorm();
+    Scalar d_sq = d.squaredNorm();
+    Scalar a_dot_d = a.dot(d);
+    Scalar delta_sq = delta * delta;
 
-    double discriminant = a_dot_d * a_dot_d - d_sq * (a_sq - delta_sq);
-    double beta = (-a_dot_d + std::sqrt(std::max(0.0, discriminant))) / d_sq;
-    beta = std::clamp(beta, 0.0, 1.0);
+    Scalar discriminant = a_dot_d * a_dot_d - d_sq * (a_sq - delta_sq);
+    Scalar beta = (-a_dot_d + std::sqrt(std::max(Scalar(0), discriminant))) / d_sq;
+    beta = std::clamp(beta, Scalar(0), Scalar(1));
 
-    Eigen::VectorXd h_free = a + beta * d;
+    Eigen::VectorX<Scalar> h_free = a + beta * d;
     return scatter_to_full(h_free, free_indices, n);
 }
 
@@ -321,15 +328,16 @@ inline Eigen::VectorXd dogleg_step(
 //
 // Reference: N&W Algorithm 4.1 (trust-region radius update).
 
-inline void update_trust_region(
-    double& delta, double rho, double step_norm,
-    double expand_threshold = 0.75,
-    double shrink_threshold = 0.25)
+template <scalar Scalar>
+void update_trust_region(
+    Scalar& delta, Scalar rho, Scalar step_norm,
+    Scalar expand_threshold = Scalar(0.75),
+    Scalar shrink_threshold = Scalar(0.25))
 {
-    if(rho > expand_threshold && step_norm >= 0.9 * delta)
-        delta = 2.0 * delta;
+    if(rho > expand_threshold && step_norm >= Scalar(0.9) * delta)
+        delta = Scalar(2.0) * delta;
     else if(rho < shrink_threshold)
-        delta *= 0.25;
+        delta *= Scalar(0.25);
 }
 
 // Predicted reduction for Nielsen/LM mode.
@@ -338,18 +346,19 @@ inline void update_trust_region(
 //
 // Reference: Nielsen (1999) Eq. 2.6, N&W Eq. 10.17.
 
-inline double predicted_reduction_lm(
-    const Eigen::VectorXd& step,
-    const Eigen::VectorXd& gradient,
-    double lambda,
-    double diagonal_min_clamp,
-    const Eigen::VectorXd& H_diag)
+template <scalar Scalar>
+Scalar predicted_reduction_lm(
+    const Eigen::VectorX<Scalar>& step,
+    const Eigen::VectorX<Scalar>& gradient,
+    Scalar lambda,
+    Scalar diagonal_min_clamp,
+    const Eigen::VectorX<Scalar>& H_diag)
 {
     int n = static_cast<int>(step.size());
-    Eigen::VectorXd D_h(n);
+    Eigen::VectorX<Scalar> D_h(n);
     for(int i = 0; i < n; ++i)
         D_h(i) = std::max(H_diag(i), diagonal_min_clamp) * step(i);
-    return 0.5 * step.dot(lambda * D_h - gradient);
+    return Scalar(0.5) * step.dot(lambda * D_h - gradient);
 }
 
 // Predicted reduction for dogleg/trust-region mode.
@@ -358,12 +367,13 @@ inline double predicted_reduction_lm(
 //
 // Reference: N&W Eq. 4.2 (quadratic model reduction).
 
-inline double predicted_reduction_tr(
-    const Eigen::VectorXd& step,
-    const Eigen::VectorXd& gradient,
-    const Eigen::MatrixXd& H)
+template <scalar Scalar>
+Scalar predicted_reduction_tr(
+    const Eigen::VectorX<Scalar>& step,
+    const Eigen::VectorX<Scalar>& gradient,
+    const Eigen::MatrixX<Scalar>& H)
 {
-    return -gradient.dot(step) - 0.5 * step.dot(H * step);
+    return -gradient.dot(step) - Scalar(0.5) * step.dot(H * step);
 }
 
 }

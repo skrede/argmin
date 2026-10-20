@@ -129,27 +129,27 @@ TEST_CASE("halton van der Corput sequence", "[multistart]")
 {
     using detail::van_der_corput;
 
-    CHECK(van_der_corput(1, 2) == Approx(0.5).margin(1e-15));
-    CHECK(van_der_corput(2, 2) == Approx(0.25).margin(1e-15));
-    CHECK(van_der_corput(3, 2) == Approx(0.75).margin(1e-15));
-    CHECK(van_der_corput(1, 3) == Approx(1.0 / 3.0).margin(1e-15));
-    CHECK(van_der_corput(2, 3) == Approx(2.0 / 3.0).margin(1e-15));
+    CHECK(van_der_corput<double>(1, 2) == Approx(0.5).margin(1e-15));
+    CHECK(van_der_corput<double>(2, 2) == Approx(0.25).margin(1e-15));
+    CHECK(van_der_corput<double>(3, 2) == Approx(0.75).margin(1e-15));
+    CHECK(van_der_corput<double>(1, 3) == Approx(1.0 / 3.0).margin(1e-15));
+    CHECK(van_der_corput<double>(2, 3) == Approx(2.0 / 3.0).margin(1e-15));
 }
 
 TEST_CASE("halton point in unit cube", "[multistart]")
 {
-    auto p0 = detail::halton_point(0, 2);
+    auto p0 = detail::halton_point<double>(0, 2);
     CHECK(p0[0] == Approx(0.5).margin(1e-15));
     CHECK(p0[1] == Approx(1.0 / 3.0).margin(1e-15));
 
-    auto p1 = detail::halton_point(1, 2);
+    auto p1 = detail::halton_point<double>(1, 2);
     CHECK(p1[0] == Approx(0.25).margin(1e-15));
     CHECK(p1[1] == Approx(2.0 / 3.0).margin(1e-15));
 
     // All values must be in (0, 1).
     for(int i = 0; i < 10; ++i)
     {
-        auto p = detail::halton_point(static_cast<std::uint32_t>(i), 3);
+        auto p = detail::halton_point<double>(static_cast<std::uint32_t>(i), 3);
         for(int d = 0; d < 3; ++d)
         {
             CHECK(p[d] > 0.0);
@@ -163,7 +163,7 @@ TEST_CASE("halton to bounds mapping", "[multistart]")
     Eigen::VectorXd lower{{-5.0, -5.0}};
     Eigen::VectorXd upper{{5.0, 5.0}};
 
-    auto p = detail::halton_to_bounds(0, 2, lower, upper);
+    auto p = detail::halton_to_bounds<double>(0, 2, lower, upper);
 
     // Should map [0,1]^2 into [-5, 5]^2.
     CHECK(p[0] >= -5.0);
@@ -292,7 +292,7 @@ TEST_CASE("multistart mirrors inner constraint violation through the decorator",
     Eigen::VectorXd x0{{0.0, 0.0}};
     solver_options opts;
 
-    using ms_policy = multistart_policy<cobyla_policy>;
+    using ms_policy = multistart_policy<cobyla_policy<>>;
     step_budget_solver solver{ms_policy{}, problem, x0, opts};
 
     // The initial iterate is deeply infeasible (c = 0 + 0 - 10 = -10) and
@@ -310,7 +310,7 @@ TEST_CASE("multistart propagates the inner policy's fixed-N vector type",
     // Compile-time pin: a fixed-N inner policy keeps fully-fixed state
     // inside the decorator instead of collapsing to Eigen::VectorXd.
     static_assert(std::is_same_v<
-        decltype(std::declval<multistart_policy<bobyqa_policy<2>>
+        decltype(std::declval<multistart_policy<bobyqa_policy<double, 2>>
             ::state_type<fixed_dim_quadratic>>().x),
         Eigen::Vector<double, 2>>);
 

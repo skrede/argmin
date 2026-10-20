@@ -364,7 +364,7 @@ TEST_CASE("tr_sqp accepted step produces an exactly-zero slack block in the "
     solver_options opts;
     opts.max_iterations = 50;
 
-    tr_sqp_policy_accurate<2> policy;
+    tr_sqp_policy_accurate<double, 2> policy;
     auto s = policy.init(problem, x0, opts);
 
     // Stale multiplier estimate as left behind by a prior iteration's
@@ -393,8 +393,8 @@ TEST_CASE("tr_sqp accepted step produces an exactly-zero slack block in the "
 TEMPLATE_TEST_CASE(
     "kkt-gated convergence fires at a solution with an active box bound",
     "[sqp_common_joint][tr_sqp][filter_trsqp]",
-    tr_sqp_policy_accurate<2>,
-    filter_trsqp_policy_accurate<2>)
+    (tr_sqp_policy_accurate<double, 2>),
+    (filter_trsqp_policy_accurate<double, 2>))
 {
     using Policy = TestType;
     // Convergence-path check for the bound-aware composite residual:

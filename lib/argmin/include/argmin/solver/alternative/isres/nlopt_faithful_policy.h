@@ -41,9 +41,11 @@
 //     rationale for sigma-collapse predicate, not a literal port).
 
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/scalar_distributions.h"
 #include "argmin/detail/stochastic_ranking.h"
 #include "argmin/detail/tuple_contains.h"
 #include "argmin/detail/xoshiro256.h"
+#include "argmin/options/isres_defaults.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/status.h"
 #include "argmin/solver/options.h"
@@ -64,13 +66,13 @@
 namespace argmin::alternative::isres
 {
 
-template <int N = dynamic_dimension>
+template <scalar Scalar = double, int N = dynamic_dimension>
 struct nlopt_faithful_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
 
     template <int M>
-    using rebind = nlopt_faithful_policy<M>;
+    using rebind = nlopt_faithful_policy<Scalar, M>;
 
     // Runtime selectors for the two operator-axis variants.
     enum class sigma_clamp_placement_type { per_mutation, end_of_step };
@@ -80,29 +82,29 @@ struct nlopt_faithful_policy
     {
         // Population sizing (inherited from production isres_policy).
         std::optional<std::uint32_t> population_size{};      // default lambda = 20*(n+1)
-        std::optional<double> parent_fraction{};             // default mu = ceil(lambda/7)
-        std::optional<double> ranking_probability{};         // default pf = 0.45
+        std::optional<Scalar> parent_fraction{};             // default mu = ceil(lambda/7)
+        std::optional<Scalar> ranking_probability{};         // default pf = 0.45
 
         // RNG seed.
         std::optional<std::uint64_t> seed{};
 
         // Stall + feasibility (inherited from production isres_policy).
         std::uint16_t stall_window{200};
-        double feasibility_gate{1e-4};                       // L2-squared in this variant
+        Scalar feasibility_gate{isres_defaults<Scalar>::feasibility_gate};  // L2-squared in this variant
 
         // NLopt-faithful operator constants. gamma = 0.85, alpha = 0.2 are
         // engineering defaults from NLopt isres.c:67-68 (NOT pinned
         // numerically by Runarsson-Yao 2005). gamma is the
         // differential-variation strength (Runarsson-Yao 2005 §III); name
         // preserves the paper's symbol per project citation policy.
-        std::optional<double> differential_variation_gamma{};  // default 0.85
-        std::optional<double> sigma_smoothing_weight{};        // default 0.2
+        std::optional<Scalar> differential_variation_gamma{};  // default 0.85
+        std::optional<Scalar> sigma_smoothing_weight{};        // default 0.2
 
         // Sigma-collapse predicate threshold (bound-relative form).
         // 1e-9 default — 1000x looser than CMA-ES's 1e-12 because
         // per-individual ISRES sigma is noisier than CMA-ES covariance
         // scaling.
-        std::optional<double> sigma_collapse_ratio{};          // default 1e-9
+        std::optional<Scalar> sigma_collapse_ratio{};          // default 1e-9
 
         // Bounded retry on resample-on-bound to avoid infinite loop on
         // degenerate-geometry problems (NLopt isres.c:245-248 uses an
@@ -140,41 +142,40 @@ struct nlopt_faithful_policy
         static constexpr int MaxLambda = 1792;
 
         const P* problem{nullptr};
-        Eigen::Vector<double, N> x;
-        double objective_value{};
+        Eigen::Vector<Scalar, N> x;
+        Scalar objective_value{};
 
         // Bounded-storage population matrices. Heap is used only when N is
         // dynamic_dimension; with a concrete N these are stack-resident up
         // to their compile-time max bounds.
-        Eigen::Matrix<double,
+        Eigen::Matrix<Scalar,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       Eigen::Dynamic, 0,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       MaxLambda> population;
 
-        Eigen::Matrix<double,
+        Eigen::Matrix<Scalar,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       Eigen::Dynamic, 0,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       MaxLambda> sigmas;
 
-        // fitnesses / violations stay as Eigen::VectorXd (the
-        // canonical Eigen::Vector<double, Dynamic> typedef) so
+        // fitnesses / violations stay dynamic vectors so
         // detail::stochastic_rank's Eigen::Vector<Scalar, Lambda> ref
         // signature deduces cleanly. The dominant cost in this variant
         // is the n x lambda matrices, which DO use bounded storage.
-        Eigen::VectorXd fitnesses;
-        Eigen::VectorXd violations;
+        Eigen::VectorX<Scalar> fitnesses;
+        Eigen::VectorX<Scalar> violations;
 
-        Eigen::Vector<double, N> lower;
-        Eigen::Vector<double, N> upper;
+        Eigen::Vector<Scalar, N> lower;
+        Eigen::Vector<Scalar, N> upper;
 
         // RNG: xoshiro256+ shared with cmaes_policy and the production
         // isres_policy alias. 32 B vs std::mt19937's 2.5 KB.
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
-        double best_ever_value{std::numeric_limits<double>::infinity()};
-        double best_ever_violation{std::numeric_limits<double>::infinity()};
+        Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
+        Scalar best_ever_violation{std::numeric_limits<Scalar>::infinity()};
 
         // Poison flag: set by init() when the requested population sizing
         // exceeds the bounded-storage caps (MaxLambda / MaxMu). init()
@@ -188,46 +189,46 @@ struct nlopt_faithful_policy
 
         // Constraint evaluation buffers. n_eq / n_ineq are problem
         // properties only known at init() time, so these stay dynamic.
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0,
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1, 0,
                       Eigen::Dynamic, 1> c_eq;
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0,
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1, 0,
                       Eigen::Dynamic, 1> c_ineq;
         int n_eq{0};
         int n_ineq{0};
 
         int lambda{0};
         int mu{0};
-        double pf{0.45};
+        Scalar pf{Scalar(0.45)};
         // alpha is the sigma-smoothing weight, re-mapped from its prior
         // pull-to-best meaning in the production isres_policy.
-        double alpha{0.2};
-        detail::es_learning_rates rates{};
+        Scalar alpha{Scalar(0.2)};
+        detail::es_learning_rates<Scalar> rates{};
 
         // x0 snapshot of the top-mu physical slots, captured at
         // start-of-step before mutation. Read by the differential
         // variation operator in step().
-        Eigen::Matrix<double,
+        Eigen::Matrix<Scalar,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       Eigen::Dynamic, 0,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       MaxMu> x0_snapshot_buf;
 
         // Per-step buffers hoisted into state to keep step() alloc-free.
-        Eigen::Matrix<double,
+        Eigen::Matrix<Scalar,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       Eigen::Dynamic, 0,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       MaxLambda> offspring_buf;
-        Eigen::Matrix<double,
+        Eigen::Matrix<Scalar,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       Eigen::Dynamic, 0,
                       N == Eigen::Dynamic ? Eigen::Dynamic : N,
                       MaxLambda> new_sigmas_buf;
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxLambda, 1>
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1, 0, MaxLambda, 1>
             offspring_fitnesses_buf;
-        Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MaxLambda, 1>
+        Eigen::Matrix<Scalar, Eigen::Dynamic, 1, 0, MaxLambda, 1>
             offspring_violations_buf;
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0,
+        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, 0,
                       Eigen::Dynamic, MaxLambda> all_constraints_buf;
         std::vector<std::uint32_t> indices_buf;
 
@@ -239,14 +240,14 @@ struct nlopt_faithful_policy
         // slsqp_compatible_convergence carries step_tolerance_rel_criterion
         // only); xtol_coupled sigma-collapse falls back to bound-relative
         // semantics in that case.
-        std::optional<double> convergence_xtol_threshold;
+        std::optional<Scalar> convergence_xtol_threshold;
     };
 
     options_type options{};
 
     template <typename Problem, typename Convergence>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& opts,
                              const options_type& policy_opts)
     {
@@ -254,12 +255,12 @@ struct nlopt_faithful_policy
         return init(problem, x0, opts);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
-        requires objective<Problem>
-              && constrained_values<Problem>
-              && bound_constrained<Problem>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
+        requires objective<Problem, Scalar>
+              && constrained_values<Problem, Scalar>
+              && bound_constrained<Problem, Scalar>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
@@ -279,17 +280,17 @@ struct nlopt_faithful_policy
         s.lambda = static_cast<int>(
             options.population_size.value_or(
                 static_cast<std::uint32_t>(20 * (n + 1))));
-        const double frac = options.parent_fraction.value_or(1.0 / 7.0);
+        const Scalar frac = options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0));
         // mu = ceil(lambda * frac) (NLopt isres.c: mu = ceil(pop/7)),
         // NOT a truncating int() cast: at lambda=60 the default fraction
         // gives ceil(60/7) = 9 survivors, not int(8.571) = 8.
-        s.mu = std::max(1, static_cast<int>(std::ceil(s.lambda * frac)));
-        s.pf = options.ranking_probability.value_or(0.45);
+        s.mu = std::max(1, static_cast<int>(std::ceil(static_cast<Scalar>(s.lambda) * frac)));
+        s.pf = options.ranking_probability.value_or(Scalar(0.45));
         // The alpha state field carries the sigma-smoothing weight,
         // NOT pull-to-best (which this variant does not implement).
         // Default 0.2 from NLopt isres.c:67.
-        s.alpha = options.sigma_smoothing_weight.value_or(0.2);
-        s.rates = detail::compute_es_rates(n);
+        s.alpha = options.sigma_smoothing_weight.value_or(Scalar(0.2));
+        s.rates = detail::compute_es_rates<Scalar>(n);
 
         // Seed RNG (xoshiro256+).
         const std::uint64_t seed = options.seed.value_or(
@@ -310,7 +311,7 @@ struct nlopt_faithful_policy
         {
             s.storage_exceeded = true;
             s.x = x0;
-            s.objective_value = std::numeric_limits<double>::infinity();
+            s.objective_value = std::numeric_limits<Scalar>::infinity();
             return s;
         }
 
@@ -351,10 +352,10 @@ struct nlopt_faithful_policy
         // fully-robust band, 2.0 yields the best near-optimum quality
         // (HS035 best 0.128 vs optimum 0.111; HS024 best -0.972 vs -1.0),
         // so it is the chosen value.
-        constexpr double seed_fallback_half_width = 2.0;
-        constexpr double inf = std::numeric_limits<double>::infinity();
-        Eigen::Vector<double, N> seed_lo = s.lower;
-        Eigen::Vector<double, N> seed_hi = s.upper;
+        constexpr Scalar seed_fallback_half_width = Scalar(2.0);
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        Eigen::Vector<Scalar, N> seed_lo = s.lower;
+        Eigen::Vector<Scalar, N> seed_hi = s.upper;
         for(int i = 0; i < n; ++i)
         {
             if(!(s.lower(i) > -inf))
@@ -364,7 +365,7 @@ struct nlopt_faithful_policy
         }
 
         // Initialize population uniformly in the (finite) seeding box. The
-        // free-function returns a heap-backed Eigen::Matrix<double, N,
+        // free-function returns a heap-backed Eigen::Matrix<Scalar, N,
         // Dynamic>; we copy into the bounded-storage member matrix. The
         // block copy is a fixed n x lambda traversal -- no per-step concern.
         const auto initial_population =
@@ -386,12 +387,12 @@ struct nlopt_faithful_policy
         // Evaluate all individuals into the persistent buffers.
         for(int j = 0; j < s.lambda; ++j)
         {
-            const Eigen::Vector<double, N> xi = s.population.col(j);
+            const Eigen::Vector<Scalar, N> xi = s.population.col(j);
             s.fitnesses[j] = s.problem->value(xi);
 
             if(n_c > 0)
             {
-                Eigen::VectorXd c(n_c);
+                Eigen::VectorX<Scalar> c(n_c);
                 s.problem->constraints(xi, c);
                 s.all_constraints_buf.col(j) = c;
             }
@@ -404,16 +405,16 @@ struct nlopt_faithful_policy
         {
             for(int j = 0; j < s.lambda; ++j)
             {
-                double v = 0.0;
+                Scalar v = Scalar(0.0);
                 for(int i = 0; i < s.n_eq; ++i)
                 {
-                    const double ce = s.all_constraints_buf(i, j);
+                    const Scalar ce = s.all_constraints_buf(i, j);
                     v += ce * ce;
                 }
                 for(int i = 0; i < s.n_ineq; ++i)
                 {
-                    const double slack =
-                        std::max(0.0, -s.all_constraints_buf(s.n_eq + i, j));
+                    const Scalar slack =
+                        std::max(Scalar(0.0), -s.all_constraints_buf(s.n_eq + i, j));
                     v += slack * slack;
                 }
                 s.violations[j] = v;
@@ -422,7 +423,7 @@ struct nlopt_faithful_policy
         else
         {
             for(int j = 0; j < s.lambda; ++j)
-                s.violations[j] = 0.0;
+                s.violations[j] = Scalar(0.0);
         }
 
         // Pick best init individual (least violation first, then best
@@ -430,8 +431,8 @@ struct nlopt_faithful_policy
         int best_idx = 0;
         for(int j = 1; j < s.lambda; ++j)
         {
-            const bool feasible_j = s.violations[j] <= 0.0;
-            const bool feasible_best = s.violations[best_idx] <= 0.0;
+            const bool feasible_j = s.violations[j] <= Scalar(0.0);
+            const bool feasible_best = s.violations[best_idx] <= Scalar(0.0);
 
             if(feasible_j && !feasible_best)
                 best_idx = j;
@@ -455,7 +456,7 @@ struct nlopt_faithful_policy
         s.c_ineq.resize(s.n_ineq);
         if(n_c > 0)
         {
-            Eigen::VectorXd c(n_c);
+            Eigen::VectorX<Scalar> c(n_c);
             s.problem->constraints(s.x, c);
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
@@ -471,10 +472,10 @@ struct nlopt_faithful_policy
         // stays std::nullopt and step() silently falls back to the
         // bound-relative form.
         if constexpr(detail::tuple_contains_v<
-                         step_tolerance_criterion,
+                         step_tolerance_criterion<scalar_type>,
                          decltype(opts.convergence.criteria)>)
         {
-            const auto& crit = std::get<step_tolerance_criterion>(
+            const auto& crit = std::get<step_tolerance_criterion<scalar_type>>(
                 opts.convergence.criteria);
             s.convergence_xtol_threshold = crit.threshold;
         }
@@ -517,7 +518,7 @@ struct nlopt_faithful_policy
     //            Runarsson & Yao (2005), IEEE Trans. SMC-C
     //            35(2):233-243; K&W 2e §8.6.
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         // Storage-cap poison (memory safety): init() detected that the
         // requested population sizing exceeds the bounded-storage caps and
@@ -525,11 +526,11 @@ struct nlopt_faithful_policy
         // touching the un-sized buffers.
         if(s.storage_exceeded)
         {
-            return step_result<double>{
+            return step_result<Scalar>{
                 .objective_value = s.objective_value,
-                .gradient_norm = 0.0,
-                .step_size = 0.0,
-                .objective_change = 0.0,
+                .gradient_norm = Scalar(0.0),
+                .step_size = Scalar(0.0),
+                .objective_change = Scalar(0.0),
                 .improved = false,
                 .x_norm = s.x.norm(),
                 .policy_status = solver_status::invalid_problem,
@@ -541,16 +542,16 @@ struct nlopt_faithful_policy
         const int lambda = s.lambda;
         const int n_c = s.n_eq + s.n_ineq;
         auto& rng = *s.rng;
-        std::normal_distribution<double> normal(0.0, 1.0);
+        detail::standard_normal_distribution<Scalar> normal;
 
         // Capture pre-step best for objective_change / improved
         // bookkeeping and for the sigma-collapse status emission below.
-        const double prev_best_ever_value = s.best_ever_value;
+        const Scalar prev_best_ever_value = s.best_ever_value;
 
-        const double gamma =
-            options.differential_variation_gamma.value_or(0.85);
-        const double alpha =
-            options.sigma_smoothing_weight.value_or(0.2);
+        const Scalar gamma =
+            options.differential_variation_gamma.value_or(Scalar(0.85));
+        const Scalar alpha =
+            options.sigma_smoothing_weight.value_or(Scalar(0.2));
         const std::uint16_t resample_budget =
             options.bound_resample_budget.value_or(
                 static_cast<std::uint16_t>(100));
@@ -585,13 +586,13 @@ struct nlopt_faithful_policy
                 s.indices_buf[static_cast<std::size_t>(k)];
             const std::uint32_t ri =
                 s.indices_buf[static_cast<std::size_t>(k % mu)];
-            const double taup_rand = s.rates.tau_prime * normal(rng);
+            const Scalar taup_rand = s.rates.tau_prime * normal(rng);
 
             for(int j = 0; j < n; ++j)
             {
-                const double sigmamax = (s.upper(j) - s.lower(j))
-                    / std::sqrt(static_cast<double>(n));
-                const double sigi = s.sigmas(j, ri);
+                const Scalar sigmamax = (s.upper(j) - s.lower(j))
+                    / std::sqrt(static_cast<Scalar>(n));
+                const Scalar sigi = s.sigmas(j, ri);
 
                 s.sigmas(j, rk) = detail::log_normal_mutate(
                     sigi, s.rates.tau, taup_rand, sigmamax, rng);
@@ -626,11 +627,11 @@ struct nlopt_faithful_policy
         {
             const std::uint32_t rk =
                 s.indices_buf[static_cast<std::size_t>(k)];
-            const double taup_rand = s.rates.tau_prime * normal(rng);
+            const Scalar taup_rand = s.rates.tau_prime * normal(rng);
 
             for(int j = 0; j < n; ++j)
             {
-                const double xi = s.population(j, rk);
+                const Scalar xi = s.population(j, rk);
                 if(k + 1 < mu)
                     s.population(j, rk) += gamma
                         * (s.x0_snapshot_buf(j, 0)
@@ -643,9 +644,9 @@ struct nlopt_faithful_policy
                 {
                     // Per-mutation sigma upper clamp:
                     //   sigma_max = (ub - lb) / sqrt(n).
-                    const double sigmamax = (s.upper(j) - s.lower(j))
-                        / std::sqrt(static_cast<double>(n));
-                    const double sigi = s.sigmas(j, rk);
+                    const Scalar sigmamax = (s.upper(j) - s.lower(j))
+                        / std::sqrt(static_cast<Scalar>(n));
+                    const Scalar sigi = s.sigmas(j, rk);
 
                     // Per-mutation form: log-normal sigma update with the
                     // upper clamp folded inside the operator.
@@ -686,28 +687,28 @@ struct nlopt_faithful_policy
         // makes mutation idempotent on the active slot).
         for(int k = 0; k < lambda; ++k)
         {
-            const Eigen::Vector<double, N> xk = s.population.col(k);
+            const Eigen::Vector<Scalar, N> xk = s.population.col(k);
             s.fitnesses[k] = s.problem->value(xk);
 
             if(n_c > 0)
             {
-                Eigen::VectorXd c(n_c);
+                Eigen::VectorX<Scalar> c(n_c);
                 s.problem->constraints(xk, c);
                 s.all_constraints_buf.col(k) = c;
             }
 
             // Inline L2-squared aggregation. NLopt's c_ineq >= 0
             // feasible convention: ineq slack = max(0, -c_ineq[j]).
-            double violation_sum = 0.0;
+            Scalar violation_sum = Scalar(0.0);
             for(int j_eq = 0; j_eq < s.n_eq; ++j_eq)
             {
-                const double ce = s.all_constraints_buf(j_eq, k);
+                const Scalar ce = s.all_constraints_buf(j_eq, k);
                 violation_sum += ce * ce;
             }
             for(int j_in = 0; j_in < s.n_ineq; ++j_in)
             {
-                const double slack = std::max(
-                    0.0,
+                const Scalar slack = std::max(
+                    Scalar(0.0),
                     -s.all_constraints_buf(s.n_eq + j_in, k));
                 violation_sum += slack * slack;
             }
@@ -728,8 +729,8 @@ struct nlopt_faithful_policy
         // This makes the returned minimizer the best FEASIBLE point the
         // solver evaluated (or the least-infeasible point if none is
         // feasible), and it never regresses across generations.
-        const double feas_tol = options.feasibility_gate;
-        const auto better_than_best = [&](double f, double v) {
+        const Scalar feas_tol = options.feasibility_gate;
+        const auto better_than_best = [&](Scalar f, Scalar v) {
             const bool cand_feasible = (v <= feas_tol);
             const bool best_feasible = (s.best_ever_violation <= feas_tol);
             if(cand_feasible != best_feasible)
@@ -756,7 +757,7 @@ struct nlopt_faithful_policy
         // it changed this generation.
         if(best_updated && n_c > 0)
         {
-            Eigen::VectorXd c(n_c);
+            Eigen::VectorX<Scalar> c(n_c);
             s.problem->constraints(s.x, c);
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
@@ -780,11 +781,11 @@ struct nlopt_faithful_policy
         //     convergence policy lacked step_tolerance_criterion or its
         //     threshold is std::nullopt, the predicate silently falls
         //     back to the bound-relative form using `ratio` (fail-safe).
-        const double mean_sigma = s.sigmas.leftCols(mu).mean();
-        const double grad_proxy =
-            mean_sigma * std::sqrt(static_cast<double>(n));
+        const Scalar mean_sigma = s.sigmas.leftCols(mu).mean();
+        const Scalar grad_proxy =
+            mean_sigma * std::sqrt(static_cast<Scalar>(n));
         const bool improved = (s.best_ever_value < prev_best_ever_value);
-        const double objective_change = improved
+        const Scalar objective_change = improved
             ? (s.best_ever_value - prev_best_ever_value)
             : mean_sigma;
 
@@ -796,16 +797,16 @@ struct nlopt_faithful_policy
         const bool feasible =
             (s.best_ever_violation <= options.feasibility_gate);
 
-        const double collapse_ratio =
-            options.sigma_collapse_ratio.value_or(1e-9);
+        const Scalar collapse_ratio =
+            options.sigma_collapse_ratio.value_or(isres_defaults<Scalar>::sigma_collapse_ratio);
 
         bool collapsed;
         if(options.sigma_collapse_form
            == sigma_collapse_form_type::xtol_coupled)
         {
-            const double threshold_value =
+            const Scalar threshold_value =
                 s.convergence_xtol_threshold.value_or(
-                    std::numeric_limits<double>::quiet_NaN());
+                    std::numeric_limits<Scalar>::quiet_NaN());
             collapsed = detail::sigma_collapsed_xtol_coupled(
                 s, threshold_value, collapse_ratio, n,
                 s.lower, s.upper);
@@ -820,7 +821,7 @@ struct nlopt_faithful_policy
         if(collapsed && feasible)
             emitted_status = solver_status::ftol_reached;
 
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value = s.objective_value,
             .gradient_norm = grad_proxy,
             .step_size = mean_sigma,
@@ -832,7 +833,7 @@ struct nlopt_faithful_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
         const int n_c = s.n_eq + s.n_ineq;
@@ -840,10 +841,10 @@ struct nlopt_faithful_policy
         // Re-initialize population uniformly, with the same explicit
         // x0-centered finite seeding fallback for infinite bounds as
         // init() (see the init() sweep note for the half-width choice).
-        constexpr double seed_fallback_half_width = 2.0;
-        constexpr double inf = std::numeric_limits<double>::infinity();
-        Eigen::Vector<double, N> seed_lo = s.lower;
-        Eigen::Vector<double, N> seed_hi = s.upper;
+        constexpr Scalar seed_fallback_half_width = Scalar(2.0);
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        Eigen::Vector<Scalar, N> seed_lo = s.lower;
+        Eigen::Vector<Scalar, N> seed_hi = s.upper;
         for(int i = 0; i < n; ++i)
         {
             if(!(s.lower(i) > -inf))
@@ -868,12 +869,12 @@ struct nlopt_faithful_policy
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
-        s.best_ever_violation = std::numeric_limits<double>::infinity();
+        s.best_ever_violation = std::numeric_limits<Scalar>::infinity();
         s.generation = 0;
 
         if(n_c > 0)
         {
-            Eigen::VectorXd c(n_c);
+            Eigen::VectorX<Scalar> c(n_c);
             s.problem->constraints(s.x, c);
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
@@ -881,7 +882,7 @@ struct nlopt_faithful_policy
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset(s, x0);
     }

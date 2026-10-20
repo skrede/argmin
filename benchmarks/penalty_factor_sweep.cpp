@@ -88,6 +88,8 @@ std::string_view status_name(argmin::solver_status s)
         case solver_status::objective_stalled:          return "objective_stalled";
         case solver_status::time_limit_reached:         return "time_limit_reached";
         case solver_status::aborted:                    return "aborted";
+        case solver_status::invalid_problem:            return "invalid_problem";
+        case solver_status::line_search_failed:         return "line_search_failed";
     }
     return "unknown";
 }
@@ -427,28 +429,28 @@ int main(int argc, char** argv)
     // gets 500 (long shallow ridge on the joint slack-augmented primal);
     // the rest get 200.
     run_cell_block<
-        tr_sqp_policy<hs026_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs026_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs026_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs026_t::problem_dimension, sqp_mode::fast>>(
         "hs026", static_cast<double>(p026.optimal_value()), 200, p026, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs028_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs028_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs028_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs028_t::problem_dimension, sqp_mode::fast>>(
         "hs028", static_cast<double>(p028.optimal_value()), 500, p028, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs043_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs043_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs043_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs043_t::problem_dimension, sqp_mode::fast>>(
         "hs043", static_cast<double>(p043.optimal_value()), 200, p043, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs071_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs071_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs071_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs071_t::problem_dimension, sqp_mode::fast>>(
         "hs071", static_cast<double>(p071.optimal_value()), 200, p071, blocks);
 
     run_cell_block<
-        tr_sqp_policy<hs076_t::problem_dimension, sqp_mode::accurate>,
-        tr_sqp_policy<hs076_t::problem_dimension, sqp_mode::fast>>(
+        tr_sqp_policy<double, hs076_t::problem_dimension, sqp_mode::accurate>,
+        tr_sqp_policy<double, hs076_t::problem_dimension, sqp_mode::fast>>(
         "hs076", static_cast<double>(p076.optimal_value()), 200, p076, blocks);
 
     // Print the sweep table.

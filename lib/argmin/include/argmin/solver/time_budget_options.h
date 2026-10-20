@@ -29,7 +29,7 @@ namespace argmin
 //                        this milestone -- K is the smallest cadence keeping
 //                        a steady_clock::now() read under ~1% of the cheapest
 //                        representative policy step.
-template <typename Convergence = default_convergence>
+template <typename Convergence = default_convergence<>>
 struct time_budget_options
 {
     using convergence_type = Convergence;

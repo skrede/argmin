@@ -1,8 +1,8 @@
 #include "argmin/options/qp_options.h"
-#include "argmin/options/cmaes_options.h"
 #include "argmin/options/asymptote_options.h"
 #include "argmin/options/trust_region_options.h"
 #include "argmin/options/mma_subproblem_options.h"
+#include "argmin/options/cmaes_detection_options.h"
 #include "argmin/solver/cmaes_policy.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/restarting_policy.h"
@@ -25,7 +25,7 @@ using namespace argmin;
 
 TEST_CASE("asymptote_options exposes literature defaults directly", "[options]")
 {
-    asymptote_options o{};
+    asymptote_options<> o{};
     static_assert(std::is_same_v<double, decltype(o.minimum_distance_fraction)>);
     static_assert(std::is_same_v<double, decltype(o.maximum_distance_fraction)>);
     CHECK(o.minimum_distance_fraction == 0.01);
@@ -34,7 +34,7 @@ TEST_CASE("asymptote_options exposes literature defaults directly", "[options]")
 
 TEST_CASE("trust_region_options exposes literature defaults directly", "[options]")
 {
-    trust_region_options o{};
+    trust_region_options<> o{};
     static_assert(std::is_same_v<double, decltype(o.eta_good)>);
     static_assert(std::is_same_v<double, decltype(o.geometry_factor)>);
     CHECK(o.eta_good == 0.7);
@@ -47,7 +47,7 @@ TEST_CASE("trust_region_options exposes literature defaults directly", "[options
 
 TEST_CASE("mma_subproblem_options exposes literature defaults directly", "[options]")
 {
-    mma_subproblem_options o{};
+    mma_subproblem_options<> o{};
     static_assert(std::is_same_v<std::uint16_t, decltype(o.dual_max_iterations)>);
     static_assert(std::is_same_v<double, decltype(o.dual_tolerance)>);
     static_assert(std::is_same_v<double, decltype(o.backtrack_factor)>);
@@ -56,9 +56,9 @@ TEST_CASE("mma_subproblem_options exposes literature defaults directly", "[optio
     CHECK(o.backtrack_factor == 0.95);
 }
 
-TEST_CASE("cmaes_options exposes literature defaults directly", "[options]")
+TEST_CASE("cmaes_detection_options exposes literature defaults directly", "[options]")
 {
-    cmaes_options o{};
+    cmaes_detection_options<> o{};
     static_assert(std::is_same_v<double, decltype(o.sigma_collapse_threshold)>);
     static_assert(std::is_same_v<double, decltype(o.condition_number_limit)>);
     static_assert(std::is_same_v<double, decltype(o.objective_value_tolerance)>);
@@ -71,8 +71,8 @@ TEST_CASE("cmaes_options exposes literature defaults directly", "[options]")
 
 TEST_CASE("qp_options is direct-value (reference shape)", "[options]")
 {
-    qp_options o{};
-    static_assert(std::is_same_v<std::uint16_t, decltype(o.max_iterations)>);
+    qp_options<> o{};
+    static_assert(std::is_same_v<std::uint32_t, decltype(o.max_iterations)>);
     static_assert(std::is_same_v<double, decltype(o.tolerance)>);
     CHECK(o.max_iterations == 200);
     CHECK(o.tolerance == 1e-12);

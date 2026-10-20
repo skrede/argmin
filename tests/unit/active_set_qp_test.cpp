@@ -9,6 +9,8 @@
 
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <utility>
 
 using Catch::Approx;
 using namespace argmin;
@@ -155,11 +157,14 @@ TEST_CASE("solve_qp mixed equality inequality box", "[qp]")
     CHECK(result.x[2] == Approx(1.0 / 3.0).margin(1e-6));
 }
 
-TEST_CASE("solve_qp infeasible detected", "[qp]")
+TEST_CASE("solve_qp does not return optimal for contradictory inequalities", "[qp]")
 {
-    // x >= 1 and x <= 0 (contradictory) -- infeasibility manifests as max_iterations.
-    // Starting from x0 = 0.5 which violates x >= 1.
-    // With contradictory constraints the solver cycles or hits iteration limit.
+    // x >= 1 and -x >= 0 have no common point. From x0 = 0.5, which violates both rows by 0.5,
+    // the unconstrained step -0.5 blocks on x >= 1 at alpha = 0, that row then fills the single
+    // dimension with multiplier g = 0.5 >= 0, and the loop reaches its terminal branch at x = 0.5,
+    // which the terminal verification rejects. An infeasible status needs a certificate, and the
+    // only one this solver builds is for inconsistent equality rows; inconsistent inequalities
+    // carry none, so the honest outcome is the bounded-iteration status.
     Eigen::MatrixXd G = Eigen::MatrixXd::Identity(1, 1);
     Eigen::VectorXd d{{0.0}};
     Eigen::MatrixXd A_eq(0, 1);
@@ -169,19 +174,11 @@ TEST_CASE("solve_qp infeasible detected", "[qp]")
     Eigen::VectorXd b_ineq(2);
     b_ineq << 1.0, 0.0;  // x >= 1 and -x >= 0 => x <= 0
     Eigen::VectorXd x0{{0.5}};
-    qp_options opts{.max_iterations = 50};
+    qp_options<> opts{.max_iterations = 50};
 
     auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
 
-    // Infeasibility should manifest as max_iterations or suboptimal result
-    CHECK((result.status == qp_status::max_iterations ||
-           result.status == qp_status::optimal));
-    // If "optimal", the constraints cannot both be satisfied
-    if(result.status == qp_status::optimal)
-    {
-        bool feasible = (result.x[0] >= 1.0 - 1e-6) && (result.x[0] <= 1e-6);
-        CHECK_FALSE(feasible);
-    }
+    CHECK(result.status == qp_status::max_iterations);
 }
 
 TEST_CASE("solve_qp degenerate weakly active", "[qp]")
@@ -372,7 +369,7 @@ TEST_CASE("solve_qp returns computed multipliers on max-iteration exit",
     Eigen::VectorXd b_ineq(5);
     b_ineq << -2.0, -6.0, -2.0, 0.0, 0.0;
     Eigen::VectorXd x0{{2.0, 0.0}};
-    qp_options opts{.max_iterations = 1};
+    qp_options<> opts{.max_iterations = 1};
 
     auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
 
@@ -467,13 +464,208 @@ TEST_CASE("solve_qp terminates on a redundant-constraint degenerate vertex",
               0.0, 5.0;
     Eigen::VectorXd b_ineq{{0.0, 0.0, 0.0, 0.0}};
     Eigen::VectorXd x0{{0.0, 0.0}};
-    qp_options opts{.max_iterations = 50};
+    qp_options<> opts{.max_iterations = 50};
 
     auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
 
     CHECK(result.status == qp_status::optimal);
     CHECK(result.x[0] == Approx(0.0).margin(1e-8));
     CHECK(result.x[1] == Approx(0.0).margin(1e-8));
+}
+
+TEST_CASE("solve_qp projects an equality-infeasible start onto the equality manifold",
+          "[qp][qp_rank]")
+{
+    // Shared objective: min 0.5 ||x||^2 + d^T x with d = (-1, 0, 1), started at x0 = 0. Under
+    // x1 + x2 + x3 = 3, stationarity x + d = t (1, 1, 1) gives x = (1 + t, t, t - 1) and the row
+    // gives 3t = 3, so x* = (2, 1, 0) with multiplier 1. Without a projection every step stays in
+    // the row's null space through x0 and the loop ends at -d = (1, 0, -1), where A_eq x = 0.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(3, 3);
+    Eigen::VectorXd d{{-1.0, 0.0, 1.0}};
+    Eigen::MatrixXd A_ineq(0, 3);
+    Eigen::VectorXd b_ineq(0);
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(3);
+
+    SECTION("a single equality row")
+    {
+        Eigen::MatrixXd A_eq(1, 3);
+        A_eq << 1.0, 1.0, 1.0;
+        Eigen::VectorXd b_eq{{3.0}};
+        auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+        REQUIRE(result.status == qp_status::optimal);
+        CHECK((A_eq * result.x - b_eq).cwiseAbs().maxCoeff() <= 1e-12 * (1.0 + 3.0));
+        CHECK(result.x[0] == Approx(2.0).margin(1e-10));
+        CHECK(result.x[1] == Approx(1.0).margin(1e-10));
+        CHECK(result.x[2] == Approx(0.0).margin(1e-10));
+        CHECK(result.lambda[0] == Approx(1.0).margin(1e-10));
+    }
+
+    SECTION("duplicated equality rows")
+    {
+        // The row stated twice has rank 1 but is consistent, so the rank-truncated correction
+        // drops the duplicate and the optimum is the single-row one.
+        Eigen::MatrixXd A_eq(2, 3);
+        A_eq << 1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0;
+        Eigen::VectorXd b_eq{{3.0, 3.0}};
+        auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+        REQUIRE(result.status == qp_status::optimal);
+        CHECK((A_eq * result.x - b_eq).cwiseAbs().maxCoeff() <= 1e-12 * (1.0 + 3.0));
+        CHECK(result.x[0] == Approx(2.0).margin(1e-10));
+        CHECK(result.x[1] == Approx(1.0).margin(1e-10));
+        CHECK(result.x[2] == Approx(0.0).margin(1e-10));
+    }
+
+    SECTION("a rank-zero equality row with a zero right-hand side")
+    {
+        // 0^T x = 0 holds everywhere, so nothing is projected and the solution is -d.
+        Eigen::MatrixXd A_eq = Eigen::MatrixXd::Zero(1, 3);
+        Eigen::VectorXd b_eq{{0.0}};
+        auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+        REQUIRE(result.status == qp_status::optimal);
+        CHECK(result.x[0] == Approx(1.0).margin(1e-10));
+        CHECK(result.x[1] == Approx(0.0).margin(1e-10));
+        CHECK(result.x[2] == Approx(-1.0).margin(1e-10));
+    }
+
+    SECTION("an inequality active only at the projected point")
+    {
+        // min 0.5 ||x||^2 + x2 s.t. x1 = 1 and x1 + x2 >= 1, from x0 = (0, 0), where the
+        // inequality is violated by 1. The projection lands on (1, 0), where it is active. With
+        // x1 = 1 the row reads x2 >= 0 against a free minimizer x2 = -1, so x* = (1, 0), and
+        // stationarity (1, 1) = lambda_eq (1, 0) + lambda_in (1, 1) gives lambda = (0, 1).
+        // Classified at the projected point both rows start in the working set and the first
+        // iteration terminates; classified at x0 the inequality enters only after a zero-length
+        // blocked step, one iteration later.
+        Eigen::MatrixXd G2 = Eigen::MatrixXd::Identity(2, 2);
+        Eigen::VectorXd d2{{0.0, 1.0}};
+        Eigen::MatrixXd A_eq(1, 2);
+        A_eq << 1.0, 0.0;
+        Eigen::VectorXd b_eq{{1.0}};
+        Eigen::MatrixXd A_in(1, 2);
+        A_in << 1.0, 1.0;
+        Eigen::VectorXd b_in{{1.0}};
+        auto result = solve_qp(G2, d2, A_eq, b_eq, A_in, b_in, Eigen::VectorXd::Zero(2).eval());
+        REQUIRE(result.status == qp_status::optimal);
+        CHECK(result.iterations == 0);
+        CHECK(result.x[0] == Approx(1.0).margin(1e-12));
+        CHECK(result.x[1] == Approx(0.0).margin(1e-12));
+        CHECK(result.lambda[0] == Approx(0.0).margin(1e-12));
+        CHECK(result.lambda[1] == Approx(1.0).margin(1e-12));
+    }
+}
+
+TEST_CASE("solve_qp reports infeasible on contradictory equality rows", "[qp][qp_rank]")
+{
+    // x1 + x2 + x3 = 3 and x1 + x2 + x3 = 4 have identical rows and different right-hand sides:
+    // (3, 4) is not in the range of A_eq = (1, 1)^T (1, 1, 1), so a rank-1 correction satisfies at
+    // most one row and leaves a residual of 1 against a bound of tol (1 + 4) = 5e-12. A zero row
+    // with a nonzero right-hand side is the rank-zero instance: its range is empty.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(3, 3);
+    Eigen::VectorXd d{{-1.0, 0.0, 1.0}};
+    Eigen::MatrixXd A_ineq(0, 3);
+    Eigen::VectorXd b_ineq(0);
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(3);
+
+    SECTION("duplicated rows with different right-hand sides")
+    {
+        Eigen::MatrixXd A_eq(2, 3);
+        A_eq << 1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0;
+        Eigen::VectorXd b_eq{{3.0, 4.0}};
+        auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+        CHECK(result.status == qp_status::infeasible);
+        CHECK(result.iterations == 0);
+        REQUIRE(result.lambda.size() == 2);
+        CHECK(result.lambda.isZero());
+    }
+
+    SECTION("a rank-zero row with a nonzero right-hand side")
+    {
+        Eigen::MatrixXd A_eq = Eigen::MatrixXd::Zero(1, 3);
+        Eigen::VectorXd b_eq{{1.0}};
+        auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+        CHECK(result.status == qp_status::infeasible);
+        CHECK(result.iterations == 0);
+    }
+}
+
+TEST_CASE("solve_qp does not return optimal for an infeasible terminal iterate", "[qp][qp_kkt]")
+{
+    // Hand-built terminal states in the free function's row layout (equality x1 = 1 first, then
+    // inequality x2 >= 1), verified at the pinned floor sqrt(epsilon). The reference state
+    // x = (1, 1), g = (-1, 1), lambda = (-1, 1) is feasible and stationary, and its negative
+    // multiplier sits on the equality row, whose sign is free, so it satisfies all three conditions.
+    const double tol = std::sqrt(std::numeric_limits<double>::epsilon());
+    const Eigen::MatrixXd A = Eigen::MatrixXd::Identity(2, 2);
+    const Eigen::VectorXd b{{1.0, 1.0}};
+    const Eigen::VectorXd x{{1.0, 1.0}};
+    Eigen::VectorXd g{{-1.0, 1.0}};
+    Eigen::VectorXd lambda{{-1.0, 1.0}};
+    Eigen::VectorXd scratch(2);
+    const auto holds = [&] { return terminal_kkt_holds(A, b, x, g, lambda, 1, 2, tol, scratch); };
+    REQUIRE(holds());
+
+    SECTION("primal feasibility")
+    {
+        // x >= 2 alone, from x0 = 0: the gradient there is zero, the working set is empty, so the
+        // first iteration takes no step and reaches the terminal branch at x = 0, which violates
+        // the row by 2. The iterate is reported as a bounded-iteration outcome, not optimal.
+        Eigen::MatrixXd G = Eigen::MatrixXd::Identity(1, 1);
+        Eigen::VectorXd d{{0.0}};
+        Eigen::MatrixXd A_eq(0, 1);
+        Eigen::VectorXd b_eq(0);
+        Eigen::MatrixXd A_in{{1.0}};
+        Eigen::VectorXd b_in{{2.0}};
+        auto result = solve_qp(G, d, A_eq, b_eq, A_in, b_in, Eigen::VectorXd::Zero(1).eval());
+        CHECK(result.status == qp_status::max_iterations);
+        CHECK(result.iterations == 0);
+        CHECK(result.x[0] == 0.0);
+    }
+
+    SECTION("dual sign")
+    {
+        // A multiplier of -1 on the inequality row against a floor of -tol (1 + 1). The leaving
+        // rule already rejects any multiplier below -opts.tolerance and the floor is never tighter,
+        // so this state is reachable only by hand.
+        g << -1.0, -1.0;
+        lambda << -1.0, -1.0;
+        CHECK_FALSE(holds());
+    }
+
+    SECTION("stationarity")
+    {
+        // g - A^T lambda = (0, 1e-3), far above tol (1 + 1.001); 1e-10 stays inside the bound.
+        g << -1.0, 1.001;
+        CHECK_FALSE(holds());
+        g << -1.0, 1.0 + 1e-10;
+        CHECK(holds());
+    }
+
+    SECTION("a correct terminal on an ill-conditioned working set")
+    {
+        // The equalities x1 = 1 and x1 + delta x2 = 1 + delta with delta = 2e-6 fix x1 = x2 = 1
+        // and x3 = 0 minimizes 0.5 ||x||^2 - x1 over the free coordinate, so g = (0, 1, 0) and
+        // A^T lambda = g gives lambda = (-1 / delta, 1 / delta). The stationarity residual carries
+        // rounding of order epsilon / delta, above the 1e-12 inner tolerance but far below the
+        // sqrt(epsilon) floor. Started at the solution, so no projection runs.
+        const double delta = 2e-6;
+        Eigen::MatrixXd G = Eigen::MatrixXd::Identity(3, 3);
+        Eigen::VectorXd d{{-1.0, 0.0, 0.0}};
+        Eigen::MatrixXd A_eq(2, 3);
+        A_eq << 1.0, 0.0, 0.0,
+                1.0, delta, 0.0;
+        Eigen::VectorXd b_eq{{1.0, 1.0 + delta}};
+        Eigen::MatrixXd A_in(0, 3);
+        Eigen::VectorXd b_in(0);
+        auto result = solve_qp(G, d, A_eq, b_eq, A_in, b_in, Eigen::VectorXd{{1.0, 1.0, 0.0}});
+        REQUIRE(result.status == qp_status::optimal);
+        CHECK(result.x[0] == Approx(1.0).margin(1e-10));
+        CHECK(result.x[1] == Approx(1.0).margin(1e-10));
+        CHECK(result.x[2] == Approx(0.0).margin(1e-10));
+        CHECK(result.lambda[1] == Approx(1.0 / delta).epsilon(1e-6));
+        CHECK(result.lambda[0] == Approx(-1.0 / delta).epsilon(1e-6));
+    }
 }
 
 // Givens QR update tests.
@@ -641,8 +833,8 @@ TEST_CASE("active_set_qp_solver projects infeasible iter-0 onto equality manifol
     // This fixture instantiates the stateful active_set_qp_solver
     // class directly and calls its public solve() member -- the same
     // code path consumed by the line-search SQP policies. The free
-    // function solve_qp(...) is a separate, independent code path and
-    // is not exercised here.
+    // function solve_qp(...) is a separate implementation that carries
+    // its own projection, covered by the solve_qp projection fixtures.
     //
     // Closed form: A_eq = I_2, b_eq = (1,1), G = I_2, d = 0, n_eq = n = 2.
     // The equality system fully determines x:
@@ -667,4 +859,373 @@ TEST_CASE("active_set_qp_solver projects infeasible iter-0 onto equality manifol
     CHECK((A_eq * result.x - b_eq).cwiseAbs().maxCoeff() < 1e-8);
     CHECK(result.x[0] == Approx(1.0).margin(1e-10));
     CHECK(result.x[1] == Approx(1.0).margin(1e-10));
+}
+
+TEST_CASE("active_set_qp_solver escalates to a pivoted projection on duplicated equality rows",
+          "[qp][qp_rank]")
+{
+    // min 0.5 ||x||^2 + d^T x with d = (-1, 0, 1), subject to x1 + x2 + x3 = 3
+    // stated twice. The equality block has rank 1 but is consistent, so the
+    // duplicate row changes nothing: stationarity x + d = t (1, 1, 1) gives
+    // x = (1 + t, t, t - 1), and the constraint gives 3t = 3, so t = 1 and
+    // x* = (2, 1, 0). From x0 = 0 the residual (3, 3) forces the phase-1
+    // projection, whose unpivoted factor has an (exactly or nearly) zero
+    // second diagonal entry.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(3, 3);
+    Eigen::VectorXd d{{-1.0, 0.0, 1.0}};
+    Eigen::MatrixXd A_eq(2, 3);
+    A_eq << 1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0;
+    Eigen::VectorXd b_eq{{3.0, 3.0}};
+    Eigen::MatrixXd A_ineq(0, 3);
+    Eigen::VectorXd b_ineq(0);
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(3);
+
+    active_set_qp_solver<double> solver(3, 2);
+    auto result = solver.solve(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    REQUIRE(result.status == qp_status::optimal);
+    CHECK((A_eq * result.x - b_eq).cwiseAbs().maxCoeff() < 1e-12);
+    CHECK(result.x[0] == Approx(2.0).margin(1e-10));
+    CHECK(result.x[1] == Approx(1.0).margin(1e-10));
+    CHECK(result.x[2] == Approx(0.0).margin(1e-10));
+}
+
+TEST_CASE("active_set_qp_solver reports infeasible on contradictory equality rows",
+          "[qp][qp_rank]")
+{
+    // x1 + x2 + x3 = 3 and x1 + x2 + x3 = 4 have identical rows and different
+    // right-hand sides: (3, 4) is not in the range of A_eq = (1, 1)^T (1, 1, 1),
+    // so no x satisfies both. Any minimum-norm correction satisfies at most one
+    // row, leaving a residual of 1 against a bound of tol (1 + 4) = 5e-12. The
+    // solver must report infeasible from the projection, before any active-set
+    // iteration, instead of optimizing over one of the two rows.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(3, 3);
+    Eigen::VectorXd d{{-1.0, 0.0, 1.0}};
+    Eigen::MatrixXd A_eq(2, 3);
+    A_eq << 1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0;
+    Eigen::VectorXd b_eq{{3.0, 4.0}};
+    Eigen::MatrixXd A_ineq(0, 3);
+    Eigen::VectorXd b_ineq(0);
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(3);
+
+    active_set_qp_solver<double> solver(3, 2);
+    auto result = solver.solve(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+
+    CHECK(result.status == qp_status::infeasible);
+    CHECK(result.iterations == 0);
+    REQUIRE(result.lambda.size() == 2);
+    CHECK(result.lambda.isZero());
+}
+
+TEST_CASE("active_set_qp_solver handles an empty and a rank-zero equality block",
+          "[qp][qp_rank]")
+{
+    // Shared objective: min 0.5 ||x||^2 + d^T x with d = (-1, 0, 1), whose
+    // unconstrained minimizer is -d = (1, 0, -1).
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(3, 3);
+    Eigen::VectorXd d{{-1.0, 0.0, 1.0}};
+    Eigen::MatrixXd A_ineq(0, 3);
+    Eigen::VectorXd b_ineq(0);
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(3);
+
+    SECTION("no equality rows")
+    {
+        // Only x1 >= 2, started feasible at (3, 0, 0). It cuts off the
+        // unconstrained minimizer, so x* = (2, 0, -1) with multiplier
+        // g1 = x1* - 1 = 1 on the active row.
+        Eigen::MatrixXd A_eq(0, 3);
+        Eigen::VectorXd b_eq(0);
+        Eigen::MatrixXd A_in(1, 3);
+        A_in << 1.0, 0.0, 0.0;
+        Eigen::VectorXd b_in{{2.0}};
+        active_set_qp_solver<double> solver(3, 1);
+        auto result = solver.solve(G, d, A_eq, b_eq, A_in, b_in, Eigen::VectorXd{{3.0, 0.0, 0.0}});
+        REQUIRE(result.status == qp_status::optimal);
+        CHECK(result.x[0] == Approx(2.0).margin(1e-10));
+        CHECK(result.x[1] == Approx(0.0).margin(1e-10));
+        CHECK(result.x[2] == Approx(-1.0).margin(1e-10));
+        CHECK(result.lambda[0] == Approx(1.0).margin(1e-10));
+    }
+
+    SECTION("a rank-zero equality row with a zero right-hand side")
+    {
+        // 0^T x = 0 holds for every x, so the row constrains nothing and the
+        // solution is the unconstrained minimizer (1, 0, -1).
+        Eigen::MatrixXd A_eq = Eigen::MatrixXd::Zero(1, 3);
+        Eigen::VectorXd b_eq{{0.0}};
+        active_set_qp_solver<double> solver(3, 1);
+        auto result = solver.solve(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+        REQUIRE(result.status == qp_status::optimal);
+        CHECK(result.x[0] == Approx(1.0).margin(1e-10));
+        CHECK(result.x[1] == Approx(0.0).margin(1e-10));
+        CHECK(result.x[2] == Approx(-1.0).margin(1e-10));
+    }
+
+    SECTION("a rank-zero equality row with a nonzero right-hand side")
+    {
+        // 0^T x = 1 holds for no x: the residual 1 lies outside the (empty)
+        // range of A_eq, which is a demonstration of infeasibility.
+        Eigen::MatrixXd A_eq = Eigen::MatrixXd::Zero(1, 3);
+        Eigen::VectorXd b_eq{{1.0}};
+        active_set_qp_solver<double> solver(3, 1);
+        auto result = solver.solve(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+        CHECK(result.status == qp_status::infeasible);
+        CHECK(result.iterations == 0);
+    }
+
+    SECTION("a single equality row")
+    {
+        // x1 + x2 + x3 = 3 alone: the same stationarity argument as the
+        // duplicated-row case gives x* = (2, 1, 0) with multiplier 1.
+        Eigen::MatrixXd A_eq(1, 3);
+        A_eq << 1.0, 1.0, 1.0;
+        Eigen::VectorXd b_eq{{3.0}};
+        active_set_qp_solver<double> solver(3, 1);
+        auto result = solver.solve(G, d, A_eq, b_eq, A_ineq, b_ineq, x0);
+        REQUIRE(result.status == qp_status::optimal);
+        CHECK(result.x[0] == Approx(2.0).margin(1e-10));
+        CHECK(result.x[1] == Approx(1.0).margin(1e-10));
+        CHECK(result.x[2] == Approx(0.0).margin(1e-10));
+        CHECK(result.lambda[0] == Approx(1.0).margin(1e-10));
+    }
+
+    SECTION("a zero-length decision vector")
+    {
+        // With no variables and no rows the empty point is trivially optimal.
+        Eigen::MatrixXd G0(0, 0);
+        Eigen::VectorXd e(0);
+        Eigen::MatrixXd A0(0, 0);
+        active_set_qp_solver<double> solver(0, 0);
+        auto result = solver.solve(G0, e, A0, e, A0, e, e);
+        CHECK(result.status == qp_status::optimal);
+        CHECK(result.x.size() == 0);
+        CHECK(result.lambda.size() == 0);
+    }
+}
+
+TEST_CASE("active_set_qp_solver does not return optimal for an infeasible terminal iterate",
+          "[qp][qp_kkt]")
+{
+    // Hand-built terminal states for min 0.5 ||x||^2 + d^T x s.t. x1 + x2 >= 1, verified at the
+    // pinned floor sqrt(epsilon). The reference state x = (0.5, 0.5), lambda = 0.5, g = (0.5, 0.5)
+    // satisfies all three conditions exactly; each section breaks one of them.
+    const double tol = std::sqrt(std::numeric_limits<double>::epsilon());
+    Eigen::MatrixXd A(1, 2);
+    A << 1.0, 1.0;
+    const Eigen::VectorXd b{{1.0}};
+    Eigen::VectorXd x{{0.5, 0.5}};
+    Eigen::VectorXd g{{0.5, 0.5}};
+    Eigen::VectorXd lambda{{0.5}};
+    Eigen::VectorXd scratch(2);
+    const auto holds = [&] { return terminal_kkt_holds(A, b, x, g, lambda, 0, 1, tol, scratch); };
+    REQUIRE(holds());
+
+    SECTION("primal feasibility")
+    {
+        // x = (0.4, 0.4) violates the row by 0.2 against a bound of tol (1 + 0.8 + 1).
+        x << 0.4, 0.4;
+        g << 0.4, 0.4;
+        lambda << 0.0;
+        CHECK_FALSE(holds());
+
+        // Through the solver: x >= 1 and -x >= 0 from x0 = 0.5, where both rows are violated by
+        // 0.5. The first step blocks on x >= 1 at alpha = 0, the working set {x >= 1} then
+        // fills the single dimension, p = 0, and its multiplier g / 1 = 0.5 is nonnegative, so
+        // the loop reaches its terminal branch at x = 0.5 with both rows still violated. That
+        // iterate has no infeasibility certificate, so it is reported as a bounded-iteration
+        // outcome rather than optimal or infeasible.
+        Eigen::MatrixXd G = Eigen::MatrixXd::Identity(1, 1);
+        Eigen::VectorXd d{{0.0}};
+        Eigen::MatrixXd A_eq(0, 1);
+        Eigen::VectorXd b_eq(0);
+        Eigen::MatrixXd A_in(2, 1);
+        A_in << 1.0, -1.0;
+        Eigen::VectorXd b_in{{1.0, 0.0}};
+        active_set_qp_solver<double> solver(1, 2);
+        auto result = solver.solve(G, d, A_eq, b_eq, A_in, b_in, Eigen::VectorXd{{0.5}});
+        CHECK(result.status == qp_status::max_iterations);
+        CHECK(result.x[0] == Approx(0.5).margin(1e-12));
+    }
+
+    SECTION("dual sign")
+    {
+        // Stationary and feasible, but the inequality multiplier is -0.5 against a floor of
+        // -tol (1 + 0.5): the point is a constrained maximizer of the linearization, not a
+        // minimizer. The solver's own leaving rule already rejects any multiplier below
+        // -opts.tolerance, and the floor is never tighter than that, so this state is only
+        // reachable by hand.
+        g << -0.5, -0.5;
+        lambda << -0.5;
+        CHECK_FALSE(holds());
+    }
+
+    SECTION("stationarity")
+    {
+        // g - A^T lambda = (0, 1e-3), far above tol (1 + 0.5001); a perturbation of 1e-10
+        // stays inside that relative bound.
+        g << 0.5, 0.501;
+        CHECK_FALSE(holds());
+        g << 0.5, 0.5 + 1e-10;
+        CHECK(holds());
+    }
+
+    SECTION("a correct terminal on an ill-conditioned working set")
+    {
+        // Equalities x1 = 1 and x1 + delta x2 = 1 + delta with delta = 2e-6 (condition number
+        // about 1e6), objective 0.5 ||x||^2 - x1. The equalities fix x1 = x2 = 1, x3 = 0
+        // minimizes the free coordinate, and g = x + d = (0, 1, 0). Stationarity
+        // A^T lambda = g gives delta lambda2 = 1 and lambda1 = -lambda2, so lambda = (-5e5, 5e5):
+        // multipliers of order 1 / delta cancel to an order-one gradient, and the computed
+        // stationarity residual carries rounding of order epsilon / delta, above the 1e-12
+        // inner tolerance but far below the sqrt(epsilon) floor. Started at the solution, so no
+        // projection runs and the terminal is reached on the first iteration.
+        const double delta = 2e-6;
+        Eigen::MatrixXd G = Eigen::MatrixXd::Identity(3, 3);
+        Eigen::VectorXd d{{-1.0, 0.0, 0.0}};
+        Eigen::MatrixXd A_eq(2, 3);
+        A_eq << 1.0, 0.0, 0.0,
+                1.0, delta, 0.0;
+        Eigen::VectorXd b_eq{{1.0, 1.0 + delta}};
+        Eigen::MatrixXd A_in(0, 3);
+        Eigen::VectorXd b_in(0);
+        active_set_qp_solver<double> solver(3, 2);
+        auto result = solver.solve(G, d, A_eq, b_eq, A_in, b_in, Eigen::VectorXd{{1.0, 1.0, 0.0}});
+        REQUIRE(result.status == qp_status::optimal);
+        CHECK(result.x[0] == Approx(1.0).margin(1e-10));
+        CHECK(result.x[1] == Approx(1.0).margin(1e-10));
+        CHECK(result.x[2] == Approx(0.0).margin(1e-10));
+        CHECK(result.lambda[1] == Approx(1.0 / delta).epsilon(1e-6));
+        CHECK(result.lambda[0] == Approx(-1.0 / delta).epsilon(1e-6));
+    }
+}
+
+TEST_CASE("active-set projection judges a large start by its backward error", "[qp][qp_rank]")
+{
+    // One consistent row through the origin, so the minimizer of 0.5 ||x||^2 is x = 0. From a
+    // start of magnitude s the projected residual is rounding of order epsilon * s, which an
+    // absolute tolerance would read as an inconsistent system.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(3, 3);
+    Eigen::VectorXd d = Eigen::VectorXd::Zero(3);
+    Eigen::MatrixXd A_eq(1, 3);
+    A_eq << 0.3, 0.7, 1.1;
+    const Eigen::VectorXd b_eq{{0.0}};
+    Eigen::MatrixXd A_in(0, 3);
+    Eigen::VectorXd b_in(0);
+    const Eigen::VectorXd direction{{1.37, -0.91, 0.53}};
+    const auto solve_both = [&](double scale) {
+        active_set_qp_solver<double> solver(3, 1);
+        const Eigen::VectorXd x0 = scale * direction;
+        return std::pair{solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0),
+                         solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0)};
+    };
+
+    for(const double scale : {1e5, 1e6})
+    {
+        const auto [stateful, free] = solve_both(scale);
+        for(const auto& result : {stateful, free})
+        {
+            CHECK(result.status == qp_status::optimal);
+            CHECK(result.x.lpNorm<Eigen::Infinity>() < 1e-12 * scale);
+        }
+    }
+
+    // At 1e8 the terminal check still bounds the residual by the landed x ~ 0 rather than the
+    // cancelled start, so the correct point is reported unverified, never infeasible.
+    const auto [stateful, free] = solve_both(1e8);
+    CHECK(stateful.status == qp_status::max_iterations);
+    CHECK(free.status == qp_status::max_iterations);
+}
+
+TEST_CASE("active-set terminal verification is not excused by a far bound on another row",
+          "[qp][qp_kkt]")
+{
+    // The contradictory pair x1 >= 1, -x1 >= 0 from x1 = 0.5 ends unverified; adding the slack row
+    // x2 >= -1e30 must not lend its magnitude to the violated rows.
+    Eigen::MatrixXd G = Eigen::MatrixXd::Identity(2, 2);
+    Eigen::VectorXd d = Eigen::VectorXd::Zero(2);
+    Eigen::MatrixXd A_eq(0, 2);
+    Eigen::VectorXd b_eq(0);
+    Eigen::MatrixXd A_in(3, 2);
+    A_in << 1.0, 0.0,
+            -1.0, 0.0,
+            0.0, 1.0;
+    const Eigen::VectorXd b_in{{1.0, 0.0, -1e30}};
+    const Eigen::VectorXd x0{{0.5, 0.0}};
+    active_set_qp_solver<double> solver(2, 3);
+    CHECK(solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::max_iterations);
+    CHECK(solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::max_iterations);
+}
+
+TEST_CASE("active-set step test scales with the iterate", "[qp][qp_kkt]")
+{
+    // The unconstrained minimizer c is cut off by x1 >= 0.5 s, so the solution sits on that row and
+    // the equality. At magnitude s a null step is rounding of order epsilon * s, which an absolute
+    // step test never accepts, so the solver cycled to its iteration cap.
+    Eigen::MatrixXd G(3, 3);
+    G << 2.0, 0.6, 0.1,
+         0.6, 1.0, 0.2,
+         0.1, 0.2, 1.5;
+    Eigen::MatrixXd A_eq(1, 3);
+    A_eq << 0.3, 1.1, -0.5;
+    const Eigen::VectorXd b_eq{{0.0}};
+    Eigen::MatrixXd A_in(2, 3);
+    A_in << -1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0;
+    const Eigen::Vector3d c{1.3, -0.7, 0.4};
+    const Eigen::Vector3d starts[] = {{0.0, 0.0, 0.0}, {0.1, 0.2, 0.1}, {-0.37, 0.11, 0.02}};
+
+    for(const double s : {1e5, 1e6, 1e7})
+    {
+        const Eigen::VectorXd d = -G * (s * c);
+        const Eigen::VectorXd b_in{{-0.5 * s, -10.0 * s}};
+        for(const Eigen::Vector3d& start : starts)
+        {
+            const Eigen::VectorXd x0 = s * start;
+            active_set_qp_solver<double> solver(3, 3);
+            const auto stateful = solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0);
+            const auto free = solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0);
+            for(const auto& result : {stateful, free})
+            {
+                CHECK(result.status == qp_status::optimal);
+                CHECK(result.iterations < 5);
+                CHECK(result.x[0] == Approx(0.5 * s).epsilon(1e-12));
+            }
+        }
+    }
+}
+
+TEST_CASE("active-set takes a rounding-sized step before declaring a warm start stationary",
+          "[qp][qp_kkt]")
+{
+    // A start 1e-12 relative from the solution of a stiff objective: the step is under
+    // tol (1 + ||x||), yet skipping it leaves a gradient of order 1e6 times the offset, which the
+    // terminal verification rightly refuses. Taking the step lands on the minimizer.
+    Eigen::MatrixXd G(3, 3);
+    G << 2.0, 0.6, 0.1,
+         0.6, 1.0, 0.2,
+         0.1, 0.2, 1.5;
+    G *= 1e6;
+    Eigen::MatrixXd A_eq(1, 3);
+    A_eq << 0.3, 1.1, -0.5;
+    const double s = 1e4;
+    const Eigen::VectorXd xs = s * Eigen::Vector3d{1.3, -0.7, 0.4};
+    const Eigen::VectorXd b_eq = A_eq * xs;
+    const Eigen::VectorXd d = -G * xs + 0.8e6 * A_eq.transpose();
+    Eigen::MatrixXd A_in(0, 3);
+    Eigen::VectorXd b_in(0);
+
+    for(const Eigen::Vector3d& direction : {Eigen::Vector3d{1.1, -0.3, 0.0}, Eigen::Vector3d{0.6, -0.3, 0.9}})
+    {
+        const Eigen::VectorXd x0 = xs + 1e-12 * s * direction;
+        active_set_qp_solver<double> solver(3, 1);
+        const auto stateful = solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0);
+        const auto free = solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0);
+        for(const auto& result : {stateful, free})
+        {
+            CHECK(result.status == qp_status::optimal);
+            CHECK((result.x - xs).lpNorm<Eigen::Infinity>() < 1e-10 * s);
+        }
+    }
 }

@@ -84,20 +84,20 @@ int main()
 
     // The exact four-policy set from rt_probe_workload.h:156-184.
     const std::size_t kraft = measure_policy_temporary(
-        argmin::kraft_slsqp_policy<hs071<>::problem_dimension>{}, hs071<>{});
+        argmin::kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{});
     std::printf("[kraft_slsqp hs071] largest single temporary = %zu B\n", kraft);
 
     const std::size_t nw = measure_policy_temporary(
-        argmin::nw_sqp_policy<hs071<>::problem_dimension>{}, hs071<>{});
+        argmin::nw_sqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{});
     std::printf("[nw_sqp hs071] largest single temporary = %zu B\n", nw);
 
     const std::size_t filt = measure_policy_temporary(
-        argmin::filter_nw_sqp_policy<hs071<>::problem_dimension>{}, hs071<>{});
+        argmin::filter_nw_sqp_policy<double, hs071<>::problem_dimension>{}, hs071<>{});
     std::printf("[filter_nw_sqp hs071] largest single temporary = %zu B\n", filt);
 
     const std::size_t lm = measure_policy_temporary(
-        argmin::lm_policy<argmin::mcu::fixed_rosenbrock_ls::problem_dimension>{},
-        argmin::mcu::fixed_rosenbrock_ls{});
+        argmin::lm_policy<double, argmin::mcu::fixed_rosenbrock_ls<double>::problem_dimension>{},
+        argmin::mcu::fixed_rosenbrock_ls<double>{});
     std::printf("[lm rosenbrock_ls] largest single temporary = %zu B\n", lm);
 
     const std::size_t l_max = std::max(std::max(kraft, nw), std::max(filt, lm));

@@ -39,27 +39,22 @@ namespace
 inline int g_dual_init_count = 0;
 inline int g_dual_reset_clear_count = 0;
 
-template <int M>
-struct counting_lbfgsb
+template <scalar S, int M>
+struct counting_lbfgsb : lbfgsb_policy<S, M>
 {
-    lbfgsb_policy<M> inner_;
-
     template <typename Problem, typename Convergence>
-    auto init(const Problem& p, const Eigen::Vector<double, M>& x0,
+    auto init(const Problem& p, const Eigen::Vector<S, M>& x0,
               const solver_options<Convergence>& opts)
     {
         ++g_dual_init_count;
-        return inner_.init(p, x0, opts);
+        return lbfgsb_policy<S, M>::init(p, x0, opts);
     }
 
     template <typename State>
-    auto step(State& s) { return inner_.step(s); }
-
-    template <typename State>
-    void reset_clear(State& s, const Eigen::Vector<double, M>& x0)
+    void reset_clear(State& s, const Eigen::Vector<S, M>& x0)
     {
         ++g_dual_reset_clear_count;
-        inner_.reset_clear(s, x0);
+        lbfgsb_policy<S, M>::reset_clear(s, x0);
     }
 };
 
@@ -113,7 +108,7 @@ TEST_CASE("gcmma rho-wval converges on HS024", "[gcmma_rho_wval]")
 
     step_budget_solver solver{
         alternative::gcmma::rho_wval_policy<
-            hs024<>::problem_dimension>{},
+            double, hs024<>::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve(opts);
 
@@ -133,7 +128,7 @@ TEST_CASE("gcmma rho-wval converges on HS035", "[gcmma_rho_wval]")
 
     step_budget_solver solver{
         alternative::gcmma::rho_wval_policy<
-            hs035<>::problem_dimension>{},
+            double, hs035<>::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve(opts);
 
@@ -153,7 +148,7 @@ TEST_CASE("gcmma rho-wval converges on HS076", "[gcmma_rho_wval]")
 
     step_budget_solver solver{
         alternative::gcmma::rho_wval_policy<
-            hs076<>::problem_dimension>{},
+            double, hs076<>::problem_dimension>{},
         problem, x0, opts};
     const auto result = solver.solve(opts);
 
@@ -240,7 +235,7 @@ TEST_CASE("gcmma rho-wval constructs the dual solver once per outer",
     opts.max_iterations = 500;
 
     alternative::gcmma::rho_wval_policy<
-        hs024<>::problem_dimension, counting_lbfgsb> policy;
+        double, hs024<>::problem_dimension, counting_lbfgsb> policy;
     auto s = policy.init(problem, x0, opts);
 
     g_dual_init_count = 0;

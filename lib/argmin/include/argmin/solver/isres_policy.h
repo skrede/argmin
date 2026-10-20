@@ -22,8 +22,8 @@
 namespace argmin
 {
 
-template <int N = dynamic_dimension>
-using isres_policy = alternative::isres::nlopt_faithful_policy<N>;
+template <scalar Scalar = double, int N = dynamic_dimension>
+using isres_policy = alternative::isres::nlopt_faithful_policy<Scalar, N>;
 
 }
 

@@ -339,20 +339,20 @@ int main()
     {
         fixed_rosenbrock problem;
         Eigen::Vector<double, 2> x0(-1.2, 1.0);
-        exercise(lbfgsb_policy<fixed_rosenbrock::problem_dimension>{}, problem, x0);
-        exercise(byrd_lbfgsb_policy<fixed_rosenbrock::problem_dimension>{}, problem, x0);
+        exercise(lbfgsb_policy<double, fixed_rosenbrock::problem_dimension>{}, problem, x0);
+        exercise(byrd_lbfgsb_policy<double, fixed_rosenbrock::problem_dimension>{}, problem, x0);
     }
 
     // --- Constrained NLP: the six SQP policies on fixed-N HS071 ------------
     {
         hs071<> problem;
         auto x0 = problem.initial_point();
-        exercise(kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
-        exercise(filter_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
-        exercise(nw_sqp_policy<hs071<>::problem_dimension>{}, problem, x0);
-        exercise(filter_nw_sqp_policy<hs071<>::problem_dimension>{}, problem, x0);
-        exercise(tr_sqp_policy<hs071<>::problem_dimension>{}, problem, x0);
-        exercise(filter_trsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
+        exercise(kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
+        exercise(filter_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
+        exercise(nw_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
+        exercise(filter_nw_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
+        exercise(tr_sqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
+        exercise(filter_trsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
     }
 
     // --- Constrained NLP on the dynamic-N axis -----------------------------
@@ -366,7 +366,7 @@ int main()
     {
         hs035<> problem;
         auto x0 = problem.initial_point();
-        exercise(augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+        exercise(augmented_lagrangian_policy<lbfgsb_policy<double, hs035<>::problem_dimension>>{},
                  problem, x0);
     }
 
@@ -392,10 +392,10 @@ int main()
     {
         derivative_free_constrained problem;
         Eigen::VectorXd x0{{2.0, 2.0}};
-        // cobyla_policy is dimension-agnostic: it is a non-template whose
-        // rebind is the identity, so it takes no dimension argument.
-        exercise(cobyla_policy{}, problem, x0);
-        exercise(isres_policy<derivative_free_constrained::problem_dimension>{},
+        // cobyla_policy is dimension-agnostic: its rebind ignores the
+        // dimension, so it takes no dimension argument.
+        exercise(cobyla_policy<>{}, problem, x0);
+        exercise(isres_policy<double, derivative_free_constrained::problem_dimension>{},
                  problem, x0);
     }
 
@@ -403,13 +403,13 @@ int main()
     {
         hs076<> problem;
         auto x0 = problem.initial_point();
-        exercise(mma_policy<hs076<>::problem_dimension>{}, problem, x0);
-        exercise(ccsa_quadratic_policy<hs076<>::problem_dimension>{}, problem, x0);
+        exercise(mma_policy<double, hs076<>::problem_dimension>{}, problem, x0);
+        exercise(ccsa_quadratic_policy<double, hs076<>::problem_dimension>{}, problem, x0);
     }
     {
         hs024<> problem;
         auto x0 = problem.initial_point();
-        exercise(gcmma_policy<hs024<>::problem_dimension>{}, problem, x0);
+        exercise(gcmma_policy<double, hs024<>::problem_dimension>{}, problem, x0);
     }
 
     // --- The other three drivers -------------------------------------------
@@ -422,11 +422,11 @@ int main()
     {
         hs071<> problem;
         auto x0 = problem.initial_point();
-        exercise_stepper(kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
-        exercise_time_budget(kraft_slsqp_policy<hs071<>::problem_dimension>{},
+        exercise_stepper(kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
+        exercise_time_budget(kraft_slsqp_policy<double, hs071<>::problem_dimension>{},
                              problem, x0);
         exercise_step_and_time_budget(
-            kraft_slsqp_policy<hs071<>::problem_dimension>{}, problem, x0);
+            kraft_slsqp_policy<double, hs071<>::problem_dimension>{}, problem, x0);
     }
     {
         rosenbrock<> problem{.n = 2};

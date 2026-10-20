@@ -302,7 +302,7 @@ int main()
         argmin::bench::println("\n--- Rastrigin 2D (global minimum at 0, multimodal) ---");
         argmin::rastrigin<double, 2> fixed_prob;
         argmin::rastrigin<double>    dyn_prob{.n = 2};
-        auto fixed = bench_argmin(argmin::cmaes_policy<2>{}, fixed_prob, reps, 10000);
+        auto fixed = bench_argmin(argmin::cmaes_policy<double, 2>{}, fixed_prob, reps, 10000);
         auto dyn   = bench_argmin(argmin::cmaes_policy<>{},  dyn_prob,  reps, 10000);
         auto libc  = bench_libcmaes_cma(2, rastrigin_libcmaes,
             {2.5, 2.5}, {-5.12, -5.12}, {5.12, 5.12}, reps, 10000);
@@ -368,7 +368,7 @@ int main()
         argmin::rastrigin<double, 5> fixed_prob;
         argmin::rastrigin<double>    dyn_prob{.n = 5};
         std::vector<double> x0(5, 2.5), lb(5, -5.12), ub(5, 5.12);
-        auto fixed = bench_argmin(argmin::cmaes_policy<5>{}, fixed_prob, reps, 50000);
+        auto fixed = bench_argmin(argmin::cmaes_policy<double, 5>{}, fixed_prob, reps, 50000);
         auto dyn   = bench_argmin(argmin::cmaes_policy<>{},  dyn_prob,  reps, 50000);
         auto libc  = bench_libcmaes_cma(5, rastrigin_libcmaes, x0, lb, ub, reps, 50000);
         print_row("argmin<5>", fixed);
@@ -385,7 +385,7 @@ int main()
         argmin::bench::println("\n--- Rosenbrock 2D bounded [-5,5]^2 ---");
         bounded_rosenbrock<2>       fixed_prob;
         bounded_rosenbrock_dynamic  dyn_prob;
-        auto fixed = bench_argmin(argmin::cmaes_policy<2>{}, fixed_prob, reps, 10000);
+        auto fixed = bench_argmin(argmin::cmaes_policy<double, 2>{}, fixed_prob, reps, 10000);
         auto dyn   = bench_argmin(argmin::cmaes_policy<>{},  dyn_prob,  reps, 10000);
         auto libc  = bench_libcmaes_cma(2, rosenbrock_libcmaes,
             {-1.2, 1.0}, {-5.0, -5.0}, {5.0, 5.0}, reps, 10000);
@@ -423,12 +423,12 @@ int main()
         opts.set_objective_threshold(1e-12);
         opts.set_step_threshold(1e-12);
 
-        argmin::cmaes_policy<2>::options_type cmaes_opts{};
+        argmin::cmaes_policy<double, 2>::options_type cmaes_opts{};
         cmaes_opts.seed = 42u;
-        cmaes_opts.restart = argmin::cmaes_policy<2>::restart_strategy::ipop;
+        cmaes_opts.restart = argmin::cmaes_policy<double, 2>::restart_strategy::ipop;
 
         argmin::step_budget_solver solver{
-            argmin::cmaes_policy<2>{}, wrapped, x0, opts, cmaes_opts};
+            argmin::cmaes_policy<double, 2>{}, wrapped, x0, opts, cmaes_opts};
         auto result = solver.solve();
 
         constexpr int max_pop = 512;  // matches MaxPop in cmaes_policy.h
@@ -477,14 +477,14 @@ int main()
         opts.set_objective_threshold(1e-30);
         opts.set_step_threshold(1e-30);
 
-        argmin::cmaes_policy<2>::options_type cmaes_opts{};
+        argmin::cmaes_policy<double, 2>::options_type cmaes_opts{};
         cmaes_opts.seed = 42u;
         // Defeat TolX so TolFun is the criterion that owns the exit on
         // this run.
         cmaes_opts.cmaes.step_size_tolerance = 1e-30;
 
         argmin::step_budget_solver solver{
-            argmin::cmaes_policy<2>{}, prob, x0, opts, cmaes_opts};
+            argmin::cmaes_policy<double, 2>{}, prob, x0, opts, cmaes_opts};
         auto result = solver.solve();
 
         argmin::bench::println("  iters: {}, status: {}, objective: {:.6e}",

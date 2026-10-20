@@ -115,8 +115,8 @@ cell_result run_cell(const std::string& pname, const Problem& problem,
     opts.set_gradient_threshold(1e-6);
     opts.set_step_threshold(1e-14);
 
-    argmin::alternative::gcmma::raa_augmented_policy<N> policy;
-    typename argmin::alternative::gcmma::raa_augmented_policy<N>::options_type
+    argmin::alternative::gcmma::raa_augmented_policy<double, N> policy;
+    typename argmin::alternative::gcmma::raa_augmented_policy<double, N>::options_type
         popts;
     popts.raa_svanberg_schedule = svanberg;
     auto s = policy.init(problem, x0, opts, popts);

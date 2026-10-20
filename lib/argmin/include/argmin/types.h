@@ -3,6 +3,8 @@
 
 #include <Eigen/Core>
 
+#include <concepts>
+
 // Force-inline attribute portable across GCC, Clang, and MSVC.
 //
 // Used on per-iteration helper functions where the function-call boundary
@@ -34,6 +36,9 @@ namespace argmin
 
 inline constexpr int dynamic_dimension = Eigen::Dynamic;
 
+template <typename S>
+concept scalar = std::same_as<S, float> || std::same_as<S, double>;
+
 template <typename Scalar = double, int N = dynamic_dimension>
 using vector = Eigen::Vector<Scalar, N>;
 
@@ -42,6 +47,26 @@ using matrix = Eigen::Matrix<Scalar, Rows, Cols>;
 
 template <typename Scalar = double, int N = dynamic_dimension>
 using row_vector = Eigen::RowVector<Scalar, N>;
+
+namespace detail
+{
+
+// Eigen 3.4's LDLT/LLT constructors leave m_info indeterminate and moving one is undefined behavior;
+// setting the protected member defines it without instantiating a factorization at construction.
+template <typename Decomposition>
+class defined_decomposition : public Decomposition
+{
+public:
+    defined_decomposition() { this->m_info = Eigen::Success; }
+
+    explicit defined_decomposition(Eigen::Index size)
+        : Decomposition(size)
+    {
+        this->m_info = Eigen::Success;
+    }
+};
+
+}
 
 }
 

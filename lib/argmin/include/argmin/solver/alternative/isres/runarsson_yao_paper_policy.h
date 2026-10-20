@@ -53,9 +53,11 @@
 //     btad403, Table 2 (numeric default attribution gap).
 
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/scalar_distributions.h"
 #include "argmin/detail/stochastic_ranking.h"
 #include "argmin/detail/tuple_contains.h"
 #include "argmin/detail/xoshiro256.h"
+#include "argmin/options/isres_defaults.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/status.h"
 #include "argmin/solver/options.h"
@@ -75,13 +77,13 @@
 namespace argmin::alternative::isres
 {
 
-template <int N = dynamic_dimension>
+template <scalar Scalar = double, int N = dynamic_dimension>
 struct runarsson_yao_paper_policy
 {
-    using scalar_type = double;
+    using scalar_type = Scalar;
 
     template <int M>
-    using rebind = runarsson_yao_paper_policy<M>;
+    using rebind = runarsson_yao_paper_policy<Scalar, M>;
 
     enum class sigma_clamp_placement_type { per_mutation, end_of_step };
     enum class sigma_collapse_form_type { bound_relative_configurable, xtol_coupled };
@@ -90,24 +92,24 @@ struct runarsson_yao_paper_policy
     {
         // Population sizing.
         std::optional<std::uint32_t> population_size{};
-        std::optional<double> parent_fraction{};
-        std::optional<double> ranking_probability{};
+        std::optional<Scalar> parent_fraction{};
+        std::optional<Scalar> ranking_probability{};
 
         // RNG seed.
         std::optional<std::uint64_t> seed{};
 
         // Stall + feasibility.
         std::uint16_t stall_window{200};
-        double feasibility_gate{1e-4};
+        Scalar feasibility_gate{isres_defaults<Scalar>::feasibility_gate};
 
         // Numeric values are NOT paper-pinned (see file-header citation gap).
         // Defaults match NLopt for cross-implementation comparability.
         // Field names use the paper_ prefix to mark the citation gap.
-        std::optional<double> paper_gamma{};   // default 0.85 (citation gap; not in paper text)
-        std::optional<double> paper_alpha{};   // default 0.2  (citation gap; not in paper text)
+        std::optional<Scalar> paper_gamma{};   // default 0.85 (citation gap; not in paper text)
+        std::optional<Scalar> paper_alpha{};   // default 0.2  (citation gap; not in paper text)
 
         // Sigma-collapse predicate threshold.
-        std::optional<double> sigma_collapse_ratio{};  // default 1e-9
+        std::optional<Scalar> sigma_collapse_ratio{};  // default 1e-9
 
         // Bounded resample budget — caps NLopt's unbounded retry loop.
         std::optional<std::uint16_t> bound_resample_budget{};  // default 100
@@ -142,36 +144,36 @@ struct runarsson_yao_paper_policy
             (N == dynamic_dimension) ? Eigen::Dynamic : N;
 
         const P* problem{nullptr};
-        Eigen::Vector<double, N> x;
-        double objective_value{};
+        Eigen::Vector<Scalar, N> x;
+        Scalar objective_value{};
 
-        Eigen::Matrix<double, N, Eigen::Dynamic, 0, RowsCap, MaxLambda> population;
-        Eigen::Matrix<double, N, Eigen::Dynamic, 0, RowsCap, MaxLambda> sigmas;
-        Eigen::VectorXd fitnesses;
-        Eigen::VectorXd violations;
+        Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0, RowsCap, MaxLambda> population;
+        Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0, RowsCap, MaxLambda> sigmas;
+        Eigen::VectorX<Scalar> fitnesses;
+        Eigen::VectorX<Scalar> violations;
 
-        Eigen::Vector<double, N> lower;
-        Eigen::Vector<double, N> upper;
+        Eigen::Vector<Scalar, N> lower;
+        Eigen::Vector<Scalar, N> upper;
 
         // RNG matches cmaes_policy + production isres_policy (xoshiro256+).
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
-        double best_ever_value{std::numeric_limits<double>::infinity()};
-        double best_ever_violation{std::numeric_limits<double>::infinity()};
+        Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
+        Scalar best_ever_violation{std::numeric_limits<Scalar>::infinity()};
 
-        Eigen::VectorXd c_eq;
-        Eigen::VectorXd c_ineq;
+        Eigen::VectorX<Scalar> c_eq;
+        Eigen::VectorX<Scalar> c_ineq;
         int n_eq{0};
         int n_ineq{0};
 
         int lambda{0};
         int mu{0};
-        double pf{0.45};
-        double alpha{0.2};
-        detail::es_learning_rates rates{};
+        Scalar pf{Scalar(0.45)};
+        Scalar alpha{Scalar(0.2)};
+        detail::es_learning_rates<Scalar> rates{};
 
         // Per-step buffers hoisted to state to keep step() alloc-free.
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0,
+        Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, 0,
                       Eigen::Dynamic, MaxLambda> all_constraints_buf;
         std::vector<std::uint32_t> indices_buf;
 
@@ -179,7 +181,7 @@ struct runarsson_yao_paper_policy
         // start-of-generation. The mu rank-0..rank-(mu-1) survivors are
         // copied here BEFORE the differential-variation update; col(0)
         // is rank-0 (best) and is the BEST anchor for the DE update.
-        Eigen::Matrix<double, N, Eigen::Dynamic, 0, RowsCap, MaxMu> x0_snapshot_buf;
+        Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0, RowsCap, MaxMu> x0_snapshot_buf;
 
         // User-set step_tolerance threshold captured at init() time when
         // the convergence policy carries a step_tolerance_criterion. step()
@@ -189,14 +191,14 @@ struct runarsson_yao_paper_policy
         // slsqp_compatible_convergence carries step_tolerance_rel_criterion
         // only); xtol_coupled sigma-collapse falls back to bound-relative
         // semantics in that case.
-        std::optional<double> convergence_xtol_threshold;
+        std::optional<Scalar> convergence_xtol_threshold;
     };
 
     options_type options{};
 
     template <typename Problem, typename Convergence>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& x0,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& opts,
                              const options_type& policy_opts)
     {
@@ -204,10 +206,10 @@ struct runarsson_yao_paper_policy
         return init(problem, x0, opts);
     }
 
-    template <typename Problem, typename Convergence = default_convergence>
-        requires objective<Problem> && constrained_values<Problem> && bound_constrained<Problem>
+    template <typename Problem, typename Convergence = default_convergence<scalar_type>>
+        requires objective<Problem, Scalar> && constrained_values<Problem, Scalar> && bound_constrained<Problem, Scalar>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<double, N>& /*x0*/,
+                             const Eigen::Vector<Scalar, N>& /*x0*/,
                              const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
@@ -224,11 +226,11 @@ struct runarsson_yao_paper_policy
         s.lambda = static_cast<int>(
             options.population_size.value_or(
                 static_cast<std::uint32_t>(20 * (n + 1))));
-        const double frac = options.parent_fraction.value_or(1.0 / 7.0);
-        s.mu = std::max(1, static_cast<int>(s.lambda * frac));
-        s.pf = options.ranking_probability.value_or(0.45);
-        s.alpha = options.paper_alpha.value_or(0.2);
-        s.rates = detail::compute_es_rates(n);
+        const Scalar frac = options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0));
+        s.mu = std::max(1, static_cast<int>(static_cast<Scalar>(s.lambda) * frac));
+        s.pf = options.ranking_probability.value_or(Scalar(0.45));
+        s.alpha = options.paper_alpha.value_or(Scalar(0.2));
+        s.rates = detail::compute_es_rates<Scalar>(n);
 
         const std::uint64_t seed = options.seed.value_or(
             static_cast<std::uint64_t>(std::random_device{}()));
@@ -249,12 +251,12 @@ struct runarsson_yao_paper_policy
 
         for(int j = 0; j < s.lambda; ++j)
         {
-            Eigen::Vector<double, N> xi = s.population.col(j);
+            Eigen::Vector<Scalar, N> xi = s.population.col(j);
             s.fitnesses[j] = s.problem->value(xi);
 
             if(n_c > 0)
             {
-                Eigen::VectorXd c(n_c);
+                Eigen::VectorX<Scalar> c(n_c);
                 s.problem->constraints(xi, c);
                 s.all_constraints_buf.col(j) = c;
             }
@@ -266,16 +268,16 @@ struct runarsson_yao_paper_policy
         {
             for(int j = 0; j < s.lambda; ++j)
             {
-                double violation_sum = 0.0;
+                Scalar violation_sum = Scalar(0.0);
                 for(int i_eq = 0; i_eq < s.n_eq; ++i_eq)
                 {
-                    const double c_val = s.all_constraints_buf(i_eq, j);
+                    const Scalar c_val = s.all_constraints_buf(i_eq, j);
                     violation_sum += c_val * c_val;
                 }
                 for(int i_in = 0; i_in < s.n_ineq; ++i_in)
                 {
-                    const double c_val = s.all_constraints_buf(s.n_eq + i_in, j);
-                    const double v = std::max(0.0, -c_val);
+                    const Scalar c_val = s.all_constraints_buf(s.n_eq + i_in, j);
+                    const Scalar v = std::max(Scalar(0.0), -c_val);
                     violation_sum += v * v;
                 }
                 s.violations[j] = violation_sum;
@@ -290,8 +292,8 @@ struct runarsson_yao_paper_policy
         int best_idx = 0;
         for(int j = 1; j < s.lambda; ++j)
         {
-            const bool feasible_j = s.violations[j] <= 0.0;
-            const bool feasible_best = s.violations[best_idx] <= 0.0;
+            const bool feasible_j = s.violations[j] <= Scalar(0.0);
+            const bool feasible_best = s.violations[best_idx] <= Scalar(0.0);
 
             if(feasible_j && !feasible_best)
                 best_idx = j;
@@ -313,7 +315,7 @@ struct runarsson_yao_paper_policy
         s.c_ineq.resize(s.n_ineq);
         if(n_c > 0)
         {
-            Eigen::VectorXd c(n_c);
+            Eigen::VectorX<Scalar> c(n_c);
             s.problem->constraints(s.x, c);
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
@@ -329,10 +331,10 @@ struct runarsson_yao_paper_policy
         // stays std::nullopt and step() silently falls back to the
         // bound-relative form.
         if constexpr(detail::tuple_contains_v<
-                         step_tolerance_criterion,
+                         step_tolerance_criterion<scalar_type>,
                          decltype(opts.convergence.criteria)>)
         {
-            const auto& crit = std::get<step_tolerance_criterion>(
+            const auto& crit = std::get<step_tolerance_criterion<scalar_type>>(
                 opts.convergence.criteria);
             s.convergence_xtol_threshold = crit.threshold;
         }
@@ -341,22 +343,22 @@ struct runarsson_yao_paper_policy
     }
 
     template <typename P>
-    step_result<double> step(state_type<P>& s)
+    step_result<Scalar> step(state_type<P>& s)
     {
         // Capture previous best-ever for objective_change / improved
         // bookkeeping; also referenced by the sigma-collapse status
         // emission below.
-        const double prev_best_ever_value = s.best_ever_value;
+        const Scalar prev_best_ever_value = s.best_ever_value;
 
         const int n = static_cast<int>(s.x.size());
         const int mu = s.mu;
         const int lambda = s.lambda;
         const int n_c = s.n_eq + s.n_ineq;
         auto& rng = *s.rng;
-        std::normal_distribution<double> normal(0.0, 1.0);
+        detail::standard_normal_distribution<Scalar> normal;
 
-        const double gamma = options.paper_gamma.value_or(0.85);
-        const double alpha = options.paper_alpha.value_or(0.2);
+        const Scalar gamma = options.paper_gamma.value_or(Scalar(0.85));
+        const Scalar alpha = options.paper_alpha.value_or(Scalar(0.2));
         const std::uint16_t resample_budget =
             options.bound_resample_budget.value_or(100);
 
@@ -385,11 +387,11 @@ struct runarsson_yao_paper_policy
         for(int k = 0; k < mu; ++k)
         {
             const std::uint32_t rk = s.indices_buf[static_cast<std::size_t>(k)];
-            const double taup_rand = s.rates.tau_prime * normal(rng);
+            const Scalar taup_rand = s.rates.tau_prime * normal(rng);
 
             for(int j = 0; j < n; ++j)
             {
-                const double xi = s.population(j, rk);
+                const Scalar xi = s.population(j, rk);
 
                 if(k > 0)
                 {
@@ -407,9 +409,9 @@ struct runarsson_yao_paper_policy
                     // Inherited NLopt-form leg (paper agrees on these axes):
                     //   sigma upper clamp + log-normal mutate + bounded
                     //   resample + alpha-smoothing.
-                    const double sigmamax = (s.upper(j) - s.lower(j))
-                                              / std::sqrt(static_cast<double>(n));
-                    const double sigi = s.sigmas(j, rk);
+                    const Scalar sigmamax = (s.upper(j) - s.lower(j))
+                                              / std::sqrt(static_cast<Scalar>(n));
+                    const Scalar sigi = s.sigmas(j, rk);
 
                     s.sigmas(j, rk) = detail::log_normal_mutate(
                         sigi, s.rates.tau, taup_rand, sigmamax, rng);
@@ -438,13 +440,13 @@ struct runarsson_yao_paper_policy
         {
             const std::uint32_t rk = s.indices_buf[static_cast<std::size_t>(k)];
             const std::uint32_t ri = s.indices_buf[static_cast<std::size_t>(k % mu)];
-            const double taup_rand = s.rates.tau_prime * normal(rng);
+            const Scalar taup_rand = s.rates.tau_prime * normal(rng);
 
             for(int j = 0; j < n; ++j)
             {
-                const double sigmamax = (s.upper(j) - s.lower(j))
-                                          / std::sqrt(static_cast<double>(n));
-                const double sigi = s.sigmas(j, ri);
+                const Scalar sigmamax = (s.upper(j) - s.lower(j))
+                                          / std::sqrt(static_cast<Scalar>(n));
+                const Scalar sigi = s.sigmas(j, ri);
 
                 s.sigmas(j, rk) = detail::log_normal_mutate(
                     sigi, s.rates.tau, taup_rand, sigmamax, rng);
@@ -468,12 +470,12 @@ struct runarsson_yao_paper_policy
         //     NLopt agree on this axis (NLopt isres.c:151,163).
         for(int k = 0; k < lambda; ++k)
         {
-            Eigen::Vector<double, N> xk = s.population.col(k);
+            Eigen::Vector<Scalar, N> xk = s.population.col(k);
             s.fitnesses[k] = s.problem->value(xk);
 
             if(n_c > 0)
             {
-                Eigen::VectorXd c(n_c);
+                Eigen::VectorX<Scalar> c(n_c);
                 s.problem->constraints(xk, c);
                 s.all_constraints_buf.col(k) = c;
             }
@@ -483,16 +485,16 @@ struct runarsson_yao_paper_policy
         {
             for(int k = 0; k < lambda; ++k)
             {
-                double violation_sum = 0.0;
+                Scalar violation_sum = Scalar(0.0);
                 for(int i_eq = 0; i_eq < s.n_eq; ++i_eq)
                 {
-                    const double c_val = s.all_constraints_buf(i_eq, k);
+                    const Scalar c_val = s.all_constraints_buf(i_eq, k);
                     violation_sum += c_val * c_val;
                 }
                 for(int i_in = 0; i_in < s.n_ineq; ++i_in)
                 {
-                    const double c_val = s.all_constraints_buf(s.n_eq + i_in, k);
-                    const double v = std::max(0.0, -c_val);
+                    const Scalar c_val = s.all_constraints_buf(s.n_eq + i_in, k);
+                    const Scalar v = std::max(Scalar(0.0), -c_val);
                     violation_sum += v * v;
                 }
                 s.violations[k] = violation_sum;
@@ -514,25 +516,25 @@ struct runarsson_yao_paper_policy
         //     first, then a Pareto-tightened pre-feasible least-infeasibility
         //     witness (rolling best_ever_violation).
         const std::uint32_t best_ranked = s.indices_buf[0];
-        const double best_ranked_f = s.fitnesses[best_ranked];
-        const double best_ranked_v = s.violations[best_ranked];
+        const Scalar best_ranked_f = s.fitnesses[best_ranked];
+        const Scalar best_ranked_v = s.violations[best_ranked];
 
-        if(best_ranked_f < s.best_ever_value && best_ranked_v <= 0.0)
+        if(best_ranked_f < s.best_ever_value && best_ranked_v <= Scalar(0.0))
         {
             s.best_ever_value = best_ranked_f;
-            s.best_ever_violation = 0.0;
+            s.best_ever_violation = Scalar(0.0);
             s.objective_value = best_ranked_f;
             s.x = s.population.col(best_ranked);
 
             if(n_c > 0)
             {
-                Eigen::VectorXd c(n_c);
+                Eigen::VectorX<Scalar> c(n_c);
                 s.problem->constraints(s.x, c);
                 s.c_eq = c.head(s.n_eq);
                 s.c_ineq = c.tail(s.n_ineq);
             }
         }
-        else if(s.best_ever_value == std::numeric_limits<double>::infinity())
+        else if(s.best_ever_value == std::numeric_limits<Scalar>::infinity())
         {
             if(best_ranked_v < s.best_ever_violation
                && best_ranked_f <= s.objective_value)
@@ -543,7 +545,7 @@ struct runarsson_yao_paper_policy
 
                 if(n_c > 0)
                 {
-                    Eigen::VectorXd c(n_c);
+                    Eigen::VectorX<Scalar> c(n_c);
                     s.problem->constraints(s.x, c);
                     s.c_eq = c.head(s.n_eq);
                     s.c_ineq = c.tail(s.n_ineq);
@@ -570,22 +572,22 @@ struct runarsson_yao_paper_policy
         //         its threshold is std::nullopt, the predicate silently
         //         falls back to the bound-relative form using `ratio`
         //         (fail-safe).
-        const double mean_sigma = s.sigmas.leftCols(mu).mean();
+        const Scalar mean_sigma = s.sigmas.leftCols(mu).mean();
 
         const std::uint32_t rank0 = s.indices_buf[0];
-        const double v_best = s.violations[rank0];
+        const Scalar v_best = s.violations[rank0];
         const bool feasible = (v_best <= options.feasibility_gate);
 
-        const double collapse_ratio =
-            options.sigma_collapse_ratio.value_or(1e-9);
+        const Scalar collapse_ratio =
+            options.sigma_collapse_ratio.value_or(isres_defaults<Scalar>::sigma_collapse_ratio);
 
         bool collapsed;
         if(options.sigma_collapse_form
            == sigma_collapse_form_type::xtol_coupled)
         {
-            const double threshold_value =
+            const Scalar threshold_value =
                 s.convergence_xtol_threshold.value_or(
-                    std::numeric_limits<double>::quiet_NaN());
+                    std::numeric_limits<Scalar>::quiet_NaN());
             collapsed = detail::sigma_collapsed_xtol_coupled(
                 s, threshold_value, collapse_ratio, n,
                 s.lower, s.upper);
@@ -600,9 +602,9 @@ struct runarsson_yao_paper_policy
         if(collapsed && feasible)
             emitted_status = solver_status::ftol_reached;
 
-        return step_result<double>{
+        return step_result<Scalar>{
             .objective_value = s.objective_value,
-            .gradient_norm = std::numeric_limits<double>::infinity(),
+            .gradient_norm = std::numeric_limits<Scalar>::infinity(),
             .step_size = mean_sigma,
             .objective_change = std::abs(s.best_ever_value - prev_best_ever_value),
             .improved = (s.best_ever_value < prev_best_ever_value),
@@ -612,7 +614,7 @@ struct runarsson_yao_paper_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
 
@@ -624,13 +626,13 @@ struct runarsson_yao_paper_policy
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
-        s.best_ever_violation = std::numeric_limits<double>::infinity();
+        s.best_ever_violation = std::numeric_limits<Scalar>::infinity();
         s.generation = 0;
 
         if(s.n_eq + s.n_ineq > 0)
         {
             const int n_c = s.n_eq + s.n_ineq;
-            Eigen::VectorXd c(n_c);
+            Eigen::VectorX<Scalar> c(n_c);
             s.problem->constraints(s.x, c);
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
@@ -638,7 +640,7 @@ struct runarsson_yao_paper_policy
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<double, N>> x0)
+    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         reset(s, x0);
     }

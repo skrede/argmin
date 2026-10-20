@@ -28,7 +28,7 @@ TEST_CASE("augmented lagrangian converges on HS076", "[augmented_lagrangian]")
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-4);
 
-    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, hs076<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -48,7 +48,7 @@ TEST_CASE("augmented lagrangian converges on HS035", "[augmented_lagrangian]")
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-4);
 
-    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, hs035<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -69,7 +69,7 @@ TEST_CASE("augmented lagrangian on HS071 (equality + inequality)",
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-2);
 
-    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs071<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, hs071<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -101,7 +101,7 @@ TEST_CASE("augmented lagrangian with BOBYQA inner solver",
     // a cited rationale is the intended escape hatch.
     opts.constraint_tolerance = 5e-2;
 
-    step_budget_solver solver{augmented_lagrangian_policy<bobyqa_policy<hs035<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<bobyqa_policy<double, hs035<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -145,7 +145,7 @@ TEST_CASE("augmented lagrangian step and solve consistency",
 
     SECTION("step returns finite values")
     {
-        step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+        step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, hs035<>::problem_dimension>>{},
             problem, x0, opts};
 
         for(int i = 0; i < 5; ++i)
@@ -158,11 +158,11 @@ TEST_CASE("augmented lagrangian step and solve consistency",
 
     SECTION("solve gives similar result to manual stepping")
     {
-        step_budget_solver solver1{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+        step_budget_solver solver1{augmented_lagrangian_policy<lbfgsb_policy<double, hs035<>::problem_dimension>>{},
             problem, x0, opts};
         auto result1 = solver1.solve(opts);
 
-        step_budget_solver solver2{augmented_lagrangian_policy<lbfgsb_policy<hs035<>::problem_dimension>>{},
+        step_budget_solver solver2{augmented_lagrangian_policy<lbfgsb_policy<double, hs035<>::problem_dimension>>{},
             problem, x0, opts};
         step_result<double> last{};
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
@@ -190,7 +190,7 @@ TEST_CASE("augmented lagrangian reports actual gradient norm",
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-4);
 
-    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, hs076<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -216,7 +216,7 @@ TEST_CASE("augmented lagrangian convergence on HS076 with stationarity_threshold
     opts.set_step_threshold(1e-12);
     opts.set_stationarity_threshold(1e-4);
 
-    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, hs076<>::problem_dimension>>{},
         problem, x0, opts};
     auto result = solver.solve(opts);
 
@@ -228,7 +228,7 @@ TEST_CASE("augmented lagrangian warm-start converges on HS071",
           "[augmented_lagrangian]")
 {
     constexpr int D = hs071<>::problem_dimension;
-    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<D>, D>;
+    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<double, D>, D>;
 
     hs071 problem;
     auto x0 = problem.initial_point();
@@ -263,7 +263,7 @@ TEST_CASE("augmented lagrangian warm-start reduces inner iterations",
           "[augmented_lagrangian]")
 {
     constexpr int D = hs071<>::problem_dimension;
-    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<D>, D>;
+    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<double, D>, D>;
 
     hs071 problem;
     auto x0 = problem.initial_point();
@@ -315,7 +315,7 @@ TEST_CASE("augmented lagrangian adaptive tolerance converges on HS071",
           "[augmented_lagrangian]")
 {
     constexpr int D = hs071<>::problem_dimension;
-    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<D>, D>;
+    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<double, D>, D>;
 
     hs071 problem;
     auto x0 = problem.initial_point();
@@ -342,7 +342,7 @@ TEST_CASE("augmented lagrangian cold-start still works on HS071",
           "[augmented_lagrangian]")
 {
     constexpr int D = hs071<>::problem_dimension;
-    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<D>, D>;
+    using policy_type = augmented_lagrangian_policy<lbfgsb_policy<double, D>, D>;
 
     hs071 problem;
     auto x0 = problem.initial_point();
@@ -387,7 +387,7 @@ TEST_CASE("augmented lagrangian populates kkt_residual",
     opts.set_step_threshold(1e-15);
     opts.set_stationarity_threshold(1e-4);
 
-    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>>{},
+    step_budget_solver solver{augmented_lagrangian_policy<lbfgsb_policy<double, hs076<>::problem_dimension>>{},
         problem, x0, opts};
 
     bool populated = false;
@@ -417,7 +417,7 @@ TEST_CASE("augmented lagrangian outer trajectory is chunk-size invariant",
           "[augmented_lagrangian][chunking]")
 {
     using policy_t =
-        augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>,
+        augmented_lagrangian_policy<lbfgsb_policy<double, hs076<>::problem_dimension>,
                                     hs076<>::problem_dimension>;
 
     hs076 problem;
@@ -493,7 +493,7 @@ TEST_CASE("augmented lagrangian bounds inner work per step",
           "[augmented_lagrangian][chunking]")
 {
     using policy_t =
-        augmented_lagrangian_policy<lbfgsb_policy<hs076<>::problem_dimension>,
+        augmented_lagrangian_policy<lbfgsb_policy<double, hs076<>::problem_dimension>,
                                     hs076<>::problem_dimension>;
 
     hs076 problem;

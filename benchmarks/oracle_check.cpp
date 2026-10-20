@@ -640,7 +640,7 @@ template <int H>
 {
     using Problem = argmin::nmpc_lqr<H>;
     constexpr int Ndim = Problem::problem_dimension;
-    using Policy = argmin::filter_trsqp_policy_accurate<Ndim>;
+    using Policy = argmin::filter_trsqp_policy_accurate<double, Ndim>;
 
     Problem prob;
     auto x0 = prob.initial_point();

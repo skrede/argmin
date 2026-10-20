@@ -93,6 +93,8 @@ using rebind_policy_t = typename rebind_policy<Policy, N>::type;
     case solver_status::objective_stalled: return "objective_stalled";
     case solver_status::time_limit_reached: return "time_limit_reached";
     case solver_status::aborted:           return "aborted";
+    case solver_status::invalid_problem:   return "invalid_problem";
+    case solver_status::line_search_failed: return "line_search_failed";
     case solver_status::running:           return "running";
     }
     return "unknown";
@@ -159,7 +161,7 @@ inline void warn_instruction_counter_unavailable_once()
 // solver sets its inner `objective_tolerance_criterion::stationarity_threshold`
 // directly, and the composite kkt_residual E-measure (N&W 2e Definition 12.1,
 // eq. 12.34) carries primal feasibility into the single termination test.
-template <typename Policy, typename Convergence = default_convergence,
+template <typename Policy, typename Convergence = default_convergence<>,
           typename Problem, typename... PolicyOpts>
 auto run_argmin_solver(std::string_view solver_name,
                         std::string_view problem_name,
@@ -460,7 +462,7 @@ void run_all_argmin_solvers(
 
     auto run_constrained = [&]<typename Policy>(std::string_view name, Policy) {
         std::vector<trace_entry> trace;
-        auto r = run_argmin_solver<Policy, default_convergence>(
+        auto r = run_argmin_solver<Policy, default_convergence<>>(
             name, problem_name, prob, max_iterations, collect_trace, trace,
             config);
         results.push_back(r);
@@ -515,7 +517,7 @@ void run_all_argmin_solvers(
             {
                 {
                     std::vector<trace_entry> trace;
-                    auto r = run_argmin_solver<mma_policy<>, default_convergence>(
+                    auto r = run_argmin_solver<mma_policy<>, default_convergence<>>(
                         "mma", problem_name, prob, max_iterations, collect_trace, trace,
                         config);
                     results.push_back(r);
@@ -523,7 +525,7 @@ void run_all_argmin_solvers(
                 }
                 {
                     std::vector<trace_entry> trace;
-                    auto r = run_argmin_solver<gcmma_policy<>, default_convergence>(
+                    auto r = run_argmin_solver<gcmma_policy<>, default_convergence<>>(
                         "gcmma", problem_name, prob, max_iterations, collect_trace, trace,
                         config);
                     results.push_back(r);
@@ -531,7 +533,7 @@ void run_all_argmin_solvers(
                 }
                 {
                     std::vector<trace_entry> trace;
-                    auto r = run_argmin_solver<ccsa_quadratic_policy<>, default_convergence>(
+                    auto r = run_argmin_solver<ccsa_quadratic_policy<>, default_convergence<>>(
                         "ccsa_quadratic", problem_name, prob, max_iterations, collect_trace, trace,
                         config);
                     results.push_back(r);
@@ -546,7 +548,7 @@ void run_all_argmin_solvers(
                     std::vector<trace_entry> trace;
                     auto r = run_argmin_solver<
                         alternative::gcmma::move_limit_shrink_policy<>,
-                        default_convergence>(
+                        default_convergence<>>(
                         "gcmma_move_limit_shrink", problem_name, prob,
                         max_iterations, collect_trace, trace, config);
                     results.push_back(r);
@@ -556,7 +558,7 @@ void run_all_argmin_solvers(
                     std::vector<trace_entry> trace;
                     auto r = run_argmin_solver<
                         alternative::gcmma::raa_augmented_policy<>,
-                        default_convergence>(
+                        default_convergence<>>(
                         "gcmma_raa_augmented", problem_name, prob,
                         max_iterations, collect_trace, trace, config);
                     results.push_back(r);
@@ -632,7 +634,7 @@ void run_all_argmin_solvers(
         traces.push_back(std::move(trace));
     }
 
-    // restarting_policy<cmaes_policy<...>>: gate mirrors CMA-ES (global + bounds).
+    // restarting_policy<cmaes_policy<double, ...>>: gate mirrors CMA-ES (global + bounds).
     // Plumb the per-row seed through options.inner so the decorator's inner
     // cmaes_policy uses the caller-visible seed rather than the deterministic
     // default fallback that restarting_policy::init() emits when
@@ -664,12 +666,12 @@ void run_all_argmin_solvers(
     //   cells that never need it.
     if constexpr(is_global && is_bound)
     {
-        typename restarting_policy<cmaes_policy<dynamic_dimension, 4096>>::options_type rcmaes_opts{};
+        typename restarting_policy<cmaes_policy<double, dynamic_dimension, 4096>>::options_type rcmaes_opts{};
         rcmaes_opts.inner.seed = seed;
         std::vector<trace_entry> trace;
         try
         {
-            auto r = run_argmin_solver<restarting_policy<cmaes_policy<dynamic_dimension, 4096>>>(
+            auto r = run_argmin_solver<restarting_policy<cmaes_policy<double, dynamic_dimension, 4096>>>(
                 "restarting_cmaes", problem_name, prob, max_iterations, collect_trace, trace,
                 config, rcmaes_opts);
             results.push_back(r);
@@ -689,7 +691,7 @@ void run_all_argmin_solvers(
 
     // COBYLA: constrained derivative-free (requires bounds + constraint values).
     if constexpr(constrained_values<Problem> && is_bound)
-        run_constrained("cobyla", cobyla_policy{});
+        run_constrained("cobyla", cobyla_policy<>{});
 
     // ISRES: global constrained (requires bounds + constraint values).
     //
@@ -708,7 +710,7 @@ void run_all_argmin_solvers(
         typename isres_policy<>::options_type isres_opts{};
         isres_opts.seed = seed;
         std::vector<trace_entry> trace;
-        auto r = run_argmin_solver<isres_policy<>, default_convergence>(
+        auto r = run_argmin_solver<isres_policy<>, default_convergence<>>(
             "isres", problem_name, prob, max_iterations, collect_trace, trace,
             config, isres_opts);
         results.push_back(r);

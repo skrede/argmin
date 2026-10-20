@@ -26,6 +26,7 @@
 //     and ccsa_quadratic_minimize().
 
 #include "argmin/types.h"
+#include "argmin/options/mma_defaults.h"
 #include "argmin/options/mma_subproblem_options.h"
 
 #include <Eigen/Core>
@@ -106,7 +107,9 @@ class mma_subproblem_solver
 
 public:
     explicit mma_subproblem_solver(int n, int m)
-        : n_{n}, m_{m}
+        : n_{n}
+        , m_{m}
+        , ldlt_(m)
     {
         y_.resize(m);
         y_.setZero();
@@ -135,9 +138,9 @@ public:
         const vec_n& sigma,
         Scalar rho, const vec_m& rhoc,
         const vec_n& lb, const vec_n& ub,
-        const mma_subproblem_options& opts = {})
+        const mma_subproblem_options<Scalar>& opts = {})
     {
-        constexpr Scalar eps = Scalar(1e-10);
+        constexpr Scalar eps = mma_defaults<Scalar>::subproblem_epsilon;
         const int max_iter = static_cast<int>(opts.dual_max_iterations);
         const auto tol = static_cast<Scalar>(opts.dual_tolerance);
         const auto bt = static_cast<Scalar>(opts.backtrack_factor);
@@ -281,7 +284,7 @@ private:
         Scalar rho, const vec_m& rhoc,
         const vec_n& lb, const vec_n& ub)
     {
-        constexpr Scalar eps = Scalar(1e-10);
+        constexpr Scalar eps = mma_defaults<Scalar>::subproblem_epsilon;
 
         Scalar u = rho;
         for(int i = 0; i < m_; ++i)
@@ -328,7 +331,7 @@ private:
 
     vec_m dual_grad_;
     mat_mm dual_hess_;
-    Eigen::LDLT<mat_mm> ldlt_;
+    defined_decomposition<Eigen::LDLT<mat_mm>> ldlt_;
     vec_m dy_;
 };
 

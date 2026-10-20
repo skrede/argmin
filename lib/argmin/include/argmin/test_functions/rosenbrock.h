@@ -46,7 +46,7 @@ struct rosenbrock
     [[nodiscard]] Scalar value(const Eigen::Vector<Scalar, N>& x) const
     {
         Scalar f{0};
-        for(int i = 0; i < n - 1; ++i)
+        for(Eigen::Index i = 0; i < x.size() - 1; ++i)
         {
             Scalar t1 = a - x[i];
             Scalar t2 = x[i + 1] - x[i] * x[i];
@@ -59,7 +59,7 @@ struct rosenbrock
     {
         g.resize(n);
         g.setZero();
-        for(int i = 0; i < n - 1; ++i)
+        for(Eigen::Index i = 0; i < x.size() - 1; ++i)
         {
             Scalar t1 = a - x[i];
             Scalar t2 = x[i + 1] - x[i] * x[i];

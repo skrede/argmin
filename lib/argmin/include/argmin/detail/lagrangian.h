@@ -10,6 +10,8 @@
 //            N&W eq. 15.24 / 17.44 (constraint violation);
 //            N&W eq. 18.15 (multiplier estimation).
 
+#include "argmin/detail/householder_apply.h"
+
 #include "argmin/types.h"
 
 #include <Eigen/Core>
@@ -234,6 +236,7 @@ struct kkt_multiplier_workspace
                       Eigen::ColMajor, MaxN, MaxN>> qr;
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor, MaxN, 1> grad_f_dyn;
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor, MaxN, 1> lambda_active;
+    Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor, MaxN, 1> scaled;
 };
 
 // Active-set multiplier estimate with scatter into caller-owned outputs.
@@ -309,8 +312,10 @@ ARGMIN_FORCE_INLINE void compute_kkt_multipliers_active_set(
     // LS on the reduced system (N&W eq. 18.15) via the persistent QR.
     ws.qr.compute(ws.A_active.transpose());
     if(ws.grad_f_dyn.size() != n) ws.grad_f_dyn.resize(n);
+    if(ws.scaled.size() != n) ws.scaled.resize(n);
+    if(ws.lambda_active.size() < m_active) ws.lambda_active.resize(m_active);
     ws.grad_f_dyn = g;
-    ws.lambda_active = ws.qr.solve(ws.grad_f_dyn);
+    col_piv_qr_solve_in_place(ws.qr, ws.grad_f_dyn, ws.lambda_active.head(m_active), ws.scaled);
 
     // Equality multipliers: sign unrestricted.
     if(n_eq > 0)
