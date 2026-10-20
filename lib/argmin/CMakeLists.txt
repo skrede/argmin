@@ -45,6 +45,8 @@ set(INCLUDE_DIRECTORY include)
 add_library(argmin INTERFACE)
 add_library(argmin::argmin ALIAS argmin)
 
+target_compile_features(argmin INTERFACE cxx_std_20)
+
 target_include_directories(argmin
     INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${INCLUDE_DIRECTORY}>
