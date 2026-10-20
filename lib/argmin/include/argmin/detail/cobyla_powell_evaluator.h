@@ -62,9 +62,6 @@ struct cobyla_powell_evaluator
     }
 };
 
-// Build the Powell-convention evaluator (holds the problem by reference)
-// and initialize the engine. The evaluator also refreshes s.c_eq / s.c_ineq
-// so step_budget_solver's constraint_violation reporting sees the latest point.
 template <typename State, typename Scalar>
 inline void cobyla_init_engine(State& s, Scalar rhobeg, Scalar rhoend)
 {
