@@ -15,6 +15,12 @@ on:
       - '.planning/**'
   workflow_dispatch:
 
+# A newer push to a pull request cancels its older run; every other run gets a group of its own,
+# because a group holds one pending run and would otherwise drop queued develop or master pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   fuzz:
     runs-on: ubuntu-latest
