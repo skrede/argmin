@@ -3,7 +3,7 @@
 This benchmark compares argmin's three quadratic-program solvers (dense ADMM, dense active-set and
 sparse ADMM) against OSQP, qpOASES, DAQP, ProxQP, HPIPM and TinyMPC on the same model-predictive
 control problems, measured through the ctrlpp benchmark harness,
-`benchmarks/comparison/qp_head_to_head/`. It answers three questions: whether block-structured
+`benchmarks/comparison/qp_solvers/run_qp_solvers.sh`. It answers three questions: whether block-structured
 (Riccati-class) storage would pay off for argmin's sparse solver, which argmin dense solver should
 be the documented default for each regime and accuracy tier, and whether argmin's sparse ADMM
 solver can replace OSQP in ctrlpp's linear MPC. The decision rules below were committed before any
@@ -2298,8 +2298,8 @@ here are of the pinned configuration.
 
 - argmin library under test: `ca7ec854a02dc90f0b423cec52bda9a4f306c43a`, fetched by the harness.
   The argmin commits after it, which add the verdict command and this page, touch only
-  `benchmarks/scripts/` and `docs/`: `git diff --stat ca7ec854a02dc90f0b423cec52bda9a4f306c43a --
-  lib/` prints nothing.
+  `benchmarks/scripts/` and `docs/`: `git diff --stat ca7ec854a02dc90f0b423cec52bda9a4f306c43a
+  b91820d929bbad8edb73c1e890ca75935523b25f -- lib/` prints nothing.
 - Pre-registration freeze commit: `b91820d929bbad8edb73c1e890ca75935523b25f`, committed
   2026-10-08T20:00:27Z, before the run started. The run's manifest cites it, and the verdict command
   checked it with `--expect-preregistration-commit`.
@@ -2361,9 +2361,7 @@ gets its own run id and its own timings.
 1. Check out ctrlpp at `706d5262e9a458b5683d80c1565257eba5a5b46f`, and argmin at
    `b91820d929bbad8edb73c1e890ca75935523b25f` or later beside it (the harness reads the verdict
    command from `../argmin`, or from `ARGMIN_CHECKOUT`). Install Eigen 3.4.1 and proxsuite 0.7.3
-   where CMake finds them; the harness does not fetch either. At that commit the harness is
-   `benchmarks/comparison/qp_solvers/run_qp_solvers.sh`; the directory named in the introduction
-   above, `benchmarks/comparison/qp_head_to_head/`, does not exist under that name.
+   where CMake finds them; the harness does not fetch either.
 2. Prepare: `benchmarks/comparison/qp_solvers/run_qp_solvers.sh prepare`. It configures, builds the
    two drivers, checks every fetched pin and the BLASFEO, HPIPM and DAQP targets, and runs a short
    smoke pass and the schema check. The configure command it runs is:
