@@ -1,6 +1,10 @@
 include(Catch)
 
 add_executable(argmin_defect_tests
+    bound_ls_al_augmented_lagrangian_test.cpp
+    bound_ls_al_detail_test.cpp
+    bound_ls_al_least_squares_test.cpp
+    bound_ls_al_test.cpp
     derivative_free_model_test.cpp
     derivative_free_oracle_test.cpp
     derivative_free_test.cpp
@@ -19,6 +23,8 @@ add_executable(argmin_defect_tests
     sqp_safety_qp_test.cpp
     sqp_safety_restoration_test.cpp
     sqp_safety_test.cpp
+    status_infra_group_test.cpp
+    status_infra_sqp_test.cpp
     status_infra_test.cpp
     stochastic_oracle_test.cpp
     stochastic_sampling_test.cpp
@@ -80,6 +86,17 @@ argmin_known_defect_scan(seeded_standard_distributions seeded_standard_distribut
 argmin_known_defect_scan(bobyqa_hessian_packing_helper bobyqa_hessian_packing_helper.cmake)
 argmin_known_defect_scan(bobyqa_safety_cap_converged bobyqa_safety_cap_converged.cmake)
 argmin_known_defect_scan(bobyqa_bare_constants bobyqa_bare_constants.cmake)
+argmin_known_defect_scan(lbfgs_middle_matrix_refactorization lbfgs_middle_matrix_refactorization.cmake)
+argmin_known_defect_scan(augmented_lagrangian_bare_inner_constants augmented_lagrangian_bare_inner_constants.cmake)
+argmin_known_defect_scan(least_squares_bare_diagonal_clamp least_squares_bare_diagonal_clamp.cmake)
+argmin_known_defect_scan(fast_math_guard_diagnostic fast_math_guard_diagnostic.cmake)
+argmin_known_defect_scan(fast_math_documentation fast_math_documentation.cmake)
+argmin_known_defect_scan(convergence_bare_feasibility_floor convergence_bare_feasibility_floor.cmake)
+argmin_known_defect_scan(convergence_bare_stall_windows convergence_bare_stall_windows.cmake)
+argmin_known_defect_scan(convergence_bare_stall_buffer_cap convergence_bare_stall_buffer_cap.cmake)
+argmin_known_defect_scan(convergence_vacuous_stationarity_citation convergence_vacuous_stationarity_citation.cmake)
+argmin_known_defect_scan(line_search_bare_evaluation_budget line_search_bare_evaluation_budget.cmake)
+argmin_known_defect_scan(finite_difference_jacobian_allocation finite_difference_jacobian_allocation.cmake)
 
 # The probes run the compiler's -fsyntax-only, a GCC/Clang flag, so MSVC skips them.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

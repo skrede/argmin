@@ -375,7 +375,7 @@ jobs:
           cd build
           count=$(ctest -N -L known-defect | grep -cE '^ *Test +#')
           echo "known defects registered: $count"
-          test "$count" -eq 126 || { echo "expected 126 known defects, found $count"; exit 1; }
+          test "$count" -eq 163 || { echo "expected 163 known defects, found $count"; exit 1; }
 
       # The literal is deliberate: adding or removing an oracle pin should force a visible edit.
       - name: Verify the full oracle-pin set registered

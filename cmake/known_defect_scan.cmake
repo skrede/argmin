@@ -4,6 +4,8 @@
 #          ROOT, matched recursively) and SCAN_REGEX (the witness). The regex lives in a data file so no
 #          shell quotes it differently on Windows.
 #   ROOT - the source tree the globs are relative to.
+#   SCAN_ABSENT - optional; when TRUE the defect is a missing construct, so the scan passes while the
+#          regex matches nothing and stops with "unexpected pass" once it matches.
 #
 # Passes while the witness is present; stops with "unexpected pass" once it is gone, so the fixing change
 # has to retire the scan. A glob that matches nothing is an error, not a fixed defect.
@@ -34,6 +36,15 @@ foreach(path IN LISTS files)
     list(LENGTH hits n)
     math(EXPR count "${count} + ${n}")
 endforeach()
+
+if(SCAN_ABSENT)
+    if(count GREATER 0)
+        message(FATAL_ERROR "unexpected pass: '${SCAN_NAME}' now holds (${count} matches); "
+                            "retire this known-defect scan")
+    endif()
+    message(STATUS "known defect still present: ${SCAN_NAME} (no match)")
+    return()
+endif()
 
 if(count EQUAL 0)
     message(FATAL_ERROR "unexpected pass: the witness for '${SCAN_NAME}' is gone; "
