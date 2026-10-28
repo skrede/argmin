@@ -2,6 +2,7 @@ include(Catch)
 
 add_executable(argmin_defect_tests
     harness_canary_test.cpp
+    least_squares_oracle_test.cpp
     status_infra_test.cpp
 )
 
