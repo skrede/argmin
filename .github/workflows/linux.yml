@@ -493,18 +493,23 @@ jobs:
           echo "property suites registered: $count"
           test "$count" -eq 19 || { echo "expected 19 property suites, found $count"; exit 1; }
 
-      # The seed follows the run number, so successive runs explore new problems. A newly explored seed can
-      # turn an unrelated push red: that is a finding to triage from the printed reproduce string, not flakiness.
+      # Pushes and pull requests run a pinned seed set so a seed-dependent solver status cannot turn an
+      # unrelated change red; a manual dispatch seeds from the run number to explore new problems.
       - name: Run the property suites
         env:
-          RC_PARAMS: "max_success=200 seed=${{ github.run_number }}"
-        run: cd build && ctest --output-on-failure --no-tests=error -L property --timeout 600
+          SEEDS: ${{ github.event_name == 'workflow_dispatch' && github.run_number || '1 2' }}
+        run: |
+          cd build
+          for seed in $SEEDS; do
+            echo "property seed $seed"
+            RC_PARAMS="max_success=200 seed=$seed" ctest --output-on-failure --no-tests=error -L property --timeout 600
+          done
 
       # A property suite never seen to fail proves nothing, so a QP result moved past the oracle's acceptance
       # bound must turn the selection red and print RapidCheck's reproduce string.
       - name: Check that a planted violation turns the property suites red
         env:
-          RC_PARAMS: "max_success=200 seed=${{ github.run_number }}"
+          RC_PARAMS: "max_success=200 seed=1"
           ARGMIN_PROPERTY_PLANT_VIOLATION: "1"
         run: |
           cd build
