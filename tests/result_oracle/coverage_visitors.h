@@ -4,6 +4,7 @@
 #include "margin_table.h"
 #include "oracle_tolerances.h"
 
+#include "cases/case_keys.h"
 #include "cases/case_options.h"
 #include "cases/known_defect_cases.h"
 
@@ -11,7 +12,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <vector>
+#include <cstddef>
 #include <algorithm>
 #include <string_view>
 
@@ -57,6 +60,24 @@ struct collecting_visitor
 inline bool visits_key(const std::vector<case_id>& visited, std::string_view key)
 {
     return std::ranges::any_of(visited, [&](const case_id& id) { return id.key == key; });
+}
+
+// A family visits every key of its array and no other, so a dropped or renamed solver changes the set.
+template <typename VisitFamily, std::size_t Size>
+void check_visits_exactly(VisitFamily visit_family, const std::array<std::string_view, Size>& keys)
+{
+    collecting_visitor collector;
+    visit_family(collector);
+    for(const std::string_view key : keys)
+    {
+        INFO(key);
+        CHECK(visits_key(collector.visited, key));
+    }
+    for(const case_id& id : collector.visited)
+    {
+        INFO(id.key);
+        CHECK(std::ranges::find(keys, id.key) != keys.end());
+    }
 }
 
 // An entry naming one of this family's keys must match a visited case, so a renamed or removed case

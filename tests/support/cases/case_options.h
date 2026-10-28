@@ -48,6 +48,24 @@ inline solver_options<> moving_asymptote_options()
     return opts;
 }
 
+// A derivative-free iteration spends one or a few evaluations, so these families need a budget sized in
+// evaluations: BOBYQA takes about 500 on the Wood function (hs038).
+inline solver_options<> derivative_free_options()
+{
+    solver_options<> opts = gradient_options();
+    opts.max_iterations = 2000;
+    return opts;
+}
+
+// The evolution strategies count a generation as an iteration; ISRES is specified with about 1750
+// generations (Runarsson and Yao 2000).
+inline solver_options<> stochastic_options()
+{
+    solver_options<> opts = gradient_options();
+    opts.max_iterations = 2000;
+    return opts;
+}
+
 // The visitor runs inside this call, so the problem outlives every solver make_solver returns.
 template <typename Visitor, typename Policy, typename Problem>
 void visit_case(Visitor& visitor, const case_id& id, const Policy& policy, const Problem& problem, const solver_options<>& options)

@@ -1,0 +1,41 @@
+# Every solver and QP header on disk, relative to the repository root, with what covers it:
+#   key <k>...       the case-table keys that cover the header's solver
+#   alias <path>     a public alias of the solver in that header, which is mapped to a key
+#   exempt <reason>  not a solver
+
+set(SOLVER_INVENTORY
+    "lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h key augmented_lagrangian_lbfgsb"
+    "lib/argmin/include/argmin/solver/bobyqa_policy.h key bobyqa"
+    "lib/argmin/include/argmin/solver/byrd_lbfgsb_policy.h key byrd_lbfgsb"
+    "lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h key ccsa_quadratic"
+    "lib/argmin/include/argmin/solver/cmaes_policy.h alias lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h"
+    "lib/argmin/include/argmin/solver/cobyla_policy.h key cobyla"
+    "lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h key filter_nw_sqp"
+    "lib/argmin/include/argmin/solver/filter_slsqp_policy.h key filter_slsqp"
+    "lib/argmin/include/argmin/solver/filter_trsqp_policy.h key filter_trsqp_fast filter_trsqp_accurate"
+    "lib/argmin/include/argmin/solver/gcmma_policy.h alias lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h"
+    "lib/argmin/include/argmin/solver/isres_policy.h alias lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h"
+    "lib/argmin/include/argmin/solver/kraft_slsqp_policy.h key kraft_slsqp"
+    "lib/argmin/include/argmin/solver/lbfgsb_policy.h key lbfgsb"
+    "lib/argmin/include/argmin/solver/lm_policy.h key lm"
+    "lib/argmin/include/argmin/solver/mma_policy.h key mma"
+    "lib/argmin/include/argmin/solver/multistart_policy.h key multistart_lbfgsb"
+    "lib/argmin/include/argmin/solver/nw_sqp_policy.h key nw_sqp"
+    "lib/argmin/include/argmin/solver/projected_gn_policy.h key projected_gn"
+    "lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h key projected_gradient_gn"
+    "lib/argmin/include/argmin/solver/restarting_policy.h key restarting_cmaes"
+    "lib/argmin/include/argmin/solver/tr_sqp_policy.h key tr_sqp_fast tr_sqp_accurate"
+    "lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h key cmaes_no_repair_adaptive_penalty"
+    "lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h key cmaes_pwq_reparameterization"
+    "lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h key cmaes_repair_l2_penalty"
+    "lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h key gcmma_move_limit_shrink"
+    "lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h key gcmma_raa_augmented"
+    "lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h key gcmma_rho_wval"
+    "lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h key isres_nlopt_faithful"
+    "lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h key isres_original_argmin"
+    "lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h key isres_runarsson_yao_paper"
+    "lib/argmin/include/argmin/qp/dense_active_set_qp.h key dense_active_set_qp"
+    "lib/argmin/include/argmin/qp/dense_admm_qp.h key dense_admm_qp"
+    "lib/argmin/include/argmin/qp/qp_types.h exempt defines the QP problem and result types, not a solver"
+    "lib/argmin/include/argmin/qp/sparse_admm_qp.h key sparse_admm_qp"
+)

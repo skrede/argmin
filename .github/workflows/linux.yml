@@ -375,7 +375,7 @@ jobs:
           cd build
           count=$(ctest -N -L known-defect | grep -cE '^ *Test +#')
           echo "known defects registered: $count"
-          test "$count" -eq 10 || { echo "expected 10 known defects, found $count"; exit 1; }
+          test "$count" -eq 24 || { echo "expected 24 known defects, found $count"; exit 1; }
 
       # ctest treats a label selection that matches nothing as success, so
       # without --no-tests=error this step would pass if the labels it names

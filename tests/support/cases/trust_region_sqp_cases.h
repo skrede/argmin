@@ -11,8 +11,13 @@
 
 #include "argmin/types.h"
 
+#include <array>
+#include <string_view>
+
 namespace argmin::cases
 {
+
+inline constexpr std::array<std::string_view, 4> trust_region_sqp_keys{"tr_sqp_fast", "tr_sqp_accurate", "filter_trsqp_fast", "filter_trsqp_accurate"};
 
 template <sqp_mode Mode>
 using tr_sqp = tr_sqp_policy<double, dynamic_dimension, Mode>;

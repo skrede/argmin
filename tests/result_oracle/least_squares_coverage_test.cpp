@@ -19,3 +19,8 @@ TEST_CASE("every listed least-squares known defect matches a case in the table",
 {
     cases::check_known_defects_match([](auto& visitor) { cases::visit_least_squares_cases(visitor); });
 }
+
+TEST_CASE("the least-squares case table visits exactly its keys", "[oracle]")
+{
+    cases::check_visits_exactly([](auto& visitor) { cases::visit_least_squares_cases(visitor); }, cases::least_squares_keys);
+}

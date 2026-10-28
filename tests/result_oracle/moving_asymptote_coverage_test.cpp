@@ -19,3 +19,8 @@ TEST_CASE("every listed moving-asymptote known defect matches a case in the tabl
 {
     cases::check_known_defects_match([](auto& visitor) { cases::visit_moving_asymptote_cases(visitor); });
 }
+
+TEST_CASE("the moving-asymptote case table visits exactly its keys", "[oracle]")
+{
+    cases::check_visits_exactly([](auto& visitor) { cases::visit_moving_asymptote_cases(visitor); }, cases::moving_asymptote_keys);
+}

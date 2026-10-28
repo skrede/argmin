@@ -18,7 +18,7 @@ struct known_defect
 };
 
 // Each entry is skipped by the oracle coverage and asserted by an expected-fail case under tests/defects.
-inline constexpr std::array<known_defect, 7> known_defect_cases{{
+inline constexpr std::array<known_defect, 21> known_defect_cases{{
     {"projected_gradient_gn",
      "bound",
      "projecting the full Gauss-Newton step onto the box crawls along the free variable once a bound is active, so the "
@@ -47,45 +47,39 @@ inline constexpr std::array<known_defect, 7> known_defect_cases{{
      "inequality",
      "the shrinking move limit stalls progress on hs076, which the other variants solve in under 30 iterations, so the "
      "run ends max_iterations far from stationarity"},
+    {"cobyla",
+     "bound",
+     "from the default initial radius the linear models stall near the saddle of the Wood function at f = 7.877, so the run "
+     "ends max_iterations far from stationarity"},
+    {"cmaes_pwq_reparameterization", "bound", "on hs005 the run reports converged after 65 generations and returns the initial point, which is not stationary"},
+    {"cmaes_no_repair_adaptive_penalty", "bound", "on hs005 the step size collapses at a non-stationary interior point and the run reports converged"},
+    {"isres_nlopt_faithful",
+     "bound",
+     "the step-size collapse ends the run converged on the Wood function with stationarity about 150 times the gradient "
+     "tolerance"},
+    {"isres_nlopt_faithful", "inequality", "the run reports converged at a point of hs076 that violates an inequality row and is far from stationary"},
+    {"isres_nlopt_faithful", "mixed", "the run reports converged at a point of hs071 that violates both constraint kinds and is far from stationary"},
+    {"isres_original_argmin", "bound", "the run ends max_iterations on the Wood function far from stationarity"},
+    {"isres_original_argmin", "inequality", "the run reports converged after 34 generations on hs076 far from stationarity"},
+    {"isres_original_argmin",
+     "equality",
+     "the best point never moves from the best of the initial population, so the run ends max_iterations at an "
+     "infeasible point of hs028"},
+    {"isres_original_argmin",
+     "mixed",
+     "the best point never moves from the best of the initial population, so the run ends max_iterations at an "
+     "infeasible point of hs071"},
+    {"isres_runarsson_yao_paper", "bound", "the run ends max_iterations on the Wood function far from stationarity"},
+    {"isres_runarsson_yao_paper", "inequality", "the run ends ftol_reached on hs076 with stationarity far above the tolerance"},
+    {"isres_runarsson_yao_paper",
+     "equality",
+     "the best point never moves from the best of the initial population, so the run ends ftol_reached at an infeasible "
+     "point of hs028"},
+    {"isres_runarsson_yao_paper",
+     "mixed",
+     "the best point never moves from the best of the initial population, so the run ends ftol_reached at an infeasible "
+     "point of hs071"},
 }};
-
-inline constexpr std::array<std::string_view, 32> solver_keys{"lbfgsb",
-                                                              "byrd_lbfgsb",
-                                                              "kraft_slsqp",
-                                                              "nw_sqp",
-                                                              "filter_slsqp",
-                                                              "filter_nw_sqp",
-                                                              "tr_sqp_fast",
-                                                              "tr_sqp_accurate",
-                                                              "filter_trsqp_fast",
-                                                              "filter_trsqp_accurate",
-                                                              "lm",
-                                                              "projected_gn",
-                                                              "projected_gradient_gn",
-                                                              "mma",
-                                                              "ccsa_quadratic",
-                                                              "gcmma_move_limit_shrink",
-                                                              "gcmma_raa_augmented",
-                                                              "gcmma_rho_wval",
-                                                              "bobyqa",
-                                                              "cobyla",
-                                                              "cmaes_repair_l2_penalty",
-                                                              "cmaes_pwq_reparameterization",
-                                                              "cmaes_no_repair_adaptive_penalty",
-                                                              "isres_nlopt_faithful",
-                                                              "isres_original_argmin",
-                                                              "isres_runarsson_yao_paper",
-                                                              "augmented_lagrangian_lbfgsb",
-                                                              "multistart_lbfgsb",
-                                                              "restarting_cmaes",
-                                                              "dense_admm_qp",
-                                                              "sparse_admm_qp",
-                                                              "dense_active_set_qp"};
-
-inline bool is_solver_key(std::string_view key)
-{
-    return std::ranges::find(solver_keys, key) != solver_keys.end();
-}
 
 inline bool same_case(const known_defect& defect, const case_id& id)
 {

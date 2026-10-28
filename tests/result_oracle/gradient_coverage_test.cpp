@@ -19,3 +19,8 @@ TEST_CASE("every listed gradient-based known defect matches a case in the table"
 {
     cases::check_known_defects_match([](auto& visitor) { cases::visit_gradient_cases(visitor); });
 }
+
+TEST_CASE("the gradient case table visits exactly its keys", "[oracle]")
+{
+    cases::check_visits_exactly([](auto& visitor) { cases::visit_gradient_cases(visitor); }, cases::gradient_keys);
+}

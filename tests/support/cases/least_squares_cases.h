@@ -10,10 +10,13 @@
 
 #include "argmin/test_functions/small_dense.h"
 
+#include <array>
 #include <string_view>
 
 namespace argmin::cases
 {
+
+inline constexpr std::array<std::string_view, 3> least_squares_keys{"lm", "projected_gn", "projected_gradient_gn"};
 
 // Levenberg-Marquardt never reads a box, so a bounded problem is not one of its cases.
 template <typename Visitor>

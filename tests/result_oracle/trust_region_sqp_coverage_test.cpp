@@ -19,3 +19,8 @@ TEST_CASE("every listed trust-region SQP known defect matches a case in the tabl
 {
     cases::check_known_defects_match([](auto& visitor) { cases::visit_trust_region_sqp_cases(visitor); });
 }
+
+TEST_CASE("the trust-region SQP case table visits exactly its keys", "[oracle]")
+{
+    cases::check_visits_exactly([](auto& visitor) { cases::visit_trust_region_sqp_cases(visitor); }, cases::trust_region_sqp_keys);
+}

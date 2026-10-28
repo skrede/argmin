@@ -13,11 +13,14 @@
 
 #include "argmin/test_functions/hock_schittkowski.h"
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 
 namespace argmin::cases
 {
+
+inline constexpr std::array<std::string_view, 5> moving_asymptote_keys{"mma", "ccsa_quadratic", "gcmma_move_limit_shrink", "gcmma_raa_augmented", "gcmma_rho_wval"};
 
 template <typename Visitor, typename Policy>
 void visit_bound_and_inequality(Visitor& visitor, std::string_view key, const Policy& policy)

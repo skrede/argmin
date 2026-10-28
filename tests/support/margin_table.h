@@ -8,6 +8,7 @@
 #include "argmin/result/status.h"
 
 #include <string>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -38,22 +39,29 @@ public:
         if(!out_.is_open())
             return;
         const Scalar stationarity = v.claimed == oracle::claim::ftol_optimality ? tol.ftol_stationarity : tol.stationarity;
-        row(id, status, "stationarity", v.legs.stationarity, stationarity);
-        row(id, status, "equality_violation", v.legs.equality_violation, tol.feasibility);
-        row(id, status, "inequality_violation", v.legs.inequality_violation, tol.feasibility);
-        row(id, status, "bound_violation", v.legs.bound_violation, tol.feasibility);
-        row(id, status, "complementarity", v.legs.complementarity, stationarity);
-        row(id, status, "dual_sign_breach", v.legs.dual_sign_breach, stationarity);
+        const std::int32_t code = static_cast<std::int32_t>(status);
+        row(id, code, "stationarity", v.legs.stationarity, stationarity);
+        row(id, code, "equality_violation", v.legs.equality_violation, tol.feasibility);
+        row(id, code, "inequality_violation", v.legs.inequality_violation, tol.feasibility);
+        row(id, code, "bound_violation", v.legs.bound_violation, tol.feasibility);
+        row(id, code, "complementarity", v.legs.complementarity, stationarity);
+        row(id, code, "dual_sign_breach", v.legs.dual_sign_breach, stationarity);
+    }
+
+    template <typename Scalar>
+    void record_leg(const case_id& id, std::int32_t status, std::string_view leg, Scalar value, Scalar tolerance)
+    {
+        if(out_.is_open())
+            row(id, status, leg, value, tolerance);
     }
 
 private:
     std::ofstream out_;
 
     template <typename Scalar>
-    void row(const case_id& id, solver_status status, std::string_view leg, Scalar value, Scalar tolerance)
+    void row(const case_id& id, std::int32_t status, std::string_view leg, Scalar value, Scalar tolerance)
     {
-        out_ << id.key << ',' << id.problem_class << ',' << id.problem << ',' << static_cast<int>(status) << ',' << leg << ',' << std::scientific << std::setprecision(6) << value << ',' << tolerance << ','
-             << value / tolerance << '\n';
+        out_ << id.key << ',' << id.problem_class << ',' << id.problem << ',' << status << ',' << leg << ',' << std::scientific << std::setprecision(6) << value << ',' << tolerance << ',' << value / tolerance << '\n';
     }
 };
 

@@ -1,11 +1,13 @@
 include(Catch)
 
 add_executable(argmin_defect_tests
+    derivative_free_oracle_test.cpp
     harness_canary_test.cpp
     least_squares_oracle_test.cpp
     moving_asymptote_oracle_test.cpp
     sqp_oracle_test.cpp
     status_infra_test.cpp
+    stochastic_oracle_test.cpp
 )
 
 target_include_directories(argmin_defect_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)

@@ -8,8 +8,13 @@
 #include "argmin/solver/byrd_lbfgsb_policy.h"
 #include "argmin/solver/augmented_lagrangian_policy.h"
 
+#include <array>
+#include <string_view>
+
 namespace argmin::cases
 {
+
+inline constexpr std::array<std::string_view, 4> gradient_keys{"lbfgsb", "byrd_lbfgsb", "augmented_lagrangian_lbfgsb", "multistart_lbfgsb"};
 
 template <typename Visitor>
 void visit_gradient_cases(Visitor& visitor)
