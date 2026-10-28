@@ -32,6 +32,8 @@ a failure, not a skip. There is no in-code marker and there are no silent except
 A function's length is the line count clang-tidy's `readability-function-size` check reports: the
 body from its opening brace to its closing brace, so the signature and the member initializer list
 are not counted.
+`scripts/check_function_size.py` measures it over every tracked header and fails on the same faults
+for functions.
 
 ## Scope
 

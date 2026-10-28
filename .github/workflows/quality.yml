@@ -62,3 +62,52 @@ jobs:
 
       - name: Negative control
         run: bash scripts/size_gate_negative_control.sh
+
+  function-size:
+    runs-on: ubuntu-24.04
+    name: size gate (function lengths)
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      # A check's line counts can move between clang-tidy releases, and the baseline records exact counts,
+      # so the release is pinned to the one the baseline was recorded with.
+      - name: Install the pinned clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 clang-tidy-18 libeigen3-dev
+          clang-tidy-18 --version
+
+      - name: Function-size fixtures
+        run: python3 scripts/check_function_size_test.py
+
+      - name: Choose the commit the baseline may not exceed
+        id: baseline
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          ref="${PR_BASE:-$PUSH_BEFORE}"
+          if [ -z "$ref" ] || [ -z "${ref//0/}" ] || ! git cat-file -e "${ref}^{commit}" 2>/dev/null; then
+            ref="$(git rev-parse HEAD~1)"
+          fi
+          echo "comparing the baseline against $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Function sizes against the register and the debt baseline
+        env:
+          BASELINE_REF: ${{ steps.baseline.outputs.ref }}
+        run: >-
+          python3 scripts/check_function_size.py --clang-tidy clang-tidy-18
+          --eigen-include /usr/include/eigen3 --baseline-ref "$BASELINE_REF"
+
+      - name: Negative control with real clang-tidy plants
+        env:
+          CLANG_TIDY: clang-tidy-18
+        run: bash scripts/size_gate_negative_control.sh

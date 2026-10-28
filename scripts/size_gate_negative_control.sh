@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Prove that the file-size gate is able to fail, on an over-limit file nobody registered and on a
-# debt baseline that grew.
+# Prove that the size gates are able to fail, on an over-limit file or function nobody registered and on
+# a debt baseline that grew.
 #
 # The gate measures tracked files only, so an untracked plant would be invisible to it. Every plant
 # therefore goes into a throwaway repository holding a copy of the real tree, and the real working
 # tree is never written.
+#
+# The function plants run a real clang-tidy, found through CLANG_TIDY, then clang-tidy-18, then the
+# llvm18 install path; without one they are skipped visibly. ARGMIN_TIDY_EXTRA_ARG, when set, is passed
+# to the compiler, e.g. --gcc-install-dir=... where clang-18 cannot parse the default libstdc++.
 #
 #   scripts/size_gate_negative_control.sh
 set -euo pipefail
@@ -29,7 +33,7 @@ in_copy() { git -C "$WORK" -c user.name=control -c user.email=control@localhost 
 
 gate_status() {
     local rc=0
-    (cd "$WORK" && python3 scripts/check_file_size.py "$@") >/dev/null 2>&1 || rc=$?
+    (cd "$WORK" && "$@") >/dev/null 2>&1 || rc=$?
     echo "$rc"
 }
 
@@ -43,6 +47,29 @@ expect() {
 plant_probe() { for _ in $(seq 201); do echo '// probe'; done > "$WORK/$PROBE"; in_copy add "$PROBE"; }
 remove_probe() { in_copy rm -q --cached "$PROBE"; rm -f "$WORK/$PROBE"; }
 restore() { in_copy checkout -q -- "$@"; }
+
+plant_function() {
+    {
+        echo '#ifndef HPP_GUARD_ARGMIN_SIZE_GATE_PROBE_H'
+        echo '#define HPP_GUARD_ARGMIN_SIZE_GATE_PROBE_H'
+        echo 'inline void size_gate_probe()'
+        echo '{'
+        for _ in $(seq 29); do echo '    static_cast<void>(0);'; done
+        echo '}'
+        echo '#endif'
+    } > "$WORK/$PROBE"
+    in_copy add "$PROBE"
+}
+
+find_tidy() {
+    local candidate
+    for candidate in "${CLANG_TIDY:-}" clang-tidy-18 /usr/lib/llvm18/bin/clang-tidy; do
+        if [ -n "$candidate" ] && command -v "$candidate" >/dev/null 2>&1; then
+            command -v "$candidate"
+            return
+        fi
+    done
+}
 
 add_probe_row() {
     python3 - "$WORK/$BASELINE" "$PROBE" <<'PY'
@@ -65,31 +92,50 @@ in_copy add -A
 in_copy commit -q -m "copy of the real tree"
 
 recorded="$(awk -F'\t' '$1 == "file" { print $2; exit }' "$WORK/$BASELINE")"
+FILE_GATE=(python3 scripts/check_file_size.py)
+TIDY="$(find_tidy)"
+FUNCTION_GATE=(python3 scripts/check_function_size.py --clang-tidy "$TIDY")
+if [ -n "${ARGMIN_TIDY_EXTRA_ARG:-}" ]; then FUNCTION_GATE+=("--extra-arg=$ARGMIN_TIDY_EXTRA_ARG"); fi
 
 echo "proving the file-size gate can fail:"
 
-expect 0 "the untouched copy passes"
-expect 0 "the untouched copy passes against its own commit" --baseline-ref HEAD
+expect 0 "the untouched copy passes" "${FILE_GATE[@]}"
+expect 0 "the untouched copy passes against its own commit" "${FILE_GATE[@]}" --baseline-ref HEAD
 
 plant_probe
-expect 1 "a planted lib/ header in no register is caught"
+expect 1 "a planted lib/ header in no register is caught" "${FILE_GATE[@]}"
 remove_probe
 
 echo '// probe' >> "$WORK/$recorded"
-expect 4 "one line added to a file with a baseline row is caught"
+expect 4 "one line added to a file with a baseline row is caught" "${FILE_GATE[@]}"
 restore "$recorded"
 
 awk 'BEGIN { FS = OFS = "\t" } !done && $1 == "file" { $4 += 1; done = 1 } { print }' \
     "$WORK/$BASELINE" > "$WORK/$BASELINE.raised"
 mv "$WORK/$BASELINE.raised" "$WORK/$BASELINE"
-expect 8 "a raised baseline count is caught against the ref" --baseline-ref HEAD
+expect 8 "a raised baseline count is caught against the ref" "${FILE_GATE[@]}" --baseline-ref HEAD
 restore "$BASELINE"
 
 plant_probe
 add_probe_row
-expect 8 "a new baseline row is caught against the ref" --baseline-ref HEAD
+expect 8 "a new baseline row is caught against the ref" "${FILE_GATE[@]}" --baseline-ref HEAD
 remove_probe
 restore "$BASELINE"
+
+echo "proving the function-size gate can fail:"
+if [ -z "$TIDY" ]; then
+    echo "  SKIP  function plants: no clang-tidy found; set CLANG_TIDY to run them"
+else
+    expect 0 "the untouched copy passes the function gate" "${FUNCTION_GATE[@]}" --baseline-ref HEAD
+    plant_function
+    expect 1 "a planted 30-line function in no register is caught by $TIDY" "${FUNCTION_GATE[@]}"
+    remove_probe
+    awk 'BEGIN { FS = OFS = "\t" } !done && $1 == "function" { $4 -= 1; done = 1 } { print }' \
+        "$WORK/$BASELINE" > "$WORK/$BASELINE.lowered"
+    mv "$WORK/$BASELINE.lowered" "$WORK/$BASELINE"
+    expect 4 "a function one line past its lowered baseline row is caught" "${FUNCTION_GATE[@]}"
+    restore "$BASELINE"
+fi
 
 if [ "$(git status --porcelain)" = "$before" ]; then
     pass "the real working tree is unchanged"
@@ -99,9 +145,9 @@ fi
 
 echo
 if [ "$failures" -ne 0 ]; then
-    echo "the file-size gate is NOT proven able to fail: $failures of the control's properties do not hold"
+    echo "the size gates are NOT proven able to fail: $failures of the control's properties do not hold"
     exit 1
 fi
 
-echo "the file-size gate discriminates: the untouched copy passes, and an unregistered overage,"
-echo "file growth past its baseline row, and a baseline that grew against the ref all go red"
+echo "the size gates discriminate: the untouched copy passes, and an unregistered overage, growth past"
+echo "a baseline row, and a baseline that grew against the ref all go red"

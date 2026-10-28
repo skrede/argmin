@@ -75,75 +75,12 @@ build if they do.
 
 ## Coding Conventions
 
-argmin targets idiomatic C++20 with first-class embedded targets. The
-conventions below apply to all contributions.
-
-### Language and style
-
-- **C++20 is the floor** (required for wide MCU toolchain support). Use
-  modern features where they improve clarity -- `concepts`, `if
-  constexpr`, designated initializers, `std::ranges`. C++23-only
-  features must be feature-test-macro guarded with a C++20 fallback, or
-  dropped. `std::expected` is C++23, so the library ships an in-library
-  `argmin::expected` backport via `<argmin/expected.h>` that aliases the
-  standard type when the toolchain provides it.
-- **Exception-free and RTTI-free.** The library builds
-  `-fno-exceptions -fno-rtti`. Return `expected`-based errors rather than
-  throwing; do not use `dynamic_cast` / `typeid`. New code must not add
-  `throw` sites.
-- **Eigen is the only required dependency.** argmin reinvents no matrix
-  math.
-- **Naming:** lowercase types and functions (`lbfgsb_policy`,
-  `step_budget_solver`); private member variables take a trailing
-  underscore (`n_`, `updates_since_reset_`); template parameters in
-  `CamelCase` (`Scalar`, `Policy`, `Problem`, `N`).
-- **Braces:** Allman style (opening brace on its own line for functions,
-  classes, and control flow). 4-space indentation, no tabs.
-
-### Headers
-
-- **Header-only.** Public headers live under
-  `lib/argmin/include/argmin/`; there is no compiled library artifact.
-- **Header guards** in the form `HPP_GUARD_ARGMIN_<FOLDER>_<FILE>_H`. No
-  `#pragma once`.
-- **No matching closing-namespace comment** (`// namespace argmin` is
-  noise after the closing brace; just close the brace).
-- **No matching `#endif` comment** for the include guard.
-
-### Include ordering
-
-Includes are grouped into three sections separated by a single blank
-line:
-
-1. Internal project includes (`#include "..."`).
-2. Third-party library includes (`#include <Eigen/...>`,
-   `#include <catch2/...>`).
-3. Standard library includes (`#include <vector>`, `#include <expected>`).
-
-Within each section, group by folder location with a blank line between
-folder groups. Within each folder group, sort by line length first, then
-alphabetically. Order matters only where a header genuinely must precede
-another.
-
-### Documentation comments
-
-Every public class, function, template, and concept carries a doc-comment
-naming its purpose, parameters, return value, and edge cases worth
-flagging. Keep doc-comments at the *why* level for non-obvious behavior;
-don't restate what well-named identifiers already communicate. Algorithm
-headers cite their source (textbook + section, or the original paper).
-
-### Testing
-
-- **Unit tests** via Catch2: cover every public API path.
-- **Property-based tests** via RapidCheck (optional target): for
-  numerical kernels, property tests catch what handpicked cases miss.
-- **Fixed-seed determinism.** Tests must not depend on an
-  implementation-defined RNG stream: `std::normal_distribution` /
-  `std::uniform_real_distribution` produce different sequences across
-  standard libraries. Derive random inputs from the raw engine output,
-  and prefer well-conditioned inputs over assertions that ride the
-  floating-point rounding boundary.
+The code style -- language floor, size limits, comments, includes, naming,
+construction, ownership, formatting and testing -- is specified in
+[CONVENTIONS.md](CONVENTIONS.md). Units over the size ceilings are
+registered in [EXCEPTIONS.md](EXCEPTIONS.md) or recorded in the
+shrink-only debt baseline it describes, and the size gate fails on
+anything else.
 
 ## Commit Message Format
 
