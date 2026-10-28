@@ -1,7 +1,9 @@
 include(Catch)
 
 add_executable(argmin_defect_tests
+    derivative_free_model_test.cpp
     derivative_free_oracle_test.cpp
+    derivative_free_test.cpp
     harness_canary_test.cpp
     least_squares_oracle_test.cpp
     moving_asymptote_oracle_test.cpp
@@ -19,6 +21,8 @@ add_executable(argmin_defect_tests
     sqp_safety_test.cpp
     status_infra_test.cpp
     stochastic_oracle_test.cpp
+    stochastic_sampling_test.cpp
+    stochastic_test.cpp
 )
 
 target_include_directories(argmin_defect_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)
@@ -71,6 +75,11 @@ argmin_known_defect_scan(sqp_bare_restoration_step_budget sqp_bare_restoration_s
 argmin_known_defect_scan(moving_asymptote_equality_probe_overflow moving_asymptote_equality_probe_overflow.cmake)
 argmin_known_defect_scan(moving_asymptote_bare_dual_budget moving_asymptote_bare_dual_budget.cmake)
 argmin_known_defect_scan(moving_asymptote_subproblem_dual_budget moving_asymptote_subproblem_dual_budget.cmake)
+argmin_known_defect_scan(cmaes_dense_sampling_and_ranking cmaes_dense_sampling_and_ranking.cmake)
+argmin_known_defect_scan(seeded_standard_distributions seeded_standard_distributions.cmake)
+argmin_known_defect_scan(bobyqa_hessian_packing_helper bobyqa_hessian_packing_helper.cmake)
+argmin_known_defect_scan(bobyqa_safety_cap_converged bobyqa_safety_cap_converged.cmake)
+argmin_known_defect_scan(bobyqa_bare_constants bobyqa_bare_constants.cmake)
 
 # The probes run the compiler's -fsyntax-only, a GCC/Clang flag, so MSVC skips them.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -95,4 +104,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     argmin_defect_compile_probe_test(known_defect_compile_canary_compiles compile_canary_compiles.cpp
         "static assertion failed")
     set_tests_properties(known_defect_compile_canary_compiles PROPERTIES PASS_REGULAR_EXPRESSION "unexpected pass")
+
+    argmin_known_defect_compile_probe(isres_fixed_dimension_ten isres_fixed_dimension_ten.cpp
+        "static assertion failed.*OBJECT_ALLOCATED_ON_STACK_IS_TOO_BIG")
+    argmin_known_defect_compile_probe(cmaes_fixed_dimension_thirty_three cmaes_fixed_dimension_thirty_three.cpp
+        "static assertion failed.*OBJECT_ALLOCATED_ON_STACK_IS_TOO_BIG")
 endif()
