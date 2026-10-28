@@ -1,0 +1,3 @@
+set(SCAN_NAME "the solve loop, the step-budget driver and the solver group order their includes by folder group, then by file-name length")
+set(SCAN_FILES "lib/argmin/include/argmin/detail/solve_loop.h;lib/argmin/include/argmin/solver/step_budget_solver.h;lib/argmin/include/argmin/schedule/basic_solver_group.h")
+set(SCAN_REGEX "\"argmin/result/solve_result\\.h\"\r?\n#include \"argmin/result/status\\.h\"\r?\n#include \"argmin/solver/|convergence\\.h\"\r?\n#include \"argmin/solver/options\\.h\"|#include \"argmin/types\\.h\"\r?\n#include \"argmin/detail/|\"argmin/solver/step_budget_solver\\.h\"\r?\n#include \"argmin/formulation/|#include <utility>\r?\n#include <cstdint>|#include <concepts>\r?\n#include <cstddef>")
