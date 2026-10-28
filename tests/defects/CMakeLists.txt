@@ -5,10 +5,14 @@ add_executable(argmin_defect_tests
     harness_canary_test.cpp
     least_squares_oracle_test.cpp
     moving_asymptote_oracle_test.cpp
+    moving_asymptote_solve_test.cpp
+    moving_asymptote_test.cpp
     property_findings_test.cpp
     qp_active_set_oracle_test.cpp
     qp_oracle_test.cpp
     qp_test.cpp
+    sqp_algorithm_step_test.cpp
+    sqp_algorithm_test.cpp
     sqp_oracle_test.cpp
     sqp_safety_qp_test.cpp
     sqp_safety_restoration_test.cpp
@@ -59,6 +63,14 @@ argmin_known_defect_scan(qp_admm_rho_update_gram_rebuild qp_admm_rho_update_gram
 argmin_known_defect_scan(sqp_kkt_active_set_capacity sqp_kkt_active_set_capacity.cmake)
 argmin_known_defect_scan(constraint_count_cap_unchecked constraint_count_cap_unchecked.cmake)
 argmin_known_defect_scan(sqp_underived_tolerance_defaults sqp_underived_tolerance_defaults.cmake)
+argmin_known_defect_scan(sqp_soc_full_cascade_resolve sqp_soc_full_cascade_resolve.cmake)
+argmin_known_defect_scan(sqp_lin_more_restart_refactorization sqp_lin_more_restart_refactorization.cmake)
+argmin_known_defect_scan(sqp_dense_hessian_handoff sqp_dense_hessian_handoff.cmake)
+argmin_known_defect_scan(sqp_absolute_zero_guard sqp_absolute_zero_guard.cmake)
+argmin_known_defect_scan(sqp_bare_restoration_step_budget sqp_bare_restoration_step_budget.cmake)
+argmin_known_defect_scan(moving_asymptote_equality_probe_overflow moving_asymptote_equality_probe_overflow.cmake)
+argmin_known_defect_scan(moving_asymptote_bare_dual_budget moving_asymptote_bare_dual_budget.cmake)
+argmin_known_defect_scan(moving_asymptote_subproblem_dual_budget moving_asymptote_subproblem_dual_budget.cmake)
 
 # The probes run the compiler's -fsyntax-only, a GCC/Clang flag, so MSVC skips them.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
