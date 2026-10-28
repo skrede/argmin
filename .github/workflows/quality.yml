@@ -1,0 +1,64 @@
+name: Quality
+
+# Unlike the build workflows this one carries no path filter: the register the size gate reads is a
+# markdown file, so ignoring '**.md' would skip exactly the edit that can turn the gate red.
+on:
+  push:
+    branches: [master, develop, 'milestone/**']
+  pull_request:
+    branches: [master, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels its older run; every other run gets a group of its own,
+# because a group holds one pending run and would otherwise drop queued develop or master pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-24.04
+    name: size gate (file lengths)
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      # The fixtures are repositories built to hit one verdict each, so they run before the gate:
+      # a gate only ever seen passing cannot show that it still fails.
+      - name: Register fixtures
+        run: python3 scripts/check_file_size_test.py
+
+      - name: Debt-baseline fixtures
+        run: python3 scripts/size_baseline_test.py
+
+      # The first push's `before` predates the baseline, so that run prints the first-recording
+      # notice and the shrink-only check bites from the next push on.
+      - name: Choose the commit the baseline may not exceed
+        id: baseline
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          ref="${PR_BASE:-$PUSH_BEFORE}"
+          if [ -z "$ref" ] || [ -z "${ref//0/}" ] || ! git cat-file -e "${ref}^{commit}" 2>/dev/null; then
+            ref="$(git rev-parse HEAD~1)"
+          fi
+          echo "comparing the baseline against $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: File sizes against the register and the debt baseline
+        env:
+          BASELINE_REF: ${{ steps.baseline.outputs.ref }}
+        run: python3 scripts/check_file_size.py --baseline-ref "$BASELINE_REF"
+
+      - name: Negative control
+        run: bash scripts/size_gate_negative_control.sh
