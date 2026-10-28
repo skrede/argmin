@@ -145,7 +145,7 @@ not sort includes, so the order is kept by hand.
 
 - Types, functions and variables are lowercase with underscores (`lbfgsb_policy`,
   `step_budget_solver`). Template parameters are `CamelCase` (`Scalar`, `Policy`, `Problem`, `N`).
-- Private data members take a trailing underscore (`n_`, `updates_since_reset_`).
+- Private data members take an `m_` prefix (`m_n`, `m_updates_since_reset`).
 - A member holding a callback or hook (a `move_only_function`) takes a `_cb` suffix and groups with
   the other callbacks; the suffix marks it as injected behavior, not state.
 
@@ -157,7 +157,9 @@ not sort includes, so the order is kept by hand.
 - **No `[[nodiscard]]`**, and no other attribute the compiler does not require.
 - **Fixed-width integers** (`std::int32_t`, `std::uint16_t`, ...) rather than `int`, `long` and
   friends, and never a platform-specific alias where a fixed-width type serves. A dimension or index
-  handed to or taken from Eigen uses `Eigen::Index`, the type Eigen itself uses.
+  handed to or taken from Eigen uses `Eigen::Index`, the type Eigen itself uses, and a compile-time
+  dimension template parameter is an `int`, as in Eigen's own templates. A standard-container size
+  is a `std::size_t`.
 
 ## API design
 
