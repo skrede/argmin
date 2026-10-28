@@ -8,6 +8,7 @@ add_executable(argmin_defect_tests
     derivative_free_model_test.cpp
     derivative_free_oracle_test.cpp
     derivative_free_test.cpp
+    embedded_test.cpp
     harness_canary_test.cpp
     least_squares_oracle_test.cpp
     moving_asymptote_oracle_test.cpp
@@ -23,6 +24,7 @@ add_executable(argmin_defect_tests
     sqp_safety_qp_test.cpp
     sqp_safety_restoration_test.cpp
     sqp_safety_test.cpp
+    state_docs_test.cpp
     status_infra_group_test.cpp
     status_infra_sqp_test.cpp
     status_infra_test.cpp
@@ -45,6 +47,27 @@ catch_discover_tests(argmin_defect_tests
     TEST_SPEC "[known-defect]"
     PROPERTIES LABELS "known-defect")
 catch_discover_tests(argmin_defect_tests
+    TEST_SPEC "~[known-defect]")
+
+# The allocation sensor redefines eigen_assert for every Eigen include, so its cases cannot share a binary with the
+# other defect cases without two definitions of Eigen's inline functions.
+add_executable(argmin_defect_alloc_tests
+    embedded_alloc_test.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/alloc_sensor_counters.cpp
+)
+target_link_libraries(argmin_defect_alloc_tests
+    PRIVATE
+        argmin::argmin
+        Catch2::Catch2WithMain
+)
+target_compile_definitions(argmin_defect_alloc_tests
+    PRIVATE ARGMIN_BENCH_TRACE_ALLOC=1 EIGEN_RUNTIME_NO_MALLOC)
+target_compile_options(argmin_defect_alloc_tests
+    PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
+catch_discover_tests(argmin_defect_alloc_tests
+    TEST_SPEC "[known-defect]"
+    PROPERTIES LABELS "known-defect")
+catch_discover_tests(argmin_defect_alloc_tests
     TEST_SPEC "~[known-defect]")
 
 function(argmin_defect_scan_test test_name data_file)
@@ -97,6 +120,22 @@ argmin_known_defect_scan(convergence_bare_stall_buffer_cap convergence_bare_stal
 argmin_known_defect_scan(convergence_vacuous_stationarity_citation convergence_vacuous_stationarity_citation.cmake)
 argmin_known_defect_scan(line_search_bare_evaluation_budget line_search_bare_evaluation_budget.cmake)
 argmin_known_defect_scan(finite_difference_jacobian_allocation finite_difference_jacobian_allocation.cmake)
+argmin_known_defect_scan(embedded_solver_static_storage_guidance embedded_solver_static_storage_guidance.cmake)
+argmin_known_defect_scan(embedded_flash_footprint_documentation embedded_flash_footprint_documentation.cmake)
+argmin_known_defect_scan(denormal_behavior_documentation denormal_behavior_documentation.cmake)
+argmin_known_defect_scan(alloc_counter_atomic_increment alloc_counter_atomic_increment.cmake)
+argmin_known_defect_scan(active_set_layout_stack_limit active_set_layout_stack_limit.cmake)
+argmin_known_defect_scan(time_budget_unguarded_deadline time_budget_unguarded_deadline.cmake)
+argmin_known_defect_scan(documented_compiler_floor_below_ci documented_compiler_floor_below_ci.cmake)
+argmin_known_defect_scan(integration_consumer_cxx20 integration_consumer_cxx20.cmake)
+argmin_known_defect_scan(windows_cxx20_configure windows_cxx20_configure.cmake)
+argmin_known_defect_scan(umbrella_include_order umbrella_include_order.cmake)
+argmin_known_defect_scan(benchmark_driver_include_order benchmark_driver_include_order.cmake)
+argmin_known_defect_scan(choosing_a_solver_policy_count choosing_a_solver_policy_count.cmake)
+argmin_known_defect_scan(rt_matrix_intrinsic_leaf_caps rt_matrix_intrinsic_leaf_caps.cmake)
+argmin_known_defect_scan(rt_matrix_bounded_iterations_definition rt_matrix_bounded_iterations_definition.cmake)
+argmin_known_defect_scan(readme_bounded_iterations_claim readme_bounded_iterations_claim.cmake)
+argmin_known_defect_scan(rt_matrix_restoration_evidence_provenance rt_matrix_restoration_evidence_provenance.cmake)
 
 # The probes run the compiler's -fsyntax-only, a GCC/Clang flag, so MSVC skips them.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -126,4 +165,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         "static assertion failed.*OBJECT_ALLOCATED_ON_STACK_IS_TOO_BIG")
     argmin_known_defect_compile_probe(cmaes_fixed_dimension_thirty_three cmaes_fixed_dimension_thirty_three.cpp
         "static assertion failed.*OBJECT_ALLOCATED_ON_STACK_IS_TOO_BIG")
+    argmin_known_defect_compile_probe(argmin_under_min_max_macros argmin_under_min_max_macros.cpp
+        "requires 2 arguments, but only 1 given|too few arguments provided to function-like macro invocation")
 endif()
