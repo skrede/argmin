@@ -29,7 +29,9 @@ add_executable(argmin_defect_tests
     status_infra_group_test.cpp
     status_infra_sqp_test.cpp
     status_infra_test.cpp
+    status_underreporting_oracle_test.cpp
     stochastic_oracle_test.cpp
+    stochastic_reset_test.cpp
     stochastic_sampling_test.cpp
     stochastic_test.cpp
 )
@@ -186,6 +188,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         "static assertion failed.*OBJECT_ALLOCATED_ON_STACK_IS_TOO_BIG")
     argmin_known_defect_compile_probe(cmaes_fixed_dimension_thirty_three cmaes_fixed_dimension_thirty_three.cpp
         "static assertion failed.*OBJECT_ALLOCATED_ON_STACK_IS_TOO_BIG")
+    argmin_known_defect_compile_probe(mma_zero_fixed_constraint_rows mma_zero_fixed_constraint_rows.cpp
+        "static assertion failed.*YOU_TRIED_CALLING_A_VECTOR_METHOD_ON_A_MATRIX")
     argmin_known_defect_compile_probe(argmin_under_min_max_macros argmin_under_min_max_macros.cpp
         "requires 2 arguments, but only 1 given|too few arguments provided to function-like macro invocation")
 endif()
