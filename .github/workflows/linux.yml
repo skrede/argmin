@@ -375,7 +375,7 @@ jobs:
           cd build
           count=$(ctest -N -L known-defect | grep -cE '^ *Test +#')
           echo "known defects registered: $count"
-          test "$count" -eq 24 || { echo "expected 24 known defects, found $count"; exit 1; }
+          test "$count" -eq 31 || { echo "expected 31 known defects, found $count"; exit 1; }
 
       # The literal is deliberate: adding or removing an oracle pin should force a visible edit.
       - name: Verify the full oracle-pin set registered
@@ -462,6 +462,58 @@ jobs:
           python3 scripts/rt_matrix.py resolve scripts/rt_matrix_cells.json build .github/workflows
           python3 scripts/rt_matrix.py resolve scripts/rt_matrix_tiers.json build .github/workflows
           python3 scripts/rt_matrix.py resolve scripts/rt_matrix_float.json build .github/workflows
+
+  property:
+    runs-on: ubuntu-24.04
+    name: property suites (RapidCheck + oracle)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: |
+          cmake . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DARGMIN_BUILD_TESTS=ON \
+            -DARGMIN_BUILD_PROPERTY_TESTS=ON \
+            -DARGMIN_CMAKE_FETCH_DEPS=ON
+
+      - name: Build
+        run: cmake --build build --target argmin_property_tests
+
+      # The literal is deliberate: adding or removing a property suite should force a visible edit, and an
+      # empty selection fails here. catch_discover_tests registers the suites at build time, so this runs
+      # after the build.
+      - name: Verify the full property set registered
+        run: |
+          cd build
+          count=$(ctest -N -L property | grep -cE '^ *Test +#')
+          echo "property suites registered: $count"
+          test "$count" -eq 19 || { echo "expected 19 property suites, found $count"; exit 1; }
+
+      # The seed follows the run number, so successive runs explore new problems. A newly explored seed can
+      # turn an unrelated push red: that is a finding to triage from the printed reproduce string, not flakiness.
+      - name: Run the property suites
+        env:
+          RC_PARAMS: "max_success=200 seed=${{ github.run_number }}"
+        run: cd build && ctest --output-on-failure --no-tests=error -L property --timeout 600
+
+      # A property suite never seen to fail proves nothing, so a QP result moved past the oracle's acceptance
+      # bound must turn the selection red and print RapidCheck's reproduce string.
+      - name: Check that a planted violation turns the property suites red
+        env:
+          RC_PARAMS: "max_success=200 seed=${{ github.run_number }}"
+          ARGMIN_PROPERTY_PLANT_VIOLATION: "1"
+        run: |
+          cd build
+          set +e
+          ctest --output-on-failure --no-tests=error -L property --timeout 600 --output-log property_planted.log
+          status=$?
+          set -e
+          test "$status" -ne 0 || { echo "the property suites passed with a planted violation"; exit 1; }
+          grep -q "reproduce" property_planted.log
 
   install-test:
     runs-on: ubuntu-24.04

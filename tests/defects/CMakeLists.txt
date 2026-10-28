@@ -5,6 +5,7 @@ add_executable(argmin_defect_tests
     harness_canary_test.cpp
     least_squares_oracle_test.cpp
     moving_asymptote_oracle_test.cpp
+    property_findings_test.cpp
     sqp_oracle_test.cpp
     status_infra_test.cpp
     stochastic_oracle_test.cpp
