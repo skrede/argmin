@@ -6,6 +6,8 @@ add_executable(argmin_defect_tests
     least_squares_oracle_test.cpp
     moving_asymptote_oracle_test.cpp
     property_findings_test.cpp
+    qp_active_set_oracle_test.cpp
+    qp_oracle_test.cpp
     sqp_oracle_test.cpp
     status_infra_test.cpp
     stochastic_oracle_test.cpp
@@ -45,6 +47,7 @@ argmin_defect_scan_test(known_defect_scan_canary_absent canary_absent.cmake)
 set_tests_properties(known_defect_scan_canary_absent PROPERTIES PASS_REGULAR_EXPRESSION "unexpected pass")
 
 argmin_known_defect_scan(conventions_discarded_value_attribute conventions_discarded_value_attribute.cmake)
+argmin_known_defect_scan(qp_active_set_empty_problem qp_active_set_empty_problem.cmake)
 
 # The probes run the compiler's -fsyntax-only, a GCC/Clang flag, so MSVC skips them.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

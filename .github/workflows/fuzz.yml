@@ -13,6 +13,10 @@ on:
       - '**.md'
       - 'docs/**'
       - '.planning/**'
+  # Exploration on a cadence, not only when someone pushes; scheduled runs use the default branch and the larger
+  # budget selected below.
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 # A newer push to a pull request cancels its older run; every other run gets a group of its own,
@@ -23,26 +27,259 @@ concurrency:
 
 jobs:
   fuzz:
-    runs-on: ubuntu-latest
+    name: "fuzz QP ingestion"
+    runs-on: ubuntu-24.04
+
+    # Writing the corpus store goes through its own deploy key, never through this token.
+    permissions:
+      contents: read
+
     env:
-      CC: clang
-      CXX: clang++
+      CC: clang-18
+      CXX: clang++-18
+      # The targets already abort on undefined behavior; this keeps a report from ever being the only thing
+      # standing between a finding and a green run.
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      ARGMIN_FUZZ_TARGETS: >-
+        fuzz_dense_admm_qp
+        fuzz_dense_active_set_qp
+        fuzz_sparse_admm_qp
+      ARGMIN_FUZZ_PLANTED: fuzz_dense_admm_qp_planted
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Clang and LLVM
+      # Pinned, because the verdict is a sanitizer's verdict, and libFuzzer ships in the compiler runtime package.
+      - name: Install the pinned Clang
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang llvm
+          sudo apt-get install -y clang-18 llvm-18 libclang-rt-18-dev
+          clang++-18 --version
 
       - name: Configure
         run: >
           cmake -B build
-          -DCMAKE_C_COMPILER=clang
-          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_C_COMPILER=clang-18
+          -DCMAKE_CXX_COMPILER=clang++-18
           -DARGMIN_BUILD_FUZZ_TESTS=ON
           -DARGMIN_CMAKE_FETCH_DEPS=ON
 
       - name: Build fuzz targets
         run: cmake --build build -j$(nproc)
+
+      # Asserted in both directions, so a target added to the build and not to the list is a failure rather than a
+      # binary nobody fuzzes. The planted binary is counted separately.
+      - name: Assert every target was built
+        run: |
+          set -euo pipefail
+          for target in $ARGMIN_FUZZ_TARGETS $ARGMIN_FUZZ_PLANTED; do
+            if [ ! -x build/tests/fuzz/"$target" ]; then
+              echo "::error::build/tests/fuzz/$target is missing: the build produced no such target" >&2
+              exit 1
+            fi
+          done
+          built=$(find build/tests/fuzz -maxdepth 1 -type f -executable ! -name "$ARGMIN_FUZZ_PLANTED" | wc -l)
+          listed=$(echo $ARGMIN_FUZZ_TARGETS | wc -w)
+          if [ "$built" -ne "$listed" ]; then
+            echo "::error::built $built targets but this job runs $listed of them" >&2
+            exit 1
+          fi
+          echo "built and listed: $built targets"
+
+      # A run over an empty directory passes because it tested nothing.
+      - name: Assert every corpus is populated
+        run: |
+          set -euo pipefail
+          for target in $ARGMIN_FUZZ_TARGETS; do
+            dir=build/tests/fuzz/corpus/"$target"
+            if [ ! -d "$dir" ]; then
+              echo "::error::$dir does not exist: nothing seeded the corpus" >&2
+              exit 1
+            fi
+            inputs=$(find "$dir" -type f | wc -l)
+            if [ "$inputs" -lt 1 ]; then
+              echo "::error::$dir holds no inputs" >&2
+              exit 1
+            fi
+            echo "$target: $inputs seed inputs"
+          done
+
+      # Runs before the accumulated corpus is layered on, so it stays a regression check over the committed seeds.
+      - name: Regression replay over the committed corpus
+        run: ctest --test-dir build --output-on-failure --no-tests=error -R _replay
+
+      # The store is optional until a repository variable names it. Once named, an unreachable store is an error,
+      # because a silently skipped restore would degrade every later run to seed-only while reporting green; an
+      # empty store is a first run.
+      - name: Restore the accumulated corpus
+        env:
+          CORPUS_URL: ${{ vars.ARGMIN_FUZZ_CORPUS_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CORPUS_URL:-}" ]; then
+            echo "::notice::no corpus store configured; fuzzing from the committed seeds only"
+            exit 0
+          fi
+          git init -q accumulated
+          cd accumulated
+          git remote add origin "$CORPUS_URL"
+          if ! git ls-remote origin > /tmp/store-refs 2>/tmp/store-err; then
+            echo "::error::the corpus store is unreachable" >&2
+            cat /tmp/store-err >&2
+            exit 1
+          fi
+          if ! grep -q 'refs/heads/master$' /tmp/store-refs; then
+            echo "::notice::the store has no master branch yet; fuzzing from the committed seeds only"
+            exit 0
+          fi
+          git fetch -q --depth 1 origin master
+          git checkout -q FETCH_HEAD
+          cd ..
+          restored=0
+          for target in $ARGMIN_FUZZ_TARGETS; do
+            if [ -d accumulated/"$target" ]; then
+              count=$(find accumulated/"$target" -type f | wc -l)
+              cp -a accumulated/"$target"/. build/tests/fuzz/corpus/"$target"/
+              restored=$((restored + count))
+              echo "$target: restored $count accumulated inputs"
+            fi
+          done
+          if [ "$restored" -lt 1 ]; then
+            echo "::error::the store carries a master branch but no inputs for any target" >&2
+            exit 1
+          fi
+          echo "restored $restored input(s) from the store"
+
+      # The gate proper: a replay cannot reach a defect that needs a mutation. If this step has to get cheaper, cut
+      # the budget; never turn it into a replay. Any nonzero exit fails, since libFuzzer's and a sanitizer's exit
+      # codes differ and both are findings.
+      - name: Fuzz every target
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            budget=300
+            seed=
+          else
+            budget=60
+            seed=-seed=1
+          fi
+          mkdir -p fuzz-artifacts
+          for target in $ARGMIN_FUZZ_TARGETS; do
+            log=fuzz-artifacts/"$target".log
+            build/tests/fuzz/"$target" \
+              -max_total_time="$budget" \
+              -timeout=25 \
+              -rss_limit_mb=2048 \
+              -print_final_stats=1 \
+              -artifact_prefix=fuzz-artifacts/"$target"- \
+              $seed \
+              build/tests/fuzz/corpus/"$target" 2>&1 | tee "$log"
+            executed=$(awk '/stat::number_of_executed_units/ { print $2 }' "$log")
+            if [ "${executed:-0}" -lt 1 ]; then
+              echo "::error::$target exited zero having executed ${executed:-no} inputs" >&2
+              exit 1
+            fi
+            echo "$target executed $executed inputs in ${budget}s"
+          done
+
+      # The planted binary reports every finite x as a violation, so a run that stays green here means the oracle
+      # is not wired to the exit status.
+      - name: Require the planted violation to fail
+        run: |
+          set -uo pipefail
+          mkdir -p planted
+          cp -a build/tests/fuzz/corpus/fuzz_dense_admm_qp/. planted/
+          build/tests/fuzz/"$ARGMIN_FUZZ_PLANTED" -max_total_time=30 -seed=1 -artifact_prefix=planted-crash- planted > planted.log 2>&1
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "::error::the planted violation exited zero" >&2
+            exit 1
+          fi
+          if ! grep -q "argmin fuzz oracle violated" planted.log; then
+            echo "::error::the planted binary exited $status without the oracle's message" >&2
+            cat planted.log >&2
+            exit 1
+          fi
+          echo "planted violation failed as required (exit $status)"
+
+      - name: Minimize the corpus
+        run: |
+          set -euo pipefail
+          for target in $ARGMIN_FUZZ_TARGETS; do
+            mkdir -p minimized-corpus/"$target"
+            build/tests/fuzz/"$target" -merge=1 -timeout=25 -rss_limit_mb=2048 \
+              minimized-corpus/"$target" build/tests/fuzz/corpus/"$target"
+          done
+
+      - name: Upload the minimized corpus
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: minimized-corpus
+          path: minimized-corpus/
+
+      # Only from master and never from a pull request: a corpus grown against unmerged code would be
+      # indistinguishable from the rest once stored. The store receives the merged set only; crash inputs travel as
+      # a failure artifact, and a failed run never reaches this step.
+      - name: Push the merged corpus to the store
+        if: >-
+          github.event_name != 'pull_request'
+          && github.ref == 'refs/heads/master'
+        env:
+          CORPUS_URL: ${{ vars.ARGMIN_FUZZ_CORPUS_URL }}
+          CORPUS_KEY: ${{ secrets.FUZZ_CORPUS_DEPLOY_KEY }}
+        run: |
+          # Never add -x here: the job log is public and -x would echo the key below. The key reaches disk only by
+          # redirection; masking is a backstop, not the protection.
+          set -euo pipefail
+          if [ -z "${CORPUS_URL:-}" ] || [ -z "${CORPUS_KEY:-}" ]; then
+            echo "::notice::no corpus store or credential; the merged set was uploaded as an artifact but not stored"
+            exit 0
+          fi
+          case "$CORPUS_URL" in
+            https://github.com/*) push_url="git@github.com:${CORPUS_URL#https://github.com/}" ;;
+            *) echo "::error::the corpus store URL is not a https://github.com/ address" >&2; exit 1 ;;
+          esac
+          mkdir -p ~/.ssh
+          # github.com's published ed25519 host key, pinned rather than keyscanned.
+          printf '%s\n' \
+            'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > ~/.ssh/known_hosts
+          printf '%s\n' "${CORPUS_KEY}" > ~/.ssh/corpus_key
+          chmod 600 ~/.ssh/corpus_key
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/corpus_key -o IdentitiesOnly=yes"
+          # A merge that produced nothing would empty the store on push.
+          for target in $ARGMIN_FUZZ_TARGETS; do
+            count=$(find minimized-corpus/"$target" -type f 2>/dev/null | wc -l)
+            if [ "$count" -lt 1 ]; then
+              echo "::error::$target merged to zero inputs; refusing to overwrite the store" >&2
+              exit 1
+            fi
+          done
+          total=$(find minimized-corpus -type f | wc -l)
+          cd accumulated
+          git remote set-url origin "$push_url"
+          git config user.name "argmin fuzz"
+          git config user.email "noreply@github.com"
+          # An empty store leaves HEAD unborn, so the branch is created on the first push only.
+          git rev-parse --verify HEAD > /dev/null 2>&1 || git checkout -b master
+          for target in $ARGMIN_FUZZ_TARGETS; do
+            rm -rf "$target"
+            cp -a ../minimized-corpus/"$target" "$target"
+          done
+          git add -A
+          if git diff --cached --quiet; then
+            echo "the merged set is identical to the store; nothing to push"
+            exit 0
+          fi
+          git commit -m "Merge corpus from ${GITHUB_SHA:0:12} (${total} inputs)"
+          git push origin HEAD:master
+          echo "pushed ${total} input(s) to the store"
+
+      # The per-target log carries the seed the run used, so it travels with the crash input.
+      - name: Upload crash inputs and run logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-findings
+          path: fuzz-artifacts/

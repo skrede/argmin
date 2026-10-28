@@ -78,11 +78,12 @@ qp_tolerances<Scalar> qp_tolerances_of(const sparse_qp_options<Scalar>& opts)
     return qp_tolerances<Scalar>(opts.eps_abs, opts.eps_rel, opts.eps_prim_inf, opts.eps_dual_inf);
 }
 
-// The active-set method has a single optimality tolerance and no relative or certificate tolerances.
+// The active-set method has a single tolerance, which its terminal KKT check applies relative to the gradient and
+// multiplier scale, so it is both the absolute and the relative term here.
 template <typename Scalar>
 qp_tolerances<Scalar> qp_tolerances_of(const dense_active_set_qp_options<Scalar>& opts)
 {
-    return qp_tolerances<Scalar>(opts.tolerance, Scalar(0), opts.tolerance, opts.tolerance);
+    return qp_tolerances<Scalar>(opts.tolerance, opts.tolerance, opts.tolerance, opts.tolerance);
 }
 
 }
