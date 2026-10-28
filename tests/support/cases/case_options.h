@@ -66,11 +66,18 @@ inline solver_options<> stochastic_options()
     return opts;
 }
 
-// The visitor runs inside this call, so the problem outlives every solver make_solver returns.
+// The visitor runs inside this call, so the problem outlives every solver make_solver returns. A visitor
+// may pass its own start point, which the trajectory golden's perturbation controls use.
 template <typename Visitor, typename Policy, typename Problem>
 void visit_case(Visitor& visitor, const case_id& id, const Policy& policy, const Problem& problem, const solver_options<>& options)
 {
-    const auto make_solver = [&]() { return step_budget_solver{policy, problem, problem.initial_point(), options}; };
+    const auto make_solver = [&](const auto&... x0)
+    {
+        if constexpr(sizeof...(x0) == 0)
+            return step_budget_solver{policy, problem, problem.initial_point(), options};
+        else
+            return step_budget_solver{policy, problem, x0..., options};
+    };
     visitor(id, problem, options, make_solver);
 }
 

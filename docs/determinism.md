@@ -157,6 +157,55 @@ Concretely, what follows from the choice:
 - Do compare across architectures at a tolerance you choose and state — the way
   the cross-instantiation check does.
 
+## The all-family trajectory golden
+
+`tests/oracles/all_family_trajectory_golden.csv` pins the trajectory bits of every
+solver family on one build. Every public solver runs on each case of the shared
+case table: one fixed problem for each constraint class the solver supports, with
+a fixed seed for the stochastic ones. Each case records a digest of the first 50
+iterates. The digest covers the iterate, the objective, the multipliers where the
+state carries them, the step size and the constraint violation. Each case also
+records the final point, objective, status, iteration count and evaluation count
+as exact bits. A QP solver has no step interface, so it records only its final
+primal point, dual point, iteration count and status. A refactor that claims to
+preserve the numerics must leave this file unchanged. On a mismatch,
+`argmin_trajectory_golden_test` names each case that moved, its first diverging
+iteration and the final fields that differ.
+
+It is a refactor guard on one build identity:
+`clang-18;x86_64;NDEBUG;x86-64-baseline`, the release build of the
+labeled-instruments job. It claims nothing across compilers, architectures or
+compile flags; the anti-feature above applies to it in full. Other builds
+compare against it only when their identity matches. Otherwise they warn and
+skip the comparison. The labeled-instruments job sets
+`ARGMIN_TRAJECTORY_GOLDEN_ENFORCE=1`, which turns a missing or foreign golden into
+a failure. The real-time-path golden
+`tests/oracles/solver_bit_identity_golden.csv` is a separate file with its own
+build identity and consumers.
+
+The golden's executable does not take the release test flags. The other release
+test targets are compiled for the host CPU, and the CI runner pool mixes vector
+widths, which change Eigen's reduction order and with it the low bits. So the
+golden is compiled for the baseline instruction set with `-ffp-contract=off` and
+without link-time optimization. The ISA tag in the build identity keeps a
+host-tuned build from ever claiming the golden's identity.
+
+When a change moves a trajectory on purpose, re-record the golden in the same
+change:
+
+1. Run the change through CI, or build `argmin_trajectory_golden_test` in an
+   Ubuntu 24.04 clang-18 container that replicates the labeled-instruments job.
+2. Take the live table. In CI it is the `trajectory-golden-live` artifact of the
+   failing run. Locally, run the test with
+   `ARGMIN_TRAJECTORY_GOLDEN_CAPTURE=<path>`, which writes the table and passes.
+3. Diff the live table against the committed golden and review every moved
+   case. Each one should be a trajectory the change was meant to move.
+4. Commit the new golden with the change that moved it. Name the intended
+   trajectory change in the commit message.
+
+Never re-record the golden just to turn a red comparison green. Never relax its
+exact compare to a tolerance, and never drop a case from it.
+
 ## See also
 
 - [RT-safety matrix](rt-safety-matrix.md) — the per-policy

@@ -377,6 +377,14 @@ jobs:
           echo "known defects registered: $count"
           test "$count" -eq 24 || { echo "expected 24 known defects, found $count"; exit 1; }
 
+      # The literal is deliberate: adding or removing an oracle pin should force a visible edit.
+      - name: Verify the full oracle-pin set registered
+        run: |
+          cd build
+          count=$(ctest -N -L oracle-pin | grep -cE '^ *Test +#')
+          echo "oracle pins registered: $count"
+          test "$count" -eq 16 || { echo "expected 16 oracle pins, found $count"; exit 1; }
+
       # ctest treats a label selection that matches nothing as success, so
       # without --no-tests=error this step would pass if the labels it names
       # were renamed or deleted -- the job would go green having run nothing.
@@ -395,7 +403,32 @@ jobs:
       # the weekly regression-weekly tier. Green here means CORRECTNESS verified;
       # it does NOT mean iteration counts or instruction costs were verified.
       - name: Run alloc-gate, oracle-pin, fast regression, and known-defect instruments (correctness gated; iteration + instruction ceilings NOT gated here)
+        env:
+          ARGMIN_TRAJECTORY_GOLDEN_ENFORCE: "1"
+          ARGMIN_TRAJECTORY_GOLDEN_LIVE_OUT: ${{ github.workspace }}/build/trajectory_golden_live.csv
         run: cd build && ctest --output-on-failure --no-tests=error -L "alloc-gate|oracle-pin|regression-fast|known-defect"
+
+      # A golden never seen to fail proves nothing, so a one-ulp start perturbation of one solver must turn
+      # the enforced comparison against the committed golden red.
+      - name: Check that a planted perturbation turns the trajectory golden red
+        run: |
+          if ARGMIN_TRAJECTORY_GOLDEN_ENFORCE=1 ARGMIN_TRAJECTORY_GOLDEN_PERTURB=lbfgsb ./build/tests/golden/argmin_trajectory_golden_test "[oracle-pin]" > build/trajectory_golden_planted.log 2>&1; then
+            cat build/trajectory_golden_planted.log
+            echo "the trajectory golden accepted a perturbed start"
+            exit 1
+          fi
+          cat build/trajectory_golden_planted.log
+          grep -q "^ *lbfgsb|.*: first diverging iteration" build/trajectory_golden_planted.log
+
+      # The live table is what a reviewed re-recording of the golden starts from.
+      - name: Upload the live trajectory table on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trajectory-golden-live
+          path: build/trajectory_golden_live.csv
+          retention-days: 14
+          if-no-files-found: ignore
 
       # The summary, returned points and oracle verdicts are what a breach is diagnosed from.
       - name: Upload the regression run on failure
