@@ -369,6 +369,14 @@ jobs:
           echo "allocation gates registered: $count"
           test "$count" -eq 18 || { echo "expected 18 allocation gates, found $count"; exit 1; }
 
+      # The literal is deliberate: fixing a known defect turns its case red, and the fixing change lowers it.
+      - name: Verify the full known-defect set registered
+        run: |
+          cd build
+          count=$(ctest -N -L known-defect | grep -cE '^ *Test +#')
+          echo "known defects registered: $count"
+          test "$count" -eq 3 || { echo "expected 3 known defects, found $count"; exit 1; }
+
       # ctest treats a label selection that matches nothing as success, so
       # without --no-tests=error this step would pass if the labels it names
       # were renamed or deleted -- the job would go green having run nothing.
@@ -386,8 +394,8 @@ jobs:
       # gate on the controlled host, whose compiler matches the baseline's, plus
       # the weekly regression-weekly tier. Green here means CORRECTNESS verified;
       # it does NOT mean iteration counts or instruction costs were verified.
-      - name: Run alloc-gate, oracle-pin, and fast regression instruments (correctness gated; iteration + instruction ceilings NOT gated here)
-        run: cd build && ctest --output-on-failure --no-tests=error -L "alloc-gate|oracle-pin|regression-fast"
+      - name: Run alloc-gate, oracle-pin, fast regression, and known-defect instruments (correctness gated; iteration + instruction ceilings NOT gated here)
+        run: cd build && ctest --output-on-failure --no-tests=error -L "alloc-gate|oracle-pin|regression-fast|known-defect"
 
       # The summary, returned points and oracle verdicts are what a breach is diagnosed from.
       - name: Upload the regression run on failure

@@ -249,6 +249,14 @@ These are judgment calls for the eye, not mechanical rules.
   `std::normal_distribution` and `std::uniform_real_distribution` produce different sequences across
   standard libraries. Derive random inputs from the raw engine output, and prefer well-conditioned
   inputs over assertions that ride a floating-point rounding boundary.
+- **Known defects.** A live defect is reproduced by a `[known-defect][!shouldfail]` Catch2 case, a
+  known-defect scan (`argmin_known_defect_scan`) or a known-defect compile probe
+  (`argmin_known_defect_compile_probe`), all under the ctest label `known-defect`. Each asserts the correct
+  behavior, one property per case, and passes inverted while the defect exists; setup that could fail for
+  another reason is asserted in a sibling case without the inversion. A fix makes the reproducer fail, so the
+  fixing change removes the tag (keeping the case as its regression test) and lowers the known-defect count
+  CI asserts. A probe for an out-of-bounds or abort path asserts the missing rejection and never executes the
+  unguarded path. Names are descriptive sentences and carry no tracker identifiers.
 
 ## English
 

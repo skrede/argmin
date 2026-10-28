@@ -22,4 +22,10 @@ target_compile_options(argmin_oracle_tests
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror=switch>
 )
 
-catch_discover_tests(argmin_oracle_tests PROPERTIES LABELS "oracle")
+# A known defect is counted under its own label rather than as an oracle self-test.
+catch_discover_tests(argmin_oracle_tests
+    TEST_SPEC "~[known-defect]"
+    PROPERTIES LABELS "oracle")
+catch_discover_tests(argmin_oracle_tests
+    TEST_SPEC "[known-defect]"
+    PROPERTIES LABELS "known-defect")
