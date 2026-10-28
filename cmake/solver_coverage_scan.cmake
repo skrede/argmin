@@ -8,6 +8,8 @@
 # Fails on a solver header without an entry, an entry naming a missing file, an alias whose target is not
 # mapped to a key, a key absent from case_keys, and a case_keys key that no header reaches.
 
+cmake_minimum_required(VERSION 3.28)
+
 include(${INVENTORY})
 
 file(GLOB discovered RELATIVE "${ROOT}"

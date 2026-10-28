@@ -14,6 +14,8 @@
 #                      the first violation in include order (its own includes follow it), which is how
 #                      its negative control proves it can fail.
 
+cmake_minimum_required(VERSION 3.28)
+
 set(inc_flags "")
 foreach(dir IN LISTS INCS)
     if(dir)
