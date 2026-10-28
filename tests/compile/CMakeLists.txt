@@ -108,3 +108,31 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
             "-DINCS=$<TARGET_PROPERTY:argmin::argmin,INTERFACE_INCLUDE_DIRECTORIES>;${ARGMIN_EIGEN_INCLUDE_DIRS}"
             -P ${CMAKE_SOURCE_DIR}/cmake/rng_freedom_scan.cmake)
 endif()
+
+# The oracle judges returned results, so its include graph may reach problem and result vocabulary
+# but no convergence code. The probe compiles everywhere; the -M scan and its negative control, which
+# plants an include of solver/convergence.h, run on GCC/Clang.
+add_executable(oracle_independence_probe oracle_independence_probe.cpp)
+target_include_directories(oracle_independence_probe PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)
+target_link_libraries(oracle_independence_probe PRIVATE argmin::argmin)
+target_compile_options(oracle_independence_probe PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS})
+add_test(NAME oracle_independence_compiles COMMAND oracle_independence_probe)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(oracle_scan_incs "$<TARGET_PROPERTY:argmin::argmin,INTERFACE_INCLUDE_DIRECTORIES>;${ARGMIN_EIGEN_INCLUDE_DIRS};${CMAKE_SOURCE_DIR}/tests/support")
+    add_test(NAME oracle_independence_scan
+        COMMAND ${CMAKE_COMMAND}
+            -DCXX=${CMAKE_CXX_COMPILER}
+            -DSTD=c++20
+            -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/oracle_independence_probe.cpp
+            "-DINCS=${oracle_scan_incs}"
+            -P ${CMAKE_SOURCE_DIR}/cmake/oracle_independence_scan.cmake)
+    add_test(NAME oracle_independence_scan_negative_control
+        COMMAND ${CMAKE_COMMAND}
+            -DCXX=${CMAKE_CXX_COMPILER}
+            -DSTD=c++20
+            -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/oracle_independence_violation_probe.cpp
+            "-DINCS=${oracle_scan_incs}"
+            -DEXPECT_VIOLATION=solver/convergence.h
+            -P ${CMAKE_SOURCE_DIR}/cmake/oracle_independence_scan.cmake)
+endif()

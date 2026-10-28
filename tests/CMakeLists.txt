@@ -40,6 +40,7 @@ if(ARGMIN_BUILD_TESTS)
     endif()
 
     add_subdirectory(unit)
+    add_subdirectory(result_oracle)
     add_subdirectory(compile)
     add_subdirectory(regression)
 
