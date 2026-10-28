@@ -63,6 +63,25 @@ struct infinite_box : Problem
     vector upper_bounds() const { return vector::Constant(std::numeric_limits<double>::infinity()); }
 };
 
+// The policies that require the constrained interface take a bound-only case as one with zero
+// constraint rows. The count is left dynamic because a fixed zero row count does not compile for the
+// moving-asymptote family.
+template <typename Problem>
+struct no_constraint_rows : Problem
+{
+    using vector = Eigen::Vector<double, Problem::problem_dimension>;
+
+    static constexpr std::int32_t constraint_count = Eigen::Dynamic;
+
+    std::int32_t num_equality() const { return 0; }
+
+    std::int32_t num_inequality() const { return 0; }
+
+    void constraints(const vector&, Eigen::VectorXd&) const {}
+
+    void constraint_jacobian(const vector&, Eigen::MatrixXd&) const {}
+};
+
 }
 
 #endif

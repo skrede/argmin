@@ -39,6 +39,15 @@ inline solver_options<> least_squares_options()
     return opts;
 }
 
+// The moving-asymptote family crawls past the saddle of the Wood function (hs038) for 8000 to 19000
+// iterations before it converges, so its budget leaves room for that.
+inline solver_options<> moving_asymptote_options()
+{
+    solver_options<> opts = gradient_options();
+    opts.max_iterations = 30000;
+    return opts;
+}
+
 // The visitor runs inside this call, so the problem outlives every solver make_solver returns.
 template <typename Visitor, typename Policy, typename Problem>
 void visit_case(Visitor& visitor, const case_id& id, const Policy& policy, const Problem& problem, const solver_options<>& options)
