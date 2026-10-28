@@ -1,0 +1,3 @@
+set(SCAN_NAME "every policy that sizes state on the declared constraint count rejects a larger runtime count with an error status")
+set(SCAN_FILES "lib/argmin/include/argmin/solver/nw_sqp_policy.h;lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h;lib/argmin/include/argmin/solver/mma_policy.h;lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h;lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h;lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h;lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h")
+set(SCAN_REGEX "assert\\(m <= state_type<Problem>::M|problem\\.num_inequality\\(\\);[ \t\r\n]+(//[^\r\n]*[ \t\r\n]+)*(const int n_all = n_eq \\+ m(_ineq)?;[ \t\r\n]+)?state_type<Problem> s;")

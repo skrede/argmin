@@ -8,7 +8,11 @@ add_executable(argmin_defect_tests
     property_findings_test.cpp
     qp_active_set_oracle_test.cpp
     qp_oracle_test.cpp
+    qp_test.cpp
     sqp_oracle_test.cpp
+    sqp_safety_qp_test.cpp
+    sqp_safety_restoration_test.cpp
+    sqp_safety_test.cpp
     status_infra_test.cpp
     stochastic_oracle_test.cpp
 )
@@ -48,6 +52,13 @@ set_tests_properties(known_defect_scan_canary_absent PROPERTIES PASS_REGULAR_EXP
 
 argmin_known_defect_scan(conventions_discarded_value_attribute conventions_discarded_value_attribute.cmake)
 argmin_known_defect_scan(qp_active_set_empty_problem qp_active_set_empty_problem.cmake)
+argmin_known_defect_scan(qp_admm_empty_problem qp_admm_empty_problem.cmake)
+argmin_known_defect_scan(qp_active_set_multiplier_pivoted_qr qp_active_set_multiplier_pivoted_qr.cmake)
+argmin_known_defect_scan(qp_lsi_lsei_dense_factorizations qp_lsi_lsei_dense_factorizations.cmake)
+argmin_known_defect_scan(qp_admm_rho_update_gram_rebuild qp_admm_rho_update_gram_rebuild.cmake)
+argmin_known_defect_scan(sqp_kkt_active_set_capacity sqp_kkt_active_set_capacity.cmake)
+argmin_known_defect_scan(constraint_count_cap_unchecked constraint_count_cap_unchecked.cmake)
+argmin_known_defect_scan(sqp_underived_tolerance_defaults sqp_underived_tolerance_defaults.cmake)
 
 # The probes run the compiler's -fsyntax-only, a GCC/Clang flag, so MSVC skips them.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
