@@ -1,0 +1,45 @@
+name: Property exploration
+
+# Push and pull-request runs pin their property seeds, so new problems are explored here on a cadence and on
+# demand, without running the rest of the Linux workflow. Scheduled runs use the default branch.
+on:
+  schedule:
+    - cron: "47 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+
+jobs:
+  explore:
+    runs-on: ubuntu-24.04
+    name: property exploration (RapidCheck + oracle)
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: |
+          cmake . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DARGMIN_BUILD_TESTS=ON \
+            -DARGMIN_BUILD_PROPERTY_TESTS=ON \
+            -DARGMIN_CMAKE_FETCH_DEPS=ON
+
+      - name: Build
+        run: cmake --build build --target argmin_property_tests
+
+      # The run id gives every run a seed of its own, never the pinned 1 and 2; a failure prints RapidCheck's
+      # reproduce string, and the logged seed replays the whole selection.
+      - name: Run the property suites at a fresh seed
+        env:
+          SEED: ${{ github.run_id }}
+        run: |
+          cd build
+          echo "property seed $SEED"
+          RC_PARAMS="max_success=200 seed=$SEED" ctest --output-on-failure --no-tests=error -L property --timeout 600
