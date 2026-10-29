@@ -6,8 +6,10 @@
 #include "oracle/result_oracle.h"
 
 #include "argmin/solver/mma_policy.h"
+#include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/projected_gn_policy.h"
 #include "argmin/solver/projected_gradient_gn_policy.h"
+#include "argmin/solver/augmented_lagrangian_policy.h"
 
 #include "argmin/solver/alternative/gcmma/rho_wval_policy.h"
 #include "argmin/solver/alternative/gcmma/raa_augmented_policy.h"
@@ -44,7 +46,14 @@ void check_infeasible_start_claim(const Policy& policy)
     CHECK(v.ok);
 }
 
+void check_augmented_lagrangian_claim(const cases::linearly_constrained_quadratic& problem)
+{
+    const oracle::verdict<double> v = defects::judge_finding(augmented_lagrangian_policy<lbfgsb_policy<>>{}, problem, cases::gradient_options());
+    CAPTURE(static_cast<int>(v.claimed), v.failing, v.legs.stationarity);
+    CHECK(v.ok);
 }
+
+} // namespace
 
 TEST_CASE("the projected Gauss-Newton solvers stay inside the box on a generated box-binding least-squares case", "[least_squares]")
 {
@@ -99,4 +108,14 @@ TEST_CASE("gcmma move_limit_shrink makes a claim the oracle accepts on a generat
     const oracle::verdict<double> v = defects::judge_finding(alternative::gcmma::move_limit_shrink_policy<>{}, defects::two_row_quadratic(), cases::moving_asymptote_options());
     CAPTURE(static_cast<int>(v.claimed), v.failing, v.legs.stationarity);
     CHECK(v.ok);
+}
+
+TEST_CASE("augmented_lagrangian_lbfgsb makes a claim the oracle accepts on a generated one-equality quadratic", "[known-defect][!shouldfail]")
+{
+    check_augmented_lagrangian_claim(defects::one_equality_quadratic());
+}
+
+TEST_CASE("augmented_lagrangian_lbfgsb makes a claim the oracle accepts on a generated mixed-row quadratic", "[known-defect][!shouldfail]")
+{
+    check_augmented_lagrangian_claim(defects::mixed_row_quadratic());
 }

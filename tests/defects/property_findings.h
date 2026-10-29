@@ -63,6 +63,47 @@ inline cases::linearly_constrained_quadratic two_row_quadratic()
     return p;
 }
 
+// Shrunk by the property suite, printed to six digits: one equality row, where the run ends converged at
+// stationarity 1.03e-5.
+inline cases::linearly_constrained_quadratic one_equality_quadratic()
+{
+    cases::linearly_constrained_quadratic p;
+    p.Q = Eigen::MatrixXd{{0.752011, 0.179287, -0.121763, -0.235831, -0.354821},
+                          {0.179287, 1.888812, 0.24738, -0.285365, 0.575907},
+                          {-0.121763, 0.24738, 2.074395, -0.142072, 0.363666},
+                          {-0.235831, -0.285365, -0.142072, 3.461062, 0.699774},
+                          {-0.354821, 0.575907, 0.363666, 0.699774, 1.908781}};
+    p.c = Eigen::VectorXd{{-0.565, 0.28, 0.196, -0.145, 0.788}};
+    p.start = Eigen::VectorXd{{-0.003248, -0.505608, -0.46868, -0.083394, -0.25186}};
+    p.lower = Eigen::VectorXd{{-0.217, -0.828, -1.266, -0.165, -1.315}};
+    p.upper = Eigen::VectorXd{{1.015, 0.384, 0.02, 0.183, 0.048}};
+    p.E = Eigen::MatrixXd{{0.805, -0.579, -0.104, 0.672, 0.362}};
+    p.e = Eigen::VectorXd{{0.292329}};
+    p.G.resize(0, 5);
+    p.h.resize(0);
+    return p;
+}
+
+// Shrunk by the property suite, printed to six digits: two equality and four inequality rows, where the
+// run ends converged at stationarity 1.13e-5.
+inline cases::linearly_constrained_quadratic mixed_row_quadratic()
+{
+    cases::linearly_constrained_quadratic p;
+    p.Q = Eigen::Matrix4d{{1.066942, 0.386187, 0.231738, -0.293517},
+                          {0.386187, 0.873598, 0.402186, -0.297213},
+                          {0.231738, 0.402186, 0.577507, -0.279405},
+                          {-0.293517, -0.297213, -0.279405, 0.433054}};
+    p.c = Eigen::Vector4d(0.291, 0.366, 0.203, -0.244);
+    p.start = Eigen::Vector4d(-0.951802, 0.526756, -0.278584, 0.8264225);
+    p.lower = Eigen::Vector4d(-1.0, -0.296, -0.286, 0.365);
+    p.upper = Eigen::Vector4d(0.108, 0.788, 0.126, 0.926);
+    p.E = Eigen::MatrixXd{{0.249, -1.0, -0.229, -0.44}, {0.335, -0.291, 0.297, -0.035}};
+    p.e = Eigen::Vector2d(-0.289581, -0.207695);
+    p.G = Eigen::MatrixXd{{-1.0, -1.0, -1.0, -1.0}, {-0.203, 0.449, 0.631, -0.81}, {0.473, -0.769, -0.235, 0.044}, {-1.0, -1.0, -1.0, -1.0}};
+    p.h = Eigen::Vector4d(-0.123, -0.438809, -0.279733, -0.123);
+    return p;
+}
+
 template <typename Policy, typename Problem>
 oracle::verdict<double> judge_finding(const Policy& policy, const Problem& problem, const solver_options<>& options)
 {
