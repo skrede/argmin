@@ -137,11 +137,15 @@ jobs:
             --json coverage.json
           python3 scripts/coverage_gate.py coverage.json scripts/coverage_floors.txt
 
+      # The job has already reduced coverage to coverage.xml; the uploader's own search and gcov plugin would sweep
+      # every .gcno again, and on this build that sweep has taken the runner down.
       - name: Upload to Codecov
         if: matrix.coverage
         uses: codecov/codecov-action@v5
         with:
           files: coverage.xml
+          disable_search: true
+          plugins: noop
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
