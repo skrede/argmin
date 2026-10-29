@@ -1,0 +1,3 @@
+set(SCAN_NAME "the CMA-ES variants map non-finite fitness to the worst rank before sorting the offspring")
+set(SCAN_FILES "lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h;lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h;lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h")
+set(SCAN_REGEX "f_raw = s\\.problem->value\\([^;]*;([^fn]|f[^i]|fi[^n]|n[^a]|na[^n])*std::sort\\(idx\\.begin\\(\\), idx\\.begin\\(\\) \\+ lambda, \\[&\\]\\(int a, int b\\) {[ \t\r\n]+return fitnesses\\[a\\] < fitnesses\\[b\\];")
