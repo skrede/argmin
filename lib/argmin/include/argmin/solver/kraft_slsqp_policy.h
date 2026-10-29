@@ -499,7 +499,7 @@ struct kraft_slsqp_policy
             s.bufs.p_lo_buf.noalias() = s.lower - s.x;
             s.bufs.p_hi_buf.noalias() = s.upper - s.x;
 
-            s.qp_solver.solve_with_factored_hessian_into(
+            s.qp_solver.template solve_with_factored_hessian_into<dynamic_dimension>(
                 qp_res,
                 s.bufs.E_buf, s.bufs.f_buf, s.g,
                 s.J_eq, s.bufs.b_eq_workspace,
@@ -777,7 +777,7 @@ struct kraft_slsqp_policy
                             // between the main solve and this SOC retry, only
                             // the constraint RHS (b_eq_soc_buf, b_ineq_soc_buf).
                             detail::qp_result<Scalar, N>& soc_res = s.soc_qp_res;
-                            s.qp_solver.solve_with_factored_hessian_into(
+                            s.qp_solver.template solve_with_factored_hessian_into<dynamic_dimension>(
                                 soc_res,
                                 s.bufs.E_buf, s.bufs.f_buf, s.g,
                                 s.J_eq, s.bufs.b_eq_soc_buf, s.J_ineq, s.bufs.b_ineq_soc_buf,
