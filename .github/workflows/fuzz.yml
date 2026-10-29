@@ -190,8 +190,9 @@ jobs:
           set -uo pipefail
           mkdir -p planted
           cp -a build/tests/fuzz/corpus/fuzz_dense_admm_qp/. planted/
-          build/tests/fuzz/"$ARGMIN_FUZZ_PLANTED" -max_total_time=30 -seed=1 -artifact_prefix=planted-crash- planted > planted.log 2>&1
-          status=$?
+          # The step shell runs with -e, so the expected non-zero exit is captured here instead of ending the step.
+          status=0
+          build/tests/fuzz/"$ARGMIN_FUZZ_PLANTED" -max_total_time=30 -seed=1 -artifact_prefix=planted-crash- planted > planted.log 2>&1 || status=$?
           if [ "$status" -eq 0 ]; then
             echo "::error::the planted violation exited zero" >&2
             exit 1
