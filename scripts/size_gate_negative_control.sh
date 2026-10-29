@@ -6,12 +6,23 @@
 # therefore goes into a throwaway repository holding a copy of the real tree, and the real working
 # tree is never written.
 #
-# The function plants run a real clang-tidy, found through CLANG_TIDY, then clang-tidy-18, then the
-# llvm18 install path; without one they are skipped visibly. ARGMIN_TIDY_EXTRA_ARG, when set, is passed
-# to the compiler, e.g. --gcc-install-dir=... where clang-18 cannot parse the default libstdc++.
+# The scope names the gates to prove: files, functions, or all (the default). A CI job passes the scope of
+# the gate it runs, because the function plants need the clang-tidy and Eigen that job installs, and a
+# clang-tidy merely present on the runner image would otherwise trigger them without either.
 #
-#   scripts/size_gate_negative_control.sh
+# The function plants run a real clang-tidy, found through CLANG_TIDY, then clang-tidy-18, then the
+# llvm18 install path. Without one, scope all skips them visibly and scope functions fails.
+# ARGMIN_TIDY_EXTRA_ARG, when set, is passed to the compiler, e.g. --gcc-install-dir=... where clang-18
+# cannot parse the default libstdc++.
+#
+#   scripts/size_gate_negative_control.sh [files|functions|all]
 set -euo pipefail
+
+SCOPE="${1:-all}"
+case "$SCOPE" in
+    files|functions|all) ;;
+    *) echo "usage: $0 [files|functions|all]" >&2; exit 2 ;;
+esac
 
 cd "$(dirname "$0")/.."
 
@@ -97,35 +108,43 @@ TIDY="$(find_tidy)"
 FUNCTION_GATE=(python3 scripts/check_function_size.py --clang-tidy "$TIDY")
 if [ -n "${ARGMIN_TIDY_EXTRA_ARG:-}" ]; then FUNCTION_GATE+=("--extra-arg=$ARGMIN_TIDY_EXTRA_ARG"); fi
 
-echo "proving the file-size gate can fail:"
+prove_file_gate() {
+    echo "proving the file-size gate can fail:"
 
-expect 0 "the untouched copy passes" "${FILE_GATE[@]}"
-expect 0 "the untouched copy passes against its own commit" "${FILE_GATE[@]}" --baseline-ref HEAD
+    expect 0 "the untouched copy passes" "${FILE_GATE[@]}"
+    expect 0 "the untouched copy passes against its own commit" "${FILE_GATE[@]}" --baseline-ref HEAD
 
-plant_probe
-expect 1 "a planted lib/ header in no register is caught" "${FILE_GATE[@]}"
-remove_probe
+    plant_probe
+    expect 1 "a planted lib/ header in no register is caught" "${FILE_GATE[@]}"
+    remove_probe
 
-echo '// probe' >> "$WORK/$recorded"
-expect 4 "one line added to a file with a baseline row is caught" "${FILE_GATE[@]}"
-restore "$recorded"
+    echo '// probe' >> "$WORK/$recorded"
+    expect 4 "one line added to a file with a baseline row is caught" "${FILE_GATE[@]}"
+    restore "$recorded"
 
-awk 'BEGIN { FS = OFS = "\t" } !done && $1 == "file" { $4 += 1; done = 1 } { print }' \
-    "$WORK/$BASELINE" > "$WORK/$BASELINE.raised"
-mv "$WORK/$BASELINE.raised" "$WORK/$BASELINE"
-expect 8 "a raised baseline count is caught against the ref" "${FILE_GATE[@]}" --baseline-ref HEAD
-restore "$BASELINE"
+    awk 'BEGIN { FS = OFS = "\t" } !done && $1 == "file" { $4 += 1; done = 1 } { print }' \
+        "$WORK/$BASELINE" > "$WORK/$BASELINE.raised"
+    mv "$WORK/$BASELINE.raised" "$WORK/$BASELINE"
+    expect 8 "a raised baseline count is caught against the ref" "${FILE_GATE[@]}" --baseline-ref HEAD
+    restore "$BASELINE"
 
-plant_probe
-add_probe_row
-expect 8 "a new baseline row is caught against the ref" "${FILE_GATE[@]}" --baseline-ref HEAD
-remove_probe
-restore "$BASELINE"
+    plant_probe
+    add_probe_row
+    expect 8 "a new baseline row is caught against the ref" "${FILE_GATE[@]}" --baseline-ref HEAD
+    remove_probe
+    restore "$BASELINE"
+}
 
-echo "proving the function-size gate can fail:"
-if [ -z "$TIDY" ]; then
-    echo "  SKIP  function plants: no clang-tidy found; set CLANG_TIDY to run them"
-else
+prove_function_gate() {
+    echo "proving the function-size gate can fail:"
+    if [ -z "$TIDY" ] && [ "$SCOPE" = functions ]; then
+        fail "function plants: no clang-tidy found; set CLANG_TIDY"
+        return
+    fi
+    if [ -z "$TIDY" ]; then
+        echo "  SKIP  function plants: no clang-tidy found; set CLANG_TIDY to run them"
+        return
+    fi
     expect 0 "the untouched copy passes the function gate" "${FUNCTION_GATE[@]}" --baseline-ref HEAD
     plant_function
     expect 1 "a planted 30-line function in no register is caught by $TIDY" "${FUNCTION_GATE[@]}"
@@ -135,7 +154,10 @@ else
     mv "$WORK/$BASELINE.lowered" "$WORK/$BASELINE"
     expect 4 "a function one line past its lowered baseline row is caught" "${FUNCTION_GATE[@]}"
     restore "$BASELINE"
-fi
+}
+
+if [ "$SCOPE" != functions ]; then prove_file_gate; fi
+if [ "$SCOPE" != files ]; then prove_function_gate; fi
 
 if [ "$(git status --porcelain)" = "$before" ]; then
     pass "the real working tree is unchanged"

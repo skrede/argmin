@@ -61,7 +61,7 @@ jobs:
         run: python3 scripts/check_file_size.py --baseline-ref "$BASELINE_REF"
 
       - name: Negative control
-        run: bash scripts/size_gate_negative_control.sh
+        run: bash scripts/size_gate_negative_control.sh files
 
   function-size:
     runs-on: ubuntu-24.04
@@ -110,4 +110,4 @@ jobs:
       - name: Negative control with real clang-tidy plants
         env:
           CLANG_TIDY: clang-tidy-18
-        run: bash scripts/size_gate_negative_control.sh
+        run: bash scripts/size_gate_negative_control.sh functions
