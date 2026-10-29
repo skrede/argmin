@@ -493,11 +493,11 @@ jobs:
           echo "property suites registered: $count"
           test "$count" -eq 19 || { echo "expected 19 property suites, found $count"; exit 1; }
 
-      # Pushes and pull requests run a pinned seed set so a seed-dependent solver status cannot turn an
-      # unrelated change red; a manual dispatch seeds from the run number to explore new problems.
+      # A pinned seed set, so a seed-dependent solver status cannot turn an unrelated change red; fresh seeds
+      # are explored in property-explore.yml.
       - name: Run the property suites
         env:
-          SEEDS: ${{ github.event_name == 'workflow_dispatch' && github.run_number || '1 2' }}
+          SEEDS: "1 2"
         run: |
           cd build
           for seed in $SEEDS; do
