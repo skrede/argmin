@@ -3,6 +3,8 @@
 
 #include "argmin/types.h"
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/start_point.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/tuple_contains.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -381,6 +383,8 @@ public:
     // owns its own stopping decision.
     step_result<scalar_type> step_impl()
     {
+        if(last_status_ == solver_status::invalid_problem)
+            return detail::rejected_step<scalar_type>(state_);
         auto result = policy_.step(state_);
         result.x_norm = state_.x.norm();
         ++iterations_;
@@ -396,7 +400,7 @@ public:
     // line_search_calls on kraft_slsqp_policy::state_type.
     const Convergence& convergence() const { return stored_convergence_; }
 
-    solver_status status() const { return last_status_; }
+    solver_status status() const { return detail::state_rejected(state_) ? solver_status::invalid_problem : last_status_; }
 
     // The wrapped policy instance (options included). Lets a caller confirm
     // the configuration that actually reached the policy -- notably that a
@@ -445,34 +449,33 @@ public:
             stored_convergence_.last_check_results_ = oc.last_check_results_;
     }
 
-    // Reset to a new starting point, preserving algorithm state (e.g. L-BFGS
-    // curvature pairs). Delegates to policy.reset(), binding the caller buffer
-    // straight into the policy's Eigen::Ref parameter -- a plain vector of the
-    // matching scalar passes through with no conversion temporary (the warm
-    // per-tick path is allocation-free); only a genuine expression argument
-    // materializes, inside Ref's own storage.
+    // Reset to a new starting point, preserving algorithm state (e.g. L-BFGS curvature pairs). A plain vector
+    // of the matching scalar binds the policy's Eigen::Ref with no conversion temporary.
     template <typename Derived>
-    void reset(const Eigen::MatrixBase<Derived>& x0)
+    solver_status reset(const Eigen::MatrixBase<Derived>& x0)
     {
-        policy_.reset(state_, x0);
+        if(!detail::start_length_ok<N>(x0, detail::start_dimension<N>(problem_ptr_, state_)))
+            return last_status_ = solver_status::invalid_problem;
+        last_status_ = policy_.reset(state_, x0);
         iterations_ = 0;
         function_evaluations_ = 0;
         last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
-        last_status_ = solver_status::running;
         abort_flag_.store(false, std::memory_order_relaxed);
+        return last_status_;
     }
 
     // Reset to a new starting point, clearing all algorithm state.
-    // Delegates to policy.reset_clear() with the same pass-through binding.
     template <typename Derived>
-    void reset_clear(const Eigen::MatrixBase<Derived>& x0)
+    solver_status reset_clear(const Eigen::MatrixBase<Derived>& x0)
     {
-        policy_.reset_clear(state_, x0);
+        if(!detail::start_length_ok<N>(x0, detail::start_dimension<N>(problem_ptr_, state_)))
+            return last_status_ = solver_status::invalid_problem;
+        last_status_ = policy_.reset_clear(state_, x0);
         iterations_ = 0;
         function_evaluations_ = 0;
         last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
-        last_status_ = solver_status::running;
         abort_flag_.store(false, std::memory_order_relaxed);
+        return last_status_;
     }
 
     // Seed best-seen f at loop entry via a direct problem evaluation.
@@ -488,12 +491,9 @@ public:
     //            Problem types.
     scalar_type seed_best_f() const
     {
-        // A problem its policy rejected is never evaluated, not even at x_0.
-        if constexpr(requires { state_.invalid_problem; })
-        {
-            if(state_.invalid_problem)
-                return std::numeric_limits<scalar_type>::infinity();
-        }
+        // A rejected problem is never evaluated, not even at x_0.
+        if(status() == solver_status::invalid_problem)
+            return std::numeric_limits<scalar_type>::infinity();
         if constexpr(!std::is_same_v<Problem, void>)
             return static_cast<scalar_type>(problem_ptr_->value(state_.x));
         else

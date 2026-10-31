@@ -12,6 +12,7 @@
 
 #include <Eigen/Core>
 
+#include <algorithm>
 #include <array>
 #include <concepts>
 #include <cstddef>
@@ -137,15 +138,15 @@ public:
         return results_;
     }
 
-    // Reset every solver to a new starting point and restart the schedule.
-    // Mirrors step_budget_solver::reset: each policy's reset() reseeds its solver,
-    // retirement flags are cleared, and Schedule::reset() restarts the
-    // selection state through init_schedule().
-    void reset(const Eigen::VectorX<scalar_type>& x0)
+    // Every member is reset even after one rejects the start; the first member status that is not running is
+    // reported.
+    solver_status reset(const Eigen::VectorX<scalar_type>& x0)
     {
-        reset_solvers(x0, std::index_sequence_for<Policies...>{});
+        const auto statuses = reset_solvers(x0, std::index_sequence_for<Policies...>{});
         retired_ = {};
         init_schedule();
+        const auto rejected = std::ranges::find_if(statuses, [](solver_status member) { return member != solver_status::running; });
+        return rejected == statuses.end() ? solver_status::running : *rejected;
     }
 
     solve_result<scalar_type, N> solve()
@@ -237,10 +238,9 @@ private:
     }
 
     template <std::size_t... Is>
-    void reset_solvers(const Eigen::VectorX<scalar_type>& x0,
-                       std::index_sequence<Is...>)
+    std::array<solver_status, sizeof...(Policies)> reset_solvers(const Eigen::VectorX<scalar_type>& x0, std::index_sequence<Is...>)
     {
-        (std::get<Is>(solvers_).reset(x0), ...);
+        return {std::get<Is>(solvers_).reset(x0)...};
     }
 
     template <typename P, typename Convergence, std::size_t... Is>

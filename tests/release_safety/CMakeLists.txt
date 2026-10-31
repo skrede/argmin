@@ -5,6 +5,7 @@ add_executable(argmin_release_safety_tests
     compliant_rejection_test.cpp
     qp_empty_problem_test.cpp
     reset_status_test.cpp
+    reset_length_surfaces_test.cpp
 )
 target_include_directories(argmin_release_safety_tests
     PRIVATE
@@ -47,6 +48,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     argmin_release_safety_compile_probe(release_safety_status_reset_policy_compiles status_reset_policy.cpp
         "static assertion failed")
     set_tests_properties(release_safety_status_reset_policy_compiles PROPERTIES PASS_REGULAR_EXPRESSION "unexpected pass")
+    argmin_release_safety_compile_probe(release_safety_void_reset_stepper_rejected void_reset_stepper.cpp
+        "static assertion failed.*must report a solver status")
+    argmin_release_safety_compile_probe(release_safety_status_reset_stepper_compiles status_reset_stepper.cpp
+        "static assertion failed")
+    set_tests_properties(release_safety_status_reset_stepper_compiles PROPERTIES PASS_REGULAR_EXPRESSION "unexpected pass")
 endif()
 
 function(argmin_assert_inventory_test test_name root allow)

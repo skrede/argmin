@@ -273,8 +273,8 @@ struct mock_solver_no_cv
     argmin::solve_result<double> step_n(int) { return {}; }
     const state_type& state() const { static state_type s{}; return s; }
     argmin::solver_status status() const { return {}; }
-    void reset(const Eigen::VectorXd&) {}
-    void reset_clear(const Eigen::VectorXd&) {}
+    argmin::solver_status reset(const Eigen::VectorXd&) { return {}; }
+    argmin::solver_status reset_clear(const Eigen::VectorXd&) { return {}; }
     void abort() {}
     // deliberately omitting constraint_violation()
 };
@@ -284,6 +284,22 @@ static_assert(!argmin::nlp_solver<mock_solver_no_cv>);
 // The same mock also fails the core steppable contract: it omits
 // constraint_violation(), which steppable requires.
 static_assert(!argmin::steppable<mock_solver_no_cv>);
+
+// A solver whose resets report no status fails steppable.
+struct mock_solver_void_reset
+{
+    using scalar_type = double;
+    using state_type = int;
+    argmin::step_result<double> step() { return {}; }
+    const state_type& state() const { static state_type s{}; return s; }
+    argmin::solver_status status() const { return {}; }
+    void reset(const Eigen::VectorXd&) {}
+    void reset_clear(const Eigen::VectorXd&) {}
+    void abort() {}
+    double constraint_violation() const { return 0.0; }
+};
+
+static_assert(!argmin::steppable<mock_solver_void_reset>);
 
 // ---------------------------------------------------------------------------
 // Harness contract: solver_policy / solver_state / schedule concepts.

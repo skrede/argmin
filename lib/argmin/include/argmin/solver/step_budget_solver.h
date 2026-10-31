@@ -4,6 +4,7 @@
 #include "argmin/types.h"
 #include "argmin/detail/solve_loop.h"
 #include "argmin/detail/solver_core.h"
+#include "argmin/detail/start_point.h"
 #include "argmin/detail/runner_concept_probe.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -70,20 +71,10 @@ public:
     using scalar_type = typename Policy::scalar_type;
     using state_type = typename core_type::state_type;
 
-    // Diagnostic for the deduced x0 expression: a fixed-N caller must pass an
-    // N-row column vector. A mismatch fails here with a one-line message
-    // instead of deep inside Eigen's assignment. dynamic_dimension (N == -1)
-    // accepts any column count.
-    template <typename Derived>
-    static constexpr bool x0_shape_ok =
-        (Derived::ColsAtCompileTime == 1) &&
-        (N == dynamic_dimension || Derived::RowsAtCompileTime == Eigen::Dynamic ||
-         Derived::RowsAtCompileTime == N);
-
     template <typename Derived>
     static Eigen::Vector<scalar_type, N> to_x0(const Eigen::MatrixBase<Derived>& x0)
     {
-        static_assert(x0_shape_ok<Derived>,
+        static_assert(detail::x0_shape_ok<N, Derived>,
                       "x0 must be a column vector matching the solver dimension "
                       "N (an N x 1 Eigen vector for fixed N; any n x 1 vector "
                       "for dynamic_dimension).");
@@ -225,24 +216,16 @@ public:
     // Reset to a new starting point, preserving algorithm state (e.g. L-BFGS
     // curvature pairs).
     template <typename Derived>
-    void reset(const Eigen::MatrixBase<Derived>& x0)
+    solver_status reset(const Eigen::MatrixBase<Derived>& x0)
     {
-        static_assert(x0_shape_ok<Derived>,
-                      "x0 must be a column vector matching the solver dimension "
-                      "N (an N x 1 Eigen vector for fixed N; any n x 1 vector "
-                      "for dynamic_dimension).");
-        core_.reset(x0);
+        return core_.reset(x0);
     }
 
     // Reset to a new starting point, clearing all algorithm state.
     template <typename Derived>
-    void reset_clear(const Eigen::MatrixBase<Derived>& x0)
+    solver_status reset_clear(const Eigen::MatrixBase<Derived>& x0)
     {
-        static_assert(x0_shape_ok<Derived>,
-                      "x0 must be a column vector matching the solver dimension "
-                      "N (an N x 1 Eigen vector for fixed N; any n x 1 vector "
-                      "for dynamic_dimension).");
-        core_.reset_clear(x0);
+        return core_.reset_clear(x0);
     }
 
 private:

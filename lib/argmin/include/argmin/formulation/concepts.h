@@ -139,8 +139,8 @@ concept steppable = requires(Solver& solver, const Solver& csolver,
     { solver.step() } -> std::convertible_to<step_result<S>>;
     { csolver.state() };
     { csolver.status() } -> std::convertible_to<solver_status>;
-    { solver.reset(x0) };
-    { solver.reset_clear(x0) };
+    { solver.reset(x0) } -> std::same_as<solver_status>;
+    { solver.reset_clear(x0) } -> std::same_as<solver_status>;
     { solver.abort() };
     { csolver.constraint_violation() } -> std::convertible_to<S>;
 };
