@@ -39,6 +39,7 @@
 
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/mma_reciprocal_dual_problem.h"
 #include "argmin/result/step_result.h"
@@ -77,7 +78,6 @@ struct move_limit_shrink_policy
         std::optional<Scalar> asymptote_contract{};       // 0.7
         std::optional<Scalar> asymptote_expand{};         // 1.2
 
-        // Initial asymptote distance fraction.
         std::optional<Scalar> asymptote_init{};           // 0.5
         std::optional<Scalar> asymptote_init_unbounded{}; // 1.0
 
@@ -92,14 +92,11 @@ struct move_limit_shrink_policy
         // Distance-scaled p/q regularizer (Svanberg 2007 notes 2.3-2.4).
         Scalar raai{mma_defaults<Scalar>::raai};
 
-        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale *
-        // max(|g_i(x0)|, 1). Scale multiplier is empirical (swept). See
-        // detail/mma_subproblem.h recover_elastic_slacks(). Direct value.
+        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale * max(|g_i(x0)|, 1). Scale multiplier is empirical
+        // (swept). See detail/mma_subproblem.h recover_elastic_slacks(). Direct value.
         Scalar dual_bound_scale{mma_defaults<Scalar>::dual_bound_scale};
 
-        // Conservativity loop: max inner iterations and shrink factor.
-        // shrink_factor = 0.5 contracts [alpha, beta] toward x_k by half
-        // each non-conservative trial.
+        // Conservativity loop: shrink_factor = 0.5 contracts [alpha, beta] toward x_k by half each non-conservative trial.
         std::optional<std::uint16_t> max_inner_iterations{};  // 15
         std::optional<Scalar> shrink_factor{};               // 0.5
 
@@ -489,7 +486,7 @@ struct move_limit_shrink_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = x0;
         s.f = s.problem->value(x0);
@@ -510,13 +507,15 @@ struct move_limit_shrink_policy
         s.x_old1 = x0;
         s.x_old2 = x0;
         s.y_dual.setZero();
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         init_asymptotes(s);
+        return status;
     }
 
 private:

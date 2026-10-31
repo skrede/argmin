@@ -32,6 +32,7 @@
 
 #include "argmin/detail/ccsa_dual_problem.h"
 #include "argmin/detail/mma_subproblem.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/lagrangian.h"
 #include "argmin/solver/lbfgsb_policy.h"
@@ -319,24 +320,9 @@ struct ccsa_quadratic_policy
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
 
-        // Reject equality-constrained problems before touching any
-        // constraint buffer (they are sized for inequalities only). This
-        // is a hard, exception-free runtime precondition failure surfaced
-        // as a terminal status; the caller must route equalities through
-        // SQP or an augmented Lagrangian.
+        // Reject before touching any constraint buffer: they are sized for inequalities only.
         if(s.invalid_problem)
-        {
-            return step_result<Scalar>{
-                .objective_value = s.f,
-                .gradient_norm = s.g.norm(),
-                .step_size = Scalar(0.0),
-                .objective_change = Scalar(0.0),
-                .improved = false,
-                .is_null_step = true,
-                .x_norm = s.x.norm(),
-                .policy_status = solver_status::invalid_problem,
-            };
-        }
+            return detail::rejected_step<Scalar>(s);
 
         const std::uint16_t max_inner =
             s.opts.max_inner_iterations.value_or(15);
@@ -626,23 +612,12 @@ struct ccsa_quadratic_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = x0;
         s.f = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
-        const int m = static_cast<int>(s.c_ineq.size());
-        if(m > 0)
-        {
-            Eigen::VectorX<Scalar> c_tmp(m);
-            s.problem->constraints(x0, c_tmp);
-            s.c_ineq = c_tmp;
-            Eigen::MatrixX<Scalar> J_tmp(m, static_cast<int>(s.x.size()));
-            s.problem->constraint_jacobian(x0, J_tmp);
-            s.J_ineq = J_tmp;
-            for(int i = 0; i < m; ++i)
-                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), Scalar(1.0));
-        }
+        refresh_inequality_rows(s);
         s.iteration = 0;
         s.x_old1 = x0;
         s.x_old2 = x0;
@@ -653,12 +628,13 @@ struct ccsa_quadratic_policy
         s.feasible = false;
         s.infeasibility = Scalar(0.0);
         s.y_dual.setZero();
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         const int n = static_cast<int>(x0.size());
         constexpr Scalar inf_val = std::numeric_limits<Scalar>::infinity();
         const Scalar si = s.opts.sigma_init.value_or(mma_defaults<Scalar>::sigma_init);
@@ -668,6 +644,25 @@ struct ccsa_quadratic_policy
                 s.sigma[j] = si * (s.upper[j] - s.lower[j]);
             else
                 s.sigma[j] = Scalar(1.0);
+        }
+        return status;
+    }
+
+private:
+    template <typename P>
+    void refresh_inequality_rows(state_type<P>& s)
+    {
+        const int m = static_cast<int>(s.c_ineq.size());
+        if(m > 0)
+        {
+            Eigen::VectorX<Scalar> c_tmp(m);
+            s.problem->constraints(s.x, c_tmp);
+            s.c_ineq = c_tmp;
+            Eigen::MatrixX<Scalar> J_tmp(m, static_cast<int>(s.x.size()));
+            s.problem->constraint_jacobian(s.x, J_tmp);
+            s.J_ineq = J_tmp;
+            for(int i = 0; i < m; ++i)
+                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), Scalar(1.0));
         }
     }
 };

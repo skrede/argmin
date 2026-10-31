@@ -196,37 +196,33 @@ struct restarting_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const auto& x0)
+    solver_status reset(state_type<P>& s, const auto& x0)
     {
-        inner_policy_.reset(s.inner, x0);
+        const solver_status status = inner_policy_.reset(s.inner, x0);
         s.stagnation_count = 0;
         s.best_ever_value = s.inner.objective_value;
         s.restart_pending = false;
         sync_from_inner(s);
+        return status;
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const auto& x0)
+    solver_status reset_clear(state_type<P>& s, const auto& x0)
     {
-        inner_policy_.reset_clear(s.inner, x0);
+        const solver_status status = inner_policy_.reset_clear(s.inner, x0);
         s.stagnation_count = 0;
         s.restart_count = 0;
         s.best_ever_value = s.inner.objective_value;
         s.restart_pending = false;
         sync_from_inner(s);
+        return status;
     }
 
-    // Accessor for the wrapped inner policy. Lets a caller mutate the
-    // inner policy's options (e.g. options.lambda for the
-    // F-R-01-style "bump lambda then reset" contract test in
-    // tests/unit/restarting_policy_test.cpp). The decorator otherwise
-    // owns the inner via the reinit() codepath; callers should not
-    // rely on this accessor for non-test mutation.
-    //
-    // Reference: Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES) --
-    // the decorator's reinit() is the canonical lambda-bump path; this
-    // accessor enables locking the inner-policy reset() contract that
-    // reinit() depends on.
+    // Lets a caller mutate the inner policy's options (e.g. options.lambda for a "bump lambda then reset" contract
+    // test). The decorator otherwise owns the inner via the reinit() codepath; callers should not rely on this accessor
+    // for non-test mutation.
+    // Reference: Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES) -- the decorator's reinit() is the canonical
+    // lambda-bump path; this accessor enables locking the inner-policy reset() contract that reinit() depends on.
     Inner& inner_policy() { return inner_policy_; }
     const Inner& inner_policy() const { return inner_policy_; }
 

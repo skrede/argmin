@@ -41,6 +41,7 @@
 //     rationale for sigma-collapse predicate, not a literal port).
 
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/scalar_distributions.h"
 #include "argmin/detail/stochastic_ranking.h"
 #include "argmin/detail/tuple_contains.h"
@@ -833,14 +834,13 @@ struct nlopt_faithful_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
         const int n_c = s.n_eq + s.n_ineq;
 
-        // Re-initialize population uniformly, with the same explicit
-        // x0-centered finite seeding fallback for infinite bounds as
-        // init() (see the init() sweep note for the half-width choice).
+        // Re-initialize population uniformly, with the same explicit x0-centered finite seeding fallback for infinite
+        // bounds as init() (see the init() sweep note for the half-width choice).
         constexpr Scalar seed_fallback_half_width = Scalar(2.0);
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
         Eigen::Vector<Scalar, N> seed_lo = s.lower;
@@ -858,8 +858,7 @@ struct nlopt_faithful_policy
                 n, s.lambda, seed_lo, seed_hi, *s.rng);
         s.population.leftCols(s.lambda) = initial_population;
 
-        // Inject x0 into the initial population on reset too (same
-        // warm-start seeding as init(); NLopt isres.c:128).
+        // Inject x0 into the initial population on reset too (same warm-start seeding as init(); NLopt isres.c:128).
         s.population.col(0) = x0.cwiseMax(s.lower).cwiseMin(s.upper);
 
         const auto initial_sigmas =
@@ -879,12 +878,13 @@ struct nlopt_faithful_policy
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
         }
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 

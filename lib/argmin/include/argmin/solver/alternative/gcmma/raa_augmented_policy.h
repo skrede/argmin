@@ -24,6 +24,7 @@
 
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/mma_raa_augmented_dual_problem.h"
 #include "argmin/result/step_result.h"
@@ -68,9 +69,8 @@ struct raa_augmented_policy
         Scalar move_bound_fraction{mma_defaults<Scalar>::move_bound_fraction};  // Svanberg XXMOVE
         Scalar raai{mma_defaults<Scalar>::raai};  // p/q regularizer
 
-        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale *
-        // max(|g_i(x0)|, 1). Scale multiplier is empirical (swept). See
-        // detail/mma_subproblem.h recover_elastic_slacks(). Direct value.
+        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale * max(|g_i(x0)|, 1). Scale multiplier is empirical
+        // (swept). See detail/mma_subproblem.h recover_elastic_slacks(). Direct value.
         Scalar dual_bound_scale{mma_defaults<Scalar>::dual_bound_scale};
 
         std::optional<std::uint16_t> max_inner_iterations{};  // 15
@@ -78,15 +78,11 @@ struct raa_augmented_policy
         std::optional<Scalar> raa_min{};                      // 1e-7
         std::optional<Scalar> raa_decay{};                    // 0.5
 
-        // raa penalty schedule (Svanberg 2002 §3, eqs. 3.6-3.9). When true,
-        // the raa floor is recomputed each outer iteration from the current
-        // gradient as (0.1/n) * sum_j |dg_j| * range_j (3.6), so the penalty
-        // scales with the objective/constraint magnitude instead of the
-        // fixed raa_min (which wastes inner budget on large-scale
-        // objectives), and the non-conservative growth is 1.1*(raa + delta)
-        // (3.9) rather than raa + 2*delta. When false, the pre-fix schedule
-        // (fixed floor + raa + 2*delta growth). Default set by the empirical
-        // scale-robustness sweep.
+        // raa penalty schedule (Svanberg 2002 §3, eqs. 3.6-3.9). When true, the raa floor is recomputed each outer
+        // iteration from the current gradient as (0.1/n) * sum_j |dg_j| * range_j (3.6), so the penalty scales with the
+        // objective/constraint magnitude instead of the fixed raa_min (which wastes inner budget on large-scale
+        // objectives), and the non-conservative growth is 1.1*(raa + delta) (3.9) rather than raa + 2*delta. When false,
+        // the pre-fix schedule (fixed floor + raa + 2*delta growth). Default set by the empirical scale-robustness sweep.
         bool raa_svanberg_schedule{true};
 
         std::optional<Scalar> stall_tolerance_threshold{};
@@ -544,7 +540,7 @@ struct raa_augmented_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = x0;
         s.f = s.problem->value(x0);
@@ -568,13 +564,15 @@ struct raa_augmented_policy
         const Scalar ri = s.opts.raa_init.value_or(mma_defaults<Scalar>::raa_init);
         s.raa_obj = ri;
         s.raa_con.setConstant(ri);
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         init_asymptotes(s);
+        return status;
     }
 
 private:

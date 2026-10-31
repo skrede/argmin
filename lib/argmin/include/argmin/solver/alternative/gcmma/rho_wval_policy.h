@@ -34,6 +34,7 @@
 
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/mma_augmented_dual_problem.h"
 #include "argmin/result/step_result.h"
@@ -252,24 +253,9 @@ struct rho_wval_policy
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
 
-        // Reject equality-constrained problems before touching any
-        // constraint buffer (they are sized for inequalities only). This
-        // is a hard, exception-free runtime precondition failure surfaced
-        // as a terminal status; the caller must route equalities through
-        // SQP or an augmented Lagrangian.
+        // Reject before touching any constraint buffer: they are sized for inequalities only.
         if(s.invalid_problem)
-        {
-            return step_result<Scalar>{
-                .objective_value = s.f,
-                .gradient_norm = s.g.norm(),
-                .step_size = Scalar(0.0),
-                .objective_change = Scalar(0.0),
-                .improved = false,
-                .is_null_step = true,
-                .x_norm = s.x.norm(),
-                .policy_status = solver_status::invalid_problem,
-            };
-        }
+            return detail::rejected_step<Scalar>(s);
 
         const Scalar gam_dec = s.opts.asymptote_contract.value_or(mma_defaults<Scalar>::asymptote_contract);
         const Scalar gam_inc = s.opts.asymptote_expand.value_or(mma_defaults<Scalar>::asymptote_expand);
@@ -603,7 +589,7 @@ struct rho_wval_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = x0;
         s.f = s.problem->value(x0);
@@ -627,13 +613,15 @@ struct rho_wval_policy
         const Scalar ri = s.opts.rho_init.value_or(mma_defaults<Scalar>::rho_init);
         s.rho_obj = ri;
         s.rho_con.setConstant(ri);
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         init_asymptotes(s);
+        return status;
     }
 
 private:

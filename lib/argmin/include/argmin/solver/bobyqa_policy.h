@@ -24,6 +24,7 @@
 #include "argmin/detail/interpolation_system.h"
 #include "argmin/detail/trust_region.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/options/trust_region_options.h"
 #include "argmin/options/derivative_free_defaults.h"
 #include "argmin/result/step_result.h"
@@ -157,7 +158,6 @@ struct bobyqa_policy
         //
         // diffa/diffb/diffc hold |Q-error| at the last three interpolation
         // points; xoptsq = ||xopt||^2, reset to zero by the origin shift.
-        //
         // Reference: Powell 2009, Section 5; NLopt bobyqb_ lines 2100-3053.
         int ntrits{0};
         int nfsav{0};
@@ -1113,16 +1113,15 @@ struct bobyqa_policy
         return r;
     }
 
-    // Cold restart -- BOBYQA has no warm-start mode since the interpolation
-    // set is point-specific.
+    // Cold restart -- BOBYQA has no warm-start mode since the interpolation set is point-specific.
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset_clear(s, x0);
+        return reset_clear(s, x0);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
         s.x_scaled = (s.x.array() / s.scale.array()).matrix();
@@ -1146,6 +1145,7 @@ struct bobyqa_policy
         s.delta = h;
         seed_driver(s);
         s.initialized = true;
+        return detail::latch_status(s);
     }
 };
 

@@ -53,6 +53,7 @@
 //     btad403, Table 2 (numeric default attribution gap).
 
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/scalar_distributions.h"
 #include "argmin/detail/stochastic_ranking.h"
 #include "argmin/detail/tuple_contains.h"
@@ -129,14 +130,11 @@ struct runarsson_yao_paper_policy
             else return dynamic_dimension;
         }();
 
-        // Bounded-storage scaffolding shared with nlopt_faithful_policy
-        // (cmaes_policy MaxPop=512 idiom). For fixed-N specializations the
-        // row count is exact (N); for dynamic_dimension the row count is
-        // heap-sized (Eigen::Dynamic). Column count is capped at MaxLambda
-        // / MaxMu so the column axis does not heap-resize on the hot path.
-        // fitnesses / violations remain ordinary VectorXd because
-        // detail::stochastic_rank takes an Eigen::Vector<Scalar, N>
-        // (no Max-cap) signature.
+        // Bounded-storage scaffolding shared with nlopt_faithful_policy (cmaes_policy MaxPop=512 idiom). For fixed-N
+        // specializations the row count is exact (N); for dynamic_dimension the row count is heap-sized (Eigen::Dynamic).
+        // Column count is capped at MaxLambda / MaxMu so the column axis does not heap-resize on the hot path.
+        // fitnesses / violations remain ordinary VectorXd because detail::stochastic_rank takes an
+        // Eigen::Vector<Scalar, N> (no Max-cap) signature.
         static constexpr int MaxN = 64;
         static constexpr int MaxMu = 256;
         static constexpr int MaxLambda = 1792;
@@ -614,7 +612,7 @@ struct runarsson_yao_paper_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
 
@@ -637,12 +635,13 @@ struct runarsson_yao_paper_policy
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
         }
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 

@@ -7,11 +7,9 @@
 // multi-start restarts. When the inner solver stagnates, the decorator
 // generates a new starting point via Halton quasi-random sequence mapped
 // to the problem bounds, then restarts the inner solver from that point.
-//
 // Unlike CMA-ES IPOP (which doubles population size), this generates
 // DIVERSE starting points across the feasible region. Suitable for any
 // derivative-free policy (BOBYQA, CMA-ES).
-//
 // Reference: Halton, J. H. (1960), quasi-random sequence seeding.
 //            K&W Section 8.1 (multi-start global optimization).
 
@@ -203,24 +201,26 @@ struct multistart_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const auto& x0)
+    solver_status reset(state_type<P>& s, const auto& x0)
     {
-        inner_policy_.reset(s.inner, x0);
+        const solver_status status = inner_policy_.reset(s.inner, x0);
         s.stagnation_count = 0;
         s.restart_pending = false;
         sync_from_inner(s);
+        return status;
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const auto& x0)
+    solver_status reset_clear(state_type<P>& s, const auto& x0)
     {
-        inner_policy_.reset_clear(s.inner, x0);
+        const solver_status status = inner_policy_.reset_clear(s.inner, x0);
         s.stagnation_count = 0;
         s.restart_pending = false;
         s.restart_count = 0;
         s.best_ever_value = s.inner.objective_value;
         s.best_ever_x = s.inner.x;
         sync_from_inner(s);
+        return status;
     }
 
 private:

@@ -44,6 +44,7 @@
 //   K&W (2025) Algorithms for Optimization 2e, §8.7, Algorithm 8.10.
 
 #include "argmin/detail/xoshiro256.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/cmaes_constants.h"
 #include "argmin/detail/cmaes_covariance.h"
 #include "argmin/detail/cmaes_sampling.h"
@@ -1049,7 +1050,7 @@ struct no_repair_adaptive_penalty_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
         // Refresh strategy parameters for the current options.lambda value
@@ -1059,17 +1060,14 @@ struct no_repair_adaptive_penalty_policy
         // IPOP branch's recompute (in step()) and the libcmaes contract
         // (cmaparameters.cc::initialize_parameters re-invoked from
         // ipopcmastrategy.cc on each lambda bump).
-        //
         // References:
         //   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
         s.params = detail::compute_constants<Scalar>(n,
             static_cast<int>(options.lambda.value_or(0)));
-        // Re-evaluate the population-cap guard on the refreshed lambda. A
-        // reset that lands over the cap flags the state so step() returns
-        // solver_status::invalid_problem instead of resizing the lambda-
-        // sized buffers past the static MaxPop bound; a reset back under
-        // the cap clears the flag.
+        // Re-evaluate the population-cap guard on the refreshed lambda. A reset that lands over the cap flags the state so step()
+        // returns solver_status::invalid_problem instead of resizing the lambda-sized buffers past the static MaxPop bound; a reset
+        // back under the cap clears the flag.
         s.invalid_problem = (s.params.lambda > state_type<P>::MaxPop);
         s.mean = x0;
         s.x = x0;
@@ -1084,12 +1082,13 @@ struct no_repair_adaptive_penalty_policy
         s.generation = 0;
         s.best_fitness_history.clear();
         s.median_fitness_history.clear();
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 

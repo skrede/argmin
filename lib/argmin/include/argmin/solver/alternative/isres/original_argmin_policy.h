@@ -29,6 +29,7 @@
 //            K&W Section 8.6 (evolution strategies).
 
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/stochastic_ranking.h"
 #include "argmin/detail/xoshiro256.h"
 #include "argmin/options/isres_defaults.h"
@@ -93,9 +94,8 @@ struct original_argmin_policy
         Eigen::Vector<Scalar, N> lower;
         Eigen::Vector<Scalar, N> upper;
 
-        // RNG: xoshiro256+ matches cmaes (consistent across the global
-        // / stochastic policies). std::mt19937 was 2.5 KB of state;
-        // xoshiro256 is 32 B.
+        // RNG: xoshiro256+ matches cmaes (consistent across the global / stochastic policies). std::mt19937 was 2.5 KB
+        // of state; xoshiro256 is 32 B.
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
         Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
@@ -410,11 +410,10 @@ struct original_argmin_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
 
-        // Re-initialize population uniformly
         s.population = detail::initialize_population<N>(
             n, s.lambda, s.lower, s.upper, *s.rng);
         s.sigmas = detail::initialize_sigmas(n, s.lambda, s.lower, s.upper);
@@ -433,12 +432,13 @@ struct original_argmin_policy
             s.c_eq = c.head(s.n_eq);
             s.c_ineq = c.tail(s.n_ineq);
         }
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 

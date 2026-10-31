@@ -49,6 +49,7 @@
 //   K&W (2025) Algorithms for Optimization 2e, §8.7, Algorithm 8.10.
 
 #include "argmin/detail/xoshiro256.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/cmaes_constants.h"
 #include "argmin/detail/cmaes_covariance.h"
 #include "argmin/detail/cmaes_sampling.h"
@@ -1215,7 +1216,7 @@ struct pwq_reparameterization_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int n = static_cast<int>(x0.size());
         // Refresh strategy parameters and every configuration-derived
@@ -1223,13 +1224,11 @@ struct pwq_reparameterization_policy
         // fresh run on the same configured problem. Mirrors the in-policy
         // population-doubling branch's recompute and the libcmaes contract
         // (cmaparameters.cc::initialize_parameters re-invoked per restart).
-        //
         // References:
         //   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
         //   Hansen (2023) arXiv:1604.00772 §B.1 (population default),
         //   §B.2 (eigendecomposition skip period), §B.3 (stagnation window).
-        //
         // Population size: honor an explicit override, else the same Hansen
         // default 4 + floor(3 ln n) init() applies (no widened bounded
         // floor), so a reset matches a fresh run.
@@ -1237,11 +1236,9 @@ struct pwq_reparameterization_policy
             ? static_cast<int>(options.lambda.value())
             : 0;
         s.params = detail::compute_constants<Scalar>(n, pop_lambda);
-        // Re-evaluate the population-cap guard on the refreshed lambda. A
-        // reset that lands over the cap flags the state so step() returns
-        // solver_status::invalid_problem instead of resizing the lambda-
-        // sized buffers past the static MaxPop bound; a reset back under
-        // the cap clears the flag.
+        // Re-evaluate the population-cap guard on the refreshed lambda. A reset that lands over the cap flags the state so step()
+        // returns solver_status::invalid_problem instead of resizing the lambda-sized buffers past the static MaxPop bound; a reset
+        // back under the cap clears the flag.
         s.invalid_problem = (s.params.lambda > state_type<P>::MaxPop);
         s.mean = x0;
         s.x = x0;
@@ -1287,17 +1284,19 @@ struct pwq_reparameterization_policy
                           / static_cast<Scalar>(s.params.lambda)));
         if(options.stagnation_window.has_value())
             s.stagnation_window_min = *options.stagnation_window;
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         // reset() re-derives the init-time quantities and anchors the mean
         // at x0; a restart additionally randomizes the mean within the box
         // (Auger & Hansen 2005 §III) so the external restart decorator gets
         // basin diversity, matching the in-policy IPOP branch.
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         randomize_restart_mean(s);
+        return status;
     }
 };
 
