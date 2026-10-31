@@ -178,15 +178,7 @@ struct nlopt_faithful_policy
         Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
         Scalar best_ever_violation{std::numeric_limits<Scalar>::infinity()};
 
-        // Poison flag: set by init() when the requested population sizing
-        // exceeds the bounded-storage caps (MaxLambda / MaxMu). init()
-        // then skips the unsafe resize() calls (a resize past the
-        // compile-time max-cols bound is undefined behavior) and step()
-        // returns solver_status::invalid_problem on the first call. The
-        // library is exception-free, so this is surfaced as a terminal
-        // status rather than a throw (the same invalid_problem status-return
-        // idiom guards the CMA-ES population-cap path).
-        bool storage_exceeded{false};
+        bool invalid_problem{false};
 
         // Constraint evaluation buffers. n_eq / n_ineq are problem
         // properties only known at init() time, so these stay dynamic.
@@ -298,19 +290,11 @@ struct nlopt_faithful_policy
             static_cast<std::uint64_t>(std::random_device{}()));
         s.rng.emplace(seed);
 
-        // Runtime storage-cap guard (memory safety). The population /
-        // sigma / offspring buffers are Eigen matrices with a compile-time
-        // maximum-columns bound of MaxLambda, and the x0 snapshot buffer is
-        // bounded at MaxMu columns; resizing past those bounds is undefined
-        // behavior. If the requested sizing exceeds the caps, poison the
-        // state, skip every unsafe resize, and let the first step() return
-        // solver_status::invalid_problem (exception-free precondition
-        // failure). Set x/objective to safe defaults so step_budget_solver can
-        // read the state before that first step().
-        using ST = state_type<Problem>;
-        if(s.lambda > ST::MaxLambda || s.mu > ST::MaxMu)
+        // A resize past the compile-time max-columns bound is undefined behavior, so a population the bounded storage
+        // cannot hold latches before the first resize.
+        s.invalid_problem = exceeds_storage(s);
+        if(s.invalid_problem)
         {
-            s.storage_exceeded = true;
             s.x = x0;
             s.objective_value = std::numeric_limits<Scalar>::infinity();
             return s;
@@ -521,11 +505,7 @@ struct nlopt_faithful_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
-        // Storage-cap poison (memory safety): init() detected that the
-        // requested population sizing exceeds the bounded-storage caps and
-        // skipped the unsafe resizes. Surface a terminal status instead of
-        // touching the un-sized buffers.
-        if(s.storage_exceeded)
+        if(s.invalid_problem)
         {
             return step_result<Scalar>{
                 .objective_value = s.objective_value,
@@ -836,11 +816,13 @@ struct nlopt_faithful_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = exceeds_storage(s) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         const int n = static_cast<int>(x0.size());
         const int n_c = s.n_eq + s.n_ineq;
 
-        // Re-initialize population uniformly, with the same explicit x0-centered finite seeding fallback for infinite
-        // bounds as init() (see the init() sweep note for the half-width choice).
+        // Infinite bounds seed in a finite box centered on x0, as in init().
         constexpr Scalar seed_fallback_half_width = Scalar(2.0);
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
         Eigen::Vector<Scalar, N> seed_lo = s.lower;
@@ -853,16 +835,13 @@ struct nlopt_faithful_policy
                 seed_hi(i) = x0(i) + seed_fallback_half_width;
         }
 
-        const auto initial_population =
-            detail::initialize_population<N>(
-                n, s.lambda, seed_lo, seed_hi, *s.rng);
+        const auto initial_population = detail::initialize_population<N>(n, s.lambda, seed_lo, seed_hi, *s.rng);
         s.population.leftCols(s.lambda) = initial_population;
 
         // Inject x0 into the initial population on reset too (same warm-start seeding as init(); NLopt isres.c:128).
         s.population.col(0) = x0.cwiseMax(s.lower).cwiseMin(s.upper);
 
-        const auto initial_sigmas =
-            detail::initialize_sigmas<N>(n, s.lambda, seed_lo, seed_hi);
+        const auto initial_sigmas = detail::initialize_sigmas<N>(n, s.lambda, seed_lo, seed_hi);
         s.sigmas.leftCols(s.lambda) = initial_sigmas;
 
         s.x = x0;
@@ -885,6 +864,13 @@ struct nlopt_faithful_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         return reset(s, x0);
+    }
+
+private:
+    template <typename P>
+    static bool exceeds_storage(const state_type<P>& s)
+    {
+        return s.lambda > state_type<P>::MaxLambda || s.mu > state_type<P>::MaxMu;
     }
 };
 

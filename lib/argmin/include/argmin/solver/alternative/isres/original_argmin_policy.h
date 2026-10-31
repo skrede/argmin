@@ -94,8 +94,6 @@ struct original_argmin_policy
         Eigen::Vector<Scalar, N> lower;
         Eigen::Vector<Scalar, N> upper;
 
-        // RNG: xoshiro256+ matches cmaes (consistent across the global / stochastic policies). std::mt19937 was 2.5 KB
-        // of state; xoshiro256 is 32 B.
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
         Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
@@ -108,6 +106,7 @@ struct original_argmin_policy
         Eigen::VectorX<Scalar> c_ineq;
         int n_eq{0};
         int n_ineq{0};
+        bool invalid_problem{false};
 
         int lambda{0};
         int mu{0};
@@ -117,9 +116,7 @@ struct original_argmin_policy
 
         std::optional<detail::isres_operator_workspace<Scalar, N>> mutation_workspace;
 
-        // Per-step buffers hoisted to state so step() does not
-        // heap-resize them every generation. Sized to
-        // current lambda in init(); persistent across steps.
+        // Per-step buffers, sized to lambda in init() so step() never heap-resizes.
         Eigen::Matrix<Scalar, N, Eigen::Dynamic> offspring_buf;
         Eigen::MatrixX<Scalar> new_sigmas_buf;
         Eigen::VectorX<Scalar> offspring_fitnesses_buf;
@@ -256,13 +253,13 @@ struct original_argmin_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         const int n = static_cast<int>(s.x.size());
         const int n_c = s.n_eq + s.n_ineq;
         Scalar old_best = s.objective_value;
 
         // 1. Generate offspring via mutation + differential variation.
-        // Buffers live on s; mutation operator is unchanged in this
-        // commit (the operator rewrite is a follow-up).
         for(int j = 0; j < s.lambda; ++j)
         {
             // Select parent from current population (top mu by rank)
@@ -412,6 +409,9 @@ struct original_argmin_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         const int n = static_cast<int>(x0.size());
 
         s.population = detail::initialize_population<N>(

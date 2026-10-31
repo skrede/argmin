@@ -130,11 +130,8 @@ struct runarsson_yao_paper_policy
             else return dynamic_dimension;
         }();
 
-        // Bounded-storage scaffolding shared with nlopt_faithful_policy (cmaes_policy MaxPop=512 idiom). For fixed-N
-        // specializations the row count is exact (N); for dynamic_dimension the row count is heap-sized (Eigen::Dynamic).
-        // Column count is capped at MaxLambda / MaxMu so the column axis does not heap-resize on the hot path.
-        // fitnesses / violations remain ordinary VectorXd because detail::stochastic_rank takes an
-        // Eigen::Vector<Scalar, N> (no Max-cap) signature.
+        // Columns are capped at MaxLambda / MaxMu so the hot path never heap-resizes; a population past the caps is
+        // rejected at init. fitnesses / violations stay VectorX because detail::stochastic_rank takes no Max-cap type.
         static constexpr int MaxN = 64;
         static constexpr int MaxMu = 256;
         static constexpr int MaxLambda = 1792;
@@ -163,6 +160,7 @@ struct runarsson_yao_paper_policy
         Eigen::VectorX<Scalar> c_ineq;
         int n_eq{0};
         int n_ineq{0};
+        bool invalid_problem{false};
 
         int lambda{0};
         int mu{0};
@@ -175,20 +173,12 @@ struct runarsson_yao_paper_policy
                       Eigen::Dynamic, MaxLambda> all_constraints_buf;
         std::vector<std::uint32_t> indices_buf;
 
-        // PAPER DELTA #1 storage: rank-permuted x0 snapshot at
-        // start-of-generation. The mu rank-0..rank-(mu-1) survivors are
-        // copied here BEFORE the differential-variation update; col(0)
-        // is rank-0 (best) and is the BEST anchor for the DE update.
+        // PAPER DELTA #1: the mu rank-ordered survivors, copied BEFORE the differential-variation update; col(0) is the
+        // rank-0 BEST anchor of the DE update.
         Eigen::Matrix<Scalar, N, Eigen::Dynamic, 0, RowsCap, MaxMu> x0_snapshot_buf;
 
-        // User-set step_tolerance threshold captured at init() time when
-        // the convergence policy carries a step_tolerance_criterion. step()
-        // cannot thread the Convergence template through state_type<P>, so
-        // the threshold value is captured here. Stays std::nullopt for
-        // convergence policies that lack step_tolerance_criterion (e.g.
-        // slsqp_compatible_convergence carries step_tolerance_rel_criterion
-        // only); xtol_coupled sigma-collapse falls back to bound-relative
-        // semantics in that case.
+        // step() cannot see the Convergence type, so init() captures its step_tolerance_criterion threshold here; it
+        // stays unset without one and xtol_coupled sigma collapse then falls back to the bound-relative form.
         std::optional<Scalar> convergence_xtol_threshold;
     };
 
@@ -207,7 +197,7 @@ struct runarsson_yao_paper_policy
     template <typename Problem, typename Convergence = default_convergence<scalar_type>>
         requires objective<Problem, Scalar> && constrained_values<Problem, Scalar> && bound_constrained<Problem, Scalar>
     state_type<Problem> init(const Problem& problem,
-                             const Eigen::Vector<Scalar, N>& /*x0*/,
+                             const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
@@ -233,6 +223,14 @@ struct runarsson_yao_paper_policy
         const std::uint64_t seed = options.seed.value_or(
             static_cast<std::uint64_t>(std::random_device{}()));
         s.rng.emplace(seed);
+
+        s.invalid_problem = exceeds_storage(s);
+        if(s.invalid_problem)
+        {
+            s.x = x0;
+            s.objective_value = std::numeric_limits<Scalar>::infinity();
+            return s;
+        }
 
         s.population.resize(n, s.lambda);
         s.sigmas.resize(n, s.lambda);
@@ -319,15 +317,7 @@ struct runarsson_yao_paper_policy
             s.c_ineq = c.tail(s.n_ineq);
         }
 
-        // Capture the user-set step_tolerance_criterion threshold (if the
-        // convergence policy carries one) so step()'s xtol_coupled
-        // sigma-collapse predicate can read it without threading the
-        // Convergence type through state_type. The tuple_contains gate
-        // keeps init() compilable against convergence policies that lack
-        // step_tolerance_criterion (e.g. slsqp_compatible_convergence,
-        // which carries step_tolerance_rel_criterion only); the field
-        // stays std::nullopt and step() silently falls back to the
-        // bound-relative form.
+        // The gate keeps init() compilable for convergence policies without step_tolerance_criterion.
         if constexpr(detail::tuple_contains_v<
                          step_tolerance_criterion<scalar_type>,
                          decltype(opts.convergence.criteria)>)
@@ -343,9 +333,8 @@ struct runarsson_yao_paper_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
-        // Capture previous best-ever for objective_change / improved
-        // bookkeeping; also referenced by the sigma-collapse status
-        // emission below.
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         const Scalar prev_best_ever_value = s.best_ever_value;
 
         const int n = static_cast<int>(s.x.size());
@@ -614,12 +603,13 @@ struct runarsson_yao_paper_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = exceeds_storage(s) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         const int n = static_cast<int>(x0.size());
 
-        s.population = detail::initialize_population<N>(
-            n, s.lambda, s.lower, s.upper, *s.rng);
-        s.sigmas = detail::initialize_sigmas<N>(
-            n, s.lambda, s.lower, s.upper);
+        s.population = detail::initialize_population<N>(n, s.lambda, s.lower, s.upper, *s.rng);
+        s.sigmas = detail::initialize_sigmas<N>(n, s.lambda, s.lower, s.upper);
 
         s.x = x0;
         s.objective_value = s.problem->value(x0);
@@ -642,6 +632,13 @@ struct runarsson_yao_paper_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         return reset(s, x0);
+    }
+
+private:
+    template <typename P>
+    static bool exceeds_storage(const state_type<P>& s)
+    {
+        return s.lambda > state_type<P>::MaxLambda || s.mu > state_type<P>::MaxMu;
     }
 };
 

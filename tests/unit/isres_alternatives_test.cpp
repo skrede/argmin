@@ -367,7 +367,7 @@ TEST_CASE("nlopt_faithful: oversized population is rejected with invalid_problem
     policy.options.population_size = 4000u;
 
     auto s = policy.init(problem, x0, opts);
-    REQUIRE(s.storage_exceeded);
+    REQUIRE(s.invalid_problem);
 
     auto sr = policy.step(s);
     REQUIRE(sr.policy_status.has_value());
