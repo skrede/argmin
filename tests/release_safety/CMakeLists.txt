@@ -10,6 +10,7 @@ add_executable(argmin_release_safety_tests
     reset_length_sqp_test.cpp
     reset_length_moving_stochastic_test.cpp
     sqp_constraint_shape_test.cpp
+    sqp_reset_shape_test.cpp
     moving_asymptote_shape_test.cpp
     hot_reset_test.cpp
     isres_storage_test.cpp

@@ -109,9 +109,10 @@ TEMPLATE_LIST_TEST_CASE("a moving-asymptote policy re-anchors its asymptotes aro
     contract_asymptotes(solver);
     const vector2 target(9.5, 9.5);
     REQUIRE(solver.reset(target) == solver_status::running);
+    const step_budget_solver fresh{TestType{}, problem, target, solver_options<>{}};
     CHECK(solver.state().x == target);
-    CHECK((solver.state().L.array() < target.array()).all());
-    CHECK((target.array() < solver.state().U.array()).all());
+    CHECK(solver.state().L == fresh.state().L);
+    CHECK(solver.state().U == fresh.state().U);
 }
 
 TEMPLATE_LIST_TEST_CASE("a moving-asymptote policy steps through an ordered window after a hot reset", "[release-safety][hot-reset]", asymptote_policies)
