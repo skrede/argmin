@@ -259,6 +259,14 @@ These are judgment calls for the eye, not mechanical rules.
   fixing change removes the tag (keeping the case as its regression test) and lowers the known-defect count
   CI asserts. A probe for an out-of-bounds or abort path asserts the missing rejection and never executes the
   unguarded path. Names are descriptive sentences and carry no tracker identifiers.
+- **Boundary checks.** A size or shape contract between two static shapes is a `static_assert` or a
+  constraint, pinned by a must-not-compile probe and its must-compile twin. A contract between a dynamic
+  value and a static shape or capacity is a runtime check that returns `solver_status::invalid_problem`
+  (a `qp_error` for the QP solvers) before any narrowing or storage write, at construction and at reset, and is
+  latched so `step` and `solve` return it too. Each such check has a status-exact probe under the ctest label
+  `release-safety`, whose translation units trap Eigen's assertions; CI runs that label on NDEBUG sanitizer
+  builds, where no assertion is left to catch a missed check. An `assert` in `lib/` guards only an internal
+  invariant and is listed in `tests/release_safety/assert_allow_list.txt`.
 
 ## English
 

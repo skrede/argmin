@@ -164,6 +164,20 @@ jobs:
             cc: gcc-14
             cxx: g++-14
             flags: "-fsanitize=undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          # NDEBUG compiles out every assert and Eigen bounds check, so these legs catch an out-of-bounds or
+          # undefined path that only the Debug assertions were stopping.
+          - name: ndebug-asan-ubsan
+            cc: clang-18
+            cxx: clang++-18
+            flags: "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+            build_type: Release
+            release_flags: "-O1 -g -DNDEBUG"
+          - name: ndebug-ubsan-gcc
+            cc: gcc-14
+            cxx: g++-14
+            flags: "-fsanitize=undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+            build_type: Release
+            release_flags: "-O1 -g -DNDEBUG"
 
     runs-on: ubuntu-24.04
     name: sanitize (${{ matrix.name }})
@@ -176,14 +190,28 @@ jobs:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
         run: |
-          cmake . -B build -DCMAKE_BUILD_TYPE=Debug \
+          cmake . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type || 'Debug' }} \
             -DCMAKE_CXX_FLAGS="${{ matrix.flags }}" \
+            -DCMAKE_CXX_FLAGS_RELEASE="${{ matrix.release_flags || '-O3 -DNDEBUG' }}" \
             -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.flags }}" \
             -DARGMIN_BUILD_TESTS=ON \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
       - name: Build
         run: cmake --build build
+
+      # The literal is deliberate: a dropped probe must fail here rather than leave a green leg that ran less.
+      - name: Verify the full release-safety set registered
+        if: matrix.build_type == 'Release'
+        run: |
+          cd build
+          count=$(ctest -N -L release-safety | grep -cE '^ *Test +#')
+          echo "release-safety probes registered: $count"
+          test "$count" -eq 175 || { echo "expected 175 release-safety probes, found $count"; exit 1; }
+
+      - name: Release-safety probes
+        if: matrix.build_type == 'Release'
+        run: cd build && ctest --output-on-failure --no-tests=error -L release-safety
 
       - name: Test
         run: cd build && ctest --output-on-failure
