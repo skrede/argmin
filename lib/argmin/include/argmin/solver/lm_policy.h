@@ -83,6 +83,7 @@ struct lm_policy
         Scalar initial_objective{};      // for divergence detection
         std::uint32_t iteration{0};
         int num_residuals{};
+        bool invalid_problem{false};
     };
 
     template <typename Problem, typename Convergence>
@@ -138,6 +139,8 @@ struct lm_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         const int n = static_cast<int>(s.x.size());
         const Scalar diag_min = options.diagonal_min_clamp.value_or(least_squares_defaults<Scalar>::diagonal_min_clamp);
         const Scalar lam_min = options.lambda_min.value_or(least_squares_defaults<Scalar>::lambda_min);
@@ -156,10 +159,8 @@ struct lm_policy
         for(int i = 0; i < n; ++i)
             H(i, i) += s.lambda * std::max(H(i, i), diag_min);
 
-        // Solve damped normal equations via LDLT
         Eigen::Vector<Scalar, N> h = H.ldlt().solve(-g);
 
-        // Trial point
         Eigen::Vector<Scalar, N> x_trial = (s.x + h).eval();
 
         // Evaluate trial residuals into the state-resident buffer
@@ -222,13 +223,8 @@ struct lm_policy
         else if(s.initial_objective > Scalar(0) && s.objective_value > Scalar(100) * s.initial_objective)
             policy_status = solver_status::diverged;
 
-        // Report h.norm() as step_size even on rejection so step_budget_solver's stall
-        // detection does not fire while the solver is still adjusting lambda.
-        // objective_change carries the ACTUAL objective change (zero on a
-        // rejected step, where the iterate did not move); the former hack that
-        // reported lambda here leaked an internal damping value into the
-        // user-visible step_result. ftol_reached is now correctly gated on the
-        // KKT residual (convergence.h), so no proxy is needed to suppress it.
+        // Report h.norm() as step_size even on rejection so step_budget_solver's stall detection does not fire while the
+        // solver is still adjusting lambda; objective_change is the actual change, zero on a rejected step.
         Scalar effective_change = s.objective_value - old_value;
 
         // KKT residual for unconstrained least-squares: infinity-norm of the
@@ -256,6 +252,9 @@ struct lm_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = s.problem->num_residuals() != s.num_residuals;
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.x = x0;
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, x0.size());

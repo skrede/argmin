@@ -475,8 +475,6 @@ struct filter_trsqp_policy
         // primal width n + n_ineq is a runtime quantity even when the
         // policy's N template parameter is a fixed compile-time
         // constant for the x-only dimension.
-        //
-        // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers.
         argmin::detail::sqp_state_buffers<Scalar, N> bufs;
 
         // Joint-space (x, s) dynamic buffers. Sized at n + n_ineq on
@@ -610,6 +608,7 @@ struct filter_trsqp_policy
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
+        bool invalid_problem{false};
     };
 
     template <typename Problem, typename Convergence>
@@ -796,18 +795,14 @@ struct filter_trsqp_policy
         // z = (x, s); a Fletcher-Leyffer dominance check on (f, h)
         // replaces the L2-merit augmented ratio test at the call site.
         //
-        // Reference: Fletcher and Leyffer 2002 Section 2.1
-        //            (filter dominance);
-        //            Fletcher, Leyffer, Toint 2002 Section 3
-        //            (filter-TR convergence theory; TR-shrink gate);
-        //            Wachter and Biegler 2005 Section 2.3
-        //            (switching condition);
-        //            Wachter and Biegler 2006 Section 2.3 eq. 6
-        //            (filter envelope);
-        //            Nocedal and Wright 2e Section 18.5 Algorithm 18.4
-        //            (Byrd-Omojokun composite step);
-        //            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim.
-        //            8(3):682-706.
+        // Reference: Fletcher and Leyffer 2002 Section 2.1 (filter dominance);
+        //            Fletcher, Leyffer, Toint 2002 Section 3 (filter-TR convergence theory; TR-shrink gate);
+        //            Wachter and Biegler 2005 Section 2.3 (switching condition);
+        //            Wachter and Biegler 2006 Section 2.3 eq. 6 (filter envelope);
+        //            Nocedal and Wright 2e Section 18.5 Algorithm 18.4 (Byrd-Omojokun composite step);
+        //            Lalee, Nocedal, Plantenga 1998 SIAM J. Optim. 8(3):682-706.
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
 
         const int n = static_cast<int>(s.x.size());
         const int n_ineq = s.n_ineq;
@@ -1716,14 +1711,15 @@ struct filter_trsqp_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
 
-        // Re-evaluate the constraints / Jacobian into the state-resident
-        // c_all / J_all scratch (pre-sized at init) so a warm reset stays
-        // allocation-free.
+        // c_all / J_all were sized at init, so a warm reset stays allocation-free.
         if(m > 0)
             s.problem->constraints(x0, s.bufs.c_all);
         s.c_eq = s.bufs.c_all.head(s.n_eq);
@@ -1736,8 +1732,7 @@ struct filter_trsqp_policy
 
         s.s_slack = s.c_ineq.cwiseMax(Scalar(0.0)).eval();
         s.trust_radius = options.initial_trust_radius;
-        // Inert at this policy's composite-step call site
-        // (penalty_factor = 0.0 keeps the LNP update a no-op) but
+        // Inert at this policy's composite-step call site (penalty_factor = 0.0 keeps the LNP update a no-op) but
         // re-seeded anyway so no cross-run value survives a reset.
         s.penalty = Scalar(1.0);
         s.iteration = 0;
@@ -1746,10 +1741,7 @@ struct filter_trsqp_policy
         s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
         s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
 
-        // Clear-then-seed at the new x0 (same seeding as init /
-        // reset_clear): h_max = 1e4 * max(1, h_0), entry floor
-        // theta_min = 1e-4 * max(1, h_0).
-        // Reference: Wachter and Biegler 2006 eq. (8) and Section 4.
+        // h_max = 1e4 * max(1, h_0), entry floor theta_min = 1e-4 * max(1, h_0); Wachter and Biegler 2006 eq. (8), Section 4.
         s.filter.clear();
         Scalar h_0 = Scalar(0.0);
         if(s.n_eq > 0)
@@ -1768,6 +1760,8 @@ struct filter_trsqp_policy
                               Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
+        if(status != solver_status::running)
+            return status;
         s.hessian.reset();
         s.lambda.setZero();
         return status;

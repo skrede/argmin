@@ -163,6 +163,9 @@ struct cobyla_policy
     {
         if(detail::cobyla_reject_invalid_box(s, x0))
             return detail::latch_status(s);
+        s.invalid_problem = detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.x = detail::project(x0, s.lower, s.upper);
         s.iteration = 0;
         s.parmu = Scalar(0.0);

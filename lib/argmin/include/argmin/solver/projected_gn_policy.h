@@ -97,6 +97,7 @@ struct projected_gn_policy
         Eigen::Matrix<Scalar, Eigen::Dynamic, N> J;
         std::uint32_t iteration{0};
         int num_residuals{};
+        bool invalid_problem{false};
 
         // Write scratch for the analytic/FD Jacobian evaluation. The problem's
         // jacobian()/fd_jacobian sink is a runtime-sized MatrixXd; on the
@@ -155,6 +156,8 @@ struct projected_gn_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         const int n = static_cast<int>(s.x.size());
 
         // Gauss-Newton Hessian approximation: H = J^T J
@@ -186,11 +189,8 @@ struct projected_gn_policy
         // Project trial point onto bounds before evaluating (N&W Section 16.7)
         Eigen::Vector<Scalar, N> x_plus_h = (s.x + h).eval();
         Eigen::Vector<Scalar, N> x_trial = detail::project(x_plus_h, s.lower, s.upper);
-
-        // Effective step after projection
         Eigen::Vector<Scalar, N> d = (x_trial - s.x).eval();
 
-        // Evaluate trial residuals
         s.problem->residuals(x_trial, s.ws.r_trial);
         Scalar f_trial = Scalar(0.5) * s.ws.r_trial.squaredNorm();
 
@@ -250,17 +250,12 @@ struct projected_gn_policy
             }
         }
 
-        // Clamp lambda
         s.lambda = std::clamp(s.lambda, options.lambda_min, options.lambda_max);
 
         ++s.iteration;
 
-        // Report h.norm() as step_size even on rejection so step_budget_solver's
-        // stall detection does not fire while lambda is still adapting.
-        // objective_change carries the ACTUAL objective change (zero on a
-        // rejected step); the former hack that reported lambda here leaked an
-        // internal damping value into the user-visible step_result, and
-        // ftol_reached is correctly gated on the KKT residual.
+        // Report h.norm() as step_size even on rejection so step_budget_solver's stall detection does not fire while
+        // lambda is still adapting; objective_change is the actual change, zero on a rejected step.
         Scalar effective_change = s.objective_value - old_value;
 
         // KKT residual for bound-constrained least-squares: projected-gradient
@@ -282,6 +277,9 @@ struct projected_gn_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = s.problem->num_residuals() != s.num_residuals;
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.x = detail::project(x0, s.lower, s.upper);
         const int n = static_cast<int>(x0.size());
         s.r.resize(s.num_residuals);

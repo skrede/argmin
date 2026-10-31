@@ -82,9 +82,7 @@ struct projected_gradient_gn_policy
         std::uint32_t max_backtrack{20}; // maximum backtracking iterations
 
         std::uint16_t stall_window{50};
-        // feasibility_gate intentionally omitted: projected_gradient_gn_policy handles box
-        // bounds via projection — no general nonlinear constraint_violation is emitted, so the
-        // feasibility_gate criterion would gate on 0. Silent no-op made explicit.
+        // No feasibility_gate: the box is handled by projection, so no constraint_violation is emitted to gate on.
     };
 
     options_type options{};
@@ -105,13 +103,12 @@ struct projected_gradient_gn_policy
         Eigen::Matrix<Scalar, Eigen::Dynamic, N> J;
         std::uint32_t iteration{0};
         int num_residuals{};
+        bool invalid_problem{false};
 
-        // Write scratch for the analytic/FD Jacobian evaluation (see
-        // projected_gn_policy for the fixed-N-vs-dynamic sink rationale).
+        // Runtime-sized Jacobian sink copied into the fixed-N J; the dynamic axis writes J directly.
         Eigen::MatrixX<Scalar> J_raw;
 
-        // Caller-owned scratch for the trial evaluation / reduced solve, sized
-        // once and reused so the step is allocation-free at fixed N.
+        // Sized once and reused so the step is allocation-free at fixed N.
         detail::projected_gn_workspace<Scalar, N> ws;
     };
 
@@ -163,12 +160,12 @@ struct projected_gradient_gn_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         const int n = static_cast<int>(s.x.size());
 
-        // Gauss-Newton Hessian approximation: H = J^T J
         Eigen::Matrix<Scalar, N, N> H = (s.J.transpose() * s.J).eval();
 
-        // Gradient of 0.5*||r||^2: g = J^T r
         Eigen::Vector<Scalar, N> g = (s.J.transpose() * s.r).eval();
 
         if(options.use_dogleg)
@@ -180,6 +177,9 @@ struct projected_gradient_gn_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = s.problem->num_residuals() != s.num_residuals;
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.x = detail::project(x0, s.lower, s.upper);
         const int n = static_cast<int>(x0.size());
         s.r.resize(s.num_residuals);

@@ -314,8 +314,6 @@ struct tr_sqp_policy
         // below (joint_*) because the joint primal width n + n_ineq is a
         // runtime quantity even when the policy's N template parameter is
         // a fixed compile-time constant for the x-only dimension.
-        //
-        // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers.
         argmin::detail::sqp_state_buffers<Scalar, N> bufs;
 
         // Joint-space (x, s) dynamic buffers. Sized at n + n_ineq on init;
@@ -326,9 +324,7 @@ struct tr_sqp_policy
         Eigen::VectorX<Scalar> joint_sk_buf;
         Eigen::VectorX<Scalar> joint_yk_buf;
 
-        // TRSQP-specific slack vector for the inequality reformulation
-        // c_ineq(x) + s = 0, s >= 0. The full step() integration in a
-        // later commit operates on the joint (x, s) primal.
+        // Slack for the inequality reformulation c_ineq(x) + s = 0, s >= 0.
         Eigen::VectorX<Scalar> s_slack;
 
         // Current trust-region radius; updated by the ratio test inside
@@ -395,6 +391,7 @@ struct tr_sqp_policy
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
+        bool invalid_problem{false};
     };
 
     template <typename Problem, typename Convergence>
@@ -570,11 +567,10 @@ struct tr_sqp_policy
         //            Dembo, Eisenstat, Steihaug 1982 SIAM J. Numer.
         //            Anal. 19(2):400-408 (fast-mode forcing sequence).
         //
-        // argmin variant: slack reformulation makes the joint Jacobian
-        //                 block-diagonal in the slack block; bounds
-        //                 projection inside Steihaug-CG handles box
-        //                 bounds on x and the s >= 0 bound on slacks
-        //                 uniformly via detail::project.
+        // argmin variant: the slack reformulation makes the joint Jacobian block-diagonal in the slack block, and the
+        // bound projection inside Steihaug-CG handles the x box and s >= 0 uniformly via detail::project.
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
 
         const int n = static_cast<int>(s.x.size());
         const int n_ineq = s.n_ineq;
@@ -1241,13 +1237,15 @@ struct tr_sqp_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
 
-        // Re-evaluate the constraints / Jacobian into the state-resident c_all / J_all scratch
-        // (pre-sized at init) so a warm reset stays allocation-free.
+        // c_all / J_all were sized at init, so a warm reset stays allocation-free.
         if(m > 0)
             s.problem->constraints(x0, s.bufs.c_all);
         s.c_eq = s.bufs.c_all.head(s.n_eq);
@@ -1263,12 +1261,8 @@ struct tr_sqp_policy
         s.penalty      = options.initial_penalty;
         s.iteration = 0;
 
-        // Zero the active-set multiplier buffers: they were estimated
-        // at the pre-reset iterate's linearization, and the first
-        // post-reset joint Lagrangian gradient reads them directly --
-        // without the zeroing it would consume multipliers from an
-        // unrelated point (under fast mode's re-estimation stride the
-        // stale values could persist for several iterations).
+        // The multipliers were estimated at the pre-reset iterate and the first joint Lagrangian gradient reads them
+        // directly; under fast mode's re-estimation stride stale values would persist for several iterations.
         s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
         s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
         return detail::latch_status(s);
@@ -1279,6 +1273,8 @@ struct tr_sqp_policy
                               Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
+        if(status != solver_status::running)
+            return status;
         s.hessian.reset();
         s.lambda.setZero();
         return status;

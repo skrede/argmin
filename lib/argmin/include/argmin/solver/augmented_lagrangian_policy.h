@@ -187,13 +187,10 @@ struct augmented_lagrangian_policy
         // small enough that warm-starting is OK.
         std::optional<scalar_type> mu_at_last_inner_solve{};
 
-        // Adaptive inner stopping tolerance (omega_k) of the CGT/N&W
-        // Algorithm 17.4 two-branch schedule. Persisted across outer
-        // iterations so the schedule can tighten multiplicatively on
-        // multiplier updates (penalty pinned) and re-derive from the
-        // penalty regime on penalty reductions -- driving omega_k -> 0
-        // even when the penalty parameter never moves. Lazily initialized
-        // on the first step from the initial penalty.
+        // Adaptive inner stopping tolerance (omega_k) of the CGT/N&W Algorithm 17.4 two-branch schedule. Persisted across
+        // outer iterations so the schedule can tighten multiplicatively on multiplier updates (penalty pinned) and
+        // re-derive from the penalty regime on penalty reductions -- driving omega_k -> 0 even when the penalty never
+        // moves. Lazily initialized on the first step from the initial penalty.
         std::optional<scalar_type> omega{};
 
         // Chunked inner-solve state machine (bounded per-tick work).
@@ -225,6 +222,7 @@ struct augmented_lagrangian_policy
 
         int n_eq = 0;
         int n_ineq = 0;
+        bool invalid_problem{false};
         std::uint32_t outer_iter = 0;
 
         options_type opts;
@@ -588,6 +586,8 @@ struct augmented_lagrangian_policy
     template <typename P>
     step_result<scalar_type> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<scalar_type>(s);
         const int n = static_cast<int>(s.x.size());
 
         const scalar_type inner_grad_tol = s.opts.inner_gradient_tolerance;
@@ -597,16 +597,11 @@ struct augmented_lagrangian_policy
         const scalar_type feas_progress = s.opts.feasibility_progress;
         const scalar_type con_tol = s.opts.constraint_tolerance;
 
-        // Re-seed the subproblem's self-references at the TOP of every step,
-        // including a resume step in the middle of an inner solve. The
-        // outer-state pointers (bounds, multipliers, penalty) address state
-        // fields that a memberwise move relocates, so they must be refreshed
-        // against the live state before the inner solve dereferences them; the
-        // buffer pointers and the subproblem's own address live in the heap
-        // node and survive a move, but refreshing them is harmless. This is
-        // the move-safety discipline the chunking must preserve unchanged -- a
-        // solver moved between two chunks of the same inner solve resumes on
-        // freshly re-seeded pointers, never stale ones.
+        // Re-seed the subproblem's self-references at the TOP of every step, including a resume step in the middle of
+        // an inner solve. The outer-state pointers (bounds, multipliers, penalty) address state fields that a memberwise
+        // move relocates, so they must be refreshed against the live state before the inner solve dereferences them;
+        // the buffer pointers and the subproblem's own address live in the heap node and survive a move. A solver
+        // moved between two chunks of the same inner solve thus resumes on freshly re-seeded pointers.
         using active_subproblem = typename state_type<P>::active_subproblem;
         constexpr bool lift_equalities_only = state_type<P>::lift_equalities_only;
         auto& ctx = *s.ctx;
@@ -1001,6 +996,9 @@ struct augmented_lagrangian_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<scalar_type, N>> x0)
     {
+        s.invalid_problem = detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.x = x0;
         s.f = s.problem->value(x0);
         {
@@ -1012,10 +1010,9 @@ struct augmented_lagrangian_policy
             s.c_ineq = c_all.tail(s.n_ineq);
         }
         s.outer_iter = 0;
-        // Abandon any inner solve that was mid-chunk: the next step() starts a fresh inner solve at x0. The
-        // persisted inner solver is KEPT -- reset() preserves algorithm state (e.g. compact_lbfgs curvature
-        // pairs) and the next step warm-restarts it at x0, so a warm per-tick reset is reconstruction-free and
-        // allocation-free. Subproblem storage is kept too (its pointers are re-seeded at the top of the next step).
+        // Abandon any mid-chunk inner solve. The inner solver and its algorithm state (e.g. compact_lbfgs curvature
+        // pairs) are KEPT and warm-restarted at x0, so a warm per-tick reset is reconstruction-free and allocation-free;
+        // the subproblem storage is kept too, its pointers re-seeded at the top of the next step.
         s.inner_active = false;
         s.last_inner_advance = 0;
         // Re-seed the adaptive inner tolerance on the next step from the current penalty regime.
@@ -1028,6 +1025,8 @@ struct augmented_lagrangian_policy
                               Eigen::Ref<const Eigen::Vector<scalar_type, N>> x0)
     {
         const solver_status status = reset(s, x0);
+        if(status != solver_status::running)
+            return status;
         s.lambda_eq.setZero();
         s.lambda_ineq.setZero();
         s.mu = s.opts.mu_init;
