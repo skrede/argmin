@@ -39,7 +39,6 @@
 #include <Eigen/Core>
 
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -118,13 +117,16 @@ struct raa_augmented_policy
         Eigen::Vector<Scalar, N> lower, upper;
         Eigen::Vector<Scalar, M> y_dual;
 
-        // Bounded-dual elastics. c_dual_ref[i] = max(|g_i(x0)|, 1) is the
-        // fixed per-constraint scale reference; c_dual[i] =
-        // dual_bound_scale * c_dual_ref[i] is the working dual upper bound.
+        // Bounded-dual elastics: c_dual_ref[i] = max(|g_i(x0)|, 1) is the fixed per-constraint scale reference and
+        // c_dual[i] = dual_bound_scale * c_dual_ref[i] the working dual upper bound.
         Eigen::Vector<Scalar, M> c_dual_ref;
         Eigen::Vector<Scalar, M> c_dual;
 
         std::uint32_t iteration{0};
+
+        // Set when the problem has equality rows or an inequality count other than a static M.
+        bool invalid_problem{false};
+
         options_type opts;
     };
 
@@ -150,38 +152,37 @@ struct raa_augmented_policy
     {
         static_assert(differentiable<Problem, Scalar>);
         static_assert(constrained<Problem, Scalar>);
-        assert(problem.num_equality() == 0);
 
         const int n = problem.dimension();
         const int m = problem.num_inequality();
+        const bool mismatched = detail::mismatches_fixed_count<state_type<Problem>::M>(m);
+        const int rows = mismatched ? state_type<Problem>::M : m;
         state_type<Problem> s;
         s.problem = &problem;
+        s.invalid_problem = problem.num_equality() > 0 || mismatched;
 
         s.x = x0;
         s.g.resize(n);
-        s.c_ineq.resize(m);
-        s.J_ineq.resize(m, n);
+        s.c_ineq.resize(rows);
+        s.J_ineq.resize(rows, n);
         s.L.resize(n);
         s.U.resize(n);
         s.alpha.resize(n);
         s.beta.resize(n);
         s.p_obj.resize(n);
         s.q_obj.resize(n);
-        s.p_con.resize(m, n);
-        s.q_con.resize(m, n);
-        s.r_con.resize(m);
-        s.raa_con.resize(m);
-        s.raa_con.setConstant(mma_defaults<Scalar>::raa_init);
+        s.p_con.resize(rows, n);
+        s.q_con.resize(rows, n);
+        s.r_con.resize(rows);
+        s.raa_con.setConstant(rows, mma_defaults<Scalar>::raa_init);
         s.raa_obj = mma_defaults<Scalar>::raa_init;
-        s.y_dual.resize(m);
-        s.y_dual.setZero();
-        s.c_dual_ref.resize(m);
-        s.c_dual_ref.setOnes();
-        s.c_dual.resize(m);
+        s.y_dual.setZero(rows);
+        s.c_dual_ref.setOnes(rows);
+        s.c_dual.resize(rows);
 
         s.f = problem.value(x0);
         problem.gradient(x0, s.g);
-        if(m > 0)
+        if(m > 0 && !s.invalid_problem)
         {
             Eigen::VectorX<Scalar> c_tmp(m);
             problem.constraints(x0, c_tmp);
@@ -219,6 +220,9 @@ struct raa_augmented_policy
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
 
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
+
         const Scalar gam_dec = s.opts.asymptote_contract.value_or(mma_defaults<Scalar>::asymptote_contract);
         const Scalar gam_inc = s.opts.asymptote_expand.value_or(mma_defaults<Scalar>::asymptote_expand);
         const Scalar s_min_f = s.opts.asymptote_min_fraction.value_or(mma_defaults<Scalar>::asymptote_min_fraction);
@@ -233,13 +237,10 @@ struct raa_augmented_policy
 
         constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
 
-        // Svanberg 2002 eq. 3.6 gradient-scaled raa floor, recomputed each
-        // outer iteration so the penalty tracks the objective/constraint
-        // magnitude: raa_floor_i = (0.1/n) * sum_j |dg_ij| * range_j. This
-        // replaces the fixed raa_min as the decay floor and as a lower bound
-        // on the starting raa (the fixed 1e-5/1e-7 wastes inner conservativity
-        // budget on large-scale objectives). range_j is the box width for a
-        // bounded variable, the scale proxy max(|x_j|, 1) for an unbounded one.
+        // Svanberg 2002 eq. 3.6 gradient-scaled raa floor raa_floor_i = (0.1/n) * sum_j |dg_ij| * range_j, recomputed each
+        // outer iteration so the penalty tracks the objective/constraint magnitude. It replaces the fixed raa_min (whose
+        // 1e-5/1e-7 wastes inner conservativity budget on large-scale objectives) as the decay floor and as a lower bound
+        // on the starting raa; range_j is the box width for a bounded variable, the scale proxy max(|x_j|, 1) otherwise.
         auto range_of = [&](int j) {
             if(s.lower[j] > -inf && s.upper[j] < inf)
                 return s.upper[j] - s.lower[j];
@@ -376,11 +377,9 @@ struct raa_augmented_policy
         dual_prob.x_primal.resize(n);
         dual_prob.gcval.resize(m);
 
-        // Bounded-dual elastics: box the constraint multipliers at
-        // c_i = dual_bound_scale * max(|g_i(x0)|, 1) so an inequality-
-        // infeasible iterate cannot make the subproblem infeasible and
-        // drive the dual unbounded (Svanberg 2002 relaxed subproblem,
-        // a_i = 0 instance).
+        // Bounded-dual elastics: box the constraint multipliers at c_i = dual_bound_scale * max(|g_i(x0)|, 1) so an
+        // inequality-infeasible iterate cannot make the subproblem infeasible and drive the dual unbounded (Svanberg 2002
+        // relaxed subproblem, a_i = 0 instance).
         if(m > 0)
             s.c_dual = s.opts.dual_bound_scale * s.c_dual_ref;
         dual_prob.c_dual_out = &s.c_dual;
@@ -389,12 +388,8 @@ struct raa_augmented_policy
         Scalar f_trial = s.f;
         Eigen::VectorX<Scalar> c_trial = s.c_ineq;
 
-        // Persistent inner dual solver: construct the box-constrained solver
-        // state once per outer iteration and cold-restart it (reset_clear
-        // clears the L-BFGS curvature so each inner solve starts fresh, as a
-        // per-inner re-construction would, while reusing the allocated
-        // buffers) rather than re-allocating it on every conservativity
-        // iteration.
+        // Built once per outer iteration and cold-restarted by reset_clear (a fresh L-BFGS curvature per inner solve, as a
+        // re-construction would give) so the conservativity loop reuses its buffers instead of re-allocating them.
         DualPolicy<scalar_type, MC> dp;
         // Near the dual optimum the decrease left falls below the roundoff of the dual value, so the line
         // search certifies those steps from the exact dual gradient instead.
@@ -422,10 +417,8 @@ struct raa_augmented_policy
                 for(int k = 0; k < 100; ++k)
                 {
                     auto dsr = dp.step(*ds);
-                    // Terminate on the projected KKT residual (the box-
-                    // constrained dual's stationarity measure), not the raw
-                    // gradient norm: at a dual solution with an inactive
-                    // constraint (y_i = 0) the raw component stays bounded
+                    // Terminate on the projected KKT residual (the box-constrained dual's stationarity measure), not the raw
+                    // gradient norm: at a dual solution with an inactive constraint (y_i = 0) the raw component stays bounded
                     // away from zero and the loop would run to its cap.
                     if(dsr.kkt_residual.value_or(dsr.gradient_norm) < mma_defaults<Scalar>::dual_gradient_threshold
                        || dsr.step_size < mma_defaults<Scalar>::dual_step_threshold)
@@ -462,13 +455,9 @@ struct raa_augmented_policy
 
             if(conservative) break;
 
-            // raa-growth: Svanberg 2002 eq. 3.7-3.8 spirit. dval_sum
-            // captures total d_j mass at the trial; growth ensures the
-            // augmented approximation crosses the true value for the
-            // failing constraints (evaluated on the raw approximation).
-            // raa-growth. Svanberg 2002 eq. 3.9 raa' = 1.1*(raa + delta)
-            // (svanberg schedule) vs the pre-fix raa + 2*delta; delta is the
-            // conservativity shortfall per unit d_j mass. Both capped at 10x.
+            // raa growth (Svanberg 2002 eqs. 3.7-3.9): dval_sum is the total d_j mass at the trial and delta the conservativity
+            // shortfall per unit of it; the svanberg schedule grows raa' = 1.1*(raa + delta), the pre-fix one raa + 2*delta, both
+            // capped at 10x, so the augmented approximation crosses the true value on the failing (raw-approximation) constraints.
             const Scalar dsum = std::max(dual_prob.dval_sum, Scalar(1e-20));
             auto grow = [&](Scalar raa, Scalar delta) {
                 const Scalar target = svanberg
@@ -542,21 +531,14 @@ struct raa_augmented_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        const int m = s.problem->num_inequality();
+        s.invalid_problem = s.problem->num_equality() > 0 || detail::mismatches_fixed_count<state_type<P>::M>(m) || m != s.c_ineq.size();
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.x = x0;
         s.f = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
-        const int m = static_cast<int>(s.c_ineq.size());
-        if(m > 0)
-        {
-            Eigen::VectorX<Scalar> c_tmp(m);
-            s.problem->constraints(x0, c_tmp);
-            s.c_ineq = c_tmp;
-            Eigen::MatrixX<Scalar> J_tmp(m, static_cast<int>(s.x.size()));
-            s.problem->constraint_jacobian(x0, J_tmp);
-            s.J_ineq = J_tmp;
-            for(int i = 0; i < m; ++i)
-                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), Scalar(1.0));
-        }
+        refresh_inequality_rows(s);
         s.iteration = 0;
         s.x_old1 = x0;
         s.x_old2 = x0;
@@ -571,11 +553,29 @@ struct raa_augmented_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
-        init_asymptotes(s);
+        if(status == solver_status::running)
+            init_asymptotes(s);
         return status;
     }
 
 private:
+    template <typename P>
+    void refresh_inequality_rows(state_type<P>& s)
+    {
+        const int m = static_cast<int>(s.c_ineq.size());
+        if(m > 0)
+        {
+            Eigen::VectorX<Scalar> c_tmp(m);
+            s.problem->constraints(s.x, c_tmp);
+            s.c_ineq = c_tmp;
+            Eigen::MatrixX<Scalar> J_tmp(m, static_cast<int>(s.x.size()));
+            s.problem->constraint_jacobian(s.x, J_tmp);
+            s.J_ineq = J_tmp;
+            for(int i = 0; i < m; ++i)
+                s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), Scalar(1.0));
+        }
+    }
+
     template <typename P>
     void init_asymptotes(state_type<P>& s)
     {

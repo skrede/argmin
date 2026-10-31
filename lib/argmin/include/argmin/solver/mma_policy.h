@@ -169,10 +169,7 @@ struct mma_policy
 
         std::uint32_t iteration{0};
 
-        // Set during init() when the problem carries equality constraints.
-        // MMA sizes its constraint buffers for inequalities only; an
-        // equality-constrained problem is rejected at the top of step()
-        // before any constraint evaluation. See init() for the rationale.
+        // Set when the problem has equality rows or an inequality count other than a static M.
         bool invalid_problem{false};
 
         options_type opts;
@@ -203,45 +200,37 @@ struct mma_policy
         const int n = problem.dimension();
         const int n_eq = problem.num_equality();
         const int m = problem.num_inequality();
-        // Full constraint count. problem.constraints()/constraint_jacobian()
-        // write n_eq + n_ineq rows with the equalities first, so any probe
-        // buffer must be sized on the total or an equality-constrained
-        // problem overflows it (a heap out-of-bounds write in release,
-        // where the debug precondition assert is compiled out). MMA handles
-        // inequality constraints only; equality-constrained problems are
-        // flagged here and rejected at the top of step(). Use SQP or an
-        // augmented Lagrangian for equality constraints.
+        // The probe is sized on all rows because constraints() writes the equality rows first.
         const int n_all = n_eq + m;
+        const bool mismatched = detail::mismatches_fixed_count<state_type<Problem>::M>(m);
+        const int rows = mismatched ? state_type<Problem>::M : m;
         state_type<Problem> s;
         s.problem = &problem;
-        s.invalid_problem = (n_eq > 0);
+        s.invalid_problem = n_eq > 0 || mismatched;
 
         s.x = x0;
         s.g.resize(n);
-        s.c_ineq.resize(m);
-        s.J_ineq.resize(m, n);
+        s.c_ineq.resize(rows);
+        s.J_ineq.resize(rows, n);
         s.L.resize(n);
         s.U.resize(n);
         s.alpha.resize(n);
         s.beta.resize(n);
         s.p_obj.resize(n);
         s.q_obj.resize(n);
-        s.p_con.resize(m, n);
-        s.q_con.resize(m, n);
-        s.r_con.resize(m);
-        s.y_dual.resize(m);
+        s.p_con.resize(rows, n);
+        s.q_con.resize(rows, n);
+        s.r_con.resize(rows);
+        s.y_dual.resize(rows);
         s.y_dual.setZero();
-        s.c_dual_ref.resize(m);
+        s.c_dual_ref.resize(rows);
         s.c_dual_ref.setOnes();
-        s.c_dual.resize(m);
+        s.c_dual.resize(rows);
 
         s.f = problem.value(x0);
         problem.gradient(x0, s.g);
         if(n_all > 0)
         {
-            // Size the probe on the full constraint count (equalities
-            // first) so the evaluation cannot overflow even when the
-            // problem is about to be rejected for carrying equalities.
             Eigen::VectorX<Scalar> c_tmp(n_all);
             problem.constraints(x0, c_tmp);
             Eigen::MatrixX<Scalar> J_tmp(n_all, n);
@@ -518,10 +507,13 @@ struct mma_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        const int m = s.problem->num_inequality();
+        s.invalid_problem = s.problem->num_equality() > 0 || detail::mismatches_fixed_count<state_type<P>::M>(m) || m != s.c_ineq.size();
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.x = x0;
         s.f = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
-        const int m = static_cast<int>(s.c_ineq.size());
         if(m > 0)
         {
             Eigen::VectorX<Scalar> c_tmp(m);
@@ -544,7 +536,8 @@ struct mma_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
-        init_asymptotes(s);
+        if(status == solver_status::running)
+            init_asymptotes(s);
         return status;
     }
 

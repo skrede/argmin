@@ -152,10 +152,7 @@ struct ccsa_quadratic_policy
         bool feasible{false};
         Scalar infeasibility{Scalar(0.0)};
 
-        // Set during init() when the problem carries equality constraints.
-        // CCSA sizes its constraint buffers for inequalities only; an
-        // equality-constrained problem is rejected at the top of step()
-        // before any constraint evaluation. See init() for the rationale.
+        // Set when the problem has equality rows or an inequality count other than a static M.
         bool invalid_problem{false};
 
         options_type opts;
@@ -201,31 +198,23 @@ struct ccsa_quadratic_policy
         const int n = problem.dimension();
         const int n_eq = problem.num_equality();
         const int m_ineq = problem.num_inequality();
-        // Full constraint count. problem.constraints()/constraint_jacobian()
-        // write n_eq + n_ineq rows with the equalities first, so any probe
-        // buffer must be sized on the total or an equality-constrained
-        // problem overflows it (a heap out-of-bounds write in release,
-        // where the debug precondition assert is compiled out). CCSA
-        // handles inequality constraints only; equality-constrained
-        // problems are flagged here and rejected at the top of step(). Use
-        // SQP or an augmented Lagrangian for equality constraints.
+        // The probe is sized on all rows because constraints() writes the equality rows first.
         const int n_all = n_eq + m_ineq;
+        const bool mismatched = detail::mismatches_fixed_count<state_type<Problem>::M>(m_ineq);
+        const int rows = mismatched ? state_type<Problem>::M : m_ineq;
         state_type<Problem> s;
         s.problem = &problem;
-        s.invalid_problem = (n_eq > 0);
+        s.invalid_problem = n_eq > 0 || mismatched;
 
         s.x = x0;
         s.g.resize(n);
-        s.c_ineq.resize(m_ineq);
-        s.J_ineq.resize(m_ineq, n);
+        s.c_ineq.resize(rows);
+        s.J_ineq.resize(rows, n);
 
         s.f = problem.value(x0);
         problem.gradient(x0, s.g);
         if(n_all > 0)
         {
-            // Size the probe on the full constraint count (equalities
-            // first) so the evaluation cannot overflow even when the
-            // problem is about to be rejected for carrying equalities.
             Eigen::VectorX<Scalar> c_tmp(n_all);
             problem.constraints(x0, c_tmp);
             Eigen::MatrixX<Scalar> J_tmp(n_all, n);
@@ -235,22 +224,14 @@ struct ccsa_quadratic_policy
                 s.c_ineq = c_tmp;
                 s.J_ineq = J_tmp;
             }
-            else
-            {
-                // solver_core::seed_best_cv() reads c_ineq at construction
-                // (this state carries a c_eq member, so the primal-
-                // feasibility probe there is enabled) -- before step() can
-                // short-circuit the rejected problem. Leave it defined
-                // rather than intentionally-unpopulated so that read is not
-                // of uninitialized memory; the value is discarded once the
-                // solver returns invalid_problem.
-                s.c_ineq.setZero();
-            }
         }
+        // solver_core::seed_best_cv() reads c_ineq (this state has a c_eq) before step() rejects the problem.
+        if(s.invalid_problem)
+            s.c_ineq.setZero();
 
-        s.c_dual_ref.resize(m_ineq);
+        s.c_dual_ref.resize(rows);
         s.c_dual_ref.setOnes();
-        s.c_dual.resize(m_ineq);
+        s.c_dual.resize(rows);
         if(!s.invalid_problem)
             for(int i = 0; i < m_ineq; ++i)
                 s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), Scalar(1.0));
@@ -284,7 +265,7 @@ struct ccsa_quadratic_policy
 
         const Scalar ri = s.opts.rho_init.value_or(mma_defaults<Scalar>::rho_init);
         s.rho = ri;
-        s.rhoc.resize(m_ineq);
+        s.rhoc.resize(rows);
         s.rhoc.setConstant(ri);
 
         // Initial feasibility assessment. Skipped for a rejected problem:
@@ -302,11 +283,11 @@ struct ccsa_quadratic_policy
             }
         }
 
-        s.y_dual.resize(m_ineq);
+        s.y_dual.resize(rows);
         s.y_dual.setZero();
 
         // Fallback for the m=0 unconstrained case (analytic primal).
-        if(m_ineq == 0)
+        if(rows == 0)
             s.subproblem_m0.emplace(n, 0);
 
         return s;
@@ -614,6 +595,10 @@ struct ccsa_quadratic_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        const int m = s.problem->num_inequality();
+        s.invalid_problem = s.problem->num_equality() > 0 || detail::mismatches_fixed_count<state_type<P>::M>(m) || m != s.c_ineq.size();
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.x = x0;
         s.f = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
@@ -635,6 +620,8 @@ struct ccsa_quadratic_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
+        if(status != solver_status::running)
+            return status;
         const int n = static_cast<int>(x0.size());
         constexpr Scalar inf_val = std::numeric_limits<Scalar>::infinity();
         const Scalar si = s.opts.sigma_init.value_or(mma_defaults<Scalar>::sigma_init);

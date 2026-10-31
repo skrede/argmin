@@ -41,7 +41,7 @@ file	lib/argmin/include/argmin/schedule/basic_solver_group.h	-	409
 file	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	-	1097
 file	lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h	-	1305
 file	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h	-	1033
-file	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	-	545
+file	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	-	542
 file	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	-	602
 file	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	-	651
 file	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	-	893
@@ -49,7 +49,7 @@ file	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h
 file	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	-	650
 file	lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h	-	1050
 file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1154
-file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	672
+file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	659
 file	lib/argmin/include/argmin/solver/convergence.h	-	392
 file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1488
 file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1331
@@ -57,7 +57,7 @@ file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1793
 file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1164
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	205
 file	lib/argmin/include/argmin/solver/lm_policy.h	-	303
-file	lib/argmin/include/argmin/solver/mma_policy.h	-	575
+file	lib/argmin/include/argmin/solver/mma_policy.h	-	568
 file	lib/argmin/include/argmin/solver/multistart_policy.h	-	242
 file	lib/argmin/include/argmin/solver/nw_sqp_policy.h	-	1208
 file	lib/argmin/include/argmin/solver/projected_gn_policy.h	-	372
@@ -184,11 +184,11 @@ function	lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterizati
 function	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h	init	142
 function	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h	reset	32
 function	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h	step	641
-function	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	init	61
-function	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	step	261
-function	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	init	63
-function	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	step	323
-function	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	init	82
+function	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	init	60
+function	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	step	253
+function	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	init	62
+function	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	step	311
+function	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	init	74
 function	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	step	338
 function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	init	219
 function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	reset	44
@@ -208,7 +208,7 @@ function	lib/argmin/include/argmin/solver/bobyqa_policy.h	select_replacement_rel
 function	lib/argmin/include/argmin/solver/bobyqa_policy.h	step	545
 function	lib/argmin/include/argmin/solver/byrd_lbfgsb_policy.h	init	28
 function	lib/argmin/include/argmin/solver/byrd_lbfgsb_policy.h	null_direction_step	39
-function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	init	118
+function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	init	102
 function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	step	295
 function	lib/argmin/include/argmin/solver/convergence.h	check	41
 function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	init	83
@@ -226,7 +226,7 @@ function	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	step	668
 function	lib/argmin/include/argmin/solver/lbfgsb_policy.h	init	28
 function	lib/argmin/include/argmin/solver/lm_policy.h	init	34
 function	lib/argmin/include/argmin/solver/lm_policy.h	step	114
-function	lib/argmin/include/argmin/solver/mma_policy.h	init	79
+function	lib/argmin/include/argmin/solver/mma_policy.h	init	71
 function	lib/argmin/include/argmin/solver/mma_policy.h	step	236
 function	lib/argmin/include/argmin/solver/multistart_policy.h	step	71
 function	lib/argmin/include/argmin/solver/nw_sqp_policy.h	init	82

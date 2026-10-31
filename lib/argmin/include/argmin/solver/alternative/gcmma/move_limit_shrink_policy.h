@@ -54,7 +54,6 @@
 #include <Eigen/Core>
 
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -131,13 +130,16 @@ struct move_limit_shrink_policy
         Eigen::Vector<Scalar, N> lower, upper;
         Eigen::Vector<Scalar, M> y_dual;
 
-        // Bounded-dual elastics. c_dual_ref[i] = max(|g_i(x0)|, 1) is the
-        // fixed per-constraint scale reference; c_dual[i] =
-        // dual_bound_scale * c_dual_ref[i] is the working dual upper bound.
+        // Bounded-dual elastics: c_dual_ref[i] = max(|g_i(x0)|, 1) is the fixed per-constraint scale reference and
+        // c_dual[i] = dual_bound_scale * c_dual_ref[i] the working dual upper bound.
         Eigen::Vector<Scalar, M> c_dual_ref;
         Eigen::Vector<Scalar, M> c_dual;
 
         std::uint32_t iteration{0};
+
+        // Set when the problem has equality rows or an inequality count other than a static M.
+        bool invalid_problem{false};
+
         options_type opts;
     };
 
@@ -160,36 +162,35 @@ struct move_limit_shrink_policy
     {
         static_assert(differentiable<Problem, Scalar>);
         static_assert(constrained<Problem, Scalar>);
-        assert(problem.num_equality() == 0
-               && "GCMMA handles inequality constraints only.");
 
         const int n = problem.dimension();
         const int m = problem.num_inequality();
+        const bool mismatched = detail::mismatches_fixed_count<state_type<Problem>::M>(m);
+        const int rows = mismatched ? state_type<Problem>::M : m;
         state_type<Problem> s;
         s.problem = &problem;
+        s.invalid_problem = problem.num_equality() > 0 || mismatched;
 
         s.x = x0;
         s.g.resize(n);
-        s.c_ineq.resize(m);
-        s.J_ineq.resize(m, n);
+        s.c_ineq.resize(rows);
+        s.J_ineq.resize(rows, n);
         s.L.resize(n);
         s.U.resize(n);
         s.alpha.resize(n);
         s.beta.resize(n);
         s.p_obj.resize(n);
         s.q_obj.resize(n);
-        s.p_con.resize(m, n);
-        s.q_con.resize(m, n);
-        s.r_con.resize(m);
-        s.y_dual.resize(m);
-        s.y_dual.setZero();
-        s.c_dual_ref.resize(m);
-        s.c_dual_ref.setOnes();
-        s.c_dual.resize(m);
+        s.p_con.resize(rows, n);
+        s.q_con.resize(rows, n);
+        s.r_con.resize(rows);
+        s.y_dual.setZero(rows);
+        s.c_dual_ref.setOnes(rows);
+        s.c_dual.resize(rows);
 
         s.f = problem.value(x0);
         problem.gradient(x0, s.g);
-        if(m > 0)
+        if(m > 0 && !s.invalid_problem)
         {
             Eigen::VectorX<Scalar> c_tmp(m);
             problem.constraints(x0, c_tmp);
@@ -226,6 +227,9 @@ struct move_limit_shrink_policy
         constexpr int MC = state_type<P>::M;
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
+
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
 
         const Scalar gam_dec = s.opts.asymptote_contract.value_or(mma_defaults<Scalar>::asymptote_contract);
         const Scalar gam_inc = s.opts.asymptote_expand.value_or(mma_defaults<Scalar>::asymptote_expand);
@@ -329,10 +333,8 @@ struct move_limit_shrink_policy
             }
         }
 
-        // 4. Conservativity loop. Solve the dual under the current
-        //    move-limit window; on non-conservative trial, shrink the
-        //    window toward x_k and re-solve. Loop terminates when
-        //    conservativity holds or max_inner is reached.
+        // 4. Conservativity loop: solve the dual under the current move-limit window and, on a non-conservative trial,
+        //    shrink the window toward x_k and re-solve, until conservativity holds or max_inner is reached.
         detail::mma_reciprocal_dual_problem<Scalar, N, MC> dual_prob;
         dual_prob.L_out = &s.L;
         dual_prob.U_out = &s.U;
@@ -362,11 +364,8 @@ struct move_limit_shrink_policy
         Scalar f_trial = s.f;
         Eigen::VectorX<Scalar> c_trial = s.c_ineq;
 
-        // Persistent inner dual solver: construct the box-constrained solver
-        // state once per outer iteration and cold-restart it (reset_clear
-        // clears the L-BFGS curvature so each inner solve starts fresh, as a
-        // per-inner re-construction would, while reusing the allocated
-        // buffers) rather than re-allocating it on every shrink iteration.
+        // Built once per outer iteration and cold-restarted by reset_clear (a fresh L-BFGS curvature per inner solve, as a
+        // re-construction would give) so the shrink loop reuses its buffers instead of re-allocating them.
         DualPolicy<scalar_type, MC> dp;
         // Near the dual optimum the decrease left falls below the roundoff of the dual value, so the line
         // search certifies those steps from the exact dual gradient instead.
@@ -414,7 +413,6 @@ struct move_limit_shrink_policy
                 x_trial = dual_prob.x_primal;
             }
 
-            // True f, c at trial.
             f_trial = s.problem->value(x_trial);
             if(m > 0)
             {
@@ -423,20 +421,15 @@ struct move_limit_shrink_policy
                 c_trial = c_tmp;
             }
 
-            // Conservativity test (Svanberg 2002 §4.2 concheck) against the
-            // raw approximation values g_tilde_i(x*):
-            //   Objective: gval >= f_trial.
-            //   Constraints (MMA convention g_i = -c_i):
-            //     gcval[i] >= -c_trial[i].
-            // The artificial slacks that keep the subproblem feasible do
-            // not enter the comparison.
+            // Conservativity test (Svanberg 2002 §4.2 concheck) against the raw approximation values g_tilde_i(x*):
+            // gval >= f_trial and, in the MMA convention g_i = -c_i, gcval[i] >= -c_trial[i]. The artificial slacks that
+            // keep the subproblem feasible do not enter the comparison.
             bool conservative = (dual_prob.gval >= f_trial);
             for(int i = 0; i < m && conservative; ++i)
                 conservative = (dual_prob.gcval[i] >= -c_trial[i]);
 
             if(conservative) break;
 
-            // Shrink alpha, beta toward x_k.
             for(int j = 0; j < n; ++j)
             {
                 s.alpha[j] = shrink * s.alpha[j] + (Scalar(1.0) - shrink) * s.x[j];
@@ -488,10 +481,13 @@ struct move_limit_shrink_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        const int m = s.problem->num_inequality();
+        s.invalid_problem = s.problem->num_equality() > 0 || detail::mismatches_fixed_count<state_type<P>::M>(m) || m != s.c_ineq.size();
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.x = x0;
         s.f = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
-        const int m = static_cast<int>(s.c_ineq.size());
         if(m > 0)
         {
             Eigen::VectorX<Scalar> c_tmp(m);
@@ -514,7 +510,8 @@ struct move_limit_shrink_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
-        init_asymptotes(s);
+        if(status == solver_status::running)
+            init_asymptotes(s);
         return status;
     }
 

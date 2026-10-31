@@ -53,6 +53,13 @@ bool exceeds_capacity(Eigen::Index rows)
     return Capacity != dynamic_dimension && rows > Capacity;
 }
 
+// A static row count sized exact fixed-size storage, so any other runtime count over-reads or overflows it.
+template <int Rows>
+bool mismatches_fixed_count(Eigen::Index rows)
+{
+    return Rows != dynamic_dimension && rows != Rows;
+}
+
 inline bool more_equalities_than_variables(Eigen::Index n_eq, Eigen::Index n)
 {
     return n_eq > n;
