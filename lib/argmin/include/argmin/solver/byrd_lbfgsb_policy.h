@@ -20,6 +20,7 @@
 //            subspace minimization).
 
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/lbfgsb_direction.h"
 #include "argmin/detail/lbfgsb_step_attempt.h"
 
@@ -121,19 +122,21 @@ struct byrd_lbfgsb_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
         s.iteration = 0;
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         s.B.reset();
+        return status;
     }
 
 private:

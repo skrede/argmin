@@ -23,6 +23,7 @@
 
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/compact_lbfgs.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/lbfgsb_direction.h"
 #include "argmin/detail/lbfgsb_step_attempt.h"
@@ -72,10 +73,9 @@ struct lbfgsb_policy
 
     options_type options{};
 
-    // The Problem object passed to init() MUST outlive the solver.
-    // This is the same lifetime model as all argmin policies (init takes
-    // const Problem&). The problem pointer enables direct inlinable calls
-    // without std::function type-erasure overhead.
+    // The Problem object passed to init() MUST outlive the solver, the same
+    // lifetime model as every argmin policy. The stored pointer enables direct
+    // inlinable calls without std::function type-erasure overhead.
     template <typename P = void>
     struct state_type
     {
@@ -157,23 +157,23 @@ struct lbfgsb_policy
         return result;
     }
 
-    // Hot start -- preserves curvature pairs.
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
         s.iteration = 0;
         // B (compact_lbfgs) is NOT reset -- preserves curvature pairs
+        return detail::latch_status(s);
     }
 
-    // Cold restart -- clears curvature history.
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         s.B.reset();
+        return status;
     }
 
 private:

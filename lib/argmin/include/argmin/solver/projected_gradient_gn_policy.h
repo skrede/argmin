@@ -32,6 +32,7 @@
 
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/gain_ratio.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/projected_gn_step.h"
 #include "argmin/derivative/finite_difference.h"
@@ -177,7 +178,7 @@ struct projected_gradient_gn_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
         const int n = static_cast<int>(x0.size());
@@ -196,17 +197,17 @@ struct projected_gradient_gn_policy
         s.nu = least_squares_defaults<Scalar>::nu_initial;
         s.delta = options.trust_region_radius.value_or(Scalar(1));
         s.iteration = 0;
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 
 private:
     // Projected-gradient backtracking line search (N&W Algorithm 16.1).
-    //
     // Solves the full damped system (H + lambda*D)h = -g, projects onto bounds
     // to get direction d = P(x + h) - x, then backtracks alpha until the
     // Armijo sufficient decrease condition holds on the projected trial point.
@@ -317,7 +318,6 @@ private:
     }
 
     // Dogleg trust-region step (N&W Algorithm 4.1).
-    //
     // Same as projected_gn_policy dogleg mode: active-set identification,
     // dogleg interpolation on free subspace, projection onto bounds, gain-ratio
     // acceptance with trust-region radius update.

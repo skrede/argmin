@@ -27,6 +27,7 @@
 #include "argmin/detail/sqp_common.h"
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/active_set_qp.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
@@ -1301,7 +1302,6 @@ struct filter_nw_sqp_policy
     }
 
     // Hot start: preserves BFGS Hessian, but clears the filter envelope.
-    //
     // The filter is a per-run dominance set: entries added during one
     // solve represent (objective, violation) pairs that were rejected
     // along that trajectory. Carrying them across to a new run on the
@@ -1309,16 +1309,14 @@ struct filter_nw_sqp_policy
     // -- a converged near-optimum entry from the prior run dominates
     // virtually every trial point of the new run, the filter rejects
     // every line-search step, and the outer loop stalls at alpha -> 0.
-    //
     // BFGS Hessian curvature, on the other hand, IS transferable across
     // runs that approach the same local model, so reset() preserves it.
-    //
     // Reference: Wachter & Biegler 2006, Section 3.3 (filter
     //            re-initialization between independent runs);
     //            N&W 2e Section 15.4 (filter SQP semantics).
     template <typename Problem>
-    void reset(state_type<Problem>& s,
-               Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<Problem>& s,
+                        Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so
         // a dynamic-N warm reset does not materialize a heap temporary when the
@@ -1338,21 +1336,23 @@ struct filter_nw_sqp_policy
         }
         s.filter.clear();
         s.iteration = 0;
+        return detail::latch_status(s);
     }
 
     // Cold restart: clears BFGS Hessian, filter envelope (with new
     // h_max derived from the new x0), and penalty.
     template <typename Problem>
-    void reset_clear(state_type<Problem>& s,
-                     Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<Problem>& s,
+                              Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         s.hessian.reset();
         const Scalar h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.filter.initialize(Scalar(1e4) * std::max(Scalar(1.0), h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
         s.sigma = Scalar(1.0);
         s.lambda.setZero();
+        return status;
     }
 
 private:

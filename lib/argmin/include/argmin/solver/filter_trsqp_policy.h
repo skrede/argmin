@@ -80,6 +80,7 @@
 #include "argmin/detail/restoration.h"
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/byrd_omojokun.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/steihaug_cg.h"
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/bound_projection.h"
@@ -1713,7 +1714,7 @@ struct filter_trsqp_policy
     // an unrelated point), the inert BO-internal penalty, and the
     // restoration budget latch.
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
@@ -1748,7 +1749,6 @@ struct filter_trsqp_policy
         // Clear-then-seed at the new x0 (same seeding as init /
         // reset_clear): h_max = 1e4 * max(1, h_0), entry floor
         // theta_min = 1e-4 * max(1, h_0).
-        //
         // Reference: Wachter and Biegler 2006 eq. (8) and Section 4.
         s.filter.clear();
         Scalar h_0 = Scalar(0.0);
@@ -1760,17 +1760,17 @@ struct filter_trsqp_policy
                             Scalar(1e-4) * std::max(Scalar(1.0), h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
         s.filter.add(s.objective_value, h_0);
+        return detail::latch_status(s);
     }
 
-    // Cold restart -- additionally clears the BFGS Hessian and the
-    // multiplier estimate; the filter reseed is performed by reset().
     template <typename P>
-    void reset_clear(state_type<P>& s,
-                     Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s,
+                              Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         s.hessian.reset();
         s.lambda.setZero();
+        return status;
     }
 };
 

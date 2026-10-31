@@ -33,6 +33,7 @@
 #include "argmin/detail/sqp_common.h"
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/byrd_omojokun.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/steihaug_cg.h"
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/bound_projection.h"
@@ -1237,18 +1238,16 @@ struct tr_sqp_policy
         };
     }
 
-    // Hot start -- preserves BFGS Hessian.
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int m = s.n_eq + s.n_ineq;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);
 
-        // Re-evaluate the constraints / Jacobian into the state-resident
-        // c_all / J_all scratch (pre-sized at init) so a warm reset stays
-        // allocation-free.
+        // Re-evaluate the constraints / Jacobian into the state-resident c_all / J_all scratch
+        // (pre-sized at init) so a warm reset stays allocation-free.
         if(m > 0)
             s.problem->constraints(x0, s.bufs.c_all);
         s.c_eq = s.bufs.c_all.head(s.n_eq);
@@ -1272,16 +1271,17 @@ struct tr_sqp_policy
         // stale values could persist for several iterations).
         s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
         s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
+        return detail::latch_status(s);
     }
 
-    // Cold restart -- clears BFGS Hessian.
     template <typename P>
-    void reset_clear(state_type<P>& s,
-                     Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s,
+                              Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         s.hessian.reset();
         s.lambda.setZero();
+        return status;
     }
 };
 

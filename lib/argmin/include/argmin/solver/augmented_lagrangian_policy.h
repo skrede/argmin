@@ -54,6 +54,7 @@
 #include "argmin/detail/augmented_lagrangian.h"
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/options/augmented_lagrangian_defaults.h"
 #include "argmin/solver/lbfgsb_policy.h"
@@ -998,7 +999,7 @@ struct augmented_lagrangian_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<scalar_type, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<scalar_type, N>> x0)
     {
         s.x = x0;
         s.f = s.problem->value(x0);
@@ -1011,24 +1012,22 @@ struct augmented_lagrangian_policy
             s.c_ineq = c_all.tail(s.n_ineq);
         }
         s.outer_iter = 0;
-        // Abandon any inner solve that was mid-chunk: the next step() starts a
-        // fresh inner solve at x0. The persisted inner solver is KEPT --
-        // reset() preserves algorithm state (e.g. compact_lbfgs curvature
-        // pairs) and the next step warm-restarts it at x0, so a warm per-tick
-        // reset is reconstruction-free and allocation-free. Subproblem storage
-        // is kept too (its pointers are re-seeded at the top of the next step).
+        // Abandon any inner solve that was mid-chunk: the next step() starts a fresh inner solve at x0. The
+        // persisted inner solver is KEPT -- reset() preserves algorithm state (e.g. compact_lbfgs curvature
+        // pairs) and the next step warm-restarts it at x0, so a warm per-tick reset is reconstruction-free and
+        // allocation-free. Subproblem storage is kept too (its pointers are re-seeded at the top of the next step).
         s.inner_active = false;
         s.last_inner_advance = 0;
-        // Re-seed the adaptive inner tolerance on the next step from the
-        // current penalty regime.
+        // Re-seed the adaptive inner tolerance on the next step from the current penalty regime.
         s.omega.reset();
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s,
-                     Eigen::Ref<const Eigen::Vector<scalar_type, N>> x0)
+    solver_status reset_clear(state_type<P>& s,
+                              Eigen::Ref<const Eigen::Vector<scalar_type, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         s.lambda_eq.setZero();
         s.lambda_ineq.setZero();
         s.mu = s.opts.mu_init;
@@ -1042,6 +1041,7 @@ struct augmented_lagrangian_policy
             s.ctx->sub_storage.reset();
             s.ctx->inner_solver.reset();
         }
+        return status;
     }
 };
 

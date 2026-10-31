@@ -29,6 +29,7 @@
 
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/gain_ratio.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/projected_gn_step.h"
 #include "argmin/derivative/finite_difference.h"
@@ -279,7 +280,7 @@ struct projected_gn_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = detail::project(x0, s.lower, s.upper);
         const int n = static_cast<int>(x0.size());
@@ -298,12 +299,13 @@ struct projected_gn_policy
         s.nu = least_squares_defaults<Scalar>::nu_initial;
         s.delta = options.trust_region_radius.value_or(Scalar(1));
         s.iteration = 0;
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 
 private:
@@ -348,9 +350,7 @@ private:
         }
     }
 
-    // Initialize lambda (Nielsen 1999), honoring the configured
-    // initial_lambda / tau exactly. Reads the option fields directly rather
-    // than duplicating the literature default.
+    // Initialize lambda (Nielsen 1999) from the configured initial_lambda / tau.
     template <typename P>
     void init_lambda(state_type<P>& s) const
     {

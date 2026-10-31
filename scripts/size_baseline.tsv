@@ -52,11 +52,11 @@ file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1154
 file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	677
 file	lib/argmin/include/argmin/solver/convergence.h	-	392
 file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1500
-file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1340
+file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1339
 file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1793
 file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1171
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	205
-file	lib/argmin/include/argmin/solver/lm_policy.h	-	314
+file	lib/argmin/include/argmin/solver/lm_policy.h	-	303
 file	lib/argmin/include/argmin/solver/mma_policy.h	-	587
 file	lib/argmin/include/argmin/solver/multistart_policy.h	-	242
 file	lib/argmin/include/argmin/solver/nw_sqp_policy.h	-	1218
@@ -225,9 +225,8 @@ function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	step	911
 function	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	init	98
 function	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	step	671
 function	lib/argmin/include/argmin/solver/lbfgsb_policy.h	init	28
-function	lib/argmin/include/argmin/solver/lm_policy.h	init	44
-function	lib/argmin/include/argmin/solver/lm_policy.h	reset	26
-function	lib/argmin/include/argmin/solver/lm_policy.h	step	124
+function	lib/argmin/include/argmin/solver/lm_policy.h	init	34
+function	lib/argmin/include/argmin/solver/lm_policy.h	step	114
 function	lib/argmin/include/argmin/solver/mma_policy.h	init	79
 function	lib/argmin/include/argmin/solver/mma_policy.h	step	251
 function	lib/argmin/include/argmin/solver/multistart_policy.h	step	71

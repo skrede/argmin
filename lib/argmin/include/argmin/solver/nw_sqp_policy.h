@@ -22,6 +22,7 @@
 #include "argmin/detail/sqp_common.h"
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/active_set_qp.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
@@ -1160,14 +1161,12 @@ struct nw_sqp_policy
         };
     }
 
-    // Hot start -- preserves BFGS Hessian.
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const int m = s.n_eq + s.n_ineq;
-        // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so
-        // a dynamic-N warm reset does not materialize a heap temporary when the
-        // problem method takes a plain vector.
+        // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so a dynamic-N warm reset does not
+        // materialize a heap temporary when the problem method takes a plain vector.
         s.x = x0;
         s.objective_value = s.problem->value(s.x);
         s.problem->gradient(s.x, s.g);
@@ -1180,17 +1179,18 @@ struct nw_sqp_policy
         s.J_eq = s.bufs.J_all.topRows(s.n_eq);
         s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
         s.iteration = 0;
+        return detail::latch_status(s);
     }
 
-    // Cold restart -- clears BFGS Hessian.
     template <typename P>
-    void reset_clear(state_type<P>& s,
-                     Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s,
+                              Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         s.hessian.reset();
         s.sigma = Scalar(1.0);
         s.lambda.setZero();
+        return status;
     }
 
 private:

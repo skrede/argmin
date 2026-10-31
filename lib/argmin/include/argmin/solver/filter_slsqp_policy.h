@@ -33,6 +33,7 @@
 #include "argmin/detail/kraft_lsq_qp_recovery.h"
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/sqp_common.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
 
@@ -1184,7 +1185,7 @@ struct filter_slsqp_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so
         // a dynamic-N warm reset does not materialize a heap temporary when the
@@ -1213,32 +1214,30 @@ struct filter_slsqp_policy
         // that kept a too-tight ceiling would reject its own first step. Seed
         // exactly as init() / reset_clear() -- h_max = 1e4 * max(1, h_0) with
         // the configured envelope margins.
-        //
         // Reference: Wachter and Biegler 2006 eq. (8), Section 2.3.
         s.filter.clear();
         s.filter.initialize(Scalar(1e4) * std::max(Scalar(1.0), h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
         s.iteration = 0;
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         s.hessian.reset();
+        return status;
     }
 
 private:
     // Lagrangian gradient norm for KKT-consistent stationarity reporting.
-    //
     // grad_L = grad_f - [J_eq; J_ineq]^T * lambda. At a constrained optimum
     // grad_L vanishes (N&W eq. 12.34) while raw ||grad_f|| in general does
     // not. Convergence criteria gate on Lagrangian-gradient norm.
-    //
     // Adopted from: argmin/solver/nw_sqp_policy.h::step null-step branch (in-tree precedent).
     // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity);
     //            eq. 18.2-18.3 (Lagrangian gradient definition).
-    //
     // argmin variant: per-policy static helper parameterised on state_type<P>;
     //                 a shared free-function variant is deferred to a later
     //                 helper-extraction pass. Rationale: state_type members

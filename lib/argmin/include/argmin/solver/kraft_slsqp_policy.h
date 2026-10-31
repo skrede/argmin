@@ -49,6 +49,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/sqp_common.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
 
 #include "argmin/options/qp_options.h"
@@ -1090,15 +1091,13 @@ struct kraft_slsqp_policy
         };
     }
 
-    // Hot start -- preserves BFGS curvature information.
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        // Land the caller buffer into state storage first, then evaluate the
-        // problem at s.x (a concrete Eigen::Vector of the exact argument type)
-        // rather than at the Ref: a dynamic-N Ref bound to a problem method
-        // taking a plain VectorXd would otherwise materialize a heap temporary,
-        // defeating the allocation-free warm path.
+        // Land the caller buffer into state storage first, then evaluate the problem at s.x
+        // (a concrete Eigen::Vector of the exact argument type) rather than at the Ref: a
+        // dynamic-N Ref bound to a problem method taking a plain VectorXd would otherwise
+        // materialize a heap temporary, defeating the allocation-free warm path.
         s.x = x0;
         s.objective_value = s.problem->value(s.x);
         s.problem->gradient(s.x, s.g);
@@ -1116,15 +1115,16 @@ struct kraft_slsqp_policy
             }
         }
         s.iteration = 0;
+        return detail::latch_status(s);
     }
 
-    // Cold restart -- clears BFGS curvature information (B := I).
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        const solver_status status = reset(s, x0);
         s.hessian.reset();
         s.sigma = options.initial_penalty;
+        return status;
     }
 
 private:

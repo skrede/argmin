@@ -19,6 +19,7 @@
 //            N&W Section 10.2-10.3 (nonlinear least-squares).
 
 #include "argmin/detail/gain_ratio.h"
+#include "argmin/detail/problem_shape.h"
 #include "argmin/derivative/finite_difference.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
@@ -111,17 +112,7 @@ struct lm_policy
         s.r_trial.resize(s.num_residuals);
         s.Jh.resize(s.num_residuals);
         s.problem->residuals(x0, s.r);
-        if constexpr(requires(const Problem& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
-                         p.jacobian(xx, JJ);
-                     })
-            s.problem->jacobian(x0, s.J);
-        else
-        {
-            auto residual_fn = [&](const Eigen::Vector<Scalar, N>& xx, Eigen::VectorX<Scalar>& rr) {
-                s.problem->residuals(xx, rr);
-            };
-            fd_jacobian<N>(residual_fn, x0, s.J, s.num_residuals);
-        }
+        evaluate_jacobian(s);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
 
@@ -204,17 +195,7 @@ struct lm_policy
         {
             s.x = x_trial;
             s.r = r_trial;
-            if constexpr(requires(const P& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
-                             p.jacobian(xx, JJ);
-                         })
-                s.problem->jacobian(s.x, s.J);
-            else
-            {
-                auto residual_fn = [&](const Eigen::Vector<Scalar, N>& xx, Eigen::VectorX<Scalar>& rr) {
-                    s.problem->residuals(xx, rr);
-                };
-                fd_jacobian<N>(residual_fn, s.x, s.J, s.num_residuals);
-            }
+            evaluate_jacobian(s);
             s.objective_value = f_trial;
 
             Scalar factor = Scalar(1) - std::pow(Scalar(2) * rho - Scalar(1), Scalar(3));
@@ -273,23 +254,13 @@ struct lm_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         s.x = x0;
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, x0.size());
         s.problem->residuals(x0, s.r);
-        if constexpr(requires(const P& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
-                         p.jacobian(xx, JJ);
-                     })
-            s.problem->jacobian(x0, s.J);
-        else
-        {
-            auto residual_fn = [&](const Eigen::Vector<Scalar, N>& xx, Eigen::VectorX<Scalar>& rr) {
-                s.problem->residuals(xx, rr);
-            };
-            fd_jacobian<N>(residual_fn, x0, s.J, s.num_residuals);
-        }
+        evaluate_jacobian(s);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
 
@@ -300,12 +271,30 @@ struct lm_policy
         s.lambda = (max_diag > Scalar(0)) ? tau * max_diag : least_squares_defaults<Scalar>::fallback_lambda;
         s.nu = options.nu_initial.value_or(least_squares_defaults<Scalar>::nu_initial);
         s.iteration = 0;
+        return detail::latch_status(s);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
+    }
+
+private:
+    template <typename P>
+    void evaluate_jacobian(state_type<P>& s) const
+    {
+        if constexpr(requires(const P& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
+                         p.jacobian(xx, JJ);
+                     })
+            s.problem->jacobian(s.x, s.J);
+        else
+        {
+            auto residual_fn = [&s](const Eigen::Vector<Scalar, N>& xx, Eigen::VectorX<Scalar>& rr) {
+                s.problem->residuals(xx, rr);
+            };
+            fd_jacobian<N>(residual_fn, s.x, s.J, s.num_residuals);
+        }
     }
 };
 
