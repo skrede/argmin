@@ -3,6 +3,7 @@ include(Catch)
 # Every TU here traps eigen_assert as a throw, so an alloc-counter TU (its own eigen_assert) must never join this binary.
 add_executable(argmin_release_safety_tests
     compliant_rejection_test.cpp
+    qp_empty_problem_test.cpp
 )
 target_include_directories(argmin_release_safety_tests
     PRIVATE

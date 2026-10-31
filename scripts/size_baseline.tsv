@@ -158,7 +158,7 @@ function	lib/argmin/include/argmin/detail/trust_region.h	select_replacement	61
 function	lib/argmin/include/argmin/detail/trust_region.h	solve_trust_region_box	204
 function	lib/argmin/include/argmin/line_search/armijo.h	armijo	33
 function	lib/argmin/include/argmin/line_search/strong_wolfe.h	strong_wolfe	89
-function	lib/argmin/include/argmin/qp/dense_active_set_qp.h	run	48
+function	lib/argmin/include/argmin/qp/dense_active_set_qp.h	run	46
 function	lib/argmin/include/argmin/qp/dense_active_set_qp.h	scatter_result	69
 function	lib/argmin/include/argmin/qp/dense_active_set_qp.h	split_rows	49
 function	lib/argmin/include/argmin/qp/dense_admm_qp.h	finalize	62

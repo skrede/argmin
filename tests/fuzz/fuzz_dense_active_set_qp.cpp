@@ -88,7 +88,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     const qp_problem p = decode_problem(fields, 3);
     const options_type opts = active_set_options<options_type>(fields);
     const qp_capacity capacity = decode_capacity(fields, p);
-    if(empty_dense_problem(static_cast<std::int32_t>(p.q.size()), capacity.n) || unsatisfiable_infinite_row(p.l, p.u))
+    if(unsatisfiable_infinite_row(p.l, p.u))
         return 0;
     solver_type solver(capacity.n, capacity.m);
     Eigen::VectorXd x0 = Eigen::VectorXd::Zero(capacity.n);

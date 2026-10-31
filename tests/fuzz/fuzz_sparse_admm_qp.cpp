@@ -74,10 +74,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     solver_type solver;
     if((fields.byte() & 1) != 0)
         solver.warm_start(p.x_f, Eigen::VectorXd());
-    const bool valid = admm_options_valid(opts);
-    error_set justified = solve_faults(p, valid, {static_cast<std::int32_t>(p.q.size()), static_cast<std::int32_t>(p.A.rows())});
-    if(valid && p.q.size() == 0)
-        justified.demand(argmin::qp_error::dimension_mismatch);
+    const error_set justified = solve_faults(p, admm_options_valid(opts), {static_cast<std::int32_t>(p.q.size()), static_cast<std::int32_t>(p.A.rows())});
     const auto outcome = solver.solve(to_sparse(p.P), p.q, to_sparse(p.A), p.l, p.u, opts);
     if(!admitted(outcome, justified))
         return 0;

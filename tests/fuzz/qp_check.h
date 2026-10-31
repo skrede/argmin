@@ -104,6 +104,8 @@ inline error_set solve_faults(const qp_problem& p, bool options_valid, qp_capaci
     error_set justified;
     if(!options_valid)
         justified.demand(qp_error::invalid_options);
+    else if(p.q.size() == 0)
+        justified.demand(qp_error::dimension_mismatch);
     else if(capacity.n != p.q.size() || p.A.rows() > capacity.m)
         justified.demand(qp_error::capacity_exceeded);
     else

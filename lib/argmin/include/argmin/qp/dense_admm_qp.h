@@ -271,6 +271,8 @@ private:
         if(P.cols() != n || A.cols() != n || q.size() != n
            || static_cast<int>(l.size()) != m || static_cast<int>(u.size()) != m)
             return qp_error::dimension_mismatch;
+        if(n <= 0)
+            return qp_error::dimension_mismatch;
         if(n != n_cap_ || m > m_cap_)
             return qp_error::capacity_exceeded;
         if(!P.allFinite() || !q.allFinite() || !A.allFinite())
@@ -908,8 +910,6 @@ private:
     vector<Scalar> rho_inv_vec_;
     vector<Scalar> base_mult_;
 
-    // Condensed KKT is a fixed n x n member: the EIGEN_STACK_ALLOCATION_LIMIT
-    // ceiling caps a fixed-N instantiation at N <= 128 for double.
     matrix<Scalar, N, N> K_;
     // llt_ reads only the lower triangle of K_, which agrees with the full-matrix uses of P_ in the
     // dual residual and the objective because pose rejects an asymmetric P; with validate_convexity

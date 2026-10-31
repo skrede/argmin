@@ -75,13 +75,6 @@ inline constexpr bool planted_violation = false;
 // Known live defects. Each predicate names one input class the targets do not send, or one oracle leg they do
 // not hold, until the owning fix lands; the fix deletes the predicate.
 
-// The dense ADMM and dense active-set solvers have no n = 0 guard and reduce an empty matrix, which is undefined
-// behavior.
-inline bool empty_dense_problem(std::int32_t n, std::int32_t capacity)
-{
-    return n == 0 && capacity == 0;
-}
-
 // The QP solvers accept a row whose bounds are both +inf or both -inf, which no point satisfies: the ADMM solvers
 // return a non-finite x under a dual_infeasible claim and the active-set solver drops the row and claims solved.
 inline bool unsatisfiable_infinite_row(const Eigen::VectorXd& l, const Eigen::VectorXd& u)

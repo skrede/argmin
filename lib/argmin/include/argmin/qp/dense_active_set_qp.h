@@ -208,6 +208,8 @@ private:
         if(P.cols() != n || A.cols() != n || q.size() != n
            || static_cast<int>(l.size()) != m || static_cast<int>(u.size()) != m)
             return qp_error::dimension_mismatch;
+        if(n <= 0)
+            return qp_error::dimension_mismatch;
         if(n != n_cap_ || m > m_cap_)
             return qp_error::capacity_exceeded;
         if(!P.allFinite() || !q.allFinite() || !A.allFinite())
@@ -229,8 +231,6 @@ private:
 
     std::optional<qp_error> run(result_type& out, const dense_active_set_qp_options<Scalar>& opts)
     {
-        // Equality-row-count contract: the delegated solver requires at most n
-        // equality rows.
         int m_eq = 0;
         for(int i = 0; i < m_; ++i)
             if(is_equality_row(i, opts))
