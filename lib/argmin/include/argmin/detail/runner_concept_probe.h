@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_RUNNER_CONCEPT_PROBE_H
 #define HPP_GUARD_ARGMIN_DETAIL_RUNNER_CONCEPT_PROBE_H
 
+#include "argmin/result/status.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/solver/options.h"
@@ -37,8 +38,17 @@ struct runner_concept_probe_policy
     }
 
     step_result<Scalar> step(state_type&) { return {}; }
-    void reset(state_type& s, const Eigen::VectorX<Scalar>& x0) { s.x = x0; }
-    void reset_clear(state_type& s, const Eigen::VectorX<Scalar>& x0) { s.x = x0; }
+    solver_status reset(state_type& s, const Eigen::VectorX<Scalar>& x0)
+    {
+        s.x = x0;
+        return solver_status::running;
+    }
+
+    solver_status reset_clear(state_type& s, const Eigen::VectorX<Scalar>& x0)
+    {
+        s.x = x0;
+        return solver_status::running;
+    }
     // LCOV_EXCL_STOP
 };
 

@@ -61,16 +61,17 @@ struct descent_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, const Eigen::VectorX<S>& x0)
+    solver_status reset(state_type<P>& s, const Eigen::VectorX<S>& x0)
     {
         s.x = x0;
         s.objective = s.problem.value(s.x);
+        return solver_status::running;
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, const Eigen::VectorX<S>& x0)
+    solver_status reset_clear(state_type<P>& s, const Eigen::VectorX<S>& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 

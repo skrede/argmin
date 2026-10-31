@@ -103,8 +103,8 @@ public:
     // diagnostic at the construction site instead of a deep template error.
     static_assert(solver_policy<Policy, state_type, scalar_type>,
                   "Policy does not satisfy the solver_policy contract: it must "
-                  "expose scalar_type and step(state) / reset(state, x0) / "
-                  "reset_clear(state, x0), and its state must expose x. "
+                  "expose scalar_type, step(state), and reset(state, x0) / "
+                  "reset_clear(state, x0) returning solver_status; its state must expose x. "
                   "Construct via CTAD from a problem + x0.");
     static_assert(std::same_as<typename Convergence::scalar_type, scalar_type>,
                   "Convergence criteria must use the same scalar type as the policy.");

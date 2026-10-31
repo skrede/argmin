@@ -79,8 +79,8 @@ struct sleeping_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0) { s.x = x0; }
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0) { reset(s, x0); }
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0) { s.x = x0; return solver_status::running; }
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0) { return reset(s, x0); }
 };
 
 // Detects whether a result type carries a wall_time member.

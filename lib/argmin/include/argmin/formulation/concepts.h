@@ -208,8 +208,8 @@ concept solver_policy = solver_state<State> &&
 {
     typename Policy::scalar_type;
     { policy.step(state) } -> std::convertible_to<step_result<S>>;
-    { policy.reset(state, x0) };
-    { policy.reset_clear(state, x0) };
+    { policy.reset(state, x0) } -> std::same_as<solver_status>;
+    { policy.reset_clear(state, x0) } -> std::same_as<solver_status>;
 };
 
 // Harness contract for solver-group schedules (duck-typed, no base class).

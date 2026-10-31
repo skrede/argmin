@@ -291,7 +291,8 @@ static_assert(!argmin::steppable<mock_solver_no_cv>);
 // These lock the enforcement introduced at the harness (step_budget_solver static-
 // asserts solver_policy; basic_solver_group static-asserts schedule). The
 // negative cases prove the concepts are non-vacuous: a policy missing
-// reset_clear, or a state without x, or a schedule missing reset, is rejected.
+// reset_clear or whose reset returns no status, a state without x, or a
+// schedule missing reset, is rejected.
 // ---------------------------------------------------------------------------
 
 // A well-formed minimal state and policy that satisfy the contract.
@@ -304,8 +305,8 @@ struct good_policy
 {
     using scalar_type = double;
     argmin::step_result<double> step(good_state&) { return {}; }
-    void reset(good_state&, const Eigen::VectorXd&) {}
-    void reset_clear(good_state&, const Eigen::VectorXd&) {}
+    argmin::solver_status reset(good_state&, const Eigen::VectorXd&) { return {}; }
+    argmin::solver_status reset_clear(good_state&, const Eigen::VectorXd&) { return {}; }
 };
 
 static_assert(argmin::solver_state<good_state>);
@@ -325,18 +326,29 @@ struct policy_no_reset_clear
 {
     using scalar_type = double;
     argmin::step_result<double> step(good_state&) { return {}; }
-    void reset(good_state&, const Eigen::VectorXd&) {}
+    argmin::solver_status reset(good_state&, const Eigen::VectorXd&) { return {}; }
     // deliberately omitting reset_clear()
 };
 
 static_assert(!argmin::solver_policy<policy_no_reset_clear, good_state>);
 
+// A policy whose reset reports no status is rejected by solver_policy.
+struct policy_void_reset
+{
+    using scalar_type = double;
+    argmin::step_result<double> step(good_state&) { return {}; }
+    void reset(good_state&, const Eigen::VectorXd&) {}
+    argmin::solver_status reset_clear(good_state&, const Eigen::VectorXd&) { return {}; }
+};
+
+static_assert(!argmin::solver_policy<policy_void_reset, good_state>);
+
 // A policy missing scalar_type is rejected by solver_policy.
 struct policy_no_scalar_type
 {
     argmin::step_result<double> step(good_state&) { return {}; }
-    void reset(good_state&, const Eigen::VectorXd&) {}
-    void reset_clear(good_state&, const Eigen::VectorXd&) {}
+    argmin::solver_status reset(good_state&, const Eigen::VectorXd&) { return {}; }
+    argmin::solver_status reset_clear(good_state&, const Eigen::VectorXd&) { return {}; }
 };
 
 static_assert(!argmin::solver_policy<policy_no_scalar_type, good_state>);

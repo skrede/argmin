@@ -51,10 +51,10 @@ struct counting_lbfgsb : lbfgsb_policy<S, M>
     }
 
     template <typename State>
-    void reset_clear(State& s, const Eigen::Vector<S, M>& x0)
+    solver_status reset_clear(State& s, const Eigen::Vector<S, M>& x0)
     {
         ++g_dual_reset_clear_count;
-        lbfgsb_policy<S, M>::reset_clear(s, x0);
+        return lbfgsb_policy<S, M>::reset_clear(s, x0);
     }
 };
 

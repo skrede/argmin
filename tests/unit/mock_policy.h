@@ -56,15 +56,16 @@ struct mock_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -103,16 +104,17 @@ struct non_converging_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 100.0;
         s.step_count = 0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -168,16 +170,17 @@ struct constrained_mock_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
         s.c_ineq(0) = x0(0) - 1.0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -219,14 +222,15 @@ struct feasible_mock_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -268,14 +272,15 @@ struct infeasible_mock_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -317,14 +322,15 @@ struct high_violation_mock_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -368,16 +374,17 @@ struct converging_mock_policy
         return r;
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
         s.step_count = 0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -423,14 +430,15 @@ struct borderline_feasible_mock_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -476,14 +484,15 @@ struct feasible_worse_objective_mock_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -542,17 +551,18 @@ struct borderline_then_worse_mock_policy
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 10.0;
         s.c_ineq(0) = -5e-7;
         s.step_count = 0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -595,16 +605,17 @@ struct roundoff_mock_policy
         return r;
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
         s.step_count = 0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -647,16 +658,17 @@ struct diverging_mock_policy
         return r;
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 1.0;
         s.step_count = 0;
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 
@@ -711,15 +723,16 @@ struct mock_policy_with_opts
         };
     }
 
-    void reset(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
     {
         s.x = x0;
         s.objective_value = 0.5 * x0.squaredNorm();
+        return solver_status::running;
     }
 
-    void reset_clear(state_type& s, const Eigen::VectorXd& x0)
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0)
     {
-        reset(s, x0);
+        return reset(s, x0);
     }
 };
 

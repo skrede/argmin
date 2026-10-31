@@ -36,6 +36,7 @@
 
 #include "argmin/solver/options.h"
 
+#include "argmin/detail/problem_shape.h"
 #include "argmin/detail/cobyla_simplex.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/cobyla_policy_bridge.h"
@@ -152,16 +153,16 @@ struct cobyla_policy
     }
 
     template <typename P>
-    void reset(state_type<P>& s, Eigen::Ref<const Eigen::VectorX<Scalar>> x0)
+    solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::VectorX<Scalar>> x0)
     {
-        reset_clear(s, x0);
+        return reset_clear(s, x0);
     }
 
     template <typename P>
-    void reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::VectorX<Scalar>> x0)
+    solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::VectorX<Scalar>> x0)
     {
         if(detail::cobyla_reject_invalid_box(s, x0))
-            return;
+            return detail::latch_status(s);
         s.x = detail::project(x0, s.lower, s.upper);
         s.iteration = 0;
         s.parmu = Scalar(0.0);
@@ -171,6 +172,7 @@ struct cobyla_policy
         Scalar rhoend = options.final_trust_radius;
         detail::cobyla_init_engine(s, rhobeg, rhoend);
         detail::cobyla_sync_from_engine(s);
+        return detail::latch_status(s);
     }
 };
 
