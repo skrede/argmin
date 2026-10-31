@@ -139,28 +139,22 @@ struct original_argmin_policy
     template <typename Problem, typename Convergence = default_convergence<scalar_type>>
         requires objective<Problem, Scalar> && constrained_values<Problem, Scalar> && bound_constrained<Problem, Scalar>
     state_type<Problem> init(const Problem& problem,
-                    const Eigen::Vector<Scalar, N>& /*x0*/,
+                    const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
         const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
 
-        // Store bounds
         s.lower = problem.lower_bounds();
         s.upper = problem.upper_bounds();
 
-        // Constraint counts
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
         const int n_c = s.n_eq + s.n_ineq;
 
-        // Population parameters
-        s.lambda = static_cast<int>(
-            options.population_size.value_or(
-                static_cast<std::uint32_t>(20 * (n + 1))));
-        Scalar frac = options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0));
-        s.mu = std::max(1, static_cast<int>(static_cast<Scalar>(s.lambda) * frac));
+        s.lambda = static_cast<int>(options.population_size.value_or(static_cast<std::uint32_t>(20 * (n + 1))));
+        s.mu = parent_count(s.lambda, options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0)));
         s.pf = options.ranking_probability.value_or(Scalar(0.45));
         s.alpha = options.pull_to_best_weight.value_or(Scalar(0.2));
         s.rates = detail::compute_es_rates<Scalar>(n);
@@ -170,7 +164,14 @@ struct original_argmin_policy
             static_cast<std::uint64_t>(std::random_device{}()));
         s.rng.emplace(seed);
 
-        // Pre-allocate mutation workspace
+        s.invalid_problem = rejects_population(s);
+        if(s.invalid_problem)
+        {
+            s.x = x0;
+            s.objective_value = std::numeric_limits<Scalar>::infinity();
+            return s;
+        }
+
         s.mutation_workspace.emplace(n);
 
         // Pre-allocate per-step buffers.
@@ -181,11 +182,9 @@ struct original_argmin_policy
         s.all_constraints_buf.resize(n_c, s.lambda);
         s.indices_buf.resize(static_cast<std::size_t>(s.lambda));
 
-        // Initialize population uniformly in bounds
         s.population = detail::initialize_population<N>(
             n, s.lambda, s.lower, s.upper, *s.rng);
 
-        // Initialize step sizes
         s.sigmas = detail::initialize_sigmas(n, s.lambda, s.lower, s.upper);
 
         // Evaluate all individuals (use the pre-allocated all_constraints_buf)
@@ -204,7 +203,6 @@ struct original_argmin_policy
             }
         }
 
-        // Compute violations
         if(n_c > 0)
             s.violations = detail::compute_violations(s.all_constraints_buf, s.n_eq, s.n_ineq);
         else
@@ -236,7 +234,6 @@ struct original_argmin_policy
         // in step().
         s.best_ever_violation = s.violations[best_idx];
 
-        // Store constraint values at best point
         s.c_eq.resize(s.n_eq);
         s.c_ineq.resize(s.n_ineq);
         if(n_c > 0)
@@ -319,13 +316,8 @@ struct original_argmin_policy
             s.violations[j] = s.offspring_violations_buf[idx];
         }
 
-        // Fill remaining slots by copying parents cyclically.
-        // (Note: this fill is dead code -- the
-        // mutation step at line 1 above reads via `parent_idx = j % mu`,
-        // which only touches columns [0, mu). Slots [mu, lambda) are
-        // structurally unread between step() invocations. Kept for
-        // observable-state hygiene; eliminating it is a separate
-        // micro-cleanup.)
+        // Dead fill: mutation reads parents via j % mu, so slots [mu, lambda) are never read between steps. Kept
+        // for observable-state hygiene.
         for(int j = s.mu; j < s.lambda; ++j)
         {
             int src = j % s.mu;
@@ -357,20 +349,8 @@ struct original_argmin_policy
         }
         else if(s.best_ever_value == std::numeric_limits<Scalar>::infinity())
         {
-            // No feasible point found yet -- track least-violating
-            // witness. Pre-fix this branch compared `s.violations[0]`,
-            // but s.violations[0] was overwritten by the just-selected
-            // top-ranked offspring at the population-update loop above
-            // (comparing best-ranked to itself never updates).
-            // Now compare against the rolling
-            // s.best_ever_violation which is preserved across steps.
-            //
-            // Pre-fix the predicate also used `||` between violation-
-            // decrease and fitness-decrease, which
-            // admitted offspring with worse feasibility but better
-            // fitness, masking the least-violating witness. Use `&&`
-            // so we only update on a Pareto improvement (both lower
-            // violation AND not-worse fitness).
+            // No feasible point yet: compare against the rolling best_ever_violation (s.violations[0] was just
+            // overwritten by the selection above) and update only on a Pareto improvement.
             if(best_ranked_v < s.best_ever_violation
                && best_ranked_f <= s.objective_value)
             {
@@ -409,7 +389,7 @@ struct original_argmin_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        s.invalid_problem = detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        s.invalid_problem = rejects_population(s) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
         if(s.invalid_problem)
             return solver_status::invalid_problem;
         const int n = static_cast<int>(x0.size());
@@ -439,6 +419,23 @@ struct original_argmin_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         return reset(s, x0);
+    }
+
+private:
+    // A population_size above INT32_MAX arrives here negative, since the unsigned-to-int conversion is modular.
+    template <typename P>
+    static bool rejects_population(const state_type<P>& s)
+    {
+        return s.lambda < 1 || s.mu < 1;
+    }
+
+    // Zero flags a NaN fraction or a count above lambda; the int64 step holds a lambda a float Scalar rounds to 2^31.
+    static int parent_count(int lambda, Scalar fraction)
+    {
+        const Scalar rounded = std::trunc(Scalar(lambda) * fraction);
+        if(!(rounded <= Scalar(lambda)))
+            return 0;
+        return static_cast<int>(std::min<std::int64_t>(static_cast<std::int64_t>(std::max(Scalar(1), rounded)), lambda));
     }
 };
 

@@ -14,6 +14,7 @@ add_executable(argmin_release_safety_tests
     hot_reset_test.cpp
     isres_storage_test.cpp
     reset_rows_test.cpp
+    population_range_test.cpp
 )
 target_include_directories(argmin_release_safety_tests
     PRIVATE

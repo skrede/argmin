@@ -45,7 +45,7 @@ file	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy
 file	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	-	601
 file	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	-	650
 file	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	-	879
-file	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	-	447
+file	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	-	444
 file	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	-	647
 file	lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h	-	1049
 file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1154
@@ -190,12 +190,12 @@ function	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy
 function	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	step	311
 function	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	init	74
 function	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	step	338
-function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	init	211
+function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	init	201
 function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	reset	43
 function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	step	307
-function	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	init	107
-function	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	step	152
-function	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	init	129
+function	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	init	104
+function	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	step	135
+function	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	init	125
 function	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	step	266
 function	lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h	gradient	27
 function	lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h	gradient	30

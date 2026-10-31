@@ -91,15 +91,12 @@ struct runarsson_yao_paper_policy
 
     struct options_type
     {
-        // Population sizing.
         std::optional<std::uint32_t> population_size{};
         std::optional<Scalar> parent_fraction{};
         std::optional<Scalar> ranking_probability{};
 
-        // RNG seed.
         std::optional<std::uint64_t> seed{};
 
-        // Stall + feasibility.
         std::uint16_t stall_window{200};
         Scalar feasibility_gate{isres_defaults<Scalar>::feasibility_gate};
 
@@ -109,15 +106,12 @@ struct runarsson_yao_paper_policy
         std::optional<Scalar> paper_gamma{};   // default 0.85 (citation gap; not in paper text)
         std::optional<Scalar> paper_alpha{};   // default 0.2  (citation gap; not in paper text)
 
-        // Sigma-collapse predicate threshold.
         std::optional<Scalar> sigma_collapse_ratio{};  // default 1e-9
 
         // Bounded resample budget — caps NLopt's unbounded retry loop.
         std::optional<std::uint16_t> bound_resample_budget{};  // default 100
 
-        // Operator-axis runtime selectors.
-        sigma_clamp_placement_type sigma_clamp_placement{
-            sigma_clamp_placement_type::per_mutation};
+        sigma_clamp_placement_type sigma_clamp_placement{sigma_clamp_placement_type::per_mutation};
         sigma_collapse_form_type sigma_collapse_form{
             sigma_collapse_form_type::bound_relative_configurable};
     };
@@ -211,11 +205,8 @@ struct runarsson_yao_paper_policy
         s.n_ineq = problem.num_inequality();
         const int n_c = s.n_eq + s.n_ineq;
 
-        s.lambda = static_cast<int>(
-            options.population_size.value_or(
-                static_cast<std::uint32_t>(20 * (n + 1))));
-        const Scalar frac = options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0));
-        s.mu = std::max(1, static_cast<int>(static_cast<Scalar>(s.lambda) * frac));
+        s.lambda = static_cast<int>(options.population_size.value_or(static_cast<std::uint32_t>(20 * (n + 1))));
+        s.mu = parent_count(s.lambda, options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0)));
         s.pf = options.ranking_probability.value_or(Scalar(0.45));
         s.alpha = options.paper_alpha.value_or(Scalar(0.2));
         s.rates = detail::compute_es_rates<Scalar>(n);
@@ -224,7 +215,7 @@ struct runarsson_yao_paper_policy
             static_cast<std::uint64_t>(std::random_device{}()));
         s.rng.emplace(seed);
 
-        s.invalid_problem = exceeds_storage(s);
+        s.invalid_problem = rejects_population(s);
         if(s.invalid_problem)
         {
             s.x = x0;
@@ -284,7 +275,6 @@ struct runarsson_yao_paper_policy
             s.violations.setZero();
         }
 
-        // Find best individual (least violation first, then best objective).
         int best_idx = 0;
         for(int j = 1; j < s.lambda; ++j)
         {
@@ -603,7 +593,7 @@ struct runarsson_yao_paper_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        s.invalid_problem = exceeds_storage(s) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        s.invalid_problem = rejects_population(s) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
         if(s.invalid_problem)
             return solver_status::invalid_problem;
         const int n = static_cast<int>(x0.size());
@@ -635,10 +625,20 @@ struct runarsson_yao_paper_policy
     }
 
 private:
+    // A population_size above INT32_MAX arrives here negative, since the unsigned-to-int conversion is modular.
     template <typename P>
-    static bool exceeds_storage(const state_type<P>& s)
+    static bool rejects_population(const state_type<P>& s)
     {
-        return s.lambda > state_type<P>::MaxLambda || s.mu > state_type<P>::MaxMu;
+        return s.lambda < 1 || s.mu < 1 || s.lambda > state_type<P>::MaxLambda || s.mu > state_type<P>::MaxMu;
+    }
+
+    // Zero flags a NaN fraction or a count above lambda; the int64 step holds a lambda a float Scalar rounds to 2^31.
+    static int parent_count(int lambda, Scalar fraction)
+    {
+        const Scalar rounded = std::trunc(Scalar(lambda) * fraction);
+        if(!(rounded <= Scalar(lambda)))
+            return 0;
+        return static_cast<int>(std::min<std::int64_t>(static_cast<std::int64_t>(std::max(Scalar(1), rounded)), lambda));
     }
 };
 

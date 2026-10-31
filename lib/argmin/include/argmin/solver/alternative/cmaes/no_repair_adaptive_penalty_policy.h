@@ -261,7 +261,7 @@ struct no_repair_adaptive_penalty_policy
         // Lambda: user override or auto-compute, with bounded-problem minimum.
         // Hansen (2023): lambda >= 4*N recommended for multimodal landscape coverage.
         int pop_lambda = options.lambda.has_value()
-            ? static_cast<int>(options.lambda.value())
+            ? static_cast<int>(std::min<std::uint32_t>(options.lambda.value(), state_type<Problem>::MaxPop + 1u))
             : 0;
         if(pop_lambda == 0 && s.has_bounds)
             pop_lambda = std::max(4 * n,
@@ -1064,7 +1064,7 @@ struct no_repair_adaptive_penalty_policy
         //   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
         s.params = detail::compute_constants<Scalar>(n,
-            static_cast<int>(options.lambda.value_or(0)));
+            static_cast<int>(std::min<std::uint32_t>(options.lambda.value_or(0), state_type<P>::MaxPop + 1u)));
         // Re-evaluate the population-cap guard on the refreshed lambda. A reset that lands over the cap flags the state so step()
         // returns solver_status::invalid_problem instead of resizing the lambda-sized buffers past the static MaxPop bound; a reset
         // back under the cap clears the flag.

@@ -395,7 +395,7 @@ struct pwq_reparameterization_policy
         // a base run stalls on a multimodal landscape, so the base default
         // stays at the efficient Hansen value.
         int pop_lambda = options.lambda.has_value()
-            ? static_cast<int>(options.lambda.value())
+            ? static_cast<int>(std::min<std::uint32_t>(options.lambda.value(), state_type<Problem>::MaxPop + 1u))
             : 0;
         s.params = detail::compute_constants<Scalar>(n, pop_lambda);
 
@@ -1233,7 +1233,7 @@ struct pwq_reparameterization_policy
         // default 4 + floor(3 ln n) init() applies (no widened bounded
         // floor), so a reset matches a fresh run.
         int pop_lambda = options.lambda.has_value()
-            ? static_cast<int>(options.lambda.value())
+            ? static_cast<int>(std::min<std::uint32_t>(options.lambda.value(), state_type<P>::MaxPop + 1u))
             : 0;
         s.params = detail::compute_constants<Scalar>(n, pop_lambda);
         // Re-evaluate the population-cap guard on the refreshed lambda. A reset that lands over the cap flags the state so step()

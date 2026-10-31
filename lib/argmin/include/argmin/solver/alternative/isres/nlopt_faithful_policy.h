@@ -86,7 +86,6 @@ struct nlopt_faithful_policy
         std::optional<Scalar> parent_fraction{};             // default mu = ceil(lambda/7)
         std::optional<Scalar> ranking_probability{};         // default pf = 0.45
 
-        // RNG seed.
         std::optional<std::uint64_t> seed{};
 
         // Stall + feasibility (inherited from production isres_policy).
@@ -260,24 +259,15 @@ struct nlopt_faithful_policy
         state_type<Problem> s;
         s.problem = &problem;
 
-        // Bounds.
         s.lower = problem.lower_bounds();
         s.upper = problem.upper_bounds();
 
-        // Constraint counts.
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
         const int n_c = s.n_eq + s.n_ineq;
 
-        // Population parameters.
-        s.lambda = static_cast<int>(
-            options.population_size.value_or(
-                static_cast<std::uint32_t>(20 * (n + 1))));
-        const Scalar frac = options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0));
-        // mu = ceil(lambda * frac) (NLopt isres.c: mu = ceil(pop/7)),
-        // NOT a truncating int() cast: at lambda=60 the default fraction
-        // gives ceil(60/7) = 9 survivors, not int(8.571) = 8.
-        s.mu = std::max(1, static_cast<int>(std::ceil(static_cast<Scalar>(s.lambda) * frac)));
+        s.lambda = static_cast<int>(options.population_size.value_or(static_cast<std::uint32_t>(20 * (n + 1))));
+        s.mu = parent_count(s.lambda, options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0)));
         s.pf = options.ranking_probability.value_or(Scalar(0.45));
         // The alpha state field carries the sigma-smoothing weight,
         // NOT pull-to-best (which this variant does not implement).
@@ -285,14 +275,13 @@ struct nlopt_faithful_policy
         s.alpha = options.sigma_smoothing_weight.value_or(Scalar(0.2));
         s.rates = detail::compute_es_rates<Scalar>(n);
 
-        // Seed RNG (xoshiro256+).
         const std::uint64_t seed = options.seed.value_or(
             static_cast<std::uint64_t>(std::random_device{}()));
         s.rng.emplace(seed);
 
         // A resize past the compile-time max-columns bound is undefined behavior, so a population the bounded storage
         // cannot hold latches before the first resize.
-        s.invalid_problem = exceeds_storage(s);
+        s.invalid_problem = rejects_population(s);
         if(s.invalid_problem)
         {
             s.x = x0;
@@ -816,7 +805,7 @@ struct nlopt_faithful_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        s.invalid_problem = exceeds_storage(s) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        s.invalid_problem = rejects_population(s) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
         if(s.invalid_problem)
             return solver_status::invalid_problem;
         const int n = static_cast<int>(x0.size());
@@ -867,10 +856,21 @@ struct nlopt_faithful_policy
     }
 
 private:
+    // A population_size above INT32_MAX arrives here negative, since the unsigned-to-int conversion is modular.
     template <typename P>
-    static bool exceeds_storage(const state_type<P>& s)
+    static bool rejects_population(const state_type<P>& s)
     {
-        return s.lambda > state_type<P>::MaxLambda || s.mu > state_type<P>::MaxMu;
+        return s.lambda < 1 || s.mu < 1 || s.lambda > state_type<P>::MaxLambda || s.mu > state_type<P>::MaxMu;
+    }
+
+    // mu = ceil(lambda * frac) (NLopt isres.c: mu = ceil(pop/7)), not a truncating cast: ceil(60/7) = 9, not 8. Zero
+    // flags a NaN fraction or a count above lambda; the int64 step holds a lambda a float Scalar rounds to 2^31.
+    static int parent_count(int lambda, Scalar fraction)
+    {
+        const Scalar rounded = std::ceil(Scalar(lambda) * fraction);
+        if(!(rounded <= Scalar(lambda)))
+            return 0;
+        return static_cast<int>(std::min<std::int64_t>(static_cast<std::int64_t>(std::max(Scalar(1), rounded)), lambda));
     }
 };
 
