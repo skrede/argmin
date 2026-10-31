@@ -63,12 +63,12 @@ std::size_t first_step_soc_retries(double nan_beyond)
 
 }
 
-TEST_CASE("kraft_slsqp rejects more equality rows than variables before its first step", "[known-defect][!shouldfail]")
+TEST_CASE("kraft_slsqp rejects more equality rows than variables before its first step", "[sqp]")
 {
     CHECK(status_after_construction<kraft_slsqp_policy<>>() == solver_status::invalid_problem);
 }
 
-TEST_CASE("filter_slsqp rejects more equality rows than variables before its first step", "[known-defect][!shouldfail]")
+TEST_CASE("filter_slsqp rejects more equality rows than variables before its first step", "[sqp]")
 {
     CHECK(status_after_construction<filter_slsqp_policy<>>() == solver_status::invalid_problem);
 }

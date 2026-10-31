@@ -45,7 +45,6 @@
 #include <Eigen/Cholesky>
 
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -191,36 +190,15 @@ struct nw_sqp_policy
         Eigen::Vector<Scalar, N> g;
         Eigen::VectorX<Scalar> c_eq;
         Eigen::VectorX<Scalar> c_ineq;
-        // J_eq / J_ineq match the QP solver's expected
-        // Matrix<Scalar, Meq, N> shape so the policy can pass them
-        // directly into qp_solver.solve without an A_eq/A_ineq local
-        // copy (the prior pattern existed because s.J_eq was MatrixXd
-        // — fully dynamic cols — and would not deduce to Matrix<,, N>
-        // on the templated solve call when N is a compile-time bound).
+        // Matrix<Scalar, Dynamic, N>, not MatrixX, so the Jacobians deduce on the templated qp_solver.solve without a local copy.
         Eigen::Matrix<Scalar, Eigen::Dynamic, N> J_eq;
         Eigen::Matrix<Scalar, Eigen::Dynamic, N> J_ineq;
         Eigen::Vector<Scalar, N> lower;
         Eigen::Vector<Scalar, N> upper;
         Eigen::VectorX<Scalar> lambda;
 
-        // Cross-policy state-resident buffer struct. Consolidates the
-        // per-step / per-line-search trial buffers, the BFGS curvature-pair
-        // buffers, the constraint-axis workspaces (c_all, c_trial,
-        // b_eq / b_ineq, lam / lam_eq / lam_ineq, kkt_lambda_eq /
-        // kkt_mu_ineq), and the constraint Jacobian pair (J_all and the
-        // J_all_old cached copy that supports the BFGS curvature-pair on
-        // the post-step Jacobian re-evaluation path). nw_sqp does not use
-        // the SOC-retry b_eq_soc_buf / b_ineq_soc_buf or the kraft-only
-        // pre-factored Hessian E_buf / f_buf members; those remain present
-        // (zero-sized after resize on the n_eq / n_ineq dynamic axes) for
-        // cross-policy struct consistency.
-        //
-        // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers
-        //               (in-tree precedent: generalizes the per-policy
-        //                *_buf state-resident layout).
-        // Reference: N&W 2e Section 18.
-        //
-        // argmin variant: cross-policy state-resident buffer struct.
+        // nw_sqp leaves the SOC-retry b_eq_soc_buf / b_ineq_soc_buf and the kraft-only E_buf / f_buf unused; they stay
+        // zero-sized for cross-policy struct consistency.
         argmin::detail::sqp_state_buffers<Scalar, N> bufs;
 
         Eigen::MatrixX<Scalar> AAt_workspace;      // Feasibility LDLT workspace
@@ -239,6 +217,7 @@ struct nw_sqp_policy
         std::uint32_t iteration{0};
         int n_eq{0};
         int n_ineq{0};
+        bool invalid_problem{false};
     };
 
     template <typename Problem, typename Convergence>
@@ -268,11 +247,7 @@ struct nw_sqp_policy
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
         const int m = s.n_eq + s.n_ineq;
-
-        // Contract: runtime_m <= state_type<Problem>::M when the cap is static -- a smaller runtime count is supported, but exceeding the declared cap overflows the inline result-multiplier storage.
-        if constexpr(state_type<Problem>::M != argmin::dynamic_dimension)
-            assert(m <= state_type<Problem>::M
-                   && "runtime constraint count exceeds the problem's declared constraint_count cap");
+        s.invalid_problem = rejects_shape(s);
 
         s.x = x0;
         s.g.setZero(n);
@@ -346,6 +321,8 @@ struct nw_sqp_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         const int n = static_cast<int>(s.x.size());
         const int m = s.n_eq + s.n_ineq;
 
@@ -358,10 +335,7 @@ struct nw_sqp_policy
         // options.bfgs_reset_max. On cap exhaustion, return a null-step
         // with diagnostics.bfgs_reset_count populated.
         //
-        // Adopted from: argmin/solver/kraft_slsqp_policy.h::step retry-loop
-        //               pattern (in-tree precedent).
-        //               NLopt slsqp.c:1890-1895 (ireset retry pattern,
-        //               max=5).
+        // Adopted from: NLopt slsqp.c:1890-1895 (ireset retry pattern, max=5).
         // Reference: NLopt slsqp.c slsqpb_ outer loop (line-search exhaustion
         //            fallback);
         //            N&W 2e Section 3.3 (recovery from non-descent).
@@ -1164,6 +1138,9 @@ struct nw_sqp_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = rejects_shape(s);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         const int m = s.n_eq + s.n_ineq;
         // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so a dynamic-N warm reset does not
         // materialize a heap temporary when the problem method takes a plain vector.
@@ -1187,6 +1164,8 @@ struct nw_sqp_policy
                               Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
+        if(status != solver_status::running)
+            return status;
         s.hessian.reset();
         s.sigma = Scalar(1.0);
         s.lambda.setZero();
@@ -1194,6 +1173,17 @@ struct nw_sqp_policy
     }
 
 private:
+    // The multiplier storage is bounded by the declared constraint count, and the QP's equality projection needs
+    // no more equality rows than variables; a reset must also see the row counts the state was sized for.
+    template <typename Problem>
+    static bool rejects_shape(const state_type<Problem>& s)
+    {
+        const Problem& problem = *s.problem;
+        return detail::exceeds_capacity<state_type<Problem>::M>(problem.num_equality() + problem.num_inequality())
+               || detail::more_equalities_than_variables(problem.num_equality(), problem.dimension())
+               || detail::constraint_rows_changed(problem, s.n_eq, s.n_ineq);
+    }
+
     static bool has_finite_box(const Eigen::Vector<Scalar, N>& lower,
                                const Eigen::Vector<Scalar, N>& upper)
     {

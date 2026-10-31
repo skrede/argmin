@@ -235,23 +235,6 @@ struct filter_slsqp_policy
         detail::qp_result<Scalar, N> qp_res;
         detail::qp_result<Scalar, N> soc_qp_res;
 
-        // Cross-policy state-resident buffer struct. Consolidates the
-        // per-step / per-line-search trial buffers, the BFGS curvature-
-        // pair buffers, the constraint-axis workspaces (c_all, c_trial,
-        // b_eq / b_ineq, b_eq_soc / b_ineq_soc, lam / lam_eq / lam_ineq,
-        // kkt_lambda_eq / kkt_mu_ineq), the constraint Jacobian pair
-        // (J_all and the J_all_old cached copy that eliminates the
-        // second constraint_jacobian(x_old, ...) call on the BFGS
-        // curvature-pair path), and the
-        // pre-factored Hessian buffers (E_buf / f_buf) consumed by
-        // kraft_lsq_qp_recovery_solver::solve_with_factored_hessian.
-        //
-        // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers
-        //               (in-tree precedent: generalizes the kraft *_buf
-        //                state-resident layout).
-        // Reference: N&W 2e Section 18.
-        //
-        // argmin variant: cross-policy state-resident buffer struct.
         argmin::detail::sqp_state_buffers<Scalar, N> bufs;
 
         std::uint64_t line_search_calls{0};
@@ -259,6 +242,7 @@ struct filter_slsqp_policy
         int n_eq{0};
         int n_ineq{0};
         int n{0};
+        bool invalid_problem{false};
     };
 
     template <typename Problem, typename Convergence>
@@ -308,11 +292,8 @@ struct filter_slsqp_policy
             s.n_eq = 0;
             s.n_ineq = 0;
         }
+        s.invalid_problem = rejects_shape(s);
 
-        // Cross-policy state-resident buffer struct: sizes all per-step
-        // workspaces (n-sized iterate / direction / curvature-pair buffers,
-        // m-sized constraint workspaces, and the pre-factored Hessian E / f
-        // buffers consumed by kraft_lsq_qp_recovery_solver) in one call.
         s.bufs.resize(n, s.n_eq, s.n_ineq);
 
         Scalar h_0 = Scalar(0.0);
@@ -371,6 +352,8 @@ struct filter_slsqp_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         const int n = s.n;
 
         // Cold-start mu calibration: documented no-op for filter_slsqp.
@@ -393,10 +376,7 @@ struct filter_slsqp_policy
         //
         // argmin variant: filter_slsqp main loop is filter-based, so the
         //                 main-path cold-start is a no-op; sigma calibration
-        //                 lives in the restoration helper. Future helper
-        //                 extraction may unify these into a single shared
-        //                 cold-start site; preserved in current form for
-        //                 bit-identical regression compatibility.
+        //                 lives in the restoration helper.
 
         // BFGS-reset retry layered after the restoration path.
         //
@@ -1187,6 +1167,9 @@ struct filter_slsqp_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        s.invalid_problem = rejects_shape(s);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so
         // a dynamic-N warm reset does not materialize a heap temporary when the
         // problem method takes a plain vector.
@@ -1209,12 +1192,8 @@ struct filter_slsqp_policy
                 h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);
             }
         }
-        // Clear then re-seed the filter at the NEW x0. A warm reset must not
-        // inherit the previous run's h_max ceiling: a high-violation restart
-        // that kept a too-tight ceiling would reject its own first step. Seed
-        // exactly as init() / reset_clear() -- h_max = 1e4 * max(1, h_0) with
-        // the configured envelope margins.
-        // Reference: Wachter and Biegler 2006 eq. (8), Section 2.3.
+        // A warm reset re-seeds h_max at the new x0: a high-violation restart that kept the previous run's tighter
+        // ceiling would reject its own first step. Reference: Wachter and Biegler 2006 eq. (8), Section 2.3.
         s.filter.clear();
         s.filter.initialize(Scalar(1e4) * std::max(Scalar(1.0), h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
@@ -1226,11 +1205,24 @@ struct filter_slsqp_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
+        if(status != solver_status::running)
+            return status;
         s.hessian.reset();
         return status;
     }
 
 private:
+    // lsei's equality QR needs no more equality rows than variables; a reset must also see the row counts the state
+    // was sized for.
+    template <typename P>
+    static bool rejects_shape(const state_type<P>& s)
+    {
+        if constexpr(constrained<P, Scalar>)
+            return detail::more_equalities_than_variables(s.problem->num_equality(), s.n) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        else
+            return false;
+    }
+
     // Lagrangian gradient norm for KKT-consistent stationarity reporting.
     // grad_L = grad_f - [J_eq; J_ineq]^T * lambda. At a constrained optimum
     // grad_L vanishes (N&W eq. 12.34) while raw ||grad_f|| in general does

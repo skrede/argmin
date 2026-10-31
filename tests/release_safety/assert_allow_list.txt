@@ -3,7 +3,5 @@ lib/argmin/include/argmin/detail/active_set_qp.h|assert(m_eq <= n
 lib/argmin/include/argmin/detail/householder_apply.h|assert(dst.cols() == 1);
 
 # public-input guards awaiting a runtime check
-lib/argmin/include/argmin/solver/nw_sqp_policy.h|assert(m <= state_type<Problem>::M
-lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h|assert(m <= state_type<Problem>::M
 lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h|assert(problem.num_equality() == 0);
 lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h|assert(problem.num_equality() == 0

@@ -4,6 +4,8 @@
 #include "argmin/result/status.h"
 #include "argmin/result/step_result.h"
 
+#include "argmin/types.h"
+
 #include <Eigen/Core>
 
 #include <limits>
@@ -42,6 +44,24 @@ Scalar rejected_gradient_norm(const State& s)
         return s.g.norm();
     else
         return std::numeric_limits<Scalar>::quiet_NaN();
+}
+
+// A static row capacity is a hard storage bound; dynamic_dimension stays a runtime capacity with no bound to exceed.
+template <int Capacity>
+bool exceeds_capacity(Eigen::Index rows)
+{
+    return Capacity != dynamic_dimension && rows > Capacity;
+}
+
+inline bool more_equalities_than_variables(Eigen::Index n_eq, Eigen::Index n)
+{
+    return n_eq > n;
+}
+
+template <typename Problem>
+bool constraint_rows_changed(const Problem& problem, Eigen::Index n_eq, Eigen::Index n_ineq)
+{
+    return problem.num_equality() != n_eq || problem.num_inequality() != n_ineq;
 }
 
 // The result of a step the policy refuses to take on a problem it rejected.

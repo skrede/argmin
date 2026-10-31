@@ -258,22 +258,6 @@ struct kraft_slsqp_policy
         detail::qp_result<Scalar, N> qp_res;
         detail::qp_result<Scalar, N> soc_qp_res;
 
-        // Cross-policy state-resident buffer struct. Consolidates the
-        // per-step / per-line-search trial buffers, the BFGS curvature-
-        // pair buffers, the constraint-axis workspaces (c_all, c_trial,
-        // b_eq / b_ineq, b_eq_soc / b_ineq_soc, lam / lam_eq / lam_ineq,
-        // kkt_lambda_eq / kkt_mu_ineq), the constraint Jacobian pair
-        // (J_all and the J_all_old cached copy that eliminates the second
-        // constraint_jacobian(x_old, ...) call on the BFGS curvature-pair
-        // path), and the pre-factored Hessian buffers (E_buf / f_buf)
-        // consumed by kraft_lsq_qp_recovery_solver::solve_with_factored_hessian.
-        //
-        // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers
-        //               (in-tree precedent: generalizes the kraft *_buf
-        //                state-resident layout).
-        // Reference: N&W 2e Section 18.
-        //
-        // argmin variant: cross-policy state-resident buffer struct.
         argmin::detail::sqp_state_buffers<Scalar, N> bufs;
 
         // Step direction combined with the second-order correction (Maratos
@@ -300,6 +284,7 @@ struct kraft_slsqp_policy
         int n_eq{0};
         int n_ineq{0};
         int n{0};
+        bool invalid_problem{false};
     };
 
     template <typename Problem, typename Convergence>
@@ -354,11 +339,8 @@ struct kraft_slsqp_policy
             s.n_eq = 0;
             s.n_ineq = 0;
         }
+        s.invalid_problem = rejects_shape(s);
 
-        // Cross-policy state-resident buffer struct: sizes all per-step
-        // workspaces (n-sized iterate / direction / curvature-pair buffers,
-        // m-sized constraint workspaces, and the pre-factored Hessian E / f
-        // buffers consumed by kraft_lsq_qp_recovery_solver) in one call.
         s.bufs.resize(n, s.n_eq, s.n_ineq);
 
         if constexpr(constrained<Problem, Scalar>)
@@ -419,13 +401,10 @@ struct kraft_slsqp_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
-        // Invariant at top of step: s.g, s.c_eq/c_ineq, s.J_eq/J_ineq are
-        // already fresh at s.x. Maintained by init() / reset() / the prior
-        // step()'s post-update block at the bottom of this function, which
-        // writes gradient and constraint data for the accepted new iterate
-        // before returning. step_budget_solver::step_n does not mutate state.x
-        // between policy.step() calls, so no top-of-step re-evaluation is
-        // needed.
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
+        // Invariant: s.g, s.c_eq/c_ineq and s.J_eq/J_ineq are fresh at s.x (init, reset and the previous step's bottom
+        // block write them, and the drivers never move state.x between steps), so no top-of-step re-evaluation is needed.
 
         // BFGS-reset retry loop on line-search exhaustion (NLopt
         // slsqp.c:1890-1895 ireset parity). Wraps factor -> QP solve ->
@@ -1094,9 +1073,10 @@ struct kraft_slsqp_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        // Land the caller buffer into state storage first, then evaluate the problem at s.x
-        // (a concrete Eigen::Vector of the exact argument type) rather than at the Ref: a
-        // dynamic-N Ref bound to a problem method taking a plain VectorXd would otherwise
+        s.invalid_problem = rejects_shape(s);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
+        // Evaluate at s.x, not the Ref: a dynamic-N Ref bound to a problem method taking a plain VectorXd would
         // materialize a heap temporary, defeating the allocation-free warm path.
         s.x = x0;
         s.objective_value = s.problem->value(s.x);
@@ -1122,12 +1102,25 @@ struct kraft_slsqp_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
+        if(status != solver_status::running)
+            return status;
         s.hessian.reset();
         s.sigma = options.initial_penalty;
         return status;
     }
 
 private:
+    // lsei's equality QR needs no more equality rows than variables; a reset must also see the row counts the state
+    // was sized for.
+    template <typename P>
+    static bool rejects_shape(const state_type<P>& s)
+    {
+        if constexpr(constrained<P, Scalar>)
+            return detail::more_equalities_than_variables(s.problem->num_equality(), s.n) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
+        else
+            return false;
+    }
+
     // Lagrangian gradient norm for KKT-consistent stationarity reporting.
     //
     // grad_L = grad_f - [J_eq; J_ineq]^T * lambda. At a constrained optimum
