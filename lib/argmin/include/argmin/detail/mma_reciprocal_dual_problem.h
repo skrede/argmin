@@ -48,6 +48,7 @@
 #include <Eigen/Core>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <limits>
 
@@ -138,7 +139,6 @@ struct mma_reciprocal_dual_problem
     }
 
 private:
-    // Compute primal x(y) per component and populate v_obj, v_con.
     void eval_primal(const Eigen::Vector<Scalar, M>& y) const
     {
         if(cache_valid_ && cache_y_.size() == y.size() && cache_y_ == y)
@@ -148,11 +148,11 @@ private:
         const auto& U = *U_out;
         const auto& alpha = *alpha_out;
         const auto& beta = *beta_out;
+        assert(!(alpha.array() > beta.array()).any());
         const auto& p0 = *p_obj_out;
         const auto& q0 = *q_obj_out;
         const auto& pc = *p_con_out;
         const auto& qc = *q_con_out;
-
         const auto& rc = *r_con_out;
 
         if(x_primal.size() != n_primal)

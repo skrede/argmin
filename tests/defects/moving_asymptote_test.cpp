@@ -73,12 +73,12 @@ rho_wval::state_type<scalar_bowl> first_rho_wval_step_on_wide_quadratic()
 
 }
 
-TEST_CASE("mma re-anchors its asymptotes around the point of a hot reset", "[known-defect][!shouldfail]")
+TEST_CASE("mma re-anchors its asymptotes around the point of a hot reset", "[moving_asymptote]")
 {
     CHECK(asymptotes_bracket_hot_reset_point<mma_policy<>>());
 }
 
-TEST_CASE("gcmma re-anchors its asymptotes around the point of a hot reset", "[known-defect][!shouldfail]")
+TEST_CASE("gcmma re-anchors its asymptotes around the point of a hot reset", "[moving_asymptote]")
 {
     CHECK(asymptotes_bracket_hot_reset_point<gcmma_policy<>>());
 }

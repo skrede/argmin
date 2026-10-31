@@ -25,6 +25,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/problem_shape.h"
+#include "argmin/detail/bound_projection.h"
 #include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/mma_raa_augmented_dual_problem.h"
 #include "argmin/result/step_result.h"
@@ -161,7 +162,19 @@ struct raa_augmented_policy
         s.problem = &problem;
         s.invalid_problem = problem.num_equality() > 0 || mismatched;
 
-        s.x = x0;
+        if constexpr(bound_constrained<Problem, Scalar>)
+        {
+            s.lower = problem.lower_bounds();
+            s.upper = problem.upper_bounds();
+        }
+        else
+        {
+            constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+            s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
+        }
+
+        s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
         s.g.resize(n);
         s.c_ineq.resize(rows);
         s.J_ineq.resize(rows, n);
@@ -180,35 +193,23 @@ struct raa_augmented_policy
         s.c_dual_ref.setOnes(rows);
         s.c_dual.resize(rows);
 
-        s.f = problem.value(x0);
-        problem.gradient(x0, s.g);
+        s.f = problem.value(s.x);
+        problem.gradient(s.x, s.g);
         if(m > 0 && !s.invalid_problem)
         {
             Eigen::VectorX<Scalar> c_tmp(m);
-            problem.constraints(x0, c_tmp);
+            problem.constraints(s.x, c_tmp);
             s.c_ineq = c_tmp;
             Eigen::MatrixX<Scalar> J_tmp(m, n);
-            problem.constraint_jacobian(x0, J_tmp);
+            problem.constraint_jacobian(s.x, J_tmp);
             s.J_ineq = J_tmp;
             for(int i = 0; i < m; ++i)
                 s.c_dual_ref[i] = std::max(std::abs(s.c_ineq[i]), Scalar(1.0));
         }
 
-        if constexpr(bound_constrained<Problem, Scalar>)
-        {
-            s.lower = problem.lower_bounds();
-            s.upper = problem.upper_bounds();
-        }
-        else
-        {
-            constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-            s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
-            s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
-        }
-
         init_asymptotes(s);
-        s.x_old1 = x0;
-        s.x_old2 = x0;
+        s.x_old1 = s.x;
+        s.x_old2 = s.x;
         s.iteration = 0;
         return s;
     }
@@ -535,14 +536,15 @@ struct raa_augmented_policy
         s.invalid_problem = s.problem->num_equality() > 0 || detail::mismatches_fixed_count<state_type<P>::M>(m) || m != s.c_ineq.size();
         if(s.invalid_problem)
             return solver_status::invalid_problem;
-        s.x = x0;
-        s.f = s.problem->value(x0);
-        s.problem->gradient(x0, s.g);
+        s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
+        s.f = s.problem->value(s.x);
+        s.problem->gradient(s.x, s.g);
         refresh_inequality_rows(s);
         s.iteration = 0;
-        s.x_old1 = x0;
-        s.x_old2 = x0;
+        s.x_old1 = s.x;
+        s.x_old2 = s.x;
         s.y_dual.setZero();
+        init_asymptotes(s);
         const Scalar ri = s.opts.raa_init.value_or(mma_defaults<Scalar>::raa_init);
         s.raa_obj = ri;
         s.raa_con.setConstant(ri);
@@ -552,10 +554,7 @@ struct raa_augmented_policy
     template <typename P>
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        const solver_status status = reset(s, x0);
-        if(status == solver_status::running)
-            init_asymptotes(s);
-        return status;
+        return reset(s, x0);
     }
 
 private:

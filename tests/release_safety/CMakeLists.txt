@@ -11,6 +11,7 @@ add_executable(argmin_release_safety_tests
     reset_length_moving_stochastic_test.cpp
     sqp_constraint_shape_test.cpp
     moving_asymptote_shape_test.cpp
+    hot_reset_test.cpp
 )
 target_include_directories(argmin_release_safety_tests
     PRIVATE

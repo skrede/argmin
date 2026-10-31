@@ -41,6 +41,7 @@
 #include <Eigen/Core>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <limits>
 
@@ -64,7 +65,6 @@ struct mma_augmented_dual_problem
     const Eigen::Matrix<Scalar, M, N>* p_con_out{};
     const Eigen::Matrix<Scalar, M, N>* q_con_out{};
 
-    // Approximation constants.
     Scalar r_obj{0};
     const Eigen::Vector<Scalar, M>* r_con_out{};
 
@@ -209,6 +209,7 @@ private:
         const auto& x_k = *x_k_out;
         const auto& alpha = *alpha_out;
         const auto& beta = *beta_out;
+        assert(!(alpha.array() > beta.array()).any());
         const auto& w = *w_out;
         const auto& p0 = *p_obj_out;
         const auto& q0 = *q_obj_out;
@@ -235,8 +236,7 @@ private:
                 P += y[i] * pc(i, j);
                 Q += y[i] * qc(i, j);
             }
-            x_primal[j] = solve_per_component(
-                P, Q, R, w[j], L[j], U[j], x_k[j], alpha[j], beta[j]);
+            x_primal[j] = solve_per_component(P, Q, R, w[j], L[j], U[j], x_k[j], alpha[j], beta[j]);
         }
 
         gval = r_obj;

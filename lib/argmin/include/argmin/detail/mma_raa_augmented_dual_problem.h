@@ -41,6 +41,7 @@
 #include <Eigen/Core>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <limits>
 
@@ -95,8 +96,7 @@ struct mma_raa_augmented_dual_problem
     // eval_primal is a pure function of y; the box-constrained inner solver
     // evaluates value() and gradient() at the same y (line search). Cache
     // the last y and reuse the populated gval/gcval/dval_sum/x_primal. The
-    // outer loop calls invalidate_cache() whenever it mutates raa (per inner
-    // iteration).
+    // outer loop calls invalidate_cache() whenever it mutates raa (per inner iteration).
     mutable Eigen::Vector<Scalar, M> cache_y_;
     mutable bool cache_valid_{false};
 
@@ -238,6 +238,7 @@ private:
         const auto& x_k = *x_k_out;
         const auto& alpha = *alpha_out;
         const auto& beta = *beta_out;
+        assert(!(alpha.array() > beta.array()).any());
         const auto& p0 = *p_obj_out;
         const auto& q0 = *q_obj_out;
         const auto& pc = *p_con_out;
@@ -263,8 +264,7 @@ private:
                 P += y[i] * pc(i, j);
                 Q += y[i] * qc(i, j);
             }
-            x_primal[j] = solve_per_component(
-                P, Q, R, L[j], U[j], x_k[j], alpha[j], beta[j]);
+            x_primal[j] = solve_per_component(P, Q, R, L[j], U[j], x_k[j], alpha[j], beta[j]);
         }
 
         gval = r_obj;

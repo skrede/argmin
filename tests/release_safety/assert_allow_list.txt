@@ -1,3 +1,6 @@
 # internal invariants
 lib/argmin/include/argmin/detail/active_set_qp.h|assert(m_eq <= n
 lib/argmin/include/argmin/detail/householder_apply.h|assert(dst.cols() == 1);
+lib/argmin/include/argmin/detail/mma_reciprocal_dual_problem.h|assert(!(alpha.array() > beta.array()).any());
+lib/argmin/include/argmin/detail/mma_augmented_dual_problem.h|assert(!(alpha.array() > beta.array()).any());
+lib/argmin/include/argmin/detail/mma_raa_augmented_dual_problem.h|assert(!(alpha.array() > beta.array()).any());
