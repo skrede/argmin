@@ -6,8 +6,8 @@
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/step_budget_solver.h"
-#include "argmin/solver/projected_gn_policy.h"
 #include "argmin/solver/filter_trsqp_policy.h"
+#include "argmin/solver/projected_gn_policy.h"
 #include "argmin/solver/augmented_lagrangian_policy.h"
 #include "argmin/solver/projected_gradient_gn_policy.h"
 
