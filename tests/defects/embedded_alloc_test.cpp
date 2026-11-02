@@ -51,7 +51,7 @@ TEST_CASE("kraft_slsqp steps without heap allocation at 48 equality rows", "[kno
     CHECK(measure_equality_rich_kraft().eigen_malloc == 0);
 }
 
-TEST_CASE("constructing a fixed-dimension solver from a fixed start allocates no more than the policy's init", "[known-defect][!shouldfail]")
+TEST_CASE("constructing a fixed-dimension solver from a fixed start allocates no more than the policy's init", "[embedded]")
 {
     const defects::coupled_quadratic<4, 0, 0> problem;
     const Eigen::Vector<double, 4> x0 = problem.initial_point();

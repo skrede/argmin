@@ -25,6 +25,18 @@ bool start_length_ok(const Eigen::MatrixBase<Derived>& x0, Eigen::Index n)
         return x0.size() == n;
 }
 
+// A problem that reports no dimension leaves a dynamic-N start's length unconstrained.
+template <int N, typename Problem>
+Eigen::Index problem_start_dimension(const Problem& problem, Eigen::Index start_length)
+{
+    if constexpr(N != dynamic_dimension)
+        return N;
+    else if constexpr(requires { problem.dimension(); })
+        return problem.dimension();
+    else
+        return start_length;
+}
+
 // A dynamic-N state keeps the dimension it was built with, so once the problem reports another one no start matches.
 template <int N, typename Problem, typename State>
 Eigen::Index start_dimension(const Problem* problem, const State& s)

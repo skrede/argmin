@@ -63,10 +63,10 @@ file	lib/argmin/include/argmin/solver/nw_sqp_policy.h	-	1208
 file	lib/argmin/include/argmin/solver/projected_gn_policy.h	-	370
 file	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	-	452
 file	lib/argmin/include/argmin/solver/restarting_policy.h	-	265
-file	lib/argmin/include/argmin/solver/step_and_time_budget_solver.h	-	289
-file	lib/argmin/include/argmin/solver/step_budget_solver.h	-	298
-file	lib/argmin/include/argmin/solver/stepper.h	-	256
-file	lib/argmin/include/argmin/solver/time_budget_solver.h	-	293
+file	lib/argmin/include/argmin/solver/step_and_time_budget_solver.h	-	278
+file	lib/argmin/include/argmin/solver/step_budget_solver.h	-	283
+file	lib/argmin/include/argmin/solver/stepper.h	-	241
+file	lib/argmin/include/argmin/solver/time_budget_solver.h	-	282
 file	lib/argmin/include/argmin/solver/tr_sqp_policy.h	-	1292
 file	lib/argmin/include/argmin/test_functions/ik_pose_batch.h	-	319
 file	lib/argmin/include/argmin/test_functions/more_garbow_hillstrom.h	-	489

@@ -87,6 +87,25 @@ step_result<Scalar> rejected_step(const State& s)
     };
 }
 
+// The result of a step on a state that was never built: there is no iterate to report.
+template <typename Scalar>
+step_result<Scalar> unbuilt_step()
+{
+    constexpr Scalar nan = std::numeric_limits<Scalar>::quiet_NaN();
+    return step_result<Scalar>{
+        .objective_value = nan,
+        .gradient_norm = nan,
+        .step_size = Scalar(0.0),
+        .objective_change = Scalar(0.0),
+        .improved = false,
+        .is_null_step = true,
+        .constraint_violation = nan,
+        .x_norm = nan,
+        .policy_status = solver_status::invalid_problem,
+        .evaluations = 0,
+    };
+}
+
 }
 
 #endif

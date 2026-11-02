@@ -91,6 +91,10 @@ template <typename Policy, int N = dynamic_dimension, typename Problem = void,
           typename Convergence = default_convergence<typename Policy::scalar_type>>
 class solver_core
 {
+    struct build_tag
+    {
+    };
+
 public:
     using policy_type = Policy;
     using scalar_type = typename Policy::scalar_type;
@@ -173,141 +177,59 @@ public:
         return p;
     }
 
-    template <typename P>
-    solver_core(Policy policy, const P& problem,
-                const Eigen::VectorX<scalar_type>& x0,
-                const solver_options<Convergence>& opts = {})
-        : policy_{std::move(policy)}
-        , max_iterations_{opts.max_iterations}
-        , constraint_tolerance_{opts.constraint_tolerance}
-        , feasibility_tolerance_{opts.feasibility_tolerance}
-        , problem_ptr_{bind_problem(problem)}
-        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
-    {
-        store_convergence(opts.convergence);
-        forward_solver_hints(opts);
-        if constexpr(requires { policy_.options; })
-            forward_policy_hints(policy_.options);
-    }
+    template <typename P, typename Derived>
+    solver_core(Policy policy, const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts = {})
+        : solver_core{build_tag{}, std::move(policy), problem, x0, opts, std::nullopt}
+    {}
 
-    // CTAD converting constructor: accepts an un-rebound policy and rebinds
-    // it to the problem's compile-time dimension, preserving the caller's
-    // configured options. The requires-clause strips cvref from OrigPolicy so
-    // both lvalue and rvalue source policies are accepted (an lvalue deduces
-    // OrigPolicy as a reference type, which has no nested rebind alias).
-    template <typename OrigPolicy, typename P>
+    // CTAD converting constructor: rebinds an un-rebound policy to the problem's compile-time dimension, keeping its
+    // options. cvref is stripped from OrigPolicy because an lvalue deduces a reference type, which has no nested rebind.
+    template <typename OrigPolicy, typename P, typename Derived>
         requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
               && requires { typename std::remove_cvref_t<OrigPolicy>::template rebind<N>; }
               && std::same_as<Policy, typename std::remove_cvref_t<OrigPolicy>::template rebind<N>>
-    solver_core(OrigPolicy&& orig, const P& problem,
-                const Eigen::VectorX<scalar_type>& x0,
-                const solver_options<Convergence>& opts = {})
-        : policy_{rebind_policy(std::forward<OrigPolicy>(orig))}
-        , max_iterations_{opts.max_iterations}
-        , constraint_tolerance_{opts.constraint_tolerance}
-        , feasibility_tolerance_{opts.feasibility_tolerance}
-        , problem_ptr_{bind_problem(problem)}
-        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
-    {
-        store_convergence(opts.convergence);
-        forward_solver_hints(opts);
-        if constexpr(requires { policy_.options; })
-            forward_policy_hints(policy_.options);
-    }
+    solver_core(OrigPolicy&& orig, const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts = {})
+        : solver_core{build_tag{}, rebind_policy(std::forward<OrigPolicy>(orig)), problem, x0, opts, std::nullopt}
+    {}
 
-    template <typename P>
-    solver_core(const P& problem, const Eigen::VectorX<scalar_type>& x0,
-                const solver_options<Convergence>& opts = {})
-        : max_iterations_{opts.max_iterations}
-        , constraint_tolerance_{opts.constraint_tolerance}
-        , feasibility_tolerance_{opts.feasibility_tolerance}
-        , problem_ptr_{bind_problem(problem)}
-        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
-    {
-        store_convergence(opts.convergence);
-        forward_solver_hints(opts);
-        if constexpr(requires { policy_.options; })
-            forward_policy_hints(policy_.options);
-    }
+    template <typename P, typename Derived>
+    solver_core(const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts = {})
+        : solver_core{build_tag{}, Policy{}, problem, x0, opts, std::nullopt}
+    {}
 
-    template <typename P, typename PolicyOpts>
+    template <typename P, typename Derived, typename PolicyOpts>
         requires has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
-    solver_core(Policy policy, const P& problem,
-                const Eigen::VectorX<scalar_type>& x0,
-                const solver_options<Convergence>& opts,
-                const PolicyOpts& policy_opts)
-        : policy_{std::move(policy)}
-        , max_iterations_{opts.max_iterations}
-        , constraint_tolerance_{opts.constraint_tolerance}
-        , feasibility_tolerance_{opts.feasibility_tolerance}
-        , problem_ptr_{bind_problem(problem)}
-        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
-    {
-        store_convergence(opts.convergence);
-        forward_solver_hints(opts);
-        forward_policy_hints(policy_opts);
-    }
+    solver_core(Policy policy, const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts, const PolicyOpts& policy_opts)
+        : solver_core{build_tag{}, std::move(policy), problem, x0, opts, policy_opts}
+    {}
 
-    // CTAD converting constructor with policy options. The explicit
-    // policy_opts (already rebound-typed) is installed by init(); the
-    // requires-clause strips cvref from OrigPolicy so an lvalue source policy
-    // is accepted.
-    template <typename OrigPolicy, typename P, typename PolicyOpts>
+    // CTAD converting constructor with policy options: the explicit policy_opts, already of the rebound type, are
+    // installed by init.
+    template <typename OrigPolicy, typename P, typename Derived, typename PolicyOpts>
         requires (!std::same_as<std::remove_cvref_t<OrigPolicy>, Policy>)
               && requires { typename std::remove_cvref_t<OrigPolicy>::template rebind<N>; }
               && std::same_as<Policy, typename std::remove_cvref_t<OrigPolicy>::template rebind<N>>
               && has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
-    solver_core(OrigPolicy&&, const P& problem,
-                const Eigen::VectorX<scalar_type>& x0,
-                const solver_options<Convergence>& opts,
-                const PolicyOpts& policy_opts)
-        : max_iterations_{opts.max_iterations}
-        , constraint_tolerance_{opts.constraint_tolerance}
-        , feasibility_tolerance_{opts.feasibility_tolerance}
-        , problem_ptr_{bind_problem(problem)}
-        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
-    {
-        store_convergence(opts.convergence);
-        forward_solver_hints(opts);
-        forward_policy_hints(policy_opts);
-    }
+    solver_core(OrigPolicy&&, const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts, const PolicyOpts& policy_opts)
+        : solver_core{build_tag{}, Policy{}, problem, x0, opts, policy_opts}
+    {}
 
-    template <typename P, typename PolicyOpts>
+    template <typename P, typename Derived, typename PolicyOpts>
         requires has_options_type<Policy>
               && std::same_as<std::remove_cvref_t<PolicyOpts>, typename Policy::options_type>
-    solver_core(const P& problem, const Eigen::VectorX<scalar_type>& x0,
-                const solver_options<Convergence>& opts,
-                const PolicyOpts& policy_opts)
-        : max_iterations_{opts.max_iterations}
-        , constraint_tolerance_{opts.constraint_tolerance}
-        , feasibility_tolerance_{opts.feasibility_tolerance}
-        , problem_ptr_{bind_problem(problem)}
-        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts, policy_opts)}
-    {
-        store_convergence(opts.convergence);
-        forward_solver_hints(opts);
-        forward_policy_hints(policy_opts);
-    }
+    solver_core(const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts, const PolicyOpts& policy_opts)
+        : solver_core{build_tag{}, Policy{}, problem, x0, opts, policy_opts}
+    {}
 
     // Overload for policies without options_type: the fourth argument is
     // the policy_options_t fallback solver_options and is ignored.
-    template <typename P>
+    template <typename P, typename Derived>
         requires (!has_options_type<Policy>)
-    solver_core(const P& problem, const Eigen::VectorX<scalar_type>& x0,
-                const solver_options<Convergence>& opts,
-                const solver_options<default_convergence<scalar_type>>&)
-        : max_iterations_{opts.max_iterations}
-        , constraint_tolerance_{opts.constraint_tolerance}
-        , feasibility_tolerance_{opts.feasibility_tolerance}
-        , problem_ptr_{bind_problem(problem)}
-        , state_{policy_.init(problem, Eigen::Vector<scalar_type, N>(x0), opts)}
-    {
-        store_convergence(opts.convergence);
-        forward_solver_hints(opts);
-        // No policy hints for policies without options_type.
-    }
+    solver_core(const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts, const solver_options<default_convergence<scalar_type>>&)
+        : solver_core{build_tag{}, Policy{}, problem, x0, opts, std::nullopt}
+    {}
 
     solver_core(const solver_core&) = delete;
     solver_core& operator=(const solver_core&) = delete;
@@ -319,6 +241,8 @@ public:
         , feasibility_tolerance_{other.feasibility_tolerance_}
         , stored_convergence_{other.stored_convergence_}
         , problem_ptr_{other.problem_ptr_}
+        , policy_opts_{std::move(other.policy_opts_)}
+        , built_{other.built_}
         , state_{std::move(other.state_)}
         , iterations_{other.iterations_}
         , function_evaluations_{other.function_evaluations_}
@@ -337,6 +261,8 @@ public:
             feasibility_tolerance_ = other.feasibility_tolerance_;
             stored_convergence_ = other.stored_convergence_;
             problem_ptr_ = other.problem_ptr_;
+            policy_opts_ = std::move(other.policy_opts_);
+            built_ = other.built_;
             state_ = std::move(other.state_);
             iterations_ = other.iterations_;
             function_evaluations_ = other.function_evaluations_;
@@ -383,6 +309,8 @@ public:
     // owns its own stopping decision.
     step_result<scalar_type> step_impl()
     {
+        if(!built_)
+            return detail::unbuilt_step<scalar_type>();
         if(last_status_ == solver_status::invalid_problem)
             return detail::rejected_step<scalar_type>(state_);
         auto result = policy_.step(state_);
@@ -400,7 +328,7 @@ public:
     // line_search_calls on kraft_slsqp_policy::state_type.
     const Convergence& convergence() const { return stored_convergence_; }
 
-    solver_status status() const { return detail::state_rejected(state_) ? solver_status::invalid_problem : last_status_; }
+    solver_status status() const { return !built_ || detail::state_rejected(state_) ? solver_status::invalid_problem : last_status_; }
 
     // The wrapped policy instance (options included). Lets a caller confirm
     // the configuration that actually reached the policy -- notably that a
@@ -415,6 +343,8 @@ public:
 
     scalar_type constraint_violation() const
     {
+        if(!built_)
+            return std::numeric_limits<scalar_type>::quiet_NaN();
         if constexpr(requires { state_.c_eq; state_.c_ineq; })
             return detail::constraint_violation(state_.c_eq, state_.c_ineq);
         else
@@ -450,32 +380,23 @@ public:
     }
 
     // Reset to a new starting point, preserving algorithm state (e.g. L-BFGS curvature pairs). A plain vector
-    // of the matching scalar binds the policy's Eigen::Ref with no conversion temporary.
+    // of the matching scalar binds the policy's Eigen::Ref with no conversion temporary. A state never built
+    // because its construction start was rejected is built here, as the constructor would have.
     template <typename Derived>
     solver_status reset(const Eigen::MatrixBase<Derived>& x0)
     {
-        if(!detail::start_length_ok<N>(x0, detail::start_dimension<N>(problem_ptr_, state_)))
+        if(!detail::start_length_ok<N>(x0, expected_dimension(x0.size())))
             return last_status_ = solver_status::invalid_problem;
-        last_status_ = policy_.reset(state_, x0);
-        iterations_ = 0;
-        function_evaluations_ = 0;
-        last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
-        abort_flag_.store(false, std::memory_order_relaxed);
-        return last_status_;
+        return restart(built_ ? policy_.reset(state_, x0) : build(x0));
     }
 
     // Reset to a new starting point, clearing all algorithm state.
     template <typename Derived>
     solver_status reset_clear(const Eigen::MatrixBase<Derived>& x0)
     {
-        if(!detail::start_length_ok<N>(x0, detail::start_dimension<N>(problem_ptr_, state_)))
+        if(!detail::start_length_ok<N>(x0, expected_dimension(x0.size())))
             return last_status_ = solver_status::invalid_problem;
-        last_status_ = policy_.reset_clear(state_, x0);
-        iterations_ = 0;
-        function_evaluations_ = 0;
-        last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
-        abort_flag_.store(false, std::memory_order_relaxed);
-        return last_status_;
+        return restart(built_ ? policy_.reset_clear(state_, x0) : build(x0));
     }
 
     // Seed best-seen f at loop entry via a direct problem evaluation.
@@ -511,6 +432,8 @@ public:
     //            lagrangian.h); N&W 2e Def 12.1.
     scalar_type seed_best_cv() const
     {
+        if(!built_)
+            return std::numeric_limits<scalar_type>::infinity();
         if constexpr(requires { state_.c_eq; state_.c_ineq; })
             return detail::primal_feasibility_inf(state_.c_eq, state_.c_ineq);
         else
@@ -661,6 +584,9 @@ private:
     scalar_type feasibility_tolerance_{convergence_defaults<scalar_type>::feasibility_tolerance};
     Convergence stored_convergence_{};
     const Problem* problem_ptr_{nullptr};
+    std::optional<policy_options_t<Policy, scalar_type>> policy_opts_;
+    // False when the construction start was rejected: state_ then holds no value but a NaN x.
+    bool built_;
     state_type state_;
     std::uint32_t iterations_{0};
     // Accumulated genuine evaluation count (sum of per-step
@@ -672,6 +598,80 @@ private:
     scalar_type last_gradient_norm_{std::numeric_limits<scalar_type>::quiet_NaN()};
     solver_status last_status_{solver_status::running};
     std::atomic<bool> abort_flag_{false};
+
+    template <typename P, typename Derived>
+    solver_core(build_tag, Policy policy, const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts, std::optional<policy_options_t<Policy, scalar_type>> policy_opts)
+        : policy_{std::move(policy)}
+        , max_iterations_{opts.max_iterations}
+        , constraint_tolerance_{opts.constraint_tolerance}
+        , feasibility_tolerance_{opts.feasibility_tolerance}
+        , problem_ptr_{bind_problem(problem)}
+        , policy_opts_{std::move(policy_opts)}
+        , built_{detail::start_length_ok<N>(x0, detail::problem_start_dimension<N>(problem, x0.size()))}
+        , state_{built_ ? make_state(problem, x0, opts) : unbuilt_state()}
+        , last_status_{built_ ? solver_status::running : solver_status::invalid_problem}
+    {
+        store_convergence(opts.convergence);
+        forward_solver_hints(opts);
+        if(policy_opts_)
+            forward_policy_hints(*policy_opts_);
+        else if constexpr(requires { policy_.options; })
+            forward_policy_hints(policy_.options);
+    }
+
+    // The policy options the constructor received are passed to init again, so a policy that copies them
+    // into its state is rebuilt with them.
+    template <typename P, typename Derived>
+    state_type make_state(const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts)
+    {
+        if constexpr(!std::is_same_v<Derived, vector_type>)
+            return make_state(problem, vector_type(x0), opts);
+        else if constexpr(has_options_type<Policy>)
+            return policy_opts_ ? policy_.init(problem, x0.derived(), opts, *policy_opts_) : policy_.init(problem, x0.derived(), opts);
+        else
+            return policy_.init(problem, x0.derived(), opts);
+    }
+
+    static state_type unbuilt_state()
+    {
+        state_type s;
+        if constexpr(N != dynamic_dimension)
+            s.x = vector_type::Constant(std::numeric_limits<scalar_type>::quiet_NaN());
+        return s;
+    }
+
+    template <typename Derived>
+    solver_status build(const Eigen::MatrixBase<Derived>& x0)
+    {
+        if constexpr(std::is_same_v<Problem, void>)
+            return solver_status::invalid_problem;
+        else
+        {
+            state_ = make_state(*problem_ptr_, x0, {.max_iterations = max_iterations_, .constraint_tolerance = constraint_tolerance_, .feasibility_tolerance = feasibility_tolerance_, .convergence = stored_convergence_});
+            built_ = true;
+            return detail::latch_status(state_);
+        }
+    }
+
+    Eigen::Index expected_dimension(Eigen::Index start_length) const
+    {
+        if constexpr(!std::is_same_v<Problem, void>)
+        {
+            if(!built_)
+                return detail::problem_start_dimension<N>(*problem_ptr_, start_length);
+        }
+        return detail::start_dimension<N>(problem_ptr_, state_);
+    }
+
+    solver_status restart(solver_status status)
+    {
+        last_status_ = status;
+        iterations_ = 0;
+        function_evaluations_ = 0;
+        last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
+        abort_flag_.store(false, std::memory_order_relaxed);
+        return status;
+    }
 };
 }
 

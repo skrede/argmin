@@ -4,7 +4,6 @@
 #include "argmin/types.h"
 #include "argmin/detail/solve_loop.h"
 #include "argmin/detail/solver_core.h"
-#include "argmin/detail/start_point.h"
 #include "argmin/detail/runner_concept_probe.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -64,28 +63,14 @@ class step_budget_solver
 public:
     using core_type = detail::solver_core<Policy, N, Problem, Convergence>;
     using policy_type = Policy;
-    // scalar_type is derived directly from Policy (not core_type) so the x0
-    // constructor parameter mentions only Policy. Routing it through
-    // core_type would drag N/Problem into the (non-deduced) x0 diagnostic and
-    // perturb CTAD guide selection.
     using scalar_type = typename Policy::scalar_type;
     using state_type = typename core_type::state_type;
-
-    template <typename Derived>
-    static Eigen::Vector<scalar_type, N> to_x0(const Eigen::MatrixBase<Derived>& x0)
-    {
-        static_assert(detail::x0_shape_ok<N, Derived>,
-                      "x0 must be a column vector matching the solver dimension "
-                      "N (an N x 1 Eigen vector for fixed N; any n x 1 vector "
-                      "for dynamic_dimension).");
-        return Eigen::Vector<scalar_type, N>(x0);
-    }
 
     template <typename P, typename Derived>
     step_budget_solver(Policy policy, const P& problem,
                        const Eigen::MatrixBase<Derived>& x0,
                        const solver_options<Convergence>& opts = {})
-        : core_{std::move(policy), problem, to_x0(x0), opts}
+        : core_{std::move(policy), problem, x0, opts}
     {}
 
     // CTAD converting constructor: accepts an un-rebound policy and rebinds
@@ -98,13 +83,13 @@ public:
     step_budget_solver(OrigPolicy&& orig, const P& problem,
                        const Eigen::MatrixBase<Derived>& x0,
                        const solver_options<Convergence>& opts = {})
-        : core_{std::forward<OrigPolicy>(orig), problem, to_x0(x0), opts}
+        : core_{std::forward<OrigPolicy>(orig), problem, x0, opts}
     {}
 
     template <typename P, typename Derived>
     step_budget_solver(const P& problem, const Eigen::MatrixBase<Derived>& x0,
                        const solver_options<Convergence>& opts = {})
-        : core_{problem, to_x0(x0), opts}
+        : core_{problem, x0, opts}
     {}
 
     template <typename P, typename Derived, typename PolicyOpts>
@@ -114,7 +99,7 @@ public:
                        const Eigen::MatrixBase<Derived>& x0,
                        const solver_options<Convergence>& opts,
                        const PolicyOpts& policy_opts)
-        : core_{std::move(policy), problem, to_x0(x0), opts, policy_opts}
+        : core_{std::move(policy), problem, x0, opts, policy_opts}
     {}
 
     // CTAD converting constructor with policy options.
@@ -128,7 +113,7 @@ public:
                        const Eigen::MatrixBase<Derived>& x0,
                        const solver_options<Convergence>& opts,
                        const PolicyOpts& policy_opts)
-        : core_{std::forward<OrigPolicy>(orig), problem, to_x0(x0), opts, policy_opts}
+        : core_{std::forward<OrigPolicy>(orig), problem, x0, opts, policy_opts}
     {}
 
     template <typename P, typename Derived, typename PolicyOpts>
@@ -137,7 +122,7 @@ public:
     step_budget_solver(const P& problem, const Eigen::MatrixBase<Derived>& x0,
                        const solver_options<Convergence>& opts,
                        const PolicyOpts& policy_opts)
-        : core_{problem, to_x0(x0), opts, policy_opts}
+        : core_{problem, x0, opts, policy_opts}
     {}
 
     // Overload for policies without options_type: the fourth argument is
@@ -147,7 +132,7 @@ public:
     step_budget_solver(const P& problem, const Eigen::MatrixBase<Derived>& x0,
                        const solver_options<Convergence>& opts,
                        const solver_options<default_convergence<scalar_type>>& policy_opts)
-        : core_{problem, to_x0(x0), opts, policy_opts}
+        : core_{problem, x0, opts, policy_opts}
     {}
 
     step_budget_solver(const step_budget_solver&) = delete;

@@ -4,7 +4,6 @@
 #include "argmin/types.h"
 #include "argmin/detail/solve_loop.h"
 #include "argmin/detail/solver_core.h"
-#include "argmin/detail/start_point.h"
 #include "argmin/detail/runner_concept_probe.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -61,23 +60,13 @@ public:
     using state_type = typename core_type::state_type;
     using result_type = timed_solve_result<scalar_type, N>;
 
-    template <typename Derived>
-    static Eigen::Vector<scalar_type, N> to_x0(const Eigen::MatrixBase<Derived>& x0)
-    {
-        static_assert(detail::x0_shape_ok<N, Derived>,
-                      "x0 must be a column vector matching the solver dimension "
-                      "N (an N x 1 Eigen vector for fixed N; any n x 1 vector "
-                      "for dynamic_dimension).");
-        return Eigen::Vector<scalar_type, N>(x0);
-    }
-
     template <typename P, typename Derived>
     time_budget_solver(Policy policy, const P& problem,
                        const Eigen::MatrixBase<Derived>& x0,
                        const time_budget_options<Convergence>& opts = {})
         : max_time_{opts.max_time}
         , poll_stride_{opts.time_poll_stride}
-        , core_{std::move(policy), problem, to_x0(x0), opts.core}
+        , core_{std::move(policy), problem, x0, opts.core}
     {}
 
     // CTAD converting constructor: rebinds an un-rebound policy to the
@@ -91,7 +80,7 @@ public:
                        const time_budget_options<Convergence>& opts = {})
         : max_time_{opts.max_time}
         , poll_stride_{opts.time_poll_stride}
-        , core_{std::forward<OrigPolicy>(orig), problem, to_x0(x0), opts.core}
+        , core_{std::forward<OrigPolicy>(orig), problem, x0, opts.core}
     {}
 
     template <typename P, typename Derived>
@@ -99,7 +88,7 @@ public:
                        const time_budget_options<Convergence>& opts = {})
         : max_time_{opts.max_time}
         , poll_stride_{opts.time_poll_stride}
-        , core_{problem, to_x0(x0), opts.core}
+        , core_{problem, x0, opts.core}
     {}
 
     template <typename P, typename Derived, typename PolicyOpts>
@@ -111,7 +100,7 @@ public:
                        const PolicyOpts& policy_opts)
         : max_time_{opts.max_time}
         , poll_stride_{opts.time_poll_stride}
-        , core_{std::move(policy), problem, to_x0(x0), opts.core, policy_opts}
+        , core_{std::move(policy), problem, x0, opts.core, policy_opts}
     {}
 
     template <typename OrigPolicy, typename P, typename Derived, typename PolicyOpts>
@@ -126,7 +115,7 @@ public:
                        const PolicyOpts& policy_opts)
         : max_time_{opts.max_time}
         , poll_stride_{opts.time_poll_stride}
-        , core_{std::forward<OrigPolicy>(orig), problem, to_x0(x0), opts.core, policy_opts}
+        , core_{std::forward<OrigPolicy>(orig), problem, x0, opts.core, policy_opts}
     {}
 
     template <typename P, typename Derived, typename PolicyOpts>
@@ -137,7 +126,7 @@ public:
                        const PolicyOpts& policy_opts)
         : max_time_{opts.max_time}
         , poll_stride_{opts.time_poll_stride}
-        , core_{problem, to_x0(x0), opts.core, policy_opts}
+        , core_{problem, x0, opts.core, policy_opts}
     {}
 
     // Overload for policies without options_type: the fifth argument is
@@ -149,7 +138,7 @@ public:
                        const solver_options<default_convergence<scalar_type>>& policy_opts)
         : max_time_{opts.max_time}
         , poll_stride_{opts.time_poll_stride}
-        , core_{problem, to_x0(x0), opts.core, policy_opts}
+        , core_{problem, x0, opts.core, policy_opts}
     {}
 
     time_budget_solver(const time_budget_solver&) = delete;
