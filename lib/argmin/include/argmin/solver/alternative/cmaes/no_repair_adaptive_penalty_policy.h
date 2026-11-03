@@ -44,6 +44,7 @@
 //   K&W (2025) Algorithms for Optimization 2e, §8.7, Algorithm 8.10.
 
 #include "argmin/detail/xoshiro256.h"
+#include "argmin/detail/finite_order.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/cmaes_constants.h"
 #include "argmin/detail/cmaes_covariance.h"
@@ -463,7 +464,7 @@ struct no_repair_adaptive_penalty_policy
         auto& idx = s.idx_buf;
         std::iota(idx.begin(), idx.begin() + lambda, 0);
         std::sort(idx.begin(), idx.begin() + lambda, [&](int a, int b) {
-            return fitnesses[a] < fitnesses[b];
+            return detail::finite_first(fitnesses[a], fitnesses[b]);
         });
 
         // 4. Update mean: weighted recombination of mu best
@@ -670,9 +671,8 @@ struct no_repair_adaptive_penalty_policy
             for(int i = 0; i < lambda; ++i)
                 gen_fitnesses[static_cast<std::size_t>(i)] = fitnesses[i];
             auto mid = gen_fitnesses.begin() + lambda / 2;
-            std::nth_element(gen_fitnesses.begin(),
-                             mid,
-                             gen_fitnesses.begin() + lambda);
+            std::nth_element(gen_fitnesses.begin(), mid, gen_fitnesses.begin() + lambda,
+                             detail::finite_first<Scalar>);
             s.median_fitness_history.push_back(*mid);
         }
         if(s.best_fitness_history.size() > 20000)

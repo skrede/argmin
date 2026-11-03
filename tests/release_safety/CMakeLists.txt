@@ -20,6 +20,7 @@ add_executable(argmin_release_safety_tests
     isres_storage_test.cpp
     reset_rows_test.cpp
     population_range_test.cpp
+    cmaes_nonfinite_ranking_test.cpp
 )
 target_include_directories(argmin_release_safety_tests
     PRIVATE
