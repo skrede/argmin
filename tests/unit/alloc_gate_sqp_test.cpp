@@ -1,5 +1,7 @@
 #include "alloc_gate_support.h"
 
+#include "argmin/detail/lagrangian.h"
+
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
 #include "argmin/solver/kraft_slsqp_policy.h"
@@ -24,6 +26,8 @@ namespace
 namespace sensor = argmin::detail::bench;
 
 using argmin::alloc_gate::check_steady_zero;
+using argmin::alloc_gate::declared_degenerate_vertex;
+using argmin::alloc_gate::degenerate_vertex;
 using argmin::alloc_gate::hs026_fixed_gate;
 using argmin::alloc_gate::hs071_fixed;
 using argmin::alloc_gate::hs071_fixed_gate;
@@ -55,6 +59,27 @@ void check_at_solution_zero()
              || r.solve_status == argmin::solver_status::stalled));
     CHECK(r.eigen_malloc == 0);
     CHECK(r.c_alloc == 0);
+}
+
+// The first step after each unarmed reset lands on the vertex, where the multiplier estimate sees three active rows at
+// N = 2 and takes the reduction to an independent row subset.
+template <typename Policy, typename Problem>
+void check_degenerate_vertex_zero(Policy policy, const Problem& problem)
+{
+    const Eigen::Vector2d x0 = problem.initial_point();
+    argmin::step_budget_solver solver{policy, problem, x0, sqp_gate_opts()};
+    REQUIRE(solver.solve().status == argmin::solver_status::converged);
+    REQUIRE(solver.state().x.norm() < 1e-8);
+    for(std::size_t tick = 0; tick < 3; ++tick)
+    {
+        solver.reset(x0);
+        const auto counts = run_armed([&] {
+            for(std::size_t i = 0; i < 5; ++i)
+                solver.step();
+        });
+        CHECK(counts.eigen == 0);
+        CHECK(counts.c == 0);
+    }
 }
 
 }
@@ -244,4 +269,30 @@ TEST_CASE("sqp_alloc_gate_tr_sqp", "[alloc-gate]")
 
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);
+}
+
+// The estimate reduces the vertex's three active rows inside a fixed-N workspace. tr_sqp and filter_trsqp step there
+// with the constraint count undeclared; nw_sqp and filter_nw_sqp size their QP result storage from the declared count,
+// so they step there with it declared.
+TEST_CASE("sqp_alloc_gate_degenerate_vertex", "[alloc-gate]")
+{
+    const Eigen::Vector2d g(2.0, 2.0);
+    const Eigen::Matrix<double, Eigen::Dynamic, 2> J_eq(0, 2);
+    const Eigen::Matrix<double, Eigen::Dynamic, 2> J_ineq = degenerate_vertex::normals();
+    const Eigen::VectorXd c_ineq = Eigen::VectorXd::Zero(3);
+    argmin::detail::kkt_multiplier_workspace<double, 2> ws;
+    Eigen::VectorXd lam_eq(0);
+    Eigen::VectorXd mu_ineq(3);
+    const auto counts = run_armed([&] {
+        for(std::size_t i = 0; i < 4; ++i)
+            argmin::detail::compute_kkt_multipliers_active_set<double, 2>(g, J_eq, J_ineq, c_ineq, ws, lam_eq, mu_ineq);
+    });
+    CHECK(counts.eigen == 0);
+    CHECK(counts.c == 0);
+    CHECK((mu_ineq.array() != 0.0).count() == 2);
+
+    check_degenerate_vertex_zero(argmin::tr_sqp_policy<double, 2>{}, degenerate_vertex{});
+    check_degenerate_vertex_zero(argmin::filter_trsqp_policy<double, 2>{}, degenerate_vertex{});
+    check_degenerate_vertex_zero(argmin::nw_sqp_policy<double, 2>{}, declared_degenerate_vertex{});
+    check_degenerate_vertex_zero(argmin::filter_nw_sqp_policy<double, 2>{}, declared_degenerate_vertex{});
 }

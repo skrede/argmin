@@ -17,9 +17,10 @@
 #include <Eigen/Core>
 #include <Eigen/QR>
 
-#include <algorithm>
-#include <limits>
 #include <cmath>
+#include <limits>
+#include <algorithm>
+#include <type_traits>
 
 namespace argmin::detail
 {
@@ -111,121 +112,50 @@ Eigen::Vector<Scalar, M> estimate_multipliers(
     return qr.solve(grad_f);
 }
 
-// Active-set least-squares multiplier estimate.
-//
-// Detects active inequalities (|c_ineq[i]| < active_tol), solves the
-// min-residual LS problem on the union of equality and active inequality
-// rows only, and returns the full (n_eq + n_ineq) multiplier vector in
-// the canonical [lambda_eq; mu_ineq] layout. Inactive mu_ineq entries
-// are zero; active mu_ineq entries are projected to >= 0 (KKT dual
-// feasibility).
-//
-// This is strictly more correct than estimate_multipliers + cwiseMax on
-// problems where two inequalities have parallel constraint gradients at
-// the optimum and only one is binding: standard LS picks an arbitrary
-// split between the parallel rows that breaks dual feasibility after
-// sign projection, leaving the stationarity leg positive at the KKT
-// point. Restricting the LS to the binding rows only recovers the
-// textbook active-set multiplier.
-//
-// Reference: N&W 2e Section 18.3 + Algorithm 18.3 (working-set / active-
-//            set identification);
-//            eq. 18.15 (least-squares lambda);
-//            Definition 12.1 (KKT conditions require mu_ineq >= 0 and
-//            complementarity).
-template <typename Scalar,
-          int N = argmin::dynamic_dimension,
-          int Meq = argmin::dynamic_dimension,
-          int Mineq = argmin::dynamic_dimension>
-Eigen::Vector<Scalar, Eigen::Dynamic> estimate_multipliers_active_set(
-    const Eigen::Vector<Scalar, N>& grad_f,
-    const Eigen::Matrix<Scalar, Meq, N>& J_eq,
-    const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
-    const Eigen::Vector<Scalar, Mineq>& c_ineq,
-    Scalar active_kappa = std::sqrt(std::numeric_limits<Scalar>::epsilon()))
+// The rows a multiplier estimate may use: every equality and each inequality inside its active band. A row id
+// indexes the stacked [J_eq; J_ineq].
+template <typename Scalar, int N, int Meq, int Mineq>
+struct active_rows
 {
-    const Eigen::Index n = grad_f.size();
-    const Eigen::Index n_eq = J_eq.rows();
-    const Eigen::Index n_ineq = J_ineq.rows();
+    Scalar kappa;
+    const Eigen::Matrix<Scalar, Meq, N>& J_eq;
+    const Eigen::Vector<Scalar, Mineq>& c_ineq;
+    const Eigen::Matrix<Scalar, Mineq, N>& J_ineq;
 
-    Eigen::Vector<Scalar, Eigen::Dynamic> lambda_full =
-        Eigen::Vector<Scalar, Eigen::Dynamic>::Zero(n_eq + n_ineq);
+    // Active in the row's own units, |c_i| < kappa * max(1, ||J_i||), so rescaling a constraint does not move it in or
+    // out of the band; kappa defaults to sqrt(eps), the classical working-set identification band.
+    bool active(Eigen::Index i) const { return std::abs(c_ineq[i]) < kappa * std::max(Scalar(1), J_ineq.row(i).norm()); }
 
-    // Per-row-relative active-set band. A constraint is active when its
-    // residual is small in its OWN units: |c_ineq[i]| < kappa * max(1,
-    // ||J_ineq.row(i)||). Rescaling a constraint by s multiplies both
-    // c_ineq[i] and ||J_ineq.row(i)|| by s, so this band is scale-invariant
-    // -- unlike a fixed absolute tolerance, which drops a genuinely active
-    // constraint whose gradient (hence residual) carries non-unit scale.
-    // kappa defaults to sqrt(eps), the classical working-set identification
-    // band. max(1, .) preserves the absolute floor for unit-scaled rows.
-    const auto active_band = [&](Eigen::Index i) -> Scalar
+    Eigen::Index count() const { return J_eq.rows() + J_ineq.rows(); }
+
+    Eigen::Index next(Eigen::Index id) const
     {
-        return active_kappa
-               * std::max(Scalar(1), J_ineq.row(i).norm());
-    };
+        while(id < count() && id >= J_eq.rows() && !active(id - J_eq.rows()))
+            ++id;
+        return id;
+    }
 
-    // Count active inequalities.
-    Eigen::Index n_active = 0;
-    for(Eigen::Index i = 0; i < n_ineq; ++i)
-        if(std::abs(c_ineq[i]) < active_band(i))
-            ++n_active;
+    template <typename Row>
+    void copy(Eigen::Index id, Row&& row) const
+    {
+        if(id < J_eq.rows())
+            copy_row(J_eq, id, row);
+        else
+            copy_row(J_ineq, id - J_eq.rows(), row);
+    }
 
-    const Eigen::Index m_active = n_eq + n_active;
-    if(m_active == 0)
-        return lambda_full;
+    // Eigen rejects a row block of a compile-time zero-row matrix, so that copy is never instantiated.
+    template <typename Jacobian, typename Row>
+    static void copy_row(const Jacobian& J, Eigen::Index i, Row& row)
+    {
+        if constexpr(Jacobian::RowsAtCompileTime != 0)
+            row = J.row(i);
+    }
+};
 
-    // Build reduced constraint Jacobian: [J_eq; J_ineq_active].
-    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> A_active(m_active, n);
-    if(n_eq > 0)
-        A_active.topRows(n_eq) = J_eq;
-    Eigen::Index row = n_eq;
-    for(Eigen::Index i = 0; i < n_ineq; ++i)
-        if(std::abs(c_ineq[i]) < active_band(i))
-        {
-            A_active.row(row) = J_ineq.row(i);
-            ++row;
-        }
-
-    // LS on the reduced system (N&W eq. 18.15).
-    auto qr = A_active.transpose().colPivHouseholderQr();
-    Eigen::Vector<Scalar, Eigen::Dynamic> grad_f_dyn(n);
-    grad_f_dyn = grad_f;
-    Eigen::Vector<Scalar, Eigen::Dynamic> lambda_active = qr.solve(grad_f_dyn);
-
-    // Equality multipliers: sign is unrestricted.
-    if(n_eq > 0)
-        lambda_full.head(n_eq) = lambda_active.head(n_eq);
-
-    // Active inequality multipliers: clipped to >= 0 for dual feasibility.
-    Eigen::Index ak = 0;
-    for(Eigen::Index i = 0; i < n_ineq; ++i)
-        if(std::abs(c_ineq[i]) < active_band(i))
-        {
-            lambda_full[n_eq + i] = std::max(Scalar(0), lambda_active[n_eq + ak]);
-            ++ak;
-        }
-
-    return lambda_full;
-}
-
-// Caller-owned workspace for compute_kkt_multipliers_active_set.
-//
-// Holds the reduced active-set Jacobian buffer, a persistent
-// ColPivHouseholderQR object (reused across calls instead of a fresh
-// factorization per estimate), and the gradient / multiplier scratch.
-// Owned by the SQP policy state (via sqp_state_buffers); grow-only, so
-// steady-state re-estimation at a stable active-set shape performs no
-// allocation.
-// MaxN bounds the decision-variable axis at compile time. The QR factorizes
-// A_active^T, an n x m_active matrix whose reduced active set satisfies
-// m_active <= n <= MaxN under the LICQ that the SQP multiplier estimate
-// already assumes (linearly independent active constraint gradients). Both QR
-// axes and the least-squares right-hand side are therefore bounded by MaxN, so
-// the factorization's internal buffers, the solve's rhs copy, and the
-// Householder apply's scratch all live in inline storage at fixed N. MaxN ==
-// Eigen::Dynamic degrades to plain heap-backed storage (the runtime-dimension
-// instantiation), which is not required to be allocation-free.
+// Caller-owned workspace for compute_kkt_multipliers_active_set, held by the SQP policy state and grow-only, so
+// re-estimation at a stable active-set shape performs no allocation. The estimate never factorizes more rows than
+// variables, so MaxN bounds both QR axes and every buffer, and fixed N stays in inline storage.
 template <typename Scalar, int MaxN = Eigen::Dynamic>
 struct kkt_multiplier_workspace
 {
@@ -237,25 +167,87 @@ struct kkt_multiplier_workspace
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor, MaxN, 1> grad_f_dyn;
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor, MaxN, 1> lambda_active;
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor, MaxN, 1> scaled;
+    Eigen::Matrix<Eigen::Index, Eigen::Dynamic, 1, Eigen::ColMajor, MaxN, 1> row_ids;
 };
 
-// Active-set multiplier estimate with scatter into caller-owned outputs.
+template <typename Rows, typename Scalar, int MaxN>
+void load_rows(const Rows& rows, Eigen::Index count, Eigen::Index n, kkt_multiplier_workspace<Scalar, MaxN>& ws)
+{
+    if(ws.A_active.rows() != count || ws.A_active.cols() != n)
+        ws.A_active.resize(count, n);
+    for(Eigen::Index k = 0; k < count; ++k)
+        rows.copy(ws.row_ids[k], ws.A_active.row(k));
+}
+
+template <typename Rows, typename Scalar, int MaxN>
+Eigen::Index fill_rows(const Rows& rows, Eigen::Index& id, Eigen::Index count, kkt_multiplier_workspace<Scalar, MaxN>& ws)
+{
+    for(; count < ws.row_ids.size() && id < rows.count(); id = rows.next(id + 1))
+        ws.row_ids[count++] = id;
+    return count;
+}
+
+// Keeps, in order, the rows that are pivot columns within the rank of A_active^T.
+template <typename Rows, typename Scalar, int MaxN>
+Eigen::Index keep_pivot_rows(const Rows& rows, Eigen::Index count, Eigen::Index n, kkt_multiplier_workspace<Scalar, MaxN>& ws)
+{
+    load_rows(rows, count, n, ws);
+    ws.qr.compute(ws.A_active.transpose());
+    const auto pivots = ws.qr.colsPermutation().indices().head(ws.qr.rank());
+    using pivot_index = typename std::decay_t<decltype(pivots)>::Scalar;
+    Eigen::Index kept = 0;
+    for(Eigen::Index k = 0; k < count; ++k)
+        if((pivots.array() == static_cast<pivot_index>(k)).any())
+            ws.row_ids[kept++] = ws.row_ids[k];
+    return kept;
+}
+
+// At a degenerate vertex the active rows outnumber the variables; column-pivoted QR reduces them to a maximal linearly
+// independent subset, refilling dropped slots in row order. Every such subset spans the same row space, so the
+// least-squares stationarity residual is unchanged, and the multipliers are not unique there in any case.
+template <typename Rows, typename Scalar, int MaxN>
+Eigen::Index select_rows(const Rows& rows, Eigen::Index n, kkt_multiplier_workspace<Scalar, MaxN>& ws)
+{
+    if(ws.row_ids.size() != n)
+        ws.row_ids.resize(n);
+    Eigen::Index id = rows.next(0);
+    Eigen::Index count = fill_rows(rows, id, 0, ws);
+    if(id == rows.count())
+        return count;
+    while(true)
+    {
+        count = keep_pivot_rows(rows, count, n, ws);
+        if(count == n || id == rows.count())
+            return count;
+        count = fill_rows(rows, id, count, ws);
+    }
+}
+
+template <typename Rows, typename Scalar, int MaxN>
+void scatter_multipliers(const Rows& rows, Eigen::Index count, const kkt_multiplier_workspace<Scalar, MaxN>& ws,
+                         Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> lam_eq_out,
+                         Eigen::Ref<Eigen::Vector<Scalar, Eigen::Dynamic>> mu_ineq_out)
+{
+    for(Eigen::Index k = 0; k < count; ++k)
+    {
+        const Eigen::Index id = ws.row_ids[k];
+        if(id < rows.J_eq.rows())
+            lam_eq_out[id] = ws.lambda_active[k];
+        else
+            mu_ineq_out[id - rows.J_eq.rows()] = std::max(Scalar(0), ws.lambda_active[k]);
+    }
+}
+
+// Active-set least-squares multiplier estimate into caller-owned outputs: the least-squares problem is restricted to
+// the equalities and the active inequalities, active mu_ineq entries are projected to >= 0 (KKT dual feasibility) and
+// every other entry is zero. Restricting to the binding rows recovers the textbook active-set multiplier where two
+// parallel inequalities share a gradient and only one binds; a least-squares split between them breaks dual
+// feasibility after the sign projection.
 //
-// Adopted from: argmin/detail/lagrangian.h:137 estimate_multipliers_active_set
-//               (in-tree precedent — the allocating sibling).
-// Reference: N&W 2e Section 16.5 (least-squares multiplier estimate);
-//            Kraft 1988 DFVLR-FB 88-28 §2.2.4.
-//
-// argmin variant: caller-owned-workspace form that writes into caller-owned
-//                 Ref<VectorXd> outputs. The shared helper takes a
-//                 kkt_multiplier_workspace by reference (persistent QR +
-//                 reduced-Jacobian buffer) instead of building fresh Eigen
-//                 objects per call, so the four SQP policy KKT-leg sites
-//                 re-estimate multipliers without per-call allocation. The
-//                 arithmetic is identical to the allocating sibling (same
-//                 active-set band, same ColPivHouseholderQR on the same
-//                 reduced Jacobian, same sign clip); only the object
-//                 lifetimes change.
+// Reference: N&W 2e Section 18.3 + Algorithm 18.3 (working-set identification);
+//            eq. 18.15 (least-squares lambda);
+//            Definition 12.1 (KKT conditions require mu_ineq >= 0 and complementarity);
+//            Kraft 1988 DFVLR-FB 88-28 Section 2.2.4.
 template <typename Scalar,
           int N = argmin::dynamic_dimension,
           int Meq = argmin::dynamic_dimension,
@@ -272,64 +264,40 @@ ARGMIN_FORCE_INLINE void compute_kkt_multipliers_active_set(
     Scalar active_kappa = std::sqrt(std::numeric_limits<Scalar>::epsilon()))
 {
     const Eigen::Index n = g.size();
-    const Eigen::Index n_eq = J_eq.rows();
-    const Eigen::Index n_ineq = J_ineq.rows();
-
     lam_eq_out.setZero();
     mu_ineq_out.setZero();
+    const active_rows<Scalar, N, Meq, Mineq> rows{active_kappa, J_eq, c_ineq, J_ineq};
+    const Eigen::Index count = select_rows(rows, n, ws);
+    if(count == 0)
+        return;
 
-    // Per-row-relative active-set band (scale-invariant), matching
-    // estimate_multipliers_active_set: |c_ineq[i]| < kappa * max(1,
-    // ||J_ineq.row(i)||).
-    const auto active_band = [&](Eigen::Index i) -> Scalar
-    {
-        return active_kappa
-               * std::max(Scalar(1), J_ineq.row(i).norm());
-    };
-
-    Eigen::Index n_active = 0;
-    for(Eigen::Index i = 0; i < n_ineq; ++i)
-        if(std::abs(c_ineq[i]) < active_band(i))
-            ++n_active;
-
-    const Eigen::Index m_active = n_eq + n_active;
-    if(m_active == 0)
-        return;  // outputs already zeroed above
-
-    // Reduced constraint Jacobian [J_eq; J_ineq_active] into the workspace.
-    if(ws.A_active.rows() != m_active || ws.A_active.cols() != n)
-        ws.A_active.resize(m_active, n);
-    if(n_eq > 0)
-        ws.A_active.topRows(n_eq) = J_eq;
-    Eigen::Index row = n_eq;
-    for(Eigen::Index i = 0; i < n_ineq; ++i)
-        if(std::abs(c_ineq[i]) < active_band(i))
-        {
-            ws.A_active.row(row) = J_ineq.row(i);
-            ++row;
-        }
-
-    // LS on the reduced system (N&W eq. 18.15) via the persistent QR.
+    load_rows(rows, count, n, ws);
     ws.qr.compute(ws.A_active.transpose());
     if(ws.grad_f_dyn.size() != n) ws.grad_f_dyn.resize(n);
     if(ws.scaled.size() != n) ws.scaled.resize(n);
-    if(ws.lambda_active.size() < m_active) ws.lambda_active.resize(m_active);
+    if(ws.lambda_active.size() < count) ws.lambda_active.resize(count);
     ws.grad_f_dyn = g;
-    col_piv_qr_solve_in_place(ws.qr, ws.grad_f_dyn, ws.lambda_active.head(m_active), ws.scaled);
+    col_piv_qr_solve_in_place(ws.qr, ws.grad_f_dyn, ws.lambda_active.head(count), ws.scaled);
+    scatter_multipliers(rows, count, ws, lam_eq_out, mu_ineq_out);
+}
 
-    // Equality multipliers: sign unrestricted.
-    if(n_eq > 0)
-        lam_eq_out.head(n_eq) = ws.lambda_active.head(n_eq);
-
-    // Active inequality multipliers: clipped to >= 0 for dual feasibility;
-    // inactive entries remain zero from the setZero above.
-    Eigen::Index ak = 0;
-    for(Eigen::Index i = 0; i < n_ineq; ++i)
-        if(std::abs(c_ineq[i]) < active_band(i))
-        {
-            mu_ineq_out[i] = std::max(Scalar(0), ws.lambda_active[n_eq + ak]);
-            ++ak;
-        }
+// The allocating form of compute_kkt_multipliers_active_set, returning the canonical [lambda_eq; mu_ineq] layout.
+template <typename Scalar,
+          int N = argmin::dynamic_dimension,
+          int Meq = argmin::dynamic_dimension,
+          int Mineq = argmin::dynamic_dimension>
+Eigen::Vector<Scalar, Eigen::Dynamic> estimate_multipliers_active_set(
+    const Eigen::Vector<Scalar, N>& grad_f,
+    const Eigen::Matrix<Scalar, Meq, N>& J_eq,
+    const Eigen::Matrix<Scalar, Mineq, N>& J_ineq,
+    const Eigen::Vector<Scalar, Mineq>& c_ineq,
+    Scalar active_kappa = std::sqrt(std::numeric_limits<Scalar>::epsilon()))
+{
+    Eigen::Vector<Scalar, Eigen::Dynamic> lambda(J_eq.rows() + J_ineq.rows());
+    kkt_multiplier_workspace<Scalar> ws;
+    compute_kkt_multipliers_active_set<Scalar, N, Meq, Mineq, Eigen::Dynamic>(
+        grad_f, J_eq, J_ineq, c_ineq, ws, lambda.head(J_eq.rows()), lambda.tail(J_ineq.rows()), active_kappa);
+    return lambda;
 }
 
 }

@@ -17,7 +17,7 @@ file	lib/argmin/include/argmin/detail/isres_operators.h	-	454
 file	lib/argmin/include/argmin/detail/kkt_residual.h	-	203
 file	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	-	428
 file	lib/argmin/include/argmin/detail/kraft_lsq_qp_recovery.h	-	370
-file	lib/argmin/include/argmin/detail/lagrangian.h	-	337
+file	lib/argmin/include/argmin/detail/lagrangian.h	-	305
 file	lib/argmin/include/argmin/detail/lsei.h	-	405
 file	lib/argmin/include/argmin/detail/lsi.h	-	281
 file	lib/argmin/include/argmin/detail/mma_augmented_dual_problem.h	-	271
@@ -115,8 +115,6 @@ function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	solve_into	52
 function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	solve_lsei_	142
 function	lib/argmin/include/argmin/detail/kraft_lsq_qp_recovery.h	solve	86
 function	lib/argmin/include/argmin/detail/kraft_lsq_qp_recovery.h	solve_with_factored_hessian_into	88
-function	lib/argmin/include/argmin/detail/lagrangian.h	compute_kkt_multipliers_active_set	60
-function	lib/argmin/include/argmin/detail/lagrangian.h	estimate_multipliers_active_set	64
 function	lib/argmin/include/argmin/detail/lbfgsb_direction.h	compute_direction	65
 function	lib/argmin/include/argmin/detail/ldp.h	ldp	115
 function	lib/argmin/include/argmin/detail/lsei.h	lsei	232

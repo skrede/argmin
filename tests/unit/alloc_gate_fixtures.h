@@ -9,6 +9,7 @@
 #include <Eigen/Core>
 
 #include <cmath>
+#include <cstdint>
 
 namespace argmin::alloc_gate
 {
@@ -387,6 +388,42 @@ struct rosenbrock_ls_fixed
     {
         return Eigen::Vector<double, 2>{-1.0, 1.0};
     }
+};
+
+// Fixed-2 bowl minimized at the vertex (0, 0) of x0 >= 0, x1 >= 0 and x0 + x1 >= 0, with no declared constraint_count.
+// All three rows are active there, one more than there are variables.
+struct degenerate_vertex
+{
+    static constexpr std::int32_t problem_dimension = 2;
+
+    std::int32_t dimension() const { return 2; }
+    std::int32_t num_equality() const { return 0; }
+    std::int32_t num_inequality() const { return 3; }
+
+    double value(const Eigen::Vector2d& x) const { return (x + Eigen::Vector2d::Ones()).squaredNorm(); }
+
+    void gradient(const Eigen::Vector2d& x, Eigen::Vector2d& g) const { g = 2.0 * (x + Eigen::Vector2d::Ones()); }
+
+    template <typename Values>
+    void constraints(const Eigen::Vector2d& x, Values& c) const
+    {
+        c = normals() * x;
+    }
+
+    template <typename Jacobian>
+    void constraint_jacobian(const Eigen::Vector2d&, Jacobian& J) const
+    {
+        J = normals();
+    }
+
+    Eigen::Vector2d initial_point() const { return Eigen::Vector2d(0.5, 0.5); }
+
+    static Eigen::Matrix<double, 3, 2> normals() { return (Eigen::Matrix<double, 3, 2>() << 1.0, 0.0, 0.0, 1.0, 1.0, 1.0).finished(); }
+};
+
+struct declared_degenerate_vertex : degenerate_vertex
+{
+    static constexpr std::int32_t constraint_count = 3;
 };
 
 }
