@@ -19,9 +19,11 @@
 #include <Eigen/Core>
 
 #include <bit>
+#include <new>
 #include <tuple>
 #include <atomic>
 #include <limits>
+#include <memory>
 #include <cstdint>
 #include <utility>
 #include <concepts>
@@ -55,10 +57,6 @@ using policy_options_t = typename detail::policy_options_impl<Policy, Scalar>::t
 
 namespace detail
 {
-// Resolve state_type: if Policy has template state_type<P>, use it.
-// Otherwise fall back to Policy::state_type (non-template).
-// This enables incremental conversion of policies from std::function
-// to direct problem pointer calls.
 template <typename Policy, typename Problem>
 consteval auto resolve_state_tag()
 {
@@ -93,6 +91,22 @@ class solver_core
 {
     struct build_tag
     {
+    };
+
+    // Rebuilds the placeholder when constructing a state throws, so state_ is never left destroyed. A placeholder
+    // that itself throws, as an allocating one can, terminates the program from this destructor.
+    struct unbuilt_on_unwind
+    {
+        bool armed;
+        solver_core& core;
+
+        ~unbuilt_on_unwind()
+        {
+            if(!armed)
+                return;
+            core.built_ = false;
+            ::new(static_cast<void*>(std::addressof(core.state_))) state_type(unbuilt_state());
+        }
     };
 
 public:
@@ -274,17 +288,8 @@ public:
         return *this;
     }
 
-    // Single iteration with per-step convergence consultation.
-    //
-    // Beyond executing the policy step and updating telemetry, step() checks
-    // the stored convergence criteria against the produced result and updates
-    // the solver's reported status(). A caller driving a tick loop via step()
-    // alone (MPC/IK) therefore sees a by-criterion terminal status without
-    // reimplementing the stopping tests or paying the step_n(1) cost of
-    // rebuilding options and reseeding best-seen tracking. The stored
-    // convergence and the running iteration counter are reused as-is; no
-    // options are rebuilt. Policy-reported failure (policy_status) takes
-    // precedence over the convergence verdict.
+    // Consults the stored convergence, so a tick loop driving step() alone (MPC, IK) sees a by-criterion status
+    // without the step_n(1) cost of rebuilding options. A policy-reported failure takes precedence.
     step_result<scalar_type> step()
     {
         auto result = step_impl();
@@ -299,14 +304,8 @@ public:
         return result;
     }
 
-    // Raw single iteration shared by the public step() and the step_n()
-    // convergence loop. Executes the policy step, fills x_norm centrally
-    // (so step_tolerance_rel_criterion has a consistent denominator without
-    // per-policy churn -- policies own constraint_violation, previously
-    // overwritten here), advances the iteration and evaluation counters, and
-    // records the reported gradient norm. Deliberately does NOT consult
-    // convergence: the public step() adds that on top, while the solve loop
-    // owns its own stopping decision.
+    // Does not consult convergence: the solve loop owns its stopping decision. x_norm is filled here so
+    // step_tolerance_rel_criterion has one denominator for every policy.
     step_result<scalar_type> step_impl()
     {
         if(!built_)
@@ -336,9 +335,7 @@ public:
     // them.
     const Policy& policy() const { return policy_; }
 
-    // The gradient-like norm reported by the most recent step, or a NaN
-    // sentinel when no step has run yet (genuinely unavailable -- never a
-    // fabricated 0 that would read as a stationary point).
+    // NaN before the first step, never a fabricated 0 that would read as a stationary point.
     scalar_type gradient_norm() const { return last_gradient_norm_; }
 
     scalar_type constraint_violation() const
@@ -360,7 +357,6 @@ public:
 
     void abort() { abort_flag_.store(true, std::memory_order_relaxed); }
 
-    // Loop-support surface consumed by detail/solve_loop.h.
     bool abort_requested() const { return abort_flag_.load(std::memory_order_relaxed); }
     std::uint32_t iteration_count() const { return iterations_; }
     std::uint32_t evaluation_count() const { return function_evaluations_; }
@@ -576,11 +572,8 @@ private:
     Policy policy_{};
     std::uint32_t max_iterations_{1000};
     std::optional<scalar_type> constraint_tolerance_{};
-    // Mirrors solver_options::feasibility_tolerance (constructor-time
-    // configured); read back into the locally-rebuilt solver_options on the
-    // defaulted solve()/step_n(budget) paths so the best-seen feasibility
-    // comparator honors the constructor's configured value instead of
-    // reverting to solver_options's own 1e-6 default.
+    // Read back by the defaulted solve()/step_n(budget) paths, which rebuild solver_options and would otherwise
+    // revert the best-seen feasibility comparator to the 1e-6 default.
     scalar_type feasibility_tolerance_{convergence_defaults<scalar_type>::feasibility_tolerance};
     Convergence stored_convergence_{};
     const Problem* problem_ptr_{nullptr};
@@ -589,12 +582,8 @@ private:
     bool built_;
     state_type state_;
     std::uint32_t iterations_{0};
-    // Accumulated genuine evaluation count (sum of per-step
-    // step_result::evaluations); reported as solve_result::function_evaluations
-    // instead of aliasing the iteration count.
+    // Sum of the per-step step_result::evaluations, reported as solve_result::function_evaluations.
     std::uint32_t function_evaluations_{0};
-    // Gradient-like norm from the most recent step; NaN until the first step
-    // (genuinely unavailable), never a fabricated 0.
     scalar_type last_gradient_norm_{std::numeric_limits<scalar_type>::quiet_NaN()};
     solver_status last_status_{solver_status::running};
     std::atomic<bool> abort_flag_{false};
@@ -608,7 +597,7 @@ private:
         , problem_ptr_{bind_problem(problem)}
         , policy_opts_{std::move(policy_opts)}
         , built_{detail::start_length_ok<N>(x0, detail::problem_start_dimension<N>(problem, x0.size()))}
-        , state_{built_ ? make_state(problem, x0, opts) : unbuilt_state()}
+        , state_{make_state(problem, x0, opts)}
         , last_status_{built_ ? solver_status::running : solver_status::invalid_problem}
     {
         store_convergence(opts.convergence);
@@ -619,15 +608,21 @@ private:
             forward_policy_hints(policy_.options);
     }
 
-    // The policy options the constructor received are passed to init again, so a policy that copies them
-    // into its state is rebuilt with them.
+    // Init gets the constructor's policy options again, so a policy copying them into its state is rebuilt with
+    // them. No path puts a second state on the stack: each branch returns a prvalue and build constructs in place.
     template <typename P, typename Derived>
     state_type make_state(const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts)
     {
+        if(!built_)
+            return unbuilt_state();
         if constexpr(!std::is_same_v<Derived, vector_type>)
             return make_state(problem, vector_type(x0), opts);
         else if constexpr(has_options_type<Policy>)
-            return policy_opts_ ? policy_.init(problem, x0.derived(), opts, *policy_opts_) : policy_.init(problem, x0.derived(), opts);
+        {
+            if(policy_opts_)
+                return policy_.init(problem, x0.derived(), opts, *policy_opts_);
+            return policy_.init(problem, x0.derived(), opts);
+        }
         else
             return policy_.init(problem, x0.derived(), opts);
     }
@@ -647,8 +642,13 @@ private:
             return solver_status::invalid_problem;
         else
         {
-            state_ = make_state(*problem_ptr_, x0, {.max_iterations = max_iterations_, .constraint_tolerance = constraint_tolerance_, .feasibility_tolerance = feasibility_tolerance_, .convergence = stored_convergence_});
+            // Copied before the state dies: a caller may pass a view into the placeholder state, such as state().x.
+            const vector_type start(x0);
             built_ = true;
+            std::destroy_at(std::addressof(state_));
+            unbuilt_on_unwind guard{true, *this};
+            ::new(static_cast<void*>(std::addressof(state_))) state_type(make_state(*problem_ptr_, start, {.max_iterations = max_iterations_, .constraint_tolerance = constraint_tolerance_, .feasibility_tolerance = feasibility_tolerance_, .convergence = stored_convergence_}));
+            guard.armed = false;
             return detail::latch_status(state_);
         }
     }

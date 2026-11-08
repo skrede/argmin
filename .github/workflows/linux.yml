@@ -207,7 +207,7 @@ jobs:
           cd build
           count=$(ctest -N -L release-safety | grep -cE '^ *Test +#')
           echo "release-safety probes registered: $count"
-          test "$count" -eq 200 || { echo "expected 200 release-safety probes, found $count"; exit 1; }
+          test "$count" -eq 202 || { echo "expected 202 release-safety probes, found $count"; exit 1; }
 
       - name: Release-safety probes
         if: matrix.build_type == 'Release'
