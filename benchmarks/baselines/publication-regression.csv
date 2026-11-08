@@ -242,7 +242,7 @@ gcmma,hs037,default,27,-8.0,28,-6.0,excluded,publish-2026-07-24T11-44-24Z,enforc
 gcmma,hs043,default,59,-8.0,26,-6.0,excluded,publish-2026-07-24T11-44-24Z,enforced,"toolchain-variant termination: the returned point's oracle verdict flips between gcc and clang builds of the same source, so the verdict is not a stable gate signal on any toolchain",589632,
 gcmma,hs044,default,58,-8.0,15,-6.0,pass,publish-2026-07-24T11-44-24Z,enforced,,541271,
 gcmma,hs076,default,39,-8.0,24,-6.0,pass,publish-2026-10-16T20-26-32Z,enforced,,305192,
-gcmma_move_limit_shrink,hs021,default,39,-8.0,13000,-6.0,expected_fail,publish-2026-07-24T11-44-24Z,enforced,,439268,
+gcmma_move_limit_shrink,hs021,default,39,-8.0,13000,-6.0,pass,publish-2026-11-08T18-09-09Z,enforced,,439268,
 gcmma_move_limit_shrink,hs023,default,640,-8.0,856,-6.0,excluded,publish-2026-07-24T11-44-24Z,enforced,"toolchain-variant termination: the returned point's oracle verdict flips between gcc and clang builds of the same source, so the verdict is not a stable gate signal on any toolchain",7519069,
 gcmma_move_limit_shrink,hs024,default,53,-8.0,13,-6.0,pass,publish-2026-07-24T11-44-24Z,enforced,,595060,
 gcmma_move_limit_shrink,hs029,default,47,-8.0,3192,-6.0,pass,publish-2026-10-16T20-26-32Z,enforced,,470836,

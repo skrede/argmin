@@ -386,7 +386,7 @@ Each of these is a deliberate exclusion, with the reason.
 - **The GCMMA variants.** Held back on their publication figures:
   `gcmma` 9 pass / 0 expected_fail / 4 excluded,
   `gcmma_raa_augmented` 9 pass / 0 expected_fail / 4 excluded and
-  `gcmma_move_limit_shrink` 5 pass / 6 expected_fail / 2 excluded. Every
+  `gcmma_move_limit_shrink` 6 pass / 5 expected_fail / 2 excluded. Every
   excluded cell is one whose returned point passes the oracle under one
   compiler and fails it under another, built from the same source.
 - **`tr_sqp`'s fast mode.** Only the accurate mode is instantiated; the fast
