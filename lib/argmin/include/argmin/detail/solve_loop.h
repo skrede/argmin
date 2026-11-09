@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_SOLVE_LOOP_H
 #define HPP_GUARD_ARGMIN_DETAIL_SOLVE_LOOP_H
 
+#include "argmin/detail/status_claim.h"
+
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
 #include "argmin/result/status.h"
@@ -12,13 +14,6 @@ namespace argmin
 {
 namespace detail
 {
-
-// A status whose stopping test accepted the final iterate is a claim about that iterate.
-constexpr bool certifies_iterate(solver_status status) noexcept
-{
-    return status == solver_status::converged || status == solver_status::ftol_reached
-        || status == solver_status::xtol_reached || status == solver_status::stalled;
-}
 
 // Feasibility-first best-seen comparator selecting the returned iterate: feasible (cv <= feas_tol)
 // beats infeasible, two infeasible iterates rank by violation, two feasible ones by objective -- except
@@ -93,7 +88,7 @@ run_solve_loop(Core& core, std::uint32_t budget,
     scalar_type best_cv = core.seed_best_cv();
     // User-supplied constraint_tolerance takes precedence over the baked-in
     // feasibility_tolerance default: a caller who bothered to tighten the KKT
-    // residual gate expects the best-seen comparator to honor the same floor.
+    // residual gate expects the optimality claim and the best-seen comparator to honor the same floor.
     const scalar_type feas_tol = static_cast<scalar_type>(
         opts.constraint_tolerance.value_or(opts.feasibility_tolerance));
 
@@ -116,12 +111,8 @@ run_solve_loop(Core& core, std::uint32_t budget,
 
         // step_impl() (not the public step()) runs the raw iteration: this loop owns the stopping
         // decision, so a second per-step convergence consult would double-advance windowed criteria.
-        // A policy-reported status is final and skips the convergence policy.
         last = core.step_impl();
-        if(last.policy_status)
-            status = *last.policy_status;
-        else if(const auto conv = opts.convergence.check(last, core.iteration_count()))
-            status = *conv;
+        status = resolve_step_status(last, opts.convergence, core.iteration_count(), feas_tol);
 
         if(is_better(status, last.objective_value, last.constraint_violation,
                      best_f, best_cv, feas_tol))

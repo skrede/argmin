@@ -4,6 +4,7 @@
 #include "argmin/types.h"
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/start_point.h"
+#include "argmin/detail/status_claim.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/tuple_contains.h"
 #include "argmin/result/step_result.h"
@@ -289,18 +290,11 @@ public:
     }
 
     // Consults the stored convergence, so a tick loop driving step() alone (MPC, IK) sees a by-criterion status
-    // without the step_n(1) cost of rebuilding options. A policy-reported failure takes precedence.
+    // without the step_n(1) cost of rebuilding options. The claim is judged as the solve loop judges it.
     step_result<scalar_type> step()
     {
         auto result = step_impl();
-
-        if(result.policy_status)
-            last_status_ = *result.policy_status;
-        else if(auto conv = stored_convergence_.check(result, iterations_))
-            last_status_ = *conv;
-        else
-            last_status_ = solver_status::running;
-
+        last_status_ = detail::resolve_step_status(result, stored_convergence_, iterations_, constraint_tolerance_.value_or(feasibility_tolerance_));
         return result;
     }
 

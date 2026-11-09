@@ -2,6 +2,7 @@
 #define HPP_GUARD_ARGMIN_SCHEDULE_BASIC_SOLVER_GROUP_H
 
 #include "argmin/solver/step_budget_solver.h"
+#include "argmin/detail/status_claim.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -112,10 +113,8 @@ public:
                 // Retire on failure or (per-policy) convergence status so a
                 // converged solver stops being re-stepped and cannot
                 // livelock the group.
-                if(result.policy_status &&
-                   (*result.policy_status == solver_status::roundoff_limited ||
-                    *result.policy_status == solver_status::diverged ||
-                    *result.policy_status == solver_status::converged))
+                const auto policy_status = detail::admit_claim(result.policy_status, result.constraint_violation, feasibility_tolerance_in_force());
+                if(policy_status == solver_status::roundoff_limited || policy_status == solver_status::diverged || policy_status == solver_status::converged)
                 {
                     retired_[idx] = true;
                     populate_result(idx, result, std::index_sequence_for<Policies...>{});
@@ -191,7 +190,7 @@ public:
             }
 
             // Convergence policy check
-            auto conv = opts.convergence.check(last, i + 1);
+            auto conv = detail::admit_claim(opts.convergence.check(last, i + 1), last.constraint_violation, feasibility_tolerance_in_force());
             if(conv)
             {
                 status = *conv;
@@ -263,6 +262,13 @@ private:
         return result;
     }
 
+    // The precedence step_budget_solver applies, so a group and a standalone solver judge an iterate's feasibility
+    // and its claims identically.
+    scalar_type feasibility_tolerance_in_force() const
+    {
+        return constraint_tolerance_.value_or(static_cast<scalar_type>(feasibility_tolerance_));
+    }
+
     // Feasibility-first ranking.
     // Reference: N&W Ch. 15.
     template <std::size_t... Is>
@@ -271,13 +277,7 @@ private:
         scalar_type best_obj = std::numeric_limits<scalar_type>::max();
         scalar_type best_cv = std::numeric_limits<scalar_type>::max();
         std::size_t best_idx = 0;
-        // User-supplied constraint_tolerance takes precedence; otherwise
-        // fall back to the same feasibility_tolerance default step_budget_solver
-        // uses for its own best-seen comparator (options.h), so a group and
-        // a standalone solver judge the same iterate's feasibility
-        // identically.
-        scalar_type tol = constraint_tolerance_.value_or(
-            static_cast<scalar_type>(feasibility_tolerance_));
+        const scalar_type tol = feasibility_tolerance_in_force();
 
         auto check = [&](std::size_t idx, const auto& solver)
         {
