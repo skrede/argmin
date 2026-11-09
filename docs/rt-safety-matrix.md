@@ -164,9 +164,9 @@ steps, never idling); see the footnotes for the two characterized off-hot-loop r
 | module | allocation-free? | bounded-iterations? | wall-clock-free? | exceptions-off-clean? | deterministic(seeded)? | evidence |
 |---|---|---|---|---|---|---|
 | `kraft_slsqp` | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | sqp_alloc_gate_kraft (zero-allocation assertion over the armed steady-state window); labeled instruments (alloc-gate, oracle-pin); line search exhaustion surfaces a null step rather than a silent accept; nnls exhaustion returns mode 3 rather than a silent accept; restoration exhaustion returns max_iter_reached rather than a silent accept; c++20 (build + ctest); c++23 (build + ctest); policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; argmin_no_exceptions_probe; policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
-| `filter_slsqp` | **yes** *(gated)* [^restore] | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | sqp_alloc_gate_filter_slsqp (zero-allocation assertion over the warm-started armed window); labeled instruments (alloc-gate, oracle-pin); line search exhaustion surfaces a null step rather than a silent accept; nnls exhaustion returns mode 3 rather than a silent accept; restoration exhaustion returns max_iter_reached rather than a silent accept; c++20 (build + ctest); c++23 (build + ctest); policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; argmin_no_exceptions_probe; policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
+| `filter_slsqp` | **yes** *(gated)* [^restore] | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | sqp_alloc_gate_filter_slsqp (zero-allocation assertion over the warm-started armed window); sqp_alloc_gate_restoration (a counting window over the L1 restoration leaf on the policy's own state, entered from an infeasible start); sqp_alloc_gate_degenerate_vertex (warm-reset ticks at a degenerate vertex, including the steps that enter restoration in an -O3 -march=native build); labeled instruments (alloc-gate, oracle-pin); line search exhaustion surfaces a null step rather than a silent accept; nnls exhaustion returns mode 3 rather than a silent accept; restoration exhaustion returns max_iter_reached rather than a silent accept; c++20 (build + ctest); c++23 (build + ctest); policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; argmin_no_exceptions_probe; policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
 | `nw_sqp` | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | sqp_alloc_gate_nw (zero-allocation assertion over the fixed-N steady-state window; the inner active-set solves in that window run the always-on terminal KKT verification and the equality-projection rank screen, so both are covered without a separate gate); qp_escalation_allocation_probe (no armed gate window reaches the escalated pivoted equality projection, which runs only on rank-deficient or inconsistent equality rows; this probe arms a counting window over that path on a degenerate input); labeled instruments (alloc-gate, oracle-pin); line search exhaustion surfaces a null step rather than a silent accept; nnls exhaustion returns mode 3 rather than a silent accept; c++20 (build + ctest); c++23 (build + ctest); policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; argmin_no_exceptions_probe; policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
-| `filter_nw_sqp` | **yes** *(gated)* [^restore] | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | sqp_alloc_gate_filter_nw (zero-allocation assertion over the fixed-N steady-state window; the inner active-set solves in that window run the always-on terminal KKT verification and the equality-projection rank screen, so both are covered without a separate gate); qp_escalation_allocation_probe (no armed gate window reaches the escalated pivoted equality projection, which runs only on rank-deficient or inconsistent equality rows; this probe arms a counting window over that path on a degenerate input); labeled instruments (alloc-gate, oracle-pin); line search exhaustion surfaces a null step rather than a silent accept; restoration exhaustion returns max_iter_reached rather than a silent accept; c++20 (build + ctest); c++23 (build + ctest); policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; argmin_no_exceptions_probe; policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
+| `filter_nw_sqp` | **yes** *(gated)* [^restore] | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | sqp_alloc_gate_filter_nw (zero-allocation assertion over the fixed-N steady-state window; the inner active-set solves in that window run the always-on terminal KKT verification and the equality-projection rank screen, so both are covered without a separate gate); qp_escalation_allocation_probe (no armed gate window reaches the escalated pivoted equality projection, which runs only on rank-deficient or inconsistent equality rows; this probe arms a counting window over that path on a degenerate input); sqp_alloc_gate_restoration (no armed solver window reaches restoration; this gate arms a counting window over the L1 restoration leaf on the policy's own state, entered from an infeasible start); labeled instruments (alloc-gate, oracle-pin); line search exhaustion surfaces a null step rather than a silent accept; restoration exhaustion returns max_iter_reached rather than a silent accept; c++20 (build + ctest); c++23 (build + ctest); policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; argmin_no_exceptions_probe; policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
 | `tr_sqp` | **yes** *(gated)* [^nullspace] | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | sqp_alloc_gate_tr_sqp (zero-allocation assertion on an equality-constrained fixture); labeled instruments (alloc-gate, oracle-pin); steihaug-cg exhaustion returns max_iterations rather than a silent accept; restoration exhaustion returns max_iter_reached rather than a silent accept (the restoration inner leaf caps at 10 steps); c++20 (build + ctest); c++23 (build + ctest); policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; argmin_no_exceptions_probe; policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
 | `filter_trsqp` | **yes** *(gated)* [^restore] [^nullspace] | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | sqp_alloc_gate_filter_trsqp (zero-allocation assertion on an equality-constrained fixture); labeled instruments (alloc-gate, oracle-pin); steihaug-cg exhaustion returns max_iterations rather than a silent accept; restoration exhaustion returns max_iter_reached rather than a silent accept (the restoration inner leaf caps at 10 steps); c++20 (build + ctest); c++23 (build + ctest); policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; argmin_no_exceptions_probe; policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
 | `lbfgsb` | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | **yes** *(gated)* | alloc_gate_lbfgsb (zero-allocation assertion including the bound-active generalized-Cauchy-point/subspace branch); alloc_gate_lbfgsb_line_search_failure (zero-allocation assertion across the reset-and-retry and terminal line-search-failure branches); labeled instruments (alloc-gate, oracle-pin); L-BFGS-B line-search failure: a second consecutive failure ends the solve non-converged - lbfgsb_2; L-BFGS-B line-search failure: an empty memory terminates without a retry - lbfgsb_2; c++20 (build + ctest); c++23 (build + ctest); policy_chrono_freedom_scan (GCC/Clang only); policy_chrono_freedom_compiles; argmin_no_exceptions_probe; policy_rng_freedom_scan (GCC/Clang only); policy_rng_freedom_compiles |
@@ -244,14 +244,12 @@ made or advertised for `N ≥ 49`**.
 Per-algo level reached (measured at the pinned Release config; the alloc-gate evidence certifies
 it): the three separately-gated real-time-path solvers — `nw_sqp`, `filter_nw_sqp`, and `lm` —
 each reach **steady-state 0.00 allocations/step, gated red-on-regression** (four, three, and two
-armed windows respectively); restoration is covered through the `filter_nw` gate. None reaches
-the stricter **zero-after-construction**: a one-time setup cost survives at construction plus the
-first step — **75** allocations for `nw_sqp`, **76** for `filter_nw_sqp`, **5** for `lm` (the
-QP-solver workspace built at construction plus per-state buffer resizes, warmed by the harness
-before any armed steady window). These one-time allocations are documented and deferred, not
-gated. The off-hot-loop post-convergence restoration idle window improved from 56 to 3
-allocations per 10 idle steps as a side effect of the shared active-set QP substrate plumbing;
-it remains informational and ungated (see the restoration footnote).
+armed windows respectively); restoration has its own gate (see the restoration footnote).
+None reaches the stricter **zero-after-construction**: a one-time setup cost survives at
+construction plus the first step — **75** allocations for `nw_sqp`, **76** for `filter_nw_sqp`,
+**5** for `lm` (the QP-solver workspace built at construction plus per-state buffer resizes,
+warmed by the harness before any armed steady window). These one-time allocations are
+documented and deferred, not gated.
 
 The matrix is certified on host. Carrying the zero-alloc claim onto a
 cross-compiled bare-metal target additionally requires Eigen's stack-temporary
@@ -267,16 +265,23 @@ stack-budgeting rule: [Embedded Cross-Compiling](embedded.md).
 
 ## Footnotes on the allocation-free cells
 
-[^restore]: **Post-convergence feasibility restoration (filter families).** The filter zero-mode
-    gates certify the *pre-convergence* RT regime. The shared `detail::restore_l1` feasibility
-    restoration allocates its local work vectors, but on a fixed-`N` fixture this fires only on
-    *post-convergence idle steps* — a zero-step QP at a converged iterate whose constraint
-    violation sits marginally above the restoration trigger (an `-O3` FMA/vectorization rounding
-    artifact; an `-O2` build never restores). This is outside the real-time operating regime
-    (warm-started, bounded per-tick steps, never idling). It is a characterized, documented
-    residual pending a future allocation-free rewrite of the shared restoration helper, left
-    byte-for-byte unchanged by choice. `kraft_slsqp` has no restoration path, so its window is
-    incidentally allocation-free post-convergence too.
+[^restore]: **Feasibility restoration (filter families).** `filter_slsqp` and `filter_nw_sqp`
+    restore with the hybrid strategy by default: the shared L1 steepest-descent leaf first, then a
+    feasibility QP when that leaf returns unsuccessfully (stalled progress, no descent direction,
+    exhausted backtracking, or its step budget). The L1 leaf works on storage held in the policy's
+    state and sized at construction, so at a fixed `N` it allocates nothing.
+    `sqp_alloc_gate_restoration` arms a counting window directly over the leaf on each policy's own
+    state from an infeasible start, so the claim does not depend on the filter happening to block a
+    step. Of the solver gate windows only the degenerate-vertex ticks reach restoration, and only
+    by rounding: in an `-O3 -march=native` build the filter rejects a QP step of order `1e-15` at
+    the converged vertex, where the constraint violation is zero, and the leaf returns success on
+    entry; `sqp_alloc_gate_degenerate_vertex` holds those `filter_slsqp` steps at zero allocations.
+    The feasibility-QP leg is not allocation-free: it builds its QP data in local dynamic storage
+    on every restoration step, and no gate covers it, so a restoration whose L1 leaf fails
+    allocates. `restoration_strategy::l1_penalty` leaves that leg out. `filter_trsqp` uses neither
+    leaf: its Levenberg-Marquardt restoration runs on buffers held in its state and is entered only
+    when a step is rejected with the trust radius below `min_trust_radius` at an infeasible
+    iterate, and no armed window reaches it. `kraft_slsqp` has no restoration path.
 
 [^nullspace]: **Box/inequality free-set-restart projection (trust-region families).** The
     trust-region gates are certified on an equality-constrained fixture, which never engages the

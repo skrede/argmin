@@ -64,7 +64,8 @@ bool l1_leaf_restores(double scale, double x0)
     const Eigen::VectorXd none = Eigen::VectorXd::Zero(1);
     const Eigen::VectorXd lower = Eigen::VectorXd::Constant(1, -inf);
     const Eigen::VectorXd upper = Eigen::VectorXd::Constant(1, inf);
-    return detail::restore_l1<double, Eigen::Dynamic>(scaled_row{scale}, x, none, lower, upper).success;
+    detail::filter_restoration_workspace<double, Eigen::Dynamic> ws;
+    return detail::restore_l1<double, Eigen::Dynamic>(scaled_row{scale}, ws, x, none, lower, upper).success;
 }
 
 }

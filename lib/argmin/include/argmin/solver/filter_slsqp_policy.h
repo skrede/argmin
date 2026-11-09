@@ -236,6 +236,7 @@ struct filter_slsqp_policy
         detail::qp_result<Scalar, N> soc_qp_res;
 
         argmin::detail::sqp_state_buffers<Scalar, N> bufs;
+        detail::filter_restoration_workspace<Scalar, N> restoration_ws;
 
         std::uint64_t line_search_calls{0};
         std::uint32_t iteration{0};
@@ -295,6 +296,7 @@ struct filter_slsqp_policy
         s.invalid_problem = rejects_shape(s);
 
         s.bufs.resize(n, s.n_eq, s.n_ineq);
+        s.restoration_ws.resize(n, s.n_eq, s.n_ineq, options.max_restoration_steps);
 
         Scalar h_0 = Scalar(0.0);
         if constexpr(constrained<Problem, Scalar>)
@@ -328,9 +330,7 @@ struct filter_slsqp_policy
 
         // Initialize filter with h_max per Wachter-Biegler 2006 eq. (8)
         // and thread the configured envelope margins onto the filter
-        // (Wachter & Biegler 2006 Section 2.3, eq. 6). Defaults
-        // 1e-5 / 1e-5 preserve the previously-shipped behavior when the
-        // options are unset.
+        // (Wachter & Biegler 2006 Section 2.3, eq. 6).
         s.filter.initialize(Scalar(1e4) * std::max(Scalar(1.0), h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
 
@@ -1251,44 +1251,13 @@ private:
         return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
     }
 
-    // Adapter wrapping a argmin problem type for the restoration
-    // functions, which expect eval_constraints(x, c_eq, c_ineq) and
-    // eval_constraint_jacobians(x, J_eq, J_ineq) methods.
-    template <typename P>
-    struct restoration_adapter
-    {
-        const P& problem;
-        int n_eq;
-        int n_ineq;
-
-        void eval_constraints(const Eigen::Vector<Scalar, N>& x,
-                              Eigen::VectorX<Scalar>& c_eq,
-                              Eigen::VectorX<Scalar>& c_ineq) const
-        {
-            Eigen::VectorX<Scalar> c_all(n_eq + n_ineq);
-            problem.constraints(x, c_all);
-            c_eq = c_all.head(n_eq);
-            c_ineq = c_all.tail(n_ineq);
-        }
-
-        void eval_constraint_jacobians(const Eigen::Vector<Scalar, N>& x,
-                                       Eigen::MatrixX<Scalar>& J_eq,
-                                       Eigen::MatrixX<Scalar>& J_ineq) const
-        {
-            Eigen::MatrixX<Scalar> J_all(n_eq + n_ineq, x.size());
-            problem.constraint_jacobian(x, J_all);
-            J_eq = J_all.topRows(n_eq);
-            J_ineq = J_all.bottomRows(n_ineq);
-        }
-    };
-
     // Run the configured restoration strategy.
     //
     // Reference: Wachter & Biegler 2006 Section 3.
     template <typename P>
     detail::restoration_result<Scalar, N> run_restoration_(state_type<P>& s)
     {
-        restoration_adapter<P> adapter{*s.problem, s.n_eq, s.n_ineq};
+        detail::restoration_adapter<Scalar, N, P> adapter{s.n_eq, s.n_ineq, *s.problem, s.restoration_ws.c_all, s.restoration_ws.J_all};
 
         // sigma for L1 restoration: max(|lambda|) + 1e-4
         // Reference: N&W eq. 18.36 (same formula as kraft_slsqp update_penalty).
@@ -1303,7 +1272,7 @@ private:
            strategy == detail::restoration_strategy::hybrid)
         {
             auto result = detail::restore_l1<Scalar, N>(
-                adapter, s.x, s.g, s.lower, s.upper,
+                adapter, s.restoration_ws, s.x, s.g, s.lower, s.upper,
                 sigma_restore, max_steps);
             if(result.success)
                 return result;

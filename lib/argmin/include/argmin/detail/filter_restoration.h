@@ -22,6 +22,7 @@
 //            N&W Section 15.5 (filter methods overview).
 
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/filter_restoration_workspace.h"
 
 #include "argmin/types.h"
 
@@ -72,17 +73,63 @@ struct filter_restoration_constants<float>
     static constexpr float alpha_min = 4e-5f;            // rule
 };
 
-// L1 penalty restoration: steepest descent on h(x) with backtracking.
-//
-// Takes steepest-descent steps on the L1 constraint violation
-// h(x) = ||c_eq||_1 + ||max(0, -c_ineq)||_1 using the Jacobian
-// transpose to form the descent direction. Includes stall detection
-// to allow fallback to feasibility QP in hybrid mode.
+template <typename Scalar>
+bool l1_stalled(std::vector<Scalar>& h_history, Scalar h_k, Scalar stall_ratio, std::uint16_t stall_window)
+{
+    h_history.push_back(h_k);
+    if(h_history.size() < stall_window)
+        return false;
+    return h_history.back() > stall_ratio * h_history[h_history.size() - stall_window];
+}
+
+// The L1 subgradient direction p = -J_eq^T sign(c_eq) - J_ineq^T s, where s_i = -1 on a violated inequality row.
+template <typename Scalar, int N>
+void l1_descent(filter_restoration_workspace<Scalar, N>& ws, Eigen::Vector<Scalar, N>& p)
+{
+    p.setZero();
+    if(ws.c_eq.size() > 0)
+    {
+        ws.sign_eq.resize(ws.c_eq.size());
+        for(Eigen::Index i = 0; i < ws.c_eq.size(); ++i)
+            ws.sign_eq[i] = (ws.c_eq[i] > Scalar(0)) ? Scalar(1) : Scalar(-1);
+        ws.descent.noalias() = ws.J_eq.transpose() * ws.sign_eq;
+        p -= ws.descent;
+    }
+    if(ws.c_ineq.size() > 0)
+    {
+        ws.sign_ineq.resize(ws.c_ineq.size());
+        for(Eigen::Index i = 0; i < ws.c_ineq.size(); ++i)
+            ws.sign_ineq[i] = (ws.c_ineq[i] < Scalar(0)) ? Scalar(-1) : Scalar(0);
+        ws.descent.noalias() = ws.J_ineq.transpose() * ws.sign_ineq;
+        p -= ws.descent;
+    }
+}
+
+template <typename Scalar, int N, typename Problem>
+bool l1_backtrack(const Problem& problem, filter_restoration_workspace<Scalar, N>& ws, Eigen::Vector<Scalar, N>& x,
+                  const Eigen::Vector<Scalar, N>& p, Scalar h_k, const Eigen::Vector<Scalar, N>& lower, const Eigen::Vector<Scalar, N>& upper)
+{
+    for(Scalar alpha = Scalar(1); alpha > filter_restoration_constants<Scalar>::alpha_min; alpha *= Scalar(0.5))
+    {
+        Eigen::Vector<Scalar, N> x_trial = (x + alpha * p).cwiseMax(lower).cwiseMin(upper);
+        problem.eval_constraints(x_trial, ws.c_eq, ws.c_ineq);
+        if(constraint_violation(ws.c_eq, ws.c_ineq) < h_k)
+        {
+            x = x_trial;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Steepest descent with backtracking on h(x) = ||c_eq||_1 + ||max(0, -c_ineq)||_1. Stalled progress returns
+// unsuccessfully so the hybrid strategy can fall back to the feasibility QP.
 //
 // Reference: Wachter & Biegler 2006, Section 3.
 template <typename Scalar, int N, typename Problem>
 restoration_result<Scalar, N> restore_l1(
     const Problem& problem,
+    filter_restoration_workspace<Scalar, N>& ws,
     const Eigen::Vector<Scalar, N>& x0,
     const Eigen::Vector<Scalar, N>& /*gradient*/,
     const Eigen::Vector<Scalar, N>& lower,
@@ -92,104 +139,27 @@ restoration_result<Scalar, N> restore_l1(
     Scalar stall_ratio = Scalar(0.99),
     std::uint16_t stall_window = 5)
 {
-    const auto n = x0.size();
+    constexpr Scalar h_floor = filter_restoration_constants<Scalar>::infeasibility_floor;
     Eigen::Vector<Scalar, N> x = x0;
-
-    // Ring buffer for stall detection
-    std::vector<Scalar> h_history;
-    h_history.reserve(max_steps);
-
+    Eigen::Vector<Scalar, N> p = Eigen::Vector<Scalar, N>::Zero(x0.size());
+    ws.h_history.clear();
+    ws.h_history.reserve(max_steps);
     for(std::uint16_t step = 0; step < max_steps; ++step)
     {
-        // Evaluate constraints and Jacobian at current x
-        Eigen::VectorX<Scalar> c_eq, c_ineq;
-        problem.eval_constraints(x, c_eq, c_ineq);
-
-        Scalar h_k = constraint_violation(c_eq, c_ineq);
-
-        if(h_k < filter_restoration_constants<Scalar>::infeasibility_floor)
-        {
+        problem.eval_constraints(x, ws.c_eq, ws.c_ineq);
+        const Scalar h_k = constraint_violation(ws.c_eq, ws.c_ineq);
+        if(h_k < h_floor)
             return {x, h_k, true, step};
-        }
-
-        h_history.push_back(h_k);
-
-        // Stall detection: check if recent progress is too slow
-        if(h_history.size() >= stall_window)
-        {
-            auto oldest_idx = h_history.size() - stall_window;
-            if(h_history.back() > stall_ratio * h_history[oldest_idx])
-            {
-                return {x, h_k, false, step};
-            }
-        }
-
-        // Compute descent direction: p = -J^T * sign_vector
-        // where sign_vector encodes the L1 subgradient
-        Eigen::MatrixX<Scalar> J_eq, J_ineq;
-        problem.eval_constraint_jacobians(x, J_eq, J_ineq);
-
-        Eigen::Vector<Scalar, N> p = Eigen::Vector<Scalar, N>::Zero(n);
-
-        // Equality constraint contribution: sign(c_eq_i)
-        if(c_eq.size() > 0)
-        {
-            Eigen::VectorX<Scalar> sign_eq(c_eq.size());
-            for(Eigen::Index i = 0; i < c_eq.size(); ++i)
-                sign_eq[i] = (c_eq[i] > Scalar(0)) ? Scalar(1) : Scalar(-1);
-            p -= J_eq.transpose() * sign_eq;
-        }
-
-        // Inequality constraint contribution: only violated (c_ineq < 0)
-        if(c_ineq.size() > 0)
-        {
-            Eigen::VectorX<Scalar> sign_ineq = Eigen::VectorX<Scalar>::Zero(c_ineq.size());
-            for(Eigen::Index i = 0; i < c_ineq.size(); ++i)
-            {
-                if(c_ineq[i] < Scalar(0))
-                    sign_ineq[i] = Scalar(-1);
-            }
-            p -= J_ineq.transpose() * sign_ineq;
-        }
-
-        Scalar p_norm = p.norm();
-        if(p_norm < filter_restoration_constants<Scalar>::zero_guard)
-        {
+        if(l1_stalled(ws.h_history, h_k, stall_ratio, stall_window))
             return {x, h_k, false, step};
-        }
-
-        // Backtracking line search on constraint violation
-        Scalar alpha = Scalar(1);
-        constexpr Scalar alpha_min = filter_restoration_constants<Scalar>::alpha_min;
-
-        while(alpha > alpha_min)
-        {
-            Eigen::Vector<Scalar, N> x_trial = (x + alpha * p).cwiseMax(lower).cwiseMin(upper);
-
-            Eigen::VectorX<Scalar> c_eq_trial, c_ineq_trial;
-            problem.eval_constraints(x_trial, c_eq_trial, c_ineq_trial);
-            Scalar h_trial = constraint_violation(c_eq_trial, c_ineq_trial);
-
-            if(h_trial < h_k)
-            {
-                x = x_trial;
-                break;
-            }
-            alpha *= Scalar(0.5);
-        }
-
-        if(alpha <= alpha_min)
-        {
+        problem.eval_constraint_jacobians(x, ws.J_eq, ws.J_ineq);
+        l1_descent(ws, p);
+        if(p.norm() < filter_restoration_constants<Scalar>::zero_guard || !l1_backtrack(problem, ws, x, p, h_k, lower, upper))
             return {x, h_k, false, step};
-        }
     }
-
-    // Final violation evaluation
-    Eigen::VectorX<Scalar> c_eq_final, c_ineq_final;
-    problem.eval_constraints(x, c_eq_final, c_ineq_final);
-    Scalar h_final = constraint_violation(c_eq_final, c_ineq_final);
-
-    return {x, h_final, h_final < filter_restoration_constants<Scalar>::infeasibility_floor, max_steps};
+    problem.eval_constraints(x, ws.c_eq, ws.c_ineq);
+    const Scalar h_final = constraint_violation(ws.c_eq, ws.c_ineq);
+    return {x, h_final, h_final < h_floor, max_steps};
 }
 
 // Feasibility QP restoration: minimize constraint violation via the

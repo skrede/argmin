@@ -225,6 +225,7 @@ struct filter_nw_sqp_policy
 
         // The kraft-only E_buf / f_buf stay zero-sized for cross-policy struct consistency.
         argmin::detail::sqp_state_buffers<Scalar, N> bufs;
+        detail::filter_restoration_workspace<Scalar, N> restoration_ws;
 
         // Adopted from: argmin/solver/nw_sqp_policy.h::default_* constexpr
         //               block and state_type init (in-tree precedent —
@@ -301,8 +302,8 @@ struct filter_nw_sqp_policy
         s.objective_value = problem.value(x0);
         problem.gradient(x0, s.g);
 
-        // Adopted from: argmin/detail/sqp_common.h sqp_state_buffers::resize.
         s.bufs.resize(s.n, s.n_eq, s.n_ineq);
+        s.restoration_ws.resize(s.n, s.n_eq, s.n_ineq, options.max_restoration_steps);
         s.bufs.J_all_old.setZero(m, s.n);
 
         if(s.n_eq > 0)
@@ -1369,39 +1370,11 @@ private:
         return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
     }
 
-    template <typename P>
-    struct restoration_adapter
-    {
-        const P& problem;
-        int n_eq;
-        int n_ineq;
-
-        void eval_constraints(const Eigen::Vector<Scalar, N>& x,
-                              Eigen::VectorX<Scalar>& c_eq,
-                              Eigen::VectorX<Scalar>& c_ineq) const
-        {
-            Eigen::VectorX<Scalar> c_all(n_eq + n_ineq);
-            problem.constraints(x, c_all);
-            c_eq = c_all.head(n_eq);
-            c_ineq = c_all.tail(n_ineq);
-        }
-
-        void eval_constraint_jacobians(const Eigen::Vector<Scalar, N>& x,
-                                       Eigen::MatrixX<Scalar>& J_eq,
-                                       Eigen::MatrixX<Scalar>& J_ineq) const
-        {
-            Eigen::MatrixX<Scalar> J_all(n_eq + n_ineq, x.size());
-            problem.constraint_jacobian(x, J_all);
-            J_eq = J_all.topRows(n_eq);
-            J_ineq = J_all.bottomRows(n_ineq);
-        }
-    };
-
     // Reference: Wachter & Biegler 2006 Section 3.
     template <typename P>
     detail::restoration_result<Scalar, N> run_restoration_(state_type<P>& s)
     {
-        restoration_adapter<P> adapter{*s.problem, s.n_eq, s.n_ineq};
+        detail::restoration_adapter<Scalar, N, P> adapter{s.n_eq, s.n_ineq, *s.problem, s.restoration_ws.c_all, s.restoration_ws.J_all};
 
         Scalar sigma_restore = Scalar(1e4);
         if(s.lambda.size() > 0)
@@ -1414,7 +1387,7 @@ private:
            strategy == detail::restoration_strategy::hybrid)
         {
             auto result = detail::restore_l1<Scalar, N>(
-                adapter, s.x, s.g, s.lower, s.upper,
+                adapter, s.restoration_ws, s.x, s.g, s.lower, s.upper,
                 sigma_restore, max_steps);
             if(result.success)
                 return result;

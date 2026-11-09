@@ -43,6 +43,7 @@
 
 using Catch::Approx;
 using argmin::detail::restore_l1;
+using argmin::detail::filter_restoration_workspace;
 using argmin::detail::restore_feasibility_qp;
 
 namespace
@@ -130,7 +131,8 @@ TEST_CASE("restore_l1 returns success on an already-feasible entry",
     affine_problem prob = eq_problem(1.0, 0.0);
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
 
-    auto r = restore_l1<double, 2>(prob, x0, kZeroGrad, kLower, kUpper);
+    filter_restoration_workspace<double, 2> ws;
+    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
 
     CHECK(r.success);
     CHECK(r.constraint_violation < 1e-12);
@@ -145,7 +147,8 @@ TEST_CASE("restore_l1 descends a violated equality to feasibility",
     affine_problem prob = eq_problem(1.0, 3.0);
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
 
-    auto r = restore_l1<double, 2>(prob, x0, kZeroGrad, kLower, kUpper);
+    filter_restoration_workspace<double, 2> ws;
+    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
 
     CHECK(r.success);
     CHECK(r.constraint_violation < 1e-12);
@@ -164,7 +167,8 @@ TEST_CASE("restore_l1 descends a violated inequality to feasibility",
 
     Eigen::Vector<double, 2> x0{{-5.0, 0.0}};
 
-    auto r = restore_l1<double, 2>(prob, x0, kZeroGrad, kLower, kUpper);
+    filter_restoration_workspace<double, 2> ws;
+    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
 
     CHECK(r.success);
     CHECK(r.constraint_violation < 1e-12);
@@ -180,11 +184,12 @@ TEST_CASE("restore_l1 returns unsuccessfully on stalled progress",
     affine_problem prob = eq_problem(1.0, 1000.0);
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
 
-    auto r = restore_l1<double, 2>(prob, x0, kZeroGrad, kLower, kUpper,
-                                   /*sigma_restore=*/1e4,
-                                   /*max_steps=*/20,
-                                   /*stall_ratio=*/0.99,
-                                   /*stall_window=*/5);
+    filter_restoration_workspace<double, 2> ws;
+    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper,
+                                       /*sigma_restore=*/1e4,
+                                       /*max_steps=*/20,
+                                       /*stall_ratio=*/0.99,
+                                       /*stall_window=*/5);
 
     CHECK_FALSE(r.success);
     CHECK(r.constraint_violation > 1.0);
@@ -203,7 +208,8 @@ TEST_CASE("restore_l1 returns unsuccessfully on a vanishing subgradient",
 
     Eigen::Vector<double, 2> x0{{0.5, -0.5}};
 
-    auto r = restore_l1<double, 2>(prob, x0, kZeroGrad, kLower, kUpper);
+    filter_restoration_workspace<double, 2> ws;
+    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
 
     CHECK_FALSE(r.success);
     CHECK(r.constraint_violation == Approx(1.0));
@@ -238,7 +244,8 @@ TEST_CASE("restore_l1 returns unsuccessfully when backtracking is exhausted",
 
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
 
-    auto r = restore_l1<double, 2>(prob, x0, kZeroGrad, kLower, kUpper);
+    filter_restoration_workspace<double, 2> ws;
+    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
 
     CHECK_FALSE(r.success);
     CHECK(r.constraint_violation == Approx(1.0));

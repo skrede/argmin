@@ -1,6 +1,7 @@
 #include "alloc_gate_support.h"
 
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/filter_restoration.h"
 
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/tr_sqp_policy.h"
@@ -98,6 +99,27 @@ void check_rejected_start_zero()
     CHECK(status == argmin::solver_status::invalid_problem);
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);
+}
+
+// A counting window over the L1 restoration leaf itself, on the workspace the policy's state was sized with, reaches
+// restoration without waiting for the filter to block a step. From the lower-bound corner of HS071 both constraint
+// rows are violated, so every pass runs the descent, the backtracking and the step-budget exit.
+template <typename Policy>
+void check_restoration_zero(Policy policy)
+{
+    const hs071_fixed problem;
+    const Eigen::Vector<double, 4> x0 = Eigen::Vector<double, 4>::Ones();
+    auto s = policy.init(problem, x0, sqp_gate_opts());
+    const argmin::detail::restoration_adapter<double, 4, hs071_fixed> adapter{s.n_eq, s.n_ineq, problem, s.restoration_ws.c_all, s.restoration_ws.J_all};
+    argmin::detail::restoration_result<double, 4> r{};
+    const auto counts = run_armed([&] {
+        for(std::size_t i = 0; i < 3; ++i)
+            r = argmin::detail::restore_l1<double, 4>(adapter, s.restoration_ws, x0, s.g, s.lower, s.upper);
+    });
+    CHECK(counts.eigen == 0);
+    CHECK(counts.c == 0);
+    CHECK(r.iterations_used == 10);
+    CHECK(r.constraint_violation < 1e-4);
 }
 
 }
@@ -289,9 +311,10 @@ TEST_CASE("sqp_alloc_gate_tr_sqp", "[alloc-gate]")
     CHECK(counts.c == 0);
 }
 
-// The estimate reduces the vertex's three active rows inside a fixed-N workspace. tr_sqp and filter_trsqp step there
-// with the constraint count undeclared; nw_sqp and filter_nw_sqp size their QP result storage from the declared count,
-// so they step there with it declared.
+// The estimate reduces the vertex's three active rows inside a fixed-N workspace. tr_sqp, filter_trsqp and filter_slsqp
+// step there with the constraint count undeclared; nw_sqp and filter_nw_sqp size their QP result storage from the
+// declared count, so they step there with it declared. At -O3 with -march=native, filter_slsqp's filter rejects the
+// converged vertex's rounding-sized step in one tick and enters restoration.
 TEST_CASE("sqp_alloc_gate_degenerate_vertex", "[alloc-gate]")
 {
     const Eigen::Vector2d g(2.0, 2.0);
@@ -313,6 +336,14 @@ TEST_CASE("sqp_alloc_gate_degenerate_vertex", "[alloc-gate]")
     check_degenerate_vertex_zero(argmin::filter_trsqp_policy<double, 2>{}, degenerate_vertex{});
     check_degenerate_vertex_zero(argmin::nw_sqp_policy<double, 2>{}, declared_degenerate_vertex{});
     check_degenerate_vertex_zero(argmin::filter_nw_sqp_policy<double, 2>{}, declared_degenerate_vertex{});
+    check_degenerate_vertex_zero(argmin::filter_slsqp_policy<double, 2>{}, degenerate_vertex{});
+}
+
+// filter_slsqp and filter_nw_sqp share the L1 leaf of the hybrid restoration strategy.
+TEST_CASE("sqp_alloc_gate_restoration", "[alloc-gate]")
+{
+    check_restoration_zero(argmin::filter_slsqp_policy<double, 4>{});
+    check_restoration_zero(argmin::filter_nw_sqp_policy<double, 4>{});
 }
 
 // A start of the wrong length leaves each fixed-N solver holding only its placeholder state.
