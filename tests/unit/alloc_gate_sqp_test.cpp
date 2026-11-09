@@ -82,6 +82,24 @@ void check_degenerate_vertex_zero(Policy policy, const Problem& problem)
     }
 }
 
+// solver_core also builds the placeholder state from a destructor while unwinding, where a throwing allocation would
+// terminate the program.
+template <template <typename, int> typename Policy>
+void check_rejected_start_zero()
+{
+    const argmin::hs071<> problem;
+    const Eigen::VectorXd rejected = Eigen::VectorXd::Constant(3, 1.0);
+    const auto opts = sqp_gate_opts();
+    argmin::solver_status status = argmin::solver_status::running;
+    const auto counts = run_armed([&] {
+        argmin::step_budget_solver solver{Policy<double, argmin::hs071<>::problem_dimension>{}, problem, rejected, opts};
+        status = solver.status();
+    });
+    CHECK(status == argmin::solver_status::invalid_problem);
+    CHECK(counts.eigen == 0);
+    CHECK(counts.c == 0);
+}
+
 }
 
 // nw_sqp across the fixed-N fixture family, spanning unconstrained (sd006)
@@ -295,4 +313,13 @@ TEST_CASE("sqp_alloc_gate_degenerate_vertex", "[alloc-gate]")
     check_degenerate_vertex_zero(argmin::filter_trsqp_policy<double, 2>{}, degenerate_vertex{});
     check_degenerate_vertex_zero(argmin::nw_sqp_policy<double, 2>{}, declared_degenerate_vertex{});
     check_degenerate_vertex_zero(argmin::filter_nw_sqp_policy<double, 2>{}, declared_degenerate_vertex{});
+}
+
+// A start of the wrong length leaves each fixed-N solver holding only its placeholder state.
+TEST_CASE("sqp_alloc_gate_rejected_start", "[alloc-gate]")
+{
+    check_rejected_start_zero<argmin::kraft_slsqp_policy>();
+    check_rejected_start_zero<argmin::nw_sqp_policy>();
+    check_rejected_start_zero<argmin::filter_slsqp_policy>();
+    check_rejected_start_zero<argmin::filter_nw_sqp_policy>();
 }

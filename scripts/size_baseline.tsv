@@ -95,7 +95,7 @@ function	lib/argmin/include/argmin/detail/compact_lbfgs.h	solve_middle_into	46
 function	lib/argmin/include/argmin/detail/dense_ldl_bfgs.h	factor_to_E_and_f	35
 function	lib/argmin/include/argmin/detail/dense_ldl_bfgs.h	ldl_update_	82
 function	lib/argmin/include/argmin/detail/dense_ldl_bfgs.h	multiply_in_place_	34
-function	lib/argmin/include/argmin/detail/dense_ldl_bfgs.h	push	78
+function	lib/argmin/include/argmin/detail/dense_ldl_bfgs.h	push	77
 function	lib/argmin/include/argmin/detail/diagnostics/steady_state_driver.h	measure_steady	28
 function	lib/argmin/include/argmin/detail/filter_acceptance.h	add	58
 function	lib/argmin/include/argmin/detail/filter_restoration.h	restore_feasibility_qp	70

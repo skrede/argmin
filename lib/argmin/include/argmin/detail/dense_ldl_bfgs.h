@@ -57,8 +57,6 @@
 
 #include <cmath>
 #include <limits>
-#include <vector>
-#include <cstddef>
 #include <algorithm>
 #include <cstdint>
 
@@ -87,6 +85,10 @@ struct dense_ldl_bfgs_constants<float>
 template <typename Scalar = double, int N = argmin::dynamic_dimension>
 class dense_ldl_bfgs
 {
+    // N(N+1)/2 <= N*N, so the inline bound fits the stack limit whenever the fixed-size B_ does.
+    static constexpr int packed_max = N == argmin::dynamic_dimension ? Eigen::Dynamic : N * (N + 1) / 2;
+    using packed_vector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor, packed_max, 1>;
+
 public:
     explicit dense_ldl_bfgs(int n = (N == argmin::dynamic_dimension ? 0 : N))
         : n_(n)
@@ -104,10 +106,9 @@ public:
     // Clear the stored history: L = I, D = I, B = I.
     void reset()
     {
-        // Pack L = I, D = I into the column-major flat array.
         // Column j layout: slot col_start_(j) holds D[j] = 1, slots
         // col_start_(j) + 1 .. + (n - 1 - j) hold L[j+1, j] .. L[n-1, j] = 0.
-        std::size_t idx = 0;
+        Eigen::Index idx = 0;
         for(int j = 0; j < n_; ++j)
         {
             L_packed_[idx] = Scalar(1);
@@ -200,7 +201,6 @@ public:
         if(h1_raw < h3)
         {
             const Scalar h4 = (h2 - h3) / (h2 - h1_raw);
-            // u = h4 * y + (1 - h4) * v_workspace_
             u_workspace_.head(n_).noalias() = h4 * y.head(n_)
                                             + (Scalar(1) - h4) * v_workspace_.head(n_);
             h1 = h3;
@@ -318,24 +318,24 @@ public:
     int dimension() const { return n_; }
 
 private:
-    static std::size_t packed_size_(int n) noexcept
+    static Eigen::Index packed_size_(int n) noexcept
     {
-        return static_cast<std::size_t>(n) * (static_cast<std::size_t>(n) + 1) / 2;
+        return static_cast<Eigen::Index>(n) * (static_cast<Eigen::Index>(n) + 1) / 2;
     }
 
     // Index of the diagonal entry of column j in the packed array.
     // Column 0 starts at 0, column 1 at n, column 2 at n + (n-1), etc.
     // Closed form: j * n - j*(j-1)/2.
-    std::size_t col_start_(int j) const noexcept
+    Eigen::Index col_start_(int j) const noexcept
     {
-        return static_cast<std::size_t>(j) * static_cast<std::size_t>(n_)
-             - static_cast<std::size_t>(j) * static_cast<std::size_t>(j - 1) / 2;
+        return static_cast<Eigen::Index>(j) * static_cast<Eigen::Index>(n_)
+             - static_cast<Eigen::Index>(j) * static_cast<Eigen::Index>(j - 1) / 2;
     }
 
     // L[i, j] for i > j (sub-diagonal entry).
     Scalar L_at_(int i, int j) const noexcept
     {
-        return L_packed_[col_start_(j) + static_cast<std::size_t>(i - j)];
+        return L_packed_[col_start_(j) + static_cast<Eigen::Index>(i - j)];
     }
 
     // D[i] (stored as the diagonal slot of column i in packed L).
@@ -419,7 +419,7 @@ private:
 
         constexpr Scalar epmach = std::numeric_limits<Scalar>::epsilon();
         Scalar t = Scalar(1) / sigma;
-        std::size_t ij = 0;
+        Eigen::Index ij = 0;
 
         if(sigma < Scalar(0))
         {
@@ -451,7 +451,7 @@ private:
             for(int i = 0; i < n_; ++i)
             {
                 const int jcol = n_ - 1 - i;
-                ij -= static_cast<std::size_t>(i + 1);
+                ij -= static_cast<Eigen::Index>(i + 1);
                 const Scalar u = w_workspace_[jcol];
                 w_workspace_[jcol] = t;
                 t -= u * u / L_packed_[ij];
@@ -499,7 +499,7 @@ private:
     }
 
     int n_;
-    std::vector<Scalar> L_packed_;
+    packed_vector L_packed_;
     mutable Eigen::Matrix<Scalar, N, N> B_;
     Eigen::Vector<Scalar, N> Bs_;
     Eigen::Vector<Scalar, N> u_workspace_;

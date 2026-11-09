@@ -93,8 +93,8 @@ class solver_core
     {
     };
 
-    // Rebuilds the placeholder when constructing a state throws, so state_ is never left destroyed. A placeholder
-    // that itself throws, as an allocating one can, terminates the program from this destructor.
+    // Rebuilds the placeholder when constructing a state throws, so state_ is never left destroyed. A placeholder that
+    // threw here would terminate the program; a fixed-dimension placeholder allocates nothing, a dynamic-dimension one may.
     struct unbuilt_on_unwind
     {
         bool armed;
