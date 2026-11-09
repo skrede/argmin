@@ -378,10 +378,7 @@ struct kraft_slsqp_policy
         s.sigma = options.initial_penalty;
         s.iteration = 0;
 
-        // Pre-allocate kraft_lsq_qp_solver workspace. Size finite-bound
-        // counts to n so the allocator covers any runtime pattern of
-        // finite/infinite box bounds without re-allocating.
-        s.qp_solver.resize(n, s.n_eq, s.n_ineq, n, n);
+        s.qp_solver.resize(n, s.n_eq, s.n_ineq, s.lower, s.upper);
 
         // Pre-size the persistent QP result multiplier buffers to the real
         // constraint count. The fill-into QP solve unconditionally issues

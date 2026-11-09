@@ -54,6 +54,16 @@ window_counts run_armed(Body&& body)
     return {sensor::read_eigen_malloc_count(), sensor::read_c_alloc_count()};
 }
 
+inline argmin::solver_options<> sqp_gate_opts()
+{
+    argmin::solver_options<> opts;
+    opts.max_iterations = 200;
+    opts.set_gradient_threshold(1e-8);
+    opts.set_objective_threshold(1e-10);
+    opts.set_step_threshold(1e-10);
+    return opts;
+}
+
 // Assert an armed steady-state window drove a pre-convergence, allocation-free
 // hot loop.
 inline void check_steady_zero(const sensor::steady_state_result& r)

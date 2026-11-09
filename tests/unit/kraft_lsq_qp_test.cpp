@@ -483,7 +483,7 @@ TEST_CASE("kraft_lsq_qp_solver unconstrained", "[kraft_lsq_qp]")
     Eigen::Vector<double, n> p_hi{{ inf,  inf}};
 
     kraft_lsq_qp_solver<double, n> solver;
-    solver.resize(n, 0, 0, 0, 0);
+    solver.resize(n, 0, 0, p_lo, p_hi);
     auto res = solver.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     CHECK(res.status == qp_status::optimal);
@@ -511,7 +511,7 @@ TEST_CASE("kraft_lsq_qp_solver equality only", "[kraft_lsq_qp]")
     Eigen::Vector<double, n> p_hi{{ inf,  inf}};
 
     kraft_lsq_qp_solver<double, n> solver;
-    solver.resize(n, 1, 0, 0, 0);
+    solver.resize(n, 1, 0, p_lo, p_hi);
     auto res = solver.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     CHECK(res.status == qp_status::optimal);
@@ -536,7 +536,7 @@ TEST_CASE("kraft_lsq_qp_solver box bounds only", "[kraft_lsq_qp]")
     Eigen::Vector<double, n> p_hi{{2.0, 2.0}};
 
     kraft_lsq_qp_solver<double, n> solver;
-    solver.resize(n, 0, 0, n, n);
+    solver.resize(n, 0, 0, p_lo, p_hi);
     auto res = solver.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     CHECK(res.status == qp_status::optimal);
@@ -563,7 +563,7 @@ TEST_CASE("kraft_lsq_qp_solver infinite bounds not augmented", "[kraft_lsq_qp]")
     Eigen::Vector<double, n> p_hi{{inf, inf}};
 
     kraft_lsq_qp_solver<double, n> solver;
-    solver.resize(n, 0, 0, n, 0);
+    solver.resize(n, 0, 0, p_lo, p_hi);
     auto res = solver.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     CHECK(res.status == qp_status::optimal);
@@ -611,7 +611,7 @@ TEST_CASE("kraft_lsq_qp_solver equality multiplier matches hand-derived KKT dual
     Eigen::Vector<double, n> p_hi{{ inf,  inf}};
 
     kraft_lsq_qp_solver<double, n> solver;
-    solver.resize(n, 1, 0, 0, 0);
+    solver.resize(n, 1, 0, p_lo, p_hi);
     auto res = solver.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     CHECK(res.status == qp_status::optimal);
@@ -645,7 +645,7 @@ TEST_CASE("kraft_lsq_qp_solver active-inequality multiplier is a nonnegative KKT
     Eigen::Vector<double, n> p_hi{{ inf,  inf}};
 
     kraft_lsq_qp_solver<double, n> solver;
-    solver.resize(n, 0, 1, 0, 0);
+    solver.resize(n, 0, 1, p_lo, p_hi);
     auto res = solver.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     CHECK(res.status == qp_status::optimal);
@@ -681,7 +681,7 @@ TEST_CASE("kraft_lsq_qp_solver mixed HS071-like subproblem", "[kraft_lsq_qp]")
     Eigen::Vector<double, n> p_hi{{ 1.0,  1.0,  1.0,  1.0}};
 
     kraft_lsq_qp_solver<double, n> solver;
-    solver.resize(n, 1, 1, n, n);
+    solver.resize(n, 1, 1, p_lo, p_hi);
     auto res = solver.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     CHECK(res.status == qp_status::optimal);

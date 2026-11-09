@@ -38,11 +38,17 @@ namespace
 constexpr double inf = std::numeric_limits<double>::infinity();
 
 detail::sqp_state_buffers<double, dynamic_dimension> make_buffers(
-    int n, int n_ineq)
+    int n, int n_ineq, const Eigen::VectorXd& lower, const Eigen::VectorXd& upper)
 {
     detail::sqp_state_buffers<double, dynamic_dimension> bufs;
     bufs.resize(n, 0, n_ineq);
+    bufs.resize_soc_projection(n, n_ineq, lower, upper);
     return bufs;
+}
+
+detail::sqp_state_buffers<double, dynamic_dimension> make_buffers(int n, int n_ineq)
+{
+    return make_buffers(n, n_ineq, Eigen::VectorXd::Constant(n, -inf), Eigen::VectorXd::Constant(n, inf));
 }
 
 }  // namespace
@@ -127,7 +133,6 @@ TEST_CASE("soc_seed_projection stacks finite bound rows and skips infinite "
     // q = (1, 1), which violates q0 <= 0.5; with both rows active the
     // KKT system q = (lambda_1 (1,1) + lambda_2 (-1,0)) / 2 gives
     // q* = (0.5, 1.5) with lambda = (3, 2) >= 0.
-    auto bufs = make_buffers(2, 1);
     Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> J(1, 2);
     J << 1.0, 1.0;
     Eigen::VectorXd b(1);
@@ -136,6 +141,7 @@ TEST_CASE("soc_seed_projection stacks finite bound rows and skips infinite "
     Eigen::VectorXd p_lo(2), p_hi(2);
     p_lo << -inf, -inf;
     p_hi << 0.5, inf;
+    auto bufs = make_buffers(2, 1, p_lo, p_hi);
 
     const bool projected =
         detail::soc_seed_projection<double, dynamic_dimension>(

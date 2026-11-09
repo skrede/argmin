@@ -145,6 +145,7 @@
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "sqp_alloc_gate_kraft", "note": "zero-allocation assertion over the armed steady-state window"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_first_solve_half_box", "note": "zero-allocation assertion over the first solve after construction, on a box with infinite entries"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
             },
@@ -198,6 +199,7 @@
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_slsqp", "note": "zero-allocation assertion over the warm-started armed window"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_first_solve_half_box", "note": "zero-allocation assertion over the first solve after construction, on a box with infinite entries"},
                 {"kind": "ctest_test", "name": "sqp_alloc_gate_restoration", "note": "a counting window over the policy's hybrid restoration on its own state, entered from an infeasible start where the L1 leaf exhausts its budget and the feasibility QP runs"},
                 {"kind": "ctest_test", "name": "sqp_alloc_gate_degenerate_vertex", "note": "warm-reset ticks at a degenerate vertex, including the steps that enter restoration in an -O3 -march=native build"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
@@ -254,6 +256,8 @@
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "sqp_alloc_gate_nw", "note": "zero-allocation assertion over the fixed-N steady-state window; the inner active-set solves in that window run the always-on terminal KKT verification and the equality-projection rank screen, so both are covered without a separate gate"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_first_solve_phase1", "note": "zero-allocation assertion over the first solve after construction, from a start whose first QP takes the active-set phase-1 projection"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_first_solve_half_box", "note": "zero-allocation assertion over the first solve after construction, on a box with infinite entries"},
                 {"kind": "ctest_test", "name": "qp_escalation_allocation_probe", "note": "no armed gate window reaches the escalated pivoted equality projection, which runs only on rank-deficient or inconsistent equality rows; this probe arms a counting window over that path on a degenerate input"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}
               ]
@@ -307,6 +311,8 @@
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "sqp_alloc_gate_filter_nw", "note": "zero-allocation assertion over the fixed-N steady-state window; the inner active-set solves in that window run the always-on terminal KKT verification and the equality-projection rank screen, so both are covered without a separate gate"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_first_solve_phase1", "note": "zero-allocation assertion over the first solve after construction, from a start whose first QP takes the active-set phase-1 projection"},
+                {"kind": "ctest_test", "name": "sqp_alloc_gate_first_solve_half_box", "note": "zero-allocation assertion over the first solve after construction, on a box with infinite entries"},
                 {"kind": "ctest_test", "name": "qp_escalation_allocation_probe", "note": "no armed gate window reaches the escalated pivoted equality projection, which runs only on rank-deficient or inconsistent equality rows; this probe arms a counting window over that path on a degenerate input"},
                 {"kind": "ctest_test", "name": "sqp_alloc_gate_restoration", "note": "no armed solver window reaches restoration; this gate arms a counting window over the policy's hybrid restoration on its own state, entered from an infeasible start where the L1 leaf exhausts its budget and the feasibility QP runs"},
                 {"kind": "ci_job", "name": "labeled instruments (alloc-gate, oracle-pin)"}

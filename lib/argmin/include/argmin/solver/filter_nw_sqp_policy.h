@@ -336,11 +336,11 @@ struct filter_nw_sqp_policy
             s.lower = Eigen::Vector<Scalar, N>::Constant(s.n, -inf);
             s.upper = Eigen::Vector<Scalar, N>::Constant(s.n, inf);
         }
+        s.bufs.resize_soc_projection(s.n, s.n_ineq, s.lower, s.upper);
 
         s.hessian = detail::dense_ldl_bfgs<Scalar, N>(s.n);
-        // Pre-allocate QP solver workspace: equality + inequality + 2n box bounds.
         const int max_constraints = s.n_eq + s.n_ineq + 2 * s.n;
-        s.qp_solver = decltype(s.qp_solver)(s.n, max_constraints, s.n_eq);
+        s.qp_solver = decltype(s.qp_solver)(s.n, max_constraints);
         s.sigma = Scalar(1.0);
         s.iteration = 0;
 

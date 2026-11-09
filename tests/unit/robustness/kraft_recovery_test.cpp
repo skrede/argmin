@@ -52,7 +52,7 @@ TEST_CASE("kraft factored-Hessian path is direct-optimal on a feasible QP",
     Eigen::Vector<double, n> p_hi{{ 1.0,  1.0}};
 
     kraft_lsq_qp_recovery_solver<double, n> recovery;
-    recovery.resize(n, 0, 0, n, n);
+    recovery.resize(n, 0, 0, p_lo, p_hi);
     auto res = recovery.solve_with_factored_hessian(
         E, f, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
@@ -85,7 +85,7 @@ TEST_CASE("kraft factored-Hessian recovery resolves an infeasible equality",
     Eigen::Vector<double, n> p_hi{{ 1.0,  1.0}};
 
     kraft_lsq_qp_recovery_solver<double, n> recovery;
-    recovery.resize(n, 1, 0, n, n);
+    recovery.resize(n, 1, 0, p_lo, p_hi);
     auto res = recovery.solve_with_factored_hessian(
         E, f, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
@@ -117,7 +117,7 @@ TEST_CASE("kraft factored-Hessian recovery resolves an infeasible inequality",
     Eigen::Vector<double, n> p_hi{{ 1.0,  1.0}};
 
     kraft_lsq_qp_recovery_solver<double, n> recovery;
-    recovery.resize(n, 0, 1, n, n);
+    recovery.resize(n, 0, 1, p_lo, p_hi);
     auto res = recovery.solve_with_factored_hessian(
         E, f, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 

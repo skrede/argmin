@@ -336,7 +336,7 @@ struct filter_slsqp_policy
         s.filter.initialize(Scalar(1e4) * std::max(Scalar(1.0), h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
 
-        s.qp_solver.resize(n, s.n_eq, s.n_ineq, n, n);
+        s.qp_solver.resize(n, s.n_eq, s.n_ineq, s.lower, s.upper);
 
         // Pre-size the persistent QP result multiplier buffers to the real
         // constraint count so the fill-into QP solve's out.lambda.setZero()

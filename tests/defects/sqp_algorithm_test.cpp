@@ -79,13 +79,13 @@ std::size_t second_order_corrections_at_feasible_iterates()
 // Two copies of the consistent row x0 + x1 = 1 in three variables: rank-deficient with fewer rows than unknowns.
 double duplicated_row_relaxation_factor()
 {
-    detail::kraft_lsq_qp_recovery_solver<double, Eigen::Dynamic> qp;
-    qp.resize(3, 2, 0, 0, 0);
     Eigen::MatrixXd A_eq(2, 3);
     A_eq << 1.0, 1.0, 0.0, 1.0, 1.0, 0.0;
     const double inf = std::numeric_limits<double>::infinity();
     const Eigen::VectorXd lower = Eigen::VectorXd::Constant(3, -inf);
     const Eigen::VectorXd upper = Eigen::VectorXd::Constant(3, inf);
+    detail::kraft_lsq_qp_recovery_solver<double, Eigen::Dynamic> qp;
+    qp.resize(3, 2, 0, lower, upper);
     return qp.solve(Eigen::MatrixXd::Identity(3, 3), Eigen::VectorXd::Ones(3), A_eq, Eigen::VectorXd::Ones(2), Eigen::MatrixXd(0, 3), Eigen::VectorXd(0), lower, upper).relaxation_factor;
 }
 

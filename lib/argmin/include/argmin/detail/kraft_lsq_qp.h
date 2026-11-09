@@ -17,7 +17,7 @@
 // Box bounds are folded into the inequality block as augmented +I / -I
 // rows (only for finite bounds; infinite bounds are skipped, matching
 // the NLopt SGJ 2010 patch). No allocation occurs inside solve() once
-// resize() has been called.
+// resize() has been called with the box the solves use.
 //
 // Reference: Kraft, D. (1988). A Software Package for Sequential
 //            Quadratic Programming. DFVLR-FB 88-28, eq. 2.33 and
@@ -41,43 +41,44 @@
 namespace argmin::detail
 {
 
+template <typename Scalar, int N>
+int finite_count(const Eigen::Vector<Scalar, N>& v)
+{
+    return static_cast<int>(v.array().isFinite().count());
+}
+
 template <typename Scalar = double, int N = argmin::dynamic_dimension>
 class kraft_lsq_qp_solver
 {
 public:
     kraft_lsq_qp_solver() = default;
 
-    // Pre-allocate workspace for a problem of the given shape.
-    // n_finite_lower / n_finite_upper are upper bounds; the actual
-    // number of augmented rows is determined per-solve from which
-    // bounds are finite.
-    void resize(int n, int m_eq, int m_ineq, int n_finite_lower, int n_finite_upper)
+    // The cascade sizes its buffers to the exact augmented row count, so they are sized here for step boxes with the
+    // finite entries of [lower, upper]; a box with another count of finite entries reshapes them.
+    void resize(int n, int m_eq, int m_ineq, const Eigen::Vector<Scalar, N>& lower, const Eigen::Vector<Scalar, N>& upper)
     {
-        const int m_aug_max = m_ineq + n_finite_lower + n_finite_upper;
+        const int m_aug = m_ineq + finite_count(lower) + finite_count(upper);
 
         E_.resize(n, n);
         f_.resize(n);
-        G_aug_.resize(m_aug_max, n);
-        h_aug_.resize(m_aug_max);
+        G_aug_.resize(m_aug, n);
+        h_aug_.resize(m_aug);
         A_eq_buf_.resize(m_eq, n);
         b_eq_buf_.resize(m_eq);
         x_out_.resize(n);
 
         // The LDP inside lsei works in the dimension left after the equality rows are eliminated.
         const int n_ldp = m_eq > 0 ? std::max(n - m_eq, 0) : n;
-        nnls_A_.resize(n_ldp + 1, m_aug_max);
+        nnls_A_.resize(n_ldp + 1, m_aug);
         nnls_b_.resize(n_ldp + 1);
-        nnls_x_vec_.resize(m_aug_max);
-        nnls_w_.resize(m_aug_max);
-        nnls_ws_.ensure(n_ldp + 1, m_aug_max);
+        nnls_x_vec_.resize(m_aug);
+        nnls_w_.resize(m_aug);
+        nnls_ws_.ensure(n_ldp + 1, m_aug);
         nnls_ws_.r_buf.resize(n_ldp + 1);
 
-        lsei_ws_.resize(n, m_eq, m_aug_max);
-
-        // Multiplier output buffers from lsei. Sized to the maximum
-        // problem shape so solve() does not allocate.
+        lsei_ws_.resize(n, m_eq, m_aug);
         qp_lambda_eq_.resize(m_eq);
-        qp_lambda_ineq_.resize(m_aug_max);
+        qp_lambda_ineq_.resize(m_aug);
     }
 
     // Solve the QP subproblem from a dense Hessian.
@@ -261,14 +262,7 @@ private:
         // RHS:
         //   b_ineq  |  p_lo_finite  |  -p_hi_finite
         // -------------------------------------------------------------
-        int nlo = 0;
-        int nhi = 0;
-        for(int i = 0; i < n; ++i)
-        {
-            if(isfinite(p_lo[i])) ++nlo;
-            if(isfinite(p_hi[i])) ++nhi;
-        }
-        const int m_aug = m_ineq + nlo + nhi;
+        const int m_aug = m_ineq + finite_count(p_lo) + finite_count(p_hi);
 
         if(G_aug_.rows() != m_aug || G_aug_.cols() != n)
             G_aug_.resize(m_aug, n);

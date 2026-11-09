@@ -282,7 +282,6 @@ struct nw_sqp_policy
         s.J_eq = s.bufs.J_all.topRows(s.n_eq);
         s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
 
-        // Box bounds
         if constexpr(bound_constrained<Problem, Scalar>)
         {
             s.lower = problem.lower_bounds();
@@ -294,6 +293,7 @@ struct nw_sqp_policy
             s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
             s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
         }
+        s.bufs.resize_soc_projection(n, s.n_ineq, s.lower, s.upper);
 
         // BFGS Hessian of Lagrangian, initialized to I
         s.hessian = detail::dense_ldl_bfgs<Scalar, N>(n);

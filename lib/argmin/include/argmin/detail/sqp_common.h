@@ -92,14 +92,8 @@ struct sqp_state_buffers
     Eigen::Matrix<Scalar, N, N> E_buf;
     Eigen::Vector<Scalar, N> f_buf;
 
-    // Second-order-correction warm-start projection scratch (see
-    // soc_seed_projection below): stacked LDP polyhedron rows
-    // (inequality rows plus up to 2n finite-bound rows), the min-norm
-    // shift and its multipliers, and the dual-NNLS workspaces threaded
-    // through detail::ldp. Sized for the worst case (every bound
-    // finite); detail::ldp re-shapes the nnls_* views to the actual row
-    // count, which is constant per problem instance, so the projection
-    // is allocation-free at steady state.
+    // Warm-start projection scratch for soc_seed_projection, sized by resize_soc_projection: detail::ldp sizes its
+    // buffers to the exact stacked row count, one row per inequality and per finite bound.
     Eigen::MatrixX<Scalar> soc_ldp_G_buf;
     Eigen::VectorX<Scalar> soc_ldp_h_buf;
     Eigen::VectorX<Scalar> soc_ldp_q_buf;
@@ -109,9 +103,6 @@ struct sqp_state_buffers
     Eigen::VectorX<Scalar> soc_nnls_x_buf;
     Eigen::VectorX<Scalar> soc_nnls_w_buf;
 
-    // Maintained-factorization workspace threaded into detail::nnls through
-    // the SOC-projection detail::ldp call (replaces nnls's former
-    // thread_local statics). Grow-only; steady-state allocation-free.
     nnls_workspace<Scalar> soc_nnls_ws;
 
     // Caller-owned workspace for compute_kkt_multipliers_active_set
@@ -120,6 +111,8 @@ struct sqp_state_buffers
     kkt_multiplier_workspace<Scalar, N> kkt_ws;
 
     void resize(int n, int n_eq, int n_ineq);
+
+    void resize_soc_projection(int n, int n_ineq, const Eigen::Vector<Scalar, N>& lower, const Eigen::Vector<Scalar, N>& upper);
 };
 
 template <typename Scalar, int N>
@@ -158,16 +151,23 @@ inline void sqp_state_buffers<Scalar, N>::resize(int n, int n_eq, int n_ineq)
 
     E_buf.resize(n, n);
     f_buf.resize(n);
+}
 
-    const int soc_rows = n_ineq + 2 * n;
-    soc_ldp_G_buf.resize(soc_rows, n);
-    soc_ldp_h_buf.resize(soc_rows);
+template <typename Scalar, int N>
+inline void sqp_state_buffers<Scalar, N>::resize_soc_projection(int n, int n_ineq, const Eigen::Vector<Scalar, N>& lower, const Eigen::Vector<Scalar, N>& upper)
+{
+    constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+    const int rows = n_ineq + static_cast<int>((lower.array() > -inf).count() + (upper.array() < inf).count());
+    soc_ldp_G_buf.resize(rows, n);
+    soc_ldp_h_buf.resize(rows);
     soc_ldp_q_buf.resize(n);
-    soc_ldp_lambda_buf.resize(soc_rows);
-    soc_nnls_A_buf.resize(n + 1, soc_rows);
+    soc_ldp_lambda_buf.resize(rows);
+    soc_nnls_A_buf.resize(n + 1, rows);
     soc_nnls_b_buf.resize(n + 1);
-    soc_nnls_x_buf.resize(soc_rows);
-    soc_nnls_w_buf.resize(soc_rows);
+    soc_nnls_x_buf.resize(rows);
+    soc_nnls_w_buf.resize(rows);
+    soc_nnls_ws.ensure(n + 1, rows);
+    soc_nnls_ws.r_buf.resize(n + 1);
 }
 
 // Adopted from: argmin/result/step_result.h schema (in-tree precedent —
@@ -636,9 +636,7 @@ ARGMIN_FORCE_INLINE bool soc_seed_projection(
     // rows [0, n_ineq) are J_ineq * q >= b_ineq_soc - J_ineq * seed,
     // then one identity row per finite lower bound (q_i >= p_lo_i -
     // seed_i) and one negated identity row per finite upper bound
-    // (-q_i >= seed_i - p_hi_i). G / h are top-block views into the
-    // worst-case-sized scratch; detail::ldp reads only the leading m
-    // rows.
+    // (-q_i >= seed_i - p_hi_i); detail::ldp reads the leading m rows of G / h.
     auto& G = bufs.soc_ldp_G_buf;
     auto& h = bufs.soc_ldp_h_buf;
 

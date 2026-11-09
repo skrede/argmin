@@ -33,17 +33,8 @@ using argmin::alloc_gate::hs026_fixed_gate;
 using argmin::alloc_gate::hs071_fixed;
 using argmin::alloc_gate::hs071_fixed_gate;
 using argmin::alloc_gate::run_armed;
+using argmin::alloc_gate::sqp_gate_opts;
 using argmin::alloc_gate::undercap_rosenbrock;
-
-argmin::solver_options<> sqp_gate_opts()
-{
-    argmin::solver_options<> opts;
-    opts.max_iterations = 200;
-    opts.set_gradient_threshold(1e-8);
-    opts.set_objective_threshold(1e-10);
-    opts.set_step_threshold(1e-10);
-    return opts;
-}
 
 // Assert the steps taken after a converged solve are allocation-free, in the
 // scalar's own default options. The solve must have reached the solution, or

@@ -74,23 +74,18 @@ public:
 
     kraft_lsq_qp_recovery_solver() = default;
 
-    // Pre-allocate workspace for a problem of the given shape.
-    // n_finite_lower / n_finite_upper are upper bounds on how many of the
-    // n primal box bounds will be finite at solve-time; the augmented
-    // solver always has one additional finite lower (s >= 0) and one
-    // additional finite upper (s <= 1) bound, accounted for here.
-    void resize(int n, int m_eq, int m_ineq, int n_finite_lower, int n_finite_upper)
+    // Sized for step boxes with the finite entries of [lower, upper], as kraft_lsq_qp_solver::resize.
+    void resize(int n, int m_eq, int m_ineq, const Eigen::Vector<Scalar, N>& lower, const Eigen::Vector<Scalar, N>& upper)
     {
-        solver_.resize(n, m_eq, m_ineq, n_finite_lower, n_finite_upper);
-        solver_aug_.resize(n + 1, m_eq, m_ineq, n_finite_lower + 1, n_finite_upper + 1);
+        augment_box_(n, lower, upper);
+        solver_.resize(n, m_eq, m_ineq, lower, upper);
+        solver_aug_.resize(n + 1, m_eq, m_ineq, p_lo_aug_, p_hi_aug_);
 
         const int n_aug = n + 1;
         B_aug_.resize(n_aug, n_aug);
         g_aug_.resize(n_aug);
         A_eq_aug_.resize(m_eq, n_aug);
         A_ineq_aug_.resize(m_ineq, n_aug);
-        p_lo_aug_.resize(n_aug);
-        p_hi_aug_.resize(n_aug);
         B_recover_.resize(n, n);
         aug_.x.setZero(n_aug);
         aug_.lambda.setZero(m_eq + m_ineq);
@@ -291,16 +286,21 @@ private:
         if(B_aug_.rows() != n_aug || B_aug_.cols() != n_aug)
             B_aug_.resize(n_aug, n_aug);
         if(g_aug_.size() != n_aug) g_aug_.resize(n_aug);
-        if(p_lo_aug_.size() != n_aug) p_lo_aug_.resize(n_aug);
-        if(p_hi_aug_.size() != n_aug) p_hi_aug_.resize(n_aug);
-        p_lo_aug_.head(n) = p_lo;
-        p_lo_aug_[n] = Scalar(0);
-        p_hi_aug_.head(n) = p_hi;
-        p_hi_aug_[n] = Scalar(1);
+        augment_box_(n, p_lo, p_hi);
         g_aug_.head(n) = g;
         g_aug_[n] = Scalar(0);
         B_aug_.setZero();
         B_aug_.topLeftCorner(n, n) = B;
+    }
+
+    void augment_box_(int n, const Eigen::Vector<Scalar, N>& p_lo, const Eigen::Vector<Scalar, N>& p_hi)
+    {
+        if(p_lo_aug_.size() != n + 1) p_lo_aug_.resize(n + 1);
+        if(p_hi_aug_.size() != n + 1) p_hi_aug_.resize(n + 1);
+        p_lo_aug_.head(n) = p_lo;
+        p_lo_aug_[n] = Scalar(0);
+        p_hi_aug_.head(n) = p_hi;
+        p_hi_aug_[n] = Scalar(1);
     }
 
     // Penalty schedule and retry cap per Kraft 1988 §3.4: rho_0 = 100,

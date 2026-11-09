@@ -399,7 +399,7 @@ jobs:
           # guard exists to catch a dropped gate; it must not miscount silently.
           count=$(ctest -N -L alloc-gate | grep -cE '^ *Test +#')
           echo "allocation gates registered: $count"
-          test "$count" -eq 21 || { echo "expected 21 allocation gates, found $count"; exit 1; }
+          test "$count" -eq 24 || { echo "expected 24 allocation gates, found $count"; exit 1; }
 
       # The literal is deliberate: fixing a known defect turns its case red, and the fixing change lowers it.
       - name: Verify the full known-defect set registered

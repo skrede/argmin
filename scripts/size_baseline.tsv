@@ -14,7 +14,7 @@ file	lib/argmin/include/argmin/detail/filter_acceptance.h	-	419
 file	lib/argmin/include/argmin/detail/filter_restoration.h	-	252
 file	lib/argmin/include/argmin/detail/interpolation_system.h	-	996
 file	lib/argmin/include/argmin/detail/isres_operators.h	-	454
-file	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	-	428
+file	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	-	422
 file	lib/argmin/include/argmin/detail/kraft_lsq_qp_recovery.h	-	335
 file	lib/argmin/include/argmin/detail/lagrangian.h	-	305
 file	lib/argmin/include/argmin/detail/lsei.h	-	405
@@ -28,7 +28,7 @@ file	lib/argmin/include/argmin/detail/projected_gn_step.h	-	381
 file	lib/argmin/include/argmin/detail/quadratic_model.h	-	480
 file	lib/argmin/include/argmin/detail/restoration.h	-	371
 file	lib/argmin/include/argmin/detail/solver_core.h	-	680
-file	lib/argmin/include/argmin/detail/sqp_common.h	-	793
+file	lib/argmin/include/argmin/detail/sqp_common.h	-	791
 file	lib/argmin/include/argmin/detail/steihaug_cg.h	-	255
 file	lib/argmin/include/argmin/detail/trust_region.h	-	924
 file	lib/argmin/include/argmin/formulation/concepts.h	-	234
@@ -53,7 +53,7 @@ file	lib/argmin/include/argmin/solver/convergence.h	-	392
 file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1346
 file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1218
 file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1787
-file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1123
+file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1120
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	205
 file	lib/argmin/include/argmin/solver/lm_policy.h	-	302
 file	lib/argmin/include/argmin/solver/mma_policy.h	-	567
@@ -107,9 +107,8 @@ function	lib/argmin/include/argmin/detail/interpolation_system.h	shift_xbase	94
 function	lib/argmin/include/argmin/detail/interpolation_system.h	update_bmat_zmat	82
 function	lib/argmin/include/argmin/detail/interpolation_system.h	update_model_on_replacement	108
 function	lib/argmin/include/argmin/detail/kkt_residual.h	kkt_feasibility_legs	29
-function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	resize	26
 function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	solve_into	52
-function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	solve_lsei_	142
+function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	solve_lsei_	135
 function	lib/argmin/include/argmin/detail/lbfgsb_direction.h	compute_direction	65
 function	lib/argmin/include/argmin/detail/ldp.h	ldp	115
 function	lib/argmin/include/argmin/detail/lsei.h	lsei	232
@@ -135,8 +134,8 @@ function	lib/argmin/include/argmin/detail/sqp_common.h	compute_bfgs_pair_fused	2
 function	lib/argmin/include/argmin/detail/sqp_common.h	extract_qp_multipliers	29
 function	lib/argmin/include/argmin/detail/sqp_common.h	null_space_project	39
 function	lib/argmin/include/argmin/detail/sqp_common.h	null_step_result	56
-function	lib/argmin/include/argmin/detail/sqp_common.h	resize	44
-function	lib/argmin/include/argmin/detail/sqp_common.h	soc_seed_projection	60
+function	lib/argmin/include/argmin/detail/sqp_common.h	resize	34
+function	lib/argmin/include/argmin/detail/sqp_common.h	soc_seed_projection	58
 function	lib/argmin/include/argmin/detail/steihaug_cg.h	steihaug_cg	138
 function	lib/argmin/include/argmin/detail/stochastic_ranking.h	stochastic_rank	34
 function	lib/argmin/include/argmin/detail/subspace_minimization.h	solve	36
@@ -212,7 +211,7 @@ function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	step	783
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	init	160
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	reset	43
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	step	907
-function	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	init	95
+function	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	init	92
 function	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	step	657
 function	lib/argmin/include/argmin/solver/lbfgsb_policy.h	init	28
 function	lib/argmin/include/argmin/solver/lm_policy.h	init	34

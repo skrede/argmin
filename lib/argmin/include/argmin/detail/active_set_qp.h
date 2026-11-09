@@ -30,7 +30,6 @@
 #include <limits>
 #include <utility>
 #include <vector>
-#include <optional>
 
 namespace argmin::detail
 {
@@ -598,13 +597,13 @@ public:
     using result_type =
         qp_result<Scalar, N, argmin::dynamic_dimension, max_total_constraints>;
 
-    explicit active_set_qp_solver(int n, int max_constraints, std::optional<int> n_eq = std::nullopt)
+    explicit active_set_qp_solver(int n, int max_constraints)
         : n_(n)
         , max_m_(max_constraints)
         , A_full_(max_constraints, n)
         , b_full_(max_constraints)
         , A_W_(max_constraints, n)
-        , qr_lambda_(n, n_eq.value_or(n))
+        , qr_lambda_(n, n)
         , qr_rr_(n, n)
         , qr_full_(n, n)
         , llt_reduced_(n)
@@ -1244,7 +1243,8 @@ private:
     constraint_vector b_full_;
     constraint_matrix A_W_;
 
-    Eigen::HouseholderQR<qr_lambda_matrix> qr_lambda_;
+    // Phase-1 factors the n x m_eq matrix A_eq^T with m_eq <= n, so square max-bounded storage holds any equality count.
+    Eigen::HouseholderQR<n_square_matrix> qr_lambda_;
     Eigen::ColPivHouseholderQR<qr_lambda_matrix> qr_rr_;
     Eigen::HouseholderQR<qr_matrix> qr_full_;
     defined_decomposition<Eigen::LLT<n_square_matrix>> llt_reduced_;

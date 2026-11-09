@@ -42,12 +42,12 @@ TEST_CASE("kraft_lsq_qp_recovery is bit-identical to direct solver on feasible Q
     Eigen::Vector<double, n> p_hi{{ 1.0,  1.0,  1.0,  1.0}};
 
     kraft_lsq_qp_solver<double, n> direct;
-    direct.resize(n, 1, 1, n, n);
+    direct.resize(n, 1, 1, p_lo, p_hi);
     auto direct_res = direct.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
     REQUIRE(direct_res.status == qp_status::optimal);
 
     kraft_lsq_qp_recovery_solver<double, n> recovery;
-    recovery.resize(n, 1, 1, n, n);
+    recovery.resize(n, 1, 1, p_lo, p_hi);
     auto recovery_res = recovery.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     CHECK(recovery_res.status == qp_status::optimal);
@@ -85,7 +85,7 @@ TEST_CASE("kraft_lsq_qp_recovery preserves dynamic-N direct path",
     Eigen::VectorXd p_hi =  Eigen::VectorXd::Ones(n);
 
     kraft_lsq_qp_recovery_solver<double, Eigen::Dynamic> recovery;
-    recovery.resize(n, 0, 0, n, n);
+    recovery.resize(n, 0, 0, p_lo, p_hi);
     auto res = recovery.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     CHECK(res.status == qp_status::optimal);
@@ -137,13 +137,13 @@ TEST_CASE("kraft_lsq_qp_recovery resolves infeasible equality via augmentation",
 
     // Direct solver should fail (infeasible linearization).
     kraft_lsq_qp_solver<double, n> direct;
-    direct.resize(n, 1, 0, n, n);
+    direct.resize(n, 1, 0, p_lo, p_hi);
     auto direct_res = direct.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
     CHECK(direct_res.status != qp_status::optimal);
 
     // Recovery solver should succeed via augmentation.
     kraft_lsq_qp_recovery_solver<double, n> recovery;
-    recovery.resize(n, 1, 0, n, n);
+    recovery.resize(n, 1, 0, p_lo, p_hi);
     auto rec_res = recovery.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     REQUIRE(rec_res.status == qp_status::optimal);
@@ -189,7 +189,7 @@ TEST_CASE("kraft_lsq_qp_recovery resolves infeasible inequality via augmentation
     Eigen::Vector<double, n> p_hi{{ 1.0,  1.0}};
 
     kraft_lsq_qp_recovery_solver<double, n> recovery;
-    recovery.resize(n, 0, 1, n, n);
+    recovery.resize(n, 0, 1, p_lo, p_hi);
     auto res = recovery.solve(B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
 
     REQUIRE(res.status == qp_status::optimal);

@@ -567,7 +567,7 @@ TEST_CASE("sparse_admm_qp polish agrees with the active-set oracle on equality-c
         const Eigen::MatrixXd A_in(0, n);
         const Eigen::VectorXd b_in(0);
         detail::kraft_lsq_qp_solver<double> oracle;
-        oracle.resize(n, 1, 0, n, n);
+        oracle.resize(n, 1, 0, p.l.head(n), p.u.head(n));
         auto ref = oracle.solve(p.P, p.q, A_eq, b_eq, A_in, b_in, p.l.head(n), p.u.head(n));
         const double reference_objective =
             0.5 * ref.x.dot(p.P * ref.x) + p.q.dot(ref.x);
