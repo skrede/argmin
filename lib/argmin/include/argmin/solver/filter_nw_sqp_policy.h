@@ -244,6 +244,7 @@ struct filter_nw_sqp_policy
         // (allocation-free steady-state solves). Falls back to the dynamic
         // sentinel for problems without a static constraint_count.
         detail::active_set_qp_solver<Scalar, N, M> qp_solver;
+        typename detail::active_set_qp_solver<Scalar, N, M>::result_type restoration_qp;
         Eigen::MatrixX<Scalar> AAt_workspace;
         detail::defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> ldlt_feasibility;
         Eigen::VectorX<Scalar> w_workspace;
@@ -303,7 +304,7 @@ struct filter_nw_sqp_policy
         problem.gradient(x0, s.g);
 
         s.bufs.resize(s.n, s.n_eq, s.n_ineq);
-        s.restoration_ws.resize(s.n, s.n_eq, s.n_ineq, options.max_restoration_steps);
+        s.restoration_ws.resize(s.n, s.n_eq, s.n_ineq, options.max_restoration_steps, s.restoration_qp);
         s.bufs.J_all_old.setZero(m, s.n);
 
         if(s.n_eq > 0)
@@ -338,7 +339,7 @@ struct filter_nw_sqp_policy
         s.hessian = detail::dense_ldl_bfgs<Scalar, N>(s.n);
         // Pre-allocate QP solver workspace: equality + inequality + 2n box bounds.
         const int max_constraints = s.n_eq + s.n_ineq + 2 * s.n;
-        s.qp_solver = decltype(s.qp_solver)(s.n, max_constraints);
+        s.qp_solver = decltype(s.qp_solver)(s.n, max_constraints, s.n_eq);
         s.sigma = Scalar(1.0);
         s.iteration = 0;
 
@@ -1374,79 +1375,7 @@ private:
     template <typename P>
     detail::restoration_result<Scalar, N> run_restoration_(state_type<P>& s)
     {
-        detail::restoration_adapter<Scalar, N, P> adapter{s.n_eq, s.n_ineq, *s.problem, s.restoration_ws.c_all, s.restoration_ws.J_all};
-
-        Scalar sigma_restore = Scalar(1e4);
-        if(s.lambda.size() > 0)
-            sigma_restore = s.lambda.cwiseAbs().maxCoeff() + Scalar(1e-4);
-
-        auto strategy = options.restoration;
-        auto max_steps = options.max_restoration_steps;
-
-        if(strategy == detail::restoration_strategy::l1_penalty ||
-           strategy == detail::restoration_strategy::hybrid)
-        {
-            auto result = detail::restore_l1<Scalar, N>(
-                adapter, s.restoration_ws, s.x, s.g, s.lower, s.upper,
-                sigma_restore, max_steps);
-            if(result.success)
-                return result;
-        }
-
-        // feasibility QP via solve_qp free function
-        if(strategy == detail::restoration_strategy::feasibility_qp ||
-           strategy == detail::restoration_strategy::hybrid)
-        {
-            Eigen::Vector<Scalar, N> x = s.x;
-            for(std::uint16_t step = 0; step < max_steps; ++step)
-            {
-                Eigen::VectorX<Scalar> c_eq, c_ineq;
-                adapter.eval_constraints(x, c_eq, c_ineq);
-                Scalar h_k = detail::constraint_violation(c_eq, c_ineq);
-                if(h_k < line_search_sqp_defaults<Scalar>::infeasibility_floor)
-                    return {x, h_k, true, step};
-
-                Eigen::MatrixX<Scalar> J_eq_r, J_ineq_r;
-                adapter.eval_constraint_jacobians(x, J_eq_r, J_ineq_r);
-
-                auto n = x.size();
-                Eigen::MatrixX<Scalar> H = Eigen::MatrixX<Scalar>::Identity(n, n);
-                Eigen::VectorX<Scalar> g_zero = Eigen::VectorX<Scalar>::Zero(n);
-                Eigen::VectorX<Scalar> x0_qp = Eigen::VectorX<Scalar>::Zero(n);
-
-                Eigen::VectorX<Scalar> neg_c_eq = (-c_eq).eval();
-                Eigen::VectorX<Scalar> neg_c_ineq = (-c_ineq).eval();
-                auto qp_res = detail::solve_qp(H, g_zero,
-                    J_eq_r, neg_c_eq, J_ineq_r, neg_c_ineq, x0_qp);
-
-                Eigen::Vector<Scalar, N> p = qp_res.x;
-                if(p.norm() < line_search_sqp_defaults<Scalar>::zero_guard)
-                    return {x, h_k, false, step};
-
-                Scalar alpha = Scalar(1.0);
-                while(alpha > line_search_sqp_defaults<Scalar>::restoration_alpha_min)
-                {
-                    Eigen::Vector<Scalar, N> x_trial =
-                        (x + alpha * p).cwiseMax(s.lower).cwiseMin(s.upper);
-                    Eigen::VectorX<Scalar> c_eq_t, c_ineq_t;
-                    adapter.eval_constraints(x_trial, c_eq_t, c_ineq_t);
-                    if(detail::constraint_violation(c_eq_t, c_ineq_t) < h_k)
-                    {
-                        x = x_trial;
-                        break;
-                    }
-                    alpha *= Scalar(0.5);
-                }
-                if(alpha <= line_search_sqp_defaults<Scalar>::restoration_alpha_min)
-                    return {x, h_k, false, step};
-            }
-            Eigen::VectorX<Scalar> c_eq_f, c_ineq_f;
-            adapter.eval_constraints(x, c_eq_f, c_ineq_f);
-            Scalar h_f = detail::constraint_violation(c_eq_f, c_ineq_f);
-            return {x, h_f, h_f < line_search_sqp_defaults<Scalar>::infeasibility_floor, max_steps};
-        }
-
-        return {s.x, detail::constraint_violation(s.c_eq, s.c_ineq), false, 0};
+        return detail::restore_feasibility<Scalar, N>(options.restoration, s, options.max_restoration_steps);
     }
 };
 

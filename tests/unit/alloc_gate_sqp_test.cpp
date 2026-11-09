@@ -101,9 +101,9 @@ void check_rejected_start_zero()
     CHECK(counts.c == 0);
 }
 
-// A counting window over the L1 restoration leaf itself, on the workspace the policy's state was sized with, reaches
-// restoration without waiting for the filter to block a step. From the lower-bound corner of HS071 both constraint
-// rows are violated, so every pass runs the descent, the backtracking and the step-budget exit.
+// A counting window over the policy's own restoration entry, on the state init() sized, reaches restoration without
+// waiting for the filter to block a step. From the lower-bound corner of HS071 both constraint rows are violated and
+// the L1 descent ends at its step budget, so the default hybrid strategy falls back to the feasibility QP every pass.
 template <typename Policy>
 void check_restoration_zero(Policy policy)
 {
@@ -111,15 +111,14 @@ void check_restoration_zero(Policy policy)
     const Eigen::Vector<double, 4> x0 = Eigen::Vector<double, 4>::Ones();
     auto s = policy.init(problem, x0, sqp_gate_opts());
     const argmin::detail::restoration_adapter<double, 4, hs071_fixed> adapter{s.n_eq, s.n_ineq, problem, s.restoration_ws.c_all, s.restoration_ws.J_all};
-    argmin::detail::restoration_result<double, 4> r{};
+    REQUIRE(policy.options.restoration == argmin::detail::restoration_strategy::hybrid);
+    REQUIRE_FALSE(argmin::detail::restore_l1<double, 4>(adapter, s.restoration_ws, x0, s.lower, s.upper).success);
     const auto counts = run_armed([&] {
         for(std::size_t i = 0; i < 3; ++i)
-            r = argmin::detail::restore_l1<double, 4>(adapter, s.restoration_ws, x0, s.g, s.lower, s.upper);
+            argmin::detail::restore_feasibility<double, 4>(policy.options.restoration, s, policy.options.max_restoration_steps);
     });
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);
-    CHECK(r.iterations_used == 10);
-    CHECK(r.constraint_violation < 1e-4);
 }
 
 }
@@ -339,7 +338,7 @@ TEST_CASE("sqp_alloc_gate_degenerate_vertex", "[alloc-gate]")
     check_degenerate_vertex_zero(argmin::filter_slsqp_policy<double, 2>{}, degenerate_vertex{});
 }
 
-// filter_slsqp and filter_nw_sqp share the L1 leaf of the hybrid restoration strategy.
+// filter_slsqp and filter_nw_sqp share the hybrid restoration strategy and differ in the QP behind its fallback.
 TEST_CASE("sqp_alloc_gate_restoration", "[alloc-gate]")
 {
     check_restoration_zero(argmin::filter_slsqp_policy<double, 4>{});

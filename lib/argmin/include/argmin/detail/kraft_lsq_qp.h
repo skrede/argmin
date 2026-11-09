@@ -63,15 +63,15 @@ public:
         b_eq_buf_.resize(m_eq);
         x_out_.resize(n);
 
-        const int n2_max = n;
-        nnls_A_.resize(n2_max + 1, m_aug_max);
-        nnls_b_.resize(n2_max + 1);
+        // The LDP inside lsei works in the dimension left after the equality rows are eliminated.
+        const int n_ldp = m_eq > 0 ? std::max(n - m_eq, 0) : n;
+        nnls_A_.resize(n_ldp + 1, m_aug_max);
+        nnls_b_.resize(n_ldp + 1);
         nnls_x_vec_.resize(m_aug_max);
         nnls_w_.resize(m_aug_max);
+        nnls_ws_.ensure(n_ldp + 1, m_aug_max);
+        nnls_ws_.r_buf.resize(n_ldp + 1);
 
-        // LSEI workspace. The augmented inequality block lsei sees has
-        // up to m_aug_max rows after the kraft_lsq_qp side folds in
-        // finite box bounds.
         lsei_ws_.resize(n, m_eq, m_aug_max);
 
         // Multiplier output buffers from lsei. Sized to the maximum

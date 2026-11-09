@@ -92,6 +92,8 @@ public:
         p_lo_aug_.resize(n_aug);
         p_hi_aug_.resize(n_aug);
         B_recover_.resize(n, n);
+        aug_.x.setZero(n_aug);
+        aug_.lambda.setZero(m_eq + m_ineq);
     }
 
     // Solve the QP subproblem with augmented-QP recovery on infeasibility.
@@ -116,91 +118,29 @@ public:
         const Eigen::Vector<Scalar, N>& p_lo,
         const Eigen::Vector<Scalar, N>& p_hi)
     {
-        auto direct = solver_.template solve<M>(
-            B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+        qp_result<Scalar, N, M> out;
+        solve_into<M>(out, B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+        return out;
+    }
 
-        if(direct.status == qp_status::optimal)
-            return direct;
-
-        // -------------------------------------------------------------
-        // Augmented retry path.
-        // -------------------------------------------------------------
-        const int n      = static_cast<int>(B.rows());
-        const int m_eq   = static_cast<int>(A_eq.rows());
-        const int m_ineq = static_cast<int>(A_ineq.rows());
-        const int n_aug  = n + 1;
-
-        if(B_aug_.rows() != n_aug || B_aug_.cols() != n_aug)
-            B_aug_.resize(n_aug, n_aug);
-        if(g_aug_.size() != n_aug) g_aug_.resize(n_aug);
-        if(A_eq_aug_.rows() != m_eq || A_eq_aug_.cols() != n_aug)
-            A_eq_aug_.resize(m_eq, n_aug);
-        if(A_ineq_aug_.rows() != m_ineq || A_ineq_aug_.cols() != n_aug)
-            A_ineq_aug_.resize(m_ineq, n_aug);
-        if(p_lo_aug_.size() != n_aug) p_lo_aug_.resize(n_aug);
-        if(p_hi_aug_.size() != n_aug) p_hi_aug_.resize(n_aug);
-
-        // Augmented A_eq: leftmost n cols = A_eq, last col = b_eq.
-        if(m_eq > 0)
-        {
-            A_eq_aug_.leftCols(n) = A_eq;
-            A_eq_aug_.col(n) = b_eq;
-        }
-
-        // Augmented A_ineq: leftmost n cols = A_ineq, last col = max(b_ineq, 0).
-        if(m_ineq > 0)
-        {
-            A_ineq_aug_.leftCols(n) = A_ineq;
-            for(int j = 0; j < m_ineq; ++j)
-                A_ineq_aug_(j, n) = std::max(b_ineq[j], Scalar(0));
-        }
-
-        // Augmented box bounds: original bounds on p, [0, 1] on s.
-        p_lo_aug_.head(n) = p_lo;
-        p_lo_aug_[n] = Scalar(0);
-        p_hi_aug_.head(n) = p_hi;
-        p_hi_aug_[n] = Scalar(1);
-
-        // Augmented gradient: extra component is zero (no linear cost on s).
-        g_aug_.head(n) = g;
-        g_aug_[n] = Scalar(0);
-
-        // Augmented Hessian: block diagonal [B 0; 0 rho]. rho is updated
-        // per attempt below. Off-diagonal blocks zeroed once.
-        B_aug_.setZero();
-        B_aug_.topLeftCorner(n, n) = B;
-
-        Scalar rho = penalty_initial_;
-
-        for(int attempt = 0; attempt < max_attempts_; ++attempt)
-        {
-            B_aug_(n, n) = rho;
-
-            auto aug = solver_aug_.template solve<M>(
-                B_aug_, g_aug_, A_eq_aug_, b_eq, A_ineq_aug_, b_ineq,
-                p_lo_aug_, p_hi_aug_);
-
-            if(aug.status == qp_status::optimal)
-            {
-                qp_result<Scalar, N, M> out;
-                out.x.resize(n);
-                out.x = aug.x.head(n);
-                out.lambda = aug.lambda;
-                out.status = qp_status::optimal;
-                out.iterations = attempt + 2;  // 1 direct + (attempt+1) augmented
-                out.relaxation_factor = aug.x[n];  // s in [0, 1]
-                return out;
-            }
-
-            rho *= penalty_growth_;
-        }
-
-        // Augmentation failed across all attempts. Return the direct
-        // path's failure status, with relaxation_factor = 1 to signal
-        // that recovery was attempted but did not produce a feasible
-        // augmented step.
-        direct.relaxation_factor = Scalar(1);
-        return direct;
+    // Fill-into sibling of solve(): a caller reusing the same qp_result at a stable problem shape incurs no per-solve
+    // allocation on either path.
+    template <int M = argmin::dynamic_dimension>
+    void solve_into(
+        qp_result<Scalar, N, M>& out,
+        const Eigen::Matrix<Scalar, N, N>& B,
+        const Eigen::Vector<Scalar, N>& g,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_ineq,
+        const Eigen::Vector<Scalar, N>& p_lo,
+        const Eigen::Vector<Scalar, N>& p_hi)
+    {
+        out.relaxation_factor = Scalar(0);
+        solver_.template solve_into<M>(out, B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+        if(out.status != qp_status::optimal)
+            recover_<M>(out, B, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
     }
 
     // Variant of solve() that consumes a pre-factored Hessian (E, f) for
@@ -234,8 +174,7 @@ public:
 
     // Fill-into sibling of solve_with_factored_hessian(): writes into the
     // caller-owned qp_result so a caller reusing the same result across
-    // solves incurs no per-solve allocation on the direct (optimal) path.
-    // The recovery branch is off the steady-state hot path.
+    // solves incurs no per-solve allocation.
     template <int M = argmin::dynamic_dimension>
     void solve_with_factored_hessian_into(
         qp_result<Scalar, N, M>& out,
@@ -260,14 +199,7 @@ public:
         if(out.status == qp_status::optimal)
             return;
 
-        // -------------------------------------------------------------
-        // Recovery: reconstruct B = E^T E and run the augmented loop.
-        // -------------------------------------------------------------
-        const int n      = static_cast<int>(E.rows());
-        const int m_eq   = static_cast<int>(A_eq.rows());
-        const int m_ineq = static_cast<int>(A_ineq.rows());
-        const int n_aug  = n + 1;
-
+        const int n = static_cast<int>(E.rows());
         if(B_recover_.rows() != n || B_recover_.cols() != n)
             B_recover_.resize(n, n);
         B_recover_.setZero();
@@ -275,17 +207,64 @@ public:
             .rankUpdate(E.transpose());
         B_recover_.template triangularView<Eigen::StrictlyUpper>() =
             B_recover_.transpose();
+        recover_<M>(out, B_recover_, g, A_eq, b_eq, A_ineq, b_ineq, p_lo, p_hi);
+    }
 
-        if(B_aug_.rows() != n_aug || B_aug_.cols() != n_aug)
-            B_aug_.resize(n_aug, n_aug);
-        if(g_aug_.size() != n_aug) g_aug_.resize(n_aug);
-        if(A_eq_aug_.rows() != m_eq || A_eq_aug_.cols() != n_aug)
-            A_eq_aug_.resize(m_eq, n_aug);
-        if(A_ineq_aug_.rows() != m_ineq || A_ineq_aug_.cols() != n_aug)
-            A_ineq_aug_.resize(m_ineq, n_aug);
-        if(p_lo_aug_.size() != n_aug) p_lo_aug_.resize(n_aug);
-        if(p_hi_aug_.size() != n_aug) p_hi_aug_.resize(n_aug);
+private:
+    // Augmented retry over a direct result that was not optimal. On success the step is the first n components of the
+    // augmented x and relaxation_factor the slack s; on exhaustion `out` keeps the direct result, flagged with
+    // relaxation_factor = 1.
+    template <int M>
+    void recover_(
+        qp_result<Scalar, N, M>& out,
+        const Eigen::Matrix<Scalar, N, N>& B,
+        const Eigen::Vector<Scalar, N>& g,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_ineq,
+        const Eigen::Vector<Scalar, N>& p_lo,
+        const Eigen::Vector<Scalar, N>& p_hi)
+    {
+        const int n = static_cast<int>(B.rows());
+        augment_rows_(n, A_eq, b_eq, A_ineq, b_ineq);
+        augment_objective_(n, B, g, p_lo, p_hi);
 
+        Scalar rho = penalty_initial_;
+        for(int attempt = 0; attempt < max_attempts_; ++attempt)
+        {
+            B_aug_(n, n) = rho;
+            solver_aug_.solve_into(aug_, B_aug_, g_aug_, A_eq_aug_, b_eq, A_ineq_aug_, b_ineq, p_lo_aug_, p_hi_aug_);
+            if(aug_.status == qp_status::optimal)
+            {
+                out.x.resize(n);
+                out.x = aug_.x.head(n);
+                out.lambda = aug_.lambda;
+                out.status = qp_status::optimal;
+                out.iterations = attempt + 2;  // 1 direct + (attempt+1) augmented
+                out.relaxation_factor = aug_.x[n];
+                return;
+            }
+            rho *= penalty_growth_;
+        }
+        out.relaxation_factor = Scalar(1);
+    }
+
+    // Augmented A_eq: leftmost n cols = A_eq, last col = b_eq. Augmented
+    // A_ineq: leftmost n cols = A_ineq, last col = max(b_ineq, 0).
+    void augment_rows_(
+        int n,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_eq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_eq,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A_ineq,
+        const Eigen::Vector<Scalar, Eigen::Dynamic>& b_ineq)
+    {
+        const int m_eq = static_cast<int>(A_eq.rows());
+        const int m_ineq = static_cast<int>(A_ineq.rows());
+        if(A_eq_aug_.rows() != m_eq || A_eq_aug_.cols() != n + 1)
+            A_eq_aug_.resize(m_eq, n + 1);
+        if(A_ineq_aug_.rows() != m_ineq || A_ineq_aug_.cols() != n + 1)
+            A_ineq_aug_.resize(m_ineq, n + 1);
         if(m_eq > 0)
         {
             A_eq_aug_.leftCols(n) = A_eq;
@@ -297,48 +276,33 @@ public:
             for(int j = 0; j < m_ineq; ++j)
                 A_ineq_aug_(j, n) = std::max(b_ineq[j], Scalar(0));
         }
+    }
 
+    // Box [p_lo, p_hi] on p and [0, 1] on s, no linear cost on s, and the block-diagonal Hessian [B 0; 0 rho] whose
+    // rho entry each attempt sets.
+    void augment_objective_(
+        int n,
+        const Eigen::Matrix<Scalar, N, N>& B,
+        const Eigen::Vector<Scalar, N>& g,
+        const Eigen::Vector<Scalar, N>& p_lo,
+        const Eigen::Vector<Scalar, N>& p_hi)
+    {
+        const int n_aug = n + 1;
+        if(B_aug_.rows() != n_aug || B_aug_.cols() != n_aug)
+            B_aug_.resize(n_aug, n_aug);
+        if(g_aug_.size() != n_aug) g_aug_.resize(n_aug);
+        if(p_lo_aug_.size() != n_aug) p_lo_aug_.resize(n_aug);
+        if(p_hi_aug_.size() != n_aug) p_hi_aug_.resize(n_aug);
         p_lo_aug_.head(n) = p_lo;
         p_lo_aug_[n] = Scalar(0);
         p_hi_aug_.head(n) = p_hi;
         p_hi_aug_[n] = Scalar(1);
-
         g_aug_.head(n) = g;
         g_aug_[n] = Scalar(0);
-
         B_aug_.setZero();
-        B_aug_.topLeftCorner(n, n) = B_recover_;
-
-        Scalar rho = penalty_initial_;
-
-        for(int attempt = 0; attempt < max_attempts_; ++attempt)
-        {
-            B_aug_(n, n) = rho;
-
-            auto aug = solver_aug_.template solve<M>(
-                B_aug_, g_aug_, A_eq_aug_, b_eq, A_ineq_aug_, b_ineq,
-                p_lo_aug_, p_hi_aug_);
-
-            if(aug.status == qp_status::optimal)
-            {
-                out.x.resize(n);
-                out.x = aug.x.head(n);
-                out.lambda = aug.lambda;
-                out.status = qp_status::optimal;
-                out.iterations = attempt + 2;
-                out.relaxation_factor = aug.x[n];
-                return;
-            }
-
-            rho *= penalty_growth_;
-        }
-
-        // Recovery exhausted: out still holds the direct (non-optimal)
-        // result; flag full relaxation and leave it as the returned step.
-        out.relaxation_factor = Scalar(1);
+        B_aug_.topLeftCorner(n, n) = B;
     }
 
-private:
     // Penalty schedule and retry cap per Kraft 1988 §3.4: rho_0 = 100,
     // rho_{k+1} = 10 * rho_k, k_max = 5. Adjusting these changes the
     // tradeoff between aggressive relaxation (smaller initial penalty,
@@ -363,6 +327,7 @@ private:
     // cascade reports infeasibility. Held as a member so the rare
     // recovery does not allocate.
     Eigen::Matrix<Scalar, N, N>                     B_recover_;
+    qp_result<Scalar, N_aug>                        aug_;
 };
 
 }

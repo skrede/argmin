@@ -234,6 +234,7 @@ struct filter_slsqp_policy
         // allocation for the QP multipliers at steady state.
         detail::qp_result<Scalar, N> qp_res;
         detail::qp_result<Scalar, N> soc_qp_res;
+        detail::qp_result<Scalar, N> restoration_qp;
 
         argmin::detail::sqp_state_buffers<Scalar, N> bufs;
         detail::filter_restoration_workspace<Scalar, N> restoration_ws;
@@ -296,7 +297,7 @@ struct filter_slsqp_policy
         s.invalid_problem = rejects_shape(s);
 
         s.bufs.resize(n, s.n_eq, s.n_ineq);
-        s.restoration_ws.resize(n, s.n_eq, s.n_ineq, options.max_restoration_steps);
+        s.restoration_ws.resize(n, s.n_eq, s.n_ineq, options.max_restoration_steps, s.restoration_qp);
 
         Scalar h_0 = Scalar(0.0);
         if constexpr(constrained<Problem, Scalar>)
@@ -356,27 +357,8 @@ struct filter_slsqp_policy
             return detail::rejected_step<Scalar>(s);
         const int n = s.n;
 
-        // Cold-start mu calibration: documented no-op for filter_slsqp.
-        //
-        // The cold-start fix (calibrate_initial_penalty after iter-0 QP solve)
-        // applies to SQP policies whose main acceptance test is L1 merit:
-        // kraft_slsqp, nw_sqp, filter_nw_sqp. filter_slsqp's main loop uses
-        // filter dominance (Wachter & Biegler 2006 Section 2.3) and does
-        // not consume sigma on the accepted path. The only sigma site in
-        // this policy is sigma_restore in the restoration helper, which
-        // already implements the equivalent of the cold-start formula
-        // (sigma_restore = ||lambda||_inf + 1e-4, matching N&W eq. 18.36
-        // up to the choice of safety constant).
-        //
-        // Reference: N&W 2e eq. 18.36 (sigma sufficient for L1-merit descent);
-        //            Wachter & Biegler 2006 Section 2.3 (filter acceptance);
-        //            cold-start applies only to merit-based policies (the
-        //            qp-lambda-driven sigma seed bounds first-step rejection
-        //            on L1-merit acceptance).
-        //
-        // argmin variant: filter_slsqp main loop is filter-based, so the
-        //                 main-path cold-start is a no-op; sigma calibration
-        //                 lives in the restoration helper.
+        // No cold-start penalty calibration: the main loop accepts by filter dominance (Wachter & Biegler 2006
+        // Section 2.3) and consumes no L1-merit penalty, unlike kraft_slsqp, nw_sqp and filter_nw_sqp.
 
         // BFGS-reset retry layered after the restoration path.
         //
@@ -1257,35 +1239,7 @@ private:
     template <typename P>
     detail::restoration_result<Scalar, N> run_restoration_(state_type<P>& s)
     {
-        detail::restoration_adapter<Scalar, N, P> adapter{s.n_eq, s.n_ineq, *s.problem, s.restoration_ws.c_all, s.restoration_ws.J_all};
-
-        // sigma for L1 restoration: max(|lambda|) + 1e-4
-        // Reference: N&W eq. 18.36 (same formula as kraft_slsqp update_penalty).
-        Scalar sigma_restore = Scalar(1e4);
-        if(s.lambda.size() > 0)
-            sigma_restore = s.lambda.cwiseAbs().maxCoeff() + Scalar(1e-4);
-
-        auto strategy = options.restoration;
-        auto max_steps = options.max_restoration_steps;
-
-        if(strategy == detail::restoration_strategy::l1_penalty ||
-           strategy == detail::restoration_strategy::hybrid)
-        {
-            auto result = detail::restore_l1<Scalar, N>(
-                adapter, s.restoration_ws, s.x, s.g, s.lower, s.upper,
-                sigma_restore, max_steps);
-            if(result.success)
-                return result;
-        }
-
-        if(strategy == detail::restoration_strategy::feasibility_qp ||
-           strategy == detail::restoration_strategy::hybrid)
-        {
-            return detail::restore_feasibility_qp<Scalar, N>(
-                adapter, s.qp_solver, s.x, s.lower, s.upper, max_steps);
-        }
-
-        return {s.x, detail::constraint_violation(s.c_eq, s.c_ineq), false, 0};
+        return detail::restore_feasibility<Scalar, N>(options.restoration, s, options.max_restoration_steps);
     }
 };
 

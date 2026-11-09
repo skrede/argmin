@@ -9,7 +9,7 @@
 // region.
 //
 // Three strategies:
-//   l1_penalty    — steepest descent on sigma * h(x), cheap and often
+//   l1_penalty    — steepest descent on h(x), cheap and often
 //                   sufficient for mild infeasibility.
 //   feasibility_qp — solve min 0.5 ||p||^2 s.t. linearized feasibility
 //                    via the policy's own QP solver. More expensive but
@@ -22,16 +22,21 @@
 //            N&W Section 15.5 (filter methods overview).
 
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/active_set_qp.h"
+#include "argmin/detail/kraft_lsq_qp_recovery.h"
 #include "argmin/detail/filter_restoration_workspace.h"
 
 #include "argmin/types.h"
 
+#include "argmin/options/qp_options.h"
+
 #include <Eigen/Core>
 
-#include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <vector>
+#include <cstdint>
+#include <algorithm>
+#include <type_traits>
 
 namespace argmin::detail
 {
@@ -106,8 +111,8 @@ void l1_descent(filter_restoration_workspace<Scalar, N>& ws, Eigen::Vector<Scala
 }
 
 template <typename Scalar, int N, typename Problem>
-bool l1_backtrack(const Problem& problem, filter_restoration_workspace<Scalar, N>& ws, Eigen::Vector<Scalar, N>& x,
-                  const Eigen::Vector<Scalar, N>& p, Scalar h_k, const Eigen::Vector<Scalar, N>& lower, const Eigen::Vector<Scalar, N>& upper)
+bool backtrack_violation(const Problem& problem, filter_restoration_workspace<Scalar, N>& ws, Eigen::Vector<Scalar, N>& x,
+                         const Eigen::Vector<Scalar, N>& p, Scalar h_k, const Eigen::Vector<Scalar, N>& lower, const Eigen::Vector<Scalar, N>& upper)
 {
     for(Scalar alpha = Scalar(1); alpha > filter_restoration_constants<Scalar>::alpha_min; alpha *= Scalar(0.5))
     {
@@ -131,10 +136,8 @@ restoration_result<Scalar, N> restore_l1(
     const Problem& problem,
     filter_restoration_workspace<Scalar, N>& ws,
     const Eigen::Vector<Scalar, N>& x0,
-    const Eigen::Vector<Scalar, N>& /*gradient*/,
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper,
-    Scalar /*sigma_restore*/ = Scalar(1e4),
     std::uint16_t max_steps = 10,
     Scalar stall_ratio = Scalar(0.99),
     std::uint16_t stall_window = 5)
@@ -154,7 +157,7 @@ restoration_result<Scalar, N> restore_l1(
             return {x, h_k, false, step};
         problem.eval_constraint_jacobians(x, ws.J_eq, ws.J_ineq);
         l1_descent(ws, p);
-        if(p.norm() < filter_restoration_constants<Scalar>::zero_guard || !l1_backtrack(problem, ws, x, p, h_k, lower, upper))
+        if(p.norm() < filter_restoration_constants<Scalar>::zero_guard || !backtrack_violation(problem, ws, x, p, h_k, lower, upper))
             return {x, h_k, false, step};
     }
     problem.eval_constraints(x, ws.c_eq, ws.c_ineq);
@@ -162,94 +165,86 @@ restoration_result<Scalar, N> restore_l1(
     return {x, h_final, h_final < h_floor, max_steps};
 }
 
-// Feasibility QP restoration: minimize constraint violation via the
-// policy's own QP solver.
-//
-// Each step solves min 0.5 ||p||^2 s.t. J_eq*p + c_eq = 0,
-// J_ineq*p + c_ineq >= 0 using an identity Hessian and zero gradient.
-// This finds the minimum-norm step that linearizes away the constraint
-// violation.
+// The QP min 0.5 ||p||^2 s.t. J_eq p = -c_eq, J_ineq p >= -c_ineq at the current linearization.
+template <typename Scalar, int N>
+void load_feasibility_qp(filter_restoration_workspace<Scalar, N>& ws)
+{
+    ws.A_eq = ws.J_eq;
+    ws.A_ineq = ws.J_ineq;
+    ws.b_eq = -ws.c_eq;
+    ws.b_ineq = -ws.c_ineq;
+}
+
+template <typename Scalar, int N>
+const Eigen::Vector<Scalar, N>& feasibility_step(kraft_lsq_qp_recovery_solver<Scalar, N>& qp_solver, qp_result<Scalar, N>& qp,
+                                                 filter_restoration_workspace<Scalar, N>& ws, const Eigen::Vector<Scalar, N>& x,
+                                                 const Eigen::Vector<Scalar, N>& lower, const Eigen::Vector<Scalar, N>& upper)
+{
+    ws.step_lower = lower - x;
+    ws.step_upper = upper - x;
+    qp_solver.solve_into(qp, ws.identity, ws.zero, ws.A_eq, ws.b_eq, ws.A_ineq, ws.b_ineq, ws.step_lower, ws.step_upper);
+    return qp.x;
+}
+
+// The active-set QP takes no box here and starts from p = 0; the backtracking projects each trial point instead.
+template <typename Scalar, int N, int M>
+const Eigen::Vector<Scalar, N>& feasibility_step(active_set_qp_solver<Scalar, N, M>& qp_solver, typename active_set_qp_solver<Scalar, N, M>::result_type& qp,
+                                                 filter_restoration_workspace<Scalar, N>& ws, const Eigen::Vector<Scalar, N>& /*x*/,
+                                                 const Eigen::Vector<Scalar, N>& /*lower*/, const Eigen::Vector<Scalar, N>& /*upper*/)
+{
+    qp_solver.solve_into(ws.identity, ws.zero, ws.A_eq, ws.b_eq, ws.A_ineq, ws.b_ineq, ws.zero, qp_options<Scalar>{}, qp);
+    return qp.x;
+}
+
+// Each step takes the minimum-norm linearized feasibility step from the policy's own QP solver (feasibility_step,
+// found by argument-dependent lookup) and backtracks on the constraint violation.
 //
 // Reference: Wachter & Biegler 2006, Section 3;
 //            N&W Section 15.5 (restoration phase).
-template <typename Scalar, int N, typename Problem, typename QpSolver>
+template <typename Scalar, int N, typename Problem, typename QpSolver, typename QpResult>
 restoration_result<Scalar, N> restore_feasibility_qp(
     const Problem& problem,
+    filter_restoration_workspace<Scalar, N>& ws,
     QpSolver& qp_solver,
+    QpResult& qp,
     const Eigen::Vector<Scalar, N>& x0,
     const Eigen::Vector<Scalar, N>& lower,
     const Eigen::Vector<Scalar, N>& upper,
     std::uint16_t max_steps = 10)
 {
-    const auto n = x0.size();
+    constexpr Scalar h_floor = filter_restoration_constants<Scalar>::infeasibility_floor;
     Eigen::Vector<Scalar, N> x = x0;
-
     for(std::uint16_t step = 0; step < max_steps; ++step)
     {
-        Eigen::VectorX<Scalar> c_eq, c_ineq;
-        problem.eval_constraints(x, c_eq, c_ineq);
-
-        Scalar h_k = constraint_violation(c_eq, c_ineq);
-
-        if(h_k < filter_restoration_constants<Scalar>::infeasibility_floor)
-        {
+        problem.eval_constraints(x, ws.c_eq, ws.c_ineq);
+        const Scalar h_k = constraint_violation(ws.c_eq, ws.c_ineq);
+        if(h_k < h_floor)
             return {x, h_k, true, step};
-        }
-
-        // Compute constraint Jacobians
-        Eigen::MatrixX<Scalar> J_eq, J_ineq;
-        problem.eval_constraint_jacobians(x, J_eq, J_ineq);
-
-        // Solve feasibility QP: min 0.5 p^T I p s.t. linearized constraints
-        Eigen::MatrixX<Scalar> H = Eigen::MatrixX<Scalar>::Identity(n, n);
-        Eigen::VectorX<Scalar> g = Eigen::VectorX<Scalar>::Zero(n);
-
-        // Bounds on the step: lower - x <= p <= upper - x
-        Eigen::VectorX<Scalar> p_lower = (lower - x).eval();
-        Eigen::VectorX<Scalar> p_upper = (upper - x).eval();
-
-        auto qp_result = qp_solver.solve(H, g, J_eq, -c_eq, J_ineq, -c_ineq,
-                                         p_lower, p_upper);
-
-        Eigen::Vector<Scalar, N> p = qp_result.x;
-        Scalar p_norm = p.norm();
-
-        if(p_norm < filter_restoration_constants<Scalar>::zero_guard)
-        {
+        problem.eval_constraint_jacobians(x, ws.J_eq, ws.J_ineq);
+        load_feasibility_qp(ws);
+        const Eigen::Vector<Scalar, N>& p = feasibility_step(qp_solver, qp, ws, x, lower, upper);
+        if(p.norm() < filter_restoration_constants<Scalar>::zero_guard || !backtrack_violation(problem, ws, x, p, h_k, lower, upper))
             return {x, h_k, false, step};
-        }
-
-        // Backtracking on constraint violation
-        Scalar alpha = Scalar(1);
-        constexpr Scalar alpha_min = filter_restoration_constants<Scalar>::alpha_min;
-
-        while(alpha > alpha_min)
-        {
-            Eigen::Vector<Scalar, N> x_trial = (x + alpha * p).cwiseMax(lower).cwiseMin(upper);
-
-            Eigen::VectorX<Scalar> c_eq_trial, c_ineq_trial;
-            problem.eval_constraints(x_trial, c_eq_trial, c_ineq_trial);
-            Scalar h_trial = constraint_violation(c_eq_trial, c_ineq_trial);
-
-            if(h_trial < h_k)
-            {
-                x = x_trial;
-                break;
-            }
-            alpha *= Scalar(0.5);
-        }
-
-        if(alpha <= alpha_min)
-        {
-            return {x, h_k, false, step};
-        }
     }
+    problem.eval_constraints(x, ws.c_eq, ws.c_ineq);
+    const Scalar h_final = constraint_violation(ws.c_eq, ws.c_ineq);
+    return {x, h_final, h_final < h_floor, max_steps};
+}
 
-    Eigen::VectorX<Scalar> c_eq_final, c_ineq_final;
-    problem.eval_constraints(x, c_eq_final, c_ineq_final);
-    Scalar h_final = constraint_violation(c_eq_final, c_ineq_final);
-
-    return {x, h_final, h_final < filter_restoration_constants<Scalar>::infeasibility_floor, max_steps};
+// The configured strategy on a filter policy's state at its current iterate. The hybrid strategy falls back to the
+// feasibility QP when the L1 descent fails; an unsuccessful result carries no usable iterate.
+template <typename Scalar, int N, typename State>
+restoration_result<Scalar, N> restore_feasibility(restoration_strategy strategy, State& s, std::uint16_t max_steps)
+{
+    using problem_type = std::remove_cvref_t<decltype(*s.problem)>;
+    const restoration_adapter<Scalar, N, problem_type> adapter{s.n_eq, s.n_ineq, *s.problem, s.restoration_ws.c_all, s.restoration_ws.J_all};
+    if(strategy != restoration_strategy::feasibility_qp)
+    {
+        restoration_result<Scalar, N> result = restore_l1<Scalar, N>(adapter, s.restoration_ws, s.x, s.lower, s.upper, max_steps);
+        if(result.success || strategy == restoration_strategy::l1_penalty)
+            return result;
+    }
+    return restore_feasibility_qp<Scalar, N>(adapter, s.restoration_ws, s.qp_solver, s.restoration_qp, s.x, s.lower, s.upper, max_steps);
 }
 
 }

@@ -72,43 +72,33 @@ struct affine_problem
                                    Eigen::MatrixXd& J_eq,
                                    Eigen::MatrixXd& J_ineq) const
     {
-        J_eq = A_eq;
-        J_ineq = A_ineq;
+        J_eq = A_eq.rows() > 0 ? A_eq : Eigen::MatrixXd(0, 2);
+        J_ineq = A_ineq.rows() > 0 ? A_ineq : Eigen::MatrixXd(0, 2);
     }
 };
 
-// Minimal min-norm-step QP mock: returns p = scale * (J_eq^T rhs_eq +
-// J_ineq^T max(rhs_ineq, 0)). For a full-rank single equality this is the
-// exact least-norm feasibility step; a zero Jacobian yields p = 0, which
-// drives restore_feasibility_qp's zero-step guard. `scale` throttles
-// progress to reach the step-budget-exhausted branch.
+// Minimal min-norm-step QP mock: p = scale * (J_eq^T rhs_eq + J_ineq^T max(rhs_ineq, 0)), the QP step
+// restore_feasibility_qp finds for it by argument-dependent lookup. For a full-rank single equality this is the exact
+// least-norm feasibility step; a zero Jacobian yields p = 0, which drives restore_feasibility_qp's zero-step guard.
+// `scale` throttles progress to reach the step-budget-exhausted branch.
 struct min_norm_qp_mock
 {
     double scale{1.0};
-
-    struct result_type
-    {
-        Eigen::VectorXd x;
-    };
-
-    result_type solve(const auto& H, const auto& /*g*/,
-                      const auto& J_eq, const auto& rhs_eq,
-                      const auto& J_ineq, const auto& rhs_ineq,
-                      const auto& /*p_lo*/, const auto& /*p_hi*/) const
-    {
-        const int n = static_cast<int>(H.rows());
-        Eigen::VectorXd p = Eigen::VectorXd::Zero(n);
-        if(J_eq.rows() > 0)
-            p.noalias() += J_eq.transpose() * rhs_eq;
-        if(J_ineq.rows() > 0)
-            p.noalias() += J_ineq.transpose()
-                * rhs_ineq.cwiseMax(0.0).matrix();
-        p *= scale;
-        return result_type{p};
-    }
 };
 
-const Eigen::Vector<double, 2> kZeroGrad = Eigen::Vector<double, 2>::Zero();
+const Eigen::Vector<double, 2>& feasibility_step(min_norm_qp_mock& qp, Eigen::Vector<double, 2>& p,
+                                                 filter_restoration_workspace<double, 2>& ws, const Eigen::Vector<double, 2>& /*x*/,
+                                                 const Eigen::Vector<double, 2>& /*lower*/, const Eigen::Vector<double, 2>& /*upper*/)
+{
+    p.setZero();
+    if(ws.A_eq.rows() > 0)
+        p.noalias() += ws.A_eq.transpose() * ws.b_eq;
+    if(ws.A_ineq.rows() > 0)
+        p.noalias() += ws.A_ineq.transpose() * ws.b_ineq.cwiseMax(0.0);
+    p *= qp.scale;
+    return p;
+}
+
 const Eigen::Vector<double, 2> kLower{{-100.0, -100.0}};
 const Eigen::Vector<double, 2> kUpper{{100.0, 100.0}};
 
@@ -132,7 +122,7 @@ TEST_CASE("restore_l1 returns success on an already-feasible entry",
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
 
     filter_restoration_workspace<double, 2> ws;
-    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
+    auto r = restore_l1<double, 2>(prob, ws, x0, kLower, kUpper);
 
     CHECK(r.success);
     CHECK(r.constraint_violation < 1e-12);
@@ -148,7 +138,7 @@ TEST_CASE("restore_l1 descends a violated equality to feasibility",
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
 
     filter_restoration_workspace<double, 2> ws;
-    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
+    auto r = restore_l1<double, 2>(prob, ws, x0, kLower, kUpper);
 
     CHECK(r.success);
     CHECK(r.constraint_violation < 1e-12);
@@ -168,7 +158,7 @@ TEST_CASE("restore_l1 descends a violated inequality to feasibility",
     Eigen::Vector<double, 2> x0{{-5.0, 0.0}};
 
     filter_restoration_workspace<double, 2> ws;
-    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
+    auto r = restore_l1<double, 2>(prob, ws, x0, kLower, kUpper);
 
     CHECK(r.success);
     CHECK(r.constraint_violation < 1e-12);
@@ -185,8 +175,7 @@ TEST_CASE("restore_l1 returns unsuccessfully on stalled progress",
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
 
     filter_restoration_workspace<double, 2> ws;
-    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper,
-                                       /*sigma_restore=*/1e4,
+    auto r = restore_l1<double, 2>(prob, ws, x0, kLower, kUpper,
                                        /*max_steps=*/20,
                                        /*stall_ratio=*/0.99,
                                        /*stall_window=*/5);
@@ -209,7 +198,7 @@ TEST_CASE("restore_l1 returns unsuccessfully on a vanishing subgradient",
     Eigen::Vector<double, 2> x0{{0.5, -0.5}};
 
     filter_restoration_workspace<double, 2> ws;
-    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
+    auto r = restore_l1<double, 2>(prob, ws, x0, kLower, kUpper);
 
     CHECK_FALSE(r.success);
     CHECK(r.constraint_violation == Approx(1.0));
@@ -245,7 +234,7 @@ TEST_CASE("restore_l1 returns unsuccessfully when backtracking is exhausted",
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
 
     filter_restoration_workspace<double, 2> ws;
-    auto r = restore_l1<double, 2>(prob, ws, x0, kZeroGrad, kLower, kUpper);
+    auto r = restore_l1<double, 2>(prob, ws, x0, kLower, kUpper);
 
     CHECK_FALSE(r.success);
     CHECK(r.constraint_violation == Approx(1.0));
@@ -259,8 +248,10 @@ TEST_CASE("restore_feasibility_qp returns success on an already-feasible entry",
     affine_problem prob = eq_problem(1.0, 0.0);
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
     min_norm_qp_mock qp;
+    filter_restoration_workspace<double, 2> ws;
+    Eigen::Vector<double, 2> p;
 
-    auto r = restore_feasibility_qp<double, 2>(prob, qp, x0, kLower, kUpper);
+    auto r = restore_feasibility_qp<double, 2>(prob, ws, qp, p, x0, kLower, kUpper);
 
     CHECK(r.success);
     CHECK(r.constraint_violation < 1e-12);
@@ -273,8 +264,10 @@ TEST_CASE("restore_feasibility_qp drives a violated equality feasible via the QP
     affine_problem prob = eq_problem(1.0, 3.0);
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
     min_norm_qp_mock qp{.scale = 1.0};  // exact least-norm step
+    filter_restoration_workspace<double, 2> ws;
+    Eigen::Vector<double, 2> p;
 
-    auto r = restore_feasibility_qp<double, 2>(prob, qp, x0, kLower, kUpper);
+    auto r = restore_feasibility_qp<double, 2>(prob, ws, qp, p, x0, kLower, kUpper);
 
     CHECK(r.success);
     CHECK(r.constraint_violation < 1e-12);
@@ -292,8 +285,10 @@ TEST_CASE("restore_feasibility_qp returns unsuccessfully on a ~zero QP step",
 
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
     min_norm_qp_mock qp;
+    filter_restoration_workspace<double, 2> ws;
+    Eigen::Vector<double, 2> p;
 
-    auto r = restore_feasibility_qp<double, 2>(prob, qp, x0, kLower, kUpper);
+    auto r = restore_feasibility_qp<double, 2>(prob, ws, qp, p, x0, kLower, kUpper);
 
     CHECK_FALSE(r.success);
     CHECK(r.constraint_violation == Approx(1.0));
@@ -309,9 +304,11 @@ TEST_CASE("restore_feasibility_qp returns unsuccessfully at the step budget",
     affine_problem prob = eq_problem(1.0, 3.0);
     Eigen::Vector<double, 2> x0{{0.0, 0.0}};
     min_norm_qp_mock qp{.scale = 0.01};
+    filter_restoration_workspace<double, 2> ws;
+    Eigen::Vector<double, 2> p;
 
     const double h0 = 3.0;
-    auto r = restore_feasibility_qp<double, 2>(prob, qp, x0, kLower, kUpper,
+    auto r = restore_feasibility_qp<double, 2>(prob, ws, qp, p, x0, kLower, kUpper,
                                                /*max_steps=*/3);
 
     CHECK_FALSE(r.success);

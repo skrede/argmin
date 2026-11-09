@@ -111,11 +111,11 @@ struct lsei_workspace
         hseq_qc.resize(n);
         hseq_qtf.resize(1);
 
-        // Worst-case shape for inner lsi: when m_eq == 0 (pure LSI
-        // fallback), lsi sees the original n; otherwise it sees the
-        // reduced n2. Size for the original n and m_ineq so both
-        // entry paths are covered.
-        lsi_ws.resize(n, m_ineq);
+        // The inner lsi sees the original n only on the pure LSI
+        // fallback (m_eq == 0) and the reduced n2 otherwise; sizing for
+        // the path this shape takes keeps its first solve from
+        // reallocating.
+        lsi_ws.resize(m_eq > 0 ? std::max(n2, 0) : n, m_ineq);
     }
 };
 

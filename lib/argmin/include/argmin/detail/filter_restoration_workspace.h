@@ -17,27 +17,47 @@ struct filter_restoration_workspace
 {
     Eigen::VectorX<Scalar> c_eq;
     Eigen::MatrixX<Scalar> J_eq;
+    Eigen::VectorX<Scalar> b_eq;
     Eigen::VectorX<Scalar> c_all;
     Eigen::MatrixX<Scalar> J_all;
+    Eigen::Vector<Scalar, N> zero;
     Eigen::VectorX<Scalar> c_ineq;
     Eigen::MatrixX<Scalar> J_ineq;
+    Eigen::VectorX<Scalar> b_ineq;
     std::vector<Scalar> h_history;
     Eigen::VectorX<Scalar> sign_eq;
-    Eigen::Vector<Scalar, N> descent;
     Eigen::VectorX<Scalar> sign_ineq;
+    Eigen::Vector<Scalar, N> descent;
+    Eigen::Vector<Scalar, N> step_lower;
+    Eigen::Vector<Scalar, N> step_upper;
+    Eigen::Matrix<Scalar, N, N> identity;
+    Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_eq;
+    Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_ineq;
 
-    void resize(Eigen::Index n, Eigen::Index n_eq, Eigen::Index n_ineq, std::uint16_t max_steps)
+    // The feasibility-QP leg writes its step into the policy's own QP result, sized here with the rest.
+    template <typename QpResult>
+    void resize(Eigen::Index n, Eigen::Index n_eq, Eigen::Index n_ineq, std::uint16_t max_steps, QpResult& qp)
     {
         c_eq.resize(n_eq);
         J_eq.resize(n_eq, n);
+        b_eq.resize(n_eq);
         c_all.resize(n_eq + n_ineq);
         J_all.resize(n_eq + n_ineq, n);
+        zero.setZero(n);
         c_ineq.resize(n_ineq);
         J_ineq.resize(n_ineq, n);
+        b_ineq.resize(n_ineq);
         h_history.reserve(max_steps);
         sign_eq.resize(n_eq);
-        descent.resize(n);
         sign_ineq.resize(n_ineq);
+        descent.resize(n);
+        step_lower.resize(n);
+        step_upper.resize(n);
+        identity.setIdentity(n, n);
+        A_eq.resize(n_eq, n);
+        A_ineq.resize(n_ineq, n);
+        qp.x.setZero(n);
+        qp.lambda.setZero(n_eq + n_ineq);
     }
 };
 

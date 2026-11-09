@@ -30,6 +30,7 @@
 #include <limits>
 #include <utility>
 #include <vector>
+#include <optional>
 
 namespace argmin::detail
 {
@@ -350,7 +351,7 @@ Eigen::Vector<Scalar, M> build_full_lambda(
     return lambda;
 }
 
-// In-place overload: writes into pre-allocated output vector.
+// In-place overload: writes the leading total_constraints entries of a vector at least that long, keeping its storage.
 template <typename Scalar, int Mw = argmin::dynamic_dimension, int M = argmin::dynamic_dimension>
 void build_full_lambda(
     const Eigen::Vector<Scalar, Mw>& lambda_W,
@@ -358,7 +359,7 @@ void build_full_lambda(
     int total_constraints,
     Eigen::Vector<Scalar, M>& lambda_full)
 {
-    lambda_full.setZero(total_constraints);
+    lambda_full.head(total_constraints).setZero();
     const int wsize = static_cast<int>(working_set.size());
     for(int k = 0; k < wsize && k < lambda_W.size(); ++k)
         lambda_full[working_set[static_cast<std::size_t>(k)]] = lambda_W[k];
@@ -564,7 +565,6 @@ class active_set_qp_solver
     // N-dimension square matrix (max-bounded).
     using n_square_matrix = bounded_matrix<Eigen::Dynamic, Eigen::Dynamic, N, N>;
 
-    // N-dimension vector (max-bounded).
     using n_vector = bounded_vector<Eigen::Dynamic, N>;
 
     // QR input for A_W^T: always N rows, variable cols. Fixed-row when N is compile-time.
@@ -598,13 +598,13 @@ public:
     using result_type =
         qp_result<Scalar, N, argmin::dynamic_dimension, max_total_constraints>;
 
-    explicit active_set_qp_solver(int n, int max_constraints)
+    explicit active_set_qp_solver(int n, int max_constraints, std::optional<int> n_eq = std::nullopt)
         : n_(n)
         , max_m_(max_constraints)
         , A_full_(max_constraints, n)
         , b_full_(max_constraints)
         , A_W_(max_constraints, n)
-        , qr_lambda_(n, n)
+        , qr_lambda_(n, n_eq.value_or(n))
         , qr_rr_(n, n)
         , qr_full_(n, n)
         , llt_reduced_(n)
@@ -894,7 +894,7 @@ private:
                 }
                 if(!reliable && !project_equalities_pivoted(n, m_eq, tol, magnitude))
                 {
-                    lambda_full_.setZero(m_total);
+                    lambda_full_.head(m_total).setZero();
                     status_ = qp_status::infeasible;
                     iters_ = 0;
                     return;

@@ -11,12 +11,12 @@ file	lib/argmin/include/argmin/detail/compact_lbfgs.h	-	529
 file	lib/argmin/include/argmin/detail/dense_ldl_bfgs.h	-	517
 file	lib/argmin/include/argmin/detail/expected_fallback.h	-	202
 file	lib/argmin/include/argmin/detail/filter_acceptance.h	-	419
-file	lib/argmin/include/argmin/detail/filter_restoration.h	-	257
+file	lib/argmin/include/argmin/detail/filter_restoration.h	-	252
 file	lib/argmin/include/argmin/detail/interpolation_system.h	-	996
 file	lib/argmin/include/argmin/detail/isres_operators.h	-	454
 file	lib/argmin/include/argmin/detail/kkt_residual.h	-	203
 file	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	-	428
-file	lib/argmin/include/argmin/detail/kraft_lsq_qp_recovery.h	-	370
+file	lib/argmin/include/argmin/detail/kraft_lsq_qp_recovery.h	-	335
 file	lib/argmin/include/argmin/detail/lagrangian.h	-	305
 file	lib/argmin/include/argmin/detail/lsei.h	-	405
 file	lib/argmin/include/argmin/detail/lsi.h	-	281
@@ -51,8 +51,8 @@ file	lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h	-	1049
 file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1154
 file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	659
 file	lib/argmin/include/argmin/solver/convergence.h	-	392
-file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1461
-file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1300
+file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1390
+file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1254
 file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1787
 file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1164
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	205
@@ -98,7 +98,6 @@ function	lib/argmin/include/argmin/detail/dense_ldl_bfgs.h	multiply_in_place_	34
 function	lib/argmin/include/argmin/detail/dense_ldl_bfgs.h	push	77
 function	lib/argmin/include/argmin/detail/diagnostics/steady_state_driver.h	measure_steady	28
 function	lib/argmin/include/argmin/detail/filter_acceptance.h	add	58
-function	lib/argmin/include/argmin/detail/filter_restoration.h	restore_feasibility_qp	70
 function	lib/argmin/include/argmin/detail/interpolation_system.h	bootstrap_interpolation_system	164
 function	lib/argmin/include/argmin/detail/interpolation_system.h	compute_lagrange_at	45
 function	lib/argmin/include/argmin/detail/interpolation_system.h	compute_vlag_beta	77
@@ -112,8 +111,6 @@ function	lib/argmin/include/argmin/detail/kkt_residual.h	kkt_feasibility_legs	29
 function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	resize	26
 function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	solve_into	52
 function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	solve_lsei_	142
-function	lib/argmin/include/argmin/detail/kraft_lsq_qp_recovery.h	solve	86
-function	lib/argmin/include/argmin/detail/kraft_lsq_qp_recovery.h	solve_with_factored_hessian_into	88
 function	lib/argmin/include/argmin/detail/lbfgsb_direction.h	compute_direction	65
 function	lib/argmin/include/argmin/detail/ldp.h	ldp	115
 function	lib/argmin/include/argmin/detail/lsei.h	lsei	232
@@ -209,12 +206,10 @@ function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	init	102
 function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	step	295
 function	lib/argmin/include/argmin/solver/convergence.h	check	41
 function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	init	83
-function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	run_restoration_	74
 function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	step	902
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	init	87
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	reset	33
-function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	run_restoration_	30
-function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	step	811
+function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	step	792
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	init	160
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	reset	43
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	step	907
