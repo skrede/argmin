@@ -13,43 +13,39 @@ namespace argmin
 namespace detail
 {
 
-// Feasibility-first best-seen comparator used by the solve loop to select
-// the returned iterate.
+// A status whose stopping test accepted the final iterate is a claim about that iterate.
+constexpr bool certifies_iterate(solver_status status) noexcept
+{
+    return status == solver_status::converged || status == solver_status::ftol_reached
+        || status == solver_status::xtol_reached || status == solver_status::stalled;
+}
+
+// Feasibility-first best-seen comparator selecting the returned iterate: feasible (cv <= feas_tol)
+// beats infeasible, two infeasible iterates rank by violation, two feasible ones by objective -- except
+// that a candidate whose status certifies it wins, since within the tolerance an earlier iterate's
+// lower objective can be bought with violation and would not satisfy the status's claim.
 //
-// Tiered ordering:
-//   1. Feasible beats infeasible unconditionally.
-//   2. Both feasible: prefer lower objective.
-//   3. Both infeasible: prefer lower constraint violation.
-//
-// An iterate is "feasible" when its constraint_violation is <= feas_tol;
-// unconstrained problems (cv = 0) always take the feasible branch.
-//
-// Reference: NLopt nlopt_optimize convention (nlopt/src/api/nlopt.c) --
-//            the caller receives the best point encountered, not the
-//            terminal trial. This monotonically improves the reported
-//            solve_result for oscillation-prone policies (MMA, GCMMA,
-//            ISRES, CMA-ES) without regressing well-behaved policies
-//            whose terminal iterate is already their best.
+// Reference: NLopt nlopt_optimize convention (nlopt/src/api/nlopt.c) -- the caller receives the best
+//            point encountered, not the terminal trial.
 template <typename Scalar>
-constexpr bool is_better(Scalar f_cand, Scalar cv_cand,
-                         Scalar f_best, Scalar cv_best,
-                         Scalar feas_tol) noexcept
+constexpr bool is_better(solver_status status, Scalar f_cand, Scalar cv_cand,
+                         Scalar f_best, Scalar cv_best, Scalar feas_tol) noexcept
 {
     const bool cand_feasible = cv_cand <= feas_tol;
     const bool best_feasible = cv_best <= feas_tol;
-    if(cand_feasible && !best_feasible) return true;
-    if(!cand_feasible && best_feasible) return false;
-    if(cand_feasible && best_feasible)
-        return f_cand < f_best;
-    return cv_cand < cv_best;
+    if(cand_feasible != best_feasible)
+        return cand_feasible;
+    if(!cand_feasible)
+        return cv_cand < cv_best;
+    return certifies_iterate(status) || f_cand < f_best;
 }
 
 // The single solve loop body shared by every driver facade.
 //
 // A surface type (the step-budget driver, the time-budget drivers, the
 // passive stepper) supplies its already-configured solver_core and a budget
-// predicate; the loop owns the abort -> budget -> step_impl -> best-seen ->
-// policy-status -> convergence -> terminal-resolution anatomy exactly once so
+// predicate; the loop owns the abort -> budget -> step_impl -> policy-status ->
+// convergence -> best-seen -> terminal-resolution anatomy exactly once so
 // distinct surfaces never duplicate it.
 //
 // Convergence loop structure:
@@ -118,39 +114,24 @@ run_solve_loop(Core& core, std::uint32_t budget,
             break;
         }
 
-        // step_impl() (not the public step()) runs the raw iteration:
-        // this loop owns the stopping decision through opts.convergence, so
-        // a second per-step convergence consult inside step() would
-        // double-advance windowed criteria.
+        // step_impl() (not the public step()) runs the raw iteration: this loop owns the stopping
+        // decision, so a second per-step convergence consult would double-advance windowed criteria.
+        // A policy-reported status is final and skips the convergence policy.
         last = core.step_impl();
+        if(last.policy_status)
+            status = *last.policy_status;
+        else if(const auto conv = opts.convergence.check(last, core.iteration_count()))
+            status = *conv;
 
-        // Best-seen update: compare after every step including the one that
-        // triggers policy_status or convergence, so the terminal iterate
-        // itself is eligible to be the winner. state_.x has already been
-        // updated by policy.step(); the policy-reported (f, cv) in last are
-        // the values at that x.
-        if(is_better(last.objective_value, last.constraint_violation,
+        if(is_better(status, last.objective_value, last.constraint_violation,
                      best_f, best_cv, feas_tol))
         {
             best_x = core.state().x;
             best_f = last.objective_value;
             best_cv = last.constraint_violation;
         }
-
-        // Policy-reported failure is final.
-        if(last.policy_status)
-        {
-            status = *last.policy_status;
+        if(status != solver_status::running)
             break;
-        }
-
-        // Convergence policy check
-        auto conv = opts.convergence.check(last, core.iteration_count());
-        if(conv)
-        {
-            status = *conv;
-            break;
-        }
     }
 
     if(status == solver_status::running)

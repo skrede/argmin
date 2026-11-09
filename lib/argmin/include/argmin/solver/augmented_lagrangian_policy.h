@@ -739,12 +739,12 @@ struct augmented_lagrangian_policy
         // comparator so the extracted solution equals a single full-budget
         // solve's. The inner driver reports the best over each chunk (seeded
         // from where the prior chunk left off); folding those recovers the
-        // best over the whole solve. feas_tol matches the inner options'
-        // feasibility floor (the bound-constrained inner reports cv == 0 and
-        // this reduces to a plain objective comparison).
+        // best over the whole solve, and the final chunk's status certifies its
+        // iterate exactly when the single solve's would. The bound-constrained
+        // inner reports cv == 0, so feas_tol never separates two chunks.
         {
             constexpr scalar_type inner_feas_tol = augmented_lagrangian_defaults<scalar_type>::inner_feasibility_tolerance;
-            if(detail::is_better(inner_result.objective_value,
+            if(detail::is_better(inner_result.status, inner_result.objective_value,
                                  inner_result.constraint_violation,
                                  s.best_inner_f, s.best_inner_cv, inner_feas_tol))
             {

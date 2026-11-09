@@ -128,7 +128,7 @@ function	lib/argmin/include/argmin/detail/quadratic_model.h	build_model	101
 function	lib/argmin/include/argmin/detail/quadratic_model.h	compute_lagrange_at_point	66
 function	lib/argmin/include/argmin/detail/quadratic_model.h	update_model_incremental	28
 function	lib/argmin/include/argmin/detail/restoration.h	feasibility_restoration	194
-function	lib/argmin/include/argmin/detail/solve_loop.h	run_solve_loop	109
+function	lib/argmin/include/argmin/detail/solve_loop.h	run_solve_loop	94
 function	lib/argmin/include/argmin/detail/solver_core.h	forward_policy_hints	82
 function	lib/argmin/include/argmin/detail/sqp_common.h	compute_bfgs_pair_fused	26
 function	lib/argmin/include/argmin/detail/sqp_common.h	extract_qp_multipliers	29

@@ -41,8 +41,8 @@ struct trust_region_sqp_defaults<float>
     static constexpr float gradient_tolerance_accurate = 3e-4f;     // rule
     static constexpr float step_tolerance_rel_fast = 2e-3f;         // rule
     static constexpr float step_tolerance_rel_accurate = 5e-6f;     // rule
-    static constexpr float feasibility_tolerance_fast = 1e-3f;      // driver row; rule value 2e-2
-    static constexpr float feasibility_tolerance_accurate = 1e-3f;  // driver row; rule value 2e-3
+    static constexpr float feasibility_tolerance_fast = 2e-3f;      // driver row; rule value 2e-2
+    static constexpr float feasibility_tolerance_accurate = 2e-3f;  // rule
     static constexpr float initial_trust_radius = 1.0f;             // dimensionless
     static constexpr float min_trust_radius = 5e-6f;                // rule
     static constexpr float initial_penalty = 1.0f;                  // dimensionless

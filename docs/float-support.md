@@ -46,20 +46,18 @@ parameters, magnitude caps that fit in `float` range, and integer budgets copy t
 applies.
 
 A `float` value departs from the rule only when the family's gate fails at the
-rule value, and then it moves to the nearest value that passes. Three did:
+rule value, and then it moves to the nearest value that passes. One did:
 
 | default | rule value | shipped | measured reason |
 |---|---|---|---|
-| `convergence_defaults<float>::feasibility_tolerance` | 2e-3 | 1e-3 | at 2e-3 the best-seen selection returned a `filter_nw_sqp` hs043 iterate with violation 1.53e-3 and an objective gap of 6.55e-3, against a gate of 3.45e-3 |
-| `line_search_sqp_defaults<float>::feasibility_tolerance` | 2e-3 | 1e-3 | aligned with the driver value above so the line-search policies advertise the tolerance they are gated at |
 | `isres_defaults<float>::feasibility_gate` | 2e-2 | 1e-3 | the faithful ISRES variant returns the lowest objective inside the gate, so at 2e-2 its hs023 result sat 1.2e-1 from the optimum in objective; 1e-3 passes on every measured seed |
 
-The trust-region SQP feasibility tolerances in both modes also start at 1e-3,
-the driver's value, rather than at their rule values (2e-2 fast, 2e-3 accurate):
-the fast-mode rule value fails under the policies' own tolerances. In `float` the
-two modes therefore share one feasibility tolerance; `sqp_mode::fast` and
-`sqp_mode::accurate` differ only in their gradient and relative step tolerances,
-where `double` also separates them by two decades in feasibility.
+The trust-region SQP fast-mode feasibility tolerance starts at 2e-3, the driver's
+value, rather than at its rule value of 2e-2, which fails under the policies' own
+tolerances. In `float` the two modes therefore share one feasibility tolerance;
+`sqp_mode::fast` and `sqp_mode::accurate` differ only in their gradient and
+relative step tolerances, where `double` also separates them by two decades in
+feasibility.
 
 ## Status per family
 

@@ -54,6 +54,7 @@ add_executable(argmin_unit_tests
     sparse_qp_reference_test.cpp
     maros_meszaros_dense_test.cpp
     step_budget_solver_test.cpp
+    best_iterate_test.cpp
     stepper_test.cpp
     active_set_qp_test.cpp
     lsei_mode4_test.cpp

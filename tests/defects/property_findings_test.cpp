@@ -78,22 +78,22 @@ TEST_CASE("the generated infeasible-start quadratic violates both rows at its st
     check_inside_box(mma_policy<>{}, p, cases::moving_asymptote_options());
 }
 
-TEST_CASE("mma makes a claim the oracle accepts from a generated infeasible start", "[known-defect][!shouldfail]")
+TEST_CASE("mma makes a claim the oracle accepts from a generated infeasible start", "[moving_asymptote]")
 {
     check_infeasible_start_claim(mma_policy<>{});
 }
 
-TEST_CASE("gcmma move_limit_shrink makes a claim the oracle accepts from a generated infeasible start", "[known-defect][!shouldfail]")
+TEST_CASE("gcmma move_limit_shrink makes a claim the oracle accepts from a generated infeasible start", "[moving_asymptote]")
 {
     check_infeasible_start_claim(alternative::gcmma::move_limit_shrink_policy<>{});
 }
 
-TEST_CASE("gcmma raa_augmented makes a claim the oracle accepts from a generated infeasible start", "[known-defect][!shouldfail]")
+TEST_CASE("gcmma raa_augmented makes a claim the oracle accepts from a generated infeasible start", "[moving_asymptote]")
 {
     check_infeasible_start_claim(alternative::gcmma::raa_augmented_policy<>{});
 }
 
-TEST_CASE("gcmma rho_wval makes a claim the oracle accepts from a generated infeasible start", "[known-defect][!shouldfail]")
+TEST_CASE("gcmma rho_wval makes a claim the oracle accepts from a generated infeasible start", "[moving_asymptote]")
 {
     check_infeasible_start_claim(alternative::gcmma::rho_wval_policy<>{});
 }
@@ -103,19 +103,19 @@ TEST_CASE("gcmma move_limit_shrink stays inside the box on a generated two-row q
     check_inside_box(alternative::gcmma::move_limit_shrink_policy<>{}, defects::two_row_quadratic(), cases::moving_asymptote_options());
 }
 
-TEST_CASE("gcmma move_limit_shrink makes a claim the oracle accepts on a generated two-row quadratic", "[known-defect][!shouldfail]")
+TEST_CASE("gcmma move_limit_shrink makes a claim the oracle accepts on a generated two-row quadratic", "[moving_asymptote]")
 {
     const oracle::verdict<double> v = defects::judge_finding(alternative::gcmma::move_limit_shrink_policy<>{}, defects::two_row_quadratic(), cases::moving_asymptote_options());
     CAPTURE(static_cast<int>(v.claimed), v.failing, v.legs.stationarity);
     CHECK(v.ok);
 }
 
-TEST_CASE("augmented_lagrangian_lbfgsb makes a claim the oracle accepts on a generated one-equality quadratic", "[known-defect][!shouldfail]")
+TEST_CASE("augmented_lagrangian_lbfgsb makes a claim the oracle accepts on a generated one-equality quadratic", "[augmented_lagrangian]")
 {
     check_augmented_lagrangian_claim(defects::one_equality_quadratic());
 }
 
-TEST_CASE("augmented_lagrangian_lbfgsb makes a claim the oracle accepts on a generated mixed-row quadratic", "[known-defect][!shouldfail]")
+TEST_CASE("augmented_lagrangian_lbfgsb makes a claim the oracle accepts on a generated mixed-row quadratic", "[augmented_lagrangian]")
 {
     check_augmented_lagrangian_claim(defects::mixed_row_quadratic());
 }

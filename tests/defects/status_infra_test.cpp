@@ -70,7 +70,7 @@ TEST_CASE("stepper converged() is false after a solve that ended diverged", "[kn
     CHECK_FALSE(stepped_into_nan(problem).converged());
 }
 
-TEST_CASE("solve does not claim converged with a NaN objective from a NaN start", "[known-defect][!shouldfail]")
+TEST_CASE("solve does not claim converged with a NaN objective from a NaN start", "[status]")
 {
     const nan_at_origin problem{};
     nan_start_solver solver = solver_from_nan_start(problem);
@@ -78,7 +78,7 @@ TEST_CASE("solve does not claim converged with a NaN objective from a NaN start"
     CHECK_FALSE((r.status == solver_status::converged && std::isnan(r.objective_value)));
 }
 
-TEST_CASE("solve returns the iterate the solver holds when its start objective is NaN", "[known-defect][!shouldfail]")
+TEST_CASE("solve returns the iterate the solver holds when its start objective is NaN", "[status]")
 {
     const nan_at_origin problem{};
     nan_start_solver solver = solver_from_nan_start(problem);
