@@ -15,6 +15,8 @@
 //            Section 16.7 (projected gradient optimality for
 //            bound-constrained problems).
 
+#include "argmin/detail/bound_projection.h"
+
 #include "argmin/types.h"
 
 #include <Eigen/Core>
@@ -109,25 +111,10 @@ Scalar kkt_residual(const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       grad
                     kkt_feasibility_legs<Scalar, Meq, Mineq>(mu_ineq, c_eq, c_ineq));
 }
 
-// Bound-aware composite first-order optimality error.
+// The composite above with the projected gradient as the stationarity leg, so a solution on an active bound
+// reads zero instead of the unmodeled bound multiplier; at an interior point it equals the raw composite.
 //
-// Identical to the raw-stationarity composite above except Leg 1 is
-// the box-projected stationarity measure
-//
-//     ||P(x - grad_L, lower, upper) - x||_inf
-//
-// (the kkt_residual_bound expression applied to the Lagrangian
-// gradient). At a solution with an active box bound the raw
-// stationarity leg equals the unmodeled bound multiplier and is
-// bounded away from zero, structurally preventing kkt-gated
-// convergence; the projected leg is zero there. At interior points
-// the projection is inactive and the projected leg collapses to the
-// raw ||grad_L||_inf, so unbounded problems are numerically unchanged
-// under this overload.
-//
-// Reference: Nocedal and Wright 2e Definition 12.1 (KKT conditions);
-//            Section 16.7 (projected gradient optimality for
-//            bound-constrained problems).
+// Reference: N&W 2e Definition 12.1; Section 16.7.
 template <typename Scalar, int N, int Meq, int Mineq>
 Scalar kkt_residual(const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       grad_f,
                     const Eigen::Ref<const Eigen::Matrix<Scalar, Meq, N>>&  J_eq,
@@ -140,13 +127,11 @@ Scalar kkt_residual(const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       grad
                     const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       lower,
                     const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       upper)
 {
-    // Leg 1 - Box-projected stationarity: ||P(x - grad_L, l, u) - x||_inf.
     Eigen::Vector<Scalar, N> grad_L = grad_f;
     if(J_eq.rows()   > 0) grad_L.noalias() -= J_eq.transpose()   * lambda_eq;
     if(J_ineq.rows() > 0) grad_L.noalias() -= J_ineq.transpose() * mu_ineq;
     const Scalar stationarity = grad_L.size() > 0
-        ? ((x - grad_L).cwiseMax(lower).cwiseMin(upper) - x)
-              .template lpNorm<Eigen::Infinity>()
+        ? projected_gradient_inf_norm<Scalar, N>(grad_L, x, lower, upper)
         : Scalar(0);
 
     return std::max(stationarity,

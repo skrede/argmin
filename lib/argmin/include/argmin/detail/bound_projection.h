@@ -51,6 +51,40 @@ Scalar compute_alpha_max(const Eigen::Vector<Scalar, N>& x,
     return alpha;
 }
 
+// Projected gradient x - P(x - g, lower, upper) = clamp(g, x - upper, x - lower), the first-order measure of a
+// bound-constrained problem (N&W 2e Section 16.7). Its norms reduce the clamp in place; a gradient no bound clips
+// returns its own norm, bit-identical to the unprojected value.
+template <typename Scalar, int N>
+bool box_clips_gradient(const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g,
+                        const Eigen::Ref<const Eigen::Vector<Scalar, N>>& x,
+                        const Eigen::Ref<const Eigen::Vector<Scalar, N>>& lower,
+                        const Eigen::Ref<const Eigen::Vector<Scalar, N>>& upper)
+{
+    return (g.array() < (x - upper).array()).any() || (g.array() > (x - lower).array()).any();
+}
+
+template <typename Scalar, int N>
+Scalar projected_gradient_norm(const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g,
+                               const Eigen::Ref<const Eigen::Vector<Scalar, N>>& x,
+                               const Eigen::Ref<const Eigen::Vector<Scalar, N>>& lower,
+                               const Eigen::Ref<const Eigen::Vector<Scalar, N>>& upper)
+{
+    if(!box_clips_gradient<Scalar, N>(g, x, lower, upper))
+        return g.norm();
+    return g.cwiseMax(x - upper).cwiseMin(x - lower).norm();
+}
+
+template <typename Scalar, int N>
+Scalar projected_gradient_inf_norm(const Eigen::Ref<const Eigen::Vector<Scalar, N>>& g,
+                                   const Eigen::Ref<const Eigen::Vector<Scalar, N>>& x,
+                                   const Eigen::Ref<const Eigen::Vector<Scalar, N>>& lower,
+                                   const Eigen::Ref<const Eigen::Vector<Scalar, N>>& upper)
+{
+    if(!box_clips_gradient<Scalar, N>(g, x, lower, upper))
+        return g.template lpNorm<Eigen::Infinity>();
+    return g.cwiseMax(x - upper).cwiseMin(x - lower).template lpNorm<Eigen::Infinity>();
+}
+
 }
 
 #endif

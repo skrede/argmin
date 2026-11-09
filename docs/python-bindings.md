@@ -60,11 +60,10 @@ counts but no Jacobian. Inequalities are `g(x) >= 0`.
 
 **Bounds.** All five nonlinear solvers apply `lower_bounds` and `upper_bounds`,
 given as arrays or as zero-argument callables returning arrays; an unset side is
-unbounded. The constrained solvers report a bound-active optimum differently,
-because their stopping tests differ: on a bowl whose minimum lies beyond a
-corner of the box, all four stop at that corner, but `KraftSlsqpSolver` and
-`FilterSlsqpSolver` report `stalled`, since the bound-blind KKT residual they
-stop on is not small there, `TrSqpSolver` reports `converged`, and
+unbounded. On a bowl whose minimum lies beyond a corner of the box, all four
+constrained solvers stop at that corner. The three SQP solvers report
+`converged`: the KKT residual they stop on projects the Lagrangian gradient
+onto the box, so it vanishes at a solution with an active bound.
 `CobylaSolver` reports `xtol_reached`, its stop once the trust radius has
 contracted to its final value.
 
@@ -84,13 +83,13 @@ smoke test; the figures below tally its per-cell dispositions, and the test
 suite recomputes them from it. `FilterSlsqpSolver` holds
 `filter_slsqp_accurate` 26 pass / 1 expected_fail, the same as its
 already-bound peer at `kraft_slsqp_accurate` 26 pass / 1 expected_fail, and it
-brings no new stopping test: it shares the bound-blind KKT residual the Kraft
-solver already ships with. `TrSqpSolver` holds
+brings no new stopping test: it stops on the same bound-aware KKT residual as
+the Kraft solver. `TrSqpSolver` holds
 `tr_sqp_accurate` 22 pass / 5 expected_fail (its fast mode, which is not
-bound, holds `tr_sqp_fast` 21 pass / 6 expected_fail), and it is one of only
-two policies in the library that stop on the bound-aware KKT residual, which
-projects the Lagrangian gradient onto the box and so can certify a solution
-with an active bound; the other is `filter_trsqp`, which is not bound.
+bound, holds `tr_sqp_fast` 21 pass / 6 expected_fail). Like every SQP policy in
+the library it stops on the bound-aware KKT residual, which projects the
+Lagrangian gradient onto the box and so can certify a solution with an active
+bound.
 
 **Options.** `DenseQpOptions`, `SparseQpOptions` and `DenseActiveSetQpOptions`
 are passed as arguments, the last because the active-set solver takes its own

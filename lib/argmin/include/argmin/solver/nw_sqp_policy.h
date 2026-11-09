@@ -26,6 +26,7 @@
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/sqp_stationarity.h"
 
 #include "argmin/options/qp_options.h"
 #include "argmin/options/line_search_sqp_defaults.h"
@@ -527,36 +528,16 @@ struct nw_sqp_policy
                     s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
             }
 
-            // Adopted from: argmin/detail/sqp_common.h null_step_result.
             // Reference: N&W 2e Definition 12.1, eq. 12.34 (full KKT
             //            first-order optimality E-measure).
-            //
-            // argmin variant: nw_sqp's null-step path overrides the helper's
-            //                 gradient_norm (which uses lpNorm<Infinity>) with
-            //                 the L2 Lagrangian-gradient norm computed against
-            //                 the CURRENT QP multipliers. Pre-refactor in-line
-            //                 code used `grad_L.norm()` (L2); the override
-            //                 preserves bit-identical reporting on the
-            //                 cross-policy step_result consistency suite.
             auto r = argmin::detail::null_step_result<Scalar, N,
                                                       Eigen::Dynamic,
                                                       Eigen::Dynamic>(
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
                 s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
                 s.c_eq, s.c_ineq, s.x.norm(), reset_count);
-            // L2 override: helper reports lpNorm<Infinity>, nw_sqp's prior
-            // in-line code reported L2.
-            Scalar grad_L_null_norm = s.g.norm();
-            if(m > 0)
-            {
-                Eigen::Vector<Scalar, N> grad_L = s.g;
-                if(s.n_eq > 0)
-                    grad_L.noalias() -= s.J_eq.transpose() * s.bufs.kkt_lambda_eq_buf;
-                if(s.n_ineq > 0)
-                    grad_L.noalias() -= s.J_ineq.transpose() * s.bufs.kkt_mu_ineq_buf;
-                grad_L_null_norm = grad_L.norm();
-            }
-            r.gradient_norm = grad_L_null_norm;
+            r.gradient_norm = detail::multiplier_gradient_norm<Scalar, N>(s);
+            r.kkt_residual = detail::box_kkt_residual<Scalar, N>(s);
             // Mirror the cap-exhausted exit below: surface the
             // accumulated NaN-recovery and BFGS-skip counts so the
             // in-loop null-step return is symmetric with the post-loop
@@ -901,29 +882,14 @@ struct nw_sqp_policy
                     s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
             }
 
-            // Adopted from: argmin/detail/sqp_common.h null_step_result.
-            //
-            // argmin variant: nw_sqp overrides the helper's gradient_norm
-            //                 (lpNorm<Infinity>) with the L2 Lagrangian-
-            //                 gradient norm to preserve cross-policy
-            //                 step_result consistency.
             auto r = argmin::detail::null_step_result<Scalar, N,
                                                       Eigen::Dynamic,
                                                       Eigen::Dynamic>(
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
                 s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
                 s.c_eq, s.c_ineq, s.x.norm(), reset_count);
-            Scalar grad_L_cap_norm = s.g.norm();
-            if(m > 0)
-            {
-                Eigen::Vector<Scalar, N> grad_L = s.g;
-                if(s.n_eq > 0)
-                    grad_L.noalias() -= s.J_eq.transpose() * s.bufs.kkt_lambda_eq_buf;
-                if(s.n_ineq > 0)
-                    grad_L.noalias() -= s.J_ineq.transpose() * s.bufs.kkt_mu_ineq_buf;
-                grad_L_cap_norm = grad_L.norm();
-            }
-            r.gradient_norm = grad_L_cap_norm;
+            r.gradient_norm = detail::multiplier_gradient_norm<Scalar, N>(s);
+            r.kkt_residual = detail::box_kkt_residual<Scalar, N>(s);
             // Surface the Armijo NaN-recovery count accumulated across
             // the main hand-rolled LS and the SOC retry within this
             // step() call (null_step_result leaves nan_eval_count at
@@ -1030,7 +996,7 @@ struct nw_sqp_policy
         s.lambda = lambda_new;
         ++s.iteration;
 
-        Scalar grad_L_norm = grad_L_new.norm();
+        Scalar grad_L_norm = detail::projected_gradient_norm<Scalar, N>(grad_L_new, s.x, s.lower, s.upper);
 
         Scalar phi_new = detail::l1_merit(s.objective_value,
                                             s.c_eq, s.c_ineq, s.sigma);
@@ -1100,16 +1066,7 @@ struct nw_sqp_policy
             s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
             s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
         }
-        // Static-N instantiation: with N compile-time the stationarity
-        // work vector lives in inline storage (no per-step heap
-        // allocation); the constraint axes stay dynamic.
-        Scalar kkt = detail::kkt_residual<Scalar,
-                                          N,
-                                          Eigen::Dynamic,
-                                          Eigen::Dynamic>(
-            s.g, s.J_eq, s.J_ineq,
-            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
-            s.c_eq, s.c_ineq);
+        Scalar kkt = detail::box_kkt_residual<Scalar, N>(s);
 
         // Primal feasibility (L-infinity) reported into
         // step_result.constraint_violation for dimensional consistency

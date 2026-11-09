@@ -48,7 +48,7 @@ using al_lbfgsb = augmented_lagrangian_policy<lbfgsb_policy<>>;
 
 }
 
-TEST_CASE("kraft_slsqp makes an optimality claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
+TEST_CASE("kraft_slsqp makes an optimality claim the oracle accepts on hs071", "[sqp]")
 {
     check_optimality_claim<kraft_slsqp_policy<>>(hs071<>{});
 }

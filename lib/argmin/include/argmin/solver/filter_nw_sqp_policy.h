@@ -31,6 +31,7 @@
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/sqp_stationarity.h"
 #include "argmin/detail/filter_acceptance.h"
 #include "argmin/detail/filter_restoration.h"
 
@@ -603,25 +604,16 @@ struct filter_nw_sqp_policy
                     s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
             }
 
-            // Adopted from: argmin/detail/sqp_common.h null_step_result.
             // Reference: N&W 2e Definition 12.1, eq. 12.34 (full KKT
             //            first-order optimality E-measure).
-            //
-            // argmin variant: filter_nw_sqp's null-step path overrides the
-            //                 helper's gradient_norm (lpNorm<Infinity>) with
-            //                 the L2 lagrangian_gradient_norm(s) computed
-            //                 against the previous-step lambda. Pre-refactor
-            //                 in-line code used lagrangian_gradient_norm(s);
-            //                 the override preserves bit-identical reporting
-            //                 on the cross-policy step_result consistency
-            //                 suite.
             auto r = argmin::detail::null_step_result<Scalar, N,
                                                       Eigen::Dynamic,
                                                       Eigen::Dynamic>(
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
                 s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
                 s.c_eq, s.c_ineq, s.x.norm(), reset_count);
-            r.gradient_norm = lagrangian_gradient_norm(s);
+            r.gradient_norm = detail::lagrangian_gradient_norm<Scalar, N>(s);
+            r.kkt_residual = detail::box_kkt_residual<Scalar, N>(s);
             // Mirror the cap-exhausted exit below: surface the
             // accumulated NaN-recovery and BFGS-skip counts so the
             // in-loop null-step return is symmetric with the post-loop
@@ -978,19 +970,12 @@ struct filter_nw_sqp_policy
                                                                       Eigen::Dynamic>(
                         s.g, s.J_eq, s.J_ineq, s.c_ineq, s.bufs.kkt_ws,
                         s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
-                    // Static-N instantiation (see the post-step KKT leg).
-                    kkt_rest = detail::kkt_residual<Scalar,
-                                                    N,
-                                                    Eigen::Dynamic,
-                                                    Eigen::Dynamic>(
-                        s.g, s.J_eq, s.J_ineq,
-                        s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
-                        s.c_eq, s.c_ineq);
+                    kkt_rest = detail::box_kkt_residual<Scalar, N>(s);
                 }
 
                 return step_result<Scalar>{
                     .objective_value = s.objective_value,
-                    .gradient_norm = lagrangian_gradient_norm(s),
+                    .gradient_norm = detail::lagrangian_gradient_norm<Scalar, N>(s),
                     .step_size = rest_step_norm,
                     .objective_change = s.objective_value - f_k,
                     .improved = h_restored_l1 < h_k,
@@ -1050,20 +1035,13 @@ struct filter_nw_sqp_policy
                                                                   Eigen::Dynamic>(
                     s.g, s.J_eq, s.J_ineq, s.c_ineq, s.bufs.kkt_ws,
                     s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
-                // Static-N instantiation (see the post-step KKT leg).
-                kkt_cap = detail::kkt_residual<Scalar,
-                                               N,
-                                               Eigen::Dynamic,
-                                               Eigen::Dynamic>(
-                    s.g, s.J_eq, s.J_ineq,
-                    s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
-                    s.c_eq, s.c_ineq);
+                kkt_cap = detail::box_kkt_residual<Scalar, N>(s);
             }
 
             ++s.iteration;
             return step_result<Scalar>{
                 .objective_value = s.objective_value,
-                .gradient_norm = lagrangian_gradient_norm(s),
+                .gradient_norm = detail::lagrangian_gradient_norm<Scalar, N>(s),
                 .step_size = Scalar(0.0),
                 .objective_change = Scalar(0.0),
                 .improved = false,
@@ -1242,16 +1220,7 @@ struct filter_nw_sqp_policy
             s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
             s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
         }
-        // Static-N instantiation: with N compile-time the stationarity
-        // work vector lives in inline storage (no per-step heap
-        // allocation); the constraint axes stay dynamic.
-        Scalar kkt = detail::kkt_residual<Scalar,
-                                          N,
-                                          Eigen::Dynamic,
-                                          Eigen::Dynamic>(
-            s.g, s.J_eq, s.J_ineq,
-            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
-            s.c_eq, s.c_ineq);
+        Scalar kkt = detail::box_kkt_residual<Scalar, N>(s);
 
         // Primal feasibility (L-infinity) reported into step_result for
         // dimensional consistency with kkt_residual per N&W 2e Definition
@@ -1260,7 +1229,7 @@ struct filter_nw_sqp_policy
         // 2002 Section 2 dominance ordering.
         return step_result<Scalar>{
             .objective_value = s.objective_value,
-            .gradient_norm = grad_L_new.norm(),
+            .gradient_norm = detail::projected_gradient_norm<Scalar, N>(grad_L_new, s.x, s.lower, s.upper),
             .step_size = sk.norm(),
             .objective_change = s.objective_value - f_old,
             .improved = phi_new < phi0,
@@ -1356,19 +1325,6 @@ private:
                 return true;
         }
         return false;
-    }
-
-    template <typename Problem>
-    static Scalar lagrangian_gradient_norm(state_type<Problem>& s)
-    {
-        const int m = s.n_eq + s.n_ineq;
-        if(m == 0)
-            return s.g.norm();
-
-        Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A = s.bufs.lag_A_buf;
-        if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
-        if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
-        return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
     }
 
     // Reference: Wachter & Biegler 2006 Section 3.

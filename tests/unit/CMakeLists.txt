@@ -71,6 +71,7 @@ add_executable(argmin_unit_tests
     soc_seed_projection_test.cpp
     dense_ldl_bfgs_test.cpp
     sqp_step_result_consistency_test.cpp
+    sqp_bound_stationarity_test.cpp
     steihaug_cg_test.cpp
     byrd_omojokun_test.cpp
     cauchy_point_test.cpp

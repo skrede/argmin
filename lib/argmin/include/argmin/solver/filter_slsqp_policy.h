@@ -36,6 +36,7 @@
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/sqp_stationarity.h"
 
 #include "argmin/options/qp_options.h"
 #include "argmin/options/line_search_sqp_defaults.h"
@@ -484,7 +485,7 @@ struct filter_slsqp_policy
                         ++s.iteration;
                         return step_result<Scalar>{
                             .objective_value = s.objective_value,
-                            .gradient_norm = lagrangian_gradient_norm(s),
+                            .gradient_norm = detail::lagrangian_gradient_norm<Scalar, N>(s),
                             .step_size = rest_step_norm,
                             .objective_change = s.objective_value - s.objective_value,
                             .improved = false,
@@ -550,11 +551,8 @@ struct filter_slsqp_policy
                 h_zero_l1 > line_search_sqp_defaults<Scalar>::restoration_trigger
                     ? std::optional{solver_status::stalled}
                     : std::nullopt);
-            // filter_slsqp reports gradient_norm via the s.lambda
-            // multiplier vector for cross-policy consistency with the
-            // accepted-step path; override the helper's internal
-            // computation from the per-leg buffers.
-            r.gradient_norm = lagrangian_gradient_norm(s);
+            r.gradient_norm = detail::lagrangian_gradient_norm<Scalar, N>(s);
+            r.kkt_residual = detail::box_kkt_residual<Scalar, N>(s);
             // Mirror the cap-exhausted exit below: surface the
             // accumulated NaN-recovery count so the in-loop null-step
             // return is symmetric (filter_slsqp does not maintain a
@@ -858,7 +856,7 @@ struct filter_slsqp_policy
                         ++s.iteration;
                         return step_result<Scalar>{
                             .objective_value = s.objective_value,
-                            .gradient_norm = lagrangian_gradient_norm(s),
+                            .gradient_norm = detail::lagrangian_gradient_norm<Scalar, N>(s),
                             .step_size = rest_step_norm,
                             .objective_change = s.objective_value - f_k,
                             .improved = s.objective_value < f_k,
@@ -902,7 +900,7 @@ struct filter_slsqp_policy
             ++s.iteration;
             return step_result<Scalar>{
                 .objective_value = s.objective_value,
-                .gradient_norm = lagrangian_gradient_norm(s),
+                .gradient_norm = detail::lagrangian_gradient_norm<Scalar, N>(s),
                 .step_size = Scalar(0.0),
                 .objective_change = Scalar(0.0),
                 .improved = false,
@@ -1120,17 +1118,11 @@ struct filter_slsqp_policy
         }
         // else: reuse s.bufs.kkt_lambda_eq_buf / kkt_mu_ineq_buf from
         //       the prior step's gate-fire path.
-        Scalar kkt = detail::kkt_residual<Scalar,
-                                          N,
-                                          Eigen::Dynamic,
-                                          Eigen::Dynamic>(
-            s.g, s.J_eq, s.J_ineq,
-            s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
-            s.c_eq, s.c_ineq);
+        Scalar kkt = detail::box_kkt_residual<Scalar, N>(s);
 
         return step_result<Scalar>{
             .objective_value = s.objective_value,
-            .gradient_norm = lagrangian_gradient_norm(s),
+            .gradient_norm = detail::lagrangian_gradient_norm<Scalar, N>(s),
             .step_size = sk.norm(),
             .objective_change = s.objective_value - old_f,
             .improved = s.objective_value < old_f,
@@ -1203,34 +1195,6 @@ private:
             return detail::more_equalities_than_variables(s.problem->num_equality(), s.n) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
         else
             return false;
-    }
-
-    // Lagrangian gradient norm for KKT-consistent stationarity reporting.
-    // grad_L = grad_f - [J_eq; J_ineq]^T * lambda. At a constrained optimum
-    // grad_L vanishes (N&W eq. 12.34) while raw ||grad_f|| in general does
-    // not. Convergence criteria gate on Lagrangian-gradient norm.
-    // Adopted from: argmin/solver/nw_sqp_policy.h::step null-step branch (in-tree precedent).
-    // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity);
-    //            eq. 18.2-18.3 (Lagrangian gradient definition).
-    // argmin variant: per-policy static helper parameterised on state_type<P>;
-    //                 a shared free-function variant is deferred to a later
-    //                 helper-extraction pass. Rationale: state_type members
-    //                 differ across SQP policies; a shared helper would need
-    //                 a concept-or-trait abstraction not yet in place.
-    template <typename P>
-    static Scalar lagrangian_gradient_norm(state_type<P>& s)
-    {
-        const int m = s.n_eq + s.n_ineq;
-        if(m == 0)
-            return s.g.norm();
-
-        // Stacked Jacobian assembled into the state-resident buffer
-        // (sized once at init/reset) rather than a per-call A(m, n),
-        // keeping the reporting leg allocation-free at steady state.
-        Eigen::Matrix<Scalar, Eigen::Dynamic, N>& A = s.bufs.lag_A_buf;
-        if(s.n_eq > 0) A.topRows(s.n_eq) = s.J_eq;
-        if(s.n_ineq > 0) A.bottomRows(s.n_ineq) = s.J_ineq;
-        return detail::lagrangian_gradient(s.g, A, s.lambda).norm();
     }
 
     // Run the configured restoration strategy.
