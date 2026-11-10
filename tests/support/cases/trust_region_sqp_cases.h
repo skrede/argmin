@@ -25,7 +25,7 @@ using tr_sqp = tr_sqp_policy<double, dynamic_dimension, Mode>;
 template <sqp_mode Mode>
 using filter_trsqp = filter_trsqp_policy<double, dynamic_dimension, Mode>;
 
-// At the hs076 optimum accurate tr_sqp ends stalled under g++ Debug but trust_region_step_rejected
+// At the hs076 optimum accurate tr_sqp ends stalled under g++ Debug but roundoff_limited
 // under clang -march=native, so its inequality case is hs024, whose verdict both builds share.
 template <typename Visitor>
 void visit_trust_region_sqp_cases(Visitor& visitor)

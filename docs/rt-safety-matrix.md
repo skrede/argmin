@@ -282,8 +282,9 @@ stack-budgeting rule: [Embedded Cross-Compiling](embedded.md).
     vertex, where the constraint violation is zero, and the L1 leaf returns success on entry;
     `sqp_alloc_gate_degenerate_vertex` holds those `filter_slsqp` steps at zero allocations.
     `filter_trsqp` uses neither leg: its Levenberg-Marquardt restoration runs on buffers held in
-    its state and is entered only when a step is rejected with the trust radius below
-    `min_trust_radius` at an infeasible iterate. No armed window reaches it and no gate holds it;
+    its state and is entered only when a step is rejected with the trust radius below its floor
+    (`min_trust_radius`, raised to the relative machine precision of `x` where that is larger) at an
+    infeasible iterate. No armed window reaches it and no gate holds it;
     a direct counting window over that leaf on the policy's state buffers measured zero
     allocations at its step-budget and converged exits. `kraft_slsqp` has no restoration path.
 

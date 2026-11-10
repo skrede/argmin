@@ -25,15 +25,15 @@ inline constexpr std::array<known_defect, 21> known_defect_cases{{
      "bounded Rosenbrock case runs out of iterations far from stationarity"},
     {"tr_sqp_fast",
      "inequality",
-     "the trust region collapses at the hs076 optimum, so the run ends trust_region_step_rejected and claims nothing at a "
-     "point that meets the converged tolerance"},
+     "the trust region reaches its roundoff floor at the hs076 optimum, so the run ends roundoff_limited and claims nothing "
+     "at a point that meets the converged tolerance"},
     {"tr_sqp_fast",
      "mixed",
-     "the trust region collapses short of the hs071 solution, so the run ends trust_region_step_rejected with "
+     "the trust region reaches its roundoff floor short of the hs071 solution, so the run ends roundoff_limited with "
      "stationarity forty times the gradient tolerance"},
     {"tr_sqp_accurate",
      "mixed",
-     "the trust region collapses short of the hs071 solution, so the run ends trust_region_step_rejected with "
+     "the trust region reaches its roundoff floor short of the hs071 solution, so the run ends roundoff_limited with "
      "stationarity sixty times the gradient tolerance"},
     {"mma",
      "bound",

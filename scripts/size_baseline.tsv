@@ -52,7 +52,7 @@ file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	659
 file	lib/argmin/include/argmin/solver/convergence.h	-	392
 file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1346
 file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1218
-file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1787
+file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1785
 file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1120
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	205
 file	lib/argmin/include/argmin/solver/lm_policy.h	-	302
@@ -66,7 +66,7 @@ file	lib/argmin/include/argmin/solver/step_and_time_budget_solver.h	-	278
 file	lib/argmin/include/argmin/solver/step_budget_solver.h	-	283
 file	lib/argmin/include/argmin/solver/stepper.h	-	241
 file	lib/argmin/include/argmin/solver/time_budget_solver.h	-	282
-file	lib/argmin/include/argmin/solver/tr_sqp_policy.h	-	1292
+file	lib/argmin/include/argmin/solver/tr_sqp_policy.h	-	1274
 file	lib/argmin/include/argmin/test_functions/ik_pose_batch.h	-	319
 file	lib/argmin/include/argmin/test_functions/more_garbow_hillstrom.h	-	489
 file	lib/argmin/include/argmin/test_functions/nmpc_lqr.h	-	345
@@ -210,7 +210,7 @@ function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	reset	33
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	step	783
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	init	160
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	reset	43
-function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	step	907
+function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	step	904
 function	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	init	92
 function	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	step	657
 function	lib/argmin/include/argmin/solver/lbfgsb_policy.h	init	28
@@ -230,7 +230,7 @@ function	lib/argmin/include/argmin/solver/restarting_policy.h	init	47
 function	lib/argmin/include/argmin/solver/restarting_policy.h	step	39
 function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	init	141
 function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	reset	30
-function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	step	679
+function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	step	658
 function	lib/argmin/include/argmin/test_functions/more_garbow_hillstrom.h	gradient	29
 function	lib/argmin/include/argmin/test_functions/nmpc_lqr.h	constraint_jacobian	34
 function	lib/argmin/include/argmin/test_functions/nmpc_lqr.h	constraints	35

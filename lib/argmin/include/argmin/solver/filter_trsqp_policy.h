@@ -75,6 +75,7 @@
 //            alternative to the LM restoration prototype used here);
 //            scipy/optimize/_trustregion_constr (public-API reference).
 
+#include "argmin/detail/gain_ratio.h"
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/sqp_common.h"
 #include "argmin/detail/restoration.h"
@@ -408,7 +409,7 @@ struct filter_trsqp_policy
         // Feasibility-restoration knobs (minimal-viable Levenberg-
         // Marquardt prototype). The restoration hook fires only on the
         // three-way conjunction
-        //   (trust_radius < min_trust_radius) AND
+        //   (trust_radius below its floor) AND
         //   (filter rejected the most recent candidate)         AND
         //   (restoration_max_iter > 0);
         // any single conjunct false leaves the policy's
@@ -1287,7 +1288,7 @@ struct filter_trsqp_policy
 
         // Feasibility-restoration hook. Fires only on the five-way
         // conjunction
-        //   (trust_radius < min_trust_radius)                  AND
+        //   (trust_radius below its floor)                     AND
         //   (filter rejected the most recent candidate)        AND
         //   (restoration_max_iter > 0)                         AND
         //   (h_current > restoration_feasibility_tolerance)    AND
@@ -1341,7 +1342,8 @@ struct filter_trsqp_policy
         //            13(1):44-59 Section 3 (feasibility-restoration
         //            applicability gate).
         std::size_t restoration_iters_used_out = 0;
-        if(s.trust_radius < options.min_trust_radius
+        const bool collapsed = s.trust_radius < argmin::detail::trust_radius_floor(options.min_trust_radius, s.x.norm());
+        if(collapsed
            && !accepted
            && options.restoration_max_iter > 0
            && h_current > options.restoration_feasibility_tolerance
@@ -1497,12 +1499,8 @@ struct filter_trsqp_policy
             s.restoration_exhausted = true;
         }
 
-        // Section M -- Trust-radius collapse path. Below the policy-
-        // level floor the policy emits a null-step carrying the new
-        // solver_status entry; the convergence framework's stall
-        // window then declares termination after stall_window
-        // consecutive null-steps.
-        if(s.trust_radius < options.min_trust_radius)
+        // Section M -- Trust-radius collapse path.
+        if(collapsed)
         {
             auto r = argmin::detail::null_step_result<Scalar, N,
                                                       Eigen::Dynamic,

@@ -29,6 +29,7 @@
 //            scipy/optimize/_trustregion_constr (public-API reference
 //            shape).
 
+#include "argmin/detail/gain_ratio.h"
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/sqp_common.h"
 #include "argmin/detail/kkt_residual.h"
@@ -52,10 +53,12 @@
 #include <Eigen/Core>
 #include <Eigen/Cholesky>
 
-#include <algorithm>
 #include <cmath>
-#include <cstdint>
+#include <tuple>
 #include <limits>
+#include <cstdint>
+#include <optional>
+#include <algorithm>
 
 namespace argmin
 {
@@ -815,7 +818,8 @@ struct tr_sqp_policy
         // the primary step (matches the pre-refactor BO behavior).
         // The radius input below is `s.trust_radius` -- the pre-step
         // radius snapshot lives in `delta_pre_step` and is consumed
-        // by the SOC retry, not by the primary branch.
+        // by the SOC retry, not by the primary branch. The third
+        // result marks a rejection made within the merit's rounding.
         auto compute_acceptance = [](const argmin::detail::
                                          byrd_omojokun_step_result<Scalar>& bo,
                                      Scalar f_old_,
@@ -823,13 +827,12 @@ struct tr_sqp_policy
                                      Scalar penalty_,
                                      Scalar delta_in,
                                      Scalar step_norm)
-            -> std::pair<bool, Scalar>
+            -> std::tuple<bool, Scalar, bool>
         {
-            const Scalar actual =
-                (f_old_ + penalty_ * c_norm_old_)
-                - (bo.f_new + penalty_ * bo.c_norm_new);
-            const Scalar pred_aug =
-                bo.predicted + penalty_ * bo.vpred;
+            const Scalar merit = f_old_ + penalty_ * c_norm_old_;
+            const Scalar actual = merit - (bo.f_new + penalty_ * bo.c_norm_new);
+            const Scalar pred_aug = bo.predicted + penalty_ * bo.vpred;
+            const bool within_rounding = argmin::detail::reductions_within_rounding(actual, pred_aug, merit);
             // Explicit reject branch on a non-positive augmented
             // predicted reduction: N&W Algorithm 4.1's ratio test
             // assumes pred > 0. Forming rho = actual / max(pred, eps)
@@ -842,22 +845,23 @@ struct tr_sqp_policy
             // the reject branch.
             if(!(pred_aug > Scalar(0.0)))
                 return {false,
-                        argmin::detail::byrd_omojokun_constants<Scalar>::shrink_factor * delta_in};
+                        argmin::detail::byrd_omojokun_constants<Scalar>::shrink_factor * delta_in, within_rounding};
             const Scalar rho = actual / pred_aug;
             if(rho < argmin::detail::byrd_omojokun_constants<Scalar>::eta_1)
                 return {false,
-                        argmin::detail::byrd_omojokun_constants<Scalar>::shrink_factor * delta_in};
+                        argmin::detail::byrd_omojokun_constants<Scalar>::shrink_factor * delta_in, within_rounding};
             if(rho > argmin::detail::byrd_omojokun_constants<Scalar>::eta_2
                && step_norm
                   >= argmin::detail::byrd_omojokun_constants<Scalar>::boundary_guard * delta_in)
                 return {true,
                         std::min(
                             argmin::detail::byrd_omojokun_constants<Scalar>::expand_factor * delta_in,
-                            argmin::detail::byrd_omojokun_constants<Scalar>::delta_max)};
-            return {true, delta_in};
+                            argmin::detail::byrd_omojokun_constants<Scalar>::delta_max),
+                        false};
+            return {true, delta_in, false};
         };
 
-        auto [accepted, new_delta] = compute_acceptance(
+        auto [accepted, new_delta, within_rounding] = compute_acceptance(
             bo_step,
             f_old,
             c_norm_old,
@@ -978,7 +982,7 @@ struct tr_sqp_policy
                 // Re-run the caller-side acceptance gate against this
                 // retry's raw outputs. The radius input is held at
                 // delta_pre_step (no chained shrinks across retries).
-                std::tie(accepted, new_delta) = compute_acceptance(
+                std::tie(accepted, new_delta, within_rounding) = compute_acceptance(
                     bo_step,
                     f_old,
                     c_norm_old,
@@ -1008,47 +1012,25 @@ struct tr_sqp_policy
         // way, new_delta is the authoritative post-step radius.
         s.trust_radius = new_delta;
 
-        // Section M -- Trust-radius collapse path. Below the policy-
-        // level floor the policy emits a null-step carrying the new
-        // solver_status entry; the convergence framework's stall window
-        // then declares termination after stall_window consecutive
-        // null-steps. Note: the Δ-collapse path triggers ONLY when the
-        // post-update radius is below floor; this is the
-        // "shrink-shrink-shrink ... rejected" terminal pattern, not the
-        // single-rejection branch handled in Section N.
-        if(s.trust_radius < options.min_trust_radius)
+        // Section M -- Null step. A radius below its floor ends the run
+        // trust_region_step_rejected, and a rejection within the merit's
+        // rounding ends it roundoff_limited; any other rejection leaves
+        // the iterate unchanged with the radius already contracted
+        // (Nocedal and Wright 2e Section 4.1 Algorithm 4.1).
+        const bool collapsed = s.trust_radius < argmin::detail::trust_radius_floor(options.min_trust_radius, s.x.norm());
+        if(collapsed || !accepted)
         {
+            std::optional<solver_status> status{};
+            if(collapsed)
+                status = solver_status::trust_region_step_rejected;
+            else if(within_rounding)
+                status = solver_status::roundoff_limited;
             auto r = argmin::detail::null_step_result<Scalar, N,
                                                       Eigen::Dynamic,
                                                       Eigen::Dynamic>(
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
                 s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
-                s.c_eq, s.c_ineq, s.x.norm(), /*bfgs_reset_count=*/0,
-                solver_status::trust_region_step_rejected);
-            r.kkt_residual = bound_aware_kkt();
-            r.diagnostics.bfgs_skip_count = bfgs_skip_count;
-            r.diagnostics.soc_retry_count = soc_retry_count;
-            ++s.iteration;
-            return r;
-        }
-
-        // Section N -- Single-step rejection branch (ratio < eta_1 but
-        // radius above the floor). Iterate unchanged; the helper has
-        // already shrunk s.trust_radius. The null-step status is
-        // unset; step_budget_solver's convergence framework reads
-        // is_null_step + the stall window to decide termination.
-        //
-        // Reference: Nocedal and Wright 2e Section 4.1 Algorithm 4.1
-        //            (rejection contracts the radius, leaves the
-        //             iterate unchanged).
-        if(!accepted)
-        {
-            auto r = argmin::detail::null_step_result<Scalar, N,
-                                                      Eigen::Dynamic,
-                                                      Eigen::Dynamic>(
-                s.objective_value, s.g, s.J_eq, s.J_ineq,
-                s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
-                s.c_eq, s.c_ineq, s.x.norm(), /*bfgs_reset_count=*/0);
+                s.c_eq, s.c_ineq, s.x.norm(), /*bfgs_reset_count=*/0, status);
             r.kkt_residual = bound_aware_kkt();
             r.diagnostics.bfgs_skip_count = bfgs_skip_count;
             r.diagnostics.soc_retry_count = soc_retry_count;
