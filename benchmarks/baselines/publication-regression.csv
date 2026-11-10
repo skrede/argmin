@@ -192,7 +192,7 @@ filter_trsqp_accurate,hs036,accurate,4,-8.0,8,-6.0,pass,publish-2026-07-11T18-03
 filter_trsqp_accurate,hs037,accurate,3,-8.0,16,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,21193,
 filter_trsqp_accurate,hs039,accurate,2,-8.0,49,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,15315,
 filter_trsqp_accurate,hs040,accurate,3,-8.0,10,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,18564,
-filter_trsqp_accurate,hs043,accurate,4,-8.0,108,-6.0,expected_fail,publish-2026-07-11T18-03-29Z,enforced,,28684,
+filter_trsqp_accurate,hs043,accurate,4,-8.0,108,-6.0,pass,publish-2026-11-10T19-27-58Z,enforced,,28684,
 filter_trsqp_accurate,hs044,accurate,9,-8.0,75,-6.0,expected_fail,publish-2026-07-11T18-03-29Z,enforced,,89051,
 filter_trsqp_accurate,hs048,accurate,3,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,18627,
 filter_trsqp_accurate,hs050,accurate,3,-8.0,33,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,21677,
