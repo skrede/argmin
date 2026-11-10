@@ -118,7 +118,12 @@ The full concept definitions are in
   `invalid_problem` are the common non-success codes. `line_search_failed`
   comes from the L-BFGS-B policies: a line-search step was rejected and so was
   its retry from a reset curvature memory (or the memory was already empty),
-  and the iterate was held at the last accepted point.
+  and the iterate was held at the last accepted point. `converged`,
+  `ftol_reached`, `xtol_reached` and `stalled` describe the final iterate and
+  are reported only where its constraint violation is within
+  `constraint_tolerance` (or `feasibility_tolerance` when that is unset). A
+  solver whose own stopping test ends at a point outside that tolerance reports
+  `objective_stalled`, which claims nothing about the point.
 - `result.x` -- the solution vector.
 - `result.objective_value` -- the objective at `result.x`.
 

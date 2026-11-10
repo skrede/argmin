@@ -11,6 +11,7 @@ add_executable(argmin_defect_tests
     derivative_free_test.cpp
     embedded_test.cpp
     harness_canary_test.cpp
+    infeasible_claim_test.cpp
     least_squares_oracle_test.cpp
     moving_asymptote_oracle_test.cpp
     moving_asymptote_solve_test.cpp

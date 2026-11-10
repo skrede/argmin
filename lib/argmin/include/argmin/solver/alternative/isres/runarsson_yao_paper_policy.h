@@ -52,6 +52,7 @@
 //     strategy for function minimization," Bioinformatics 39(7):
 //     btad403, Table 2 (numeric default attribution gap).
 
+#include "argmin/detail/lagrangian.h"
 #include "argmin/detail/isres_operators.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/scalar_distributions.h"
@@ -532,9 +533,8 @@ struct runarsson_yao_paper_policy
 
         ++s.generation;
 
-        // (8) Return step_result with sigma-collapse + feasibility status
-        //     emission per Runarsson-Yao 2005 Section V (termination).
-        //     Emit solver_status::ftol_reached when the population's mean
+        // (8) Runarsson-Yao 2005 Section V (termination): emit
+        //     solver_status::ftol_reached when the population's mean
         //     step size has collapsed AND the rank-0 individual's violation
         //     sits within the feasibility gate. Two sigma-collapse forms
         //     are available via the runtime selector
@@ -550,7 +550,6 @@ struct runarsson_yao_paper_policy
         //         falls back to the bound-relative form using `ratio`
         //         (fail-safe).
         const Scalar mean_sigma = s.sigmas.leftCols(mu).mean();
-
         const std::uint32_t rank0 = s.indices_buf[0];
         const Scalar v_best = s.violations[rank0];
         const bool feasible = (v_best <= options.feasibility_gate);
@@ -585,6 +584,7 @@ struct runarsson_yao_paper_policy
             .step_size = mean_sigma,
             .objective_change = std::abs(s.best_ever_value - prev_best_ever_value),
             .improved = (s.best_ever_value < prev_best_ever_value),
+            .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .policy_status = emitted_status,
         };

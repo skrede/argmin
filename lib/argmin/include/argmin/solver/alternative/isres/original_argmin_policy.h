@@ -28,6 +28,7 @@
 //            Evolutionary Optimization", IEEE Trans. SMC-C.
 //            K&W Section 8.6 (evolution strategies).
 
+#include "argmin/detail/lagrangian.h"
 #include "argmin/detail/isres_operators.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/stochastic_ranking.h"
@@ -259,7 +260,6 @@ struct original_argmin_policy
         // 1. Generate offspring via mutation + differential variation.
         for(int j = 0; j < s.lambda; ++j)
         {
-            // Select parent from current population (top mu by rank)
             int parent_idx = j % s.mu;
             auto [child, sig] = s.mutation_workspace->mutate(
                 Eigen::Vector<Scalar, N>(s.population.col(parent_idx)),
@@ -370,7 +370,6 @@ struct original_argmin_policy
 
         ++s.generation;
 
-        // Convergence signalling
         Scalar mean_sigma = s.sigmas.leftCols(s.mu).mean();
         Scalar grad_proxy = mean_sigma * std::sqrt(static_cast<Scalar>(n));
         bool improved = s.objective_value < old_best;
@@ -382,6 +381,7 @@ struct original_argmin_policy
             .step_size = mean_sigma,
             .objective_change = obj_change,
             .improved = improved,
+            .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
         };
     }

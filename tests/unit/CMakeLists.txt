@@ -57,6 +57,7 @@ add_executable(argmin_unit_tests
     step_budget_solver_test.cpp
     best_iterate_test.cpp
     optimality_claim_test.cpp
+    feasibility_claim_test.cpp
     trust_region_roundoff_test.cpp
     stepper_test.cpp
     active_set_qp_test.cpp

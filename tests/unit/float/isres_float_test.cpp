@@ -9,6 +9,7 @@
 #include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
 
 #include "argmin/options/isres_defaults.h"
+#include "argmin/options/convergence_defaults.h"
 
 #include "argmin/test_functions/hock_schittkowski.h"
 
@@ -85,6 +86,24 @@ void check_tracks_double()
     CHECK(squared_violation(problem_f, result_f.x) <= isres_defaults<float>::feasibility_gate);
 }
 
+// The faithful variant's own gate (NLopt's, on the summed squared violation) stops it at points outside the solve's
+// feasibility tolerance, so it gives up the claim and returns its best feasible iterate. Each scalar stops at its own
+// such iterate, and their objectives differ by more than the stochastic tolerance, so only the point is compared.
+template <template <typename, int> typename Policy, template <typename> typename Problem>
+void check_feasible_without_claim()
+{
+    const Problem<double> problem_d;
+    const Problem<float> problem_f;
+    const auto result_d = drive<Policy<double, Problem<double>::problem_dimension>>(problem_d);
+    const auto result_f = drive<Policy<float, Problem<float>::problem_dimension>>(problem_f);
+
+    CHECK(result_d.status == solver_status::objective_stalled);
+    CHECK(result_f.status == solver_status::objective_stalled);
+    CHECK(tracks(result_f.x, result_d.x, k_stochastic));
+    CHECK(result_f.constraint_violation <= convergence_defaults<float>::feasibility_tolerance);
+    CHECK(squared_violation(problem_f, result_f.x) <= isres_defaults<float>::feasibility_gate);
+}
+
 template <scalar S, int N>
 using nlopt_faithful = isres_policy<S, N>;
 
@@ -98,11 +117,6 @@ using original_argmin = alternative::isres::original_argmin_policy<S, N>;
 
 TEST_CASE("ISRES in float tracks double on an inequality-constrained fixture at its own defaults", "[float]")
 {
-    SECTION("isres_policy hs023")
-    {
-        check_tracks_double<nlopt_faithful, hs023>();
-    }
-
     SECTION("runarsson_yao_paper_policy hs023")
     {
         check_tracks_double<runarsson_yao, hs023>();
@@ -113,11 +127,6 @@ TEST_CASE("ISRES in float tracks double on an inequality-constrained fixture at 
         check_tracks_double<original_argmin, hs023>();
     }
 
-    SECTION("isres_policy hs024")
-    {
-        check_tracks_double<nlopt_faithful, hs024>();
-    }
-
     SECTION("runarsson_yao_paper_policy hs024")
     {
         check_tracks_double<runarsson_yao, hs024>();
@@ -126,5 +135,18 @@ TEST_CASE("ISRES in float tracks double on an inequality-constrained fixture at 
     SECTION("original_argmin_policy hs024")
     {
         check_tracks_double<original_argmin, hs024>();
+    }
+}
+
+TEST_CASE("ISRES nlopt_faithful in float gives up its claim and returns a feasible point near double's at its own defaults", "[float]")
+{
+    SECTION("isres_policy hs023")
+    {
+        check_feasible_without_claim<nlopt_faithful, hs023>();
+    }
+
+    SECTION("isres_policy hs024")
+    {
+        check_feasible_without_claim<nlopt_faithful, hs024>();
     }
 }

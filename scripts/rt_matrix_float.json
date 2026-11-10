@@ -320,7 +320,7 @@
           }
         },
         {
-          "module": "ISRES (all three variants) in float tracks double",
+          "module": "ISRES (runarsson_yao_paper, original_argmin) in float tracks double",
           "cells": {
             "guaranteed?": {
               "verdict": "yes",
@@ -330,6 +330,42 @@
                 {
                   "kind": "ctest_test",
                   "name": "ISRES in float tracks double on an inequality-constrained fixture at its own defaults"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "gcc-14"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "clang-18"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 15.4)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Xcode 16.2)"
+                },
+                {
+                  "kind": "ci_job",
+                  "name": "build (Windows)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "module": "ISRES nlopt_faithful (the isres_policy alias) in float gives up its claim and returns a feasible point near double's",
+          "cells": {
+            "guaranteed?": {
+              "verdict": "yes",
+              "class": "gated",
+              "qualifier": "on hs023 and hs024, k = 100 on the returned point; the objective is not compared",
+              "evidence": [
+                {
+                  "kind": "ctest_test",
+                  "name": "ISRES nlopt_faithful in float gives up its claim and returns a feasible point near double's at its own defaults"
                 },
                 {
                   "kind": "ci_job",

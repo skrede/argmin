@@ -48,6 +48,7 @@
 //     provenance per the libcmaes header comment lines 21-26.
 //   K&W (2025) Algorithms for Optimization 2e, §8.7, Algorithm 8.10.
 
+#include "argmin/detail/row_values.h"
 #include "argmin/detail/xoshiro256.h"
 #include "argmin/detail/finite_order.h"
 #include "argmin/detail/problem_shape.h"
@@ -100,7 +101,7 @@ struct pwq_reparameterization_policy
     };
 
     template <typename P = void>
-    struct state_type
+    struct state_type : detail::row_values<Scalar>
     {
         const P* problem{nullptr};
         Eigen::Vector<Scalar, N> x;
@@ -359,7 +360,6 @@ struct pwq_reparameterization_policy
             }
         }
 
-        // Sigma initialization: explicit > bound-scaled > default.
         // Hansen (2023) arXiv:1604.00772: sigma = 1/4 to 1/3 of search space.
         if(options.initial_sigma.has_value())
         {
@@ -526,6 +526,7 @@ struct pwq_reparameterization_policy
 
         s.objective_value = s.problem->value(x0);
         s.x = x0;
+        s.measure_rows(problem, x0);
         s.best_ever_value = s.objective_value;
 
         return s;
@@ -701,18 +702,15 @@ struct pwq_reparameterization_policy
         // 14. Track best across the offspring. Hansen Algorithm 11 line 11:
         // best-ranked offspring is the candidate. For pwq, fitnesses[i]
         // and unpenalized[i] are both `problem.value(g(geno_i))` (no
-        // penalty); s.objective_value is the unpenalized value at the
-        // PHENO point. The G12 caller-facing-unpenalized
-        // contract (state.objective_value == problem.value(state.x))
-        // is preserved by writing s.x = pheno_buf.col(best_offspring),
-        // i.e. the pheno coords -- the caller can re-evaluate
-        // problem.value(state.x) and read back the same number.
+        // penalty), and s.x holds the pheno point g(geno), so
+        // problem.value(state.x) == state.objective_value.
         const int best_offspring = idx[0];
         Scalar gen_best_f = unpenalized[best_offspring];
         if(gen_best_f < s.objective_value)
         {
             s.objective_value = gen_best_f;
             s.x = pheno_buf.col(best_offspring);
+            s.measure_rows(*s.problem, s.x);
         }
         if(s.objective_value < s.best_ever_value)
             s.best_ever_value = s.objective_value;
@@ -750,6 +748,7 @@ struct pwq_reparameterization_policy
                 .step_size = Scalar(0.0),
                 .objective_change = Scalar(0.0),
                 .improved = false,
+                .constraint_violation = s.row_violation(),
                 .x_norm = s.x.allFinite() ? s.x.norm() : Scalar(0.0),
                 .policy_status = solver_status::diverged,
             };
@@ -1089,6 +1088,7 @@ struct pwq_reparameterization_policy
                         .step_size = Scalar(0.0),
                         .objective_change = Scalar(0.0),
                         .improved = false,
+                        .constraint_violation = s.row_violation(),
                         .x_norm = s.x.norm(),
                         .policy_status = policy_status,
                     };
@@ -1187,6 +1187,7 @@ struct pwq_reparameterization_policy
             .step_size = effective_step,
             .objective_change = obj_change,
             .improved = improved,
+            .constraint_violation = s.row_violation(),
             .x_norm = s.x.norm(),
             .policy_status = policy_status,
         };
@@ -1236,12 +1237,11 @@ struct pwq_reparameterization_policy
             ? static_cast<int>(std::min<std::uint32_t>(options.lambda.value(), state_type<P>::MaxPop + 1u))
             : 0;
         s.params = detail::compute_constants<Scalar>(n, pop_lambda);
-        // Re-evaluate the population-cap guard on the refreshed lambda. A reset that lands over the cap flags the state so step()
-        // returns solver_status::invalid_problem instead of resizing the lambda-sized buffers past the static MaxPop bound; a reset
-        // back under the cap clears the flag.
+        // A reset over the population cap latches invalid_problem so step() never resizes the lambda-sized buffers past the static MaxPop bound.
         s.invalid_problem = (s.params.lambda > state_type<P>::MaxPop);
         s.mean = x0;
         s.x = x0;
+        s.measure_rows(*s.problem, s.x);
         s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
         s.p_sigma.setZero();

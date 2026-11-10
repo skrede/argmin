@@ -40,6 +40,7 @@
 //     arXiv:1604.00772, §B.5 (TolX termination convention; design
 //     rationale for sigma-collapse predicate, not a literal port).
 
+#include "argmin/detail/lagrangian.h"
 #include "argmin/detail/isres_operators.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/scalar_distributions.h"
@@ -759,11 +760,9 @@ struct nlopt_faithful_policy
             ? (s.best_ever_value - prev_best_ever_value)
             : mean_sigma;
 
-        // Gate the emitted convergence status on the RETURNED x's
-        // feasibility (the best-ever record), not the current rank-0
-        // individual: otherwise the solver could emit ftol_reached while
-        // returning an infeasible point (e.g. on equality-constrained
-        // problems, where no offspring is ever exactly feasible).
+        // Gate the emitted status on the returned x's feasibility (the
+        // best-ever record), not the rank-0 individual's, so ftol_reached
+        // never describes a point other than the one returned.
         const bool feasible =
             (s.best_ever_violation <= options.feasibility_gate);
 
@@ -797,6 +796,7 @@ struct nlopt_faithful_policy
             .step_size = mean_sigma,
             .objective_change = objective_change,
             .improved = improved,
+            .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
             .policy_status = emitted_status,
         };

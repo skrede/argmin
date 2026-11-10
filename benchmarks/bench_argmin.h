@@ -41,6 +41,8 @@
 #include "argmin/solver/projected_gradient_gn_policy.h"
 #include "argmin/solver/augmented_lagrangian_policy.h"
 
+#include "argmin/detail/status_claim.h"
+
 #include "argmin/formulation/concepts.h"
 #include "argmin/result/status.h"
 #include "argmin/result/solve_result.h"
@@ -264,6 +266,7 @@ auto run_argmin_solver(std::string_view solver_name,
         int iters = 0;
         solver_status final_status = solver_status::running;
         double final_obj{};
+        const double feasibility_tolerance = opts.constraint_tolerance.value_or(opts.feasibility_tolerance);
 
         for(int i = 0; i < max_iterations; ++i)
         {
@@ -296,16 +299,10 @@ auto run_argmin_solver(std::string_view solver_name,
 
             final_obj = f_current;
 
-            if(sr.policy_status)
+            const solver_status resolved = argmin::detail::resolve_step_status(sr, opts.convergence, static_cast<std::uint32_t>(i + 1), feasibility_tolerance);
+            if(resolved != solver_status::running)
             {
-                final_status = *sr.policy_status;
-                break;
-            }
-
-            auto conv = opts.convergence.check(sr, static_cast<std::uint32_t>(i + 1));
-            if(conv)
-            {
-                final_status = *conv;
+                final_status = resolved;
                 break;
             }
         }

@@ -33,6 +33,7 @@
 //     Optimization", §2 (boundary handling tutorial).
 //   K&W (2025) Algorithms for Optimization 2e, §8.7, Algorithm 8.10.
 
+#include "argmin/detail/row_values.h"
 #include "argmin/detail/xoshiro256.h"
 #include "argmin/detail/finite_order.h"
 #include "argmin/detail/problem_shape.h"
@@ -85,7 +86,7 @@ struct repair_l2_penalty_policy
     };
 
     template <typename P = void>
-    struct state_type
+    struct state_type : detail::row_values<Scalar>
     {
         const P* problem{nullptr};
         Eigen::Vector<Scalar, N> x;
@@ -214,7 +215,6 @@ struct repair_l2_penalty_policy
             s.has_bounds = true;
         }
 
-        // Sigma initialization: explicit > bound-scaled > default.
         // Hansen (2023) arXiv:1604.00772: sigma = 1/4 to 1/3 of search space.
         if(options.initial_sigma.has_value())
         {
@@ -336,6 +336,7 @@ struct repair_l2_penalty_policy
 
         s.objective_value = s.problem->value(x0);
         s.x = x0;
+        s.measure_rows(problem, x0);
         s.best_ever_value = s.objective_value;
 
         return s;
@@ -498,18 +499,13 @@ struct repair_l2_penalty_policy
         // `problem.value(repaired_xi)` in `s.objective_value` so a
         // cross-library benchmark reads a comparable feasible-objective
         // value rather than a repair-penalty-inflated number.
-        //
-        // Pre-fix step() also evaluated `s.problem->value(s.mean)` every
-        // generation and replaced s.x / objective_value if the mean came
-        // in lower; that added ~1 eval per gen (~16% inflation at popsize
-        // 6) for no algorithmic reason (removed in the
-        // commit immediately preceding this one).
         const int best_offspring = idx[0];
         Scalar gen_best_f = unpenalized[best_offspring];
         if(gen_best_f < s.objective_value)
         {
             s.objective_value = gen_best_f;
             s.x = offspring.col(best_offspring);
+            s.measure_rows(*s.problem, s.x);
         }
         if(s.objective_value < s.best_ever_value)
             s.best_ever_value = s.objective_value;
@@ -547,6 +543,7 @@ struct repair_l2_penalty_policy
                 .step_size = Scalar(0.0),
                 .objective_change = Scalar(0.0),
                 .improved = false,
+                .constraint_violation = s.row_violation(),
                 .x_norm = s.x.allFinite() ? s.x.norm() : Scalar(0.0),
                 .policy_status = solver_status::diverged,
             };
@@ -886,6 +883,7 @@ struct repair_l2_penalty_policy
                         .step_size = Scalar(0.0),
                         .objective_change = Scalar(0.0),
                         .improved = false,
+                        .constraint_violation = s.row_violation(),
                         .x_norm = s.x.norm(),
                         .policy_status = policy_status,
                     };
@@ -980,6 +978,7 @@ struct repair_l2_penalty_policy
             .step_size = effective_step,
             .objective_change = obj_change,
             .improved = improved,
+            .constraint_violation = s.row_violation(),
             .x_norm = s.x.norm(),
             .policy_status = policy_status,
         };
@@ -1001,12 +1000,11 @@ struct repair_l2_penalty_policy
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
         s.params = detail::compute_constants<Scalar>(n,
             static_cast<int>(std::min<std::uint32_t>(options.lambda.value_or(0), state_type<P>::MaxPop + 1u)));
-        // Re-evaluate the population-cap guard on the refreshed lambda. A reset that lands over the cap flags the state so step()
-        // returns solver_status::invalid_problem instead of resizing the lambda-sized buffers past the static MaxPop bound; a reset
-        // back under the cap clears the flag.
+        // A reset over the population cap latches invalid_problem so step() never resizes the lambda-sized buffers past the static MaxPop bound.
         s.invalid_problem = (s.params.lambda > state_type<P>::MaxPop);
         s.mean = x0;
         s.x = x0;
+        s.measure_rows(*s.problem, s.x);
         s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
         s.p_sigma.setZero();

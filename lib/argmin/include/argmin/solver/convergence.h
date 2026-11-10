@@ -116,36 +116,20 @@ struct step_tolerance_criterion
     // ANL-80-74; N&W 2e Section 2.2). Empirically swept against
     // Rosenbrock/HS.
     S threshold{convergence_defaults<S>::step_threshold};
-    S feasibility_tolerance{convergence_defaults<S>::feasibility_tolerance};
 
     // A null step (step_size == 0 because the policy intentionally made
     // no move -- SQP zero-step degeneracy, trust-region rho contraction,
     // restoration exhaustion) is not a stall: it is an algorithmic
-    // signal that the policy needs more iterations, not fewer. Exempting
-    // null steps here avoids false stall detection on iteration 2 for
-    // any policy that sets is_null_step.
+    // signal that the policy needs more iterations, not fewer.
     //
-    // A small step_size at an INFEASIBLE iterate is also not a converged
-    // stall: the SQP merit function can have local minima at infeasible
-    // points (Maratos-effect trap on HS071: nw_sqp's L1 merit accepts an
-    // iter-0 direction that satisfies linearized constraints but
-    // nonlinearly violates the inequality, then collapses to step_size <
-    // 1e-10 while c_ineq remains at -6.5). Reporting `stalled` there
-    // implies "we got to a stationary point" -- the iterate is far from
-    // any KKT point. Gate on r.constraint_violation; let stall_tolerance
-    // (which uses the combined obj + cv metric) and max_iterations carry
-    // termination in that case. Unconstrained policies leave
-    // constraint_violation at the default 0.0, so the gate is satisfied
-    // trivially for them.
-    //
-    // Reference: N&W 2e Section 18.4 (SQP convergence analysis);
-    //            N&W 2e Section 18.3 (Maratos effect).
+    // A small step at an infeasible iterate makes no claim either (an SQP
+    // merit function can have local minima at infeasible points, N&W 2e
+    // Section 18.3): the solve loop admits the stall only where the
+    // violation is within the solve's feasibility tolerance.
     std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t iteration) const
     {
         if(r.is_null_step)
-            return std::nullopt;
-        if(r.constraint_violation > feasibility_tolerance)
             return std::nullopt;
         if(iteration > 1 && r.step_size < threshold)
             return solver_status::stalled;
@@ -205,24 +189,15 @@ struct step_tolerance_rel_criterion
 {
     using scalar_type = S;
     std::optional<S> threshold{};
-    S feasibility_tolerance{convergence_defaults<S>::feasibility_tolerance};
 
-    // Null steps and infeasible iterates are exempt for the same reasons
-    // as in step_tolerance_criterion. See step_tolerance_criterion::check
-    // for the detailed rationale on both gates (xtol_reached at an
-    // infeasible iterate would falsely report convergence to a non-KKT
-    // point).
-    //
-    // Reference: N&W 2e Section 18.4 (SQP convergence analysis);
-    //            N&W 2e Section 18.3 (Maratos effect).
+    // Null steps are exempt, and a claim at an infeasible iterate is
+    // dropped by the solve loop, as for step_tolerance_criterion.
     std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t iteration) const
     {
         if(!threshold)
             return std::nullopt;
         if(r.is_null_step)
-            return std::nullopt;
-        if(r.constraint_violation > feasibility_tolerance)
             return std::nullopt;
         if(iteration > 1 &&
            r.step_size / std::max(r.x_norm, S(1)) < *threshold)

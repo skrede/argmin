@@ -43,6 +43,7 @@
 //     Optimization", §3 (adaptive boundary penalty).
 //   K&W (2025) Algorithms for Optimization 2e, §8.7, Algorithm 8.10.
 
+#include "argmin/detail/row_values.h"
 #include "argmin/detail/xoshiro256.h"
 #include "argmin/detail/finite_order.h"
 #include "argmin/detail/problem_shape.h"
@@ -95,7 +96,7 @@ struct no_repair_adaptive_penalty_policy
     };
 
     template <typename P = void>
-    struct state_type
+    struct state_type : detail::row_values<Scalar>
     {
         const P* problem{nullptr};
         Eigen::Vector<Scalar, N> x;
@@ -236,7 +237,6 @@ struct no_repair_adaptive_penalty_policy
         // Reference: Hansen (2009) §3.
         s.adaptive_weights = Eigen::Vector<Scalar, N>::Ones(n);
 
-        // Sigma initialization: explicit > bound-scaled > default.
         // Hansen (2023) arXiv:1604.00772: sigma = 1/4 to 1/3 of search space.
         if(options.initial_sigma.has_value())
         {
@@ -358,6 +358,7 @@ struct no_repair_adaptive_penalty_policy
 
         s.objective_value = s.problem->value(x0);
         s.x = x0;
+        s.measure_rows(problem, x0);
         s.best_ever_value = s.objective_value;
 
         return s;
@@ -562,18 +563,15 @@ struct no_repair_adaptive_penalty_policy
 
         // 14. Track best across the offspring. Hansen Algorithm 11 line 11:
         // best-ranked offspring is the candidate (ranked by penalized
-        // `fitnesses`). For G12, s.x is the REPAIRED (in-box) point of
-        // the best offspring and s.objective_value is
-        // problem.value(repaired_x). Storing repaired x means
-        // problem.value(state.x) == state.objective_value (the user's
-        // objective is feasible-evaluated), preserving the G12
-        // caller-facing-unpenalized contract.
+        // `fitnesses`). s.x is the repaired (in-box) point of the best
+        // offspring, so problem.value(state.x) == state.objective_value.
         const int best_offspring = idx[0];
         Scalar gen_best_f = unpenalized[best_offspring];
         if(gen_best_f < s.objective_value)
         {
             s.objective_value = gen_best_f;
             s.x = repaired_buf.col(best_offspring);
+            s.measure_rows(*s.problem, s.x);
         }
         if(s.objective_value < s.best_ever_value)
             s.best_ever_value = s.objective_value;
@@ -611,6 +609,7 @@ struct no_repair_adaptive_penalty_policy
                 .step_size = Scalar(0.0),
                 .objective_change = Scalar(0.0),
                 .improved = false,
+                .constraint_violation = s.row_violation(),
                 .x_norm = s.x.allFinite() ? s.x.norm() : Scalar(0.0),
                 .policy_status = solver_status::diverged,
             };
@@ -950,6 +949,7 @@ struct no_repair_adaptive_penalty_policy
                         .step_size = Scalar(0.0),
                         .objective_change = Scalar(0.0),
                         .improved = false,
+                        .constraint_violation = s.row_violation(),
                         .x_norm = s.x.norm(),
                         .policy_status = policy_status,
                     };
@@ -1044,6 +1044,7 @@ struct no_repair_adaptive_penalty_policy
             .step_size = effective_step,
             .objective_change = obj_change,
             .improved = improved,
+            .constraint_violation = s.row_violation(),
             .x_norm = s.x.norm(),
             .policy_status = policy_status,
         };
@@ -1065,12 +1066,11 @@ struct no_repair_adaptive_penalty_policy
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
         s.params = detail::compute_constants<Scalar>(n,
             static_cast<int>(std::min<std::uint32_t>(options.lambda.value_or(0), state_type<P>::MaxPop + 1u)));
-        // Re-evaluate the population-cap guard on the refreshed lambda. A reset that lands over the cap flags the state so step()
-        // returns solver_status::invalid_problem instead of resizing the lambda-sized buffers past the static MaxPop bound; a reset
-        // back under the cap clears the flag.
+        // A reset over the population cap latches invalid_problem so step() never resizes the lambda-sized buffers past the static MaxPop bound.
         s.invalid_problem = (s.params.lambda > state_type<P>::MaxPop);
         s.mean = x0;
         s.x = x0;
+        s.measure_rows(*s.problem, s.x);
         s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
         s.p_sigma.setZero();

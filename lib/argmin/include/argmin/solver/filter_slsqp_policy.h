@@ -517,14 +517,10 @@ struct filter_slsqp_policy
             else
             {
 
-            // Null step: QP zero direction with high constraint
-            // violation; filter blocks all trial steps. Kraft 1988
-            // Section 2.2.3.
-            //
-            // is_null_step=true exempts this iterate from
-            // step_tolerance stall detection so step_budget_solver does not
-            // double-report the stall via the tolerance criterion on
-            // top of the policy-reported solver_status::stalled below.
+            // Null step: QP zero direction at an iterate within the
+            // restoration trigger, so the claim is left to the solve's
+            // criteria; is_null_step exempts it from step-size stall
+            // detection. Kraft 1988 Section 2.2.3.
             //
             // Null-step branch: x_{k+1} = x_k so the active-set LS
             // re-estimate is measured at the current iterate with no
@@ -547,10 +543,7 @@ struct filter_slsqp_policy
                                                       Eigen::Dynamic>(
                 s.objective_value, s.g, s.J_eq, s.J_ineq,
                 s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf,
-                s.c_eq, s.c_ineq, s.x.norm(), reset_count,
-                h_zero_l1 > line_search_sqp_defaults<Scalar>::restoration_trigger
-                    ? std::optional{solver_status::stalled}
-                    : std::nullopt);
+                s.c_eq, s.c_ineq, s.x.norm(), reset_count);
             r.gradient_norm = detail::lagrangian_gradient_norm<Scalar, N>(s);
             r.kkt_residual = detail::box_kkt_residual<Scalar, N>(s);
             // Mirror the cap-exhausted exit below: surface the
