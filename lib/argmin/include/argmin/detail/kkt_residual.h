@@ -27,6 +27,20 @@
 namespace argmin::detail
 {
 
+// Complementarity max_i |mu_i c_i|, the product form of N&W 2e Definition 12.1 (eq. 12.34e) and of IPOPT's
+// complementarity error at mu = 0 (Waechter and Biegler 2006, eq. 5), unscaled (no s_c). min(|mu_i|, |c_i|) is the
+// product divided by max(|mu_i|, |c_i|), so wherever that exceeds 1 it certifies points the product rejects.
+// The loop is bounded by the shorter vector so mismatched Ref lengths never read past either.
+template <typename Scalar, int Mineq>
+Scalar complementarity_leg(const Eigen::Ref<const Eigen::Vector<Scalar, Mineq>>& mu_ineq, const Eigen::Ref<const Eigen::Vector<Scalar, Mineq>>& c_ineq)
+{
+    Scalar complementarity = Scalar(0);
+    const Eigen::Index m = std::min(mu_ineq.size(), c_ineq.size());
+    for(Eigen::Index i = 0; i < m; ++i)
+        complementarity = std::max(complementarity, std::abs(mu_ineq[i] * c_ineq[i]));
+    return complementarity;
+}
+
 // Legs 2-5 of the composite first-order optimality error (primal
 // equality feasibility, primal inequality feasibility, dual
 // feasibility, complementarity). Shared by the raw-stationarity and
@@ -53,19 +67,7 @@ Scalar kkt_feasibility_legs(
     for(Eigen::Index i = 0; i < mu_ineq.size(); ++i)
         dual_feas = std::max(dual_feas, std::max(-mu_ineq[i], Scalar(0)));
 
-    // Leg 5 - Complementarity: max_i min(|mu_i|, |c_i|)
-    // Bound the loop by the smaller of the two sizes so a caller passing
-    // mismatched mu_ineq / c_ineq lengths (allowed by the Ref-based
-    // signature) does not read past either vector. All in-tree call sites
-    // currently pass matched n_ineq-sized vectors; the defense mirrors the
-    // diagnostic harness in benchmarks/diagnostic_kkt_breakdown.cpp.
-    Scalar complementarity = Scalar(0);
-    const Eigen::Index m_comp = std::min(mu_ineq.size(), c_ineq.size());
-    for(Eigen::Index i = 0; i < m_comp; ++i)
-        complementarity = std::max(complementarity,
-            std::min(std::abs(mu_ineq[i]), std::abs(c_ineq[i])));
-
-    return std::max({primal_eq, primal_ineq, dual_feas, complementarity});
+    return std::max({primal_eq, primal_ineq, dual_feas, complementarity_leg<Scalar, Mineq>(mu_ineq, c_ineq)});
 }
 
 // Composite first-order optimality error E(x, lambda, mu) as the maximum

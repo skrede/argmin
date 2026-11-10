@@ -60,6 +60,7 @@
 #include "argmin/solver/nw_sqp_policy.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/kkt_residual.h"
 #include "argmin/solver/options.h"
 #include "argmin/test_functions/hock_schittkowski.h"
 #include "argmin/test_functions/more_garbow_hillstrom.h"
@@ -152,14 +153,7 @@ kkt_leg_breakdown kkt_residual_breakdown(
     for(Eigen::Index i = 0; i < mu_ineq.size(); ++i)
         out.dual_feas = std::max(out.dual_feas, std::max(-mu_ineq[i], 0.0));
 
-    // Leg 5: complementarity max_i min(|mu_ineq_i|, |c_ineq_i|).
-    out.complementarity = 0.0;
-    const Eigen::Index m = std::min(mu_ineq.size(), c_ineq.size());
-    for(Eigen::Index i = 0; i < m; ++i)
-    {
-        double local = std::min(std::abs(mu_ineq[i]), std::abs(c_ineq[i]));
-        out.complementarity = std::max(out.complementarity, local);
-    }
+    out.complementarity = argmin::detail::complementarity_leg<double, Eigen::Dynamic>(mu_ineq, c_ineq);
 
     return out;
 }

@@ -106,7 +106,6 @@ function	lib/argmin/include/argmin/detail/interpolation_system.h	model_gradient_
 function	lib/argmin/include/argmin/detail/interpolation_system.h	shift_xbase	94
 function	lib/argmin/include/argmin/detail/interpolation_system.h	update_bmat_zmat	82
 function	lib/argmin/include/argmin/detail/interpolation_system.h	update_model_on_replacement	108
-function	lib/argmin/include/argmin/detail/kkt_residual.h	kkt_feasibility_legs	29
 function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	solve_into	52
 function	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	solve_lsei_	135
 function	lib/argmin/include/argmin/detail/lbfgsb_direction.h	compute_direction	65

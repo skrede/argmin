@@ -70,6 +70,7 @@ add_executable(argmin_unit_tests
     zero_copy_test.cpp
     finite_difference_test.cpp
     kkt_residual_test.cpp
+    complementarity_claim_test.cpp
     sqp_common_joint_test.cpp
     soc_seed_projection_test.cpp
     dense_ldl_bfgs_test.cpp

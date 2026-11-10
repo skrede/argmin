@@ -85,9 +85,9 @@ TEST_CASE("kkt_residual captures complementarity violation", "[kkt_residual]")
 
     double r = detail::kkt_residual<double, 2, 0, 1>(
         grad_f, J_eq, J_ineq, lambda_eq, mu_ineq, c_eq, c_ineq);
-    // min(0.5, 0.3) = 0.3, stationarity is 0, primal_ineq = max(-0.3, 0) = 0,
-    // dual_feas = max(-0.5, 0) = 0; so composite = 0.3.
-    CHECK(r == 0.3);
+    // |0.5 * 0.3| = 0.15, stationarity is 0, primal_ineq = max(-0.3, 0) = 0,
+    // dual_feas = max(-0.5, 0) = 0; so composite = 0.15.
+    CHECK(r == 0.15);
 }
 
 TEST_CASE("kkt_residual with empty constraints reduces to grad_f norm",
