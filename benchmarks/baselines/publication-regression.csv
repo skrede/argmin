@@ -178,7 +178,7 @@ filter_slsqp_accurate,nmpc_lqr_h20,accurate,625,-8.0,36,-6.0,pass,publish-2026-0
 filter_trsqp_accurate,hs006,accurate,2,-8.0,13,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,10743,
 filter_trsqp_accurate,hs007,accurate,3,-8.0,11,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,10915,
 filter_trsqp_accurate,hs021,accurate,5,-8.0,6,-6.0,expected_fail,publish-2026-07-11T18-03-29Z,enforced,,18390,
-filter_trsqp_accurate,hs023,accurate,7,-8.0,21,-6.0,expected_fail,publish-2026-07-11T18-03-29Z,enforced,,57906,
+filter_trsqp_accurate,hs023,accurate,7,-8.0,21,-6.0,pass,publish-2026-11-10T06-57-44Z,enforced,,57906,
 filter_trsqp_accurate,hs024,accurate,3,-8.0,95,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,25252,
 filter_trsqp_accurate,hs026,accurate,2,-8.0,43,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,13590,
 filter_trsqp_accurate,hs027,accurate,2,-8.0,25,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,12538,
