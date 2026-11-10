@@ -15,7 +15,10 @@
 #include "argmin/solver/alternative/gcmma/raa_augmented_policy.h"
 #include "argmin/solver/alternative/gcmma/move_limit_shrink_policy.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#include <cstdint>
 
 using namespace argmin;
 
@@ -44,6 +47,25 @@ void check_infeasible_start_claim(const Policy& policy)
     const oracle::verdict<double> v = defects::judge_finding(policy, defects::infeasible_start_quadratic(), cases::moving_asymptote_options());
     CAPTURE(static_cast<int>(v.claimed), v.failing, v.legs.stationarity, v.legs.inequality_violation);
     CHECK(v.ok);
+}
+
+template <typename Policy>
+void check_reported_violation(const Policy& policy, std::uint32_t budget)
+{
+    const cases::linearly_constrained_quadratic p = defects::infeasible_start_quadratic();
+    const solver_options<> opts = cases::moving_asymptote_options();
+    step_budget_solver solver{policy, p, p.initial_point(), opts};
+    const auto result = solver.step_n(budget, opts);
+    const oracle::verdict<double> v = oracle::judge(p, result, oracle::tolerances_of(opts));
+    CAPTURE(budget, static_cast<int>(result.status), result.constraint_violation, v.legs.inequality_violation);
+    CHECK(result.constraint_violation == Catch::Approx(v.legs.inequality_violation).epsilon(1e-12));
+}
+
+template <typename Policy>
+void check_reported_violation(const Policy& policy)
+{
+    check_reported_violation(policy, 0);
+    check_reported_violation(policy, 3);
 }
 
 void check_augmented_lagrangian_claim(const cases::linearly_constrained_quadratic& problem)
@@ -96,6 +118,14 @@ TEST_CASE("gcmma raa_augmented makes a claim the oracle accepts from a generated
 TEST_CASE("gcmma rho_wval makes a claim the oracle accepts from a generated infeasible start", "[moving_asymptote]")
 {
     check_infeasible_start_claim(alternative::gcmma::rho_wval_policy<>{});
+}
+
+TEST_CASE("the moving-asymptote solvers report the true violation of the point they return from a generated infeasible start", "[moving_asymptote]")
+{
+    check_reported_violation(mma_policy<>{});
+    check_reported_violation(alternative::gcmma::move_limit_shrink_policy<>{});
+    check_reported_violation(alternative::gcmma::raa_augmented_policy<>{});
+    check_reported_violation(alternative::gcmma::rho_wval_policy<>{});
 }
 
 TEST_CASE("gcmma move_limit_shrink stays inside the box on a generated two-row quadratic", "[moving_asymptote]")

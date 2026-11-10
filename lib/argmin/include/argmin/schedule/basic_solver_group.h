@@ -2,6 +2,7 @@
 #define HPP_GUARD_ARGMIN_SCHEDULE_BASIC_SOLVER_GROUP_H
 
 #include "argmin/solver/step_budget_solver.h"
+#include "argmin/detail/solve_loop.h"
 #include "argmin/detail/status_claim.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/result/step_result.h"
@@ -269,38 +270,26 @@ private:
         return constraint_tolerance_.value_or(static_cast<scalar_type>(feasibility_tolerance_));
     }
 
-    // Feasibility-first ranking.
-    // Reference: N&W Ch. 15.
+    // Members rank as one solve's iterates do, each with its own status.
     template <std::size_t... Is>
     std::size_t best_solver_index(std::index_sequence<Is...>) const
     {
-        scalar_type best_obj = std::numeric_limits<scalar_type>::max();
-        scalar_type best_cv = std::numeric_limits<scalar_type>::max();
-        std::size_t best_idx = 0;
+        constexpr scalar_type unset = std::numeric_limits<scalar_type>::max();
         const scalar_type tol = feasibility_tolerance_in_force();
+        detail::iterate_rank<scalar_type> best{solver_status::running, unset, unset};
+        std::size_t best_idx = 0;
 
-        auto check = [&](std::size_t idx, const auto& solver)
+        auto rank = [&](std::size_t idx, const auto& solver)
         {
-            scalar_type obj = solver.state().objective_value;
-            scalar_type cv = solver.constraint_violation();
-            bool feas = cv <= tol;
-            bool best_feas = best_cv <= tol;
-
-            bool better = false;
-            if(feas && !best_feas) better = true;
-            else if(!feas && best_feas) better = false;
-            else if(feas && best_feas) better = obj < best_obj;
-            else better = cv < best_cv;
-
-            if(better)
+            const detail::iterate_rank<scalar_type> cand{solver.status(), solver.state().objective_value, solver.constraint_violation()};
+            if(detail::is_better(cand, best, tol))
             {
-                best_obj = obj;
-                best_cv = cv;
+                best = cand;
                 best_idx = idx;
             }
         };
 
-        (check(Is, std::get<Is>(solvers_)), ...);
+        (rank(Is, std::get<Is>(solvers_)), ...);
         return best_idx;
     }
 

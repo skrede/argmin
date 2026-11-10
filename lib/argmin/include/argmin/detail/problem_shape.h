@@ -28,6 +28,22 @@ solver_status latch_status(const State& s)
     return state_rejected(s) ? solver_status::invalid_problem : solver_status::running;
 }
 
+// A state holds only the constraint values of the row kinds its family supports (the moving-asymptote states have
+// no c_eq), so an empty vector stands in for an absent kind.
+template <typename Scalar, typename State, typename Measure>
+Scalar measure_constraint_values(const State& s, Measure measure)
+{
+    const Eigen::Vector<Scalar, 0> none;
+    if constexpr(requires { s.c_eq; s.c_ineq; })
+        return measure(s.c_eq, s.c_ineq);
+    else if constexpr(requires { s.c_ineq; })
+        return measure(none, s.c_ineq);
+    else if constexpr(requires { s.c_eq; })
+        return measure(s.c_eq, none);
+    else
+        return Scalar(0);
+}
+
 template <typename Scalar, typename State>
 Scalar rejected_objective(const State& s)
 {

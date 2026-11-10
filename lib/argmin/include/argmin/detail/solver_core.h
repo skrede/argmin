@@ -334,12 +334,9 @@ public:
 
     scalar_type constraint_violation() const
     {
-        if(!built_)
+        if(status() == solver_status::invalid_problem)
             return std::numeric_limits<scalar_type>::quiet_NaN();
-        if constexpr(requires { state_.c_eq; state_.c_ineq; })
-            return detail::constraint_violation(state_.c_eq, state_.c_ineq);
-        else
-            return scalar_type(0);
+        return detail::measure_constraint_values<scalar_type>(state_, [](const auto& c_eq, const auto& c_ineq) { return detail::constraint_violation(c_eq, c_ineq); });
     }
 
     // Configured stopping budget and best-seen feasibility floors, read back
@@ -415,19 +412,15 @@ public:
     // constraint values (populated by policy.init at x_0). L-infinity
     // composition matches step_result.constraint_violation reporting
     // downstream, so is_better compares like-against-like in the best-
-    // seen branch. Unconstrained / bound-constrained-only Problems have
-    // empty c_eq / c_ineq and yield cv = 0.
+    // seen branch. A rejected problem's values are never filled.
     //
     // Reference: detail::primal_feasibility_inf (argmin/detail/
     //            lagrangian.h); N&W 2e Def 12.1.
     scalar_type seed_best_cv() const
     {
-        if(!built_)
+        if(status() == solver_status::invalid_problem)
             return std::numeric_limits<scalar_type>::infinity();
-        if constexpr(requires { state_.c_eq; state_.c_ineq; })
-            return detail::primal_feasibility_inf(state_.c_eq, state_.c_ineq);
-        else
-            return scalar_type(0);
+        return detail::measure_constraint_values<scalar_type>(state_, [](const auto& c_eq, const auto& c_ineq) { return detail::primal_feasibility_inf(c_eq, c_ineq); });
     }
 
     // Stores the constructor's convergence policy by value, with no

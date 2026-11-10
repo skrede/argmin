@@ -42,6 +42,7 @@ add_executable(argmin_unit_tests
     multistart_test.cpp
     projected_gn_test.cpp
     solver_group_test.cpp
+    solver_group_ranking_test.cpp
     kraft_slsqp_test.cpp
     kraft_lsq_qp_test.cpp
     kraft_lsq_qp_recovery_test.cpp

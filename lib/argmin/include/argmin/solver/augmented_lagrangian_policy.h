@@ -205,7 +205,7 @@ struct augmented_lagrangian_policy
         // That clamp is what makes the outer mu / multiplier trajectory
         // chunk-size-invariant.
         //
-        // best_inner_{x,f,cv} accumulate the inner driver's feasibility-first
+        // best_inner and best_inner_x accumulate the inner driver's feasibility-first
         // best-seen iterate across chunks so the point handed to the outer
         // update equals a single full-budget solve's. last_inner_advance is
         // the iterations executed by the most recent step() (<= inner_chunk),
@@ -213,8 +213,7 @@ struct augmented_lagrangian_policy
         bool inner_active = false;
         std::uint32_t inner_iters_done = 0;
         std::uint32_t last_inner_advance = 0;
-        scalar_type best_inner_f{};
-        scalar_type best_inner_cv{};
+        detail::iterate_rank<scalar_type> best_inner{};
         Eigen::Vector<scalar_type, N> best_inner_x;
 
         Eigen::Vector<scalar_type, N> lower;
@@ -713,8 +712,7 @@ struct augmented_lagrangian_policy
             // the +inf sentinel so the first chunk's result always wins.
             s.inner_active = true;
             s.inner_iters_done = 0;
-            s.best_inner_f = std::numeric_limits<scalar_type>::infinity();
-            s.best_inner_cv = std::numeric_limits<scalar_type>::infinity();
+            s.best_inner = {solver_status::running, std::numeric_limits<scalar_type>::infinity(), std::numeric_limits<scalar_type>::infinity()};
             s.best_inner_x = s.x;
         }
 
@@ -744,12 +742,10 @@ struct augmented_lagrangian_policy
         // inner reports cv == 0, so feas_tol never separates two chunks.
         {
             constexpr scalar_type inner_feas_tol = augmented_lagrangian_defaults<scalar_type>::inner_feasibility_tolerance;
-            if(detail::is_better(inner_result.status, inner_result.objective_value,
-                                 inner_result.constraint_violation,
-                                 s.best_inner_f, s.best_inner_cv, inner_feas_tol))
+            const detail::iterate_rank<scalar_type> inner_rank{inner_result.status, inner_result.objective_value, inner_result.constraint_violation};
+            if(detail::is_better(inner_rank, s.best_inner, inner_feas_tol))
             {
-                s.best_inner_f = inner_result.objective_value;
-                s.best_inner_cv = inner_result.constraint_violation;
+                s.best_inner = inner_rank;
                 s.best_inner_x = inner_result.x;
             }
         }

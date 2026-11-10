@@ -15,24 +15,33 @@ namespace argmin
 namespace detail
 {
 
+template <typename Scalar>
+struct iterate_rank
+{
+    solver_status status;
+    Scalar objective_value;
+    Scalar constraint_violation;
+};
+
 // Feasibility-first best-seen comparator selecting the returned iterate: feasible (cv <= feas_tol)
 // beats infeasible, two infeasible iterates rank by violation, two feasible ones by objective -- except
-// that a candidate whose status certifies it wins, since within the tolerance an earlier iterate's
-// lower objective can be bought with violation and would not satisfy the status's claim.
+// that an iterate whose status certifies it beats one whose status does not, since within the tolerance
+// an earlier iterate's lower objective can be bought with violation and would not satisfy the status's claim.
 //
 // Reference: NLopt nlopt_optimize convention (nlopt/src/api/nlopt.c) -- the caller receives the best
 //            point encountered, not the terminal trial.
 template <typename Scalar>
-constexpr bool is_better(solver_status status, Scalar f_cand, Scalar cv_cand,
-                         Scalar f_best, Scalar cv_best, Scalar feas_tol) noexcept
+constexpr bool is_better(const iterate_rank<Scalar>& cand, const iterate_rank<Scalar>& best, Scalar feas_tol) noexcept
 {
-    const bool cand_feasible = cv_cand <= feas_tol;
-    const bool best_feasible = cv_best <= feas_tol;
+    const bool cand_feasible = cand.constraint_violation <= feas_tol;
+    const bool best_feasible = best.constraint_violation <= feas_tol;
     if(cand_feasible != best_feasible)
         return cand_feasible;
     if(!cand_feasible)
-        return cv_cand < cv_best;
-    return certifies_iterate(status) || f_cand < f_best;
+        return cand.constraint_violation < best.constraint_violation;
+    if(certifies_iterate(cand.status) != certifies_iterate(best.status))
+        return certifies_iterate(cand.status);
+    return cand.objective_value < best.objective_value;
 }
 
 // The single solve loop body shared by every driver facade.
@@ -84,8 +93,7 @@ run_solve_loop(Core& core, std::uint32_t budget,
     //            returned semantics); N&W 2e Def 12.1 (primal feasibility,
     //            L-infinity composition).
     typename Core::vector_type best_x = core.state().x;
-    scalar_type best_f = core.seed_best_f();
-    scalar_type best_cv = core.seed_best_cv();
+    iterate_rank<scalar_type> best{solver_status::running, core.seed_best_f(), core.seed_best_cv()};
     // User-supplied constraint_tolerance takes precedence over the baked-in
     // feasibility_tolerance default: a caller who bothered to tighten the KKT
     // residual gate expects the optimality claim and the best-seen comparator to honor the same floor.
@@ -114,12 +122,11 @@ run_solve_loop(Core& core, std::uint32_t budget,
         last = core.step_impl();
         status = resolve_step_status(last, opts.convergence, core.iteration_count(), feas_tol);
 
-        if(is_better(status, last.objective_value, last.constraint_violation,
-                     best_f, best_cv, feas_tol))
+        const iterate_rank<scalar_type> cand{status, last.objective_value, last.constraint_violation};
+        if(is_better(cand, best, feas_tol))
         {
             best_x = core.state().x;
-            best_f = last.objective_value;
-            best_cv = last.constraint_violation;
+            best = cand;
         }
         if(status != solver_status::running)
             break;
@@ -149,9 +156,9 @@ run_solve_loop(Core& core, std::uint32_t budget,
         // count. Policies that evaluate several times per iteration (line
         // searches) report > iterations here.
         .function_evaluations = core.evaluation_count(),
-        .objective_value = best_f,
+        .objective_value = best.objective_value,
         .gradient_norm = last.gradient_norm,
-        .constraint_violation = best_cv,
+        .constraint_violation = best.constraint_violation,
         .x = best_x,
     };
 }
