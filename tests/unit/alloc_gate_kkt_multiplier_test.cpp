@@ -4,6 +4,7 @@
 
 #include <Eigen/Core>
 
+#include <limits>
 #include <cstdint>
 
 namespace
@@ -30,7 +31,8 @@ Eigen::MatrixXd random_matrix(Eigen::Index rows, Eigen::Index cols, std::uint64_
 }
 
 // Every fourth inequality sits on its bound, so 24 equalities and 4 active inequalities give the
-// multiplier estimate a 40 x 28 least-squares solve on each re-estimation.
+// multiplier estimate a 40 x 28 least-squares solve on each re-estimation, with every fifth coordinate on its
+// lower bound and masked out of the fit.
 TEST_CASE("kkt_multiplier_estimate_allocation_count", "[alloc-gate]")
 {
     constexpr Eigen::Index n = 40, n_eq = 24, n_ineq = 16;
@@ -41,16 +43,21 @@ TEST_CASE("kkt_multiplier_estimate_allocation_count", "[alloc-gate]")
     for(Eigen::Index i = 0; i < n_ineq; i += 4)
         c_ineq[i] = 0.0;
     Eigen::VectorXd g = random_matrix(n, 1, state);
+    const Eigen::VectorXd x = Eigen::VectorXd::Zero(n);
+    const Eigen::VectorXd upper = Eigen::VectorXd::Constant(n, std::numeric_limits<double>::infinity());
+    Eigen::VectorXd lower = -upper;
+    for(Eigen::Index j = 0; j < n; j += 5)
+        lower[j] = 0.0;
     argmin::detail::kkt_multiplier_workspace<double> ws;
     Eigen::VectorXd lam_eq(n_eq);
     Eigen::VectorXd mu_ineq(n_ineq);
-    argmin::detail::compute_kkt_multipliers_active_set<double>(g, J_eq, J_ineq, c_ineq, ws, lam_eq, mu_ineq);
+    argmin::detail::compute_kkt_multipliers_active_set<double>(g, J_eq, J_ineq, c_ineq, x, lower, upper, ws, lam_eq, mu_ineq);
 
     for(std::int32_t step = 0; step < 4; ++step)
     {
         g += 0.1 * random_matrix(n, 1, state);
         const window_counts counts = run_armed([&] {
-            argmin::detail::compute_kkt_multipliers_active_set<double>(g, J_eq, J_ineq, c_ineq, ws, lam_eq, mu_ineq);
+            argmin::detail::compute_kkt_multipliers_active_set<double>(g, J_eq, J_ineq, c_ineq, x, lower, upper, ws, lam_eq, mu_ineq);
         });
         INFO("warm estimate " << step);
         CHECK(lam_eq.allFinite());

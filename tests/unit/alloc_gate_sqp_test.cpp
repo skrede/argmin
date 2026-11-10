@@ -19,6 +19,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 #include <cstddef>
 
 namespace
@@ -311,12 +312,15 @@ TEST_CASE("sqp_alloc_gate_degenerate_vertex", "[alloc-gate]")
     const Eigen::Matrix<double, Eigen::Dynamic, 2> J_eq(0, 2);
     const Eigen::Matrix<double, Eigen::Dynamic, 2> J_ineq = degenerate_vertex::normals();
     const Eigen::VectorXd c_ineq = Eigen::VectorXd::Zero(3);
+    const Eigen::Vector2d x = Eigen::Vector2d::Zero();
+    const Eigen::Vector2d upper = Eigen::Vector2d::Constant(std::numeric_limits<double>::infinity());
+    const Eigen::Vector2d lower = -upper;
     argmin::detail::kkt_multiplier_workspace<double, 2> ws;
     Eigen::VectorXd lam_eq(0);
     Eigen::VectorXd mu_ineq(3);
     const auto counts = run_armed([&] {
         for(std::size_t i = 0; i < 4; ++i)
-            argmin::detail::compute_kkt_multipliers_active_set<double, 2>(g, J_eq, J_ineq, c_ineq, ws, lam_eq, mu_ineq);
+            argmin::detail::compute_kkt_multipliers_active_set<double, 2>(g, J_eq, J_ineq, c_ineq, x, lower, upper, ws, lam_eq, mu_ineq);
     });
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);

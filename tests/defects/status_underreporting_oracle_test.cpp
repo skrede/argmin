@@ -53,37 +53,37 @@ TEST_CASE("kraft_slsqp makes an optimality claim the oracle accepts on hs071", "
     check_optimality_claim<kraft_slsqp_policy<>>(hs071<>{});
 }
 
-TEST_CASE("filter_slsqp makes an optimality claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
+TEST_CASE("filter_slsqp makes an optimality claim the oracle accepts on hs071", "[sqp]")
 {
     check_optimality_claim<filter_slsqp_policy<>>(hs071<>{});
 }
 
-TEST_CASE("nw_sqp makes an optimality claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
+TEST_CASE("nw_sqp makes an optimality claim the oracle accepts on hs071", "[sqp]")
 {
     check_optimality_claim<nw_sqp_policy<>>(hs071<>{});
 }
 
-TEST_CASE("filter_nw_sqp makes an optimality claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
+TEST_CASE("filter_nw_sqp makes an optimality claim the oracle accepts on hs071", "[sqp]")
 {
     check_optimality_claim<filter_nw_sqp_policy<>>(hs071<>{});
 }
 
-TEST_CASE("filter_trsqp in fast mode makes an optimality claim the oracle accepts on hs076", "[known-defect][!shouldfail]")
+TEST_CASE("filter_trsqp in fast mode makes an optimality claim the oracle accepts on hs076", "[sqp]")
 {
     check_optimality_claim<filter_trsqp<sqp_mode::fast>>(hs076<>{});
 }
 
-TEST_CASE("filter_trsqp in accurate mode makes an optimality claim the oracle accepts on hs076", "[known-defect][!shouldfail]")
+TEST_CASE("filter_trsqp in accurate mode makes an optimality claim the oracle accepts on hs076", "[sqp]")
 {
     check_optimality_claim<filter_trsqp<sqp_mode::accurate>>(hs076<>{});
 }
 
-TEST_CASE("tr_sqp in accurate mode makes an optimality claim the oracle accepts on hs044", "[known-defect][!shouldfail]")
+TEST_CASE("tr_sqp in accurate mode makes an optimality claim the oracle accepts on hs044", "[sqp]")
 {
     check_optimality_claim<tr_sqp<sqp_mode::accurate>>(hs044<>{});
 }
 
-TEST_CASE("filter_trsqp in accurate mode makes an optimality claim the oracle accepts on hs044", "[known-defect][!shouldfail]")
+TEST_CASE("filter_trsqp in accurate mode makes an optimality claim the oracle accepts on hs044", "[sqp]")
 {
     check_optimality_claim<filter_trsqp<sqp_mode::accurate>>(hs044<>{});
 }

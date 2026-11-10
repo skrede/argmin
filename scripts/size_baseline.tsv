@@ -16,7 +16,6 @@ file	lib/argmin/include/argmin/detail/interpolation_system.h	-	996
 file	lib/argmin/include/argmin/detail/isres_operators.h	-	454
 file	lib/argmin/include/argmin/detail/kraft_lsq_qp.h	-	422
 file	lib/argmin/include/argmin/detail/kraft_lsq_qp_recovery.h	-	335
-file	lib/argmin/include/argmin/detail/lagrangian.h	-	305
 file	lib/argmin/include/argmin/detail/lsei.h	-	405
 file	lib/argmin/include/argmin/detail/lsi.h	-	281
 file	lib/argmin/include/argmin/detail/mma_augmented_dual_problem.h	-	271

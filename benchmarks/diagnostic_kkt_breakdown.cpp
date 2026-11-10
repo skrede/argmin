@@ -153,7 +153,7 @@ kkt_leg_breakdown kkt_residual_breakdown(
     for(Eigen::Index i = 0; i < mu_ineq.size(); ++i)
         out.dual_feas = std::max(out.dual_feas, std::max(-mu_ineq[i], 0.0));
 
-    out.complementarity = argmin::detail::complementarity_leg<double, Eigen::Dynamic>(mu_ineq, c_ineq);
+    out.complementarity = argmin::detail::complementarity_leg(mu_ineq, c_ineq);
 
     return out;
 }

@@ -51,9 +51,10 @@ TEST_CASE("substrate scale witness: lagrangian detects a scaled active constrain
     Eigen::Vector<double, 1> c_ineq;
     c_ineq << S * 1e-9;                  // = 1e-3
 
+    const Eigen::Vector2d unbounded = Eigen::Vector2d::Constant(std::numeric_limits<double>::infinity());
     Eigen::Vector<double, Eigen::Dynamic> mu =
         argmin::detail::estimate_multipliers_active_set<double, 2, 0, 1>(
-            grad_f, J_eq, J_ineq, c_ineq);
+            grad_f, J_eq, J_ineq, c_ineq, Eigen::Vector2d::Zero(), -unbounded, unbounded);
 
     REQUIRE(mu.size() == 1);
     INFO("recovered mu = " << mu[0]);

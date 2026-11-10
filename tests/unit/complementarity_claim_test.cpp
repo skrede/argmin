@@ -87,8 +87,8 @@ TEST_CASE("the complementarity leg is the product of the multiplier and the cons
 {
     const Eigen::Vector<double, 2> mu{{1000.0, 0.5}};
     const Eigen::Vector<double, 2> c{{1e-10, -0.25}};
-    CHECK(detail::complementarity_leg<double, 2>(mu, c) == 0.125);
-    CHECK(detail::complementarity_leg<double, 2>(Eigen::Vector2d(1000.0, 0.0), Eigen::Vector2d(1e-10, 0.25)) == 1000.0 * 1e-10);
+    CHECK(detail::complementarity_leg(mu, c) == 0.125);
+    CHECK(detail::complementarity_leg(Eigen::Vector2d(1000.0, 0.0), Eigen::Vector2d(1e-10, 0.25)) == 1000.0 * 1e-10);
 }
 
 TEST_CASE("a point whose multiplier-constraint product exceeds the threshold makes no optimality claim", "[kkt_residual]")

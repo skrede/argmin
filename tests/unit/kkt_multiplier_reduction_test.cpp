@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 #include <cstdint>
 
 namespace
@@ -18,12 +19,18 @@ struct vertex_estimate
 };
 
 template <int N>
+Eigen::Vector<double, N> unbounded()
+{
+    return Eigen::Vector<double, N>::Constant(std::numeric_limits<double>::infinity());
+}
+
+template <int N>
 vertex_estimate estimate_on_fixed_workspace(const Eigen::Vector<double, N>& g, const Eigen::Matrix<double, Eigen::Dynamic, N>& J_eq,
                                             const Eigen::Matrix<double, Eigen::Dynamic, N>& J_ineq, const Eigen::VectorXd& c_ineq)
 {
     argmin::detail::kkt_multiplier_workspace<double, N> ws;
     vertex_estimate e{Eigen::VectorXd(J_eq.rows()), Eigen::VectorXd(J_ineq.rows())};
-    argmin::detail::compute_kkt_multipliers_active_set<double, N>(g, J_eq, J_ineq, c_ineq, ws, e.lam_eq, e.mu_ineq);
+    argmin::detail::compute_kkt_multipliers_active_set<double, N>(g, J_eq, J_ineq, c_ineq, Eigen::Vector<double, N>::Zero(), -unbounded<N>(), unbounded<N>(), ws, e.lam_eq, e.mu_ineq);
     return e;
 }
 
@@ -60,7 +67,7 @@ void check_reduced_estimate(const Eigen::Vector<double, N>& g, const Eigen::Matr
 
     Eigen::VectorXd stacked(J_eq.rows() + J_ineq.rows());
     stacked << e.lam_eq, e.mu_ineq;
-    CHECK(argmin::detail::estimate_multipliers_active_set<double, N>(g, J_eq, J_ineq, c_ineq) == stacked);
+    CHECK(argmin::detail::estimate_multipliers_active_set<double, N>(g, J_eq, J_ineq, c_ineq, Eigen::Vector<double, N>::Zero(), -unbounded<N>(), unbounded<N>()) == stacked);
 }
 
 }

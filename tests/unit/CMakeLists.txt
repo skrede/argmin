@@ -106,6 +106,7 @@ add_executable(argmin_unit_tests
     merit_function_test.cpp
     substrate_scale_witness_test.cpp
     kkt_multiplier_reduction_test.cpp
+    kkt_multiplier_bound_test.cpp
     sparse_kkt_witness_test.cpp
     expected_test.cpp
 )

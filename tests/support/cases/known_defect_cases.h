@@ -18,7 +18,7 @@ struct known_defect
 };
 
 // Each entry is skipped by the oracle coverage and asserted by an expected-fail case under tests/defects.
-inline constexpr std::array<known_defect, 21> known_defect_cases{{
+inline constexpr std::array<known_defect, 19> known_defect_cases{{
     {"projected_gradient_gn",
      "bound",
      "projecting the full Gauss-Newton step onto the box crawls along the free variable once a bound is active, so the "
@@ -27,14 +27,6 @@ inline constexpr std::array<known_defect, 21> known_defect_cases{{
      "inequality",
      "the trust region reaches its roundoff floor at the hs076 optimum, so the run ends roundoff_limited and claims nothing "
      "at a point that meets the converged tolerance"},
-    {"tr_sqp_fast",
-     "mixed",
-     "the trust region reaches its roundoff floor short of the hs071 solution, so the run ends roundoff_limited with "
-     "stationarity forty times the gradient tolerance"},
-    {"tr_sqp_accurate",
-     "mixed",
-     "the trust region reaches its roundoff floor short of the hs071 solution, so the run ends roundoff_limited with "
-     "stationarity sixty times the gradient tolerance"},
     {"mma",
      "bound",
      "with zero constraint rows the iterate stops changing at a non-stationary point of the Wood function, so the run "

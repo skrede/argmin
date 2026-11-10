@@ -101,7 +101,7 @@ TEST_CASE("a solve whose status certifies its final iterate returns that iterate
     }
 }
 
-TEST_CASE("filter trust-region SQP returns the hs071 iterate its stalled status describes", "[solver]")
+TEST_CASE("filter trust-region SQP returns the hs071 iterate its converged status describes", "[solver]")
 {
     const hs071<> problem;
     solver_options<> opts;
@@ -112,7 +112,7 @@ TEST_CASE("filter trust-region SQP returns the hs071 iterate its stalled status 
     step_budget_solver solver{filter_trsqp_policy<>{}, problem, problem.initial_point(), opts};
     const auto result = solver.solve();
 
-    REQUIRE(result.status == solver_status::stalled);
+    REQUIRE(result.status == solver_status::converged);
     CHECK(result.x == solver.state().x);
     CHECK(result.objective_value == problem.value(solver.state().x));
 }

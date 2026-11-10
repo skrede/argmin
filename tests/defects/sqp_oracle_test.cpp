@@ -65,12 +65,12 @@ TEST_CASE("tr_sqp stays feasible on hs071 in both modes", "[sqp]")
     }
 }
 
-TEST_CASE("tr_sqp in fast mode makes an optimality claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
+TEST_CASE("tr_sqp in fast mode makes an optimality claim the oracle accepts on hs071", "[sqp]")
 {
     check_optimality_claim<sqp_mode::fast>(hs071<>{});
 }
 
-TEST_CASE("tr_sqp in accurate mode makes an optimality claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
+TEST_CASE("tr_sqp in accurate mode makes an optimality claim the oracle accepts on hs071", "[sqp]")
 {
     check_optimality_claim<sqp_mode::accurate>(hs071<>{});
 }

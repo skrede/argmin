@@ -30,15 +30,26 @@ namespace argmin::detail
 // Complementarity max_i |mu_i c_i|, the product form of N&W 2e Definition 12.1 (eq. 12.34e) and of IPOPT's
 // complementarity error at mu = 0 (Waechter and Biegler 2006, eq. 5), unscaled (no s_c). min(|mu_i|, |c_i|) is the
 // product divided by max(|mu_i|, |c_i|), so wherever that exceeds 1 it certifies points the product rejects.
-// The loop is bounded by the shorter vector so mismatched Ref lengths never read past either.
-template <typename Scalar, int Mineq>
-Scalar complementarity_leg(const Eigen::Ref<const Eigen::Vector<Scalar, Mineq>>& mu_ineq, const Eigen::Ref<const Eigen::Vector<Scalar, Mineq>>& c_ineq)
+// The loop is bounded by the shorter vector so mismatched lengths never read past either.
+template <typename Multiplier, typename Slack>
+typename Multiplier::Scalar complementarity_leg(const Eigen::DenseBase<Multiplier>& mu, const Eigen::DenseBase<Slack>& c)
 {
-    Scalar complementarity = Scalar(0);
-    const Eigen::Index m = std::min(mu_ineq.size(), c_ineq.size());
+    typename Multiplier::Scalar complementarity(0);
+    const Eigen::Index m = std::min(mu.size(), c.size());
     for(Eigen::Index i = 0; i < m; ++i)
-        complementarity = std::max(complementarity, std::abs(mu_ineq[i] * c_ineq[i]));
+        complementarity = std::max(complementarity, std::abs(mu.coeff(i) * c.coeff(i)));
     return complementarity;
+}
+
+// grad_L minus its box projection is the bound multiplier and the projection its slack; the projection alone is their min form.
+template <typename Scalar, int N>
+Scalar bound_complementarity_leg(const Eigen::Ref<const Eigen::Vector<Scalar, N>>& grad_L,
+                                 const Eigen::Ref<const Eigen::Vector<Scalar, N>>& x,
+                                 const Eigen::Ref<const Eigen::Vector<Scalar, N>>& lower,
+                                 const Eigen::Ref<const Eigen::Vector<Scalar, N>>& upper)
+{
+    const auto projected = grad_L.cwiseMax(x - upper).cwiseMin(x - lower);
+    return complementarity_leg(grad_L - projected, projected);
 }
 
 // Legs 2-5 of the composite first-order optimality error (primal
@@ -67,7 +78,7 @@ Scalar kkt_feasibility_legs(
     for(Eigen::Index i = 0; i < mu_ineq.size(); ++i)
         dual_feas = std::max(dual_feas, std::max(-mu_ineq[i], Scalar(0)));
 
-    return std::max({primal_eq, primal_ineq, dual_feas, complementarity_leg<Scalar, Mineq>(mu_ineq, c_ineq)});
+    return std::max({primal_eq, primal_ineq, dual_feas, complementarity_leg(mu_ineq, c_ineq)});
 }
 
 // Composite first-order optimality error E(x, lambda, mu) as the maximum
@@ -113,8 +124,8 @@ Scalar kkt_residual(const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       grad
                     kkt_feasibility_legs<Scalar, Meq, Mineq>(mu_ineq, c_eq, c_ineq));
 }
 
-// The composite above with the projected gradient as the stationarity leg, so a solution on an active bound
-// reads zero instead of the unmodeled bound multiplier; at an interior point it equals the raw composite.
+// The composite above with the projected gradient as the stationarity leg and the box's multipliers held to the
+// product complementarity; where the box clips nothing it equals the raw composite.
 //
 // Reference: N&W 2e Definition 12.1; Section 16.7.
 template <typename Scalar, int N, int Meq, int Mineq>
@@ -136,8 +147,7 @@ Scalar kkt_residual(const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       grad
         ? projected_gradient_inf_norm<Scalar, N>(grad_L, x, lower, upper)
         : Scalar(0);
 
-    return std::max(stationarity,
-                    kkt_feasibility_legs<Scalar, Meq, Mineq>(mu_ineq, c_eq, c_ineq));
+    return std::max({stationarity, bound_complementarity_leg<Scalar, N>(grad_L, x, lower, upper), kkt_feasibility_legs<Scalar, Meq, Mineq>(mu_ineq, c_eq, c_ineq)});
 }
 
 // KKT residual for bound-constrained problems.

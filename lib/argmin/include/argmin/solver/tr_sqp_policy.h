@@ -1097,7 +1097,7 @@ struct tr_sqp_policy
                 argmin::detail::compute_kkt_multipliers_active_set<Scalar, N,
                                                                   Eigen::Dynamic,
                                                                   Eigen::Dynamic>(
-                    s.g, s.J_eq, s.J_ineq, s.c_ineq, s.bufs.kkt_ws,
+                    s.g, s.J_eq, s.J_ineq, s.c_ineq, s.x, s.lower, s.upper, s.bufs.kkt_ws,
                     s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
             }
         }

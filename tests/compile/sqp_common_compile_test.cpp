@@ -58,8 +58,10 @@ int main()
         Eigen::VectorXd mu_ineq = Eigen::VectorXd::Zero(n_ineq);
 
         argmin::detail::kkt_multiplier_workspace<double> kkt_ws;
+        const Eigen::Vector<double, N> x = Eigen::Vector<double, N>::Zero();
+        const Eigen::Vector<double, N> upper = Eigen::Vector<double, N>::Ones();
         argmin::detail::compute_kkt_multipliers_active_set<double, N>(
-            g, J_eq, J_ineq, c_ineq, kkt_ws, lam_eq, mu_ineq);
+            g, J_eq, J_ineq, c_ineq, x, -upper, upper, kkt_ws, lam_eq, mu_ineq);
 
         const double dphi = argmin::detail::l1_merit_dphi_h4<double>(
             -1.0, c_eq_v, c_ineq, 1.0, 1.0);
