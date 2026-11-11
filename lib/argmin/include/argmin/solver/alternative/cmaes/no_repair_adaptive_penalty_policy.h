@@ -33,6 +33,9 @@
 //
 // Requires: objective<P,S> (no gradient needed).
 // When bound_constrained<P,S>, applies the adaptive boundary penalty.
+// Box bounds only: a problem with equality or inequality rows latches
+// invalid_problem, as NLopt answers NLOPT_INVALID_ARGS for constraints an
+// algorithm does not support; general constraints belong to an outer method.
 //
 // References:
 //   Hansen & Ostermeier (2001), "Completely Derandomized
@@ -43,7 +46,6 @@
 //     Optimization", §3 (adaptive boundary penalty).
 //   K&W (2025) Algorithms for Optimization 2e, §8.7, Algorithm 8.10.
 
-#include "argmin/detail/row_values.h"
 #include "argmin/detail/xoshiro256.h"
 #include "argmin/detail/finite_order.h"
 #include "argmin/detail/problem_shape.h"
@@ -96,7 +98,7 @@ struct no_repair_adaptive_penalty_policy
     };
 
     template <typename P = void>
-    struct state_type : detail::row_values<Scalar>
+    struct state_type
     {
         const P* problem{nullptr};
         Eigen::Vector<Scalar, N> x;
@@ -159,15 +161,9 @@ struct no_repair_adaptive_penalty_policy
         bool covariance_dirty{false};
         std::uint32_t decomposition_skip_k{1};
 
-        // Set during init()/reset() when the auto-computed or requested
-        // population size exceeds the compile-time MaxPop cap. The lambda-
-        // sized per-step buffers below are Eigen::Matrix<..., 0, MaxPop, ...>
-        // with a static maximum-rows bound; resizing them past MaxPop is
-        // undefined behavior. When this flag is set, init()/reset() skip
-        // those sizing calls and step() returns solver_status::invalid_problem
-        // on its first call, before any buffer is touched. Raise the
-        // MaxPopulation template parameter on cmaes_policy to admit a wider
-        // population.
+        // Latched by init()/reset() for a population over the MaxPop cap, whose lambda-sized buffers below have a static
+        // maximum-rows bound and stay unsized, or for a problem that declares constraint rows. step() then returns
+        // solver_status::invalid_problem without touching a buffer or evaluating the problem.
         bool invalid_problem{false};
 
         // Per-step buffers. Pre-allocated to MaxPop
@@ -269,15 +265,6 @@ struct no_repair_adaptive_penalty_policy
                 static_cast<int>(4 + std::floor(Scalar(3.0) * std::log(static_cast<Scalar>(n)))));
         s.params = detail::compute_constants<Scalar>(n, pop_lambda);
 
-        // Reject the silent UB at lambda > MaxPop as a terminal status
-        // rather than a resize: s.fitnesses_buf et al. are
-        // `Eigen::Matrix<..., 0, MaxPop, ...>` with a static
-        // maximum-rows compile-time bound; a resize past MaxPop is
-        // undefined behavior. Flag the state so the lambda-sized sizing
-        // below is skipped and step() returns
-        // solver_status::invalid_problem on its first call. Raise the
-        // MaxPopulation template parameter on cmaes_policy to admit the
-        // requested population.
         s.invalid_problem = (s.params.lambda > state_type<Problem>::MaxPop);
 
         // Pre-allocate per-step buffers. Sized to
@@ -356,9 +343,14 @@ struct no_repair_adaptive_penalty_policy
         if(options.stagnation_window.has_value())
             s.stagnation_window_min = *options.stagnation_window;
 
-        s.objective_value = s.problem->value(x0);
         s.x = x0;
-        s.measure_rows(problem, x0);
+        s.invalid_problem = s.invalid_problem || detail::declares_constraint_rows(problem);
+        if(s.invalid_problem)
+        {
+            s.objective_value = std::numeric_limits<Scalar>::quiet_NaN();
+            return s;
+        }
+        s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
 
         return s;
@@ -367,12 +359,6 @@ struct no_repair_adaptive_penalty_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
-        // Reject an over-cap population before touching any lambda-sized
-        // buffer (they were left unsized by init()/reset() precisely so
-        // this path cannot resize past the static MaxPop bound). This is a
-        // hard, exception-free runtime precondition failure surfaced as a
-        // terminal status; the caller must raise the MaxPopulation template
-        // parameter on cmaes_policy.
         if(s.invalid_problem)
         {
             return step_result<Scalar>{
@@ -571,7 +557,6 @@ struct no_repair_adaptive_penalty_policy
         {
             s.objective_value = gen_best_f;
             s.x = repaired_buf.col(best_offspring);
-            s.measure_rows(*s.problem, s.x);
         }
         if(s.objective_value < s.best_ever_value)
             s.best_ever_value = s.objective_value;
@@ -609,7 +594,6 @@ struct no_repair_adaptive_penalty_policy
                 .step_size = Scalar(0.0),
                 .objective_change = Scalar(0.0),
                 .improved = false,
-                .constraint_violation = s.row_violation(),
                 .x_norm = s.x.allFinite() ? s.x.norm() : Scalar(0.0),
                 .policy_status = solver_status::diverged,
             };
@@ -949,7 +933,6 @@ struct no_repair_adaptive_penalty_policy
                         .step_size = Scalar(0.0),
                         .objective_change = Scalar(0.0),
                         .improved = false,
-                        .constraint_violation = s.row_violation(),
                         .x_norm = s.x.norm(),
                         .policy_status = policy_status,
                     };
@@ -1044,7 +1027,6 @@ struct no_repair_adaptive_penalty_policy
             .step_size = effective_step,
             .objective_change = obj_change,
             .improved = improved,
-            .constraint_violation = s.row_violation(),
             .x_norm = s.x.norm(),
             .policy_status = policy_status,
         };
@@ -1066,11 +1048,11 @@ struct no_repair_adaptive_penalty_policy
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
         s.params = detail::compute_constants<Scalar>(n,
             static_cast<int>(std::min<std::uint32_t>(options.lambda.value_or(0), state_type<P>::MaxPop + 1u)));
-        // A reset over the population cap latches invalid_problem so step() never resizes the lambda-sized buffers past the static MaxPop bound.
-        s.invalid_problem = (s.params.lambda > state_type<P>::MaxPop);
+        s.invalid_problem = (s.params.lambda > state_type<P>::MaxPop) || detail::declares_constraint_rows(*s.problem);
+        if(s.invalid_problem)
+            return solver_status::invalid_problem;
         s.mean = x0;
         s.x = x0;
-        s.measure_rows(*s.problem, s.x);
         s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
         s.p_sigma.setZero();

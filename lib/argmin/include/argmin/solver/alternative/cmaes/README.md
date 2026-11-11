@@ -17,6 +17,8 @@ interchangeably for benchmarking.
 
 The variant ranking above is reproducible from the persistent comparison harness at `benchmarks/micro_cmaes.cpp`, which re-runs the boundary-handling A/B on any commit.
 
+All three handle box bounds only. A problem that declares an equality or inequality row is rejected as `invalid_problem` at construction and on reset, before it is evaluated; general constraints belong to an outer method.
+
 ## Lifecycle
 
 These variants are compiled, tested, and benchmarked alongside the

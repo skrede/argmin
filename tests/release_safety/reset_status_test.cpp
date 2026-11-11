@@ -35,7 +35,7 @@ namespace
 using vector2 = Eigen::Vector2d;
 using capped_cmaes = cmaes_policy<double, dynamic_dimension, 8>;
 
-// f = 0.5 |x - (1, 2)|^2 as residuals r = x - (1, 2), with one inequality x0 + x1 >= 1, so one fixture fits every family.
+// f = 0.5 |x - (1, 2)|^2 as residuals r = x - (1, 2), with one inequality x0 + x1 >= 1, so one fixture fits every family that accepts it.
 struct boxed_residual_bowl
 {
     static constexpr std::int32_t problem_dimension = 2;
@@ -68,13 +68,27 @@ struct boxed_residual_bowl
     vector2 upper_bounds() const { return upper; }
 };
 
+// The bowl on the same box without its row, for a family that handles box bounds only.
+struct box_only_bowl
+{
+    static constexpr std::int32_t problem_dimension = 2;
+
+    std::int32_t dimension() const { return 2; }
+
+    double value(const vector2& x) const { return 0.5 * (x - vector2(1.0, 2.0)).squaredNorm(); }
+
+    vector2 lower_bounds() const { return vector2(-5.0, -5.0); }
+
+    vector2 upper_bounds() const { return vector2(5.0, 5.0); }
+};
+
 boxed_residual_bowl make_bowl()
 {
     return boxed_residual_bowl{.lower = vector2(-5.0, -5.0), .upper = vector2(5.0, 5.0)};
 }
 
-template <typename Policy>
-std::pair<solver_status, solver_status> reset_after_init(Policy policy, const boxed_residual_bowl& problem)
+template <typename Policy, typename Problem>
+std::pair<solver_status, solver_status> reset_after_init(Policy policy, const Problem& problem)
 {
     const vector2 x0(2.0, 1.0);
     auto state = policy.init(problem, x0, solver_options<>{});
@@ -104,7 +118,6 @@ TEMPLATE_TEST_CASE("a policy reset on a valid state reports running",
                    tr_sqp_policy<>,
                    mma_policy<>,
                    ccsa_quadratic_policy<>,
-                   capped_cmaes,
                    isres_policy<>,
                    bobyqa_policy<>,
                    cobyla_policy<>)
@@ -114,12 +127,19 @@ TEMPLATE_TEST_CASE("a policy reset on a valid state reports running",
     CHECK(reset_clear == solver_status::running);
 }
 
+TEST_CASE("a CMA-ES reset on a valid box-only state reports running", "[release-safety][reset]")
+{
+    const auto [reset, reset_clear] = reset_after_init(capped_cmaes::rebind<2>{}, box_only_bowl{});
+    CHECK(reset == solver_status::running);
+    CHECK(reset_clear == solver_status::running);
+}
+
 TEST_CASE("a CMA-ES reset over its population cap reports invalid_problem until the population fits", "[release-safety][reset]")
 {
     capped_cmaes::rebind<2> policy;
     policy.options.lambda = 6u;
     policy.options.seed = 7u;
-    const auto problem = make_bowl();
+    const box_only_bowl problem{};
     const vector2 x0(2.0, 1.0);
     auto state = policy.init(problem, x0, solver_options<>{});
     policy.options.lambda = 16u;

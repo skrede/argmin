@@ -25,6 +25,7 @@ add_executable(argmin_unit_tests
     lbfgsb_line_search_failure_test.cpp
     cmaes_test.cpp
     cmaes_invalid_problem_test.cpp
+    cmaes_constraint_rows_test.cpp
     cmaes_sampling_test.cpp
     restarting_policy_test.cpp
     tolerance_test.cpp

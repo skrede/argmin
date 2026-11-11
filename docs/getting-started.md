@@ -92,7 +92,11 @@ runtime size) and exposes the members its problem class needs:
 | `least_squares` | `residuals(x, r)`, `jacobian(x, J)`, `num_residuals()` |
 
 Constraints are written with the equality rows first, inequality rows second,
-inequalities in `g(x) >= 0` form. A small differentiable problem:
+inequalities in `g(x) >= 0` form. CMA-ES (`cmaes_policy` and the variants under
+`solver/alternative/cmaes/`) handles box bounds only: a problem that declares an
+equality or inequality row is rejected as `invalid_problem` before it is
+evaluated, rather than solved with its rows ignored. A small differentiable
+problem:
 
 ```cpp
 struct paraboloid

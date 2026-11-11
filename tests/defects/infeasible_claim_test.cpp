@@ -9,10 +9,6 @@
 #include "argmin/solver/alternative/isres/original_argmin_policy.h"
 #include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
 
-#include "argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h"
-#include "argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h"
-#include "argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
-
 #include <Eigen/Core>
 
 #include <catch2/catch_test_macros.hpp>
@@ -95,10 +91,7 @@ TEMPLATE_TEST_CASE("a stochastic search reports the constraint violation of the 
                    "[stochastic]",
                    (alternative::isres::nlopt_faithful_policy<double, 2>),
                    (alternative::isres::original_argmin_policy<double, 2>),
-                   (alternative::isres::runarsson_yao_paper_policy<double, 2>),
-                   (alternative::cmaes::repair_l2_penalty_policy<double, 2>),
-                   (alternative::cmaes::pwq_reparameterization_policy<double, 2>),
-                   (alternative::cmaes::no_repair_adaptive_penalty_policy<double, 2>))
+                   (alternative::isres::runarsson_yao_paper_policy<double, 2>))
 {
     auto solver = make_solver(seeded<TestType>());
     std::int32_t misreported = 0;

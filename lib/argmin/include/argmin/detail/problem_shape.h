@@ -87,6 +87,18 @@ bool constraint_rows_changed(const Problem& problem, Eigen::Index n_eq, Eigen::I
     return problem.num_equality() != n_eq || problem.num_inequality() != n_ineq;
 }
 
+// The counts are read at run time, so a problem carrying the row interface with zero rows is box-only.
+template <typename Problem>
+bool declares_constraint_rows(const Problem& problem)
+{
+    Eigen::Index rows = 0;
+    if constexpr(requires { problem.num_equality(); })
+        rows += problem.num_equality();
+    if constexpr(requires { problem.num_inequality(); })
+        rows += problem.num_inequality();
+    return rows > 0;
+}
+
 // The result of a step the policy refuses to take on a problem it rejected.
 template <typename Scalar, typename State>
 step_result<Scalar> rejected_step(const State& s)

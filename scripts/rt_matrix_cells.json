@@ -872,6 +872,7 @@
               "class": "gated",
               "evidence": [
                 {"kind": "ctest_test", "name": "argmin_no_exceptions_probe", "note": "throw sites converted to status returns"},
+                {"kind": "ctest_test", "name": "CMA-ES rejects a problem with constraint rows as an invalid problem without evaluating it - pwq", "note": "box bounds only: a constraint row is a status return, never ignored"},
                 {"kind": "ci_job", "name": "c++20 (build + ctest)"},
                 {"kind": "ci_job", "name": "c++23 (build + ctest)"}
               ]

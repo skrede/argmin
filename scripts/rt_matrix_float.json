@@ -289,7 +289,7 @@
             "guaranteed?": {
               "verdict": "yes",
               "class": "gated",
-              "qualifier": "unconstrained and active-bound Rosenbrock, k = 100",
+              "qualifier": "unconstrained and active-bound Rosenbrock, k = 100; CMA-ES handles box bounds only and rejects a problem with constraint rows as `invalid_problem`",
               "evidence": [
                 {
                   "kind": "ctest_test",

@@ -51,7 +51,7 @@ Policy requesting(std::optional<std::uint32_t> lambda)
 template <typename Policy>
 void check_cmaes_rejected(const Policy& policy)
 {
-    const auto problem = plane(1);
+    const auto problem = plane(0);
     step_budget_solver solver{policy, problem, inside, solver_options<>{}};
     CHECK(solver.status() == solver_status::invalid_problem);
     CHECK(solver.step().policy_status == solver_status::invalid_problem);
@@ -63,7 +63,7 @@ template <typename Policy>
 std::int32_t requested_population(std::optional<std::uint32_t> lambda)
 {
     auto policy = requesting<Policy>(lambda);
-    const auto problem = plane(1);
+    const auto problem = plane(0);
     const auto state = policy.init(problem, inside, solver_options<>{});
     CHECK_FALSE(state.invalid_problem);
     step_budget_solver solver{policy, problem, inside, solver_options<>{}};
@@ -129,7 +129,7 @@ TEMPLATE_TEST_CASE("a CMA-ES population request above INT32_MAX is rejected as a
 TEMPLATE_TEST_CASE("a CMA-ES reset rejects a population request above INT32_MAX until it fits", "[release-safety][cmaes]", pwq, repair_l2, no_repair)
 {
     auto policy = requesting<TestType>(6u);
-    const auto problem = plane(1);
+    const auto problem = plane(0);
     auto state = policy.init(problem, inside, solver_options<>{});
     policy.options.lambda = first_wrapped;
     CHECK(policy.reset(state, inside) == solver_status::invalid_problem);
