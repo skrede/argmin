@@ -34,7 +34,10 @@ struct step_result
     // restoration exhaustion). Convergence criteria that test
     // step_size must exempt null steps to avoid false stall detection.
     bool is_null_step{false};
+    // Infinity norm over the constraint rows only; the iterate's distance outside the box is bound_violation, which
+    // the driver fills for every policy.
     Scalar constraint_violation{};
+    Scalar bound_violation{};
     Scalar x_norm{};
     // KKT residual: L-infinity norm combining Lagrangian stationarity
     // and complementarity. Populated by gradient-aware policies that

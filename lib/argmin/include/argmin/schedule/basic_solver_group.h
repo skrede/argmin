@@ -114,7 +114,7 @@ public:
                 // Retire on failure or (per-policy) convergence status so a
                 // converged solver stops being re-stepped and cannot
                 // livelock the group.
-                const auto policy_status = detail::admit_claim(result.policy_status, result.constraint_violation, feasibility_tolerance_in_force());
+                const auto policy_status = detail::admit_claim(result.policy_status, result, feasibility_tolerance_in_force());
                 if(policy_status == solver_status::roundoff_limited || policy_status == solver_status::diverged || policy_status == solver_status::converged)
                 {
                     retired_[idx] = true;
@@ -191,7 +191,7 @@ public:
             }
 
             // Convergence policy check
-            auto conv = detail::admit_claim(opts.convergence.check(last, i + 1), last.constraint_violation, feasibility_tolerance_in_force());
+            auto conv = detail::admit_claim(opts.convergence.check(last, i + 1), last, feasibility_tolerance_in_force());
             if(conv)
             {
                 status = *conv;

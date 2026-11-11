@@ -1,14 +1,19 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_PROBLEM_SHAPE_H
 #define HPP_GUARD_ARGMIN_DETAIL_PROBLEM_SHAPE_H
 
+#include "argmin/detail/bound_projection.h"
+
 #include "argmin/result/status.h"
 #include "argmin/result/step_result.h"
+
+#include "argmin/formulation/concepts.h"
 
 #include "argmin/types.h"
 
 #include <Eigen/Core>
 
 #include <limits>
+#include <type_traits>
 
 namespace argmin::detail
 {
@@ -42,6 +47,24 @@ Scalar measure_constraint_values(const State& s, Measure measure)
         return measure(s.c_eq, none);
     else
         return Scalar(0);
+}
+
+// A family that keeps the box holds the problem's bounds in its state, read here so a step calls no user code; a
+// family that ignores the box is measured against the problem's own bounds.
+template <typename Scalar, int N, typename State, typename Problem>
+Scalar measure_bound_violation(const State& s, const Problem* problem)
+{
+    if constexpr(std::is_void_v<Problem>)
+        return Scalar(0);
+    else if constexpr(!bound_constrained<Problem, Scalar>)
+        return Scalar(0);
+    else if constexpr(requires {
+                          s.lower;
+                          s.upper;
+                      })
+        return box_violation_inf<Scalar, N>(s.x, s.lower, s.upper);
+    else
+        return box_violation_inf<Scalar, N>(s.x, problem->lower_bounds(), problem->upper_bounds());
 }
 
 template <typename Scalar, typename State>

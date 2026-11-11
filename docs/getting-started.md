@@ -124,12 +124,15 @@ The full concept definitions are in
   its retry from a reset curvature memory (or the memory was already empty),
   and the iterate was held at the last accepted point. `converged`,
   `ftol_reached`, `xtol_reached` and `stalled` describe the final iterate and
-  are reported only where its constraint violation is within
-  `constraint_tolerance` (or `feasibility_tolerance` when that is unset). A
-  solver whose own stopping test ends at a point outside that tolerance reports
-  `objective_stalled`, which claims nothing about the point.
+  are reported only where both its constraint violation and its distance
+  outside the bounds are within `constraint_tolerance` (or
+  `feasibility_tolerance` when that is unset). A solver whose own stopping test
+  ends at a point outside that tolerance reports `objective_stalled`, which
+  claims nothing about the point.
 - `result.x` -- the solution vector.
 - `result.objective_value` -- the objective at `result.x`.
+- `result.constraint_violation` -- the infinity-norm of the constraint residual
+  at `result.x`; bounds are not constraint rows and are not included.
 
 For a constrained solve, the driver also exposes
 `solver.constraint_violation()` (the infinity-norm of the constraint

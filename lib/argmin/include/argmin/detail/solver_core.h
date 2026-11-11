@@ -298,8 +298,8 @@ public:
         return result;
     }
 
-    // Does not consult convergence: the solve loop owns its stopping decision. x_norm is filled here so
-    // step_tolerance_rel_criterion has one denominator for every policy.
+    // Does not consult convergence: the solve loop owns its stopping decision. x_norm and bound_violation are filled
+    // here so step_tolerance_rel_criterion has one denominator and the claim gate one box measure for every policy.
     step_result<scalar_type> step_impl()
     {
         if(!built_)
@@ -308,6 +308,7 @@ public:
             return detail::rejected_step<scalar_type>(state_);
         auto result = policy_.step(state_);
         result.x_norm = state_.x.norm();
+        result.bound_violation = detail::measure_bound_violation<scalar_type, N>(state_, problem_ptr_);
         ++iterations_;
         function_evaluations_ += result.evaluations;
         last_gradient_norm_ = result.gradient_norm;
@@ -413,7 +414,6 @@ public:
     // composition matches step_result.constraint_violation reporting
     // downstream, so is_better compares like-against-like in the best-
     // seen branch. A rejected problem's values are never filled.
-    //
     // Reference: detail::primal_feasibility_inf (argmin/detail/
     //            lagrangian.h); N&W 2e Def 12.1.
     scalar_type seed_best_cv() const

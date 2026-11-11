@@ -65,7 +65,7 @@ file	lib/argmin/include/argmin/solver/step_and_time_budget_solver.h	-	278
 file	lib/argmin/include/argmin/solver/step_budget_solver.h	-	283
 file	lib/argmin/include/argmin/solver/stepper.h	-	241
 file	lib/argmin/include/argmin/solver/time_budget_solver.h	-	282
-file	lib/argmin/include/argmin/solver/tr_sqp_policy.h	-	1274
+file	lib/argmin/include/argmin/solver/tr_sqp_policy.h	-	1269
 file	lib/argmin/include/argmin/test_functions/ik_pose_batch.h	-	319
 file	lib/argmin/include/argmin/test_functions/more_garbow_hillstrom.h	-	489
 file	lib/argmin/include/argmin/test_functions/nmpc_lqr.h	-	345
@@ -225,7 +225,7 @@ function	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	step_ba
 function	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	step_dogleg	67
 function	lib/argmin/include/argmin/solver/restarting_policy.h	init	47
 function	lib/argmin/include/argmin/solver/restarting_policy.h	step	39
-function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	init	141
+function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	init	136
 function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	reset	30
 function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	step	658
 function	lib/argmin/include/argmin/test_functions/more_garbow_hillstrom.h	gradient	29

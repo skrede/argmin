@@ -25,6 +25,13 @@ Eigen::Vector<Scalar, N> project(const Eigen::MatrixBase<XExpr>& x,
     return x.cwiseMax(lower).cwiseMin(upper).eval();
 }
 
+// Infinity-norm distance of x outside the box: the bound leg of primal feasibility, max(lower - x, x - upper, 0).
+template <typename Scalar, int N>
+Scalar box_violation_inf(const Eigen::Ref<const Eigen::Vector<Scalar, N>>& x, const Eigen::Ref<const Eigen::Vector<Scalar, N>>& lower, const Eigen::Ref<const Eigen::Vector<Scalar, N>>& upper)
+{
+    return (lower - x).cwiseMax(x - upper).cwiseMax(Scalar(0)).template lpNorm<Eigen::Infinity>();
+}
+
 // Compute maximum feasible step alpha such that x + alpha*d stays in [lower, upper].
 //
 // Returns infinity if no bound is hit (unconstrained direction).

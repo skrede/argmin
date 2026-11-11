@@ -640,10 +640,23 @@ struct filter_trsqp_policy
         s.n_ineq = problem.num_inequality();
         const int m = s.n_eq + s.n_ineq;
 
-        s.x = x0;
+        // The composite step's displaced box [lower - x, upper - x] contains the zero step only for an iterate inside the
+        // box, so the start is projected before it is evaluated.
+        if constexpr(bound_constrained<Problem, Scalar>)
+        {
+            s.lower = problem.lower_bounds();
+            s.upper = problem.upper_bounds();
+        }
+        else
+        {
+            constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+            s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
+            s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
+        }
+        s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
         s.g.setZero(n);
-        s.objective_value = problem.value(x0);
-        problem.gradient(x0, s.g);
+        s.objective_value = problem.value(s.x);
+        problem.gradient(s.x, s.g);
 
         // Cross-policy state-resident buffer struct sized on the x-only
         // dimension n; the constraint-axis buffers hold un-reformulated
@@ -721,28 +734,15 @@ struct filter_trsqp_policy
         // Constraint evaluation on the un-reformulated x-only shape.
         Eigen::VectorX<Scalar> c_eval(m);
         if(m > 0)
-            problem.constraints(x0, c_eval);
+            problem.constraints(s.x, c_eval);
         s.c_eq = c_eval.head(s.n_eq);
         s.c_ineq = c_eval.tail(s.n_ineq);
 
         Eigen::MatrixX<Scalar> J_eval(m, n);
         if(m > 0)
-            problem.constraint_jacobian(x0, J_eval);
+            problem.constraint_jacobian(s.x, J_eval);
         s.J_eq = J_eval.topRows(s.n_eq);
         s.J_ineq = J_eval.bottomRows(s.n_ineq);
-
-        // Box bounds: detected via concept.
-        if constexpr(bound_constrained<Problem, Scalar>)
-        {
-            s.lower = problem.lower_bounds();
-            s.upper = problem.upper_bounds();
-        }
-        else
-        {
-            constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-            s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
-            s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
-        }
 
         // Slack initialization: s_0 = max(c_ineq(x_0), 0) enforces
         // s_0 >= 0 and zeroes the joint residual c_ineq - s at every
@@ -1713,18 +1713,18 @@ struct filter_trsqp_policy
         if(s.invalid_problem)
             return solver_status::invalid_problem;
         const int m = s.n_eq + s.n_ineq;
-        s.x = x0;
-        s.objective_value = s.problem->value(x0);
-        s.problem->gradient(x0, s.g);
+        s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
+        s.objective_value = s.problem->value(s.x);
+        s.problem->gradient(s.x, s.g);
 
         // c_all / J_all were sized at init, so a warm reset stays allocation-free.
         if(m > 0)
-            s.problem->constraints(x0, s.bufs.c_all);
+            s.problem->constraints(s.x, s.bufs.c_all);
         s.c_eq = s.bufs.c_all.head(s.n_eq);
         s.c_ineq = s.bufs.c_all.tail(s.n_ineq);
 
         if(m > 0)
-            s.problem->constraint_jacobian(x0, s.bufs.J_all);
+            s.problem->constraint_jacobian(s.x, s.bufs.J_all);
         s.J_eq = s.bufs.J_all.topRows(s.n_eq);
         s.J_ineq = s.bufs.J_all.bottomRows(s.n_ineq);
 
