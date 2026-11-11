@@ -322,12 +322,8 @@ struct repair_l2_penalty_policy
             s.stagnation_window_min = *options.stagnation_window;
 
         s.x = x0;
-        s.invalid_problem = s.invalid_problem || detail::declares_constraint_rows(problem);
-        if(s.invalid_problem)
-        {
-            s.objective_value = std::numeric_limits<Scalar>::quiet_NaN();
+        if(detail::latch_rejection<Scalar>(s, s.invalid_problem || detail::declares_constraint_rows(problem)))
             return s;
-        }
         s.objective_value = s.problem->value(x0);
         s.best_ever_value = s.objective_value;
 
@@ -982,8 +978,7 @@ struct repair_l2_penalty_policy
         //   libcmaes ipopcmastrategy.cc::reset_search_state.
         s.params = detail::compute_constants<Scalar>(n,
             static_cast<int>(std::min<std::uint32_t>(options.lambda.value_or(0), state_type<P>::MaxPop + 1u)));
-        s.invalid_problem = (s.params.lambda > state_type<P>::MaxPop) || detail::declares_constraint_rows(*s.problem);
-        if(s.invalid_problem)
+        if(detail::latch_rejection<Scalar>(s, s.params.lambda > state_type<P>::MaxPop || detail::declares_constraint_rows(*s.problem)))
             return solver_status::invalid_problem;
         s.mean = x0;
         s.x = x0;

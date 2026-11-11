@@ -3,16 +3,12 @@
 
 // L-BFGS-B solver policy for step_budget_solver.
 //
-// Implements the Limited-memory BFGS algorithm for Bound-constrained
-// optimization. Each step computes: (1) Generalized Cauchy Point via
-// breakpoint search along the projected gradient path, (2) subspace
-// minimization over free variables using the compact L-BFGS reduced
-// Hessian, (3) strong Wolfe line search capped at the maximum feasible
-// step length.
+// Implements the Limited-memory BFGS algorithm for Bound-constrained optimization. Each step computes: (1) Generalized
+// Cauchy Point via breakpoint search along the projected gradient path, (2) subspace minimization over free variables
+// using the compact L-BFGS reduced Hessian, (3) strong Wolfe line search capped at the maximum feasible step length.
 //
-// When the problem satisfies only differentiable (no bounds), all bounds
-// default to +/-infinity and the algorithm reduces to standard L-BFGS
-// with projected steps.
+// When the problem satisfies only differentiable (no bounds), all bounds default to +/-infinity and the algorithm
+// reduces to standard L-BFGS with projected steps. A problem with equality or inequality rows is rejected as invalid_problem.
 //
 // Reference: Byrd, Lu, Nocedal, Zhu (1995) "A Limited Memory Algorithm
 //            for Bound Constrained Optimization", SIAM J. Sci. Comput.
@@ -89,6 +85,7 @@ struct lbfgsb_policy
         detail::cauchy_point_solver<Scalar, N> gcp_solver;
         detail::subspace_minimizer<Scalar, N> ssm_solver;
         std::uint32_t iteration{0};
+        bool invalid_problem{false};
     };
 
     template <typename Problem, typename Convergence>
@@ -108,12 +105,8 @@ struct lbfgsb_policy
         const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
-
         s.x = x0;
         s.g.setZero(n);
-        s.objective_value = problem.value(x0);
-        problem.gradient(x0, s.g);
-
         if constexpr(bound_constrained<Problem, Scalar>)
         {
             s.lower = problem.lower_bounds();
@@ -125,18 +118,22 @@ struct lbfgsb_policy
             s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
             s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
         }
-
         s.B = detail::compact_lbfgs<Scalar, N, 10>{};
         s.gcp_solver = detail::cauchy_point_solver<Scalar, N>{n};
         s.ssm_solver = detail::subspace_minimizer<Scalar, N>{n};
         s.iteration = 0;
-
+        if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
+            return s;
+        s.objective_value = problem.value(x0);
+        problem.gradient(x0, s.g);
         return s;
     }
 
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         // Evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
             s.problem->gradient(s.x, s.g);
@@ -160,6 +157,8 @@ struct lbfgsb_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(*s.problem)))
+            return solver_status::invalid_problem;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);

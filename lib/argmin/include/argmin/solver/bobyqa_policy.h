@@ -136,6 +136,7 @@ struct bobyqa_policy
         bool last_improved{false};       // Whether the previous step improved the objective
         int m{};
         bool initialized{false};
+        bool invalid_problem{false};
 
         // Powell bobyqb driver state (the ntrits state machine).
         //
@@ -311,13 +312,11 @@ struct bobyqa_policy
             h = (max_range > Scalar(0.0)) ? Scalar(0.1) * max_range : Scalar(1.0);
         }
 
-        // Bound-safety repair (core BOBYQA guarantee: the objective is NEVER
-        // evaluated outside [xl, xu]). Powell requires rhobeg <= 0.5 * min
-        // finite bound range and x0 at least rhobeg inside every finite bound
-        // so the 2n coordinate perturbations of the bootstrap stay feasible.
-        // Repair rather than reject: clamp h on tight ranges and shift x0
-        // inward, which keeps near-bound or tight-box starts solvable instead
-        // of tripping a domain error on log/sqrt objectives.
+        // Bound-safety repair (core BOBYQA guarantee: the objective is NEVER evaluated outside [xl, xu]). Powell
+        // requires rhobeg <= 0.5 * min finite bound range and x0 at least rhobeg inside every finite bound so the 2n
+        // coordinate perturbations of the bootstrap stay feasible. Repair rather than reject: clamp h on tight ranges
+        // and shift x0 inward, which keeps near-bound or tight-box starts solvable instead of tripping a domain error
+        // on log/sqrt objectives.
         h = clamp_radius_to_bounds(h, s.lower_scaled, s.upper_scaled);
         shift_inside_bounds(s.x_scaled, h, s.lower_scaled, s.upper_scaled);
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
@@ -325,6 +324,8 @@ struct bobyqa_policy
         s.initial_radius = h;
         s.delta = h;
         s.delta_max = Scalar(10.0) * h;
+        if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
+            return s;
 
         // Bootstrap the BMAT/ZMAT interpolation system.
         // The bootstrap evaluates f at 2n+1 coordinate-perturbation points
@@ -567,6 +568,8 @@ struct bobyqa_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         const int n = static_cast<int>(s.x.size());
         const int nptm = s.m - n - 1;
         const Scalar old_incumbent_f = s.objective_value;
@@ -574,9 +577,8 @@ struct bobyqa_policy
         // Machine labels (the bobyqb_ goto targets, reified as a state variable).
         enum class label { l60, l90, l210, l230, l360, l650, l680 };
 
-        // Evaluate the objective at a trial point given in shifted coordinates
-        // (relative to xbase), clamping into the box so the objective is never
-        // probed outside [xl, xu]. Returns {f, x in scaled-absolute coords}.
+        // Evaluate the objective at a trial point given in shifted coordinates (relative to xbase), clamping into the
+        // box so the objective is never probed outside [xl, xu]. Returns {f, x in scaled-absolute coords}.
         auto eval_shifted = [&](const Eigen::Vector<Scalar, N>& xn)
             -> std::pair<Scalar, Eigen::Vector<Scalar, N>>
         {
@@ -588,10 +590,9 @@ struct bobyqa_policy
             return {f, xabs};
         };
 
-        // Powell's RESCUE: rebuild the interpolation system from scratch about
-        // the current best point. Used when a chosen denominator has collapsed
-        // (bobyqb_ L190). Kept as the bootstrap rebuild (Powell never writes
-        // behind the factorization); the rebuild's 2n+1 evaluations are counted.
+        // Powell's RESCUE: rebuild the interpolation system from scratch about the current best point. Used when a
+        // chosen denominator has collapsed (bobyqb_ L190). Kept as the bootstrap rebuild (Powell never writes behind
+        // the factorization); the rebuild's 2n+1 evaluations are counted.
         auto do_rescue = [&]()
         {
             Scalar h = s.rho;
@@ -1123,22 +1124,21 @@ struct bobyqa_policy
     template <typename P>
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(*s.problem)))
+            return solver_status::invalid_problem;
         s.x = detail::project(x0, s.lower, s.upper);
         s.x_scaled = (s.x.array() / s.scale.array()).matrix();
         s.iteration = 0;
         s.initialized = false;
-
         Scalar h = clamp_radius_to_bounds(s.initial_radius, s.lower_scaled, s.upper_scaled);
         shift_inside_bounds(s.x_scaled, h, s.lower_scaled, s.upper_scaled);
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
-
         s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
             s.x_scaled, h, s.lower_scaled, s.upper_scaled,
             [&](const Eigen::Vector<Scalar, N>& x_sc) {
                 return s.problem->value(
                     (x_sc.array() * s.scale.array()).matrix());
             });
-
         s.x_scaled = s.sys.xbase + s.sys.xopt;
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
         s.objective_value = s.sys.fval[s.sys.kopt];

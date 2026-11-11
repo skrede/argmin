@@ -134,8 +134,6 @@ struct projected_gradient_gn_policy
         s.x = detail::project(x0, s.lower, s.upper);
         s.num_residuals = problem.num_residuals();
         s.delta = options.trust_region_radius.value_or(Scalar(1));
-
-        // Evaluate initial residuals and Jacobian
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, n);
         if constexpr(N != Eigen::Dynamic)
@@ -143,6 +141,8 @@ struct projected_gradient_gn_policy
         s.ws.free_indices.reserve(static_cast<std::size_t>(n));
         s.ws.r_trial.resize(s.num_residuals);
         s.ws.Jd.resize(s.num_residuals);
+        if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
+            return s;
         s.problem->residuals(s.x, s.r);
         evaluate_jacobian(s);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
@@ -177,8 +177,7 @@ struct projected_gradient_gn_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        s.invalid_problem = s.problem->num_residuals() != s.num_residuals;
-        if(s.invalid_problem)
+        if(detail::latch_rejection<Scalar>(s, s.problem->num_residuals() != s.num_residuals || detail::declares_constraint_rows(*s.problem)))
             return solver_status::invalid_problem;
         s.x = detail::project(x0, s.lower, s.upper);
         const int n = static_cast<int>(x0.size());

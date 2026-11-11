@@ -59,6 +59,7 @@ struct byrd_lbfgsb_policy
         detail::cauchy_point_solver<Scalar, N> gcp_solver;
         detail::subspace_minimizer<Scalar, N> ssm_solver;
         std::uint32_t iteration{0};
+        bool invalid_problem{false};
     };
 
     template <typename Problem, typename Convergence>
@@ -78,12 +79,8 @@ struct byrd_lbfgsb_policy
         const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
-
         s.x = x0;
         s.g.setZero(n);
-        s.objective_value = problem.value(x0);
-        problem.gradient(x0, s.g);
-
         if constexpr(bound_constrained<Problem, Scalar>)
         {
             s.lower = problem.lower_bounds();
@@ -95,18 +92,22 @@ struct byrd_lbfgsb_policy
             s.lower = Eigen::Vector<Scalar, N>::Constant(n, -inf);
             s.upper = Eigen::Vector<Scalar, N>::Constant(n, inf);
         }
-
         s.B = detail::compact_lbfgs<Scalar, N, 5>{};
         s.gcp_solver = detail::cauchy_point_solver<Scalar, N>{n};
         s.ssm_solver = detail::subspace_minimizer<Scalar, N>{n};
         s.iteration = 0;
-
+        if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
+            return s;
+        s.objective_value = problem.value(x0);
+        problem.gradient(x0, s.g);
         return s;
     }
 
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
+        if(s.invalid_problem)
+            return detail::rejected_step<Scalar>(s);
         if(s.iteration != 0)
             s.problem->gradient(s.x, s.g);
 
@@ -124,6 +125,8 @@ struct byrd_lbfgsb_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
+        if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(*s.problem)))
+            return solver_status::invalid_problem;
         s.x = x0;
         s.objective_value = s.problem->value(x0);
         s.problem->gradient(x0, s.g);

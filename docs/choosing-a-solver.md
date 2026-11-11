@@ -20,10 +20,12 @@ If you only remember one rule: **`lbfgsb` for unconstrained / box-constrained, `
 | Constrained problem with separable structure (topology / structural opt) | `mma`, `gcmma`, or `ccsa_quadratic` | Method of Moving Asymptotes (Svanberg 1987 / 2002). Best when the objective and constraints are well-approximated by separable convex functions in `1/(U-x)` and `1/(x-L)`. |
 | Constrained problem, derivative-free | `cobyla` or `augmented_lagrangian` wrapping `bobyqa` | Powell's linear-approximation trust region. Every point COBYLA evaluates lies inside the box; a fixed or inverted box (a lower bound not below its upper bound) is rejected with `invalid_problem`. |
 | General constrained, want to use any unconstrained solver as the inner | `augmented_lagrangian` | Meta-policy. Wraps any unconstrained or box-constrained policy and handles equality + inequality via penalty + multiplier updates. |
-| Bound-constrained, multimodal, no gradients | `cmaes` or `restarting_policy` wrapping `cmaes` | Covariance Matrix Adaptation Evolution Strategy. The restarting wrapper adds Hansen-Auger IPOP restarts for harder landscapes. Box bounds only: a problem with an equality or inequality row is rejected with `invalid_problem`. |
+| Bound-constrained, multimodal, no gradients | `cmaes` or `restarting_policy` wrapping `cmaes` | Covariance Matrix Adaptation Evolution Strategy. The restarting wrapper adds Hansen-Auger IPOP restarts for harder landscapes. |
 | Bound-constrained, multimodal, **with constraints** | `isres` | Runarsson-Yao 2005 stochastic ranking ES. Handles inequality constraints via stochastic ranking. |
 | Local solver but you want random restarts | `multistart_policy<InnerPolicy>` | Wraps any local policy. |
 | CMA-ES with restart strategy | `restarting_policy<cmaes_policy<>>` | The IPOP-CMA-ES restart wrapper. |
+
+`lbfgsb`, `byrd_lbfgsb`, `lm`, `projected_gn`, `projected_gradient_gn`, `bobyqa` and `cmaes`, and the `multistart_policy` and `restarting_policy` wrappers around them, handle box bounds only. A problem that declares an equality or inequality row is rejected with `invalid_problem` before it is evaluated, never solved with its rows ignored; give it to a constrained policy or to `augmented_lagrangian`, whose inner policy solves a box-only subproblem.
 
 ## Known limitations at the current HEAD
 

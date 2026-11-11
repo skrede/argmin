@@ -13,11 +13,14 @@
 namespace argmin::detail
 {
 
+// A decorator's state (restarting, multistart) holds no latch of its own and rejects what the state it wraps rejects.
 template <typename State>
 bool state_rejected(const State& s)
 {
     if constexpr(requires { s.invalid_problem; })
         return s.invalid_problem;
+    else if constexpr(requires { s.inner; })
+        return state_rejected(s.inner);
     else
         return false;
 }
@@ -87,7 +90,9 @@ bool constraint_rows_changed(const Problem& problem, Eigen::Index n_eq, Eigen::I
     return problem.num_equality() != n_eq || problem.num_inequality() != n_ineq;
 }
 
-// The counts are read at run time, so a problem carrying the row interface with zero rows is box-only.
+// A family that cannot honor constraint rows rejects any, as NLopt answers NLOPT_INVALID_ARGS for constraints an
+// algorithm does not support. The counts are read at run time, so a problem carrying the row interface with zero rows
+// is box-only.
 template <typename Problem>
 bool declares_constraint_rows(const Problem& problem)
 {
@@ -97,6 +102,21 @@ bool declares_constraint_rows(const Problem& problem)
     if constexpr(requires { problem.num_inequality(); })
         rows += problem.num_inequality();
     return rows > 0;
+}
+
+// A latched state keeps no objective or gradient from before the rejection, so a reader sees NaN, never a stale or
+// fabricated 0.
+template <typename Scalar, typename State>
+bool latch_rejection(State& s, bool rejected)
+{
+    s.invalid_problem = rejected;
+    if(rejected)
+    {
+        s.objective_value = std::numeric_limits<Scalar>::quiet_NaN();
+        if constexpr(requires { s.g.setConstant(Scalar(0)); })
+            s.g.setConstant(std::numeric_limits<Scalar>::quiet_NaN());
+    }
+    return rejected;
 }
 
 // The result of a step the policy refuses to take on a problem it rejected.
