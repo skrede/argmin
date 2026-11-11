@@ -106,7 +106,7 @@ TEST_CASE("a caller's explicit stall window survives the policy's hint", "[known
 }
 
 // Two equality residuals of 0.6e-6 each at the start: their L1 sum and their maximum straddle the 1e-6 floor.
-TEST_CASE("the solver and its result report the same constraint violation for one iterate", "[known-defect][!shouldfail]")
+TEST_CASE("the solver and its result report the same constraint violation for one iterate", "[status]")
 {
     const defects::row_quadratic problem{
         2.0 * Eigen::MatrixXd::Identity(2, 2), Eigen::VectorXd::Zero(2), Eigen::MatrixXd::Identity(2, 2), Eigen::VectorXd::Ones(2), Eigen::MatrixXd(0, 2), Eigen::VectorXd(0), defects::nowhere};

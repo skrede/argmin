@@ -330,11 +330,12 @@ public:
     // NaN before the first step, never a fabricated 0 that would read as a stationary point.
     scalar_type gradient_norm() const { return last_gradient_norm_; }
 
+    // L-infinity, as step_result, solve_result and the feasibility tolerance measure the rows (N&W 2e Def 12.1).
     scalar_type constraint_violation() const
     {
         if(status() == solver_status::invalid_problem)
             return std::numeric_limits<scalar_type>::quiet_NaN();
-        return detail::measure_constraint_values<scalar_type>(state_, [](const auto& c_eq, const auto& c_ineq) { return detail::constraint_violation(c_eq, c_ineq); });
+        return detail::measure_constraint_values<scalar_type>(state_, [](const auto& c_eq, const auto& c_ineq) { return detail::primal_feasibility_inf(c_eq, c_ineq); });
     }
 
     scalar_type bound_violation() const { return status() == solver_status::invalid_problem ? std::numeric_limits<scalar_type>::quiet_NaN() : bound_measure_(state_); }
@@ -407,16 +408,8 @@ public:
             return std::numeric_limits<scalar_type>::infinity();
     }
 
-    // Seed best-seen cv at loop entry from the policy's cached constraint values (populated by policy.init at x_0).
-    // L-infinity composition matches step_result.constraint_violation reporting downstream, so is_better compares
-    // like-against-like in the best-seen branch. A rejected problem's values are never filled.
-    // Reference: detail::primal_feasibility_inf (argmin/detail/lagrangian.h); N&W 2e Def 12.1.
-    scalar_type seed_best_cv() const
-    {
-        if(status() == solver_status::invalid_problem)
-            return std::numeric_limits<scalar_type>::infinity();
-        return detail::measure_constraint_values<scalar_type>(state_, [](const auto& c_eq, const auto& c_ineq) { return detail::primal_feasibility_inf(c_eq, c_ineq); });
-    }
+    // The constraint values at x_0 are cached by policy.init; a rejected problem's are never filled.
+    scalar_type seed_best_cv() const { return status() == solver_status::invalid_problem ? std::numeric_limits<scalar_type>::infinity() : constraint_violation(); }
 
     // A rejected problem seeds the same +inf sentinel for the box as for its rows.
     scalar_type seed_best_bv() const { return status() == solver_status::invalid_problem ? std::numeric_limits<scalar_type>::infinity() : bound_measure_(state_); }

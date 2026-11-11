@@ -26,7 +26,7 @@ file	lib/argmin/include/argmin/detail/nnls.h	-	415
 file	lib/argmin/include/argmin/detail/projected_gn_step.h	-	381
 file	lib/argmin/include/argmin/detail/quadratic_model.h	-	480
 file	lib/argmin/include/argmin/detail/restoration.h	-	371
-file	lib/argmin/include/argmin/detail/solver_core.h	-	667
+file	lib/argmin/include/argmin/detail/solver_core.h	-	660
 file	lib/argmin/include/argmin/detail/sqp_common.h	-	791
 file	lib/argmin/include/argmin/detail/steihaug_cg.h	-	255
 file	lib/argmin/include/argmin/detail/trust_region.h	-	924
