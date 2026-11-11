@@ -59,7 +59,7 @@ TEST_CASE("a solver group stops once every member reports line_search_failed", "
     CHECK(group.solve().iterations == 2);
 }
 
-TEST_CASE("a solver group reports line_search_failed for a member whose line search failed", "[known-defect][!shouldfail]")
+TEST_CASE("a solver group reports line_search_failed for a member whose line search failed", "[solver_group][status]")
 {
     const poisoned_box_bowl problem{};
     lbfgsb_pair group{problem, Eigen::VectorXd(Eigen::Vector2d(3.0, 2.0)), fifty_iterations()};

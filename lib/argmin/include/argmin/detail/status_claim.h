@@ -32,20 +32,32 @@ constexpr Scalar claim_violation(Scalar rows, Scalar box) noexcept
 // tolerance lets a composite KKT residual pass at an infeasible iterate, so the claim is gated on the violation
 // directly, as IPOPT requires constr_viol_tol alongside its overall tol (Ipopt options reference, Termination).
 template <typename Scalar>
-constexpr std::optional<solver_status> admit_claim(std::optional<solver_status> status, const step_result<Scalar>& r, Scalar feas_tol) noexcept
+constexpr std::optional<solver_status> admit_claim(std::optional<solver_status> status, Scalar violation, Scalar feas_tol) noexcept
 {
-    if(status && certifies_iterate(*status) && !(claim_violation(r.constraint_violation, r.bound_violation) <= feas_tol))
+    if(status && certifies_iterate(*status) && !(violation <= feas_tol))
         return std::nullopt;
     return status;
+}
+
+template <typename Scalar>
+constexpr std::optional<solver_status> admit_claim(std::optional<solver_status> status, const step_result<Scalar>& r, Scalar feas_tol) noexcept
+{
+    return admit_claim(status, claim_violation(r.constraint_violation, r.bound_violation), feas_tol);
 }
 
 // A policy reports a status from a state its own stopping test ended (COBYLA's radius at its floor, collapsed
 // ISRES mutation strengths, an exhausted SQP reset), which the next step would report again, so an inadmissible
 // policy claim ends the solve without the claim; a criterion is retested on the next iterate, which may be feasible.
 template <typename Scalar>
+constexpr solver_status admit_policy_status(solver_status status, Scalar violation, Scalar feas_tol) noexcept
+{
+    return admit_claim(std::optional{status}, violation, feas_tol).value_or(solver_status::objective_stalled);
+}
+
+template <typename Scalar>
 constexpr solver_status admit_policy_status(solver_status status, const step_result<Scalar>& r, Scalar feas_tol) noexcept
 {
-    return admit_claim(std::optional{status}, r, feas_tol).value_or(solver_status::objective_stalled);
+    return admit_policy_status(status, claim_violation(r.constraint_violation, r.bound_violation), feas_tol);
 }
 
 // A policy-reported status takes precedence and skips the convergence policy, which is consulted once per step

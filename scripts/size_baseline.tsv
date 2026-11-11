@@ -35,7 +35,7 @@ file	lib/argmin/include/argmin/qp/dense_active_set_qp.h	-	448
 file	lib/argmin/include/argmin/qp/dense_admm_qp.h	-	972
 file	lib/argmin/include/argmin/qp/detail/sparse_kkt.h	-	251
 file	lib/argmin/include/argmin/qp/sparse_admm_qp.h	-	1041
-file	lib/argmin/include/argmin/schedule/basic_solver_group.h	-	398
+file	lib/argmin/include/argmin/schedule/basic_solver_group.h	-	395
 file	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	-	1079
 file	lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h	-	1287
 file	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h	-	1013
@@ -126,7 +126,7 @@ function	lib/argmin/include/argmin/detail/quadratic_model.h	build_model	101
 function	lib/argmin/include/argmin/detail/quadratic_model.h	compute_lagrange_at_point	66
 function	lib/argmin/include/argmin/detail/quadratic_model.h	update_model_incremental	28
 function	lib/argmin/include/argmin/detail/restoration.h	feasibility_restoration	194
-function	lib/argmin/include/argmin/detail/solve_loop.h	run_solve_loop	88
+function	lib/argmin/include/argmin/detail/solve_loop.h	run_solve_loop	84
 function	lib/argmin/include/argmin/detail/solver_core.h	forward_policy_hints	82
 function	lib/argmin/include/argmin/detail/sqp_common.h	compute_bfgs_pair_fused	26
 function	lib/argmin/include/argmin/detail/sqp_common.h	extract_qp_multipliers	29
@@ -161,8 +161,8 @@ function	lib/argmin/include/argmin/qp/detail/sparse_kkt.h	analyze	80
 function	lib/argmin/include/argmin/qp/sparse_admm_qp.h	finalize	55
 function	lib/argmin/include/argmin/qp/sparse_admm_qp.h	ruiz	67
 function	lib/argmin/include/argmin/qp/sparse_admm_qp.h	try_polish	137
-function	lib/argmin/include/argmin/schedule/basic_solver_group.h	step	49
-function	lib/argmin/include/argmin/schedule/basic_solver_group.h	step_n	62
+function	lib/argmin/include/argmin/schedule/basic_solver_group.h	step	47
+function	lib/argmin/include/argmin/schedule/basic_solver_group.h	step_n	38
 function	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	init	144
 function	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	reset	31
 function	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	step	672

@@ -47,6 +47,11 @@ constexpr bool is_better(const iterate_rank<Scalar>& cand, const iterate_rank<Sc
     return cand.objective_value < best.objective_value;
 }
 
+constexpr solver_status budget_status(std::uint32_t iterations, std::uint32_t max_iterations) noexcept
+{
+    return iterations >= max_iterations ? solver_status::max_iterations : solver_status::budget_exhausted;
+}
+
 // The single solve loop body shared by every driver facade.
 //
 // A surface type (the step-budget driver, the time-budget drivers, the
@@ -136,11 +141,7 @@ run_solve_loop(Core& core, std::uint32_t budget,
     }
 
     if(status == solver_status::running)
-    {
-        status = (core.iteration_count() >= opts.max_iterations)
-                     ? solver_status::max_iterations
-                     : solver_status::budget_exhausted;
-    }
+        status = budget_status(core.iteration_count(), opts.max_iterations);
 
     core.set_status(status);
 

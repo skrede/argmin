@@ -196,7 +196,7 @@ TEST_CASE("solver_group results provides per-policy info", "[tolerance]")
     CHECK(results[1].x.size() == 2);
     // Retired policy has roundoff_limited status
     CHECK(results[0].status == solver_status::roundoff_limited);
-    // Active policy gets group status
+    // Active policy reports its own claim
     CHECK(results[1].status == solver_status::converged);
 }
 
@@ -218,7 +218,8 @@ TEST_CASE("solver_group all retired stops iteration", "[tolerance]")
     // 1000 budget. The reported iteration count must be the real number of
     // steps executed before all solvers retired -- not the requested budget
     // (which would falsely claim 1000 iterations of work never performed).
-    CHECK(result.status == solver_status::budget_exhausted);
+    // The status is that of the member whose point is returned.
+    CHECK(result.status == solver_status::roundoff_limited);
     CHECK(result.iterations < 1000);
     CHECK(result.iterations > 0);
 

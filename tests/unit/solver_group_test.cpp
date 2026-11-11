@@ -486,14 +486,15 @@ TEST_CASE("group step_n reports the executed iteration count on early break, not
     // Both policies retire (report converged) on their own 2nd step;
     // round-robin retires both within 4 group steps -- far short of the 100
     // budget. The reported iteration/evaluation counts must reflect the 4
-    // steps that actually ran, not the requested budget.
+    // steps that actually ran, not the requested budget, and the status is the
+    // chosen member's claim.
     basic_solver_group<round_robin_schedule, argmin::dynamic_dimension, void,
                        test::converging_mock_policy, test::converging_mock_policy>
         group{prob, x0, opts};
 
     auto result = group.step_n(100);
 
-    CHECK(result.status == solver_status::budget_exhausted);
+    CHECK(result.status == solver_status::converged);
     CHECK(result.iterations == 4);
     CHECK(result.iterations < 100);
     // One evaluation per step here, genuinely accumulated -- not the budget.

@@ -31,6 +31,11 @@ namespace argmin
 // Holds a tuple of step_budget_solver<Policies, N>... and uses a Schedule to decide
 // which solver to step next. The compile-time fold-expression requires clause
 // ensures the Problem type satisfies the union of all policy requirements.
+//
+// A solve returns the best member's point with that member's own status, so a claim always describes the point it
+// comes with; results() reports every member the same way. A member still running when the group stops gets the
+// group's reason instead: max_iterations or budget_exhausted when the budget ended, objective_stalled when the
+// group's criteria ended it, since their verdict is not that member's claim.
 
 template <typename Schedule, int N = dynamic_dimension, typename Problem = void, typename... Policies>
 class basic_solver_group
@@ -111,10 +116,8 @@ public:
                 auto result = step_at(idx, std::index_sequence_for<Policies...>{});
                 schedule_.notify(result);
 
-                // Retire on failure or (per-policy) convergence status so a
-                // converged solver stops being re-stepped and cannot
-                // livelock the group.
-                const auto policy_status = detail::admit_claim(result.policy_status, result, feasibility_tolerance_in_force());
+                // A converged member stops being re-stepped, so it cannot livelock the group.
+                const solver_status policy_status = result.policy_status ? detail::admit_policy_status(*result.policy_status, result, feasibility_tolerance_in_force()) : solver_status::running;
                 if(policy_status == solver_status::roundoff_limited || policy_status == solver_status::diverged || policy_status == solver_status::converged)
                 {
                     retired_[idx] = true;
@@ -162,35 +165,17 @@ public:
     {
         step_result<scalar_type> last{};
         solver_status status = solver_status::running;
-
-        // Real executed counts, so an early break (all solvers retired or a
-        // converged criterion) reports what actually ran rather than the full
-        // budget.
         std::uint32_t executed = 0;
         std::uint32_t evaluations = 0;
 
-        for(std::uint32_t i = 0; i < budget; ++i)
+        for(std::uint32_t i = 0; i < budget && !all_retired(); ++i)
         {
-            // All policies retired -- stop iteration
-            if(all_retired())
-            {
-                status = solver_status::budget_exhausted;
-                break;
-            }
-
             last = step();
             ++executed;
             evaluations += last.evaluations;
-
-            // For groups, policy failure retires the individual policy (handled in step()).
-            // Only stop the entire group if ALL policies are retired.
             if(all_retired())
-            {
-                status = solver_status::budget_exhausted;
                 break;
-            }
 
-            // Convergence policy check
             auto conv = detail::admit_claim(opts.convergence.check(last, i + 1), last, feasibility_tolerance_in_force());
             if(conv)
             {
@@ -200,20 +185,14 @@ public:
         }
 
         if(status == solver_status::running)
-        {
-            status = solver_status::budget_exhausted;
-        }
+            status = detail::budget_status(executed, opts.max_iterations);
 
-        // Populate results for non-retired policies
-        populate_active_results(status, std::index_sequence_for<Policies...>{});
-
-        auto best_idx = best_solver_index(std::index_sequence_for<Policies...>{});
-        auto seq = std::index_sequence_for<Policies...>{};
+        const auto seq = std::index_sequence_for<Policies...>{};
+        populate_active_results(status, seq);
+        const std::size_t best_idx = best_solver_index(seq);
 
         return solve_result<scalar_type, N>{
-            .status = status,
-            // Real executed iteration count and accumulated evaluation count,
-            // not the requested budget -- an early break reports what ran.
+            .status = reported_status(best_idx, status, seq),
             .iterations = executed,
             .function_evaluations = evaluations,
             .objective_value = objective_at(best_idx, seq),
@@ -268,6 +247,24 @@ private:
     scalar_type feasibility_tolerance_in_force() const
     {
         return constraint_tolerance_.value_or(static_cast<scalar_type>(feasibility_tolerance_));
+    }
+
+    // A claim is admitted on the member's own rows and box, as the solve loop admits a policy's status.
+    template <typename Solver>
+    solver_status member_status(const Solver& solver, solver_status group_status) const
+    {
+        if(solver.status() == solver_status::running)
+            return detail::certifies_iterate(group_status) ? solver_status::objective_stalled : group_status;
+        const scalar_type violation = detail::claim_violation(solver.constraint_violation(), solver.bound_violation());
+        return detail::admit_policy_status(solver.status(), violation, feasibility_tolerance_in_force());
+    }
+
+    template <std::size_t... Is>
+    solver_status reported_status(std::size_t idx, solver_status group_status, std::index_sequence<Is...>) const
+    {
+        solver_status status = group_status;
+        ((Is == idx ? void(status = member_status(std::get<Is>(solvers_), group_status)) : void()), ...);
+        return status;
     }
 
     // Members rank as one solve's iterates do, each with its own status.
@@ -370,7 +367,7 @@ private:
             if(!retired_[i])
             {
                 results_[i] = solve_result<scalar_type, N>{
-                    .status = group_status,
+                    .status = member_status(solver, group_status),
                     .objective_value = solver.state().objective_value,
                     // Real last-reported gradient norm for this active solver
                     // (NaN sentinel if it never stepped) -- never a fabricated
