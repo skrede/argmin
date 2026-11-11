@@ -958,20 +958,7 @@ struct filter_nw_sqp_policy
                 // stationarity quantity at the converged optimum (cases
                 // where the line search exhausts on micro-steps near the
                 // KKT point but restoration yields a no-movement success).
-                //
-                // Adopted from: argmin/detail/lagrangian.h compute_kkt_multipliers_active_set.
-                s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
-                s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
-                std::optional<Scalar> kkt_rest;
-                if(m > 0)
-                {
-                    argmin::detail::compute_kkt_multipliers_active_set<Scalar, N,
-                                                                      Eigen::Dynamic,
-                                                                      Eigen::Dynamic>(
-                        s.g, s.J_eq, s.J_ineq, s.c_ineq, s.x, s.lower, s.upper, s.bufs.kkt_ws,
-                        s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
-                    kkt_rest = detail::box_kkt_residual<Scalar, N>(s);
-                }
+                const Scalar kkt_rest = detail::estimated_box_kkt_residual<Scalar, N>(s);
 
                 return step_result<Scalar>{
                     .objective_value = s.objective_value,
@@ -1023,20 +1010,7 @@ struct filter_nw_sqp_policy
             // moved) iterate so the cross-policy step_result consistency
             // suite has a valid stationarity quantity on the cap-exhausted
             // null-step return.
-            //
-            // Adopted from: argmin/detail/lagrangian.h compute_kkt_multipliers_active_set.
-            s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
-            s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
-            std::optional<Scalar> kkt_cap;
-            if(m > 0)
-            {
-                argmin::detail::compute_kkt_multipliers_active_set<Scalar, N,
-                                                                  Eigen::Dynamic,
-                                                                  Eigen::Dynamic>(
-                    s.g, s.J_eq, s.J_ineq, s.c_ineq, s.x, s.lower, s.upper, s.bufs.kkt_ws,
-                    s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
-                kkt_cap = detail::box_kkt_residual<Scalar, N>(s);
-            }
+            const Scalar kkt_cap = detail::estimated_box_kkt_residual<Scalar, N>(s);
 
             ++s.iteration;
             return step_result<Scalar>{

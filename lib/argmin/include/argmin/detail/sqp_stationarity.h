@@ -46,6 +46,18 @@ Scalar box_kkt_residual(const State& s)
                                                                    s.c_eq, s.c_ineq, s.x, s.lower, s.upper);
 }
 
+// The residual above with the multipliers re-estimated at the current iterate, for a return reached away from the
+// step that last estimated them (a restoration, an exhausted retry). The estimate writes only binding entries.
+template <typename Scalar, int N, typename State>
+Scalar estimated_box_kkt_residual(State& s)
+{
+    s.bufs.kkt_lambda_eq_buf.setZero(s.n_eq);
+    s.bufs.kkt_mu_ineq_buf.setZero(s.n_ineq);
+    if(s.n_eq + s.n_ineq > 0)
+        compute_kkt_multipliers_active_set<Scalar, N, Eigen::Dynamic, Eigen::Dynamic>(s.g, s.J_eq, s.J_ineq, s.c_ineq, s.x, s.lower, s.upper, s.bufs.kkt_ws, s.bufs.kkt_lambda_eq_buf, s.bufs.kkt_mu_ineq_buf);
+    return box_kkt_residual<Scalar, N>(s);
+}
+
 }
 
 #endif

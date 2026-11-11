@@ -150,15 +150,11 @@ Scalar kkt_residual(const Eigen::Ref<const Eigen::Vector<Scalar, N>>&       grad
     return std::max({stationarity, bound_complementarity_leg<Scalar, N>(grad_L, x, lower, upper), kkt_feasibility_legs<Scalar, Meq, Mineq>(mu_ineq, c_eq, c_ineq)});
 }
 
-// KKT residual for bound-constrained problems.
+// KKT residual for bound-constrained problems: the projected step ||P(x - grad_f, lower, upper) - x||_inf, P the
+// component-wise box projection (||grad_f||_inf at an interior point), with the box multipliers held to the product
+// complementarity as in the composite above.
 //
-// Reduces to ||P(x - grad_f, lower, upper) - x||_inf where P is
-// component-wise box projection. This is zero iff x satisfies the
-// bound-constrained first-order conditions (at an interior point it
-// collapses to ||grad_f||_inf; at an active bound it captures the
-// projected gradient).
-//
-// Reference: N&W 2e Section 16.7 (projected gradient optimality).
+// Reference: N&W 2e Section 16.7 (projected gradient optimality); Definition 12.1.
 template <typename Scalar, int N>
 Scalar kkt_residual_bound(const Eigen::Vector<Scalar, N>& x,
                           const Eigen::Vector<Scalar, N>& grad_f,
@@ -167,9 +163,8 @@ Scalar kkt_residual_bound(const Eigen::Vector<Scalar, N>& x,
 {
     Eigen::Vector<Scalar, N> projected_step =
         (x - grad_f).cwiseMax(lower).cwiseMin(upper) - x;
-    return projected_step.size() > 0
-        ? projected_step.template lpNorm<Eigen::Infinity>()
-        : Scalar(0);
+    const Scalar stationarity = projected_step.size() > 0 ? projected_step.template lpNorm<Eigen::Infinity>() : Scalar(0);
+    return std::max(stationarity, bound_complementarity_leg<Scalar, N>(grad_f, x, lower, upper));
 }
 
 // Box-projected stationarity measure in displaced-bound form.

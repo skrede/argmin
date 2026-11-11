@@ -491,6 +491,7 @@ struct filter_slsqp_policy
                             .improved = false,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
+                            .kkt_residual = detail::estimated_box_kkt_residual<Scalar, N>(s),
                             .diagnostics = {
                                 .bfgs_reset_count = reset_count,
                                 .bfgs_skip_count = 0,
@@ -692,7 +693,6 @@ struct filter_slsqp_policy
         // it accepted a backtracked short step, alpha < 1) -- the Maratos
         // effect manifests precisely as a backtracked acceptance replacing
         // the quadratic full step.
-        //
         // Reference: Wachter & Biegler 2006 Section 2.4;
         //            N&W Section 18.3 (Maratos effect).
         if((!accepted || alpha < Scalar(1.0)) && h_full_step >= h_k)
@@ -816,7 +816,6 @@ struct filter_slsqp_policy
         // cheaper than discarding curvature. The BFGS-reset retry layered
         // at the bottom of the loop fires only if restoration also fails
         // to recover an acceptable trial point.
-        //
         // Reference: Wachter & Biegler 2006 Section 3.
         if(!accepted)
         {
@@ -855,6 +854,7 @@ struct filter_slsqp_policy
                             .improved = s.objective_value < f_k,
                             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
                             .x_norm = s.x.norm(),
+                            .kkt_residual = detail::estimated_box_kkt_residual<Scalar, N>(s),
                             .diagnostics = {
                                 .bfgs_reset_count = reset_count,
                                 .bfgs_skip_count = 0,
