@@ -5,6 +5,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/start_point.h"
 #include "argmin/detail/status_claim.h"
+#include "argmin/detail/bound_measure.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/tuple_contains.h"
 #include "argmin/result/step_result.h"
@@ -72,7 +73,6 @@ using resolve_state_t =
     typename decltype(resolve_state_tag<Policy, Problem>())::type;
 
 // Shared step/binding/convergence engine for every driver facade.
-//
 // solver_core owns the wrapped policy instance, its resolved state, the
 // problem binding, the iteration/evaluation counters, the stored convergence
 // criteria, the abort flag, and the by-step convergence consultation. It
@@ -82,7 +82,6 @@ using resolve_state_t =
 // (detail/solve_loop.h) parameterized by a budget predicate; every surface
 // type (the basic step driver, the budget drivers, the passive stepper)
 // composes this core rather than forking a copy of the loop.
-//
 // Convergence checking is performed here, not by the policy: the policy does
 // NOT know about convergence. Reference: K&W Section 4.4 (convergence
 // criteria), N&W Section 3.1.
@@ -130,14 +129,10 @@ public:
     static_assert(std::same_as<typename Convergence::scalar_type, scalar_type>,
                   "Convergence criteria must use the same scalar type as the policy.");
 
-    // Rebinds the incoming problem reference onto the class-template
-    // Problem slot so the loop can call value()/constraints() directly
-    // instead of probing policy state for a cached (f, cv) pair.
-    // Returns nullptr when Problem==void (the legacy non-template
-    // state_type policies, e.g. projected_gn, where no class-level
-    // Problem type exists); returns &problem otherwise. Lifetime
-    // follows the caller-owned problem object -- the same constraint
-    // already applies to every policy state that caches &problem.
+    // Rebinds the incoming problem reference onto the class-template Problem slot so the loop can call value()/constraints()
+    // directly instead of probing policy state for a cached (f, cv) pair. Returns nullptr when Problem==void (the legacy
+    // non-template state_type policies, e.g. projected_gn, where no class-level Problem type exists); returns &problem
+    // otherwise. Lifetime follows the caller-owned problem object, as for every policy state that caches &problem.
     template <typename P>
     static constexpr const Problem* bind_problem(const P& problem) noexcept
     {
@@ -256,6 +251,7 @@ public:
         , feasibility_tolerance_{other.feasibility_tolerance_}
         , stored_convergence_{other.stored_convergence_}
         , problem_ptr_{other.problem_ptr_}
+        , bound_measure_{std::move(other.bound_measure_)}
         , policy_opts_{std::move(other.policy_opts_)}
         , built_{other.built_}
         , state_{std::move(other.state_)}
@@ -276,6 +272,7 @@ public:
             feasibility_tolerance_ = other.feasibility_tolerance_;
             stored_convergence_ = other.stored_convergence_;
             problem_ptr_ = other.problem_ptr_;
+            bound_measure_ = std::move(other.bound_measure_);
             policy_opts_ = std::move(other.policy_opts_);
             built_ = other.built_;
             state_ = std::move(other.state_);
@@ -308,7 +305,7 @@ public:
             return detail::rejected_step<scalar_type>(state_);
         auto result = policy_.step(state_);
         result.x_norm = state_.x.norm();
-        result.bound_violation = detail::measure_bound_violation<scalar_type, N>(state_, problem_ptr_);
+        result.bound_violation = bound_measure_(state_);
         ++iterations_;
         function_evaluations_ += result.evaluations;
         last_gradient_norm_ = result.gradient_norm;
@@ -339,6 +336,8 @@ public:
             return std::numeric_limits<scalar_type>::quiet_NaN();
         return detail::measure_constraint_values<scalar_type>(state_, [](const auto& c_eq, const auto& c_ineq) { return detail::constraint_violation(c_eq, c_ineq); });
     }
+
+    scalar_type bound_violation() const { return status() == solver_status::invalid_problem ? std::numeric_limits<scalar_type>::quiet_NaN() : bound_measure_(state_); }
 
     // Configured stopping budget and best-seen feasibility floors, read back
     // by the driver facade when it rebuilds the local solver_options on the
@@ -394,7 +393,6 @@ public:
     // target least_squares only) fall back to the +inf sentinel so the
     // first accepted step becomes the best-seen baseline; x_0 is still
     // returned via best_x if no step succeeds.
-    //
     // Reference: argmin::objective concept (argmin/formulation/
     //            concepts.h) -- value(x) is total across supported
     //            Problem types.
@@ -409,19 +407,19 @@ public:
             return std::numeric_limits<scalar_type>::infinity();
     }
 
-    // Seed best-seen cv at loop entry from the policy's cached
-    // constraint values (populated by policy.init at x_0). L-infinity
-    // composition matches step_result.constraint_violation reporting
-    // downstream, so is_better compares like-against-like in the best-
-    // seen branch. A rejected problem's values are never filled.
-    // Reference: detail::primal_feasibility_inf (argmin/detail/
-    //            lagrangian.h); N&W 2e Def 12.1.
+    // Seed best-seen cv at loop entry from the policy's cached constraint values (populated by policy.init at x_0).
+    // L-infinity composition matches step_result.constraint_violation reporting downstream, so is_better compares
+    // like-against-like in the best-seen branch. A rejected problem's values are never filled.
+    // Reference: detail::primal_feasibility_inf (argmin/detail/lagrangian.h); N&W 2e Def 12.1.
     scalar_type seed_best_cv() const
     {
         if(status() == solver_status::invalid_problem)
             return std::numeric_limits<scalar_type>::infinity();
         return detail::measure_constraint_values<scalar_type>(state_, [](const auto& c_eq, const auto& c_ineq) { return detail::primal_feasibility_inf(c_eq, c_ineq); });
     }
+
+    // A rejected problem seeds the same +inf sentinel for the box as for its rows.
+    scalar_type seed_best_bv() const { return status() == solver_status::invalid_problem ? std::numeric_limits<scalar_type>::infinity() : bound_measure_(state_); }
 
     // Stores the constructor's convergence policy by value, with no
     // field-by-field remap: Convergence is the solver's own class-template
@@ -440,12 +438,10 @@ public:
     // every constructor; once set here the tightened threshold persists
     // through subsequent solve() / step_n(budget) calls that reconstruct
     // local solver_options from stored state.
-    //
     // constraint_tolerance is a solver_options field (not a policy_options
     // field), which is why this is a sibling to forward_policy_hints
     // instead of an extension of it -- the two forwarders honor different
     // scopes.
-    //
     // Mapping rule (max-of-two): user-supplied constraint_tolerance now
     // gates the composite E-measure (N&W 2e Def 12.1) via
     // stationarity_threshold rather than a separate primal-feasibility
@@ -564,6 +560,7 @@ private:
     scalar_type feasibility_tolerance_{convergence_defaults<scalar_type>::feasibility_tolerance};
     Convergence stored_convergence_{};
     const Problem* problem_ptr_{nullptr};
+    detail::bound_measure<scalar_type, N, state_type, Problem> bound_measure_;
     std::optional<policy_options_t<Policy, scalar_type>> policy_opts_;
     // False when the construction start was rejected: state_ then holds no value but a NaN x.
     bool built_;
@@ -582,6 +579,7 @@ private:
         , constraint_tolerance_{opts.constraint_tolerance}
         , feasibility_tolerance_{opts.feasibility_tolerance}
         , problem_ptr_{bind_problem(problem)}
+        , bound_measure_{problem}
         , policy_opts_{std::move(policy_opts)}
         , built_{detail::start_length_ok<N>(x0, detail::problem_start_dimension<N>(problem, x0.size()))}
         , state_{make_state(problem, x0, opts)}
@@ -652,6 +650,8 @@ private:
 
     solver_status restart(solver_status status)
     {
+        if constexpr(!std::is_same_v<Problem, void>)
+            bound_measure_.refresh(*problem_ptr_);
         last_status_ = status;
         iterations_ = 0;
         function_evaluations_ = 0;

@@ -23,6 +23,7 @@
 
 #include <vector>
 #include <cstddef>
+#include <cstdint>
 
 namespace
 {
@@ -85,6 +86,52 @@ TEST_CASE("alloc_gate_lm", "[alloc-gate]")
     check_steady_zero(sensor::measure_steady(
         argmin::lm_policy<double, argmin::sd_ls012<>::problem_dimension>{},
         argmin::sd_ls012<>{}, opts, 10));
+}
+
+namespace
+{
+
+// Box wide enough never to bind, returned as a dynamic vector as a caller's problem may return it whatever its dimension.
+struct rosenbrock_ls_fixed_dynamic_box : rosenbrock_ls_fixed
+{
+    Eigen::VectorXd lower_bounds() const { return Eigen::VectorXd::Constant(2, -5.0); }
+    Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd::Constant(2, 5.0); }
+};
+
+struct rosenbrock_ls_dynamic
+{
+    static constexpr std::int32_t problem_dimension = argmin::dynamic_dimension;
+
+    std::int32_t dimension() const { return 2; }
+    std::int32_t num_residuals() const { return 2; }
+    double value(const Eigen::VectorXd& x) const { return rosenbrock_ls_fixed{}.value(x); }
+    void residuals(const Eigen::VectorXd& x, Eigen::VectorXd& r) const { rosenbrock_ls_fixed{}.residuals(x, r); }
+    void jacobian(const Eigen::VectorXd& x, Eigen::MatrixXd& J) const { rosenbrock_ls_fixed{}.jacobian(x, J); }
+    Eigen::VectorXd initial_point() const { return Eigen::VectorXd{{-1.0, 1.0}}; }
+};
+
+struct rosenbrock_ls_dynamic_box : rosenbrock_ls_dynamic
+{
+    Eigen::VectorXd lower_bounds() const { return Eigen::VectorXd::Constant(2, -5.0); }
+    Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd::Constant(2, 5.0); }
+};
+
+}
+
+// Levenberg-Marquardt ignores the box, so a step measures its iterate against bounds copied when the state was built:
+// a bounded problem adds no allocation to a step, none at a fixed dimension and none beyond the family's own at a
+// dynamic one.
+TEST_CASE("alloc_gate_lm_bounded", "[alloc-gate]")
+{
+    const auto opts = lm_gate_opts();
+
+    check_steady_zero(sensor::measure_steady(argmin::lm_policy<double, 2>{}, rosenbrock_ls_fixed_dynamic_box{}, opts, 10));
+
+    const auto bounded = sensor::measure_steady(argmin::lm_policy<double>{}, rosenbrock_ls_dynamic_box{}, opts, 10);
+    const auto unbounded = sensor::measure_steady(argmin::lm_policy<double>{}, rosenbrock_ls_dynamic{}, opts, 10);
+    CHECK(bounded.eigen_malloc == unbounded.eigen_malloc);
+    CHECK(bounded.c_alloc == unbounded.c_alloc);
+    CHECK_FALSE(bounded.terminated_early);
 }
 
 namespace

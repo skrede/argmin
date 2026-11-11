@@ -21,7 +21,6 @@ namespace argmin
 {
 
 // Passive real-time step primitive: the caller owns all scheduling.
-//
 // stepper is the purest embeddable surface over detail::solver_core. It shares
 // the driver constructor family, the templated MatrixBase x0 boundary, the CTAD
 // deduction guides, and every accessor with step_budget_solver, but it exposes
@@ -31,7 +30,6 @@ namespace argmin
 // naturally by polling status() / converged() between ticks. This is the shape a
 // hard-real-time control or IK loop wants: a single bounded-work call per tick
 // with no hidden iteration and no wall clock.
-//
 // stepper satisfies the steppable concept (the passive single-step surface) but
 // deliberately NOT nlp_solver (which refines steppable with the loop-owning
 // drive/bounded-run surface). RT-safety here is a property, not a location: the
@@ -170,6 +168,8 @@ public:
     scalar_type gradient_norm() const { return core_.gradient_norm(); }
 
     scalar_type constraint_violation() const { return core_.constraint_violation(); }
+
+    scalar_type bound_violation() const { return core_.bound_violation(); }
 
     void abort() { core_.abort(); }
 

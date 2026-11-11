@@ -26,7 +26,6 @@ namespace argmin
 {
 
 // Wall-clock deadline driver.
-//
 // time_budget_solver is the same thin facade over detail::solver_core +
 // detail::run_solve_loop as step_budget_solver, but budgeted by a wall-clock
 // deadline: solve()/step_n() run until the elapsed time since the loop began
@@ -37,7 +36,6 @@ namespace argmin
 // builds that predicate and hands it to the shared loop, so every chrono
 // symbol stays confined to this time path -- the step-budget driver never
 // sees it.
-//
 // The result is timed_solve_result: the chrono-free solve_result diagnostics
 // plus the measured wall_time. Because timed_solve_result publicly derives
 // from solve_result, this driver satisfies nlp_solver exactly as the step
@@ -181,6 +179,8 @@ public:
     const Policy& policy() const { return core_.policy(); }
     scalar_type gradient_norm() const { return core_.gradient_norm(); }
     scalar_type constraint_violation() const { return core_.constraint_violation(); }
+
+    scalar_type bound_violation() const { return core_.bound_violation(); }
     void abort() { core_.abort(); }
 
     template <typename Derived>

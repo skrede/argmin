@@ -1,4 +1,5 @@
 #include "argmin/solver/options.h"
+#include "argmin/solver/lm_policy.h"
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/filter_trsqp_policy.h"
 
@@ -65,6 +66,21 @@ struct leaning_then_final_policy
     solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0) { return reset(s, x0); }
 };
 
+// r(x) = x - (2, 0.25), whose zero lies outside the box: Levenberg-Marquardt ignores the box and steps onto it.
+struct offset_outside_box
+{
+    static constexpr std::int32_t problem_dimension = dynamic_dimension;
+
+    std::int32_t dimension() const { return 2; }
+    std::int32_t num_residuals() const { return 2; }
+    double value(const Eigen::VectorXd& x) const { return 0.5 * (x - target()).squaredNorm(); }
+    void residuals(const Eigen::VectorXd& x, Eigen::VectorXd& r) const { r = x - target(); }
+    void jacobian(const Eigen::VectorXd&, Eigen::MatrixXd& J) const { J.setIdentity(); }
+    Eigen::VectorXd lower_bounds() const { return Eigen::VectorXd::Constant(2, -2.0); }
+    Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd{{0.5, 2.0}}; }
+    static Eigen::Vector2d target() { return {2.0, 0.25}; }
+};
+
 solve_result<double, dynamic_dimension> solve_leaning(std::optional<solver_status> final_status)
 {
     solver_options<> opts;
@@ -115,4 +131,18 @@ TEST_CASE("filter trust-region SQP returns the hs071 iterate its converged statu
     REQUIRE(result.status == solver_status::converged);
     CHECK(result.x == solver.state().x);
     CHECK(result.objective_value == problem.value(solver.state().x));
+}
+
+TEST_CASE("a family that ignores the box returns an iterate inside it over a lower objective outside it", "[solver]")
+{
+    const offset_outside_box problem;
+    const Eigen::VectorXd x0{{0.1, -1.0}};
+    solver_options<> opts;
+    opts.max_iterations = 5;
+    step_budget_solver solver{lm_policy<double>{}, problem, x0, opts};
+    const auto result = solver.solve();
+    CHECK(result.status != solver_status::converged);
+    CHECK(result.x == x0);
+    CHECK(result.objective_value == problem.value(x0));
+    CHECK(result.constraint_violation == 0.0);
 }

@@ -24,8 +24,19 @@ struct line
     double value(const Eigen::VectorXd& x) const { return x(0); }
 };
 
-// Holds a feasible point of objective Objective and reports Claim as its policy status on every step (running: none).
-template <std::int32_t Objective, solver_status Claim>
+struct boxed_line
+{
+    static constexpr std::int32_t problem_dimension = dynamic_dimension;
+
+    std::int32_t dimension() const { return 1; }
+    double value(const Eigen::VectorXd& x) const { return x(0); }
+    Eigen::VectorXd lower_bounds() const { return Eigen::VectorXd::Constant(1, -1.0); }
+    Eigen::VectorXd upper_bounds() const { return Eigen::VectorXd::Constant(1, 1.0); }
+};
+
+// Holds the point x = Position, feasible for the rows, at objective Objective and reports Claim as its policy status on
+// every step (running: none).
+template <std::int32_t Objective, solver_status Claim, std::int32_t Position = 0>
 struct parked_member_policy
 {
     using scalar_type = double;
@@ -39,7 +50,7 @@ struct parked_member_policy
     template <typename Problem, typename Convergence>
     state_type init(const Problem&, const Eigen::VectorXd& x0, const solver_options<Convergence>&)
     {
-        return state_type{x0, static_cast<double>(Objective)};
+        return state_type{Eigen::VectorXd::Constant(x0.size(), static_cast<double>(Position)), static_cast<double>(Objective)};
     }
 
     step_result<double> step(state_type& s)
@@ -68,6 +79,14 @@ using lower_running = parked_member_policy<1, solver_status::running>;
 using higher_running = parked_member_policy<2, solver_status::running>;
 using lower_converged = parked_member_policy<1, solver_status::converged>;
 using higher_converged = parked_member_policy<2, solver_status::converged>;
+using lower_outside_box = parked_member_policy<1, solver_status::running, 5>;
+
+template <typename First, typename Second>
+double chosen_objective_in_box()
+{
+    basic_solver_group<round_robin_schedule, dynamic_dimension, boxed_line, First, Second> group{boxed_line{}, Eigen::VectorXd::Constant(1, 0.0)};
+    return group.step_n(4).objective_value;
+}
 
 }
 
@@ -84,4 +103,10 @@ TEST_CASE("a solver group ranks its members as the solve loop ranks iterates", "
         CHECK(chosen_objective<higher_running, lower_running>() == 1.0);
         CHECK(chosen_objective<higher_converged, lower_converged>() == 1.0);
     }
+}
+
+TEST_CASE("a solver group ranks a member outside the box below one inside it", "[solver_group][feasibility]")
+{
+    CHECK(chosen_objective_in_box<lower_outside_box, higher_running>() == 2.0);
+    CHECK(chosen_objective_in_box<higher_running, lower_outside_box>() == 2.0);
 }

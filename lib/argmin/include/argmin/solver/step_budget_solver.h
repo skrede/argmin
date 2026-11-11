@@ -23,7 +23,6 @@ namespace argmin
 {
 
 // Real-time step-budget driver: budget is max_iterations only.
-//
 // step_budget_solver is a thin facade over detail::solver_core composed with
 // the ONE detail::run_solve_loop. The core owns the wrapped Policy, its
 // resolved state, the problem binding, the counters, the stored convergence
@@ -36,7 +35,6 @@ namespace argmin
 // so a translation unit budgeting purely by iterations never pulls the clock
 // in. Wall-clock budgeting lives on the sibling time_budget_solver /
 // step_and_time_budget_solver drivers.
-//
 // step_budget_solver<Policy, N, Problem> has three template parameters: the
 // policy, the compile-time dimension N, and the Problem type. N and Problem
 // are deduced from the problem via CTAD deduction guides -- users never write
@@ -195,6 +193,8 @@ public:
     scalar_type gradient_norm() const { return core_.gradient_norm(); }
 
     scalar_type constraint_violation() const { return core_.constraint_violation(); }
+
+    scalar_type bound_violation() const { return core_.bound_violation(); }
 
     void abort() { core_.abort(); }
 

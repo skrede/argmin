@@ -28,7 +28,6 @@ namespace argmin
 // Combined step + wall-clock budget driver -- the like-for-like successor of
 // the original step_budget_solver semantics, where both an iteration cap and a
 // wall-clock deadline are first-class stopping conditions.
-//
 // Mechanically it is the same thin facade over detail::solver_core +
 // detail::run_solve_loop as time_budget_solver: solve()/step_n() run the loop
 // up to max_iterations while the deadline predicate (polled every
@@ -37,7 +36,6 @@ namespace argmin
 // the convergence policy -- terminates the run. The distinction from
 // time_budget_solver is one of contract, not implementation: here the
 // iteration cap is an equal, advertised budget rather than a safety backstop.
-//
 // The result is timed_solve_result (chrono-free diagnostics plus wall_time);
 // because it publicly derives from solve_result, this driver satisfies
 // nlp_solver as the other drivers do. Every chrono symbol is confined to this
@@ -180,6 +178,8 @@ public:
     const Policy& policy() const { return core_.policy(); }
     scalar_type gradient_norm() const { return core_.gradient_norm(); }
     scalar_type constraint_violation() const { return core_.constraint_violation(); }
+
+    scalar_type bound_violation() const { return core_.bound_violation(); }
     void abort() { core_.abort(); }
 
     template <typename Derived>

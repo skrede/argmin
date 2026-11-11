@@ -136,7 +136,10 @@ The full concept definitions are in
 
 For a constrained solve, the driver also exposes
 `solver.constraint_violation()` (the infinity-norm of the constraint
-residual).
+residual) and `solver.bound_violation()` (the current iterate's infinity-norm
+distance outside the bounds). `result.x` is the best iterate seen, ranked first
+on the larger of the two, so a point within the tolerance on both beats any
+point outside it.
 
 ## Choosing an execution mode
 

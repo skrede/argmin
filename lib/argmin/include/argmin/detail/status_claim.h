@@ -19,6 +19,14 @@ constexpr bool certifies_iterate(solver_status status) noexcept
         || status == solver_status::xtol_reached || status == solver_status::stalled;
 }
 
+// The violation a claim is judged on and an iterate ranked by, over the constraint rows and the box. A NaN in either
+// leg is the result, so a non-finite iterate never reads as feasible.
+template <typename Scalar>
+constexpr Scalar claim_violation(Scalar rows, Scalar box) noexcept
+{
+    return (box > rows || box != box) ? box : rows;
+}
+
 // Every claim about the final iterate includes primal feasibility, the box included: optimality by N&W 2e
 // Definition 12.1, and stalled / xtol_reached assert it outright. A stationarity threshold above the feasibility
 // tolerance lets a composite KKT residual pass at an infeasible iterate, so the claim is gated on the violation
@@ -26,7 +34,7 @@ constexpr bool certifies_iterate(solver_status status) noexcept
 template <typename Scalar>
 constexpr std::optional<solver_status> admit_claim(std::optional<solver_status> status, const step_result<Scalar>& r, Scalar feas_tol) noexcept
 {
-    if(status && certifies_iterate(*status) && !(r.constraint_violation <= feas_tol && r.bound_violation <= feas_tol))
+    if(status && certifies_iterate(*status) && !(claim_violation(r.constraint_violation, r.bound_violation) <= feas_tol))
         return std::nullopt;
     return status;
 }

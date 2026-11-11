@@ -712,7 +712,7 @@ struct augmented_lagrangian_policy
             // the +inf sentinel so the first chunk's result always wins.
             s.inner_active = true;
             s.inner_iters_done = 0;
-            s.best_inner = {solver_status::running, std::numeric_limits<scalar_type>::infinity(), std::numeric_limits<scalar_type>::infinity()};
+            s.best_inner = {solver_status::running, std::numeric_limits<scalar_type>::infinity(), std::numeric_limits<scalar_type>::infinity(), std::numeric_limits<scalar_type>::infinity()};
             s.best_inner_x = s.x;
         }
 
@@ -738,11 +738,11 @@ struct augmented_lagrangian_policy
         // solve's. The inner driver reports the best over each chunk (seeded
         // from where the prior chunk left off); folding those recovers the
         // best over the whole solve, and the final chunk's status certifies its
-        // iterate exactly when the single solve's would. The bound-constrained
-        // inner reports cv == 0, so feas_tol never separates two chunks.
+        // iterate exactly when the single solve's would. The subproblem has no rows, so only its box separates two chunks.
         {
             constexpr scalar_type inner_feas_tol = augmented_lagrangian_defaults<scalar_type>::inner_feasibility_tolerance;
-            const detail::iterate_rank<scalar_type> inner_rank{inner_result.status, inner_result.objective_value, inner_result.constraint_violation};
+            const scalar_type inner_box = detail::box_violation_inf<scalar_type, N>(inner_result.x, s.lower, s.upper);
+            const detail::iterate_rank<scalar_type> inner_rank{inner_result.status, inner_result.objective_value, inner_result.constraint_violation, inner_box};
             if(detail::is_better(inner_rank, s.best_inner, inner_feas_tol))
             {
                 s.best_inner = inner_rank;

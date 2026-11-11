@@ -276,12 +276,12 @@ private:
     {
         constexpr scalar_type unset = std::numeric_limits<scalar_type>::max();
         const scalar_type tol = feasibility_tolerance_in_force();
-        detail::iterate_rank<scalar_type> best{solver_status::running, unset, unset};
+        detail::iterate_rank<scalar_type> best{solver_status::running, unset, unset, unset};
         std::size_t best_idx = 0;
 
         auto rank = [&](std::size_t idx, const auto& solver)
         {
-            const detail::iterate_rank<scalar_type> cand{solver.status(), solver.state().objective_value, solver.constraint_violation()};
+            const detail::iterate_rank<scalar_type> cand{solver.status(), solver.state().objective_value, solver.constraint_violation(), solver.bound_violation()};
             if(detail::is_better(cand, best, tol))
             {
                 best = cand;
