@@ -47,24 +47,6 @@ Scalar measure_constraint_values(const State& s, Measure measure)
         return Scalar(0);
 }
 
-template <typename Scalar, typename State>
-Scalar rejected_objective(const State& s)
-{
-    if constexpr(requires { s.f; })
-        return s.f;
-    else
-        return std::numeric_limits<Scalar>::quiet_NaN();
-}
-
-template <typename Scalar, typename State>
-Scalar rejected_gradient_norm(const State& s)
-{
-    if constexpr(requires { s.g.norm(); })
-        return s.g.norm();
-    else
-        return std::numeric_limits<Scalar>::quiet_NaN();
-}
-
 // A static row capacity is a hard storage bound; dynamic_dimension stays a runtime capacity with no bound to exceed.
 template <int Capacity>
 bool exceeds_capacity(Eigen::Index rows)
@@ -119,25 +101,10 @@ bool latch_rejection(State& s, bool rejected)
     return rejected;
 }
 
-// The result of a step the policy refuses to take on a problem it rejected.
-template <typename Scalar, typename State>
-step_result<Scalar> rejected_step(const State& s)
-{
-    return step_result<Scalar>{
-        .objective_value = rejected_objective<Scalar>(s),
-        .gradient_norm = rejected_gradient_norm<Scalar>(s),
-        .step_size = Scalar(0.0),
-        .objective_change = Scalar(0.0),
-        .improved = false,
-        .is_null_step = true,
-        .x_norm = s.x.norm(),
-        .policy_status = solver_status::invalid_problem,
-    };
-}
-
-// The result of a step on a state that was never built: there is no iterate to report.
+// A rejected or unbuilt problem is never evaluated, so its step reports no value: NaN, never a fabricated 0 that a
+// solve would rank as a feasible iterate.
 template <typename Scalar>
-step_result<Scalar> unbuilt_step()
+step_result<Scalar> no_value_step(Scalar x_norm)
 {
     constexpr Scalar nan = std::numeric_limits<Scalar>::quiet_NaN();
     return step_result<Scalar>{
@@ -148,10 +115,24 @@ step_result<Scalar> unbuilt_step()
         .improved = false,
         .is_null_step = true,
         .constraint_violation = nan,
-        .x_norm = nan,
+        .bound_violation = nan,
+        .x_norm = x_norm,
         .policy_status = solver_status::invalid_problem,
         .evaluations = 0,
     };
+}
+
+template <typename Scalar, typename State>
+step_result<Scalar> rejected_step(const State& s)
+{
+    return no_value_step<Scalar>(s.x.norm());
+}
+
+// A state that was never built has no iterate whose norm to report.
+template <typename Scalar>
+step_result<Scalar> unbuilt_step()
+{
+    return no_value_step<Scalar>(std::numeric_limits<Scalar>::quiet_NaN());
 }
 
 }

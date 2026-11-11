@@ -301,7 +301,7 @@ public:
     {
         if(!built_)
             return detail::unbuilt_step<scalar_type>();
-        if(last_status_ == solver_status::invalid_problem)
+        if(status() == solver_status::invalid_problem)
             return detail::rejected_step<scalar_type>(state_);
         auto result = policy_.step(state_);
         result.x_norm = state_.x.norm();
@@ -374,7 +374,7 @@ public:
     solver_status reset(const Eigen::MatrixBase<Derived>& x0)
     {
         if(!detail::start_length_ok<N>(x0, expected_dimension(x0.size())))
-            return last_status_ = solver_status::invalid_problem;
+            return restart(solver_status::invalid_problem);
         return restart(built_ ? policy_.reset(state_, x0) : build(x0));
     }
 
@@ -383,7 +383,7 @@ public:
     solver_status reset_clear(const Eigen::MatrixBase<Derived>& x0)
     {
         if(!detail::start_length_ok<N>(x0, expected_dimension(x0.size())))
-            return last_status_ = solver_status::invalid_problem;
+            return restart(solver_status::invalid_problem);
         return restart(built_ ? policy_.reset_clear(state_, x0) : build(x0));
     }
 
@@ -399,20 +399,16 @@ public:
     //            Problem types.
     scalar_type seed_best_f() const
     {
-        // A rejected problem is never evaluated, not even at x_0.
-        if(status() == solver_status::invalid_problem)
-            return std::numeric_limits<scalar_type>::infinity();
         if constexpr(!std::is_same_v<Problem, void>)
             return static_cast<scalar_type>(problem_ptr_->value(state_.x));
         else
             return std::numeric_limits<scalar_type>::infinity();
     }
 
-    // The constraint values at x_0 are cached by policy.init; a rejected problem's are never filled.
-    scalar_type seed_best_cv() const { return status() == solver_status::invalid_problem ? std::numeric_limits<scalar_type>::infinity() : constraint_violation(); }
+    // The constraint values at x_0 are cached by policy.init.
+    scalar_type seed_best_cv() const { return constraint_violation(); }
 
-    // A rejected problem seeds the same +inf sentinel for the box as for its rows.
-    scalar_type seed_best_bv() const { return status() == solver_status::invalid_problem ? std::numeric_limits<scalar_type>::infinity() : bound_measure_(state_); }
+    scalar_type seed_best_bv() const { return bound_measure_(state_); }
 
     // Stores the constructor's convergence policy by value, with no
     // field-by-field remap: Convergence is the solver's own class-template

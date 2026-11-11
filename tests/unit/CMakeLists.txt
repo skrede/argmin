@@ -26,6 +26,7 @@ add_executable(argmin_unit_tests
     cmaes_test.cpp
     cmaes_invalid_problem_test.cpp
     constraint_rows_rejection_test.cpp
+    rejected_solve_report_test.cpp
     cmaes_sampling_test.cpp
     restarting_policy_test.cpp
     tolerance_test.cpp

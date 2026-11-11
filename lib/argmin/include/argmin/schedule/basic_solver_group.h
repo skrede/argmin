@@ -92,22 +92,15 @@ public:
 
         if(all_retired())
         {
-            // No live solver remains. Returning a value-initialized
-            // step_result here would masquerade as a real step (objective
-            // 0, gradient 0) and could falsely satisfy a caller's own
-            // convergence check; report a truthful terminal outcome
-            // instead.
+            // No live solver remains. A value-initialized step_result would masquerade as a real step (objective 0,
+            // gradient 0) and could falsely satisfy a caller's own convergence check.
             return terminal_result();
         }
 
-        // Skip-scan for the next live solver. fallback_schedule and
-        // time_boxed_schedule only advance their internal index on stall
-        // / time-slice expiry, not on retirement, so a repeated
-        // schedule_.select(n) call can keep returning an already-retired
-        // index forever. Query the schedule once for its proposed index,
-        // then scan forward over the live solvers from there -- since
-        // all_retired() is false above, at least one live index exists
-        // within the next n slots.
+        // Skip-scan for the next live solver. fallback_schedule and time_boxed_schedule only advance their index on
+        // stall or time-slice expiry, not on retirement, so a repeated select(n) can keep returning a retired index
+        // forever. Query the schedule once, then scan forward over the live solvers from there; since all_retired()
+        // is false above, a live index exists within the next n slots.
         std::size_t idx = schedule_.select(n);
         for(std::size_t attempt = 0; attempt < n; ++attempt)
         {
@@ -129,10 +122,7 @@ public:
             idx = (idx + 1) % n;
         }
 
-        // Unreachable given the all_retired() guard above: every index was
-        // found retired mid-scan even though all_retired() reported false.
-        // Fall back to the same truthful terminal outcome rather than a
-        // fabricated result.
+        // Unreachable given the all_retired() guard above; the same truthful terminal outcome, not a fabricated result.
         return terminal_result();
     }
 
@@ -163,12 +153,13 @@ public:
     solve_result<scalar_type, N> step_n(std::uint32_t budget,
                                         const solver_options<Convergence>& opts = {})
     {
-        step_result<scalar_type> last{};
+        step_result<scalar_type> last{.gradient_norm = std::numeric_limits<scalar_type>::quiet_NaN()};
         solver_status status = solver_status::running;
         std::uint32_t executed = 0;
         std::uint32_t evaluations = 0;
+        const auto seq = std::index_sequence_for<Policies...>{};
 
-        for(std::uint32_t i = 0; i < budget && !all_retired(); ++i)
+        for(std::uint32_t i = 0; i < budget && !all_retired() && !all_rejected(seq); ++i)
         {
             last = step();
             ++executed;
@@ -187,7 +178,6 @@ public:
         if(status == solver_status::running)
             status = detail::budget_status(executed, opts.max_iterations);
 
-        const auto seq = std::index_sequence_for<Policies...>{};
         populate_active_results(status, seq);
         const std::size_t best_idx = best_solver_index(seq);
 
@@ -313,6 +303,13 @@ private:
         scalar_type cv{};
         ((Is == idx ? void(cv = std::get<Is>(solvers_).constraint_violation()) : void()), ...);
         return cv;
+    }
+
+    // A member rejected at construction or reset is never evaluated, so a group of them has no step to take.
+    template <std::size_t... Is>
+    bool all_rejected(std::index_sequence<Is...>) const
+    {
+        return ((std::get<Is>(solvers_).status() == solver_status::invalid_problem) && ...);
     }
 
     bool all_retired() const

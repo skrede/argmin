@@ -334,18 +334,7 @@ struct repair_l2_penalty_policy
     step_result<Scalar> step(state_type<P>& s)
     {
         if(s.invalid_problem)
-        {
-            return step_result<Scalar>{
-                .objective_value = s.objective_value,
-                .gradient_norm = Scalar(0.0),
-                .step_size = Scalar(0.0),
-                .objective_change = Scalar(0.0),
-                .improved = false,
-                .is_null_step = true,
-                .x_norm = s.x.norm(),
-                .policy_status = solver_status::invalid_problem,
-            };
-        }
+            return detail::rejected_step<Scalar>(s);
 
         const int n = static_cast<int>(s.mean.size());
         const int lambda = s.params.lambda;

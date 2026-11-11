@@ -144,6 +144,14 @@ distance outside the bounds). `result.x` is the best iterate seen, ranked first
 on the larger of the two, so a point within the tolerance on both beats any
 point outside it.
 
+A problem rejected as `invalid_problem` at construction or on `reset` is never
+evaluated: its solve takes no step, so `result.iterations` and
+`result.function_evaluations` are 0 and `result.objective_value`,
+`result.gradient_norm` and `result.constraint_violation` are NaN, as are
+`solver.gradient_norm()`, `solver.constraint_violation()` and
+`solver.bound_violation()`. A NaN is never read as a feasible or stationary
+point; a 0 would be.
+
 ## Choosing an execution mode
 
 The same policy runs in three modes on `step_budget_solver`:

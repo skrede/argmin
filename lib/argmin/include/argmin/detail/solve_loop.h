@@ -8,6 +8,7 @@
 #include "argmin/result/status.h"
 #include "argmin/solver/options.h"
 
+#include <limits>
 #include <cstdint>
 
 namespace argmin
@@ -52,6 +53,22 @@ constexpr solver_status budget_status(std::uint32_t iterations, std::uint32_t ma
     return iterations >= max_iterations ? solver_status::max_iterations : solver_status::budget_exhausted;
 }
 
+// A rejected problem is never evaluated, not even at x_0, so its solve takes no step and its result agrees with the
+// solver's accessors.
+template <typename Core>
+typename Core::solve_result_type rejected_solve(const Core& core)
+{
+    return typename Core::solve_result_type{
+        .status = solver_status::invalid_problem,
+        .iterations = core.iteration_count(),
+        .function_evaluations = core.evaluation_count(),
+        .objective_value = std::numeric_limits<typename Core::scalar_type>::quiet_NaN(),
+        .gradient_norm = core.gradient_norm(),
+        .constraint_violation = core.constraint_violation(),
+        .x = core.state().x,
+    };
+}
+
 // The single solve loop body shared by every driver facade.
 //
 // A surface type (the step-budget driver, the time-budget drivers, the
@@ -82,24 +99,19 @@ run_solve_loop(Core& core, std::uint32_t budget,
                const solver_options<OptsConvergence>& opts,
                BudgetExhausted&& budget_exhausted)
 {
-    using scalar_type = typename Core::scalar_type;
+    if(core.status() == solver_status::invalid_problem)
+        return rejected_solve(core);
 
+    using scalar_type = typename Core::scalar_type;
     solver_status status = solver_status::running;
     step_result<scalar_type> last{};
 
-    // Best-seen tracking (NLopt convention: the returned solve_result
-    // reports the best point encountered across the entire loop, not the
-    // terminal trial). Seed from the entry iterate x_0 and the policy's
-    // cached (f, cv) at x_0 -- no state-field probing beyond the core's
-    // seed helpers. Policies without a problem binding (projected_gn family,
-    // where Problem==void) fall back to +inf sentinels; the first accepted
-    // step becomes the best-seen baseline in that case, which still
-    // preserves the entry invariant because state_.x is unchanged until
-    // step() runs.
+    // Best-seen tracking: the result reports the best point encountered, not the terminal trial, seeded from x_0 and
+    // the policy's cached (f, cv) there. A policy without a problem binding (projected_gn family, Problem == void)
+    // seeds f at +inf, so its first accepted step becomes the baseline.
     //
-    // Reference: nlopt/src/api/nlopt.c nlopt_optimize (best-solution-
-    //            returned semantics); N&W 2e Def 12.1 (primal feasibility,
-    //            L-infinity composition).
+    // Reference: nlopt/src/api/nlopt.c nlopt_optimize (best-solution-returned semantics); N&W 2e Def 12.1 (primal
+    //            feasibility, L-infinity composition).
     typename Core::vector_type best_x = core.state().x;
     iterate_rank<scalar_type> best{solver_status::running, core.seed_best_f(), core.seed_best_cv(), core.seed_best_bv()};
     // User-supplied constraint_tolerance takes precedence over the baked-in
