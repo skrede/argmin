@@ -123,7 +123,7 @@ cobyla,nmpc_lqr_h10,default,1177,-8.0,5312,-6.0,expected_fail,publish-2026-07-24
 cobyla,nmpc_lqr_h20,default,12460,-8.0,13000,-6.0,expected_fail,publish-2026-07-24T11-44-24Z,enforced,,88690708,
 filter_nw_sqp_accurate,hs006,accurate,3,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,12478,15598
 filter_nw_sqp_accurate,hs007,accurate,2,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,11675,14595
-filter_nw_sqp_accurate,hs021,accurate,1,-8.0,13000,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,6152,7691
+filter_nw_sqp_accurate,hs021,accurate,1,-8.0,13000,-6.0,pass,publish-2026-11-12T10-41-08Z,enforced,,11173,13966
 filter_nw_sqp_accurate,hs023,accurate,4,-8.0,8,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,12026,15088
 filter_nw_sqp_accurate,hs024,accurate,3,-8.0,16,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,13001,16283
 filter_nw_sqp_accurate,hs026,accurate,3,-8.0,42,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,17580,21976
@@ -134,12 +134,12 @@ filter_nw_sqp_accurate,hs030,accurate,3,-8.0,25,-6.0,pass,publish-2026-07-11T18-
 filter_nw_sqp_accurate,hs031,accurate,5,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,22490,28113
 filter_nw_sqp_accurate,hs034,accurate,7,-8.0,10,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,30094,37630
 filter_nw_sqp_accurate,hs035,accurate,4,-8.0,13,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,18048,22560
-filter_nw_sqp_accurate,hs036,accurate,2,-8.0,13000,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,10547,13184
+filter_nw_sqp_accurate,hs036,accurate,2,-8.0,13000,-6.0,pass,publish-2026-11-12T10-41-08Z,enforced,,20770,25963
 filter_nw_sqp_accurate,hs037,accurate,4,-8.0,10,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,19123,23904
 filter_nw_sqp_accurate,hs039,accurate,4,-8.0,19,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,26284,32862
 filter_nw_sqp_accurate,hs040,accurate,5,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,30037,37553
 filter_nw_sqp_accurate,hs043,accurate,6,-8.0,13,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,32133,40208
-filter_nw_sqp_accurate,hs044,accurate,3,-8.0,13000,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,17216,21520
+filter_nw_sqp_accurate,hs044,accurate,3,-8.0,13000,-6.0,pass,publish-2026-11-12T10-41-08Z,enforced,,27635,34544
 filter_nw_sqp_accurate,hs048,accurate,6,-8.0,8,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,36291,45367
 filter_nw_sqp_accurate,hs050,accurate,6,-8.0,21,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,41229,51550
 filter_nw_sqp_accurate,hs051,accurate,7,-8.0,10,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,42758,53458
@@ -150,7 +150,7 @@ filter_nw_sqp_accurate,nmpc_lqr_h10,accurate,1271,-8.0,28,-6.0,pass,publish-2026
 filter_nw_sqp_accurate,nmpc_lqr_h20,accurate,13243,-8.0,36,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,121866377,152333921
 filter_slsqp_accurate,hs006,accurate,2,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,7993,10102
 filter_slsqp_accurate,hs007,accurate,2,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,7686,9608
-filter_slsqp_accurate,hs021,accurate,1,-8.0,13000,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,8323,10410
+filter_slsqp_accurate,hs021,accurate,1,-8.0,13000,-6.0,pass,publish-2026-11-12T10-41-08Z,enforced,,8323,14665
 filter_slsqp_accurate,hs023,accurate,4,-8.0,8,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,14817,18565
 filter_slsqp_accurate,hs024,accurate,2,-8.0,16,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,11112,13923
 filter_slsqp_accurate,hs026,accurate,2,-8.0,49,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,9825,12282
@@ -177,7 +177,7 @@ filter_slsqp_accurate,nmpc_lqr_h10,accurate,121,-8.0,28,-6.0,pass,publish-2026-0
 filter_slsqp_accurate,nmpc_lqr_h20,accurate,625,-8.0,36,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,6184364,7730513
 filter_trsqp_accurate,hs006,accurate,2,-8.0,13,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,10743,
 filter_trsqp_accurate,hs007,accurate,3,-8.0,11,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,10915,
-filter_trsqp_accurate,hs021,accurate,5,-8.0,6,-6.0,pass,publish-2026-11-11T07-39-20Z,enforced,,18390,
+filter_trsqp_accurate,hs021,accurate,5,-8.0,13,-6.0,pass,publish-2026-11-12T10-41-08Z,enforced,,18390,
 filter_trsqp_accurate,hs023,accurate,7,-8.0,21,-6.0,pass,publish-2026-11-10T06-57-44Z,enforced,,57906,
 filter_trsqp_accurate,hs024,accurate,3,-8.0,95,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,25252,
 filter_trsqp_accurate,hs026,accurate,2,-8.0,43,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,13590,
@@ -192,7 +192,7 @@ filter_trsqp_accurate,hs036,accurate,4,-8.0,8,-6.0,pass,publish-2026-07-11T18-03
 filter_trsqp_accurate,hs037,accurate,3,-8.0,16,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,21193,
 filter_trsqp_accurate,hs039,accurate,2,-8.0,49,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,15315,
 filter_trsqp_accurate,hs040,accurate,3,-8.0,10,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,18564,
-filter_trsqp_accurate,hs043,accurate,4,-8.0,108,-6.0,pass,publish-2026-11-10T19-27-58Z,enforced,,28684,
+filter_trsqp_accurate,hs043,accurate,4,-8.0,195,-6.0,pass,publish-2026-11-12T10-41-08Z,enforced,,28684,
 filter_trsqp_accurate,hs044,accurate,9,-8.0,75,-6.0,expected_fail,publish-2026-07-11T18-03-29Z,enforced,,89051,
 filter_trsqp_accurate,hs048,accurate,3,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,18627,
 filter_trsqp_accurate,hs050,accurate,3,-8.0,33,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,21677,
@@ -204,7 +204,7 @@ filter_trsqp_accurate,nmpc_lqr_h10,accurate,66,-8.0,29,-6.0,pass,publish-2026-07
 filter_trsqp_accurate,nmpc_lqr_h20,accurate,1104,-8.0,37,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,7045601,
 filter_trsqp_fast,hs006,fast,2,-4.0,12,-4.0,pass,publish-2026-07-11T18-03-29Z,enforced,,9687,
 filter_trsqp_fast,hs007,fast,2,-4.0,13,-4.0,pass,publish-2026-07-11T18-03-29Z,enforced,,9881,
-filter_trsqp_fast,hs021,fast,4,-4.0,6,-4.0,pass,publish-2026-11-11T07-39-20Z,enforced,,15546,
+filter_trsqp_fast,hs021,fast,4,-4.0,15,-4.0,pass,publish-2026-11-12T10-41-08Z,enforced,,15546,
 filter_trsqp_fast,hs023,fast,6,-4.0,23,-4.0,pass,publish-2026-07-11T18-03-29Z,enforced,,51846,
 filter_trsqp_fast,hs024,fast,3,-4.0,97,-4.0,pass,publish-2026-07-11T18-03-29Z,enforced,,24219,
 filter_trsqp_fast,hs026,fast,2,-4.0,42,-4.0,pass,publish-2026-07-11T18-03-29Z,enforced,,12624,
@@ -270,7 +270,7 @@ gcmma_raa_augmented,hs044,default,33,-8.0,15,-6.0,pass,publish-2026-07-24T11-44-
 gcmma_raa_augmented,hs076,default,30,-8.0,24,-6.0,pass,publish-2026-10-16T20-26-32Z,enforced,,233585,
 kraft_slsqp_accurate,hs006,accurate,3,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,7195,8995
 kraft_slsqp_accurate,hs007,accurate,2,-8.0,12,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,6457,8072
-kraft_slsqp_accurate,hs021,accurate,1,-8.0,13000,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,8241,10302
+kraft_slsqp_accurate,hs021,accurate,1,-8.0,13000,-6.0,pass,publish-2026-11-12T10-41-08Z,enforced,,8241,13727
 kraft_slsqp_accurate,hs023,accurate,3,-8.0,8,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,14322,17941
 kraft_slsqp_accurate,hs024,accurate,2,-8.0,17,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,9647,12072
 kraft_slsqp_accurate,hs026,accurate,2,-8.0,200,-6.0,pass,publish-2026-07-11T18-03-29Z,enforced,,12299,15375
