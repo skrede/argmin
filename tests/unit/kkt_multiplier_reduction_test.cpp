@@ -90,3 +90,11 @@ TEST_CASE("a rank-deficient degenerate active set refills dropped rows and keeps
     c_ineq << 0.0, 0.0, 1.0;
     check_reduced_estimate<3>(Eigen::Vector3d(3.0, 1.0, 3.0), J_eq, J_ineq, c_ineq, 2);
 }
+
+TEST_CASE("a rank-deficient degenerate active set refills dropped rows and keeps the least-squares residual when its leading rows are dependent", "[lagrangian][kkt-vertex]")
+{
+    Eigen::Matrix<double, Eigen::Dynamic, 2> J_eq(0, 2);
+    Eigen::Matrix<double, Eigen::Dynamic, 2> J_ineq(3, 2);
+    J_ineq << 1.0, 0.0, 1.0, 0.0, 0.0, 1.0;
+    check_reduced_estimate<2>(Eigen::Vector2d(1.0, 1.0), J_eq, J_ineq, Eigen::VectorXd::Zero(3), 2);
+}

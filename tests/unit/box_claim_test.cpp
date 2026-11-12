@@ -32,6 +32,8 @@ struct boxed_line
     Eigen::VectorX<S> lower_bounds() const { return Eigen::VectorX<S>::Constant(1, S(-10)); }
     Eigen::VectorX<S> upper_bounds() const { return Eigen::VectorX<S>::Constant(1, upper_); }
 
+    void move_upper(S upper) { upper_ = upper; }
+
 private:
     S upper_;
 };
@@ -54,15 +56,23 @@ struct box_holding_policy : scripted_policy<S>
 };
 
 template <typename Policy, typename S>
-solve_result<S> solve_in_box(S upper, const scripted_step<S>& step)
+using boxed_solver = step_budget_solver<Policy, dynamic_dimension, boxed_line<S>, default_convergence<S>>;
+
+template <typename Policy, typename S>
+boxed_solver<Policy, S> make_boxed_solver(const boxed_line<S>& problem, const scripted_step<S>& step)
 {
-    const boxed_line<S> problem{upper};
     Policy policy{};
     policy.script = {step, step};
     solver_options<default_convergence<S>> opts;
     opts.max_iterations = 3;
-    step_budget_solver<Policy, dynamic_dimension, boxed_line<S>, default_convergence<S>> solver{policy, problem, Eigen::VectorX<S>::Constant(1, S(-1)), opts};
-    return solver.solve();
+    return {policy, problem, Eigen::VectorX<S>::Constant(1, S(-1)), opts};
+}
+
+template <typename Policy, typename S>
+solve_result<S> solve_in_box(S upper, const scripted_step<S>& step)
+{
+    const boxed_line<S> problem{upper};
+    return make_boxed_solver<Policy>(problem, step).solve();
 }
 
 template <typename S>
@@ -100,4 +110,18 @@ TEMPLATE_TEST_CASE("a claim requires the iterate within the box for a family tha
 TEMPLATE_TEST_CASE("a claim requires the iterate within the box for a family that ignores the box", "[solver][convergence]", double, float)
 {
     check_box_gates_claims<scripted_policy<TestType>, TestType>();
+}
+
+TEMPLATE_TEST_CASE("a claim requires the iterate within the box for a family that ignores the box when its problem moves the box before a reset", "[solver][convergence]", double, float)
+{
+    using S = TestType;
+    boxed_line<S> problem{S(10)};
+    auto solver = make_boxed_solver<scripted_policy<S>>(problem, feasible<S>);
+    problem.move_upper(S(0.5));
+    REQUIRE(solver.reset(Eigen::VectorX<S>::Constant(1, S(1))) == solver_status::running);
+    CHECK(solver.bound_violation() == S(0.5));
+
+    const auto result = solver.solve();
+    CHECK(result.status == solver_status::max_iterations);
+    CHECK(solver.bound_violation() > S(0));
 }
