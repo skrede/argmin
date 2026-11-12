@@ -41,6 +41,7 @@
 //     rationale for sigma-collapse predicate, not a literal port).
 
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/isres_record.h"
 #include "argmin/detail/isres_operators.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/scalar_distributions.h"
@@ -89,9 +90,7 @@ struct nlopt_faithful_policy
 
         std::optional<std::uint64_t> seed{};
 
-        // Stall + feasibility (inherited from production isres_policy).
         std::uint16_t stall_window{200};
-        Scalar feasibility_gate{isres_defaults<Scalar>::feasibility_gate};  // L2-squared in this variant
 
         // NLopt-faithful operator constants. gamma = 0.85, alpha = 0.2 are
         // engineering defaults from NLopt isres.c:67-68 (NOT pinned
@@ -175,8 +174,7 @@ struct nlopt_faithful_policy
         // isres_policy alias. 32 B vs std::mt19937's 2.5 KB.
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
-        Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
-        Scalar best_ever_violation{std::numeric_limits<Scalar>::infinity()};
+        detail::best_evaluated<Scalar> record;
 
         bool invalid_problem{false};
 
@@ -401,41 +399,7 @@ struct nlopt_faithful_policy
                 s.violations[j] = Scalar(0.0);
         }
 
-        // Pick best init individual (least violation first, then best
-        // objective). Mirrors production isres_policy::init logic.
-        int best_idx = 0;
-        for(int j = 1; j < s.lambda; ++j)
-        {
-            const bool feasible_j = s.violations[j] <= Scalar(0.0);
-            const bool feasible_best = s.violations[best_idx] <= Scalar(0.0);
-
-            if(feasible_j && !feasible_best)
-                best_idx = j;
-            else if(feasible_j == feasible_best)
-            {
-                if(feasible_j && s.fitnesses[j] < s.fitnesses[best_idx])
-                    best_idx = j;
-                else if(!feasible_j
-                        && s.violations[j] < s.violations[best_idx])
-                    best_idx = j;
-            }
-        }
-
-        s.x = s.population.col(best_idx);
-        s.objective_value = s.fitnesses[best_idx];
-        s.best_ever_value = s.objective_value;
-        s.best_ever_violation = s.violations[best_idx];
-
-        // Cache constraint values at best init point.
-        s.c_eq.resize(s.n_eq);
-        s.c_ineq.resize(s.n_ineq);
-        if(n_c > 0)
-        {
-            Eigen::VectorX<Scalar> c(n_c);
-            s.problem->constraints(s.x, c);
-            s.c_eq = c.head(s.n_eq);
-            s.c_ineq = c.tail(s.n_ineq);
-        }
+        detail::start_best_evaluated(s, s.population, s.fitnesses, static_cast<Scalar>(opts.feasibility_tolerance_in_force()));
 
         // Capture the user-set step_tolerance_criterion threshold (if the
         // convergence policy carries one) so step()'s xtol_coupled
@@ -484,10 +448,8 @@ struct nlopt_faithful_policy
     //         v_k = sum_i c_eq[i]^2 + sum_j max(0, -c_ineq[j])^2
     //      (NLopt isres.c:151,163). Differs from the prior production
     //      isres_policy which used L1 via detail::compute_violations.
-    //   6. Best-ever bookkeeping uses a rolling best_ever_violation with
-    //      a Pareto-tightened pre-feasible update predicate.
-    //   7. Return step_result with policy_status set when sigma-collapse
-    //      and feasibility both hold (see step 7's body).
+    //   6. Keep the best evaluated point by the solve's own comparator.
+    //   7. Report a sigma collapse as a claim about that point.
     //
     // Reference: NLopt 2.10.0 isres.c lines 233-280;
     //            Runarsson & Yao (2005), IEEE Trans. SMC-C
@@ -496,17 +458,7 @@ struct nlopt_faithful_policy
     step_result<Scalar> step(state_type<P>& s)
     {
         if(s.invalid_problem)
-        {
-            return step_result<Scalar>{
-                .objective_value = s.objective_value,
-                .gradient_norm = Scalar(0.0),
-                .step_size = Scalar(0.0),
-                .objective_change = Scalar(0.0),
-                .improved = false,
-                .x_norm = s.x.norm(),
-                .policy_status = solver_status::invalid_problem,
-            };
-        }
+            return detail::rejected_step<Scalar>(s);
 
         const int n = static_cast<int>(s.x.size());
         const int mu = s.mu;
@@ -515,9 +467,7 @@ struct nlopt_faithful_policy
         auto& rng = *s.rng;
         detail::standard_normal_distribution<Scalar> normal;
 
-        // Capture pre-step best for objective_change / improved
-        // bookkeeping and for the sigma-collapse status emission below.
-        const Scalar prev_best_ever_value = s.best_ever_value;
+        const Scalar prev_objective = s.objective_value;
 
         const Scalar gamma =
             options.differential_variation_gamma.value_or(Scalar(0.85));
@@ -686,63 +636,14 @@ struct nlopt_faithful_policy
             s.violations[k] = violation_sum;
         }
 
-        // (6) Per-evaluation best-ever bookkeeping (NLopt isres.c:174-193).
-        // Check EVERY individual at evaluation time against the best-ever
-        // (x, f, v) record, not the previous generation's rank-0 slot
-        // (which by this point holds an overwritten fitness). The
-        // replacement predicate is feasibility-first with a feasibility
-        // tolerance so it works for equality-constrained problems, where
-        // the L2-squared violation v = sum c_eq^2 is never exactly zero:
-        //   - a candidate within the feasibility tolerance beats any best
-        //     that is not,
-        //   - among two feasible points, lower objective wins,
-        //   - among two infeasible points, lower violation wins.
-        // This makes the returned minimizer the best FEASIBLE point the
-        // solver evaluated (or the least-infeasible point if none is
-        // feasible), and it never regresses across generations.
-        const Scalar feas_tol = options.feasibility_gate;
-        const auto better_than_best = [&](Scalar f, Scalar v) {
-            const bool cand_feasible = (v <= feas_tol);
-            const bool best_feasible = (s.best_ever_violation <= feas_tol);
-            if(cand_feasible != best_feasible)
-                return cand_feasible;
-            if(cand_feasible)
-                return f < s.best_ever_value;
-            return v < s.best_ever_violation;
-        };
-
-        bool best_updated = false;
-        for(int k = 0; k < lambda; ++k)
-        {
-            if(better_than_best(s.fitnesses[k], s.violations[k]))
-            {
-                s.best_ever_value = s.fitnesses[k];
-                s.best_ever_violation = s.violations[k];
-                s.objective_value = s.fitnesses[k];
-                s.x = s.population.col(k);
-                best_updated = true;
-            }
-        }
-
-        // Refresh the cached constraint split for the returned x once, if
-        // it changed this generation.
-        if(best_updated && n_c > 0)
-        {
-            Eigen::VectorX<Scalar> c(n_c);
-            s.problem->constraints(s.x, c);
-            s.c_eq = c.head(s.n_eq);
-            s.c_ineq = c.tail(s.n_ineq);
-        }
+        // (6) Every individual is checked at evaluation time, as NLopt's isres.c:174-193 does, but against the
+        // solve's own feasibility tolerance per row rather than a gate on the summed squared violation.
+        detail::keep_best_evaluated(s, s.population, s.fitnesses);
 
         ++s.generation;
 
-        // (7) Step report.
-        //
-        // Status emission per Runarsson-Yao 2005 Section V (termination):
-        // emit solver_status::ftol_reached when the population's mean
-        // step size has collapsed AND the rank-0 individual's violation
-        // sits within the feasibility gate. Two sigma-collapse forms are
-        // available via the runtime selector options.sigma_collapse_form:
+        // (7) Step report. A collapse of the population's mean step size ends the run (Runarsson-Yao 2005
+        // Section V, termination). Two sigma-collapse forms are available via options.sigma_collapse_form:
         //
         //   - bound_relative_configurable: compares mean_sigma against
         //     `ratio * mean(ub - lb) / sqrt(n)` (default ratio 1e-9).
@@ -753,18 +654,10 @@ struct nlopt_faithful_policy
         //     threshold is std::nullopt, the predicate silently falls
         //     back to the bound-relative form using `ratio` (fail-safe).
         const Scalar mean_sigma = s.sigmas.leftCols(mu).mean();
-        const Scalar grad_proxy =
-            mean_sigma * std::sqrt(static_cast<Scalar>(n));
-        const bool improved = (s.best_ever_value < prev_best_ever_value);
+        const bool improved = (s.objective_value < prev_objective);
         const Scalar objective_change = improved
-            ? (s.best_ever_value - prev_best_ever_value)
+            ? (s.objective_value - prev_objective)
             : mean_sigma;
-
-        // Gate the emitted status on the returned x's feasibility (the
-        // best-ever record), not the rank-0 individual's, so ftol_reached
-        // never describes a point other than the one returned.
-        const bool feasible =
-            (s.best_ever_violation <= options.feasibility_gate);
 
         const Scalar collapse_ratio =
             options.sigma_collapse_ratio.value_or(isres_defaults<Scalar>::sigma_collapse_ratio);
@@ -786,19 +679,15 @@ struct nlopt_faithful_policy
                 s, collapse_ratio, n, s.lower, s.upper);
         }
 
-        std::optional<solver_status> emitted_status;
-        if(collapsed && feasible)
-            emitted_status = solver_status::ftol_reached;
-
         return step_result<Scalar>{
             .objective_value = s.objective_value,
-            .gradient_norm = grad_proxy,
+            .gradient_norm = std::numeric_limits<Scalar>::quiet_NaN(),
             .step_size = mean_sigma,
             .objective_change = objective_change,
             .improved = improved,
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
-            .policy_status = emitted_status,
+            .policy_status = detail::collapse_status(collapsed, s.record),
         };
     }
 
@@ -809,7 +698,6 @@ struct nlopt_faithful_policy
         if(s.invalid_problem)
             return solver_status::invalid_problem;
         const int n = static_cast<int>(x0.size());
-        const int n_c = s.n_eq + s.n_ineq;
 
         // Infinite bounds seed in a finite box centered on x0, as in init().
         constexpr Scalar seed_fallback_half_width = Scalar(2.0);
@@ -833,19 +721,8 @@ struct nlopt_faithful_policy
         const auto initial_sigmas = detail::initialize_sigmas<N>(n, s.lambda, seed_lo, seed_hi);
         s.sigmas.leftCols(s.lambda) = initial_sigmas;
 
-        s.x = x0;
-        s.objective_value = s.problem->value(x0);
-        s.best_ever_value = s.objective_value;
-        s.best_ever_violation = std::numeric_limits<Scalar>::infinity();
         s.generation = 0;
-
-        if(n_c > 0)
-        {
-            Eigen::VectorX<Scalar> c(n_c);
-            s.problem->constraints(s.x, c);
-            s.c_eq = c.head(s.n_eq);
-            s.c_ineq = c.tail(s.n_ineq);
-        }
+        detail::restart_best_evaluated(s, x0);
         return detail::latch_status(s);
     }
 

@@ -21,7 +21,7 @@ If you only remember one rule: **`lbfgsb` for unconstrained / box-constrained, `
 | Constrained problem, derivative-free | `cobyla` or `augmented_lagrangian` wrapping `bobyqa` | Powell's linear-approximation trust region. Every point COBYLA evaluates lies inside the box; a fixed or inverted box (a lower bound not below its upper bound) is rejected with `invalid_problem`. |
 | General constrained, want to use any unconstrained solver as the inner | `augmented_lagrangian` | Meta-policy. Wraps any unconstrained or box-constrained policy and handles equality + inequality via penalty + multiplier updates. |
 | Bound-constrained, multimodal, no gradients | `cmaes` or `restarting_policy` wrapping `cmaes` | Covariance Matrix Adaptation Evolution Strategy. The restarting wrapper adds Hansen-Auger IPOP restarts for harder landscapes. |
-| Bound-constrained, multimodal, **with constraints** | `isres` | Runarsson-Yao 2005 stochastic ranking ES. Handles inequality constraints via stochastic ranking. |
+| Bound-constrained, multimodal, **with constraints** | `isres` | Runarsson-Yao 2005 stochastic ranking ES. Handles inequality constraints via stochastic ranking, and returns the best point it evaluated within the feasibility tolerance. An evolution strategy certifies no optimality: when its population collapses it reports `xtol_reached`, and no gradient norm. |
 | Local solver but you want random restarts | `multistart_policy<InnerPolicy>` | Wraps any local policy. |
 | CMA-ES with restart strategy | `restarting_policy<cmaes_policy<>>` | The IPOP-CMA-ES restart wrapper. |
 

@@ -52,6 +52,10 @@ struct solver_options
     scalar_type feasibility_tolerance{convergence_defaults<scalar_type>::feasibility_tolerance};
     Convergence convergence{};
 
+    // A caller who sets constraint_tolerance expects the claims and the returned iterate to honor it, so it takes
+    // precedence over the feasibility_tolerance default.
+    scalar_type feasibility_tolerance_in_force() const { return constraint_tolerance.value_or(feasibility_tolerance); }
+
     // Convenience accessors for common convergence criteria thresholds.
     // These delegate to the corresponding criterion in the convergence policy.
 

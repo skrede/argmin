@@ -76,13 +76,12 @@ Scalar constraint_violation(
 // merit functions (N&W eq. 15.24 / 17.44).
 //
 // Reference: N&W 2e Definition 12.1 (KKT primal feasibility).
-template <typename Scalar,
-          int Meq = argmin::dynamic_dimension,
-          int Mineq = argmin::dynamic_dimension>
-Scalar primal_feasibility_inf(
-    const Eigen::Vector<Scalar, Meq>& c_eq,
-    const Eigen::Vector<Scalar, Mineq>& c_ineq)
+template <typename DerivedEq, typename DerivedIneq>
+typename DerivedEq::Scalar primal_feasibility_inf(
+    const Eigen::MatrixBase<DerivedEq>& c_eq,
+    const Eigen::MatrixBase<DerivedIneq>& c_ineq)
 {
+    using Scalar = typename DerivedEq::Scalar;
     const Scalar eq_leg = c_eq.size() > 0
         ? c_eq.template lpNorm<Eigen::Infinity>()
         : Scalar{0};

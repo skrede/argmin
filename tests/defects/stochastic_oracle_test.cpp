@@ -48,57 +48,57 @@ TEST_CASE("isres stays inside the box on hs076", "[stochastic]")
     check_inside_box("isres_original_argmin", "inequality");
 }
 
-TEST_CASE("isres nlopt_faithful makes an optimality claim the oracle accepts on the bound-only Wood problem", "[known-defect][!shouldfail]")
+TEST_CASE("isres nlopt_faithful makes a claim the oracle accepts on the bound-only Wood problem", "[stochastic]")
 {
     cases::check_case_claim(visit_family, "isres_nlopt_faithful", "bound");
 }
 
-TEST_CASE("isres nlopt_faithful makes an optimality claim the oracle accepts on hs076", "[known-defect][!shouldfail]")
+TEST_CASE("isres nlopt_faithful makes a claim the oracle accepts on hs076", "[stochastic]")
 {
     cases::check_case_claim(visit_family, "isres_nlopt_faithful", "inequality");
 }
 
-TEST_CASE("isres nlopt_faithful makes an optimality claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
+TEST_CASE("isres nlopt_faithful makes a claim the oracle accepts on hs071", "[stochastic]")
 {
     cases::check_case_claim(visit_family, "isres_nlopt_faithful", "mixed");
 }
 
-TEST_CASE("isres original_argmin makes an optimality claim the oracle accepts on the bound-only Wood problem", "[known-defect][!shouldfail]")
+TEST_CASE("isres original_argmin makes a claim the oracle accepts on the bound-only Wood problem", "[known-defect][!shouldfail]")
 {
     cases::check_case_claim(visit_family, "isres_original_argmin", "bound");
 }
 
-TEST_CASE("isres original_argmin makes an optimality claim the oracle accepts on hs076", "[known-defect][!shouldfail]")
+TEST_CASE("isres original_argmin makes a claim the oracle accepts on hs076", "[stochastic]")
 {
     cases::check_case_claim(visit_family, "isres_original_argmin", "inequality");
 }
 
-TEST_CASE("isres original_argmin makes an optimality claim the oracle accepts on hs028", "[known-defect][!shouldfail]")
+TEST_CASE("isres original_argmin makes a claim the oracle accepts on hs028", "[known-defect][!shouldfail]")
 {
     cases::check_case_claim(visit_family, "isres_original_argmin", "equality");
 }
 
-TEST_CASE("isres original_argmin makes an optimality claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
+TEST_CASE("isres original_argmin makes a claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
 {
     cases::check_case_claim(visit_family, "isres_original_argmin", "mixed");
 }
 
-TEST_CASE("isres runarsson_yao_paper makes an optimality claim the oracle accepts on the bound-only Wood problem", "[known-defect][!shouldfail]")
+TEST_CASE("isres runarsson_yao_paper makes a claim the oracle accepts on the bound-only Wood problem", "[known-defect][!shouldfail]")
 {
     cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "bound");
 }
 
-TEST_CASE("isres runarsson_yao_paper makes an optimality claim the oracle accepts on hs076", "[known-defect][!shouldfail]")
+TEST_CASE("isres runarsson_yao_paper makes a claim the oracle accepts on hs076", "[stochastic]")
 {
     cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "inequality");
 }
 
-TEST_CASE("isres runarsson_yao_paper makes an optimality claim the oracle accepts on hs028", "[known-defect][!shouldfail]")
+TEST_CASE("isres runarsson_yao_paper makes a claim the oracle accepts on hs028", "[stochastic]")
 {
     cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "equality");
 }
 
-TEST_CASE("isres runarsson_yao_paper makes an optimality claim the oracle accepts on hs071", "[known-defect][!shouldfail]")
+TEST_CASE("isres runarsson_yao_paper makes a claim the oracle accepts on hs071", "[stochastic]")
 {
     cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "mixed");
 }

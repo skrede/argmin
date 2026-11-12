@@ -32,6 +32,7 @@ add_executable(argmin_defect_tests
     status_infra_test.cpp
     status_underreporting_oracle_test.cpp
     stochastic_oracle_test.cpp
+    stochastic_record_test.cpp
     stochastic_reset_test.cpp
     stochastic_sampling_test.cpp
     stochastic_test.cpp

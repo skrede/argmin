@@ -46,11 +46,7 @@ parameters, magnitude caps that fit in `float` range, and integer budgets copy t
 applies.
 
 A `float` value departs from the rule only when the family's gate fails at the
-rule value, and then it moves to the nearest value that passes. One did:
-
-| default | rule value | shipped | measured reason |
-|---|---|---|---|
-| `isres_defaults<float>::feasibility_gate` | 2e-2 | 1e-3 | measured when the faithful ISRES variant's float gate compared objectives at the lowest objective inside this gate: at 2e-2 its hs023 result sat 1.2e-1 from the optimum, at 1e-3 it passed on every measured seed. The gate is NLopt's and stays; a point it admits outside the solve's feasibility tolerance now carries no claim |
+rule value, and then it moves to the nearest value that passes.
 
 The trust-region SQP fast-mode feasibility tolerance starts at 2e-3, the driver's
 value, rather than at its rule value of 2e-2, which fails under the policies' own
@@ -82,7 +78,7 @@ Windows build jobs, which select the `float` test label explicitly.
 | derivative-free (bobyqa, cobyla) in float tracks double | **yes** *(gated)* (bounded and constrained fixtures, k = 30) | derivative-free policies in float track double on bounded and constrained fixtures at their own defaults; BOBYQA in float tracks double on bounded fixtures at its own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
 | CMA-ES (all three variants) in float tracks double | **yes** *(gated)* (unconstrained and active-bound Rosenbrock, k = 100; CMA-ES handles box bounds only and rejects a problem with constraint rows as `invalid_problem`) | CMA-ES in float tracks double on Rosenbrock at its own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
 | ISRES (runarsson_yao_paper, original_argmin) in float tracks double | **yes** *(gated)* (on hs023 and hs024, k = 100) | ISRES in float tracks double on an inequality-constrained fixture at its own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
-| ISRES nlopt_faithful (the isres_policy alias) in float gives up its claim and returns a feasible point near double's | **yes** *(gated)* (on hs023 and hs024, k = 100 on the returned point; the objective is not compared) | ISRES nlopt_faithful in float gives up its claim and returns a feasible point near double's at its own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
+| ISRES nlopt_faithful (the isres_policy alias) in float tracks double | **yes** *(gated)* (on hs023 and hs024, k = 100) | ISRES nlopt_faithful in float tracks double on an inequality-constrained fixture at its own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
 | wrappers (augmented_lagrangian, multistart, restarting) over a float inner policy track double | **yes** *(gated)* (k = 10) | wrappers over a float inner policy track double at their own defaults; gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
 <!-- END GENERATED: float-status -->
 

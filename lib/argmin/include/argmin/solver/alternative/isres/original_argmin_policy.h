@@ -1,15 +1,16 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_ALTERNATIVE_ISRES_ORIGINAL_ARGMIN_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_ALTERNATIVE_ISRES_ORIGINAL_ARGMIN_POLICY_H
 
-// FROZEN BASELINE — DO NOT MODIFY.
+// FROZEN SEARCH — DO NOT MODIFY THE OPERATORS.
 //
-// This variant is the byte-for-byte pre-rewrite ISRES implementation.
+// This variant's search is the byte-for-byte pre-rewrite ISRES implementation.
 // It is preserved as a research artifact for the empirical comparison
 // reported in the published paper. New project rules (no_dynamic_eigen,
 // no_pre-existing_disclaimers, allocation hygiene, sigma upper clamp,
 // alpha-smoothing remap, dead-code removal) are CONSCIOUSLY NOT
 // APPLIED here. Modifications are accepted only if they preserve
-// observable behavior byte-identical to the pre-rewrite version.
+// the search trajectory byte-identical to the pre-rewrite version; the
+// point it returns and what it claims follow the other ISRES variants.
 //
 // The mismapping of `alpha` to pull-to-best (rather than sigma-smoothing)
 // is the key algorithmic divergence vs Runarsson-Yao 2005 / NLopt
@@ -29,6 +30,7 @@
 //            K&W Section 8.6 (evolution strategies).
 
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/isres_record.h"
 #include "argmin/detail/isres_operators.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/stochastic_ranking.h"
@@ -72,7 +74,6 @@ struct original_argmin_policy
         std::optional<Scalar> pull_to_best_weight{};
         std::optional<std::uint64_t> seed{};
         std::uint16_t stall_window{200};
-        Scalar feasibility_gate{isres_defaults<Scalar>::feasibility_gate};
     };
 
     template <typename P = void>
@@ -97,10 +98,13 @@ struct original_argmin_policy
 
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
+        detail::best_evaluated<Scalar> record;
+        // The pull-to-best operator's target, kept by the baseline's own rule, which the search depends on; the
+        // least-infeasibility witness lets the pre-feasible update compare against the rolling best instead of the
+        // just-overwritten s.violations[0].
+        Eigen::Vector<Scalar, N> pull_target;
+        Scalar pull_target_value{};
         Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
-        // Track the least-infeasibility witness across the run so the
-        // pre-feasible best update can compare against the rolling
-        // best instead of the just-overwritten s.violations[0].
         Scalar best_ever_violation{std::numeric_limits<Scalar>::infinity()};
 
         Eigen::VectorX<Scalar> c_eq;
@@ -141,7 +145,7 @@ struct original_argmin_policy
         requires objective<Problem, Scalar> && constrained_values<Problem, Scalar> && bound_constrained<Problem, Scalar>
     state_type<Problem> init(const Problem& problem,
                     const Eigen::Vector<Scalar, N>& x0,
-                    const solver_options<Convergence>& /*opts*/)
+                    const solver_options<Convergence>& opts)
     {
         const int n = problem.dimension();
         state_type<Problem> s;
@@ -209,7 +213,7 @@ struct original_argmin_policy
         else
             s.violations = Eigen::VectorX<Scalar>::Zero(s.lambda);
 
-        // Find best individual (least violation first, then best objective)
+        // The pull-to-best target starts at the least-violating individual, then the lowest objective.
         int best_idx = 0;
         for(int j = 1; j < s.lambda; ++j)
         {
@@ -227,24 +231,12 @@ struct original_argmin_policy
             }
         }
 
-        s.x = s.population.col(best_idx);
-        s.objective_value = s.fitnesses[best_idx];
-        s.best_ever_value = s.objective_value;
-        // Initial best-ever-violation is the violation at the chosen
-        // best init point. Used by the pre-feasible best-update path
-        // in step().
+        s.pull_target = s.population.col(best_idx);
+        s.pull_target_value = s.fitnesses[best_idx];
+        s.best_ever_value = s.pull_target_value;
         s.best_ever_violation = s.violations[best_idx];
 
-        s.c_eq.resize(s.n_eq);
-        s.c_ineq.resize(s.n_ineq);
-        if(n_c > 0)
-        {
-            Eigen::VectorX<Scalar> c(n_c);
-            s.problem->constraints(s.x, c);
-            s.c_eq = c.head(s.n_eq);
-            s.c_ineq = c.tail(s.n_ineq);
-        }
-
+        detail::start_best_evaluated(s, s.population, s.fitnesses, static_cast<Scalar>(opts.feasibility_tolerance_in_force()));
         return s;
     }
 
@@ -264,7 +256,7 @@ struct original_argmin_policy
             auto [child, sig] = s.mutation_workspace->mutate(
                 Eigen::Vector<Scalar, N>(s.population.col(parent_idx)),
                 s.sigmas.col(parent_idx),
-                s.x,
+                s.pull_target,
                 s.alpha, s.rates.tau, s.rates.tau_prime,
                 s.lower, s.upper, *s.rng);
 
@@ -327,7 +319,7 @@ struct original_argmin_policy
             s.violations[j] = s.violations[src];
         }
 
-        // 6. Update best if improved.
+        // 6. Move the pull-to-best target if improved.
         auto best_ranked = s.indices_buf[0];
         const Scalar best_ranked_f = s.offspring_fitnesses_buf[best_ranked];
         const Scalar best_ranked_v = s.offspring_violations_buf[best_ranked];
@@ -336,48 +328,32 @@ struct original_argmin_policy
         {
             s.best_ever_value = best_ranked_f;
             s.best_ever_violation = Scalar(0.0);
-            s.objective_value = best_ranked_f;
-            s.x = s.offspring_buf.col(best_ranked);
-
-            if(n_c > 0)
-            {
-                Eigen::VectorX<Scalar> c(n_c);
-                s.problem->constraints(s.x, c);
-                s.c_eq = c.head(s.n_eq);
-                s.c_ineq = c.tail(s.n_ineq);
-            }
+            s.pull_target_value = best_ranked_f;
+            s.pull_target = s.offspring_buf.col(best_ranked);
         }
         else if(s.best_ever_value == std::numeric_limits<Scalar>::infinity())
         {
-            // No feasible point yet: compare against the rolling best_ever_violation (s.violations[0] was just
-            // overwritten by the selection above) and update only on a Pareto improvement.
+            // No feasible point yet: update only on a Pareto improvement.
             if(best_ranked_v < s.best_ever_violation
-               && best_ranked_f <= s.objective_value)
+               && best_ranked_f <= s.pull_target_value)
             {
                 s.best_ever_violation = best_ranked_v;
-                s.objective_value = best_ranked_f;
-                s.x = s.offspring_buf.col(best_ranked);
-
-                if(n_c > 0)
-                {
-                    Eigen::VectorX<Scalar> c(n_c);
-                    s.problem->constraints(s.x, c);
-                    s.c_eq = c.head(s.n_eq);
-                    s.c_ineq = c.tail(s.n_ineq);
-                }
+                s.pull_target_value = best_ranked_f;
+                s.pull_target = s.offspring_buf.col(best_ranked);
             }
         }
 
+        // 7. Every offspring is offered to the record, judged by the solve's own comparator and tolerance.
+        detail::keep_best_evaluated(s, s.offspring_buf, s.offspring_fitnesses_buf);
         ++s.generation;
 
         Scalar mean_sigma = s.sigmas.leftCols(s.mu).mean();
-        Scalar grad_proxy = mean_sigma * std::sqrt(static_cast<Scalar>(n));
         bool improved = s.objective_value < old_best;
         Scalar obj_change = improved ? (s.objective_value - old_best) : mean_sigma;
 
         return step_result<Scalar>{
             .objective_value = s.objective_value,
-            .gradient_norm = grad_proxy,
+            .gradient_norm = std::numeric_limits<Scalar>::quiet_NaN(),
             .step_size = mean_sigma,
             .objective_change = obj_change,
             .improved = improved,
@@ -398,20 +374,12 @@ struct original_argmin_policy
             n, s.lambda, s.lower, s.upper, *s.rng);
         s.sigmas = detail::initialize_sigmas(n, s.lambda, s.lower, s.upper);
 
-        s.x = x0;
-        s.objective_value = s.problem->value(x0);
+        detail::restart_best_evaluated(s, x0);
+        s.pull_target = x0;
+        s.pull_target_value = s.objective_value;
         s.best_ever_value = s.objective_value;
         s.best_ever_violation = std::numeric_limits<Scalar>::infinity();
         s.generation = 0;
-
-        if(s.n_eq + s.n_ineq > 0)
-        {
-            const int n_c = s.n_eq + s.n_ineq;
-            Eigen::VectorX<Scalar> c(n_c);
-            s.problem->constraints(s.x, c);
-            s.c_eq = c.head(s.n_eq);
-            s.c_ineq = c.tail(s.n_ineq);
-        }
         return detail::latch_status(s);
     }
 

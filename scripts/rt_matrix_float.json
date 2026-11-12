@@ -356,16 +356,16 @@
           }
         },
         {
-          "module": "ISRES nlopt_faithful (the isres_policy alias) in float gives up its claim and returns a feasible point near double's",
+          "module": "ISRES nlopt_faithful (the isres_policy alias) in float tracks double",
           "cells": {
             "guaranteed?": {
               "verdict": "yes",
               "class": "gated",
-              "qualifier": "on hs023 and hs024, k = 100 on the returned point; the objective is not compared",
+              "qualifier": "on hs023 and hs024, k = 100",
               "evidence": [
                 {
                   "kind": "ctest_test",
-                  "name": "ISRES nlopt_faithful in float gives up its claim and returns a feasible point near double's at its own defaults"
+                  "name": "ISRES nlopt_faithful in float tracks double on an inequality-constrained fixture at its own defaults"
                 },
                 {
                   "kind": "ci_job",

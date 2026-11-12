@@ -76,8 +76,8 @@ solver_options<> trajectory_options()
     return opts;
 }
 
-// Drain the per-step trajectory (objective, mean step size, gradient proxy and
-// both iterate coordinates) coefficient by coefficient.
+// Drain the per-step trajectory (objective, mean step size, constraint violation
+// and both iterate coordinates) coefficient by coefficient.
 template <typename Solver>
 std::vector<std::array<double, 5>> drain_trajectory(Solver& solver)
 {
@@ -86,7 +86,7 @@ std::vector<std::array<double, 5>> drain_trajectory(Solver& solver)
     {
         auto r = solver.step();
         const auto& s = solver.state();
-        trace.push_back({r.objective_value, r.step_size, r.gradient_norm,
+        trace.push_back({r.objective_value, r.step_size, r.constraint_violation,
                          s.x(0), s.x(1)});
         if(r.policy_status)
             break;

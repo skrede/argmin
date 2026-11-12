@@ -53,6 +53,7 @@
 //     btad403, Table 2 (numeric default attribution gap).
 
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/isres_record.h"
 #include "argmin/detail/isres_operators.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/scalar_distributions.h"
@@ -99,7 +100,6 @@ struct runarsson_yao_paper_policy
         std::optional<std::uint64_t> seed{};
 
         std::uint16_t stall_window{200};
-        Scalar feasibility_gate{isres_defaults<Scalar>::feasibility_gate};
 
         // Numeric values are NOT paper-pinned (see file-header citation gap).
         // Defaults match NLopt for cross-implementation comparability.
@@ -148,8 +148,7 @@ struct runarsson_yao_paper_policy
         // RNG matches cmaes_policy + production isres_policy (xoshiro256+).
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
-        Scalar best_ever_value{std::numeric_limits<Scalar>::infinity()};
-        Scalar best_ever_violation{std::numeric_limits<Scalar>::infinity()};
+        detail::best_evaluated<Scalar> record;
 
         Eigen::VectorX<Scalar> c_eq;
         Eigen::VectorX<Scalar> c_ineq;
@@ -276,37 +275,7 @@ struct runarsson_yao_paper_policy
             s.violations.setZero();
         }
 
-        int best_idx = 0;
-        for(int j = 1; j < s.lambda; ++j)
-        {
-            const bool feasible_j = s.violations[j] <= Scalar(0.0);
-            const bool feasible_best = s.violations[best_idx] <= Scalar(0.0);
-
-            if(feasible_j && !feasible_best)
-                best_idx = j;
-            else if(feasible_j == feasible_best)
-            {
-                if(feasible_j && s.fitnesses[j] < s.fitnesses[best_idx])
-                    best_idx = j;
-                else if(!feasible_j && s.violations[j] < s.violations[best_idx])
-                    best_idx = j;
-            }
-        }
-
-        s.x = s.population.col(best_idx);
-        s.objective_value = s.fitnesses[best_idx];
-        s.best_ever_value = s.objective_value;
-        s.best_ever_violation = s.violations[best_idx];
-
-        s.c_eq.resize(s.n_eq);
-        s.c_ineq.resize(s.n_ineq);
-        if(n_c > 0)
-        {
-            Eigen::VectorX<Scalar> c(n_c);
-            s.problem->constraints(s.x, c);
-            s.c_eq = c.head(s.n_eq);
-            s.c_ineq = c.tail(s.n_ineq);
-        }
+        detail::start_best_evaluated(s, s.population, s.fitnesses, static_cast<Scalar>(opts.feasibility_tolerance_in_force()));
 
         // The gate keeps init() compilable for convergence policies without step_tolerance_criterion.
         if constexpr(detail::tuple_contains_v<
@@ -326,7 +295,7 @@ struct runarsson_yao_paper_policy
     {
         if(s.invalid_problem)
             return detail::rejected_step<Scalar>(s);
-        const Scalar prev_best_ever_value = s.best_ever_value;
+        const Scalar prev_objective = s.objective_value;
 
         const int n = static_cast<int>(s.x.size());
         const int mu = s.mu;
@@ -483,62 +452,20 @@ struct runarsson_yao_paper_policy
             s.violations.setZero();
         }
 
-        // (6) Re-rank the post-mutation population so the rank-0 column
-        //     reflects the new generation's best.
+        // (6) Re-rank the post-mutation population. The ranking's draws advance the random stream the next
+        //     generation mutates with, so it runs although no selection here reads it.
         for(int j = 0; j < lambda; ++j)
             s.indices_buf[static_cast<std::size_t>(j)]
                 = static_cast<std::uint32_t>(j);
         detail::stochastic_rank(s.indices_buf, s.fitnesses, s.violations, s.pf, rng);
 
-        // (7) Best-update + best_ever bookkeeping: feasible improvement
-        //     first, then a Pareto-tightened pre-feasible least-infeasibility
-        //     witness (rolling best_ever_violation).
-        const std::uint32_t best_ranked = s.indices_buf[0];
-        const Scalar best_ranked_f = s.fitnesses[best_ranked];
-        const Scalar best_ranked_v = s.violations[best_ranked];
-
-        if(best_ranked_f < s.best_ever_value && best_ranked_v <= Scalar(0.0))
-        {
-            s.best_ever_value = best_ranked_f;
-            s.best_ever_violation = Scalar(0.0);
-            s.objective_value = best_ranked_f;
-            s.x = s.population.col(best_ranked);
-
-            if(n_c > 0)
-            {
-                Eigen::VectorX<Scalar> c(n_c);
-                s.problem->constraints(s.x, c);
-                s.c_eq = c.head(s.n_eq);
-                s.c_ineq = c.tail(s.n_ineq);
-            }
-        }
-        else if(s.best_ever_value == std::numeric_limits<Scalar>::infinity())
-        {
-            if(best_ranked_v < s.best_ever_violation
-               && best_ranked_f <= s.objective_value)
-            {
-                s.best_ever_violation = best_ranked_v;
-                s.objective_value = best_ranked_f;
-                s.x = s.population.col(best_ranked);
-
-                if(n_c > 0)
-                {
-                    Eigen::VectorX<Scalar> c(n_c);
-                    s.problem->constraints(s.x, c);
-                    s.c_eq = c.head(s.n_eq);
-                    s.c_ineq = c.tail(s.n_ineq);
-                }
-            }
-        }
+        // (7) Every individual is offered to the record, judged by the solve's own comparator and tolerance.
+        detail::keep_best_evaluated(s, s.population, s.fitnesses);
 
         ++s.generation;
 
-        // (8) Runarsson-Yao 2005 Section V (termination): emit
-        //     solver_status::ftol_reached when the population's mean
-        //     step size has collapsed AND the rank-0 individual's violation
-        //     sits within the feasibility gate. Two sigma-collapse forms
-        //     are available via the runtime selector
-        //     options.sigma_collapse_form:
+        // (8) Runarsson-Yao 2005 Section V (termination): a collapse of the population's mean step size ends the
+        //     run. Two sigma-collapse forms are available via the runtime selector options.sigma_collapse_form:
         //
         //       - bound_relative_configurable: compares mean_sigma against
         //         `ratio * mean(ub - lb) / sqrt(n)` (default ratio 1e-9).
@@ -550,9 +477,6 @@ struct runarsson_yao_paper_policy
         //         falls back to the bound-relative form using `ratio`
         //         (fail-safe).
         const Scalar mean_sigma = s.sigmas.leftCols(mu).mean();
-        const std::uint32_t rank0 = s.indices_buf[0];
-        const Scalar v_best = s.violations[rank0];
-        const bool feasible = (v_best <= options.feasibility_gate);
 
         const Scalar collapse_ratio =
             options.sigma_collapse_ratio.value_or(isres_defaults<Scalar>::sigma_collapse_ratio);
@@ -574,19 +498,15 @@ struct runarsson_yao_paper_policy
                 s, collapse_ratio, n, s.lower, s.upper);
         }
 
-        std::optional<solver_status> emitted_status;
-        if(collapsed && feasible)
-            emitted_status = solver_status::ftol_reached;
-
         return step_result<Scalar>{
             .objective_value = s.objective_value,
-            .gradient_norm = std::numeric_limits<Scalar>::infinity(),
+            .gradient_norm = std::numeric_limits<Scalar>::quiet_NaN(),
             .step_size = mean_sigma,
-            .objective_change = std::abs(s.best_ever_value - prev_best_ever_value),
-            .improved = (s.best_ever_value < prev_best_ever_value),
+            .objective_change = std::abs(s.objective_value - prev_objective),
+            .improved = (s.objective_value < prev_objective),
             .constraint_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
             .x_norm = s.x.norm(),
-            .policy_status = emitted_status,
+            .policy_status = detail::collapse_status(collapsed, s.record),
         };
     }
 
@@ -601,20 +521,8 @@ struct runarsson_yao_paper_policy
         s.population = detail::initialize_population<N>(n, s.lambda, s.lower, s.upper, *s.rng);
         s.sigmas = detail::initialize_sigmas<N>(n, s.lambda, s.lower, s.upper);
 
-        s.x = x0;
-        s.objective_value = s.problem->value(x0);
-        s.best_ever_value = s.objective_value;
-        s.best_ever_violation = std::numeric_limits<Scalar>::infinity();
         s.generation = 0;
-
-        if(s.n_eq + s.n_ineq > 0)
-        {
-            const int n_c = s.n_eq + s.n_ineq;
-            Eigen::VectorX<Scalar> c(n_c);
-            s.problem->constraints(s.x, c);
-            s.c_eq = c.head(s.n_eq);
-            s.c_ineq = c.tail(s.n_ineq);
-        }
+        detail::restart_best_evaluated(s, x0);
         return detail::latch_status(s);
     }
 

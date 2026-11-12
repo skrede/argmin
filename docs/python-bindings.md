@@ -378,10 +378,12 @@ Each of these is a deliberate exclusion, with the reason.
   first step that satisfies the linearized inequality but violates the
   nonlinear one and then stop at that infeasible point (see the
   [solver-selection guide](choosing-a-solver.md)).
-- **`isres`.** Its steps report no constraint violation, so the driver's
-  stopping tests that refuse to stop on an infeasible step read every step as
-  feasible; and its population options have no lower bound, so an integer from
-  Python could size a population of zero.
+- **`isres`.** A candidate, not yet bound. It was held back while its steps
+  reported no constraint violation and its population options had no lower
+  bound; it now reports the violation of the point it holds, rejects an empty
+  population or one it cannot hold as an invalid problem, and returns the best
+  point it evaluated within the feasibility tolerance, claiming no more than
+  that (`xtol_reached`), so binding it is a decision still to be taken.
 - **The GCMMA variants.** Held back on their publication figures:
   `gcmma` 9 pass / 0 expected_fail / 4 excluded,
   `gcmma_raa_augmented` 9 pass / 0 expected_fail / 4 excluded and

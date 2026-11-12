@@ -265,14 +265,10 @@ TEST_CASE("isres: mu rounds up (ceil) and x0 is injected into the initial popula
     CHECK(s.population(1, 0) == Approx(2.0).epsilon(0).margin(1e-12));
 }
 
-// Equality-constrained best gate: whenever the solver emits a converged
-// status (ftol_reached), the RETURNED x must be feasible within the
-// feasibility gate. Pre-fix the feasible branch required v <= 0.0
-// exactly (unreachable for an equality's squared violation) and the
-// status was gated on the rank-0 individual rather than the returned x,
-// so the solver could return an infeasible x while reporting
-// convergence.
-TEST_CASE("isres: converged status implies a feasible returned x on an equality constraint",
+// Equality-constrained claim: a sigma collapse claims only that the returned x
+// is within the solve's feasibility tolerance, so the returned x must meet it on
+// the equality's residual, which a stochastic sampler never drives to zero.
+TEST_CASE("isres: a claim at a sigma collapse holds a returned x within the feasibility tolerance on an equality constraint",
           "[isres][oracle-pin]")
 {
     equality_qp problem;
@@ -285,27 +281,15 @@ TEST_CASE("isres: converged status implies a feasible returned x on an equality 
 
     isres_policy<> policy;
     policy.options.seed = 7u;
-    policy.options.feasibility_gate = 1e-4;
 
     step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
 
-    // The best-ever record must never carry an infeasible point out as a
-    // converged result. If the run reports convergence, the returned x's
-    // equality residual must sit within the feasibility gate (L2-squared).
     Eigen::VectorXd c(1);
     problem.constraints(result.x, c);
-    const double v = c[0] * c[0];
-
-    INFO("returned x = (" << result.x[0] << ", " << result.x[1]
-         << "), equality residual^2 = " << v
-         << ", status converged = "
-         << (result.status == solver_status::ftol_reached));
-    if(result.status == solver_status::ftol_reached)
-        CHECK(v <= 1e-4);
-
-    // Regardless of status, the returned objective is finite and the
-    // best-ever record is self-consistent (never worse than x0 once a
-    // feasible point has been seen).
-    CHECK(std::isfinite(result.objective_value));
+    INFO("returned x = (" << result.x[0] << ", " << result.x[1] << "), equality residual = " << c[0]);
+    CHECK(result.status == solver_status::xtol_reached);
+    CHECK(std::abs(c[0]) <= opts.feasibility_tolerance);
+    CHECK(result.constraint_violation == std::abs(c[0]));
+    CHECK(std::isnan(result.gradient_norm));
 }

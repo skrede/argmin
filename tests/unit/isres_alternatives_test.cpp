@@ -2,7 +2,7 @@
 // original_argmin, runarsson_yao_paper). Covers (1) nlp_solver concept
 // satisfaction, (2) restarting_policy<variant>::rebind static_asserts,
 // (3) simple_constrained smoke runs, and (4) synthetic-state
-// ftol_reached emission tests per Runarsson-Yao 2005 termination
+// sigma-collapse status tests per Runarsson-Yao 2005 termination
 // convention.
 
 #include "argmin/solver/alternative/isres/nlopt_faithful_policy.h"
@@ -169,15 +169,15 @@ TEST_CASE("runarsson_yao_paper: simple_constrained smoke",
 }
 
 // ---------------------------------------------------------------------------
-// Synthetic-state ftol_reached emission tests.
+// Synthetic-state sigma-collapse tests.
 //
-// Drive state directly into a sigma-collapsed + feasible configuration
-// and verify step() emits solver_status::ftol_reached. This is the
-// canonical test recipe for the termination predicate without
-// relying on the algorithm to converge end-to-end on a real problem.
+// Drive state directly into a sigma-collapsed configuration and verify the
+// status step() reports. The start (0.5, 0.5) satisfies the constraint, so
+// the record is within the feasibility tolerance; a collapse there claims
+// only that, and no gradient norm is reported.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("nlopt_faithful: emits ftol_reached on sigma collapse + feasibility",
+TEST_CASE("nlopt_faithful: a sigma collapse at a record within the tolerance reports xtol_reached",
           "[isres][alternatives][nlopt_faithful][status]")
 {
     simple_constrained problem;
@@ -191,17 +191,15 @@ TEST_CASE("nlopt_faithful: emits ftol_reached on sigma collapse + feasibility",
 
     auto s = policy.init(problem, x0, opts);
 
-    // Force sigma collapse and feasibility on the rank-0 individual.
     s.sigmas.leftCols(s.lambda).setConstant(1e-20);
-    s.violations.setZero();
-    s.best_ever_violation = 0.0;
 
     auto sr = policy.step(s);
     REQUIRE(sr.policy_status.has_value());
-    CHECK(*sr.policy_status == solver_status::ftol_reached);
+    CHECK(*sr.policy_status == solver_status::xtol_reached);
+    CHECK(std::isnan(sr.gradient_norm));
 }
 
-TEST_CASE("runarsson_yao_paper: emits ftol_reached on sigma collapse + feasibility",
+TEST_CASE("runarsson_yao_paper: a sigma collapse at a record within the tolerance reports xtol_reached",
           "[isres][alternatives][runarsson_yao_paper][status]")
 {
     simple_constrained problem;
@@ -216,20 +214,20 @@ TEST_CASE("runarsson_yao_paper: emits ftol_reached on sigma collapse + feasibili
     auto s = policy.init(problem, x0, opts);
 
     s.sigmas.leftCols(s.lambda).setConstant(1e-20);
-    s.violations.setZero();
-    s.best_ever_violation = 0.0;
 
     auto sr = policy.step(s);
     REQUIRE(sr.policy_status.has_value());
-    CHECK(*sr.policy_status == solver_status::ftol_reached);
+    CHECK(*sr.policy_status == solver_status::xtol_reached);
+    CHECK(std::isnan(sr.gradient_norm));
 }
 
 // ---------------------------------------------------------------------------
-// Synthetic-state NO emission tests: collapsed sigma alone is not enough,
-// nor is feasibility alone. Both predicates must fire.
+// Synthetic-state tests of the other outcomes: a feasible record without a
+// collapse reports nothing, and a collapse at a record outside the tolerance
+// reports objective_stalled, which claims nothing about the point.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("nlopt_faithful: no ftol_reached on large sigma even when feasible",
+TEST_CASE("nlopt_faithful: no status on large sigma even when feasible",
           "[isres][alternatives][nlopt_faithful][status]")
 {
     simple_constrained problem;
@@ -245,42 +243,35 @@ TEST_CASE("nlopt_faithful: no ftol_reached on large sigma even when feasible",
 
     // Sigma is large -- the bound-relative collapse predicate must NOT fire.
     s.sigmas.leftCols(s.lambda).setConstant(1.0);
-    s.violations.setZero();
-    s.best_ever_violation = 0.0;
 
     auto sr = policy.step(s);
     CHECK_FALSE(sr.policy_status.has_value());
 }
 
-TEST_CASE("nlopt_faithful: no ftol_reached on infeasible rank-0",
+TEST_CASE("nlopt_faithful: a sigma collapse at a record outside the tolerance reports objective_stalled",
           "[isres][alternatives][nlopt_faithful][status]")
 {
     simple_constrained problem;
-    Eigen::VectorXd x0{{0.5, 0.5}};
+    Eigen::VectorXd x0{{-10.0, -10.0}};
     solver_options opts;
     opts.max_iterations = 1;
 
     alternative::isres::nlopt_faithful_policy<> policy;
     policy.options.seed = 42u;
+    policy.options.population_size = 1u;
     policy.options.sigma_collapse_ratio = 1e-9;
-    policy.options.feasibility_gate = 1e-4;
 
     auto s = policy.init(problem, x0, opts);
 
-    // Sigma collapsed but the population is forced into infeasible
-    // territory. The constraint `c[0] = x0 + x1 - 1.0 >= 0` is grossly
-    // violated at the lower bound (-10, -10), giving an L2-squared
-    // violation of (0 - (-10 + -10 - 1))^2 = 21^2 = 441 >> 1e-4.
-    // step() re-evaluates violations after mutation, so we drive the
-    // population to the lower bound rather than seeding s.violations
-    // directly (which would be overwritten).
-    s.population.leftCols(s.lambda).colwise() = s.lower;
+    // A population of one is the start alone, at the lower bound where
+    // `c[0] = x0 + x1 - 1.0 >= 0` is violated by 21; with its step size
+    // collapsed it never leaves.
     s.sigmas.leftCols(s.lambda).setConstant(1e-20);
-    s.violations.setConstant(1.0);
-    s.best_ever_violation = 1.0;
 
     auto sr = policy.step(s);
-    CHECK_FALSE(sr.policy_status.has_value());
+    REQUIRE(sr.policy_status.has_value());
+    CHECK(*sr.policy_status == solver_status::objective_stalled);
+    CHECK(sr.constraint_violation > 1.0);
 }
 
 TEST_CASE("original_argmin: never emits ftol_reached (frozen baseline)",
@@ -336,12 +327,10 @@ TEST_CASE("nlopt_faithful: xtol_coupled falls back to bound-relative when thresh
     auto s = policy.init(problem, x0, opts);
 
     s.sigmas.leftCols(s.lambda).setConstant(1e-20);
-    s.violations.setZero();
-    s.best_ever_violation = 0.0;
 
     auto sr = policy.step(s);
     REQUIRE(sr.policy_status.has_value());
-    CHECK(*sr.policy_status == solver_status::ftol_reached);
+    CHECK(*sr.policy_status == solver_status::xtol_reached);
 }
 
 // ---------------------------------------------------------------------------

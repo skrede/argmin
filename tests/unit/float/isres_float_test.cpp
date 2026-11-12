@@ -8,7 +8,6 @@
 #include "argmin/solver/alternative/isres/original_argmin_policy.h"
 #include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
 
-#include "argmin/options/isres_defaults.h"
 #include "argmin/options/convergence_defaults.h"
 
 #include "argmin/test_functions/hock_schittkowski.h"
@@ -21,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <algorithm>
 
@@ -33,10 +33,9 @@ namespace
 constexpr std::uint32_t max_iterations = 2000;
 constexpr std::uint64_t seed = 42;
 
-// ISRES reports ftol_reached on its own sigma-collapse stop; converged and stalled are harness
-// criteria, stalled firing once the surviving population stops improving the objective.
-constexpr std::array accepted_statuses{solver_status::ftol_reached, solver_status::converged,
-                                       solver_status::stalled};
+// ISRES reports xtol_reached on its own sigma-collapse stop; stalled is the harness step criterion,
+// firing once the surviving population's mean step size falls below its threshold.
+constexpr std::array accepted_statuses{solver_status::xtol_reached, solver_status::stalled};
 
 bool accepted(solver_status status)
 {
@@ -54,21 +53,17 @@ solve_result<typename Policy::scalar_type, Problem::problem_dimension> drive(con
     return solver.solve();
 }
 
-// The feasibility gate bounds this sum of squared violations, evaluated from the problem rather than
-// read from the solver's report.
+// The largest row violation, evaluated from the problem rather than read from the solver's report.
 template <typename Problem>
-float squared_violation(const Problem& problem, const vector<float, Problem::problem_dimension>& x)
+float row_violation(const Problem& problem, const vector<float, Problem::problem_dimension>& x)
 {
     const int n_eq = problem.num_equality();
     vector<float, dynamic_dimension> c(n_eq + problem.num_inequality());
     problem.constraints(x, c);
-    float sum = 0.0f;
+    float largest = 0.0f;
     for(int i = 0; i < static_cast<int>(c.size()); ++i)
-    {
-        const float v = i < n_eq ? c[i] : std::min(0.0f, c[i]);
-        sum += v * v;
-    }
-    return sum;
+        largest = std::max(largest, i < n_eq ? std::abs(c[i]) : -c[i]);
+    return largest;
 }
 
 template <template <typename, int> typename Policy, template <typename> typename Problem>
@@ -83,25 +78,7 @@ void check_tracks_double()
     REQUIRE(accepted(result_f.status));
     CHECK(tracks(result_f.x, result_d.x, k_stochastic));
     CHECK(objective_tracks(result_f.objective_value, result_d.objective_value, k_stochastic));
-    CHECK(squared_violation(problem_f, result_f.x) <= isres_defaults<float>::feasibility_gate);
-}
-
-// The faithful variant's own gate (NLopt's, on the summed squared violation) stops it at points outside the solve's
-// feasibility tolerance, so it gives up the claim and returns its best feasible iterate. Each scalar stops at its own
-// such iterate, and their objectives differ by more than the stochastic tolerance, so only the point is compared.
-template <template <typename, int> typename Policy, template <typename> typename Problem>
-void check_feasible_without_claim()
-{
-    const Problem<double> problem_d;
-    const Problem<float> problem_f;
-    const auto result_d = drive<Policy<double, Problem<double>::problem_dimension>>(problem_d);
-    const auto result_f = drive<Policy<float, Problem<float>::problem_dimension>>(problem_f);
-
-    CHECK(result_d.status == solver_status::objective_stalled);
-    CHECK(result_f.status == solver_status::objective_stalled);
-    CHECK(tracks(result_f.x, result_d.x, k_stochastic));
-    CHECK(result_f.constraint_violation <= convergence_defaults<float>::feasibility_tolerance);
-    CHECK(squared_violation(problem_f, result_f.x) <= isres_defaults<float>::feasibility_gate);
+    CHECK(row_violation(problem_f, result_f.x) <= convergence_defaults<float>::feasibility_tolerance);
 }
 
 template <scalar S, int N>
@@ -138,15 +115,15 @@ TEST_CASE("ISRES in float tracks double on an inequality-constrained fixture at 
     }
 }
 
-TEST_CASE("ISRES nlopt_faithful in float gives up its claim and returns a feasible point near double's at its own defaults", "[float]")
+TEST_CASE("ISRES nlopt_faithful in float tracks double on an inequality-constrained fixture at its own defaults", "[float]")
 {
     SECTION("isres_policy hs023")
     {
-        check_feasible_without_claim<nlopt_faithful, hs023>();
+        check_tracks_double<nlopt_faithful, hs023>();
     }
 
     SECTION("isres_policy hs024")
     {
-        check_feasible_without_claim<nlopt_faithful, hs024>();
+        check_tracks_double<nlopt_faithful, hs024>();
     }
 }

@@ -18,7 +18,7 @@ struct known_defect
 };
 
 // Each entry is skipped by the oracle coverage and asserted by an expected-fail case under tests/defects.
-inline constexpr std::array<known_defect, 19> known_defect_cases{{
+inline constexpr std::array<known_defect, 12> known_defect_cases{{
     {"projected_gradient_gn",
      "bound",
      "projecting the full Gauss-Newton step onto the box crawls along the free variable once a bound is active, so the "
@@ -45,32 +45,16 @@ inline constexpr std::array<known_defect, 19> known_defect_cases{{
      "ends max_iterations far from stationarity"},
     {"cmaes_pwq_reparameterization", "bound", "on hs005 the run reports converged after 65 generations and returns the initial point, which is not stationary"},
     {"cmaes_no_repair_adaptive_penalty", "bound", "on hs005 the step size collapses at a non-stationary interior point and the run reports converged"},
-    {"isres_nlopt_faithful",
-     "bound",
-     "the step-size collapse ends the run converged on the Wood function with stationarity about 150 times the gradient "
-     "tolerance"},
-    {"isres_nlopt_faithful", "inequality", "the run reports converged at a point of hs076 that violates an inequality row and is far from stationary"},
-    {"isres_nlopt_faithful", "mixed", "the run reports converged at a point of hs071 that violates both constraint kinds and is far from stationary"},
     {"isres_original_argmin", "bound", "the run ends max_iterations on the Wood function far from stationarity"},
-    {"isres_original_argmin", "inequality", "the run reports converged after 34 generations on hs076 far from stationarity"},
     {"isres_original_argmin",
      "equality",
-     "the best point never moves from the best of the initial population, so the run ends max_iterations at an "
-     "infeasible point of hs028"},
+     "the frozen search does not settle on hs028 within the budget, so the run ends max_iterations, claiming nothing, at a "
+     "feasible point far from the optimum"},
     {"isres_original_argmin",
      "mixed",
-     "the best point never moves from the best of the initial population, so the run ends max_iterations at an "
-     "infeasible point of hs071"},
+     "the frozen search does not settle on hs071 within the budget, so the run ends max_iterations, claiming nothing, at a "
+     "feasible point far from the optimum"},
     {"isres_runarsson_yao_paper", "bound", "the run ends max_iterations on the Wood function far from stationarity"},
-    {"isres_runarsson_yao_paper", "inequality", "the run ends ftol_reached on hs076 with stationarity far above the tolerance"},
-    {"isres_runarsson_yao_paper",
-     "equality",
-     "the best point never moves from the best of the initial population, so the run ends ftol_reached at an infeasible "
-     "point of hs028"},
-    {"isres_runarsson_yao_paper",
-     "mixed",
-     "the best point never moves from the best of the initial population, so the run ends ftol_reached at an infeasible "
-     "point of hs071"},
 }};
 
 inline bool same_case(const known_defect& defect, const case_id& id)
