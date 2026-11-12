@@ -44,8 +44,82 @@ Policies available at HEAD, grouped by problem class:
 - COBYLA's policy state carries `clamped_evaluations`, the number of evaluation
   points its safety clamp moved into the box; Python reports it as
   `CobylaSolver.clamped_evaluations`.
+- `bound_violation()` on `step_budget_solver`, `time_budget_solver`,
+  `step_and_time_budget_solver` and `stepper`, and
+  `step_result::bound_violation`: the largest distance of the iterate outside
+  the box. The accessor is NaN for a rejected problem.
 
 ### Changed
+
+- `reset(x0)` and `reset_clear(x0)` return `solver_status` instead of `void`,
+  on every policy, solver driver and `basic_solver_group`. A start of the wrong
+  length, at construction or on reset, ends with `invalid_problem` instead of
+  being read out of bounds. So do more constraint rows than a declared
+  `constraint_count`, a row or residual count changed between resets, a row
+  shape the family cannot store (for example more equality rows than
+  variables in the line-search SQP policies), and an ISRES or CMA-ES
+  population option the policy cannot store. The status is latched: `step()`
+  and `solve()` return it without evaluating the problem until a valid reset.
+- A status that describes the returned point (`converged`, `ftol_reached`,
+  `xtol_reached`, `stalled`) is reported only when that point is feasible
+  within the feasibility tolerance in force (`constraint_tolerance` when set,
+  else `feasibility_tolerance`). Feasibility covers both the largest
+  constraint-row violation and the distance outside the box. A convergence
+  criterion that fires at an infeasible point is not reported, and the solve
+  continues. A policy that stops on its own test at an infeasible point ends
+  the solve with `objective_stalled`. This holds for `solve()`, `step()`, the
+  stepper and the solver group.
+- A solve whose status certifies its final iterate returns that iterate.
+  Before, an earlier iterate with a lower objective inside the feasibility
+  tolerance could be returned under the final iterate's status. Exits that make
+  no claim still return the best point seen, ranked feasible first on the
+  larger of the row and box violation.
+- The KKT residual's complementarity term is the product `max |mu_i c_i|`
+  (Nocedal and Wright, Definition 12.1) instead of `max min(|mu_i|, |c_i|)`. It
+  applies to the general constraint rows and to the box multipliers of the
+  L-BFGS-B, projected Gauss-Newton and SQP solvers. A point with a large
+  multiplier and a small nonzero constraint value is no longer certified
+  `converged`.
+- `nw_sqp`, `filter_nw_sqp`, `filter_slsqp` and `kraft_slsqp` measure
+  stationarity, including the reported `gradient_norm`, on the box-projected
+  Lagrangian gradient. A minimizer on a bound now ends `converged` instead of
+  `stalled` or `max_iterations`.
+- The multiplier estimate of `nw_sqp`, `filter_nw_sqp`, `filter_slsqp`,
+  `tr_sqp` and `filter_trsqp` treats a coordinate on its bound as a working-set
+  row. A KKT point where a bound and general constraint rows are both active
+  (HS071) is certified `converged`.
+- `tr_sqp` and `filter_trsqp` project a start outside the box onto it before
+  evaluating it, at construction and on reset, as MMA and the GCMMA variants
+  do.
+- `tr_sqp` ends `roundoff_limited` when a rejected trial's actual and predicted
+  merit reductions both lie within the merit's rounding error, instead of
+  shrinking the radius until `trust_region_step_rejected`. `tr_sqp` and
+  `filter_trsqp` treat a trust radius below the relative machine precision of
+  the iterate as collapsed, even when `min_trust_radius` is smaller.
+- `constraint_violation()` on the solver drivers is the largest row violation
+  (L-infinity), the measure `solve_result::constraint_violation` and the
+  feasibility tolerance use, instead of the sum (L1).
+- `basic_solver_group` reports the status of the member whose point it
+  returns, admitted on that member's rows and box, instead of its own verdict
+  for whichever member ranked best. A member still running when the group stops
+  reports `max_iterations` or `budget_exhausted`, or `objective_stalled` when
+  the group's criteria stopped it. `results()` reports members the same way.
+- `lbfgsb`, `byrd_lbfgsb`, `bobyqa`, `lm`, `projected_gn`,
+  `projected_gradient_gn` and the three CMA-ES variants end with
+  `invalid_problem` for a problem that declares equality or inequality rows,
+  at construction or on reset and without evaluating it, instead of ignoring
+  the rows. `restarting_policy` and `multistart_policy` report the rejection
+  of the policy they wrap. A problem with the row interface and zero rows runs
+  as before; constrained problems go through `augmented_lagrangian`.
+- A solve rejected with `invalid_problem` counts no iteration and no
+  evaluation, and reports NaN for `objective_value`, `gradient_norm` and
+  `constraint_violation`, as the drivers' accessors do. Before, it could count
+  one iteration and report a violation of 0.
+- ISRES (all three variants) returns the best point it evaluated within the
+  solve's feasibility tolerance, ranked by the solve's own best-iterate rule. A
+  collapsed population reports `xtol_reached` instead of `converged` or
+  `ftol_reached`, or `objective_stalled` when no evaluated point is within the
+  tolerance. ISRES reports a NaN gradient norm and never claims optimality.
 
 - Python names follow the C++ types they bind, with no aliases for the old
   names: `SlsqpSolver` is `KraftSlsqpSolver`, `SlsqpOptions` is
@@ -74,7 +148,17 @@ Policies available at HEAD, grouped by problem class:
 - `float` is supported per algorithm family, each gated against `double`; see
   [docs/float-support.md](docs/float-support.md).
 
+### Removed
+
+- ISRES's `feasibility_gate` option. ISRES used it as a fixed gate on the
+  summed squared constraint violation; its record is now ranked at the solve's
+  feasibility tolerance.
+
 ### Fixed
+
+- MMA and the GCMMA variants no longer treat an infeasible start as feasible
+  when choosing the point to return. A solve that ended without a claim could
+  return its start and report a constraint violation of 0.
 
 - COBYLA never evaluates the objective or the constraints outside the box. Two
   sign errors in its bound repair, in the initial simplex step and in the
