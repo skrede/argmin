@@ -85,8 +85,8 @@ suite recomputes them from it. `FilterSlsqpSolver` holds
 already-bound peer at `kraft_slsqp_accurate` 26 pass / 1 expected_fail, and it
 brings no new stopping test: it stops on the same bound-aware KKT residual as
 the Kraft solver. `TrSqpSolver` holds
-`tr_sqp_accurate` 22 pass / 5 expected_fail (its fast mode, which is not
-bound, holds `tr_sqp_fast` 21 pass / 6 expected_fail). Like every SQP policy in
+`tr_sqp_accurate` 23 pass / 4 expected_fail (its fast mode, which is not
+bound, holds `tr_sqp_fast` 22 pass / 5 expected_fail). Like every SQP policy in
 the library it stops on the bound-aware KKT residual, which projects the
 Lagrangian gradient onto the box and so can certify a solution with an active
 bound.

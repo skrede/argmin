@@ -100,15 +100,8 @@ TABLE = {
         Source(
             "solver/convergence.h",
             "step_tolerance_criterion",
-            2,
+            1,
             rename=(("threshold", "step_threshold"),),
-            unchecked=(
-                (
-                    "feasibility_tolerance",
-                    "the criterion's own copy; the driver-level tolerance of the "
-                    "same name is the one the binding exposes",
-                ),
-            ),
         ),
         Source(
             "solver/convergence.h",
