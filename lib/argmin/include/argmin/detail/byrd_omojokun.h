@@ -202,15 +202,10 @@ struct byrd_omojokun_step_result
     cg_exit_status tangential_cg_status;
 };
 
-// Caller-owned scratch for the composite step's normal-leg dogleg and
-// the predicted-reduction assembly. The helper is instantiated at a
-// dynamic joint dimension (the slack-augmented primal width is a
-// runtime quantity even when the policy pins a compile-time x-only N),
-// so every one of these would otherwise heap-allocate on each step.
-// Threaded from the policy state so the composite step is allocation-
-// free across the real-time step window. The step-space vectors live on
-// the joint primal axis n_joint; Ag_n / Av / Ap_plus_c live on the
-// constraint axis m_total.
+// Caller-owned scratch for the composite step, held by the policy state. The helper runs at the dynamic joint
+// dimension (the slack-augmented width is a runtime quantity even at a compile-time x-only N), so each buffer here,
+// the rank-deficient projector's QR included, would otherwise allocate on every step. Step-space vectors live on the
+// joint primal axis n_joint; Ag_n, Av and Ap_plus_c on the constraint axis m_total.
 template <typename Scalar, int N>
 struct byrd_omojokun_workspace
 {
@@ -229,7 +224,6 @@ struct byrd_omojokun_workspace
     Eigen::VectorX<Scalar> Av;
     Eigen::VectorX<Scalar> Ap_plus_c;
 
-
     // Lin-More tangential free-set restart scratch. The augmented normal
     // equations grow one unit row per pinned box coordinate; sized to the
     // worst case m_total + n_joint (every joint coordinate fixed) and used
@@ -239,6 +233,8 @@ struct byrd_omojokun_workspace
     Eigen::MatrixX<Scalar> AAt_aug;
     Eigen::VectorX<Scalar> w_aug;
     defined_decomposition<Eigen::LDLT<Eigen::MatrixX<Scalar>>> ldlt_aug;
+    null_space_qr_workspace<Scalar> null_qr;
+    null_space_qr_workspace<Scalar> null_qr_aug;
     std::vector<int> fixed;
 
     void resize(int n_joint, int m_total)
@@ -263,6 +259,8 @@ struct byrd_omojokun_workspace
         AAt_aug.resize(m_aug_max, m_aug_max);
         w_aug.resize(m_aug_max);
         ldlt_aug = decltype(ldlt_aug)(m_aug_max);
+        null_qr.resize(n_joint, m_total);
+        null_qr_aug.resize(n_joint, m_aug_max);
         fixed.reserve(static_cast<std::size_t>(n_joint));
     }
 };
@@ -588,7 +586,7 @@ byrd_omojokun_step_result<Scalar> byrd_omojokun_composite_step(
     {
         if(m_total > 0)
             detail::null_space_project<Scalar, N>(
-                A, ldlt_workspace, vec, w_workspace,
+                A, ldlt_workspace, vec, w_workspace, ws.null_qr,
                 null_space_refine_passes);
     };
 
@@ -630,7 +628,7 @@ byrd_omojokun_step_result<Scalar> byrd_omojokun_composite_step(
             auto project_aug = [&](auto& vec)
             {
                 detail::null_space_project<Scalar, N>(
-                    A_aug_ref, ws.ldlt_aug, vec, ws.w_aug,
+                    A_aug_ref, ws.ldlt_aug, vec, ws.w_aug, ws.null_qr_aug,
                     null_space_refine_passes);
                 // Hold the pinned coordinates at their box-face value
                 // EXACTLY. The free-set semantics define a pinned

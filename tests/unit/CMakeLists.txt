@@ -84,6 +84,7 @@ add_executable(argmin_unit_tests
     sqp_bound_stationarity_test.cpp
     steihaug_cg_test.cpp
     byrd_omojokun_test.cpp
+    null_space_projection_test.cpp
     cauchy_point_test.cpp
     restoration_test.cpp
     tr_sqp_test.cpp

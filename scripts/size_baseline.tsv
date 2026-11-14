@@ -4,7 +4,7 @@
 # This file only shrinks: lower a count or delete a row as a unit is decomposed, never raise or add one.
 file	lib/argmin/include/argmin/detail/active_set_qp.h	-	1516
 file	lib/argmin/include/argmin/detail/augmented_lagrangian.h	-	205
-file	lib/argmin/include/argmin/detail/byrd_omojokun.h	-	790
+file	lib/argmin/include/argmin/detail/byrd_omojokun.h	-	788
 file	lib/argmin/include/argmin/detail/cauchy_point.h	-	319
 file	lib/argmin/include/argmin/detail/cobyla_trust_region.h	-	560
 file	lib/argmin/include/argmin/detail/compact_lbfgs.h	-	529
@@ -27,7 +27,7 @@ file	lib/argmin/include/argmin/detail/projected_gn_step.h	-	381
 file	lib/argmin/include/argmin/detail/quadratic_model.h	-	480
 file	lib/argmin/include/argmin/detail/restoration.h	-	371
 file	lib/argmin/include/argmin/detail/solver_core.h	-	656
-file	lib/argmin/include/argmin/detail/sqp_common.h	-	791
+file	lib/argmin/include/argmin/detail/sqp_common.h	-	784
 file	lib/argmin/include/argmin/detail/steihaug_cg.h	-	255
 file	lib/argmin/include/argmin/detail/trust_region.h	-	924
 file	lib/argmin/include/argmin/formulation/concepts.h	-	234
@@ -130,7 +130,7 @@ function	lib/argmin/include/argmin/detail/solve_loop.h	run_solve_loop	75
 function	lib/argmin/include/argmin/detail/solver_core.h	forward_policy_hints	82
 function	lib/argmin/include/argmin/detail/sqp_common.h	compute_bfgs_pair_fused	26
 function	lib/argmin/include/argmin/detail/sqp_common.h	extract_qp_multipliers	29
-function	lib/argmin/include/argmin/detail/sqp_common.h	null_space_project	39
+function	lib/argmin/include/argmin/detail/sqp_common.h	null_space_project	30
 function	lib/argmin/include/argmin/detail/sqp_common.h	null_step_result	56
 function	lib/argmin/include/argmin/detail/sqp_common.h	resize	34
 function	lib/argmin/include/argmin/detail/sqp_common.h	soc_seed_projection	58

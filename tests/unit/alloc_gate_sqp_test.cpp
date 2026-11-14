@@ -1,6 +1,7 @@
 #include "alloc_gate_support.h"
 
 #include "argmin/detail/lagrangian.h"
+#include "argmin/detail/sqp_common.h"
 #include "argmin/detail/filter_restoration.h"
 
 #include "argmin/solver/nw_sqp_policy.h"
@@ -325,6 +326,19 @@ TEST_CASE("sqp_alloc_gate_degenerate_vertex", "[alloc-gate]")
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);
     CHECK((mu_ineq.array() != 0.0).count() == 2);
+
+    // Whether LDLT flags the vertex's rank-deficient A A^T depends on rounding, so the QR projector the trust-region
+    // policies fall back to is gated on its own.
+    const Eigen::MatrixXd A = J_ineq;
+    argmin::detail::null_space_qr_workspace<double> qr_ws;
+    qr_ws.resize(2, 3);
+    Eigen::VectorXd z(2);
+    const auto projection = run_armed([&] {
+        z << 0.25, -0.75;
+        argmin::detail::project_off_range_qr<double, Eigen::Dynamic>(A, z, qr_ws);
+    });
+    CHECK(projection.eigen == 0);
+    CHECK(projection.c == 0);
 
     check_degenerate_vertex_zero(argmin::tr_sqp_policy<double, 2>{}, degenerate_vertex{});
     check_degenerate_vertex_zero(argmin::filter_trsqp_policy<double, 2>{}, degenerate_vertex{});

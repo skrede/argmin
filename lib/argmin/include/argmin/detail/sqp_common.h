@@ -20,6 +20,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/result/step_result.h"
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/null_space_qr.h"
 #include "argmin/detail/bound_projection.h"
 
 #include <Eigen/QR>
@@ -705,9 +706,9 @@ ARGMIN_FORCE_INLINE bool soc_seed_projection(
 //
 // Rank-deficient A (ldlt.info() != Success): fall back to the projector
 // built from a rank-revealing ColPivHouseholderQR of A^T, z = x - Q1
-// Q1^T x with Q1 the first rank(A) columns of Q. Correctness fallback
-// only -- it allocates and is off the hot path (the composite step also
-// flags normal_step_lsq_fallback on this branch).
+// Q1^T x with Q1 the first rank(A) columns of Q. Whether LDLT flags a
+// rank-deficient A A^T depends on rounding, so the fallback runs on the
+// caller's preallocated workspace like the full-rank path.
 //
 // Reference: Gould, Hribar, Nocedal 2001 SIAM J. Sci. Comput. 23(6);
 //            Nocedal and Wright 2e Section 16.3 Algorithm 16.2
@@ -719,6 +720,7 @@ ARGMIN_FORCE_INLINE void null_space_project(
     Eigen::LDLT<Eigen::MatrixX<Scalar>>& ldlt,
     Eigen::Ref<Eigen::Vector<Scalar, N>> x,
     Eigen::VectorX<Scalar>& m_scratch,
+    null_space_qr_workspace<Scalar>& qr_ws,
     int refine_passes)
 {
     const int m = static_cast<int>(A.rows());
@@ -727,16 +729,7 @@ ARGMIN_FORCE_INLINE void null_space_project(
 
     if(ldlt.info() != Eigen::Success)
     {
-        // Rank-deficient AA^T: project off range(A^T) via pivoted QR.
-        Eigen::ColPivHouseholderQR<Eigen::MatrixX<Scalar>> qr(
-            A.transpose());
-        const int r = static_cast<int>(qr.rank());
-        if(r == 0)
-            return;
-        const Eigen::MatrixX<Scalar> Q =
-            qr.householderQ()
-            * Eigen::MatrixX<Scalar>::Identity(A.cols(), r);
-        x.noalias() -= Q * (Q.transpose() * x);
+        project_off_range_qr<Scalar, N>(A, x, qr_ws);
         return;
     }
 
