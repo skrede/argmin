@@ -5,6 +5,7 @@
 #include "argmin/solver/step_budget_solver.h"
 
 #include <cstdint>
+#include <version>
 #include <string_view>
 
 namespace argmin::cases
@@ -18,6 +19,15 @@ struct case_id
 };
 
 inline constexpr std::uint64_t stochastic_seed = 20261028;
+
+// The seeded double cases were recorded on libstdc++. The standard leaves the output sequence of its distributions to
+// the implementation, so another standard library draws a different stream from the same seed, and whether a seeded
+// run ends with a claim is only pinned on the recorded one.
+#if defined(__GLIBCXX__)
+inline constexpr bool recorded_random_stream = true;
+#else
+inline constexpr bool recorded_random_stream = false;
+#endif
 
 inline solver_options<> gradient_options()
 {

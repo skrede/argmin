@@ -2,6 +2,7 @@
 
 #include "oracle/kkt_point.h"
 #include "oracle/kkt_measure.h"
+#include "oracle/result_oracle.h"
 
 #include "argmin/solver/options.h"
 #include "argmin/solver/step_budget_solver.h"
@@ -65,6 +66,12 @@ void check_returns_best_evaluated()
     step_budget_solver solver{policy, problem, problem.initial_point(), options};
     const auto result = solver.solve(options);
 
+    if(!cases::recorded_random_stream && !std::isfinite(problem.best_within()))
+    {
+        CHECK(oracle::claim_of(result.status) == oracle::claim::none);
+        CHECK(result.constraint_violation > options.feasibility_tolerance);
+        return;
+    }
     REQUIRE(std::isfinite(problem.best_within()));
     CHECK(result.objective_value == problem.best_within());
     CHECK(result.constraint_violation <= options.feasibility_tolerance);

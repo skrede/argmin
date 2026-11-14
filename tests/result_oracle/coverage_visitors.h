@@ -24,7 +24,11 @@ namespace argmin::cases
 class judging_visitor
 {
 public:
-    explicit judging_visitor(margin_table& margins) : margins_(margins) {}
+    explicit judging_visitor(margin_table& margins, bool require_claim = true)
+        : margins_(margins)
+        , require_claim_(require_claim)
+    {
+    }
 
     template <typename Problem, typename Options, typename MakeSolver>
     void operator()(const case_id& id, const Problem& problem, const Options& options, const MakeSolver& make_solver)
@@ -38,12 +42,14 @@ public:
         margins_.record(id, result.status, v, tol);
         INFO(id.key << ' ' << id.problem_class << ' ' << id.problem);
         CAPTURE(static_cast<int>(result.status), v.failing, v.legs.stationarity, v.legs.equality_violation, v.legs.inequality_violation, v.legs.bound_violation, v.legs.complementarity, v.legs.dual_sign_breach);
-        CHECK(v.claimed != oracle::claim::none);
+        if(require_claim_)
+            CHECK(v.claimed != oracle::claim::none);
         CHECK(v.ok);
     }
 
 private:
     margin_table& margins_;
+    bool require_claim_;
 };
 
 struct collecting_visitor

@@ -50,14 +50,15 @@ std::optional<oracle::verdict<double>> judge_case(VisitFamily visit_family, std:
 // A case missing from the table leaves no verdict and asserts nothing, so an expected-fail case built on
 // this check reports it as an unexpected pass.
 template <typename VisitFamily>
-void check_case_claim(VisitFamily visit_family, std::string_view key, std::string_view problem_class)
+void check_case_claim(VisitFamily visit_family, std::string_view key, std::string_view problem_class, bool require_claim = true)
 {
     const std::optional<oracle::verdict<double>> v = judge_case(visit_family, key, problem_class);
     if(!v.has_value())
         return;
     INFO(key << ' ' << problem_class);
     CAPTURE(v->legs.stationarity, v->failing);
-    CHECK(v->claimed != oracle::claim::none);
+    if(require_claim)
+        CHECK(v->claimed != oracle::claim::none);
     CHECK(v->ok);
 }
 

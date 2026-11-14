@@ -11,7 +11,7 @@ using namespace argmin;
 TEST_CASE("oracle accepts every stochastic solver result in the case table", "[oracle]")
 {
     cases::margin_table margins("stochastic");
-    cases::judging_visitor judge(margins);
+    cases::judging_visitor judge(margins, cases::recorded_random_stream);
     cases::visit_stochastic_cases(judge);
 }
 

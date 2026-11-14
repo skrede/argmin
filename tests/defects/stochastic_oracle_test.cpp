@@ -50,17 +50,17 @@ TEST_CASE("isres stays inside the box on hs076", "[stochastic]")
 
 TEST_CASE("isres nlopt_faithful makes a claim the oracle accepts on the bound-only Wood problem", "[stochastic]")
 {
-    cases::check_case_claim(visit_family, "isres_nlopt_faithful", "bound");
+    cases::check_case_claim(visit_family, "isres_nlopt_faithful", "bound", cases::recorded_random_stream);
 }
 
 TEST_CASE("isres nlopt_faithful makes a claim the oracle accepts on hs076", "[stochastic]")
 {
-    cases::check_case_claim(visit_family, "isres_nlopt_faithful", "inequality");
+    cases::check_case_claim(visit_family, "isres_nlopt_faithful", "inequality", cases::recorded_random_stream);
 }
 
 TEST_CASE("isres nlopt_faithful makes a claim the oracle accepts on hs071", "[stochastic]")
 {
-    cases::check_case_claim(visit_family, "isres_nlopt_faithful", "mixed");
+    cases::check_case_claim(visit_family, "isres_nlopt_faithful", "mixed", cases::recorded_random_stream);
 }
 
 TEST_CASE("isres original_argmin makes a claim the oracle accepts on the bound-only Wood problem", "[known-defect][!shouldfail]")
@@ -70,7 +70,7 @@ TEST_CASE("isres original_argmin makes a claim the oracle accepts on the bound-o
 
 TEST_CASE("isres original_argmin makes a claim the oracle accepts on hs076", "[stochastic]")
 {
-    cases::check_case_claim(visit_family, "isres_original_argmin", "inequality");
+    cases::check_case_claim(visit_family, "isres_original_argmin", "inequality", cases::recorded_random_stream);
 }
 
 TEST_CASE("isres original_argmin makes a claim the oracle accepts on hs028", "[known-defect][!shouldfail]")
@@ -90,15 +90,15 @@ TEST_CASE("isres runarsson_yao_paper makes a claim the oracle accepts on the bou
 
 TEST_CASE("isres runarsson_yao_paper makes a claim the oracle accepts on hs076", "[stochastic]")
 {
-    cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "inequality");
+    cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "inequality", cases::recorded_random_stream);
 }
 
 TEST_CASE("isres runarsson_yao_paper makes a claim the oracle accepts on hs028", "[stochastic]")
 {
-    cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "equality");
+    cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "equality", cases::recorded_random_stream);
 }
 
 TEST_CASE("isres runarsson_yao_paper makes a claim the oracle accepts on hs071", "[stochastic]")
 {
-    cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "mixed");
+    cases::check_case_claim(visit_family, "isres_runarsson_yao_paper", "mixed", cases::recorded_random_stream);
 }
