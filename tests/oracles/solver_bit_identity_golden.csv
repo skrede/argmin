@@ -12,7 +12,7 @@
 # committing its output; the target-identity line then activates the
 # assertions only on the matching leg.
 #
-# captured (compile date Oct 11 2026)
+# captured (compile date Nov 14 2026)
 target_identity,gcc-14;x86_64;DEBUG
 bobyqa|active_box_rosenbrock|final|f|0,0x3fd0000000000000
 bobyqa|active_box_rosenbrock|final|x|0,0x3fe0000000000000
@@ -23,13 +23,13 @@ bobyqa|active_box_rosenbrock|step10|x|1,0x3fef1f3c2f7035bf
 bobyqa|active_box_rosenbrock|step3|f|0,0x400feb7846094b1c
 bobyqa|active_box_rosenbrock|step3|x|0,0xbfefd67dd46db826
 bobyqa|active_box_rosenbrock|step3|x|1,0x3ff0000000000000
-filter_nw_sqp|hs071|final|f|0,0x40310396a315f57e
-filter_nw_sqp|hs071|final|lambda|0,0xbfc4ab0082ccdd05
-filter_nw_sqp|hs071|final|lambda|1,0x3fe1ac63c1001e36
+filter_nw_sqp|hs071|final|f|0,0x40310396a30d5833
+filter_nw_sqp|hs071|final|lambda|0,0xbfc4ab0082b703f2
+filter_nw_sqp|hs071|final|lambda|1,0x3fe1ac63c0fe9e0f
 filter_nw_sqp|hs071|final|x|0,0x3ff0000000000000
-filter_nw_sqp|hs071|final|x|1,0x4012f8d4e59c15f9
-filter_nw_sqp|hs071|final|x|2,0x400e91b715395667
-filter_nw_sqp|hs071|final|x|3,0x3ff6120e6e2f3602
+filter_nw_sqp|hs071|final|x|1,0x4012f8d4e59e0993
+filter_nw_sqp|hs071|final|x|2,0x400e91b715371886
+filter_nw_sqp|hs071|final|x|3,0x3ff6120e6e20ca10
 filter_nw_sqp|hs071|step10|f|0,0x40310395fa0da4e6
 filter_nw_sqp|hs071|step10|lambda|0,0xbfc4aaff00171705
 filter_nw_sqp|hs071|step10|lambda|1,0x3fe1ac63a3a0655e
@@ -203,13 +203,13 @@ lm|sd_ls012|step3|x|6,0xbff0e9eb6333e366
 lm|sd_ls012|step3|x|7,0x3ff1ede02db3ef09
 lm|sd_ls012|step3|x|8,0xbff0e9eb6333e366
 lm|sd_ls012|step3|x|9,0x3ff1ede02db3ef09
-nw_sqp|hs071|final|f|0,0x40310396a315f57e
-nw_sqp|hs071|final|lambda|0,0xbfc4ab0082ccdd05
-nw_sqp|hs071|final|lambda|1,0x3fe1ac63c1001e36
+nw_sqp|hs071|final|f|0,0x40310396a30d5833
+nw_sqp|hs071|final|lambda|0,0xbfc4ab0082b703f2
+nw_sqp|hs071|final|lambda|1,0x3fe1ac63c0fe9e0f
 nw_sqp|hs071|final|x|0,0x3ff0000000000000
-nw_sqp|hs071|final|x|1,0x4012f8d4e59c15f9
-nw_sqp|hs071|final|x|2,0x400e91b715395667
-nw_sqp|hs071|final|x|3,0x3ff6120e6e2f3602
+nw_sqp|hs071|final|x|1,0x4012f8d4e59e0993
+nw_sqp|hs071|final|x|2,0x400e91b715371886
+nw_sqp|hs071|final|x|3,0x3ff6120e6e20ca10
 nw_sqp|hs071|step10|f|0,0x40310395fa0da4e6
 nw_sqp|hs071|step10|lambda|0,0xbfc4aaff00171705
 nw_sqp|hs071|step10|lambda|1,0x3fe1ac63a3a0655e
