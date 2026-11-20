@@ -36,6 +36,7 @@ jobs:
   clean-room:
     runs-on: ubuntu-24.04
     name: documented snippets (clean room, no system Eigen)
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4

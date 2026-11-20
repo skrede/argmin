@@ -18,6 +18,7 @@ add_executable(argmin_unit_tests
     cobyla_test.cpp
     cobyla_bounds_test.cpp
     cobyla_invalid_box_test.cpp
+    hock_schittkowski_test.cpp
     bobyqa_test.cpp
     bobyqa_bounds_test.cpp
     bobyqa_xbase_shift_test.cpp
@@ -69,7 +70,6 @@ add_executable(argmin_unit_tests
     compact_lbfgs_test.cpp
     test_functions_test.cpp
     filter_nw_sqp_test.cpp
-    hock_schittkowski_test.cpp
     augmented_lagrangian_test.cpp
     convergence_policy_test.cpp
     filter_sqp_test.cpp

@@ -25,16 +25,18 @@ jobs:
   build:
     runs-on: windows-2022
     name: build (Windows)
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
+      # MSBuild compiles one source of a target at a time; /MP3 runs three, short of one per core for memory.
       - name: Configure
         run: |
           cmake . -B build -A x64 `
             -DARGMIN_BUILD_TESTS=ON `
             -DARGMIN_BUILD_EXAMPLES=OFF `
             -DARGMIN_CMAKE_FETCH_DEPS=ON `
-            '-DCMAKE_CXX_FLAGS=/std:c++latest /W4'
+            '-DCMAKE_CXX_FLAGS=/std:c++latest /W4 /MP3'
 
       - name: Build
         run: cmake --build build --config Release
@@ -60,6 +62,7 @@ jobs:
 
   install-test:
     runs-on: windows-2022
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

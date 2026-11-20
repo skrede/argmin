@@ -29,8 +29,23 @@ jobs:
         xcode: ["15.4", "16.2"]
     runs-on: macos-14
     name: build (Xcode ${{ matrix.xcode }})
+    timeout-minutes: 90
+
+    # The arm64 runner has 7 GB of memory, so two jobs, not one per core.
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_COMPILERCHECK: "%compiler% -march=native -### -E -x c++ /dev/null -o /dev/null"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore the compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.workflow }}-${{ github.job }}-${{ matrix.xcode }}
+          max-size: 750M
+          evict-old-files: job
+          save: ${{ github.event_name != 'pull_request' }}
 
       - name: Select Xcode ${{ matrix.xcode }}
         run: sudo xcode-select -s /Applications/Xcode_${{ matrix.xcode }}.app
@@ -43,8 +58,9 @@ jobs:
             -DARGMIN_BUILD_EXAMPLES=OFF \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
+      # An out-of-memory kill under a parallel build resumes serially; a real compile error fails both attempts.
       - name: Build
-        run: cmake --build build
+        run: cmake --build build || { echo "::warning::parallel build failed, retrying serially"; cmake --build build --parallel 1; }
 
       - name: Test
         run: cd build && ctest --output-on-failure
@@ -66,6 +82,7 @@ jobs:
 
   install-test:
     runs-on: macos-14
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

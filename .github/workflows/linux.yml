@@ -21,6 +21,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  # ccache older than 4.12 hashes -march=native literally, and the runner pool mixes CPU generations, so the
+  # compiler check hashes the compiler's own expansion of the native target.
+  CCACHE_COMPILERCHECK: "%compiler% -march=native -### -E -x c++ /dev/null -o /dev/null"
+
 jobs:
   build:
     strategy:
@@ -41,6 +47,12 @@ jobs:
 
     runs-on: ubuntu-24.04
     name: ${{ matrix.compiler }}
+    timeout-minutes: 300
+
+    # Several Debug test sources peak at 5-10 GB under gcc and 5-8 GB under clang; two of them at once must fit
+    # in the 16 GB runner, so gcc gets two jobs and clang three.
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: ${{ startsWith(matrix.cxx, 'g++') && 2 || 3 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -80,8 +92,10 @@ jobs:
               -DARGMIN_CMAKE_FETCH_DEPS=ON
           fi
 
-      - name: Build
-        run: cmake --build build
+      # An out-of-memory kill under a parallel build resumes serially; a real compile error fails both attempts.
+      - &build
+        name: Build
+        run: cmake --build build || { echo "::warning::parallel build failed, retrying serially"; cmake --build build --parallel 1; }
 
       - name: Test
         run: cd build && ctest --output-on-failure
@@ -181,6 +195,11 @@ jobs:
 
     runs-on: ubuntu-24.04
     name: sanitize (${{ matrix.name }})
+    timeout-minutes: 350
+
+    # Memory per job as in the build job.
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: ${{ startsWith(matrix.cxx, 'g++') && 2 || 3 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -197,8 +216,7 @@ jobs:
             -DARGMIN_BUILD_TESTS=ON \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
-      - name: Build
-        run: cmake --build build
+      - *build
 
       # The literal is deliberate: a dropped probe must fail here rather than leave a green leg that ran less.
       - name: Verify the full release-safety set registered
@@ -232,6 +250,7 @@ jobs:
   sanitize-msan:
     runs-on: ubuntu-24.04
     name: sanitize (msan, instrumented libc++)
+    timeout-minutes: 350
     # Gating: observed green on develop 2026-07-13 (full ~36m run) once the
     # unwinder-instrumentation defect was fixed, so it is now a hard gate.
     continue-on-error: false
@@ -241,6 +260,8 @@ jobs:
       CC: clang-18
       CXX: clang++-18
       LIBCXX_MSAN: ${{ github.workspace }}/libcxx-msan
+      # Full debug info on the heaviest sources once exhausted this runner even serially; two jobs at -g1.
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
 
     steps:
       - uses: actions/checkout@v4
@@ -297,8 +318,7 @@ jobs:
             -DARGMIN_BUILD_TESTS=ON \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
-      - name: Build
-        run: cmake --build build
+      - *build
 
       - name: Test
         env:
@@ -315,6 +335,9 @@ jobs:
 
     runs-on: ubuntu-24.04
     name: warnings (${{ matrix.build_type }})
+    timeout-minutes: 195
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 3
 
     # Gating: ARGMIN_WARNING_FLAGS is wired onto the header-compiling test
     # target and surfaced here with -Werror in both Debug and Release. The
@@ -342,15 +365,25 @@ jobs:
             -DARGMIN_BUILD_TESTS=ON \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
-      - name: Build
-        run: cmake --build build
+      - *build
 
   labeled-instruments:
     runs-on: ubuntu-24.04
     name: labeled instruments (alloc-gate, oracle-pin)
+    timeout-minutes: 225
 
     steps:
       - uses: actions/checkout@v4
+
+      # Release objects carry no debug info, so a leg's cache fits the budget; Debug -g legs would not.
+      - &ccache
+        name: Restore the compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.workflow }}-${{ github.job }}-${{ strategy.job-index }}
+          max-size: 750M
+          evict-old-files: job
+          save: ${{ github.event_name != 'pull_request' }}
 
       # The build uses -march=native and the runner pool mixes CPU generations, so a
       # correctness verdict that differs between runs can only be traced with the CPU on record.
@@ -363,6 +396,7 @@ jobs:
         env:
           CC: clang-18
           CXX: clang++-18
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         # The allocation gates live in the tests tree and link neither the
         # cross-solver comparison library nor the benchmark tree, so no NLopt
         # install is needed here. Benchmarks stay ON only so the citation
@@ -381,8 +415,7 @@ jobs:
             -DARGMIN_BENCH_LIBCMAES=OFF \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
-      - name: Build
-        run: cmake --build build
+      - *build
 
       # The gates are argmin-only correctness cases in the tests tree, so the
       # count is NLopt-independent. Assert it anyway so a silently dropped case
@@ -498,14 +531,18 @@ jobs:
   property:
     runs-on: ubuntu-24.04
     name: property suites (RapidCheck + oracle)
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
+
+      - *ccache
 
       - name: Configure
         env:
           CC: clang-18
           CXX: clang++-18
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           cmake . -B build -DCMAKE_BUILD_TYPE=Release \
             -DARGMIN_BUILD_TESTS=ON \
@@ -554,6 +591,7 @@ jobs:
 
   install-test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -599,9 +637,12 @@ jobs:
   system-eigen-suite:
     runs-on: ubuntu-24.04
     name: system-eigen (integration path)
+    timeout-minutes: 180
 
     steps:
       - uses: actions/checkout@v4
+
+      - *ccache
 
       - name: Install system Eigen and Catch2
         run: sudo apt-get update && sudo apt-get install -y libeigen3-dev catch2
@@ -614,13 +655,14 @@ jobs:
           echo "avx512: $(grep -m1 -o 'avx512[a-z_]*' /proc/cpuinfo | head -1 || echo none)"
 
       - name: Configure (system deps, no FetchContent)
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           cmake . -B build -DCMAKE_BUILD_TYPE=Release \
             -DARGMIN_BUILD_TESTS=ON \
             -DARGMIN_CMAKE_FETCH_DEPS=OFF
 
-      - name: Build
-        run: cmake --build build
+      - *build
 
       - name: Test (including the integration consumer path)
         run: cd build && ctest --output-on-failure
@@ -643,6 +685,11 @@ jobs:
 
     runs-on: ubuntu-24.04
     name: c++${{ matrix.cxx_standard }} (build + ctest)
+    timeout-minutes: 240
+
+    # gcc Debug; memory per job as in the build job.
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
 
     steps:
       - uses: actions/checkout@v4
@@ -659,8 +706,7 @@ jobs:
             -DARGMIN_BUILD_EXAMPLES=OFF \
             -DARGMIN_CMAKE_FETCH_DEPS=ON
 
-      - name: Build
-        run: cmake --build build
+      - *build
 
       - name: Test
         run: cd build && ctest --output-on-failure
@@ -668,6 +714,7 @@ jobs:
   no-exceptions:
     runs-on: ubuntu-24.04
     name: exceptions-off (instantiation probe)
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -699,6 +746,7 @@ jobs:
   arm-no-exceptions-link:
     runs-on: ubuntu-24.04
     name: arm cross-compile-link (newlib-nano, -fno-exceptions)
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -755,6 +803,7 @@ jobs:
   esp32-float-build:
     runs-on: ubuntu-24.04
     name: esp32 probe build (ESP-IDF, double + float)
+    timeout-minutes: 40
     container: espressif/idf:v6.0.2
     permissions:
       contents: read
@@ -772,6 +821,7 @@ jobs:
   python-bindings:
     runs-on: ubuntu-24.04
     name: python bindings (build + pytest)
+    timeout-minutes: 10
 
     # The extension is gated behind an option that defaults off, so no other job
     # in this workflow builds it and none of them would notice it breaking. This
@@ -809,6 +859,7 @@ jobs:
   examples:
     runs-on: ubuntu-24.04
     name: examples (build + run)
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4

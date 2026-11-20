@@ -73,6 +73,7 @@ jobs:
   drift:
     runs-on: ubuntu-24.04
     name: rt matrix drift + negative control
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4

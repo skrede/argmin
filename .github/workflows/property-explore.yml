@@ -17,6 +17,10 @@ jobs:
   explore:
     runs-on: ubuntu-24.04
     name: property exploration (RapidCheck + oracle)
+    timeout-minutes: 20
+
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
