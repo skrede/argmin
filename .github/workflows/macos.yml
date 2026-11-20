@@ -31,9 +31,9 @@ jobs:
     name: build (Xcode ${{ matrix.xcode }})
     timeout-minutes: 90
 
-    # The arm64 runner has 7 GB of memory, so two jobs, not one per core.
+    # The arm64 runner has 7 GB of memory and per-source peaks there are unmeasured, so the build stays serial.
     env:
-      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      CMAKE_BUILD_PARALLEL_LEVEL: 1
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
       CCACHE_COMPILERCHECK: "%compiler% -march=native -### -E -x c++ /dev/null -o /dev/null"
     steps:

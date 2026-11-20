@@ -21,8 +21,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
+# Parallel Debug, sanitizer and system-eigen builds lost the runner about 50 minutes in (memory exhaustion takes the
+# runner agent down, so the serial retry never runs); those legs build serially until per-source peaks are measured.
 env:
-  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  CMAKE_BUILD_PARALLEL_LEVEL: 1
   # ccache older than 4.12 hashes -march=native literally, and the runner pool mixes CPU generations, so the
   # compiler check hashes the compiler's own expansion of the native target.
   CCACHE_COMPILERCHECK: "%compiler% -march=native -### -E -x c++ /dev/null -o /dev/null"
@@ -49,10 +51,6 @@ jobs:
     name: ${{ matrix.compiler }}
     timeout-minutes: 300
 
-    # Several Debug test sources peak at 5-10 GB under gcc and 5-8 GB under clang; two of them at once must fit
-    # in the 16 GB runner, so gcc gets two jobs and clang three.
-    env:
-      CMAKE_BUILD_PARALLEL_LEVEL: ${{ startsWith(matrix.cxx, 'g++') && 2 || 3 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -197,9 +195,6 @@ jobs:
     name: sanitize (${{ matrix.name }})
     timeout-minutes: 350
 
-    # Memory per job as in the build job.
-    env:
-      CMAKE_BUILD_PARALLEL_LEVEL: ${{ startsWith(matrix.cxx, 'g++') && 2 || 3 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -337,7 +332,7 @@ jobs:
     name: warnings (${{ matrix.build_type }})
     timeout-minutes: 195
     env:
-      CMAKE_BUILD_PARALLEL_LEVEL: 3
+      CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.build_type == 'Release' && 3 || 1 }}
 
     # Gating: ARGMIN_WARNING_FLAGS is wired onto the header-compiling test
     # target and surfaced here with -Werror in both Debug and Release. The
@@ -532,6 +527,8 @@ jobs:
     runs-on: ubuntu-24.04
     name: property suites (RapidCheck + oracle)
     timeout-minutes: 20
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
 
     steps:
       - uses: actions/checkout@v4
@@ -687,9 +684,6 @@ jobs:
     name: c++${{ matrix.cxx_standard }} (build + ctest)
     timeout-minutes: 240
 
-    # gcc Debug; memory per job as in the build job.
-    env:
-      CMAKE_BUILD_PARALLEL_LEVEL: 2
 
     steps:
       - uses: actions/checkout@v4
