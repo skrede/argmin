@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_FINITE_ORDER_H
 #define HPP_GUARD_ARGMIN_DETAIL_FINITE_ORDER_H
 
+#include "argmin/types.h"
+
 #include <cmath>
 
 namespace argmin::detail

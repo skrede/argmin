@@ -5,6 +5,11 @@
 
 #include <concepts>
 
+// GCC and Clang define __FINITE_MATH_ONLY__ as 0 in a default build, so its value is tested rather than its presence.
+#if !defined(ARGMIN_ALLOW_FINITE_MATH_ASSUMPTIONS) && (defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__))
+    #error "argmin: -ffast-math and -ffinite-math-only remove the library's NaN and Inf checks; define ARGMIN_ALLOW_FINITE_MATH_ASSUMPTIONS to build anyway"
+#endif
+
 // Force-inline attribute portable across GCC, Clang, and MSVC.
 //
 // Used on per-iteration helper functions where the function-call boundary

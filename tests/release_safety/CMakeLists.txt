@@ -44,10 +44,12 @@ catch_discover_tests(argmin_release_safety_tests
 # The probes run the compiler's -fsyntax-only, a GCC/Clang flag, so MSVC skips them.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     function(argmin_release_safety_compile_probe test_name source expect_regex)
+        cmake_parse_arguments(PARSE_ARGV 3 probe "" "" "FLAGS")
         add_test(NAME ${test_name}
             COMMAND ${CMAKE_COMMAND}
                 -DCXX=${CMAKE_CXX_COMPILER}
                 -DSTD=c++20
+                "-DFLAGS=${probe_FLAGS}"
                 -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/probes/${source}
                 "-DEXPECT=${expect_regex}"
                 "-DINCS=$<TARGET_PROPERTY:argmin::argmin,INTERFACE_INCLUDE_DIRECTORIES>;${ARGMIN_EIGEN_INCLUDE_DIRS}"
@@ -75,6 +77,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     argmin_release_safety_compile_probe(release_safety_reset_rows_match_compiles reset_rows_match.cpp
         "static assertion failed")
     set_tests_properties(release_safety_reset_rows_match_compiles PROPERTIES PASS_REGULAR_EXPRESSION "unexpected pass")
+    argmin_release_safety_compile_probe(release_safety_finite_math_rejected finite_math_rejected.cpp
+        "error: .*NaN and Inf checks.*ARGMIN_ALLOW_FINITE_MATH_ASSUMPTIONS" FLAGS -ffinite-math-only)
+    argmin_release_safety_compile_probe(release_safety_finite_math_opt_out_compiles finite_math_opt_out.cpp
+        "error: .*NaN and Inf checks" FLAGS -ffast-math -DARGMIN_ALLOW_FINITE_MATH_ASSUMPTIONS)
+    set_tests_properties(release_safety_finite_math_opt_out_compiles PROPERTIES PASS_REGULAR_EXPRESSION "unexpected pass")
 endif()
 
 function(argmin_assert_inventory_test test_name root allow)

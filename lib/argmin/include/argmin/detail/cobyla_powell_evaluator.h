@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_COBYLA_POWELL_EVALUATOR_H
 #define HPP_GUARD_ARGMIN_DETAIL_COBYLA_POWELL_EVALUATOR_H
 
+#include "argmin/types.h"
+
 #include <Eigen/Core>
 
 #include <cmath>

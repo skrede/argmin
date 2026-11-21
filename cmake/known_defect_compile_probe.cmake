@@ -1,6 +1,7 @@
 # Inverted compile probe for a known defect, run with -P.
 #
 #   CXX, STD, INCS - the compiler, the standard and the ';'-separated include directories
+#   FLAGS          - optional ';'-separated compiler flags placed before SRC
 #   SRC            - the probe translation unit
 #   EXPECT         - a regex one diagnostic line must match while the defect is present
 #
@@ -16,7 +17,7 @@ foreach(dir IN LISTS INCS)
 endforeach()
 
 execute_process(
-    COMMAND ${CXX} -std=${STD} -fsyntax-only ${inc_flags} ${SRC}
+    COMMAND ${CXX} -std=${STD} -fsyntax-only ${inc_flags} ${FLAGS} ${SRC}
     OUTPUT_VARIABLE out
     ERROR_VARIABLE err
     RESULT_VARIABLE rc)
