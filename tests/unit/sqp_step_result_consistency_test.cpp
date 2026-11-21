@@ -275,7 +275,7 @@ TEMPLATE_TEST_CASE(
         for(std::uint32_t i = 0; i < opts.max_iterations; ++i)
         {
             last = solver.step();
-            if(last.policy_status)
+            if(solver.status() != solver_status::running)
                 break;
         }
 
@@ -338,7 +338,7 @@ TEMPLATE_TEST_CASE(
                 kkt_seen = true;
                 CHECK(*sr.kkt_residual >= 0.0);
             }
-            if(sr.policy_status)
+            if(solver.status() != solver_status::running)
                 break;
         }
         CHECK(kkt_seen);
@@ -371,7 +371,7 @@ TEMPLATE_TEST_CASE(
         for(int i = 0; i < 200; ++i)
         {
             last = solver.step();
-            if(last.policy_status)
+            if(solver.status() != solver_status::running)
                 break;
         }
 
@@ -808,7 +808,7 @@ TEMPLATE_TEST_CASE(
                     any_finite_step = true;
                 else
                     any_nonfinite_step = true;
-                if(sr.policy_status)
+                if(solver.status() != solver_status::running)
                     break;
             }
 

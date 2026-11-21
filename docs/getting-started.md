@@ -167,6 +167,20 @@ solver.step_n(budget);     // run at most `budget` iterations
 solver.step();             // exactly one iteration
 ```
 
+A terminal status stays until `reset(x0)` or `reset_clear(x0)`. `step()` never
+advances from one: it returns the status with an unevaluated step result (NaN
+values, no evaluations). `step_n()` and `solve()` continue only from
+`budget_exhausted` or `time_limit_reached`, the statuses meaning the previous
+call's own iteration or time budget ran out; from any other terminal status,
+`max_iterations` included, they take no step and report that status. `abort()`
+is honored by `step()` as by the loops: the next call ends `aborted` without
+running the policy.
+
+On a `stepper`, `finished()` is true for any status other than `running` and
+drives the tick loop, `while(!st.finished()) st.step();`. `converged()` is true
+only for a status that claims the final iterate: `converged`, `ftol_reached`,
+`xtol_reached` or `stalled`.
+
 For a control loop or IK tick that cannot afford a blocking `solve()`, the
 `stepper` primitive has no internal loop at all -- the caller's scheduler owns
 the budget and calls `step()` once per tick. See

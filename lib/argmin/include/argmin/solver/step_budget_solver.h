@@ -143,9 +143,9 @@ public:
     step_result<scalar_type> step() { return core_.step(); }
 
     // Solve with stored convergence, budgeted by the stored max_iterations.
-    // Re-entrancy matches solver_core: solve() and step_n(budget) are
-    // continuations, not restarts -- call reset()/reset_clear() first to
-    // restart from a clean counter and a new starting point.
+    // solve() and step_n(budget) continue only after a budget_exhausted or
+    // time_limit_reached end; any other terminal status stays until
+    // reset()/reset_clear().
     solve_result<scalar_type, N> solve()
     {
         return step_n(core_.max_iterations(), make_default_opts());

@@ -697,6 +697,10 @@ TEST_CASE("projected_gradient_gn_policy: gain_ratio extraction is numerically id
         solver_options opts;
         opts.max_iterations = 100;
         opts.set_gradient_threshold(1e-12);
+        // The capture steps past the other stopping tests, and a solver takes no step after one fires.
+        opts.set_objective_threshold(0.0);
+        opts.set_step_threshold(0.0);
+        opts.set_stall_threshold(0.0);
         projected_gradient_gn_policy<>::options_type po{};
         po.use_dogleg = dogleg;
         step_budget_solver solver{projected_gradient_gn_policy<>{}, problem, start, opts, po};
@@ -813,7 +817,7 @@ std::vector<std::array<double, 6>> drain_trajectory(Solver& solver)
         const auto& s = solver.state();
         trace.push_back({r.objective_value, r.step_size,
                          r.gradient_norm, s.x(0), s.x(1), s.x(2)});
-        if(r.policy_status)
+        if(solver.status() != solver_status::running)
             break;
     }
     return trace;

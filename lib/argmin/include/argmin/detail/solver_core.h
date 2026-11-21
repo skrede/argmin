@@ -7,6 +7,7 @@
 #include "argmin/detail/status_claim.h"
 #include "argmin/detail/bound_measure.h"
 #include "argmin/detail/problem_shape.h"
+#include "argmin/detail/terminal_step.h"
 #include "argmin/detail/tuple_contains.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -286,17 +287,18 @@ public:
         return *this;
     }
 
-    // Consults the stored convergence, so a tick loop driving step() alone (MPC, IK) sees a by-criterion status
-    // without the step_n(1) cost of rebuilding options. The claim is judged as the solve loop judges it.
     step_result<scalar_type> step()
     {
+        if(abort_requested() && status() == solver_status::running)
+            last_status_ = solver_status::aborted;
+        if(status() != solver_status::running && status() != solver_status::invalid_problem)
+            return detail::latched_step<scalar_type>(state_.x.norm(), status());
         auto result = step_impl();
         last_status_ = detail::resolve_step_status(result, stored_convergence_, iterations_, constraint_tolerance_.value_or(feasibility_tolerance_));
         return result;
     }
 
-    // Does not consult convergence: the solve loop owns its stopping decision. x_norm and bound_violation are filled
-    // here so step_tolerance_rel_criterion has one denominator and the claim gate one box measure for every policy.
+    // Does not consult convergence: the solve loop owns its stopping decision.
     step_result<scalar_type> step_impl()
     {
         if(!built_)
@@ -314,9 +316,7 @@ public:
 
     const state_type& state() const { return state_; }
 
-    // Read the stored convergence policy (populated with per-criterion
-    // last_check_results by the most recent solve loop). Precedent:
-    // line_search_calls on kraft_slsqp_policy::state_type.
+    // Populated with per-criterion last_check_results by the most recent solve loop.
     const Convergence& convergence() const { return stored_convergence_; }
 
     solver_status status() const { return !built_ || detail::state_rejected(state_) ? solver_status::invalid_problem : last_status_; }

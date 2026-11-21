@@ -433,6 +433,10 @@ double lm_trajectory_fingerprint(double& out_f, double& out_x0, double& out_x1)
     solver_options opts;
     opts.max_iterations = 50;
     opts.set_gradient_threshold(1e-12);
+    // The capture steps past the other stopping tests, and a solver takes no step after one fires.
+    opts.set_objective_threshold(0.0);
+    opts.set_step_threshold(0.0);
+    opts.set_stall_threshold(0.0);
     step_budget_solver solver{lm_policy<double, 2>{}, problem, x0, opts};
     double fp = 0.0;
     for(int i = 0; i < 50; ++i)

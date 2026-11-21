@@ -13,6 +13,8 @@
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
 
+#include "argmin/test_functions/rosenbrock.h"
+
 #include <Eigen/Core>
 
 #include <catch2/catch_test_macros.hpp>
@@ -51,6 +53,33 @@ struct nan_at_origin
 
 using nan_start_solver = step_budget_solver<lbfgsb_policy<double, 1>, 1, nan_at_origin>;
 
+// Reports diverged from its first step, as a family's own divergence test would, without evaluating anything.
+struct diverging_policy
+{
+    using scalar_type = double;
+
+    struct state_type
+    {
+        vector1 x;
+    };
+
+    template <typename Problem, typename Convergence>
+    state_type init(const Problem&, const vector1& x0, const solver_options<Convergence>&)
+    {
+        return {x0};
+    }
+
+    step_result<double> step(state_type& s) { return {.objective_value = 1.0, .x_norm = s.x.norm(), .policy_status = solver_status::diverged}; }
+
+    solver_status reset(state_type& s, const Eigen::VectorXd& x0)
+    {
+        s.x = x0;
+        return solver_status::running;
+    }
+
+    solver_status reset_clear(state_type& s, const Eigen::VectorXd& x0) { return reset(s, x0); }
+};
+
 nan_start_solver solver_from_nan_start(const nan_at_origin& problem)
 {
     return {lbfgsb_policy<double, 1>{}, problem, vector1{0.0}, solver_options<>{}, lbfgsb_policy<double, 1>::options_type{}};
@@ -64,10 +93,21 @@ TEST_CASE("stepper ends diverged after a step into a non-finite residual", "[sta
     CHECK(stepped_into_nan(problem).status() == solver_status::diverged);
 }
 
-TEST_CASE("stepper converged() is false after a solve that ended diverged", "[known-defect][!shouldfail]")
+TEST_CASE("stepper converged() is false after a solve that ended diverged", "[status]")
 {
-    const defects::sqrt_residual problem{};
-    CHECK_FALSE(stepped_into_nan(problem).converged());
+    const nan_at_origin problem{};
+    stepper<diverging_policy, 1, nan_at_origin> st{problem, vector1{1.0}};
+    st.step();
+    REQUIRE(st.status() == solver_status::diverged);
+    CHECK_FALSE(st.converged());
+}
+
+TEST_CASE("stepper converged() is false after a rejected start", "[status]")
+{
+    const rosenbrock<double> problem{};
+    stepper st{lbfgsb_policy<>{}, problem, Eigen::VectorXd::Zero(3)};
+    REQUIRE(st.status() == solver_status::invalid_problem);
+    CHECK_FALSE(st.converged());
 }
 
 TEST_CASE("solve does not claim converged with a NaN objective from a NaN start", "[status]")

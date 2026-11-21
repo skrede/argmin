@@ -62,16 +62,18 @@ al_policy::options_type one_inner_solve_per_step()
 
 }
 
-// 5 - x0 >= 0 holds at every iterate from the origin, so each outer step meets the feasibility-progress gate.
+// 5 - x0 >= 0 holds at every iterate from the origin, so each outer step meets the feasibility-progress gate. The
+// policy is stepped directly: the solve converges on its first outer step and a solver takes no step after that.
 TEST_CASE("the augmented Lagrangian keeps its penalty parameter at feasible iterates", "[known-defect][!shouldfail]")
 {
     const double no_poison = std::numeric_limits<double>::quiet_NaN();
     const one_row_bowl problem{{-1.0, 0.0}, -5.0, false, Eigen::Vector2d::Constant(no_poison)};
-    al_solver solver{al_policy{}, problem, Eigen::Vector2d::Zero().eval(), solver_options<>{}, one_inner_solve_per_step()};
-    const double initial_mu = solver.state().mu;
+    al_policy policy{};
+    auto state = policy.init(problem, Eigen::Vector2d::Zero().eval(), solver_options<>{}, one_inner_solve_per_step());
+    const double initial_mu = state.mu;
     for(std::int32_t k = 0; k < 5; ++k)
-        static_cast<void>(solver.step());
-    CHECK(solver.state().mu == initial_mu);
+        static_cast<void>(policy.step(state));
+    CHECK(state.mu == initial_mu);
 }
 
 // Every point but the start (3, 2) has a NaN objective, so the inner L-BFGS-B solve ends line_search_failed.

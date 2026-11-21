@@ -61,6 +61,21 @@ Policies available at HEAD, grouped by problem class:
 
 ### Changed
 
+- Breaking: a terminal status stays until `reset(x0)` or `reset_clear(x0)`.
+  `step()` checks `abort()` on entry and ends `aborted` without running the
+  policy, and from any terminal status it returns that status with an
+  unevaluated step result (NaN values, a null step, no evaluations).
+  `step_n()` and `solve()` continue only from `budget_exhausted` and
+  `time_limit_reached`, the statuses meaning the previous call's own iteration
+  or time budget ran out; from any other terminal status, `max_iterations`
+  included, they take no step and report that status. A second `solve()` after
+  a claim used to step on from the claimed point.
+- Breaking: `stepper::converged()` is true only for a status that claims the
+  final iterate (`converged`, `ftol_reached`, `xtol_reached`, `stalled`), so it
+  is false after `diverged`, `invalid_problem` and every other failure. The new
+  `stepper::finished()` is true for any status other than `running`, the old
+  meaning of `converged()`: a `while(!st.converged()) st.step();` loop becomes
+  `while(!st.finished()) st.step();`.
 - `reset(x0)` and `reset_clear(x0)` return `solver_status` instead of `void`,
   on every policy, solver driver and `basic_solver_group`. A start of the wrong
   length, at construction or on reset, ends with `invalid_problem` instead of

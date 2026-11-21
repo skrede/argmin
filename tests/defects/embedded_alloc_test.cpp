@@ -26,6 +26,11 @@ sensor::steady_state_result measure_equality_rich_kraft()
 {
     solver_options<> opts;
     opts.max_iterations = 200;
+    // The solve converges in two iterations and a solver takes no step after a claim, so the stopping tests are
+    // zeroed to keep the measured window on the policy's steps at the solution.
+    opts.set_gradient_threshold(0.0);
+    opts.set_objective_threshold(0.0);
+    opts.set_step_threshold(0.0);
     return sensor::measure_steady(kraft_slsqp_policy<double, 48>{}, defects::coupled_quadratic<48, 48, 1>{}, opts, 10);
 }
 

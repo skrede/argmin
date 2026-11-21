@@ -553,7 +553,7 @@ TEST_CASE("step_budget_solver step() consults convergence and reports a by-crite
     CHECK(solver.status() == solver_status::converged);
 }
 
-TEST_CASE("step_budget_solver solve() re-entrancy is a continuation; reset() restarts",
+TEST_CASE("step_budget_solver solve() after a claim keeps it; reset() restarts",
           "[solver][reentrancy]")
 {
     quadratic prob;
@@ -568,18 +568,14 @@ TEST_CASE("step_budget_solver solve() re-entrancy is a continuation; reset() res
     const auto n1 = r1.iterations;
     REQUIRE(n1 > 0);
 
-    // Second solve() WITHOUT reset is a continuation: the iteration counter
-    // accumulates, so the solver resumes from the converged iterate and
-    // reports a strictly larger cumulative count.
     auto r2 = solver.solve(opts);
-    CHECK(r2.iterations > n1);
+    CHECK(r2.status == solver_status::converged);
+    CHECK(r2.iterations == n1);
 
-    // reset() restarts the counter and the iterate; the next solve() reports
-    // the same fresh count as the first, strictly below the continuation.
     solver.reset(x0);
     auto r3 = solver.solve(opts);
+    CHECK(r3.status == solver_status::converged);
     CHECK(r3.iterations == n1);
-    CHECK(r3.iterations < r2.iterations);
 }
 
 // ---------------------------------------------------------------------------

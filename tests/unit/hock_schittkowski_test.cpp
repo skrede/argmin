@@ -587,7 +587,7 @@ TEST_CASE("gcmma on hock-schittkowski problems", "[hs][gcmma]")
         auto x0 = problem.initial_point();
         step_budget_solver solver{ccsa_quadratic_policy<double, hs024<>::problem_dimension>{}, problem, x0, opts};
 
-        for(int i = 0; i < 50; ++i)
+        for(int i = 0; i < 50 && solver.status() == solver_status::running; ++i)
         {
             auto sr = solver.step();
             CHECK(std::isfinite(sr.objective_value));

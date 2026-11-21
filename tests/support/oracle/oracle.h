@@ -5,5 +5,6 @@
 #include "oracle/qp_oracle.h"
 #include "oracle/kkt_measure.h"
 #include "oracle/result_oracle.h"
+#include "oracle/state_machine.h"
 
 #endif

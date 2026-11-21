@@ -3,6 +3,7 @@
 
 #include "argmin/types.h"
 #include "argmin/detail/solver_core.h"
+#include "argmin/detail/status_claim.h"
 #include "argmin/detail/runner_concept_probe.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/status.h"
@@ -27,7 +28,7 @@ namespace argmin
 // NO internal loop: it has neither a drive-to-convergence entry point nor a
 // bounded-run one. A caller advances the optimization one iteration at a time
 // via step() and decides -- entirely on its own schedule -- when to stop, most
-// naturally by polling status() / converged() between ticks. This is the shape a
+// naturally by polling status() / finished() between ticks. This is the shape a
 // hard-real-time control or IK loop wants: a single bounded-work call per tick
 // with no hidden iteration and no wall clock.
 // stepper satisfies the steppable concept (the passive single-step surface) but
@@ -46,8 +47,9 @@ namespace argmin
 // step(), live in detail::solver_core -- stepper reuses step() verbatim rather
 // than re-deriving a stepping surface.
 //
+// A terminal status is sticky: step() takes no step from it until reset() or reset_clear().
 // A hand-rolled caller loop
-//     while(st.status() == solver_status::running && i < budget) { st.step(); ++i; }
+//     while(!st.finished() && i < budget) { st.step(); ++i; }
 // reproduces the step_budget_solver drive-to-convergence iterate/objective
 // trajectories bit-for-bit on the same policy / problem / options, because both
 // drive the identical solver_core over the identical policy.step(state)
@@ -152,13 +154,10 @@ public:
 
     solver_status status() const { return core_.status(); }
 
-    // Terminal-status query for the caller's tick loop. Returns true once the
-    // solver has reached any terminal status -- i.e. status() != running --
-    // whether by the convergence policy, a policy-reported failure, or an
-    // abort() request. The specific terminal reason is read from status();
-    // this is the one-liner a `while(!st.converged()) st.step();` loop wants
-    // so it need not name solver_status::running itself.
-    bool converged() const { return core_.status() != solver_status::running; }
+    // True only for a status that claims the final iterate; finished() is true for any terminal status.
+    bool converged() const { return detail::certifies_iterate(core_.status()); }
+
+    bool finished() const { return core_.status() != solver_status::running; }
 
     // The wrapped policy instance (options included).
     const Policy& policy() const { return core_.policy(); }

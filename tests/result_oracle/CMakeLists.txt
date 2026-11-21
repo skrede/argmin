@@ -13,6 +13,8 @@ add_executable(argmin_oracle_tests
     oracle_edge_test.cpp
     oracle_self_test.cpp
     qp_oracle_self_test.cpp
+    state_machine_budget_test.cpp
+    state_machine_test.cpp
 )
 
 target_include_directories(argmin_oracle_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)

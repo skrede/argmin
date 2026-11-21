@@ -22,6 +22,13 @@ constexpr solver_status budget_status(std::uint32_t iterations, std::uint32_t ma
     return iterations >= max_iterations ? solver_status::max_iterations : solver_status::budget_exhausted;
 }
 
+// A solve continues from running and from the two statuses meaning the previous call's own iteration or time budget
+// ran out; every other terminal status stays until a reset.
+constexpr bool resumable(solver_status status) noexcept
+{
+    return status == solver_status::running || status == solver_status::budget_exhausted || status == solver_status::time_limit_reached;
+}
+
 // A rejected problem is never evaluated, not even at x_0, so its solve takes no step and its result agrees with the
 // solver's accessors.
 template <typename Core>
@@ -72,7 +79,7 @@ run_solve_loop(Core& core, std::uint32_t budget,
         return rejected_solve(core);
 
     using scalar_type = typename Core::scalar_type;
-    solver_status status = solver_status::running;
+    solver_status status = resumable(core.status()) ? solver_status::running : core.status();
     step_result<scalar_type> last{};
 
     // Best-seen tracking: the result reports the best point encountered, not the terminal trial, seeded from x_0 and
@@ -85,7 +92,7 @@ run_solve_loop(Core& core, std::uint32_t budget,
     iterate_rank<scalar_type> best{solver_status::running, core.seed_best_f(), core.seed_best_cv(), core.seed_best_bv()};
     const scalar_type feas_tol = static_cast<scalar_type>(opts.feasibility_tolerance_in_force());
 
-    for(std::uint32_t i = 0; i < budget; ++i)
+    for(std::uint32_t i = 0; status == solver_status::running && i < budget; ++i)
     {
         if(core.abort_requested())
         {
@@ -113,8 +120,6 @@ run_solve_loop(Core& core, std::uint32_t budget,
             best_x = core.state().x;
             best = cand;
         }
-        if(status != solver_status::running)
-            break;
     }
 
     if(status == solver_status::running)

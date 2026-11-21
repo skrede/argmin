@@ -76,21 +76,26 @@ struct at_solution_result
     solver_status solve_status;
 };
 
-// A real-time loop keeps stepping once the solver sits at its solution, and the
-// steps taken there run code (null-step reporting, multiplier extraction) that a
-// pre-convergence window never reaches. Solve unarmed, then arm the steps after.
+// A real-time loop sitting at its solution re-arms with reset each tick, since a
+// terminal status takes no step, and the step taken there runs code (null-step
+// reporting, multiplier extraction) that a pre-convergence window never reaches.
+// Solve and reset unarmed, then arm each step.
 template <typename Policy, typename Problem, typename Options>
 at_solution_result measure_at_solution(Policy policy, const Problem& problem,
                                        const Options& opts, std::size_t hot_steps)
 {
     argmin::step_budget_solver solver{policy, problem, problem.initial_point(), opts};
     const solver_status solve_status = solver.solve().status;
+    const auto solution = solver.state().x;
 
     reset_alloc_count();
-    arm_alloc_trace();
     for(std::size_t i = 0; i < hot_steps; ++i)
+    {
+        solver.reset(solution);
+        arm_alloc_trace();
         solver.step();
-    disarm_alloc_trace();
+        disarm_alloc_trace();
+    }
 
     return at_solution_result{read_eigen_malloc_count(), read_c_alloc_count(), solve_status};
 }
