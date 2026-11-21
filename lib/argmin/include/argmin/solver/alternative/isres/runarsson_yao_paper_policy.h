@@ -55,6 +55,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/isres_record.h"
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/scalar_distributions.h"
 #include "argmin/detail/stochastic_ranking.h"
@@ -103,7 +104,6 @@ struct runarsson_yao_paper_policy
 
         // Numeric values are NOT paper-pinned (see file-header citation gap).
         // Defaults match NLopt for cross-implementation comparability.
-        // Field names use the paper_ prefix to mark the citation gap.
         std::optional<Scalar> paper_gamma{};   // default 0.85 (citation gap; not in paper text)
         std::optional<Scalar> paper_alpha{};   // default 0.2  (citation gap; not in paper text)
 
@@ -145,9 +145,9 @@ struct runarsson_yao_paper_policy
         Eigen::Vector<Scalar, N> lower;
         Eigen::Vector<Scalar, N> upper;
 
-        // RNG matches cmaes_policy + production isres_policy (xoshiro256+).
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
+        std::uint32_t evaluations{0};
         detail::best_evaluated<Scalar> record;
 
         Eigen::VectorX<Scalar> c_eq;
@@ -239,7 +239,7 @@ struct runarsson_yao_paper_policy
         for(int j = 0; j < s.lambda; ++j)
         {
             Eigen::Vector<Scalar, N> xi = s.population.col(j);
-            s.fitnesses[j] = s.problem->value(xi);
+            s.fitnesses[j] = detail::counted_value<Scalar>(s.evaluations, *s.problem, xi);
 
             if(n_c > 0)
             {
@@ -418,7 +418,7 @@ struct runarsson_yao_paper_policy
         for(int k = 0; k < lambda; ++k)
         {
             Eigen::Vector<Scalar, N> xk = s.population.col(k);
-            s.fitnesses[k] = s.problem->value(xk);
+            s.fitnesses[k] = detail::counted_value<Scalar>(s.evaluations, *s.problem, xk);
 
             if(n_c > 0)
             {

@@ -84,7 +84,6 @@ inline step_result<Scalar> cobyla_invalid_step_report(const State& s)
         .is_null_step = true,
         .constraint_violation = Scalar(0.0),
         .policy_status = solver_status::invalid_problem,
-        .evaluations = 0,
     };
 }
 
@@ -98,6 +97,7 @@ inline void cobyla_sync_from_engine(State& s)
     s.objective_value = s.engine->objective_value();
     s.parmu = s.engine->parmu();
     s.clamped_evaluations = s.engine->clamped_evaluations();
+    s.evaluations = s.engine->evaluations();
 
     const int m_total = s.n_eq + s.n_ineq;
     if(m_total > 0)

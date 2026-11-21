@@ -43,6 +43,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/isres_record.h"
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/scalar_distributions.h"
 #include "argmin/detail/stochastic_ranking.h"
@@ -100,10 +101,8 @@ struct nlopt_faithful_policy
         std::optional<Scalar> differential_variation_gamma{};  // default 0.85
         std::optional<Scalar> sigma_smoothing_weight{};        // default 0.2
 
-        // Sigma-collapse predicate threshold (bound-relative form).
-        // 1e-9 default — 1000x looser than CMA-ES's 1e-12 because
-        // per-individual ISRES sigma is noisier than CMA-ES covariance
-        // scaling.
+        // Sigma-collapse predicate threshold (bound-relative form). The 1e-9 default is 1000x looser than CMA-ES's 1e-12
+        // because per-individual ISRES sigma is noisier than CMA-ES covariance scaling.
         std::optional<Scalar> sigma_collapse_ratio{};          // default 1e-9
 
         // Bounded retry on resample-on-bound to avoid infinite loop on
@@ -174,6 +173,7 @@ struct nlopt_faithful_policy
         // isres_policy alias. 32 B vs std::mt19937's 2.5 KB.
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
+        std::uint32_t evaluations{0};
         detail::best_evaluated<Scalar> record;
 
         bool invalid_problem{false};
@@ -361,7 +361,7 @@ struct nlopt_faithful_policy
         for(int j = 0; j < s.lambda; ++j)
         {
             const Eigen::Vector<Scalar, N> xi = s.population.col(j);
-            s.fitnesses[j] = s.problem->value(xi);
+            s.fitnesses[j] = detail::counted_value<Scalar>(s.evaluations, *s.problem, xi);
 
             if(n_c > 0)
             {
@@ -609,7 +609,7 @@ struct nlopt_faithful_policy
         for(int k = 0; k < lambda; ++k)
         {
             const Eigen::Vector<Scalar, N> xk = s.population.col(k);
-            s.fitnesses[k] = s.problem->value(xk);
+            s.fitnesses[k] = detail::counted_value<Scalar>(s.evaluations, *s.problem, xk);
 
             if(n_c > 0)
             {

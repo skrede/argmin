@@ -4,6 +4,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/iterate_rank.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 
 #include "argmin/result/status.h"
 
@@ -64,7 +65,7 @@ template <typename State, typename Start>
 void restart_best_evaluated(State& s, const Start& x0)
 {
     s.x = x0;
-    s.objective_value = s.problem->value(s.x);
+    s.objective_value = counted_value<typename held_vector<State>::Scalar>(s.evaluations, *s.problem, s.x);
     if(s.n_eq + s.n_ineq > 0)
     {
         Eigen::VectorX<typename held_vector<State>::Scalar> c(s.n_eq + s.n_ineq);

@@ -14,6 +14,8 @@
 // Reference: Auger & Hansen (2005), "A Restart CMA Evolution Strategy
 //            with Increasing Population Size", CEC 2005.
 
+#include "argmin/detail/evaluation_count.h"
+
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
@@ -32,7 +34,6 @@ namespace argmin
 namespace detail
 {
 // Resolve state_type: use Inner::state_type<P> when available, else Inner::state_type.
-// Mirrors step_budget_solver's resolve_state_t for use in policy decorators.
 template <typename InnerPolicy, typename P>
 consteval auto resolve_inner_state_tag()
 {
@@ -69,7 +70,7 @@ struct restarting_policy
     };
 
     template <typename P = void>
-    struct state_type
+    struct state_type : detail::wrapped_evaluations<detail::resolve_inner_state_t<Inner, P>>
     {
         detail::resolve_inner_state_t<Inner, P> inner;
         decltype(std::declval<detail::resolve_inner_state_t<Inner, P>>().x) x{};
@@ -129,7 +130,6 @@ struct restarting_policy
         s.restart_pending = false;
         s.dimension = static_cast<std::uint32_t>(x0.size());
 
-        // Extract initial lambda from inner state
         if constexpr(requires { s.inner.lambda; })
             s.initial_lambda = static_cast<std::uint32_t>(s.inner.lambda);
         else if constexpr(requires { s.inner.params.lambda; })
@@ -238,7 +238,6 @@ private:
         auto new_pop = static_cast<std::uint32_t>(
             static_cast<scalar_type>(s.initial_lambda) * std::pow(multiplier, static_cast<scalar_type>(s.restart_count)));
 
-        // Update inner population size via the appropriate field
         if constexpr(requires { inner_policy_.options.population_size; })
             inner_policy_.options.population_size = new_pop;
         else if constexpr(requires { inner_policy_.options.lambda; })
@@ -252,6 +251,7 @@ private:
     static void sync_from_inner(state_type<P>& s)
     {
         s.x = s.inner.x;
+        detail::mirror_evaluations(s, s.inner);
         if constexpr(requires { s.inner.c_eq; s.inner.c_ineq; })
         {
             s.c_eq = s.inner.c_eq;

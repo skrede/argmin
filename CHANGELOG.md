@@ -159,6 +159,14 @@ Policies available at HEAD, grouped by problem class:
   restoration re-evaluation and conservativity re-evaluation is counted.
   Before, they reported one evaluation per step and did not count the
   start-point calls.
+- The same counts hold for `bobyqa`, `cobyla`, the three CMA-ES and three ISRES
+  variants, `multistart` and the restarting decorator: every interpolation-set,
+  rescue and generation evaluation is counted, repair and penalty re-evaluations
+  included, and a decorator counts every evaluation of every start and restart
+  of the policy it wraps. Before, the population methods reported one
+  evaluation per generation, `cobyla` missed its initial simplex, both
+  derivative-free solvers missed the start-point call of each solve, and
+  `multistart` summed its inner solver's per-step counts.
 - `solve()` and `step_n()` on a status they cannot continue from evaluate
   nothing and return the result of the call that ended the solve: the same `x`,
   objective, constraint violation and gradient norm. Before, they evaluated the

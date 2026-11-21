@@ -56,6 +56,7 @@
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/cmaes_constants.h"
 #include "argmin/detail/cmaes_covariance.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/cmaes_sampling.h"
 #include "argmin/options/cmaes_detection_options.h"
 #include "argmin/result/step_result.h"
@@ -128,6 +129,7 @@ struct pwq_reparameterization_policy
         Eigen::Vector<Scalar, N> p_c;
         Scalar sigma{};
         std::uint32_t generation{0};
+        std::uint32_t evaluations{0};
         detail::cmaes_params<Scalar> params;
         detail::xoshiro256 rng{1};
 
@@ -171,19 +173,10 @@ struct pwq_reparameterization_policy
         // solver_status::invalid_problem without touching a buffer or evaluating the problem.
         bool invalid_problem{false};
 
-        // Per-step buffers. Pre-allocated to MaxPop
-        // so step() does not heap-resize them on the hot path. lambda
-        // (current popsize) may be smaller than MaxPop on early
-        // generations / pre-IPOP-doubling runs; the working size is
-        // tracked by the per-step `lambda` argument and segments are
-        // sized via .head(lambda) / .leftCols(lambda).
-        //
-        // MaxPop derives from the policy's MaxPopulation template
-        // parameter so a caller that opts into a wider population
-        // (e.g. restarting_policy with deep IPOP escalation per
-        // Auger & Hansen 2005) gets matching buffer capacity. The
-        // `dynamic_dimension` default keeps the historical 512 cap
-        // for callers that do not opt in.
+        // Per-step buffers, pre-allocated to MaxPop so step() does not heap-resize them on the hot path; the current
+        // popsize lambda may be smaller, so segments are sized via .head(lambda) / .leftCols(lambda). MaxPop derives
+        // from MaxPopulation so a caller that opts into a wider population (e.g. restarting_policy with deep IPOP
+        // escalation per Auger & Hansen 2005) gets matching capacity; the dynamic_dimension default keeps the 512 cap.
         static constexpr int MaxPop =
             (MaxPopulation == argmin::dynamic_dimension) ? 512 : MaxPopulation;
         Eigen::Matrix<Scalar, Eigen::Dynamic, 1, 0, MaxPop, 1> fitnesses_buf;
@@ -514,7 +507,7 @@ struct pwq_reparameterization_policy
         s.x = x0;
         if(detail::latch_rejection<Scalar>(s, s.invalid_problem || detail::declares_constraint_rows(problem)))
             return s;
-        s.objective_value = s.problem->value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, x0);
         s.best_ever_value = s.objective_value;
 
         return s;
@@ -586,7 +579,7 @@ struct pwq_reparameterization_policy
             if(s.has_bounds)
                 geno_to_pheno(xi_pheno, s.pwq, s.lower, s.upper);
             pheno_buf.col(i) = xi_pheno;
-            const Scalar f_raw = s.problem->value(xi_pheno);
+            const Scalar f_raw = detail::counted_value<Scalar>(s.evaluations, *s.problem, xi_pheno);
             unpenalized[i] = f_raw;
             fitnesses[i] = f_raw;       // no penalty; pwq enforces feasibility
         }
@@ -1208,7 +1201,7 @@ struct pwq_reparameterization_policy
             return solver_status::invalid_problem;
         s.mean = x0;
         s.x = x0;
-        s.objective_value = s.problem->value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, x0);
         s.best_ever_value = s.objective_value;
         s.p_sigma.setZero();
         s.p_c.setZero();

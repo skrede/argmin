@@ -14,6 +14,7 @@
 //            K&W Section 8.1 (multi-start global optimization).
 
 #include "argmin/detail/halton.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/solver/restarting_policy.h"
@@ -54,13 +55,11 @@ struct multistart_policy
         // this SKIP deactivates.
     };
 
-    // Reuses restarting_policy's inner-state resolution (state_type<P> when the
-    // inner policy templates on the problem, plain state_type otherwise) instead
-    // of duplicating it, and derives x / lower / upper / best_ever_x from the
-    // inner state's own vector type so fixed-N inner policies keep fully-fixed
-    // state inside this decorator rather than collapsing to a dynamic vector.
+    // Reuses restarting_policy's inner-state resolution (state_type<P> when the inner policy templates on the problem,
+    // plain state_type otherwise) and derives x / lower / upper / best_ever_x from the inner state's own vector type so
+    // fixed-N inner policies keep fully-fixed state inside this decorator rather than collapsing to a dynamic vector.
     template <typename P = void>
-    struct state_type
+    struct state_type : detail::wrapped_evaluations<detail::resolve_inner_state_t<Inner, P>>
     {
         detail::resolve_inner_state_t<Inner, P> inner;
         decltype(std::declval<detail::resolve_inner_state_t<Inner, P>>().x) x{};
@@ -74,9 +73,8 @@ struct multistart_policy
         std::uint16_t restart_count{0};
         int dimension{0};
 
-        // Mirrors the inner policy's constraint residuals so
-        // step_budget_solver::constraint_violation() reads the real inner violation
-        // for constrained inner policies instead of silently reading zero.
+        // Mirrors the inner policy's constraint residuals so step_budget_solver::constraint_violation() reads the real
+        // inner violation for constrained inner policies instead of silently reading zero.
         Eigen::VectorX<scalar_type> c_eq{};
         Eigen::VectorX<scalar_type> c_ineq{};
     };
@@ -229,6 +227,7 @@ private:
     {
         s.x = s.inner.x;
         s.objective_value = s.inner.objective_value;
+        detail::mirror_evaluations(s, s.inner);
         if constexpr(requires { s.inner.c_eq; s.inner.c_ineq; })
         {
             s.c_eq = s.inner.c_eq;

@@ -32,6 +32,7 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/isres_record.h"
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/stochastic_ranking.h"
 #include "argmin/detail/xoshiro256.h"
@@ -98,6 +99,7 @@ struct original_argmin_policy
 
         std::optional<detail::xoshiro256> rng;
         std::uint32_t generation{0};
+        std::uint32_t evaluations{0};
         detail::best_evaluated<Scalar> record;
         // The pull-to-best operator's target, kept by the baseline's own rule, which the search depends on; the
         // least-infeasibility witness lets the pre-feasible update compare against the rolling best instead of the
@@ -164,7 +166,6 @@ struct original_argmin_policy
         s.alpha = options.pull_to_best_weight.value_or(Scalar(0.2));
         s.rates = detail::compute_es_rates<Scalar>(n);
 
-        // Seed RNG (xoshiro256+; consistent with cmaes_policy).
         const std::uint64_t seed = options.seed.value_or(
             static_cast<std::uint64_t>(std::random_device{}()));
         s.rng.emplace(seed);
@@ -179,7 +180,6 @@ struct original_argmin_policy
 
         s.mutation_workspace.emplace(n);
 
-        // Pre-allocate per-step buffers.
         s.offspring_buf.resize(n, s.lambda);
         s.new_sigmas_buf.resize(n, s.lambda);
         s.offspring_fitnesses_buf.resize(s.lambda);
@@ -198,7 +198,7 @@ struct original_argmin_policy
         for(int j = 0; j < s.lambda; ++j)
         {
             Eigen::Vector<Scalar, N> xi = s.population.col(j);
-            s.fitnesses[j] = s.problem->value(xi);
+            s.fitnesses[j] = detail::counted_value<Scalar>(s.evaluations, *s.problem, xi);
 
             if(n_c > 0)
             {
@@ -271,7 +271,7 @@ struct original_argmin_policy
         for(int j = 0; j < s.lambda; ++j)
         {
             Eigen::Vector<Scalar, N> xi = s.offspring_buf.col(j);
-            s.offspring_fitnesses_buf[j] = s.problem->value(xi);
+            s.offspring_fitnesses_buf[j] = detail::counted_value<Scalar>(s.evaluations, *s.problem, xi);
 
             if(n_c > 0)
             {

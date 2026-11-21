@@ -39,6 +39,28 @@ void counted_residuals(std::uint32_t& evaluations, const Problem& problem, const
     problem.residuals(x, r);
 }
 
+// A decorator counts only when the state it wraps does, so a wrapped policy without a counter keeps its per-step sum.
+template <typename Inner>
+struct wrapped_evaluations
+{
+};
+
+template <counts_evaluations Inner>
+struct wrapped_evaluations<Inner>
+{
+    wrapped_evaluations() : evaluations{0} {}
+
+    std::uint32_t evaluations;
+};
+
+// A decorator drives one inner state for its whole life, so the inner counter already totals every start and restart.
+template <typename State, typename Inner>
+void mirror_evaluations(State& s, const Inner& inner)
+{
+    if constexpr(counts_evaluations<Inner>)
+        s.evaluations = inner.evaluations;
+}
+
 // The counter is unsigned, so the difference is exact across a wrap.
 template <typename State, typename Scalar>
 void settle_step_evaluations(step_result<Scalar>& result, const State& s, std::uint32_t before)

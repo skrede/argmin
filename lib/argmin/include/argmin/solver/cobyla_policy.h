@@ -77,7 +77,7 @@ struct cobyla_policy
     template <typename P = void>
     struct state_type
     {
-        state_type() : problem{nullptr}, objective_value{}, parmu{Scalar(0.0)}, n_eq{0}, n_ineq{0}, m_powell{0}, iteration{0}, clamped_evaluations{0}, invalid_coordinate{-1}, invalid_problem{false} {}
+        state_type() : problem{nullptr}, objective_value{}, parmu{Scalar(0.0)}, n_eq{0}, n_ineq{0}, m_powell{0}, iteration{0}, evaluations{0}, clamped_evaluations{0}, invalid_coordinate{-1}, invalid_problem{false} {}
 
         const P* problem;
         Eigen::VectorX<Scalar> x;
@@ -94,6 +94,7 @@ struct cobyla_policy
         int n_ineq;
         int m_powell;
         std::uint32_t iteration;
+        std::uint32_t evaluations;
         std::uint32_t clamped_evaluations;
         std::int32_t invalid_coordinate;
         bool invalid_problem;

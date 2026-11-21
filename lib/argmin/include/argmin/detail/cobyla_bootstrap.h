@@ -34,6 +34,7 @@ inline void cobyla_engine<Scalar>::evaluate(const vector_type& x)
 {
     clamp_into_box(x);
     vector_type conv(m_);
+    ++evaluations_;
     Scalar f = eval_(x_eval_, x, conv);
     resmax_ = Scalar(0);
     for(int k = 1; k <= m_; ++k)

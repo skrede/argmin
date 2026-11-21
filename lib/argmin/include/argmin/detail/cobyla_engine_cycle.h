@@ -35,6 +35,7 @@ inline cobyla_engine<Scalar>::cobyla_engine()
     , ifull_{1}
     , nevals_{0}
     , seed_{0}
+    , evaluations_{0}
     , clamped_evaluations_{0}
     , converged_{false}
     , status_{solver_status::running}

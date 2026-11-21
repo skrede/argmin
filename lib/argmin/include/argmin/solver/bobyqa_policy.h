@@ -25,6 +25,7 @@
 #include "argmin/detail/trust_region.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/problem_shape.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/options/trust_region_options.h"
 #include "argmin/options/derivative_free_defaults.h"
 #include "argmin/result/step_result.h"
@@ -154,8 +155,8 @@ struct bobyqa_policy
         // reduction -- the bookkeeping whose absence stalls the driver.
         //
         // nevals mirrors Powell's evaluation counter (seeded to the 2n+1
-        // bootstrap count so the reported total matches the reference); nresc is
-        // its value at the last rescue.
+        // bootstrap count, as the reference's includes PRELIM); nresc is its
+        // value at the last rescue.
         //
         // diffa/diffb/diffc hold |Q-error| at the last three interpolation
         // points; xoptsq = ||xopt||^2, reset to zero by the origin shift.
@@ -171,7 +172,7 @@ struct bobyqa_policy
         // lines 2900-2923). On the third such iteration the model is replaced by
         // the least-Frobenius-norm interpolant to shed accumulated Hessian error.
         int itest{0};
-        std::uint32_t nevals_reported{0};
+        std::uint32_t evaluations{0};
         Scalar diffa{Scalar(0.0)};
         Scalar diffb{Scalar(0.0)};
         Scalar diffc{Scalar(0.0)};
@@ -337,8 +338,8 @@ struct bobyqa_policy
         s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
             s.x_scaled, h, s.lower_scaled, s.upper_scaled,
             [&](const Eigen::Vector<Scalar, N>& x_sc) {
-                return s.problem->value(
-                    (x_sc.array() * s.scale.array()).matrix());
+                return detail::counted_value<Scalar>(
+                    s.evaluations, *s.problem, (x_sc.array() * s.scale.array()).matrix());
             });
 
         // Update x to the best point found during bootstrap.
@@ -364,7 +365,6 @@ struct bobyqa_policy
     {
         s.rho = s.delta;
         s.nevals = s.m;
-        s.nevals_reported = 0;
         s.nfsav = s.m;
         s.nresc = s.m;
         s.ntrits = 0;
@@ -585,7 +585,7 @@ struct bobyqa_policy
             Eigen::Vector<Scalar, N> xabs = detail::project(
                 (s.sys.xbase + xn).eval(), s.lower_scaled, s.upper_scaled);
             Eigen::Vector<Scalar, N> xorig = (xabs.array() * s.scale.array()).matrix();
-            Scalar f = s.problem->value(xorig);
+            Scalar f = detail::counted_value<Scalar>(s.evaluations, *s.problem, xorig);
             ++s.nevals;
             return {f, xabs};
         };
@@ -602,7 +602,7 @@ struct bobyqa_policy
             s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
                 xb, h, s.lower_scaled, s.upper_scaled,
                 [&](const Eigen::Vector<Scalar, N>& x_sc) {
-                    return s.problem->value((x_sc.array() * s.scale.array()).matrix());
+                    return detail::counted_value<Scalar>(s.evaluations, *s.problem, (x_sc.array() * s.scale.array()).matrix());
                 });
             s.nevals += s.m;
             s.nresc = s.nevals;
@@ -1093,9 +1093,6 @@ struct bobyqa_policy
                 effective_change = s.rho;
         }
 
-        std::uint32_t evals = static_cast<std::uint32_t>(s.nevals) - s.nevals_reported;
-        s.nevals_reported = static_cast<std::uint32_t>(s.nevals);
-
         step_result<Scalar> r{
             .objective_value = s.objective_value,
             .gradient_norm = grad_proxy,
@@ -1104,11 +1101,6 @@ struct bobyqa_policy
             .improved = improved,
             .x_norm = s.x.norm(),
         };
-        // Report the true number of objective calls this step made. A terminate
-        // path that exits without evaluating (a refused, unrescuable denominator)
-        // legitimately makes zero calls; fabricating a phantom evaluation there
-        // would corrupt the accumulated evaluation total.
-        r.evaluations = evals;
         if(terminated)
             r.policy_status = solver_status::converged;
         return r;
@@ -1136,8 +1128,8 @@ struct bobyqa_policy
         s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
             s.x_scaled, h, s.lower_scaled, s.upper_scaled,
             [&](const Eigen::Vector<Scalar, N>& x_sc) {
-                return s.problem->value(
-                    (x_sc.array() * s.scale.array()).matrix());
+                return detail::counted_value<Scalar>(
+                    s.evaluations, *s.problem, (x_sc.array() * s.scale.array()).matrix());
             });
         s.x_scaled = s.sys.xbase + s.sys.xopt;
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();

@@ -36,9 +36,9 @@ file	lib/argmin/include/argmin/qp/dense_admm_qp.h	-	972
 file	lib/argmin/include/argmin/qp/detail/sparse_kkt.h	-	251
 file	lib/argmin/include/argmin/qp/sparse_admm_qp.h	-	1041
 file	lib/argmin/include/argmin/schedule/basic_solver_group.h	-	359
-file	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	-	1063
-file	lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h	-	1271
-file	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h	-	997
+file	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	-	1056
+file	lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h	-	1264
+file	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h	-	990
 file	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	-	541
 file	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	-	601
 file	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	-	649
@@ -46,7 +46,7 @@ file	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	
 file	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	-	412
 file	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	-	555
 file	lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h	-	1044
-file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1154
+file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1146
 file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	659
 file	lib/argmin/include/argmin/solver/convergence.h	-	367
 file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1319
@@ -56,7 +56,7 @@ file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1119
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	203
 file	lib/argmin/include/argmin/solver/lm_policy.h	-	301
 file	lib/argmin/include/argmin/solver/mma_policy.h	-	567
-file	lib/argmin/include/argmin/solver/multistart_policy.h	-	242
+file	lib/argmin/include/argmin/solver/multistart_policy.h	-	241
 file	lib/argmin/include/argmin/solver/nw_sqp_policy.h	-	1164
 file	lib/argmin/include/argmin/solver/projected_gn_policy.h	-	369
 file	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	-	451
@@ -180,7 +180,7 @@ function	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	st
 function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	init	167
 function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	reset	31
 function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	step	233
-function	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	init	92
+function	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	init	90
 function	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	step	118
 function	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	init	95
 function	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	step	216
@@ -192,7 +192,7 @@ function	lib/argmin/include/argmin/solver/bobyqa_policy.h	build_explicit_hessian
 function	lib/argmin/include/argmin/solver/bobyqa_policy.h	frobenius_model_reset	76
 function	lib/argmin/include/argmin/solver/bobyqa_policy.h	init	119
 function	lib/argmin/include/argmin/solver/bobyqa_policy.h	select_replacement_relative	27
-function	lib/argmin/include/argmin/solver/bobyqa_policy.h	step	545
+function	lib/argmin/include/argmin/solver/bobyqa_policy.h	step	537
 function	lib/argmin/include/argmin/solver/byrd_lbfgsb_policy.h	init	26
 function	lib/argmin/include/argmin/solver/byrd_lbfgsb_policy.h	null_direction_step	39
 function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	init	102
@@ -221,7 +221,7 @@ function	lib/argmin/include/argmin/solver/projected_gn_policy.h	step	115
 function	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	init	27
 function	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	step_backtracking	100
 function	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	step_dogleg	66
-function	lib/argmin/include/argmin/solver/restarting_policy.h	init	47
+function	lib/argmin/include/argmin/solver/restarting_policy.h	init	46
 function	lib/argmin/include/argmin/solver/restarting_policy.h	step	39
 function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	init	136
 function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	reset	30

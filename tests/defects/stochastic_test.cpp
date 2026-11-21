@@ -90,7 +90,7 @@ TEST_CASE("cmaes evaluates no point outside the box when started outside it", "[
     CHECK(problem.calls_outside_box == 0);
 }
 
-TEST_CASE("cmaes counts every objective call in its function evaluations", "[known-defect][!shouldfail]")
+TEST_CASE("cmaes counts every objective call in its function evaluations", "[stochastic]")
 {
     const counting_box problem = box(Eigen::Vector2d::Constant(-5.0), Eigen::Vector2d::Constant(5.0));
     solver_options<> options;

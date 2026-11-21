@@ -2,7 +2,9 @@
 
 #include "cases/sqp_cases.h"
 #include "cases/gradient_cases.h"
+#include "cases/stochastic_cases.h"
 #include "cases/least_squares_cases.h"
+#include "cases/derivative_free_cases.h"
 #include "cases/moving_asymptote_cases.h"
 #include "cases/trust_region_sqp_cases.h"
 
@@ -63,4 +65,29 @@ TEST_CASE("every moving-asymptote solver reports every objective evaluation it m
     cases::count_visitor count{cases::moving_asymptote_keys, 0};
     cases::visit_moving_asymptote_cases(count);
     CHECK(count.judged == 10);
+}
+
+TEST_CASE("every derivative-free solver reports every objective evaluation it makes", "[oracle][evaluations]")
+{
+    cases::count_visitor count{cases::derivative_free_keys, 0};
+    cases::visit_derivative_free_cases(count);
+    CHECK(count.judged == 5);
+}
+
+TEST_CASE("every CMA-ES and ISRES solver reports every fitness evaluation of every generation", "[oracle][evaluations]")
+{
+    constexpr std::array<std::string_view, 6> keys{
+        "cmaes_repair_l2_penalty", "cmaes_pwq_reparameterization", "cmaes_no_repair_adaptive_penalty", "isres_nlopt_faithful", "isres_original_argmin", "isres_runarsson_yao_paper"};
+    cases::count_visitor count{keys, 0};
+    cases::visit_stochastic_cases(count);
+    CHECK(count.judged == 18);
+}
+
+TEST_CASE("the multistart and restarting solvers report every evaluation of every start", "[oracle][evaluations]")
+{
+    constexpr std::array<std::string_view, 2> keys{"multistart_lbfgsb", "restarting_cmaes"};
+    cases::count_visitor count{keys, 0};
+    cases::visit_gradient_cases(count);
+    cases::visit_stochastic_cases(count);
+    CHECK(count.judged == 4);
 }

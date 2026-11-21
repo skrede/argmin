@@ -58,6 +58,8 @@ public:
     [[nodiscard]] Scalar resmax() const { return resmax_best_; }
     [[nodiscard]] const vector_type& x() const { return x_best_; }
     std::uint32_t clamped_evaluations() const { return clamped_evaluations_; }
+    // Unlike the clamped count, a re-init does not restart it, so it totals every evaluation of the engine's life.
+    std::uint32_t evaluations() const { return evaluations_; }
     [[nodiscard]] Scalar gradient_proxy() const
     {
         Scalar g = Scalar(0);
@@ -162,6 +164,7 @@ private:
     int ifull_;
     int nevals_;
     std::uint32_t seed_;
+    std::uint32_t evaluations_;
     std::uint32_t clamped_evaluations_;
     bool converged_;
     solver_status status_;

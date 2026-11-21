@@ -57,7 +57,7 @@ TEST_CASE("filter_nw_sqp reports every objective evaluation in its function eval
     CHECK(solve.reported == solve.counted);
 }
 
-TEST_CASE("cobyla reports every objective evaluation in its function evaluations", "[known-defect][!shouldfail]")
+TEST_CASE("cobyla reports every objective evaluation in its function evaluations")
 {
     const counted_solve solve = solve_counting(cobyla_policy<>{}, defects::counting_row_bowl{});
     CHECK(solve.reported == solve.counted);
