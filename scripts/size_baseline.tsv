@@ -26,7 +26,7 @@ file	lib/argmin/include/argmin/detail/nnls.h	-	415
 file	lib/argmin/include/argmin/detail/projected_gn_step.h	-	381
 file	lib/argmin/include/argmin/detail/quadratic_model.h	-	480
 file	lib/argmin/include/argmin/detail/restoration.h	-	371
-file	lib/argmin/include/argmin/detail/solver_core.h	-	631
+file	lib/argmin/include/argmin/detail/solver_core.h	-	630
 file	lib/argmin/include/argmin/detail/sqp_common.h	-	784
 file	lib/argmin/include/argmin/detail/steihaug_cg.h	-	255
 file	lib/argmin/include/argmin/detail/trust_region.h	-	924
@@ -197,7 +197,7 @@ function	lib/argmin/include/argmin/solver/byrd_lbfgsb_policy.h	init	26
 function	lib/argmin/include/argmin/solver/byrd_lbfgsb_policy.h	null_direction_step	39
 function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	init	102
 function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	step	292
-function	lib/argmin/include/argmin/solver/convergence.h	check	31
+function	lib/argmin/include/argmin/solver/convergence.h	check	29
 function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	init	83
 function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	step	844
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	init	87

@@ -23,6 +23,7 @@ add_executable(argmin_release_safety_tests
     cmaes_nonfinite_ranking_test.cpp
     rejected_start_build_test.cpp
     kkt_degenerate_vertex_test.cpp
+    stall_window_capacity_test.cpp
 )
 target_include_directories(argmin_release_safety_tests
     PRIVATE

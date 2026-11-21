@@ -224,6 +224,9 @@ template <scalar S = double>
 struct stall_tolerance_criterion
 {
     using scalar_type = S;
+    // Twice the largest shipped window (200, BOBYQA and ISRES), rounded up to a power of two: 4096 bytes at double. A
+    // larger window is rejected with invalid_problem, never shortened.
+    static constexpr std::uint16_t capacity = 512;
     std::optional<S> threshold{};
     std::uint16_t window{50};
     bool track_best_seen_feasible{false};
@@ -232,10 +235,8 @@ struct stall_tolerance_criterion
     std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t iteration) const
     {
-        if(!threshold)
+        if(!threshold || window > capacity)
             return std::nullopt;
-
-        auto effective_window = std::min(window, max_window);
 
         // The best-seen feasible objective never increases, so an objective oscillating about an optimum it already
         // reached still stalls (a heuristic for the moving-asymptote family of Svanberg 2002, SIAM J. Optim. 12(2)).
@@ -251,12 +252,12 @@ struct stall_tolerance_criterion
         {
             metric = r.objective_value + r.constraint_violation;
         }
-        buffer_[iteration % max_window] = metric;
+        buffer_[iteration % capacity] = metric;
 
-        if(iteration < effective_window)
+        if(iteration < window)
             return std::nullopt;
 
-        S old_metric = buffer_[(iteration - effective_window + 1) % max_window];
+        S old_metric = buffer_[(iteration - window + 1) % capacity];
 
         if(std::abs(metric - old_metric) < *threshold * std::max(std::abs(metric), S(1)))
             return solver_status::stalled;
@@ -271,8 +272,7 @@ struct stall_tolerance_criterion
     }
 
 private:
-    static constexpr std::uint16_t max_window = 512;
-    mutable std::array<S, max_window> buffer_{};
+    mutable std::array<S, capacity> buffer_{};
     mutable S best_seen_feasible_{std::numeric_limits<S>::infinity()};
 };
 

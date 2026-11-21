@@ -4,6 +4,7 @@
 #include "argmin/detail/best_point.h"
 #include "argmin/detail/iterate_rank.h"
 #include "argmin/detail/status_claim.h"
+#include "argmin/detail/criteria_state.h"
 
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -76,7 +77,7 @@ run_solve_loop(Core& core, std::uint32_t budget,
                const solver_options<OptsConvergence>& opts,
                BudgetExhausted&& budget_exhausted)
 {
-    if(core.status() == solver_status::invalid_problem)
+    if(core.status() == solver_status::invalid_problem || !within_capacity(opts.convergence))
         return rejected_solve(core);
     if(!resumable(core.status()) && core.last_result())
         return *core.last_result();

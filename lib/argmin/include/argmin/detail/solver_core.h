@@ -8,6 +8,7 @@
 #include "argmin/detail/bound_measure.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/terminal_step.h"
+#include "argmin/detail/criteria_state.h"
 #include "argmin/detail/tuple_contains.h"
 #include "argmin/detail/evaluation_count.h"
 #include "argmin/result/step_result.h"
@@ -318,7 +319,7 @@ public:
     // Populated with per-criterion last_check_results by the most recent solve loop.
     const Convergence& convergence() const { return options_.convergence; }
 
-    solver_status status() const { return !built_ || detail::state_rejected(state_) ? solver_status::invalid_problem : last_status_; }
+    solver_status status() const { return !built_ || detail::state_rejected(state_) || !detail::within_capacity(options_.convergence) ? solver_status::invalid_problem : last_status_; }
 
     // The wrapped policy instance (options included). Lets a caller confirm
     // the configuration that actually reached the policy -- notably that a
@@ -403,8 +404,6 @@ public:
 
     scalar_type seed_best_bv() const { return bound_measure_(state_); }
 
-    // Forwards solver-level options (currently constraint_tolerance) into
-    // the stored convergence criteria at construction.
     // constraint_tolerance is a solver_options field (not a policy_options
     // field), which is why this is a sibling to forward_policy_hints
     // instead of an extension of it -- the two forwarders honor different
@@ -621,7 +620,7 @@ private:
         last_result_.reset();
         options_.convergence.reset();
         abort_flag_.store(false, std::memory_order_relaxed);
-        return status;
+        return detail::within_capacity(options_.convergence) ? status : solver_status::invalid_problem;
     }
 };
 }

@@ -274,6 +274,12 @@ Policies available at HEAD, grouped by problem class:
   512-entry stall buffer on every outer step. The defaulted paths run on the
   solver's stored criteria, so their stall history continues across
   `step_n` chunks as it does across `step()` calls.
+- A stall window above the criterion's 512-entry buffer
+  (`stall_tolerance_criterion::capacity`) reports `invalid_problem` instead of
+  being shortened to 512. A solver whose stored window is too large reports it
+  from construction, `reset` and `reset_clear`, and an explicit `solve(opts)`
+  or `step_n(budget, opts)` with such options returns `invalid_problem`
+  without stepping.
 
 ### Notes
 
