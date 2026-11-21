@@ -44,6 +44,7 @@ void abort_before_solve_yields_aborted()
     CHECK(result.status == solver_status::aborted);
     CHECK(result.iterations == 0);
     CHECK(std::isfinite(result.objective_value));
+    CHECK(std::isnan(result.gradient_norm));
 }
 
 // reset_clear() clears the abort flag: the same driver runs normally afterward.

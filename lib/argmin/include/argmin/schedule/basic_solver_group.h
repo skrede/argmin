@@ -143,16 +143,12 @@ public:
     solve_result<scalar_type, N> step_n(std::uint32_t budget,
                                         const solver_options<Convergence>& opts = {})
     {
-        step_result<scalar_type> last{.gradient_norm = std::numeric_limits<scalar_type>::quiet_NaN()};
         std::uint32_t executed = 0;
         std::uint32_t evaluations = 0;
         const auto seq = std::index_sequence_for<Policies...>{};
 
         for(; executed < budget && !all_retired() && !all_rejected(seq); ++executed)
-        {
-            last = step();
-            evaluations += last.evaluations;
-        }
+            evaluations += step().evaluations;
 
         const solver_status status = detail::budget_status(executed, opts.max_iterations);
         populate_active_results(status, seq);
@@ -162,9 +158,9 @@ public:
             .status = reported_status(best_idx, status, seq),
             .iterations = executed,
             .function_evaluations = evaluations,
-            .objective_value = objective_at(best_idx, seq),
-            .gradient_norm = last.gradient_norm,
-            .constraint_violation = constraint_violation_at(best_idx, seq),
+            .objective_value = member_at(best_idx, seq, [](const auto& member) { return member.state().objective_value; }),
+            .gradient_norm = member_at(best_idx, seq, [](const auto& member) { return member.gradient_norm(); }),
+            .constraint_violation = member_at(best_idx, seq, [](const auto& member) { return member.constraint_violation(); }),
             .x = best_x(seq),
         };
     }
@@ -274,20 +270,12 @@ private:
         return *ptr;
     }
 
-    template <std::size_t... Is>
-    scalar_type objective_at(std::size_t idx, std::index_sequence<Is...>) const
+    template <typename Read, std::size_t... Is>
+    scalar_type member_at(std::size_t idx, std::index_sequence<Is...>, Read read) const
     {
-        scalar_type val{};
-        ((Is == idx ? void(val = std::get<Is>(solvers_).state().objective_value) : void()), ...);
-        return val;
-    }
-
-    template <std::size_t... Is>
-    scalar_type constraint_violation_at(std::size_t idx, std::index_sequence<Is...>) const
-    {
-        scalar_type cv{};
-        ((Is == idx ? void(cv = std::get<Is>(solvers_).constraint_violation()) : void()), ...);
-        return cv;
+        scalar_type value{};
+        ((Is == idx ? void(value = read(std::get<Is>(solvers_))) : void()), ...);
+        return value;
     }
 
     // A member rejected at construction or reset is never evaluated, so a group of them has no step to take.

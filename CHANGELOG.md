@@ -135,6 +135,14 @@ Policies available at HEAD, grouped by problem class:
   `max_iterations` or `budget_exhausted`. A `step()` after every member retired
   returns that status with an unevaluated step result instead of
   `budget_exhausted`. `results()` reports members the same way.
+- `solve_result::gradient_norm` is the norm reported by the step that produced
+  the returned point, as `x`, `objective_value` and `constraint_violation` are,
+  instead of the last step's. It is NaN when the returned point is the start
+  point (a solve that aborts, has a zero budget or is called on a terminal status
+  before its first step, or whose steps never rank above the start), and no
+  gradient is evaluated to fill it. Before, a solve that ended before its first
+  step reported 0. A solver group reports the gradient norm of the member whose
+  point it returns.
 - `lbfgsb`, `byrd_lbfgsb`, `bobyqa`, `lm`, `projected_gn`,
   `projected_gradient_gn` and the three CMA-ES variants end with
   `invalid_problem` for a problem that declares equality or inequality rows,

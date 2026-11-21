@@ -139,6 +139,9 @@ The full concept definitions are in
   claims nothing about the point.
 - `result.x` -- the solution vector.
 - `result.objective_value` -- the objective at `result.x`.
+- `result.gradient_norm` -- the gradient-like norm the step that produced
+  `result.x` reported; NaN when `result.x` is the start point, where no step
+  evaluated one.
 - `result.constraint_violation` -- the infinity-norm of the constraint residual
   at `result.x`; bounds are not constraint rows and are not included.
 

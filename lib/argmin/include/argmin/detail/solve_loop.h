@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_SOLVE_LOOP_H
 #define HPP_GUARD_ARGMIN_DETAIL_SOLVE_LOOP_H
 
+#include "argmin/detail/best_point.h"
 #include "argmin/detail/iterate_rank.h"
 #include "argmin/detail/status_claim.h"
 
@@ -80,16 +81,7 @@ run_solve_loop(Core& core, std::uint32_t budget,
 
     using scalar_type = typename Core::scalar_type;
     solver_status status = resumable(core.status()) ? solver_status::running : core.status();
-    step_result<scalar_type> last{};
-
-    // Best-seen tracking: the result reports the best point encountered, not the terminal trial, seeded from x_0 and
-    // the policy's cached (f, cv) there. A policy without a problem binding (projected_gn family, Problem == void)
-    // seeds f at +inf, so its first accepted step becomes the baseline.
-    //
-    // Reference: nlopt/src/api/nlopt.c nlopt_optimize (best-solution-returned semantics); N&W 2e Def 12.1 (primal
-    //            feasibility, L-infinity composition).
-    typename Core::vector_type best_x = core.state().x;
-    iterate_rank<scalar_type> best{solver_status::running, core.seed_best_f(), core.seed_best_cv(), core.seed_best_bv()};
+    best_point<typename Core::vector_type, scalar_type> best{core.state().x, {solver_status::running, core.seed_best_f(), core.seed_best_cv(), core.seed_best_bv()}};
     const scalar_type feas_tol = static_cast<scalar_type>(opts.feasibility_tolerance_in_force());
 
     for(std::uint32_t i = 0; status == solver_status::running && i < budget; ++i)
@@ -111,15 +103,9 @@ run_solve_loop(Core& core, std::uint32_t budget,
 
         // step_impl() (not the public step()) runs the raw iteration: this loop owns the stopping
         // decision, so a second per-step convergence consult would double-advance windowed criteria.
-        last = core.step_impl();
+        const step_result<scalar_type> last = core.step_impl();
         status = resolve_step_status(last, opts.convergence, core.iteration_count(), feas_tol);
-
-        const iterate_rank<scalar_type> cand{status, last.objective_value, last.constraint_violation, last.bound_violation};
-        if(is_better(cand, best, feas_tol))
-        {
-            best_x = core.state().x;
-            best = cand;
-        }
+        best.offer(status, last, core.state().x, feas_tol);
     }
 
     if(status == solver_status::running)
@@ -142,10 +128,10 @@ run_solve_loop(Core& core, std::uint32_t budget,
         // count. Policies that evaluate several times per iteration (line
         // searches) report > iterations here.
         .function_evaluations = core.evaluation_count(),
-        .objective_value = best.objective_value,
-        .gradient_norm = last.gradient_norm,
-        .constraint_violation = best.constraint_violation,
-        .x = best_x,
+        .objective_value = best.objective_value(),
+        .gradient_norm = best.gradient_norm(),
+        .constraint_violation = best.constraint_violation(),
+        .x = best.x(),
     };
 }
 

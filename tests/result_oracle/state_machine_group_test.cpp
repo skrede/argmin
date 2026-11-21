@@ -72,6 +72,7 @@ struct ending_policy
 
 using failing_pair = basic_solver_group<round_robin_schedule, dynamic_dimension, void, ending_policy<0, 1, solver_status::line_search_failed>, ending_policy<1, 1, solver_status::line_search_failed>>;
 using mixed_pair = basic_solver_group<round_robin_schedule, dynamic_dimension, void, ending_policy<0, 1, solver_status::line_search_failed>, ending_policy<1, 3, solver_status::converged>>;
+using early_claim_pair = basic_solver_group<round_robin_schedule, dynamic_dimension, void, ending_policy<0, 1, solver_status::converged>, ending_policy<1, 3, solver_status::line_search_failed>>;
 
 solver_options<> fifty_iterations()
 {
@@ -118,4 +119,16 @@ TEST_CASE("a group step after every member retired returns the latched status an
     CHECK(r.policy_status == result.status);
     CHECK(group.step_n(10).iterations == 0);
     CHECK(member_steps == std::array<std::uint32_t, 2>{1, 3});
+}
+
+TEST_CASE("a group reports the gradient norm of the member whose point it returns, not the last step's", "[oracle][state-machine][solver_group]")
+{
+    member_steps = {};
+    early_claim_pair group{bowl{}, start, fifty_iterations()};
+    const solve_result<double> result = group.step_n(50);
+    REQUIRE(member_steps == std::array<std::uint32_t, 2>{1, 3});
+    REQUIRE(result.status == solver_status::converged);
+    CHECK(oracle::same_bits(result.x, group.results()[0].x));
+    CHECK(oracle::same_bits(result.gradient_norm, group.results()[0].gradient_norm));
+    CHECK(oracle::same_bits(result.gradient_norm, (0.5 * start).norm()));
 }
