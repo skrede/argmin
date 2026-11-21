@@ -139,12 +139,12 @@ TEST_CASE("a solver group reports the status of the member whose point it return
         CHECK(group_result<higher_converged, lower_running>().status == solver_status::converged);
     }
 
-    SECTION("no claim when the chosen member makes none, though the group's own criteria stopped it")
+    SECTION("no claim when the chosen member makes none, though step_n's own criteria would be met")
     {
         solver_options<> loose;
         loose.set_gradient_threshold(2.0);
-        CHECK(group_result<higher_running, lower_running>(loose).status == solver_status::objective_stalled);
-        CHECK(group_result<lower_running, higher_running>(loose).status == solver_status::objective_stalled);
+        CHECK(group_result<higher_running, lower_running>(loose).status == solver_status::budget_exhausted);
+        CHECK(group_result<lower_running, higher_running>(loose).status == solver_status::budget_exhausted);
     }
 
     SECTION("no claim when the chosen member's rows do not admit its claim")

@@ -124,11 +124,17 @@ Policies available at HEAD, grouped by problem class:
 - `constraint_violation()` on the solver drivers is the largest row violation
   (L-infinity), the measure `solve_result::constraint_violation` and the
   feasibility tolerance use, instead of the sum (L1).
-- `basic_solver_group` reports the status of the member whose point it
-  returns, admitted on that member's rows and box, instead of its own verdict
-  for whichever member ranked best. A member still running when the group stops
-  reports `max_iterations` or `budget_exhausted`, or `objective_stalled` when
-  the group's criteria stopped it. `results()` reports members the same way.
+- `basic_solver_group` retires a member once that member's own status, judged
+  by its own convergence criteria, is not `running`, and never steps it again.
+  The group ends when every member has retired or its budget is spent;
+  `step_n()` no longer judges steps from different members against one shared
+  convergence object, so its `opts` argument supplies only `max_iterations`.
+  The group reports the status of the member whose point it returns, admitted
+  on that member's rows and box, instead of its own verdict for whichever
+  member ranked best; a member still running when the budget ends reports
+  `max_iterations` or `budget_exhausted`. A `step()` after every member retired
+  returns that status with an unevaluated step result instead of
+  `budget_exhausted`. `results()` reports members the same way.
 - `lbfgsb`, `byrd_lbfgsb`, `bobyqa`, `lm`, `projected_gn`,
   `projected_gradient_gn` and the three CMA-ES variants end with
   `invalid_problem` for a problem that declares equality or inequality rows,

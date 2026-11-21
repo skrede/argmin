@@ -35,7 +35,7 @@ file	lib/argmin/include/argmin/qp/dense_active_set_qp.h	-	448
 file	lib/argmin/include/argmin/qp/dense_admm_qp.h	-	972
 file	lib/argmin/include/argmin/qp/detail/sparse_kkt.h	-	251
 file	lib/argmin/include/argmin/qp/sparse_admm_qp.h	-	1041
-file	lib/argmin/include/argmin/schedule/basic_solver_group.h	-	392
+file	lib/argmin/include/argmin/schedule/basic_solver_group.h	-	371
 file	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	-	1063
 file	lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h	-	1271
 file	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h	-	997
@@ -161,8 +161,6 @@ function	lib/argmin/include/argmin/qp/detail/sparse_kkt.h	analyze	80
 function	lib/argmin/include/argmin/qp/sparse_admm_qp.h	finalize	55
 function	lib/argmin/include/argmin/qp/sparse_admm_qp.h	ruiz	67
 function	lib/argmin/include/argmin/qp/sparse_admm_qp.h	try_polish	137
-function	lib/argmin/include/argmin/schedule/basic_solver_group.h	step	37
-function	lib/argmin/include/argmin/schedule/basic_solver_group.h	step_n	38
 function	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	init	140
 function	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	reset	30
 function	lib/argmin/include/argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h	step	661

@@ -349,11 +349,9 @@ TEST_CASE("group step returns a truthful terminal outcome once every solver has 
 
     auto r = group.step();
 
-    // No live solver remains -- this must be a truthful terminal signal,
-    // never a step_result masquerading as a real (objective-0) step: the
-    // status is explicitly set and the metrics are NaN rather than the
-    // misleading value-initialized 0.
-    CHECK(r.policy_status == argmin::solver_status::budget_exhausted);
+    // No live solver remains, so the step carries the returned member's status and NaN metrics rather than a
+    // value-initialized 0 a caller would read as a stationary point.
+    CHECK(r.policy_status == argmin::solver_status::roundoff_limited);
     CHECK(std::isnan(r.objective_value));
     CHECK(std::isnan(r.gradient_norm));
 }

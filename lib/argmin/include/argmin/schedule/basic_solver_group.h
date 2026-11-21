@@ -4,6 +4,7 @@
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/detail/solve_loop.h"
 #include "argmin/detail/status_claim.h"
+#include "argmin/detail/terminal_step.h"
 #include "argmin/formulation/concepts.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -32,10 +33,10 @@ namespace argmin
 // which solver to step next. The compile-time fold-expression requires clause
 // ensures the Problem type satisfies the union of all policy requirements.
 //
-// A solve returns the best member's point with that member's own status, so a claim always describes the point it
-// comes with; results() reports every member the same way. A member still running when the group stops gets the
-// group's reason instead: max_iterations or budget_exhausted when the budget ended, objective_stalled when the
-// group's criteria ended it, since their verdict is not that member's claim.
+// A member retires once its own status is not running, judged by its own convergence object. A solve returns the
+// best member's point with that member's own status, so a claim always describes the point it comes with; results()
+// reports every member the same way. A member still running when the budget ends gets max_iterations or
+// budget_exhausted instead.
 
 template <typename Schedule, int N = dynamic_dimension, typename Problem = void, typename... Policies>
 class basic_solver_group
@@ -89,41 +90,29 @@ public:
     step_result<scalar_type> step()
     {
         constexpr std::size_t n = sizeof...(Policies);
-
+        const auto seq = std::index_sequence_for<Policies...>{};
         if(all_retired())
-        {
-            // No live solver remains. A value-initialized step_result would masquerade as a real step (objective 0,
-            // gradient 0) and could falsely satisfy a caller's own convergence check.
-            return terminal_result();
-        }
+            return retired_step(seq);
 
-        // Skip-scan for the next live solver. fallback_schedule and time_boxed_schedule only advance their index on
-        // stall or time-slice expiry, not on retirement, so a repeated select(n) can keep returning a retired index
-        // forever. Query the schedule once, then scan forward over the live solvers from there; since all_retired()
-        // is false above, a live index exists within the next n slots.
+        // fallback_schedule and time_boxed_schedule do not advance past a retired index, so the schedule is queried
+        // once and the scan moves forward to the next live member.
         std::size_t idx = schedule_.select(n);
         for(std::size_t attempt = 0; attempt < n; ++attempt)
         {
             if(!retired_[idx])
             {
-                auto result = step_at(idx, std::index_sequence_for<Policies...>{});
+                auto result = step_at(idx, seq);
                 schedule_.notify(result);
-
-                // A converged member stops being re-stepped, so it cannot livelock the group.
-                const solver_status policy_status = result.policy_status ? detail::admit_policy_status(*result.policy_status, result, feasibility_tolerance_in_force()) : solver_status::running;
-                if(policy_status == solver_status::roundoff_limited || policy_status == solver_status::diverged || policy_status == solver_status::converged)
+                if(status_at(idx, seq) != solver_status::running)
                 {
                     retired_[idx] = true;
-                    populate_result(idx, result, std::index_sequence_for<Policies...>{});
+                    populate_result(idx, result, seq);
                 }
-
                 return result;
             }
             idx = (idx + 1) % n;
         }
-
-        // Unreachable given the all_retired() guard above; the same truthful terminal outcome, not a fabricated result.
-        return terminal_result();
+        return retired_step(seq);
     }
 
     const std::array<solve_result<scalar_type, N>, sizeof...(Policies)>& results() const
@@ -149,35 +138,23 @@ public:
         return step_n(max_iterations_, opts);
     }
 
+    // Steps from different members are never judged together, so only opts.max_iterations is read.
     template <typename Convergence = default_convergence<scalar_type>>
     solve_result<scalar_type, N> step_n(std::uint32_t budget,
                                         const solver_options<Convergence>& opts = {})
     {
         step_result<scalar_type> last{.gradient_norm = std::numeric_limits<scalar_type>::quiet_NaN()};
-        solver_status status = solver_status::running;
         std::uint32_t executed = 0;
         std::uint32_t evaluations = 0;
         const auto seq = std::index_sequence_for<Policies...>{};
 
-        for(std::uint32_t i = 0; i < budget && !all_retired() && !all_rejected(seq); ++i)
+        for(; executed < budget && !all_retired() && !all_rejected(seq); ++executed)
         {
             last = step();
-            ++executed;
             evaluations += last.evaluations;
-            if(all_retired())
-                break;
-
-            auto conv = detail::admit_claim(opts.convergence.check(last, i + 1), last, feasibility_tolerance_in_force());
-            if(conv)
-            {
-                status = *conv;
-                break;
-            }
         }
 
-        if(status == solver_status::running)
-            status = detail::budget_status(executed, opts.max_iterations);
-
+        const solver_status status = detail::budget_status(executed, opts.max_iterations);
         populate_active_results(status, seq);
         const std::size_t best_idx = best_solver_index(seq);
 
@@ -232,6 +209,14 @@ private:
         return result;
     }
 
+    template <std::size_t... Is>
+    solver_status status_at(std::size_t idx, std::index_sequence<Is...>) const
+    {
+        solver_status status = solver_status::running;
+        ((Is == idx ? void(status = std::get<Is>(solvers_).status()) : void()), ...);
+        return status;
+    }
+
     // The precedence step_budget_solver applies, so a group and a standalone solver judge an iterate's feasibility
     // and its claims identically.
     scalar_type feasibility_tolerance_in_force() const
@@ -244,7 +229,7 @@ private:
     solver_status member_status(const Solver& solver, solver_status group_status) const
     {
         if(solver.status() == solver_status::running)
-            return detail::certifies_iterate(group_status) ? solver_status::objective_stalled : group_status;
+            return group_status;
         const scalar_type violation = detail::claim_violation(solver.constraint_violation(), solver.bound_violation());
         return detail::admit_policy_status(solver.status(), violation, feasibility_tolerance_in_force());
     }
@@ -321,18 +306,12 @@ private:
         return true;
     }
 
-    // Truthful "no live solver" outcome for step(). Distinguishable from a
-    // real step by construction: policy_status is explicitly set (never
-    // nullopt, unlike an in-progress real step) and the metrics are NaN
-    // rather than the misleading value-initialized 0, so a NaN-oblivious
-    // comparison (e.g. `< threshold`) can never read this as convergence.
-    static step_result<scalar_type> terminal_result()
+    // Once every member has retired, a step reports the returned member's status and runs no member.
+    template <std::size_t... Is>
+    step_result<scalar_type> retired_step(std::index_sequence<Is...> seq) const
     {
-        step_result<scalar_type> r{};
-        r.objective_value = std::numeric_limits<scalar_type>::quiet_NaN();
-        r.gradient_norm = std::numeric_limits<scalar_type>::quiet_NaN();
-        r.policy_status = solver_status::budget_exhausted;
-        return r;
+        const std::size_t best_idx = best_solver_index(seq);
+        return detail::latched_step<scalar_type>(best_x(seq).norm(), reported_status(best_idx, solver_status::running, seq));
     }
 
     template <std::size_t... Is>
@@ -344,7 +323,7 @@ private:
             if(i == idx)
             {
                 results_[i] = solve_result<scalar_type, N>{
-                    .status = sr.policy_status.value_or(solver_status::running),
+                    .status = member_status(solver, solver.status()),
                     .objective_value = sr.objective_value,
                     .gradient_norm = sr.gradient_norm,
                     .constraint_violation = solver.constraint_violation(),
