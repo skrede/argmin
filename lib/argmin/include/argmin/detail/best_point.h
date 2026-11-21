@@ -16,7 +16,6 @@ namespace detail
 // The point a solve returns is the best one it encountered, not the terminal trial, and every field reported for it
 // is taken from that one iterate. The start point carries no gradient norm, since no step evaluated one there. A
 // policy without a problem binding (Problem == void) seeds f at +inf, so its first accepted step becomes the baseline.
-//
 // Reference: nlopt/src/api/nlopt.c nlopt_optimize (best-solution-returned semantics); N&W 2e Def 12.1 (primal
 //            feasibility, L-infinity composition).
 template <typename Vector, typename Scalar>

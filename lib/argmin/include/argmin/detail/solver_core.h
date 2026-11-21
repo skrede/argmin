@@ -552,7 +552,7 @@ private:
     std::uint32_t function_evaluations_{0};
     scalar_type last_gradient_norm_{std::numeric_limits<scalar_type>::quiet_NaN()};
     solver_status last_status_{solver_status::running};
-    std::optional<solve_result_type> last_result_{};
+    std::optional<solve_result_type> last_result_;
     std::atomic<bool> abort_flag_{false};
 
     template <typename P, typename Derived>
