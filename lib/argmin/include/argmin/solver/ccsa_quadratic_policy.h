@@ -31,8 +31,8 @@
 //   NLopt ccsa_quadratic.c (Steven G. Johnson 2008-2012).
 
 #include "argmin/detail/evaluation_count.h"
-#include "argmin/detail/dual_solve_options.h"
 #include "argmin/detail/ccsa_dual_problem.h"
+#include "argmin/detail/dual_solve_options.h"
 #include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/kkt_residual.h"

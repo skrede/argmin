@@ -4,8 +4,8 @@
 #include "argmin/solver/stepper.h"
 #include "argmin/solver/mma_policy.h"
 #include "argmin/solver/lbfgsb_policy.h"
-#include "argmin/solver/time_budget_solver.h"
 #include "argmin/solver/step_budget_solver.h"
+#include "argmin/solver/time_budget_solver.h"
 #include "argmin/solver/time_budget_options.h"
 
 #include "argmin/test_functions/rosenbrock.h"
