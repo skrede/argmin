@@ -37,11 +37,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -73,11 +75,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -121,11 +125,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -157,11 +163,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -193,11 +201,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -229,11 +239,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -269,11 +281,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -305,11 +319,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -341,11 +357,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -377,11 +395,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
@@ -413,11 +433,13 @@
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 15.4)"
+                  "name": "build (Xcode 16.4)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",
-                  "name": "build (Xcode 16.2)"
+                  "name": "build (Xcode 26.2)",
+                  "note": "no CI run on record yet"
                 },
                 {
                   "kind": "ci_job",

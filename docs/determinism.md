@@ -19,9 +19,9 @@ names the test that goes red when the tier stops being true.
 <!-- BEGIN GENERATED: tiers -->
 | claim | guaranteed? | evidence |
 |---|---|---|
-| run-to-run and post-`reset()` bit-exactness | **yes** *(gated)* (on every platform, on both dimension axes, and across `reset()`) | projected_gn_policy: trajectory is run-to-run deterministic on a fixed target (exact ==, not a tolerance); gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
-| cross-instantiation algorithmic-decision identity | **yes** *(gated)* (identical accept, reject, and termination decisions, pinned as exact step-count equality) | projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory (the step-count REQUIRE); gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
-| cross-instantiation numeric agreement | **yes** *(gated)* (within the per-element tolerance stated below and under a swept aggregate spread bound, wherever the test runs; not a comparison between architectures) | projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory (the per-element tolerance check and the aggregate spread bound); gcc-14; clang-18; build (Xcode 15.4); build (Xcode 16.2); build (Windows) |
+| run-to-run and post-`reset()` bit-exactness | **yes** *(gated)* (on every platform, on both dimension axes, and across `reset()`) | projected_gn_policy: trajectory is run-to-run deterministic on a fixed target (exact ==, not a tolerance); gcc-14; clang-18; build (Xcode 16.4) (no CI run on record yet); build (Xcode 26.2) (no CI run on record yet); build (Windows) |
+| cross-instantiation algorithmic-decision identity | **yes** *(gated)* (identical accept, reject, and termination decisions, pinned as exact step-count equality) | projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory (the step-count REQUIRE); gcc-14; clang-18; build (Xcode 16.4) (no CI run on record yet); build (Xcode 26.2) (no CI run on record yet); build (Windows) |
+| cross-instantiation numeric agreement | **yes** *(gated)* (within the per-element tolerance stated below and under a swept aggregate spread bound, wherever the test runs; not a comparison between architectures) | projected_gn_policy: fixed-N path reproduces the dynamic-N trajectory (the per-element tolerance check and the aggregate spread bound); gcc-14; clang-18; build (Xcode 16.4) (no CI run on record yet); build (Xcode 26.2) (no CI run on record yet); build (Windows) |
 | cross-architecture or cross-instantiation bit-identity | **not claimed** (a deliberate anti-feature, not a gap) | none, and there will not be one: this is the claim the tiers above exist to not make, and its cost is stated below |
 <!-- END GENERATED: tiers -->
 
@@ -107,8 +107,9 @@ The architecture is nevertheless why this tier is a tolerance rather than an
 equality: contraction behavior is architecture-dependent, so how far the two
 instantiations drift apart depends on where you run them. On the platforms this
 test runs on, the trajectory-wide maximum spread `max |dyn − fix|` has been
-measured at `2.05887e-10` on arm64 (both Xcode legs of continuous integration,
-identical), and exactly `0` on both x86_64 legs and on x86_64 Windows — the
+measured at `2.05887e-10` on arm64 (the Xcode 15.4 and 16.2 legs of continuous
+integration, identical; the current Xcode 16.4 and 26.2 legs have no reading on
+record yet), and exactly `0` on both x86_64 legs and on x86_64 Windows — the
 spread is arm64-specific, attributable to FMA contraction. That magnitude is
 recorded on every run, and it is now bounded: alongside the per-element check,
 the aggregate maximum is pinned under `1.5e-9`, a single portable constant
