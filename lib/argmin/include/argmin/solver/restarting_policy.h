@@ -15,7 +15,6 @@
 //            with Increasing Population Size", CEC 2005.
 
 #include "argmin/detail/evaluation_count.h"
-
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
