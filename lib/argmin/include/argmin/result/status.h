@@ -36,7 +36,13 @@ enum class solver_status : std::uint8_t
     invalid_problem,
     // A line-search step was rejected twice in a row, once on the curvature memory and once from
     // a reset memory, or once with an empty memory.
-    line_search_failed
+    line_search_failed,
+    // The objective, a constraint, the gradient or the Jacobian evaluated non-finite at the start point, or later at
+    // a point the family cannot recover from.
+    non_finite_evaluation,
+    // An inner solve (the main QP, a dual subproblem, the trust-region linear program, a restoration phase or an
+    // augmented Lagrangian inner solve) failed and the family has no recovery left.
+    inner_solve_failed
 };
 
 }

@@ -123,6 +123,7 @@ TEST_CASE("budget and failure statuses make no optimality claim", "[oracle]")
 {
     for(const solver_status s : {solver_status::max_iterations, solver_status::budget_exhausted, solver_status::diverged, solver_status::maxeval_reached,
                                  solver_status::roundoff_limited, solver_status::trust_region_step_rejected, solver_status::objective_stalled,
-                                 solver_status::time_limit_reached, solver_status::aborted, solver_status::invalid_problem, solver_status::line_search_failed})
+                                 solver_status::time_limit_reached, solver_status::aborted, solver_status::invalid_problem, solver_status::line_search_failed,
+                                 solver_status::non_finite_evaluation, solver_status::inner_solve_failed})
         CHECK(oracle::claim_of(s) == oracle::claim::none);
 }

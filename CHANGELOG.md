@@ -36,6 +36,16 @@ Policies available at HEAD, grouped by problem class:
 - `solver_status::line_search_failed` (Python `SolverStatus.line_search_failed`),
   reported by the L-BFGS-B policies when a line-search step and its retry from a
   reset curvature memory are both rejected.
+- `solver_status::non_finite_evaluation` and `solver_status::inner_solve_failed`
+  (Python `SolverStatus.non_finite_evaluation` and
+  `SolverStatus.inner_solve_failed`). The first reports an objective,
+  constraint, gradient or Jacobian that evaluated non-finite at the start point,
+  or later at a point the method cannot recover from; the second reports an
+  inner solve (main QP, dual subproblem, trust-region linear program,
+  restoration phase or augmented Lagrangian inner solve) that failed with no
+  recovery left. Neither is a claim about the final iterate. Both are appended
+  to the enum, so existing values keep their numbering, but every exhaustive
+  `switch` over `solver_status` must handle them.
 - `line_search_options::relative_value_noise`, an opt-in approximate Wolfe band
   (Hager and Zhang 2005): a trial whose value is at most
   `phi(0) + relative_value_noise * |phi(0)|` is accepted on the strong-Wolfe

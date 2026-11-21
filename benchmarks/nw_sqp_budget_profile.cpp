@@ -289,6 +289,8 @@ struct profile_row
 #if ARGMIN_NW_PROFILE_HAS_BUDGET_DRIVERS
     case argmin::solver_status::invalid_problem: return "invalid_problem";
     case argmin::solver_status::line_search_failed: return "line_search_failed";
+    case argmin::solver_status::non_finite_evaluation: return "non_finite_evaluation";
+    case argmin::solver_status::inner_solve_failed: return "inner_solve_failed";
 #endif
     }
     return "unknown";

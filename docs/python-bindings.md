@@ -126,6 +126,14 @@ already empty) it holds the last accepted iterate and reports
 discarded either: near a solution a solve can end this way at a good point, so
 inspect the result rather than treating it as a crash.
 
+Two more statuses end a solve without a claim about the iterate.
+`SolverStatus.non_finite_evaluation` means the objective, a constraint, the
+gradient or the Jacobian evaluated non-finite at the start point, or later at a
+point the method cannot recover from. `SolverStatus.inner_solve_failed` means an
+inner solve (the main QP, a dual subproblem, the trust-region linear program, a
+restoration phase or an augmented Lagrangian inner solve) failed with no
+recovery left.
+
 **Compiled test problems.** `Rosenbrock` and `ConstrainedTestProblem` are the
 same problems compiled into the extension, each with a `solve_native()` entry
 point that runs a solve with no interpreter callback in the loop. They exist so

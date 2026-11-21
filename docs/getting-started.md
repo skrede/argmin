@@ -125,7 +125,12 @@ The full concept definitions are in
   `invalid_problem` are the common non-success codes. `line_search_failed`
   comes from the L-BFGS-B policies: a line-search step was rejected and so was
   its retry from a reset curvature memory (or the memory was already empty),
-  and the iterate was held at the last accepted point. `converged`,
+  and the iterate was held at the last accepted point. `non_finite_evaluation`
+  means the objective, a constraint, the gradient or the Jacobian evaluated
+  non-finite at the start point, or later at a point the method cannot recover
+  from. `inner_solve_failed` means an inner solve (the main QP, a dual
+  subproblem, the trust-region linear program, a restoration phase or an
+  augmented Lagrangian inner solve) failed with no recovery left. `converged`,
   `ftol_reached`, `xtol_reached` and `stalled` describe the final iterate and
   are reported only where both its constraint violation and its distance
   outside the bounds are within `constraint_tolerance` (or

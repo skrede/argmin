@@ -46,6 +46,7 @@ inline claim claim_of(solver_status status)
     case solver_status::diverged: case solver_status::roundoff_limited: case solver_status::line_search_failed:
     case solver_status::trust_region_step_rejected: case solver_status::objective_stalled:
     case solver_status::aborted: case solver_status::invalid_problem:
+    case solver_status::non_finite_evaluation: case solver_status::inner_solve_failed:
         return claim::none;
     }
     return claim::none;
