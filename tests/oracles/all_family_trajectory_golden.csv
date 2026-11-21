@@ -25,7 +25,7 @@ lbfgsb|unconstrained|rosenbrock|final|x1,0x3ff0000016686449
 lbfgsb|unconstrained|rosenbrock|final|f,0x3cdec09bdb9cad21
 lbfgsb|unconstrained|rosenbrock|final|status,1:converged
 lbfgsb|unconstrained|rosenbrock|final|iterations,21
-lbfgsb|unconstrained|rosenbrock|final|evaluations,70
+lbfgsb|unconstrained|rosenbrock|final|evaluations,50
 lbfgsb|bound|hs038|0,0xa0cd330512b86036
 lbfgsb|bound|hs038|1,0x6c1c76b60baaecda
 lbfgsb|bound|hs038|2,0x27d2ae816f75ec27
@@ -83,7 +83,7 @@ lbfgsb|bound|hs038|final|x3,0x3feffffff89b1caf
 lbfgsb|bound|hs038|final|f,0x3cc06e53308af090
 lbfgsb|bound|hs038|final|status,1:converged
 lbfgsb|bound|hs038|final|iterations,55
-lbfgsb|bound|hs038|final|evaluations,183
+lbfgsb|bound|hs038|final|evaluations,128
 byrd_lbfgsb|unconstrained|rosenbrock|0,0x57c8e4fe7d87d751
 byrd_lbfgsb|unconstrained|rosenbrock|1,0x4f91be5ed1ca94de
 byrd_lbfgsb|unconstrained|rosenbrock|2,0x9bd577f9c6e54999
@@ -112,7 +112,7 @@ byrd_lbfgsb|unconstrained|rosenbrock|final|x1,0x3ff00000322ea742
 byrd_lbfgsb|unconstrained|rosenbrock|final|f,0x3d02c4eb3853c7de
 byrd_lbfgsb|unconstrained|rosenbrock|final|status,1:converged
 byrd_lbfgsb|unconstrained|rosenbrock|final|iterations,23
-byrd_lbfgsb|unconstrained|rosenbrock|final|evaluations,23
+byrd_lbfgsb|unconstrained|rosenbrock|final|evaluations,57
 byrd_lbfgsb|bound|hs038|0,0xc8e619ce2b85dd63
 byrd_lbfgsb|bound|hs038|1,0xf55a76e88559a4b6
 byrd_lbfgsb|bound|hs038|2,0x6c6a84340c7823ac
@@ -170,7 +170,7 @@ byrd_lbfgsb|bound|hs038|final|x3,0x3feffffffcf7b00f
 byrd_lbfgsb|bound|hs038|final|f,0x3cb55943b9cddc65
 byrd_lbfgsb|bound|hs038|final|status,1:converged
 byrd_lbfgsb|bound|hs038|final|iterations,57
-byrd_lbfgsb|bound|hs038|final|evaluations,57
+byrd_lbfgsb|bound|hs038|final|evaluations,127
 augmented_lagrangian_lbfgsb|inequality|hs076|0,0x356b2bcac3056b6b
 augmented_lagrangian_lbfgsb|inequality|hs076|1,0xc7547621e74061d4
 augmented_lagrangian_lbfgsb|inequality|hs076|2,0xfcaf272887bcee22
@@ -185,7 +185,7 @@ augmented_lagrangian_lbfgsb|inequality|hs076|final|x3,0x3fe1745d17ae9adf
 augmented_lagrangian_lbfgsb|inequality|hs076|final|f,0xc012ba2e8bc30992
 augmented_lagrangian_lbfgsb|inequality|hs076|final|status,4:stalled
 augmented_lagrangian_lbfgsb|inequality|hs076|final|iterations,7
-augmented_lagrangian_lbfgsb|inequality|hs076|final|evaluations,7
+augmented_lagrangian_lbfgsb|inequality|hs076|final|evaluations,138
 augmented_lagrangian_lbfgsb|equality|hs028|0,0x5990c3d09fe20635
 augmented_lagrangian_lbfgsb|equality|hs028|1,0xfde33a05a85497c8
 augmented_lagrangian_lbfgsb|equality|hs028|2,0x0e649e206b20d20d
@@ -201,7 +201,7 @@ augmented_lagrangian_lbfgsb|equality|hs028|final|x2,0x3fdfffffffdbe74c
 augmented_lagrangian_lbfgsb|equality|hs028|final|f,0x3c47977220b9ff28
 augmented_lagrangian_lbfgsb|equality|hs028|final|status,1:converged
 augmented_lagrangian_lbfgsb|equality|hs028|final|iterations,9
-augmented_lagrangian_lbfgsb|equality|hs028|final|evaluations,9
+augmented_lagrangian_lbfgsb|equality|hs028|final|evaluations,139
 augmented_lagrangian_lbfgsb|mixed|hs071|0,0x1abec11ff5fd0b0d
 augmented_lagrangian_lbfgsb|mixed|hs071|1,0x7fd0a7d6efc862e6
 augmented_lagrangian_lbfgsb|mixed|hs071|2,0x61bc0fc14a603c64
@@ -220,7 +220,7 @@ augmented_lagrangian_lbfgsb|mixed|hs071|final|x3,0x3ff6120e6e21af99
 augmented_lagrangian_lbfgsb|mixed|hs071|final|f,0x40310396a3163b1b
 augmented_lagrangian_lbfgsb|mixed|hs071|final|status,4:stalled
 augmented_lagrangian_lbfgsb|mixed|hs071|final|iterations,11
-augmented_lagrangian_lbfgsb|mixed|hs071|final|evaluations,11
+augmented_lagrangian_lbfgsb|mixed|hs071|final|evaluations,276
 multistart_lbfgsb|unconstrained|rosenbrock|0,0x9fc3f6c74d28ea6a
 multistart_lbfgsb|unconstrained|rosenbrock|1,0x0026dcb53ca1e43e
 multistart_lbfgsb|unconstrained|rosenbrock|2,0x0ae3c0445537ae9e
@@ -326,7 +326,7 @@ lm|unconstrained|rosenbrock_ls2|final|x1,0x3feffffffffe3083
 lm|unconstrained|rosenbrock_ls2|final|f,0x3b39476479a00000
 lm|unconstrained|rosenbrock_ls2|final|status,1:converged
 lm|unconstrained|rosenbrock_ls2|final|iterations,15
-lm|unconstrained|rosenbrock_ls2|final|evaluations,15
+lm|unconstrained|rosenbrock_ls2|final|evaluations,17
 lm|unconstrained|sd_ls012|0,0xc0dfd66f5b4fbab0
 lm|unconstrained|sd_ls012|1,0x9e5620ba7637d507
 lm|unconstrained|sd_ls012|2,0x5707b51e14141cf0
@@ -377,7 +377,7 @@ lm|unconstrained|sd_ls012|final|x11,0x3fefffffffffde37
 lm|unconstrained|sd_ls012|final|f,0x3aeab3a478000000
 lm|unconstrained|sd_ls012|final|status,1:converged
 lm|unconstrained|sd_ls012|final|iterations,35
-lm|unconstrained|sd_ls012|final|evaluations,35
+lm|unconstrained|sd_ls012|final|evaluations,37
 projected_gn|unconstrained|rosenbrock_ls2|0,0x6f3f2a2c079e9bfd
 projected_gn|unconstrained|rosenbrock_ls2|1,0xdd64cbb84134e1d0
 projected_gn|unconstrained|rosenbrock_ls2|2,0xf8401e0c5598d04a
@@ -398,7 +398,7 @@ projected_gn|unconstrained|rosenbrock_ls2|final|x1,0x3feffffffffe3083
 projected_gn|unconstrained|rosenbrock_ls2|final|f,0x3b39476479a00000
 projected_gn|unconstrained|rosenbrock_ls2|final|status,1:converged
 projected_gn|unconstrained|rosenbrock_ls2|final|iterations,15
-projected_gn|unconstrained|rosenbrock_ls2|final|evaluations,15
+projected_gn|unconstrained|rosenbrock_ls2|final|evaluations,17
 projected_gn|unconstrained|sd_ls012|0,0xc0dfd66f5b4fbab0
 projected_gn|unconstrained|sd_ls012|1,0x9e5620ba7637d507
 projected_gn|unconstrained|sd_ls012|2,0x5707b51e14141cf0
@@ -449,7 +449,7 @@ projected_gn|unconstrained|sd_ls012|final|x11,0x3fefffffffffde37
 projected_gn|unconstrained|sd_ls012|final|f,0x3aeab3a478000000
 projected_gn|unconstrained|sd_ls012|final|status,1:converged
 projected_gn|unconstrained|sd_ls012|final|iterations,35
-projected_gn|unconstrained|sd_ls012|final|evaluations,35
+projected_gn|unconstrained|sd_ls012|final|evaluations,37
 projected_gn|bound|bounded_rosenbrock_ls2|0,0x6f3f2a2c079e9bfd
 projected_gn|bound|bounded_rosenbrock_ls2|1,0xdd64cbb84134e1d0
 projected_gn|bound|bounded_rosenbrock_ls2|2,0xf8401e0c5598d04a
@@ -467,7 +467,7 @@ projected_gn|bound|bounded_rosenbrock_ls2|final|x1,0x3fd00000006629b5
 projected_gn|bound|bounded_rosenbrock_ls2|final|f,0x3fc0000000000000
 projected_gn|bound|bounded_rosenbrock_ls2|final|status,1:converged
 projected_gn|bound|bounded_rosenbrock_ls2|final|iterations,12
-projected_gn|bound|bounded_rosenbrock_ls2|final|evaluations,12
+projected_gn|bound|bounded_rosenbrock_ls2|final|evaluations,14
 projected_gradient_gn|unconstrained|rosenbrock_ls2|0,0xb7b8b86de435ebb5
 projected_gradient_gn|unconstrained|rosenbrock_ls2|1,0xa1bc74da6983522b
 projected_gradient_gn|unconstrained|rosenbrock_ls2|2,0x20a8a75862f04404
@@ -483,7 +483,7 @@ projected_gradient_gn|unconstrained|rosenbrock_ls2|final|x1,0x3feffffffffd9cf9
 projected_gradient_gn|unconstrained|rosenbrock_ls2|final|f,0x3b45f796ca100000
 projected_gradient_gn|unconstrained|rosenbrock_ls2|final|status,1:converged
 projected_gradient_gn|unconstrained|rosenbrock_ls2|final|iterations,10
-projected_gradient_gn|unconstrained|rosenbrock_ls2|final|evaluations,10
+projected_gradient_gn|unconstrained|rosenbrock_ls2|final|evaluations,14
 projected_gradient_gn|unconstrained|sd_ls012|0,0xc0dfd66f5b4fbab0
 projected_gradient_gn|unconstrained|sd_ls012|1,0x9e5620ba7637d507
 projected_gradient_gn|unconstrained|sd_ls012|2,0x5707b51e14141cf0
@@ -522,7 +522,7 @@ projected_gradient_gn|unconstrained|sd_ls012|final|x11,0x3feffffffffed289
 projected_gradient_gn|unconstrained|sd_ls012|final|f,0x3b509c265dc00000
 projected_gradient_gn|unconstrained|sd_ls012|final|status,1:converged
 projected_gradient_gn|unconstrained|sd_ls012|final|iterations,23
-projected_gradient_gn|unconstrained|sd_ls012|final|evaluations,23
+projected_gradient_gn|unconstrained|sd_ls012|final|evaluations,39
 projected_gradient_gn|bound|bounded_rosenbrock_ls2|0,0xb7b8b86de435ebb5
 projected_gradient_gn|bound|bounded_rosenbrock_ls2|1,0xe3bab6213352d5a5
 projected_gradient_gn|bound|bounded_rosenbrock_ls2|2,0x17a985e2017dde64
@@ -578,7 +578,7 @@ projected_gradient_gn|bound|bounded_rosenbrock_ls2|final|x1,0x3fd05d4ee10a65a4
 projected_gradient_gn|bound|bounded_rosenbrock_ls2|final|f,0x3fc002a8301c3538
 projected_gradient_gn|bound|bounded_rosenbrock_ls2|final|status,2:max_iterations
 projected_gradient_gn|bound|bounded_rosenbrock_ls2|final|iterations,200
-projected_gradient_gn|bound|bounded_rosenbrock_ls2|final|evaluations,200
+projected_gradient_gn|bound|bounded_rosenbrock_ls2|final|evaluations,2295
 kraft_slsqp|unconstrained|rosenbrock|0,0x57c8e4fe7d87d751
 kraft_slsqp|unconstrained|rosenbrock|1,0x4f91be5ed1ca94de
 kraft_slsqp|unconstrained|rosenbrock|2,0x6fe8ae79d78facd0
