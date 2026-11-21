@@ -52,7 +52,7 @@ TEST_CASE("compact L-BFGS keeps the secant equation for a pair whose curvature i
     CHECK((pair_skipped || (B.multiply(s) - y).norm() <= 1e-12 * y.norm()));
 }
 
-TEST_CASE("strong Wolfe makes no more objective and slope evaluations than its budget", "[known-defect][!shouldfail]")
+TEST_CASE("strong Wolfe makes no more objective and slope evaluations than its budget", "[line_search][strong_wolfe]")
 {
     std::int32_t calls = 0;
     const auto phi = [&calls](double t)

@@ -68,12 +68,10 @@ std::optional<Scalar> quadratic_minimize(Scalar a_lo, Scalar phi_lo, Scalar dphi
     return alpha_min;
 }
 
-template <typename DPhi, typename Scalar>
-bool zoom_lower_accepts(DPhi& dphi, wolfe_bracket<Scalar>& b, Scalar alpha_j, Scalar phi_j, Scalar dphi0,
+template <typename Scalar>
+bool zoom_lower_accepts(Scalar dphi_j, wolfe_bracket<Scalar>& b, Scalar alpha_j, Scalar phi_j, Scalar dphi0,
                         const line_search_options<Scalar>& opts, line_search_result<Scalar>& result)
 {
-    Scalar dphi_j = dphi(alpha_j);
-    ++result.evaluations;
     bool dphi_j_finite = std::isfinite(dphi_j);
     if(!dphi_j_finite)
         ++result.diagnostics.nan_eval_count;
@@ -109,7 +107,13 @@ bool zoom_accepts(DPhi& dphi, wolfe_bracket<Scalar>& b, Scalar alpha_j, Scalar p
         b.phi_hi = phi_j;
         return false;
     }
-    return zoom_lower_accepts(dphi, b, alpha_j, phi_j, dphi0, opts, result);
+    std::optional<Scalar> slope = budgeted_evaluation(dphi, alpha_j, opts, result);
+    if(slope)
+        return zoom_lower_accepts(*slope, b, alpha_j, phi_j, dphi0, opts, result);
+    // A spent budget still keeps the sufficient-decrease trial as the bracket's best point.
+    b.alpha_lo = alpha_j;
+    b.phi_lo = phi_j;
+    return false;
 }
 
 // Zoom phase, N&W Algorithm 3.6 (pp. 59-62): bisection first, quadratic interpolation after,
@@ -118,13 +122,15 @@ template <typename Phi, typename DPhi, typename Scalar>
 line_search_result<Scalar> strong_wolfe_zoom(Phi& phi, DPhi& dphi, wolfe_bracket<Scalar> b, Scalar phi0, Scalar dphi0,
                                              const line_search_options<Scalar>& opts, line_search_result<Scalar>& result)
 {
-    for(int32_t zoom_iter = 0; result.evaluations < opts.max_iterations; ++zoom_iter)
+    for(int32_t zoom_iter = 0;; ++zoom_iter)
     {
         auto interp = (zoom_iter > 0) ? quadratic_minimize(b.alpha_lo, b.phi_lo, b.dphi_lo, b.alpha_hi, b.phi_hi)
                                       : std::optional<Scalar>{};
         Scalar alpha_j = interp ? *interp : (b.alpha_lo + b.alpha_hi) / Scalar(2);
-        Scalar phi_j = phi(alpha_j);
-        ++result.evaluations;
+        std::optional<Scalar> trial = budgeted_evaluation(phi, alpha_j, opts, result);
+        if(!trial)
+            break;
+        Scalar phi_j = *trial;
         if(!std::isfinite(phi_j))
             ++result.diagnostics.nan_eval_count;
         if(zoom_accepts(dphi, b, alpha_j, phi_j, phi0, dphi0, opts, result))

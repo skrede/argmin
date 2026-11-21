@@ -294,6 +294,10 @@ Policies available at HEAD, grouped by problem class:
 - Breaking: `augmented_lagrangian_policy`'s `constraint_tolerance` option is
   `std::optional`. The outer feasibility test uses the solver's
   `constraint_tolerance` when set, then this option, then the default (1e-6).
+- The strong Wolfe line search counts every slope evaluation against its
+  `max_iterations` budget, in the bracket, the zoom and the approximate Wolfe
+  test. It used to check the budget only before an objective evaluation, so a
+  search could make one evaluation past its budget.
 
 ### Notes
 

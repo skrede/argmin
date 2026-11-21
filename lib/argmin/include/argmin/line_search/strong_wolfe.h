@@ -7,6 +7,7 @@
 #include "argmin/line_search/strong_wolfe_zoom.h"
 
 #include <cmath>
+#include <optional>
 #include <algorithm>
 
 namespace argmin
@@ -48,10 +49,6 @@ template <typename Phi, typename DPhi, typename Scalar = double>
     line_search_result<Scalar> result;
     result.value = phi0;
 
-    auto budget_ok = [&]() { return result.evaluations < opts.max_iterations; };
-
-    // Any return path that has not achieved success reports value = phi0,
-    // matching the Armijo backtracker's failure contract (see armijo.h).
     auto finalize = [&](line_search_result<Scalar> r) -> line_search_result<Scalar>
     {
         if(!r.success)
@@ -69,10 +66,12 @@ template <typename Phi, typename DPhi, typename Scalar = double>
     Scalar alpha = std::min(Scalar(1), opts.max_alpha);
     result.alpha = alpha;
 
-    for(int i = 1; budget_ok(); ++i)
+    for(int i = 1;; ++i)
     {
-        Scalar phi_alpha = phi(alpha);
-        ++result.evaluations;
+        std::optional<Scalar> trial = detail::budgeted_evaluation(phi, alpha, opts, result);
+        if(!trial)
+            break;
+        Scalar phi_alpha = *trial;
 
         bool phi_alpha_finite = std::isfinite(phi_alpha);
         if(!phi_alpha_finite)
@@ -92,8 +91,10 @@ template <typename Phi, typename DPhi, typename Scalar = double>
                                           phi0, dphi0, opts, result));
         }
 
-        Scalar dphi_alpha = dphi(alpha);
-        ++result.evaluations;
+        std::optional<Scalar> slope = detail::budgeted_evaluation(dphi, alpha, opts, result);
+        if(!slope)
+            break;
+        Scalar dphi_alpha = *slope;
 
         bool dphi_alpha_finite = std::isfinite(dphi_alpha);
         if(!dphi_alpha_finite)
