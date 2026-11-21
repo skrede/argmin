@@ -43,6 +43,7 @@
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/evaluation_count.h"
+#include "argmin/detail/dual_solve_options.h"
 #include "argmin/detail/mma_reciprocal_dual_problem.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
@@ -371,10 +372,7 @@ struct move_limit_shrink_policy
         // Near the dual optimum the decrease left falls below the roundoff of the dual value, so the line
         // search certifies those steps from the exact dual gradient instead.
         dp.options.line_search.relative_value_noise = mma_defaults<Scalar>::dual_value_noise;
-        solver_options<default_convergence<scalar_type>> dopts;
-        dopts.max_iterations = 100;
-        dopts.set_gradient_threshold(mma_defaults<Scalar>::dual_gradient_threshold);
-        dopts.set_step_threshold(mma_defaults<Scalar>::dual_step_threshold);
+        const auto dopts = detail::dual_solve_options<Scalar>();
         using dual_state_t = decltype(dp.init(dual_prob, s.y_dual, dopts));
         std::optional<dual_state_t> ds;
 

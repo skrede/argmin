@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_CONVERGENCE_H
 #define HPP_GUARD_ARGMIN_SOLVER_CONVERGENCE_H
 
+#include "argmin/detail/criteria_state.h"
+
 #include "argmin/result/step_result.h"
 #include "argmin/result/status.h"
 
@@ -222,19 +224,9 @@ template <scalar S = double>
 struct stall_tolerance_criterion
 {
     using scalar_type = S;
-    // No literature default: stall detection is a window/scale-dependent
-    // safety net (auto-enabled per-policy via forward_policy_hints, e.g.
-    // the MMA/GCMMA stall_tolerance_threshold option), not a universal
-    // stopping test, so it stays optional/inert until a caller or policy
-    // opts in.
     std::optional<S> threshold{};
     std::uint16_t window{50};
     bool track_best_seen_feasible{false};
-    // Feasibility floor for the best-seen-feasible metric below. Direct-
-    // value default matching the project's KKT primal-feasibility
-    // convention (solver_options::feasibility_tolerance; N&W 2e
-    // Definition 12.1), configurable per-criterion instead of a hardcoded
-    // local constant.
     S feasibility_tolerance{convergence_defaults<S>::feasibility_tolerance};
 
     std::optional<solver_status> check(const step_result<S>& r,
@@ -245,18 +237,8 @@ struct stall_tolerance_criterion
 
         auto effective_window = std::min(window, max_window);
 
-        // The best_seen_feasible termination metric is robust against the
-        // oscillation mode documented in in-tree diagnosis traces (HS043
-        // objective oscillates with amplitude ~2.75 at move_limit=0.9 while
-        // the best-seen iterate is reached at outer iter ~4 and never
-        // improved), because the best-seen metric is monotone-non-increasing
-        // by construction.  Policies that don't opt in fall through to the
-        // combined (objective + constraint_violation) metric byte-for-byte.
-        //
-        // This is a library termination heuristic for the separable-
-        // approximation family; the globally convergent conservative-convex
-        // approximation framework it accompanies is Svanberg 2002 (SIAM J.
-        // Optim. 12(2)).
+        // The best-seen feasible objective never increases, so an objective oscillating about an optimum it already
+        // reached still stalls (a heuristic for the moving-asymptote family of Svanberg 2002, SIAM J. Optim. 12(2)).
         S metric;
         if(track_best_seen_feasible)
         {
@@ -280,6 +262,12 @@ struct stall_tolerance_criterion
             return solver_status::stalled;
 
         return std::nullopt;
+    }
+
+    void reset() const
+    {
+        buffer_.fill(S(0));
+        best_seen_feasible_ = std::numeric_limits<S>::infinity();
     }
 
 private:
@@ -324,13 +312,17 @@ struct convergence_policy
         return std::nullopt;
     }
 
+    void reset() const
+    {
+        detail::reset_criteria(criteria);
+        last_check_results_ = {};
+    }
+
     // Per-criterion statuses from the most recent check() call. Index
     // matches declaration order of Criteria...; a nullopt entry means
     // the criterion did not fire. Reachable from step_budget_solver via
     // solver.convergence().last_check_results().
-    [[nodiscard]] const std::array<std::optional<solver_status>,
-                                   sizeof...(Criteria)>&
-    last_check_results() const noexcept
+    const std::array<std::optional<solver_status>, sizeof...(Criteria)>& last_check_results() const noexcept
     {
         return last_check_results_;
     }

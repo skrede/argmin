@@ -248,10 +248,7 @@ public:
 
     solver_core(solver_core&& other) noexcept
         : policy_{std::move(other.policy_)}
-        , max_iterations_{other.max_iterations_}
-        , constraint_tolerance_{other.constraint_tolerance_}
-        , feasibility_tolerance_{other.feasibility_tolerance_}
-        , stored_convergence_{other.stored_convergence_}
+        , options_{other.options_}
         , problem_ptr_{other.problem_ptr_}
         , bound_measure_{std::move(other.bound_measure_)}
         , policy_opts_{std::move(other.policy_opts_)}
@@ -270,10 +267,7 @@ public:
         if(this != &other)
         {
             policy_ = std::move(other.policy_);
-            max_iterations_ = other.max_iterations_;
-            constraint_tolerance_ = other.constraint_tolerance_;
-            feasibility_tolerance_ = other.feasibility_tolerance_;
-            stored_convergence_ = other.stored_convergence_;
+            options_ = other.options_;
             problem_ptr_ = other.problem_ptr_;
             bound_measure_ = std::move(other.bound_measure_);
             policy_opts_ = std::move(other.policy_opts_);
@@ -297,7 +291,7 @@ public:
         if(status() != solver_status::running && status() != solver_status::invalid_problem)
             return detail::latched_step<scalar_type>(state_.x.norm(), status());
         auto result = step_impl();
-        last_status_ = detail::resolve_step_status(result, stored_convergence_, iterations_, constraint_tolerance_.value_or(feasibility_tolerance_));
+        last_status_ = detail::resolve_step_status(result, options_.convergence, iterations_, options_.feasibility_tolerance_in_force());
         return result;
     }
 
@@ -322,7 +316,7 @@ public:
     const state_type& state() const { return state_; }
 
     // Populated with per-criterion last_check_results by the most recent solve loop.
-    const Convergence& convergence() const { return stored_convergence_; }
+    const Convergence& convergence() const { return options_.convergence; }
 
     solver_status status() const { return !built_ || detail::state_rejected(state_) ? solver_status::invalid_problem : last_status_; }
 
@@ -345,12 +339,8 @@ public:
 
     scalar_type bound_violation() const { return status() == solver_status::invalid_problem ? std::numeric_limits<scalar_type>::quiet_NaN() : bound_measure_(state_); }
 
-    // Configured stopping budget and best-seen feasibility floors, read back
-    // by the driver facade when it rebuilds the local solver_options on the
-    // defaulted solve() / step_n(budget) paths.
-    std::uint32_t max_iterations() const { return max_iterations_; }
-    std::optional<scalar_type> constraint_tolerance() const { return constraint_tolerance_; }
-    scalar_type feasibility_tolerance() const { return feasibility_tolerance_; }
+    // The defaulted solve paths run on this object itself, so its criteria history continues across them.
+    const solver_options<Convergence>& options() const { return options_; }
 
     void abort() { abort_flag_.store(true, std::memory_order_relaxed); }
 
@@ -369,7 +359,10 @@ public:
     void back_copy_convergence(const OptsConvergence& oc)
     {
         if constexpr(std::is_same_v<OptsConvergence, Convergence>)
-            stored_convergence_.last_check_results_ = oc.last_check_results_;
+        {
+            if(&oc != &options_.convergence)
+                options_.convergence.last_check_results_ = oc.last_check_results_;
+        }
     }
 
     // Reset to a new starting point, preserving algorithm state (e.g. L-BFGS curvature pairs). A plain vector
@@ -410,16 +403,8 @@ public:
 
     scalar_type seed_best_bv() const { return bound_measure_(state_); }
 
-    void store_convergence(const Convergence& conv)
-    {
-        stored_convergence_ = conv;
-    }
-
     // Forwards solver-level options (currently constraint_tolerance) into
-    // the stored convergence criteria. Called at construction time from
-    // every constructor; once set here the tightened threshold persists
-    // through subsequent solve() / step_n(budget) calls that reconstruct
-    // local solver_options from stored state.
+    // the stored convergence criteria at construction.
     // constraint_tolerance is a solver_options field (not a policy_options
     // field), which is why this is a sibling to forward_policy_hints
     // instead of an extension of it -- the two forwarders honor different
@@ -432,16 +417,16 @@ public:
     // default (1e-8) whenever constraint_tolerance is unset or looser.
     void forward_solver_hints(const solver_options<Convergence>& opts)
     {
-        using criteria_tuple = decltype(stored_convergence_.criteria);
+        using criteria_tuple = decltype(options_.convergence.criteria);
         if constexpr(detail::tuple_contains_v<objective_tolerance_criterion<scalar_type>, criteria_tuple>)
         {
-            auto& ftol = std::get<objective_tolerance_criterion<scalar_type>>(stored_convergence_.criteria);
+            auto& ftol = std::get<objective_tolerance_criterion<scalar_type>>(options_.convergence.criteria);
             if(opts.constraint_tolerance)
                 ftol.stationarity_threshold = std::max(ftol.stationarity_threshold, *opts.constraint_tolerance);
         }
         if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion<scalar_type>, criteria_tuple>)
         {
-            auto& ftol_rel = std::get<objective_tolerance_rel_criterion<scalar_type>>(stored_convergence_.criteria);
+            auto& ftol_rel = std::get<objective_tolerance_rel_criterion<scalar_type>>(options_.convergence.criteria);
             if(opts.constraint_tolerance)
                 ftol_rel.stationarity_threshold = std::max(ftol_rel.stationarity_threshold, *opts.constraint_tolerance);
         }
@@ -460,9 +445,9 @@ public:
             // (e.g. a caller-supplied policy combining a stall_window-bearing
             // policy's options with a bespoke non-stall convergence type).
             if constexpr(detail::tuple_contains_v<stall_tolerance_criterion<scalar_type>,
-                                                   decltype(stored_convergence_.criteria)>)
+                                                   decltype(options_.convergence.criteria)>)
             {
-                auto& stall = std::get<stall_tolerance_criterion<scalar_type>>(stored_convergence_.criteria);
+                auto& stall = std::get<stall_tolerance_criterion<scalar_type>>(options_.convergence.criteria);
                 stall.window = policy_opts.stall_window;
             }
         }
@@ -478,10 +463,10 @@ public:
         //            max-of-two mapping rule per forward_solver_hints.
         if constexpr(requires { policy_opts.kkt_tolerance; })
         {
-            using criteria_tuple = decltype(stored_convergence_.criteria);
+            using criteria_tuple = decltype(options_.convergence.criteria);
             if constexpr(detail::tuple_contains_v<objective_tolerance_criterion<scalar_type>, criteria_tuple>)
             {
-                auto& ftol = std::get<objective_tolerance_criterion<scalar_type>>(stored_convergence_.criteria);
+                auto& ftol = std::get<objective_tolerance_criterion<scalar_type>>(options_.convergence.criteria);
                 if(policy_opts.kkt_tolerance)
                 {
                     ftol.stationarity_threshold =
@@ -490,7 +475,7 @@ public:
             }
             if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion<scalar_type>, criteria_tuple>)
             {
-                auto& ftol_rel = std::get<objective_tolerance_rel_criterion<scalar_type>>(stored_convergence_.criteria);
+                auto& ftol_rel = std::get<objective_tolerance_rel_criterion<scalar_type>>(options_.convergence.criteria);
                 if(policy_opts.kkt_tolerance)
                 {
                     ftol_rel.stationarity_threshold =
@@ -519,10 +504,10 @@ public:
         // (objective + constraint_violation) metric byte-for-byte.
         if constexpr(requires { policy_opts.stall_tolerance_threshold; })
         {
-            using criteria_tuple = decltype(stored_convergence_.criteria);
+            using criteria_tuple = decltype(options_.convergence.criteria);
             if constexpr(detail::tuple_contains_v<stall_tolerance_criterion<scalar_type>, criteria_tuple>)
             {
-                auto& stall = std::get<stall_tolerance_criterion<scalar_type>>(stored_convergence_.criteria);
+                auto& stall = std::get<stall_tolerance_criterion<scalar_type>>(options_.convergence.criteria);
                 stall.threshold = policy_opts.stall_tolerance_threshold.value_or(convergence_defaults<scalar_type>::stall_threshold);
                 if constexpr(requires { policy_opts.rho_init; }
                           || requires { policy_opts.raa0; })
@@ -535,12 +520,7 @@ public:
 
 private:
     Policy policy_{};
-    std::uint32_t max_iterations_{1000};
-    std::optional<scalar_type> constraint_tolerance_{};
-    // Read back by the defaulted solve()/step_n(budget) paths, which rebuild solver_options and would otherwise
-    // revert the best-seen feasibility comparator to the 1e-6 default.
-    scalar_type feasibility_tolerance_{convergence_defaults<scalar_type>::feasibility_tolerance};
-    Convergence stored_convergence_{};
+    solver_options<Convergence> options_;
     const Problem* problem_ptr_{nullptr};
     detail::bound_measure<scalar_type, N, state_type, Problem> bound_measure_;
     std::optional<policy_options_t<Policy, scalar_type>> policy_opts_;
@@ -558,9 +538,7 @@ private:
     template <typename P, typename Derived>
     solver_core(build_tag, Policy policy, const P& problem, const Eigen::MatrixBase<Derived>& x0, const solver_options<Convergence>& opts, std::optional<policy_options_t<Policy, scalar_type>> policy_opts)
         : policy_{std::move(policy)}
-        , max_iterations_{opts.max_iterations}
-        , constraint_tolerance_{opts.constraint_tolerance}
-        , feasibility_tolerance_{opts.feasibility_tolerance}
+        , options_{opts}
         , problem_ptr_{bind_problem(problem)}
         , bound_measure_{problem}
         , policy_opts_{std::move(policy_opts)}
@@ -569,7 +547,7 @@ private:
         , function_evaluations_{detail::evaluations_of(state_)}
         , last_status_{built_ ? solver_status::running : solver_status::invalid_problem}
     {
-        store_convergence(opts.convergence);
+        options_.convergence.reset();
         forward_solver_hints(opts);
         if(policy_opts_)
             forward_policy_hints(*policy_opts_);
@@ -616,7 +594,7 @@ private:
             built_ = true;
             std::destroy_at(std::addressof(state_));
             unbuilt_on_unwind guard{true, *this};
-            ::new(static_cast<void*>(std::addressof(state_))) state_type(make_state(*problem_ptr_, start, {.max_iterations = max_iterations_, .constraint_tolerance = constraint_tolerance_, .feasibility_tolerance = feasibility_tolerance_, .convergence = stored_convergence_}));
+            ::new(static_cast<void*>(std::addressof(state_))) state_type(make_state(*problem_ptr_, start, options_));
             guard.armed = false;
             return detail::latch_status(state_);
         }
@@ -641,6 +619,7 @@ private:
         function_evaluations_ = detail::evaluations_of(state_) - evaluations_before;
         last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
         last_result_.reset();
+        options_.convergence.reset();
         abort_flag_.store(false, std::memory_order_relaxed);
         return status;
     }

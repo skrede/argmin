@@ -260,6 +260,20 @@ Policies available at HEAD, grouped by problem class:
 - `ccsa_quadratic` in `float` keeps its move box resolvable: the minimum move
   limit is 3e-4 of the variable range instead of 1e-8, which is below `float`
   precision at unit scale.
+- Convergence criteria no longer carry history from one solve into the next.
+  `stall_tolerance_criterion` and `convergence_policy` gain a `reset()` that
+  clears the stall window and the best-seen feasible objective. An explicit
+  `solve(opts)` or `step_n(budget, opts)` resets `opts.convergence` unless the
+  call resumes after `budget_exhausted` or `time_limit_reached`, and `reset`
+  and `reset_clear` reset the solver's stored criteria. Before, a second solve
+  on the same options object could stall at once on the first solve's best
+  objective, and a solver reset kept the stall history.
+- The defaulted `solve()` and `step_n(budget)` of the three budget drivers no
+  longer copy the convergence object on every call, and the MMA, CCSA
+  quadratic and GCMMA dual solves no longer build a convergence object with a
+  512-entry stall buffer on every outer step. The defaulted paths run on the
+  solver's stored criteria, so their stall history continues across
+  `step_n` chunks as it does across `step()` calls.
 
 ### Notes
 

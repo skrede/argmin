@@ -4,6 +4,7 @@
 #include "argmin/types.h"
 #include "argmin/detail/solve_loop.h"
 #include "argmin/detail/solver_core.h"
+#include "argmin/detail/criteria_state.h"
 #include "argmin/detail/runner_concept_probe.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -148,7 +149,7 @@ public:
     // reset()/reset_clear().
     solve_result<scalar_type, N> solve()
     {
-        return step_n(core_.max_iterations(), make_default_opts());
+        return run(core_.options().max_iterations, core_.options());
     }
 
     // Solve with an explicit convergence policy via solver_options.
@@ -161,20 +162,14 @@ public:
     // Step with budget, stored convergence.
     solve_result<scalar_type, N> step_n(std::uint32_t budget)
     {
-        return step_n(budget, make_default_opts());
+        return run(budget, core_.options());
     }
 
-    // Step with budget and an explicit convergence policy via solver_options.
-    //
-    // Delegates the loop body to detail::run_solve_loop with an always-false
-    // budget predicate: this driver budgets by iterations alone, so no wall
-    // clock is ever consulted.
     template <typename OptsConvergence>
-    solve_result<scalar_type, N> step_n(std::uint32_t budget,
-                                        const solver_options<OptsConvergence>& opts)
+    solve_result<scalar_type, N> step_n(std::uint32_t budget, const solver_options<OptsConvergence>& opts)
     {
-        auto never_exhausted = [](std::uint32_t) -> bool { return false; };
-        return detail::run_solve_loop(core_, budget, opts, never_exhausted);
+        detail::reset_unless_resuming(core_.status(), opts.convergence);
+        return run(budget, opts);
     }
 
     const state_type& state() const { return core_.state(); }
@@ -214,16 +209,12 @@ public:
     }
 
 private:
-    // Rebuild the local solver_options for the defaulted solve() /
-    // step_n(budget) paths from the constructor-configured stored state.
-    solver_options<Convergence> make_default_opts() const
+    // This driver budgets by iterations alone, so the loop's budget predicate never consults a clock.
+    template <typename OptsConvergence>
+    solve_result<scalar_type, N> run(std::uint32_t budget, const solver_options<OptsConvergence>& opts)
     {
-        solver_options<Convergence> opts;
-        opts.max_iterations = core_.max_iterations();
-        opts.constraint_tolerance = core_.constraint_tolerance();
-        opts.feasibility_tolerance = core_.feasibility_tolerance();
-        opts.convergence = core_.convergence();
-        return opts;
+        auto never_exhausted = [](std::uint32_t) -> bool { return false; };
+        return detail::run_solve_loop(core_, budget, opts, never_exhausted);
     }
 
     core_type core_;

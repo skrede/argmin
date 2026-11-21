@@ -954,6 +954,48 @@ TEST_CASE("stall detection disabled with nullopt threshold", "[convergence][stal
     }
 }
 
+TEST_CASE("a stall criterion after reset() reports what a fresh one reports", "[convergence][stall]")
+{
+    for(const bool best_seen : {false, true})
+    {
+        stall_tolerance_criterion<> used;
+        used.threshold = 1e-10;
+        used.window = 5;
+        used.track_best_seen_feasible = best_seen;
+        const stall_tolerance_criterion<> fresh = used;
+        for(std::uint32_t i = 0; i < 10; ++i)
+            (void)used.check(step_result<double>{.objective_value = best_seen ? 0.0 : 1.0, .constraint_violation = 0.0}, i);
+        used.reset();
+        // The window reaches back before the reset only when the first iteration after it is past the window.
+        const std::uint32_t first = best_seen ? 0 : 9;
+        for(std::uint32_t i = first; i < 10; ++i)
+        {
+            const step_result<double> r{.objective_value = best_seen ? 10.0 - static_cast<double>(i) : 1.0, .constraint_violation = 0.0};
+            CHECK(used.check(r, i) == fresh.check(r, i));
+        }
+    }
+}
+
+TEST_CASE("two mma solves on one caller-owned options object return the same result", "[convergence][stall]")
+{
+    const hs076 problem;
+    solver_options opts;
+    opts.set_stall_threshold(1e-6);
+    opts.set_stall_window(5);
+    std::get<stall_tolerance_criterion<>>(opts.convergence.criteria).track_best_seen_feasible = true;
+    const auto solve_once = [&] {
+        step_budget_solver solver{mma_policy<double, hs076<>::problem_dimension>{}, problem, problem.initial_point(), opts};
+        return solver.solve(opts);
+    };
+    const auto first = solve_once();
+    const auto second = solve_once();
+    CHECK(second.status == first.status);
+    CHECK(second.iterations == first.iterations);
+    CHECK(second.function_evaluations == first.function_evaluations);
+    CHECK(second.objective_value == first.objective_value);
+    CHECK(second.x == first.x);
+}
+
 TEST_CASE("kraft_slsqp hs043 terminates before max_iterations with stall detection", "[convergence][stall]")
 {
     hs043 problem;

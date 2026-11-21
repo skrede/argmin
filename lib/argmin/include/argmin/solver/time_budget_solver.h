@@ -4,6 +4,7 @@
 #include "argmin/types.h"
 #include "argmin/detail/solve_loop.h"
 #include "argmin/detail/solver_core.h"
+#include "argmin/detail/criteria_state.h"
 #include "argmin/detail/runner_concept_probe.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
@@ -149,27 +150,27 @@ public:
     // Solve to the stored deadline (max_iterations is the safety cap).
     result_type solve()
     {
-        return run(core_.max_iterations(), make_default_opts(),
-                   max_time_, poll_stride_);
+        return run(core_.options().max_iterations, core_.options(), max_time_, poll_stride_);
     }
 
     // Solve with explicit options (deadline, poll cadence, convergence).
     template <typename ExplicitConvergence>
     result_type solve(const time_budget_options<ExplicitConvergence>& opts)
     {
-        return run(opts.core.max_iterations, opts.core,
-                   opts.max_time, opts.time_poll_stride);
+        detail::reset_unless_resuming(core_.status(), opts.core.convergence);
+        return run(opts.core.max_iterations, opts.core, opts.max_time, opts.time_poll_stride);
     }
 
     result_type step_n(std::uint32_t budget)
     {
-        return run(budget, make_default_opts(), max_time_, poll_stride_);
+        return run(budget, core_.options(), max_time_, poll_stride_);
     }
 
     template <typename ExplicitConvergence>
     result_type step_n(std::uint32_t budget,
                        const time_budget_options<ExplicitConvergence>& opts)
     {
+        detail::reset_unless_resuming(core_.status(), opts.core.convergence);
         return run(budget, opts.core, opts.max_time, opts.time_poll_stride);
     }
 
@@ -196,16 +197,6 @@ public:
     }
 
 private:
-    solver_options<Convergence> make_default_opts() const
-    {
-        solver_options<Convergence> opts;
-        opts.max_iterations = core_.max_iterations();
-        opts.constraint_tolerance = core_.constraint_tolerance();
-        opts.feasibility_tolerance = core_.feasibility_tolerance();
-        opts.convergence = core_.convergence();
-        return opts;
-    }
-
     // Drive the shared loop under a wall-clock deadline. The deadline origin
     // t0 and the reported wall_time share the identical stamp captured here,
     // so the budget the loop enforces and the time it reports agree. The
