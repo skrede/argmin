@@ -9,6 +9,7 @@
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/terminal_step.h"
 #include "argmin/detail/tuple_contains.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
 #include "argmin/result/status.h"
@@ -260,6 +261,7 @@ public:
         , function_evaluations_{other.function_evaluations_}
         , last_gradient_norm_{other.last_gradient_norm_}
         , last_status_{other.last_status_}
+        , last_result_{std::move(other.last_result_)}
         , abort_flag_{other.abort_flag_.load(std::memory_order_relaxed)}
     {}
 
@@ -281,6 +283,7 @@ public:
             function_evaluations_ = other.function_evaluations_;
             last_gradient_norm_ = other.last_gradient_norm_;
             last_status_ = other.last_status_;
+            last_result_ = std::move(other.last_result_);
             abort_flag_.store(other.abort_flag_.load(std::memory_order_relaxed),
                               std::memory_order_relaxed);
         }
@@ -305,7 +308,9 @@ public:
             return detail::unbuilt_step<scalar_type>();
         if(status() == solver_status::invalid_problem)
             return detail::rejected_step<scalar_type>(state_);
+        const std::uint32_t evaluations_before = detail::evaluations_of(state_);
         auto result = policy_.step(state_);
+        detail::settle_step_evaluations(result, state_, evaluations_before);
         result.x_norm = state_.x.norm();
         result.bound_violation = bound_measure_(state_);
         ++iterations_;
@@ -354,12 +359,12 @@ public:
     std::uint32_t evaluation_count() const { return function_evaluations_; }
     void set_status(solver_status s) { last_status_ = s; }
 
-    // Back-copy per-criterion telemetry from a caller-owned solver_options
-    // convergence instance into stored_convergence_ when the types match, so
-    // convergence().last_check_results() reflects the most recent solve loop.
-    // For an OptsConvergence differing from the solver's own stored
-    // Convergence type, consumers read last_check_results directly from their
-    // own opts.convergence instance.
+    // What the last solve loop returned, until a reset; a call that cannot resume returns it again without evaluating.
+    const std::optional<solve_result_type>& last_result() const { return last_result_; }
+
+    void record_result(const solve_result_type& result) { last_result_ = result; }
+
+    // Only a matching convergence type is copied back; a caller passing another type reads its own instance's results.
     template <typename OptsConvergence>
     void back_copy_convergence(const OptsConvergence& oc)
     {
@@ -373,36 +378,31 @@ public:
     template <typename Derived>
     solver_status reset(const Eigen::MatrixBase<Derived>& x0)
     {
+        const std::uint32_t evaluations_before = detail::evaluations_of(state_);
         if(!detail::start_length_ok<N>(x0, expected_dimension(x0.size())))
-            return restart(solver_status::invalid_problem);
-        return restart(built_ ? policy_.reset(state_, x0) : build(x0));
+            return restart(solver_status::invalid_problem, evaluations_before);
+        return restart(built_ ? policy_.reset(state_, x0) : build(x0), evaluations_before);
     }
 
     // Reset to a new starting point, clearing all algorithm state.
     template <typename Derived>
     solver_status reset_clear(const Eigen::MatrixBase<Derived>& x0)
     {
+        const std::uint32_t evaluations_before = detail::evaluations_of(state_);
         if(!detail::start_length_ok<N>(x0, expected_dimension(x0.size())))
-            return restart(solver_status::invalid_problem);
-        return restart(built_ ? policy_.reset_clear(state_, x0) : build(x0));
+            return restart(solver_status::invalid_problem, evaluations_before);
+        return restart(built_ ? policy_.reset_clear(state_, x0) : build(x0), evaluations_before);
     }
 
-    // Seed best-seen f at loop entry via a direct problem evaluation.
-    // Requires Problem != void (i.e. the class-template Problem slot was
-    // filled by CTAD or explicit instantiation). Legacy non-template
-    // state_type policies (projected_gn, projected_gradient_gn -- which
-    // target least_squares only) fall back to the +inf sentinel so the
-    // first accepted step becomes the best-seen baseline; x_0 is still
-    // returned via best_x if no step succeeds.
-    // Reference: argmin::objective concept (argmin/formulation/
-    //            concepts.h) -- value(x) is total across supported
-    //            Problem types.
-    scalar_type seed_best_f() const
+    // Counted only for a state that counts its own evaluations, so the total of any other state stays its step sum.
+    scalar_type seed_best_f()
     {
-        if constexpr(!std::is_same_v<Problem, void>)
-            return static_cast<scalar_type>(problem_ptr_->value(state_.x));
-        else
+        if constexpr(std::is_same_v<Problem, void>)
             return std::numeric_limits<scalar_type>::infinity();
+        else if constexpr(detail::counts_evaluations<state_type>)
+            return detail::counted_value<scalar_type>(function_evaluations_, *problem_ptr_, state_.x);
+        else
+            return static_cast<scalar_type>(problem_ptr_->value(state_.x));
     }
 
     // The constraint values at x_0 are cached by policy.init.
@@ -410,13 +410,6 @@ public:
 
     scalar_type seed_best_bv() const { return bound_measure_(state_); }
 
-    // Stores the constructor's convergence policy by value, with no
-    // field-by-field remap: Convergence is the solver's own class-template
-    // parameter (deduced from the ctor's solver_options<Convergence>
-    // argument via CTAD), so stored_convergence_ always has the exact same
-    // type as the argument here. A relative-tolerance Convergence is stored
-    // -- and later checked -- as a relative-tolerance policy; there is no
-    // absolute-criterion coercion.
     void store_convergence(const Convergence& conv)
     {
         stored_convergence_ = conv;
@@ -555,10 +548,11 @@ private:
     bool built_;
     state_type state_;
     std::uint32_t iterations_{0};
-    // Sum of the per-step step_result::evaluations, reported as solve_result::function_evaluations.
+    // Since construction or reset: the state's own count when it keeps one, else the sum of the per-step evaluations.
     std::uint32_t function_evaluations_{0};
     scalar_type last_gradient_norm_{std::numeric_limits<scalar_type>::quiet_NaN()};
     solver_status last_status_{solver_status::running};
+    std::optional<solve_result_type> last_result_{};
     std::atomic<bool> abort_flag_{false};
 
     template <typename P, typename Derived>
@@ -572,6 +566,7 @@ private:
         , policy_opts_{std::move(policy_opts)}
         , built_{detail::start_length_ok<N>(x0, detail::problem_start_dimension<N>(problem, x0.size()))}
         , state_{make_state(problem, x0, opts)}
+        , function_evaluations_{detail::evaluations_of(state_)}
         , last_status_{built_ ? solver_status::running : solver_status::invalid_problem}
     {
         store_convergence(opts.convergence);
@@ -637,14 +632,15 @@ private:
         return detail::start_dimension<N>(problem_ptr_, state_);
     }
 
-    solver_status restart(solver_status status)
+    solver_status restart(solver_status status, std::uint32_t evaluations_before)
     {
         if constexpr(!std::is_same_v<Problem, void>)
             bound_measure_.refresh(*problem_ptr_);
         last_status_ = status;
         iterations_ = 0;
-        function_evaluations_ = 0;
+        function_evaluations_ = detail::evaluations_of(state_) - evaluations_before;
         last_gradient_norm_ = std::numeric_limits<scalar_type>::quiet_NaN();
+        last_result_.reset();
         abort_flag_.store(false, std::memory_order_relaxed);
         return status;
     }

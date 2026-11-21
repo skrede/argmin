@@ -21,6 +21,7 @@
 
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/problem_shape.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/lbfgsb_direction.h"
 #include "argmin/detail/lbfgsb_step_attempt.h"
 
@@ -59,6 +60,7 @@ struct byrd_lbfgsb_policy
         detail::cauchy_point_solver<Scalar, N> gcp_solver;
         detail::subspace_minimizer<Scalar, N> ssm_solver;
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         bool invalid_problem{false};
     };
 
@@ -98,7 +100,7 @@ struct byrd_lbfgsb_policy
         s.iteration = 0;
         if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
             return s;
-        s.objective_value = problem.value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, problem, x0);
         problem.gradient(x0, s.g);
         return s;
     }
@@ -128,7 +130,7 @@ struct byrd_lbfgsb_policy
         if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(*s.problem)))
             return solver_status::invalid_problem;
         s.x = x0;
-        s.objective_value = s.problem->value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, x0);
         s.problem->gradient(x0, s.g);
         s.iteration = 0;
         return detail::latch_status(s);

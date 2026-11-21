@@ -175,7 +175,8 @@ advances from one: it returns the status with an unevaluated step result (NaN
 values, no evaluations). `step_n()` and `solve()` continue only from
 `budget_exhausted` or `time_limit_reached`, the statuses meaning the previous
 call's own iteration or time budget ran out; from any other terminal status,
-`max_iterations` included, they take no step and report that status. `abort()`
+`max_iterations` included, they take no step, evaluate nothing and return the
+result the call that ended the solve returned. `abort()`
 is honored by `step()` as by the loops: the next call ends `aborted` without
 running the policy.
 

@@ -34,6 +34,7 @@
 #include "argmin/detail/gain_ratio.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/projected_gn_step.h"
 #include "argmin/derivative/finite_difference.h"
 #include "argmin/result/step_result.h"
@@ -102,6 +103,7 @@ struct projected_gradient_gn_policy
         Eigen::VectorX<Scalar> r;
         Eigen::Matrix<Scalar, Eigen::Dynamic, N> J;
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         int num_residuals{};
         bool invalid_problem{false};
 
@@ -143,7 +145,7 @@ struct projected_gradient_gn_policy
         s.ws.Jd.resize(s.num_residuals);
         if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
             return s;
-        s.problem->residuals(s.x, s.r);
+        detail::counted_residuals(s.evaluations, *s.problem, s.x, s.r);
         evaluate_jacobian(s);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
 
@@ -188,7 +190,7 @@ struct projected_gradient_gn_policy
         s.ws.free_indices.reserve(static_cast<std::size_t>(n));
         s.ws.r_trial.resize(s.num_residuals);
         s.ws.Jd.resize(s.num_residuals);
-        s.problem->residuals(s.x, s.r);
+        detail::counted_residuals(s.evaluations, *s.problem, s.x, s.r);
         evaluate_jacobian(s);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
 
@@ -244,7 +246,7 @@ private:
         {
             Eigen::Vector<Scalar, N> x_candidate = (s.x + alpha * d).eval();
             x_trial = detail::project(x_candidate, s.lower, s.upper);
-            s.problem->residuals(x_trial, s.ws.r_trial);
+            detail::counted_residuals(s.evaluations, *s.problem, x_trial, s.ws.r_trial);
             f_trial = Scalar(0.5) * s.ws.r_trial.squaredNorm();
 
             // Armijo condition: f(x_trial) <= f(x) + c * alpha * g^T d
@@ -339,8 +341,7 @@ private:
         Eigen::Vector<Scalar, N> x_trial = detail::project(x_plus_h, s.lower, s.upper);
         Eigen::Vector<Scalar, N> d = (x_trial - s.x).eval();
 
-        // Evaluate trial residuals
-        s.problem->residuals(x_trial, s.ws.r_trial);
+        detail::counted_residuals(s.evaluations, *s.problem, x_trial, s.ws.r_trial);
         Scalar f_trial = Scalar(0.5) * s.ws.r_trial.squaredNorm();
 
         // Gain ratio via the direct model reduction at the accepted (projected)
@@ -400,7 +401,6 @@ private:
             p.jacobian(xx, JJ);
         };
 
-    // Evaluate the Jacobian at s.x into s.J (analytic or finite-difference).
     template <typename P>
     void evaluate_jacobian(state_type<P>& s) const
     {
@@ -412,7 +412,7 @@ private:
             else
             {
                 auto residual_fn = [&s](const auto& xx, Eigen::VectorX<Scalar>& rr) {
-                    s.problem->residuals(xx, rr);
+                    detail::counted_residuals(s.evaluations, *s.problem, xx, rr);
                 };
                 fd_jacobian<N>(residual_fn, s.x, sink, s.num_residuals);
             }

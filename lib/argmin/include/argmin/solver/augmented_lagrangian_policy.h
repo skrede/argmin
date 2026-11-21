@@ -56,6 +56,7 @@
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/options/augmented_lagrangian_defaults.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/solver/options.h"
@@ -212,6 +213,7 @@ struct augmented_lagrangian_policy
         // the directly observable per-tick work bound.
         bool inner_active = false;
         std::uint32_t inner_iters_done = 0;
+        std::uint32_t inner_evaluations_done = 0;
         std::uint32_t last_inner_advance = 0;
         detail::iterate_rank<scalar_type> best_inner{};
         Eigen::Vector<scalar_type, N> best_inner_x;
@@ -223,6 +225,7 @@ struct augmented_lagrangian_policy
         int n_ineq = 0;
         bool invalid_problem{false};
         std::uint32_t outer_iter = 0;
+        std::uint32_t evaluations = 0;
 
         options_type opts;
 
@@ -533,7 +536,7 @@ struct augmented_lagrangian_policy
         s.n_ineq = problem.num_inequality();
 
         s.x = x0;
-        s.f = problem.value(x0);
+        s.f = detail::counted_value<scalar_type>(s.evaluations, problem, x0);
 
         // Allocate the heap-boxed inner context and pre-size its per-inner-
         // iter subproblem buffers. Reused across all inner f / g calls; the
@@ -663,12 +666,6 @@ struct augmented_lagrangian_policy
         std::get<step_tolerance_criterion<scalar_type>>(inner_opts.convergence.criteria)
             .threshold = augmented_lagrangian_defaults<scalar_type>::inner_stall_threshold;
 
-        // Start a fresh inner solve when none is in progress. This is where
-        // the current outer iterate's constraints are evaluated, the inner
-        // solver is warm/cold-restarted, and the chunk bookkeeping is armed.
-        // While an inner solve is already in progress (inner_active), all of
-        // this is skipped and step() simply advances the running solve by
-        // another bounded chunk below.
         if(!s.inner_active)
         {
             // Evaluate constraints at the current outer iterate (hoisted
@@ -712,6 +709,7 @@ struct augmented_lagrangian_policy
             // the +inf sentinel so the first chunk's result always wins.
             s.inner_active = true;
             s.inner_iters_done = 0;
+            s.inner_evaluations_done = 0;
             s.best_inner = {solver_status::running, std::numeric_limits<scalar_type>::infinity(), std::numeric_limits<scalar_type>::infinity(), std::numeric_limits<scalar_type>::infinity()};
             s.best_inner_x = s.x;
         }
@@ -730,6 +728,9 @@ struct augmented_lagrangian_policy
         const std::uint32_t prev_inner = s.inner_iters_done;
         auto inner_result = ctx.inner_solver->step_n(chunk, inner_opts);
         s.inner_iters_done = inner_result.iterations;
+        // The inner count restarts with each fresh inner solve and includes its init or reset calls.
+        s.evaluations += inner_result.function_evaluations - s.inner_evaluations_done;
+        s.inner_evaluations_done = inner_result.function_evaluations;
         s.last_inner_advance = s.inner_iters_done - prev_inner;
 
         // Accumulate the feasibility-first best-seen inner iterate across
@@ -774,14 +775,12 @@ struct augmented_lagrangian_policy
             };
         }
 
-        // Inner solve complete: close out this outer iteration.
         s.inner_active = false;
 
-        // Extract solution from inner solver
         scalar_type f_old = s.f;
         Eigen::Vector<scalar_type, N> x_old = s.x;
         s.x = s.best_inner_x;
-        s.f = s.problem->value(s.x);
+        s.f = detail::counted_value<scalar_type>(s.evaluations, *s.problem, s.x);
         {
             const int m = s.n_eq + s.n_ineq;
             auto& c_all = s.ctx->c_all_outer_buf;
@@ -996,7 +995,7 @@ struct augmented_lagrangian_policy
         if(s.invalid_problem)
             return solver_status::invalid_problem;
         s.x = x0;
-        s.f = s.problem->value(x0);
+        s.f = detail::counted_value<scalar_type>(s.evaluations, *s.problem, x0);
         {
             const int m = s.n_eq + s.n_ineq;
             auto& c_all = s.ctx->c_all_outer_buf;

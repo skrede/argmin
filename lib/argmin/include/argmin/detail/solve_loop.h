@@ -78,6 +78,8 @@ run_solve_loop(Core& core, std::uint32_t budget,
 {
     if(core.status() == solver_status::invalid_problem)
         return rejected_solve(core);
+    if(!resumable(core.status()) && core.last_result())
+        return *core.last_result();
 
     using scalar_type = typename Core::scalar_type;
     solver_status status = resumable(core.status()) ? solver_status::running : core.status();
@@ -92,9 +94,7 @@ run_solve_loop(Core& core, std::uint32_t budget,
             break;
         }
 
-        // Budget predicate check (between steps, not inside the policy).
-        // The predicate is handed the loop index i so a time-budget driver
-        // can poll its deadline only every K iterations.
+        // Handed the loop index so a time-budget driver can poll its deadline only every K iterations.
         if(budget_exhausted(i))
         {
             status = solver_status::time_limit_reached;
@@ -120,19 +120,17 @@ run_solve_loop(Core& core, std::uint32_t budget,
     // consumers read last_check_results directly from their own instance.
     core.back_copy_convergence(opts.convergence);
 
-    return typename Core::solve_result_type{
+    typename Core::solve_result_type result{
         .status = status,
         .iterations = core.iteration_count(),
-        // Genuine accumulated evaluation count (summed from each step's
-        // reported step_result::evaluations), not an alias of the iteration
-        // count. Policies that evaluate several times per iteration (line
-        // searches) report > iterations here.
         .function_evaluations = core.evaluation_count(),
         .objective_value = best.objective_value(),
         .gradient_norm = best.gradient_norm(),
         .constraint_violation = best.constraint_violation(),
         .x = best.x(),
     };
+    core.record_result(result);
+    return result;
 }
 
 }

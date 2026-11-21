@@ -3,6 +3,7 @@
 
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/lbfgsb_direction.h"
 
 #include "argmin/formulation/concepts.h"
@@ -68,12 +69,12 @@ Eigen::Vector<Scalar, N> lbfgsb_trial_point(const State& s, const Eigen::Vector<
 }
 
 template <typename P, typename Scalar, int N, typename State, typename Options>
-bool attempt_lbfgsb_step(const State& s, const Eigen::Vector<Scalar, N>& d, Scalar alpha_max,
+bool attempt_lbfgsb_step(State& s, const Eigen::Vector<Scalar, N>& d, Scalar alpha_max,
                          const Options& options, lbfgsb_attempt<Scalar, N>& a)
 {
     using line_search_kind = decltype(options.line_search_type);
     a.cached_alpha = Scalar(-1.0);
-    auto phi = [&](Scalar t) { return s.problem->value((s.x + t * d).eval()); };
+    auto phi = [&](Scalar t) { return counted_value<Scalar>(s.evaluations, *s.problem, (s.x + t * d).eval()); };
     auto dphi = [&](Scalar t) {
         s.problem->gradient((s.x + t * d).eval(), a.g);
         a.cached_alpha = t;
@@ -86,7 +87,7 @@ bool attempt_lbfgsb_step(const State& s, const Eigen::Vector<Scalar, N>& d, Scal
         ? armijo(phi, s.objective_value, dphi0, ls_opts)
         : strong_wolfe(phi, dphi, s.objective_value, dphi0, ls_opts);
     a.x = lbfgsb_trial_point<P>(s, d, a.ls.alpha);
-    a.value = s.problem->value(a.x);
+    a.value = counted_value<Scalar>(s.evaluations, *s.problem, a.x);
     a.evaluations += static_cast<std::uint32_t>(a.ls.evaluations) + 1u;
     a.accepted = accepts_lbfgsb_step(a, s.objective_value, ls_opts.c1, dphi0);
     return a.accepted;

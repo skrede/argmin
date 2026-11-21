@@ -10,6 +10,7 @@ add_executable(argmin_oracle_tests
     sqp_coverage_test.cpp
     stochastic_coverage_test.cpp
     trust_region_sqp_coverage_test.cpp
+    evaluation_count_test.cpp
     oracle_edge_test.cpp
     oracle_self_test.cpp
     qp_oracle_self_test.cpp

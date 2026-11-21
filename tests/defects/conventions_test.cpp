@@ -63,19 +63,19 @@ TEST_CASE("cobyla reports every objective evaluation in its function evaluations
     CHECK(solve.reported == solve.counted);
 }
 
-TEST_CASE("byrd_lbfgsb reports every objective evaluation in its function evaluations", "[known-defect][!shouldfail]")
+TEST_CASE("byrd_lbfgsb reports every objective evaluation in its function evaluations")
 {
     const counted_solve solve = solve_counting(byrd_lbfgsb_policy<>{}, defects::counting_box_bowl{});
     CHECK(solve.reported == solve.counted);
 }
 
-TEST_CASE("projected_gradient_gn reports every residual evaluation in its function evaluations", "[known-defect][!shouldfail]")
+TEST_CASE("projected_gradient_gn reports every residual evaluation in its function evaluations")
 {
     const counted_solve solve = solve_counting(projected_gradient_gn_policy<>{}, defects::counting_box_residual{});
     CHECK(solve.reported == solve.counted);
 }
 
-TEST_CASE("the augmented Lagrangian reports every objective evaluation in its function evaluations", "[known-defect][!shouldfail]")
+TEST_CASE("the augmented Lagrangian reports every objective evaluation in its function evaluations")
 {
     const counted_solve solve = solve_counting(al_policy{}, defects::counting_row_bowl{});
     CHECK(solve.reported == solve.counted);

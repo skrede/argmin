@@ -20,6 +20,7 @@
 
 #include "argmin/detail/gain_ratio.h"
 #include "argmin/detail/problem_shape.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/derivative/finite_difference.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
@@ -82,6 +83,7 @@ struct lm_policy
         Eigen::VectorX<Scalar> Jh;       // J * h product for the gain ratio (m-dimensional)
         Scalar initial_objective{};      // for divergence detection
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         int num_residuals{};
         bool invalid_problem{false};
     };
@@ -112,7 +114,7 @@ struct lm_policy
         s.Jh.resize(s.num_residuals);
         if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
             return s;
-        s.problem->residuals(x0, s.r);
+        detail::counted_residuals(s.evaluations, *s.problem, x0, s.r);
         evaluate_jacobian(s);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
@@ -163,10 +165,8 @@ struct lm_policy
 
         Eigen::Vector<Scalar, N> x_trial = (s.x + h).eval();
 
-        // Evaluate trial residuals into the state-resident buffer
-        // (residual dimension, stays dynamic; storage reused per step).
         Eigen::VectorX<Scalar>& r_trial = s.r_trial;
-        s.problem->residuals(x_trial, r_trial);
+        detail::counted_residuals(s.evaluations, *s.problem, x_trial, r_trial);
         Scalar f_trial = Scalar(0.5) * r_trial.squaredNorm();
 
         // Gain ratio (Nielsen 1999): direct model reduction using the original
@@ -257,7 +257,7 @@ struct lm_policy
         s.x = x0;
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, x0.size());
-        s.problem->residuals(x0, s.r);
+        detail::counted_residuals(s.evaluations, *s.problem, x0, s.r);
         evaluate_jacobian(s);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
@@ -289,7 +289,7 @@ private:
         else
         {
             auto residual_fn = [&s](const Eigen::Vector<Scalar, N>& xx, Eigen::VectorX<Scalar>& rr) {
-                s.problem->residuals(xx, rr);
+                detail::counted_residuals(s.evaluations, *s.problem, xx, rr);
             };
             fd_jacobian<N>(residual_fn, s.x, s.J, s.num_residuals);
         }

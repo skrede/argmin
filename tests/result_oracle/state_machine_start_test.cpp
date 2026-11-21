@@ -72,7 +72,7 @@ TEST_CASE("a zero-budget solve reports no gradient norm and evaluates none", "[o
     CHECK(std::isnan(result.gradient_norm));
 }
 
-TEST_CASE("a solve from a latched status reports no gradient norm and evaluates none", "[oracle][state-machine]")
+TEST_CASE("a solve from a latched status returns the terminal solve's result and evaluates none", "[oracle][state-machine]")
 {
     const gradient_counting_rosenbrock problem;
     counting_solver solver = solver_at_start(problem);
@@ -81,5 +81,9 @@ TEST_CASE("a solve from a latched status reports no gradient norm and evaluates 
     const solve_result<double, 2> result = solve_counting_gradients(problem, [&] { return solver.solve(); });
     CHECK(result.status == first.status);
     CHECK(result.iterations == first.iterations);
-    CHECK(std::isnan(result.gradient_norm));
+    CHECK(result.function_evaluations == first.function_evaluations);
+    CHECK(oracle::same_bits(Eigen::VectorXd(result.x), Eigen::VectorXd(first.x)));
+    CHECK(oracle::same_bits(result.objective_value, first.objective_value));
+    CHECK(oracle::same_bits(result.constraint_violation, first.constraint_violation));
+    CHECK(oracle::same_bits(result.gradient_norm, first.gradient_norm));
 }

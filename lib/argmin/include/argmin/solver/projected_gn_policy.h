@@ -31,6 +31,7 @@
 #include "argmin/detail/gain_ratio.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/projected_gn_step.h"
 #include "argmin/derivative/finite_difference.h"
 #include "argmin/result/step_result.h"
@@ -96,6 +97,7 @@ struct projected_gn_policy
         Eigen::VectorX<Scalar> r;
         Eigen::Matrix<Scalar, Eigen::Dynamic, N> J;
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         int num_residuals{};
         bool invalid_problem{false};
 
@@ -142,7 +144,7 @@ struct projected_gn_policy
         s.ws.Jd.resize(s.num_residuals);
         if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
             return s;
-        s.problem->residuals(s.x, s.r);
+        detail::counted_residuals(s.evaluations, *s.problem, s.x, s.r);
         evaluate_jacobian(s);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
 
@@ -160,10 +162,8 @@ struct projected_gn_policy
             return detail::rejected_step<Scalar>(s);
         const int n = static_cast<int>(s.x.size());
 
-        // Gauss-Newton Hessian approximation: H = J^T J
         Eigen::Matrix<Scalar, N, N> H = (s.J.transpose() * s.J).eval();
 
-        // Gradient of 0.5*||r||^2: g = J^T r
         Eigen::Vector<Scalar, N> g = (s.J.transpose() * s.r).eval();
 
         // Active-set identification (N&W Section 16.6)
@@ -191,7 +191,7 @@ struct projected_gn_policy
         Eigen::Vector<Scalar, N> x_trial = detail::project(x_plus_h, s.lower, s.upper);
         Eigen::Vector<Scalar, N> d = (x_trial - s.x).eval();
 
-        s.problem->residuals(x_trial, s.ws.r_trial);
+        detail::counted_residuals(s.evaluations, *s.problem, x_trial, s.ws.r_trial);
         Scalar f_trial = Scalar(0.5) * s.ws.r_trial.squaredNorm();
 
         // Gain ratio via the direct model reduction evaluated at the ACCEPTED
@@ -288,7 +288,7 @@ struct projected_gn_policy
         s.ws.free_indices.reserve(static_cast<std::size_t>(n));
         s.ws.r_trial.resize(s.num_residuals);
         s.ws.Jd.resize(s.num_residuals);
-        s.problem->residuals(s.x, s.r);
+        detail::counted_residuals(s.evaluations, *s.problem, s.x, s.r);
         evaluate_jacobian(s);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
 
@@ -330,7 +330,7 @@ private:
             else
             {
                 auto residual_fn = [&s](const auto& xx, Eigen::VectorX<Scalar>& rr) {
-                    s.problem->residuals(xx, rr);
+                    detail::counted_residuals(s.evaluations, *s.problem, xx, rr);
                 };
                 fd_jacobian<N>(residual_fn, s.x, sink, s.num_residuals);
             }

@@ -21,6 +21,7 @@
 #include "argmin/detail/compact_lbfgs.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/lbfgsb_direction.h"
 #include "argmin/detail/lbfgsb_step_attempt.h"
 #include "argmin/line_search/armijo.h"
@@ -69,9 +70,7 @@ struct lbfgsb_policy
 
     options_type options{};
 
-    // The Problem object passed to init() MUST outlive the solver, the same
-    // lifetime model as every argmin policy. The stored pointer enables direct
-    // inlinable calls without std::function type-erasure overhead.
+    // The problem passed to init() must outlive the solver: the state keeps its address for direct, inlinable calls.
     template <typename P = void>
     struct state_type
     {
@@ -85,6 +84,7 @@ struct lbfgsb_policy
         detail::cauchy_point_solver<Scalar, N> gcp_solver;
         detail::subspace_minimizer<Scalar, N> ssm_solver;
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         bool invalid_problem{false};
     };
 
@@ -124,7 +124,7 @@ struct lbfgsb_policy
         s.iteration = 0;
         if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
             return s;
-        s.objective_value = problem.value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, problem, x0);
         problem.gradient(x0, s.g);
         return s;
     }
@@ -134,7 +134,6 @@ struct lbfgsb_policy
     {
         if(s.invalid_problem)
             return detail::rejected_step<Scalar>(s);
-        // Evaluate gradient (skip on first iteration -- init already computed it)
         if(s.iteration != 0)
             s.problem->gradient(s.x, s.g);
 
@@ -149,7 +148,7 @@ struct lbfgsb_policy
         else
             r = detail::retry_lbfgsb_step<P>(s, options, a);
         step_result<Scalar> result = r ? *r : null_direction_step(s, 1);
-        // Every line-search trial plus the objective evaluation at each attempted iterate.
+        // Read only by a decorator whose own state keeps no count; for this state the core reports its counter.
         result.evaluations = a.evaluations;
         return result;
     }
@@ -160,7 +159,7 @@ struct lbfgsb_policy
         if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(*s.problem)))
             return solver_status::invalid_problem;
         s.x = x0;
-        s.objective_value = s.problem->value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, x0);
         s.problem->gradient(x0, s.g);
         s.iteration = 0;
         // B (compact_lbfgs) is NOT reset -- preserves curvature pairs

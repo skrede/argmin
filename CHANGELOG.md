@@ -143,6 +143,22 @@ Policies available at HEAD, grouped by problem class:
   gradient is evaluated to fill it. Before, a solve that ended before its first
   step reported 0. A solver group reports the gradient norm of the member whose
   point it returns.
+- `solve_result::function_evaluations` and `step_result::evaluations` of
+  `lbfgsb`, `byrd_lbfgsb`, `lm`, `projected_gn`, `projected_gradient_gn` and
+  the augmented Lagrangian count every objective call the solver made since
+  construction or the last reset: the start-point evaluations of construction
+  and reset, the one each `solve()` or `step_n()` makes at its start point, and,
+  for the augmented Lagrangian, every call of its inner solver. A least-squares
+  solver counts each residual evaluation, the ones of a finite-difference
+  Jacobian included. Before, `lbfgsb` also counted each strong-Wolfe slope
+  evaluation, the other five reported one evaluation per step, and none counted
+  the start-point calls.
+- `solve()` and `step_n()` on a status they cannot continue from evaluate
+  nothing and return the result of the call that ended the solve: the same `x`,
+  objective, constraint violation and gradient norm. Before, they evaluated the
+  objective at the current iterate and reported it with a NaN gradient norm.
+  Without such a result, as when `step()` reached the status, they report the
+  current iterate as before.
 - `lbfgsb`, `byrd_lbfgsb`, `bobyqa`, `lm`, `projected_gn`,
   `projected_gradient_gn` and the three CMA-ES variants end with
   `invalid_problem` for a problem that declares equality or inequality rows,
