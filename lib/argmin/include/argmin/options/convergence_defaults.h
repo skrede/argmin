@@ -16,9 +16,15 @@ struct convergence_defaults<double>
 {
     static constexpr double gradient_threshold = 1e-5;
     static constexpr double objective_threshold = 1e-10;
+    // The default of Ipopt's tol option (Ipopt options reference), its bound on the scaled first-order optimality
+    // error of Wachter and Biegler 2006, Math. Program. 106(1):25-57, Section 2.1.
     static constexpr double stationarity_threshold = 1e-8;
     static constexpr double step_threshold = 1e-8;
+    // SNOPT's Major feasibility tolerance default (Gill, Murray and Saunders, User's Guide for SNOPT 7), applied here as
+    // an absolute bound on the raw violation with no scaling by the constraint or iterate size.
     static constexpr double feasibility_tolerance = 1e-6;
+    // The pair matches the FunctionTolerance and MaxStallGenerations defaults of MATLAB's ga, which stops on a test of
+    // the same shape: the average relative change of the best value over the window falls below the tolerance.
     static constexpr double stall_threshold = 1e-6;
     static constexpr std::uint16_t stall_window = 50;
 };

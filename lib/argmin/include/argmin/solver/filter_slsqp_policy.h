@@ -168,7 +168,7 @@ struct filter_slsqp_policy
         };
         detail::restoration_strategy restoration{detail::restoration_strategy::hybrid};
         std::uint16_t max_restoration_steps{10};
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
 
         // Filter envelope margins (Wachter & Biegler 2006 Section 2.3,
         // eq. 6). Direct-field-default form: per-mode default_filter_gamma_*

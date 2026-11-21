@@ -21,7 +21,9 @@ namespace argmin
 //
 // max_alpha: initial step length (unit step for quasi-Newton methods).
 //
-// max_iterations: evaluation budget.
+// max_iterations: evaluation budget, objective values and slopes counted alike. 40 is 20 trial points of a
+//     value and a slope each: L-BFGS-B ends a line search after 20 trials (iback >= 20 in lbfgsb.c; Zhu, Byrd,
+//     Lu and Nocedal 1997, ACM TOMS 23(4):550-560), and SciPy's L-BFGS-B documents maxls = 20.
 //
 // relative_value_noise: half-width of the band phi(0) + relative_value_noise * |phi(0)| inside which a
 //     trial that fails the value tests is accepted on the curvature condition alone -- the approximate

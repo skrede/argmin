@@ -68,7 +68,7 @@ struct cobyla_policy
     {
         Scalar initial_trust_radius{Scalar(0.0)};   // 0 means auto (10% of max bound range, at most half the min, else 1.0)
         Scalar final_trust_radius{derivative_free_defaults<Scalar>::final_trust_radius};
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
         Scalar feasibility_gate{derivative_free_defaults<Scalar>::cobyla_feasibility_gate};
     };
 

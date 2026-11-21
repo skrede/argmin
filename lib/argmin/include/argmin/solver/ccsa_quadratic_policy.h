@@ -105,7 +105,7 @@ struct ccsa_quadratic_policy
 
         // A hint for the solver's stall threshold, with best-seen feasible tracking, where the caller sets none.
         std::optional<Scalar> stall_tolerance_threshold{};  // default: 1e-6
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
 
         mma_subproblem_options<scalar_type> subproblem{};
     };

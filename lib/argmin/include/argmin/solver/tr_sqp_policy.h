@@ -252,7 +252,7 @@ struct tr_sqp_policy
 
         // Stall window carried over from the line-search SQP family for
         // step_budget_solver convergence-framework parity.
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
 
         // Active-set multiplier re-estimation stride. A value of 0 is
         // treated as 1 (re-estimate every step) by the read-site clamp.

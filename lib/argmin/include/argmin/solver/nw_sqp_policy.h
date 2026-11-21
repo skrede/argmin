@@ -76,12 +76,6 @@ struct nw_sqp_policy
     static constexpr Scalar default_step_tolerance_rel = line_search_sqp_defaults<Scalar>::step_tolerance_rel;
     static constexpr Scalar default_feasibility_tolerance = line_search_sqp_defaults<Scalar>::feasibility_tolerance;
 
-    // Armijo backtracking budget (NLopt-parity sustained backtracking
-    // before declaring exhaustion).
-    //
-    // Reference: NLopt slsqp.c:1803-2189 (slsqpb_ outer line-search budget).
-    static constexpr std::uint16_t default_line_search_max_iterations = 40;
-
     // Armijo sufficient-decrease parameter (Wolfe-condition convention).
     //
     // Reference: N&W 2e §3.1 (Wolfe-condition convention);
@@ -135,14 +129,9 @@ struct nw_sqp_policy
 
     struct options_type
     {
-        // Embedded line-search params. Designated-initializer order follows
-        // line_search_options field-declaration order (c1, c2, rho,
-        // max_alpha, max_iterations); skipped designators (c2, max_alpha)
-        // keep their line_search_options-side defaults (0.9 and 1.0).
         line_search_options<scalar_type> line_search{
             .c1 = default_armijo_c1,
             .rho = default_armijo_rho,
-            .max_iterations = default_line_search_max_iterations,
         };
 
         // QP subproblem params. Brace-initialized from the policy's
@@ -152,7 +141,7 @@ struct nw_sqp_policy
             .max_iterations = default_qp_max_iterations,
             .tolerance = default_qp_tolerance,
         };
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
 
         // BFGS-reset retry cap on line-search exhaustion. On Armijo
         // failure (after SOC retry), the policy resets the BFGS Hessian

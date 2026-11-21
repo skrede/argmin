@@ -82,7 +82,7 @@ struct projected_gradient_gn_policy
         Scalar backtrack_rho{least_squares_defaults<Scalar>::backtrack_rho};  // step shrink factor per backtrack
         std::uint32_t max_backtrack{20}; // maximum backtracking iterations
 
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
         // No feasibility_gate: the box is handled by projection, so no constraint_violation is emitted to gate on.
     };
 

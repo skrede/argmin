@@ -65,7 +65,7 @@ struct lbfgsb_policy
     {
         line_search_options<Scalar> line_search{};  // Embedded line search params
         lbfgsb_line_search line_search_type{lbfgsb_line_search::strong_wolfe};
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
     };
 
     options_type options{};

@@ -92,7 +92,7 @@ struct rho_wval_policy
         std::optional<Scalar> rho_decay{};                    // 0.1 (between outer iters)
 
         std::optional<Scalar> stall_tolerance_threshold{};
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
     };
 
     template <typename P = void>

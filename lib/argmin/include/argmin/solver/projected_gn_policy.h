@@ -74,7 +74,7 @@ struct projected_gn_policy
         std::optional<Scalar> trust_region_expand_threshold{};
         std::optional<Scalar> trust_region_shrink_threshold{};
 
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
         // feasibility_gate intentionally omitted: projected_gn_policy handles box bounds via
         // projection — no general nonlinear constraint_violation is emitted in step_result,
         // so the feasibility_gate criterion would gate on 0. Silent no-op made explicit.

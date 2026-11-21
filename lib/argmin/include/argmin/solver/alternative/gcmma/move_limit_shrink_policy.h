@@ -102,7 +102,7 @@ struct move_limit_shrink_policy
 
         // Stall detection (forwarded by step_budget_solver).
         std::optional<Scalar> stall_tolerance_threshold{};   // 1e-6
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
     };
 
     template <typename P = void>

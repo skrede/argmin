@@ -77,8 +77,6 @@ struct objective_tolerance_criterion
     // epsilon)-to-eps^(2/3) for double precision (eps ~ 2.22e-16).
     // Empirically swept against Rosenbrock/HS.
     S threshold{convergence_defaults<S>::objective_threshold};
-    // Direct-value literature default: 1e-8 matches N&W 2e Definition
-    // 12.1's typical first-order KKT stationarity gate.
     S stationarity_threshold{convergence_defaults<S>::stationarity_threshold};
     // Primal feasibility is folded directly into r.kkt_residual via the
     // full first-order optimality error composition (stationarity + primal
@@ -150,9 +148,6 @@ struct objective_tolerance_rel_criterion
     // default_convergence, so it stays optional/inert until the caller
     // opts in via set_objective_threshold_rel(...).
     std::optional<S> threshold{};
-    // Direct-value literature default: 1e-8, matching the absolute
-    // objective_tolerance_criterion's stationarity_threshold convention
-    // (N&W 2e Definition 12.1).
     S stationarity_threshold{convergence_defaults<S>::stationarity_threshold};
     // Primal feasibility is folded directly into r.kkt_residual via the
     // full first-order optimality error composition (stationarity + primal

@@ -59,7 +59,7 @@ struct lm_policy
         std::optional<Scalar> diagonal_min_clamp{};  // min diagonal value
         std::optional<Scalar> lambda_min{};          // lambda floor
         std::optional<Scalar> lambda_max{};          // lambda ceiling
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
         // feasibility_gate intentionally omitted: lm_policy is unconstrained least-squares;
         // step_result reports no constraint_violation signal, so gating ftol_reached on a
         // feasibility threshold is vacuous. Silent no-op made explicit here.

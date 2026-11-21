@@ -203,7 +203,7 @@ struct kraft_slsqp_policy
             .max_iterations = default_qp_max_iterations,
             .tolerance = default_qp_tolerance,
         };
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
 
         // BFGS-reset retry cap on line-search exhaustion. On Armijo
         // failure (after SOC retry), the policy resets the BFGS Hessian

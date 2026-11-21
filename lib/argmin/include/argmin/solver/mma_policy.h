@@ -123,7 +123,7 @@ struct mma_policy
         // Stall detection (forwarded by step_budget_solver into a
         // stall_tolerance_criterion).
         std::optional<Scalar> stall_tolerance_threshold{}; // default: 1e-6
-        std::uint16_t stall_window{50};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
     };
 
     template <typename P = void>
