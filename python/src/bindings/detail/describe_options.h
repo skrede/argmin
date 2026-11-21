@@ -22,6 +22,12 @@ const Criterion& criterion_of(const driver_options& opts)
     return std::get<Criterion>(opts.convergence.criteria);
 }
 
+template <typename T>
+std::string describe_optional(const std::optional<T>& value)
+{
+    return value ? format_number(*value) : std::string("None");
+}
+
 inline std::string describe_line_search(const line_search_options<>& opts)
 {
     return "LineSearchOptions(c1=" + format_number(opts.c1) + ", c2=" + format_number(opts.c2)
@@ -44,12 +50,9 @@ inline std::string describe_driver_options(const driver_options& opts)
            + ", stationarity_threshold="
            + format_number(criterion_of<objective_tolerance_criterion<>>(opts).stationarity_threshold)
            + ", step_threshold="
-           + format_number(criterion_of<step_tolerance_criterion<>>(opts).threshold) + ")";
-}
-
-inline std::string describe_optional(const std::optional<double>& value)
-{
-    return value ? format_number(*value) : std::string("None");
+           + format_number(criterion_of<step_tolerance_criterion<>>(opts).threshold)
+           + ", stall_threshold=" + describe_optional(criterion_of<stall_tolerance_criterion<>>(opts).threshold)
+           + ", stall_window=" + describe_optional(criterion_of<stall_tolerance_criterion<>>(opts).window) + ")";
 }
 
 }

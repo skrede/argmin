@@ -168,7 +168,7 @@ public:
     template <typename OptsConvergence>
     solve_result<scalar_type, N> step_n(std::uint32_t budget, const solver_options<OptsConvergence>& opts)
     {
-        detail::reset_unless_resuming(core_.status(), opts.convergence);
+        detail::enter_explicit_solve(core_, opts.convergence);
         return run(budget, opts);
     }
 

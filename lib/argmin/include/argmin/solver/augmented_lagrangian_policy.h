@@ -128,7 +128,8 @@ struct augmented_lagrangian_policy
         // solve; set inner_chunk >= inner_max_iterations to recover
         // single-tick outer iterations (a full inner solve per step()).
         std::uint32_t inner_chunk{32};
-        scalar_type constraint_tolerance{augmented_lagrangian_defaults<scalar_type>::constraint_tolerance};          // K&W 10.9
+        // The outer feasibility test uses the solver's constraint_tolerance when set, then this, then the default.
+        std::optional<scalar_type> constraint_tolerance{};                                                          // K&W 10.9
         scalar_type inner_gradient_tolerance{augmented_lagrangian_defaults<scalar_type>::inner_gradient_tolerance};  // K&W 10.9
         scalar_type feasibility_progress{augmented_lagrangian_defaults<scalar_type>::feasibility_progress};          // N&W 17.4
         typename InnerPolicy::options_type inner_opts = {};
@@ -228,6 +229,7 @@ struct augmented_lagrangian_policy
         std::uint32_t evaluations = 0;
 
         options_type opts;
+        scalar_type constraint_tolerance_in_force{};
 
         // Synthetic subproblem for the inner solver.
         // Stores const P* and penalty state; satisfies differentiable + bound_constrained.
@@ -513,7 +515,6 @@ struct augmented_lagrangian_policy
     {
         options = policy_opts;
         auto s = init(problem, x0, solver_opts);
-        s.opts = policy_opts;
         s.mu = policy_opts.mu_init;
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
         return s;
@@ -522,7 +523,7 @@ struct augmented_lagrangian_policy
     template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem,
                              const Eigen::Vector<scalar_type, N>& x0,
-                             const solver_options<Convergence>& /*solver_opts*/)
+                             const solver_options<Convergence>& solver_opts)
     {
         static_assert(constrained<Problem, scalar_type>,
                       "augmented_lagrangian_policy requires constrained<Problem>");
@@ -560,11 +561,10 @@ struct augmented_lagrangian_policy
         s.c_eq = ctx.c_all_buf.head(s.n_eq);
         s.c_ineq = ctx.c_all_buf.tail(s.n_ineq);
 
-        // Initialize multipliers to zero
         s.lambda_eq = Eigen::VectorX<scalar_type>::Zero(s.n_eq);
         s.lambda_ineq = Eigen::VectorX<scalar_type>::Zero(s.n_ineq);
 
-        // Penalty
+        s.constraint_tolerance_in_force = static_cast<scalar_type>(solver_opts.constraint_tolerance.value_or(s.opts.constraint_tolerance.value_or(augmented_lagrangian_defaults<scalar_type>::constraint_tolerance)));
         s.mu = s.opts.mu_init;
         s.prev_viol = detail::constraint_violation(s.c_eq, s.c_ineq);
         s.outer_iter = 0;
@@ -597,7 +597,7 @@ struct augmented_lagrangian_policy
         const scalar_type mu_dec = s.opts.mu_decrease;
         const scalar_type mu_floor = s.opts.mu_min;
         const scalar_type feas_progress = s.opts.feasibility_progress;
-        const scalar_type con_tol = s.opts.constraint_tolerance;
+        const scalar_type con_tol = s.constraint_tolerance_in_force;
 
         // Re-seed the subproblem's self-references at the TOP of every step, including a resume step in the middle of
         // an inner solve. The outer-state pointers (bounds, multipliers, penalty) address state fields that a memberwise

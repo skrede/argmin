@@ -103,9 +103,7 @@ struct ccsa_quadratic_policy
         // recover_elastic_slacks(). Direct value.
         Scalar dual_bound_scale{mma_defaults<Scalar>::dual_bound_scale};
 
-        // Framework-side stall detection threshold. Wired by
-        // step_budget_solver::forward_policy_hints into
-        // stall_tolerance_criterion with best_seen_feasible tracking.
+        // A hint for the solver's stall threshold, with best-seen feasible tracking, where the caller sets none.
         std::optional<Scalar> stall_tolerance_threshold{};  // default: 1e-6
         std::uint16_t stall_window{50};
 

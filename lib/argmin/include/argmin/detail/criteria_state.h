@@ -26,8 +26,8 @@ void reset_criteria(const std::tuple<Criteria...>& criteria)
 template <typename Criterion>
 bool criterion_within_capacity(const Criterion& criterion)
 {
-    if constexpr(requires { Criterion::capacity; criterion.window; })
-        return criterion.window <= Criterion::capacity;
+    if constexpr(requires { Criterion::capacity; criterion.window_in_force(); })
+        return criterion.window_in_force() <= Criterion::capacity;
     else
         return true;
 }
@@ -43,11 +43,14 @@ bool within_capacity(const Convergence& convergence)
 }
 
 // A caller's options object holds the history of whatever it last ran, so an explicit solve starts it fresh unless the
-// call resumes its own iteration or time budget. The core's stored object is reset only by reset and reset_clear. An
-// object over capacity is left untouched: the solve loop rejects it before its first step.
-template <typename Convergence>
-void reset_unless_resuming(solver_status status, const Convergence& convergence)
+// call resumes its own iteration or time budget. The current policy's hints go in first, resumes included, so the
+// capacity check and the solve see the values in force. The core's stored object is reset only by reset and
+// reset_clear. An object over capacity keeps its history: the solve loop rejects it before its first step.
+template <typename Core, typename Convergence>
+void enter_explicit_solve(const Core& core, const Convergence& convergence)
 {
+    core.write_policy_hints(convergence);
+    const solver_status status = core.status();
     if(within_capacity(convergence) && status != solver_status::budget_exhausted && status != solver_status::time_limit_reached)
         reset_criterion(convergence);
 }

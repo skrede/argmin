@@ -135,7 +135,7 @@ TEST_CASE("the stationarity criterion does not accept an infeasible null step", 
     CHECK(default_convergence<double>{}.check(r, 2) != solver_status::converged);
 }
 
-TEST_CASE("a caller's explicit stall window survives the policy's hint", "[known-defect][!shouldfail]")
+TEST_CASE("a caller's explicit stall window survives the policy's hint", "[status]")
 {
     const defects::repeat_counting_rosenbrock problem{};
     solver_options<> opts;
@@ -143,6 +143,24 @@ TEST_CASE("a caller's explicit stall window survives the policy's hint", "[known
     opts.set_stall_window(7);
     step_budget_solver<lbfgsb_policy<double, 2>, 2, defects::repeat_counting_rosenbrock> solver{lbfgsb_policy<double, 2>{}, problem, Eigen::Vector2d(-1.2, 1.0), opts, lbfgsb_policy<double, 2>::options_type{}};
     CHECK(std::get<stall_tolerance_criterion<double>>(solver.convergence().criteria).window == 7);
+    CHECK(std::get<stall_tolerance_criterion<double>>(solver.convergence().criteria).window_in_force() == 7);
+}
+
+TEST_CASE("an explicit solve takes the policy's stall window only where the caller left it unset", "[status]")
+{
+    const defects::repeat_counting_rosenbrock problem{};
+    solver_options<> opts;
+    opts.max_iterations = 1;
+    step_budget_solver<lbfgsb_policy<double, 2>, 2, defects::repeat_counting_rosenbrock> solver{lbfgsb_policy<double, 2>{}, problem, Eigen::Vector2d(-1.2, 1.0), opts, lbfgsb_policy<double, 2>::options_type{.stall_window = 9}};
+    const auto& stall = std::get<stall_tolerance_criterion<double>>(opts.convergence.criteria);
+    solver.solve(opts);
+    CHECK_FALSE(stall.window.has_value());
+    CHECK(stall.window_in_force() == 9);
+    opts.set_stall_window(7);
+    solver.reset_clear(Eigen::Vector2d(-1.2, 1.0));
+    solver.solve(opts);
+    CHECK(stall.window == 7);
+    CHECK(stall.window_in_force() == 7);
 }
 
 // Two equality residuals of 0.6e-6 each at the start: their L1 sum and their maximum straddle the 1e-6 floor.

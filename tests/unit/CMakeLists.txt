@@ -41,6 +41,7 @@ add_executable(argmin_unit_tests
     robustness/kraft_recovery_test.cpp
     scheduling_test.cpp
     convergence_test.cpp
+    caller_precedence_test.cpp
     line_search_test.cpp
     multistart_test.cpp
     projected_gn_test.cpp
@@ -123,6 +124,9 @@ target_link_libraries(argmin_unit_tests
         argmin::argmin
         Catch2::Catch2WithMain
 )
+
+# The precedence cells walk the shared case table, so the support headers are on the path.
+target_include_directories(argmin_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)
 
 target_compile_options(argmin_unit_tests PRIVATE ${ARGMIN_TEST_RELEASE_FLAGS} ${ARGMIN_WARNING_FLAGS})
 if(ARGMIN_LTO_SUPPORTED)

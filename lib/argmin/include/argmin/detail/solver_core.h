@@ -10,14 +10,13 @@
 #include "argmin/detail/terminal_step.h"
 #include "argmin/detail/criteria_state.h"
 #include "argmin/detail/tuple_contains.h"
+#include "argmin/detail/hint_precedence.h"
 #include "argmin/detail/evaluation_count.h"
 #include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
 #include "argmin/result/status.h"
 #include "argmin/solver/convergence.h"
 #include "argmin/solver/options.h"
-
-#include "argmin/options/convergence_defaults.h"
 
 #include "argmin/formulation/concepts.h"
 
@@ -404,10 +403,6 @@ public:
 
     scalar_type seed_best_bv() const { return bound_measure_(state_); }
 
-    // constraint_tolerance is a solver_options field (not a policy_options
-    // field), which is why this is a sibling to forward_policy_hints
-    // instead of an extension of it -- the two forwarders honor different
-    // scopes.
     // Mapping rule (max-of-two): user-supplied constraint_tolerance now
     // gates the composite E-measure (N&W 2e Def 12.1) via
     // stationarity_threshold rather than a separate primal-feasibility
@@ -431,90 +426,15 @@ public:
         }
     }
 
-    template <typename PolicyOpts>
-    void forward_policy_hints(const PolicyOpts& policy_opts)
+    template <typename OtherConvergence>
+    void write_policy_hints(const OtherConvergence& convergence) const
     {
-        if constexpr(requires { policy_opts.stall_window; })
-        {
-            // detail::tuple_contains_v (not a raw `requires { std::get<...> }`
-            // probe) is required here: libstdc++'s std::get<T> on a tuple
-            // lacking T fails via a static_assert inside the function body,
-            // which is not a SFINAE-friendly substitution failure and would
-            // hard-error for any Convergence lacking stall_tolerance_criterion
-            // (e.g. a caller-supplied policy combining a stall_window-bearing
-            // policy's options with a bespoke non-stall convergence type).
-            if constexpr(detail::tuple_contains_v<stall_tolerance_criterion<scalar_type>,
-                                                   decltype(options_.convergence.criteria)>)
-            {
-                auto& stall = std::get<stall_tolerance_criterion<scalar_type>>(options_.convergence.criteria);
-                stall.window = policy_opts.stall_window;
-            }
-        }
-
-        // MMA / GCMMA kkt_tolerance option -> stationarity_threshold via
-        // the max-of-two rule. Preserves the user's explicit
-        // stationarity_threshold while honoring the policy hint as a
-        // floor. Mirrors the pattern in forward_solver_hints above for
-        // constraint_tolerance -> stationarity_threshold.
-        //
-        // Reference: Nocedal and Wright, "Numerical Optimization" 2e,
-        //            Definition 12.1 (KKT stationarity); canonical
-        //            max-of-two mapping rule per forward_solver_hints.
-        if constexpr(requires { policy_opts.kkt_tolerance; })
-        {
-            using criteria_tuple = decltype(options_.convergence.criteria);
-            if constexpr(detail::tuple_contains_v<objective_tolerance_criterion<scalar_type>, criteria_tuple>)
-            {
-                auto& ftol = std::get<objective_tolerance_criterion<scalar_type>>(options_.convergence.criteria);
-                if(policy_opts.kkt_tolerance)
-                {
-                    ftol.stationarity_threshold =
-                        std::max(ftol.stationarity_threshold, *policy_opts.kkt_tolerance);
-                }
-            }
-            if constexpr(detail::tuple_contains_v<objective_tolerance_rel_criterion<scalar_type>, criteria_tuple>)
-            {
-                auto& ftol_rel = std::get<objective_tolerance_rel_criterion<scalar_type>>(options_.convergence.criteria);
-                if(policy_opts.kkt_tolerance)
-                {
-                    ftol_rel.stationarity_threshold =
-                        std::max(ftol_rel.stationarity_threshold, *policy_opts.kkt_tolerance);
-                }
-            }
-        }
-
-        // MMA / GCMMA stall_tolerance_threshold option -> stall_tolerance_criterion.
-        // Unconditional set via value_or(default): the criterion's
-        // `if(!threshold) return std::nullopt;` short-circuit means a nullopt
-        // threshold disables the criterion silently.  stall_tolerance_threshold
-        // has no baseline; this wire is what enables the criterion for the
-        // MMA / GCMMA policy family.  Mirrors the canonical forward_solver_hints
-        // constraint_tolerance -> stationarity_threshold precedent above but
-        // uses value_or rather than max-of-two because stall detection has no
-        // pre-existing default to preserve.
-        //
-        // The best_seen_feasible metric flag is auto-enabled when the policy
-        // has the rho_init option (MMA) or the raa0 option (GCMMA), which
-        // together identify the MMA policy family and the early-convergence-
-        // then-destabilization mechanism documented in in-tree diagnosis
-        // traces.  Non-MMA policies that happen to expose
-        // stall_tolerance_threshold (none today) leave the flag in its
-        // defaulted false state; the criterion then uses the combined
-        // (objective + constraint_violation) metric byte-for-byte.
-        if constexpr(requires { policy_opts.stall_tolerance_threshold; })
-        {
-            using criteria_tuple = decltype(options_.convergence.criteria);
-            if constexpr(detail::tuple_contains_v<stall_tolerance_criterion<scalar_type>, criteria_tuple>)
-            {
-                auto& stall = std::get<stall_tolerance_criterion<scalar_type>>(options_.convergence.criteria);
-                stall.threshold = policy_opts.stall_tolerance_threshold.value_or(convergence_defaults<scalar_type>::stall_threshold);
-                if constexpr(requires { policy_opts.rho_init; }
-                          || requires { policy_opts.raa0; })
-                {
-                    stall.track_best_seen_feasible = true;
-                }
-            }
-        }
+        if(policy_opts_)
+            detail::write_hints(convergence, *policy_opts_);
+        else if constexpr(requires { policy_.options; })
+            detail::write_hints(convergence, policy_.options);
+        else
+            detail::write_hints(convergence, detail::no_policy_hints{});
     }
 
 private:
@@ -547,11 +467,8 @@ private:
         , last_status_{built_ ? solver_status::running : solver_status::invalid_problem}
     {
         options_.convergence.reset();
+        write_policy_hints(options_.convergence);
         forward_solver_hints(opts);
-        if(policy_opts_)
-            forward_policy_hints(*policy_opts_);
-        else if constexpr(requires { policy_.options; })
-            forward_policy_hints(policy_.options);
     }
 
     // Init gets the constructor's policy options again, so a policy copying them into its state is rebuilt with

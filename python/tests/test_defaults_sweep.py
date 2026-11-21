@@ -82,11 +82,9 @@ def test_the_policy_snapshot_reports_the_committed_defaults(repository_root, sol
     check_entry(repository_root, snapshot, POLICY_OPTION_TYPE[solver_name])
 
 
-# The driver's stall window is the one field a policy overwrites: the driver
-# copies the policy's window over it unconditionally, where the neighboring
-# hints take the larger of the two. That is library behavior, so the field is
-# excluded from the committed-default comparison and its actual value is pinned
-# against the policy instead.
+# A policy's stall window is a hint for a window the caller left unset, so the
+# snapshot reports the window as None, and the window in force is pinned
+# against the policy and, with no solver, against the named library default.
 @pytest.mark.parametrize("solver_name", sorted(UNCONFIGURED))
 def test_the_driver_snapshot_reports_the_committed_defaults(repository_root, solver_name):
     solver = UNCONFIGURED[solver_name]()
@@ -99,8 +97,6 @@ def test_the_driver_snapshot_reports_the_committed_defaults(repository_root, sol
             if source.reason(field):
                 continue
             attribute = source.renamed(field)
-            if attribute == "stall_window":
-                continue
             expected = resolve(initializer, constants)
             if isinstance(expected, (Empty, Designated, Unresolved, EnumMember)):
                 continue
@@ -108,9 +104,11 @@ def test_the_driver_snapshot_reports_the_committed_defaults(repository_root, sol
                 expected = float(expected)
             assert getattr(snapshot, attribute) == expected, (solver_name, attribute)
 
-    assert snapshot.stall_window == solver.policy_options().stall_window
-    if snapshot.stall_window != committed.stall_window:
-        assert solver.policy_options().stall_window != committed.stall_window
+    library_window = resolve("convergence_defaults<double>::stall_window", {})
+    assert committed.stall_window is None
+    assert committed.stall_window_in_force == library_window
+    assert snapshot.stall_window is None
+    assert snapshot.stall_window_in_force == solver.policy_options().stall_window
 
 
 

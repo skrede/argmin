@@ -81,19 +81,18 @@ def test_an_unspecified_keyword_keeps_the_library_default(method):
     )
 
 
-# Every policy bound here carries its own stall window, and the driver copies
-# that policy value over the one the driver keyword set -- unconditionally,
-# unlike the max-of-two rule the other forwarded hints use. The driver keyword
-# is therefore inert for these five methods, which is only visible at all
-# because the options snapshot reads the effective value back.
+# Every policy bound here carries its own stall window. It is a hint: the
+# driver keyword wins when given, and the snapshot reports the unset window as
+# None while the policy's window is the one in force.
 @ALL_METHODS
-def test_the_policy_stall_window_overrides_the_driver_keyword(method):
+def test_the_driver_stall_window_keyword_wins_over_the_policy_window(method):
     solver = FACTORIES[method](stall_window=7, policy_stall_window=9)
-    assert solver.options().stall_window == 9
+    assert solver.options().stall_window == 7
+    assert solver.options().stall_window_in_force == 7
 
-    ignored = FACTORIES[method](stall_window=7)
-    assert ignored.options().stall_window == ignored.policy_options().stall_window
-    assert ignored.options().stall_window != 7
+    hinted = FACTORIES[method](policy_stall_window=9)
+    assert hinted.options().stall_window is None
+    assert hinted.options().stall_window_in_force == 9
 
 
 def test_the_stochastic_method_is_reproducible_at_a_fixed_seed():

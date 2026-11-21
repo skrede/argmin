@@ -118,6 +118,11 @@ TABLE = {
                     "feasibility_tolerance",
                     "the criterion's own copy, as in the step criterion above",
                 ),
+                (
+                    "policy_hints",
+                    "written by the solver from its policy, never configured; the "
+                    "window it puts in force is pinned by the driver snapshot sweep",
+                ),
             ),
         ),
     ),

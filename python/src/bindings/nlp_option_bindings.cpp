@@ -70,6 +70,9 @@ void bind_driver_options(nb::module_& m)
         .def_prop_ro("stall_window",
                      [](const driver_options& opts)
                      { return criterion_of<stall_tolerance_criterion<>>(opts).window; })
+        .def_prop_ro("stall_window_in_force",
+                     [](const driver_options& opts)
+                     { return criterion_of<stall_tolerance_criterion<>>(opts).window_in_force(); })
         .def("__repr__", &describe_driver_options);
 }
 

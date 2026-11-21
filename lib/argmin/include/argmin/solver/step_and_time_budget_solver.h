@@ -156,7 +156,7 @@ public:
     template <typename ExplicitConvergence>
     result_type solve(const time_budget_options<ExplicitConvergence>& opts)
     {
-        detail::reset_unless_resuming(core_.status(), opts.core.convergence);
+        detail::enter_explicit_solve(core_, opts.core.convergence);
         return run(opts.core.max_iterations, opts.core, opts.max_time, opts.time_poll_stride);
     }
 
@@ -169,7 +169,7 @@ public:
     result_type step_n(std::uint32_t budget,
                        const time_budget_options<ExplicitConvergence>& opts)
     {
-        detail::reset_unless_resuming(core_.status(), opts.core.convergence);
+        detail::enter_explicit_solve(core_, opts.core.convergence);
         return run(budget, opts.core, opts.max_time, opts.time_poll_stride);
     }
 

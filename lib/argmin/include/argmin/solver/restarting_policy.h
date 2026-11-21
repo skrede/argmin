@@ -64,8 +64,7 @@ struct restarting_policy
         // restarting_policy emits synthetic (obj_change=1.0, step_size=1.0) step_results on
         // restart and maintains its own internal stall logic (see the restart-trigger block
         // below). Exposing an external stall_window would double-fire against this internal
-        // logic; feasibility_gate is inner-policy territory. Silent no-op made explicit here —
-        // see forward_policy_hints in step_budget_solver.h.
+        // logic; feasibility_gate is inner-policy territory.
     };
 
     template <typename P = void>

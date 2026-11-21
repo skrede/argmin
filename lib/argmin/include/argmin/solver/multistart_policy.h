@@ -50,9 +50,7 @@ struct multistart_policy
         // multistart_policy emits synthetic (obj_change=1.0, step_size=1.0) step_results on
         // restart-consuming steps; exposing an external stall_window would double-fire against
         // the inner policy's own stall logic, which is already forwarded via options.inner.
-        // feasibility_gate is inner-policy territory for the same reason. Silent no-op made
-        // explicit here — see forward_policy_hints in step_budget_solver.h for the plumbing that
-        // this SKIP deactivates.
+        // feasibility_gate is inner-policy territory for the same reason.
     };
 
     // Reuses restarting_policy's inner-state resolution (state_type<P> when the inner policy templates on the problem,

@@ -3,6 +3,8 @@
 
 #include "argmin/types.h"
 
+#include <cstdint>
+
 namespace argmin
 {
 
@@ -18,6 +20,7 @@ struct convergence_defaults<double>
     static constexpr double step_threshold = 1e-8;
     static constexpr double feasibility_tolerance = 1e-6;
     static constexpr double stall_threshold = 1e-6;
+    static constexpr std::uint16_t stall_window = 50;
 };
 
 template <>
@@ -31,6 +34,7 @@ struct convergence_defaults<float>
     static constexpr float step_threshold = 3e-4f;          // rule
     static constexpr float feasibility_tolerance = 2e-3f;   // rule
     static constexpr float stall_threshold = 2e-3f;         // rule
+    static constexpr std::uint16_t stall_window = 50;
 };
 
 }

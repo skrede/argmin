@@ -2,6 +2,7 @@
 #define HPP_GUARD_ARGMIN_SOLVER_CONVERGENCE_H
 
 #include "argmin/detail/criteria_state.h"
+#include "argmin/detail/hint_precedence.h"
 
 #include "argmin/result/step_result.h"
 #include "argmin/result/status.h"
@@ -209,17 +210,10 @@ struct step_tolerance_rel_criterion
 };
 
 // Stall detection: terminates when objective + constraint violation makes
-// no progress over a rolling window of K iterations.
-//
-// Unlike the other criteria which are stateless, this maintains a circular
-// buffer of combined metric values. The mutable buffer keeps convergence
-// logic self-contained within the criterion.
-//
-// The combined metric (objective + constraint_violation) catches SQP
-// solvers that cycle between feasible and infeasible points, where the
-// objective alone may appear to oscillate while overall progress stalls.
-//
-// Reference: K&W 2e Section 4.4 (convergence criteria).
+// no progress over a rolling window of K iterations. The combined metric
+// catches SQP solvers that cycle between feasible and infeasible points,
+// where the objective alone may appear to oscillate while overall progress
+// stalls. Reference: K&W 2e Section 4.4 (convergence criteria).
 template <scalar S = double>
 struct stall_tolerance_criterion
 {
@@ -227,41 +221,37 @@ struct stall_tolerance_criterion
     // Twice the largest shipped window (200, BOBYQA and ISRES), rounded up to a power of two: 4096 bytes at double. A
     // larger window is rejected with invalid_problem, never shortened.
     static constexpr std::uint16_t capacity = 512;
+    // An empty field is one the caller did not set: the policy's hint is then in force, else the library default.
     std::optional<S> threshold{};
-    std::uint16_t window{50};
-    bool track_best_seen_feasible{false};
+    std::optional<std::uint16_t> window{};
+    std::optional<bool> track_best_seen_feasible{};
     S feasibility_tolerance{convergence_defaults<S>::feasibility_tolerance};
+    // Written by the solver core from the current policy at construction and at every explicit solve, never by the
+    // caller, so a hint never reads back as a caller setting.
+    mutable detail::stall_hints<S> policy_hints{};
+
+    std::optional<S> threshold_in_force() const { return detail::in_force(threshold, policy_hints.threshold); }
+
+    std::uint16_t window_in_force() const { return detail::in_force(window, policy_hints.window, convergence_defaults<S>::stall_window); }
+
+    bool best_seen_feasible_in_force() const { return detail::in_force(track_best_seen_feasible, policy_hints.track_best_seen_feasible, false); }
 
     std::optional<solver_status> check(const step_result<S>& r,
                                        std::uint32_t iteration) const
     {
-        if(!threshold || window > capacity)
+        const std::optional<S> tolerance = threshold_in_force();
+        const std::uint16_t span = window_in_force();
+        if(!tolerance || span > capacity)
             return std::nullopt;
 
-        // The best-seen feasible objective never increases, so an objective oscillating about an optimum it already
-        // reached still stalls (a heuristic for the moving-asymptote family of Svanberg 2002, SIAM J. Optim. 12(2)).
-        S metric;
-        if(track_best_seen_feasible)
-        {
-            if(r.constraint_violation <= feasibility_tolerance
-               && r.objective_value < best_seen_feasible_)
-                best_seen_feasible_ = r.objective_value;
-            metric = best_seen_feasible_;
-        }
-        else
-        {
-            metric = r.objective_value + r.constraint_violation;
-        }
+        const S metric = metric_of(r);
         buffer_[iteration % capacity] = metric;
-
-        if(iteration < window)
+        if(iteration < span)
             return std::nullopt;
 
-        S old_metric = buffer_[(iteration - window + 1) % capacity];
-
-        if(std::abs(metric - old_metric) < *threshold * std::max(std::abs(metric), S(1)))
+        const S old_metric = buffer_[(iteration - span + 1) % capacity];
+        if(std::abs(metric - old_metric) < *tolerance * std::max(std::abs(metric), S(1)))
             return solver_status::stalled;
-
         return std::nullopt;
     }
 
@@ -274,6 +264,17 @@ struct stall_tolerance_criterion
 private:
     mutable std::array<S, capacity> buffer_{};
     mutable S best_seen_feasible_{std::numeric_limits<S>::infinity()};
+
+    // The best-seen feasible objective never increases, so an objective oscillating about an optimum it already
+    // reached still stalls (a heuristic for the moving-asymptote family of Svanberg 2002, SIAM J. Optim. 12(2)).
+    S metric_of(const step_result<S>& r) const
+    {
+        if(!best_seen_feasible_in_force())
+            return r.objective_value + r.constraint_violation;
+        if(r.constraint_violation <= feasibility_tolerance && r.objective_value < best_seen_feasible_)
+            best_seen_feasible_ = r.objective_value;
+        return best_seen_feasible_;
+    }
 };
 
 template <typename... Criteria>
@@ -318,10 +319,7 @@ struct convergence_policy
         last_check_results_ = {};
     }
 
-    // Per-criterion statuses from the most recent check() call. Index
-    // matches declaration order of Criteria...; a nullopt entry means
-    // the criterion did not fire. Reachable from step_budget_solver via
-    // solver.convergence().last_check_results().
+    // Index matches the declaration order of Criteria...; a nullopt entry means the criterion did not fire.
     const std::array<std::optional<solver_status>, sizeof...(Criteria)>& last_check_results() const noexcept
     {
         return last_check_results_;

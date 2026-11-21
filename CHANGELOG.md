@@ -280,6 +280,20 @@ Policies available at HEAD, grouped by problem class:
   from construction, `reset` and `reset_clear`, and an explicit `solve(opts)`
   or `step_n(budget, opts)` with such options returns `invalid_problem`
   without stepping.
+- A policy hint no longer overrides a caller's convergence setting on any solve
+  path. Breaking: `stall_tolerance_criterion::window` and
+  `track_best_seen_feasible` are `std::optional` (empty when the caller did not
+  set them), and `window_in_force()`, `threshold_in_force()` and
+  `best_seen_feasible_in_force()` report the value used: the caller's, then the
+  current policy's hint, then the library default
+  (`convergence_defaults::stall_window` is 50). The hints apply at construction
+  and at every explicit `solve(opts)` and `step_n(budget, opts)` without being
+  written into the caller's fields, so a reused options object carries no hint
+  from another policy. Python: `SolverOptions.stall_window` is `None` when unset
+  and `SolverOptions.stall_window_in_force` reports the window used.
+- Breaking: `augmented_lagrangian_policy`'s `constraint_tolerance` option is
+  `std::optional`. The outer feasibility test uses the solver's
+  `constraint_tolerance` when set, then this option, then the default (1e-6).
 
 ### Notes
 

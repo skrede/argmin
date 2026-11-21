@@ -87,7 +87,7 @@ TEST_CASE("augmented_lagrangian options are direct-value and single-sourced",
     static_assert(std::is_same_v<double, decltype(o.mu_decrease)>);
     static_assert(std::is_same_v<double, decltype(o.mu_min)>);
     static_assert(std::is_same_v<std::uint32_t, decltype(o.inner_max_iterations)>);
-    static_assert(std::is_same_v<double, decltype(o.constraint_tolerance)>);
+    static_assert(std::is_same_v<std::optional<double>, decltype(o.constraint_tolerance)>);
     static_assert(std::is_same_v<double, decltype(o.inner_gradient_tolerance)>);
     static_assert(std::is_same_v<double, decltype(o.feasibility_progress)>);
     static_assert(std::is_same_v<bool, decltype(o.warm_start_inner)>);
@@ -97,7 +97,7 @@ TEST_CASE("augmented_lagrangian options are direct-value and single-sourced",
     CHECK(o.mu_decrease == 0.25);
     CHECK(o.mu_min == 1e-6);
     CHECK(o.inner_max_iterations == 200u);
-    CHECK(o.constraint_tolerance == 1e-6);
+    CHECK_FALSE(o.constraint_tolerance.has_value());
     CHECK(o.inner_gradient_tolerance == 1e-6);
     CHECK(o.feasibility_progress == 0.25);
     CHECK(o.warm_start_inner == true);

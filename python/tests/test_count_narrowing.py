@@ -32,7 +32,7 @@ def assert_rejected(raised, keyword):
 def test_the_largest_policy_stall_window_is_kept_exactly(method):
     solver = FACTORIES[method](policy_stall_window=UINT16_MAX)
     assert solver.policy_options().stall_window == UINT16_MAX
-    assert solver.options().stall_window == UINT16_MAX
+    assert solver.options().stall_window_in_force == UINT16_MAX
 
 
 @ALL_METHODS
