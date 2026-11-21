@@ -603,7 +603,7 @@ kraft_slsqp|unconstrained|rosenbrock|final|x1,0x3ff0000002c6b8d4
 kraft_slsqp|unconstrained|rosenbrock|final|f,0x3c9050d75b0d8634
 kraft_slsqp|unconstrained|rosenbrock|final|status,1:converged
 kraft_slsqp|unconstrained|rosenbrock|final|iterations,19
-kraft_slsqp|unconstrained|rosenbrock|final|evaluations,19
+kraft_slsqp|unconstrained|rosenbrock|final|evaluations,67
 kraft_slsqp|bound|hs038|0,0x4d12e1c62282c2c2
 kraft_slsqp|bound|hs038|1,0xeb81fb5c5cdbaeed
 kraft_slsqp|bound|hs038|2,0xd96977a500a45279
@@ -641,7 +641,7 @@ kraft_slsqp|bound|hs038|final|x3,0x3ff0000003bdb360
 kraft_slsqp|bound|hs038|final|f,0x3cba0f2a80ba6e58
 kraft_slsqp|bound|hs038|final|status,1:converged
 kraft_slsqp|bound|hs038|final|iterations,30
-kraft_slsqp|bound|hs038|final|evaluations,30
+kraft_slsqp|bound|hs038|final|evaluations,93
 kraft_slsqp|inequality|hs024|0,0x42cf924ffb1e9de2
 kraft_slsqp|inequality|hs024|1,0x57601e6f5bbd1b8e
 kraft_slsqp|inequality|hs024|2,0x204dbd78a9797a85
@@ -660,7 +660,7 @@ kraft_slsqp|inequality|hs024|final|x1,0x3ffbb67ae8584cad
 kraft_slsqp|inequality|hs024|final|f,0xbff0000000000005
 kraft_slsqp|inequality|hs024|final|status,1:converged
 kraft_slsqp|inequality|hs024|final|iterations,13
-kraft_slsqp|inequality|hs024|final|evaluations,13
+kraft_slsqp|inequality|hs024|final|evaluations,41
 kraft_slsqp|equality|hs028|0,0x467ac2da95cf678c
 kraft_slsqp|equality|hs028|1,0x0579f6298f1e5e15
 kraft_slsqp|equality|hs028|2,0xae1906a4d742dd7f
@@ -677,7 +677,7 @@ kraft_slsqp|equality|hs028|final|x2,0x3fdffffffacfad17
 kraft_slsqp|equality|hs028|final|f,0x3c8e692e97ebb268
 kraft_slsqp|equality|hs028|final|status,1:converged
 kraft_slsqp|equality|hs028|final|iterations,10
-kraft_slsqp|equality|hs028|final|evaluations,10
+kraft_slsqp|equality|hs028|final|evaluations,35
 kraft_slsqp|mixed|hs071|0,0x3e32bfb963be74ec
 kraft_slsqp|mixed|hs071|1,0xcacc1b6f521c8fae
 kraft_slsqp|mixed|hs071|2,0xf1a7e926e6223ed8
@@ -691,7 +691,7 @@ kraft_slsqp|mixed|hs071|final|x3,0x3ff6120e6f3d4181
 kraft_slsqp|mixed|hs071|final|f,0x40310396a30ee7ea
 kraft_slsqp|mixed|hs071|final|status,1:converged
 kraft_slsqp|mixed|hs071|final|iterations,6
-kraft_slsqp|mixed|hs071|final|evaluations,6
+kraft_slsqp|mixed|hs071|final|evaluations,24
 nw_sqp|bound|hs038|0,0x598dddc63271bef9
 nw_sqp|bound|hs038|1,0x012e8954c477109d
 nw_sqp|bound|hs038|2,0x00c592e0d129024e
@@ -729,7 +729,7 @@ nw_sqp|bound|hs038|final|x3,0x3ff0000003a7fc03
 nw_sqp|bound|hs038|final|f,0x3cb8f420d2993978
 nw_sqp|bound|hs038|final|status,1:converged
 nw_sqp|bound|hs038|final|iterations,30
-nw_sqp|bound|hs038|final|evaluations,30
+nw_sqp|bound|hs038|final|evaluations,33
 nw_sqp|inequality|hs024|0,0x42cf924ffb1e9de2
 nw_sqp|inequality|hs024|1,0x2455f4b2a5fac951
 nw_sqp|inequality|hs024|2,0xceb2b298634772e3
@@ -747,7 +747,7 @@ nw_sqp|inequality|hs024|final|x1,0x3ffbb67ae8584cad
 nw_sqp|inequality|hs024|final|f,0xbff0000000000005
 nw_sqp|inequality|hs024|final|status,1:converged
 nw_sqp|inequality|hs024|final|iterations,12
-nw_sqp|inequality|hs024|final|evaluations,12
+nw_sqp|inequality|hs024|final|evaluations,14
 nw_sqp|equality|hs028|0,0x5d8f419503d9b529
 nw_sqp|equality|hs028|1,0xdd0a6dee99ef17ba
 nw_sqp|equality|hs028|2,0x8d6d612a0c4f9270
@@ -764,7 +764,7 @@ nw_sqp|equality|hs028|final|x2,0x3fdffffffacfad18
 nw_sqp|equality|hs028|final|f,0x3c8e692e97ebb268
 nw_sqp|equality|hs028|final|status,1:converged
 nw_sqp|equality|hs028|final|iterations,10
-nw_sqp|equality|hs028|final|evaluations,10
+nw_sqp|equality|hs028|final|evaluations,14
 nw_sqp|mixed|hs071|0,0x47a0c5160c3c3932
 nw_sqp|mixed|hs071|1,0x757e23148fe798cd
 nw_sqp|mixed|hs071|2,0x86b674754b51cca1
@@ -785,7 +785,7 @@ nw_sqp|mixed|hs071|final|x3,0x3ff6120e6a124600
 nw_sqp|mixed|hs071|final|f,0x40310396a0a0e7d6
 nw_sqp|mixed|hs071|final|status,1:converged
 nw_sqp|mixed|hs071|final|iterations,13
-nw_sqp|mixed|hs071|final|evaluations,13
+nw_sqp|mixed|hs071|final|evaluations,15
 filter_slsqp|unconstrained|rosenbrock|0,0x57c8e4fe7d87d751
 filter_slsqp|unconstrained|rosenbrock|1,0x4f91be5ed1ca94de
 filter_slsqp|unconstrained|rosenbrock|2,0x6fe8ae79d78facd0
@@ -810,7 +810,7 @@ filter_slsqp|unconstrained|rosenbrock|final|x1,0x3ff0000002c6b8d4
 filter_slsqp|unconstrained|rosenbrock|final|f,0x3c9050d75b0d8634
 filter_slsqp|unconstrained|rosenbrock|final|status,1:converged
 filter_slsqp|unconstrained|rosenbrock|final|iterations,19
-filter_slsqp|unconstrained|rosenbrock|final|evaluations,19
+filter_slsqp|unconstrained|rosenbrock|final|evaluations,48
 filter_slsqp|bound|hs038|0,0x4d12e1c62282c2c2
 filter_slsqp|bound|hs038|1,0xeb81fb5c5cdbaeed
 filter_slsqp|bound|hs038|2,0xd96977a500a45279
@@ -848,7 +848,7 @@ filter_slsqp|bound|hs038|final|x3,0x3ff0000003bdb360
 filter_slsqp|bound|hs038|final|f,0x3cba0f2a80ba6e58
 filter_slsqp|bound|hs038|final|status,1:converged
 filter_slsqp|bound|hs038|final|iterations,30
-filter_slsqp|bound|hs038|final|evaluations,30
+filter_slsqp|bound|hs038|final|evaluations,63
 filter_slsqp|inequality|hs076|0,0x5695d8750ed0ca0c
 filter_slsqp|inequality|hs076|1,0xe1fd74b2c1906175
 filter_slsqp|inequality|hs076|2,0x46ba6fb5c932fe05
@@ -861,7 +861,7 @@ filter_slsqp|inequality|hs076|final|x3,0x3fe1745d56274444
 filter_slsqp|inequality|hs076|final|f,0xc012ba2e8ba2e896
 filter_slsqp|inequality|hs076|final|status,1:converged
 filter_slsqp|inequality|hs076|final|iterations,5
-filter_slsqp|inequality|hs076|final|evaluations,5
+filter_slsqp|inequality|hs076|final|evaluations,12
 filter_slsqp|equality|hs028|0,0x467ac2da95cf678c
 filter_slsqp|equality|hs028|1,0x0579f6298f1e5e15
 filter_slsqp|equality|hs028|2,0xae1906a4d742dd7f
@@ -878,7 +878,7 @@ filter_slsqp|equality|hs028|final|x2,0x3fdffffffacfad17
 filter_slsqp|equality|hs028|final|f,0x3c8e692e97ebb268
 filter_slsqp|equality|hs028|final|status,1:converged
 filter_slsqp|equality|hs028|final|iterations,10
-filter_slsqp|equality|hs028|final|evaluations,10
+filter_slsqp|equality|hs028|final|evaluations,25
 filter_slsqp|mixed|hs071|0,0x3e32bfb963be74ec
 filter_slsqp|mixed|hs071|1,0xcacc1b6f521c8fae
 filter_slsqp|mixed|hs071|2,0xf1a7e926e6223ed8
@@ -892,7 +892,7 @@ filter_slsqp|mixed|hs071|final|x3,0x3ff6120e6795f17a
 filter_slsqp|mixed|hs071|final|f,0x40310396a30e90fa
 filter_slsqp|mixed|hs071|final|status,1:converged
 filter_slsqp|mixed|hs071|final|iterations,6
-filter_slsqp|mixed|hs071|final|evaluations,6
+filter_slsqp|mixed|hs071|final|evaluations,14
 filter_nw_sqp|bound|hs038|0,0x598dddc63271bef9
 filter_nw_sqp|bound|hs038|1,0x012e8954c477109d
 filter_nw_sqp|bound|hs038|2,0x00c592e0d129024e
@@ -930,7 +930,7 @@ filter_nw_sqp|bound|hs038|final|x3,0x3ff0000003a7fc03
 filter_nw_sqp|bound|hs038|final|f,0x3cb8f420d2993978
 filter_nw_sqp|bound|hs038|final|status,1:converged
 filter_nw_sqp|bound|hs038|final|iterations,30
-filter_nw_sqp|bound|hs038|final|evaluations,30
+filter_nw_sqp|bound|hs038|final|evaluations,33
 filter_nw_sqp|inequality|hs024|0,0x42cf924ffb1e9de2
 filter_nw_sqp|inequality|hs024|1,0x2455f4b2a5fac951
 filter_nw_sqp|inequality|hs024|2,0xceb2b298634772e3
@@ -948,7 +948,7 @@ filter_nw_sqp|inequality|hs024|final|x1,0x3ffbb67ae8584cad
 filter_nw_sqp|inequality|hs024|final|f,0xbff0000000000005
 filter_nw_sqp|inequality|hs024|final|status,1:converged
 filter_nw_sqp|inequality|hs024|final|iterations,12
-filter_nw_sqp|inequality|hs024|final|evaluations,12
+filter_nw_sqp|inequality|hs024|final|evaluations,14
 filter_nw_sqp|equality|hs028|0,0x5d8f419503d9b529
 filter_nw_sqp|equality|hs028|1,0xdd0a6dee99ef17ba
 filter_nw_sqp|equality|hs028|2,0x8d6d612a0c4f9270
@@ -965,7 +965,7 @@ filter_nw_sqp|equality|hs028|final|x2,0x3fdffffffacfad18
 filter_nw_sqp|equality|hs028|final|f,0x3c8e692e97ebb268
 filter_nw_sqp|equality|hs028|final|status,1:converged
 filter_nw_sqp|equality|hs028|final|iterations,10
-filter_nw_sqp|equality|hs028|final|evaluations,10
+filter_nw_sqp|equality|hs028|final|evaluations,14
 filter_nw_sqp|mixed|hs071|0,0x47a0c5160c3c3932
 filter_nw_sqp|mixed|hs071|1,0x757e23148fe798cd
 filter_nw_sqp|mixed|hs071|2,0x86b674754b51cca1
@@ -986,7 +986,7 @@ filter_nw_sqp|mixed|hs071|final|x3,0x3ff6120e6a124600
 filter_nw_sqp|mixed|hs071|final|f,0x40310396a0a0e7d6
 filter_nw_sqp|mixed|hs071|final|status,1:converged
 filter_nw_sqp|mixed|hs071|final|iterations,13
-filter_nw_sqp|mixed|hs071|final|evaluations,13
+filter_nw_sqp|mixed|hs071|final|evaluations,15
 tr_sqp_fast|bound|hs038|0,0xd0ef7cdca738e0ee
 tr_sqp_fast|bound|hs038|1,0x974e7878dda0ce71
 tr_sqp_fast|bound|hs038|2,0xd19e59e54d6efdf0
@@ -1032,7 +1032,7 @@ tr_sqp_fast|bound|hs038|final|x3,0x3ff00000015b6829
 tr_sqp_fast|bound|hs038|final|f,0x3c7c5c8345c7c4e0
 tr_sqp_fast|bound|hs038|final|status,1:converged
 tr_sqp_fast|bound|hs038|final|iterations,38
-tr_sqp_fast|bound|hs038|final|evaluations,38
+tr_sqp_fast|bound|hs038|final|evaluations,76
 tr_sqp_fast|inequality|hs076|0,0x90e27eaef8b3701a
 tr_sqp_fast|inequality|hs076|1,0xe60fcdf8147361ad
 tr_sqp_fast|inequality|hs076|2,0xf19082204f3615b5
@@ -1054,7 +1054,7 @@ tr_sqp_fast|inequality|hs076|final|x3,0x3fe1745d167a0f42
 tr_sqp_fast|inequality|hs076|final|f,0xc012ba2e8ba2e8be
 tr_sqp_fast|inequality|hs076|final|status,9:roundoff_limited
 tr_sqp_fast|inequality|hs076|final|iterations,14
-tr_sqp_fast|inequality|hs076|final|evaluations,14
+tr_sqp_fast|inequality|hs076|final|evaluations,29
 tr_sqp_fast|equality|hs028|0,0xe5610c21570f29ac
 tr_sqp_fast|equality|hs028|1,0xab0f9c759d02f1de
 tr_sqp_fast|equality|hs028|2,0xa5e21c7f615bb366
@@ -1071,7 +1071,7 @@ tr_sqp_fast|equality|hs028|final|x2,0x3fe0000000083876
 tr_sqp_fast|equality|hs028|final|f,0x3bc10917c1ed2000
 tr_sqp_fast|equality|hs028|final|status,1:converged
 tr_sqp_fast|equality|hs028|final|iterations,10
-tr_sqp_fast|equality|hs028|final|evaluations,10
+tr_sqp_fast|equality|hs028|final|evaluations,22
 tr_sqp_fast|mixed|hs071|0,0x95d95bb9485ee0c2
 tr_sqp_fast|mixed|hs071|1,0x7facb66e81739abb
 tr_sqp_fast|mixed|hs071|2,0xfe5a3644ff84cf5a
@@ -1094,7 +1094,7 @@ tr_sqp_fast|mixed|hs071|final|x3,0x3ff6120e6ec211d3
 tr_sqp_fast|mixed|hs071|final|f,0x40310396a310d7b1
 tr_sqp_fast|mixed|hs071|final|status,1:converged
 tr_sqp_fast|mixed|hs071|final|iterations,15
-tr_sqp_fast|mixed|hs071|final|evaluations,15
+tr_sqp_fast|mixed|hs071|final|evaluations,27
 tr_sqp_accurate|bound|hs038|0,0xd0ef7cdca738e0ee
 tr_sqp_accurate|bound|hs038|1,0x974e7878dda0ce71
 tr_sqp_accurate|bound|hs038|2,0xd19e59e54d6efdf0
@@ -1138,7 +1138,7 @@ tr_sqp_accurate|bound|hs038|final|x3,0x3fefffffb2863283
 tr_sqp_accurate|bound|hs038|final|f,0x3d15674811d37430
 tr_sqp_accurate|bound|hs038|final|status,1:converged
 tr_sqp_accurate|bound|hs038|final|iterations,36
-tr_sqp_accurate|bound|hs038|final|evaluations,36
+tr_sqp_accurate|bound|hs038|final|evaluations,73
 tr_sqp_accurate|inequality|hs024|0,0xae72f3868865fda3
 tr_sqp_accurate|inequality|hs024|1,0xb97ef6eac0986e4d
 tr_sqp_accurate|inequality|hs024|2,0x60f6ac1467d4c753
@@ -1194,7 +1194,7 @@ tr_sqp_accurate|inequality|hs024|final|x1,0x3ffbb67ae8584cb0
 tr_sqp_accurate|inequality|hs024|final|f,0xbff000000000000b
 tr_sqp_accurate|inequality|hs024|final|status,1:converged
 tr_sqp_accurate|inequality|hs024|final|iterations,73
-tr_sqp_accurate|inequality|hs024|final|evaluations,73
+tr_sqp_accurate|inequality|hs024|final|evaluations,148
 tr_sqp_accurate|equality|hs028|0,0xe5610c21570f29ac
 tr_sqp_accurate|equality|hs028|1,0xe2b4951ba31c098f
 tr_sqp_accurate|equality|hs028|2,0x29a3192a42810d20
@@ -1209,7 +1209,7 @@ tr_sqp_accurate|equality|hs028|final|x2,0x3fdfffffc43d0c5a
 tr_sqp_accurate|equality|hs028|final|f,0x3d00e3f9cee5ce34
 tr_sqp_accurate|equality|hs028|final|status,1:converged
 tr_sqp_accurate|equality|hs028|final|iterations,8
-tr_sqp_accurate|equality|hs028|final|evaluations,8
+tr_sqp_accurate|equality|hs028|final|evaluations,18
 tr_sqp_accurate|mixed|hs071|0,0x95d95bb9485ee0c2
 tr_sqp_accurate|mixed|hs071|1,0x5c15e7fa918f5dea
 tr_sqp_accurate|mixed|hs071|2,0x1f1e81a6e063d5ce
@@ -1224,7 +1224,7 @@ tr_sqp_accurate|mixed|hs071|final|x3,0x3ff6120e6e091542
 tr_sqp_accurate|mixed|hs071|final|f,0x40310396a30951a7
 tr_sqp_accurate|mixed|hs071|final|status,1:converged
 tr_sqp_accurate|mixed|hs071|final|iterations,7
-tr_sqp_accurate|mixed|hs071|final|evaluations,7
+tr_sqp_accurate|mixed|hs071|final|evaluations,16
 filter_trsqp_fast|bound|hs038|0,0xd0ef7cdca738e0ee
 filter_trsqp_fast|bound|hs038|1,0x974e7878dda0ce71
 filter_trsqp_fast|bound|hs038|2,0xd19e59e54d6efdf0
@@ -1268,7 +1268,7 @@ filter_trsqp_fast|bound|hs038|final|x3,0x3ff000000100307b
 filter_trsqp_fast|bound|hs038|final|f,0x3ce3ee1f37c7122b
 filter_trsqp_fast|bound|hs038|final|status,1:converged
 filter_trsqp_fast|bound|hs038|final|iterations,36
-filter_trsqp_fast|bound|hs038|final|evaluations,36
+filter_trsqp_fast|bound|hs038|final|evaluations,74
 filter_trsqp_fast|inequality|hs076|0,0x90e27eaef8b3701a
 filter_trsqp_fast|inequality|hs076|1,0xe60fcdf8147361ad
 filter_trsqp_fast|inequality|hs076|2,0xf19082204f3615b5
@@ -1291,7 +1291,7 @@ filter_trsqp_fast|inequality|hs076|final|x3,0x3fe1745d1745d0a4
 filter_trsqp_fast|inequality|hs076|final|f,0xc012ba2e8ba2e8be
 filter_trsqp_fast|inequality|hs076|final|status,1:converged
 filter_trsqp_fast|inequality|hs076|final|iterations,15
-filter_trsqp_fast|inequality|hs076|final|evaluations,15
+filter_trsqp_fast|inequality|hs076|final|evaluations,32
 filter_trsqp_fast|equality|hs028|0,0xe5610c21570f29ac
 filter_trsqp_fast|equality|hs028|1,0xab0f9c759d02f1de
 filter_trsqp_fast|equality|hs028|2,0xa5e21c7f615bb366
@@ -1308,7 +1308,7 @@ filter_trsqp_fast|equality|hs028|final|x2,0x3fe0000000083876
 filter_trsqp_fast|equality|hs028|final|f,0x3bc10917c1ed2000
 filter_trsqp_fast|equality|hs028|final|status,1:converged
 filter_trsqp_fast|equality|hs028|final|iterations,10
-filter_trsqp_fast|equality|hs028|final|evaluations,10
+filter_trsqp_fast|equality|hs028|final|evaluations,22
 filter_trsqp_fast|mixed|hs071|0,0x95d95bb9485ee0c2
 filter_trsqp_fast|mixed|hs071|1,0x7facb66e81739abb
 filter_trsqp_fast|mixed|hs071|2,0xfe5a3644ff84cf5a
@@ -1326,7 +1326,7 @@ filter_trsqp_fast|mixed|hs071|final|x3,0x3ff6120e6e2e6002
 filter_trsqp_fast|mixed|hs071|final|f,0x40310396a316811e
 filter_trsqp_fast|mixed|hs071|final|status,1:converged
 filter_trsqp_fast|mixed|hs071|final|iterations,10
-filter_trsqp_fast|mixed|hs071|final|evaluations,10
+filter_trsqp_fast|mixed|hs071|final|evaluations,22
 filter_trsqp_accurate|bound|hs038|0,0xd0ef7cdca738e0ee
 filter_trsqp_accurate|bound|hs038|1,0x974e7878dda0ce71
 filter_trsqp_accurate|bound|hs038|2,0xd19e59e54d6efdf0
@@ -1370,7 +1370,7 @@ filter_trsqp_accurate|bound|hs038|final|x3,0x3fefffffff65115a
 filter_trsqp_accurate|bound|hs038|final|f,0x3c7186205ebf93a0
 filter_trsqp_accurate|bound|hs038|final|status,1:converged
 filter_trsqp_accurate|bound|hs038|final|iterations,36
-filter_trsqp_accurate|bound|hs038|final|evaluations,36
+filter_trsqp_accurate|bound|hs038|final|evaluations,74
 filter_trsqp_accurate|inequality|hs076|0,0x90e27eaef8b3701a
 filter_trsqp_accurate|inequality|hs076|1,0xe60fcdf8147361ad
 filter_trsqp_accurate|inequality|hs076|2,0xf19082204f3615b5
@@ -1390,7 +1390,7 @@ filter_trsqp_accurate|inequality|hs076|final|x3,0x3fe1745d18dc70bb
 filter_trsqp_accurate|inequality|hs076|final|f,0xc012ba2e8ba2e8ba
 filter_trsqp_accurate|inequality|hs076|final|status,1:converged
 filter_trsqp_accurate|inequality|hs076|final|iterations,12
-filter_trsqp_accurate|inequality|hs076|final|evaluations,12
+filter_trsqp_accurate|inequality|hs076|final|evaluations,26
 filter_trsqp_accurate|equality|hs028|0,0xe5610c21570f29ac
 filter_trsqp_accurate|equality|hs028|1,0xe2b4951ba31c098f
 filter_trsqp_accurate|equality|hs028|2,0x29a3192a42810d20
@@ -1405,7 +1405,7 @@ filter_trsqp_accurate|equality|hs028|final|x2,0x3fdfffffc43d0c5a
 filter_trsqp_accurate|equality|hs028|final|f,0x3d00e3f9cee5ce34
 filter_trsqp_accurate|equality|hs028|final|status,1:converged
 filter_trsqp_accurate|equality|hs028|final|iterations,8
-filter_trsqp_accurate|equality|hs028|final|evaluations,8
+filter_trsqp_accurate|equality|hs028|final|evaluations,18
 filter_trsqp_accurate|mixed|hs071|0,0x95d95bb9485ee0c2
 filter_trsqp_accurate|mixed|hs071|1,0x5c15e7fa918f5dea
 filter_trsqp_accurate|mixed|hs071|2,0x1f1e81a6e063d5ce
@@ -1420,7 +1420,7 @@ filter_trsqp_accurate|mixed|hs071|final|x3,0x3ff6120e6e091542
 filter_trsqp_accurate|mixed|hs071|final|f,0x40310396a30951a7
 filter_trsqp_accurate|mixed|hs071|final|status,1:converged
 filter_trsqp_accurate|mixed|hs071|final|iterations,7
-filter_trsqp_accurate|mixed|hs071|final|evaluations,7
+filter_trsqp_accurate|mixed|hs071|final|evaluations,16
 mma|bound|hs038|0,0x6808be76ecc11aa5
 mma|bound|hs038|1,0x7e7e55a6846fb243
 mma|bound|hs038|2,0x8d93142e46525d1b
@@ -1478,7 +1478,7 @@ mma|bound|hs038|final|x3,0x3ffae5d2cf952500
 mma|bound|hs038|final|f,0x4033a066c33953d2
 mma|bound|hs038|final|status,2:max_iterations
 mma|bound|hs038|final|iterations,30000
-mma|bound|hs038|final|evaluations,30000
+mma|bound|hs038|final|evaluations,30002
 mma|inequality|hs076|0,0x7316c1e307d6c802
 mma|inequality|hs076|1,0x3982583b117cab0b
 mma|inequality|hs076|2,0xa592019da533a449
@@ -1509,7 +1509,7 @@ mma|inequality|hs076|final|x3,0x3fe1745d1745e8fb
 mma|inequality|hs076|final|f,0xc012ba2e8ba2eabb
 mma|inequality|hs076|final|status,4:stalled
 mma|inequality|hs076|final|iterations,23
-mma|inequality|hs076|final|evaluations,23
+mma|inequality|hs076|final|evaluations,25
 ccsa_quadratic|bound|hs038|0,0xaa9215d6b0b20d54
 ccsa_quadratic|bound|hs038|1,0xcbbd2fab9574c0fe
 ccsa_quadratic|bound|hs038|2,0xc6c80ae0d7a5c2ec
@@ -1567,7 +1567,7 @@ ccsa_quadratic|bound|hs038|final|x3,0x3ff0000147c1c3ba
 ccsa_quadratic|bound|hs038|final|f,0x3d77b641c4c45fa0
 ccsa_quadratic|bound|hs038|final|status,1:converged
 ccsa_quadratic|bound|hs038|final|iterations,8205
-ccsa_quadratic|bound|hs038|final|evaluations,8205
+ccsa_quadratic|bound|hs038|final|evaluations,19510
 ccsa_quadratic|inequality|hs076|0,0x9de543bcf9006de3
 ccsa_quadratic|inequality|hs076|1,0xfc974ca189ecab5e
 ccsa_quadratic|inequality|hs076|2,0x4276818e70184fa6
@@ -1590,7 +1590,7 @@ ccsa_quadratic|inequality|hs076|final|x3,0x3fe1745d2ba3e073
 ccsa_quadratic|inequality|hs076|final|f,0xc012ba2e8ba2e8b8
 ccsa_quadratic|inequality|hs076|final|status,4:stalled
 ccsa_quadratic|inequality|hs076|final|iterations,15
-ccsa_quadratic|inequality|hs076|final|evaluations,15
+ccsa_quadratic|inequality|hs076|final|evaluations,63
 gcmma_move_limit_shrink|bound|hs038|0,0xbf71dbe7c6083132
 gcmma_move_limit_shrink|bound|hs038|1,0x77c71eff84b89ca3
 gcmma_move_limit_shrink|bound|hs038|2,0x6eba03d5237aa3ed
@@ -1648,7 +1648,7 @@ gcmma_move_limit_shrink|bound|hs038|final|x3,0x3ff002fd06af5464
 gcmma_move_limit_shrink|bound|hs038|final|f,0x3ea0250605554bc0
 gcmma_move_limit_shrink|bound|hs038|final|status,2:max_iterations
 gcmma_move_limit_shrink|bound|hs038|final|iterations,30000
-gcmma_move_limit_shrink|bound|hs038|final|evaluations,30000
+gcmma_move_limit_shrink|bound|hs038|final|evaluations,449927
 gcmma_move_limit_shrink|inequality|hs076|0,0x7316c1e307d6c802
 gcmma_move_limit_shrink|inequality|hs076|1,0x68ced99d70eeb74a
 gcmma_move_limit_shrink|inequality|hs076|2,0xbb5359b87fae18ad
@@ -1706,7 +1706,7 @@ gcmma_move_limit_shrink|inequality|hs076|final|x3,0x3fe1745d1745d1b0
 gcmma_move_limit_shrink|inequality|hs076|final|f,0xc012ba2e8ba2e8c0
 gcmma_move_limit_shrink|inequality|hs076|final|status,4:stalled
 gcmma_move_limit_shrink|inequality|hs076|final|iterations,28689
-gcmma_move_limit_shrink|inequality|hs076|final|evaluations,28689
+gcmma_move_limit_shrink|inequality|hs076|final|evaluations,416078
 gcmma_raa_augmented|bound|hs038|0,0xe69369d1c10acb87
 gcmma_raa_augmented|bound|hs038|1,0xe34cb0f6eb6e6f9c
 gcmma_raa_augmented|bound|hs038|2,0x8dc5f230caaa0bde
@@ -1764,7 +1764,7 @@ gcmma_raa_augmented|bound|hs038|final|x3,0x3feffffd2d1a4eba
 gcmma_raa_augmented|bound|hs038|final|f,0x3d7ccbe078a32380
 gcmma_raa_augmented|bound|hs038|final|status,1:converged
 gcmma_raa_augmented|bound|hs038|final|iterations,18989
-gcmma_raa_augmented|bound|hs038|final|evaluations,18989
+gcmma_raa_augmented|bound|hs038|final|evaluations,31775
 gcmma_raa_augmented|inequality|hs076|0,0x91f434777c8d156a
 gcmma_raa_augmented|inequality|hs076|1,0x25384a4d820c64e5
 gcmma_raa_augmented|inequality|hs076|2,0x5342303696c6fe34
@@ -1798,7 +1798,7 @@ gcmma_raa_augmented|inequality|hs076|final|x3,0x3fe1745d3a8871b9
 gcmma_raa_augmented|inequality|hs076|final|f,0xc012ba2e8ba312a9
 gcmma_raa_augmented|inequality|hs076|final|status,4:stalled
 gcmma_raa_augmented|inequality|hs076|final|iterations,26
-gcmma_raa_augmented|inequality|hs076|final|evaluations,26
+gcmma_raa_augmented|inequality|hs076|final|evaluations,89
 gcmma_rho_wval|bound|hs038|0,0x63bc9a18eed7242c
 gcmma_rho_wval|bound|hs038|1,0x42892ccc703bf3a7
 gcmma_rho_wval|bound|hs038|2,0xbdafbee873aed4fd
@@ -1856,7 +1856,7 @@ gcmma_rho_wval|bound|hs038|final|x3,0x3feffffd13fb3163
 gcmma_rho_wval|bound|hs038|final|f,0x3d7ea5692b253b00
 gcmma_rho_wval|bound|hs038|final|status,1:converged
 gcmma_rho_wval|bound|hs038|final|iterations,13879
-gcmma_rho_wval|bound|hs038|final|evaluations,13879
+gcmma_rho_wval|bound|hs038|final|evaluations,33066
 gcmma_rho_wval|inequality|hs076|0,0x33ed5a2899b910e8
 gcmma_rho_wval|inequality|hs076|1,0xad543cea4b5ac7e6
 gcmma_rho_wval|inequality|hs076|2,0x8ca0da0e0dafec36
@@ -1884,7 +1884,7 @@ gcmma_rho_wval|inequality|hs076|final|x3,0x3fe1745cd33dd947
 gcmma_rho_wval|inequality|hs076|final|f,0xc012ba2e8ba2e891
 gcmma_rho_wval|inequality|hs076|final|status,4:stalled
 gcmma_rho_wval|inequality|hs076|final|iterations,20
-gcmma_rho_wval|inequality|hs076|final|evaluations,20
+gcmma_rho_wval|inequality|hs076|final|evaluations,80
 bobyqa|bound|hs038|0,0xe0d8413d843934ab
 bobyqa|bound|hs038|1,0xaaadc31e30773e21
 bobyqa|bound|hs038|2,0x8884278f0b94ff96
