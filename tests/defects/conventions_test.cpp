@@ -45,13 +45,13 @@ using al_policy = augmented_lagrangian_policy<lbfgsb_policy<>>;
 
 }
 
-TEST_CASE("nw_sqp reports every objective evaluation in its function evaluations", "[known-defect][!shouldfail]")
+TEST_CASE("nw_sqp reports every objective evaluation in its function evaluations")
 {
     const counted_solve solve = solve_counting(nw_sqp_policy<>{}, defects::counting_row_bowl{});
     CHECK(solve.reported == solve.counted);
 }
 
-TEST_CASE("filter_nw_sqp reports every objective evaluation in its function evaluations", "[known-defect][!shouldfail]")
+TEST_CASE("filter_nw_sqp reports every objective evaluation in its function evaluations")
 {
     const counted_solve solve = solve_counting(filter_nw_sqp_policy<>{}, defects::counting_row_bowl{});
     CHECK(solve.reported == solve.counted);

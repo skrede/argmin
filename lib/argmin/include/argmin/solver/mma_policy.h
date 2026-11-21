@@ -39,6 +39,7 @@
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/mma_reciprocal_dual_problem.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
@@ -138,7 +139,6 @@ struct mma_policy
         Eigen::Vector<Scalar, M> c_ineq;
         Eigen::Matrix<Scalar, M, N> J_ineq;
 
-        // Asymptotes per component.
         Eigen::Vector<Scalar, N> L, U;
 
         // Move-limit window for the current step (recomputed each iter).
@@ -162,13 +162,13 @@ struct mma_policy
         // Warm-started dual variables (m-dim, y >= 0).
         Eigen::Vector<Scalar, M> y_dual;
 
-        // Bounded-dual elastics. c_dual_ref[i] = max(|g_i(x0)|, 1) is the
-        // fixed per-constraint scale reference; c_dual[i] =
-        // dual_bound_scale * c_dual_ref[i] is the working dual upper bound.
+        // Bounded-dual elastics: c_dual_ref[i] = max(|g_i(x0)|, 1) is the fixed per-constraint scale reference and
+        // c_dual[i] = dual_bound_scale * c_dual_ref[i] the working dual upper bound.
         Eigen::Vector<Scalar, M> c_dual_ref;
         Eigen::Vector<Scalar, M> c_dual;
 
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
 
         // Set when the problem has equality rows or an inequality count other than a static M.
         bool invalid_problem{false};
@@ -240,7 +240,7 @@ struct mma_policy
         s.c_dual_ref.setOnes();
         s.c_dual.resize(rows);
 
-        s.f = problem.value(s.x);
+        s.f = detail::counted_value<Scalar>(s.evaluations, problem, s.x);
         problem.gradient(s.x, s.g);
         if(n_all > 0)
         {
@@ -470,7 +470,7 @@ struct mma_policy
         s.x_old1 = s.x;
         s.x = x_trial;
 
-        s.f = s.problem->value(s.x);
+        s.f = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
         if(m > 0)
         {
@@ -513,7 +513,7 @@ struct mma_policy
         if(s.invalid_problem)
             return solver_status::invalid_problem;
         s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
-        s.f = s.problem->value(s.x);
+        s.f = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
         if(m > 0)
         {

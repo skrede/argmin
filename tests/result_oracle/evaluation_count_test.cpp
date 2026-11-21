@@ -1,7 +1,10 @@
 #include "count_visitor.h"
 
+#include "cases/sqp_cases.h"
 #include "cases/gradient_cases.h"
 #include "cases/least_squares_cases.h"
+#include "cases/moving_asymptote_cases.h"
+#include "cases/trust_region_sqp_cases.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -39,4 +42,25 @@ TEST_CASE("every least-squares solver reports every residual and objective evalu
     cases::count_visitor count{cases::least_squares_keys, 0};
     cases::visit_least_squares_cases(count);
     CHECK(count.judged == 8);
+}
+
+TEST_CASE("every line-search SQP solver reports every objective evaluation it makes", "[oracle][evaluations]")
+{
+    cases::count_visitor count{cases::sqp_keys, 0};
+    cases::visit_sqp_cases(count);
+    CHECK(count.judged == 18);
+}
+
+TEST_CASE("every trust-region SQP solver reports every objective evaluation it makes", "[oracle][evaluations]")
+{
+    cases::count_visitor count{cases::trust_region_sqp_keys, 0};
+    cases::visit_trust_region_sqp_cases(count);
+    CHECK(count.judged == 16);
+}
+
+TEST_CASE("every moving-asymptote solver reports every objective evaluation it makes", "[oracle][evaluations]")
+{
+    cases::count_visitor count{cases::moving_asymptote_keys, 0};
+    cases::visit_moving_asymptote_cases(count);
+    CHECK(count.judged == 10);
 }

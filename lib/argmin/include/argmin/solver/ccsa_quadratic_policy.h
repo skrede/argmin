@@ -30,6 +30,7 @@
 //     Optim. 12(2):555-573.
 //   NLopt ccsa_quadratic.c (Steven G. Johnson 2008-2012).
 
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/ccsa_dual_problem.h"
 #include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/problem_shape.h"
@@ -129,8 +130,6 @@ struct ccsa_quadratic_policy
         Eigen::Vector<Scalar, N> x_old1, x_old2; // history for oscillation
         Eigen::Vector<Scalar, N> lower, upper;   // box bounds
 
-        // Warm-started dual variables (m-dimensional). Persists across
-        // inner and outer iterations. Initialized to zero.
         Eigen::Vector<Scalar, M> y_dual;
 
         // Bounded-dual elastics. c_dual_ref[i] = max(|g_i(x0)|, 1) is the
@@ -144,6 +143,7 @@ struct ccsa_quadratic_policy
         std::optional<detail::mma_subproblem_solver<Scalar, N, M>> subproblem_m0;
 
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
 
         Scalar rho{mma_defaults<Scalar>::rho_init};
         Eigen::Vector<Scalar, M> rhoc;
@@ -211,7 +211,7 @@ struct ccsa_quadratic_policy
         s.c_ineq.resize(rows);
         s.J_ineq.resize(rows, n);
 
-        s.f = problem.value(x0);
+        s.f = detail::counted_value<Scalar>(s.evaluations, problem, x0);
         problem.gradient(x0, s.g);
         if(n_all > 0)
         {
@@ -453,7 +453,7 @@ struct ccsa_quadratic_policy
                 dual_prob.wval = s.subproblem_m0->wval();
             }
 
-            f_trial = s.problem->value(x_trial);
+            f_trial = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_trial);
             if(m > 0)
             {
                 Eigen::VectorX<Scalar> c_tmp(m);
@@ -600,7 +600,7 @@ struct ccsa_quadratic_policy
         if(s.invalid_problem)
             return solver_status::invalid_problem;
         s.x = x0;
-        s.f = s.problem->value(x0);
+        s.f = detail::counted_value<Scalar>(s.evaluations, *s.problem, x0);
         s.problem->gradient(x0, s.g);
         refresh_inequality_rows(s);
         s.iteration = 0;

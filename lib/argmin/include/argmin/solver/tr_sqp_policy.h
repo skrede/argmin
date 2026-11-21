@@ -38,6 +38,7 @@
 #include "argmin/detail/steihaug_cg.h"
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 
 #include "argmin/options/trust_region_sqp_defaults.h"
 
@@ -383,15 +384,14 @@ struct tr_sqp_policy
         // sized n + n_ineq. The compile-time dimension is Eigen::Dynamic
         // because the joint primal width is a runtime quantity even when
         // the policy's N template parameter pins the x-only dimension.
-        //
         // Reference: Fletcher and Powell 1974 Math. Computation 28:1067-
         //            1078 (LDL^T rank-1 update);
-        //            Nocedal and Wright 2e Section 7.2 (limited-memory
-        //            BFGS);
+        //            Nocedal and Wright 2e Section 7.2 (limited-memory BFGS);
         //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.3 (BFGS in
         //            the SQP outer loop).
         detail::dense_ldl_bfgs<Scalar, Eigen::Dynamic> hessian;
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         int n_eq{0};
         int n_ineq{0};
         bool invalid_problem{false};
@@ -440,7 +440,7 @@ struct tr_sqp_policy
         }
         s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
         s.g.setZero(n);
-        s.objective_value = problem.value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, problem, s.x);
         problem.gradient(s.x, s.g);
 
         // Cross-policy state-resident buffer struct sized on the x-only
@@ -712,7 +712,7 @@ struct tr_sqp_policy
             if(n_ineq > 0)
                 s.trial_s_buf.noalias() = s.s_slack + p.tail(n_ineq);
 
-            const Scalar f_new = s.problem->value(x_trial);
+            const Scalar f_new = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_trial);
 
             // Original (un-reformulated) constraint values land in the
             // shared c_trial_buf scratch; the joint residual is assembled
@@ -1056,7 +1056,7 @@ struct tr_sqp_policy
         if(n_ineq > 0)
             s.s_slack.noalias() += p_out.tail(n_ineq);
 
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
         if(m_total > 0)
         {
@@ -1219,7 +1219,7 @@ struct tr_sqp_policy
             return solver_status::invalid_problem;
         const int m = s.n_eq + s.n_ineq;
         s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
 
         // c_all / J_all were sized at init, so a warm reset stays allocation-free.

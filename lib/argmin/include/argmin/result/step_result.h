@@ -50,13 +50,9 @@ struct step_result
     std::optional<Scalar> kkt_residual{};
     std::optional<solver_status> policy_status{};
 
-    // Objective/merit evaluations performed during this single step, e.g.
-    // the trial-point evaluations a line search makes. Defaults to 1 --
-    // every real step evaluates the objective at least once. step_budget_solver
-    // accumulates this across steps so solve_result::function_evaluations
-    // reports the genuine evaluation count instead of aliasing the
-    // iteration count. Policies that perform inner evaluation loops (line
-    // searches, restoration phases) should report the true count here.
+    // Objective (or residual) evaluations made during this step. For a policy whose state keeps an evaluations counter
+    // the driver writes the counter's change across the step here; any other policy reports its own count (at least 1)
+    // and solve_result::function_evaluations is then the sum over its steps.
     std::uint32_t evaluations{1};
 
     // Per-step solver diagnostics for telemetry. Defaulted-member

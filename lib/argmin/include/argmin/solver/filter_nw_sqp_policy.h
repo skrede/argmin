@@ -31,6 +31,7 @@
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/sqp_stationarity.h"
 #include "argmin/detail/filter_acceptance.h"
 #include "argmin/detail/filter_restoration.h"
@@ -265,6 +266,7 @@ struct filter_nw_sqp_policy
         Scalar sigma{Scalar(1.0)};
 
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         int n_eq{0};
         int n_ineq{0};
         int n{0};
@@ -301,7 +303,7 @@ struct filter_nw_sqp_policy
 
         s.x = x0;
         s.g.setZero(s.n);
-        s.objective_value = problem.value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, problem, x0);
         problem.gradient(x0, s.g);
 
         s.bufs.resize(s.n, s.n_eq, s.n_ineq);
@@ -701,7 +703,7 @@ struct filter_nw_sqp_policy
             if(has_bounds)
                 x_trial = detail::project(x_trial, s.lower, s.upper);
 
-            f_trial = s.problem->value(x_trial);
+            f_trial = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_trial);
             if(m > 0)
                 s.problem->constraints(x_trial, s.bufs.c_trial_buf);
 
@@ -888,7 +890,7 @@ struct filter_nw_sqp_policy
                 if(has_bounds)
                     x_soc = detail::project(x_soc, s.lower, s.upper);
 
-                Scalar f_soc = s.problem->value(x_soc);
+                Scalar f_soc = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_soc);
                 // SOC re-evaluates c at x_soc into c_all, then computes
                 // constraint_violation / l1_merit inline on the VectorBlock
                 // head()/tail() expressions to avoid the c_eq_soc /
@@ -938,7 +940,7 @@ struct filter_nw_sqp_policy
                 // norm rather than zero.
                 const Scalar rest_step_norm = (rest.x - s.x).norm();
                 s.x = rest.x;
-                s.objective_value = s.problem->value(s.x);
+                s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
                 s.problem->gradient(s.x, s.g);
                 if(m > 0)
                 {
@@ -1242,7 +1244,7 @@ struct filter_nw_sqp_policy
         // a dynamic-N warm reset does not materialize a heap temporary when the
         // problem method takes a plain vector.
         s.x = x0;
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
         const int m = s.n_eq + s.n_ineq;
         if(m > 0)
@@ -1309,9 +1311,6 @@ private:
     }
 };
 
-// Single-mode shape: filter_nw_sqp_policy_accurate is retained as a
-// source-call-site readable alias for the bare template, matching
-// tr_sqp_policy_accurate on the surviving dual-mode trust-region policy.
 template <scalar Scalar = double, int N = dynamic_dimension>
 using filter_nw_sqp_policy_accurate = filter_nw_sqp_policy<Scalar, N>;
 

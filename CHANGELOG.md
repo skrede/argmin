@@ -153,6 +153,12 @@ Policies available at HEAD, grouped by problem class:
   Jacobian included. Before, `lbfgsb` also counted each strong-Wolfe slope
   evaluation, the other five reported one evaluation per step, and none counted
   the start-point calls.
+- The same counts hold for `kraft_slsqp`, `nw_sqp`, `filter_slsqp`,
+  `filter_nw_sqp`, `tr_sqp`, `filter_trsqp`, `mma`, `ccsa_quadratic` and the
+  three GCMMA alternates: every line-search trial, second-order correction,
+  restoration re-evaluation and conservativity re-evaluation is counted.
+  Before, they reported one evaluation per step and did not count the
+  start-point calls.
 - `solve()` and `step_n()` on a status they cannot continue from evaluate
   nothing and return the result of the call that ended the solve: the same `x`,
   objective, constraint violation and gradient norm. Before, they evaluated the

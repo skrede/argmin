@@ -26,6 +26,7 @@
 //            Kraft 1988 DFVLR-FB 88-28 (QP solver, Hessian update).
 
 #include "argmin/detail/dense_ldl_bfgs.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/filter_acceptance.h"
 #include "argmin/detail/filter_restoration.h"
 #include "argmin/detail/kkt_residual.h"
@@ -242,6 +243,7 @@ struct filter_slsqp_policy
 
         std::uint64_t line_search_calls{0};
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         int n_eq{0};
         int n_ineq{0};
         int n{0};
@@ -270,7 +272,7 @@ struct filter_slsqp_policy
         s.n = n;
         s.x = x0;
         s.g.setZero(n);
-        s.objective_value = problem.value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, problem, x0);
         problem.gradient(x0, s.g);
 
         if constexpr(bound_constrained<Problem, Scalar>)
@@ -469,7 +471,7 @@ struct filter_slsqp_policy
                         // residual constraint violation.
                         const Scalar rest_step_norm = (rest.x - s.x).norm();
                         s.x = rest.x;
-                        s.objective_value = s.problem->value(s.x);
+                        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
                         s.problem->gradient(s.x, s.g);
 
                         s.problem->constraints(s.x, s.bufs.c_all);
@@ -604,7 +606,7 @@ struct filter_slsqp_policy
             s.bufs.x_trial_buf.noalias() = s.x + alpha * p;
             s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
 
-            f_trial = s.problem->value(s.bufs.x_trial_buf);
+            f_trial = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.bufs.x_trial_buf);
             ++s.line_search_calls;
 
             bool c_finite = true;
@@ -745,7 +747,7 @@ struct filter_slsqp_policy
                             s.bufs.x_trial_buf.noalias() = s.x + alpha_soc * p_soc;
                             s.bufs.x_trial_buf = detail::project(s.bufs.x_trial_buf, s.lower, s.upper);
 
-                            Scalar f_soc = s.problem->value(s.bufs.x_trial_buf);
+                            Scalar f_soc = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.bufs.x_trial_buf);
                             ++s.line_search_calls;
 
                             Scalar h_soc = Scalar(0.0);
@@ -832,7 +834,7 @@ struct filter_slsqp_policy
                         const Scalar rest_step_norm =
                             (restoration_result.x - s.x).norm();
                         s.x = restoration_result.x;
-                        s.objective_value = s.problem->value(s.x);
+                        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
                         s.problem->gradient(s.x, s.g);
 
                         s.problem->constraints(s.x, s.bufs.c_all);
@@ -922,7 +924,7 @@ struct filter_slsqp_policy
         // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
         s.x = detail::project(s.x, s.lower, s.upper);
 
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.bufs.g_old_buf = s.g;
         Eigen::Vector<Scalar, N>& g_old = s.bufs.g_old_buf;
         s.problem->gradient(s.x, s.g);
@@ -1141,7 +1143,7 @@ struct filter_slsqp_policy
         // a dynamic-N warm reset does not materialize a heap temporary when the
         // problem method takes a plain vector.
         s.x = x0;
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
         Scalar h_0 = Scalar(0.0);
         if constexpr(constrained<P, Scalar>)
@@ -1200,9 +1202,6 @@ private:
     }
 };
 
-// Single-mode shape: filter_slsqp_policy_accurate is retained as a
-// source-call-site readable alias for the bare template, matching
-// tr_sqp_policy_accurate on the surviving dual-mode trust-region policy.
 template <scalar Scalar = double, int N = dynamic_dimension>
 using filter_slsqp_policy_accurate = filter_slsqp_policy<Scalar, N>;
 

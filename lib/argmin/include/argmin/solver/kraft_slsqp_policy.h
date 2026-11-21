@@ -45,6 +45,7 @@
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/kraft_lsq_qp.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/kraft_lsq_qp_recovery.h"
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/merit_function.h"
@@ -282,6 +283,7 @@ struct kraft_slsqp_policy
         std::uint64_t line_search_calls{0};
 
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         int n_eq{0};
         int n_ineq{0};
         int n{0};
@@ -310,7 +312,7 @@ struct kraft_slsqp_policy
         s.n = n;
         s.x = x0;
         s.g.setZero(n);
-        s.objective_value = problem.value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, problem, x0);
         problem.gradient(x0, s.g);
 
         // SOC step buffer (kraft-lineage; not part of sqp_state_buffers).
@@ -574,7 +576,7 @@ struct kraft_slsqp_policy
 
             // L1 merit function for the line search (Kraft 1988, N&W 18.3).
             auto merit = [&](const Eigen::Vector<Scalar, N>& xk) -> Scalar {
-                Scalar fval = s.problem->value(xk);
+                Scalar fval = detail::counted_value<Scalar>(s.evaluations, *s.problem, xk);
                 Scalar viol = Scalar(0.0);
 
                 if constexpr(constrained<P, Scalar>)
@@ -851,7 +853,7 @@ struct kraft_slsqp_policy
         // Adopted from: argmin/detail/bound_projection.h::project (in-tree precedent).
         s.x = detail::project(s.x, s.lower, s.upper);
 
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
 
         s.bufs.g_old_buf = s.g;
         Eigen::Vector<Scalar, N>& g_old = s.bufs.g_old_buf;
@@ -1066,7 +1068,7 @@ struct kraft_slsqp_policy
         // Evaluate at s.x, not the Ref: a dynamic-N Ref bound to a problem method taking a plain VectorXd would
         // materialize a heap temporary, defeating the allocation-free warm path.
         s.x = x0;
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
         if constexpr(constrained<P, Scalar>)
         {
@@ -1109,9 +1111,6 @@ private:
     }
 };
 
-// Single-mode shape: kraft_slsqp_policy_accurate is retained as a
-// source-call-site readable alias for the bare template, matching
-// tr_sqp_policy_accurate on the surviving dual-mode trust-region policy.
 template <scalar Scalar = double, int N = dynamic_dimension>
 using kraft_slsqp_policy_accurate = kraft_slsqp_policy<Scalar, N>;
 

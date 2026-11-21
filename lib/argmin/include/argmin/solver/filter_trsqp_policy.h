@@ -85,6 +85,7 @@
 #include "argmin/detail/steihaug_cg.h"
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/filter_acceptance.h"
 
 #include "argmin/options/trust_region_sqp_defaults.h"
@@ -588,11 +589,9 @@ struct filter_trsqp_policy
         Scalar objective_value{};
         // Lagrangian-Hessian approximation on the JOINT (x, s) space;
         // sized n + n_ineq.
-        //
         // Reference: Fletcher and Powell 1974 Math. Computation 28:1067-
         //            1078 (LDL^T rank-1 update);
-        //            Nocedal and Wright 2e Section 7.2 (limited-memory
-        //            BFGS);
+        //            Nocedal and Wright 2e Section 7.2 (limited-memory BFGS);
         //            Kraft 1988 DFVLR-FB 88-28 Section 2.2.3 (BFGS in
         //            the SQP outer loop).
         detail::dense_ldl_bfgs<Scalar, Eigen::Dynamic> hessian;
@@ -607,6 +606,7 @@ struct filter_trsqp_policy
         argmin::detail::filter_set<Scalar> filter;
 
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         int n_eq{0};
         int n_ineq{0};
         bool invalid_problem{false};
@@ -655,7 +655,7 @@ struct filter_trsqp_policy
         }
         s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
         s.g.setZero(n);
-        s.objective_value = problem.value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, problem, s.x);
         problem.gradient(s.x, s.g);
 
         // Cross-policy state-resident buffer struct sized on the x-only
@@ -956,7 +956,7 @@ struct filter_trsqp_policy
             if(n_ineq > 0)
                 s.trial_s_buf.noalias() = s.s_slack + p.tail(n_ineq);
 
-            const Scalar f_new = s.problem->value(x_trial);
+            const Scalar f_new = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_trial);
 
             if(s.n_eq + n_ineq > 0)
                 s.problem->constraints(x_trial, s.bufs.c_trial_buf);
@@ -1402,7 +1402,7 @@ struct filter_trsqp_policy
             if(restoration_outcome.status
                == argmin::detail::restoration_status::converged)
             {
-                restoration_f = s.problem->value(s.x);
+                restoration_f = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
                 if(m_total > 0)
                     s.problem->constraints(s.x, s.bufs.c_trial_buf);
                 if(s.n_eq > 0)
@@ -1445,7 +1445,7 @@ struct filter_trsqp_policy
                 // SHARED sqp_state_buffers; the restoration helper
                 // buffers are no longer consumed after this point in
                 // the iteration.
-                s.objective_value = s.problem->value(s.x);
+                s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
                 s.problem->gradient(s.x, s.g);
                 if(m_total > 0)
                 {
@@ -1563,7 +1563,7 @@ struct filter_trsqp_policy
         if(n_ineq > 0)
             s.s_slack.noalias() += p_out.tail(n_ineq);
 
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
         if(m_total > 0)
         {
@@ -1714,7 +1714,7 @@ struct filter_trsqp_policy
             return solver_status::invalid_problem;
         const int m = s.n_eq + s.n_ineq;
         s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
 
         // c_all / J_all were sized at init, so a warm reset stays allocation-free.

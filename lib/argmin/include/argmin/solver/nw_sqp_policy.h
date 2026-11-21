@@ -26,6 +26,7 @@
 #include "argmin/detail/dense_ldl_bfgs.h"
 #include "argmin/detail/merit_function.h"
 #include "argmin/detail/bound_projection.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/sqp_stationarity.h"
 
 #include "argmin/options/qp_options.h"
@@ -216,6 +217,7 @@ struct nw_sqp_policy
         // sentinel for problems without a static constraint_count.
         detail::active_set_qp_solver<Scalar, N, M> qp_solver;
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
         int n_eq{0};
         int n_ineq{0};
         bool invalid_problem{false};
@@ -252,7 +254,7 @@ struct nw_sqp_policy
 
         s.x = x0;
         s.g.setZero(n);
-        s.objective_value = problem.value(x0);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, problem, x0);
         problem.gradient(x0, s.g);
 
         // Cross-policy state-resident buffer struct: sizes all per-step
@@ -634,7 +636,7 @@ struct nw_sqp_policy
             if(has_finite_bounds)
                 x_trial = detail::project(x_trial, s.lower, s.upper);
 
-            f_trial = s.problem->value(x_trial);
+            f_trial = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_trial);
             if(m > 0)
                 s.problem->constraints(x_trial, s.bufs.c_all);
 
@@ -816,7 +818,7 @@ struct nw_sqp_policy
                         x_trial_soc = detail::project(x_trial_soc,
                                                       s.lower, s.upper);
 
-                    f_trial_soc = s.problem->value(x_trial_soc);
+                    f_trial_soc = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_trial_soc);
                     if(m > 0)
                         s.problem->constraints(x_trial_soc, s.bufs.c_all);
 
@@ -1102,7 +1104,7 @@ struct nw_sqp_policy
         // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so a dynamic-N warm reset does not
         // materialize a heap temporary when the problem method takes a plain vector.
         s.x = x0;
-        s.objective_value = s.problem->value(s.x);
+        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
         if(m > 0)
             s.problem->constraints(s.x, s.bufs.c_all);
@@ -1154,9 +1156,6 @@ private:
     }
 };
 
-// Single-mode shape: nw_sqp_policy_accurate is retained as a
-// source-call-site readable alias for the bare template, matching
-// tr_sqp_policy_accurate on the surviving dual-mode trust-region policy.
 template <scalar Scalar = double, int N = dynamic_dimension>
 using nw_sqp_policy_accurate = nw_sqp_policy<Scalar, N>;
 

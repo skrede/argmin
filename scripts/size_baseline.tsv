@@ -41,7 +41,7 @@ file	lib/argmin/include/argmin/solver/alternative/cmaes/pwq_reparameterization_p
 file	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h	-	997
 file	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	-	541
 file	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	-	601
-file	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	-	650
+file	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	-	649
 file	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	-	756
 file	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	-	412
 file	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	-	555
@@ -49,15 +49,15 @@ file	lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h	-	1044
 file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1154
 file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	659
 file	lib/argmin/include/argmin/solver/convergence.h	-	367
-file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1320
-file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1211
+file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1319
+file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1210
 file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1785
-file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1120
+file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1119
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	203
 file	lib/argmin/include/argmin/solver/lm_policy.h	-	301
 file	lib/argmin/include/argmin/solver/mma_policy.h	-	567
 file	lib/argmin/include/argmin/solver/multistart_policy.h	-	242
-file	lib/argmin/include/argmin/solver/nw_sqp_policy.h	-	1165
+file	lib/argmin/include/argmin/solver/nw_sqp_policy.h	-	1164
 file	lib/argmin/include/argmin/solver/projected_gn_policy.h	-	369
 file	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	-	451
 file	lib/argmin/include/argmin/solver/restarting_policy.h	-	265
@@ -174,7 +174,7 @@ function	lib/argmin/include/argmin/solver/alternative/cmaes/repair_l2_penalty_po
 function	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	init	60
 function	lib/argmin/include/argmin/solver/alternative/gcmma/move_limit_shrink_policy.h	step	253
 function	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	init	62
-function	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	step	311
+function	lib/argmin/include/argmin/solver/alternative/gcmma/raa_augmented_policy.h	step	310
 function	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	init	74
 function	lib/argmin/include/argmin/solver/alternative/gcmma/rho_wval_policy.h	step	338
 function	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	init	167

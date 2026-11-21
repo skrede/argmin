@@ -42,6 +42,7 @@
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/mma_subproblem.h"
+#include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/mma_reciprocal_dual_problem.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
@@ -81,7 +82,6 @@ struct move_limit_shrink_policy
         std::optional<Scalar> asymptote_init{};           // 0.5
         std::optional<Scalar> asymptote_init_unbounded{}; // 1.0
 
-        // Asymptote-distance numerical safeguards.
         std::optional<Scalar> asymptote_min_fraction{};   // 1e-4
         std::optional<Scalar> asymptote_max_fraction{};   // 10.0
 
@@ -92,8 +92,7 @@ struct move_limit_shrink_policy
         // Distance-scaled p/q regularizer (Svanberg 2007 notes 2.3-2.4).
         Scalar raai{mma_defaults<Scalar>::raai};
 
-        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale * max(|g_i(x0)|, 1). Scale multiplier is empirical
-        // (swept). See detail/mma_subproblem.h recover_elastic_slacks(). Direct value.
+        // Bounded-dual elastics: dual upper bound c_i = dual_bound_scale * max(|g_i(x0)|, 1); the scale multiplier is empirical (swept).
         Scalar dual_bound_scale{mma_defaults<Scalar>::dual_bound_scale};
 
         // Conservativity loop: shrink_factor = 0.5 contracts [alpha, beta] toward x_k by half each non-conservative trial.
@@ -137,6 +136,7 @@ struct move_limit_shrink_policy
         Eigen::Vector<Scalar, M> c_dual;
 
         std::uint32_t iteration{0};
+        std::uint32_t evaluations{0};
 
         // Set when the problem has equality rows or an inequality count other than a static M.
         bool invalid_problem{false};
@@ -201,7 +201,7 @@ struct move_limit_shrink_policy
         s.c_dual_ref.setOnes(rows);
         s.c_dual.resize(rows);
 
-        s.f = problem.value(s.x);
+        s.f = detail::counted_value<Scalar>(s.evaluations, problem, s.x);
         problem.gradient(s.x, s.g);
         if(m > 0 && !s.invalid_problem)
         {
@@ -414,7 +414,7 @@ struct move_limit_shrink_policy
                 x_trial = dual_prob.x_primal;
             }
 
-            f_trial = s.problem->value(x_trial);
+            f_trial = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_trial);
             if(m > 0)
             {
                 Eigen::VectorX<Scalar> c_tmp(m);
@@ -487,7 +487,7 @@ struct move_limit_shrink_policy
         if(s.invalid_problem)
             return solver_status::invalid_problem;
         s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
-        s.f = s.problem->value(s.x);
+        s.f = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
         if(m > 0)
         {
