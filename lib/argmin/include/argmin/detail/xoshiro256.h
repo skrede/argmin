@@ -20,6 +20,16 @@
 namespace argmin::detail
 {
 
+// Reference: Vigna, S. (2015) splitmix64.c, https://prng.di.unimi.it/splitmix64.c
+inline std::uint64_t splitmix64(std::uint64_t& state)
+{
+    state += 0x9e3779b97f4a7c15ULL;
+    std::uint64_t z = state;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+
 struct xoshiro256
 {
     using result_type = std::uint64_t;
@@ -31,18 +41,11 @@ struct xoshiro256
 
     xoshiro256() = delete;
 
-    // Expand seed into 4 state words via splitmix64.
-    // Reference: Vigna, S. (2020) splitmix64.c
+    // The seed is expanded into the four state words by splitmix64, as the reference implementation recommends.
     explicit xoshiro256(std::uint64_t seed)
     {
         for(auto& s : state)
-        {
-            seed += 0x9e3779b97f4a7c15ULL;
-            std::uint64_t z = seed;
-            z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-            z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-            s = z ^ (z >> 31);
-        }
+            s = splitmix64(seed);
     }
 
     result_type operator()()

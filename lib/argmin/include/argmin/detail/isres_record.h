@@ -51,11 +51,12 @@ bool keep_best_evaluated(State& s, const Points& points, const Values& values)
     return kept >= 0;
 }
 
-// The first individual is held until one ranks, so a population with no comparable point still holds a point.
-template <typename State, typename Points, typename Values, typename Scalar>
-void start_best_evaluated(State& s, const Points& points, const Values& values, Scalar feasibility_tolerance)
+// The first individual is held until one ranks, so a population with no comparable point still holds a point. The
+// record keeps the feasibility tolerance it was constructed with.
+template <typename State, typename Points, typename Values>
+void start_best_evaluated(State& s, const Points& points, const Values& values)
 {
-    s.record = best_evaluated<Scalar>{feasibility_tolerance};
+    s.record.clear();
     hold_individual(s, points, values, 0);
     keep_best_evaluated(s, points, values);
 }

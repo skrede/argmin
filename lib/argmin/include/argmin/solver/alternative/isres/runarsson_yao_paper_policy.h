@@ -55,6 +55,8 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/isres_record.h"
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/stochastic_seed.h"
+#include "argmin/detail/isres_evaluation.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/scalar_distributions.h"
@@ -194,7 +196,6 @@ struct runarsson_yao_paper_policy
                              const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& opts)
     {
-        const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
 
@@ -203,79 +204,8 @@ struct runarsson_yao_paper_policy
 
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
-        const int n_c = s.n_eq + s.n_ineq;
-
-        s.lambda = static_cast<int>(options.population_size.value_or(static_cast<std::uint32_t>(20 * (n + 1))));
-        s.mu = parent_count(s.lambda, options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0)));
-        s.pf = options.ranking_probability.value_or(Scalar(0.45));
-        s.alpha = options.paper_alpha.value_or(Scalar(0.2));
-        s.rates = detail::compute_es_rates<Scalar>(n);
-
-        const std::uint64_t seed = options.seed.value_or(
-            static_cast<std::uint64_t>(std::random_device{}()));
-        s.rng.emplace(seed);
-
-        s.invalid_problem = rejects_population(s);
-        if(s.invalid_problem)
-        {
-            s.x = x0;
-            s.objective_value = std::numeric_limits<Scalar>::infinity();
-            return s;
-        }
-
-        s.population.resize(n, s.lambda);
-        s.sigmas.resize(n, s.lambda);
-        s.fitnesses.resize(s.lambda);
-        s.violations.resize(s.lambda);
-        s.x0_snapshot_buf.resize(n, s.mu);
-        s.all_constraints_buf.resize(n_c > 0 ? n_c : 0, s.lambda);
-        s.indices_buf.resize(static_cast<std::size_t>(s.lambda));
-
-        s.population = detail::initialize_population<N>(
-            n, s.lambda, s.lower, s.upper, *s.rng);
-        s.sigmas = detail::initialize_sigmas<N>(
-            n, s.lambda, s.lower, s.upper);
-
-        for(int j = 0; j < s.lambda; ++j)
-        {
-            Eigen::Vector<Scalar, N> xi = s.population.col(j);
-            s.fitnesses[j] = detail::counted_value<Scalar>(s.evaluations, *s.problem, xi);
-
-            if(n_c > 0)
-            {
-                Eigen::VectorX<Scalar> c(n_c);
-                s.problem->constraints(xi, c);
-                s.all_constraints_buf.col(j) = c;
-            }
-        }
-
-        // L2-squared violation aggregation: paper and NLopt agree on this
-        // axis (NLopt isres.c:151,163).
-        if(n_c > 0)
-        {
-            for(int j = 0; j < s.lambda; ++j)
-            {
-                Scalar violation_sum = Scalar(0.0);
-                for(int i_eq = 0; i_eq < s.n_eq; ++i_eq)
-                {
-                    const Scalar c_val = s.all_constraints_buf(i_eq, j);
-                    violation_sum += c_val * c_val;
-                }
-                for(int i_in = 0; i_in < s.n_ineq; ++i_in)
-                {
-                    const Scalar c_val = s.all_constraints_buf(s.n_eq + i_in, j);
-                    const Scalar v = std::max(Scalar(0.0), -c_val);
-                    violation_sum += v * v;
-                }
-                s.violations[j] = violation_sum;
-            }
-        }
-        else
-        {
-            s.violations.setZero();
-        }
-
-        detail::start_best_evaluated(s, s.population, s.fitnesses, static_cast<Scalar>(opts.feasibility_tolerance_in_force()));
+        s.record = detail::best_evaluated<Scalar>{static_cast<Scalar>(opts.feasibility_tolerance_in_force())};
+        start(s, x0);
 
         // The gate keeps init() compilable for convergence policies without step_tolerance_criterion.
         if constexpr(detail::tuple_contains_v<
@@ -533,6 +463,50 @@ struct runarsson_yao_paper_policy
     }
 
 private:
+    template <typename P>
+    void start(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    {
+        const int n = static_cast<int>(x0.size());
+        configure(s, n);
+        s.rng.emplace(detail::seeded_generator(options.seed));
+        s.invalid_problem = rejects_population(s);
+        if(s.invalid_problem)
+        {
+            s.x = x0;
+            s.objective_value = std::numeric_limits<Scalar>::infinity();
+            return;
+        }
+        size_buffers(s, n);
+        s.population = detail::initialize_population<N>(n, s.lambda, s.lower, s.upper, *s.rng);
+        s.sigmas = detail::initialize_sigmas<N>(n, s.lambda, s.lower, s.upper);
+        detail::evaluate_population(s);
+        detail::squared_violations(s);
+        detail::start_best_evaluated(s, s.population, s.fitnesses);
+        s.generation = 0;
+    }
+
+    template <typename P>
+    void configure(state_type<P>& s, int n) const
+    {
+        s.lambda = static_cast<int>(options.population_size.value_or(static_cast<std::uint32_t>(20 * (n + 1))));
+        s.mu = parent_count(s.lambda, options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0)));
+        s.pf = options.ranking_probability.value_or(Scalar(0.45));
+        s.alpha = options.paper_alpha.value_or(Scalar(0.2));
+        s.rates = detail::compute_es_rates<Scalar>(n);
+    }
+
+    template <typename P>
+    static void size_buffers(state_type<P>& s, int n)
+    {
+        s.population.resize(n, s.lambda);
+        s.sigmas.resize(n, s.lambda);
+        s.fitnesses.resize(s.lambda);
+        s.violations.resize(s.lambda);
+        s.x0_snapshot_buf.resize(n, s.mu);
+        s.all_constraints_buf.resize(std::max(s.n_eq + s.n_ineq, 0), s.lambda);
+        s.indices_buf.resize(static_cast<std::size_t>(s.lambda));
+    }
+
     // A population_size above INT32_MAX arrives here negative, since the unsigned-to-int conversion is modular.
     template <typename P>
     static bool rejects_population(const state_type<P>& s)

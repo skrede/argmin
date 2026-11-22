@@ -43,6 +43,8 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/isres_record.h"
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/stochastic_seed.h"
+#include "argmin/detail/isres_evaluation.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/scalar_distributions.h"
@@ -254,7 +256,6 @@ struct nlopt_faithful_policy
                              const Eigen::Vector<Scalar, N>& x0,
                              const solver_options<Convergence>& opts)
     {
-        const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
 
@@ -263,153 +264,11 @@ struct nlopt_faithful_policy
 
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
-        const int n_c = s.n_eq + s.n_ineq;
+        s.record = detail::best_evaluated<Scalar>{static_cast<Scalar>(opts.feasibility_tolerance_in_force())};
+        start(s, x0);
 
-        s.lambda = static_cast<int>(options.population_size.value_or(static_cast<std::uint32_t>(20 * (n + 1))));
-        s.mu = parent_count(s.lambda, options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0)));
-        s.pf = options.ranking_probability.value_or(Scalar(0.45));
-        // The alpha state field carries the sigma-smoothing weight,
-        // NOT pull-to-best (which this variant does not implement).
-        // Default 0.2 from NLopt isres.c:67.
-        s.alpha = options.sigma_smoothing_weight.value_or(Scalar(0.2));
-        s.rates = detail::compute_es_rates<Scalar>(n);
-
-        const std::uint64_t seed = options.seed.value_or(
-            static_cast<std::uint64_t>(std::random_device{}()));
-        s.rng.emplace(seed);
-
-        // A resize past the compile-time max-columns bound is undefined behavior, so a population the bounded storage
-        // cannot hold latches before the first resize.
-        s.invalid_problem = rejects_population(s);
-        if(s.invalid_problem)
-        {
-            s.x = x0;
-            s.objective_value = std::numeric_limits<Scalar>::infinity();
-            return s;
-        }
-
-        // Pre-allocate per-step buffers. The bounded-storage Eigen
-        // matrices keep their max-storage allocation; resize() only
-        // adjusts the active dim metadata.
-        s.population.resize(n, s.lambda);
-        s.sigmas.resize(n, s.lambda);
-        s.fitnesses.resize(s.lambda);
-        s.violations.resize(s.lambda);
-        s.offspring_buf.resize(n, s.lambda);
-        s.new_sigmas_buf.resize(n, s.lambda);
-        s.offspring_fitnesses_buf.resize(s.lambda);
-        s.offspring_violations_buf.resize(s.lambda);
-        s.all_constraints_buf.resize(std::max(n_c, 0), s.lambda);
-        s.indices_buf.resize(static_cast<std::size_t>(s.lambda));
-
-        // x0 snapshot buffer (n x mu). Sized here so step() does not index
-        // a zero-sized buffer.
-        s.x0_snapshot_buf.resize(n, s.mu);
-
-        // Explicit finite seeding fallback for infinite real bounds.
-        // ISRES cannot sample uniformly to +/- infinity, so coordinates
-        // with an infinite edge are SEEDED in a finite interval centered
-        // on x0 with a documented half-width, instead of the old silent
-        // [-1, 1] box that ignored x0 entirely. The real (possibly
-        // infinite) bounds in s.lower/s.upper still govern mutation
-        // clamping via sigma_max = (ub-lb)/sqrt(n), so the search is free
-        // to leave the seeding interval and reach optima outside it (e.g.
-        // HS035, whose optimum lies past the seeding box on its
-        // unbounded-above coordinate).
-        //
-        // Half-width swept over {0.5, 1, 2, 5, 10} on the unbounded-above
-        // Hock-Schittkowski problems HS024 and HS035 (500 iters, seeds
-        // 1..100). Half-widths 0.5, 1, and 2 all converge for 100/100
-        // seeds on both problems; widths 5 and 10 over-dilute the seeding
-        // box and drop HS035 to 68/100 and 22/100 respectively. Within the
-        // fully-robust band, 2.0 yields the best near-optimum quality
-        // (HS035 best 0.128 vs optimum 0.111; HS024 best -0.972 vs -1.0),
-        // so it is the chosen value.
-        constexpr Scalar seed_fallback_half_width = Scalar(2.0);
-        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        Eigen::Vector<Scalar, N> seed_lo = s.lower;
-        Eigen::Vector<Scalar, N> seed_hi = s.upper;
-        for(int i = 0; i < n; ++i)
-        {
-            if(!(s.lower(i) > -inf))
-                seed_lo(i) = x0(i) - seed_fallback_half_width;
-            if(!(s.upper(i) < inf))
-                seed_hi(i) = x0(i) + seed_fallback_half_width;
-        }
-
-        // Initialize population uniformly in the (finite) seeding box. The
-        // free-function returns a heap-backed Eigen::Matrix<Scalar, N,
-        // Dynamic>; we copy into the bounded-storage member matrix. The
-        // block copy is a fixed n x lambda traversal -- no per-step concern.
-        const auto initial_population =
-            detail::initialize_population<N>(
-                n, s.lambda, seed_lo, seed_hi, *s.rng);
-        s.population.leftCols(s.lambda) = initial_population;
-
-        // Inject x0 into the initial population (NLopt isres.c:128 seeds
-        // the first individual with the caller's starting point rather
-        // than discarding it). Clamp to the real box so the injected point
-        // is feasible with respect to the bounds. This makes the solver
-        // warm-startable: a good x0 participates in the first ranking.
-        s.population.col(0) = x0.cwiseMax(s.lower).cwiseMin(s.upper);
-
-        const auto initial_sigmas =
-            detail::initialize_sigmas<N>(n, s.lambda, seed_lo, seed_hi);
-        s.sigmas.leftCols(s.lambda) = initial_sigmas;
-
-        // Evaluate all individuals into the persistent buffers.
-        for(int j = 0; j < s.lambda; ++j)
-        {
-            const Eigen::Vector<Scalar, N> xi = s.population.col(j);
-            s.fitnesses[j] = detail::counted_value<Scalar>(s.evaluations, *s.problem, xi);
-
-            if(n_c > 0)
-            {
-                Eigen::VectorX<Scalar> c(n_c);
-                s.problem->constraints(xi, c);
-                s.all_constraints_buf.col(j) = c;
-            }
-        }
-
-        // L2-squared violation aggregation (NLopt isres.c:151,163).
-        // Caller convention: c_ineq[j] >= 0 feasible, equality term is
-        // c_eq[j]^2.
-        if(n_c > 0)
-        {
-            for(int j = 0; j < s.lambda; ++j)
-            {
-                Scalar v = Scalar(0.0);
-                for(int i = 0; i < s.n_eq; ++i)
-                {
-                    const Scalar ce = s.all_constraints_buf(i, j);
-                    v += ce * ce;
-                }
-                for(int i = 0; i < s.n_ineq; ++i)
-                {
-                    const Scalar slack =
-                        std::max(Scalar(0.0), -s.all_constraints_buf(s.n_eq + i, j));
-                    v += slack * slack;
-                }
-                s.violations[j] = v;
-            }
-        }
-        else
-        {
-            for(int j = 0; j < s.lambda; ++j)
-                s.violations[j] = Scalar(0.0);
-        }
-
-        detail::start_best_evaluated(s, s.population, s.fitnesses, static_cast<Scalar>(opts.feasibility_tolerance_in_force()));
-
-        // Capture the user-set step_tolerance_criterion threshold (if the
-        // convergence policy carries one) so step()'s xtol_coupled
-        // sigma-collapse predicate can read it without threading the
-        // Convergence type through state_type. The tuple_contains gate
-        // keeps init() compilable against convergence policies that lack
-        // step_tolerance_criterion (e.g. slsqp_compatible_convergence,
-        // which carries step_tolerance_rel_criterion only); the field
-        // stays std::nullopt and step() silently falls back to the
-        // bound-relative form.
+        // The gate keeps init() compilable for convergence policies without step_tolerance_criterion; step() then falls
+        // back to the bound-relative collapse test.
         if constexpr(detail::tuple_contains_v<
                          step_tolerance_criterion<scalar_type>,
                          decltype(opts.convergence.criteria)>)
@@ -733,6 +592,87 @@ struct nlopt_faithful_policy
     }
 
 private:
+    template <typename P>
+    void start(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    {
+        configure(s, static_cast<int>(x0.size()));
+        s.rng.emplace(detail::seeded_generator(options.seed));
+        // A resize past the compile-time max-columns bound is undefined behavior, so a population the bounded storage
+        // cannot hold latches before the first resize.
+        s.invalid_problem = rejects_population(s);
+        if(s.invalid_problem)
+        {
+            s.x = x0;
+            s.objective_value = std::numeric_limits<Scalar>::infinity();
+            return;
+        }
+        size_buffers(s, static_cast<int>(x0.size()));
+        draw_population(s, x0);
+        detail::evaluate_population(s);
+        detail::squared_violations(s);
+        detail::start_best_evaluated(s, s.population, s.fitnesses);
+        s.generation = 0;
+    }
+
+    template <typename P>
+    void configure(state_type<P>& s, int n) const
+    {
+        s.lambda = static_cast<int>(options.population_size.value_or(static_cast<std::uint32_t>(20 * (n + 1))));
+        s.mu = parent_count(s.lambda, options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0)));
+        s.pf = options.ranking_probability.value_or(Scalar(0.45));
+        // The alpha field carries the sigma-smoothing weight (NLopt isres.c:67), not a pull to the best point.
+        s.alpha = options.sigma_smoothing_weight.value_or(Scalar(0.2));
+        s.rates = detail::compute_es_rates<Scalar>(n);
+    }
+
+    // The bounded-storage matrices keep their maximum allocation; resize() only sets the active size.
+    template <typename P>
+    static void size_buffers(state_type<P>& s, int n)
+    {
+        s.population.resize(n, s.lambda);
+        s.sigmas.resize(n, s.lambda);
+        s.fitnesses.resize(s.lambda);
+        s.violations.resize(s.lambda);
+        s.offspring_buf.resize(n, s.lambda);
+        s.new_sigmas_buf.resize(n, s.lambda);
+        s.offspring_fitnesses_buf.resize(s.lambda);
+        s.offspring_violations_buf.resize(s.lambda);
+        s.all_constraints_buf.resize(std::max(s.n_eq + s.n_ineq, 0), s.lambda);
+        s.indices_buf.resize(static_cast<std::size_t>(s.lambda));
+        s.x0_snapshot_buf.resize(n, s.mu);
+    }
+
+    // NLopt isres.c:128 seeds the first individual with the caller's start, clamped to the box, so a good start takes
+    // part in the first ranking.
+    template <typename P>
+    static void draw_population(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    {
+        const int n = static_cast<int>(x0.size());
+        Eigen::Vector<Scalar, N> seed_lo = s.lower;
+        Eigen::Vector<Scalar, N> seed_hi = s.upper;
+        close_infinite_edges(x0, seed_lo, seed_hi);
+        s.population.leftCols(s.lambda) = detail::initialize_population<N>(n, s.lambda, seed_lo, seed_hi, *s.rng);
+        s.population.col(0) = x0.cwiseMax(s.lower).cwiseMin(s.upper);
+        s.sigmas.leftCols(s.lambda) = detail::initialize_sigmas<N>(n, s.lambda, seed_lo, seed_hi);
+    }
+
+    // ISRES cannot sample to an infinite edge, so such a coordinate seeds within x0 +/- 2. The real bounds still govern
+    // mutation (sigma_max = (ub - lb) / sqrt(n)), so the search can leave the seeding box, as HS035's optimum requires.
+    // Half-widths {0.5, 1, 2, 5, 10} on HS024 and HS035 (500 iterations, seeds 1..100): 0.5 to 2 converge for every
+    // seed, 5 and 10 drop HS035 to 68 and 22 of 100, and 2 comes nearest the optima.
+    static void close_infinite_edges(Eigen::Ref<const Eigen::Vector<Scalar, N>> x0, Eigen::Vector<Scalar, N>& lo, Eigen::Vector<Scalar, N>& hi)
+    {
+        constexpr Scalar half_width = Scalar(2.0);
+        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
+        for(Eigen::Index i = 0; i < x0.size(); ++i)
+        {
+            if(!(lo(i) > -inf))
+                lo(i) = x0(i) - half_width;
+            if(!(hi(i) < inf))
+                hi(i) = x0(i) + half_width;
+        }
+    }
+
     // A population_size above INT32_MAX arrives here negative, since the unsigned-to-int conversion is modular.
     template <typename P>
     static bool rejects_population(const state_type<P>& s)

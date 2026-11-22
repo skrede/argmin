@@ -32,6 +32,8 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/isres_record.h"
 #include "argmin/detail/isres_operators.h"
+#include "argmin/detail/stochastic_seed.h"
+#include "argmin/detail/isres_evaluation.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/stochastic_ranking.h"
@@ -149,7 +151,6 @@ struct original_argmin_policy
                     const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& opts)
     {
-        const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
 
@@ -158,85 +159,8 @@ struct original_argmin_policy
 
         s.n_eq = problem.num_equality();
         s.n_ineq = problem.num_inequality();
-        const int n_c = s.n_eq + s.n_ineq;
-
-        s.lambda = static_cast<int>(options.population_size.value_or(static_cast<std::uint32_t>(20 * (n + 1))));
-        s.mu = parent_count(s.lambda, options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0)));
-        s.pf = options.ranking_probability.value_or(Scalar(0.45));
-        s.alpha = options.pull_to_best_weight.value_or(Scalar(0.2));
-        s.rates = detail::compute_es_rates<Scalar>(n);
-
-        const std::uint64_t seed = options.seed.value_or(
-            static_cast<std::uint64_t>(std::random_device{}()));
-        s.rng.emplace(seed);
-
-        s.invalid_problem = rejects_population(s);
-        if(s.invalid_problem)
-        {
-            s.x = x0;
-            s.objective_value = std::numeric_limits<Scalar>::infinity();
-            return s;
-        }
-
-        s.mutation_workspace.emplace(n);
-
-        s.offspring_buf.resize(n, s.lambda);
-        s.new_sigmas_buf.resize(n, s.lambda);
-        s.offspring_fitnesses_buf.resize(s.lambda);
-        s.offspring_violations_buf.resize(s.lambda);
-        s.all_constraints_buf.resize(n_c, s.lambda);
-        s.indices_buf.resize(static_cast<std::size_t>(s.lambda));
-
-        s.population = detail::initialize_population<N>(
-            n, s.lambda, s.lower, s.upper, *s.rng);
-
-        s.sigmas = detail::initialize_sigmas(n, s.lambda, s.lower, s.upper);
-
-        // Evaluate all individuals (use the pre-allocated all_constraints_buf)
-        s.fitnesses.resize(s.lambda);
-
-        for(int j = 0; j < s.lambda; ++j)
-        {
-            Eigen::Vector<Scalar, N> xi = s.population.col(j);
-            s.fitnesses[j] = detail::counted_value<Scalar>(s.evaluations, *s.problem, xi);
-
-            if(n_c > 0)
-            {
-                Eigen::VectorX<Scalar> c(n_c);
-                s.problem->constraints(xi, c);
-                s.all_constraints_buf.col(j) = c;
-            }
-        }
-
-        if(n_c > 0)
-            s.violations = detail::compute_violations(s.all_constraints_buf, s.n_eq, s.n_ineq);
-        else
-            s.violations = Eigen::VectorX<Scalar>::Zero(s.lambda);
-
-        // The pull-to-best target starts at the least-violating individual, then the lowest objective.
-        int best_idx = 0;
-        for(int j = 1; j < s.lambda; ++j)
-        {
-            bool feasible_j = s.violations[j] <= Scalar(0.0);
-            bool feasible_best = s.violations[best_idx] <= Scalar(0.0);
-
-            if(feasible_j && !feasible_best)
-                best_idx = j;
-            else if(feasible_j == feasible_best)
-            {
-                if(feasible_j && s.fitnesses[j] < s.fitnesses[best_idx])
-                    best_idx = j;
-                else if(!feasible_j && s.violations[j] < s.violations[best_idx])
-                    best_idx = j;
-            }
-        }
-
-        s.pull_target = s.population.col(best_idx);
-        s.pull_target_value = s.fitnesses[best_idx];
-        s.best_ever_value = s.pull_target_value;
-        s.best_ever_violation = s.violations[best_idx];
-
-        detail::start_best_evaluated(s, s.population, s.fitnesses, static_cast<Scalar>(opts.feasibility_tolerance_in_force()));
+        s.record = detail::best_evaluated<Scalar>{static_cast<Scalar>(opts.feasibility_tolerance_in_force())};
+        start(s, x0);
         return s;
     }
 
@@ -390,6 +314,75 @@ struct original_argmin_policy
     }
 
 private:
+    template <typename P>
+    void start(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    {
+        const int n = static_cast<int>(x0.size());
+        configure(s, n);
+        s.rng.emplace(detail::seeded_generator(options.seed));
+        s.invalid_problem = rejects_population(s);
+        if(s.invalid_problem)
+        {
+            s.x = x0;
+            s.objective_value = std::numeric_limits<Scalar>::infinity();
+            return;
+        }
+        size_buffers(s, n);
+        s.population = detail::initialize_population<N>(n, s.lambda, s.lower, s.upper, *s.rng);
+        s.sigmas = detail::initialize_sigmas(n, s.lambda, s.lower, s.upper);
+        detail::evaluate_population(s);
+        if(s.n_eq + s.n_ineq > 0)
+            s.violations = detail::compute_violations(s.all_constraints_buf, s.n_eq, s.n_ineq);
+        else
+            s.violations = Eigen::VectorX<Scalar>::Zero(s.lambda);
+        start_pull_target(s);
+        detail::start_best_evaluated(s, s.population, s.fitnesses);
+        s.generation = 0;
+    }
+
+    template <typename P>
+    void configure(state_type<P>& s, int n) const
+    {
+        s.lambda = static_cast<int>(options.population_size.value_or(static_cast<std::uint32_t>(20 * (n + 1))));
+        s.mu = parent_count(s.lambda, options.parent_fraction.value_or(Scalar(1.0) / Scalar(7.0)));
+        s.pf = options.ranking_probability.value_or(Scalar(0.45));
+        s.alpha = options.pull_to_best_weight.value_or(Scalar(0.2));
+        s.rates = detail::compute_es_rates<Scalar>(n);
+    }
+
+    template <typename P>
+    static void size_buffers(state_type<P>& s, int n)
+    {
+        s.mutation_workspace.emplace(n);
+        s.offspring_buf.resize(n, s.lambda);
+        s.new_sigmas_buf.resize(n, s.lambda);
+        s.offspring_fitnesses_buf.resize(s.lambda);
+        s.offspring_violations_buf.resize(s.lambda);
+        s.all_constraints_buf.resize(s.n_eq + s.n_ineq, s.lambda);
+        s.indices_buf.resize(static_cast<std::size_t>(s.lambda));
+        s.fitnesses.resize(s.lambda);
+    }
+
+    // The pull-to-best target starts at the least-violating individual, then the lowest objective.
+    template <typename P>
+    static void start_pull_target(state_type<P>& s)
+    {
+        int best_idx = 0;
+        for(int j = 1; j < s.lambda; ++j)
+        {
+            const bool feasible_j = s.violations[j] <= Scalar(0.0);
+            const bool feasible_best = s.violations[best_idx] <= Scalar(0.0);
+            if(feasible_j && !feasible_best)
+                best_idx = j;
+            else if(feasible_j == feasible_best && (feasible_j ? s.fitnesses[j] < s.fitnesses[best_idx] : s.violations[j] < s.violations[best_idx]))
+                best_idx = j;
+        }
+        s.pull_target = s.population.col(best_idx);
+        s.pull_target_value = s.fitnesses[best_idx];
+        s.best_ever_value = s.pull_target_value;
+        s.best_ever_violation = s.violations[best_idx];
+    }
+
     // A population_size above INT32_MAX arrives here negative, since the unsigned-to-int conversion is modular.
     template <typename P>
     static bool rejects_population(const state_type<P>& s)

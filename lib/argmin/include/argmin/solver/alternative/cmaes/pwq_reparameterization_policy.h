@@ -58,6 +58,7 @@
 #include "argmin/detail/cmaes_covariance.h"
 #include "argmin/detail/cmaes_sampling.h"
 #include "argmin/detail/evaluation_count.h"
+#include "argmin/detail/cmaes_search_start.h"
 #include "argmin/options/cmaes_detection_options.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
@@ -291,11 +292,6 @@ struct pwq_reparameterization_policy
         state_type<Problem> s;
         s.problem = &problem;
 
-        s.mean = x0;
-        // Captured for the IPOP restart re-anchor per Auger & Hansen 2005
-        // §III: each restart sets s.mean back to the user's initial point.
-        s.x0 = x0;
-
         if constexpr(bound_constrained<Problem, Scalar>)
         {
             s.lower = problem.lower_bounds();
@@ -349,167 +345,10 @@ struct pwq_reparameterization_policy
             }
         }
 
-        // Hansen (2023) arXiv:1604.00772: sigma = 1/4 to 1/3 of search space.
-        if(options.initial_sigma.has_value())
-        {
-            s.sigma = options.initial_sigma.value();
-        }
-        else if(s.has_bounds)
-        {
-            Scalar max_range = Scalar(0.0);
-            for(int i = 0; i < n; ++i)
-            {
-                Scalar range = s.upper[i] - s.lower[i];
-                if(std::isfinite(range))
-                    max_range = std::max(max_range, range);
-            }
-            s.sigma = max_range > Scalar(0.0) ? max_range / Scalar(3.0) : Scalar(0.3);
-        }
-        else
-        {
-            s.sigma = Scalar(0.3);
-        }
-        s.initial_sigma = s.sigma;
-
-        // Population size: user override, else the Hansen (2023,
-        // arXiv:1604.00772 §B.1) default 4 + floor(3 ln n), for both
-        // bounded and unbounded problems. A bounded landscape does NOT get
-        // a widened floor: a sweep over {4 + floor(3 ln n), 2n, 4n, 8n} on
-        // bounded unimodal controls (sphere, Rosenbrock) and multimodal
-        // problems (Rastrigin, Ackley, Schwefel) at n = 2, 5, 10 showed the
-        // larger populations inflate the unimodal eval count 2-4x while
-        // buying only marginal gains on the hard multimodal problems (which
-        // remain largely unsolved even at 8n); Ackley reaches near-full
-        // success at the Hansen default for a fraction of the cost. The
-        // population-doubling restart is the designed escalation path when
-        // a base run stalls on a multimodal landscape, so the base default
-        // stays at the efficient Hansen value.
-        int pop_lambda = options.lambda.has_value()
-            ? static_cast<int>(std::min<std::uint32_t>(options.lambda.value(), state_type<Problem>::MaxPop + 1u))
-            : 0;
-        s.params = detail::compute_constants<Scalar>(n, pop_lambda);
-
-        s.invalid_problem = (s.params.lambda > state_type<Problem>::MaxPop);
-
-        // Pre-allocate per-step buffers. Sized to
-        // current lambda; step() uses .head(lambda) / .leftCols(lambda)
-        // to track the working size, and re-resizes only on IPOP
-        // doublings. The compile-time MaxPop cap on the matrix
-        // template still protects against pathological growth. Gated on
-        // the population-cap check so an over-cap lambda never resizes
-        // past the static MaxPop bound.
-        if(!s.invalid_problem)
-        {
-            s.fitnesses_buf.resize(s.params.lambda);
-            s.unpenalized_buf.resize(s.params.lambda);
-            s.idx_buf.resize(static_cast<std::size_t>(s.params.lambda));
-            s.deltas_buf.resize(n, s.params.lambda);
-            s.gen_fitnesses_buf.resize(static_cast<std::size_t>(s.params.lambda));
-        }
-
-        s.C = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
-        s.p_sigma = Eigen::Vector<Scalar, N>::Zero(n);
-        s.p_c = Eigen::Vector<Scalar, N>::Zero(n);
-        s.B = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
-        s.D = Eigen::Vector<Scalar, N>::Ones(n);
-
-        // Anisotropic-box initial scaling. Hansen (2023) arXiv:1604.00772
-        // sets the initial per-coordinate step to ~0.3*(ub-lb); with a
-        // single scalar step size that scale must be carried per
-        // coordinate in the initial covariance diagonal, otherwise a
-        // narrow coordinate is sampled at the width of the widest one
-        // (an isotropic ellipsoid of radius max_range/3 in every
-        // direction). The scale ratio range_i/max_range gives an initial
-        // per-coordinate standard deviation sigma * D_i = range_i/3, and
-        // the widest finite coordinate keeps unit scale so an isotropic
-        // box is unchanged. Only applied when sigma is auto-derived from
-        // the bounds; an explicit initial_sigma is a deliberate isotropic
-        // scalar choice and is respected as given.
-        if(s.has_bounds && !options.initial_sigma.has_value())
-        {
-            Scalar max_range = Scalar(0.0);
-            for(int i = 0; i < n; ++i)
-            {
-                const Scalar range = s.upper[i] - s.lower[i];
-                if(std::isfinite(range) && range > max_range)
-                    max_range = range;
-            }
-            if(max_range > Scalar(0.0))
-            {
-                for(int i = 0; i < n; ++i)
-                {
-                    const Scalar range = s.upper[i] - s.lower[i];
-                    const Scalar ratio =
-                        (std::isfinite(range) && range > Scalar(0.0))
-                            ? range / max_range
-                            : Scalar(1.0);
-                    s.D[i] = ratio;
-                    s.C(i, i) = ratio * ratio;
-                }
-            }
-        }
-
-        s.eigen_solver.compute(s.C);
-        s.covariance_dirty = false;
-
-        // Hansen 2023 (arXiv:1604.00772) section B.3 item 8 (TolXUp) baseline.
-        // Recorded at init from the actual initial D. The widest finite
-        // coordinate carries unit scale, so initial_d_max == 1.0 for both
-        // the isotropic and the anisotropic-box initialization above.
-        s.initial_d_max = s.D.maxCoeff();
-        s.axis_cycle_index = 0;
-
-        // Hansen 2023 (arXiv:1604.00772) §B.2 (Strategy internal numerical
-        // effort): the skip factor floor(1 / (10*n*(c_1 + c_mu))) degenerates
-        // to 0 for low n with default weights (e.g. n=2, default lambda=6:
-        // c_1 ~= 0.18, c_mu ~= 0.04, denom = 10*2*0.22 = 4.4, floor(1/4.4)
-        // = 0), so the max(1, ...) guard pins K to 1 and a SelfAdjointEigen-
-        // Solver<2> compute() runs every iter. K=1 is accepted at low n:
-        // a 2x2 self-adjoint eigendecomposition is sub-microsecond on
-        // commodity hardware, while the publish_bench wall_us per iter on
-        // n=2 cells is ~25 us (5-seed snapshot at
-        // 2026-04-30-libcmaes-comparison: ackley_2 1322 iters / 35.4 ms),
-        // putting per-iter eigendecomp cost below 1% of total per-iter wall
-        // and below the bench noise floor. libcmaes uses a counter-based
-        // equivalent (`eigeneval - counteval > lambda / (10*(c_1 + c_mu))`,
-        // src/cmastrategy.cc::optimize_), which gives a numerically-similar
-        // skip frequency in this regime. K = max(1, floor(1 / (10 * n *
-        // (c_1 + c_mu)))).
-        if(options.eigendecomposition_skip_generations.has_value())
-        {
-            s.decomposition_skip_k = options.eigendecomposition_skip_generations.value();
-        }
-        else
-        {
-            Scalar skip_denom = Scalar(10.0) * static_cast<Scalar>(n) * (s.params.c_1 + s.params.c_mu);
-            s.decomposition_skip_k = std::max(
-                std::uint32_t{1},
-                static_cast<std::uint32_t>(std::floor(Scalar(1.0) / skip_denom)));
-        }
-
-        // xoshiro256+ RNG: 32 bytes state vs 2.5KB for mt19937.
-        // Reference: Blackman & Vigna (2021), ACM TOMS 47(4).
-        if(options.seed.has_value())
-            s.rng = detail::xoshiro256{options.seed.value()};
-        else
-            s.rng = detail::xoshiro256{static_cast<std::uint64_t>(std::random_device{}())};
-
-        // Hansen 2023 (arXiv:1604.00772) §B.3 paragraph "Stagnation":
-        // minimum stagnation history window is 120 + ceil(30 * n / lambda).
-        // The 30*n/lambda term scales the window with the
-        // dimension/popsize ratio; the 120 floor is the paper's lower
-        // bound for short-history runs.
-        s.stagnation_window_min = std::uint32_t{120}
-            + static_cast<std::uint32_t>(std::ceil(Scalar(30.0) * static_cast<Scalar>(n) / static_cast<Scalar>(s.params.lambda)));
-        if(options.stagnation_window.has_value())
-            s.stagnation_window_min = *options.stagnation_window;
-
-        s.x = x0;
-        if(detail::latch_rejection<Scalar>(s, s.invalid_problem || detail::declares_constraint_rows(problem)))
-            return s;
-        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, x0);
-        s.best_ever_value = s.objective_value;
-
+        // A bounded problem keeps the Hansen default population, without the 4n floor: on bounded sphere, Rosenbrock,
+        // Rastrigin, Ackley and Schwefel at n = 2, 5, 10, populations of 2n to 8n cost 2-4x the unimodal evaluations
+        // for marginal multimodal gains, and the population-doubling restart is the escalation path.
+        detail::start_cmaes_search<Scalar>(s, options, x0, {.bounded_population_floor = false, .box_scaled_covariance = true});
         return s;
     }
 
