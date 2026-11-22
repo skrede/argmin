@@ -100,7 +100,7 @@ struct runarsson_yao_paper_policy
 
         std::optional<std::uint64_t> seed{};
 
-        std::uint16_t stall_window{200};
+        std::uint16_t stall_window{isres_defaults<scalar_type>::stall_window};
 
         // Numeric values are NOT paper-pinned (see file-header citation gap).
         // Defaults match NLopt for cross-implementation comparability.

@@ -213,8 +213,8 @@ template <scalar S = double>
 struct stall_tolerance_criterion
 {
     using scalar_type = S;
-    // Twice the largest shipped window (200, BOBYQA and ISRES), rounded up to a power of two: 4096 bytes at double. A
-    // larger window is rejected with invalid_problem, never shortened.
+    // The largest shipped window (500, ISRES) rounded up to a power of two: 4096 bytes at double. A larger window is
+    // rejected with invalid_problem, never shortened.
     static constexpr std::uint16_t capacity = 512;
     // An empty field is one the caller did not set: the policy's hint is then in force, else the library default.
     std::optional<S> threshold{};

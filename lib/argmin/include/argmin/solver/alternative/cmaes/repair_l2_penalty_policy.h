@@ -84,7 +84,7 @@ struct repair_l2_penalty_policy
         cmaes_detection_options<Scalar> cmaes{};         // Detection params (Hansen tutorial)
         std::optional<std::uint32_t> eigendecomposition_skip_generations{}; // Override Hansen formula
         std::optional<std::uint32_t> stagnation_window{};  // Override Hansen stagnation window formula
-        std::uint16_t stall_window{100};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
         Scalar feasibility_gate{std::numeric_limits<Scalar>::infinity()};
     };
 

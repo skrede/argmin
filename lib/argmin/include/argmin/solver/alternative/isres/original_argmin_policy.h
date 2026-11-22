@@ -74,7 +74,7 @@ struct original_argmin_policy
         // variation -- the field name reflects the actual semantic).
         std::optional<Scalar> pull_to_best_weight{};
         std::optional<std::uint64_t> seed{};
-        std::uint16_t stall_window{200};
+        std::uint16_t stall_window{isres_defaults<scalar_type>::stall_window};
     };
 
     template <typename P = void>

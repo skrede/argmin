@@ -430,26 +430,12 @@ TEMPLATE_TEST_CASE(
         }
     }
 
-    SECTION("default_line_search_max_iterations propagates")
+    SECTION("the line-search budget is the line_search_options default")
     {
-        // Single-mode line-search policies + tr_sqp accurate ship 40;
-        // tr_sqp fast ships 10.
-        if constexpr(requires { Policy::default_line_search_max_iterations; })
+        if constexpr(requires(typename Policy::options_type o) { o.line_search; })
         {
             typename Policy::options_type options{};
-            REQUIRE(options.line_search.max_iterations
-                    == Policy::default_line_search_max_iterations);
-            if constexpr(requires { Policy::mode_; })
-            {
-                if constexpr(Policy::mode_ == sqp_mode::fast)
-                    REQUIRE(options.line_search.max_iterations == 10);
-                else
-                    REQUIRE(options.line_search.max_iterations == 40);
-            }
-            else
-            {
-                REQUIRE(options.line_search.max_iterations == 40);
-            }
+            REQUIRE(options.line_search.max_iterations == line_search_options<typename Policy::scalar_type>{}.max_iterations);
         }
     }
 

@@ -298,6 +298,11 @@ Policies available at HEAD, grouped by problem class:
   `max_iterations` budget, in the bracket, the zoom and the approximate Wolfe
   test. It used to check the budget only before an objective evaluation, so a
   search could make one evaluation past its budget.
+- The ISRES policies hint a stall window of 500 generations instead of 200,
+  which stopped runs on plateaus of up to 232 generations that later improved.
+  The augmented Lagrangian, BOBYQA and CMA-ES policies hint the library default
+  of 50 instead of 100 and 200. A hinted window acts only when the caller sets a
+  stall threshold.
 
 ### Notes
 

@@ -147,7 +147,7 @@ struct augmented_lagrangian_policy
         // Reference: N&W Algorithm 17.4, Step 2; CGT 1991 Section 3.
         scalar_type inner_tolerance_eta{augmented_lagrangian_defaults<scalar_type>::inner_tolerance_eta};
         scalar_type inner_tolerance_alpha{augmented_lagrangian_defaults<scalar_type>::inner_tolerance_alpha};
-        std::uint16_t stall_window{100};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
     };
 
     options_type options{};

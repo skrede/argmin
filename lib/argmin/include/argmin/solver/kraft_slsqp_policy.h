@@ -106,15 +106,6 @@ struct kraft_slsqp_policy
     // Kraft 1988 §2.2.6 (initial penalty default).
     static constexpr Scalar default_initial_penalty = line_search_sqp_defaults<Scalar>::initial_penalty;
 
-    // Armijo backtracking budget. NLopt slsqp.c's slsqpb_ outer loop
-    // (slsqp.c:1803-2189) interleaves an inner line search whose budget
-    // tracks the outer iter limit by convention; the standalone Armijo
-    // budget here is 40 (NLopt-parity sustained backtracking before
-    // declaring exhaustion).
-    //
-    // Reference: NLopt slsqp.c:1803-2189 (slsqpb_ outer line-search budget).
-    static constexpr std::uint16_t default_line_search_max_iterations = 40;
-
     // Armijo sufficient-decrease parameter. The 1e-4 default is the
     // Wolfe-condition convention used by NLopt slsqp.c.
     //
@@ -184,14 +175,9 @@ struct kraft_slsqp_policy
         // Reference: Kraft 1988 §2.2.6 (initial penalty default 1.0).
         Scalar initial_penalty{default_initial_penalty};
 
-        // Embedded line-search params. Designated-initializer order follows
-        // line_search_options field-declaration order (c1, c2, rho,
-        // max_alpha, max_iterations); skipped designators (c2, max_alpha)
-        // keep their line_search_options-side defaults (0.9 and 1.0).
         line_search_options<scalar_type> line_search{
             .c1 = default_armijo_c1,
             .rho = default_armijo_rho,
-            .max_iterations = default_line_search_max_iterations,
         };
 
         // QP subproblem params. Dead-wired on the kraft lineage at

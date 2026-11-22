@@ -91,7 +91,7 @@ struct nlopt_faithful_policy
 
         std::optional<std::uint64_t> seed{};
 
-        std::uint16_t stall_window{200};
+        std::uint16_t stall_window{isres_defaults<scalar_type>::stall_window};
 
         // NLopt-faithful operator constants. gamma = 0.85, alpha = 0.2 are
         // engineering defaults from NLopt isres.c:67-68 (NOT pinned

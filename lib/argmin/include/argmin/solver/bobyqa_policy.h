@@ -107,7 +107,7 @@ struct bobyqa_policy
         std::optional<Scalar> initial_trust_radius{};             // default: auto, 10% of max bound range (Powell 2009)
         std::optional<Scalar> final_trust_radius{};               // default: 1e-8 in double, stopping criterion on delta (Powell 2009)
         trust_region_options<Scalar> trust{};                     // Embedded trust region params
-        std::uint16_t stall_window{200};
+        std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
         Scalar feasibility_gate{std::numeric_limits<Scalar>::infinity()};
     };
 

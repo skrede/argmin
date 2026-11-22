@@ -49,10 +49,10 @@ file	lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h	-	1044
 file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1146
 file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	655
 file	lib/argmin/include/argmin/solver/convergence.h	-	352
-file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1319
-file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1210
+file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1308
+file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1199
 file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1785
-file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1119
+file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1105
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	203
 file	lib/argmin/include/argmin/solver/lm_policy.h	-	301
 file	lib/argmin/include/argmin/solver/mma_policy.h	-	565
