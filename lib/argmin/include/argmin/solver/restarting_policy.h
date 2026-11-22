@@ -1,8 +1,11 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_RESTARTING_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_RESTARTING_POLICY_H
 
-// IPOP restart decorator: wraps a population-based policy and restarts it on stagnation with an increasing population.
-// A restart consumes one step() call. rebind<M> forwards through the decorator so step_budget_solver CTAD works.
+// IPOP restart decorator: wraps a population-based policy and restarts it with an increasing population. A run ends on
+// its own verdict (the inner policy's status, else the decorator's copy of the convergence settings) or when it stops
+// improving; a converged, ftol_reached or xtol_reached claim or invalid_problem ends the solve, every other end
+// restarts, and at max_restarts the solve ends with the best run's result and status. rebind<M> forwards through the
+// decorator so step_budget_solver CTAD works.
 //
 // Reference: Auger & Hansen (2005), "A Restart CMA Evolution Strategy
 //            with Increasing Population Size", CEC 2005.
@@ -11,6 +14,7 @@
 #include "argmin/detail/cmaes_sampling.h"
 #include "argmin/detail/stochastic_seed.h"
 #include "argmin/detail/evaluation_count.h"
+#include "argmin/detail/decorator_verdict.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
@@ -21,7 +25,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <type_traits>
 
@@ -57,9 +60,10 @@ struct restarting_policy
     {
         typename Inner::options_type inner{};
         std::optional<std::uint32_t> stagnation_limit{};  // truly optional: unset = auto formula 10 + ceil(30 n / lambda)
+        std::optional<std::uint32_t> max_restarts{};  // unset: no cap, the solve's iteration budget ends the restarts
         scalar_type population_multiplier{scalar_type(2.0)};  // IPOP doubling (Auger & Hansen 2005)
-        // No stall_window: a restart emits a synthetic step result and the decorator keeps its own stagnation count, which
-        // an external stall window would double-fire against. feasibility_gate belongs to the inner policy.
+        // No stall_window or feasibility_gate: each run is judged by the decorator's own convergence copy under the
+        // inner policy's options, and the solve's criteria never see a run's steps.
     };
 
     template <typename P = void>
@@ -67,12 +71,13 @@ struct restarting_policy
     {
         detail::resolve_inner_state_t<Inner, P> inner;
         decltype(std::declval<detail::resolve_inner_state_t<Inner, P>>().x) x{};
-        const P* problem{nullptr};
         decltype(x) x0_saved{};
+        decltype(x) lower{};
+        decltype(x) upper{};
         detail::xoshiro256 rng{1};
+        detail::member_judge<scalar_type> judge{};
+        detail::best_member<decltype(x), scalar_type> best{};
         std::uint64_t base_seed{1};
-        std::uint32_t stagnation_count{0};
-        scalar_type best_ever_value{std::numeric_limits<scalar_type>::infinity()};
         bool restart_pending{false};
         std::uint32_t restart_count{0};
         std::uint32_t dimension{0};
@@ -86,39 +91,28 @@ struct restarting_policy
     options_type options{};
 
     template <typename Problem, typename Convergence = default_convergence<scalar_type>>
-    state_type<Problem> init(const Problem& problem,
-                    const auto& x0,
-                    const solver_options<Convergence>& opts)
+    state_type<Problem> init(const Problem& problem, const auto& x0, const solver_options<Convergence>& opts)
     {
         inner_policy_.options = options.inner;
         state_type<Problem> s;
-        s.problem = &problem;
         s.x0_saved = x0;
         s.base_seed = pin_inner_seed();
         s.rng = detail::xoshiro256{detail::restart_seed(s.base_seed, 0)};
         s.inner = inner_policy_.init(problem, x0, opts);
-        s.best_ever_value = s.inner.objective_value;
-        s.stagnation_count = 0;
-        s.restart_count = 0;
-        s.restart_pending = false;
         s.dimension = static_cast<std::uint32_t>(x0.size());
-
-        if constexpr(requires { s.inner.lambda; })
-            s.initial_lambda = static_cast<std::uint32_t>(s.inner.lambda);
-        else if constexpr(requires { s.inner.params.lambda; })
-            s.initial_lambda = static_cast<std::uint32_t>(s.inner.params.lambda);
-        else
-            s.initial_lambda = static_cast<std::uint32_t>(4 + 3 * std::log(static_cast<scalar_type>(s.dimension)));
-
+        s.initial_lambda = lambda_of(s);
+        s.judge = detail::member_judge<scalar_type>{opts, inner_policy_, stagnation_limit(s)};
+        if constexpr(detail::boxed_problem<Problem, scalar_type>)
+        {
+            s.lower = problem.lower_bounds();
+            s.upper = problem.upper_bounds();
+        }
         sync_from_inner(s);
         return s;
     }
 
     template <typename Problem, typename Convergence>
-    state_type<Problem> init(const Problem& problem,
-                    const auto& x0,
-                    const solver_options<Convergence>& opts,
-                    const options_type& policy_opts)
+    state_type<Problem> init(const Problem& problem, const auto& x0, const solver_options<Convergence>& opts, const options_type& policy_opts)
     {
         options = policy_opts;
         return init(problem, x0, opts);
@@ -128,38 +122,10 @@ struct restarting_policy
     step_result<scalar_type> step(state_type<P>& s)
     {
         if(s.restart_pending)
-        {
             reinit(s);
-            s.restart_pending = false;
-            s.stagnation_count = 0;
-            return step_result<scalar_type>{
-                .objective_value = s.inner.objective_value,
-                .gradient_norm = scalar_type(1.0),
-                .step_size = scalar_type(1.0),
-                .objective_change = scalar_type(1.0),
-                .improved = false,
-                .x_norm = s.inner.x.norm(),
-            };
-        }
-
-        auto result = inner_policy_.step(s.inner);
-
-        // Stall detection
-        if(result.objective_value < s.best_ever_value)
-        {
-            s.best_ever_value = result.objective_value;
-            s.stagnation_count = 0;
-        }
-        else
-            ++s.stagnation_count;
-
-        std::uint32_t limit = options.stagnation_limit.value_or(static_cast<std::uint32_t>(10 + std::ceil(30.0 * s.dimension / s.initial_lambda)));
-
-        if(s.stagnation_count >= limit)
-            s.restart_pending = true;
-
+        const step_result<scalar_type> result = inner_policy_.step(s.inner);
         sync_from_inner(s);
-        return result;
+        return detail::member_step<P>(s, result, [&](solver_status verdict) { return finishes(verdict) || restarts_used(s); });
     }
 
     template <typename P>
@@ -200,7 +166,40 @@ private:
         if constexpr(requires { inner_policy_.options.seed; })
             inner_policy_.options.seed = detail::restart_seed(s.base_seed, s.restart_count);
         inner_policy_.reset_clear(s.inner, restart_mean(s));
+        s.restart_pending = false;
+        s.judge.restart();
         sync_from_inner(s);
+    }
+
+    static constexpr bool finishes(solver_status verdict)
+    {
+        return verdict == solver_status::converged || verdict == solver_status::ftol_reached || verdict == solver_status::xtol_reached
+            || verdict == solver_status::invalid_problem;
+    }
+
+    template <typename P>
+    bool restarts_used(const state_type<P>& s) const
+    {
+        return options.max_restarts && s.restart_count >= *options.max_restarts;
+    }
+
+    // Auger and Hansen (2005): a run stagnates when its best objective has not improved for 10 + ceil(30 n / lambda)
+    // generations.
+    template <typename P>
+    std::uint32_t stagnation_limit(const state_type<P>& s) const
+    {
+        return options.stagnation_limit.value_or(static_cast<std::uint32_t>(10 + std::ceil(30.0 * s.dimension / s.initial_lambda)));
+    }
+
+    template <typename P>
+    static std::uint32_t lambda_of(const state_type<P>& s)
+    {
+        if constexpr(requires { s.inner.lambda; })
+            return static_cast<std::uint32_t>(s.inner.lambda);
+        else if constexpr(requires { s.inner.params.lambda; })
+            return static_cast<std::uint32_t>(s.inner.params.lambda);
+        else
+            return static_cast<std::uint32_t>(4 + 3 * std::log(static_cast<scalar_type>(s.dimension)));
     }
 
     // Auger and Hansen (2005) section III: a restart draws its mean in the search box to probe a new basin. The draw
@@ -209,8 +208,8 @@ private:
     decltype(state_type<P>::x0_saved) restart_mean(state_type<P>& s)
     {
         decltype(state_type<P>::x0_saved) mean = s.x0_saved;
-        if constexpr(bound_constrained<P, scalar_type>)
-            detail::uniform_in_finite_box<scalar_type>(mean, s.problem->lower_bounds(), s.problem->upper_bounds(), s.rng);
+        if constexpr(detail::boxed_problem<P, scalar_type>)
+            detail::uniform_in_finite_box<scalar_type>(mean, s.lower, s.upper, s.rng);
         return mean;
     }
 
@@ -230,8 +229,8 @@ private:
     template <typename P>
     static solver_status settle(state_type<P>& s, solver_status status)
     {
-        s.stagnation_count = 0;
-        s.best_ever_value = s.inner.objective_value;
+        s.judge.restart();
+        s.best.clear();
         s.restart_pending = false;
         sync_from_inner(s);
         return status;

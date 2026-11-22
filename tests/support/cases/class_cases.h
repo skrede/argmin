@@ -13,12 +13,12 @@ namespace argmin::cases
 {
 
 template <typename Visitor, typename Policy>
-void visit_unconstrained_and_bound(Visitor& visitor, std::string_view key, const Policy& policy)
+void visit_unconstrained_and_bound(Visitor& visitor, std::string_view key, const Policy& policy, const solver_options<>& options = gradient_options())
 {
     const rosenbrock<double, 2> unconstrained;
     const hs038<> bound;
-    visit_case(visitor, case_id{key, "unconstrained", "rosenbrock"}, policy, unconstrained, gradient_options());
-    visit_case(visitor, case_id{key, "bound", "hs038"}, policy, bound, gradient_options());
+    visit_case(visitor, case_id{key, "unconstrained", "rosenbrock"}, policy, unconstrained, options);
+    visit_case(visitor, case_id{key, "bound", "hs038"}, policy, bound, options);
 }
 
 template <typename Inequality = hs076<>, typename Visitor, typename Policy>

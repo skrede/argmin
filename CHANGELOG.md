@@ -51,6 +51,9 @@ Policies available at HEAD, grouped by problem class:
   `phi(0) + relative_value_noise * |phi(0)|` is accepted on the strong-Wolfe
   curvature condition alone. It defaults to 0, which disables the band;
   Python's `LineSearchOptions` reports it.
+- `restarting_policy::options_type::max_restarts`: when set, the solve ends
+  with the best run after that many restarts; unset, restarts continue until
+  the iteration budget ends the solve.
 - COBYLA's policy state carries `clamped_evaluations`, the number of evaluation
   points its safety clamp moved into the box; Python reports it as
   `CobylaSolver.clamped_evaluations`.
@@ -224,6 +227,21 @@ Policies available at HEAD, grouped by problem class:
   feasibility tolerance.
 
 ### Fixed
+
+- `multistart_policy` and `restarting_policy` decide when they are done and
+  report what their runs did. Each run is judged by the inner policy's own
+  status, else by the decorator's copy of the solve's convergence settings, so
+  the solve's own criteria no longer end a multistart or restarting solve on
+  the first run's verdict. `multistart_policy` starts every run it promises
+  (1 + `max_restarts`); `restarting_policy` ends on a `converged`,
+  `ftol_reached` or `xtol_reached` claim or on `invalid_problem` and restarts
+  on every other end of a run, including its own stagnation count. At the last
+  run the solve ends with the best run, ranked feasibility first, and reports
+  that run's point, objective, constraint violation, gradient norm and status.
+  A step that starts a new run no longer reports a placeholder gradient norm
+  of 0 or 1, and restart exhaustion no longer reports `budget_exhausted`. A
+  multistart over a fixed-dimension problem without a box restarts from its
+  best run's point instead of a point drawn from unset bounds.
 
 - A reset CMA-ES or ISRES solver behaves like a new one. `reset` and `reset_clear`
   reseed from `options.seed` (or from `std::random_device` when it is unset),

@@ -5,6 +5,7 @@
 #include "argmin/result/step_result.h"
 
 #include <limits>
+#include <cstdint>
 
 namespace argmin::detail
 {
@@ -28,6 +29,24 @@ step_result<Scalar> latched_step(Scalar x_norm, solver_status status)
         .policy_status = status,
         .evaluations = 0,
     };
+}
+
+// A decorator's member steps keep the solve running: the solve's criteria never see a member's own history, so they
+// must not end the solve on its steps.
+template <typename Scalar>
+step_result<Scalar> working_step(step_result<Scalar> member)
+{
+    member.policy_status = solver_status::running;
+    return member;
+}
+
+// A decorator ends with the member it returns: that member's last step and status, and the evaluations of this step.
+template <typename Scalar>
+step_result<Scalar> member_end_step(step_result<Scalar> member, solver_status status, std::uint32_t evaluations)
+{
+    member.policy_status = status;
+    member.evaluations = evaluations;
+    return member;
 }
 
 }

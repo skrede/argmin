@@ -1,20 +1,16 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_MULTISTART_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_MULTISTART_POLICY_H
 
-// Multi-start restart decorator for derivative-free solver policies.
-//
-// Transparent GoF decorator that wraps any policy and adds Halton-sequence
-// multi-start restarts. When the inner solver stagnates, the decorator
-// generates a new starting point via Halton quasi-random sequence mapped
-// to the problem bounds, then restarts the inner solver from that point.
-// Unlike CMA-ES IPOP (which doubles population size), this generates
-// DIVERSE starting points across the feasible region. Suitable for any
-// derivative-free policy (BOBYQA, CMA-ES).
+// Multi-start decorator: runs the inner policy from 1 + max_restarts starts and returns the best run. A run ends on
+// any terminal verdict of its own (the inner policy's status, else the decorator's copy of the convergence settings)
+// or when it stops improving; the next run starts from a Halton point in the box, or from the best run's point when
+// there is no box. Only the last run's end ends the solve, with the best run's result and status.
 // Reference: Halton, J. H. (1960), quasi-random sequence seeding.
 //            K&W Section 8.1 (multi-start global optimization).
 
 #include "argmin/detail/halton.h"
 #include "argmin/detail/evaluation_count.h"
+#include "argmin/detail/decorator_verdict.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/solver/restarting_policy.h"
@@ -24,7 +20,6 @@
 #include <Eigen/Core>
 
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <utility>
 
@@ -46,16 +41,13 @@ struct multistart_policy
         typename Inner::options_type inner{};
         std::uint16_t max_restarts{default_max_restarts};
         std::optional<std::uint32_t> stall_budget_per_restart{};  // truly optional: unset = auto 10 + 30 n
-        // stall_window / feasibility_gate intentionally not declared on the decorator.
-        // multistart_policy emits synthetic (obj_change=1.0, step_size=1.0) step_results on
-        // restart-consuming steps; exposing an external stall_window would double-fire against
-        // the inner policy's own stall logic, which is already forwarded via options.inner.
-        // feasibility_gate is inner-policy territory for the same reason.
+        // No stall_window or feasibility_gate: each run is judged by the decorator's own convergence copy under the
+        // inner policy's options, and the solve's criteria never see a run's steps.
     };
 
     // Reuses restarting_policy's inner-state resolution (state_type<P> when the inner policy templates on the problem,
-    // plain state_type otherwise) and derives x / lower / upper / best_ever_x from the inner state's own vector type so
-    // fixed-N inner policies keep fully-fixed state inside this decorator rather than collapsing to a dynamic vector.
+    // plain state_type otherwise) and derives x / lower / upper from the inner state's own vector type so fixed-N
+    // inner policies keep fully-fixed state inside this decorator rather than collapsing to a dynamic vector.
     template <typename P = void>
     struct state_type : detail::wrapped_evaluations<detail::resolve_inner_state_t<Inner, P>>
     {
@@ -64,9 +56,8 @@ struct multistart_policy
         decltype(x) lower{};
         decltype(x) upper{};
         scalar_type objective_value{};
-        std::uint32_t stagnation_count{0};
-        scalar_type best_ever_value{std::numeric_limits<scalar_type>::infinity()};
-        decltype(x) best_ever_x{};
+        detail::member_judge<scalar_type> judge{};
+        detail::best_member<decltype(x), scalar_type> best{};
         bool restart_pending{false};
         std::uint16_t restart_count{0};
         int dimension{0};
@@ -107,11 +98,10 @@ struct multistart_policy
     {
         state_type<Problem> s;
         s.inner = inner_policy_.init(problem, x0, opts);
-        s.best_ever_value = s.inner.objective_value;
-        s.best_ever_x = s.inner.x;
         s.dimension = problem.dimension();
+        s.judge = detail::member_judge<scalar_type>{opts, inner_policy_, effective_stall_budget(s.dimension)};
 
-        if constexpr(bound_constrained<Problem>)
+        if constexpr(detail::boxed_problem<Problem, scalar_type>)
         {
             s.lower = problem.lower_bounds();
             s.upper = problem.upper_bounds();
@@ -125,101 +115,50 @@ struct multistart_policy
     step_result<scalar_type> step(state_type<P>& s)
     {
         if(s.restart_pending)
-        {
-            s.restart_pending = false;
-
-            if(s.restart_count >= effective_max_restarts())
-            {
-                // All restarts exhausted -- restore best-ever solution and
-                // report an honest terminal status. The restart budget
-                // running out proves nothing about optimality, so this must
-                // not be reported as solver_status::converged.
-                s.x = s.best_ever_x;
-                s.objective_value = s.best_ever_value;
-                s.inner.x = s.best_ever_x;
-                s.inner.objective_value = s.best_ever_value;
-                return step_result<scalar_type>{
-                    .objective_value = s.best_ever_value,
-                    .gradient_norm = scalar_type(0.0),
-                    .step_size = scalar_type(0.0),
-                    .objective_change = scalar_type(0.0),
-                    .improved = false,
-                    .policy_status = solver_status::budget_exhausted,
-                };
-            }
-
-            // Generate Halton-seeded starting point within bounds. Widened to
-            // a dynamic vector on both ternary branches: halton_to_bounds always
-            // returns a dynamic vector, while s.best_ever_x may now be a
-            // fixed-N vector for fixed-N inner policies, and the conditional
-            // operator requires a single common type.
-            Eigen::VectorX<scalar_type> new_x0 = (s.lower.size() > 0 && s.upper.size() > 0)
-                ? detail::halton_to_bounds<scalar_type>(s.restart_count, s.dimension, s.lower, s.upper)
-                : Eigen::VectorX<scalar_type>(s.best_ever_x);
-
-            inner_policy_.reset_clear(s.inner, new_x0);
-            ++s.restart_count;
-            s.stagnation_count = 0;
-
-            sync_from_inner(s);
-
-            return step_result<scalar_type>{
-                .objective_value = s.inner.objective_value,
-                .gradient_norm = scalar_type(1.0),
-                .step_size = scalar_type(1.0),
-                .objective_change = scalar_type(1.0),
-                .improved = false,
-            };
-        }
-
-        // Forward to inner policy.
-        auto result = inner_policy_.step(s.inner);
-
-        // Track best-ever across all restarts.
-        if(result.objective_value < s.best_ever_value)
-        {
-            s.best_ever_value = result.objective_value;
-            s.best_ever_x = s.inner.x;
-            s.stagnation_count = 0;
-        }
-        else
-        {
-            ++s.stagnation_count;
-        }
-
-        // Stall detection: trigger restart if no improvement for stall_budget steps.
-        if(s.stagnation_count >= effective_stall_budget(s.dimension))
-            s.restart_pending = true;
-
+            start_next(s);
+        const step_result<scalar_type> result = inner_policy_.step(s.inner);
         sync_from_inner(s);
-
-        return result;
+        return detail::member_step<P>(s, result, [&](solver_status) { return s.restart_count >= effective_max_restarts(); });
     }
 
     template <typename P>
     solver_status reset(state_type<P>& s, const auto& x0)
     {
-        const solver_status status = inner_policy_.reset(s.inner, x0);
-        s.stagnation_count = 0;
-        s.restart_pending = false;
-        sync_from_inner(s);
-        return status;
+        return settle(s, inner_policy_.reset(s.inner, x0));
     }
 
     template <typename P>
     solver_status reset_clear(state_type<P>& s, const auto& x0)
     {
-        const solver_status status = inner_policy_.reset_clear(s.inner, x0);
-        s.stagnation_count = 0;
-        s.restart_pending = false;
         s.restart_count = 0;
-        s.best_ever_value = s.inner.objective_value;
-        s.best_ever_x = s.inner.x;
+        return settle(s, inner_policy_.reset_clear(s.inner, x0));
+    }
+
+private:
+    // The box is a property of the problem type: a fixed-N state holds unset lower and upper vectors of nonzero size.
+    template <typename P>
+    void start_next(state_type<P>& s)
+    {
+        if constexpr(detail::boxed_problem<P, scalar_type>)
+            inner_policy_.reset_clear(s.inner, detail::halton_to_bounds<scalar_type>(s.restart_count, s.dimension, s.lower, s.upper));
+        else
+            inner_policy_.reset_clear(s.inner, s.best.x());
+        ++s.restart_count;
+        s.restart_pending = false;
+        s.judge.restart();
+        sync_from_inner(s);
+    }
+
+    template <typename P>
+    static solver_status settle(state_type<P>& s, solver_status status)
+    {
+        s.judge.restart();
+        s.best.clear();
+        s.restart_pending = false;
         sync_from_inner(s);
         return status;
     }
 
-private:
     template <typename P>
     static void sync_from_inner(state_type<P>& s)
     {

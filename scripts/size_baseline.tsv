@@ -56,11 +56,10 @@ file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1105
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	203
 file	lib/argmin/include/argmin/solver/lm_policy.h	-	301
 file	lib/argmin/include/argmin/solver/mma_policy.h	-	565
-file	lib/argmin/include/argmin/solver/multistart_policy.h	-	239
 file	lib/argmin/include/argmin/solver/nw_sqp_policy.h	-	1153
 file	lib/argmin/include/argmin/solver/projected_gn_policy.h	-	369
 file	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	-	451
-file	lib/argmin/include/argmin/solver/restarting_policy.h	-	263
+file	lib/argmin/include/argmin/solver/restarting_policy.h	-	262
 file	lib/argmin/include/argmin/solver/step_and_time_budget_solver.h	-	269
 file	lib/argmin/include/argmin/solver/step_budget_solver.h	-	274
 file	lib/argmin/include/argmin/solver/stepper.h	-	240
@@ -202,7 +201,6 @@ function	lib/argmin/include/argmin/solver/lm_policy.h	init	34
 function	lib/argmin/include/argmin/solver/lm_policy.h	step	107
 function	lib/argmin/include/argmin/solver/mma_policy.h	init	71
 function	lib/argmin/include/argmin/solver/mma_policy.h	step	233
-function	lib/argmin/include/argmin/solver/multistart_policy.h	step	71
 function	lib/argmin/include/argmin/solver/nw_sqp_policy.h	init	82
 function	lib/argmin/include/argmin/solver/nw_sqp_policy.h	step	769
 function	lib/argmin/include/argmin/solver/projected_gn_policy.h	init	27
@@ -210,7 +208,6 @@ function	lib/argmin/include/argmin/solver/projected_gn_policy.h	step	115
 function	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	init	27
 function	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	step_backtracking	100
 function	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	step_dogleg	66
-function	lib/argmin/include/argmin/solver/restarting_policy.h	step	34
 function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	init	136
 function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	reset	30
 function	lib/argmin/include/argmin/solver/tr_sqp_policy.h	step	658

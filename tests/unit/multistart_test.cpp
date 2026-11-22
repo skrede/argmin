@@ -254,35 +254,29 @@ TEST_CASE("multistart respects max_restarts", "[multistart]")
     CHECK(result.iterations <= 5000);
 }
 
-TEST_CASE("multistart reports an honest status on restart exhaustion, not converged",
-          "[multistart]")
+TEST_CASE("multistart with no restarts reports its single run's own result", "[multistart]")
 {
-    // Drive the exhaustion branch directly through the decorator (mirrors
-    // restarting_policy_test.cpp's direct state/step manipulation) so the
-    // assertion is deterministic and does not depend on whether a real
-    // optimization run happens to stagnate enough times to exhaust
-    // restarts within budget.
     multistart_booth problem{
         .lb = Eigen::VectorXd{{-10.0, -10.0}},
         .ub = Eigen::VectorXd{{10.0, 10.0}},
     };
     Eigen::VectorXd x0{{0.0, 0.0}};
-    solver_options opts;
 
     using ms_policy = multistart_policy<bobyqa_policy<>>;
     ms_policy::options_type policy_opts;
-    policy_opts.max_restarts = 0;  // exhausted as soon as a restart is attempted
+    policy_opts.max_restarts = 0;
 
-    ms_policy policy;
-    auto state = policy.init(problem, x0, opts, policy_opts);
+    step_budget_solver single{bobyqa_policy<>{}, problem, x0, solver_options<>{}};
+    step_budget_solver multi{ms_policy{}, problem, x0, solver_options<>{}, policy_opts};
+    const auto single_result = single.solve();
+    const auto multi_result = multi.solve();
 
-    // Force the exhaustion branch: restart_count (0) >= max_restarts (0).
-    state.restart_pending = true;
-    auto result = policy.step(state);
-
-    REQUIRE(result.policy_status.has_value());
-    CHECK(*result.policy_status == solver_status::budget_exhausted);
-    CHECK(*result.policy_status != solver_status::converged);
+    REQUIRE(single_result.status != solver_status::max_iterations);
+    CHECK(multi_result.status == single_result.status);
+    CHECK(multi_result.iterations == single_result.iterations);
+    CHECK(multi_result.function_evaluations == single_result.function_evaluations);
+    CHECK(multi_result.x == single_result.x);
+    CHECK(multi_result.objective_value == single_result.objective_value);
 }
 
 TEST_CASE("multistart mirrors inner constraint violation through the decorator",

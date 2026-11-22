@@ -1,9 +1,13 @@
 #include "oracle/state_machine.h"
+#include "oracle/trajectory_membership.h"
 
 #include "argmin/solver/options.h"
 #include "argmin/solver/stepper.h"
 #include "argmin/solver/mma_policy.h"
+#include "argmin/solver/cmaes_policy.h"
 #include "argmin/solver/lbfgsb_policy.h"
+#include "argmin/solver/multistart_policy.h"
+#include "argmin/solver/restarting_policy.h"
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/solver/time_budget_solver.h"
 #include "argmin/solver/time_budget_options.h"
@@ -100,12 +104,56 @@ oracle::snapshot resumed_calls_snapshot(const Solver& whole, const solve_result<
     return s;
 }
 
+// A bowl centered inside its box, so every start in the box converges to the same minimizer.
+struct boxed_bowl
+{
+    static constexpr int problem_dimension = 2;
+
+    int dimension() const { return 2; }
+
+    double value(const Eigen::Vector2d& x) const { return (x - center()).squaredNorm(); }
+
+    void gradient(const Eigen::Vector2d& x, Eigen::Vector2d& g) const { g = 2.0 * (x - center()); }
+
+    Eigen::Vector2d lower_bounds() const { return Eigen::Vector2d::Constant(-5.0); }
+
+    Eigen::Vector2d upper_bounds() const { return Eigen::Vector2d::Constant(5.0); }
+
+    static Eigen::Vector2d center() { return {1.0, -2.0}; }
+};
+
+using multistart_lbfgsb = multistart_policy<lbfgsb_policy<double, 2>>;
+
+multistart_lbfgsb::options_type three_starts()
+{
+    multistart_lbfgsb::options_type policy_opts;
+    policy_opts.max_restarts = 2;
+    return policy_opts;
+}
+
 template <typename Stepper>
 void step_until_finished(Stepper& st)
 {
     for(std::uint32_t i = 0; i < 1000 && !st.finished(); ++i)
         st.step();
     REQUIRE(st.finished());
+}
+
+// Every step before the last keeps the solve running, and the last reports the status the solver ends with.
+template <typename Stepper>
+std::string decorator_step_failure(Stepper& st)
+{
+    for(std::uint32_t i = 0; i < 5000 && !st.finished(); ++i)
+    {
+        const step_result<double> r = st.step();
+        if(!r.policy_status)
+            return "step " + std::to_string(i) + " reports no status";
+        if(!st.finished() && *r.policy_status != solver_status::running)
+            return "working step " + std::to_string(i) + " reports a terminal status";
+        if(st.finished() && *r.policy_status != st.status())
+            return "end step reports another status than the solver's";
+    }
+    return st.finished() ? std::string{} : "the decorator did not finish";
 }
 
 template <typename Stepper>
@@ -264,4 +312,38 @@ TEST_CASE("a time_budget_solver call resumed after time_limit_reached equals one
     const solve_result<double, 4> whole_result = whole.step_n(203, whole_opts);
     REQUIRE(whole_result.status != solver_status::budget_exhausted);
     CHECK(oracle::first_difference(oracle::take_snapshot(resumed, resumed_result), resumed_calls_snapshot(whole, whole_result, 2)).empty());
+}
+
+TEST_CASE("a multistart solve runs every start and returns its best run's own result", "[oracle][state-machine][multistart]")
+{
+    const boxed_bowl problem;
+    const Eigen::Vector2d x0{4.0, 4.0};
+    step_budget_solver single{lbfgsb_policy<double, 2>{}, problem, x0, solver_options<>{}};
+    step_budget_solver multi{multistart_lbfgsb{}, problem, x0, solver_options<>{}, three_starts()};
+    step_budget_solver traced{multistart_lbfgsb{}, problem, x0, solver_options<>{}, three_starts()};
+    const auto single_result = single.solve();
+    const auto result = multi.solve();
+    REQUIRE(oracle::is_claim(single_result.status));
+    CHECK(multi.state().restart_count == 2);
+    CHECK(result.iterations > single_result.iterations);
+    CHECK(oracle::is_claim(result.status));
+    CHECK(result.objective_value == problem.value(result.x));
+    CHECK(oracle::membership_failure(result, oracle::record_trajectory(traced, problem, 1000)).empty());
+}
+
+TEST_CASE("a decorator's working steps keep the solve running and its end step carries its status", "[oracle][state-machine][multistart]")
+{
+    const boxed_bowl problem;
+    const Eigen::Vector2d x0{4.0, 4.0};
+    stepper<multistart_lbfgsb, 2, boxed_bowl> multi{multistart_lbfgsb{}, problem, x0, solver_options<>{}, three_starts()};
+    CHECK(decorator_step_failure(multi).empty());
+    CHECK(multi.state().restart_count == 2);
+    CHECK(oracle::is_claim(multi.status()));
+    using restarting_cmaes = restarting_policy<cmaes_policy<double, 2>>;
+    restarting_cmaes::options_type restart_opts;
+    restart_opts.inner.seed = 7u;
+    restart_opts.max_restarts = 2u;
+    stepper<restarting_cmaes, 2, boxed_bowl> restarting{restarting_cmaes{}, problem, x0, solver_options<>{}, restart_opts};
+    CHECK(decorator_step_failure(restarting).empty());
+    CHECK(oracle::is_claim(restarting.status()));
 }
