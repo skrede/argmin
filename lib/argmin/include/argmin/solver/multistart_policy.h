@@ -130,7 +130,6 @@ struct multistart_policy
     template <typename P>
     solver_status reset_clear(state_type<P>& s, const auto& x0)
     {
-        s.restart_count = 0;
         return settle(s, inner_policy_.reset_clear(s.inner, x0));
     }
 
@@ -155,6 +154,7 @@ private:
         s.judge.restart();
         s.best.clear();
         s.restart_pending = false;
+        s.restart_count = 0;
         sync_from_inner(s);
         return status;
     }

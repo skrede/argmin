@@ -228,6 +228,8 @@ Policies available at HEAD, grouped by problem class:
 
 ### Fixed
 
+- A `multistart_policy` `reset` starts its restart count over, so the solve
+  after it runs every start, as one after `reset_clear` or construction does.
 - `kraft_slsqp_policy` and `filter_slsqp_policy` restart their
   `line_search_calls` counter on `reset`, as its documentation states; a warm
   reset previously kept counting from the run before.
