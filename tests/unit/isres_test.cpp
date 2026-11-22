@@ -196,8 +196,8 @@ TEST_CASE("restarting_policy<cmaes_policy<>>: Rosenbrock 2D", "[restarting][cmae
     opts.set_step_threshold(1e-15);
 
     restarting_policy<cmaes_policy<>> policy;
-    policy.inner_policy_.options.initial_sigma = 0.5;
-    policy.inner_policy_.options.seed = 42u;
+    policy.options.inner.initial_sigma = 0.5;
+    policy.options.inner.seed = 42u;
 
     step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();
@@ -219,7 +219,7 @@ TEST_CASE("restarting_policy<isres_policy<>>: restart compiles", "[restarting][i
     opts.set_step_threshold(1e-15);
 
     restarting_policy<isres_policy<>> policy;
-    policy.inner_policy_.options.seed = 42u;
+    policy.options.inner.seed = 42u;
 
     step_budget_solver solver{policy, problem, x0, opts};
     auto result = solver.solve();

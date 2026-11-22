@@ -59,7 +59,7 @@ file	lib/argmin/include/argmin/solver/mma_policy.h	-	565
 file	lib/argmin/include/argmin/solver/nw_sqp_policy.h	-	1153
 file	lib/argmin/include/argmin/solver/projected_gn_policy.h	-	369
 file	lib/argmin/include/argmin/solver/projected_gradient_gn_policy.h	-	451
-file	lib/argmin/include/argmin/solver/restarting_policy.h	-	260
+file	lib/argmin/include/argmin/solver/restarting_policy.h	-	259
 file	lib/argmin/include/argmin/solver/step_and_time_budget_solver.h	-	269
 file	lib/argmin/include/argmin/solver/step_budget_solver.h	-	274
 file	lib/argmin/include/argmin/solver/stepper.h	-	240

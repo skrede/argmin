@@ -635,9 +635,8 @@ void run_all_argmin_solvers(
 
     // restarting_policy<cmaes_policy<double, ...>>: gate mirrors CMA-ES (global + bounds).
     // Plumb the per-row seed through options.inner so the decorator's inner
-    // cmaes_policy uses the caller-visible seed rather than the deterministic
-    // default fallback that restarting_policy::init() emits when
-    // options.inner.seed is empty. The decorator's own restart policy
+    // cmaes_policy uses the caller-visible seed; an empty options.inner.seed
+    // would draw a new std::random_device stream per solve. The decorator's own restart policy
     // replaces CMA-ES IPOP (avoids redundant double-IPOP wrapping); the inner
     // restart_strategy is therefore left at its default.
     //

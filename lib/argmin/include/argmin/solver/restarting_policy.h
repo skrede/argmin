@@ -207,14 +207,13 @@ private:
         return mean;
     }
 
-    // An unset inner seed is pinned to 1, so a default-constructed decorator, as bench harnesses and concept probes
-    // build it, reproduces its solve; a caller who wants a random stream sets options.inner.seed.
-    std::uint64_t pin_inner_seed()
+    // One base seed drives the first run, every restart's seed and the restart means. An unset inner seed draws it
+    // from std::random_device on every init and reset; an inner policy without a seed gets a fixed base.
+    std::uint64_t resolve_base_seed()
     {
         if constexpr(requires { inner_policy_.options.seed; })
         {
-            if(!inner_policy_.options.seed.has_value())
-                inner_policy_.options.seed = std::uint64_t{1};
+            inner_policy_.options.seed = detail::resolved_seed(inner_policy_.options.seed);
             return *inner_policy_.options.seed;
         }
         return std::uint64_t{1};
@@ -236,7 +235,7 @@ private:
     void rearm(state_type<P>& s, const auto& x0)
     {
         inner_policy_.options = options.inner;
-        s.base_seed = pin_inner_seed();
+        s.base_seed = resolve_base_seed();
         s.rng = detail::xoshiro256{detail::restart_seed(s.base_seed, 0)};
         s.restart_count = 0;
         s.x0_saved = x0;

@@ -1,15 +1,5 @@
 // restarting_policy<cmaes_policy<>> decorator unit tests.
 //
-// Locks the within-process bit-identity contract that closes the
-// rebuild-rebuild nondeterminism on the `restarting_cmaes` summary
-// row in publish_bench. Two back-to-back invocations of a fresh
-// `step_budget_solver` from default-constructed decorator options at the
-// SAME inner seed must produce bit-identical `final_objective` and
-// identical `iterations`. A second TEST_CASE pins the seed-plumbing
-// path so a future regression that silently bypasses the inner seed
-// (e.g. by re-routing through std::random_device) flips a deterministic
-// inequality.
-//
 // Reference: Auger & Hansen (2005), "A Restart CMA Evolution Strategy
 //            with Increasing Population Size", CEC 2005 (decorator
 //            algorithm); Hansen (2023), "The CMA Evolution Strategy:
@@ -38,11 +28,6 @@ using namespace argmin;
 namespace
 {
 
-// Bounded Ackley n=2 -- satisfies objective && bound_constrained,
-// matches the rebuild-nondeterminism closure-criterion problem
-// (Ackley n=2 from seed=42 is the canonical reproducer for the
-// publish_bench `restarting_cmaes` row regression captured in the
-// project's seed/backlog tracker).
 struct bounded_ackley
 {
     static constexpr int problem_dimension = argmin::dynamic_dimension;
@@ -234,66 +219,44 @@ TEST_CASE("restarting_policy: a fixed seed reproduces a restarting solve whose r
     }
 }
 
-TEST_CASE("restarting_policy bit-identity within process", "[restarting_policy][cmaes]")
+template <typename State>
+std::vector<std::uint64_t> seeds_of(const State& s)
 {
-    // Decorator-surface within-process determinism preflight. Two fresh
-    // `step_budget_solver` instances constructed back-to-back inside the same
-    // process from the SAME seed on the SAME problem must produce
-    // bit-identical `final_objective` and identical iteration counts.
-    //
-    // The decorator forwards seed into the inner cmaes policy via
-    // `inner_policy_.options = options.inner` at init() time. When
-    // `options.inner.seed` is unset, the decorator must NOT permit the
-    // inner policy to fall through to `std::random_device` (such a
-    // fallback caused publish_bench rebuild-rebuild nondeterminism on
-    // the `restarting_cmaes` summary row at fixed seed: 25 cells
-    // shifted final_objective between two consecutive rebuilds at the
-    // same SHA, while the directly-driven `cmaes` row was rebuild-stable
-    // because its bench wiring sets options.seed explicitly).
-    //
-    // The fresh-solver-per-run pattern defeats first-run-cache effects
-    // (state-type buffers carrying over within a single solver instance);
-    // the bit_cast equality branch defeats NaN-trap silent passes (NaN
-    // != NaN under operator==).
-    bounded_ackley problem{
-        .n = 2,
-        .lb = Eigen::VectorXd::Constant(2, -5.0),
-        .ub = Eigen::VectorXd::Constant(2, 5.0),
-    };
+    std::vector<std::uint64_t> seeds{s.base_seed};
+    seeds.insert(seeds.end(), s.rng.state.begin(), s.rng.state.end());
+    seeds.insert(seeds.end(), s.inner.rng.state.begin(), s.inner.rng.state.end());
+    return seeds;
+}
 
-    Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, 3.0);
-    solver_options opts;
-    opts.max_iterations = 500;
-    opts.set_gradient_threshold(1e-30);
-    opts.set_objective_threshold(1e-30);
-    opts.set_step_threshold(1e-30);
+template <typename Policy, typename Problem>
+std::vector<std::vector<std::uint64_t>> seeds_after_resets(Policy policy, const Problem& problem, const Eigen::VectorXd& x0)
+{
+    auto s = policy.init(problem, x0, solver_options<>{});
+    std::vector<std::vector<std::uint64_t>> seeds{seeds_of(s)};
+    policy.reset(s, x0);
+    seeds.push_back(seeds_of(s));
+    policy.reset_clear(s, x0);
+    seeds.push_back(seeds_of(s));
+    return seeds;
+}
 
-    auto run_once = [&]() {
-        // Default-constructed decorator -- mirrors bench_argmin.h
-        // wiring of the `restarting_cmaes` row. The fix at
-        // restarting_policy::init() must guarantee a deterministic
-        // inner seed in this exact configuration; without it, the
-        // inner cmaes_policy falls through to std::random_device and
-        // this assertion fails.
-        restarting_policy<cmaes_policy<>> policy;
+TEST_CASE("restarting_policy: an unset inner seed draws a new stream on init and every reset, a fixed one replays it", "[restarting_policy][cmaes]")
+{
+    const bounded_ackley problem{.n = 2, .lb = Eigen::VectorXd::Constant(2, -5.0), .ub = Eigen::VectorXd::Constant(2, 5.0)};
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, 3.0);
+    restarting_policy<cmaes_policy<>> policy;
 
-        step_budget_solver solver{policy, problem, x0, opts};
-        return solver.solve(opts);
-    };
+    const auto unseeded = seeds_after_resets(policy, problem, x0);
+    CHECK(unseeded[0] != unseeded[1]);
+    CHECK(unseeded[1] != unseeded[2]);
+    CHECK(unseeded[0] != seeds_after_resets(policy, problem, x0)[0]);
+    CHECK_FALSE(policy.options.inner.seed.has_value());
 
-    auto result_a = run_once();
-    auto result_b = run_once();
-
-    const bool bit_identical =
-        (std::isfinite(result_a.objective_value)
-         && std::isfinite(result_b.objective_value)
-         && result_a.objective_value == result_b.objective_value)
-     || (!std::isfinite(result_a.objective_value)
-         && !std::isfinite(result_b.objective_value)
-         && std::bit_cast<std::uint64_t>(result_a.objective_value)
-             == std::bit_cast<std::uint64_t>(result_b.objective_value));
-    REQUIRE(bit_identical);
-    REQUIRE(result_a.iterations == result_b.iterations);
+    policy.options.inner.seed = 42u;
+    const auto seeded = seeds_after_resets(policy, problem, x0);
+    CHECK(seeded[0] == seeded[1]);
+    CHECK(seeded[1] == seeded[2]);
+    CHECK(seeded == seeds_after_resets(policy, problem, x0));
 }
 
 TEST_CASE("restarting_policy seed plumbing through restarts", "[restarting_policy][cmaes]")

@@ -11,11 +11,16 @@ namespace argmin::detail
 {
 
 // An unset seed draws from std::random_device, so every construction and every reset starts a new stream.
-inline xoshiro256 seeded_generator(const std::optional<std::uint64_t>& seed)
+inline std::uint64_t resolved_seed(const std::optional<std::uint64_t>& seed)
 {
     if(seed.has_value())
-        return xoshiro256{*seed};
-    return xoshiro256{static_cast<std::uint64_t>(std::random_device{}())};
+        return *seed;
+    return static_cast<std::uint64_t>(std::random_device{}());
+}
+
+inline xoshiro256 seeded_generator(const std::optional<std::uint64_t>& seed)
+{
+    return xoshiro256{resolved_seed(seed)};
 }
 
 // The index-th output of a splitmix64 stream started at the base seed, so a fixed base gives every restart its own
