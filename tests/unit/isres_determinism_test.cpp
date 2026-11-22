@@ -127,7 +127,6 @@ bool differs_somewhere(const std::vector<std::array<double, 5>>& lhs,
     return false;
 }
 
-
 // Record the trajectory of a freshly constructed solver on the given seed.
 template <typename Policy = isres_policy<>>
 std::vector<std::array<double, 5>> record_trajectory(std::uint64_t seed)

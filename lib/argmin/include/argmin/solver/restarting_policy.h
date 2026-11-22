@@ -6,7 +6,6 @@
 // improving; a converged, ftol_reached or xtol_reached claim or invalid_problem ends the solve, every other end
 // restarts, and at max_restarts the solve ends with the best run's result and status. rebind<M> forwards through the
 // decorator so step_budget_solver CTAD works.
-//
 // Reference: Auger & Hansen (2005), "A Restart CMA Evolution Strategy
 //            with Increasing Population Size", CEC 2005.
 
@@ -155,7 +154,6 @@ private:
     {
         ++s.restart_count;
 
-        // IPOP: population = initial_lambda * multiplier^restart_count
         const auto new_pop = static_cast<std::uint32_t>(static_cast<scalar_type>(s.initial_lambda) * std::pow(options.population_multiplier, static_cast<scalar_type>(s.restart_count)));
 
         if constexpr(requires { inner_policy_.options.population_size; })
