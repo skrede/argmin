@@ -179,7 +179,9 @@ not sort includes, so the order is kept by hand.
   in-declaration**, so there is one source of truth and two defaults can never drift apart.
 - A **pure aggregate** with no user-declared constructor, typically an options struct, carries its
   defaults in-declaration. It stays an aggregate, so a caller designated-initializes only the fields
-  it overrides and every other field keeps its default.
+  it overrides and every other field keeps its default. The exemption covers the defaults only: a
+  member's name carries its meaning, the comment rules apply as anywhere else, and a longer
+  explanation belongs in `docs/`.
 - The init list is written in member-declaration order, since members initialize in declaration
   order regardless (no `-Wreorder`). A member consumed by another member's constructor is declared
   before its consumer, and that dependency overrides the member triangle below.
