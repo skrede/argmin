@@ -189,7 +189,7 @@ function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	step	292
 function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	init	83
 function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	step	844
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	init	87
-function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	reset	33
+function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	reset	32
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	step	776
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	init	160
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	reset	43
