@@ -1,24 +1,7 @@
-// CMA-ES restart / reset parity instruments.
-//
-// Four behaviors of the CMA-ES policies are pinned here:
-//
-//   * reset_clear() keeps the start it is handed as the distribution mean;
-//     restarting_policy, not the inner policy, draws a restart's mean.
-//
-//   * reset()/init() derived-quantity parity: reset() must re-derive the
-//     same configuration-dependent quantities init() does (the bounded
-//     population floor, the stagnation history window, the
-//     eigendecomposition skip period, and the boundary-axis cycle index),
-//     so a reset run behaves identically to a fresh run.
-//
-//   * A reset reseeds: with a fixed seed every variant retraces a fresh run
-//     bit for bit after reset() and after reset_clear(), and with no seed
-//     each reset starts a new stream.
-//
-//   * Eigendecomposition cadence: the covariance dirty flag means "C has
-//     changed since the last decomposition"; when a generation neither
-//     dirties C nor lands on the skip period, the cached B/D are reused
-//     unchanged.
+// restarting_policy, not the inner policy, draws a restart's mean, so reset_clear() keeps the start it is handed.
+// reset() re-derives what init() derives from the configuration: the bounded population floor, the stagnation window,
+// the eigendecomposition skip period and the boundary-axis cycle index. The covariance dirty flag means C changed since
+// the last decomposition, so a generation that neither dirties C nor lands on the skip period reuses B and D.
 
 #include "argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h"
 #include "argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h"

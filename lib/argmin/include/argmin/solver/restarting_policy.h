@@ -58,9 +58,9 @@ struct restarting_policy
     struct options_type
     {
         typename Inner::options_type inner{};
-        std::optional<std::uint32_t> stagnation_limit{};  // truly optional: unset = auto formula 10 + ceil(30 n / lambda)
-        std::optional<std::uint32_t> max_restarts{};  // unset: no cap, the solve's iteration budget ends the restarts
-        scalar_type population_multiplier{scalar_type(2.0)};  // IPOP doubling (Auger & Hansen 2005)
+        std::optional<std::uint32_t> stagnation_limit{};
+        std::optional<std::uint32_t> max_restarts{};  // unset: no cap
+        scalar_type population_multiplier{scalar_type(2.0)};
         // No stall_window or feasibility_gate: each run is judged by the decorator's own convergence copy under the
         // inner policy's options, and the solve's criteria never see a run's steps.
     };

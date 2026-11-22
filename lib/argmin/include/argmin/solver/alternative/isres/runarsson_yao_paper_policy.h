@@ -106,8 +106,8 @@ struct runarsson_yao_paper_policy
 
         // Numeric values are NOT paper-pinned (see file-header citation gap).
         // Defaults match NLopt for cross-implementation comparability.
-        std::optional<Scalar> paper_gamma{};   // default 0.85 (citation gap; not in paper text)
-        std::optional<Scalar> paper_alpha{};   // default 0.2  (citation gap; not in paper text)
+        std::optional<Scalar> paper_gamma{};  // default 0.85
+        std::optional<Scalar> paper_alpha{};  // default 0.2
 
         std::optional<Scalar> sigma_collapse_ratio{};  // default 1e-9
 

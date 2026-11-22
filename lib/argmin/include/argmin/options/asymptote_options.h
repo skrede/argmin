@@ -31,8 +31,8 @@ namespace argmin
 template <scalar Scalar = double>
 struct asymptote_options
 {
-    Scalar minimum_distance_fraction{Scalar(0.01)};  // min (U - L) / range (Svanberg 1987)
-    Scalar maximum_distance_fraction{Scalar(10)};    // max (U - L) / range (Svanberg 2002)
+    Scalar minimum_distance_fraction{Scalar(0.01)};
+    Scalar maximum_distance_fraction{Scalar(10)};
 };
 
 }

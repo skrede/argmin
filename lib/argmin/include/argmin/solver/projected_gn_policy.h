@@ -63,8 +63,8 @@ struct projected_gn_policy
 
     struct options_type
     {
-        Scalar initial_lambda{Scalar(0)};  // 0 = auto via Nielsen init: tau * max(diag(J^T*J))
-        Scalar tau{least_squares_defaults<Scalar>::tau};  // for initial lambda computation
+        Scalar initial_lambda{Scalar(0)};  // 0: auto
+        Scalar tau{least_squares_defaults<Scalar>::tau};
         Scalar diagonal_min_clamp{least_squares_defaults<Scalar>::diagonal_min_clamp};
         Scalar lambda_min{least_squares_defaults<Scalar>::lambda_min};
         Scalar lambda_max{least_squares_defaults<Scalar>::lambda_max};

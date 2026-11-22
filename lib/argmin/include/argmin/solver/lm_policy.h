@@ -52,13 +52,13 @@ struct lm_policy
     // An unset field takes its least_squares_defaults<Scalar> value.
     struct options_type
     {
-        std::optional<Scalar> initial_lambda{};      // LM damping init (default: auto via Nielsen, Nielsen 1999)
-        std::optional<Scalar> tau{};                 // initial damping scale (Nielsen 1999)
-        std::optional<Scalar> nu_initial{};          // damping direction factor (Nielsen 1999)
-        std::optional<Scalar> damping_factor{};      // lambda update floor factor (Nielsen 1999)
-        std::optional<Scalar> diagonal_min_clamp{};  // min diagonal value
-        std::optional<Scalar> lambda_min{};          // lambda floor
-        std::optional<Scalar> lambda_max{};          // lambda ceiling
+        std::optional<Scalar> initial_lambda{};
+        std::optional<Scalar> tau{};
+        std::optional<Scalar> nu_initial{};
+        std::optional<Scalar> damping_factor{};
+        std::optional<Scalar> diagonal_min_clamp{};
+        std::optional<Scalar> lambda_min{};
+        std::optional<Scalar> lambda_max{};
         std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
         // feasibility_gate intentionally omitted: lm_policy is unconstrained least-squares;
         // step_result reports no constraint_violation signal, so gating ftol_reached on a

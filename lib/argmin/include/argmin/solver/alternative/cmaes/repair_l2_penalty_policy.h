@@ -78,13 +78,13 @@ struct repair_l2_penalty_policy
 
     struct options_type
     {
-        std::optional<std::uint32_t> lambda{};           // population size (default: auto, K&W 8.19)
-        std::optional<Scalar> initial_sigma{};           // initial step size (default: bound-scaled, Hansen tutorial)
+        std::optional<std::uint32_t> lambda{};
+        std::optional<Scalar> initial_sigma{};
         restart_strategy restart{restart_strategy::none};
-        std::optional<std::uint64_t> seed{};             // RNG seed
-        cmaes_detection_options<Scalar> cmaes{};         // Detection params (Hansen tutorial)
-        std::optional<std::uint32_t> eigendecomposition_skip_generations{}; // Override Hansen formula
-        std::optional<std::uint32_t> stagnation_window{};  // Override Hansen stagnation window formula
+        std::optional<std::uint64_t> seed{};
+        cmaes_detection_options<Scalar> cmaes{};
+        std::optional<std::uint32_t> eigendecomposition_skip_generations{};
+        std::optional<std::uint32_t> stagnation_window{};
         std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
         Scalar feasibility_gate{std::numeric_limits<Scalar>::infinity()};
     };

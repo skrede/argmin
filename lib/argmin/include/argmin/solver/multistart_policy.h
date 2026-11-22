@@ -40,7 +40,7 @@ struct multistart_policy
     {
         typename Inner::options_type inner{};
         std::uint16_t max_restarts{default_max_restarts};
-        std::optional<std::uint32_t> stall_budget_per_restart{};  // truly optional: unset = auto 10 + 30 n
+        std::optional<std::uint32_t> stall_budget_per_restart{};
         // No stall_window or feasibility_gate: each run is judged by the decorator's own convergence copy under the
         // inner policy's options, and the solve's criteria never see a run's steps.
     };

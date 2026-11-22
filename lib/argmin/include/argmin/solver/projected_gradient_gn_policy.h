@@ -66,8 +66,8 @@ struct projected_gradient_gn_policy
 
     struct options_type
     {
-        Scalar initial_lambda{Scalar(0)};  // 0 = auto via Nielsen init: tau * max(diag(J^T*J))
-        Scalar tau{least_squares_defaults<Scalar>::tau};  // for initial lambda computation
+        Scalar initial_lambda{Scalar(0)};  // 0: auto
+        Scalar tau{least_squares_defaults<Scalar>::tau};
         Scalar diagonal_min_clamp{least_squares_defaults<Scalar>::diagonal_min_clamp};
         Scalar lambda_min{least_squares_defaults<Scalar>::lambda_min};
         Scalar lambda_max{least_squares_defaults<Scalar>::lambda_max};
@@ -78,9 +78,9 @@ struct projected_gradient_gn_policy
         std::optional<Scalar> trust_region_shrink_threshold{};
 
         // Backtracking line search parameters (N&W Algorithm 16.1):
-        Scalar armijo_c{least_squares_defaults<Scalar>::armijo_c};  // Armijo sufficient decrease parameter
-        Scalar backtrack_rho{least_squares_defaults<Scalar>::backtrack_rho};  // step shrink factor per backtrack
-        std::uint32_t max_backtrack{20}; // maximum backtracking iterations
+        Scalar armijo_c{least_squares_defaults<Scalar>::armijo_c};
+        Scalar backtrack_rho{least_squares_defaults<Scalar>::backtrack_rho};
+        std::uint32_t max_backtrack{20};
 
         std::uint16_t stall_window{convergence_defaults<scalar_type>::stall_window};
         // No feasibility_gate: the box is handled by projection, so no constraint_violation is emitted to gate on.
