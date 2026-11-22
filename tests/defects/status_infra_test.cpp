@@ -151,7 +151,8 @@ TEST_CASE("an explicit solve takes the policy's stall window only where the call
     const defects::repeat_counting_rosenbrock problem{};
     solver_options<> opts;
     opts.max_iterations = 1;
-    step_budget_solver<lbfgsb_policy<double, 2>, 2, defects::repeat_counting_rosenbrock> solver{lbfgsb_policy<double, 2>{}, problem, Eigen::Vector2d(-1.2, 1.0), opts, lbfgsb_policy<double, 2>::options_type{.stall_window = 9}};
+    step_budget_solver<lbfgsb_policy<double, 2>, 2, defects::repeat_counting_rosenbrock> solver{
+        lbfgsb_policy<double, 2>{}, problem, Eigen::Vector2d(-1.2, 1.0), opts, lbfgsb_policy<double, 2>::options_type{.stall_window = 9}};
     const auto& stall = std::get<stall_tolerance_criterion<double>>(opts.convergence.criteria);
     solver.solve(opts);
     CHECK_FALSE(stall.window.has_value());

@@ -5,8 +5,8 @@
 #include "cases/stochastic_cases.h"
 #include "cases/least_squares_cases.h"
 #include "cases/derivative_free_cases.h"
-#include "cases/trust_region_sqp_cases.h"
 #include "cases/moving_asymptote_cases.h"
+#include "cases/trust_region_sqp_cases.h"
 
 #include "argmin/solver/options.h"
 #include "argmin/solver/mma_policy.h"

@@ -56,7 +56,7 @@ inline solver_options<> one_iteration(const solver_options<>& options)
 class visitor
 {
 public:
-    visitor() : keys_{}, asymptote_cells_{0} {}
+    visitor() : asymptote_cells_{0}, keys_{} {}
 
     template <typename Problem, typename MakeSolver>
     void operator()(const cases::case_id& id, const Problem& problem, const solver_options<>& options, const MakeSolver& make_solver)
@@ -74,8 +74,8 @@ public:
     std::size_t asymptote_cells() const { return asymptote_cells_; }
 
 private:
-    std::set<std::string_view> keys_;
     std::size_t asymptote_cells_;
+    std::set<std::string_view> keys_;
 
     template <typename Solver, typename Policy, typename Problem>
     void check_configured(const Policy& policy, const Problem& problem, const solver_options<>& options)
