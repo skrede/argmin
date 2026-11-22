@@ -1128,9 +1128,7 @@ struct filter_slsqp_policy
         s.invalid_problem = rejects_shape(s);
         if(s.invalid_problem)
             return solver_status::invalid_problem;
-        // Evaluate at s.x (a concrete Eigen::Vector) rather than the Ref x0 so
-        // a dynamic-N warm reset does not materialize a heap temporary when the
-        // problem method takes a plain vector.
+        // Evaluate at s.x, not the Ref: a Ref bound to a method taking a plain VectorXd would materialize a heap temporary.
         s.x = x0;
         s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
@@ -1156,6 +1154,7 @@ struct filter_slsqp_policy
         s.filter.initialize(Scalar(1e4) * std::max(Scalar(1.0), h_0));
         s.filter.set_envelope(options.gamma_f, options.gamma_h);
         s.iteration = 0;
+        s.line_search_calls = 0;
         return detail::latch_status(s);
     }
 

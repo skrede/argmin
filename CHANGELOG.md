@@ -228,6 +228,9 @@ Policies available at HEAD, grouped by problem class:
 
 ### Fixed
 
+- `kraft_slsqp_policy` and `filter_slsqp_policy` restart their
+  `line_search_calls` counter on `reset`, as its documentation states; a warm
+  reset previously kept counting from the run before.
 - `multistart_policy` and `restarting_policy` decide when they are done and
   report what their runs did. Each run is judged by the inner policy's own
   status, else by the decorator's copy of the solve's convergence settings, so
