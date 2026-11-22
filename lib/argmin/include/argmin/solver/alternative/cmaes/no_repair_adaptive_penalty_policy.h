@@ -205,7 +205,6 @@ struct no_repair_adaptive_penalty_policy
                     const Eigen::Vector<Scalar, N>& x0,
                     const solver_options<Convergence>& /*opts*/)
     {
-        const int n = problem.dimension();
         state_type<Problem> s;
         s.problem = &problem;
 
@@ -216,13 +215,7 @@ struct no_repair_adaptive_penalty_policy
             s.has_bounds = true;
         }
 
-        // Adaptive boundary penalty weights: initialize to 1 per coord.
-        // The exponential moving average in step() updates them from
-        // the diagonal of the rank-mu accumulator each generation.
-        // Reference: Hansen (2009) §3.
-        s.adaptive_weights = Eigen::Vector<Scalar, N>::Ones(n);
-
-        detail::start_cmaes_search<Scalar>(s, options, x0, {.bounded_population_floor = true, .box_scaled_covariance = false});
+        start(s, x0);
         return s;
     }
 
@@ -894,34 +887,7 @@ struct no_repair_adaptive_penalty_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        const int n = static_cast<int>(x0.size());
-        // Refresh strategy parameters for the current options.lambda value
-        // so any caller that updates options.lambda and then calls reset()
-        // gets a refreshed adaptation parameter set (mu, mueff, c_sigma,
-        // d_sigma, c_c, c_1, c_mu, weights, chi_n). Mirrors the in-policy
-        // IPOP branch's recompute (in step()) and the libcmaes contract
-        // (cmaparameters.cc::initialize_parameters re-invoked from
-        // ipopcmastrategy.cc on each lambda bump).
-        // References:
-        //   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
-        //   libcmaes ipopcmastrategy.cc::reset_search_state.
-        s.params = detail::compute_constants<Scalar>(n,
-            static_cast<int>(std::min<std::uint32_t>(options.lambda.value_or(0), state_type<P>::MaxPop + 1u)));
-        if(detail::latch_rejection<Scalar>(s, s.params.lambda > state_type<P>::MaxPop || detail::declares_constraint_rows(*s.problem)))
-            return solver_status::invalid_problem;
-        s.mean = x0;
-        s.x = x0;
-        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, x0);
-        s.best_ever_value = s.objective_value;
-        s.p_sigma.setZero();
-        s.p_c.setZero();
-        s.C = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
-        s.B = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
-        s.D = Eigen::Vector<Scalar, N>::Ones(n);
-        s.sigma = s.initial_sigma;
-        s.generation = 0;
-        s.best_fitness_history.clear();
-        s.median_fitness_history.clear();
+        start(s, x0);
         return detail::latch_status(s);
     }
 
@@ -929,6 +895,17 @@ struct no_repair_adaptive_penalty_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         return reset(s, x0);
+    }
+
+private:
+    static constexpr detail::cmaes_start_rules start_rules{.bounded_population_floor = true, .box_scaled_covariance = false};
+
+    // Hansen (2009) section 3: the adaptive boundary weights start at 1 per coordinate.
+    template <typename P>
+    void start(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
+    {
+        s.adaptive_weights = Eigen::Vector<Scalar, N>::Ones(x0.size());
+        detail::start_cmaes_search<Scalar>(s, options, x0, start_rules);
     }
 };
 

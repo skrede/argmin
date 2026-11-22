@@ -45,10 +45,10 @@ using filter_trsqp = filter_trsqp_policy<double, dynamic_dimension, Mode>;
 }
 
 // Excluded from both reset properties:
-// - cmaes_repair_l2_penalty, cmaes_pwq_reparameterization, cmaes_no_repair_adaptive_penalty, restarting_cmaes,
-//   isres_nlopt_faithful, isres_original_argmin and isres_runarsson_yao_paper: the random stream continues across
-//   a reset, so a reset run draws other samples than a fresh run with the same seed, and the CMA-ES reset_clear
-//   draws a new mean inside the box on purpose.
+// - cmaes_repair_l2_penalty, cmaes_pwq_reparameterization, cmaes_no_repair_adaptive_penalty, isres_nlopt_faithful,
+//   isres_original_argmin and isres_runarsson_yao_paper: each reset reseeds, and the unit suite checks every variant
+//   against a fresh run bit for bit (cmaes_reset_parity_test.cpp, isres_determinism_test.cpp).
+// - restarting_cmaes: a reset of the decorator keeps the inner population an earlier solve escalated to.
 // - dense_admm_qp, sparse_admm_qp and dense_active_set_qp: they have no reset; a re-solve warm-starts by design.
 // Excluded from the warm reset() property: every other key outside the derivative-free and least-squares families,
 // because their reset() keeps algorithm state by contract (curvature pairs, quasi-Newton matrices, trust radii and

@@ -27,6 +27,7 @@
 
 #include <bit>
 #include <cmath>
+#include <vector>
 #include <cstdint>
 #include <numbers>
 
@@ -75,6 +76,54 @@ struct bounded_ackley
 
 static_assert(objective<bounded_ackley>);
 static_assert(bound_constrained<bounded_ackley>);
+
+namespace
+{
+
+struct restart_trace
+{
+    std::vector<double> objectives;
+    std::vector<Eigen::VectorXd> restart_means;
+};
+
+// Each restart's mean is read right after the decorator re-starts the inner policy, before its first generation.
+restart_trace trace_restarts(const bounded_ackley& problem, const Eigen::VectorXd& x0)
+{
+    restarting_policy<cmaes_policy<>> policy;
+    policy.options.inner.seed = 42u;
+    policy.options.stagnation_limit = 4u;
+    auto s = policy.init(problem, x0, solver_options<>{});
+    restart_trace trace;
+    for(std::int32_t k = 0; k < 60; ++k)
+    {
+        const std::uint32_t restarts = s.restart_count;
+        trace.objectives.push_back(policy.step(s).objective_value);
+        if(s.restart_count != restarts)
+            trace.restart_means.push_back(s.inner.mean);
+    }
+    return trace;
+}
+
+}
+
+TEST_CASE("restarting_policy: a fixed seed reproduces a restarting solve whose restarts start from different means",
+          "[restarting_policy][cmaes]")
+{
+    const bounded_ackley problem{.n = 2, .lb = Eigen::VectorXd::Constant(2, -5.0), .ub = Eigen::VectorXd::Constant(2, 5.0)};
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, 3.0);
+    const restart_trace first = trace_restarts(problem, x0);
+    const restart_trace second = trace_restarts(problem, x0);
+    REQUIRE(first.restart_means.size() >= 2);
+    CHECK(first.objectives == second.objectives);
+    CHECK(first.restart_means == second.restart_means);
+    for(std::size_t k = 0; k < first.restart_means.size(); ++k)
+    {
+        CHECK(first.restart_means[k] != x0);
+        CHECK((first.restart_means[k].array().abs() <= 5.0).all());
+        if(k > 0)
+            CHECK(first.restart_means[k] != first.restart_means[k - 1]);
+    }
+}
 
 TEST_CASE("restarting_policy bit-identity within process", "[restarting_policy][cmaes]")
 {

@@ -553,35 +553,12 @@ struct nlopt_faithful_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        s.invalid_problem = rejects_population(s) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
-        if(s.invalid_problem)
-            return solver_status::invalid_problem;
-        const int n = static_cast<int>(x0.size());
-
-        // Infinite bounds seed in a finite box centered on x0, as in init().
-        constexpr Scalar seed_fallback_half_width = Scalar(2.0);
-        constexpr Scalar inf = std::numeric_limits<Scalar>::infinity();
-        Eigen::Vector<Scalar, N> seed_lo = s.lower;
-        Eigen::Vector<Scalar, N> seed_hi = s.upper;
-        for(int i = 0; i < n; ++i)
+        if(detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq))
         {
-            if(!(s.lower(i) > -inf))
-                seed_lo(i) = x0(i) - seed_fallback_half_width;
-            if(!(s.upper(i) < inf))
-                seed_hi(i) = x0(i) + seed_fallback_half_width;
+            s.invalid_problem = true;
+            return solver_status::invalid_problem;
         }
-
-        const auto initial_population = detail::initialize_population<N>(n, s.lambda, seed_lo, seed_hi, *s.rng);
-        s.population.leftCols(s.lambda) = initial_population;
-
-        // Inject x0 into the initial population on reset too (same warm-start seeding as init(); NLopt isres.c:128).
-        s.population.col(0) = x0.cwiseMax(s.lower).cwiseMin(s.upper);
-
-        const auto initial_sigmas = detail::initialize_sigmas<N>(n, s.lambda, seed_lo, seed_hi);
-        s.sigmas.leftCols(s.lambda) = initial_sigmas;
-
-        s.generation = 0;
-        detail::restart_best_evaluated(s, x0);
+        start(s, x0);
         return detail::latch_status(s);
     }
 

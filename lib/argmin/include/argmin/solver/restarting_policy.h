@@ -1,23 +1,21 @@
 #ifndef HPP_GUARD_ARGMIN_SOLVER_RESTARTING_POLICY_H
 #define HPP_GUARD_ARGMIN_SOLVER_RESTARTING_POLICY_H
 
-// IPOP restart decorator for population-based solver policies.
-//
-// Transparent GoF decorator that wraps any policy and adds restart-on-
-// stagnation with increasing population size (IPOP). The decorator
-// forwards init/step/reset/reset_clear to the inner policy and monitors
-// for stagnation. When triggered, restart consumes one step() call.
-//
-// rebind<M> forwards through the decorator so step_budget_solver CTAD works
-// transparently.
+// IPOP restart decorator: wraps a population-based policy and restarts it on stagnation with an increasing population.
+// A restart consumes one step() call. rebind<M> forwards through the decorator so step_budget_solver CTAD works.
 //
 // Reference: Auger & Hansen (2005), "A Restart CMA Evolution Strategy
 //            with Increasing Population Size", CEC 2005.
 
+#include "argmin/detail/xoshiro256.h"
+#include "argmin/detail/cmaes_sampling.h"
+#include "argmin/detail/stochastic_seed.h"
 #include "argmin/detail/evaluation_count.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
+
+#include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
 
@@ -60,11 +58,8 @@ struct restarting_policy
         typename Inner::options_type inner{};
         std::optional<std::uint32_t> stagnation_limit{};  // truly optional: unset = auto formula 10 + ceil(30 n / lambda)
         scalar_type population_multiplier{scalar_type(2.0)};  // IPOP doubling (Auger & Hansen 2005)
-        // stall_window / feasibility_gate intentionally not declared on the decorator.
-        // restarting_policy emits synthetic (obj_change=1.0, step_size=1.0) step_results on
-        // restart and maintains its own internal stall logic (see the restart-trigger block
-        // below). Exposing an external stall_window would double-fire against this internal
-        // logic; feasibility_gate is inner-policy territory.
+        // No stall_window: a restart emits a synthetic step result and the decorator keeps its own stagnation count, which
+        // an external stall window would double-fire against. feasibility_gate belongs to the inner policy.
     };
 
     template <typename P = void>
@@ -74,6 +69,8 @@ struct restarting_policy
         decltype(std::declval<detail::resolve_inner_state_t<Inner, P>>().x) x{};
         const P* problem{nullptr};
         decltype(x) x0_saved{};
+        detail::xoshiro256 rng{1};
+        std::uint64_t base_seed{1};
         std::uint32_t stagnation_count{0};
         scalar_type best_ever_value{std::numeric_limits<scalar_type>::infinity()};
         bool restart_pending{false};
@@ -94,33 +91,11 @@ struct restarting_policy
                     const solver_options<Convergence>& opts)
     {
         inner_policy_.options = options.inner;
-
-        // Reproducibility: when no inner seed has been specified, plumb a
-        // deterministic default into the inner policy's local options copy.
-        // Without this, population-based inner policies (cmaes, isres, ...)
-        // fall through to a std::random_device fallback at init() time,
-        // which gives every rebuild a different RNG seed and breaks
-        // bit-identity of the final objective across rebuilds at the same
-        // SHA / same caller-visible configuration. The default-constructed
-        // decorator is the relevant case: bench harnesses and concept
-        // probes instantiate `restarting_policy<cmaes_policy<>>{}` without
-        // supplying a seed, and a stochastic inner default propagates into
-        // user-visible numeric output. Callers that want stochastic
-        // seeding set `options.inner.seed` explicitly before constructing
-        // the decorator (e.g. per-seed publish_bench sweeps); that path is
-        // unaffected because we only fill the field when it is empty.
-        //
-        // Reference: Hansen (2023), "The CMA Evolution Strategy: A
-        //            Tutorial", arXiv:1604.00772 §B.5 (reproducibility).
-        if constexpr(requires { inner_policy_.options.seed; })
-        {
-            if(!inner_policy_.options.seed.has_value())
-                inner_policy_.options.seed = std::uint64_t{1};
-        }
-
         state_type<Problem> s;
         s.problem = &problem;
         s.x0_saved = x0;
+        s.base_seed = pin_inner_seed();
+        s.rng = detail::xoshiro256{detail::restart_seed(s.base_seed, 0)};
         s.inner = inner_policy_.init(problem, x0, opts);
         s.best_ever_value = s.inner.objective_value;
         s.stagnation_count = 0;
@@ -133,8 +108,7 @@ struct restarting_policy
         else if constexpr(requires { s.inner.params.lambda; })
             s.initial_lambda = static_cast<std::uint32_t>(s.inner.params.lambda);
         else
-            s.initial_lambda = static_cast<std::uint32_t>(
-                4 + 3 * std::log(static_cast<scalar_type>(s.dimension)));
+            s.initial_lambda = static_cast<std::uint32_t>(4 + 3 * std::log(static_cast<scalar_type>(s.dimension)));
 
         sync_from_inner(s);
         return s;
@@ -158,7 +132,6 @@ struct restarting_policy
             reinit(s);
             s.restart_pending = false;
             s.stagnation_count = 0;
-
             return step_result<scalar_type>{
                 .objective_value = s.inner.objective_value,
                 .gradient_norm = scalar_type(1.0),
@@ -178,13 +151,9 @@ struct restarting_policy
             s.stagnation_count = 0;
         }
         else
-        {
             ++s.stagnation_count;
-        }
 
-        std::uint32_t limit = options.stagnation_limit.value_or(
-            static_cast<std::uint32_t>(
-                10 + std::ceil(30.0 * s.dimension / s.initial_lambda)));
+        std::uint32_t limit = options.stagnation_limit.value_or(static_cast<std::uint32_t>(10 + std::ceil(30.0 * s.dimension / s.initial_lambda)));
 
         if(s.stagnation_count >= limit)
             s.restart_pending = true;
@@ -196,31 +165,20 @@ struct restarting_policy
     template <typename P>
     solver_status reset(state_type<P>& s, const auto& x0)
     {
-        const solver_status status = inner_policy_.reset(s.inner, x0);
-        s.stagnation_count = 0;
-        s.best_ever_value = s.inner.objective_value;
-        s.restart_pending = false;
-        sync_from_inner(s);
-        return status;
+        rewind_seeds(s);
+        return settle(s, inner_policy_.reset(s.inner, x0));
     }
 
     template <typename P>
     solver_status reset_clear(state_type<P>& s, const auto& x0)
     {
-        const solver_status status = inner_policy_.reset_clear(s.inner, x0);
-        s.stagnation_count = 0;
+        rewind_seeds(s);
         s.restart_count = 0;
-        s.best_ever_value = s.inner.objective_value;
-        s.restart_pending = false;
-        sync_from_inner(s);
-        return status;
+        return settle(s, inner_policy_.reset_clear(s.inner, x0));
     }
 
-    // Lets a caller mutate the inner policy's options (e.g. options.lambda for a "bump lambda then reset" contract
-    // test). The decorator otherwise owns the inner via the reinit() codepath; callers should not rely on this accessor
-    // for non-test mutation.
-    // Reference: Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES) -- the decorator's reinit() is the canonical
-    // lambda-bump path; this accessor enables locking the inner-policy reset() contract that reinit() depends on.
+    // Lets a test mutate the inner options, such as options.lambda, to lock the inner reset() contract that a restart
+    // depends on; the decorator otherwise owns the inner policy.
     Inner& inner_policy() { return inner_policy_; }
     const Inner& inner_policy() const { return inner_policy_; }
 
@@ -231,18 +189,60 @@ private:
     {
         ++s.restart_count;
 
-        // IPOP: population = initial_lambda * 2^restart_count
-        scalar_type multiplier = options.population_multiplier;
-        auto new_pop = static_cast<std::uint32_t>(
-            static_cast<scalar_type>(s.initial_lambda) * std::pow(multiplier, static_cast<scalar_type>(s.restart_count)));
+        // IPOP: population = initial_lambda * multiplier^restart_count
+        const auto new_pop = static_cast<std::uint32_t>(static_cast<scalar_type>(s.initial_lambda) * std::pow(options.population_multiplier, static_cast<scalar_type>(s.restart_count)));
 
         if constexpr(requires { inner_policy_.options.population_size; })
             inner_policy_.options.population_size = new_pop;
         else if constexpr(requires { inner_policy_.options.lambda; })
             inner_policy_.options.lambda = new_pop;
 
-        inner_policy_.reset_clear(s.inner, s.x0_saved);
+        if constexpr(requires { inner_policy_.options.seed; })
+            inner_policy_.options.seed = detail::restart_seed(s.base_seed, s.restart_count);
+        inner_policy_.reset_clear(s.inner, restart_mean(s));
         sync_from_inner(s);
+    }
+
+    // Auger and Hansen (2005) section III: a restart draws its mean in the search box to probe a new basin. The draw
+    // uses the decorator's own generator, so the inner policy's reset stays equal to its construction.
+    template <typename P>
+    decltype(state_type<P>::x0_saved) restart_mean(state_type<P>& s)
+    {
+        decltype(state_type<P>::x0_saved) mean = s.x0_saved;
+        if constexpr(bound_constrained<P, scalar_type>)
+            detail::uniform_in_finite_box<scalar_type>(mean, s.problem->lower_bounds(), s.problem->upper_bounds(), s.rng);
+        return mean;
+    }
+
+    // An unset inner seed is pinned to 1, so a default-constructed decorator, as bench harnesses and concept probes
+    // build it, reproduces its solve; a caller who wants a random stream sets options.inner.seed.
+    std::uint64_t pin_inner_seed()
+    {
+        if constexpr(requires { inner_policy_.options.seed; })
+        {
+            if(!inner_policy_.options.seed.has_value())
+                inner_policy_.options.seed = std::uint64_t{1};
+            return *inner_policy_.options.seed;
+        }
+        return std::uint64_t{1};
+    }
+
+    template <typename P>
+    static solver_status settle(state_type<P>& s, solver_status status)
+    {
+        s.stagnation_count = 0;
+        s.best_ever_value = s.inner.objective_value;
+        s.restart_pending = false;
+        sync_from_inner(s);
+        return status;
+    }
+
+    template <typename P>
+    void rewind_seeds(state_type<P>& s)
+    {
+        if constexpr(requires { inner_policy_.options.seed; })
+            inner_policy_.options.seed = s.base_seed;
+        s.rng = detail::xoshiro256{detail::restart_seed(s.base_seed, 0)};
     }
 
     template <typename P>

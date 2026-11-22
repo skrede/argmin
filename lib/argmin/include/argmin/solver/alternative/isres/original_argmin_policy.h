@@ -289,21 +289,12 @@ struct original_argmin_policy
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        s.invalid_problem = rejects_population(s) || detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq);
-        if(s.invalid_problem)
+        if(detail::constraint_rows_changed(*s.problem, s.n_eq, s.n_ineq))
+        {
+            s.invalid_problem = true;
             return solver_status::invalid_problem;
-        const int n = static_cast<int>(x0.size());
-
-        s.population = detail::initialize_population<N>(
-            n, s.lambda, s.lower, s.upper, *s.rng);
-        s.sigmas = detail::initialize_sigmas(n, s.lambda, s.lower, s.upper);
-
-        detail::restart_best_evaluated(s, x0);
-        s.pull_target = x0;
-        s.pull_target_value = s.objective_value;
-        s.best_ever_value = s.objective_value;
-        s.best_ever_violation = std::numeric_limits<Scalar>::infinity();
-        s.generation = 0;
+        }
+        start(s, x0);
         return detail::latch_status(s);
     }
 

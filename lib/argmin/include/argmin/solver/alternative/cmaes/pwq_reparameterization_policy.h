@@ -345,10 +345,7 @@ struct pwq_reparameterization_policy
             }
         }
 
-        // A bounded problem keeps the Hansen default population, without the 4n floor: on bounded sphere, Rosenbrock,
-        // Rastrigin, Ackley and Schwefel at n = 2, 5, 10, populations of 2n to 8n cost 2-4x the unimodal evaluations
-        // for marginal multimodal gains, and the population-doubling restart is the escalation path.
-        detail::start_cmaes_search<Scalar>(s, options, x0, {.bounded_population_floor = false, .box_scaled_covariance = true});
+        detail::start_cmaes_search<Scalar>(s, options, x0, start_rules);
         return s;
     }
 
@@ -926,8 +923,7 @@ struct pwq_reparameterization_policy
                 // the box when the domain has finite extent
                 // (ipopcmastrategy.cc reset_search_state) and falls back to
                 // the fixed x0 otherwise (cmasolutions.cc:49).
-                s.mean = s.x0;
-                randomize_restart_mean(s);
+                anchor_restart_mean(s);
 
                 // Hansen 2023 (arXiv:1604.00772) §B.2 (Strategy internal
                 // numerical effort): K = max(1, floor(1 / (10 * n *
@@ -992,109 +988,31 @@ struct pwq_reparameterization_policy
         };
     }
 
-    // Auger & Hansen 2005 §III restart-mean randomization. Draws the
-    // distribution mean uniformly within the finite search box per
-    // coordinate so a restart probes a new basin rather than re-sampling
-    // the previous one. A no-op when the problem is unbounded or a
-    // coordinate has infinite extent (no finite domain to draw from); the
-    // caller leaves s.mean at the initial point on those coordinates.
-    // Consumes from the policy RNG, so successive restarts draw distinct
-    // anchors while remaining reproducible under a fixed seed.
-    template <typename P>
-    void randomize_restart_mean(state_type<P>& s)
-    {
-        if(!s.has_bounds)
-            return;
-        const int n = static_cast<int>(s.mean.size());
-        for(int i = 0; i < n; ++i)
-        {
-            const Scalar lo = s.lower[i];
-            const Scalar hi = s.upper[i];
-            if(std::isfinite(lo) && std::isfinite(hi) && hi > lo)
-                s.mean[i] = detail::uniform_in_interval<Scalar>(s.rng, lo, hi);
-        }
-    }
-
     template <typename P>
     solver_status reset(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        const int n = static_cast<int>(x0.size());
-        // Refresh strategy parameters and every configuration-derived
-        // quantity exactly as init() does, so a reset run is identical to a
-        // fresh run on the same configured problem. Mirrors the in-policy
-        // population-doubling branch's recompute and the libcmaes contract
-        // (cmaparameters.cc::initialize_parameters re-invoked per restart).
-        // References:
-        //   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
-        //   libcmaes ipopcmastrategy.cc::reset_search_state.
-        //   Hansen (2023) arXiv:1604.00772 §B.1 (population default),
-        //   §B.2 (eigendecomposition skip period), §B.3 (stagnation window).
-        // Population size: honor an explicit override, else the same Hansen
-        // default 4 + floor(3 ln n) init() applies (no widened bounded
-        // floor), so a reset matches a fresh run.
-        int pop_lambda = options.lambda.has_value()
-            ? static_cast<int>(std::min<std::uint32_t>(options.lambda.value(), state_type<P>::MaxPop + 1u))
-            : 0;
-        s.params = detail::compute_constants<Scalar>(n, pop_lambda);
-        if(detail::latch_rejection<Scalar>(s, s.params.lambda > state_type<P>::MaxPop || detail::declares_constraint_rows(*s.problem)))
-            return solver_status::invalid_problem;
-        s.mean = x0;
-        s.x = x0;
-        s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, x0);
-        s.best_ever_value = s.objective_value;
-        s.p_sigma.setZero();
-        s.p_c.setZero();
-        s.C = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
-        s.B = Eigen::Matrix<Scalar, N, N>::Identity(n, n);
-        s.D = Eigen::Vector<Scalar, N>::Ones(n);
-        s.eigen_solver.compute(s.C);
-        s.covariance_dirty = false;
-        s.initial_d_max = s.D.maxCoeff();
-        s.sigma = s.initial_sigma;
-        s.generation = 0;
-        s.axis_cycle_index = 0;
-        s.best_fitness_history.clear();
-        s.median_fitness_history.clear();
-
-        // Eigendecomposition skip period (Hansen §B.2): same
-        // override-or-formula init() applies, against the refreshed
-        // c_1 + c_mu.
-        if(options.eigendecomposition_skip_generations.has_value())
-        {
-            s.decomposition_skip_k =
-                options.eigendecomposition_skip_generations.value();
-        }
-        else
-        {
-            const Scalar skip_denom =
-                Scalar(10.0) * static_cast<Scalar>(n)
-                * (s.params.c_1 + s.params.c_mu);
-            s.decomposition_skip_k = std::max(
-                std::uint32_t{1},
-                static_cast<std::uint32_t>(std::floor(Scalar(1.0) / skip_denom)));
-        }
-
-        // Minimum stagnation history window (Hansen §B.3 "Stagnation"),
-        // recomputed for the current lambda; honors the user override.
-        s.stagnation_window_min = std::uint32_t{120}
-            + static_cast<std::uint32_t>(
-                std::ceil(Scalar(30.0) * static_cast<Scalar>(n)
-                          / static_cast<Scalar>(s.params.lambda)));
-        if(options.stagnation_window.has_value())
-            s.stagnation_window_min = *options.stagnation_window;
+        detail::start_cmaes_search<Scalar>(s, options, x0, start_rules);
         return detail::latch_status(s);
     }
 
     template <typename P>
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
-        // reset() re-derives the init-time quantities and anchors the mean
-        // at x0; a restart additionally randomizes the mean within the box
-        // (Auger & Hansen 2005 §III) so the external restart decorator gets
-        // basin diversity, matching the in-policy IPOP branch.
-        const solver_status status = reset(s, x0);
-        randomize_restart_mean(s);
-        return status;
+        return reset(s, x0);
+    }
+
+private:
+    // A bounded problem keeps the Hansen default population, without the 4n floor: on bounded sphere, Rosenbrock,
+    // Rastrigin, Ackley and Schwefel at n = 2, 5, 10, populations of 2n to 8n cost 2-4x the unimodal evaluations for
+    // marginal multimodal gains, and the population-doubling restart is the escalation path.
+    static constexpr detail::cmaes_start_rules start_rules{.bounded_population_floor = false, .box_scaled_covariance = true};
+
+    template <typename P>
+    static void anchor_restart_mean(state_type<P>& s)
+    {
+        s.mean = s.x0;
+        if(s.has_bounds)
+            detail::uniform_in_finite_box<Scalar>(s.mean, s.lower, s.upper, s.rng);
     }
 };
 

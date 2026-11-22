@@ -87,13 +87,13 @@ TEST_CASE("isres init evaluates the fitness and violation of every individual it
     CHECK(stale_violations(problem, s) == 0);
 }
 
-TEST_CASE("isres reset evaluates the fitness of every individual it redraws", "[known-defect][!shouldfail]")
+TEST_CASE("isres reset evaluates the fitness of every individual it redraws", "[stochastic]")
 {
     const sphere_under_row problem;
     CHECK(stale_fitnesses(problem, isres_after_reset(problem)) == 0);
 }
 
-TEST_CASE("isres reset evaluates the violation of every individual it redraws", "[known-defect][!shouldfail]")
+TEST_CASE("isres reset evaluates the violation of every individual it redraws", "[stochastic]")
 {
     const sphere_under_row problem;
     CHECK(stale_violations(problem, isres_after_reset(problem)) == 0);

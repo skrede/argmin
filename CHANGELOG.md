@@ -225,6 +225,16 @@ Policies available at HEAD, grouped by problem class:
 
 ### Fixed
 
+- A reset CMA-ES or ISRES solver behaves like a new one. `reset` and `reset_clear`
+  reseed from `options.seed` (or from `std::random_device` when it is unset),
+  rebuild the initial covariance scaling and the population, including the
+  bounded-problem population floor, and ISRES evaluates the population it
+  redraws. A fixed seed now reproduces a fresh run after a reset instead of
+  continuing the stream. The CMA-ES `reset_clear` keeps the start it is handed
+  as the mean; the restart decorator draws each restart's mean in the box and
+  derives a per-restart seed from the base seed, so a seeded restarting solve
+  stays reproducible.
+
 - MMA and the GCMMA variants no longer treat an infeasible start as feasible
   when choosing the point to return. A solve that ended without a claim could
   return its start and report a constraint violation of 0.

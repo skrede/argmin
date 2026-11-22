@@ -4,7 +4,6 @@
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/iterate_rank.h"
 #include "argmin/detail/bound_projection.h"
-#include "argmin/detail/evaluation_count.h"
 
 #include "argmin/result/status.h"
 
@@ -59,23 +58,6 @@ void start_best_evaluated(State& s, const Points& points, const Values& values)
     s.record.clear();
     hold_individual(s, points, values, 0);
     keep_best_evaluated(s, points, values);
-}
-
-// A reset evaluates only its start, so the start is the held point and the record's one candidate.
-template <typename State, typename Start>
-void restart_best_evaluated(State& s, const Start& x0)
-{
-    s.x = x0;
-    s.objective_value = counted_value<typename held_vector<State>::Scalar>(s.evaluations, *s.problem, s.x);
-    if(s.n_eq + s.n_ineq > 0)
-    {
-        Eigen::VectorX<typename held_vector<State>::Scalar> c(s.n_eq + s.n_ineq);
-        s.problem->constraints(s.x, c);
-        s.c_eq = c.head(s.n_eq);
-        s.c_ineq = c.tail(s.n_ineq);
-    }
-    s.record.clear();
-    s.record.offer(s.objective_value, primal_feasibility_inf(s.c_eq, s.c_ineq), outside_box(s, s.x));
 }
 
 // A collapsed population has stopped moving, which certifies the record only as a point within the feasibility

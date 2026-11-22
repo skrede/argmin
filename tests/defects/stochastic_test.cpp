@@ -51,7 +51,7 @@ TEST_CASE("cmaes rejects a generation whose objective values are all NaN before 
     CHECK(r.policy_status == solver_status::diverged);
 }
 
-TEST_CASE("cmaes reset restores the anisotropic initial scaling of a fresh run", "[known-defect][!shouldfail]")
+TEST_CASE("cmaes reset restores the anisotropic initial scaling of a fresh run", "[stochastic]")
 {
     const counting_box problem = box(Eigen::Vector2d(0.0, 0.0), Eigen::Vector2d(1.0, 0.01));
     const Eigen::Vector2d x0(0.5, 0.005);
@@ -66,7 +66,7 @@ TEST_CASE("cmaes reset restores the anisotropic initial scaling of a fresh run",
     CHECK(s.C.isApprox(fresh.C, 1e-12));
 }
 
-TEST_CASE("cmaes reset_clear keeps the start point it is handed as the distribution mean", "[known-defect][!shouldfail]")
+TEST_CASE("cmaes reset_clear keeps the start point it is handed as the distribution mean", "[stochastic]")
 {
     const counting_box problem = box(Eigen::Vector2d::Constant(-5.0), Eigen::Vector2d::Constant(5.0));
     cmaes_policy<> policy = seeded_cmaes(3);

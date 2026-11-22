@@ -18,6 +18,14 @@ inline xoshiro256 seeded_generator(const std::optional<std::uint64_t>& seed)
     return xoshiro256{static_cast<std::uint64_t>(std::random_device{}())};
 }
 
+// The index-th output of a splitmix64 stream started at the base seed, so a fixed base gives every restart its own
+// reproducible seed (Vigna, "Further scramblings of Marsaglia's xorshift generators", 2017; splitmix64 seeds xoshiro).
+inline std::uint64_t restart_seed(std::uint64_t base, std::uint32_t index)
+{
+    std::uint64_t state = base + std::uint64_t{index} * 0x9e3779b97f4a7c15ULL;
+    return splitmix64(state);
+}
+
 }
 
 #endif

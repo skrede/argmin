@@ -9,8 +9,12 @@
 // and these pins must not be extended into such a claim; that is a property
 // the policy does not have and is not trying to have.
 //
-// The reset() pin below is shaped differently from the deterministic
-// projected Gauss-Newton one. See the comment on it for why.
+// A reset reseeds from the stored seed, so with a fixed seed a reset run
+// retraces a fresh run of the same binary, for each variant.
+
+#include "argmin/solver/alternative/isres/nlopt_faithful_policy.h"
+#include "argmin/solver/alternative/isres/original_argmin_policy.h"
+#include "argmin/solver/alternative/isres/runarsson_yao_paper_policy.h"
 
 #include "argmin/solver/isres_policy.h"
 #include "argmin/solver/step_budget_solver.h"
@@ -99,35 +103,6 @@ Eigen::VectorXd start_point()
     return Eigen::VectorXd{{2.0, 2.0}};
 }
 
-// Record the trajectory of a freshly constructed solver on the given seed.
-std::vector<std::array<double, 5>> record_trajectory(std::uint64_t seed)
-{
-    simple_constrained problem;
-    isres_policy<> policy;
-    policy.options.seed = seed;
-
-    step_budget_solver solver{policy, problem, start_point(),
-                              trajectory_options()};
-    return drain_trajectory(solver);
-}
-
-// Record the trajectory a solver takes after it has already been driven to
-// exhaustion once and then reset() back to the start point.
-std::vector<std::array<double, 5>> record_trajectory_after_reset(
-    std::uint64_t seed)
-{
-    simple_constrained problem;
-    isres_policy<> policy;
-    policy.options.seed = seed;
-
-    step_budget_solver solver{policy, problem, start_point(),
-                              trajectory_options()};
-
-    (void)drain_trajectory(solver);
-    solver.reset(start_point());
-    return drain_trajectory(solver);
-}
-
 void require_bit_identical(const std::vector<std::array<double, 5>>& lhs,
                            const std::vector<std::array<double, 5>>& rhs)
 {
@@ -150,6 +125,68 @@ bool differs_somewhere(const std::vector<std::array<double, 5>>& lhs,
             if(lhs[i][k] != rhs[i][k])
                 return true;
     return false;
+}
+
+
+// Record the trajectory of a freshly constructed solver on the given seed.
+template <typename Policy = isres_policy<>>
+std::vector<std::array<double, 5>> record_trajectory(std::uint64_t seed)
+{
+    simple_constrained problem;
+    Policy policy;
+    policy.options.seed = seed;
+
+    step_budget_solver solver{policy, problem, start_point(),
+                              trajectory_options()};
+    return drain_trajectory(solver);
+}
+
+enum class reset_entry : std::uint8_t
+{
+    warm,
+    clearing
+};
+
+// Record the trajectory a solver takes after it has already been driven to
+// exhaustion once and then reset back to the start point.
+template <typename Policy = isres_policy<>>
+std::vector<std::array<double, 5>> record_trajectory_after_reset(
+    std::uint64_t seed, reset_entry entry = reset_entry::warm)
+{
+    simple_constrained problem;
+    Policy policy;
+    policy.options.seed = seed;
+
+    step_budget_solver solver{policy, problem, start_point(),
+                              trajectory_options()};
+
+    (void)drain_trajectory(solver);
+    if(entry == reset_entry::warm)
+        solver.reset(start_point());
+    else
+        solver.reset_clear(start_point());
+    return drain_trajectory(solver);
+}
+
+template <typename Policy>
+void require_reset_retraces_a_fresh_run()
+{
+    const auto fresh_run = record_trajectory<Policy>(1u);
+    require_bit_identical(fresh_run, record_trajectory_after_reset<Policy>(1u, reset_entry::warm));
+    require_bit_identical(fresh_run, record_trajectory_after_reset<Policy>(1u, reset_entry::clearing));
+}
+
+template <typename Policy>
+bool unset_seed_restreams_per_reset()
+{
+    simple_constrained problem;
+    Policy policy;
+    auto s = policy.init(problem, Eigen::Vector2d(2.0, 2.0), trajectory_options());
+    const auto constructed = s.rng->state;
+    policy.reset(s, Eigen::Vector2d(2.0, 2.0));
+    const auto after_reset = s.rng->state;
+    policy.reset_clear(s, Eigen::Vector2d(2.0, 2.0));
+    return constructed != after_reset && after_reset != s.rng->state;
 }
 
 }
@@ -175,25 +212,18 @@ TEST_CASE("isres_policy: determinism is seed-specific, not accidental",
     CHECK(differs_somewhere(seed_1, seed_2));
 }
 
-// reset() restarts the search from x0 but deliberately does NOT rewind the
-// random stream -- it draws a fresh population from wherever the stream now
-// stands. That is what lets restarting_policy explore: a reset that rewound
-// the stream would replay the identical search it just abandoned. So the
-// reproducibility that holds here is not the deterministic-policy shape ("a
-// reset run retraces a fresh run"); it is that the reset path is itself
-// reproducible from the seed. Both facts are pinned below, the second one
-// because it is the guarantee an integrator relies on.
-TEST_CASE("isres_policy: the reset path is deterministic from the same seed",
+TEST_CASE("isres variants: a fixed seed retraces a fresh run after reset and reset_clear",
           "[isres][determinism]")
 {
-    const auto reset_run1 = record_trajectory_after_reset(1u);
-    const auto reset_run2 = record_trajectory_after_reset(1u);
+    require_reset_retraces_a_fresh_run<alternative::isres::nlopt_faithful_policy<>>();
+    require_reset_retraces_a_fresh_run<alternative::isres::original_argmin_policy<>>();
+    require_reset_retraces_a_fresh_run<alternative::isres::runarsson_yao_paper_policy<>>();
+}
 
-    require_bit_identical(reset_run1, reset_run2);
-
-    // The stream carries across reset(), so the post-reset trajectory is a
-    // continuation, not a replay. Pinned so that a change to reset()'s seeding
-    // behavior surfaces here rather than silently in restarting_policy.
-    const auto fresh_run = record_trajectory(1u);
-    CHECK(differs_somewhere(fresh_run, reset_run1));
+TEST_CASE("isres variants: an unset seed starts a new stream on every reset",
+          "[isres][determinism]")
+{
+    CHECK(unset_seed_restreams_per_reset<alternative::isres::nlopt_faithful_policy<>>());
+    CHECK(unset_seed_restreams_per_reset<alternative::isres::original_argmin_policy<>>());
+    CHECK(unset_seed_restreams_per_reset<alternative::isres::runarsson_yao_paper_policy<>>());
 }

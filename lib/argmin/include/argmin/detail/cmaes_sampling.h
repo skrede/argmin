@@ -36,6 +36,7 @@
 
 #include <Eigen/Core>
 
+#include <cmath>
 #include <random>
 #include <concepts>
 
@@ -114,6 +115,19 @@ Scalar uniform_in_interval(RNG& rng, Scalar lo, Scalar hi)
     {
         const Scalar t = Scalar(0.5) * (alternative::marsaglia::canonical_uniform_pm1<Scalar>(rng) + Scalar(1));
         return lo + (hi - lo) * t;
+    }
+}
+
+// Auger and Hansen (2005), "A Restart CMA Evolution Strategy with Increasing Population Size", CEC 2005, section III:
+// a restart draws its mean uniformly in the search box so it probes a new basin. A coordinate with an infinite or
+// empty extent keeps its value, having no finite interval to draw from.
+template <scalar Scalar, typename Point, typename Bound, typename RNG>
+void uniform_in_finite_box(Point& x, const Bound& lower, const Bound& upper, RNG& rng)
+{
+    for(Eigen::Index i = 0; i < x.size(); ++i)
+    {
+        if(std::isfinite(lower[i]) && std::isfinite(upper[i]) && upper[i] > lower[i])
+            x[i] = uniform_in_interval<Scalar>(rng, lower[i], upper[i]);
     }
 }
 

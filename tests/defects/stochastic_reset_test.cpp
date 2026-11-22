@@ -59,12 +59,12 @@ const auto warm = [](auto& policy, auto& s) { policy.reset(s, x0); };
 
 }
 
-TEST_CASE("cmaes repair_l2_penalty restarts its random stream on reset_clear", "[known-defect][!shouldfail]")
+TEST_CASE("cmaes repair_l2_penalty restarts its random stream on reset_clear")
 {
     CHECK(reset_restarts_the_stream<repair_l2>(clearing));
 }
 
-TEST_CASE("cmaes restarts its random stream on reset", "[known-defect][!shouldfail]")
+TEST_CASE("cmaes restarts its random stream on reset")
 {
     CHECK(reset_restarts_the_stream<cmaes_policy<>>(warm));
 }

@@ -1,11 +1,9 @@
 // CMA-ES restart / reset parity instruments.
 //
-// Three behaviors of the production CMA-ES policy are pinned here:
+// Four behaviors of the CMA-ES policies are pinned here:
 //
-//   * Restart-mean randomization (Auger & Hansen 2005 §III): a restart on
-//     a bounded problem draws the distribution mean uniformly within the
-//     search box so successive restarts probe distinct basins instead of
-//     re-sampling the previous one around a fixed initial point.
+//   * reset_clear() keeps the start it is handed as the distribution mean;
+//     restarting_policy, not the inner policy, draws a restart's mean.
 //
 //   * reset()/init() derived-quantity parity: reset() must re-derive the
 //     same configuration-dependent quantities init() does (the bounded
@@ -13,21 +11,32 @@
 //     eigendecomposition skip period, and the boundary-axis cycle index),
 //     so a reset run behaves identically to a fresh run.
 //
+//   * A reset reseeds: with a fixed seed every variant retraces a fresh run
+//     bit for bit after reset() and after reset_clear(), and with no seed
+//     each reset starts a new stream.
+//
 //   * Eigendecomposition cadence: the covariance dirty flag means "C has
 //     changed since the last decomposition"; when a generation neither
 //     dirties C nor lands on the skip period, the cached B/D are reused
 //     unchanged.
 
+#include "argmin/solver/alternative/cmaes/repair_l2_penalty_policy.h"
 #include "argmin/solver/alternative/cmaes/pwq_reparameterization_policy.h"
-#include "argmin/solver/cmaes_policy.h"
+#include "argmin/solver/alternative/cmaes/no_repair_adaptive_penalty_policy.h"
+
 #include "argmin/solver/options.h"
+#include "argmin/solver/cmaes_policy.h"
+#include "argmin/solver/step_budget_solver.h"
+
 #include "argmin/types.h"
 
 #include <Eigen/Core>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <vector>
 #include <cstdint>
+#include <optional>
 
 using namespace argmin;
 
@@ -58,6 +67,72 @@ struct unbounded_quadratic
     double value(const Eigen::VectorXd& x) const { return x.squaredNorm(); }
 };
 
+using pwq = alternative::cmaes::pwq_reparameterization_policy<>;
+using repair_l2 = alternative::cmaes::repair_l2_penalty_policy<>;
+using no_repair = alternative::cmaes::no_repair_adaptive_penalty_policy<>;
+
+enum class reset_entry : std::uint8_t
+{
+    warm,
+    clearing
+};
+
+// A narrow second coordinate, so the anisotropic initial scaling is part of what a reset must rebuild.
+bounded_quadratic narrow_box()
+{
+    return {.lb = Eigen::VectorXd{{-5.0, -0.5}}, .ub = Eigen::VectorXd{{5.0, 0.5}}};
+}
+
+template <typename Policy>
+Policy seeded(std::optional<std::uint64_t> seed)
+{
+    Policy policy;
+    policy.options.seed = seed;
+    return policy;
+}
+
+template <typename Solver>
+std::vector<double> drain(Solver& solver)
+{
+    std::vector<double> trace;
+    for(std::int32_t k = 0; k < 30; ++k)
+    {
+        trace.push_back(solver.step().objective_value);
+        trace.insert(trace.end(), solver.state().x.begin(), solver.state().x.end());
+    }
+    return trace;
+}
+
+template <typename Policy>
+bool reset_retraces_a_fresh_run(reset_entry entry)
+{
+    const bounded_quadratic problem = narrow_box();
+    const Eigen::VectorXd x0{{1.0, -0.25}};
+    const Eigen::VectorXd other{{-3.0, 0.4}};
+    step_budget_solver fresh{seeded<Policy>(7u), problem, other, solver_options<>{}};
+    step_budget_solver used{seeded<Policy>(7u), problem, x0, solver_options<>{}};
+    drain(used);
+    if(entry == reset_entry::warm)
+        used.reset(other);
+    else
+        used.reset_clear(other);
+    return drain(used) == drain(fresh);
+}
+
+template <typename Policy>
+bool unset_seed_restreams_per_reset()
+{
+    const bounded_quadratic problem = narrow_box();
+    const Eigen::VectorXd x0{{1.0, -0.25}};
+    Policy policy;
+    auto s = policy.init(problem, x0, solver_options<>{});
+    const auto constructed = s.rng.state;
+    policy.reset(s, x0);
+    const auto after_reset = s.rng.state;
+    policy.reset_clear(s, x0);
+    return constructed != after_reset && after_reset != s.rng.state;
+}
+
 // Strongly anisotropic quadratic: the covariance deforms markedly, so a
 // scheduled eigendecomposition visibly moves B and D.
 struct anisotropic_quadratic
@@ -72,21 +147,15 @@ struct anisotropic_quadratic
 
 }
 
-TEST_CASE("cmaes_policy: bounded restart draws the mean uniformly in the box",
+TEST_CASE("cmaes_policy: bounded reset_clear keeps the start it is handed as the mean",
           "[cmaes][restart]")
 {
-    // A restart must NOT pin the mean to the fixed initial point on a
-    // bounded problem: it draws each coordinate uniformly in [lower, upper]
-    // so the widened population explores a new basin. Two consecutive
-    // restarts therefore land on distinct means, both strictly inside the
-    // box, and neither equal to x0. reset_clear() is the restart entry the
-    // external restart decorator calls; it exercises the same randomization
-    // as the in-policy IPOP branch.
     bounded_quadratic problem{
         .lb = Eigen::VectorXd::Constant(2, -5.0),
         .ub = Eigen::VectorXd::Constant(2, 5.0)};
 
     Eigen::VectorXd x0{{0.0, 0.0}};
+    const Eigen::VectorXd anchor{{2.5, -1.25}};
     solver_options opts;
     cmaes_policy<> policy;
     policy.options.seed = 42u;
@@ -94,25 +163,11 @@ TEST_CASE("cmaes_policy: bounded restart draws the mean uniformly in the box",
 
     auto s = policy.init(problem, x0, opts);
 
-    policy.reset_clear(s, x0);
-    const Eigen::VectorXd mean1 = s.mean;
+    policy.reset_clear(s, anchor);
+    CHECK(s.mean == anchor);
 
     policy.reset_clear(s, x0);
-    const Eigen::VectorXd mean2 = s.mean;
-
-    // Both draws are strictly inside the box.
-    for(int i = 0; i < 2; ++i)
-    {
-        CHECK(mean1[i] > problem.lb[i]);
-        CHECK(mean1[i] < problem.ub[i]);
-        CHECK(mean2[i] > problem.lb[i]);
-        CHECK(mean2[i] < problem.ub[i]);
-    }
-
-    // Neither restart is anchored at x0, and consecutive restarts differ.
-    CHECK(mean1 != x0);
-    CHECK(mean2 != x0);
-    CHECK(mean1 != mean2);
+    CHECK(s.mean == x0);
 }
 
 TEST_CASE("cmaes_policy: unbounded restart keeps the initial-point anchor",
@@ -230,4 +285,25 @@ TEST_CASE("cmaes_policy: eigendecomposition cadence skips between refreshes",
     // this anisotropic problem the covariance has moved, so D changes.
     (void)policy.step(s);   // generation 3 at the gate -> decompose
     CHECK(s.D != D_after_decomp);
+}
+
+TEST_CASE("cmaes variants: a fixed seed retraces a fresh run after reset", "[cmaes][reset]")
+{
+    CHECK(reset_retraces_a_fresh_run<pwq>(reset_entry::warm));
+    CHECK(reset_retraces_a_fresh_run<repair_l2>(reset_entry::warm));
+    CHECK(reset_retraces_a_fresh_run<no_repair>(reset_entry::warm));
+}
+
+TEST_CASE("cmaes variants: a fixed seed retraces a fresh run after reset_clear", "[cmaes][reset]")
+{
+    CHECK(reset_retraces_a_fresh_run<pwq>(reset_entry::clearing));
+    CHECK(reset_retraces_a_fresh_run<repair_l2>(reset_entry::clearing));
+    CHECK(reset_retraces_a_fresh_run<no_repair>(reset_entry::clearing));
+}
+
+TEST_CASE("cmaes variants: an unset seed starts a new stream on every reset", "[cmaes][reset]")
+{
+    CHECK(unset_seed_restreams_per_reset<pwq>());
+    CHECK(unset_seed_restreams_per_reset<repair_l2>());
+    CHECK(unset_seed_restreams_per_reset<no_repair>());
 }
