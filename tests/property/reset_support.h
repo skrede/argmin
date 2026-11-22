@@ -21,6 +21,8 @@
 #include <string>
 #include <cstdint>
 #include <utility>
+#include <optional>
+#include <string_view>
 
 namespace argmin::property
 {
@@ -116,6 +118,18 @@ state_of<Policy, Problem> stepped_then_reset(Policy& policy, const Problem& prob
     return s;
 }
 
+template <typename State>
+std::optional<std::string_view> divergence(const step_result<double>& a, const step_result<double>& b, const State& used, const State& fresh)
+{
+    if(!same_bits(a, b))
+        return "step result";
+    if(!same_bits(used.x, fresh.x))
+        return "x";
+    if(counters_of(used) != counters_of(fresh))
+        return "counters";
+    return std::nullopt;
+}
+
 template <typename Policy, typename State>
 bool step_alike(Policy& used_policy, State& used, Policy& fresh_policy, State& fresh, std::int32_t steps)
 {
@@ -123,10 +137,9 @@ bool step_alike(Policy& used_policy, State& used, Policy& fresh_policy, State& f
     {
         const step_result<double> a = counted_step(used_policy, used);
         const step_result<double> b = counted_step(fresh_policy, fresh);
-        const char* diverged = !same_bits(a, b) ? "step result" : !same_bits(used.x, fresh.x) ? "x" : counters_of(used) != counters_of(fresh) ? "counters" : nullptr;
-        if(diverged != nullptr)
+        if(const std::optional<std::string_view> diverged = divergence(a, b, used, fresh))
         {
-            RC_LOG() << diverged << " diverged on step " << k + 1 << '\n';
+            RC_LOG() << *diverged << " diverged on step " << k + 1 << '\n';
             return false;
         }
         if(ends_run(a))

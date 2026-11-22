@@ -310,26 +310,8 @@ TEST_CASE("restarting_policy seed plumbing through restarts", "[restarting_polic
     REQUIRE(different);
 }
 
-// When restarting_policy::reinit bumps the inner's options.lambda and
-// calls reset_clear, cmaes_policy::reset MUST recompute s.inner.params
-// via detail::compute_constants(n, new_lambda). Without the recompute,
-// s.inner.params holds init-time values (mu, mueff, c_sigma, d_sigma,
-// c_c, c_1, c_mu, weights, chi_n) that no longer match the bumped
-// lambda; the inner policy then adapts incorrectly on the new
-// generation.
-//
-// inner_policy_ is private (no public accessor), so we drive the
-// lambda bump through the decorator's natural restart trigger: a tiny
-// stagnation_limit forces reinit() to fire after the budget runs out;
-// reinit() bumps inner.options.lambda to initial_lambda * 2 and calls
-// reset_clear, which (post-fix) recomputes s.inner.params via
-// detail::compute_constants. We then compare s.inner.params against a
-// freshly-computed reference cmaes_params at the post-restart lambda.
-//
-// References:
-//   Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES).
-//   libcmaes ipopcmastrategy.cc::reset_search_state.
-TEST_CASE("restarting_policy: lambda bump propagates to inner params after reset",
+// Auger & Hansen (2005), CEC 2005 §III (IPOP-CMA-ES); libcmaes ipopcmastrategy.cc::reset_search_state.
+TEST_CASE("restarting_policy: an inner reset_clear after a population bump recomputes every CMA-ES strategy parameter",
           "[restarting_policy][cmaes]")
 {
     bounded_ackley problem{
@@ -341,12 +323,7 @@ TEST_CASE("restarting_policy: lambda bump propagates to inner params after reset
     solver_options opts;
     opts.max_iterations = 1;
 
-    // Drive the lambda bump through the decorator's inner_policy()
-    // accessor, mirroring the surface that reinit() uses internally
-    // (inner_policy_.options.lambda = new_pop; inner_policy_.reset_clear(...)).
-    // The accessor is the test-side equivalent of the private
-    // mutation reinit() performs -- both paths converge on
-    // cmaes_policy::reset, where the F-R-01 fix lives.
+    // The bump and inner reset_clear mirror what a restart does.
     restarting_policy<cmaes_policy<>> rp;
     rp.options.inner.seed = 42u;
     rp.options.inner.lambda = 6u;
@@ -356,10 +333,6 @@ TEST_CASE("restarting_policy: lambda bump propagates to inner params after reset
     REQUIRE(static_cast<std::uint32_t>(params_before.lambda)
             == state.initial_lambda);
 
-    // Simulate one IPOP-decorator restart: bump inner.options.lambda
-    // and call reset_clear. The F-R-01 fix in cmaes_policy::reset
-    // recomputes s.inner.params via detail::compute_constants on the
-    // bumped lambda.
     const std::uint32_t new_lambda = state.initial_lambda * 2u;
     rp.inner_policy().options.lambda = new_lambda;
     rp.inner_policy().reset_clear(state.inner, x0);
@@ -369,12 +342,6 @@ TEST_CASE("restarting_policy: lambda bump propagates to inner params after reset
     REQUIRE(params_after.mu == params_after.lambda / 2);
     REQUIRE(params_after.weights.size() == params_after.lambda);
 
-    // Cross-check against a freshly-computed reference: the
-    // post-restart inner.params must match what compute_constants
-    // would produce at the post-restart lambda. This is the strongest
-    // form of the F-R-01 contract -- not just "lambda updated" but
-    // "every dependent strategy parameter (mu, mueff, c_sigma,
-    // d_sigma, c_c, c_1, c_mu, weights, chi_n) refreshed".
     const auto reference = argmin::detail::compute_constants<double>(
         static_cast<int>(state.dimension),
         static_cast<int>(new_lambda));
@@ -391,11 +358,31 @@ TEST_CASE("restarting_policy: lambda bump propagates to inner params after reset
     for(int i = 0; i < params_after.weights.size(); ++i)
         REQUIRE(params_after.weights[i] == reference.weights[i]);
 
-    // Pre/post sanity: at least one strategy parameter must differ
-    // between the init-time and post-bump snapshots; otherwise we
-    // have not exercised the contract.
     REQUIRE(params_before.mu_eff != params_after.mu_eff);
     REQUIRE(params_before.c_1 != params_after.c_1);
+}
+
+TEST_CASE("restarting_policy: reset and reset_clear restore the caller's inner options after a restart changed them", "[restarting_policy][cmaes]")
+{
+    const bounded_ackley problem{.n = 2, .lb = Eigen::VectorXd::Constant(2, -5.0), .ub = Eigen::VectorXd::Constant(2, 5.0)};
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(2, 0.0);
+    restarting_policy<cmaes_policy<>> rp;
+    rp.options.inner.seed = 42u;
+    rp.options.inner.lambda = 6u;
+    auto state = rp.init(problem, x0, solver_options<>{});
+    for(const bool clearing : {false, true})
+    {
+        rp.inner_policy().options.lambda = 24u;
+        rp.inner_policy().options.seed = 7u;
+        rp.inner_policy().reset_clear(state.inner, x0);
+        if(clearing)
+            rp.reset_clear(state, x0);
+        else
+            rp.reset(state, x0);
+        CHECK(rp.inner_policy().options.lambda == rp.options.inner.lambda);
+        CHECK(rp.inner_policy().options.seed == rp.options.inner.seed);
+        CHECK(state.inner.params.lambda == 6);
+    }
 }
 
 TEST_CASE("restarting_policy restarts a CMA-ES run that stalls in a local minimum", "[restarting_policy][cmaes]")
