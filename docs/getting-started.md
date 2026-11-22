@@ -190,6 +190,31 @@ For a control loop or IK tick that cannot afford a blocking `solve()`, the
 the budget and calls `step()` once per tick. See
 [examples/step_level_control.cpp](../examples/step_level_control.cpp).
 
+## Resetting a solver
+
+`reset_clear(x0)` makes the solver what constructing it at `x0` would make it:
+a solve after it returns the same result, field for field. `reset(x0)` does the
+same except for the policy's warm set, the state it keeps to start the next
+solve informed. Everything else starts fresh on both: the iteration and
+evaluation counts, the terminal status, the convergence criteria's history,
+the best point and the random stream (a fixed seed retraces the same run, an
+unset seed draws a new one). A solve on a caller's `solver_options` object
+clears that object's criteria history first, so reusing one options object
+carries nothing from one solve into the next.
+
+| Policy | Warm set kept by `reset` |
+|--------|--------------------------|
+| `lbfgsb_policy`, `byrd_lbfgsb_policy` | L-BFGS curvature pairs |
+| `multistart_policy`, `restarting_policy` | the inner policy's warm set |
+| `augmented_lagrangian_policy` | multipliers, penalty, previous violation and the inner solver with its own warm set |
+| `kraft_slsqp_policy`, `nw_sqp_policy`, `filter_nw_sqp_policy` | quasi-Newton Hessian and merit penalty |
+| `filter_slsqp_policy` | quasi-Newton Hessian |
+| `tr_sqp_policy`, `filter_trsqp_policy` | quasi-Newton Hessian and multipliers |
+| `ccsa_quadratic_policy` | per-variable trust radii |
+| `mma_policy`, the GCMMA variants, the CMA-ES and ISRES variants, the least-squares and derivative-free policies | none: `reset` equals `reset_clear` |
+
+The quadratic-program solvers have no reset; a re-solve warm-starts by design.
+
 ## Next steps
 
 - [Choosing a Solver](choosing-a-solver.md) -- match a problem class to a policy.

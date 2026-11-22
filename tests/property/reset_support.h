@@ -1,44 +1,29 @@
 #ifndef HPP_GUARD_ARGMIN_TESTS_PROPERTY_RESET_SUPPORT_H
 #define HPP_GUARD_ARGMIN_TESTS_PROPERTY_RESET_SUPPORT_H
 
+#include "same_bits.h"
 #include "generated_values.h"
 #include "property_support.h"
 
 #include "argmin/solver/options.h"
 #include "argmin/solver/step_budget_solver.h"
 
+#include "argmin/detail/evaluation_count.h"
+
+#include "argmin/result/step_result.h"
 #include "argmin/result/solve_result.h"
 
 #include <Eigen/Core>
 
 #include <rapidcheck.h>
 
-#include <bit>
 #include <cmath>
 #include <string>
 #include <cstdint>
+#include <utility>
 
 namespace argmin::property
 {
-
-inline bool same_bits(double a, double b)
-{
-    return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b);
-}
-
-inline bool same_bits(const solve_result<double>& a, const solve_result<double>& b)
-{
-    if(a.status != b.status || a.iterations != b.iterations || a.function_evaluations != b.function_evaluations || a.x.size() != b.x.size())
-        return false;
-    if(!same_bits(a.objective_value, b.objective_value) || !same_bits(a.gradient_norm, b.gradient_norm) || !same_bits(a.constraint_violation, b.constraint_violation))
-        return false;
-    for(Eigen::Index i = 0; i < a.x.size(); ++i)
-    {
-        if(!same_bits(a.x[i], b.x[i]))
-            return false;
-    }
-    return true;
-}
 
 // A second start inside the problem's box, or anywhere in [-1, 1]^n when it has none.
 template <typename Problem>
@@ -84,6 +69,94 @@ void check_reset(const std::string& key, const Generator& generator, const Polic
 {
     const std::string description = key + (kind == reset_kind::clearing ? " reset_clear equals fresh" : " reset equals fresh");
     check(description, [&] { check_reset_equals_fresh(policy, *generator, options, kind); });
+}
+
+template <typename Generator, typename Policy>
+void check_second_solve(const std::string& key, const Generator& generator, const Policy& policy, const solver_options<>& base)
+{
+    check(key + " second solve on one options object equals the first",
+          [&]
+          {
+              const auto problem = *generator;
+              solver_options<> options = base;
+              step_budget_solver first{policy, problem, problem.initial_point(), options};
+              const solve_result<double> first_result = first.solve(options);
+              step_budget_solver second{policy, problem, problem.initial_point(), options};
+              RC_ASSERT(same_bits(first_result, second.solve(options)));
+          });
+}
+
+template <typename Policy, typename Problem>
+using state_of = decltype(std::declval<Policy&>().init(std::declval<const Problem&>(), std::declval<const Eigen::VectorXd&>(), std::declval<const solver_options<>&>()));
+
+template <typename Policy, typename State>
+step_result<double> counted_step(Policy& policy, State& s)
+{
+    const std::uint32_t before = detail::evaluations_of(s);
+    step_result<double> result = policy.step(s);
+    detail::settle_step_evaluations(result, s, before);
+    return result;
+}
+
+inline bool ends_run(const step_result<double>& result)
+{
+    return result.policy_status.has_value() && *result.policy_status != solver_status::running;
+}
+
+template <typename Policy, typename Problem>
+state_of<Policy, Problem> stepped_then_reset(Policy& policy, const Problem& problem, const solver_options<>& options, std::int32_t steps, const Eigen::VectorXd& other)
+{
+    state_of<Policy, Problem> s = policy.init(problem, problem.initial_point(), options);
+    for(std::int32_t k = 0; k < steps; ++k)
+    {
+        if(ends_run(counted_step(policy, s)))
+            break;
+    }
+    policy.reset(s, other);
+    return s;
+}
+
+template <typename Policy, typename State>
+bool step_alike(Policy& used_policy, State& used, Policy& fresh_policy, State& fresh, std::int32_t steps)
+{
+    for(std::int32_t k = 0; k < steps; ++k)
+    {
+        const step_result<double> a = counted_step(used_policy, used);
+        const step_result<double> b = counted_step(fresh_policy, fresh);
+        const char* diverged = !same_bits(a, b) ? "step result" : !same_bits(used.x, fresh.x) ? "x" : counters_of(used) != counters_of(fresh) ? "counters" : nullptr;
+        if(diverged != nullptr)
+        {
+            RC_LOG() << diverged << " diverged on step " << k + 1 << '\n';
+            return false;
+        }
+        if(ends_run(a))
+            break;
+    }
+    return true;
+}
+
+// Rebuilding the reset state a second time from the same steps gives a donor whose warm members can be moved, so a
+// member that cannot be copied (an inner solver) still transplants.
+template <typename Policy, typename Problem, typename Transplant>
+void check_warm_reset_equals_fresh(const Policy& policy, const Problem& problem, const solver_options<>& options, const Transplant& transplant, std::int32_t steps)
+{
+    const Eigen::VectorXd other = pick_other_start(problem);
+    const std::int32_t before = *rc::gen::inRange<std::int32_t>(0, steps + 1);
+    Policy used_policy = policy;
+    Policy donor_policy = policy;
+    Policy fresh_policy = policy;
+    state_of<Policy, Problem> used = stepped_then_reset(used_policy, problem, options, before, other);
+    state_of<Policy, Problem> donor = stepped_then_reset(donor_policy, problem, options, before, other);
+    state_of<Policy, Problem> fresh = fresh_policy.init(problem, other, options);
+    transplant(donor, fresh);
+    RC_LOG() << "reset after " << before << " steps\n";
+    RC_ASSERT(step_alike(used_policy, used, fresh_policy, fresh, steps));
+}
+
+template <typename Generator, typename Policy, typename Transplant>
+void check_warm_reset(const std::string& key, const Generator& generator, const Policy& policy, const solver_options<>& options, const Transplant& transplant, std::int32_t steps = 60)
+{
+    check(key + " reset equals fresh with its warm set carried over", [&] { check_warm_reset_equals_fresh(policy, *generator, options, transplant, steps); });
 }
 
 }

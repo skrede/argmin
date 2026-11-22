@@ -6,6 +6,7 @@ add_executable(argmin_property_tests
     qp_property_test.cpp
     reset_property_test.cpp
     sampling_property_test.cpp
+    second_solve_property_test.cpp
     smooth_property_test.cpp
 )
 

@@ -557,7 +557,7 @@ jobs:
           cd build
           count=$(ctest -N -L property | grep -cE '^ *Test +#')
           echo "property suites registered: $count"
-          test "$count" -eq 19 || { echo "expected 19 property suites, found $count"; exit 1; }
+          test "$count" -eq 27 || { echo "expected 27 property suites, found $count"; exit 1; }
 
       # A pinned seed set, so a seed-dependent solver status cannot turn an unrelated change red; fresh seeds
       # are explored in property-explore.yml.
