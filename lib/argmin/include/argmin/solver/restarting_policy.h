@@ -92,11 +92,8 @@ struct restarting_policy
     template <typename Problem, typename Convergence = default_convergence<scalar_type>>
     state_type<Problem> init(const Problem& problem, const auto& x0, const solver_options<Convergence>& opts)
     {
-        inner_policy_.options = options.inner;
         state_type<Problem> s;
-        s.x0_saved = x0;
-        s.base_seed = pin_inner_seed();
-        s.rng = detail::xoshiro256{detail::restart_seed(s.base_seed, 0)};
+        rearm(s, x0);
         s.inner = inner_policy_.init(problem, x0, opts);
         s.dimension = static_cast<std::uint32_t>(x0.size());
         s.initial_lambda = lambda_of(s);
@@ -130,15 +127,14 @@ struct restarting_policy
     template <typename P>
     solver_status reset(state_type<P>& s, const auto& x0)
     {
-        rewind_seeds(s);
+        rearm(s, x0);
         return settle(s, inner_policy_.reset(s.inner, x0));
     }
 
     template <typename P>
     solver_status reset_clear(state_type<P>& s, const auto& x0)
     {
-        rewind_seeds(s);
-        s.restart_count = 0;
+        rearm(s, x0);
         return settle(s, inner_policy_.reset_clear(s.inner, x0));
     }
 
@@ -234,12 +230,16 @@ private:
         return status;
     }
 
+    // Init and both resets start a solve the same way: the caller's inner options (the population a restart escalated
+    // included), the base seed, no restarts and the new start as the unboxed restart mean.
     template <typename P>
-    void rewind_seeds(state_type<P>& s)
+    void rearm(state_type<P>& s, const auto& x0)
     {
-        if constexpr(requires { inner_policy_.options.seed; })
-            inner_policy_.options.seed = s.base_seed;
+        inner_policy_.options = options.inner;
+        s.base_seed = pin_inner_seed();
         s.rng = detail::xoshiro256{detail::restart_seed(s.base_seed, 0)};
+        s.restart_count = 0;
+        s.x0_saved = x0;
     }
 
     template <typename P>

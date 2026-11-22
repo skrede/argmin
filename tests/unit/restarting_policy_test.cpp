@@ -399,7 +399,7 @@ TEST_CASE("restarting_policy: lambda bump propagates to inner params after reset
     // bumped lambda.
     const std::uint32_t new_lambda = state.initial_lambda * 2u;
     rp.inner_policy().options.lambda = new_lambda;
-    rp.reset_clear(state, x0);
+    rp.inner_policy().reset_clear(state.inner, x0);
 
     const auto& params_after = state.inner.params;
     REQUIRE(params_after.lambda == static_cast<int>(new_lambda));

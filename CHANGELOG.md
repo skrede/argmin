@@ -228,6 +228,11 @@ Policies available at HEAD, grouped by problem class:
 
 ### Fixed
 
+- `restarting_policy` `reset` and `reset_clear` start a solve as construction
+  does: the caller's inner options (a restart's escalated population and
+  per-restart seed are dropped), the base seed, no restarts, and the new start
+  as the restart mean of an unbounded problem. A warm `reset` no longer keeps
+  the escalated population.
 - A `multistart_policy` `reset` starts its restart count over, so the solve
   after it runs every start, as one after `reset_clear` or construction does.
 - `kraft_slsqp_policy` and `filter_slsqp_policy` restart their
