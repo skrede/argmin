@@ -625,23 +625,19 @@ struct filter_slsqp_policy
                 h_trial = Scalar(0.0);
             }
 
-            // NaN/Inf gate: see argmin/line_search/armijo.h header comment.
-            //               Hand-rolled inline-filter / inline-merit path
-            //               mirrors that semantics — non-finite f_trial or
-            //               constraints trigger a backtrack rather than
-            //               crossing the filter dominance / Armijo
-            //               comparison. Both modes enable the gate.
-            if(!std::isfinite(f_trial) || !c_finite)
+            // A non-finite full step records a NaN violation, which the SOC trigger below rejects.
+            const bool trial_finite = std::isfinite(f_trial) && c_finite;
+            if(ls == 0)
+                h_full_step = trial_finite ? h_trial : std::numeric_limits<Scalar>::quiet_NaN();
+
+            // NaN/Inf gate (armijo.h header comment): a non-finite trial backtracks instead of reaching the filter or
+            // Armijo comparison, in both modes.
+            if(!trial_finite)
             {
                 ++nan_eval_count;
                 alpha *= rho;
                 continue;
             }
-
-            // Record the full-unit-step violation once, on the first
-            // (alpha = 1) finite trial, for the SOC trigger below.
-            if(ls == 0)
-                h_full_step = h_trial;
 
             if(f_type)
             {
@@ -1162,7 +1158,7 @@ struct filter_slsqp_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
-        if(status != solver_status::running)
+        if(status == solver_status::invalid_problem)
             return status;
         s.hessian.reset();
         return status;

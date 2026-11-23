@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_ITERATE_RANK_H
 #define HPP_GUARD_ARGMIN_DETAIL_ITERATE_RANK_H
 
+#include "argmin/detail/finite_order.h"
 #include "argmin/detail/status_claim.h"
 
 #include "argmin/result/status.h"
@@ -22,9 +23,10 @@ struct iterate_rank
 };
 
 // Feasibility-first best-seen comparator selecting the returned iterate, on the violation a claim is judged on (rows
-// and box): feasible beats infeasible, two infeasible iterates rank by violation, two feasible ones by objective --
-// except that an iterate whose status certifies it beats one whose status does not, since within the tolerance
-// an earlier iterate's lower objective can be bought with violation and would not satisfy the status's claim.
+// and box): feasible beats infeasible, two infeasible iterates rank by violation, two feasible ones by objective, a
+// non-finite value after every finite one -- except that an iterate whose status certifies it beats one whose status
+// does not, since within the tolerance an earlier iterate's lower objective can be bought with violation and would
+// not satisfy the status's claim.
 //
 // Reference: NLopt nlopt_optimize convention (nlopt/src/api/nlopt.c) -- the caller receives the best
 //            point encountered, not the terminal trial.
@@ -38,10 +40,10 @@ constexpr bool is_better(const iterate_rank<Scalar>& cand, const iterate_rank<Sc
     if(cand_feasible != best_feasible)
         return cand_feasible;
     if(!cand_feasible)
-        return cand_violation < best_violation;
+        return finite_first(cand_violation, best_violation);
     if(certifies_iterate(cand.status) != certifies_iterate(best.status))
         return certifies_iterate(cand.status);
-    return cand.objective_value < best.objective_value;
+    return finite_first(cand.objective_value, best.objective_value);
 }
 
 // The best of the points a method has evaluated, ranked by the comparator that selects the solve's returned iterate,

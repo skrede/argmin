@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_PROBLEM_SHAPE_H
 #define HPP_GUARD_ARGMIN_DETAIL_PROBLEM_SHAPE_H
 
+#include "argmin/detail/iterate_values.h"
+
 #include "argmin/result/status.h"
 #include "argmin/result/step_result.h"
 
@@ -28,7 +30,9 @@ bool state_rejected(const State& s)
 template <typename State>
 solver_status latch_status(const State& s)
 {
-    return state_rejected(s) ? solver_status::invalid_problem : solver_status::running;
+    if(state_rejected(s))
+        return solver_status::invalid_problem;
+    return iterate_values_finite(s) ? solver_status::running : solver_status::non_finite_evaluation;
 }
 
 // A state holds only the constraint values of the row kinds its family supports (the moving-asymptote states have

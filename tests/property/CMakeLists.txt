@@ -8,6 +8,7 @@ add_executable(argmin_property_tests
     sampling_property_test.cpp
     second_solve_property_test.cpp
     smooth_property_test.cpp
+    sqp_nonfinite_property_test.cpp
 )
 
 target_include_directories(argmin_property_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/support)

@@ -155,8 +155,8 @@ public:
     }
 
     // Test whether a trial point (f_trial, h_trial) is acceptable to
-    // the filter. Returns true if the point is not dominated by any
-    // existing entry and does not exceed h_max.
+    // the filter: it is finite, not dominated by any existing entry
+    // and does not exceed h_max.
     //
     // A trial point is dominated by entry (f_j, h_j) when BOTH:
     //   f_trial >= f_j - gamma_f * h_j
@@ -165,7 +165,7 @@ public:
     // Reference: Wachter & Biegler 2006, eq. (6).
     bool is_acceptable(Scalar f_trial, Scalar h_trial) const
     {
-        if(h_trial > h_max_)
+        if(!std::isfinite(f_trial) || !std::isfinite(h_trial) || h_trial > h_max_)
             return false;
 
         for(const auto& entry : entries_)

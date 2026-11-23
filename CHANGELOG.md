@@ -228,6 +228,21 @@ Policies available at HEAD, grouped by problem class:
 
 ### Fixed
 
+- The SQP solvers (`kraft_slsqp`, `filter_slsqp`, `nw_sqp`, `filter_nw_sqp`,
+  `tr_sqp`, `filter_trsqp`) report `non_finite_evaluation` for an objective,
+  constraint, gradient or Jacobian that is non-finite at the start point, on
+  construction and on `reset` / `reset_clear`. A step that leaves them at an
+  iterate with a non-finite value ends the solve with `non_finite_evaluation`,
+  and that iterate is never returned as the best point.
+- `tr_sqp` rejects a trial whose gain ratio is not finite and shrinks its trust
+  radius, instead of accepting a step into a NaN objective. The filter of
+  `filter_trsqp`, `filter_slsqp` and `filter_nw_sqp` never accepts a non-finite
+  objective or violation, and `filter_slsqp` fires no second-order correction
+  after a non-finite full step.
+- The point a solve returns ranks a non-finite objective or violation after
+  every finite one, so a NaN at the solve's own evaluation of the start no
+  longer pins the returned point there, and a trial evaluating to -inf never
+  becomes it.
 - `restarting_policy` `reset` and `reset_clear` start a solve as construction
   does: the caller's inner options (a restart's escalated population and
   per-restart seed are dropped), the base seed, no restarts, and the new start

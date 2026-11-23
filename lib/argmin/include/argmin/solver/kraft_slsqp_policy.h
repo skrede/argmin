@@ -1077,7 +1077,7 @@ struct kraft_slsqp_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
-        if(status != solver_status::running)
+        if(status == solver_status::invalid_problem)
             return status;
         s.hessian.reset();
         s.sigma = options.initial_penalty;

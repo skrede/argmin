@@ -32,7 +32,7 @@ public:
     bool offer(solver_status status, const step_result<Scalar>& step, const X& x, Scalar feas_tol)
     {
         const iterate_rank<Scalar> candidate{status, step.objective_value, step.constraint_violation, step.bound_violation};
-        if(!is_better(candidate, m_rank, feas_tol))
+        if(status == solver_status::non_finite_evaluation || !is_better(candidate, m_rank, feas_tol))
             return false;
         m_x = x;
         m_gradient_norm = step.gradient_norm;

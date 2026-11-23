@@ -842,7 +842,7 @@ struct tr_sqp_policy
                 return {false,
                         argmin::detail::byrd_omojokun_constants<Scalar>::shrink_factor * delta_in, within_rounding};
             const Scalar rho = actual / pred_aug;
-            if(rho < argmin::detail::byrd_omojokun_constants<Scalar>::eta_1)
+            if(!(std::isfinite(rho) && rho >= argmin::detail::byrd_omojokun_constants<Scalar>::eta_1))
                 return {false,
                         argmin::detail::byrd_omojokun_constants<Scalar>::shrink_factor * delta_in, within_rounding};
             if(rho > argmin::detail::byrd_omojokun_constants<Scalar>::eta_2
@@ -1250,7 +1250,7 @@ struct tr_sqp_policy
                               Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
-        if(status != solver_status::running)
+        if(status == solver_status::invalid_problem)
             return status;
         s.hessian.reset();
         s.lambda.setZero();

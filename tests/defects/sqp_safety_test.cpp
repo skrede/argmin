@@ -1,5 +1,7 @@
 #include "sqp_safety_problems.h"
 
+#include "oracle/callback_tracer.h"
+
 #include "argmin/detail/filter_acceptance.h"
 
 #include "argmin/solver/options.h"
@@ -16,8 +18,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <cstddef>
+#include <cmath>
 #include <limits>
+#include <cstddef>
 
 using namespace argmin;
 using defects::nowhere;
@@ -82,17 +85,17 @@ TEST_CASE("tr_sqp and filter_trsqp converge to the bowl minimizer without a NaN 
     }
 }
 
-TEST_CASE("tr_sqp does not end converged after trial steps into a NaN objective", "[known-defect][!shouldfail]")
+TEST_CASE("tr_sqp does not end converged after trial steps into a NaN objective", "[sqp]")
 {
     CHECK(solve_from_origin<tr_sqp_policy<>>(bowl_with_inactive_row(0.5)).status != solver_status::converged);
 }
 
-TEST_CASE("filter_trsqp does not end converged after trial steps into a NaN objective", "[known-defect][!shouldfail]")
+TEST_CASE("filter_trsqp does not end converged after trial steps into a NaN objective", "[sqp]")
 {
     CHECK(solve_from_origin<filter_trsqp_policy<>>(bowl_with_inactive_row(0.5)).status != solver_status::converged);
 }
 
-TEST_CASE("the filter rejects a trial with a NaN objective or a NaN violation", "[known-defect][!shouldfail]")
+TEST_CASE("the filter rejects a trial with a NaN objective or a NaN violation", "[sqp]")
 {
     const double nan = std::numeric_limits<double>::quiet_NaN();
     detail::filter_set<double> filter;
@@ -106,7 +109,22 @@ TEST_CASE("filter_slsqp fires no second-order correction on a finite full step t
     CHECK(first_step_soc_retries(nowhere) == 0);
 }
 
-TEST_CASE("filter_slsqp fires no second-order correction after a NaN full step", "[known-defect][!shouldfail]")
+TEST_CASE("filter_slsqp fires no second-order correction after a NaN full step", "[sqp]")
 {
     CHECK(first_step_soc_retries(2.5) == 0);
+}
+
+TEST_CASE("tr_sqp returns the point it reached after a NaN objective at the solve's own start evaluation", "[sqp]")
+{
+    const defects::row_quadratic problem{2.0 * Eigen::MatrixXd::Identity(2, 2), Eigen::Vector2d(-4.0, -2.0), Eigen::RowVector2d(1.0, 1.0), Eigen::VectorXd::Ones(1),
+                                         Eigen::RowVector2d(1.0, -1.0), Eigen::VectorXd::Constant(1, -3.0), nowhere};
+    const oracle::traced<defects::row_quadratic> traced{problem, {oracle::callback::value, oracle::non_finite::nan, oracle::injection_mode::kth_call, 2}};
+    solver_options<> opts;
+    opts.set_gradient_threshold(1e-6);
+    opts.set_objective_threshold(1e-12);
+    opts.set_step_threshold(1e-12);
+    step_budget_solver solver{tr_sqp_policy_fast<>{}, traced, Eigen::Vector2d(0.5, 0.5).eval(), opts};
+    const solve_result<double> r = solver.solve(opts);
+    CHECK(std::isfinite(r.objective_value));
+    CHECK((r.x - Eigen::Vector2d(1.0, 0.0)).norm() <= 1e-6);
 }

@@ -1257,7 +1257,7 @@ struct filter_nw_sqp_policy
                               Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
-        if(status != solver_status::running)
+        if(status == solver_status::invalid_problem)
             return status;
         s.hessian.reset();
         const Scalar h_0 = detail::constraint_violation(s.c_eq, s.c_ineq);

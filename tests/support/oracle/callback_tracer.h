@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_ARGMIN_TESTS_SUPPORT_ORACLE_CALLBACK_TRACER_H
 #define HPP_GUARD_ARGMIN_TESTS_SUPPORT_ORACLE_CALLBACK_TRACER_H
 
+#include "oracle/injection_schedule.h"
+
 #include "argmin/formulation/concepts.h"
 
 #include <Eigen/Core>
@@ -43,7 +45,8 @@ struct traced_capacity<Problem>
     static constexpr std::int32_t constraint_count = Problem::constraint_count;
 };
 
-// Forwards every callback of the problem it wraps, so it satisfies the same formulation concepts, and records each call.
+// Forwards every callback of the problem it wraps, so it satisfies the same formulation concepts, records each call and
+// applies an injection schedule to what the callbacks return.
 template <typename Problem>
 class traced : public traced_capacity<Problem>
 {
@@ -54,6 +57,14 @@ public:
         : m_problem(problem)
         , m_counts{}
         , m_domain{true, true, 0.0}
+        , m_schedule{}
+    {}
+
+    traced(const Problem& problem, const injection& planned)
+        : m_problem(problem)
+        , m_counts{}
+        , m_domain{true, true, 0.0}
+        , m_schedule{planned}
     {}
 
     std::int32_t dimension() const { return m_problem.dimension(); }
@@ -62,7 +73,7 @@ public:
     decltype(std::declval<const Problem&>().value(std::declval<const X&>())) value(const X& x) const
     {
         record(x, m_counts.value);
-        return m_problem.value(x);
+        return m_schedule.apply_value(callback::value, x, m_problem.value(x));
     }
 
     template <typename X, typename Out>
@@ -71,6 +82,7 @@ public:
     {
         record(x, m_counts.gradient);
         m_problem.gradient(x, std::forward<Out>(g));
+        m_schedule.apply(callback::gradient, x, g);
     }
 
     template <typename X, typename Out>
@@ -87,6 +99,7 @@ public:
     {
         record(x, m_counts.residuals);
         m_problem.residuals(x, std::forward<Out>(r));
+        m_schedule.apply(callback::residuals, x, r);
     }
 
     template <typename X, typename Out>
@@ -95,6 +108,7 @@ public:
     {
         record(x, m_counts.jacobian);
         m_problem.jacobian(x, std::forward<Out>(J));
+        m_schedule.apply(callback::jacobian, x, J);
     }
 
     template <typename X, typename Out>
@@ -103,6 +117,7 @@ public:
     {
         record(x, m_counts.constraints);
         m_problem.constraints(x, std::forward<Out>(c));
+        m_schedule.apply(callback::constraints, x, c);
     }
 
     template <typename X, typename Out>
@@ -111,6 +126,7 @@ public:
     {
         record(x, m_counts.constraint_jacobian);
         m_problem.constraint_jacobian(x, std::forward<Out>(J));
+        m_schedule.apply(callback::constraint_jacobian, x, J);
     }
 
     template <typename P = Problem>
@@ -135,6 +151,8 @@ public:
 
     const argument_domain& domain() const { return m_domain; }
 
+    const injection_schedule& injections() const { return m_schedule; }
+
     // A least-squares objective is evaluated through either value or residuals.
     std::uint32_t objective_calls() const { return m_counts.value + m_counts.residuals; }
 
@@ -142,6 +160,7 @@ private:
     const Problem& m_problem;
     mutable callback_counts m_counts;
     mutable argument_domain m_domain;
+    mutable injection_schedule m_schedule;
 
     template <typename X>
     void record(const X& x, std::uint32_t& count) const

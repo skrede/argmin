@@ -1112,7 +1112,7 @@ struct nw_sqp_policy
                               Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
-        if(status != solver_status::running)
+        if(status == solver_status::invalid_problem)
             return status;
         s.hessian.reset();
         s.sigma = Scalar(1.0);

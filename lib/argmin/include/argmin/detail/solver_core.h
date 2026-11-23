@@ -9,6 +9,7 @@
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/terminal_step.h"
 #include "argmin/detail/criteria_state.h"
+#include "argmin/detail/iterate_values.h"
 #include "argmin/detail/tuple_contains.h"
 #include "argmin/detail/hint_precedence.h"
 #include "argmin/detail/evaluation_count.h"
@@ -305,6 +306,7 @@ public:
         const std::uint32_t evaluations_before = detail::evaluations_of(state_);
         auto result = policy_.step(state_);
         detail::settle_step_evaluations(result, state_, evaluations_before);
+        detail::flag_non_finite_iterate(result, state_);
         result.x_norm = state_.x.norm();
         result.bound_violation = bound_measure_(state_);
         ++iterations_;
@@ -320,10 +322,8 @@ public:
 
     solver_status status() const { return !built_ || detail::state_rejected(state_) || !detail::within_capacity(options_.convergence) ? solver_status::invalid_problem : last_status_; }
 
-    // The wrapped policy instance (options included). Lets a caller confirm
-    // the configuration that actually reached the policy -- notably that a
-    // CTAD rebind preserved the configured options rather than resetting
-    // them.
+    // The wrapped policy instance, options included, so a caller can confirm that a CTAD rebind kept the configured
+    // options.
     const Policy& policy() const { return policy_; }
 
     // NaN before the first step, never a fabricated 0 that would read as a stationary point.
@@ -464,7 +464,7 @@ private:
         , built_{detail::start_length_ok<N>(x0, detail::problem_start_dimension<N>(problem, x0.size()))}
         , state_{make_state(problem, x0, opts)}
         , function_evaluations_{detail::evaluations_of(state_)}
-        , last_status_{built_ ? solver_status::running : solver_status::invalid_problem}
+        , last_status_{built_ ? detail::latch_status(state_) : solver_status::invalid_problem}
     {
         options_.convergence.reset();
         write_policy_hints(options_.convergence);

@@ -1758,7 +1758,7 @@ struct filter_trsqp_policy
                               Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         const solver_status status = reset(s, x0);
-        if(status != solver_status::running)
+        if(status == solver_status::invalid_problem)
             return status;
         s.hessian.reset();
         s.lambda.setZero();

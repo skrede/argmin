@@ -50,7 +50,7 @@ file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1146
 file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	655
 file	lib/argmin/include/argmin/solver/convergence.h	-	352
 file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1308
-file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1198
+file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1194
 file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1785
 file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1105
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	203
@@ -190,7 +190,7 @@ function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	init	83
 function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	step	844
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	init	87
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	reset	32
-function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	step	776
+function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	step	772
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	init	160
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	reset	43
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	step	904
