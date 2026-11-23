@@ -3,6 +3,7 @@
 
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/kkt_residual.h"
+#include "argmin/detail/iterate_values.h"
 
 #include "argmin/result/status.h"
 #include "argmin/result/step_result.h"
@@ -119,6 +120,43 @@ step_result<Scalar> asymptote_null_step(const State& s, std::optional<solver_sta
     result.is_null_step = true;
     result.policy_status = status;
     return result;
+}
+
+// A trial failed by a non-finite value contracts the asymptotes; the solve ends once a trial made with them already at
+// their minimum distance fails too.
+template <typename Scalar, typename State>
+step_result<Scalar> contracted_null_step(State& s, Scalar factor, Scalar min_fraction)
+{
+    const bool at_floor = s.asymptotes_at_floor;
+    s.asymptotes_at_floor = !contract_asymptotes(s, factor, min_fraction);
+    return asymptote_null_step<Scalar>(s, non_finite_trial_status(false, at_floor));
+}
+
+// A trial within the iterate's resolution is the conservativity loop's fixed point: no larger penalty or smaller window
+// moves the trial any closer to x.
+template <typename X>
+bool at_iterate(const X& x_trial, const X& x)
+{
+    using Scalar = typename X::Scalar;
+    return (x_trial - x).norm() <= std::numeric_limits<Scalar>::epsilon() * (Scalar(1.0) + x.norm());
+}
+
+// Whether the trial ends the solve: a trial at the iterate that is non-finite, or follows a non-finite rejection, leaves
+// the penalty growth or window shrink nothing to try. The record of a non-finite trial carries across a null step, so
+// the next outer step continues from the grown penalty or the shrunk window.
+template <typename State, typename X, typename Scalar>
+bool non_finite_limit(State& s, const X& x_trial, Scalar f_trial)
+{
+    const bool non_finite = !std::isfinite(f_trial);
+    const bool limit = (non_finite || s.non_finite_rejected) && at_iterate(x_trial, s.x);
+    s.non_finite_rejected = non_finite;
+    return limit;
+}
+
+template <typename Scalar, typename State, typename X>
+step_result<Scalar> non_finite_null_step(State& s, const X& x_trial)
+{
+    return asymptote_null_step<Scalar>(s, non_finite_trial_status(false, non_finite_limit(s, x_trial, std::numeric_limits<Scalar>::infinity())));
 }
 
 }

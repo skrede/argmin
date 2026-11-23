@@ -152,6 +152,7 @@ struct ccsa_quadratic_policy
 
         // Set when the problem has equality rows or an inequality count other than a static M.
         bool invalid_problem{false};
+        bool non_finite_rejected{false};
 
         options_type opts;
     };
@@ -389,12 +390,10 @@ struct ccsa_quadratic_policy
         Eigen::MatrixX<Scalar> J_trial(m, n);
         bool accepted = false;
 
-        // Persistent inner dual solver: construct the box-constrained solver
-        // state once per outer iteration and cold-restart it (reset_clear
-        // clears the L-BFGS curvature so each inner solve starts fresh, as a
-        // per-inner re-construction would, while reusing the allocated
-        // buffers) rather than re-allocating it on every conservativity
-        // iteration.
+        // Persistent inner dual solver: construct the box-constrained solver state once per outer iteration and
+        // cold-restart it (reset_clear clears the L-BFGS curvature so each inner solve starts fresh, as a per-inner
+        // re-construction would, while reusing the allocated buffers) rather than re-allocating it on every
+        // conservativity iteration.
         DualPolicy<scalar_type, MC> dp;
         // Near the dual optimum the decrease left falls below the roundoff of the dual value, so the line
         // search certifies those steps from the exact dual gradient instead.
@@ -405,15 +404,13 @@ struct ccsa_quadratic_policy
 
         for(std::uint16_t inner = 0; inner < max_inner; ++inner)
         {
-            // Update mutable rho/rhoc on the dual problem (these grow
-            // on non-conservative trials within the inner loop) and drop
-            // the single-evaluation cache before re-solving the dual.
+            // Update mutable rho/rhoc on the dual problem (these grow on non-conservative trials within the inner
+            // loop) and drop the single-evaluation cache before re-solving the dual.
             dual_prob.rho_out = s.rho;
             dual_prob.rhoc_out = &s.rhoc;
             dual_prob.invalidate_cache();
 
-            // Solve the dual via DualPolicy. The dual problem is
-            // m-dimensional box-constrained (y >= 0). The solver
+            // Solve the dual via DualPolicy. The dual problem is m-dimensional box-constrained (y >= 0). The solver
             // warm-starts from s.y_dual.
             if(m > 0)
             {
@@ -463,6 +460,8 @@ struct ccsa_quadratic_policy
             // derivative ranks worst, so it also leaves the feasibility record below untouched.
             detail::rank_non_finite_worst(f_trial, c_ineq_trial);
             accepted = detail::accepts_trial(detail::is_conservative(dual_prob, f_trial, c_ineq_trial), *s.problem, x_trial, f_trial, c_ineq_trial, g_trial, J_trial);
+            if(detail::non_finite_limit(s, x_trial, f_trial))
+                return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
             bool inner_done = (dual_prob.gval >= f_trial);
             bool feasible_cur = true;
             Scalar infeasibility_cur = Scalar(0.0);
@@ -510,11 +509,11 @@ struct ccsa_quadratic_policy
             }
 
             if(inner + 1 == max_inner)
-                return detail::asymptote_null_step<Scalar>(s, detail::non_finite_trial_status(std::isfinite(f_trial), true));
+                return detail::asymptote_null_step<Scalar>(s);
         }
 
         if(!accepted && !(std::isfinite(f_trial) && detail::derivatives_finite_at(*s.problem, x_trial, g_trial, J_trial)))
-            return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
+            return detail::non_finite_null_step<Scalar>(s, x_trial);
 
         // 3. Inter-outer rho decay (NLopt ccsa_quadratic.c line 524).
         s.rho = std::max(rho_decay * s.rho, rho_min);
@@ -565,6 +564,7 @@ struct ccsa_quadratic_policy
         s.feasible = false;
         s.infeasibility = Scalar(0.0);
         s.y_dual.setZero();
+        s.non_finite_rejected = false;
         return detail::latch_status(s);
     }
 

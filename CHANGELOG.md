@@ -250,10 +250,13 @@ Policies available at HEAD, grouped by problem class:
   when only the gradient or constraint Jacobian at a conservative trial is
   non-finite; `lm`, `projected_gn` and `projected_gradient_gn` reject it, also
   for a non-finite Jacobian at an accepted trial, and raise their damping or
-  shrink their radius. A solve ends with `non_finite_evaluation` only when a
-  failed trial leaves the solver at its limit: the asymptotes at their minimum
-  distance, the last conservativity iteration, the damping ceiling or radius
-  floor, or a damped step that no longer moves the iterate. `lm` no longer ends
+  shrink their radius. An outer step whose conservativity loop ends on a
+  non-finite trial is a null step that keeps the grown penalty or the shrunk
+  move-limit window for the next step. A solve ends with
+  `non_finite_evaluation` only when a trial made at the solver's limit fails:
+  the asymptotes at their minimum distance, a penalty or window that leaves the
+  trial within the iterate's resolution, the damping ceiling or radius floor, or
+  a damped step that no longer moves the iterate. `lm` no longer ends
   `diverged` on its first non-finite trial.
 - `tr_sqp` rejects a trial whose gain ratio is not finite and shrinks its trust
   radius, instead of accepting a step into a NaN objective. The filter of

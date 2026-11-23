@@ -135,7 +135,7 @@ struct mma_policy
         }();
 
         const P* problem{nullptr};
-        Eigen::Vector<Scalar, N> x, g;
+        Eigen::Vector<Scalar, N> x, g, g_trial;
         Scalar f{};
         Eigen::Vector<Scalar, M> c_ineq;
         Eigen::Matrix<Scalar, M, N> J_ineq;
@@ -173,6 +173,7 @@ struct mma_policy
 
         // Set when the problem has equality rows or an inequality count other than a static M.
         bool invalid_problem{false};
+        bool asymptotes_at_floor{false};
 
         options_type opts;
     };
@@ -224,6 +225,7 @@ struct mma_policy
 
         s.x = detail::project<Scalar, N>(x0, s.lower, s.upper);
         s.g.resize(n);
+        s.g_trial.resize(n);
         s.c_ineq.resize(rows);
         s.J_ineq.resize(rows, n);
         s.L.resize(n);
@@ -235,10 +237,8 @@ struct mma_policy
         s.p_con.resize(rows, n);
         s.q_con.resize(rows, n);
         s.r_con.resize(rows);
-        s.y_dual.resize(rows);
-        s.y_dual.setZero();
-        s.c_dual_ref.resize(rows);
-        s.c_dual_ref.setOnes();
+        s.y_dual.setZero(rows);
+        s.c_dual_ref.setOnes(rows);
         s.c_dual.resize(rows);
 
         s.f = detail::counted_value<Scalar>(s.evaluations, problem, s.x);
@@ -301,10 +301,8 @@ struct mma_policy
                 s.L[j] = s.x[j] - gam * dist_L;
                 s.U[j] = s.x[j] + gam * dist_U;
 
-                // Numerical safeguard: clamp asymptote distance to a
-                // [s_min_f, s_max_f] band of the bound range. For
-                // unbounded variables, only enforce s_min_f * |x_j|
-                // (with floor 1e-12) so the dual always sees positive
+                // Numerical safeguard: clamp asymptote distance to a [s_min_f, s_max_f] band of the bound range. For
+                // unbounded variables, only enforce s_min_f * |x_j| (with floor 1e-12) so the dual always sees positive
                 // U - x and x - L.
                 Scalar range;
                 if(s.lower[j] > -inf && s.upper[j] < inf)
@@ -463,24 +461,24 @@ struct mma_policy
         // 5. Commit the trial only where every value is finite (plain MMA: no conservativity).
         const Scalar f_old = s.f;
         const Scalar step_size = (x_trial - s.x).norm();
-        Eigen::Vector<Scalar, N> g_trial(n);
         Eigen::VectorX<Scalar> c_trial(m);
         Eigen::MatrixX<Scalar> J_trial(m, n);
         const Scalar f_trial = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_trial);
-        s.problem->gradient(x_trial, g_trial);
+        s.problem->gradient(x_trial, s.g_trial);
         if(m > 0)
         {
             s.problem->constraints(x_trial, c_trial);
             s.problem->constraint_jacobian(x_trial, J_trial);
         }
-        if(!(std::isfinite(f_trial) && g_trial.allFinite() && c_trial.allFinite() && J_trial.allFinite()))
-            return detail::asymptote_null_step<Scalar>(s, detail::non_finite_trial_status(false, !detail::contract_asymptotes(s, gam_dec, s_min_f)));
+        if(!(std::isfinite(f_trial) && s.g_trial.allFinite() && c_trial.allFinite() && J_trial.allFinite()))
+            return detail::contracted_null_step(s, gam_dec, s_min_f);
 
         s.x_old2 = s.x_old1;
         s.x_old1 = s.x;
         s.x = x_trial;
         s.f = f_trial;
-        s.g = g_trial;
+        s.g.swap(s.g_trial);
+        s.asymptotes_at_floor = false;
         if(m > 0)
         {
             s.c_ineq = c_trial;
@@ -533,6 +531,7 @@ private:
         const int n = static_cast<int>(s.x.size());
         const Scalar s_init = s.opts.asymptote_init.value_or(mma_defaults<Scalar>::asymptote_init);
         const Scalar s_init_un = s.opts.asymptote_init_unbounded.value_or(mma_defaults<Scalar>::asymptote_init_unbounded);
+        s.asymptotes_at_floor = false;
 
         for(int j = 0; j < n; ++j)
         {

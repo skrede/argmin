@@ -180,17 +180,16 @@ struct lm_policy
         s.Jh.noalias() = s.J * h;
         Scalar predicted = -(h.dot(g) + Scalar(0.5) * s.Jh.squaredNorm());
 
-        // Guarded gain ratio (detail::gain_ratio): requires a strictly positive
-        // predicted reduction and a finite actual reduction before dividing,
-        // returning 0 otherwise. This replaces the |predicted|<1e-30 -> rho=1.0
-        // silent accept and gates a NaN/Inf residual evaluation (which makes
-        // `actual` non-finite) so a divergent trial cannot masquerade as an
-        // improvement.
+        // Guarded gain ratio (detail::gain_ratio): requires a strictly positive predicted reduction and a finite actual
+        // reduction before dividing, returning 0 otherwise. This replaces the |predicted|<1e-30 -> rho=1.0 silent accept
+        // and gates a NaN/Inf residual evaluation (which makes `actual` non-finite) so a divergent trial cannot
+        // masquerade as an improvement.
         Scalar rho = detail::gain_ratio(actual, predicted);
 
         const Scalar old_value = s.objective_value;
         bool accepted = rho > Scalar(0);
-        const bool failed = detail::failed_trial(s, x_trial, detail::finite_trial<N>(s, x_trial, f_trial, s.J_trial, accepted));
+        const bool failed = detail::failed_trial<N>(s, x_trial, h, f_trial, s.J_trial, accepted);
+        const bool at_limit = s.lambda >= lam_max || x_trial == s.x;
 
         if(accepted)
         {
@@ -213,7 +212,7 @@ struct lm_policy
 
         ++s.iteration;
 
-        std::optional<solver_status> policy_status = detail::non_finite_trial_status(!failed, s.lambda >= lam_max || x_trial == s.x);
+        std::optional<solver_status> policy_status = detail::non_finite_trial_status(!failed, at_limit);
         // An objective grown 100x from its initial value is a genuine failure rather than a routine damping increase.
         if(!policy_status && s.initial_objective > Scalar(0) && s.objective_value > Scalar(100) * s.initial_objective)
             policy_status = solver_status::diverged;

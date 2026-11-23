@@ -136,6 +136,7 @@ struct rho_wval_policy
 
         // Set when the problem has equality rows or an inequality count other than a static M.
         bool invalid_problem{false};
+        bool non_finite_rejected{false};
 
         options_type opts;
     };
@@ -286,11 +287,9 @@ struct rho_wval_policy
             }
         }
 
-        // 2. Move limits + separable quadratic weights. Move limits
-        //    (Svanberg 2007 notes eqs. 2.8-2.9): the box, the 0.1 asymptote
-        //    buffer, and the XXMOVE=0.5 move bound x_k +/- move_bnd*range_j
-        //    with the box-width analog 2*max(|x_kj|, 1) for an unbounded
-        //    variable (engages only once the asymptote inflates).
+        // 2. Move limits + separable quadratic weights. Move limits (Svanberg 2007 notes eqs. 2.8-2.9): the box, the 0.1
+        //    asymptote buffer, and the XXMOVE=0.5 move bound x_k +/- move_bnd*range_j with the box-width analog
+        //    2*max(|x_kj|, 1) for an unbounded variable (engages only once the asymptote inflates).
         const Scalar move_bnd = s.opts.move_bound_fraction;
         for(int j = 0; j < n; ++j)
         {
@@ -307,11 +306,9 @@ struct rho_wval_policy
             s.beta[j]  = std::min({s.upper[j],
                                    s.U[j] - move_lim * (s.U[j] - s.x[j]),
                                    s.x[j] + mb});
-            // Asymmetric-asymptote generalization of NLopt's
-            // sigma^-2 weight. In the symmetric case U-x_k = x_k-L =
-            // sigma this weight (U-L)/(dxU*dxL) = 2*sigma/sigma^2 = 2/sigma;
-            // the factor-2 is absorbed into the 0.5 penalty-mass scaling so
-            // the augmented quadratic matches NLopt's 0.5*(dx/sigma)^2.
+            // Asymmetric-asymptote generalization of NLopt's sigma^-2 weight. In the symmetric case U-x_k = x_k-L = sigma
+            // this weight (U-L)/(dxU*dxL) = 2*sigma/sigma^2 = 2/sigma; the factor-2 is absorbed into the 0.5 penalty-mass
+            // scaling so the augmented quadratic matches NLopt's 0.5*(dx/sigma)^2.
             const Scalar dxU = s.U[j] - s.x[j];
             const Scalar dxL = s.x[j] - s.L[j];
             s.w[j] = (s.U[j] - s.L[j]) / (dxU * dxL);
@@ -392,13 +389,12 @@ struct rho_wval_policy
         Eigen::Vector<Scalar, N> g_trial(n);
         Eigen::MatrixX<Scalar> J_trial(m, n);
         bool accepted = false;
+        bool committed = false;
 
-        // Persistent inner dual solver: construct the box-constrained solver
-        // state once per outer iteration and cold-restart it (reset_clear
-        // clears the L-BFGS curvature so each inner solve starts fresh, as a
-        // per-inner re-construction would, while reusing the allocated
-        // buffers) rather than re-allocating it on every conservativity
-        // iteration.
+        // Persistent inner dual solver: construct the box-constrained solver state once per outer iteration and
+        // cold-restart it (reset_clear clears the L-BFGS curvature so each inner solve starts fresh, as a per-inner
+        // re-construction would, while reusing the allocated buffers) rather than re-allocating it on every
+        // conservativity iteration.
         DualPolicy<scalar_type, MC> dp;
         // Near the dual optimum the decrease left falls below the roundoff of the dual value, so the line
         // search certifies those steps from the exact dual gradient instead.
@@ -454,6 +450,12 @@ struct rho_wval_policy
 
             detail::rank_non_finite_worst(f_trial, c_trial);
             accepted = detail::accepts_trial(detail::is_conservative(dual_prob, f_trial, c_trial), *s.problem, x_trial, f_trial, c_trial, g_trial, J_trial);
+            // The merit test commits the last trial only with finite derivatives there, checked before rho grows so a
+            // non-finite one grows it as a non-finite value does.
+            if(!accepted && inner + 1 == max_inner)
+                committed = detail::accepts_trial(exhaustion_acceptable(s, x_trial, f_trial, c_trial), *s.problem, x_trial, f_trial, c_trial, g_trial, J_trial);
+            if(detail::non_finite_limit(s, x_trial, f_trial))
+                return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
             if(accepted) break;
 
             // NLopt mma.c rho-growth (lines 388-391), on the raw
@@ -473,39 +475,17 @@ struct rho_wval_policy
                                + (gi_trial - dual_prob.gcval[i]) / wval));
             }
 
-            // Null-step-and-retry on inner exhaustion (mirrors the CCSA
-            // quadratic policy). rho has just been grown but the last trial
-            // is still non-conservative; committing it can move to a worse
-            // or more-infeasible point (the approximation under-predicted
-            // there). Commit only a merit-improving trial; otherwise take a
-            // null step that keeps x fixed and retains the grown rho (no
-            // inter-outer decay) so the next outer iteration re-solves a
+            // Null-step-and-retry on inner exhaustion (mirrors the CCSA quadratic policy). rho has just been grown but
+            // the last trial is still non-conservative; committing it can move to a worse or more-infeasible point (the
+            // approximation under-predicted there). Commit only a merit-improving trial; otherwise take a null step that
+            // keeps x fixed and retains the grown rho (no inter-outer decay) so the next outer iteration re-solves a
             // strictly more conservative approximation.
-            if(inner + 1 == max_inner)
-            {
-                Scalar viol_old = Scalar(0.0);
-                Scalar viol_new = Scalar(0.0);
-                for(int i = 0; i < m; ++i)
-                {
-                    viol_old = std::max(viol_old, -s.c_ineq[i]);
-                    viol_new = std::max(viol_new, -c_trial[i]);
-                }
-                // A trial at the current iterate is a fixed point: conservativity there fails only by
-                // roundoff, so null-stepping would grow rho forever. Committing it lets the step
-                // tolerance stop the run.
-                const bool at_iterate = (x_trial - s.x).norm()
-                    <= std::numeric_limits<Scalar>::epsilon() * (Scalar(1.0) + s.x.norm());
-                const bool acceptable =
-                    ((f_trial < s.f || at_iterate) && viol_new <= viol_old + mma_defaults<Scalar>::violation_slack)
-                    || (viol_new < viol_old - mma_defaults<Scalar>::violation_slack);
-
-                if(!acceptable)
-                    return detail::asymptote_null_step<Scalar>(s, detail::non_finite_trial_status(std::isfinite(f_trial), true));
-            }
+            if(inner + 1 == max_inner && !committed)
+                return detail::asymptote_null_step<Scalar>(s);
         }
 
-        if(!accepted && !(std::isfinite(f_trial) && detail::derivatives_finite_at(*s.problem, x_trial, g_trial, J_trial)))
-            return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
+        if(!accepted && !committed && !(std::isfinite(f_trial) && detail::derivatives_finite_at(*s.problem, x_trial, g_trial, J_trial)))
+            return detail::non_finite_null_step<Scalar>(s, x_trial);
 
         // 5. Inter-outer rho decay.
         s.rho_obj = std::max(rho_decay * s.rho_obj, rho_min);
@@ -551,6 +531,7 @@ struct rho_wval_policy
         const Scalar ri = s.opts.rho_init.value_or(mma_defaults<Scalar>::rho_init);
         s.rho_obj = ri;
         s.rho_con.setConstant(ri);
+        s.non_finite_rejected = false;
         return detail::latch_status(s);
     }
 
@@ -561,6 +542,23 @@ struct rho_wval_policy
     }
 
 private:
+    // A trial at the current iterate is a fixed point: conservativity there fails only by roundoff, so null-stepping
+    // would grow rho forever. Committing it lets the step tolerance stop the run.
+    template <typename P, typename X, typename Values>
+    bool exhaustion_acceptable(const state_type<P>& s, const X& x_trial, Scalar f_trial, const Values& c_trial) const
+    {
+        Scalar viol_old = Scalar(0.0);
+        Scalar viol_new = Scalar(0.0);
+        for(Eigen::Index i = 0; i < c_trial.size(); ++i)
+        {
+            viol_old = std::max(viol_old, -s.c_ineq[i]);
+            viol_new = std::max(viol_new, -c_trial[i]);
+        }
+        const bool at_iterate = detail::at_iterate(x_trial, s.x);
+        return ((f_trial < s.f || at_iterate) && viol_new <= viol_old + mma_defaults<Scalar>::violation_slack)
+               || (viol_new < viol_old - mma_defaults<Scalar>::violation_slack);
+    }
+
     template <typename P>
     void refresh_inequality_rows(state_type<P>& s)
     {

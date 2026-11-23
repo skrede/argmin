@@ -37,12 +37,15 @@ bool finite_trial(State& s, const Eigen::Vector<Scalar, N>& x_trial, Scalar f_tr
     return accepted;
 }
 
-// Whether the trial failed. After a non-finite rejection a trial the damped step no longer moves off x fails too: every
-// trial that moved was non-finite, so the shrink has run out below x's resolution as surely as at the damping ceiling.
-template <typename State, typename X>
-bool failed_trial(State& s, const X& x_trial, bool trial_finite)
+// Whether the trial failed: a non-finite value or Jacobian, or, after a non-finite rejection, a non-zero step that no
+// longer moves x. Every trial that moved was non-finite, so the shrink has run out below x's resolution as surely as at
+// the damping ceiling; a zero step (a direction the bounds block) is an ordinary trial. A failed trial is never accepted.
+template <int N, typename Scalar, typename State>
+bool failed_trial(State& s, const Eigen::Vector<Scalar, N>& x_trial, const Eigen::Vector<Scalar, N>& step, Scalar f_trial, Eigen::MatrixX<Scalar>& sink, bool& accepted)
 {
-    const bool failed = !trial_finite || (s.non_finite_rejected && x_trial == s.x);
+    const bool vanished = s.non_finite_rejected && x_trial == s.x && !step.isZero(Scalar(0));
+    const bool failed = vanished || !finite_trial<N>(s, x_trial, f_trial, sink, accepted);
+    accepted = accepted && !failed;
     s.non_finite_rejected = failed;
     return failed;
 }

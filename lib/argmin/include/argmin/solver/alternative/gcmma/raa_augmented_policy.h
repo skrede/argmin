@@ -128,6 +128,7 @@ struct raa_augmented_policy
 
         // Set when the problem has equality rows or an inequality count other than a static M.
         bool invalid_problem{false};
+        bool non_finite_rejected{false};
 
         options_type opts;
     };
@@ -282,11 +283,7 @@ struct raa_augmented_policy
                 s.L[j] = s.x[j] - gam * (s.x_old1[j] - s.L[j]);
                 s.U[j] = s.x[j] + gam * (s.U[j] - s.x_old1[j]);
 
-                Scalar range;
-                if(s.lower[j] > -inf && s.upper[j] < inf)
-                    range = s.upper[j] - s.lower[j];
-                else
-                    range = std::max(std::abs(s.x[j]), Scalar(1.0));
+                const Scalar range = range_of(j);
 
                 const Scalar min_d = std::max(s_min_f * range, mma_defaults<Scalar>::min_asymptote_distance);
                 const Scalar max_d = s_max_f * range;
@@ -297,10 +294,8 @@ struct raa_augmented_policy
             }
         }
 
-        // 2. Move limits (Svanberg 2007 notes eqs. 2.8-2.9): the box, the
-        //    0.1 asymptote buffer, and the XXMOVE=0.5 move bound
-        //    x_k +/- move_bnd * range_j with the box-width analog
-        //    2*max(|x_kj|, 1) for an unbounded variable.
+        // 2. Move limits (Svanberg 2007 notes eqs. 2.8-2.9): the box, the 0.1 asymptote buffer, and the XXMOVE=0.5 move
+        //    bound x_k +/- move_bnd * range_j with the box-width analog 2*max(|x_kj|, 1) for an unbounded variable.
         const Scalar move_bnd = s.opts.move_bound_fraction;
         for(int j = 0; j < n; ++j)
         {
@@ -329,15 +324,9 @@ struct raa_augmented_policy
             const Scalar dxU = s.U[j] - s.x[j];
             const Scalar dxL = s.x[j] - s.L[j];
 
-            // Distance-scaled regularizer raai/range_j (Svanberg 2007
-            // notes eqs. 2.3-2.4) with a scale proxy for unbounded
-            // variables, plus the 1.001/0.001 gradient mixing so a
-            // zero-gradient component keeps its minimizer at x_k.
-            Scalar range;
-            if(s.lower[j] > -inf && s.upper[j] < inf)
-                range = s.upper[j] - s.lower[j];
-            else
-                range = std::max(std::abs(s.x[j]), Scalar(1.0));
+            // Distance-scaled regularizer raai/range_j (Svanberg 2007 notes eqs. 2.3-2.4) with a scale proxy for unbounded
+            // variables, plus the 1.001/0.001 gradient mixing so a zero-gradient component keeps its minimizer at x_k.
+            const Scalar range = range_of(j);
             const Scalar raa_reg = raai / range;
 
             const Scalar gp = std::max(s.g[j], Scalar(0.0));
@@ -391,6 +380,7 @@ struct raa_augmented_policy
         Eigen::Vector<Scalar, N> g_trial(n);
         Eigen::MatrixX<Scalar> J_trial(m, n);
         bool accepted = false;
+        bool committed = false;
 
         // Built once per outer iteration and cold-restarted by reset_clear (a fresh L-BFGS curvature per inner solve, as a
         // re-construction would give) so the conservativity loop reuses its buffers instead of re-allocating them.
@@ -447,6 +437,12 @@ struct raa_augmented_policy
 
             detail::rank_non_finite_worst(f_trial, c_trial);
             accepted = detail::accepts_trial(detail::is_conservative(dual_prob, f_trial, c_trial), *s.problem, x_trial, f_trial, c_trial, g_trial, J_trial);
+            // The last trial is committed only with finite derivatives there, checked before raa grows so a non-finite
+            // one grows it as a non-finite value does.
+            if(!accepted && inner + 1 == max_inner)
+                committed = detail::accepts_trial(std::isfinite(f_trial), *s.problem, x_trial, f_trial, c_trial, g_trial, J_trial);
+            if(detail::non_finite_limit(s, x_trial, f_trial))
+                return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
             if(accepted) break;
 
             // raa growth (Svanberg 2002 eqs. 3.7-3.9): dval_sum is the total d_j mass at the trial and delta the conservativity
@@ -475,8 +471,8 @@ struct raa_augmented_policy
             }
         }
 
-        if(!accepted && !(std::isfinite(f_trial) && detail::derivatives_finite_at(*s.problem, x_trial, g_trial, J_trial)))
-            return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
+        if(!accepted && !committed && !(std::isfinite(f_trial) && detail::derivatives_finite_at(*s.problem, x_trial, g_trial, J_trial)))
+            return detail::non_finite_null_step<Scalar>(s, x_trial);
 
         // 5. Inter-outer raa decay toward the scale-adaptive floor (the
         //    gradient-scaled raa_floor under the Svanberg schedule, else the
@@ -524,6 +520,7 @@ struct raa_augmented_policy
         const Scalar ri = s.opts.raa_init.value_or(mma_defaults<Scalar>::raa_init);
         s.raa_obj = ri;
         s.raa_con.setConstant(ri);
+        s.non_finite_rejected = false;
         return detail::latch_status(s);
     }
 

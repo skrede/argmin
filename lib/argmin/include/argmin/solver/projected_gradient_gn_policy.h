@@ -258,7 +258,8 @@ private:
         }
 
         const Scalar old_value = s.objective_value;
-        const bool failed = detail::failed_trial(s, x_trial, detail::finite_trial<N>(s, x_trial, f_trial, s.J_raw, accepted));
+        const bool failed = detail::failed_trial<N>(s, x_trial, d, f_trial, s.J_raw, accepted);
+        const bool at_limit = s.lambda >= options.lambda_max;
 
         if(accepted)
         {
@@ -292,7 +293,6 @@ private:
         }
 
         s.lambda = std::clamp(s.lambda, options.lambda_min, options.lambda_max);
-        const bool at_limit = s.lambda >= options.lambda_max;
 
         ++s.iteration;
 
@@ -352,8 +352,9 @@ private:
 
         const Scalar old_value = s.objective_value;
         bool accepted = rho > Scalar(0);
-        const bool failed = detail::failed_trial(s, x_trial, detail::finite_trial<N>(s, x_trial, f_trial, s.J_raw, accepted));
+        const bool failed = detail::failed_trial<N>(s, x_trial, h, f_trial, s.J_raw, accepted);
         rho = failed ? Scalar(0) : rho;
+        const bool at_limit = s.delta <= detail::trust_radius_floor(Scalar(0), s.x.norm());
 
         Scalar expand_thresh = options.trust_region_expand_threshold.value_or(Scalar(0.75));
         Scalar shrink_thresh = options.trust_region_shrink_threshold.value_or(Scalar(0.25));
@@ -369,7 +370,6 @@ private:
         detail::update_trust_region<Scalar>(s.delta, rho, d.norm(), expand_thresh, shrink_thresh);
 
         s.lambda = std::clamp(s.lambda, options.lambda_min, options.lambda_max);
-        const bool at_limit = s.delta <= detail::trust_radius_floor(Scalar(0), s.x.norm());
 
         ++s.iteration;
 

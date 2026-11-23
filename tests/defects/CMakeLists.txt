@@ -12,7 +12,9 @@ add_executable(argmin_defect_tests
     embedded_test.cpp
     harness_canary_test.cpp
     infeasible_claim_test.cpp
+    least_squares_limit_test.cpp
     least_squares_oracle_test.cpp
+    moving_asymptote_limit_test.cpp
     moving_asymptote_oracle_test.cpp
     moving_asymptote_solve_test.cpp
     moving_asymptote_test.cpp

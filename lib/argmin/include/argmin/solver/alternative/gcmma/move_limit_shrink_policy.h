@@ -140,6 +140,7 @@ struct move_limit_shrink_policy
 
         // Set when the problem has equality rows or an inequality count other than a static M.
         bool invalid_problem{false};
+        bool non_finite_rejected{false};
 
         options_type opts;
     };
@@ -271,11 +272,10 @@ struct move_limit_shrink_policy
             }
         }
 
-        // 2. Initial move limits (Svanberg 2007 notes eqs. 2.8-2.9): the
-        //    box, the 0.1 asymptote buffer, and the XXMOVE=0.5 move bound
-        //    x_k +/- move_bnd * range_j with the box-width analog
-        //    2*max(|x_kj|, 1) for an unbounded variable. The conservativity
-        //    loop below shrinks this window further toward x_k.
+        // 2. Initial move limits (Svanberg 2007 notes eqs. 2.8-2.9): the box, the 0.1 asymptote buffer, and the XXMOVE=0.5
+        //    move bound x_k +/- move_bnd * range_j with the box-width analog 2*max(|x_kj|, 1) for an unbounded variable.
+        //    The conservativity loop below shrinks this window further toward x_k, and a window shrunk by trials that
+        //    failed on a non-finite value carries over a null step.
         const Scalar move_bnd = s.opts.move_bound_fraction;
         for(int j = 0; j < n; ++j)
         {
@@ -288,10 +288,10 @@ struct move_limit_shrink_policy
 
             s.alpha[j] = std::max({s.lower[j],
                                    s.L[j] + move_lim * (s.x[j] - s.L[j]),
-                                   s.x[j] - mb});
+                                   s.x[j] - mb, s.non_finite_rejected ? s.alpha[j] : -inf});
             s.beta[j]  = std::min({s.upper[j],
                                    s.U[j] - move_lim * (s.U[j] - s.x[j]),
-                                   s.x[j] + mb});
+                                   s.x[j] + mb, s.non_finite_rejected ? s.beta[j] : inf});
         }
 
         // 3. Approximation params + r_i constants.
@@ -304,10 +304,8 @@ struct move_limit_shrink_policy
             const Scalar dxU = s.U[j] - s.x[j];
             const Scalar dxL = s.x[j] - s.L[j];
 
-            // Distance-scaled regularizer raai/range_j (Svanberg 2007
-            // notes eqs. 2.3-2.4) with a scale proxy for unbounded
-            // variables, plus the 1.001/0.001 gradient mixing so a
-            // zero-gradient component keeps its minimizer at x_k.
+            // Distance-scaled regularizer raai/range_j (Svanberg 2007 notes eqs. 2.3-2.4) with a scale proxy for unbounded
+            // variables, plus the 1.001/0.001 gradient mixing so a zero-gradient component keeps its minimizer at x_k.
             Scalar range;
             if(s.lower[j] > -inf && s.upper[j] < inf)
                 range = s.upper[j] - s.lower[j];
@@ -393,10 +391,8 @@ struct move_limit_shrink_policy
                 for(int k = 0; k < 100; ++k)
                 {
                     auto dsr = dp.step(*ds);
-                    // Terminate on the projected KKT residual (the box-
-                    // constrained dual's stationarity measure), not the raw
-                    // gradient norm: at a dual solution with an inactive
-                    // constraint (y_i = 0) the raw component stays bounded
+                    // Terminate on the projected KKT residual (the box-constrained dual's stationarity measure), not the raw
+                    // gradient norm: at a dual solution with an inactive constraint (y_i = 0) the raw component stays bounded
                     // away from zero and the loop would run to its cap.
                     if(dsr.kkt_residual.value_or(dsr.gradient_norm) < mma_defaults<Scalar>::dual_gradient_threshold
                        || dsr.step_size < mma_defaults<Scalar>::dual_step_threshold)
@@ -424,6 +420,8 @@ struct move_limit_shrink_policy
 
             detail::rank_non_finite_worst(f_trial, c_trial);
             accepted = detail::accepts_trial(detail::is_conservative(dual_prob, f_trial, c_trial), *s.problem, x_trial, f_trial, c_trial, g_trial, J_trial);
+            if(detail::non_finite_limit(s, x_trial, f_trial))
+                return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
             if(accepted) break;
 
             for(int j = 0; j < n; ++j)
@@ -434,7 +432,7 @@ struct move_limit_shrink_policy
         }
 
         if(!accepted && !(std::isfinite(f_trial) && detail::derivatives_finite_at(*s.problem, x_trial, g_trial, J_trial)))
-            return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
+            return detail::non_finite_null_step<Scalar>(s, x_trial);
 
         // 5. Commit trial.
         const Scalar f_old = s.f;
@@ -499,6 +497,7 @@ private:
         const int n = static_cast<int>(s.x.size());
         const Scalar s_init = s.opts.asymptote_init.value_or(mma_defaults<Scalar>::asymptote_init);
         const Scalar s_init_un = s.opts.asymptote_init_unbounded.value_or(mma_defaults<Scalar>::asymptote_init_unbounded);
+        s.non_finite_rejected = false;
 
         for(int j = 0; j < n; ++j)
         {
