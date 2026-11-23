@@ -5,6 +5,7 @@
 #include "argmin/detail/status_claim.h"
 #include "argmin/detail/bound_measure.h"
 #include "argmin/detail/terminal_step.h"
+#include "argmin/detail/iterate_values.h"
 #include "argmin/detail/hint_precedence.h"
 #include "argmin/detail/bound_projection.h"
 
@@ -154,6 +155,18 @@ private:
     }
 };
 
+// A member is never stepped from a non-finite start, and a step that leaves it at a non-finite iterate ends it, as a
+// solve of the inner policy alone ends there.
+template <typename Scalar, typename Inner, typename State>
+step_result<Scalar> member_inner_step(Inner& policy, State& inner)
+{
+    if(!iterate_values_finite(inner))
+        return latched_step<Scalar>(inner.x.norm(), solver_status::non_finite_evaluation);
+    step_result<Scalar> result = policy.step(inner);
+    flag_non_finite_iterate(result, inner);
+    return result;
+}
+
 // One decorator step after the inner step: a member that has not ended keeps the solve running; an ended member is
 // recorded, and either the decorator ends with its best member or the next step starts the next member.
 template <typename Problem, typename State, typename Scalar, typename Ends>
@@ -165,6 +178,10 @@ step_result<Scalar> member_step(State& s, step_result<Scalar> result, Ends ends)
     const solver_status verdict = s.judge.judge(result);
     if(verdict == solver_status::running)
         return working_step(result);
+    // A member that ended non-finite reports no value, so neither the best member nor the solve's best point prefers it
+    // to a finite one.
+    if(verdict == solver_status::non_finite_evaluation)
+        result.objective_value = result.constraint_violation = std::numeric_limits<Scalar>::quiet_NaN();
     s.best.offer(verdict, result, s, s.judge.tolerance());
     if(ends(verdict))
         return s.best.surface(s, result.evaluations);

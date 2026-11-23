@@ -10,7 +10,7 @@ file	lib/argmin/include/argmin/detail/cobyla_trust_region.h	-	560
 file	lib/argmin/include/argmin/detail/compact_lbfgs.h	-	529
 file	lib/argmin/include/argmin/detail/dense_ldl_bfgs.h	-	517
 file	lib/argmin/include/argmin/detail/expected_fallback.h	-	202
-file	lib/argmin/include/argmin/detail/filter_acceptance.h	-	419
+file	lib/argmin/include/argmin/detail/filter_acceptance.h	-	414
 file	lib/argmin/include/argmin/detail/filter_restoration.h	-	252
 file	lib/argmin/include/argmin/detail/interpolation_system.h	-	996
 file	lib/argmin/include/argmin/detail/isres_operators.h	-	454
@@ -26,7 +26,7 @@ file	lib/argmin/include/argmin/detail/nnls.h	-	415
 file	lib/argmin/include/argmin/detail/projected_gn_step.h	-	381
 file	lib/argmin/include/argmin/detail/quadratic_model.h	-	480
 file	lib/argmin/include/argmin/detail/restoration.h	-	371
-file	lib/argmin/include/argmin/detail/solver_core.h	-	547
+file	lib/argmin/include/argmin/detail/solver_core.h	-	545
 file	lib/argmin/include/argmin/detail/sqp_common.h	-	784
 file	lib/argmin/include/argmin/detail/steihaug_cg.h	-	255
 file	lib/argmin/include/argmin/detail/trust_region.h	-	924
@@ -50,7 +50,7 @@ file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1146
 file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	655
 file	lib/argmin/include/argmin/solver/convergence.h	-	352
 file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1308
-file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1194
+file	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	-	1193
 file	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	-	1785
 file	lib/argmin/include/argmin/solver/kraft_slsqp_policy.h	-	1105
 file	lib/argmin/include/argmin/solver/lbfgsb_policy.h	-	203
@@ -190,7 +190,7 @@ function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	init	83
 function	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	step	844
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	init	87
 function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	reset	32
-function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	step	772
+function	lib/argmin/include/argmin/solver/filter_slsqp_policy.h	step	771
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	init	160
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	reset	43
 function	lib/argmin/include/argmin/solver/filter_trsqp_policy.h	step	904

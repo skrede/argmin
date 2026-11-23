@@ -30,6 +30,17 @@ bool iterate_values_finite(const State& s)
         return true;
 }
 
+// A decorator starts where the state it wraps starts, so a non-finite start latches it as state_rejected rejects what
+// that state rejects; a later member's start or iterate ends only that member.
+template <typename State>
+bool start_values_finite(const State& s)
+{
+    if constexpr(requires { s.inner; })
+        return start_values_finite(s.inner);
+    else
+        return iterate_values_finite(s);
+}
+
 // A family that cannot step back from a non-finite iterate ends there, and the step is never offered as the best point.
 template <typename Scalar, typename State>
 void flag_non_finite_iterate(step_result<Scalar>& result, const State& s)

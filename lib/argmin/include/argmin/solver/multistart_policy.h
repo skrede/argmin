@@ -116,7 +116,7 @@ struct multistart_policy
     {
         if(s.restart_pending)
             start_next(s);
-        const step_result<scalar_type> result = inner_policy_.step(s.inner);
+        const step_result<scalar_type> result = detail::member_inner_step<scalar_type>(inner_policy_, s.inner);
         sync_from_inner(s);
         return detail::member_step<P>(s, result, [&](solver_status) { return s.restart_count >= effective_max_restarts(); });
     }

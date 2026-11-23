@@ -322,8 +322,6 @@ public:
 
     solver_status status() const { return !built_ || detail::state_rejected(state_) || !detail::within_capacity(options_.convergence) ? solver_status::invalid_problem : last_status_; }
 
-    // The wrapped policy instance, options included, so a caller can confirm that a CTAD rebind kept the configured
-    // options.
     const Policy& policy() const { return policy_; }
 
     // NaN before the first step, never a fabricated 0 that would read as a stationary point.

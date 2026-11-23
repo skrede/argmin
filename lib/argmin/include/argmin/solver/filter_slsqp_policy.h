@@ -630,8 +630,7 @@ struct filter_slsqp_policy
             if(ls == 0)
                 h_full_step = trial_finite ? h_trial : std::numeric_limits<Scalar>::quiet_NaN();
 
-            // NaN/Inf gate (armijo.h header comment): a non-finite trial backtracks instead of reaching the filter or
-            // Armijo comparison, in both modes.
+            // NaN/Inf gate: a non-finite trial backtracks instead of reaching the filter or Armijo comparison, in both modes.
             if(!trial_finite)
             {
                 ++nan_eval_count;

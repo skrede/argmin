@@ -23,6 +23,7 @@ add_executable(argmin_defect_tests
     sqp_algorithm_step_test.cpp
     sqp_algorithm_test.cpp
     sqp_oracle_test.cpp
+    sqp_safety_nonfinite_test.cpp
     sqp_safety_qp_test.cpp
     sqp_safety_restoration_test.cpp
     sqp_safety_test.cpp

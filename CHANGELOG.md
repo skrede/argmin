@@ -231,9 +231,12 @@ Policies available at HEAD, grouped by problem class:
 - The SQP solvers (`kraft_slsqp`, `filter_slsqp`, `nw_sqp`, `filter_nw_sqp`,
   `tr_sqp`, `filter_trsqp`) report `non_finite_evaluation` for an objective,
   constraint, gradient or Jacobian that is non-finite at the start point, on
-  construction and on `reset` / `reset_clear`. A step that leaves them at an
-  iterate with a non-finite value ends the solve with `non_finite_evaluation`,
-  and that iterate is never returned as the best point.
+  construction and on `reset` / `reset_clear`, also when wrapped in
+  `multistart_policy`. A step that leaves them at an iterate with a non-finite
+  value ends the solve with `non_finite_evaluation`, and that iterate is never
+  returned as the best point. Inside `multistart_policy` such a step ends only
+  that member, a later member with a non-finite start ends without a step,
+  neither is returned over a finite member, and the next member starts.
 - `tr_sqp` rejects a trial whose gain ratio is not finite and shrinks its trust
   radius, instead of accepting a step into a NaN objective. The filter of
   `filter_trsqp`, `filter_slsqp` and `filter_nw_sqp` never accepts a non-finite
@@ -242,7 +245,9 @@ Policies available at HEAD, grouped by problem class:
 - The point a solve returns ranks a non-finite objective or violation after
   every finite one, so a NaN at the solve's own evaluation of the start no
   longer pins the returned point there, and a trial evaluating to -inf never
-  becomes it.
+  becomes it. The same order ranks ISRES's best evaluated point, the augmented
+  Lagrangian's best inner iterate, the best member of `basic_solver_group`, and
+  the member `multistart_policy` and `restarting_policy` return.
 - `restarting_policy` `reset` and `reset_clear` start a solve as construction
   does: the caller's inner options (a restart's escalated population and
   per-restart seed are dropped), the base seed, no restarts, and the new start

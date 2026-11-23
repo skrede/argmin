@@ -32,7 +32,7 @@ solver_status latch_status(const State& s)
 {
     if(state_rejected(s))
         return solver_status::invalid_problem;
-    return iterate_values_finite(s) ? solver_status::running : solver_status::non_finite_evaluation;
+    return start_values_finite(s) ? solver_status::running : solver_status::non_finite_evaluation;
 }
 
 // A state holds only the constraint values of the row kinds its family supports (the moving-asymptote states have
