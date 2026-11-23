@@ -236,7 +236,9 @@ Policies available at HEAD, grouped by problem class:
   value ends the solve with `non_finite_evaluation`, and that iterate is never
   returned as the best point. Inside `multistart_policy` such a step ends only
   that member, a later member with a non-finite start ends without a step,
-  neither is returned over a finite member, and the next member starts.
+  neither is returned over a finite member, and the next member starts. If
+  every member ends non-finite, the solve ends with `non_finite_evaluation` at
+  its best finite evaluated point.
 - The moving-asymptote solvers (`mma`, `gcmma`, `ccsa_quadratic` and the GCMMA
   alternates) and the least-squares solvers (`lm`, `projected_gn`,
   `projected_gradient_gn`) report `non_finite_evaluation` for an objective,

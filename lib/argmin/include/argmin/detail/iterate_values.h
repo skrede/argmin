@@ -61,7 +61,7 @@ bool held_values_finite(const State& s)
 }
 
 // A decorator starts where the state it wraps starts, so a non-finite start latches it as state_rejected rejects what
-// that state rejects; a later member's start or iterate ends only that member.
+// that state rejects.
 template <typename State>
 bool start_values_finite(const State& s)
 {
