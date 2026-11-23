@@ -5,7 +5,9 @@
 #include "argmin/solver/gcmma_policy.h"
 #include "argmin/solver/step_budget_solver.h"
 
+#include "argmin/result/status.h"
 #include "argmin/result/step_result.h"
+#include "argmin/result/solve_result.h"
 
 #include <Eigen/Core>
 
@@ -36,11 +38,14 @@ bool asymptotes_bracket_hot_reset_point()
     return (solver.state().L.array() < target.array()).all() && (target.array() < solver.state().U.array()).all();
 }
 
-// The change in U - L across the second of two consecutive null steps, or -1 if no such pair occurs.
+// The change in U - L across the second of two consecutive null steps, or -1 if no such pair occurs. With one inner
+// iteration a trial past the cliff is non-conservative and raises f, so the step is null.
 double asymptote_growth_across_null_step()
 {
-    const scalar_bowl problem{1.0, 2.0, 1, 10.0, 0.0, 3.0, 1.5};
-    step_budget_solver solver{gcmma_policy<double, 1>{}, problem, scalar_bowl::vector::Zero(), solver_options<>{}};
+    const defects::cliff_bowl problem{{1.0, 2.0, 1, 10.0, 0.0, 3.0, 1.5}, 10.0};
+    gcmma_policy<double, 1>::options_type popts;
+    popts.max_inner_iterations = 1;
+    step_budget_solver solver{gcmma_policy<double, 1>{}, problem, scalar_bowl::vector::Zero(), solver_options<>{}, popts};
     bool previous_null = false;
     for(std::int32_t k = 0; k < 40; ++k)
     {
@@ -83,7 +88,7 @@ TEST_CASE("gcmma re-anchors its asymptotes around the point of a hot reset", "[m
     CHECK(asymptotes_bracket_hot_reset_point<gcmma_policy<>>());
 }
 
-TEST_CASE("mma keeps a finite objective after a trial into a NaN region", "[known-defect][!shouldfail]")
+TEST_CASE("mma keeps a finite objective after a trial into a NaN region", "[moving_asymptote]")
 {
     const scalar_bowl problem{1.0, 2.0, 1, 10.0, 0.0, 3.0, 1.2};
     step_budget_solver solver{mma_policy<double, 1>{}, problem, scalar_bowl::vector::Constant(1.0), solver_options<>{}};
@@ -91,9 +96,30 @@ TEST_CASE("mma keeps a finite objective after a trial into a NaN region", "[know
     CHECK(std::isfinite(solver.state().f));
 }
 
-TEST_CASE("gcmma takes two consecutive null steps at a NaN wall", "[moving_asymptote]")
+TEST_CASE("mma ends non_finite_evaluation at its asymptote limit when every trial is non-finite", "[moving_asymptote]")
+{
+    const scalar_bowl problem{1.0, 2.0, 1, 10.0, 0.0, 3.0, 1.0};
+    step_budget_solver solver{mma_policy<double, 1>{}, problem, scalar_bowl::vector::Constant(1.0), solver_options<>{}};
+    const solve_result<double, 1> r = solver.solve();
+    CHECK(r.status == solver_status::non_finite_evaluation);
+    CHECK(r.x[0] == 1.0);
+    CHECK(r.objective_value == 1.0);
+}
+
+TEST_CASE("gcmma takes two consecutive null steps at a cliff", "[moving_asymptote]")
 {
     CHECK(asymptote_growth_across_null_step() >= 0.0);
+}
+
+TEST_CASE("gcmma advances to a NaN wall without committing a trial past it", "[moving_asymptote]")
+{
+    const scalar_bowl problem{1.0, 2.0, 1, 10.0, 0.0, 3.0, 1.5};
+    step_budget_solver solver{gcmma_policy<double, 1>{}, problem, scalar_bowl::vector::Zero(), solver_options<>{}};
+    for(std::int32_t k = 0; k < 40; ++k)
+        solver.step();
+    CHECK(std::isfinite(solver.state().f));
+    CHECK(solver.state().x[0] <= 1.5);
+    CHECK(solver.state().x[0] > 1.49);
 }
 
 TEST_CASE("gcmma leaves its asymptote width unchanged across a repeated null step", "[known-defect][!shouldfail]")

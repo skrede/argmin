@@ -59,6 +59,14 @@ struct scalar_bowl
     double nan_beyond;
 };
 
+// scalar_bowl with the finite value height beyond nan_beyond in place of NaN.
+struct cliff_bowl : scalar_bowl
+{
+    double value(const vector& x) const { return x[0] > nan_beyond ? height : scalar_bowl::value(x); }
+
+    double height;
+};
+
 // 10 (x1 - x0^2)^2 + (1 - x0)^2 on [0, 10]^2 with the active row 2.5 - x0 - x1 >= 0.
 struct rosenbrock_in_box
 {

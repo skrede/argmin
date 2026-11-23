@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_PROBLEM_SHAPE_H
 #define HPP_GUARD_ARGMIN_DETAIL_PROBLEM_SHAPE_H
 
+#include "argmin/detail/terminal_step.h"
 #include "argmin/detail/iterate_values.h"
 
 #include "argmin/result/status.h"
@@ -11,6 +12,7 @@
 #include <Eigen/Core>
 
 #include <limits>
+#include <optional>
 
 namespace argmin::detail
 {
@@ -130,6 +132,17 @@ template <typename Scalar, typename State>
 step_result<Scalar> rejected_step(const State& s)
 {
     return no_value_step<Scalar>(s.x.norm());
+}
+
+// A rejected problem or a non-finite start is never stepped from, so a policy driven directly ends there as a solve does.
+template <typename Scalar, typename State>
+std::optional<step_result<Scalar>> refused_step(const State& s)
+{
+    if(s.invalid_problem)
+        return rejected_step<Scalar>(s);
+    if(!held_values_finite(s))
+        return latched_step<Scalar>(s.x.norm(), solver_status::non_finite_evaluation);
+    return std::nullopt;
 }
 
 // A state that was never built has no iterate whose norm to report.

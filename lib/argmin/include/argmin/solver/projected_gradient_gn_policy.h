@@ -36,7 +36,7 @@
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/projected_gn_step.h"
-#include "argmin/derivative/finite_difference.h"
+#include "argmin/detail/least_squares_trial.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
@@ -106,8 +106,9 @@ struct projected_gradient_gn_policy
         std::uint32_t evaluations{0};
         int num_residuals{};
         bool invalid_problem{false};
+        bool non_finite_rejected{false};
 
-        // Runtime-sized Jacobian sink copied into the fixed-N J; the dynamic axis writes J directly.
+        // Runtime-sized Jacobian sink, at the start or a trial, copied into J only once it is known to be finite.
         Eigen::MatrixX<Scalar> J_raw;
 
         // Sized once and reused so the step is allocation-free at fixed N.
@@ -138,8 +139,7 @@ struct projected_gradient_gn_policy
         s.delta = options.trust_region_radius.value_or(Scalar(1));
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, n);
-        if constexpr(N != Eigen::Dynamic)
-            s.J_raw.resize(s.num_residuals, n);
+        s.J_raw.resize(s.num_residuals, n);
         s.ws.free_indices.reserve(static_cast<std::size_t>(n));
         s.ws.r_trial.resize(s.num_residuals);
         s.ws.Jd.resize(s.num_residuals);
@@ -162,8 +162,8 @@ struct projected_gradient_gn_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
-        if(s.invalid_problem)
-            return detail::rejected_step<Scalar>(s);
+        if(const std::optional<step_result<Scalar>> refused = detail::refused_step<Scalar>(s))
+            return *refused;
         const int n = static_cast<int>(s.x.size());
 
         Eigen::Matrix<Scalar, N, N> H = (s.J.transpose() * s.J).eval();
@@ -185,8 +185,7 @@ struct projected_gradient_gn_policy
         const int n = static_cast<int>(x0.size());
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, n);
-        if constexpr(N != Eigen::Dynamic)
-            s.J_raw.resize(s.num_residuals, n);
+        s.J_raw.resize(s.num_residuals, n);
         s.ws.free_indices.reserve(static_cast<std::size_t>(n));
         s.ws.r_trial.resize(s.num_residuals);
         s.ws.Jd.resize(s.num_residuals);
@@ -198,6 +197,7 @@ struct projected_gradient_gn_policy
         s.nu = least_squares_defaults<Scalar>::nu_initial;
         s.delta = options.trust_region_radius.value_or(Scalar(1));
         s.iteration = 0;
+        s.non_finite_rejected = false;
         return detail::latch_status(s);
     }
 
@@ -229,7 +229,6 @@ private:
         Eigen::Vector<Scalar, N> x_plus_h = (s.x + h).eval();
         Eigen::Vector<Scalar, N> d = detail::project(x_plus_h, s.lower, s.upper) - s.x;
 
-        // Directional derivative along projected direction
         Scalar gTd = g.dot(d);
 
         // Armijo backtracking (N&W Algorithm 16.1)
@@ -259,6 +258,7 @@ private:
         }
 
         const Scalar old_value = s.objective_value;
+        const bool failed = detail::failed_trial(s, x_trial, detail::finite_trial<N>(s, x_trial, f_trial, s.J_raw, accepted));
 
         if(accepted)
         {
@@ -277,7 +277,7 @@ private:
 
             s.x = x_trial;
             s.r = s.ws.r_trial;
-            evaluate_jacobian(s);
+            s.J = s.J_raw;
             s.objective_value = f_trial;
 
             // Nielsen (1999) lambda update using the guarded gain ratio
@@ -287,19 +287,17 @@ private:
         }
         else
         {
-            // Reject: increase damping
             s.lambda *= s.nu;
             s.nu *= Scalar(2);
         }
 
-        // Clamp lambda
         s.lambda = std::clamp(s.lambda, options.lambda_min, options.lambda_max);
+        const bool at_limit = s.lambda >= options.lambda_max;
 
         ++s.iteration;
 
-        // objective_change carries the ACTUAL objective change (zero on a
-        // rejected step); the former hack reported lambda here, leaking an
-        // internal damping value into the user-visible step_result.
+        // objective_change carries the actual objective change, zero on a rejected step. A non-finite trial is a null
+        // step, so the step criteria never read the shrinking damped step as a stall.
         Scalar effective_change = s.objective_value - old_value;
 
         // KKT residual for bound-constrained least-squares: projected-gradient
@@ -314,7 +312,9 @@ private:
             .step_size = h.norm(),
             .objective_change = effective_change,
             .improved = accepted,
+            .is_null_step = failed,
             .kkt_residual = kkt,
+            .policy_status = detail::non_finite_trial_status(!failed, at_limit || x_trial == s.x),
         };
     }
 
@@ -344,10 +344,7 @@ private:
         detail::counted_residuals(s.evaluations, *s.problem, x_trial, s.ws.r_trial);
         Scalar f_trial = Scalar(0.5) * s.ws.r_trial.squaredNorm();
 
-        // Gain ratio via the direct model reduction at the accepted (projected)
-        // dogleg step: predicted = -g^T d - 0.5 * ||J d||^2, valid for any d.
-        // The trial is accepted only when predicted > 0 and f_trial is finite,
-        // replacing the |predicted|<1e-30 -> rho=1 silent accept.
+        // Gain ratio from the direct model reduction at the projected dogleg step, valid for any d.
         Scalar actual = s.objective_value - f_trial;
         s.ws.Jd.noalias() = s.J * d;
         Scalar predicted = -(g.dot(d) + Scalar(0.5) * s.ws.Jd.squaredNorm());
@@ -355,6 +352,8 @@ private:
 
         const Scalar old_value = s.objective_value;
         bool accepted = rho > Scalar(0);
+        const bool failed = detail::failed_trial(s, x_trial, detail::finite_trial<N>(s, x_trial, f_trial, s.J_raw, accepted));
+        rho = failed ? Scalar(0) : rho;
 
         Scalar expand_thresh = options.trust_region_expand_threshold.value_or(Scalar(0.75));
         Scalar shrink_thresh = options.trust_region_shrink_threshold.value_or(Scalar(0.25));
@@ -363,19 +362,18 @@ private:
         {
             s.x = x_trial;
             s.r = s.ws.r_trial;
-            evaluate_jacobian(s);
+            s.J = s.J_raw;
             s.objective_value = f_trial;
         }
 
         detail::update_trust_region<Scalar>(s.delta, rho, d.norm(), expand_thresh, shrink_thresh);
 
-        // Clamp lambda
         s.lambda = std::clamp(s.lambda, options.lambda_min, options.lambda_max);
+        const bool at_limit = s.delta <= detail::trust_radius_floor(Scalar(0), s.x.norm());
 
         ++s.iteration;
 
-        // objective_change carries the ACTUAL objective change (zero on a
-        // rejected step) instead of the leaked lambda proxy.
+        // objective_change carries the actual objective change, zero on a rejected step; a non-finite trial is a null step.
         Scalar effective_change = s.objective_value - old_value;
 
         // KKT residual for bound-constrained least-squares: projected-gradient
@@ -390,43 +388,17 @@ private:
             .step_size = h.norm(),
             .objective_change = effective_change,
             .improved = accepted,
+            .is_null_step = failed,
             .kkt_residual = kkt,
+            .policy_status = detail::non_finite_trial_status(!failed, at_limit || x_trial == s.x),
         };
     }
-
-    // Analytic-Jacobian detection on the least-squares problem interface.
-    template <typename P>
-    static constexpr bool has_analytic_jacobian =
-        requires(const P& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
-            p.jacobian(xx, JJ);
-        };
 
     template <typename P>
     void evaluate_jacobian(state_type<P>& s) const
     {
-        auto write = [&s](Eigen::MatrixX<Scalar>& sink) {
-            if constexpr(has_analytic_jacobian<P>)
-            {
-                s.problem->jacobian(s.x, sink);
-            }
-            else
-            {
-                auto residual_fn = [&s](const auto& xx, Eigen::VectorX<Scalar>& rr) {
-                    detail::counted_residuals(s.evaluations, *s.problem, xx, rr);
-                };
-                fd_jacobian<N>(residual_fn, s.x, sink, s.num_residuals);
-            }
-        };
-
-        if constexpr(N == Eigen::Dynamic)
-        {
-            write(s.J);
-        }
-        else
-        {
-            write(s.J_raw);
-            s.J = s.J_raw;
-        }
+        detail::residual_jacobian<N, Scalar>(s, s.x, s.J_raw);
+        s.J = s.J_raw;
     }
 
     // Initialize lambda (Nielsen 1999) honoring initial_lambda / tau.

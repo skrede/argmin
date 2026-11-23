@@ -435,7 +435,7 @@ jobs:
           cd build
           count=$(ctest -N -L known-defect | grep -cE '^ *Test +#')
           echo "known defects registered: $count"
-          test "$count" -eq 160 || { echo "expected 160 known defects, found $count"; exit 1; }
+          test "$count" -eq 155 || { echo "expected 155 known defects, found $count"; exit 1; }
 
       # The literal is deliberate: adding or removing an oracle pin should force a visible edit.
       - name: Verify the full oracle-pin set registered
@@ -557,7 +557,7 @@ jobs:
           cd build
           count=$(ctest -N -L property | grep -cE '^ *Test +#')
           echo "property suites registered: $count"
-          test "$count" -eq 29 || { echo "expected 29 property suites, found $count"; exit 1; }
+          test "$count" -eq 31 || { echo "expected 31 property suites, found $count"; exit 1; }
 
       # A pinned seed set, so a seed-dependent solver status cannot turn an unrelated change red; fresh seeds
       # are explored in property-explore.yml.

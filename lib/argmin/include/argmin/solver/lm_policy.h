@@ -21,7 +21,7 @@
 #include "argmin/detail/gain_ratio.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/evaluation_count.h"
-#include "argmin/derivative/finite_difference.h"
+#include "argmin/detail/least_squares_trial.h"
 #include "argmin/result/step_result.h"
 #include "argmin/solver/options.h"
 #include "argmin/types.h"
@@ -77,15 +77,16 @@ struct lm_policy
         Scalar nu{least_squares_defaults<Scalar>::nu_initial};  // lambda multiplier on rejection
         Eigen::VectorX<Scalar> r;     // current residuals (m-dimensional, stays dynamic)
         Eigen::MatrixX<Scalar> J;     // current Jacobian (m x n, stays dynamic for concept compat)
-        // Per-step work buffers, sized once in init and reused so a warm
-        // steady-state step performs no heap allocation.
-        Eigen::VectorX<Scalar> r_trial;  // trial-point residuals (m-dimensional)
+        // Sized once in init and reused so a warm steady-state step performs no heap allocation.
+        Eigen::VectorX<Scalar> r_trial;
+        Eigen::MatrixX<Scalar> J_trial;
         Eigen::VectorX<Scalar> Jh;       // J * h product for the gain ratio (m-dimensional)
         Scalar initial_objective{};      // for divergence detection
         std::uint32_t iteration{0};
         std::uint32_t evaluations{0};
         int num_residuals{};
         bool invalid_problem{false};
+        bool non_finite_rejected{false};
     };
 
     template <typename Problem, typename Convergence>
@@ -111,11 +112,12 @@ struct lm_policy
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, n);
         s.r_trial.resize(s.num_residuals);
+        s.J_trial.resize(s.num_residuals, n);
         s.Jh.resize(s.num_residuals);
         if(detail::latch_rejection<Scalar>(s, detail::declares_constraint_rows(problem)))
             return s;
         detail::counted_residuals(s.evaluations, *s.problem, x0, s.r);
-        evaluate_jacobian(s);
+        detail::residual_jacobian<N, Scalar>(s, s.x, s.J);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
 
@@ -123,9 +125,7 @@ struct lm_policy
         Scalar init_lambda = options.initial_lambda.value_or(Scalar(0));
         Scalar tau = options.tau.value_or(least_squares_defaults<Scalar>::tau);
         if(init_lambda > Scalar(0))
-        {
             s.lambda = init_lambda;
-        }
         else
         {
             Eigen::Vector<Scalar, N> diag = (s.J.transpose() * s.J).diagonal();
@@ -141,8 +141,8 @@ struct lm_policy
     template <typename P>
     step_result<Scalar> step(state_type<P>& s)
     {
-        if(s.invalid_problem)
-            return detail::rejected_step<Scalar>(s);
+        if(const std::optional<step_result<Scalar>> refused = detail::refused_step<Scalar>(s))
+            return *refused;
         const int n = static_cast<int>(s.x.size());
         const Scalar diag_min = options.diagonal_min_clamp.value_or(least_squares_defaults<Scalar>::diagonal_min_clamp);
         const Scalar lam_min = options.lambda_min.value_or(least_squares_defaults<Scalar>::lambda_min);
@@ -188,15 +188,15 @@ struct lm_policy
         // improvement.
         Scalar rho = detail::gain_ratio(actual, predicted);
 
-        // Accept/reject with Nielsen (1999) lambda update
         const Scalar old_value = s.objective_value;
         bool accepted = rho > Scalar(0);
+        const bool failed = detail::failed_trial(s, x_trial, detail::finite_trial<N>(s, x_trial, f_trial, s.J_trial, accepted));
 
         if(accepted)
         {
             s.x = x_trial;
             s.r = r_trial;
-            evaluate_jacobian(s);
+            s.J.swap(s.J_trial);
             s.objective_value = f_trial;
 
             Scalar factor = Scalar(1) - std::pow(Scalar(2) * rho - Scalar(1), Scalar(3));
@@ -209,22 +209,18 @@ struct lm_policy
             s.nu *= Scalar(2);
         }
 
-        // Clamp lambda to prevent overflow/underflow
         s.lambda = std::clamp(s.lambda, lam_min, lam_max);
 
         ++s.iteration;
 
-        // Divergence detection: a non-finite trial that the guard rejected, or
-        // an objective that has grown 100x from its initial value, is a genuine
-        // failure rather than a routine damping increase.
-        std::optional<solver_status> policy_status{};
-        if(!std::isfinite(f_trial))
-            policy_status = solver_status::diverged;
-        else if(s.initial_objective > Scalar(0) && s.objective_value > Scalar(100) * s.initial_objective)
+        std::optional<solver_status> policy_status = detail::non_finite_trial_status(!failed, s.lambda >= lam_max || x_trial == s.x);
+        // An objective grown 100x from its initial value is a genuine failure rather than a routine damping increase.
+        if(!policy_status && s.initial_objective > Scalar(0) && s.objective_value > Scalar(100) * s.initial_objective)
             policy_status = solver_status::diverged;
 
         // Report h.norm() as step_size even on rejection so step_budget_solver's stall detection does not fire while the
-        // solver is still adjusting lambda; objective_change is the actual change, zero on a rejected step.
+        // solver is still adjusting lambda; objective_change is the actual change, zero on a rejected step. A non-finite
+        // trial is a null step, so the step criteria never read the shrinking damped step as a stall.
         Scalar effective_change = s.objective_value - old_value;
 
         // KKT residual for unconstrained least-squares: infinity-norm of the
@@ -243,6 +239,7 @@ struct lm_policy
             .step_size = h.norm(),
             .objective_change = effective_change,
             .improved = accepted,
+            .is_null_step = failed,
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
             .policy_status = policy_status,
@@ -257,8 +254,9 @@ struct lm_policy
         s.x = x0;
         s.r.resize(s.num_residuals);
         s.J.resize(s.num_residuals, x0.size());
+        s.J_trial.resize(s.num_residuals, x0.size());
         detail::counted_residuals(s.evaluations, *s.problem, x0, s.r);
-        evaluate_jacobian(s);
+        detail::residual_jacobian<N, Scalar>(s, s.x, s.J);
         s.objective_value = Scalar(0.5) * s.r.squaredNorm();
         s.initial_objective = s.objective_value;
 
@@ -269,6 +267,7 @@ struct lm_policy
         s.lambda = (max_diag > Scalar(0)) ? tau * max_diag : least_squares_defaults<Scalar>::fallback_lambda;
         s.nu = options.nu_initial.value_or(least_squares_defaults<Scalar>::nu_initial);
         s.iteration = 0;
+        s.non_finite_rejected = false;
         return detail::latch_status(s);
     }
 
@@ -276,23 +275,6 @@ struct lm_policy
     solver_status reset_clear(state_type<P>& s, Eigen::Ref<const Eigen::Vector<Scalar, N>> x0)
     {
         return reset(s, x0);
-    }
-
-private:
-    template <typename P>
-    void evaluate_jacobian(state_type<P>& s) const
-    {
-        if constexpr(requires(const P& p, const Eigen::Vector<Scalar, N>& xx, Eigen::MatrixX<Scalar>& JJ) {
-                         p.jacobian(xx, JJ);
-                     })
-            s.problem->jacobian(s.x, s.J);
-        else
-        {
-            auto residual_fn = [&s](const Eigen::Vector<Scalar, N>& xx, Eigen::VectorX<Scalar>& rr) {
-                detail::counted_residuals(s.evaluations, *s.problem, xx, rr);
-            };
-            fd_jacobian<N>(residual_fn, s.x, s.J, s.num_residuals);
-        }
     }
 };
 

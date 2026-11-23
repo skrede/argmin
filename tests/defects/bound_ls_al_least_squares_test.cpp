@@ -30,6 +30,21 @@ solve_result<double, 1> lm_solve_from_one()
 }
 
 template <typename Policy>
+solve_result<double, 1> solve_against_wall(Policy policy)
+{
+    const defects::walled_line_residual problem{};
+    step_budget_solver<Policy, 1, defects::walled_line_residual> solver{policy, problem, Eigen::Vector<double, 1>(1.0), solver_options<>{}};
+    return solver.solve();
+}
+
+template <typename Policy>
+Policy dogleg(Policy policy)
+{
+    policy.options.use_dogleg = true;
+    return policy;
+}
+
+template <typename Policy>
 bool reports_status_within_five_steps()
 {
     const defects::sqrt_box_residual problem{};
@@ -45,12 +60,12 @@ bool reports_status_within_five_steps()
 
 }
 
-TEST_CASE("lm does not end diverged after one trial into a non-finite residual", "[known-defect][!shouldfail]")
+TEST_CASE("lm does not end diverged after one trial into a non-finite residual", "[least_squares]")
 {
     CHECK(lm_solve_from_one().status != solver_status::diverged);
 }
 
-TEST_CASE("lm solves the square-root residual after a trial into a non-finite residual", "[known-defect][!shouldfail]")
+TEST_CASE("lm solves the square-root residual after a trial into a non-finite residual", "[least_squares]")
 {
     CHECK(std::abs(lm_solve_from_one().x[0] - 0.01) <= 1e-6);
 }
@@ -67,12 +82,25 @@ TEST_CASE("projected_gradient_gn rejects a non-descent direction before backtrac
     CHECK(problem.residual_calls <= 1);
 }
 
-TEST_CASE("projected_gn reports a status when its finite-difference Jacobian is non-finite", "[known-defect][!shouldfail]")
+TEST_CASE("projected_gn reports a status when its finite-difference Jacobian is non-finite", "[least_squares]")
 {
     CHECK(reports_status_within_five_steps<projected_gn_policy<double, 2>>());
 }
 
-TEST_CASE("projected_gradient_gn reports a status when its finite-difference Jacobian is non-finite", "[known-defect][!shouldfail]")
+TEST_CASE("projected_gradient_gn reports a status when its finite-difference Jacobian is non-finite", "[least_squares]")
 {
     CHECK(reports_status_within_five_steps<projected_gradient_gn_policy<double, 2>>());
+}
+
+TEST_CASE("the least-squares solvers end non_finite_evaluation at their limit when every trial is non-finite", "[least_squares]")
+{
+    const solve_result<double, 1> results[] = {solve_against_wall(lm_policy<double, 1>{}), solve_against_wall(projected_gn_policy<double, 1>{}),
+                                               solve_against_wall(dogleg(projected_gn_policy<double, 1>{})), solve_against_wall(projected_gradient_gn_policy<double, 1>{}),
+                                               solve_against_wall(dogleg(projected_gradient_gn_policy<double, 1>{}))};
+    for(const solve_result<double, 1>& r : results)
+    {
+        CHECK(r.status == solver_status::non_finite_evaluation);
+        CHECK(r.x[0] == 1.0);
+        CHECK(r.objective_value == 0.5);
+    }
 }

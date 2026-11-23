@@ -87,10 +87,13 @@ nan_start_solver solver_from_nan_start(const nan_at_origin& problem)
 
 }
 
-TEST_CASE("stepper ends diverged after a step into a non-finite residual", "[status]")
+TEST_CASE("stepper keeps running at its finite start after a step into a non-finite residual", "[status]")
 {
     const defects::sqrt_residual problem{};
-    CHECK(stepped_into_nan(problem).status() == solver_status::diverged);
+    const lm_stepper st = stepped_into_nan(problem);
+    CHECK(st.status() == solver_status::running);
+    CHECK(st.state().x[0] == 1.0);
+    CHECK(std::isfinite(st.state().objective_value));
 }
 
 TEST_CASE("stepper converged() is false after a solve that ended diverged", "[status]")

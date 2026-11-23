@@ -35,8 +35,7 @@
 #include "argmin/detail/dual_solve_options.h"
 #include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/problem_shape.h"
-#include "argmin/detail/kkt_residual.h"
-#include "argmin/detail/lagrangian.h"
+#include "argmin/detail/asymptote_trial.h"
 #include "argmin/solver/lbfgsb_policy.h"
 #include "argmin/options/mma_subproblem_options.h"
 #include "argmin/result/step_result.h"
@@ -301,8 +300,8 @@ struct ccsa_quadratic_policy
         const int m = static_cast<int>(s.c_ineq.size());
 
         // Reject before touching any constraint buffer: they are sized for inequalities only.
-        if(s.invalid_problem)
-            return detail::rejected_step<Scalar>(s);
+        if(const std::optional<step_result<Scalar>> refused = detail::refused_step<Scalar>(s))
+            return *refused;
 
         const std::uint16_t max_inner =
             s.opts.max_inner_iterations.value_or(15);
@@ -386,6 +385,9 @@ struct ccsa_quadratic_policy
         Eigen::Vector<Scalar, N> x_trial = s.x;
         Scalar f_trial = s.f;
         Eigen::VectorX<Scalar> c_ineq_trial = s.c_ineq;
+        Eigen::Vector<Scalar, N> g_trial(n);
+        Eigen::MatrixX<Scalar> J_trial(m, n);
+        bool accepted = false;
 
         // Persistent inner dual solver: construct the box-constrained solver
         // state once per outer iteration and cold-restart it (reset_clear
@@ -457,13 +459,10 @@ struct ccsa_quadratic_policy
                 c_ineq_trial = c_tmp;
             }
 
-            // Conservativity test (NLopt ccsa_quadratic.c lines 468-469)
-            // against the raw approximation values g_tilde_i(x*): the
-            // approximation is conservative when g_tilde_i(x*) >= f_i(x*)
-            // for every constraint (Svanberg 2002 concheck; the artificial
-            // slacks that keep the subproblem feasible do not enter this
-            // comparison -- they cancel in the honest relaxed-problem
-            // descent argument).
+            // Conservativity test (NLopt ccsa_quadratic.c lines 468-469); a trial failed by a non-finite value or
+            // derivative ranks worst, so it also leaves the feasibility record below untouched.
+            detail::rank_non_finite_worst(f_trial, c_ineq_trial);
+            accepted = detail::accepts_trial(detail::is_conservative(dual_prob, f_trial, c_ineq_trial), *s.problem, x_trial, f_trial, c_ineq_trial, g_trial, J_trial);
             bool inner_done = (dual_prob.gval >= f_trial);
             bool feasible_cur = true;
             Scalar infeasibility_cur = Scalar(0.0);
@@ -510,30 +509,12 @@ struct ccsa_quadratic_policy
                                  / wval));
             }
 
-            // Null step on max_inner exhaustion.
             if(inner + 1 == max_inner)
-            {
-                const Eigen::Matrix<Scalar, 0, N> J_eq_empty(0, n);
-                const Eigen::Vector<Scalar, 0> lambda_eq_empty;
-                const Eigen::Vector<Scalar, 0> c_eq_empty;
-                const Scalar kkt = detail::kkt_residual<Scalar, N, 0, MC>(
-                    s.g, J_eq_empty, s.J_ineq,
-                    lambda_eq_empty, s.y_dual, c_eq_empty, s.c_ineq);
-
-                return step_result<Scalar>{
-                    .objective_value = s.f,
-                    .gradient_norm = s.g.norm(),
-                    .step_size = Scalar(0.0),
-                    .objective_change = Scalar(0.0),
-                    .improved = false,
-                    .is_null_step = true,
-                    .constraint_violation = detail::primal_feasibility_inf(
-                        c_eq_empty, s.c_ineq),
-                    .x_norm = s.x.norm(),
-                    .kkt_residual = kkt,
-                };
-            }
+                return detail::asymptote_null_step<Scalar>(s, detail::non_finite_trial_status(std::isfinite(f_trial), true));
         }
+
+        if(!accepted && !(std::isfinite(f_trial) && detail::derivatives_finite_at(*s.problem, x_trial, g_trial, J_trial)))
+            return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
 
         // 3. Inter-outer rho decay (NLopt ccsa_quadratic.c line 524).
         s.rho = std::max(rho_decay * s.rho, rho_min);
@@ -552,40 +533,15 @@ struct ccsa_quadratic_policy
         s.x_old1 = s.x;
         s.x = x_trial;
         s.f = f_trial;
-        if(m > 0)
-            s.c_ineq = c_ineq_trial;
-
-        s.problem->gradient(s.x, s.g);
+        s.g = g_trial;
         if(m > 0)
         {
-            Eigen::MatrixX<Scalar> J_tmp(m, n);
-            s.problem->constraint_jacobian(s.x, J_tmp);
-            s.J_ineq = J_tmp;
+            s.c_ineq = c_ineq_trial;
+            s.J_ineq = J_trial;
         }
 
         ++s.iteration;
-
-        // 5. KKT residual (N&W 2e Definition 12.1 + eq 12.34).
-        //    Dual multipliers y_dual map directly to argmin mu_ineq
-        //    (no sign flip; see detail/ccsa_dual_problem.h comment).
-        const Eigen::Matrix<Scalar, 0, N> J_eq_empty(0, n);
-        const Eigen::Vector<Scalar, 0> lambda_eq_empty;
-        const Eigen::Vector<Scalar, 0> c_eq_empty;
-        const Scalar kkt = detail::kkt_residual<Scalar, N, 0, MC>(
-            s.g, J_eq_empty, s.J_ineq,
-            lambda_eq_empty, s.y_dual, c_eq_empty, s.c_ineq);
-
-        return step_result<Scalar>{
-            .objective_value = s.f,
-            .gradient_norm = s.g.norm(),
-            .step_size = step_size,
-            .objective_change = s.f - f_old,
-            .improved = s.f < f_old,
-            .constraint_violation = detail::primal_feasibility_inf(
-                c_eq_empty, s.c_ineq),
-            .x_norm = s.x.norm(),
-            .kkt_residual = kkt,
-        };
+        return detail::asymptote_step<Scalar>(s, f_old, step_size);
     }
 
     template <typename P>

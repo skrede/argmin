@@ -3,9 +3,10 @@
 
 // Method of Moving Asymptotes (MMA) — Svanberg 1987 reciprocal form.
 //
-// Plain MMA (no conservativity loop): each outer iteration unconditionally
-// accepts the trial computed from the reciprocal separable approximation
-// at the current iterate. The conservativity-protected variant is GCMMA
+// Plain MMA (no conservativity loop): each outer iteration accepts the trial
+// computed from the reciprocal separable approximation at the current
+// iterate wherever every value there is finite; a non-finite trial is a null
+// step that contracts the asymptotes. The conservativity-protected variant is GCMMA
 // (gcmma_policy) and the quadratic-penalty CCSA variant is
 // ccsa_quadratic_policy.
 //
@@ -35,9 +36,8 @@
 //   Svanberg 1987, "The method of moving asymptotes",
 //     Int. J. Numer. Methods Engng 24:359-373.
 
-#include "argmin/detail/lagrangian.h"
-#include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/problem_shape.h"
+#include "argmin/detail/asymptote_trial.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/evaluation_count.h"
 #include "argmin/detail/dual_solve_options.h"
@@ -274,8 +274,8 @@ struct mma_policy
         const int m = static_cast<int>(s.c_ineq.size());
 
         // Reject before touching any constraint buffer: they are sized for inequalities only.
-        if(s.invalid_problem)
-            return detail::rejected_step<Scalar>(s);
+        if(const std::optional<step_result<Scalar>> refused = detail::refused_step<Scalar>(s))
+            return *refused;
 
         const Scalar gam_dec = s.opts.asymptote_contract.value_or(mma_defaults<Scalar>::asymptote_contract);
         const Scalar gam_inc = s.opts.asymptote_expand.value_or(mma_defaults<Scalar>::asymptote_expand);
@@ -460,47 +460,34 @@ struct mma_policy
             x_trial = dual_prob.x_primal;
         }
 
-        // 5. Commit the trial unconditionally (plain MMA: no conservativity).
+        // 5. Commit the trial only where every value is finite (plain MMA: no conservativity).
         const Scalar f_old = s.f;
         const Scalar step_size = (x_trial - s.x).norm();
+        Eigen::Vector<Scalar, N> g_trial(n);
+        Eigen::VectorX<Scalar> c_trial(m);
+        Eigen::MatrixX<Scalar> J_trial(m, n);
+        const Scalar f_trial = detail::counted_value<Scalar>(s.evaluations, *s.problem, x_trial);
+        s.problem->gradient(x_trial, g_trial);
+        if(m > 0)
+        {
+            s.problem->constraints(x_trial, c_trial);
+            s.problem->constraint_jacobian(x_trial, J_trial);
+        }
+        if(!(std::isfinite(f_trial) && g_trial.allFinite() && c_trial.allFinite() && J_trial.allFinite()))
+            return detail::asymptote_null_step<Scalar>(s, detail::non_finite_trial_status(false, !detail::contract_asymptotes(s, gam_dec, s_min_f)));
 
         s.x_old2 = s.x_old1;
         s.x_old1 = s.x;
         s.x = x_trial;
-
-        s.f = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
-        s.problem->gradient(s.x, s.g);
+        s.f = f_trial;
+        s.g = g_trial;
         if(m > 0)
         {
-            Eigen::VectorX<Scalar> c_tmp(m);
-            s.problem->constraints(s.x, c_tmp);
-            s.c_ineq = c_tmp;
-            Eigen::MatrixX<Scalar> J_tmp(m, n);
-            s.problem->constraint_jacobian(s.x, J_tmp);
-            s.J_ineq = J_tmp;
+            s.c_ineq = c_trial;
+            s.J_ineq = J_trial;
         }
-
         ++s.iteration;
-
-        // 6. KKT residual (N&W 2e Definition 12.1 + eq. 12.34).
-        const Eigen::Matrix<Scalar, 0, N> J_eq_empty(0, n);
-        const Eigen::Vector<Scalar, 0> lambda_eq_empty;
-        const Eigen::Vector<Scalar, 0> c_eq_empty;
-        const Scalar kkt = detail::kkt_residual<Scalar, N, 0, MC>(
-            s.g, J_eq_empty, s.J_ineq,
-            lambda_eq_empty, s.y_dual, c_eq_empty, s.c_ineq);
-
-        return step_result<Scalar>{
-            .objective_value = s.f,
-            .gradient_norm = s.g.norm(),
-            .step_size = step_size,
-            .objective_change = s.f - f_old,
-            .improved = s.f < f_old,
-            .constraint_violation = detail::primal_feasibility_inf(
-                c_eq_empty, s.c_ineq),
-            .x_norm = s.x.norm(),
-            .kkt_residual = kkt,
-        };
+        return detail::asymptote_step<Scalar>(s, f_old, step_size);
     }
 
     template <typename P>

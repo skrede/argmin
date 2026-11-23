@@ -22,9 +22,8 @@
 // References:
 //   Svanberg 2002, SIAM J. Optim. 12(2):555-573, eq. 3.4-3.8.
 
-#include "argmin/detail/lagrangian.h"
-#include "argmin/detail/kkt_residual.h"
 #include "argmin/detail/problem_shape.h"
+#include "argmin/detail/asymptote_trial.h"
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/mma_subproblem.h"
 #include "argmin/detail/evaluation_count.h"
@@ -223,8 +222,8 @@ struct raa_augmented_policy
         const int n = static_cast<int>(s.x.size());
         const int m = static_cast<int>(s.c_ineq.size());
 
-        if(s.invalid_problem)
-            return detail::rejected_step<Scalar>(s);
+        if(const std::optional<step_result<Scalar>> refused = detail::refused_step<Scalar>(s))
+            return *refused;
 
         const Scalar gam_dec = s.opts.asymptote_contract.value_or(mma_defaults<Scalar>::asymptote_contract);
         const Scalar gam_inc = s.opts.asymptote_expand.value_or(mma_defaults<Scalar>::asymptote_expand);
@@ -389,6 +388,9 @@ struct raa_augmented_policy
         Eigen::Vector<Scalar, N> x_trial = s.x;
         Scalar f_trial = s.f;
         Eigen::VectorX<Scalar> c_trial = s.c_ineq;
+        Eigen::Vector<Scalar, N> g_trial(n);
+        Eigen::MatrixX<Scalar> J_trial(m, n);
+        bool accepted = false;
 
         // Built once per outer iteration and cold-restarted by reset_clear (a fresh L-BFGS curvature per inner solve, as a
         // re-construction would give) so the conservativity loop reuses its buffers instead of re-allocating them.
@@ -443,16 +445,9 @@ struct raa_augmented_policy
                 c_trial = c_tmp;
             }
 
-            // Conservativity test (Svanberg 2002 concheck) against the raw
-            // approximation values g_tilde_i(x*): conservative when
-            // g_tilde_i(x*) >= f_i(x*) for every constraint. The artificial
-            // slacks that keep the subproblem feasible do not enter the
-            // comparison.
-            bool conservative = (dual_prob.gval >= f_trial);
-            for(int i = 0; i < m && conservative; ++i)
-                conservative = (dual_prob.gcval[i] >= -c_trial[i]);
-
-            if(conservative) break;
+            detail::rank_non_finite_worst(f_trial, c_trial);
+            accepted = detail::accepts_trial(detail::is_conservative(dual_prob, f_trial, c_trial), *s.problem, x_trial, f_trial, c_trial, g_trial, J_trial);
+            if(accepted) break;
 
             // raa growth (Svanberg 2002 eqs. 3.7-3.9): dval_sum is the total d_j mass at the trial and delta the conservativity
             // shortfall per unit of it; the svanberg schedule grows raa' = 1.1*(raa + delta), the pre-fix one raa + 2*delta, both
@@ -480,6 +475,9 @@ struct raa_augmented_policy
             }
         }
 
+        if(!accepted && !(std::isfinite(f_trial) && detail::derivatives_finite_at(*s.problem, x_trial, g_trial, J_trial)))
+            return detail::asymptote_null_step<Scalar>(s, solver_status::non_finite_evaluation);
+
         // 5. Inter-outer raa decay toward the scale-adaptive floor (the
         //    gradient-scaled raa_floor under the Svanberg schedule, else the
         //    fixed raa_min).
@@ -496,35 +494,15 @@ struct raa_augmented_policy
         s.x = x_trial;
 
         s.f = f_trial;
-        s.problem->gradient(s.x, s.g);
+        s.g = g_trial;
         if(m > 0)
         {
             s.c_ineq = c_trial;
-            Eigen::MatrixX<Scalar> J_tmp(m, n);
-            s.problem->constraint_jacobian(s.x, J_tmp);
-            s.J_ineq = J_tmp;
+            s.J_ineq = J_trial;
         }
 
         ++s.iteration;
-
-        const Eigen::Matrix<Scalar, 0, N> J_eq_empty(0, n);
-        const Eigen::Vector<Scalar, 0> lambda_eq_empty;
-        const Eigen::Vector<Scalar, 0> c_eq_empty;
-        const Scalar kkt = detail::kkt_residual<Scalar, N, 0, MC>(
-            s.g, J_eq_empty, s.J_ineq,
-            lambda_eq_empty, s.y_dual, c_eq_empty, s.c_ineq);
-
-        return step_result<Scalar>{
-            .objective_value = s.f,
-            .gradient_norm = s.g.norm(),
-            .step_size = step_size,
-            .objective_change = s.f - f_old,
-            .improved = s.f < f_old,
-            .constraint_violation = detail::primal_feasibility_inf(
-                c_eq_empty, s.c_ineq),
-            .x_norm = s.x.norm(),
-            .kkt_residual = kkt,
-        };
+        return detail::asymptote_step<Scalar>(s, f_old, step_size);
     }
 
     template <typename P>

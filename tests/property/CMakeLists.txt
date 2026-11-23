@@ -2,6 +2,7 @@ include(Catch)
 
 add_executable(argmin_property_tests
     least_squares_property_test.cpp
+    mma_ls_nonfinite_property_test.cpp
     planted_property_test.cpp
     qp_property_test.cpp
     reset_property_test.cpp

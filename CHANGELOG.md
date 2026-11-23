@@ -237,6 +237,22 @@ Policies available at HEAD, grouped by problem class:
   returned as the best point. Inside `multistart_policy` such a step ends only
   that member, a later member with a non-finite start ends without a step,
   neither is returned over a finite member, and the next member starts.
+- The moving-asymptote solvers (`mma`, `gcmma`, `ccsa_quadratic` and the GCMMA
+  alternates) and the least-squares solvers (`lm`, `projected_gn`,
+  `projected_gradient_gn`) report `non_finite_evaluation` for an objective,
+  constraint, residual, gradient or Jacobian that is non-finite at the start
+  point, on construction and on `reset` / `reset_clear`.
+- These solvers treat a non-finite trial as a failed trial and never commit it:
+  `mma` takes a null step and contracts its asymptotes; `gcmma`,
+  `ccsa_quadratic` and the alternates treat it as a non-conservative trial, also
+  when only the gradient or constraint Jacobian at a conservative trial is
+  non-finite; `lm`, `projected_gn` and `projected_gradient_gn` reject it, also
+  for a non-finite Jacobian at an accepted trial, and raise their damping or
+  shrink their radius. A solve ends with `non_finite_evaluation` only when a
+  failed trial leaves the solver at its limit: the asymptotes at their minimum
+  distance, the last conservativity iteration, the damping ceiling or radius
+  floor, or a damped step that no longer moves the iterate. `lm` no longer ends
+  `diverged` on its first non-finite trial.
 - `tr_sqp` rejects a trial whose gain ratio is not finite and shrinks its trust
   radius, instead of accepting a step into a NaN objective. The filter of
   `filter_trsqp`, `filter_slsqp` and `filter_nw_sqp` never accepts a non-finite

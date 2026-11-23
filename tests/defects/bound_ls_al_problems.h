@@ -121,6 +121,30 @@ struct counting_linear_residual
     mutable std::int32_t residual_calls;
 };
 
+// r(x) = x - 2 on [-10, 10], NaN for x > 1: every Gauss-Newton trial from x = 1 heads into the NaN region.
+struct walled_line_residual
+{
+    static constexpr std::int32_t problem_dimension = 1;
+
+    std::int32_t dimension() const { return 1; }
+
+    std::int32_t num_residuals() const { return 1; }
+
+    double value(const Eigen::Vector<double, 1>& x) const { return x[0] > 1.0 ? std::numeric_limits<double>::quiet_NaN() : 0.5 * (x[0] - 2.0) * (x[0] - 2.0); }
+
+    void residuals(const Eigen::Vector<double, 1>& x, Eigen::VectorXd& r) const
+    {
+        r.resize(1);
+        r[0] = x[0] > 1.0 ? std::numeric_limits<double>::quiet_NaN() : x[0] - 2.0;
+    }
+
+    void jacobian(const Eigen::Vector<double, 1>&, Eigen::MatrixXd& J) const { J = Eigen::MatrixXd::Ones(1, 1); }
+
+    Eigen::Vector<double, 1> lower_bounds() const { return Eigen::Vector<double, 1>::Constant(-10.0); }
+
+    Eigen::Vector<double, 1> upper_bounds() const { return Eigen::Vector<double, 1>::Constant(10.0); }
+};
+
 // r(x) = (sqrt(x0) + 1, x1 - 0.5) on [0, 2] x [-10, 10] with no jacobian(): the finite-difference leg at x0 = 0
 // evaluates sqrt of a negative number.
 struct sqrt_box_residual
