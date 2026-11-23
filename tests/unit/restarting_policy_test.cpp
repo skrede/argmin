@@ -228,15 +228,28 @@ std::vector<std::uint64_t> seeds_of(const State& s)
     return seeds;
 }
 
+template <typename Policy, typename State>
+void consume_stream(Policy& policy, State& s)
+{
+    const std::vector<std::uint64_t> before = seeds_of(s);
+    for(std::uint32_t k = 0; k < 3; ++k)
+        policy.step(s);
+    CHECK(seeds_of(s) != before);
+}
+
 template <typename Policy, typename Problem>
 std::vector<std::vector<std::uint64_t>> seeds_after_resets(Policy policy, const Problem& problem, const Eigen::VectorXd& x0)
 {
+    const auto requested = policy.options.inner.seed;
     auto s = policy.init(problem, x0, solver_options<>{});
     std::vector<std::vector<std::uint64_t>> seeds{seeds_of(s)};
+    consume_stream(policy, s);
     policy.reset(s, x0);
     seeds.push_back(seeds_of(s));
+    consume_stream(policy, s);
     policy.reset_clear(s, x0);
     seeds.push_back(seeds_of(s));
+    CHECK(policy.options.inner.seed == requested);
     return seeds;
 }
 
@@ -247,10 +260,9 @@ TEST_CASE("restarting_policy: an unset inner seed draws a new stream on init and
     restarting_policy<cmaes_policy<>> policy;
 
     const auto unseeded = seeds_after_resets(policy, problem, x0);
-    CHECK(unseeded[0] != unseeded[1]);
-    CHECK(unseeded[1] != unseeded[2]);
+    CHECK(unseeded[0].front() != unseeded[1].front());
+    CHECK(unseeded[1].front() != unseeded[2].front());
     CHECK(unseeded[0] != seeds_after_resets(policy, problem, x0)[0]);
-    CHECK_FALSE(policy.options.inner.seed.has_value());
 
     policy.options.inner.seed = 42u;
     const auto seeded = seeds_after_resets(policy, problem, x0);

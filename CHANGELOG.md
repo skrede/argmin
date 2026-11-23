@@ -262,8 +262,8 @@ Policies available at HEAD, grouped by problem class:
   as the mean; the restart decorator draws each restart's mean in the box and
   derives a per-restart seed from the base seed, so a seeded restarting solve
   stays reproducible. An unseeded `restarting_policy` draws its base seed from
-  `std::random_device` on construction and on every reset; it previously
-  pinned an unset inner seed to 1 and replayed the same run.
+  `std::random_device` on init and every reset; it previously pinned an unset
+  inner seed to 1 and replayed the same run.
 
 - MMA and the GCMMA variants no longer treat an infeasible start as feasible
   when choosing the point to return. A solve that ended without a claim could

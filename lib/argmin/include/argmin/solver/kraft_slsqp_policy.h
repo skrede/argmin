@@ -1051,7 +1051,7 @@ struct kraft_slsqp_policy
         s.invalid_problem = rejects_shape(s);
         if(s.invalid_problem)
             return solver_status::invalid_problem;
-        // Evaluate at s.x, not the Ref: a Ref bound to a method taking a plain VectorXd would materialize a heap temporary, defeating the allocation-free warm path.
+        // Evaluate at s.x, not the Ref: a Ref passed to a plain-VectorXd method would heap-allocate on the warm path.
         s.x = x0;
         s.objective_value = detail::counted_value<Scalar>(s.evaluations, *s.problem, s.x);
         s.problem->gradient(s.x, s.g);
