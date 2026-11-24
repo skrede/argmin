@@ -204,11 +204,9 @@ struct step_tolerance_rel_criterion
     }
 };
 
-// Stall detection: terminates when objective + constraint violation makes
-// no progress over a rolling window of K iterations. The combined metric
-// catches SQP solvers that cycle between feasible and infeasible points,
-// where the objective alone may appear to oscillate while overall progress
-// stalls. Reference: K&W 2e Section 4.4 (convergence criteria).
+// Stall detection: no progress in objective + constraint violation over a rolling window of K moves; a null step leaves
+// the iterate in place, so it neither fills nor restarts the window. The combined metric catches SQP solvers that cycle
+// between feasible and infeasible points, where the objective alone may appear to oscillate. K&W 2e Section 4.4.
 template <scalar S = double>
 struct stall_tolerance_criterion
 {
@@ -236,15 +234,15 @@ struct stall_tolerance_criterion
     {
         const std::optional<S> tolerance = threshold_in_force();
         const std::uint16_t span = window_in_force();
-        if(!tolerance || span > capacity)
+        null_steps_ += static_cast<std::uint32_t>(r.is_null_step);
+        if(!tolerance || span > capacity || r.is_null_step)
             return std::nullopt;
-
+        const std::uint32_t move = iteration - null_steps_;
         const S metric = metric_of(r);
-        buffer_[iteration % capacity] = metric;
-        if(iteration < span)
+        buffer_[move % capacity] = metric;
+        if(move < span)
             return std::nullopt;
-
-        const S old_metric = buffer_[(iteration - span + 1) % capacity];
+        const S old_metric = buffer_[(move - span + 1) % capacity];
         if(std::abs(metric - old_metric) < *tolerance * std::max(std::abs(metric), S(1)))
             return solver_status::stalled;
         return std::nullopt;
@@ -254,9 +252,11 @@ struct stall_tolerance_criterion
     {
         buffer_.fill(S(0));
         best_seen_feasible_ = std::numeric_limits<S>::infinity();
+        null_steps_ = 0;
     }
 
 private:
+    mutable std::uint32_t null_steps_{0};
     mutable std::array<S, capacity> buffer_{};
     mutable S best_seen_feasible_{std::numeric_limits<S>::infinity()};
 

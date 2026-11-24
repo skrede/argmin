@@ -253,11 +253,19 @@ Policies available at HEAD, grouped by problem class:
   shrink their radius. An outer step whose conservativity loop ends on a
   non-finite trial is a null step that keeps the grown penalty or the shrunk
   move-limit window for the next step. A solve ends with
-  `non_finite_evaluation` only when a trial made at the solver's limit fails:
-  the asymptotes at their minimum distance, a penalty or window that leaves the
-  trial within the iterate's resolution, the damping ceiling or radius floor, or
-  a damped step that no longer moves the iterate. `lm` no longer ends
+  `non_finite_evaluation` only at the solver's limit: for `mma`, a failed trial
+  made with the asymptotes at their minimum distance; for `gcmma`,
+  `ccsa_quadratic` and the alternates, a trial within the iterate's resolution
+  that is non-finite or follows a non-finite rejection, so such a trial ends the
+  solve even when it is finite; for `lm`, `projected_gn` and
+  `projected_gradient_gn`, a failed trial at the damping ceiling or radius
+  floor, or a damped step that no longer moves the iterate. `lm` no longer ends
   `diverged` on its first non-finite trial.
+- `stall_tolerance_criterion` counts only steps that move the iterate: a null
+  step neither fills its window nor restarts it, so a window of K spans K moves.
+  A run of null steps, such as a conservative moving-asymptote solver's against
+  a non-finite region, no longer ends a solve `stalled` at a point that is not
+  stationary.
 - `tr_sqp` rejects a trial whose gain ratio is not finite and shrinks its trust
   radius, instead of accepting a step into a NaN objective. The filter of
   `filter_trsqp`, `filter_slsqp` and `filter_nw_sqp` never accepts a non-finite

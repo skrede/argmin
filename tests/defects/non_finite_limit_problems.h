@@ -69,6 +69,17 @@ struct blocked_corner_residual
     Eigen::Vector2d upper_bounds() const { return Eigen::Vector2d::Constant(10.0); }
 };
 
+// cliff_bowl whose gradient is NaN beyond nan_beyond too: a trial there improves on f yet fails conservativity.
+struct gradient_cliff_bowl : cliff_bowl
+{
+    void gradient(const vector& x, vector& g) const
+    {
+        scalar_bowl::gradient(x, g);
+        if(x[0] > nan_beyond)
+            g[0] = std::numeric_limits<double>::quiet_NaN();
+    }
+};
+
 // scalar_bowl whose gradient is NaN on its glitch_call-th evaluation only.
 struct glitch_bowl : scalar_bowl
 {

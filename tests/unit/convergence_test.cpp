@@ -976,6 +976,21 @@ TEST_CASE("a stall criterion after reset() reports what a fresh one reports", "[
     }
 }
 
+TEST_CASE("a stall window counts moves only: null steps neither fill nor restart it", "[convergence][stall]")
+{
+    stall_tolerance_criterion<> criterion;
+    criterion.threshold = 1e-10;
+    criterion.window = 5;
+    const step_result<double> move{.objective_value = 1.0, .constraint_violation = 0.0};
+    const step_result<double> null_step{.objective_value = 1.0, .is_null_step = true, .constraint_violation = 0.0};
+    std::uint32_t iteration = 0;
+    for(std::uint32_t k = 0; k < 4; ++k)
+        CHECK_FALSE(criterion.check(move, ++iteration).has_value());
+    for(std::uint32_t k = 0; k < 100; ++k)
+        CHECK_FALSE(criterion.check(null_step, ++iteration).has_value());
+    CHECK(criterion.check(move, ++iteration) == solver_status::stalled);
+}
+
 TEST_CASE("two mma solves on one caller-owned options object return the same result", "[convergence][stall]")
 {
     const hs076 problem;

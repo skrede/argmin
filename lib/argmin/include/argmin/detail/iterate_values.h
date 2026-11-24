@@ -72,7 +72,8 @@ bool start_values_finite(const State& s)
 }
 
 // A non-finite trial is a failed trial, rejected like any other; the solve ends only once one leaves the family at its
-// shrink limit (its largest damping, smallest region or window, or last conservativity iteration).
+// shrink limit (its largest damping, smallest region, asymptotes at their minimum distance, or a penalty or window that
+// leaves the trial within the iterate's resolution).
 inline std::optional<solver_status> non_finite_trial_status(bool trial_finite, bool at_limit)
 {
     if(trial_finite || !at_limit)
