@@ -265,7 +265,10 @@ Policies available at HEAD, grouped by problem class:
   step neither fills its window nor restarts it, so a window of K spans K moves.
   A run of null steps, such as a conservative moving-asymptote solver's against
   a non-finite region, no longer ends a solve `stalled` at a point that is not
-  stationary.
+  stationary. A run of only null steps, such as `nw_sqp`'s on a zero QP
+  direction, `filter_nw_sqp`'s at its reset cap or the augmented Lagrangian's
+  while its inner solve runs in chunks, no longer ends a solve `stalled`; the
+  solve goes on to the solver's own limit or to `max_iterations`.
 - `tr_sqp` rejects a trial whose gain ratio is not finite and shrinks its trust
   radius, instead of accepting a step into a NaN objective. The filter of
   `filter_trsqp`, `filter_slsqp` and `filter_nw_sqp` never accepts a non-finite

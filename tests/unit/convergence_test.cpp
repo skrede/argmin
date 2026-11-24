@@ -974,6 +974,16 @@ TEST_CASE("a stall criterion after reset() reports what a fresh one reports", "[
             CHECK(used.check(r, i) == fresh.check(r, i));
         }
     }
+    stall_tolerance_criterion<> used;
+    used.threshold = 1e-10;
+    used.window = 5;
+    const stall_tolerance_criterion<> fresh = used;
+    for(std::uint32_t i = 0; i < 7; ++i)
+        (void)used.check(step_result<double>{.objective_value = 1.0, .is_null_step = true, .constraint_violation = 0.0}, i);
+    used.reset();
+    const step_result<double> move{.objective_value = 1.0, .constraint_violation = 0.0};
+    for(std::uint32_t i = 0; i < 10; ++i)
+        CHECK(used.check(move, i) == fresh.check(move, i));
 }
 
 TEST_CASE("a stall window counts moves only: null steps neither fill nor restart it", "[convergence][stall]")
@@ -989,6 +999,21 @@ TEST_CASE("a stall window counts moves only: null steps neither fill nor restart
     for(std::uint32_t k = 0; k < 100; ++k)
         CHECK_FALSE(criterion.check(null_step, ++iteration).has_value());
     CHECK(criterion.check(move, ++iteration) == solver_status::stalled);
+}
+
+TEST_CASE("a null step after the stall window has filled neither fires nor overwrites a move", "[convergence][stall]")
+{
+    stall_tolerance_criterion<> criterion;
+    criterion.threshold = 1e-10;
+    criterion.window = 5;
+    const auto move = [](double f) { return step_result<double>{.objective_value = f, .constraint_violation = 0.0}; };
+    for(std::uint32_t i = 1; i <= 6; ++i)
+        CHECK_FALSE(criterion.check(move(10.0 - static_cast<double>(i)), i).has_value());
+    // Its value equals the move the window would compare it with, and the slot it would take is read back at move 10.
+    CHECK_FALSE(criterion.check(step_result<double>{.objective_value = 8.0, .is_null_step = true, .constraint_violation = 0.0}, 7).has_value());
+    for(std::uint32_t i = 8; i <= 10; ++i)
+        CHECK_FALSE(criterion.check(move(11.0 - static_cast<double>(i)), i).has_value());
+    CHECK(criterion.check(move(4.0), 11) == solver_status::stalled);
 }
 
 TEST_CASE("two mma solves on one caller-owned options object return the same result", "[convergence][stall]")
