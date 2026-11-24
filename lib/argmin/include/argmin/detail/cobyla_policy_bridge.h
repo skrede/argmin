@@ -98,6 +98,7 @@ inline void cobyla_sync_from_engine(State& s)
     s.parmu = s.engine->parmu();
     s.clamped_evaluations = s.engine->clamped_evaluations();
     s.evaluations = s.engine->evaluations();
+    s.non_finite_start = s.engine->non_finite_start();
 
     const int m_total = s.n_eq + s.n_ineq;
     if(m_total > 0)

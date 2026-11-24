@@ -38,6 +38,10 @@ inline cobyla_engine<Scalar>::cobyla_engine()
     , evaluations_{0}
     , clamped_evaluations_{0}
     , converged_{false}
+    , non_finite_start_{false}
+    , trial_non_finite_{false}
+    , non_finite_at_radius_{false}
+    , non_finite_in_model_{false}
     , status_{solver_status::running}
     , f_best_{0}
     , resmax_best_{0}
@@ -62,6 +66,7 @@ inline void cobyla_engine<Scalar>::init(int n, int m, const vector_type& x0, con
     clamped_evaluations_ = 0;
     eval_ = std::move(eval);
     converged_ = false;
+    non_finite_at_radius_ = false;
     status_ = solver_status::running;
     seed_ = static_cast<std::uint32_t>(n_ + m_);
 
@@ -82,6 +87,7 @@ inline void cobyla_engine<Scalar>::size_workspace()
     veta_.setZero(n_ + 1);
     sigbar_.setZero(n_ + 1);
     w_.setZero(n_ + 1);
+    non_finite_vertex_.setConstant(n_ + 2, false);
     dx_.setZero(n_);
     xcur_.setZero(n_);
     x_eval_.setZero(n_);

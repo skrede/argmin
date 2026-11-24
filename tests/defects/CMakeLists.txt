@@ -7,9 +7,11 @@ add_executable(argmin_defect_tests
     bound_ls_al_test.cpp
     conventions_test.cpp
     derivative_free_model_test.cpp
+    derivative_free_nonfinite_model_test.cpp
     derivative_free_oracle_test.cpp
     derivative_free_test.cpp
     embedded_test.cpp
+    gradient_derivative_free_limit_test.cpp
     harness_canary_test.cpp
     infeasible_claim_test.cpp
     least_squares_limit_test.cpp
@@ -34,6 +36,7 @@ add_executable(argmin_defect_tests
     status_infra_sqp_test.cpp
     status_infra_test.cpp
     status_underreporting_oracle_test.cpp
+    stochastic_limit_test.cpp
     stochastic_oracle_test.cpp
     stochastic_record_test.cpp
     stochastic_reset_test.cpp

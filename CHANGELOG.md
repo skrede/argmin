@@ -261,6 +261,44 @@ Policies available at HEAD, grouped by problem class:
   `projected_gradient_gn`, a failed trial at the damping ceiling or radius
   floor, or a damped step that no longer moves the iterate. `lm` no longer ends
   `diverged` on its first non-finite trial.
+- `lbfgsb`, `byrd_lbfgsb`, the augmented Lagrangian, `bobyqa`, `cobyla` and the
+  CMA-ES variants report `non_finite_evaluation` for an objective, gradient or
+  constraint that is non-finite at the start point, on construction and on
+  `reset` / `reset_clear`; the augmented Lagrangian checks its objective and
+  rows there and reports a non-finite constraint Jacobian at the start on its
+  first step, when its inner solve meets it. ISRES, which never evaluates the
+  start, does so when no individual of its first population evaluates finite.
+- These solvers treat a non-finite trial as a failed trial and never commit or
+  return it. `lbfgsb` and `byrd_lbfgsb` evaluate the gradient at an accepted
+  trial before the commit and reject the trial when it is non-finite; a line
+  search that fails in both memories after meeting a non-finite value ends
+  `non_finite_evaluation` instead of `line_search_failed`. `bobyqa` and `cobyla`
+  store a non-finite evaluation as a large finite barrier value (PRIMA's
+  moderated extreme barrier), so the trial ranks worst and the trust region
+  shrinks, and never let such a point become the incumbent. Neither claims a
+  solution while such a value can still shape its model. `bobyqa` sets a flag
+  on any non-finite evaluation, its initial interpolation points' included, and
+  holds it until it rebuilds the interpolation model from finite values (a
+  rescue or a restart); it ends `non_finite_evaluation` instead of `converged`
+  while the flag is set, so a run that recovers from a single non-finite value
+  without such a rebuild ends `non_finite_evaluation` even at a good point.
+  `cobyla` flags each simplex vertex that evaluated non-finite and ends
+  `non_finite_evaluation` instead of `xtol_reached` when a trial at its final
+  radius was non-finite or the linear models that stopped it were built on a
+  flagged vertex. Both track this with flags rather than reading it from the
+  stored value, so a finite value above the barrier is never taken for a
+  non-finite one. The CMA-ES variants and ISRES rank a non-finite individual
+  after every finite one and never hold it as the best point, and a generation
+  with no finite individual ends `non_finite_evaluation` (CMA-ES before its
+  distribution moves; a search distribution that is itself non-finite still
+  ends `diverged`, before it is sampled). The augmented Lagrangian never commits an outer iterate whose
+  objective or rows are non-finite: it tightens the penalty as after an
+  infeasible outer iterate, and ends `non_finite_evaluation` once the penalty is
+  at its floor. It reports an inner solve that ended at a non-finite region
+  without moving as a null step instead of `stalled`, and ends
+  `non_finite_evaluation` when that happens with the penalty at its floor.
+- ISRES no longer reads a NaN constraint row as satisfied: its violation is NaN,
+  so the individual ranks worst.
 - `stall_tolerance_criterion` counts only steps that move the iterate: a null
   step neither fills its window nor restarts it, so a window of K spans K moves.
   A run of null steps, such as a conservative moving-asymptote solver's against

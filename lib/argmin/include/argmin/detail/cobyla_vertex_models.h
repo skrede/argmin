@@ -30,16 +30,15 @@ inline std::int32_t cobyla_engine<Scalar>::select_optimal_vertex() const
     for(int j = 1; j <= n_; ++j)
     {
         Scalar temp = datmat_(mp_, j) + parmu_ * datmat_(mpp_, j);
-        if(temp < phimin)
+        // A vertex that evaluated non-finite never becomes the pole while a finite one exists, whatever its merit.
+        const bool finite_decides = non_finite_vertex_(j) != non_finite_vertex_(nbest);
+        if(finite_decides ? !non_finite_vertex_(j) : temp < phimin)
         {
             nbest = j;
             phimin = temp;
         }
-        else if(temp == phimin && parmu_ == Scalar(0))
-        {
-            if(datmat_(mpp_, j) < datmat_(mpp_, nbest))
-                nbest = j;
-        }
+        else if(!finite_decides && temp == phimin && parmu_ == Scalar(0) && datmat_(mpp_, j) < datmat_(mpp_, nbest))
+            nbest = j;
     }
     return nbest;
 }
@@ -49,6 +48,7 @@ inline void cobyla_engine<Scalar>::move_to_pole(std::int32_t nbest)
 {
     for(int i = 1; i <= mpp_; ++i)
         std::swap(datmat_(i, np_), datmat_(i, nbest));
+    std::swap(non_finite_vertex_(np_), non_finite_vertex_(nbest));
     for(int i = 1; i <= n_; ++i)
     {
         Scalar temp = sim_(i, nbest);
@@ -95,6 +95,7 @@ inline bool cobyla_engine<Scalar>::check_simi_error()
 template <typename Scalar>
 inline void cobyla_engine<Scalar>::build_models()
 {
+    non_finite_in_model_ = non_finite_vertex_.segment(1, np_).any();
     for(int k = 1; k <= mp_; ++k)
     {
         con_(k) = -datmat_(k, np_);

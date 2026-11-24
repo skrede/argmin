@@ -239,8 +239,7 @@ struct runarsson_yao_paper_policy
         const std::uint16_t resample_budget =
             options.bound_resample_budget.value_or(100);
 
-        // (1) Stochastic ranking populates s.indices_buf with the
-        //     rank-permutation over [0, lambda).
+        // (1) Stochastic ranking populates s.indices_buf with the rank-permutation over [0, lambda).
         for(int j = 0; j < lambda; ++j)
             s.indices_buf[static_cast<std::size_t>(j)]
                 = static_cast<std::uint32_t>(j);
@@ -371,7 +370,7 @@ struct runarsson_yao_paper_policy
                 for(int i_in = 0; i_in < s.n_ineq; ++i_in)
                 {
                     const Scalar c_val = s.all_constraints_buf(s.n_eq + i_in, k);
-                    const Scalar v = std::max(Scalar(0.0), -c_val);
+                    const Scalar v = detail::inequality_slack(c_val);
                     violation_sum += v * v;
                 }
                 s.violations[k] = violation_sum;
@@ -391,12 +390,13 @@ struct runarsson_yao_paper_policy
 
         // (7) Every individual is offered to the record, judged by the solve's own comparator and tolerance.
         detail::keep_best_evaluated(s, s.population, s.fitnesses);
+        if(std::optional<step_result<Scalar>> unranked = detail::unranked_generation(s, s.fitnesses))
+            return *unranked;
 
         ++s.generation;
 
         // (8) Runarsson-Yao 2005 Section V (termination): a collapse of the population's mean step size ends the
         //     run. Two sigma-collapse forms are available via the runtime selector options.sigma_collapse_form:
-        //
         //       - bound_relative_configurable: compares mean_sigma against
         //         `ratio * mean(ub - lb) / sqrt(n)` (default ratio 1e-9).
         //       - xtol_coupled: compares mean_sigma against the user-set

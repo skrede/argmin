@@ -203,15 +203,15 @@ private:
     Eigen::Vector<Scalar, N> x_new_;
 };
 
-// Compute total constraint violation for each individual.
-//
-// constraints_matrix: (n_eq + n_ineq) x lambda matrix of constraint values.
-// First n_eq rows are equality constraints (must be zero).
-// Remaining n_ineq rows are inequality constraints (c >= 0 convention).
-//
-// Returns: vector of violations per individual.
-// violation = sum(|c_eq|) + sum(max(0, -c_ineq))
-//
+// The slack of an inequality row c >= 0, NaN for a NaN row: std::max returns its first argument when the comparison
+// fails, so -c leads.
+template <scalar Scalar>
+Scalar inequality_slack(Scalar c)
+{
+    return std::max(-c, Scalar(0));
+}
+
+// Per column, sum(|c_eq|) + sum(max(0, -c_ineq)) over the first n_eq rows (equalities) and the n_ineq rows after them.
 // Reference: N&W eq. 15.24 / 17.44.
 template <scalar Scalar, int M = argmin::dynamic_dimension, int Lambda = argmin::dynamic_dimension>
 Eigen::Vector<Scalar, Lambda> compute_violations(
@@ -230,7 +230,7 @@ Eigen::Vector<Scalar, Lambda> compute_violations(
             v += std::abs(constraints_matrix(i, j));
 
         for(int i = 0; i < n_ineq; ++i)
-            v += std::max(Scalar(0), -constraints_matrix(n_eq + i, j));
+            v += inequality_slack(constraints_matrix(n_eq + i, j));
 
         violations[j] = v;
     }

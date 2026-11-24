@@ -1,6 +1,8 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_COBYLA_ENGINE_H
 #define HPP_GUARD_ARGMIN_DETAIL_COBYLA_ENGINE_H
 
+#include "argmin/detail/extreme_barrier.h"
+
 #include "argmin/types.h"
 
 #include "argmin/result/status.h"
@@ -52,6 +54,7 @@ public:
 
     [[nodiscard]] bool converged() const { return converged_; }
     [[nodiscard]] solver_status status() const { return status_; }
+    bool non_finite_start() const { return non_finite_start_; }
     [[nodiscard]] Scalar rho() const { return rho_; }
     [[nodiscard]] Scalar parmu() const { return parmu_; }
     [[nodiscard]] Scalar objective_value() const { return f_best_; }
@@ -83,6 +86,7 @@ private:
     vector_type origin_coords() const;
     void clamp_into_box(const vector_type& x);
     void evaluate(const vector_type& x);
+    void store_trial(std::int32_t j);
     void bootstrap(const vector_type& x0);
     void build_initial_simplex(const vector_type& x0);
     Scalar initial_step_length(std::int32_t i, Scalar xi) const;
@@ -136,6 +140,7 @@ private:
     vector_type veta_;
     vector_type sigbar_;
     vector_type w_;
+    Eigen::Array<bool, Eigen::Dynamic, 1> non_finite_vertex_;
 
     // 0-indexed working vectors.
     vector_type dx_;
@@ -167,6 +172,12 @@ private:
     std::uint32_t evaluations_;
     std::uint32_t clamped_evaluations_;
     bool converged_;
+    bool non_finite_start_;
+    bool trial_non_finite_;
+    // A stop at RHOEND certifies nothing after a non-finite evaluation at the current radius, or when the linear models
+    // that decided it were built on a vertex that evaluated non-finite.
+    bool non_finite_at_radius_;
+    bool non_finite_in_model_;
     solver_status status_;
 
     // Incumbent mirror.

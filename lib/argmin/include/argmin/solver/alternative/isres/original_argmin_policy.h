@@ -232,8 +232,7 @@ struct original_argmin_policy
             s.violations[j] = s.offspring_violations_buf[idx];
         }
 
-        // Dead fill: mutation reads parents via j % mu, so slots [mu, lambda) are never read between steps. Kept
-        // for observable-state hygiene.
+        // Dead fill, kept for observable-state hygiene: mutation reads parents via j % mu, so [mu, lambda) goes unread.
         for(int j = s.mu; j < s.lambda; ++j)
         {
             int src = j % s.mu;
@@ -267,8 +266,9 @@ struct original_argmin_policy
             }
         }
 
-        // 7. Every offspring is offered to the record, judged by the solve's own comparator and tolerance.
         detail::keep_best_evaluated(s, s.offspring_buf, s.offspring_fitnesses_buf);
+        if(std::optional<step_result<Scalar>> unranked = detail::unranked_generation(s, s.offspring_fitnesses_buf))
+            return *unranked;
         ++s.generation;
 
         Scalar mean_sigma = s.sigmas.leftCols(s.mu).mean();

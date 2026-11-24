@@ -23,6 +23,7 @@
 using argmin::solver_status;
 using argmin::lbfgsb_line_search;
 using argmin::line_search_failure::vector2;
+using argmin::line_search_failure::finite_cliff;
 using argmin::line_search_failure::far_minimizer_box;
 using argmin::line_search_failure::poisoned_everywhere;
 using argmin::line_search_failure::poisoned_off_steepest_descent;
@@ -30,10 +31,17 @@ using argmin::line_search_failure::poisoned_off_steepest_descent;
 namespace
 {
 
-constexpr std::array<lbfgsb_line_search, 2> line_searches{lbfgsb_line_search::strong_wolfe,
-                                                          lbfgsb_line_search::armijo};
+constexpr std::array<lbfgsb_line_search, 2> line_searches{lbfgsb_line_search::strong_wolfe, lbfgsb_line_search::armijo};
 
 const vector2 start{3.0, 2.0};
+
+struct poison_case
+{
+    double value;
+    solver_status status;
+};
+
+const std::array<poison_case, 2> poisons{{{std::numeric_limits<double>::quiet_NaN(), solver_status::non_finite_evaluation}, {finite_cliff, solver_status::line_search_failed}}};
 
 using lbfgsb_2 = argmin::lbfgsb_policy<double, 2>;
 using byrd_lbfgsb_2 = argmin::byrd_lbfgsb_policy<double, 2>;
@@ -54,39 +62,43 @@ solver_for<Policy, Problem> make_solver(const Problem& problem, const vector2& x
 TEMPLATE_TEST_CASE("L-BFGS-B line-search failure: a rejected step leaves the iterate in place", "[lbfgsb]",
                    lbfgsb_2, byrd_lbfgsb_2)
 {
-    for(lbfgsb_line_search kind : line_searches)
-    {
-        poisoned_everywhere problem;
-        solver_for<TestType, poisoned_everywhere> solver = make_solver<TestType>(problem, start, kind);
-        solver.step();
-        solver.step();
-        problem.anchor = solver.state().x;
-        const double held = solver.state().objective_value;
-        problem.poisoned = true;
-        const argmin::step_result<double> r = solver.step();
-        CHECK((solver.state().x == problem.anchor));
-        CHECK(solver.state().objective_value == held);
-        CHECK(r.policy_status == solver_status::line_search_failed);
-        CHECK(r.diagnostics.bfgs_reset_count == std::size_t{1});
-        CHECK(solver.state().B.size() == 0);
-    }
+    for(const poison_case& poison : poisons)
+        for(lbfgsb_line_search kind : line_searches)
+        {
+            poisoned_everywhere problem;
+            problem.poison = poison.value;
+            solver_for<TestType, poisoned_everywhere> solver = make_solver<TestType>(problem, start, kind);
+            solver.step();
+            solver.step();
+            problem.anchor = solver.state().x;
+            const double held = solver.state().objective_value;
+            problem.poisoned = true;
+            const argmin::step_result<double> r = solver.step();
+            CHECK((solver.state().x == problem.anchor));
+            CHECK(solver.state().objective_value == held);
+            CHECK(r.policy_status == poison.status);
+            CHECK(r.diagnostics.bfgs_reset_count == std::size_t{1});
+            CHECK(solver.state().B.size() == 0);
+        }
 }
 
 TEMPLATE_TEST_CASE("L-BFGS-B line-search failure: an empty memory terminates without a retry", "[lbfgsb]",
                    lbfgsb_2, byrd_lbfgsb_2)
 {
-    for(lbfgsb_line_search kind : line_searches)
-    {
-        poisoned_everywhere problem;
-        problem.anchor = start;
-        problem.poisoned = true;
-        solver_for<TestType, poisoned_everywhere> solver = make_solver<TestType>(problem, start, kind);
-        const argmin::step_result<double> r = solver.step();
-        CHECK((solver.state().x == start));
-        CHECK(r.policy_status == solver_status::line_search_failed);
-        CHECK(r.diagnostics.bfgs_reset_count == std::size_t{0});
-        CHECK(solver.status() == solver_status::line_search_failed);
-    }
+    for(const poison_case& poison : poisons)
+        for(lbfgsb_line_search kind : line_searches)
+        {
+            poisoned_everywhere problem;
+            problem.poison = poison.value;
+            problem.anchor = start;
+            problem.poisoned = true;
+            solver_for<TestType, poisoned_everywhere> solver = make_solver<TestType>(problem, start, kind);
+            const argmin::step_result<double> r = solver.step();
+            CHECK((solver.state().x == start));
+            CHECK(r.policy_status == poison.status);
+            CHECK(r.diagnostics.bfgs_reset_count == std::size_t{0});
+            CHECK(solver.status() == poison.status);
+        }
 }
 
 TEMPLATE_TEST_CASE("L-BFGS-B line-search failure: the reset retry takes a steepest-descent step", "[lbfgsb]",
@@ -130,7 +142,7 @@ TEMPLATE_TEST_CASE("L-BFGS-B line-search failure: an all-NaN Armijo search does 
         CHECK((solver.state().x == problem.anchor));
         CHECK(solver.state().x.allFinite());
         CHECK(std::isfinite(solver.state().objective_value));
-        CHECK(r.policy_status == solver_status::line_search_failed);
+        CHECK(r.policy_status == solver_status::non_finite_evaluation);
     }
 }
 
@@ -170,17 +182,19 @@ TEMPLATE_TEST_CASE("L-BFGS-B line-search failure: a capped step with sufficient 
 TEMPLATE_TEST_CASE("L-BFGS-B line-search failure: a second consecutive failure ends the solve non-converged",
                    "[lbfgsb]", lbfgsb_2, byrd_lbfgsb_2)
 {
-    for(lbfgsb_line_search kind : line_searches)
-    {
-        poisoned_everywhere problem;
-        solver_for<TestType, poisoned_everywhere> solver = make_solver<TestType>(problem, start, kind);
-        solver.step();
-        solver.step();
-        problem.anchor = solver.state().x;
-        problem.poisoned = true;
-        const argmin::solve_result<double, 2> result = solver.solve();
-        CHECK(result.status == solver_status::line_search_failed);
-        CHECK(result.status != solver_status::converged);
-        CHECK((result.x == problem.anchor));
-    }
+    for(const poison_case& poison : poisons)
+        for(lbfgsb_line_search kind : line_searches)
+        {
+            poisoned_everywhere problem;
+            problem.poison = poison.value;
+            solver_for<TestType, poisoned_everywhere> solver = make_solver<TestType>(problem, start, kind);
+            solver.step();
+            solver.step();
+            problem.anchor = solver.state().x;
+            problem.poisoned = true;
+            const argmin::solve_result<double, 2> result = solver.solve();
+            CHECK(result.status == poison.status);
+            CHECK(result.status != solver_status::converged);
+            CHECK((result.x == problem.anchor));
+        }
 }

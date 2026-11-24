@@ -5,6 +5,7 @@
 #include "argmin/result/step_result.h"
 
 #include <cmath>
+#include <concepts>
 #include <optional>
 
 namespace argmin::detail
@@ -49,6 +50,43 @@ concept caches_residual_values = requires(const State& s) {
     s.J.allFinite();
 };
 
+// L-BFGS-B keeps f and g at its iterate and the augmented Lagrangian f and the rows at its outer iterate. CMA-ES keeps
+// the objective at its start until a generation improves on it and ISRES its best finite individual (a non-finite one
+// when none is). BOBYQA and COBYLA keep only moderated values, so their states record whether the start was finite.
+template <typename State>
+concept caches_gradient_values = requires(const State& s) {
+    s.objective_value;
+    s.g.allFinite();
+};
+
+template <typename State>
+concept caches_outer_values = requires(const State& s) {
+    s.f;
+    s.c_eq.allFinite();
+    s.c_ineq.allFinite();
+};
+
+template <typename State>
+concept samples_from_start = requires(const State& s) {
+    s.objective_value;
+    s.mean;
+    s.sigma;
+};
+
+template <typename State>
+concept holds_population_record = requires(const State& s) {
+    s.record;
+    s.population;
+    s.objective_value;
+    s.c_eq.allFinite();
+    s.c_ineq.allFinite();
+};
+
+template <typename State>
+concept records_start_values = requires(const State& s) {
+    { s.non_finite_start } -> std::convertible_to<bool>;
+};
+
 template <typename State>
 bool held_values_finite(const State& s)
 {
@@ -56,8 +94,20 @@ bool held_values_finite(const State& s)
         return std::isfinite(s.f) && s.g.allFinite() && s.c_ineq.allFinite() && s.J_ineq.allFinite();
     else if constexpr(caches_residual_values<State>)
         return std::isfinite(s.objective_value) && s.r.allFinite() && s.J.allFinite();
-    else
+    else if constexpr(caches_iterate_values<State>)
         return iterate_values_finite(s);
+    else if constexpr(caches_gradient_values<State>)
+        return std::isfinite(s.objective_value) && s.g.allFinite();
+    else if constexpr(caches_outer_values<State>)
+        return std::isfinite(s.f) && s.c_eq.allFinite() && s.c_ineq.allFinite();
+    else if constexpr(samples_from_start<State>)
+        return std::isfinite(s.objective_value);
+    else if constexpr(holds_population_record<State>)
+        return std::isfinite(s.objective_value) && s.c_eq.allFinite() && s.c_ineq.allFinite();
+    else if constexpr(records_start_values<State>)
+        return !s.non_finite_start;
+    else
+        return true;
 }
 
 // A decorator starts where the state it wraps starts, so a non-finite start latches it as state_rejected rejects what

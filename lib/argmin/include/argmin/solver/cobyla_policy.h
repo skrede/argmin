@@ -77,7 +77,21 @@ struct cobyla_policy
     template <typename P = void>
     struct state_type
     {
-        state_type() : problem{nullptr}, objective_value{}, parmu{Scalar(0.0)}, n_eq{0}, n_ineq{0}, m_powell{0}, iteration{0}, evaluations{0}, clamped_evaluations{0}, invalid_coordinate{-1}, invalid_problem{false} {}
+        state_type()
+            : problem{nullptr}
+            , objective_value{}
+            , parmu{Scalar(0.0)}
+            , n_eq{0}
+            , n_ineq{0}
+            , m_powell{0}
+            , iteration{0}
+            , evaluations{0}
+            , clamped_evaluations{0}
+            , invalid_coordinate{-1}
+            , invalid_problem{false}
+            , non_finite_start{false}
+        {
+        }
 
         const P* problem;
         Eigen::VectorX<Scalar> x;
@@ -98,6 +112,7 @@ struct cobyla_policy
         std::uint32_t clamped_evaluations;
         std::int32_t invalid_coordinate;
         bool invalid_problem;
+        bool non_finite_start;
 
         // The engine is heap-owned so state moves leave its internal pointers
         // (captured by the evaluator) valid.

@@ -208,6 +208,9 @@ struct repair_l2_penalty_policy
     {
         if(s.invalid_problem)
             return detail::rejected_step<Scalar>(s);
+        // A non-finite distribution has non-finite offspring whatever the problem, so they never reach the objective.
+        if(std::optional<step_result<Scalar>> diverged = detail::diverged_search<Scalar>(s))
+            return *diverged;
 
         const int n = static_cast<int>(s.mean.size());
         const int lambda = s.params.lambda;
@@ -264,6 +267,8 @@ struct repair_l2_penalty_policy
         std::sort(idx.begin(), idx.begin() + lambda, [&](int a, int b) {
             return detail::finite_first(fitnesses[a], fitnesses[b]);
         });
+        if(std::optional<step_result<Scalar>> unranked = detail::unranked_population(fitnesses[idx[0]], s.objective_value, s.x.norm()))
+            return *unranked;
 
         // 4. Update mean: weighted recombination of mu best
         Eigen::Vector<Scalar, N> mean_old = s.mean;
@@ -345,7 +350,7 @@ struct repair_l2_penalty_policy
         // value rather than a repair-penalty-inflated number.
         const int best_offspring = idx[0];
         Scalar gen_best_f = unpenalized[best_offspring];
-        if(gen_best_f < s.objective_value)
+        if(detail::finite_first(gen_best_f, s.objective_value))
         {
             s.objective_value = gen_best_f;
             s.x = offspring.col(best_offspring);
@@ -366,29 +371,10 @@ struct repair_l2_penalty_policy
         // intentionally never sees this NaN exit, so a NaN-induced
         // divergence cannot be mistaken for a recoverable stagnation
         // trigger.
-        //
-        // Eigen::DenseBase::allFinite() is used (not
-        // !std::isfinite(maxCoeff())) because under IEEE 754 (Std
-        // 754-2019 §6.2) max-reduction semantics, std::max(NaN, finite)
-        // returns the finite operand, so a non-maximum NaN entry is
-        // invisible to the maxCoeff() form. allFinite() iterates every
-        // coefficient and returns false on the first non-finite entry,
-        // which is the correct predicate for "no NaN anywhere in the
-        // distribution shape". s.C is checked because a NaN inside the
-        // covariance silently re-injects every step via the rank-one /
-        // rank-mu update.
-        if(!std::isfinite(s.sigma) || !s.D.allFinite() || !s.C.allFinite())
+        if(std::optional<step_result<Scalar>> diverged = detail::diverged_search<Scalar>(s))
         {
             ++s.generation;
-            return step_result<Scalar>{
-                .objective_value = s.objective_value,
-                .gradient_norm = Scalar(0.0),
-                .step_size = Scalar(0.0),
-                .objective_change = Scalar(0.0),
-                .improved = false,
-                .x_norm = s.x.allFinite() ? s.x.norm() : Scalar(0.0),
-                .policy_status = solver_status::diverged,
-            };
+            return *diverged;
         }
 
         // Hansen 2023 (arXiv:1604.00772) §B.3 item 7 (TolX): legacy
@@ -799,10 +785,8 @@ struct repair_l2_penalty_policy
             }
         }
 
-        // 17. Increment generation
         ++s.generation;
 
-        // 18. Return step_result
         // Derivative-free convergence signalling (same pattern as BOBYQA):
         // - gradient_norm proxy: sigma * max(D) -- collapses when converged
         // - When no improvement, use sigma as proxy for objective_change and

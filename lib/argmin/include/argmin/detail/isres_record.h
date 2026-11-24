@@ -3,12 +3,15 @@
 
 #include "argmin/detail/lagrangian.h"
 #include "argmin/detail/iterate_rank.h"
+#include "argmin/detail/terminal_step.h"
 #include "argmin/detail/bound_projection.h"
 
 #include "argmin/result/status.h"
 
 #include <Eigen/Core>
 
+#include <cmath>
+#include <limits>
 #include <optional>
 
 namespace argmin::detail
@@ -33,8 +36,8 @@ void hold_individual(State& s, const Points& points, const Values& values, Eigen
     s.c_ineq = s.all_constraints_buf.col(k).tail(s.n_ineq);
 }
 
-// Each evaluated individual is measured on its rows and the box, as a returned iterate is, and the policy holds the
-// record. The rows come from the evaluation buffer, so no individual is evaluated twice.
+// Each individual evaluated finite is measured on its rows and the box, as a returned iterate is, and the policy holds
+// the record. The rows come from the evaluation buffer, so no individual is evaluated twice.
 template <typename State, typename Points, typename Values>
 bool keep_best_evaluated(State& s, const Points& points, const Values& values)
 {
@@ -42,7 +45,7 @@ bool keep_best_evaluated(State& s, const Points& points, const Values& values)
     for(Eigen::Index k = 0; k < points.cols(); ++k)
     {
         const auto rows = s.all_constraints_buf.col(k);
-        if(s.record.offer(values[k], primal_feasibility_inf(rows.head(s.n_eq), rows.tail(s.n_ineq)), outside_box(s, points.col(k))))
+        if(std::isfinite(values[k]) && rows.allFinite() && s.record.offer(values[k], primal_feasibility_inf(rows.head(s.n_eq), rows.tail(s.n_ineq)), outside_box(s, points.col(k))))
             kept = k;
     }
     if(kept >= 0)
@@ -50,8 +53,20 @@ bool keep_best_evaluated(State& s, const Points& points, const Values& values)
     return kept >= 0;
 }
 
-// The first individual is held until one ranks, so a population with no comparable point still holds a point. The
-// record keeps the feasibility tolerance it was constructed with.
+// A generation in which no individual evaluated finite carries no ranking, so the solve ends on the record it holds.
+template <typename State, typename Values>
+std::optional<step_result<typename Values::Scalar>> unranked_generation(const State& s, const Values& values)
+{
+    using scalar_type = typename Values::Scalar;
+    for(Eigen::Index k = 0; k < values.size(); ++k)
+        if(std::isfinite(values[k]) && s.all_constraints_buf.col(k).allFinite())
+            return std::nullopt;
+    const scalar_type violation = primal_feasibility_inf(s.c_eq, s.c_ineq);
+    return unranked_population(std::numeric_limits<scalar_type>::quiet_NaN(), s.objective_value, s.x.norm(), violation);
+}
+
+// The first individual is held until one ranks, so a population with no comparable point still holds a point, and one
+// with no finite point holds a non-finite start. The record keeps the feasibility tolerance it was constructed with.
 template <typename State, typename Points, typename Values>
 void start_best_evaluated(State& s, const Points& points, const Values& values)
 {

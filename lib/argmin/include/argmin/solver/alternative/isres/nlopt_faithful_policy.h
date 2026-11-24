@@ -487,9 +487,7 @@ struct nlopt_faithful_policy
             }
             for(int j_in = 0; j_in < s.n_ineq; ++j_in)
             {
-                const Scalar slack = std::max(
-                    Scalar(0.0),
-                    -s.all_constraints_buf(s.n_eq + j_in, k));
+                const Scalar slack = detail::inequality_slack(s.all_constraints_buf(s.n_eq + j_in, k));
                 violation_sum += slack * slack;
             }
             s.violations[k] = violation_sum;
@@ -498,6 +496,8 @@ struct nlopt_faithful_policy
         // (6) Every individual is checked at evaluation time, as NLopt's isres.c:174-193 does, but against the
         // solve's own feasibility tolerance per row rather than a gate on the summed squared violation.
         detail::keep_best_evaluated(s, s.population, s.fitnesses);
+        if(std::optional<step_result<Scalar>> unranked = detail::unranked_generation(s, s.fitnesses))
+            return *unranked;
 
         ++s.generation;
 

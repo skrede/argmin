@@ -18,6 +18,7 @@ using argmin::solver_status;
 using argmin::alloc_gate::run_armed;
 using argmin::alloc_gate::window_counts;
 using argmin::line_search_failure::vector2;
+using argmin::line_search_failure::finite_cliff;
 using argmin::line_search_failure::poisoned_everywhere;
 using argmin::line_search_failure::poisoned_off_steepest_descent;
 
@@ -45,13 +46,13 @@ bool retry_succeeds(Solver& solver, poisoned_off_steepest_descent& problem)
 }
 
 template <typename Solver>
-bool search_terminates(Solver& solver, poisoned_everywhere& problem)
+bool search_terminates(Solver& solver, poisoned_everywhere& problem, solver_status expected)
 {
     problem.anchor = solver.state().x;
     problem.poisoned = true;
     const argmin::step_result<double> r = solver.step();
     problem.poisoned = false;
-    return r.diagnostics.bfgs_reset_count == std::size_t{1} && r.policy_status == solver_status::line_search_failed;
+    return r.diagnostics.bfgs_reset_count == std::size_t{1} && r.policy_status == expected;
 }
 
 template <typename Policy>
@@ -59,28 +60,37 @@ void run_line_search_failure_gate()
 {
     poisoned_off_steepest_descent selective;
     poisoned_everywhere everywhere;
+    poisoned_everywhere cliff;
+    cliff.poison = finite_cliff;
     argmin::step_budget_solver retrying{Policy{}, selective, start};
     argmin::step_budget_solver failing{Policy{}, everywhere, start};
+    argmin::step_budget_solver stopping{Policy{}, cliff, start};
     // The warm-up steps size the curvature memory's rows before the window is armed.
     take_clean_steps(retrying);
     take_clean_steps(failing);
+    take_clean_steps(stopping);
 
     std::size_t retried = 0;
-    std::size_t terminated = 0;
+    std::size_t non_finite = 0;
+    std::size_t failed = 0;
     const window_counts counts = run_armed([&] {
         for(std::size_t pass = 0; pass < passes; ++pass)
         {
             if(retry_succeeds(retrying, selective))
                 ++retried;
             take_clean_steps(retrying);
-            if(search_terminates(failing, everywhere))
-                ++terminated;
+            if(search_terminates(failing, everywhere, solver_status::non_finite_evaluation))
+                ++non_finite;
             take_clean_steps(failing);
+            if(search_terminates(stopping, cliff, solver_status::line_search_failed))
+                ++failed;
+            take_clean_steps(stopping);
         }
     });
 
     CHECK(retried == passes);
-    CHECK(terminated == passes);
+    CHECK(non_finite == passes);
+    CHECK(failed == passes);
     CHECK(counts.eigen == 0);
     CHECK(counts.c == 0);
 }

@@ -19,7 +19,8 @@ namespace argmin::detail
 template <typename Scalar>
 inline typename cobyla_engine<Scalar>::l440_action cobyla_engine<Scalar>::process_trial()
 {
-    Scalar trured = trial_reduction();
+    // A trial that evaluated non-finite fails whatever its merit, which ignores the rows while PARMU is zero.
+    const Scalar trured = trial_non_finite_ ? -extreme_barrier<Scalar>() : trial_reduction();
     drop_by_ratio(trured);
     const std::int32_t l = drop_by_edge(trured);
     if(l > 0)
@@ -128,12 +129,10 @@ inline void cobyla_engine<Scalar>::replace_dropped_vertex()
                 simi_(j, i) -= t * simi_(jdrop_, i);
         }
     }
-    for(int k = 1; k <= mpp_; ++k)
-        datmat_(k, jdrop_) = con_(k);
+    store_trial(jdrop_);
 }
 
-// L550: rebuild an unacceptable simplex, or reduce RHO and re-derive PARMU;
-// terminate once RHO reaches RHOEND.
+// L550: rebuild an unacceptable simplex, or reduce RHO and re-derive PARMU; terminate once RHO reaches RHOEND.
 template <typename Scalar>
 inline typename cobyla_engine<Scalar>::l550_result cobyla_engine<Scalar>::l550()
 {
@@ -147,12 +146,13 @@ inline typename cobyla_engine<Scalar>::l550_result cobyla_engine<Scalar>::l550()
         rho_ *= Scalar(0.5);
         if(rho_ <= rhoend_ * Scalar(1.5))
             rho_ = rhoend_;
+        non_finite_at_radius_ = false;
         if(parmu_ > Scalar(0))
             rederive_parmu();
         return l550_result::continue_iter;
     }
     converged_ = true;
-    status_ = solver_status::xtol_reached;
+    status_ = non_finite_at_radius_ || non_finite_in_model_ ? solver_status::non_finite_evaluation : solver_status::xtol_reached;
     return l550_result::converged;
 }
 

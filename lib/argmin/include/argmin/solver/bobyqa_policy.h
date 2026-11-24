@@ -26,6 +26,7 @@
 #include "argmin/detail/bound_projection.h"
 #include "argmin/detail/problem_shape.h"
 #include "argmin/detail/evaluation_count.h"
+#include "argmin/detail/extreme_barrier.h"
 #include "argmin/options/trust_region_options.h"
 #include "argmin/options/derivative_free_defaults.h"
 #include "argmin/result/step_result.h"
@@ -138,16 +139,16 @@ struct bobyqa_policy
         int m{};
         bool initialized{false};
         bool invalid_problem{false};
+        bool non_finite_in_model{false};
+        bool non_finite_start{false};
 
         // Powell bobyqb driver state (the ntrits state machine).
-        //
         // ntrits is the number of consecutive trust-region iterations since the
         // last "alternative" (geometry) iteration:
         //   ntrits > 0  -- trust-region iteration (objective is evaluated)
         //   ntrits == 0 -- alternative / ALTMOV geometry iteration (evaluated)
         //   ntrits == -1 -- short step (dnorm < 0.5*rho): NOT evaluated, routed
         //                   to a geometry refresh or a rho reduction instead.
-        //
         // nfsav is the evaluation count captured at the start of work with the
         // current rho (init, after a step longer than rho, after a rescue or a
         // rho reduction). The nevals <= nfsav+2 guard sends the FIRST short step
@@ -331,21 +332,10 @@ struct bobyqa_policy
         // Bootstrap the BMAT/ZMAT interpolation system.
         // The bootstrap evaluates f at 2n+1 coordinate-perturbation points
         // around x_scaled and initializes BMAT, ZMAT, GOPT, HQ, PQ.
-        //
         // Reference: Powell 2009, Section 2.
         //   Adapted from NLopt prelim_() lines 1710-1950.
         //   https://github.com/stevengj/nlopt/blob/master/src/algs/bobyqa/bobyqa.c#L1710
-        s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
-            s.x_scaled, h, s.lower_scaled, s.upper_scaled,
-            [&](const Eigen::Vector<Scalar, N>& x_sc) {
-                return detail::counted_value<Scalar>(
-                    s.evaluations, *s.problem, (x_sc.array() * s.scale.array()).matrix());
-            });
-
-        // Update x to the best point found during bootstrap.
-        s.x_scaled = s.sys.xbase + s.sys.xopt;
-        s.x = (s.x_scaled.array() * s.scale.array()).matrix();
-        s.objective_value = s.sys.fval[s.sys.kopt];
+        bootstrap_from_start(s, h);
 
         s.initialized = true;
         s.iteration = 0;
@@ -354,6 +344,24 @@ struct bobyqa_policy
         seed_driver(s);
 
         return s;
+    }
+
+    // The bootstrap evaluates its base point first, so that evaluation is the start the solve latches on.
+    template <typename P>
+    static void bootstrap_from_start(state_type<P>& s, Scalar h)
+    {
+        s.non_finite_in_model = false;
+        auto evaluate = [&, at_start = true](const Eigen::Vector<Scalar, N>& x_sc) mutable
+        {
+            const Scalar f = detail::counted_value<Scalar>(s.evaluations, *s.problem, (x_sc.array() * s.scale.array()).matrix());
+            if(std::exchange(at_start, false))
+                s.non_finite_start = !std::isfinite(f);
+            return detail::moderated(f, s.non_finite_in_model);
+        };
+        s.sys = detail::bootstrap_interpolation_system<Scalar, N>(s.x_scaled, h, s.lower_scaled, s.upper_scaled, evaluate);
+        s.x_scaled = s.sys.xbase + s.sys.xopt;
+        s.x = (s.x_scaled.array() * s.scale.array()).matrix();
+        s.objective_value = s.sys.fval[s.sys.kopt];
     }
 
     // Seed the ntrits driver state after a bootstrap. Powell 2009, Section 5:
@@ -585,24 +593,25 @@ struct bobyqa_policy
             Eigen::Vector<Scalar, N> xabs = detail::project(
                 (s.sys.xbase + xn).eval(), s.lower_scaled, s.upper_scaled);
             Eigen::Vector<Scalar, N> xorig = (xabs.array() * s.scale.array()).matrix();
-            Scalar f = detail::counted_value<Scalar>(s.evaluations, *s.problem, xorig);
+            Scalar f = detail::moderated(detail::counted_value<Scalar>(s.evaluations, *s.problem, xorig), s.non_finite_in_model);
             ++s.nevals;
             return {f, xabs};
         };
 
         // Powell's RESCUE: rebuild the interpolation system from scratch about the current best point. Used when a
         // chosen denominator has collapsed (bobyqb_ L190). Kept as the bootstrap rebuild (Powell never writes behind
-        // the factorization); the rebuild's 2n+1 evaluations are counted.
+        // the factorization); its 2n+1 counted evaluations alone decide whether the model holds a non-finite value.
         auto do_rescue = [&]()
         {
             Scalar h = s.rho;
             Eigen::Vector<Scalar, N> xb = s.sys.xbase + s.sys.xopt;
             h = clamp_radius_to_bounds(h, s.lower_scaled, s.upper_scaled);
             shift_inside_bounds(xb, h, s.lower_scaled, s.upper_scaled);
+            s.non_finite_in_model = false;
             s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
                 xb, h, s.lower_scaled, s.upper_scaled,
                 [&](const Eigen::Vector<Scalar, N>& x_sc) {
-                    return detail::counted_value<Scalar>(s.evaluations, *s.problem, (x_sc.array() * s.scale.array()).matrix());
+                    return detail::moderated(detail::counted_value<Scalar>(s.evaluations, *s.problem, (x_sc.array() * s.scale.array()).matrix()), s.non_finite_in_model);
                 });
             s.nevals += s.m;
             s.nresc = s.nevals;
@@ -782,7 +791,6 @@ struct bobyqa_policy
                 // BEFORE the VLAG/BETA computation at L230 so the step is
                 // expressed in the shifted frame; performing it afterward would
                 // corrupt beta.
-                //
                 // sl/su are recomputed on the fly as lower_scaled - xbase, so
                 // the sl -= xopt / su -= xopt bookkeeping is automatic. The
                 // displacement d is invariant under the shift, so the trial
@@ -1102,7 +1110,7 @@ struct bobyqa_policy
             .x_norm = s.x.norm(),
         };
         if(terminated)
-            r.policy_status = solver_status::converged;
+            r.policy_status = s.non_finite_in_model ? solver_status::non_finite_evaluation : solver_status::converged;
         return r;
     }
 
@@ -1125,15 +1133,7 @@ struct bobyqa_policy
         Scalar h = clamp_radius_to_bounds(s.initial_radius, s.lower_scaled, s.upper_scaled);
         shift_inside_bounds(s.x_scaled, h, s.lower_scaled, s.upper_scaled);
         s.x = (s.x_scaled.array() * s.scale.array()).matrix();
-        s.sys = detail::bootstrap_interpolation_system<Scalar, N>(
-            s.x_scaled, h, s.lower_scaled, s.upper_scaled,
-            [&](const Eigen::Vector<Scalar, N>& x_sc) {
-                return detail::counted_value<Scalar>(
-                    s.evaluations, *s.problem, (x_sc.array() * s.scale.array()).matrix());
-            });
-        s.x_scaled = s.sys.xbase + s.sys.xopt;
-        s.x = (s.x_scaled.array() * s.scale.array()).matrix();
-        s.objective_value = s.sys.fval[s.sys.kopt];
+        bootstrap_from_start(s, h);
         s.delta = h;
         seed_driver(s);
         s.initialized = true;

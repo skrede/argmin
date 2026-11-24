@@ -17,6 +17,7 @@
 
 #include <Eigen/Core>
 
+#include <cmath>
 #include <vector>
 #include <cstdint>
 
@@ -56,13 +57,12 @@ void stochastic_rank(std::vector<std::uint32_t>& indices,
             auto a = indices[j];
             auto b = indices[j + 1];
 
-            bool compare_by_objective =
-                (violations[a] <= Scalar(0) && violations[b] <= Scalar(0))
-                || uniform(rng) < pf;
+            bool compare_by_objective = (violations[a] <= Scalar(0) && violations[b] <= Scalar(0)) || uniform(rng) < pf;
 
-            bool should_swap = compare_by_objective
-                ? objectives[a] > objectives[b]
-                : violations[a] > violations[b];
+            // A non-finite individual sinks below every finite one; the raw comparisons, false on NaN, never move it.
+            const bool a_finite = std::isfinite(objectives[a]) && std::isfinite(violations[a]);
+            const bool b_finite = std::isfinite(objectives[b]) && std::isfinite(violations[b]);
+            bool should_swap = a_finite != b_finite ? b_finite : compare_by_objective ? objectives[a] > objectives[b] : violations[a] > violations[b];
 
             if(should_swap)
             {

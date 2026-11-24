@@ -4,6 +4,7 @@
 #include "argmin/detail/cobyla_engine.h"
 
 #include <cstdint>
+#include <utility>
 #include <algorithm>
 
 namespace argmin::detail
@@ -35,17 +36,28 @@ inline void cobyla_engine<Scalar>::evaluate(const vector_type& x)
     clamp_into_box(x);
     vector_type conv(m_);
     ++evaluations_;
-    Scalar f = eval_(x_eval_, x, conv);
+    const Scalar f_raw = eval_(x_eval_, x, conv);
+    trial_non_finite_ = !std::isfinite(f_raw) || !conv.allFinite();
+    non_finite_at_radius_ = non_finite_at_radius_ || trial_non_finite_;
+    const Scalar f = moderated(f_raw);
     resmax_ = Scalar(0);
     for(int k = 1; k <= m_; ++k)
     {
-        Scalar d = -conv(k - 1);
-        resmax_ = std::max(resmax_, d);
-        con_(k) = conv(k - 1);
+        const Scalar c = moderated_row(conv(k - 1));
+        resmax_ = std::max(resmax_, -c);
+        con_(k) = c;
     }
     con_(mp_) = f;
     con_(mpp_) = resmax_;
     f_last_ = f;
+}
+
+template <typename Scalar>
+inline void cobyla_engine<Scalar>::store_trial(std::int32_t j)
+{
+    for(int k = 1; k <= mpp_; ++k)
+        datmat_(k, j) = con_(k);
+    non_finite_vertex_(j) = trial_non_finite_;
 }
 
 template <typename Scalar>
@@ -103,9 +115,9 @@ inline void cobyla_engine<Scalar>::evaluate_initial_vertices()
     while(true)
     {
         evaluate(xcur_);
-        ++nevals_;
-        for(int k = 1; k <= mpp_; ++k)
-            datmat_(k, jdrop_) = con_(k);
+        if(++nevals_ == 1)
+            non_finite_start_ = trial_non_finite_;
+        store_trial(jdrop_);
 
         if(nevals_ <= n_)
         {
@@ -124,13 +136,14 @@ inline void cobyla_engine<Scalar>::evaluate_initial_vertices()
 }
 
 // Exchange the newly evaluated initial vertex with the optimal vertex if it
-// improves the objective (Powell's initial-simplex completion).
+// improves the objective (Powell's initial-simplex completion); a vertex that
+// evaluated non-finite never does.
 template <typename Scalar>
 inline void cobyla_engine<Scalar>::exchange_initial_vertex()
 {
     const Scalar f = con_(mp_);
-    if(datmat_(mp_, np_) <= f)
-        return; // no improvement; leave origin in place
+    if(trial_non_finite_ || (datmat_(mp_, np_) <= f && !non_finite_vertex_(np_)))
+        return;
 
     Scalar rhocur = xcur_(jdrop_ - 1) - sim_(jdrop_, np_);
     sim_(jdrop_, np_) = xcur_(jdrop_ - 1);
@@ -139,6 +152,7 @@ inline void cobyla_engine<Scalar>::exchange_initial_vertex()
         datmat_(k, jdrop_) = datmat_(k, np_);
         datmat_(k, np_) = con_(k);
     }
+    std::swap(non_finite_vertex_(jdrop_), non_finite_vertex_(np_));
     for(int k = 1; k <= jdrop_; ++k)
     {
         sim_(jdrop_, k) = -rhocur;

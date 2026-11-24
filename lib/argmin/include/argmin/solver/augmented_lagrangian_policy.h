@@ -594,8 +594,6 @@ struct augmented_lagrangian_policy
 
         const scalar_type inner_grad_tol = s.opts.inner_gradient_tolerance;
         const std::uint32_t inner_max = s.opts.inner_max_iterations;
-        const scalar_type mu_dec = s.opts.mu_decrease;
-        const scalar_type mu_floor = s.opts.mu_min;
         const scalar_type feas_progress = s.opts.feasibility_progress;
         const scalar_type con_tol = s.constraint_tolerance_in_force;
 
@@ -641,10 +639,8 @@ struct augmented_lagrangian_policy
         // inner_grad_tol) even when the penalty parameter is pinned across
         // multiplier-only outer iterations. CGT 1991 §3 prescribes alpha >=
         // 0.9 to couple the inner and outer iterations meaningfully.
-        const scalar_type tol_eta = s.opts.inner_tolerance_eta;
-        const scalar_type tol_alpha = s.opts.inner_tolerance_alpha;
         if(!s.inner_active && !s.omega.has_value())
-            s.omega = tol_eta * std::pow(s.mu, tol_alpha);
+            s.omega = s.opts.inner_tolerance_eta * std::pow(s.mu, s.opts.inner_tolerance_alpha);
         const scalar_type inner_tol = std::max(*s.omega, inner_grad_tol);
 
         solver_options<default_convergence<scalar_type>> inner_opts;
@@ -759,33 +755,27 @@ struct augmented_lagrangian_policy
         // gate cannot fire mid-inner-solve. Any other terminal status -- a
         // convergence verdict, or max_iterations once the clamp lands the
         // accumulated count on inner_max_iterations -- completes the solve.
+        const scalar_type held_violation = detail::primal_feasibility_inf(s.c_eq, s.c_ineq);
         if(inner_result.status == solver_status::budget_exhausted)
-        {
-            return step_result<scalar_type>{
-                .objective_value = s.f,
-                .gradient_norm = std::numeric_limits<scalar_type>::infinity(),
-                .step_size = scalar_type(0),
-                .objective_change = scalar_type(0),
-                .improved = false,
-                .is_null_step = true,
-                .constraint_violation =
-                    detail::primal_feasibility_inf(s.c_eq, s.c_ineq),
-                .x_norm = s.x.norm(),
-                .kkt_residual = std::nullopt,
-            };
-        }
+            return detail::held_step(s.f, held_violation, s.x.norm());
 
         s.inner_active = false;
+        // An inner solve that latched at its start met a non-finite value at this iterate, which it cannot step from.
+        if(inner_result.status == solver_status::non_finite_evaluation && s.inner_iters_done == 0)
+            return detail::held_step(s.f, held_violation, s.x.norm(), solver_status::non_finite_evaluation);
 
         scalar_type f_old = s.f;
         Eigen::Vector<scalar_type, N> x_old = s.x;
-        s.x = s.best_inner_x;
-        s.f = detail::counted_value<scalar_type>(s.evaluations, *s.problem, s.x);
+        const scalar_type f_trial = detail::counted_value<scalar_type>(s.evaluations, *s.problem, s.best_inner_x);
         {
             const int m = s.n_eq + s.n_ineq;
             auto& c_all = s.ctx->c_all_outer_buf;
             if(m > 0)
-                s.problem->constraints(s.x, c_all);
+                s.problem->constraints(s.best_inner_x, c_all);
+            if(!std::isfinite(f_trial) || !c_all.allFinite())
+                return detail::held_step(s.f, held_violation, s.x.norm(), tighten_penalty(s) ? std::nullopt : std::optional{solver_status::non_finite_evaluation});
+            s.x = s.best_inner_x;
+            s.f = f_trial;
             s.c_eq = c_all.head(s.n_eq);
             s.c_ineq = c_all.tail(s.n_ineq);
         }
@@ -822,6 +812,9 @@ struct augmented_lagrangian_policy
         }
 
         scalar_type step_norm = (s.x - x_old).norm();
+        // An inner solve stuck at a non-finite region is a null step, and at the penalty floor it ends the solve.
+        const bool failed_in_place = inner_result.status == solver_status::non_finite_evaluation && step_norm == scalar_type(0);
+        const bool ends_at_penalty_floor = failed_in_place && s.mu <= s.opts.mu_min;
 
         // Actual augmented Lagrangian gradient norm at current iterate,
         // and KKT residual via the outer-loop multiplier estimates
@@ -961,17 +954,10 @@ struct augmented_lagrangian_policy
             // tolerance multiplicatively (mu < 1). This is what drives
             // omega_k -> 0 across multiplier-only outer iterations, where
             // the from-scratch mu^alpha form would sit flat forever.
-            s.omega = *s.omega * std::pow(s.mu, tol_alpha);
+            s.omega = *s.omega * std::pow(s.mu, s.opts.inner_tolerance_alpha);
         }
         else
-        {
-            s.mu = std::max(s.mu * mu_dec, mu_floor);
-            // Failure branch: the penalty regime just tightened; re-derive
-            // omega from the new (smaller) mu rather than carrying the
-            // possibly-unreachable tolerance accumulated in the previous
-            // regime.
-            s.omega = tol_eta * std::pow(s.mu, tol_alpha);
-        }
+            tighten_penalty(s);
         s.prev_viol = gate_viol;
 
         ++s.outer_iter;
@@ -982,10 +968,23 @@ struct augmented_lagrangian_policy
             .step_size = step_norm,
             .objective_change = s.f - f_old,
             .improved = s.f < f_old || viol < con_tol,
+            .is_null_step = failed_in_place,
             .constraint_violation = viol,
             .x_norm = s.x.norm(),
             .kkt_residual = kkt,
+            .policy_status = ends_at_penalty_floor ? std::optional{solver_status::non_finite_evaluation} : std::nullopt,
         };
+    }
+
+    // The failure branch, taken by an infeasible or a non-finite outer trial: omega is re-derived from the tighter
+    // penalty, not carried over from a regime where it may be unreachable. False once the penalty is at its floor.
+    template <typename P>
+    static bool tighten_penalty(state_type<P>& s)
+    {
+        const bool tightened = s.mu > s.opts.mu_min;
+        s.mu = std::max(s.mu * s.opts.mu_decrease, s.opts.mu_min);
+        s.omega = s.opts.inner_tolerance_eta * std::pow(s.mu, s.opts.inner_tolerance_alpha);
+        return tightened;
     }
 
     template <typename P>

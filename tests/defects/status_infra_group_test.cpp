@@ -19,18 +19,22 @@ using namespace argmin;
 namespace
 {
 
-// |x - (1, 1)|^2 on [-5, 5]^2 with a NaN objective everywhere but the start (3, 2), so every L-BFGS-B line
-// search fails.
+// |x - (1, 1)|^2 on [-5, 5]^2 with the wall value everywhere but the start (3, 2), so every L-BFGS-B line search
+// fails.
 struct poisoned_box_bowl
 {
     static constexpr std::int32_t problem_dimension = 2;
+
+    explicit poisoned_box_bowl(double wall_value)
+        : wall(wall_value)
+    {}
 
     std::int32_t dimension() const { return 2; }
 
     double value(const Eigen::Vector2d& x) const
     {
         if(x != Eigen::Vector2d(3.0, 2.0))
-            return std::numeric_limits<double>::quiet_NaN();
+            return wall;
         return (x - Eigen::Vector2d::Ones()).squaredNorm();
     }
 
@@ -39,7 +43,11 @@ struct poisoned_box_bowl
     Eigen::Vector2d lower_bounds() const { return Eigen::Vector2d::Constant(-5.0); }
 
     Eigen::Vector2d upper_bounds() const { return Eigen::Vector2d::Constant(5.0); }
+
+    double wall;
 };
+
+constexpr double finite_cliff = 1.0e6;
 
 using lbfgsb_pair = basic_solver_group<round_robin_schedule, 2, poisoned_box_bowl, lbfgsb_policy<double, 2>, lbfgsb_policy<double, 2>>;
 
@@ -54,15 +62,23 @@ solver_options<> fifty_iterations()
 
 TEST_CASE("a solver group stops once every member reports line_search_failed", "[solver_group][status]")
 {
-    const poisoned_box_bowl problem{};
+    const poisoned_box_bowl problem{finite_cliff};
     lbfgsb_pair group{problem, Eigen::VectorXd(Eigen::Vector2d(3.0, 2.0)), fifty_iterations()};
     CHECK(group.solve().iterations == 2);
 }
 
 TEST_CASE("a solver group reports line_search_failed for a member whose line search failed", "[solver_group][status]")
 {
-    const poisoned_box_bowl problem{};
+    const poisoned_box_bowl problem{finite_cliff};
     lbfgsb_pair group{problem, Eigen::VectorXd(Eigen::Vector2d(3.0, 2.0)), fifty_iterations()};
     static_cast<void>(group.solve());
     CHECK(group.results()[0].status == solver_status::line_search_failed);
+}
+
+TEST_CASE("a solver group reports non_finite_evaluation for a member whose line search met only NaN", "[solver_group][status]")
+{
+    const poisoned_box_bowl problem{std::numeric_limits<double>::quiet_NaN()};
+    lbfgsb_pair group{problem, Eigen::VectorXd(Eigen::Vector2d(3.0, 2.0)), fifty_iterations()};
+    CHECK(group.solve().iterations == 2);
+    CHECK(group.results()[0].status == solver_status::non_finite_evaluation);
 }

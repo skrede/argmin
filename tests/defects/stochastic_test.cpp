@@ -42,13 +42,15 @@ solve_result<double> solve_from_outside_unit_interval(const defects::linear_unit
 
 }
 
-TEST_CASE("cmaes rejects a generation whose objective values are all NaN before ranking it", "[known-defect][!shouldfail]")
+TEST_CASE("cmaes rejects a generation whose objective values are all NaN before ranking it", "[stochastic]")
 {
     const defects::nan_everywhere problem;
     cmaes_policy<> policy = seeded_cmaes(5);
     auto s = policy.init(problem, Eigen::Vector2d(0.1, 0.2), solver_options<>{});
+    const Eigen::VectorXd mean = s.mean;
     const step_result<double> r = policy.step(s);
-    CHECK(r.policy_status == solver_status::diverged);
+    CHECK(r.policy_status == solver_status::non_finite_evaluation);
+    CHECK(s.mean == mean);
 }
 
 TEST_CASE("cmaes reset restores the anisotropic initial scaling of a fresh run", "[stochastic]")

@@ -40,8 +40,7 @@ inline void cobyla_engine<Scalar>::geometry_step()
 
     evaluate(xcur_);
     ++nevals_;
-    for(int k = 1; k <= mpp_; ++k)
-        datmat_(k, jdrop_) = con_(k);
+    store_trial(jdrop_);
     ibrnch_ = 1;
 }
 

@@ -28,13 +28,18 @@ inline void coupled_quadratic_gradient(const vector2& x, vector2& g)
     g[1] = 20.0 * v + 3.0 * u;
 }
 
-// Once poisoned, the objective is NaN everywhere except at the anchor.
+// A finite poison above every value the coupled quadratic takes on the tests' paths, so a search against it fails
+// without meeting a non-finite value.
+inline constexpr double finite_cliff = 1.0e6;
+
+// Once poisoned, the objective is the poison (NaN unless set) everywhere except at the anchor.
 struct poisoned_everywhere
 {
     static constexpr int problem_dimension = 2;
 
     poisoned_everywhere()
         : poisoned(false)
+        , poison(std::numeric_limits<double>::quiet_NaN())
         , anchor(vector2::Zero())
     {}
 
@@ -43,13 +48,14 @@ struct poisoned_everywhere
     double value(const vector2& x) const
     {
         if(poisoned && x != anchor)
-            return std::numeric_limits<double>::quiet_NaN();
+            return poison;
         return coupled_quadratic(x);
     }
 
     void gradient(const vector2& x, vector2& g) const { coupled_quadratic_gradient(x, g); }
 
     bool poisoned;
+    double poison;
     vector2 anchor;
 };
 

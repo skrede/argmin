@@ -1,4 +1,5 @@
 #include "argmin/detail/quadratic_model.h"
+#include "argmin/detail/interpolation_system.h"
 #include "argmin/solver/bobyqa_policy.h"
 #include "argmin/solver/step_budget_solver.h"
 #include "argmin/formulation/concepts.h"
@@ -1001,8 +1002,9 @@ struct counting_booth
 
 // Collapsing-denominator termination (no-rescue roundoff limit).
 //
-// When every candidate update denominator collapses (here forced by an
-// objective that returns NaN, so scaden stays 0 and biglsq >= 0 makes the
+// When every candidate update denominator collapses (here forced by rebuilding
+// the interpolation model from NaN values, which no evaluation can produce since
+// each enters the model moderated; scaden stays 0 and biglsq >= 0 makes the
 // refusal test scaden <= 0.5*biglsq always true) and no rescue budget remains,
 // the reference returns immediately as roundoff-limited (bobyqb_ lines
 // 2483-2484 / 2546-2547). The driver's terminate flag must be a real loop exit:
@@ -1044,16 +1046,20 @@ TEST_CASE("bobyqa terminates promptly on a collapsing denominator instead of spi
     // After init the bootstrap has made exactly the 2n+1 evaluations.
     REQUIRE(calls == s.m);
     REQUIRE(s.nevals == s.m);
+    s.sys = argmin::detail::bootstrap_interpolation_system<double, 2>(
+        s.x_scaled, s.initial_radius, s.lower_scaled, s.upper_scaled,
+        [](const Eigen::Vector<double, 2>&) { return std::numeric_limits<double>::quiet_NaN(); });
 
     auto r = pol.step(s);
 
     // The first step hits the unrescuable refusal path and must exit at once:
     // it makes no further objective calls (the terminate path evaluates nothing)
-    // and reports termination.
+    // and reports termination. The NaN bootstrap at init marked the model, and only
+    // a rebuild from finite values clears that mark, so the stop is non-finite.
     CHECK(calls == s.m);
     CHECK(s.nevals == s.m);
     REQUIRE(r.policy_status.has_value());
-    CHECK(*r.policy_status == solver_status::converged);
+    CHECK(*r.policy_status == solver_status::non_finite_evaluation);
 
     // Machine-independent spin detector: the state machine increments ntrits
     // once at the top of every trust-region pass (L60). A driver that ignores
@@ -1063,16 +1069,16 @@ TEST_CASE("bobyqa terminates promptly on a collapsing denominator instead of spi
     // pass, so ntrits stays tiny.
     CHECK(s.ntrits < 100);
 
-    // A full solve on the same pathological objective returns without spending
-    // the iteration budget on phantom work: the only objective calls are the
-    // 2n+1 bootstrap plus the solver's single best-seen seed evaluation; the
-    // driver itself never evaluates past the refusal.
+    // A full solve on an objective that is NaN everywhere ends at its start: the
+    // only objective calls are the 2n+1 bootstrap plus the solver's single
+    // best-seen seed evaluation.
     int calls2 = 0;
     counting_nan problem2{.calls = &calls2};
     solver_options opts2;
     opts2.max_iterations = 1000;
     step_budget_solver solver{bobyqa_policy<double, 2>{}, problem2, x0, opts2};
     auto sr = solver.solve(opts2);
+    CHECK(sr.status == solver_status::non_finite_evaluation);
     CHECK(calls2 <= 2 * (2 * 2 + 1));
     CHECK(sr.function_evaluations <= static_cast<std::uint32_t>(2 * (2 * 2 + 1)));
 }

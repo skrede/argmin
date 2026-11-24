@@ -111,7 +111,7 @@ struct byrd_lbfgsb_policy
         if(s.invalid_problem)
             return detail::rejected_step<Scalar>(s);
         if(s.iteration != 0)
-            s.problem->gradient(s.x, s.g);
+            detail::refresh_lbfgsb_gradient<Scalar, N>(s);
 
         auto dir = detail::compute_direction<P, Scalar, N>(
             s.x, s.g, s.lower, s.upper, s.B, s.gcp_solver, s.ssm_solver);
@@ -119,7 +119,7 @@ struct byrd_lbfgsb_policy
             return null_direction_step(s, 0);
         detail::lbfgsb_attempt<Scalar, N> a(s.x.size());
         if(detail::attempt_lbfgsb_step<P>(s, dir->d, dir->alpha_max, options, a))
-            return detail::commit_lbfgsb_step<P>(s, a, dir->d);
+            return detail::commit_lbfgsb_step<Scalar, N>(s, a);
         std::optional<step_result<Scalar>> r = detail::retry_lbfgsb_step<P>(s, options, a);
         return r ? *r : null_direction_step(s, 1);
     }

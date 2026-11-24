@@ -1,6 +1,7 @@
 #ifndef HPP_GUARD_ARGMIN_DETAIL_ISRES_EVALUATION_H
 #define HPP_GUARD_ARGMIN_DETAIL_ISRES_EVALUATION_H
 
+#include "argmin/detail/isres_operators.h"
 #include "argmin/detail/evaluation_count.h"
 
 #include <Eigen/Core>
@@ -45,7 +46,7 @@ void squared_violations(State& s)
         }
         for(int i = 0; i < s.n_ineq; ++i)
         {
-            const scalar_type slack = std::max(scalar_type(0.0), -s.all_constraints_buf(s.n_eq + i, j));
+            const scalar_type slack = inequality_slack(s.all_constraints_buf(s.n_eq + i, j));
             v += slack * slack;
         }
         s.violations[j] = v;
