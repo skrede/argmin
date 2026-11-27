@@ -773,15 +773,16 @@ struct augmented_lagrangian_policy
             if(m > 0)
                 s.problem->constraints(s.best_inner_x, c_all);
             if(!std::isfinite(f_trial) || !c_all.allFinite())
-                return detail::held_step(s.f, held_violation, s.x.norm(), tighten_penalty(s) ? std::nullopt : std::optional{solver_status::non_finite_evaluation});
+            {
+                const bool tightened = tighten_penalty(s);
+                return detail::held_step(s.f, held_violation, s.x.norm(), tightened ? std::nullopt : std::optional{solver_status::non_finite_evaluation});
+            }
             s.x = s.best_inner_x;
             s.f = f_trial;
             s.c_eq = c_all.head(s.n_eq);
             s.c_ineq = c_all.tail(s.n_ineq);
         }
 
-        // Constraint violation (L-infinity).
-        //
         // step_result.constraint_violation reports primal feasibility at the
         // L-infinity norm: max(||c_eq||_inf, ||max(-c_ineq, 0)||_inf). The
         // single-scalar form is scale-invariant per CGT 1991 Section 3 and
@@ -789,7 +790,6 @@ struct augmented_lagrangian_policy
         // augmented_lagrangian adopts this convention via the combined
         // measure; the outer-loop multiplier update machinery
         // (Hestenes-Powell) is unaffected.
-        //
         // Reference: N&W 2e Definition 12.1 (KKT primal feasibility);
         //            Conn-Gould-Toint 1991 Section 3 (scale invariance of
         //            feasibility-progress gates).

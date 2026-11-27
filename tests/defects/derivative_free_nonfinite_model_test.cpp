@@ -61,3 +61,12 @@ TEST_CASE("cobyla claims no step tolerance when the models that stopped it held 
     for(const std::int32_t call : {3, 5})
         CHECK(solve_with_nan_at_call(with_radii(cobyla_policy<>{}, 0.1, 0.05), call).status == solver_status::non_finite_evaluation);
 }
+
+// The NaN lands on the clean run's last evaluation, a trial at the final radius that never enters the stopping models.
+TEST_CASE("cobyla claims no step tolerance when its last trial at the final radius evaluated NaN", "[derivative_free]")
+{
+    const cobyla_policy<> policy = with_radii(cobyla_policy<>{}, 0.1, 0.05);
+    const solve_result<double> clean = solve_with_nan_at_call(policy, std::numeric_limits<std::int32_t>::max());
+    REQUIRE(clean.status == solver_status::xtol_reached);
+    CHECK(solve_with_nan_at_call(policy, static_cast<std::int32_t>(clean.function_evaluations)).status == solver_status::non_finite_evaluation);
+}

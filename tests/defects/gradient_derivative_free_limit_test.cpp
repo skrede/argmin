@@ -76,6 +76,19 @@ solve_result<double> solve_from(const Policy& policy, const Problem& problem, co
     return solver.solve(opts);
 }
 
+template <typename Policy>
+solver_status step_with_a_finite_gradient(const Policy& policy, const defects::walled_bowl& problem)
+{
+    const solver_options<> opts = options(200);
+    step_budget_solver solver{policy, problem, point(0.0, 0.0), opts};
+    while(solver.status() == solver_status::running)
+    {
+        solver.step();
+        REQUIRE(solver.state().g.allFinite());
+    }
+    return solver.status();
+}
+
 }
 
 TEST_CASE("lbfgsb and byrd_lbfgsb report non_finite_evaluation for a non-finite gradient at the start", "[gradient]")
@@ -96,17 +109,16 @@ TEST_CASE("lbfgsb ends non_finite_evaluation at its line-search limit against a 
     }
 }
 
-TEST_CASE("lbfgsb keeps a finite gradient after a non-finite gradient at an accepted trial", "[gradient]")
+// Gradient call 1 is the start, call 2 the first step's trial, call 3 the second step's refresh and call 4 its trial.
+TEST_CASE("lbfgsb keeps the commit's finite gradient when the step-start gradient refresh evaluates non-finite", "[gradient]")
 {
-    const defects::walled_bowl problem = defects::glitching(bowl_callback::gradient, 3, true, not_a_number, 0);
-    const solver_options<> opts = options(200);
-    step_budget_solver solver{lbfgsb_policy<>{}, problem, point(0.0, 0.0), opts};
-    while(solver.status() == solver_status::running)
-    {
-        solver.step();
-        REQUIRE(solver.state().g.allFinite());
-    }
-    CHECK(solver.status() == solver_status::converged);
+    CHECK(step_with_a_finite_gradient(lbfgsb_policy<>{}, defects::glitching(bowl_callback::gradient, 3, true, not_a_number, 0)) == solver_status::converged);
+}
+
+TEST_CASE("lbfgsb and byrd_lbfgsb retry instead of committing an accepted trial whose gradient evaluates non-finite", "[gradient]")
+{
+    CHECK(step_with_a_finite_gradient(lbfgsb_policy<>{}, defects::glitching(bowl_callback::gradient, 4, true, not_a_number, 0)) == solver_status::converged);
+    CHECK(step_with_a_finite_gradient(byrd_lbfgsb_policy<>{}, defects::glitching(bowl_callback::gradient, 4, true, not_a_number, 0)) == solver_status::converged);
 }
 
 TEST_CASE("bobyqa reports non_finite_evaluation for a non-finite objective at the start", "[derivative_free]")

@@ -152,7 +152,8 @@ step_result<Scalar> commit_lbfgsb_step(State& s, const lbfgsb_attempt<Scalar, N>
     return lbfgsb_accepted_result<Scalar, N>(s, sk.norm(), old_f);
 }
 
-// Both memories failed; when the last search met a non-finite value, the search's own limit is where it ended.
+// Both memories failed. When the last search met a non-finite value or the attempt still holds a non-finite gradient
+// (after an Armijo retry it can be the first attempt's), the search's own limit is where it ended.
 template <typename Scalar, int N, typename State>
 step_result<Scalar> lbfgsb_line_search_failure(const State& s, const lbfgsb_attempt<Scalar, N>& a)
 {

@@ -269,14 +269,18 @@ Policies available at HEAD, grouped by problem class:
   first step, when its inner solve meets it. ISRES, which never evaluates the
   start, does so when no individual of its first population evaluates finite.
 - These solvers treat a non-finite trial as a failed trial and never commit or
-  return it. `lbfgsb` and `byrd_lbfgsb` evaluate the gradient at an accepted
-  trial before the commit and reject the trial when it is non-finite; a line
-  search that fails in both memories after meeting a non-finite value ends
-  `non_finite_evaluation` instead of `line_search_failed`. `bobyqa` and `cobyla`
-  store a non-finite evaluation as a large finite barrier value (PRIMA's
-  moderated extreme barrier), so the trial ranks worst and the trust region
-  shrinks, and never let such a point become the incumbent. Neither claims a
-  solution while such a value can still shape its model. `bobyqa` sets a flag
+  return it, except in the `bobyqa` case below. `lbfgsb` and `byrd_lbfgsb`
+  evaluate the gradient at an accepted trial before the commit and reject the
+  trial when it is non-finite; a line search that fails in both memories after
+  meeting a non-finite value ends `non_finite_evaluation` instead of
+  `line_search_failed`. `bobyqa` and `cobyla` store a non-finite evaluation as a
+  large finite barrier value (PRIMA's moderated extreme barrier, 2^100 or about
+  1.3e30 in double precision and 2^64 in single), so the trial ranks worst and
+  the trust region shrinks. `cobyla` never lets such a point become the
+  incumbent. `bobyqa` can rank one first only on an objective whose finite
+  values exceed the barrier; it may then return that point with the barrier as
+  its objective value, and the run ends `non_finite_evaluation`. Neither claims
+  a solution while such a value can still shape its model. `bobyqa` sets a flag
   on any non-finite evaluation, its initial interpolation points' included, and
   holds it until it rebuilds the interpolation model from finite values (a
   rescue or a restart); it ends `non_finite_evaluation` instead of `converged`
@@ -290,12 +294,12 @@ Policies available at HEAD, grouped by problem class:
   non-finite one. The CMA-ES variants and ISRES rank a non-finite individual
   after every finite one and never hold it as the best point, and a generation
   with no finite individual ends `non_finite_evaluation` (CMA-ES before its
-  distribution moves; a search distribution that is itself non-finite still
-  ends `diverged`, before it is sampled). The augmented Lagrangian never commits an outer iterate whose
-  objective or rows are non-finite: it tightens the penalty as after an
-  infeasible outer iterate, and ends `non_finite_evaluation` once the penalty is
-  at its floor. It reports an inner solve that ended at a non-finite region
-  without moving as a null step instead of `stalled`, and ends
+  distribution moves; a search distribution that is itself non-finite still ends
+  `diverged`, before it is sampled). The augmented Lagrangian never commits an
+  outer iterate whose objective or rows are non-finite: it tightens the penalty
+  as after an infeasible outer iterate, and ends `non_finite_evaluation` once
+  the penalty is at its floor. It reports an inner solve that ended at a
+  non-finite region without moving as a null step instead of `stalled`, and ends
   `non_finite_evaluation` when that happens with the penalty at its floor.
 - ISRES no longer reads a NaN constraint row as satisfied: its violation is NaN,
   so the individual ranks worst.

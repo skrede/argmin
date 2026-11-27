@@ -1,5 +1,9 @@
 #include "walled_bowl.h"
 
+#include "argmin/detail/xoshiro256.h"
+#include "argmin/detail/isres_operators.h"
+#include "argmin/detail/stochastic_ranking.h"
+
 #include "argmin/solver/options.h"
 #include "argmin/solver/step_budget_solver.h"
 
@@ -18,6 +22,7 @@
 
 #include <cmath>
 #include <limits>
+#include <vector>
 #include <cstdint>
 
 using namespace argmin;
@@ -78,4 +83,24 @@ TEST_CASE("isres ends non_finite_evaluation on a generation with no individual e
             CHECK(r.status == solver_status::non_finite_evaluation);
             CHECK(std::isfinite(r.objective_value));
         });
+}
+
+TEST_CASE("isres reads a NaN inequality row as a NaN slack, not as satisfied", "[stochastic]")
+{
+    CHECK(std::isnan(detail::inequality_slack(std::numeric_limits<double>::quiet_NaN())));
+    CHECK(detail::inequality_slack(-2.0) == 2.0);
+    CHECK(detail::inequality_slack(2.0) == 0.0);
+}
+
+TEST_CASE("stochastic ranking sinks an individual with a NaN objective or violation below a finite one", "[stochastic]")
+{
+    constexpr double not_a_number = std::numeric_limits<double>::quiet_NaN();
+    Eigen::VectorXd objectives(3);
+    objectives << not_a_number, 1.0, 2.0;
+    Eigen::VectorXd violations(3);
+    violations << 0.0, not_a_number, 0.0;
+    std::vector<std::uint32_t> indices{0, 1, 2};
+    detail::xoshiro256 rng{1u};
+    detail::stochastic_rank(indices, objectives, violations, 0.45, rng);
+    CHECK(indices == std::vector<std::uint32_t>{2, 0, 1});
 }
