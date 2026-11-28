@@ -67,6 +67,7 @@ inline void cobyla_engine<Scalar>::init(int n, int m, const vector_type& x0, con
     eval_ = std::move(eval);
     converged_ = false;
     non_finite_at_radius_ = false;
+    non_finite_in_model_ = false;
     status_ = solver_status::running;
     seed_ = static_cast<std::uint32_t>(n_ + m_);
 

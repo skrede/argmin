@@ -306,18 +306,19 @@ Policies available at HEAD, grouped by problem class:
   rescue or a restart), so a run that recovers from a single non-finite value
   without such a rebuild ends `non_finite_evaluation` even at a good point.
   `cobyla` flags each simplex vertex that evaluated non-finite and holds a flag
-  while a trial at its current radius was non-finite or its linear models are
-  built on a flagged vertex. Both track this with flags rather than reading it
-  from the stored value, so a finite value above the barrier is never taken for
-  a non-finite one. The CMA-ES variants and ISRES rank a non-finite individual
-  after every finite one and never hold it as the best point, and a generation
-  with no finite individual ends `non_finite_evaluation` (CMA-ES before its
-  distribution moves; a search distribution that is itself non-finite still ends
-  `diverged`, before it is sampled). The augmented Lagrangian never commits an
-  outer iterate whose objective or rows are non-finite: it tightens the penalty
-  as after an infeasible outer iterate, and ends `non_finite_evaluation` once
-  the penalty is at its floor. It reports an inner solve that ended at a
-  non-finite region without moving as a null step instead of `stalled`, and ends
+  while a trial at its current radius was non-finite, while its simplex keeps a
+  flagged vertex, or while the linear models of its current step were built on
+  one. Both track this with flags rather than reading it from the stored value,
+  so a finite value above the barrier is never taken for a non-finite one. The
+  CMA-ES variants and ISRES rank a non-finite individual after every finite one
+  and never hold it as the best point, and a generation with no finite
+  individual ends `non_finite_evaluation` (CMA-ES before its distribution moves;
+  a search distribution that is itself non-finite still ends `diverged`, before
+  it is sampled). The augmented Lagrangian never commits an outer iterate whose
+  objective or rows are non-finite: it tightens the penalty as after an
+  infeasible outer iterate, and ends `non_finite_evaluation` once the penalty is
+  at its floor. It reports an inner solve that ended at a non-finite region
+  without moving as a null step instead of `stalled`, and ends
   `non_finite_evaluation` when that happens with the penalty at its floor.
 - ISRES no longer reads a NaN constraint row as satisfied: its violation is NaN,
   so the individual ranks worst.

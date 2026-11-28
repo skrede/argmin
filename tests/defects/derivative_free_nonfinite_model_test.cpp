@@ -141,3 +141,9 @@ TEST_CASE("cobyla claims no stall at a NaN wall while a trial at its current rad
 {
     CHECK(status_under(cobyla_policy<>{}, defects::wall_at(1.0, 1), with_step_threshold(1e-3)) == solver_status::non_finite_evaluation);
 }
+
+// The NaN enters the simplex in the step that halves the radius, after that step's models were built.
+TEST_CASE("cobyla claims no objective tolerance at a NaN wall while its simplex holds a vertex that evaluated NaN", "[derivative_free]")
+{
+    CHECK(status_under(cobyla_policy<>{}, defects::wall_at(1.0, 1), with_objective_threshold(1e10)) == solver_status::non_finite_evaluation);
+}

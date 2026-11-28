@@ -55,7 +55,7 @@ public:
     [[nodiscard]] bool converged() const { return converged_; }
     [[nodiscard]] solver_status status() const { return status_; }
     bool non_finite_start() const { return non_finite_start_; }
-    bool holds_non_finite() const { return non_finite_at_radius_ || non_finite_in_model_; }
+    bool holds_non_finite() const { return non_finite_at_radius_ || non_finite_in_model_ || non_finite_vertex_.segment(1, np_).any(); }
     [[nodiscard]] Scalar rho() const { return rho_; }
     [[nodiscard]] Scalar parmu() const { return parmu_; }
     [[nodiscard]] Scalar objective_value() const { return f_best_; }
@@ -175,8 +175,8 @@ private:
     bool converged_;
     bool non_finite_start_;
     bool trial_non_finite_;
-    // A stop at RHOEND certifies nothing after a non-finite evaluation at the current radius, or when the linear models
-    // that decided it were built on a vertex that evaluated non-finite.
+    // No status certifies the iterate after a non-finite evaluation at the current radius, while a simplex vertex is
+    // flagged, or while the linear models of the current step were built on a flagged vertex.
     bool non_finite_at_radius_;
     bool non_finite_in_model_;
     solver_status status_;
