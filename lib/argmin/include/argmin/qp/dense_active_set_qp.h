@@ -369,14 +369,15 @@ private:
         case detail::qp_status::max_iterations:
             out.status = qp_solve_status::max_iterations;
             break;
+        case detail::qp_status::unverified:
+            out.status = qp_solve_status::solved_inaccurate;
+            break;
         case detail::qp_status::infeasible:
             out.status = qp_solve_status::primal_infeasible;
             break;
         case detail::qp_status::indefinite_hessian:
-            // Unreachable: run() maps this to qp_error::invalid_problem before
-            // scattering. The case is kept so the switch stays exhaustive, and
-            // maps to the status an indefinite P actually implies -- unbounded
-            // below on the feasible set -- rather than a primal claim.
+            // Unreachable (run() maps it to qp_error::invalid_problem); an indefinite P
+            // implies unbounded below on the feasible set, not a primal claim.
             out.status = qp_solve_status::dual_infeasible;
             break;
         }
@@ -400,13 +401,11 @@ private:
         Aty_.head(n_).setZero();
         if(m_ > 0)
             Aty_.head(n_).noalias() = A_.topRows(m_).transpose() * out.y;
-        const Scalar rd =
-            (Px_.head(n_) + q_.head(n_) + Aty_.head(n_)).cwiseAbs().maxCoeff();
+        const Scalar rd = (Px_.head(n_) + q_.head(n_) + Aty_.head(n_)).cwiseAbs().maxCoeff();
 
         out.primal_residual = rp;
         out.dual_residual = rd;
-        out.objective_value =
-            Scalar(0.5) * out.x.head(n_).dot(Px_.head(n_)) + q_.head(n_).dot(out.x.head(n_));
+        out.objective_value = Scalar(0.5) * out.x.head(n_).dot(Px_.head(n_)) + q_.head(n_).dot(out.x.head(n_));
 
         // The last solution seeds the next resolve's working set.
         x0_.head(n_) = out.x.head(n_);

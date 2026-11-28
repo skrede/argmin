@@ -250,6 +250,10 @@ Policies available at HEAD, grouped by problem class:
   `nw_sqp` solves a joint equality and inequality problem it did not finish
   within 20 iterations. `dense_active_set_qp_solver` still rejects an
   infeasible start; one within its entry tolerance is moved the rest of the way.
+- `dense_active_set_qp_solver` reports `max_iterations` only when it reaches
+  its iteration limit. A solve that stops earlier at a point its final
+  optimality check rejects, which it also reported as `max_iterations`, now
+  reports `solved_inaccurate`.
 - The moving-asymptote solvers (`mma`, `gcmma`, `ccsa_quadratic` and the GCMMA
   alternates) and the least-squares solvers (`lm`, `projected_gn`,
   `projected_gradient_gn`) report `non_finite_evaluation` for an objective,

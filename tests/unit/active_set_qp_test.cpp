@@ -163,8 +163,8 @@ TEST_CASE("solve_qp does not return optimal for contradictory inequalities", "[q
     // the unconstrained step -0.5 blocks on x >= 1 at alpha = 0, that row then fills the single
     // dimension with multiplier g = 0.5 >= 0, and the loop reaches its terminal branch at x = 0.5,
     // which the terminal verification rejects. An infeasible status needs a certificate, and the
-    // only one this solver builds is for inconsistent equality rows; inconsistent inequalities
-    // carry none, so the honest outcome is the bounded-iteration status.
+    // only one this function builds is for inconsistent equality rows; inconsistent inequalities
+    // carry none, so the honest outcome is unverified.
     Eigen::MatrixXd G = Eigen::MatrixXd::Identity(1, 1);
     Eigen::VectorXd d{{0.0}};
     Eigen::MatrixXd A_eq(0, 1);
@@ -178,7 +178,8 @@ TEST_CASE("solve_qp does not return optimal for contradictory inequalities", "[q
 
     auto result = solve_qp(G, d, A_eq, b_eq, A_ineq, b_ineq, x0, opts);
 
-    CHECK(result.status == qp_status::max_iterations);
+    CHECK(result.status == qp_status::unverified);
+    CHECK(result.iterations < 50);
 }
 
 TEST_CASE("solve_qp degenerate weakly active", "[qp]")
@@ -610,7 +611,7 @@ TEST_CASE("solve_qp does not return optimal for an infeasible terminal iterate",
     {
         // x >= 2 alone, from x0 = 0: the gradient there is zero, the working set is empty, so the
         // first iteration takes no step and reaches the terminal branch at x = 0, which violates
-        // the row by 2. The iterate is reported as a bounded-iteration outcome, not optimal.
+        // the row by 2. The iterate is reported unverified, not optimal.
         Eigen::MatrixXd G = Eigen::MatrixXd::Identity(1, 1);
         Eigen::VectorXd d{{0.0}};
         Eigen::MatrixXd A_eq(0, 1);
@@ -618,7 +619,7 @@ TEST_CASE("solve_qp does not return optimal for an infeasible terminal iterate",
         Eigen::MatrixXd A_in{{1.0}};
         Eigen::VectorXd b_in{{2.0}};
         auto result = solve_qp(G, d, A_eq, b_eq, A_in, b_in, Eigen::VectorXd::Zero(1).eval());
-        CHECK(result.status == qp_status::max_iterations);
+        CHECK(result.status == qp_status::unverified);
         CHECK(result.iterations == 0);
         CHECK(result.x[0] == 0.0);
     }
@@ -1132,8 +1133,8 @@ TEST_CASE("active-set projection judges a large start by its backward error", "[
     // At 1e8 the terminal check still bounds the residual by the landed x ~ 0 rather than the
     // cancelled start, so the correct point is reported unverified, never infeasible.
     const auto [stateful, free] = solve_both(1e8);
-    CHECK(stateful.status == qp_status::max_iterations);
-    CHECK(free.status == qp_status::max_iterations);
+    CHECK(stateful.status == qp_status::unverified);
+    CHECK(free.status == qp_status::unverified);
 }
 
 TEST_CASE("active-set terminal verification is not excused by a far bound on another row",
@@ -1154,7 +1155,7 @@ TEST_CASE("active-set terminal verification is not excused by a far bound on ano
     const Eigen::VectorXd x0{{0.5, 0.0}};
     active_set_qp_solver<double> solver(2, 3);
     CHECK(solver.solve(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::infeasible);
-    CHECK(solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::max_iterations);
+    CHECK(solve_qp(G, d, A_eq, b_eq, A_in, b_in, x0).status == qp_status::unverified);
 }
 
 TEST_CASE("active-set step test scales with the iterate", "[qp][qp_kkt]")

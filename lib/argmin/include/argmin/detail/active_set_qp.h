@@ -35,7 +35,8 @@
 namespace argmin::detail
 {
 
-enum class qp_status { optimal, infeasible, max_iterations, indefinite_hessian };
+// max_iterations: the iteration cap was reached; unverified: the loop stopped earlier at a point its terminal KKT check rejected.
+enum class qp_status { optimal, infeasible, max_iterations, indefinite_hessian, unverified };
 
 // MaxM bounds the multiplier storage without fixing its runtime length:
 // box-constrained solves return m_eq + m_ineq + 2n multipliers (bound rows
@@ -50,6 +51,8 @@ struct qp_result
     Eigen::Matrix<Scalar, M, 1, 0, MaxM, 1> lambda;
     qp_status status{qp_status::optimal};
     int iterations{0};
+    // x satisfies its rows within the terminal verification tolerance; only active_set_qp_solver sets it.
+    bool primal_feasible{false};
 
     // Set by kraft_lsq_qp_recovery_solver when the inner cascade returned
     // infeasible/rank-deficient and Kraft 1988 §3.4 augmented-QP recovery
@@ -322,7 +325,6 @@ int most_negative_multiplier(
     return drop_idx;
 }
 
-// Extract rows of A_full corresponding to working set indices.
 template <typename Scalar, int M = argmin::dynamic_dimension, int N = argmin::dynamic_dimension>
 Eigen::Matrix<Scalar, Eigen::Dynamic, N> extract_working_rows(
     const Eigen::Matrix<Scalar, M, N>& A_full,
@@ -336,8 +338,6 @@ Eigen::Matrix<Scalar, Eigen::Dynamic, N> extract_working_rows(
     return A_W;
 }
 
-// Build full multiplier vector from working set multipliers.
-// Non-active constraint multipliers are set to zero.
 template <typename Scalar, int Mw = argmin::dynamic_dimension, int M = argmin::dynamic_dimension>
 Eigen::Vector<Scalar, M> build_full_lambda(
     const Eigen::Vector<Scalar, Mw>& lambda_W,
@@ -450,6 +450,16 @@ bool equality_residual_within(const Eigen::MatrixBase<DerivedA>& A,
     residual.head(m_eq).noalias() = b.head(m_eq) - A.topRows(m_eq) * x;
     const Scalar scale = std::max(b.head(m_eq).template lpNorm<Eigen::Infinity>(), magnitude);
     return residual.head(m_eq).template lpNorm<Eigen::Infinity>() <= tol * (Scalar(1) + scale);
+}
+
+// The terminal verification floor is sqrt(epsilon): a backward-stable null-space step on a working set conditioned
+// beyond about 1e4 cannot meet the 1e-12 accurate-mode tolerance, while the floor admits conditioning to about 1e8 and
+// matches the order of the public adapter's entry feasibility tolerance, so this check is never stricter than that
+// contract.
+template <typename Scalar>
+Scalar terminal_verification_tolerance(Scalar tol)
+{
+    return std::max(tol, std::sqrt(Eigen::NumTraits<Scalar>::epsilon()));
 }
 
 template <typename Scalar, typename DerivedA, typename DerivedB, typename DerivedX>
@@ -674,7 +684,7 @@ public:
         assemble_constraints(m_eq, m_ineq, A_eq, b_eq, A_ineq, b_ineq);
         run_active_set(n, m_eq, m_ineq, G, d, x0, opts);
         result_type res;
-        write_result(res, n, m_eq + m_ineq);
+        write_result(res, n, m_eq, m_eq + m_ineq, opts.tolerance);
         return res;
     }
 
@@ -698,7 +708,7 @@ public:
         const int m_ineq = static_cast<int>(A_ineq.rows());
         assemble_constraints(m_eq, m_ineq, A_eq, b_eq, A_ineq, b_ineq);
         run_active_set(n, m_eq, m_ineq, G, d, x0, opts);
-        write_result(out, n, m_eq + m_ineq);
+        write_result(out, n, m_eq, m_eq + m_ineq, opts.tolerance);
     }
 
     // Box-constraint overload. Folds box bounds into the augmented
@@ -724,7 +734,7 @@ public:
         const int m_aug = assemble_box(n, A_eq, b_eq, A_ineq, b_ineq, lower, upper);
         run_active_set(n, m_eq, m_aug, G, d, x0, opts);
         result_type res;
-        write_result(res, n, m_eq + m_aug);
+        write_result(res, n, m_eq, m_eq + m_aug, opts.tolerance);
         return res;
     }
 
@@ -747,7 +757,7 @@ public:
         const int m_eq = static_cast<int>(A_eq.rows());
         const int m_aug = assemble_box(n, A_eq, b_eq, A_ineq, b_ineq, lower, upper);
         run_active_set(n, m_eq, m_aug, G, d, x0, opts);
-        write_result(out, n, m_eq + m_aug);
+        write_result(out, n, m_eq, m_eq + m_aug, opts.tolerance);
     }
 
 private:
@@ -810,15 +820,13 @@ private:
         return m_aug;
     }
 
-    // Copy the last active-set result into a qp_result. out.x / out.lambda are
-    // resized to (n) / (m_total); when the caller reuses the same result the
-    // assignment reuses storage (allocation-free steady state).
-    void write_result(result_type& out, int n, int m_total) const
+    void write_result(result_type& out, int n, int m_eq, int m_total, Scalar tol) const
     {
         out.x = x_.head(n);
         out.lambda = lambda_full_.head(m_total);
         out.status = status_;
         out.iterations = iters_;
+        out.primal_feasible = terminal_primal_within(A_full_.leftCols(n), b_full_, x_.head(n), m_eq, m_total, terminal_verification_tolerance(tol));
         out.relaxation_factor = Scalar(0);
     }
 
@@ -833,11 +841,7 @@ private:
         const int m_total = m_eq + m_ineq;
         const int max_iter = static_cast<int>(std::min(opts.max_iterations, static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())));
         const auto tol = static_cast<Scalar>(opts.tolerance);
-        // The terminal verification floor is sqrt(epsilon): a backward-stable null-space step on a
-        // working set conditioned beyond about 1e4 cannot meet the 1e-12 accurate-mode tolerance,
-        // while the floor admits conditioning to about 1e8 and matches the order of the public
-        // adapter's entry feasibility tolerance, so this check is never stricter than that contract.
-        const Scalar verify_tol = std::max(tol, std::sqrt(Eigen::NumTraits<Scalar>::epsilon()));
+        const Scalar verify_tol = terminal_verification_tolerance(tol);
 
         compute_initial_working_set(x0, m_total, n, m_eq, tol);
 
@@ -934,7 +938,7 @@ private:
                     build_full_lambda(lambda_sub_, W_, m_total, lambda_full_);
                     const bool verified = terminal_kkt_holds(A_full_.leftCols(n), b_full_, x, g_k_.head(n),
                                                              lambda_full_, m_eq, m_total, verify_tol, rhs_);
-                    status_ = verified ? qp_status::optimal : qp_status::max_iterations;
+                    status_ = verified ? qp_status::optimal : qp_status::unverified;
                     iters_ = iter;
                     return;
                 }
@@ -1314,11 +1318,8 @@ qp_result<Scalar, N> solve_qp(
     const int m_total = m_eq + m_ineq;
     const int max_iter = static_cast<int>(std::min(opts.max_iterations, static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())));
     const auto tol = static_cast<Scalar>(opts.tolerance);
-    // The same backward-stability floor as the stateful solver's terminal verification.
-    const Scalar verify_tol = std::max(tol, std::sqrt(Eigen::NumTraits<Scalar>::epsilon()));
+    const Scalar verify_tol = terminal_verification_tolerance(tol);
 
-    // Assemble full constraint matrix: [A_eq; A_ineq] x >= [b_eq; b_ineq]
-    // (Equality constraints treated as a_i^T x = b_i, always active.)
     Eigen::Matrix<Scalar, Eigen::Dynamic, N> A_full(m_total, n);
     Eigen::Matrix<Scalar, Eigen::Dynamic, 1> b_full(m_total);
     if(m_eq > 0)
@@ -1423,7 +1424,6 @@ qp_result<Scalar, N> solve_qp(
 
         if(stationary)
         {
-            // At stationary point for current working set -- check multipliers
             int drop = most_negative_multiplier(lambda_W, W, m_eq, tol, bland);
             if(drop == -1)
             {
@@ -1434,11 +1434,10 @@ qp_result<Scalar, N> solve_qp(
                 qp_result<Scalar, N> res;
                 res.x = x;
                 res.lambda = lambda_full;
-                res.status = verified ? qp_status::optimal : qp_status::max_iterations;
+                res.status = verified ? qp_status::optimal : qp_status::unverified;
                 res.iterations = iter;
                 return res;
             }
-            // Remove the constraint with the selected multiplier
             W.erase(W.begin() + drop);
         }
     }

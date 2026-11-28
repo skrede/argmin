@@ -68,6 +68,7 @@ add_executable(argmin_unit_tests
     stepper_test.cpp
     active_set_qp_test.cpp
     active_set_qp_phase1_test.cpp
+    active_set_qp_status_test.cpp
     lsei_mode4_test.cpp
     compact_lbfgs_test.cpp
     test_functions_test.cpp

@@ -2,7 +2,7 @@
 # Rows are kind<TAB>path<TAB>name<TAB>lines; kind is file or function, and a file row has - as name.
 # Rows sort by kind, then path, then name, then lines.
 # This file only shrinks: lower a count or delete a row as a unit is decomposed, never raise or add one.
-file	lib/argmin/include/argmin/detail/active_set_qp.h	-	1502
+file	lib/argmin/include/argmin/detail/active_set_qp.h	-	1501
 file	lib/argmin/include/argmin/detail/augmented_lagrangian.h	-	205
 file	lib/argmin/include/argmin/detail/byrd_omojokun.h	-	788
 file	lib/argmin/include/argmin/detail/cauchy_point.h	-	319
@@ -31,7 +31,7 @@ file	lib/argmin/include/argmin/detail/sqp_common.h	-	784
 file	lib/argmin/include/argmin/detail/steihaug_cg.h	-	255
 file	lib/argmin/include/argmin/detail/trust_region.h	-	924
 file	lib/argmin/include/argmin/formulation/concepts.h	-	234
-file	lib/argmin/include/argmin/qp/dense_active_set_qp.h	-	448
+file	lib/argmin/include/argmin/qp/dense_active_set_qp.h	-	447
 file	lib/argmin/include/argmin/qp/dense_admm_qp.h	-	972
 file	lib/argmin/include/argmin/qp/detail/sparse_kkt.h	-	251
 file	lib/argmin/include/argmin/qp/sparse_admm_qp.h	-	1041
@@ -74,10 +74,10 @@ function	lib/argmin/include/argmin/detail/active_set_qp.h	compute_initial_workin
 function	lib/argmin/include/argmin/detail/active_set_qp.h	initial_working_set	33
 function	lib/argmin/include/argmin/detail/active_set_qp.h	initial_working_set	35
 function	lib/argmin/include/argmin/detail/active_set_qp.h	most_negative_multiplier	32
-function	lib/argmin/include/argmin/detail/active_set_qp.h	run_active_set	129
+function	lib/argmin/include/argmin/detail/active_set_qp.h	run_active_set	125
 function	lib/argmin/include/argmin/detail/active_set_qp.h	solve_equality_qp	80
 function	lib/argmin/include/argmin/detail/active_set_qp.h	solve_equality_subproblem_into	73
-function	lib/argmin/include/argmin/detail/active_set_qp.h	solve_qp	145
+function	lib/argmin/include/argmin/detail/active_set_qp.h	solve_qp	140
 function	lib/argmin/include/argmin/detail/alternative/cmaes_sampling_marsaglia.h	sample_offspring	28
 function	lib/argmin/include/argmin/detail/byrd_omojokun.h	byrd_omojokun_composite_step	412
 function	lib/argmin/include/argmin/detail/cauchy_point.h	solve	180
@@ -147,7 +147,7 @@ function	lib/argmin/include/argmin/detail/trust_region.h	solve_trust_region_box	
 function	lib/argmin/include/argmin/line_search/armijo.h	armijo	33
 function	lib/argmin/include/argmin/line_search/strong_wolfe.h	strong_wolfe	89
 function	lib/argmin/include/argmin/qp/dense_active_set_qp.h	run	46
-function	lib/argmin/include/argmin/qp/dense_active_set_qp.h	scatter_result	69
+function	lib/argmin/include/argmin/qp/dense_active_set_qp.h	scatter_result	68
 function	lib/argmin/include/argmin/qp/dense_active_set_qp.h	split_rows	49
 function	lib/argmin/include/argmin/qp/dense_admm_qp.h	finalize	62
 function	lib/argmin/include/argmin/qp/dense_admm_qp.h	resolve_into	29
