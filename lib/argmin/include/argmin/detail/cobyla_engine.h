@@ -55,6 +55,7 @@ public:
     [[nodiscard]] bool converged() const { return converged_; }
     [[nodiscard]] solver_status status() const { return status_; }
     bool non_finite_start() const { return non_finite_start_; }
+    bool holds_non_finite() const { return non_finite_at_radius_ || non_finite_in_model_; }
     [[nodiscard]] Scalar rho() const { return rho_; }
     [[nodiscard]] Scalar parmu() const { return parmu_; }
     [[nodiscard]] Scalar objective_value() const { return f_best_; }

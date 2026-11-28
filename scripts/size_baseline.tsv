@@ -46,7 +46,7 @@ file	lib/argmin/include/argmin/solver/alternative/isres/nlopt_faithful_policy.h	
 file	lib/argmin/include/argmin/solver/alternative/isres/original_argmin_policy.h	-	396
 file	lib/argmin/include/argmin/solver/alternative/isres/runarsson_yao_paper_policy.h	-	525
 file	lib/argmin/include/argmin/solver/augmented_lagrangian_policy.h	-	1043
-file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1146
+file	lib/argmin/include/argmin/solver/bobyqa_policy.h	-	1145
 file	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	-	611
 file	lib/argmin/include/argmin/solver/convergence.h	-	352
 file	lib/argmin/include/argmin/solver/filter_nw_sqp_policy.h	-	1308
@@ -181,7 +181,7 @@ function	lib/argmin/include/argmin/solver/bobyqa_policy.h	build_explicit_hessian
 function	lib/argmin/include/argmin/solver/bobyqa_policy.h	frobenius_model_reset	76
 function	lib/argmin/include/argmin/solver/bobyqa_policy.h	init	108
 function	lib/argmin/include/argmin/solver/bobyqa_policy.h	select_replacement_relative	27
-function	lib/argmin/include/argmin/solver/bobyqa_policy.h	step	537
+function	lib/argmin/include/argmin/solver/bobyqa_policy.h	step	536
 function	lib/argmin/include/argmin/solver/byrd_lbfgsb_policy.h	init	26
 function	lib/argmin/include/argmin/solver/byrd_lbfgsb_policy.h	null_direction_step	39
 function	lib/argmin/include/argmin/solver/ccsa_quadratic_policy.h	init	102

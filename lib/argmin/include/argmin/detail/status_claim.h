@@ -39,9 +39,13 @@ constexpr std::optional<solver_status> admit_claim(std::optional<solver_status> 
     return status;
 }
 
+// A policy whose model holds a non-finite evaluation cannot vouch for the iterate that model chose, whichever stopping
+// test accepted it, so the claim becomes the non-finite evaluation it rests on.
 template <typename Scalar>
 constexpr std::optional<solver_status> admit_claim(std::optional<solver_status> status, const step_result<Scalar>& r, Scalar feas_tol) noexcept
 {
+    if(status && certifies_iterate(*status) && r.holds_non_finite)
+        return solver_status::non_finite_evaluation;
     return admit_claim(status, claim_violation(r.constraint_violation, r.bound_violation), feas_tol);
 }
 
@@ -57,7 +61,7 @@ constexpr solver_status admit_policy_status(solver_status status, Scalar violati
 template <typename Scalar>
 constexpr solver_status admit_policy_status(solver_status status, const step_result<Scalar>& r, Scalar feas_tol) noexcept
 {
-    return admit_policy_status(status, claim_violation(r.constraint_violation, r.bound_violation), feas_tol);
+    return admit_claim(std::optional{status}, r, feas_tol).value_or(solver_status::objective_stalled);
 }
 
 // A policy-reported status takes precedence and skips the convergence policy, which is consulted once per step

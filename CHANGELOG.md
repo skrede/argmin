@@ -279,19 +279,22 @@ Policies available at HEAD, grouped by problem class:
   the trust region shrinks. `cobyla` never lets such a point become the
   incumbent. `bobyqa` can rank one first only on an objective whose finite
   values exceed the barrier; it may then return that point with the barrier as
-  its objective value, and the run ends `non_finite_evaluation`. Neither claims
-  a solution while such a value can still shape its model. `bobyqa` sets a flag
-  on any non-finite evaluation, its initial interpolation points' included, and
-  holds it until it rebuilds the interpolation model from finite values (a
-  rescue or a restart); it ends `non_finite_evaluation` instead of `converged`
-  while the flag is set, so a run that recovers from a single non-finite value
+  its objective value, and the run makes no claim about it. Neither claims a
+  solution while such a value can still shape its model: while either holds a
+  non-finite flag, a status that would certify the iterate (`converged`,
+  `ftol_reached`, `xtol_reached` or `stalled`) is reported as
+  `non_finite_evaluation`, whichever stopping test accepted the iterate, the
+  solver's own or a convergence criterion such as a caller-set tolerance; a
+  budget limit such as `max_iterations` is reported as is. `bobyqa` sets its
+  flag on any non-finite evaluation, its initial interpolation points' included,
+  and holds it until it rebuilds the interpolation model from finite values (a
+  rescue or a restart), so a run that recovers from a single non-finite value
   without such a rebuild ends `non_finite_evaluation` even at a good point.
-  `cobyla` flags each simplex vertex that evaluated non-finite and ends
-  `non_finite_evaluation` instead of `xtol_reached` when a trial at its final
-  radius was non-finite or the linear models that stopped it were built on a
-  flagged vertex. Both track this with flags rather than reading it from the
-  stored value, so a finite value above the barrier is never taken for a
-  non-finite one. The CMA-ES variants and ISRES rank a non-finite individual
+  `cobyla` flags each simplex vertex that evaluated non-finite and holds a flag
+  while a trial at its current radius was non-finite or its linear models are
+  built on a flagged vertex. Both track this with flags rather than reading it
+  from the stored value, so a finite value above the barrier is never taken for
+  a non-finite one. The CMA-ES variants and ISRES rank a non-finite individual
   after every finite one and never hold it as the best point, and a generation
   with no finite individual ends `non_finite_evaluation` (CMA-ES before its
   distribution moves; a search distribution that is itself non-finite still ends

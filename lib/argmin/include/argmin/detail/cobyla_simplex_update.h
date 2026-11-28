@@ -152,7 +152,7 @@ inline typename cobyla_engine<Scalar>::l550_result cobyla_engine<Scalar>::l550()
         return l550_result::continue_iter;
     }
     converged_ = true;
-    status_ = non_finite_at_radius_ || non_finite_in_model_ ? solver_status::non_finite_evaluation : solver_status::xtol_reached;
+    status_ = holds_non_finite() ? solver_status::non_finite_evaluation : solver_status::xtol_reached;
     return l550_result::converged;
 }
 

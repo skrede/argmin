@@ -144,6 +144,7 @@ inline step_result<Scalar> cobyla_step_report(const State& s, bool running, bool
         .is_null_step = !running,
         .constraint_violation = detail::constraint_violation(s.c_eq, s.c_ineq),
         .policy_status = policy_status,
+        .holds_non_finite = s.engine->holds_non_finite(),
     };
 }
 

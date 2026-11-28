@@ -49,6 +49,9 @@ struct step_result
     // Reference: N&W 2e Section 12.3 / eq. 12.34 (Lagrangian stationarity).
     std::optional<Scalar> kkt_residual{};
     std::optional<solver_status> policy_status{};
+    // Set while the policy's model holds a non-finite evaluation (BOBYQA's and COBYLA's moderated barrier values), so
+    // no status that certifies the iterate is reported from this step.
+    bool holds_non_finite{false};
 
     // Objective (or residual) evaluations made during this step. For a policy whose state keeps an evaluations counter
     // the driver writes the counter's change across the step here; any other policy reports its own count (at least 1)

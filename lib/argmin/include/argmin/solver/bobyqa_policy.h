@@ -1080,12 +1080,10 @@ struct bobyqa_policy
         bool improved = s.objective_value < old_incumbent_f;
         s.last_improved = improved;
 
-        // BOBYQA owns its own termination, as cobyla_policy does: until Powell's
-        // stop fires, progress is reported at no less than the trust-radius
-        // scale. A geometry step leaves dnorm at the preceding short trust step,
-        // and at rho_end every evaluated step is only bounded below by
-        // 0.5 rho_end, so raw magnitudes would trip the step, objective and
-        // gradient criteria before the policy's own stop.
+        // BOBYQA owns its own termination, as cobyla_policy does: until Powell's stop fires, progress is reported at no
+        // less than the trust-radius scale. A geometry step leaves dnorm at the preceding short trust step, and at
+        // rho_end every evaluated step is only bounded below by 0.5 rho_end, so raw magnitudes would trip the step,
+        // objective and gradient criteria before the policy's own stop.
         Eigen::Vector<Scalar, N> gopt_now = detail::model_gradient_at(s.sys, zero_d);
         Scalar grad_proxy = gopt_now.norm();
         if(!terminated)
@@ -1108,6 +1106,7 @@ struct bobyqa_policy
             .objective_change = effective_change,
             .improved = improved,
             .x_norm = s.x.norm(),
+            .holds_non_finite = s.non_finite_in_model,
         };
         if(terminated)
             r.policy_status = s.non_finite_in_model ? solver_status::non_finite_evaluation : solver_status::converged;
