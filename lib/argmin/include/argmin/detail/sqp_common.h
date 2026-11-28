@@ -576,13 +576,13 @@ ARGMIN_FORCE_INLINE void equality_feasibility_warmstart(
 //
 // The SOC re-solve warm-starts active_set_qp_solver at the rejected
 // primary direction p. p is a stationary point of the UNCHANGED QP
-// objective (only the constraint RHS moved), and the solver's phase-1
-// projection restores equality feasibility only: an inequality-
-// infeasible warm start sits outside its documented precondition
-// (blocking_step_length clamps alpha to 0 against violated rows), so
-// the working-set loop terminates at the warm start without ever
-// consulting the corrected RHS and the "correction" degenerates to a
-// re-test of the already-rejected step. On rows active in the Maratos
+// objective (only the constraint RHS moved). The working-set loop needs
+// a start feasible for its rows (blocking_step_length clamps alpha to 0
+// against violated rows); started at an inequality-infeasible p it
+// would end there without consulting the corrected RHS, and the
+// "correction" would degenerate to a re-test of the rejected step. The
+// solver's own projection moves such a start where it can; this seed
+// makes it feasible before the solve. On rows active in the Maratos
 // regime the corrected RHS carries the curvature remainder,
 // b_ineq_soc ~ kappa * ||p||^2 > J_ineq * p, so both p and the plain
 // cold start q = 0 are genuinely infeasible exactly when the

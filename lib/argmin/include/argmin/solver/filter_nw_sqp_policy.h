@@ -491,13 +491,13 @@ struct filter_nw_sqp_policy
         // Inequality-feasible warm start for the main QP. At an
         // inequality-infeasible iterate the violated rows have
         // b_ineq = -c_ineq > 0, so the zero / equality-projected p0
-        // violates them and active_set_qp_solver (whose phase-1
-        // restores equality feasibility only) freezes at the warm
-        // start: blocking_step_length clamps alpha to 0 against the
-        // violated rows and the policy stalls at an infeasible
-        // stationary-looking point. At feasible iterates b_ineq <= 0,
-        // the pre-check inside the helper passes, and the projection
-        // is a no-op — the healthy path is untouched.
+        // violates them. The seed projection moves p0 onto them
+        // before the solve; a start that still violates a row after
+        // the solver's equality projection is moved by the solver's
+        // own projection, which also reports rows it proves
+        // inconsistent. At feasible iterates b_ineq <= 0, the
+        // pre-check inside the helper passes, and the projection is
+        // a no-op — the healthy path is untouched.
         //
         // Adopted from: argmin/detail/sqp_common.h soc_seed_projection.
         if(has_bounds)
@@ -819,13 +819,13 @@ struct filter_nw_sqp_policy
                     = -s.bufs.c_all.tail(s.n_ineq) + s.J_ineq * p;
 
             // Inequality-feasible SOC warm start. p is a stationary
-            // point of the unchanged QP objective, and the QP solver's
-            // phase-1 restores equality feasibility only, so seeding
-            // the re-solve at an inequality-infeasible p makes the
-            // working-set loop terminate at p without consulting the
-            // corrected RHS. Project p onto the corrected inequality
-            // polyhedron (min-norm LDP shift; bound rows stacked in the
-            // bounded branch) before the solve; equality-only problems
+            // point of the unchanged QP objective, so a working-set
+            // loop started at an inequality-infeasible p would end at
+            // p without consulting the corrected RHS. Project p onto
+            // the corrected inequality polyhedron (min-norm LDP shift;
+            // bound rows stacked in the bounded branch) before the
+            // solve; a row the seed still violates is left to the QP
+            // solver's own projection. Equality-only problems
             // (n_ineq == 0) are untouched inside the helper.
             //
             // Adopted from: argmin/detail/sqp_common.h

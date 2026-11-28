@@ -1137,7 +1137,7 @@ TEST_CASE("active-set projection judges a large start by its backward error", "[
     CHECK(free.status == qp_status::unverified);
 }
 
-TEST_CASE("active-set terminal verification is not excused by a far bound on another row",
+TEST_CASE("a far bound on another row neither excuses active-set terminal verification nor hides an inconsistency proof",
           "[qp][qp_kkt]")
 {
     // The contradictory pair x1 >= 1, -x1 >= 0 from x1 = 0.5: adding the slack row x2 >= -1e30 must

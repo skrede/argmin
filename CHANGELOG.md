@@ -243,13 +243,15 @@ Policies available at HEAD, grouped by problem class:
   that violates an inequality or bound row. It moved such a start onto the
   equality rows only, and its loop, which assumes a feasible iterate, could end
   at a point that still violated a row. The start now first moves to the
-  nearest point that satisfies every row, and the QP reports infeasible when
-  the rows have no common point. A start that satisfies every row takes the
-  same path as before. On HS071 both policies now converge in 6 iterations
-  instead of 13, at a constraint violation of about 3e-9 instead of 3e-7, and
-  `nw_sqp` solves a joint equality and inequality problem it did not finish
-  within 20 iterations. `dense_active_set_qp_solver` still rejects an
-  infeasible start; one within its entry tolerance is moved the rest of the way.
+  nearest point that satisfies every row. The QP reports infeasible only on a
+  checked proof that no point meets every row within its verification
+  tolerance; when neither the move nor such a proof is found, the loop starts
+  where it did before. A start that satisfies every row takes the same path as
+  before. On HS071 both policies now converge in 6 iterations instead of 13, at
+  a constraint violation of about 3e-9 instead of 3e-7, and `nw_sqp` solves a
+  joint equality and inequality problem it did not finish within 20 iterations.
+  `dense_active_set_qp_solver` still rejects an infeasible start; one within its
+  entry tolerance is moved the rest of the way.
 - `dense_active_set_qp_solver` reports `max_iterations` only when it reaches
   its iteration limit. A solve that stops earlier at a point its final
   optimality check rejects, which it also reported as `max_iterations`, now

@@ -1072,16 +1072,16 @@ private:
     }
 
     // The projection meets the rows it moves onto only to rounding, so the working set is rescanned at the verification
-    // floor rather than at the inner tolerance.
-    bool restore_inequality_rows(int n, int m_eq, int m_total, Scalar tol, Scalar scan_tol)
+    // floor rather than at the inner tolerance; a start the projection leaves in place enters the loop as it is.
+    bool restore_inequality_rows(int n, int m_eq, int m_total, Scalar tol, Scalar verify_tol)
     {
         auto x = x_.head(n);
         if(!violates_inequality_rows(A_full_.leftCols(n), b_full_, x, m_eq, m_total, tol))
             return true;
-        if(!feasibility_.project(A_full_.leftCols(n), b_full_, x, m_eq, m_total, tol))
-            return false;
-        compute_initial_working_set(x, m_total, n, m_eq, scan_tol);
-        return true;
+        const feasibility_projection outcome = feasibility_.project(A_full_.leftCols(n), b_full_, x, m_eq, m_total, tol, verify_tol);
+        if(outcome == feasibility_projection::moved)
+            compute_initial_working_set(x, m_total, n, m_eq, verify_tol);
+        return outcome != feasibility_projection::inconsistent || terminal_primal_within(A_full_.leftCols(n), b_full_, x, m_eq, m_total, verify_tol);
     }
 
     // Rank-truncated minimum-norm equality correction from the column-pivoted factor of A_eq^T

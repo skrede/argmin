@@ -103,3 +103,64 @@ TEST_CASE("active_set_qp_solver solves from a start that violates an inequality 
     REQUIRE(r.status == qp_status::optimal);
     CHECK((r.x - Eigen::Vector2f(1.0f, 1.0f)).cwiseAbs().maxCoeff() <= 1e-5f);
 }
+
+TEST_CASE("active_set_qp_solver solves rows its dual solve fails on instead of reporting them infeasible", "[qp]")
+{
+    // A thin wedge of rows of norm about 1e-3 around the feasible optimum; the dual NNLS returns an unchecked u there.
+    const qp p{Eigen::MatrixXd(0, 2), Eigen::VectorXd(0),
+               Eigen::MatrixXd{{0.00088851983262812296, -2.9855235365240096e-05}, {-0.00088957322490335403, 2.9796172325970206e-05},
+                               {0.00084302716795813047, 0.00075115226958537577}, {0.0018029771534392072, 0.0011043928579334077},
+                               {-0.00072103306346573825, 0.00037490658196518025}},
+               Eigen::VectorXd{{0.0034314305442807135, -0.003435363730948634, 0.0021419104735822779, 0.0047481155847467222,
+                                -0.0035835173508430608}},
+               Eigen::VectorXd{{3.3873458718784111, 4.5247996190001665}}};
+    const auto r = solve_from(p, Eigen::VectorXd{{4.6463735623912887, 2.4160338929914991}});
+    REQUIRE(r.status == qp_status::optimal);
+    CHECK((p.A_in * r.x - p.b_in).minCoeff() >= -1e-12);
+}
+
+TEST_CASE("active_set_qp_solver does not report infeasible rows that meet in one point a rounding error away", "[qp]")
+{
+    const Eigen::MatrixXd A{{1.0, 0.0}, {-0.5048461045998576, 0.8632093666488737}, {-0.4902608213406994, -0.8715757724135882}};
+    const Eigen::VectorXd xf{{0.1, 0.7}};
+    const qp p{Eigen::MatrixXd(0, 2), Eigen::VectorXd(0), A, A * xf, Eigen::VectorXd{{1.0, -1.0}}};
+    const auto r = solve_from(p, xf + Eigen::VectorXd{{1e-9, -2e-9}});
+    REQUIRE(r.status == qp_status::optimal);
+    CHECK((r.x - xf).cwiseAbs().maxCoeff() <= 1e-12);
+}
+
+TEST_CASE("active_set_qp_solver restores a row left out of its projection for its slack when the move violates it", "[qp]")
+{
+    // The wedge pair meets at x2 = 200, so the move violates x3 - x2 >= -150, a row first left out for its slack.
+    const qp p{Eigen::MatrixXd(0, 3), Eigen::VectorXd(0), Eigen::MatrixXd{{1.0, 0.005, 0.0}, {-1.0, 0.005, 0.0}, {0.0, -1.0, 1.0}},
+               Eigen::VectorXd{{1.0, 1.0, -150.0}}, Eigen::VectorXd::Zero(3)};
+    const auto r = solve_from(p, Eigen::VectorXd::Zero(3));
+    REQUIRE(r.status == qp_status::optimal);
+    CHECK((r.x - Eigen::Vector3d(0.0, 200.0, 50.0)).cwiseAbs().maxCoeff() <= 1e-9);
+    CHECK(r.primal_feasible);
+}
+
+TEST_CASE("active_set_qp_solver does not report infeasible a sharp wedge whose rows meet far from the start", "[qp]")
+{
+    const qp p{Eigen::MatrixXd(0, 2), Eigen::VectorXd(0), Eigen::MatrixXd{{1.0, 1e-8}, {-1.0, 1e-8}}, Eigen::VectorXd{{1.0, 1.0}},
+               Eigen::VectorXd::Zero(2)};
+    CHECK(solve_from(p, Eigen::VectorXd::Zero(2)).status != qp_status::infeasible);
+}
+
+TEST_CASE("active_set_qp_solver does not report infeasible a row the equality rows fix within its allowance", "[qp]")
+{
+    const qp p{Eigen::MatrixXd{{1.0, 0.0}}, Eigen::VectorXd{{0.0}}, Eigen::MatrixXd{{1.0, 0.0}}, Eigen::VectorXd{{1e-10}}, Eigen::VectorXd::Zero(2)};
+    const auto r = solve_from(p, Eigen::VectorXd::Zero(2));
+    CHECK(r.status == qp_status::optimal);
+    CHECK(r.primal_feasible);
+}
+
+TEST_CASE("active_set_qp_solver returns the equality-projected start for inequality rows with no common point", "[qp]")
+{
+    const qp p{Eigen::MatrixXd{{0.0, 1.0}}, Eigen::VectorXd{{3.0}}, Eigen::MatrixXd{{1.0, 0.0}, {-1.0, 0.0}}, Eigen::VectorXd{{1.0, 0.0}},
+               Eigen::VectorXd::Zero(2)};
+    const auto r = solve_from(p, Eigen::VectorXd::Zero(2));
+    REQUIRE(r.status == qp_status::infeasible);
+    CHECK((r.x - Eigen::Vector2d(0.0, 3.0)).cwiseAbs().maxCoeff() <= 1e-15);
+    CHECK_FALSE(r.primal_feasible);
+}
